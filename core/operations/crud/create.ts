@@ -1,288 +1,345 @@
 /**
- * Create operation implementation with full type safety and validation
+ * Effect-based create operations for entities.
+ *
+ * Uses Ref<ReadonlyMap> for atomic state mutation, Effect Schema for validation,
+ * and typed errors (ValidationError, DuplicateKeyError, ForeignKeyError).
  */
 
-import type { z } from "zod";
+import { Effect, Ref, Schema } from "effect"
 import type {
-	MinimalEntity,
 	CreateInput,
 	CreateManyOptions,
 	CreateManyResult,
-} from "../../types/crud-types.js";
-import type { LegacyCrudError as CrudError } from "../../errors/legacy.js";
+} from "../../types/crud-types.js"
 import {
-	createDuplicateKeyError,
-	createValidationError,
-	createUnknownError,
-	ok,
-	err,
-	type Result,
-} from "../../errors/legacy.js";
-import { generateId } from "../../utils/id-generator.js";
-import { validateForeignKeys } from "../../validators/foreign-key.js";
-import type { RelationshipDef } from "../../types/types.js";
+	DuplicateKeyError,
+	ForeignKeyError,
+	ValidationError,
+} from "../../errors/crud-errors.js"
+import { validateEntity } from "../../validators/schema-validator.js"
+import { generateId } from "../../utils/id-generator.js"
+import {
+	extractForeignKeyConfigs,
+} from "../../validators/foreign-key.js"
+
+// ============================================================================
+// Types
+// ============================================================================
+
+type HasId = { readonly id: string }
+
+type RelationshipConfig = {
+	readonly type: "ref" | "inverse"
+	readonly target: string
+	readonly foreignKey?: string
+}
+
+// ============================================================================
+// Foreign Key Validation (Effect-based bridge)
+// ============================================================================
+
+/**
+ * Validate foreign keys for an entity using Ref-based state.
+ * Returns Effect that fails with ForeignKeyError if a violation is found.
+ */
+const validateForeignKeysEffect = <T extends HasId>(
+	entity: T,
+	collectionName: string,
+	relationships: Record<string, RelationshipConfig>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+): Effect.Effect<void, ForeignKeyError> => {
+	const configs = extractForeignKeyConfigs(
+		relationships as Record<string, { type: "ref" | "inverse"; foreignKey?: string; target?: string }>,
+	)
+
+	if (configs.length === 0) {
+		return Effect.void
+	}
+
+	return Effect.forEach(configs, (config) => {
+		const value = (entity as Record<string, unknown>)[config.foreignKey]
+		if (value === undefined || value === null) {
+			return Effect.void
+		}
+
+		const targetRef = stateRefs[config.targetCollection]
+		if (targetRef === undefined) {
+			return Effect.fail(
+				new ForeignKeyError({
+					collection: collectionName,
+					field: config.foreignKey,
+					value: String(value),
+					targetCollection: config.targetCollection,
+					message: `Foreign key constraint violated: '${config.foreignKey}' references non-existent collection '${config.targetCollection}'`,
+				}),
+			)
+		}
+
+		return Ref.get(targetRef).pipe(
+			Effect.flatMap((targetMap) => {
+				if (targetMap.has(String(value))) {
+					return Effect.void
+				}
+				return Effect.fail(
+					new ForeignKeyError({
+						collection: collectionName,
+						field: config.foreignKey,
+						value: String(value),
+						targetCollection: config.targetCollection,
+						message: `Foreign key constraint violated: '${config.foreignKey}' references non-existent ${config.targetCollection} '${value}'`,
+					}),
+				)
+			}),
+		)
+	}, { discard: true })
+}
 
 // ============================================================================
 // Create Single Entity
 // ============================================================================
 
 /**
- * Create a single entity with validation and foreign key checks
+ * Create a single entity with validation and foreign key checks.
+ *
+ * Steps:
+ * 1. Generate ID if not provided, add timestamps
+ * 2. Validate through Effect Schema
+ * 3. Check for duplicate ID in Ref state
+ * 4. Validate foreign key constraints
+ * 5. Atomically add to Ref state
  */
-export function createCreateMethod<
-	T extends MinimalEntity,
-	TRelations extends Record<
-		string,
-		RelationshipDef<unknown, "ref" | "inverse", string>
-	>,
->(
+export const create = <T extends HasId, I = T>(
 	collectionName: string,
-	schema: z.ZodType<T>,
-	relationships: TRelations,
-	getData: () => T[],
-	setData: (data: T[]) => void,
-	allData: Record<string, unknown[]>,
-): (input: CreateInput<T>) => Promise<Result<T, CrudError<T>>> {
-	return async (input: CreateInput<T>): Promise<Result<T, CrudError<T>>> => {
-		try {
-			// Generate ID if not provided
-			const id = input.id || generateId();
-			const now = new Date().toISOString();
+	schema: Schema.Schema<T, I>,
+	relationships: Record<string, RelationshipConfig>,
+	ref: Ref.Ref<ReadonlyMap<string, T>>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+) =>
+(input: CreateInput<T>): Effect.Effect<T, ValidationError | DuplicateKeyError | ForeignKeyError> =>
+	Effect.gen(function* () {
+		const id = (input as Record<string, unknown>).id as string | undefined || generateId()
+		const now = new Date().toISOString()
 
-			// Construct complete entity
-			const entity = {
-				...input,
-				id,
-				createdAt: now,
-				updatedAt: now,
-			} as unknown as T;
-
-			// Validate with Zod schema
-			const parseResult = schema.safeParse(entity);
-			if (!parseResult.success) {
-				const errors = parseResult.error.errors.map((e) => ({
-					field: e.path.join("."),
-					message: e.message,
-					value: (entity as Record<string, unknown>)[e.path[0]],
-					received: typeof (entity as Record<string, unknown>)[e.path[0]],
-				}));
-
-				return err(createValidationError(errors));
-			}
-
-			// Check for duplicate ID
-			const existingData = getData();
-			if (existingData.some((item) => item.id === id)) {
-				return err(createDuplicateKeyError("id", id, id));
-			}
-
-			// Validate foreign keys
-			const fkValidation = await validateForeignKeys(
-				entity,
-				relationships,
-				allData,
-			);
-			if (!fkValidation.valid) {
-				return err(createValidationError(fkValidation.errors));
-			}
-
-			// Add to collection
-			setData([...existingData, parseResult.data]);
-
-			return ok(parseResult.data);
-		} catch (error) {
-			return err(createUnknownError("Failed to create entity", error));
+		// Build raw entity object for schema validation
+		const raw = {
+			...input,
+			id,
+			createdAt: now,
+			updatedAt: now,
 		}
-	};
-}
+
+		// Validate through Effect Schema
+		const validated = yield* validateEntity(schema, raw)
+
+		// Check for duplicate ID atomically
+		const currentMap = yield* Ref.get(ref)
+		if (currentMap.has(id)) {
+			return yield* Effect.fail(
+				new DuplicateKeyError({
+					collection: collectionName,
+					field: "id",
+					value: id,
+					existingId: id,
+					message: `Duplicate value for field 'id': "${id}"`,
+				}),
+			)
+		}
+
+		// Validate foreign keys
+		yield* validateForeignKeysEffect(
+			validated,
+			collectionName,
+			relationships,
+			stateRefs,
+		)
+
+		// Atomically add to state
+		yield* Ref.update(ref, (map) => {
+			const next = new Map(map)
+			next.set(id, validated)
+			return next
+		})
+
+		return validated
+	})
 
 // ============================================================================
 // Create Multiple Entities
 // ============================================================================
 
 /**
- * Create multiple entities with batch validation and optional duplicate skipping
+ * Create multiple entities with batch validation and optional duplicate skipping.
+ *
+ * When `skipDuplicates` is true, entities that fail validation or have duplicate IDs
+ * are skipped and reported in the result. Otherwise, the first error stops the operation.
  */
-export function createCreateManyMethod<
-	T extends MinimalEntity,
-	TRelations extends Record<
-		string,
-		RelationshipDef<unknown, "ref" | "inverse", string>
-	>,
->(
+export const createMany = <T extends HasId, I = T>(
 	collectionName: string,
-	schema: z.ZodType<T>,
-	relationships: TRelations,
-	getData: () => T[],
-	setData: (data: T[]) => void,
-	allData: Record<string, unknown[]>,
-): (
-	inputs: CreateInput<T>[],
+	schema: Schema.Schema<T, I>,
+	relationships: Record<string, RelationshipConfig>,
+	ref: Ref.Ref<ReadonlyMap<string, T>>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+) =>
+(
+	inputs: ReadonlyArray<CreateInput<T>>,
 	options?: CreateManyOptions,
-) => Promise<Result<CreateManyResult<T>, CrudError<T>>> {
-	return async (
-		inputs: CreateInput<T>[],
-		options?: CreateManyOptions,
-	): Promise<Result<CreateManyResult<T>, CrudError<T>>> => {
-		try {
-			const created: T[] = [];
-			const skipped: Array<{ data: Partial<T>; reason: string }> = [];
-			const existingData = getData();
-			const now = new Date().toISOString();
+): Effect.Effect<CreateManyResult<T>, ValidationError | DuplicateKeyError | ForeignKeyError> =>
+	Effect.gen(function* () {
+		const created: T[] = []
+		const skipped: Array<{ data: Partial<T>; reason: string }> = []
+		const now = new Date().toISOString()
+		const skipOnError = options?.skipDuplicates === true
 
-			// Build a set of existing IDs for faster lookup
-			const existingIds = new Set(existingData.map((item) => item.id));
+		// Get current state once for duplicate checking
+		const currentMap = yield* Ref.get(ref)
+		const existingIds = new Set(currentMap.keys())
+		// Track IDs we're adding in this batch
+		const batchIds = new Set<string>()
 
-			// Process each input
-			const entitiesToValidate: T[] = [];
-			const indexMap = new Map<number, number>(); // Maps entity index to input index
+		// Phase 1: Validate all entities and collect valid ones
+		const validEntities: T[] = []
 
-			for (let i = 0; i < inputs.length; i++) {
-				const input = inputs[i];
-				const id = input.id || generateId();
+		for (const input of inputs) {
+			const id = (input as Record<string, unknown>).id as string | undefined || generateId()
 
-				// Check for duplicate ID
-				if (
-					existingIds.has(id) ||
-					entitiesToValidate.some((e) => e.id === id)
-				) {
-					if (options?.skipDuplicates) {
-						skipped.push({
-							data: { ...input, id } as Partial<T>,
-							reason: `Duplicate ID: ${id}`,
-						});
-						continue;
-					} else {
-						return err(createDuplicateKeyError("id", id, id));
-					}
+			// Check for duplicate ID
+			if (existingIds.has(id) || batchIds.has(id)) {
+				if (skipOnError) {
+					skipped.push({
+						data: { ...input, id } as Partial<T>,
+						reason: `Duplicate ID: ${id}`,
+					})
+					continue
 				}
-
-				// Construct entity
-				const entity = {
-					...input,
-					id,
-					createdAt: now,
-					updatedAt: now,
-				} as unknown as T;
-
-				// Validate with Zod
-				const parseResult = schema.safeParse(entity);
-				if (!parseResult.success) {
-					if (options?.skipDuplicates) {
-						skipped.push({
-							data: { ...input, id } as Partial<T>,
-							reason: `Validation failed: ${parseResult.error.errors[0].message}`,
-						});
-						continue;
-					} else {
-						const errors = parseResult.error.errors.map((e) => ({
-							field: e.path.join("."),
-							message: e.message,
-							value: (entity as Record<string, unknown>)[e.path[0]],
-						}));
-						return err(createValidationError(errors));
-					}
-				}
-
-				indexMap.set(entitiesToValidate.length, i);
-				entitiesToValidate.push(parseResult.data);
+				return yield* Effect.fail(
+					new DuplicateKeyError({
+						collection: collectionName,
+						field: "id",
+						value: id,
+						existingId: id,
+						message: `Duplicate value for field 'id': "${id}"`,
+					}),
+				)
 			}
 
-			// Validate foreign keys if requested
-			if (options?.validateRelationships !== false) {
-				// Validate all entities in parallel
-				const validationPromises = entitiesToValidate.map(
-					async (entity, idx) => {
-						const result = await validateForeignKeys(
-							entity,
-							relationships,
-							allData,
-						);
-						return { entity, result, originalIndex: indexMap.get(idx)! };
-					},
-				);
+			const raw = { ...input, id, createdAt: now, updatedAt: now }
 
-				const validationResults = await Promise.all(validationPromises);
+			// Validate through schema
+			const validationResult = yield* validateEntity(schema, raw).pipe(
+				Effect.map((validated) => ({ _tag: "ok" as const, validated })),
+				Effect.catchTag("ValidationError", (err) =>
+					skipOnError
+						? Effect.succeed({ _tag: "skipped" as const, error: err })
+						: Effect.fail(err),
+				),
+			)
 
-				// Process validation results
-				const validEntities: T[] = [];
-				for (const { entity, result, originalIndex } of validationResults) {
-					if (!result.valid) {
-						if (options?.skipDuplicates) {
-							skipped.push({
-								data: inputs[originalIndex] as Partial<T>,
-								reason: `Foreign key violation: ${result.errors[0].message}`,
-							});
-						} else {
-							return err(createValidationError(result.errors));
-						}
-					} else {
-						validEntities.push(entity);
-						created.push(entity);
-					}
-				}
-
-				// Update data with all valid entities
-				if (validEntities.length > 0) {
-					setData([...existingData, ...validEntities]);
-				}
-			} else {
-				// No FK validation, add all validated entities
-				created.push(...entitiesToValidate);
-				setData([...existingData, ...entitiesToValidate]);
+			if (validationResult._tag === "skipped") {
+				skipped.push({
+					data: { ...input, id } as Partial<T>,
+					reason: `Validation failed: ${validationResult.error.issues[0]?.message ?? "unknown"}`,
+				})
+				continue
 			}
 
-			return ok({
-				created,
-				...(skipped.length > 0 ? { skipped } : {}),
-			});
-		} catch (error) {
-			return err(createUnknownError("Failed to create entities", error));
+			const validated = validationResult.validated
+			batchIds.add(id)
+			validEntities.push(validated)
 		}
-	};
-}
+
+		// Phase 2: Validate foreign keys if requested
+		if (options?.validateRelationships !== false) {
+			const finalEntities: T[] = []
+
+			for (let i = 0; i < validEntities.length; i++) {
+				const entity = validEntities[i]!
+				const fkResult = yield* validateForeignKeysEffect(
+					entity,
+					collectionName,
+					relationships,
+					stateRefs,
+				).pipe(
+					Effect.map(() => ({ _tag: "ok" as const })),
+					Effect.catchTag("ForeignKeyError", (err) =>
+						skipOnError
+							? Effect.succeed({ _tag: "skipped" as const, error: err })
+							: Effect.fail(err),
+					),
+				)
+
+				if (fkResult._tag === "skipped") {
+					skipped.push({
+						data: entity as Partial<T>,
+						reason: `Foreign key violation: ${fkResult.error.message}`,
+					})
+				} else {
+					finalEntities.push(entity)
+					created.push(entity)
+				}
+			}
+
+			// Atomically add all valid entities to state
+			if (finalEntities.length > 0) {
+				yield* Ref.update(ref, (map) => {
+					const next = new Map(map)
+					for (const entity of finalEntities) {
+						next.set(entity.id, entity)
+					}
+					return next
+				})
+			}
+		} else {
+			// No FK validation, add all validated entities
+			created.push(...validEntities)
+			if (validEntities.length > 0) {
+				yield* Ref.update(ref, (map) => {
+					const next = new Map(map)
+					for (const entity of validEntities) {
+						next.set(entity.id, entity)
+					}
+					return next
+				})
+			}
+		}
+
+		return {
+			created,
+			...(skipped.length > 0 ? { skipped } : {}),
+		} as CreateManyResult<T>
+	})
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
-/**
- * Extract unique constraint fields from schema
- * This is a placeholder - in a real implementation, this would analyze the Zod schema
- */
-export function extractUniqueFields<T>(schema: z.ZodType<T>): string[] {
-	// TODO: Implement schema analysis to extract unique fields
-	// For now, return empty array (only ID is unique by default)
-	return [];
-}
+// ============================================================================
+// Legacy Exports (backward compatibility for unmigrated factory)
+// These will be removed when core/factories/database.ts is migrated (task 10)
+// ============================================================================
+
+export { createCreateMethod, createCreateManyMethod } from "./create-legacy.js"
 
 /**
- * Check for unique constraint violations
+ * Check for unique constraint violations against existing data in a Ref.
  */
-export function checkUniqueConstraints<T extends MinimalEntity>(
+export const checkUniqueConstraints = <T extends HasId>(
 	entity: T,
-	existingData: T[],
-	uniqueFields: string[],
-): { valid: boolean; field?: string; value?: unknown; existingId?: string } {
+	existingMap: ReadonlyMap<string, T>,
+	uniqueFields: ReadonlyArray<string>,
+): { readonly valid: boolean; readonly field?: string; readonly value?: unknown; readonly existingId?: string } => {
 	for (const field of uniqueFields) {
-		const value = (entity as Record<string, unknown>)[field];
-		if (value === undefined || value === null) continue;
+		const value = (entity as Record<string, unknown>)[field]
+		if (value === undefined || value === null) continue
 
-		const existing = existingData.find(
-			(item) =>
-				(item as Record<string, unknown>)[field] === value &&
-				item.id !== entity.id,
-		);
-
-		if (existing) {
-			return {
-				valid: false,
-				field,
-				value,
-				existingId: existing.id,
-			};
+		for (const [existingId, existing] of existingMap) {
+			if (
+				(existing as Record<string, unknown>)[field] === value &&
+				existingId !== entity.id
+			) {
+				return { valid: false, field, value, existingId }
+			}
 		}
 	}
 
-	return { valid: true };
+	return { valid: true }
 }
