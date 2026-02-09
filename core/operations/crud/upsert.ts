@@ -1,40 +1,142 @@
 /**
- * Upsert operation implementation with unique constraint checking
+ * Effect-based upsert operations for entities.
+ *
+ * Uses Ref<ReadonlyMap> for atomic state mutation, Effect Schema for validation,
+ * and typed errors (ValidationError, ForeignKeyError).
+ *
+ * Upsert = find by `where` clause → update if exists, create if not.
  */
 
-import type { z } from "zod";
+import { Effect, Ref, Schema } from "effect"
 import type {
-	MinimalEntity,
 	CreateInput,
 	UpdateWithOperators,
+	MinimalEntity,
 	UpsertInput,
 	UpsertResult,
 	UpsertManyResult,
-	ExtractUniqueFields,
-} from "../../types/crud-types.js";
-import type { LegacyCrudError as CrudError } from "../../errors/legacy.js";
+} from "../../types/crud-types.js"
 import {
-	createValidationError,
-	createUnknownError,
-	createOperationNotAllowedError,
-	ok,
-	err,
-	type Result,
-} from "../../errors/legacy.js";
-import { generateId } from "../../utils/id-generator.js";
-import { validateForeignKeys } from "../../validators/foreign-key.js";
-import { filterData } from "../query/filter.js";
-import type { RelationshipDef } from "../../types/types.js";
-import { applyUpdates } from "./update.js";
+	ForeignKeyError,
+	ValidationError,
+} from "../../errors/crud-errors.js"
+import { validateEntity } from "../../validators/schema-validator.js"
+import { generateId } from "../../utils/id-generator.js"
+import { applyUpdates } from "./update.js"
+import {
+	extractForeignKeyConfigs,
+} from "../../validators/foreign-key.js"
 
-// Type guards for safe type checking
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
+// ============================================================================
+// Types
+// ============================================================================
+
+type HasId = { readonly id: string }
+
+type RelationshipConfig = {
+	readonly type: "ref" | "inverse"
+	readonly target: string
+	readonly foreignKey?: string
 }
 
-// Safe property access
-function getProperty(obj: unknown, key: string): unknown {
-	return isRecord(obj) ? obj[key] : undefined;
+// ============================================================================
+// Foreign Key Validation (Effect-based bridge)
+// ============================================================================
+
+/**
+ * Validate foreign keys for an entity using Ref-based state.
+ * Returns Effect that fails with ForeignKeyError if a violation is found.
+ */
+const validateForeignKeysEffect = <T extends HasId>(
+	entity: T,
+	collectionName: string,
+	relationships: Record<string, RelationshipConfig>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+): Effect.Effect<void, ForeignKeyError> => {
+	const configs = extractForeignKeyConfigs(
+		relationships as Record<string, { type: "ref" | "inverse"; foreignKey?: string; target?: string }>,
+	)
+
+	if (configs.length === 0) {
+		return Effect.void
+	}
+
+	return Effect.forEach(configs, (config) => {
+		const value = (entity as Record<string, unknown>)[config.foreignKey]
+		if (value === undefined || value === null) {
+			return Effect.void
+		}
+
+		const targetRef = stateRefs[config.targetCollection]
+		if (targetRef === undefined) {
+			return Effect.fail(
+				new ForeignKeyError({
+					collection: collectionName,
+					field: config.foreignKey,
+					value: String(value),
+					targetCollection: config.targetCollection,
+					message: `Foreign key constraint violated: '${config.foreignKey}' references non-existent collection '${config.targetCollection}'`,
+				}),
+			)
+		}
+
+		return Ref.get(targetRef).pipe(
+			Effect.flatMap((targetMap) => {
+				if (targetMap.has(String(value))) {
+					return Effect.void
+				}
+				return Effect.fail(
+					new ForeignKeyError({
+						collection: collectionName,
+						field: config.foreignKey,
+						value: String(value),
+						targetCollection: config.targetCollection,
+						message: `Foreign key constraint violated: '${config.foreignKey}' references non-existent ${config.targetCollection} '${value}'`,
+					}),
+				)
+			}),
+		)
+	}, { discard: true })
+}
+
+// ============================================================================
+// Find by Where Clause
+// ============================================================================
+
+/**
+ * Find an entity in a ReadonlyMap matching all fields in the where clause.
+ * If `where` contains `id`, uses O(1) lookup. Otherwise scans all values.
+ */
+const findByWhere = <T extends HasId>(
+	map: ReadonlyMap<string, T>,
+	where: Record<string, unknown>,
+): T | undefined => {
+	// Fast path: if where has `id`, use direct lookup
+	if ("id" in where && typeof where.id === "string") {
+		const candidate = map.get(where.id)
+		if (candidate === undefined) return undefined
+		// Verify all other where fields match
+		for (const [key, value] of Object.entries(where)) {
+			if ((candidate as Record<string, unknown>)[key] !== value) {
+				return undefined
+			}
+		}
+		return candidate
+	}
+
+	// Slow path: scan all entities
+	for (const entity of map.values()) {
+		let matches = true
+		for (const [key, value] of Object.entries(where)) {
+			if ((entity as Record<string, unknown>)[key] !== value) {
+				matches = false
+				break
+			}
+		}
+		if (matches) return entity
+	}
+
+	return undefined
 }
 
 // ============================================================================
@@ -42,402 +144,219 @@ function getProperty(obj: unknown, key: string): unknown {
 // ============================================================================
 
 /**
- * Find entity by unique fields
+ * Upsert a single entity: find by `where`, update if exists, create if not.
+ *
+ * Steps:
+ * 1. Look up entity by where clause in Ref state
+ * 2a. If found: apply update operators, validate, update in state
+ * 2b. If not found: merge where + create data, generate ID/timestamps, validate, add to state
+ * 3. Validate foreign key constraints
+ * 4. Return entity with __action metadata
  */
-function findByUniqueFields<T extends MinimalEntity>(
-	data: T[],
-	where: Partial<T>,
-): T | undefined {
-	return data.find((item) => {
-		// Check all fields in where clause
-		for (const [key, value] of Object.entries(where)) {
-			if (getProperty(item, key) !== value) {
-				return false;
-			}
-		}
-		return true;
-	});
-}
-
-/**
- * Upsert a single entity based on unique constraints
- */
-export function createUpsertMethod<
-	T extends MinimalEntity,
-	TRelations extends Record<
-		string,
-		RelationshipDef<unknown, "ref" | "inverse", string>
-	>,
->(
+export const upsert = <T extends HasId, I = T>(
 	collectionName: string,
-	schema: z.ZodType<T>,
-	relationships: TRelations,
-	getData: () => T[],
-	setData: (data: T[]) => void,
-	allData: Record<string, unknown[]>,
-): <UniqueFields extends keyof T = never>(
-	input: UpsertInput<T, UniqueFields>,
-) => Promise<Result<UpsertResult<T>, CrudError<T>>> {
-	return async <UniqueFields extends keyof T = never>(
-		input: UpsertInput<T, UniqueFields>,
-	): Promise<Result<UpsertResult<T>, CrudError<T>>> => {
-		try {
-			const existingData = getData();
+	schema: Schema.Schema<T, I>,
+	relationships: Record<string, RelationshipConfig>,
+	ref: Ref.Ref<ReadonlyMap<string, T>>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+) =>
+(input: UpsertInput<T>): Effect.Effect<UpsertResult<T>, ValidationError | ForeignKeyError> =>
+	Effect.gen(function* () {
+		const currentMap = yield* Ref.get(ref)
+		const where = input.where as Record<string, unknown>
+		const existing = findByWhere(currentMap, where)
 
-			// Find existing entity
-			const existing = findByUniqueFields(
-				existingData,
-				input.where as Partial<T>,
-			);
+		if (existing !== undefined) {
+			// === UPDATE PATH ===
+			const updated = applyUpdates(
+				existing as T & MinimalEntity,
+				input.update as UpdateWithOperators<T & MinimalEntity>,
+			)
 
-			if (existing) {
-				// Update existing entity
-				const updated = applyUpdates(existing, input.update);
+			// Validate through Effect Schema
+			const validated = yield* validateEntity(schema, updated)
 
-				// Validate with schema
-				const parseResult = schema.safeParse(updated);
-				if (!parseResult.success) {
-					const errors = parseResult.error.errors.map((e) => ({
-						field: e.path.join("."),
-						message: e.message,
-						value:
-							e.path.length > 0
-								? getProperty(updated, e.path[0] as string)
-								: undefined,
-					}));
+			// Validate foreign keys if relationship fields were updated
+			const relationshipFields = Object.keys(relationships).map(
+				(field) => relationships[field].foreignKey || `${field}Id`,
+			)
+			const hasRelationshipUpdate = Object.keys(input.update).some((key) =>
+				relationshipFields.includes(key),
+			)
 
-					return err(createValidationError(errors));
-				}
-
-				// Check foreign keys if relationships were updated
-				const relationshipFields = Object.keys(relationships).map(
-					(field) => relationships[field].foreignKey || `${field}Id`,
-				);
-				const hasRelationshipUpdate = Object.keys(input.update).some((key) =>
-					relationshipFields.includes(key),
-				);
-
-				if (hasRelationshipUpdate) {
-					const fkValidation = await validateForeignKeys(
-						parseResult.data,
-						relationships,
-						allData,
-					);
-					if (!fkValidation.valid) {
-						return err(createValidationError(fkValidation.errors));
-					}
-				}
-
-				// Update in place
-				const index = existingData.findIndex((item) => item.id === existing.id);
-				const newData = [...existingData];
-				newData[index] = parseResult.data;
-				setData(newData);
-
-				return ok({
-					...parseResult.data,
-					__action: "updated",
-				});
-			} else {
-				// Create new entity
-				const id =
-					((input.where as Record<string, unknown>).id as string | undefined) ||
-					generateId();
-				const now = new Date().toISOString();
-
-				// Merge where clause with create data
-				const createData = {
-					...input.where,
-					...input.create,
-					id,
-					createdAt: now,
-					updatedAt: now,
-				} as unknown as T;
-
-				// Validate with schema
-				const parseResult = schema.safeParse(createData);
-				if (!parseResult.success) {
-					const errors = parseResult.error.errors.map((e) => ({
-						field: e.path.join("."),
-						message: e.message,
-						value: (createData as Record<string, unknown>)[e.path[0]],
-					}));
-
-					return err(createValidationError(errors));
-				}
-
-				// Validate foreign keys
-				const fkValidation = await validateForeignKeys(
-					parseResult.data,
+			if (hasRelationshipUpdate) {
+				yield* validateForeignKeysEffect(
+					validated,
+					collectionName,
 					relationships,
-					allData,
-				);
-				if (!fkValidation.valid) {
-					return err(createValidationError(fkValidation.errors));
-				}
-
-				// Add to collection
-				setData([...existingData, parseResult.data]);
-
-				return ok({
-					...parseResult.data,
-					__action: "created",
-				});
+					stateRefs,
+				)
 			}
-		} catch (error) {
-			return err(createUnknownError("Failed to upsert entity", error));
+
+			// Atomically update in state
+			yield* Ref.update(ref, (map) => {
+				const next = new Map(map)
+				next.set(existing.id, validated)
+				return next
+			})
+
+			return { ...validated, __action: "updated" as const }
 		}
-	};
-}
+
+		// === CREATE PATH ===
+		const id = (typeof where.id === "string" ? where.id : undefined) || generateId()
+		const now = new Date().toISOString()
+
+		const createData = {
+			...where,
+			...input.create,
+			id,
+			createdAt: now,
+			updatedAt: now,
+		}
+
+		// Validate through Effect Schema
+		const validated = yield* validateEntity(schema, createData)
+
+		// Validate foreign keys
+		yield* validateForeignKeysEffect(
+			validated,
+			collectionName,
+			relationships,
+			stateRefs,
+		)
+
+		// Atomically add to state
+		yield* Ref.update(ref, (map) => {
+			const next = new Map(map)
+			next.set(id, validated)
+			return next
+		})
+
+		return { ...validated, __action: "created" as const }
+	})
 
 // ============================================================================
 // Upsert Multiple Entities
 // ============================================================================
 
 /**
- * Upsert multiple entities efficiently
+ * Upsert multiple entities efficiently.
+ *
+ * For each input:
+ * - If entity matches where clause: apply updates (or skip if unchanged)
+ * - If no match: create new entity
+ *
+ * All changes validated and applied atomically.
+ * Returns categorized results: created, updated, unchanged.
  */
-export function createUpsertManyMethod<
-	T extends MinimalEntity,
-	TRelations extends Record<
-		string,
-		RelationshipDef<unknown, "ref" | "inverse", string>
-	>,
->(
+export const upsertMany = <T extends HasId, I = T>(
 	collectionName: string,
-	schema: z.ZodType<T>,
-	relationships: TRelations,
-	getData: () => T[],
-	setData: (data: T[]) => void,
-	allData: Record<string, unknown[]>,
-): <UniqueFields extends keyof T = never>(
-	inputs: UpsertInput<T, UniqueFields>[],
-) => Promise<Result<UpsertManyResult<T>, CrudError<T>>> {
-	return async <UniqueFields extends keyof T = never>(
-		inputs: UpsertInput<T, UniqueFields>[],
-	): Promise<Result<UpsertManyResult<T>, CrudError<T>>> => {
-		try {
-			const existingData = getData();
-			const created: T[] = [];
-			const updated: T[] = [];
-			const unchanged: T[] = [];
-			const now = new Date().toISOString();
+	schema: Schema.Schema<T, I>,
+	relationships: Record<string, RelationshipConfig>,
+	ref: Ref.Ref<ReadonlyMap<string, T>>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+) =>
+(inputs: ReadonlyArray<UpsertInput<T>>): Effect.Effect<UpsertManyResult<T>, ValidationError | ForeignKeyError> =>
+	Effect.gen(function* () {
+		const currentMap = yield* Ref.get(ref)
+		const created: T[] = []
+		const updated: T[] = []
+		const unchanged: T[] = []
+		const now = new Date().toISOString()
 
-			// Process each input
-			const processedEntities: T[] = [];
-			const entitiesToValidate: Array<{
-				entity: T;
-				isNew: boolean;
-				originalIndex: number;
-			}> = [];
+		// Phase 1: Process all inputs, validate, and categorize
+		const toCreate: T[] = []
+		const toUpdate: T[] = []
 
-			for (let i = 0; i < inputs.length; i++) {
-				const input = inputs[i];
-				const existing = findByUniqueFields(
-					existingData,
-					input.where as Partial<T>,
-				);
+		for (let i = 0; i < inputs.length; i++) {
+			const input = inputs[i]!
+			const where = input.where as Record<string, unknown>
+			const existing = findByWhere(currentMap, where)
 
-				if (existing) {
-					// Check if update would change anything
-					const wouldChange = Object.keys(input.update).some((key) => {
-						const updateValue = (input.update as Record<string, unknown>)[key];
-						const currentValue = (existing as Record<string, unknown>)[key];
+			if (existing !== undefined) {
+				// Check if update would change anything
+				const wouldChange = Object.keys(input.update).some((key) => {
+					const updateValue = (input.update as Record<string, unknown>)[key]
+					const currentValue = (existing as Record<string, unknown>)[key]
 
-						// Handle operator-based updates
-						if (
-							typeof updateValue === "object" &&
-							updateValue !== null &&
-							!Array.isArray(updateValue)
-						) {
-							return true; // Operators always cause a change
-						}
-
-						return updateValue !== currentValue;
-					});
-
-					if (!wouldChange) {
-						unchanged.push(existing);
-						continue;
+					// Operator-based updates always cause a change
+					if (
+						typeof updateValue === "object" &&
+						updateValue !== null &&
+						!Array.isArray(updateValue)
+					) {
+						return true
 					}
 
-					// Apply updates
-					const updatedEntity = applyUpdates(existing, input.update);
+					return updateValue !== currentValue
+				})
 
-					// Validate
-					const parseResult = schema.safeParse(updatedEntity);
-					if (!parseResult.success) {
-						const errors = parseResult.error.errors.map((e) => ({
-							field: e.path.join("."),
-							message: e.message,
-							value: (updatedEntity as Record<string, unknown>)[e.path[0]],
-						}));
-
-						return err(
-							createValidationError(
-								errors,
-								`Validation failed for upsert at index ${i}`,
-							),
-						);
-					}
-
-					entitiesToValidate.push({
-						entity: parseResult.data,
-						isNew: false,
-						originalIndex: i,
-					});
-				} else {
-					// Create new entity
-					const id =
-						((input.where as Record<string, unknown>).id as
-							| string
-							| undefined) || generateId();
-
-					const createData = {
-						...input.where,
-						...input.create,
-						id,
-						createdAt: now,
-						updatedAt: now,
-					} as unknown as T;
-
-					// Validate
-					const parseResult = schema.safeParse(createData);
-					if (!parseResult.success) {
-						const errors = parseResult.error.errors.map((e) => ({
-							field: e.path.join("."),
-							message: e.message,
-							value: (createData as Record<string, unknown>)[e.path[0]],
-						}));
-
-						return err(
-							createValidationError(
-								errors,
-								`Validation failed for upsert at index ${i}`,
-							),
-						);
-					}
-
-					entitiesToValidate.push({
-						entity: parseResult.data,
-						isNew: true,
-						originalIndex: i,
-					});
+				if (!wouldChange) {
+					unchanged.push(existing)
+					continue
 				}
-			}
 
-			// Validate foreign keys for all entities
-			const fkValidationPromises = entitiesToValidate.map(
-				async ({ entity, isNew, originalIndex }) => {
-					const result = await validateForeignKeys(
-						entity,
-						relationships,
-						allData,
-					);
-					return {
-						entity,
-						isNew,
-						originalIndex,
-						valid: result.valid,
-						errors: result.errors,
-					};
-				},
-			);
+				// Apply updates
+				const updatedEntity = applyUpdates(
+					existing as T & MinimalEntity,
+					input.update as UpdateWithOperators<T & MinimalEntity>,
+				)
 
-			const fkValidationResults = await Promise.all(fkValidationPromises);
+				// Validate
+				const validated = yield* validateEntity(schema, updatedEntity)
+				toUpdate.push(validated)
+			} else {
+				// Create new entity
+				const id = (typeof where.id === "string" ? where.id : undefined) || generateId()
 
-			// Check for FK validation failures
-			const fkFailure = fkValidationResults.find((result) => !result.valid);
-			if (fkFailure) {
-				return err(
-					createValidationError(
-						fkFailure.errors,
-						`Foreign key validation failed for upsert at index ${fkFailure.originalIndex}`,
-					),
-				);
-			}
-
-			// Apply all changes
-			const updatedIds = new Set<string>();
-			const newEntities: T[] = [];
-
-			for (const { entity, isNew } of fkValidationResults) {
-				if (isNew) {
-					created.push(entity);
-					newEntities.push(entity);
-				} else {
-					updated.push(entity);
-					updatedIds.add(entity.id);
+				const createData = {
+					...where,
+					...input.create,
+					id,
+					createdAt: now,
+					updatedAt: now,
 				}
+
+				// Validate
+				const validated = yield* validateEntity(schema, createData)
+				toCreate.push(validated)
 			}
-
-			// Update data
-			const newData = existingData.map((existing) => {
-				if (updatedIds.has(existing.id)) {
-					return updated.find((u) => u.id === existing.id)!;
-				}
-				return existing;
-			});
-
-			// Add new entities
-			newData.push(...newEntities);
-			setData(newData);
-
-			return ok({
-				created,
-				updated,
-				unchanged,
-			});
-		} catch (error) {
-			return err(createUnknownError("Failed to upsert entities", error));
 		}
-	};
-}
+
+		// Phase 2: Validate foreign keys for all entities being created or updated
+		for (const entity of [...toCreate, ...toUpdate]) {
+			yield* validateForeignKeysEffect(
+				entity,
+				collectionName,
+				relationships,
+				stateRefs,
+			)
+		}
+
+		// Phase 3: Atomically apply all changes to state
+		if (toCreate.length > 0 || toUpdate.length > 0) {
+			yield* Ref.update(ref, (map) => {
+				const next = new Map(map)
+				for (const entity of toCreate) {
+					next.set(entity.id, entity)
+				}
+				for (const entity of toUpdate) {
+					next.set(entity.id, entity)
+				}
+				return next
+			})
+		}
+
+		created.push(...toCreate)
+		updated.push(...toUpdate)
+
+		return { created, updated, unchanged }
+	})
 
 // ============================================================================
-// Helper Functions
+// Legacy Exports (backward compatibility for unmigrated factory)
+// These will be removed when core/factories/database.ts is migrated (task 10)
 // ============================================================================
 
-/**
- * Extract unique fields from schema metadata
- * This is a placeholder - would need to be implemented based on how unique constraints are defined
- */
-export function extractUniqueFieldsFromSchema<T>(
-	schema: z.ZodType<T>,
-): string[] {
-	// TODO: Implement based on schema metadata
-	// For now, return empty array (only ID is unique by default)
-	return [];
-}
-
-/**
- * Validate that where clause uses unique fields
- */
-export function validateUniqueWhere<T>(
-	where: Partial<T>,
-	uniqueFields: string[],
-): boolean {
-	// Must have ID or all fields of a unique constraint
-	if ("id" in where) {
-		return true;
-	}
-
-	// Check if where clause contains any unique field combination
-	// This is simplified - real implementation would check complete unique constraints
-	return Object.keys(where).some((key) => uniqueFields.includes(key));
-}
-
-/**
- * Create a compound key from unique fields
- */
-export function createCompoundKey<T>(
-	entity: Partial<T>,
-	fields: string[],
-): string {
-	const values = fields.map((field) => {
-		const value = (entity as Record<string, unknown>)[field];
-		return value === undefined ? "undefined" : String(value);
-	});
-
-	return values.join("::");
-}
+export { createUpsertMethod, createUpsertManyMethod, extractUniqueFieldsFromSchema, validateUniqueWhere, createCompoundKey } from "./upsert-legacy.js"
