@@ -1,627 +1,572 @@
 /**
- * Delete operations with relationship support
- * Implements Phase 2 delete with relationships features
+ * Effect-based delete operations with relationship cascade support.
+ *
+ * Uses Ref<ReadonlyMap> for atomic state mutation and typed errors.
+ * Supports cascade, restrict, set_null, cascade_soft, and preserve
+ * cascade options for relationship handling during deletion.
  */
 
-import type { z } from "zod";
-import type { MinimalEntity } from "../../types/crud-types.js";
-import type { LegacyCrudError as CrudError } from "../../errors/legacy.js";
-import { isErr } from "../../errors/legacy.js";
-import type { RelationshipDef } from "../../types/types.js";
+import { Effect, Ref } from "effect"
+import type { RelationshipDef } from "../../types/types.js"
 import type {
 	CascadeOption,
 	DeleteWithRelationshipsOptions,
 	DeleteWithRelationshipsResult,
 	RestrictViolation,
-} from "../../types/crud-relationship-types.js";
+} from "../../types/crud-relationship-types.js"
 import {
-	createNotFoundError,
-	createValidationError,
-	createUnknownError,
-	ok,
-	err,
-	type Result,
-} from "../../errors/legacy.js";
+	NotFoundError,
+	ForeignKeyError,
+	ValidationError,
+	OperationError,
+} from "../../errors/crud-errors.js"
 
 // ============================================================================
-// Helper Types
+// Types
 // ============================================================================
 
-type DatabaseConfig = Record<
-	string,
-	{
-		schema: z.ZodType<unknown>;
-		relationships: Record<
-			string,
-			RelationshipDef<unknown, "ref" | "inverse", string>
-		>;
-	}
->;
+type HasId = { readonly id: string }
+
+type RelationshipConfig = {
+	readonly type: "ref" | "inverse"
+	readonly target?: string
+	readonly __targetCollection?: string
+	readonly foreignKey?: string
+}
+
+type CollectionConfig = {
+	readonly schema: unknown
+	readonly relationships: Record<string, RelationshipConfig>
+}
+
+type DatabaseConfig = Record<string, CollectionConfig>
 
 type CascadeResult = {
-	[collection: string]: {
-		count: number;
-		ids: string[];
-	};
-};
+	readonly [collection: string]: {
+		readonly count: number
+		readonly ids: ReadonlyArray<string>
+	}
+}
 
 // ============================================================================
-// Delete with Relationships
+// Helpers
+// ============================================================================
+
+const getTargetCollection = (rel: RelationshipConfig): string | undefined =>
+	rel.target || rel.__targetCollection
+
+/**
+ * Find the foreign key field name in the target collection that references
+ * back to the source collection.
+ */
+const findForeignKey = (
+	relationship: RelationshipConfig,
+	field: string,
+	sourceCollection: string,
+	targetConfig: CollectionConfig | undefined,
+): string | null => {
+	if (relationship.type === "inverse") {
+		if (!targetConfig) return null
+		for (const [targetField, targetRel] of Object.entries(targetConfig.relationships)) {
+			const target = getTargetCollection(targetRel)
+			if (target === sourceCollection && targetRel.type === "ref") {
+				return targetRel.foreignKey || `${targetField}Id`
+			}
+		}
+		return null
+	}
+	// For ref relationships
+	return relationship.foreignKey || `${field}Id`
+}
+
+/**
+ * Find all entities in a target collection that reference the given entity ID
+ * via the specified foreign key.
+ */
+const findRelatedEntities = (
+	entityId: string,
+	foreignKey: string,
+	targetRef: Ref.Ref<ReadonlyMap<string, HasId>>,
+): Effect.Effect<ReadonlyArray<HasId>> =>
+	Ref.get(targetRef).pipe(
+		Effect.map((targetMap) => {
+			const related: HasId[] = []
+			for (const entity of targetMap.values()) {
+				if ((entity as Record<string, unknown>)[foreignKey] === entityId) {
+					related.push(entity)
+				}
+			}
+			return related
+		}),
+	)
+
+/**
+ * Cascade delete (hard or soft) related entities in a target collection.
+ */
+const cascadeDeleteEntities = (
+	entities: ReadonlyArray<HasId>,
+	targetRef: Ref.Ref<ReadonlyMap<string, HasId>>,
+	soft: boolean,
+): Effect.Effect<{ readonly count: number; readonly ids: ReadonlyArray<string> }> => {
+	const entityIds = new Set(entities.map((e) => e.id))
+	const now = new Date().toISOString()
+
+	if (soft) {
+		return Ref.update(targetRef, (map) => {
+			const next = new Map(map)
+			for (const id of entityIds) {
+				const entity = next.get(id)
+				if (entity) {
+					next.set(id, {
+						...entity,
+						deletedAt: now,
+						updatedAt: now,
+					} as HasId)
+				}
+			}
+			return next
+		}).pipe(
+			Effect.map(() => ({
+				count: entityIds.size,
+				ids: [...entityIds],
+			})),
+		)
+	}
+
+	return Ref.update(targetRef, (map) => {
+		const next = new Map(map)
+		for (const id of entityIds) {
+			next.delete(id)
+		}
+		return next
+	}).pipe(
+		Effect.map(() => ({
+			count: entityIds.size,
+			ids: [...entityIds],
+		})),
+	)
+}
+
+/**
+ * Set foreign keys to null for related entities in a target collection.
+ */
+const setForeignKeysToNull = (
+	entities: ReadonlyArray<HasId>,
+	foreignKey: string,
+	targetRef: Ref.Ref<ReadonlyMap<string, HasId>>,
+): Effect.Effect<void> => {
+	const entityIds = new Set(entities.map((e) => e.id))
+	const now = new Date().toISOString()
+
+	return Ref.update(targetRef, (map) => {
+		const next = new Map(map)
+		for (const id of entityIds) {
+			const entity = next.get(id)
+			if (entity) {
+				next.set(id, {
+					...entity,
+					[foreignKey]: null,
+					updatedAt: now,
+				} as HasId)
+			}
+		}
+		return next
+	})
+}
+
+/**
+ * Check if entity supports soft delete (has deletedAt field or can have it added).
+ */
+const hasSoftDelete = <T>(entity: T): entity is T & { deletedAt?: string } =>
+	typeof entity === "object" && entity !== null
+
+// ============================================================================
+// Process Cascade Options for a Single Entity
 // ============================================================================
 
 /**
- * Delete a single entity with relationship cascade support
+ * Process all relationship cascade options for a single entity being deleted.
+ * Returns restrict violations and cascade results.
  */
-export function createDeleteWithRelationshipsMethod<
-	T extends MinimalEntity,
-	TRelations extends Record<
-		string,
-		RelationshipDef<unknown, "ref" | "inverse", string>
-	>,
->(
+const processRelationshipCascades = <T extends HasId>(
+	entityId: string,
 	collectionName: string,
-	schema: z.ZodType<T>,
-	relationships: TRelations,
-	getData: () => T[],
-	setData: (data: T[]) => void,
-	allData: Record<string, unknown[]>,
-	config: DatabaseConfig,
-): (
-	id: string,
-	options?: DeleteWithRelationshipsOptions<T, TRelations>,
-) => Promise<Result<DeleteWithRelationshipsResult<T>, CrudError<T>>> {
-	return async (
-		id: string,
-		options?: DeleteWithRelationshipsOptions<T, TRelations>,
-	): Promise<Result<DeleteWithRelationshipsResult<T>, CrudError<T>>> => {
-		try {
-			// Find entity to delete
-			const existingData = getData();
-			const entityIndex = existingData.findIndex((item) => item.id === id);
+	relationships: Record<string, RelationshipConfig>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+	dbConfig: DatabaseConfig,
+	options: DeleteWithRelationshipsOptions<T, Record<string, RelationshipDef>> | undefined,
+): Effect.Effect<
+	{
+		readonly restrictViolations: ReadonlyArray<RestrictViolation>
+		readonly cascadeResults: Record<string, { count: number; ids: string[] }>
+	},
+	OperationError
+> =>
+	Effect.gen(function* () {
+		const restrictViolations: RestrictViolation[] = []
+		const cascadeResults: Record<string, { count: number; ids: string[] }> = {}
 
-			if (entityIndex === -1) {
-				return err(createNotFoundError("Entity", id));
+		for (const [field, relationship] of Object.entries(relationships)) {
+			const targetCollection = getTargetCollection(relationship)
+			if (!targetCollection) continue
+
+			const targetConfig = dbConfig[targetCollection]
+			const foreignKey = findForeignKey(relationship, field, collectionName, targetConfig)
+			if (!foreignKey) continue
+
+			const targetRef = stateRefs[targetCollection]
+			if (!targetRef) continue
+
+			const cascadeOption: CascadeOption =
+				(options?.include as Record<string, CascadeOption> | undefined)?.[field] || "preserve"
+
+			const relatedEntities = yield* findRelatedEntities(entityId, foreignKey, targetRef)
+
+			if (relatedEntities.length === 0) continue
+
+			switch (cascadeOption) {
+				case "restrict":
+					restrictViolations.push({
+						collection: collectionName,
+						relatedCollection: targetCollection,
+						relatedCount: relatedEntities.length,
+						message: `Cannot delete ${collectionName} with ID ${entityId} because it has ${relatedEntities.length} related ${targetCollection} entities`,
+					})
+					break
+
+				case "cascade": {
+					const result = yield* cascadeDeleteEntities(
+						relatedEntities,
+						targetRef,
+						options?.soft || false,
+					)
+					if (!cascadeResults[targetCollection]) {
+						cascadeResults[targetCollection] = { count: 0, ids: [] }
+					}
+					cascadeResults[targetCollection].count += result.count
+					cascadeResults[targetCollection].ids.push(...result.ids)
+					break
+				}
+
+				case "cascade_soft": {
+					const result = yield* cascadeDeleteEntities(
+						relatedEntities,
+						targetRef,
+						true,
+					)
+					if (!cascadeResults[targetCollection]) {
+						cascadeResults[targetCollection] = { count: 0, ids: [] }
+					}
+					cascadeResults[targetCollection].count += result.count
+					cascadeResults[targetCollection].ids.push(...result.ids)
+					break
+				}
+
+				case "set_null":
+					yield* setForeignKeysToNull(relatedEntities, foreignKey, targetRef)
+					break
+
+				case "preserve":
+				default:
+					break
 			}
+		}
 
-			const entity = existingData[entityIndex];
+		return { restrictViolations, cascadeResults }
+	})
 
-			// Check relationship constraints
-			const cascadeResults: CascadeResult = {};
-			const restrictViolations: RestrictViolation[] = [];
+// ============================================================================
+// Delete with Relationships (single entity)
+// ============================================================================
 
-			// Process each relationship
-			for (const [field, relationship] of Object.entries(relationships)) {
-				const targetCollection =
-					relationship.target || relationship.__targetCollection;
-				if (!targetCollection) continue;
-
-				const cascadeOption =
-					options?.include?.[field as keyof TRelations] || "preserve";
-
-				// Check for related entities
-				const relatedEntities = await findRelatedEntities(
+/**
+ * Delete a single entity with relationship cascade support.
+ *
+ * Steps:
+ * 1. Look up entity by ID in Ref state (O(1))
+ * 2. Process relationship cascades (restrict, cascade, set_null, etc.)
+ * 3. Fail if any restrict violations exist
+ * 4. Perform the delete (soft or hard)
+ * 5. Return deleted entity with cascade information
+ */
+export const deleteWithRelationships = <T extends HasId>(
+	collectionName: string,
+	relationships: Record<string, RelationshipConfig>,
+	ref: Ref.Ref<ReadonlyMap<string, T>>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+	dbConfig: DatabaseConfig,
+) =>
+(
+	id: string,
+	options?: DeleteWithRelationshipsOptions<T, Record<string, RelationshipDef>>,
+): Effect.Effect<
+	DeleteWithRelationshipsResult<T>,
+	NotFoundError | ValidationError | OperationError
+> =>
+	Effect.gen(function* () {
+		// 1. Look up entity
+		const currentMap = yield* Ref.get(ref)
+		const entity = currentMap.get(id)
+		if (entity === undefined) {
+			return yield* Effect.fail(
+				new NotFoundError({
+					collection: collectionName,
 					id,
-					field,
-					relationship,
-					targetCollection,
-					collectionName,
-					allData,
-					config,
-				);
+					message: `Entity '${id}' not found in collection '${collectionName}'`,
+				}),
+			)
+		}
+
+		// 2. Process relationship cascades
+		const { restrictViolations, cascadeResults } = yield* processRelationshipCascades(
+			id,
+			collectionName,
+			relationships,
+			stateRefs,
+			dbConfig,
+			options,
+		)
+
+		// 3. Check for restrict violations
+		if (restrictViolations.length > 0) {
+			return yield* Effect.fail(
+				new ValidationError({
+					message: restrictViolations.map((v) => v.message).join("; "),
+					issues: restrictViolations.map((v) => ({
+						field: "relationships",
+						message: v.message,
+					})),
+				}),
+			)
+		}
+
+		// 4. Perform the delete
+		let deletedEntity: T
+
+		if (options?.soft && hasSoftDelete(entity)) {
+			const now = new Date().toISOString()
+			const softDeleted = {
+				...entity,
+				deletedAt: now,
+				updatedAt: now,
+			} as T
+
+			yield* Ref.update(ref, (map) => {
+				const next = new Map(map)
+				next.set(id, softDeleted)
+				return next
+			})
+			deletedEntity = softDeleted
+		} else {
+			yield* Ref.update(ref, (map) => {
+				const next = new Map(map)
+				next.delete(id)
+				return next
+			})
+			deletedEntity = entity
+		}
+
+		// 5. Return result
+		const result: DeleteWithRelationshipsResult<T> = {
+			deleted: deletedEntity,
+			...(Object.keys(cascadeResults).length > 0
+				? { cascaded: cascadeResults }
+				: {}),
+		}
+
+		return result
+	})
+
+// ============================================================================
+// Delete Many with Relationships
+// ============================================================================
+
+/**
+ * Delete multiple entities matching a predicate with relationship cascade support.
+ *
+ * Steps:
+ * 1. Find all matching entities using predicate
+ * 2. Apply limit if specified
+ * 3. Check all restrict violations first (fail-fast)
+ * 4. Process cascade operations for all entities
+ * 5. Perform the deletes (soft or hard)
+ * 6. Return count, deleted entities, and cascade information
+ */
+export const deleteManyWithRelationships = <T extends HasId>(
+	collectionName: string,
+	relationships: Record<string, RelationshipConfig>,
+	ref: Ref.Ref<ReadonlyMap<string, T>>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+	dbConfig: DatabaseConfig,
+) =>
+(
+	predicate: (entity: T) => boolean,
+	options?: DeleteWithRelationshipsOptions<T, Record<string, RelationshipDef>> & { readonly limit?: number },
+): Effect.Effect<
+	{ readonly count: number; readonly deleted: ReadonlyArray<T>; readonly cascaded?: CascadeResult },
+	ValidationError | OperationError
+> =>
+	Effect.gen(function* () {
+		// 1. Find matching entities
+		const currentMap = yield* Ref.get(ref)
+		let matchingEntities: T[] = []
+		for (const entity of currentMap.values()) {
+			if (predicate(entity)) {
+				matchingEntities.push(entity)
+			}
+		}
+
+		// 2. Apply limit
+		if (options?.limit !== undefined && options.limit > 0) {
+			matchingEntities = matchingEntities.slice(0, options.limit)
+		}
+
+		if (matchingEntities.length === 0) {
+			return { count: 0, deleted: [] }
+		}
+
+		// 3. Check restrict violations for ALL entities first
+		const allRestrictViolations: RestrictViolation[] = []
+
+		for (const entity of matchingEntities) {
+			for (const [field, relationship] of Object.entries(relationships)) {
+				const targetCollection = getTargetCollection(relationship)
+				if (!targetCollection) continue
+
+				const targetConfig = dbConfig[targetCollection]
+				const foreignKey = findForeignKey(relationship, field, collectionName, targetConfig)
+				if (!foreignKey) continue
+
+				const targetRef = stateRefs[targetCollection]
+				if (!targetRef) continue
+
+				const cascadeOption: CascadeOption =
+					(options?.include as Record<string, CascadeOption> | undefined)?.[field] || "preserve"
+
+				if (cascadeOption !== "restrict") continue
+
+				const relatedEntities = yield* findRelatedEntities(entity.id, foreignKey, targetRef)
 
 				if (relatedEntities.length > 0) {
-					switch (cascadeOption) {
-						case "restrict":
-							restrictViolations.push({
-								collection: collectionName,
-								relatedCollection: targetCollection,
-								relatedCount: relatedEntities.length,
-								message: `Cannot delete ${collectionName} with ID ${id} because it has ${relatedEntities.length} related ${targetCollection} entities`,
-							});
-							break;
-
-						case "cascade":
-							// Delete related entities
-							const result = await cascadeDelete(
-								relatedEntities,
-								targetCollection,
-								allData,
-								config,
-								options?.soft || false,
-							);
-							if (isErr(result)) return err(result.error as CrudError<T>);
-							cascadeResults[targetCollection] = result.data;
-							break;
-
-						case "cascade_soft":
-							// Soft delete related entities
-							const softResult = await cascadeDelete(
-								relatedEntities,
-								targetCollection,
-								allData,
-								config,
-								true,
-							);
-							if (isErr(softResult))
-								return err(softResult.error as CrudError<T>);
-							cascadeResults[targetCollection] = softResult.data;
-							break;
-
-						case "set_null":
-							// Set foreign keys to null
-							const nullResult = await setForeignKeysToNull(
-								relatedEntities,
-								field,
-								relationship,
-								targetCollection,
-								collectionName,
-								allData,
-								config,
-							);
-							if (isErr(nullResult))
-								return err(nullResult.error as CrudError<T>);
-							break;
-
-						case "preserve":
-						default:
-							// Do nothing
-							break;
-					}
+					allRestrictViolations.push({
+						collection: collectionName,
+						relatedCollection: targetCollection,
+						relatedCount: relatedEntities.length,
+						message: `Cannot delete ${collectionName} with ID ${entity.id} because it has ${relatedEntities.length} related ${targetCollection} entities`,
+					})
 				}
 			}
+		}
 
-			// Check for restrict violations
-			if (restrictViolations.length > 0) {
-				return err(
-					createValidationError(
-						restrictViolations.map((v) => ({
-							field: "relationships",
-							message: v.message,
-							code: "RESTRICT_VIOLATION",
-						})),
-					),
-				);
+		if (allRestrictViolations.length > 0) {
+			return yield* Effect.fail(
+				new ValidationError({
+					message: allRestrictViolations.map((v) => v.message).join("; "),
+					issues: allRestrictViolations.map((v) => ({
+						field: "relationships",
+						message: v.message,
+					})),
+				}),
+			)
+		}
+
+		// 4. Process cascade operations for all entities
+		const allCascadeResults: Record<string, { count: number; ids: string[] }> = {}
+
+		for (const entity of matchingEntities) {
+			for (const [field, relationship] of Object.entries(relationships)) {
+				const targetCollection = getTargetCollection(relationship)
+				if (!targetCollection) continue
+
+				const targetConfig = dbConfig[targetCollection]
+				const foreignKey = findForeignKey(relationship, field, collectionName, targetConfig)
+				if (!foreignKey) continue
+
+				const targetRef = stateRefs[targetCollection]
+				if (!targetRef) continue
+
+				const cascadeOption: CascadeOption =
+					(options?.include as Record<string, CascadeOption> | undefined)?.[field] || "preserve"
+
+				const relatedEntities = yield* findRelatedEntities(entity.id, foreignKey, targetRef)
+
+				if (relatedEntities.length === 0) continue
+
+				switch (cascadeOption) {
+					case "cascade":
+					case "cascade_soft": {
+						const result = yield* cascadeDeleteEntities(
+							relatedEntities,
+							targetRef,
+							cascadeOption === "cascade_soft" || options?.soft || false,
+						)
+						if (!allCascadeResults[targetCollection]) {
+							allCascadeResults[targetCollection] = { count: 0, ids: [] }
+						}
+						allCascadeResults[targetCollection].count += result.count
+						allCascadeResults[targetCollection].ids.push(...result.ids)
+						break
+					}
+
+					case "set_null":
+						yield* setForeignKeysToNull(relatedEntities, foreignKey, targetRef)
+						break
+				}
 			}
+		}
 
-			// Perform the delete
-			let deletedEntity: T;
+		// 5. Perform the deletes
+		const deletedEntities: T[] = []
+		const now = new Date().toISOString()
 
-			if (options?.soft && hasSoftDelete(entity)) {
-				// Soft delete
-				const now = new Date().toISOString();
+		if (options?.soft) {
+			const updatedMap = new Map<string, T>()
+			for (const entity of matchingEntities) {
 				const softDeleted = {
 					...entity,
 					deletedAt: now,
 					updatedAt: now,
-				};
-
-				const newData = [...existingData];
-				newData[entityIndex] = softDeleted as T;
-				setData(newData);
-				deletedEntity = softDeleted as T;
-			} else {
-				// Hard delete
-				const newData = existingData.filter(
-					(_, index) => index !== entityIndex,
-				);
-				setData(newData);
-				deletedEntity = entity;
+				} as T
+				updatedMap.set(entity.id, softDeleted)
+				deletedEntities.push(softDeleted)
 			}
 
-			return ok({
-				deleted: deletedEntity,
-				...(Object.keys(cascadeResults).length > 0
-					? { cascaded: cascadeResults }
-					: {}),
-			});
-		} catch (error) {
-			return err(
-				createUnknownError("Failed to delete entity with relationships", error),
-			);
-		}
-	};
-}
-
-/**
- * Delete many entities with relationship cascade support
- */
-export function createDeleteManyWithRelationshipsMethod<
-	T extends MinimalEntity,
-	TRelations extends Record<
-		string,
-		RelationshipDef<unknown, "ref" | "inverse", string>
-	>,
->(
-	collectionName: string,
-	schema: z.ZodType<T>,
-	relationships: TRelations,
-	getData: () => T[],
-	setData: (data: T[]) => void,
-	allData: Record<string, unknown[]>,
-	config: DatabaseConfig,
-): (
-	where: Partial<T>,
-	options?: DeleteWithRelationshipsOptions<T, TRelations> & { limit?: number },
-) => Promise<
-	Result<
-		{ count: number; deleted: T[]; cascaded?: CascadeResult },
-		CrudError<T>
-	>
-> {
-	return async (
-		where: Partial<T>,
-		options?: DeleteWithRelationshipsOptions<T, TRelations> & {
-			limit?: number;
-		},
-	): Promise<
-		Result<
-			{ count: number; deleted: T[]; cascaded?: CascadeResult },
-			CrudError<T>
-		>
-	> => {
-		try {
-			const existingData = getData();
-
-			// Find entities to delete
-			let entitiesToDelete = existingData.filter((item) => {
-				return Object.entries(where).every(([key, value]) => {
-					return (item as Record<string, unknown>)[key] === value;
-				});
-			});
-
-			// Apply limit if specified
-			if (options?.limit && options.limit > 0) {
-				entitiesToDelete = entitiesToDelete.slice(0, options.limit);
-			}
-
-			if (entitiesToDelete.length === 0) {
-				return ok({ count: 0, deleted: [] });
-			}
-
-			// Check all entities for restrict violations first
-			const allRestrictViolations: RestrictViolation[] = [];
-			const cascadeResults: CascadeResult = {};
-
-			for (const entity of entitiesToDelete) {
-				for (const [field, relationship] of Object.entries(relationships)) {
-					const targetCollection =
-						relationship.target || relationship.__targetCollection;
-					if (!targetCollection) continue;
-
-					const cascadeOption =
-						options?.include?.[field as keyof TRelations] || "preserve";
-
-					const relatedEntities = await findRelatedEntities(
-						entity.id,
-						field,
-						relationship,
-						targetCollection,
-						collectionName,
-						allData,
-						config,
-					);
-
-					if (relatedEntities.length > 0 && cascadeOption === "restrict") {
-						allRestrictViolations.push({
-							collection: collectionName,
-							relatedCollection: targetCollection,
-							relatedCount: relatedEntities.length,
-							message: `Cannot delete ${collectionName} with ID ${entity.id} because it has ${relatedEntities.length} related ${targetCollection} entities`,
-						});
-					}
+			yield* Ref.update(ref, (map) => {
+				const next = new Map(map)
+				for (const [id, entity] of updatedMap) {
+					next.set(id, entity)
 				}
-			}
-
-			// Fail if any restrict violations
-			if (allRestrictViolations.length > 0) {
-				return err(
-					createValidationError(
-						allRestrictViolations.map((v) => ({
-							field: "relationships",
-							message: v.message,
-							code: "RESTRICT_VIOLATION",
-						})),
-					),
-				);
-			}
-
-			// Process cascade operations for all entities
-			for (const entity of entitiesToDelete) {
-				for (const [field, relationship] of Object.entries(relationships)) {
-					const targetCollection =
-						relationship.target || relationship.__targetCollection;
-					if (!targetCollection) continue;
-
-					const cascadeOption =
-						options?.include?.[field as keyof TRelations] || "preserve";
-
-					const relatedEntities = await findRelatedEntities(
-						entity.id,
-						field,
-						relationship,
-						targetCollection,
-						collectionName,
-						allData,
-						config,
-					);
-
-					if (relatedEntities.length > 0) {
-						switch (cascadeOption) {
-							case "cascade":
-							case "cascade_soft":
-								const result = await cascadeDelete(
-									relatedEntities,
-									targetCollection,
-									allData,
-									config,
-									cascadeOption === "cascade_soft" || options?.soft || false,
-								);
-								if (isErr(result)) return err(result.error as CrudError<T>);
-
-								if (!cascadeResults[targetCollection]) {
-									cascadeResults[targetCollection] = { count: 0, ids: [] };
-								}
-								cascadeResults[targetCollection].count += result.data.count;
-								cascadeResults[targetCollection].ids.push(...result.data.ids);
-								break;
-
-							case "set_null":
-								const nullResult = await setForeignKeysToNull(
-									relatedEntities,
-									field,
-									relationship,
-									targetCollection,
-									collectionName,
-									allData,
-									config,
-								);
-								if (isErr(nullResult))
-									return err(nullResult.error as CrudError<T>);
-								break;
-						}
-					}
-				}
-			}
-
-			// Perform the deletes
-			const deletedEntities: T[] = [];
-			const now = new Date().toISOString();
-
-			if (options?.soft) {
-				// Soft delete
-				const updatedData = existingData.map((item) => {
-					const shouldDelete = entitiesToDelete.some((e) => e.id === item.id);
-					if (shouldDelete && hasSoftDelete(item)) {
-						const softDeleted = {
-							...item,
-							deletedAt: now,
-							updatedAt: now,
-						};
-						deletedEntities.push(softDeleted);
-						return softDeleted;
-					}
-					return item;
-				});
-				setData(updatedData);
-			} else {
-				// Hard delete
-				deletedEntities.push(...entitiesToDelete);
-				const remainingData = existingData.filter(
-					(item) => !entitiesToDelete.some((e) => e.id === item.id),
-				);
-				setData(remainingData);
-			}
-
-			return ok({
-				count: deletedEntities.length,
-				deleted: deletedEntities,
-				...(Object.keys(cascadeResults).length > 0
-					? { cascaded: cascadeResults }
-					: {}),
-			});
-		} catch (error) {
-			return err(
-				createUnknownError(
-					"Failed to delete entities with relationships",
-					error,
-				),
-			);
-		}
-	};
-}
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/**
- * Find entities related to the one being deleted
- */
-async function findRelatedEntities(
-	entityId: string,
-	field: string,
-	relationship: RelationshipDef<unknown, "ref" | "inverse", string>,
-	targetCollection: string,
-	sourceCollection: string,
-	allData: Record<string, unknown[]>,
-	config: DatabaseConfig,
-): Promise<Array<{ id: string; [key: string]: unknown }>> {
-	const targetData = allData[targetCollection];
-	if (!Array.isArray(targetData)) return [];
-
-	const targetConfig = config[targetCollection];
-	if (!targetConfig) return [];
-
-	// Find the foreign key that references back to the source collection
-	let foreignKey: string | null = null;
-
-	if (relationship.type === "inverse") {
-		// For inverse relationships, find the ref relationship in the target that points back
-		for (const [targetField, targetRel] of Object.entries(
-			targetConfig.relationships,
-		)) {
-			if (
-				(targetRel.target === sourceCollection ||
-					targetRel.__targetCollection === sourceCollection) &&
-				targetRel.type === "ref"
-			) {
-				foreignKey = targetRel.foreignKey || `${targetField}Id`;
-				break;
-			}
-		}
-	} else {
-		// For ref relationships, we need to check if there's an inverse in the target
-		foreignKey = relationship.foreignKey || `${field}Id`;
-	}
-
-	if (!foreignKey) return [];
-
-	// Filter entities that reference the entity being deleted
-	return targetData.filter(
-		(item: unknown): item is { id: string; [key: string]: unknown } => {
-			if (typeof item !== "object" || item === null || !("id" in item))
-				return false;
-			return (item as Record<string, unknown>)[foreignKey!] === entityId;
-		},
-	);
-}
-
-/**
- * Cascade delete related entities
- */
-async function cascadeDelete(
-	entities: Array<{ id: string; [key: string]: unknown }>,
-	collection: string,
-	allData: Record<string, unknown[]>,
-	config: DatabaseConfig,
-	soft: boolean,
-): Promise<Result<{ count: number; ids: string[] }, CrudError<unknown>>> {
-	try {
-		const targetData = allData[collection];
-		if (!Array.isArray(targetData)) {
-			return ok({ count: 0, ids: [] });
-		}
-
-		const deletedIds: string[] = [];
-		const now = new Date().toISOString();
-
-		if (soft) {
-			// Soft delete
-			const updatedData = targetData.map((item: unknown) => {
-				if (
-					typeof item === "object" &&
-					item !== null &&
-					"id" in item &&
-					entities.some((e) => e.id === item.id)
-				) {
-					deletedIds.push(item.id as string);
-					return {
-						...item,
-						deletedAt: now,
-						updatedAt: now,
-					};
-				}
-				return item;
-			});
-			allData[collection] = updatedData;
+				return next
+			})
 		} else {
-			// Hard delete
-			deletedIds.push(...entities.map((e) => e.id));
-			const remainingData = targetData.filter((item: unknown) => {
-				if (typeof item !== "object" || item === null || !("id" in item))
-					return true;
-				return !entities.some((e) => e.id === item.id);
-			});
-			allData[collection] = remainingData;
-		}
+			deletedEntities.push(...matchingEntities)
+			const deletedIds = new Set(matchingEntities.map((e) => e.id))
 
-		return ok({ count: deletedIds.length, ids: deletedIds });
-	} catch (error) {
-		return err(
-			createUnknownError(
-				`Failed to cascade delete in collection ${collection}`,
-				error,
-			),
-		);
-	}
-}
-
-/**
- * Set foreign keys to null for related entities
- */
-async function setForeignKeysToNull(
-	entities: Array<{ id: string; [key: string]: unknown }>,
-	field: string,
-	relationship: RelationshipDef<unknown, "ref" | "inverse", string>,
-	targetCollection: string,
-	sourceCollection: string,
-	allData: Record<string, unknown[]>,
-	config: DatabaseConfig,
-): Promise<Result<void, CrudError<unknown>>> {
-	try {
-		const targetData = allData[targetCollection];
-		if (!Array.isArray(targetData)) return ok(undefined);
-
-		const targetConfig = config[targetCollection];
-		if (!targetConfig) return ok(undefined);
-
-		// Find the foreign key to set to null
-		let foreignKey: string | null = null;
-
-		if (relationship.type === "inverse") {
-			// For inverse relationships, find the ref relationship in the target
-			for (const [targetField, targetRel] of Object.entries(
-				targetConfig.relationships,
-			)) {
-				if (
-					(targetRel.target === sourceCollection ||
-						targetRel.__targetCollection === sourceCollection) &&
-					targetRel.type === "ref"
-				) {
-					foreignKey = targetRel.foreignKey || `${targetField}Id`;
-					break;
+			yield* Ref.update(ref, (map) => {
+				const next = new Map(map)
+				for (const id of deletedIds) {
+					next.delete(id)
 				}
-			}
+				return next
+			})
 		}
 
-		if (!foreignKey) return ok(undefined);
+		// 6. Return result
+		return {
+			count: deletedEntities.length,
+			deleted: deletedEntities,
+			...(Object.keys(allCascadeResults).length > 0
+				? { cascaded: allCascadeResults }
+				: {}),
+		}
+	})
 
-		const now = new Date().toISOString();
-		const updatedData = targetData.map((item: unknown) => {
-			if (
-				typeof item === "object" &&
-				item !== null &&
-				"id" in item &&
-				entities.some((e) => e.id === item.id)
-			) {
-				return {
-					...item,
-					[foreignKey!]: null,
-					updatedAt: now,
-				};
-			}
-			return item;
-		});
+// ============================================================================
+// Legacy Exports (backward compatibility for unmigrated factory)
+// These will be removed when core/factories/database.ts is migrated (task 10)
+// ============================================================================
 
-		allData[targetCollection] = updatedData;
-		return ok(undefined);
-	} catch (error) {
-		return err(
-			createUnknownError(
-				`Failed to set foreign keys to null in collection ${targetCollection}`,
-				error,
-			),
-		);
-	}
-}
-
-/**
- * Check if entity has soft delete capability
- */
-function hasSoftDelete<T>(entity: T): entity is T & { deletedAt?: string } {
-	return (
-		typeof entity === "object" &&
-		entity !== null &&
-		("deletedAt" in entity || !("deletedAt" in entity))
-	); // Allow soft delete if field can be added
-}
+export {
+	createDeleteWithRelationshipsMethod,
+	createDeleteManyWithRelationshipsMethod,
+} from "./delete-with-relationships-legacy.js"
