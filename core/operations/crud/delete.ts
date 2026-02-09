@@ -1,401 +1,292 @@
 /**
- * Delete operation implementation with soft delete support
+ * Effect-based delete operations for entities.
+ *
+ * Uses Ref<ReadonlyMap> for atomic state mutation and typed errors
+ * (NotFoundError, OperationError, ForeignKeyError).
+ *
+ * Preserves soft delete support, foreign key constraint checking,
+ * and cascade handling from the legacy implementation.
  */
 
+import { Effect, Ref } from "effect"
 import type {
-	MinimalEntity,
-	DeleteOptions,
-	DeleteManyOptions,
 	DeleteManyResult,
-} from "../../types/crud-types.js";
-import { hasSoftDelete } from "../../types/crud-types.js";
-import type { LegacyCrudError as CrudError } from "../../errors/legacy.js";
-import type { WhereClause } from "../../types/types.js";
+} from "../../types/crud-types.js"
+import { hasSoftDelete } from "../../types/crud-types.js"
 import {
-	createNotFoundError,
-	createOperationNotAllowedError,
-	createUnknownError,
-	ok,
-	err,
-	type Result,
-} from "../../errors/legacy.js";
-import {
-	checkDeleteConstraints,
-	CascadeAction,
-} from "../../validators/foreign-key.js";
-import { filterData } from "../query/filter.js";
-import type { RelationshipDef } from "../../types/types.js";
+	NotFoundError,
+	ForeignKeyError,
+	OperationError,
+} from "../../errors/crud-errors.js"
 
-// Helper to transform relationships to the format expected by filterData
-function transformRelationships(
-	relationships: Record<string, RelationshipDef<unknown>>,
-): Record<string, { type: string; target: string; foreignKey?: string }> {
-	const transformed: Record<
-		string,
-		{ type: string; target: string; foreignKey?: string }
-	> = {};
-	for (const [key, rel] of Object.entries(relationships)) {
-		const entry: { type: string; target: string; foreignKey?: string } = {
-			type: rel.type,
-			target: rel.target || rel.__targetCollection || key,
-		};
-		if (rel.foreignKey !== undefined) {
-			entry.foreignKey = rel.foreignKey;
-		}
-		transformed[key] = entry;
-	}
-	return transformed;
+// ============================================================================
+// Types
+// ============================================================================
+
+type HasId = { readonly id: string }
+
+type RelationshipConfig = {
+	readonly type: "ref" | "inverse"
+	readonly target: string
+	readonly foreignKey?: string
 }
+
+type DeleteOptions = {
+	readonly soft?: boolean
+}
+
+type DeleteManyOptions = {
+	readonly soft?: boolean
+	readonly limit?: number
+}
+
+// ============================================================================
+// Foreign Key Constraint Checking (Effect-based)
+// ============================================================================
+
+/**
+ * Check if deleting an entity would violate foreign key constraints.
+ * Scans all collections for "ref" relationships targeting this collection
+ * whose foreign key field references the entity being deleted.
+ *
+ * Returns Effect that fails with ForeignKeyError if violations exist.
+ */
+const checkDeleteConstraintsEffect = (
+	entityId: string,
+	collectionName: string,
+	allRelationships: Record<string, Record<string, RelationshipConfig>>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+): Effect.Effect<void, ForeignKeyError> =>
+	Effect.gen(function* () {
+		for (const [otherCollection, relationships] of Object.entries(allRelationships)) {
+			for (const [field, rel] of Object.entries(relationships)) {
+				if (rel.type === "ref" && rel.target === collectionName) {
+					const foreignKey = rel.foreignKey || `${field}Id`
+					const otherRef = stateRefs[otherCollection]
+					if (otherRef === undefined) continue
+
+					const otherMap = yield* Ref.get(otherRef)
+					let refCount = 0
+
+					for (const entity of otherMap.values()) {
+						if ((entity as Record<string, unknown>)[foreignKey] === entityId) {
+							refCount++
+						}
+					}
+
+					if (refCount > 0) {
+						return yield* Effect.fail(
+							new ForeignKeyError({
+								collection: collectionName,
+								field: foreignKey,
+								value: entityId,
+								targetCollection: otherCollection,
+								message: `Cannot delete: ${refCount} ${otherCollection} entities reference this ${collectionName}`,
+							}),
+						)
+					}
+				}
+			}
+		}
+	})
 
 // ============================================================================
 // Delete Single Entity
 // ============================================================================
 
 /**
- * Delete a single entity by ID with optional soft delete
+ * Delete a single entity by ID with optional soft delete.
+ *
+ * Steps:
+ * 1. Look up entity by ID in Ref state (O(1))
+ * 2. If soft delete requested, verify entity has deletedAt field
+ * 3. Check foreign key constraints across all collections
+ * 4. Soft delete: update entity with deletedAt timestamp
+ *    Hard delete: remove entity from Ref state
  */
-export function createDeleteMethod<
-	T extends MinimalEntity,
-	TRelations extends Record<
-		string,
-		RelationshipDef<unknown, "ref" | "inverse", string>
-	>,
->(
+export const del = <T extends HasId>(
 	collectionName: string,
-	relationships: TRelations,
-	getData: () => T[],
-	setData: (data: T[]) => void,
-	allData: Record<string, unknown[]>,
-	allRelationships: Record<
-		string,
-		Record<string, RelationshipDef<unknown, "ref" | "inverse", string>>
-	>,
-): (
-	id: string,
-	options?: DeleteOptions<T>,
-) => Promise<Result<T, CrudError<T>>> {
-	return async (
-		id: string,
-		options?: DeleteOptions<T>,
-	): Promise<Result<T, CrudError<T>>> => {
-		try {
-			const existingData = getData();
-			const entityIndex = existingData.findIndex((item) => item.id === id);
-
-			if (entityIndex === -1) {
-				return err(createNotFoundError<T>(collectionName, id));
-			}
-
-			const entity = existingData[entityIndex];
-
-			// Check if soft delete is requested but not supported
-			if (
-				"soft" in (options ?? {}) &&
-				(options as { soft?: boolean })?.soft &&
-				!hasSoftDelete(entity)
-			) {
-				return err(
-					createOperationNotAllowedError(
-						"soft delete",
-						"Entity does not have a deletedAt field",
-					),
-				);
-			}
-
-			// Check foreign key constraints
-			const constraints = await checkDeleteConstraints(
-				id,
-				collectionName,
-				allData,
-				allRelationships,
-			);
-
-			if (!constraints.canDelete) {
-				const violation = constraints.violations[0];
-				return err(
-					createOperationNotAllowedError(
-						"delete",
-						`Cannot delete: ${violation.count} ${violation.collection} entities reference this ${collectionName}`,
-					),
-				);
-			}
-
-			let deletedEntity: T;
-
-			if (
-				"soft" in (options ?? {}) &&
-				(options as { soft?: boolean })?.soft &&
-				hasSoftDelete(entity)
-			) {
-				// Soft delete - just mark as deleted
-				const now = new Date().toISOString();
-				deletedEntity = {
-					...entity,
-					deletedAt: now,
-					updatedAt: now,
-				} as T;
-
-				// Update the entity in place
-				const newData = [...existingData];
-				newData[entityIndex] = deletedEntity;
-				setData(newData);
-			} else {
-				// Hard delete - remove from collection
-				deletedEntity = entity;
-				const newData = existingData.filter(
-					(_, index) => index !== entityIndex,
-				);
-				setData(newData);
-			}
-
-			return ok(deletedEntity);
-		} catch (error) {
-			return err(createUnknownError("Failed to delete entity", error));
+	allRelationships: Record<string, Record<string, RelationshipConfig>>,
+	ref: Ref.Ref<ReadonlyMap<string, T>>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+) =>
+(id: string, options?: DeleteOptions): Effect.Effect<T, NotFoundError | OperationError | ForeignKeyError> =>
+	Effect.gen(function* () {
+		// Look up entity by ID (O(1))
+		const currentMap = yield* Ref.get(ref)
+		const entity = currentMap.get(id)
+		if (entity === undefined) {
+			return yield* Effect.fail(
+				new NotFoundError({
+					collection: collectionName,
+					id,
+					message: `Entity '${id}' not found in collection '${collectionName}'`,
+				}),
+			)
 		}
-	};
-}
+
+		const isSoft = options?.soft === true
+
+		// Check if soft delete is requested but entity doesn't support it
+		if (isSoft && !hasSoftDelete(entity)) {
+			return yield* Effect.fail(
+				new OperationError({
+					operation: "soft delete",
+					reason: "Entity does not have a deletedAt field",
+					message: "Entity does not have a deletedAt field",
+				}),
+			)
+		}
+
+		// Check foreign key constraints
+		yield* checkDeleteConstraintsEffect(
+			id,
+			collectionName,
+			allRelationships,
+			stateRefs,
+		)
+
+		if (isSoft && hasSoftDelete(entity)) {
+			// Soft delete: mark with deletedAt timestamp
+			// If already soft-deleted, preserve the original deletedAt
+			const existingDeletedAt = (entity as Record<string, unknown>).deletedAt
+			const now = new Date().toISOString()
+			const softDeleted = {
+				...entity,
+				deletedAt: existingDeletedAt || now,
+				updatedAt: existingDeletedAt ? (entity as Record<string, unknown>).updatedAt : now,
+			} as T
+
+			yield* Ref.update(ref, (map) => {
+				const next = new Map(map)
+				next.set(id, softDeleted)
+				return next
+			})
+
+			return softDeleted
+		}
+
+		// Hard delete: remove from state
+		yield* Ref.update(ref, (map) => {
+			const next = new Map(map)
+			next.delete(id)
+			return next
+		})
+
+		return entity
+	})
 
 // ============================================================================
 // Delete Multiple Entities
 // ============================================================================
 
 /**
- * Delete multiple entities matching a query
+ * Delete multiple entities matching a predicate with optional soft delete.
+ *
+ * Uses a predicate function to select which entities to delete.
+ * The caller (database factory) can use the Stream-based filter pipeline
+ * to build the predicate from a WhereClause.
+ *
+ * All matching entities are deleted atomically in a single Ref.update call.
  */
-export function createDeleteManyMethod<
-	T extends MinimalEntity,
-	TRelations extends Record<
-		string,
-		RelationshipDef<unknown, "ref" | "inverse", string>
-	>,
-	TDB,
->(
+export const deleteMany = <T extends HasId>(
 	collectionName: string,
-	relationships: TRelations,
-	getData: () => T[],
-	setData: (data: T[]) => void,
-	allData: Record<string, unknown[]>,
-	allRelationships: Record<
-		string,
-		Record<string, RelationshipDef<unknown, "ref" | "inverse", string>>
-	>,
-	config: Record<
-		string,
-		{
-			schema: unknown;
-			relationships: Record<
-				string,
-				RelationshipDef<unknown, "ref" | "inverse", string>
-			>;
+	allRelationships: Record<string, Record<string, RelationshipConfig>>,
+	ref: Ref.Ref<ReadonlyMap<string, T>>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+) =>
+(
+	predicate: (entity: T) => boolean,
+	options?: DeleteManyOptions,
+): Effect.Effect<DeleteManyResult<T>, OperationError | ForeignKeyError> =>
+	Effect.gen(function* () {
+		// Get current state and find matching entities
+		const currentMap = yield* Ref.get(ref)
+		let matchingEntities: T[] = []
+		for (const entity of currentMap.values()) {
+			if (predicate(entity)) {
+				matchingEntities.push(entity)
+			}
 		}
-	>,
-): (
-	where: WhereClause<T, TRelations, TDB>,
-	options?: DeleteManyOptions<T>,
-) => Promise<Result<DeleteManyResult<T>, CrudError<T>>> {
-	return async (
-		where: WhereClause<T, TRelations, TDB>,
-		options?: DeleteManyOptions<T>,
-	): Promise<Result<DeleteManyResult<T>, CrudError<T>>> => {
-		try {
-			const existingData = getData();
 
-			// Filter entities to delete
-			let entitiesToDelete = filterData(
-				existingData as unknown as Record<string, unknown>[],
-				where,
-				allData,
-				transformRelationships(
-					relationships as Record<string, RelationshipDef<unknown>>,
-				),
-				collectionName,
-				config as Record<
-					string,
-					{
-						schema: unknown;
-						relationships: Record<
-							string,
-							{ type: string; target: string; foreignKey?: string }
-						>;
-					}
-				>,
-			) as unknown as T[];
+		// Apply limit if specified
+		if (options?.limit !== undefined && options.limit > 0) {
+			matchingEntities = matchingEntities.slice(0, options.limit)
+		}
 
-			// Apply limit if specified
-			if (options?.limit && options.limit > 0) {
-				entitiesToDelete = entitiesToDelete.slice(0, options.limit);
+		if (matchingEntities.length === 0) {
+			return { count: 0, deleted: [] }
+		}
+
+		const isSoft = options?.soft === true
+
+		// Check if soft delete is requested but entities don't support it
+		if (isSoft && !hasSoftDelete(matchingEntities[0]!)) {
+			return yield* Effect.fail(
+				new OperationError({
+					operation: "soft delete",
+					reason: "Entities do not have a deletedAt field",
+					message: "Entities do not have a deletedAt field",
+				}),
+			)
+		}
+
+		// Check foreign key constraints for all entities (only for hard delete)
+		if (!isSoft) {
+			for (const entity of matchingEntities) {
+				yield* checkDeleteConstraintsEffect(
+					entity.id,
+					collectionName,
+					allRelationships,
+					stateRefs,
+				)
+			}
+		}
+
+		const now = new Date().toISOString()
+		const deleted: T[] = []
+
+		if (isSoft) {
+			// Soft delete: update matching entities with deletedAt
+			const updatedEntities = new Map<string, T>()
+			for (const entity of matchingEntities) {
+				const existingDeletedAt = (entity as Record<string, unknown>).deletedAt
+				const softDeleted = {
+					...entity,
+					deletedAt: existingDeletedAt || now,
+					updatedAt: existingDeletedAt ? (entity as Record<string, unknown>).updatedAt : now,
+				} as T
+				updatedEntities.set(entity.id, softDeleted)
+				deleted.push(softDeleted)
 			}
 
-			if (entitiesToDelete.length === 0) {
-				return ok({ count: 0, deleted: [] });
-			}
-
-			// Check if soft delete is requested but not supported
-			if ("soft" in (options ?? {}) && (options as { soft?: boolean })?.soft) {
-				const firstEntity = entitiesToDelete[0];
-				if (!hasSoftDelete(firstEntity)) {
-					return err(
-						createOperationNotAllowedError(
-							"soft delete",
-							"Entities do not have a deletedAt field",
-						),
-					);
+			yield* Ref.update(ref, (map) => {
+				const next = new Map(map)
+				for (const [id, entity] of updatedEntities) {
+					next.set(id, entity)
 				}
-			}
+				return next
+			})
+		} else {
+			// Hard delete: remove matching entities from state
+			const deletedIds = new Set(matchingEntities.map((e) => e.id))
+			deleted.push(...matchingEntities)
 
-			// Check foreign key constraints for all entities
-			const constraintChecks = await Promise.all(
-				entitiesToDelete.map((entity) =>
-					checkDeleteConstraints(
-						entity.id,
-						collectionName,
-						allData,
-						allRelationships,
-					),
-				),
-			);
-
-			// Find any constraint violations
-			const violations = constraintChecks
-				.map((check, index) => ({ check, entity: entitiesToDelete[index] }))
-				.filter(({ check }) => !check.canDelete);
-
-			if (violations.length > 0) {
-				const firstViolation = violations[0];
-				const violation = firstViolation.check.violations[0];
-				return err(
-					createOperationNotAllowedError(
-						"batch delete",
-						`Cannot delete ${violations.length} entities due to foreign key constraints. First violation: ${violation.count} ${violation.collection} entities reference ${collectionName} ${firstViolation.entity.id}`,
-					),
-				);
-			}
-
-			const deleted: T[] = [];
-			const deletedIds = new Set<string>();
-			const now = new Date().toISOString();
-
-			if ("soft" in (options ?? {}) && (options as { soft?: boolean })?.soft) {
-				// Soft delete - mark as deleted
-				const newData = existingData.map((entity) => {
-					const shouldDelete = entitiesToDelete.some((e) => e.id === entity.id);
-					if (shouldDelete && hasSoftDelete(entity)) {
-						const softDeleted = {
-							...entity,
-							deletedAt: now,
-							updatedAt: now,
-						} as T;
-						deleted.push(softDeleted);
-						deletedIds.add(entity.id);
-						return softDeleted;
-					}
-					return entity;
-				});
-
-				setData(newData);
-			} else {
-				// Hard delete - remove from collection
-				entitiesToDelete.forEach((entity) => {
-					deleted.push(entity);
-					deletedIds.add(entity.id);
-				});
-
-				const newData = existingData.filter(
-					(entity) => !deletedIds.has(entity.id),
-				);
-				setData(newData);
-			}
-
-			return ok({
-				count: deleted.length,
-				deleted: options?.returnDeleted
-					? deleted
-					: deleted.map((e) => ({ ...e })),
-			});
-		} catch (error) {
-			return err(createUnknownError("Failed to delete entities", error));
+			yield* Ref.update(ref, (map) => {
+				const next = new Map(map)
+				for (const id of deletedIds) {
+					next.delete(id)
+				}
+				return next
+			})
 		}
-	};
-}
+
+		return { count: deleted.length, deleted }
+	})
 
 // ============================================================================
-// Helper Functions
+// Legacy Exports (backward compatibility for unmigrated factory)
+// These will be removed when core/factories/database.ts is migrated (task 10)
 // ============================================================================
 
-/**
- * Filter out soft-deleted entities from results
- */
-export function excludeSoftDeleted<T extends MinimalEntity>(
-	entities: T[],
-): T[] {
-	return entities.filter((entity) => {
-		if (hasSoftDelete(entity)) {
-			return !entity.deletedAt;
-		}
-		return true;
-	});
-}
-
-/**
- * Include only soft-deleted entities
- */
-export function onlySoftDeleted<T extends MinimalEntity>(entities: T[]): T[] {
-	return entities.filter((entity) => {
-		if (hasSoftDelete(entity)) {
-			return !!entity.deletedAt;
-		}
-		return false;
-	});
-}
-
-/**
- * Restore soft-deleted entities
- */
-export function restoreSoftDeleted<T extends MinimalEntity>(
-	entities: T[],
-	ids: string[],
-): { restored: T[]; notFound: string[] } {
-	const restored: T[] = [];
-	const notFound: string[] = [];
-	const idSet = new Set(ids);
-	const now = new Date().toISOString();
-
-	entities.forEach((entity) => {
-		if (idSet.has(entity.id) && hasSoftDelete(entity) && entity.deletedAt) {
-			const restoredEntity = {
-				...entity,
-				deletedAt: undefined,
-				updatedAt: now,
-			} as T;
-			restored.push(restoredEntity);
-			idSet.delete(entity.id);
-		}
-	});
-
-	// IDs that weren't found
-	notFound.push(...Array.from(idSet));
-
-	return { restored, notFound };
-}
-
-/**
- * Permanently delete soft-deleted entities older than a certain date
- */
-export function purgeSoftDeleted<T extends MinimalEntity>(
-	entities: T[],
-	olderThan: Date,
-): { purged: number; remaining: T[] } {
-	let purged = 0;
-	const remaining = entities.filter((entity) => {
-		if (hasSoftDelete(entity) && entity.deletedAt) {
-			const deletedAt = new Date(entity.deletedAt);
-			if (deletedAt < olderThan) {
-				purged++;
-				return false; // Remove from collection
-			}
-		}
-		return true; // Keep in collection
-	});
-
-	return { purged, remaining };
-}
+export { createDeleteMethod, createDeleteManyMethod } from "./delete-legacy.js"

@@ -55,7 +55,7 @@
 
 - [x] 8.1 Migrate `core/operations/crud/create.ts`: create and createMany return Effect<T, ValidationError | DuplicateKeyError | ForeignKeyError>. Use Ref.update for state mutation, Schema.decodeUnknown for validation
 - [x] 8.2 Migrate `core/operations/crud/update.ts`: update and updateMany return Effect. Preserve all update operators ($increment, $decrement, $multiply, $append, $prepend, $remove, $toggle, $set)
-- [ ] 8.3 Migrate `core/operations/crud/delete.ts`: delete and deleteMany return Effect. Preserve soft delete, foreign key constraint checking, cascade handling
+- [x] 8.3 Migrate `core/operations/crud/delete.ts`: delete and deleteMany return Effect. Preserve soft delete, foreign key constraint checking, cascade handling
 - [ ] 8.4 Migrate `core/operations/crud/upsert.ts`: upsert and upsertMany return Effect
 - [ ] 8.5 Migrate `core/operations/crud/create-with-relationships.ts`: createWithRelationships returns Effect
 - [ ] 8.6 Migrate `core/operations/crud/update-with-relationships.ts`: updateWithRelationships returns Effect
