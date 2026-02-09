@@ -1,5 +1,5 @@
-import type { z } from "zod";
-import type { CrudMethodsWithRelationships } from "../factories/crud-factory-with-relationships.js";
+import type { Schema, Stream } from "effect";
+import type { EffectCollection } from "../factories/database-effect.js";
 import type { MinimalEntity } from "./crud-types.js";
 
 // ============================================================================
@@ -695,25 +695,25 @@ export type QueryConfig<T, Relations, DB> =
 	  };
 
 // Enhanced query return type that supports both object and array-based selection
-// Use a more direct approach to avoid TypeScript's conditional type complexity limits
+// Uses Stream.Stream instead of AsyncIterable for composable query pipelines with typed errors
 export type QueryReturnType<T, Relations, Config, DB> = Config extends {
 	populate: infer P;
 	select: infer S;
 }
 	? P extends PopulateConfig<Relations, DB>
 		? S extends SelectConfig<T, Relations, DB>
-			? AsyncIterable<ApplySelectAndPopulate<T, Relations, S, P, DB>>
-			: AsyncIterable<ApplyPopulateObject<T, Relations, P, DB>>
-		: AsyncIterable<T>
+			? Stream.Stream<ApplySelectAndPopulate<T, Relations, S, P, DB>>
+			: Stream.Stream<ApplyPopulateObject<T, Relations, P, DB>>
+		: Stream.Stream<T>
 	: Config extends { populate: infer P }
 		? P extends PopulateConfig<Relations, DB>
-			? AsyncIterable<ApplyPopulateObject<T, Relations, P, DB>>
-			: AsyncIterable<T>
+			? Stream.Stream<ApplyPopulateObject<T, Relations, P, DB>>
+			: Stream.Stream<T>
 		: Config extends { select: infer S }
 			? S extends SelectConfig<T, Relations, DB>
-				? AsyncIterable<ApplySelectConfig<T, S, Relations, DB>>
-				: AsyncIterable<T>
-			: AsyncIterable<T>;
+				? Stream.Stream<ApplySelectConfig<T, S, Relations, DB>>
+				: Stream.Stream<T>
+			: Stream.Stream<T>;
 
 export type SmartCollection<
 	T,
@@ -728,11 +728,11 @@ export type SmartCollection<
 			where?: WhereClause<T, Relations, DB>;
 		},
 	>(config?: C): QueryReturnType<T, Relations, C, DB>;
-} & CrudMethodsWithRelationships<T & MinimalEntity, Relations, DB>;
+} & EffectCollection<T & MinimalEntity>;
 
 // Extract all entity types from config
 export type ExtractEntityTypes<Config> = {
-	[K in keyof Config]: Config[K] extends { schema: z.ZodType<infer T> }
+	[K in keyof Config]: Config[K] extends { schema: Schema.Schema<infer T, infer _E, infer _R> }
 		? T
 		: never;
 };
@@ -760,7 +760,7 @@ export type ResolveRelationships<Relations, AllEntities> = {
 // Generate the full database type automatically
 export type GenerateDatabase<Config> = {
 	[K in keyof Config]: Config[K] extends {
-		schema: z.ZodType<infer Entity>;
+		schema: Schema.Schema<infer Entity, infer _E, infer _R>;
 		relationships: infer Relations;
 	}
 		? SmartCollection<
@@ -785,7 +785,7 @@ export type TypedPopulate<
 
 // Type for the dataset that matches the config
 export type DatasetFor<Config> = {
-	[K in keyof Config]: Config[K] extends { schema: z.ZodType<infer T> }
+	[K in keyof Config]: Config[K] extends { schema: Schema.Schema<infer T, infer _E, infer _R> }
 		? T[]
 		: never;
 };
