@@ -38,7 +38,7 @@
 
 ## 6. Query Pipeline (Stream-based)
 
-- [ ] 6.1 Create `core/operations/query/filter-stream.ts` implementing filter as a Stream combinator: `applyFilter(where)` returning `<T>(stream: Stream<T>) => Stream<T>`. Migrate all operator matching logic from current filter.ts
+- [x] 6.1 Create `core/operations/query/filter-stream.ts` implementing filter as a Stream combinator: `applyFilter(where)` returning `<T>(stream: Stream<T>) => Stream<T>`. Migrate all operator matching logic from current filter.ts
 - [ ] 6.2 Create `core/operations/query/sort-stream.ts` implementing sort as a Stream combinator: `applySort(sort)` returning `<T>(stream: Stream<T>) => Stream<T>`. Uses Stream.runCollect → sort → Stream.fromIterable
 - [ ] 6.3 Create `core/operations/query/select-stream.ts` implementing select as a Stream combinator: `applySelect(select)` returning `<T>(stream: Stream<T>) => Stream<Selected<T>>`. Support both object and array selection
 - [ ] 6.4 Create `core/operations/query/paginate-stream.ts` implementing pagination as Stream combinators: `applyPagination(offset, limit)` using Stream.drop/Stream.take
