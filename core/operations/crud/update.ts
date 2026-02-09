@@ -392,9 +392,3 @@ export function getChangedFields<T extends MinimalEntity>(
 	return changed
 }
 
-// ============================================================================
-// Legacy Exports (backward compatibility for unmigrated factory)
-// These will be removed when core/factories/database.ts is migrated (task 10)
-// ============================================================================
-
-export { createUpdateMethod, createUpdateManyMethod } from "./update-legacy.js"

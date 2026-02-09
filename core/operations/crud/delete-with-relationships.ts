@@ -561,12 +561,3 @@ export const deleteManyWithRelationships = <T extends HasId>(
 		}
 	})
 
-// ============================================================================
-// Legacy Exports (backward compatibility for unmigrated factory)
-// These will be removed when core/factories/database.ts is migrated (task 10)
-// ============================================================================
-
-export {
-	createDeleteWithRelationshipsMethod,
-	createDeleteManyWithRelationshipsMethod,
-} from "./delete-with-relationships-legacy.js"

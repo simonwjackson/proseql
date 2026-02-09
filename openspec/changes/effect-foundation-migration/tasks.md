@@ -110,7 +110,7 @@
 
 ## 13. Cleanup
 
-- [ ] 13.1 Remove all Zod imports and references from the codebase
+- [x] 13.1 Remove all Zod imports and references from the codebase
 - [ ] 13.2 Remove `core/utils/async-iterable.ts` (collect, first, count, map — replaced by Stream utilities)
 - [ ] 13.3 Remove old `core/errors/crud-errors.ts` hand-rolled Result type if not already replaced
 - [ ] 13.4 Verify no `as unknown as` casts remain in the database factory (the type system should be cleaner)

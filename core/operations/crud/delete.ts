@@ -235,9 +235,3 @@ export const deleteMany = <T extends HasId>(
 		return { count: deleted.length, deleted }
 	})
 
-// ============================================================================
-// Legacy Exports (backward compatibility for unmigrated factory)
-// These will be removed when core/factories/database.ts is migrated (task 10)
-// ============================================================================
-
-export { createDeleteMethod, createDeleteManyMethod } from "./delete-legacy.js"

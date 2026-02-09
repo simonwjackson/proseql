@@ -655,9 +655,3 @@ export const updateWithRelationships = <T extends HasId, I = T>(
 		return validated
 	})
 
-// ============================================================================
-// Legacy Exports (backward compatibility for unmigrated factory)
-// These will be removed when core/factories/database.ts is migrated (task 10)
-// ============================================================================
-
-export { createUpdateWithRelationshipsMethod } from "./update-with-relationships-legacy.js"

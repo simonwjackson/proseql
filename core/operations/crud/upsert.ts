@@ -294,9 +294,3 @@ export const upsertMany = <T extends HasId, I = T>(
 		return { created, updated, unchanged }
 	})
 
-// ============================================================================
-// Legacy Exports (backward compatibility for unmigrated factory)
-// These will be removed when core/factories/database.ts is migrated (task 10)
-// ============================================================================
-
-export { createUpsertMethod, createUpsertManyMethod, extractUniqueFieldsFromSchema, validateUniqueWhere, createCompoundKey } from "./upsert-legacy.js"

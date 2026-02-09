@@ -23,9 +23,6 @@ export type {
 	EffectDatabasePersistenceConfig,
 } from "./factories/database-effect.js";
 
-// Legacy factory (will be removed after test migration)
-export { createDatabase } from "./factories/database.js";
-
 // ============================================================================
 // CRUD Method Types
 // ============================================================================

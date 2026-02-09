@@ -625,9 +625,3 @@ export const createWithRelationships = <T extends HasId, I = T>(
 		return validated
 	})
 
-// ============================================================================
-// Legacy Exports (backward compatibility for unmigrated factory)
-// These will be removed when core/factories/database.ts is migrated (task 10)
-// ============================================================================
-
-export { createCreateWithRelationshipsMethod } from "./create-with-relationships-legacy.js"

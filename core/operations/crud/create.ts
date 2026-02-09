@@ -252,12 +252,6 @@ export const createMany = <T extends HasId, I = T>(
 // Helper Functions
 // ============================================================================
 
-// ============================================================================
-// Legacy Exports (backward compatibility for unmigrated factory)
-// These will be removed when core/factories/database.ts is migrated (task 10)
-// ============================================================================
-
-export { createCreateMethod, createCreateManyMethod } from "./create-legacy.js"
 
 /**
  * Check for unique constraint violations against existing data in a Ref.
