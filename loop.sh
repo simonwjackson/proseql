@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 MAX_ITERATIONS=${1:-0}
 ITERATION=0
 
@@ -23,7 +26,20 @@ while true; do
   fi
 
   echo "=== Iteration $ITERATION | $REMAINING tasks remaining ==="
-  claude -p --dangerously-skip-permissions --verbose < PROMPT_build.md
+  nix run nixpkgs#bun -- x '@anthropic-ai/claude-code' --dangerously-skip-permissions --print --verbose --output-format stream-json <PROMPT_build.md |
+    jq -r '
+      if .type == "assistant" then
+        .message.content[]? |
+        if .type == "text" then .text
+        elif .type == "tool_use" then
+          "[\(.name)] " + (.input | to_entries | map("\(.key)=\(.value | tostring | .[0:120])") | join(" "))
+        else empty
+        end
+      elif .type == "result" then
+        "\n--- done: \(.duration_ms / 1000)s | cost: $\(.total_cost_usd | tostring | .[0:6]) | turns: \(.num_turns) ---"
+      else empty
+      end
+    '
   git add -A && git push origin "$(git branch --show-current)" 2>/dev/null || true
   echo ""
 done

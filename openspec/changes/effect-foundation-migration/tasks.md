@@ -1,7 +1,7 @@
 ## 1. Project Setup
 
 - [x] 1.1 Add `effect` dependency to package.json (create package.json at v2 level if needed), remove `zod` dependency
-- [ ] 1.2 Update tsconfig.json for Effect compatibility (ensure `strict: true`, `exactOptionalPropertyTypes: true`, target ES2022+)
+- [x] 1.2 Update tsconfig.json for Effect compatibility (ensure `strict: true`, `exactOptionalPropertyTypes: true`, target ES2022+)
 - [ ] 1.3 Create `core/errors/` module with all Effect TaggedError types: NotFoundError, DuplicateKeyError, ForeignKeyError, ValidationError, UniqueConstraintError, ConcurrencyError, OperationError, TransactionError, DanglingReferenceError, CollectionNotFoundError, StorageError, SerializationError, UnsupportedFormatError
 
 ## 2. Effect Schema Definitions
