@@ -3,7 +3,7 @@
  * Extends the existing configuration to include optional file paths for collections.
  */
 
-import type { z } from "zod";
+import type { Schema } from "effect";
 import type { StorageAdapter } from "../storage/types.js";
 import type { SerializerRegistry } from "../serializers/types.js";
 
@@ -12,9 +12,9 @@ import type { SerializerRegistry } from "../serializers/types.js";
  */
 export type CollectionConfig = {
 	/**
-	 * Zod schema for validating entities in this collection
+	 * Effect Schema for validating and encoding/decoding entities in this collection
 	 */
-	readonly schema: z.ZodType<unknown>;
+	readonly schema: Schema.Schema.All;
 
 	/**
 	 * Optional file path for persisting this collection.
