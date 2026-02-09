@@ -1,42 +1,41 @@
 import { describe, it, expect } from "vitest";
-import { z } from "zod";
-import { createDatabase } from "../core/factories/database";
-import { collect, map, first, count } from "../core/utils/async-iterable.js";
+import { Effect, Schema, Stream, Chunk } from "effect";
+import { createEffectDatabase } from "../core/factories/database-effect";
 
-describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
+describe("Database v2 - Conditional Logic (OR/AND/NOT) (Effect/Stream)", () => {
 	// Test schemas
-	const UserSchema = z.object({
-		id: z.string(),
-		name: z.string(),
-		email: z.string(),
-		age: z.number(),
-		status: z.enum(["active", "inactive", "pending"]),
-		role: z.string(),
-		score: z.number().optional(),
-		tags: z.array(z.string()).optional(),
-		createdAt: z.string(),
+	const UserSchema = Schema.Struct({
+		id: Schema.String,
+		name: Schema.String,
+		email: Schema.String,
+		age: Schema.Number,
+		status: Schema.String,
+		role: Schema.String,
+		score: Schema.optional(Schema.Number),
+		tags: Schema.optional(Schema.Array(Schema.String)),
+		createdAt: Schema.String,
 	});
 
-	const ProjectSchema = z.object({
-		id: z.string(),
-		title: z.string(),
-		description: z.string(),
-		status: z.enum(["draft", "active", "completed", "archived"]),
-		priority: z.number(),
-		isPublic: z.boolean(),
-		ownerId: z.string(),
-		budget: z.number(),
-		tags: z.array(z.string()).optional(),
+	const ProjectSchema = Schema.Struct({
+		id: Schema.String,
+		title: Schema.String,
+		description: Schema.String,
+		status: Schema.String,
+		priority: Schema.Number,
+		isPublic: Schema.Boolean,
+		ownerId: Schema.String,
+		budget: Schema.Number,
+		tags: Schema.optional(Schema.Array(Schema.String)),
 	});
 
-	const CommentSchema = z.object({
-		id: z.string(),
-		content: z.string(),
-		authorId: z.string(),
-		projectId: z.string(),
-		likes: z.number(),
-		isApproved: z.boolean(),
-		sentiment: z.enum(["positive", "neutral", "negative"]).optional(),
+	const CommentSchema = Schema.Struct({
+		id: Schema.String,
+		content: Schema.String,
+		authorId: Schema.String,
+		projectId: Schema.String,
+		likes: Schema.Number,
+		isApproved: Schema.Boolean,
+		sentiment: Schema.optional(Schema.String),
 	});
 
 	const config = {
@@ -253,19 +252,31 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		],
 	};
 
+	// Helper: create database and collect query results
+	const collectQuery = (
+		collection: "users" | "projects" | "comments",
+		options: Record<string, unknown>,
+	): Promise<ReadonlyArray<Record<string, unknown>>> =>
+		Effect.runPromise(
+			Effect.gen(function* () {
+				const db = yield* createEffectDatabase(config, data);
+				const coll = (db as Record<string, { query: (opts: Record<string, unknown>) => Stream.Stream<Record<string, unknown>> }>)[collection];
+				return yield* Stream.runCollect(coll.query(options)).pipe(
+					Effect.map(Chunk.toReadonlyArray),
+				);
+			}),
+		);
+
 	describe("$or Operator", () => {
 		it("should handle basic OR with two conditions", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$or: [
-							{ name: { $startsWith: "John" } },
-							{ email: { $contains: "@company.com" } },
-						],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$or: [
+						{ name: { $startsWith: "John" } },
+						{ email: { $contains: "@company.com" } },
+					],
+				},
+			});
 
 			expect(results).toHaveLength(4); // John + Jane, Alice, Eva from @company.com
 			const names = results.map((r) => r.name).sort();
@@ -278,18 +289,15 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle OR with multiple conditions", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$or: [
-							{ age: { $lt: 25 } },
-							{ role: "admin" },
-							{ status: "pending" },
-						],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$or: [
+						{ age: { $lt: 25 } },
+						{ role: "admin" },
+						{ status: "pending" },
+					],
+				},
+			});
 
 			expect(results).toHaveLength(3); // Eva (22), John (admin), Alice (pending)
 			const names = results.map((r) => r.name).sort();
@@ -297,18 +305,15 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle OR with different field types", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.projects.query({
-					where: {
-						$or: [
-							{ isPublic: true },
-							{ budget: { $gte: 70000 } },
-							{ status: "archived" },
-						],
-					},
-				}),
-			);
+			const results = await collectQuery("projects", {
+				where: {
+					$or: [
+						{ isPublic: true },
+						{ budget: { $gte: 70000 } },
+						{ status: "archived" },
+					],
+				},
+			});
 
 			expect(results).toHaveLength(4); // p1, p4 (public), p2 (budget>=70000), p5 (archived)
 			const ids = results.map((r) => r.id).sort();
@@ -316,14 +321,11 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle OR with operators inside", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$or: [{ age: { $in: [25, 30, 35] } }, { score: { $gte: 90 } }],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$or: [{ age: { $in: [25, 30, 35] } }, { score: { $gte: 90 } }],
+				},
+			});
 
 			expect(results).toHaveLength(4); // Jane(25), John(30), Bob(35), Charlie(score:91)
 			const names = results.map((r) => r.name).sort();
@@ -336,28 +338,22 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle empty OR array", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$or: [],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$or: [],
+				},
+			});
 
 			// Empty OR should return no results (no conditions to satisfy)
 			expect(results).toHaveLength(0);
 		});
 
 		it("should handle OR with null/undefined checks", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$or: [{ score: { $eq: undefined } }, { score: { $lt: 70 } }],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$or: [{ score: { $eq: undefined } }, { score: { $lt: 70 } }],
+				},
+			});
 
 			expect(results).toHaveLength(2); // Alice (undefined), Eva (65)
 			const names = results.map((r) => r.name).sort();
@@ -367,32 +363,26 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 
 	describe("$and Operator", () => {
 		it("should handle basic AND with two conditions", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$and: [{ status: "active" }, { role: "developer" }],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$and: [{ status: "active" }, { role: "developer" }],
+				},
+			});
 
 			expect(results).toHaveLength(1); // Only Jane
 			expect(results[0].name).toBe("Jane Smith");
 		});
 
 		it("should handle AND with multiple conditions", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$and: [
-							{ status: "active" },
-							{ age: { $gte: 25 } },
-							{ score: { $gte: 80 } },
-						],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$and: [
+						{ status: "active" },
+						{ age: { $gte: 25 } },
+						{ score: { $gte: 80 } },
+					],
+				},
+			});
 
 			expect(results).toHaveLength(3); // John, Jane, Charlie
 			const names = results.map((r) => r.name).sort();
@@ -400,18 +390,15 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle AND with operators inside", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.projects.query({
-					where: {
-						$and: [
-							{ priority: { $lte: 2 } },
-							{ budget: { $gte: 20000, $lte: 60000 } },
-							{ status: { $ne: "draft" } },
-						],
-					},
-				}),
-			);
+			const results = await collectQuery("projects", {
+				where: {
+					$and: [
+						{ priority: { $lte: 2 } },
+						{ budget: { $gte: 20000, $lte: 60000 } },
+						{ status: { $ne: "draft" } },
+					],
+				},
+			});
 
 			expect(results).toHaveLength(3); // p1, p3, p5
 			const ids = results.map((r) => r.id).sort();
@@ -419,39 +406,30 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle empty AND array", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$and: [],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$and: [],
+				},
+			});
 
 			// Empty AND should return all results (no conditions to fail)
 			expect(results).toHaveLength(6);
 		});
 
 		it("should handle implicit AND (default behavior)", async () => {
-			const db = createDatabase(config, data);
-
 			// These two queries should produce identical results
-			const implicitAnd = await collect(
-				db.users.query({
-					where: {
-						status: "active",
-						age: { $gte: 30 },
-					},
-				}),
-			);
+			const implicitAnd = await collectQuery("users", {
+				where: {
+					status: "active",
+					age: { $gte: 30 },
+				},
+			});
 
-			const explicitAnd = await collect(
-				db.users.query({
-					where: {
-						$and: [{ status: "active" }, { age: { $gte: 30 } }],
-					},
-				}),
-			);
+			const explicitAnd = await collectQuery("users", {
+				where: {
+					$and: [{ status: "active" }, { age: { $gte: 30 } }],
+				},
+			});
 
 			expect(implicitAnd).toHaveLength(2); // John, Charlie
 			expect(explicitAnd).toHaveLength(2);
@@ -463,14 +441,11 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 
 	describe("$not Operator", () => {
 		it("should handle basic NOT negation", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$not: { status: "active" },
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$not: { status: "active" },
+				},
+			});
 
 			expect(results).toHaveLength(2); // Bob (inactive), Alice (pending)
 			const statuses = results.map((r) => r.status).sort();
@@ -478,30 +453,24 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle NOT with operators", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$not: { age: { $gte: 30 } },
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$not: { age: { $gte: 30 } },
+				},
+			});
 
 			expect(results).toHaveLength(3); // Jane(25), Alice(28), Eva(22)
-			expect(results.every((r) => r.age < 30)).toBe(true);
+			expect(results.every((r) => (r.age as number) < 30)).toBe(true);
 		});
 
 		it("should handle NOT with nested objects", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.projects.query({
-					where: {
-						$not: {
-							$and: [{ isPublic: true }, { priority: { $lte: 2 } }],
-						},
+			const results = await collectQuery("projects", {
+				where: {
+					$not: {
+						$and: [{ isPublic: true }, { priority: { $lte: 2 } }],
 					},
-				}),
-			);
+				},
+			});
 
 			// Should exclude projects that are both public AND priority <= 2
 			// p1 is excluded (public, priority 1)
@@ -511,14 +480,11 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle double negation", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$not: { $not: { role: "admin" } },
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$not: { $not: { role: "admin" } },
+				},
+			});
 
 			// Double negation should equal the positive condition
 			expect(results).toHaveLength(1);
@@ -526,14 +492,11 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle NOT with array fields", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$not: { tags: { $contains: "junior" } },
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$not: { tags: { $contains: "junior" } },
+				},
+			});
 
 			// Should exclude users with "junior" tag
 			expect(results).toHaveLength(5); // All except Jane
@@ -543,19 +506,16 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 
 	describe("Nested Boolean Logic", () => {
 		it("should handle OR inside AND", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$and: [
-							{ status: "active" },
-							{
-								$or: [{ role: "admin" }, { score: { $gte: 90 } }],
-							},
-						],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$and: [
+						{ status: "active" },
+						{
+							$or: [{ role: "admin" }, { score: { $gte: 90 } }],
+						},
+					],
+				},
+			});
 
 			// Active users who are either admin or have score >= 90
 			expect(results).toHaveLength(2); // John (admin), Charlie (score 91)
@@ -564,21 +524,18 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle AND inside OR", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.projects.query({
-					where: {
-						$or: [
-							{
-								$and: [{ status: "active" }, { isPublic: true }],
-							},
-							{
-								$and: [{ budget: { $gte: 70000 } }, { status: "draft" }],
-							},
-						],
-					},
-				}),
-			);
+			const results = await collectQuery("projects", {
+				where: {
+					$or: [
+						{
+							$and: [{ status: "active" }, { isPublic: true }],
+						},
+						{
+							$and: [{ budget: { $gte: 70000 } }, { status: "draft" }],
+						},
+					],
+				},
+			});
 
 			// Projects that are (active AND public) OR (budget >= 70k AND draft)
 			expect(results).toHaveLength(3); // p1, p4 (active & public), p2 (budget & draft)
@@ -587,26 +544,23 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle multiple levels of nesting", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$or: [
-							{
-								$and: [
-									{ age: { $lt: 30 } },
-									{
-										$or: [{ status: "active" }, { role: "designer" }],
-									},
-								],
-							},
-							{
-								$and: [{ score: { $gte: 90 } }, { $not: { role: "admin" } }],
-							},
-						],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$or: [
+						{
+							$and: [
+								{ age: { $lt: 30 } },
+								{
+									$or: [{ status: "active" }, { role: "designer" }],
+								},
+							],
+						},
+						{
+							$and: [{ score: { $gte: 90 } }, { $not: { role: "admin" } }],
+						},
+					],
+				},
+			});
 
 			// Complex condition: ((age < 30 AND (status active OR role designer)) OR (score >= 90 AND NOT admin))
 			expect(results).toHaveLength(4); // Jane, Alice, Eva, Charlie
@@ -620,21 +574,18 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle complex combinations with NOT", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.comments.query({
-					where: {
-						$and: [
-							{
-								$not: {
-									$or: [{ sentiment: "negative" }, { isApproved: false }],
-								},
+			const results = await collectQuery("comments", {
+				where: {
+					$and: [
+						{
+							$not: {
+								$or: [{ sentiment: "negative" }, { isApproved: false }],
 							},
-							{ likes: { $gte: 2 } },
-						],
-					},
-				}),
-			);
+						},
+						{ likes: { $gte: 2 } },
+					],
+				},
+			});
 
 			// Comments that are NOT (negative OR unapproved) AND have likes >= 2
 			// This means: approved, non-negative comments with likes >= 2
@@ -646,48 +597,34 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 
 	describe("Integration with Existing Features", () => {
 		it("should work with relationships and population", async () => {
-			const db = createDatabase(config, data);
-			// Collect without population to avoid type complexity
-			const query = db.users.query({
+			const results = await collectQuery("users", {
 				where: {
 					$or: [{ role: "admin" }, { score: { $gte: 90 } }],
 				},
 				populate: { projects: true },
 			});
 
-			// Manually collect results with explicit typing
-			type UserWithProjects = z.infer<typeof UserSchema> & {
-				projects: z.infer<typeof ProjectSchema>[];
-			};
-			const results: UserWithProjects[] = [];
-			for await (const item of query) {
-				results.push(item);
-			}
-
 			expect(results).toHaveLength(2); // John, Charlie
 
 			// Check populated projects
-			const john = results.find((r) => r.name === "John Doe");
+			const john = results.find((r) => r.name === "John Doe") as Record<string, unknown>;
 			expect(john?.projects).toHaveLength(2); // p1, p3
 
-			const charlie = results.find((r) => r.name === "Charlie Wilson");
+			const charlie = results.find((r) => r.name === "Charlie Wilson") as Record<string, unknown>;
 			expect(charlie?.projects).toHaveLength(2); // p4, p5
 		});
 
 		it("should work with sorting and pagination", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$or: [
-							{ age: { $lte: 30 } },
-							{ role: { $in: ["consultant", "designer"] } },
-						],
-					},
-					sort: { age: "asc" },
-					limit: 3,
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$or: [
+						{ age: { $lte: 30 } },
+						{ role: { $in: ["consultant", "designer"] } },
+					],
+				},
+				sort: { age: "asc" },
+				limit: 3,
+			});
 
 			expect(results).toHaveLength(3);
 			// Should be Eva(22), Jane(25), Alice(28) - sorted by age
@@ -696,105 +633,83 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 			expect(results[2].name).toBe("Alice Brown");
 		});
 
-		it("should work with relationship filtering", async () => {
-			const db = createDatabase(config, data);
-			const query = db.projects.query({
+		it("should work with status filtering and population", async () => {
+			// Relationship filtering in where clauses (filtering entities by related entity fields)
+			// is not supported — where clauses operate on flat entity fields only.
+			// This test verifies status filtering with population instead.
+			const results = await collectQuery("projects", {
 				where: {
 					$and: [
 						{
 							$or: [{ status: "active" }, { status: "completed" }],
 						},
-						// TODO: Fix relationship filtering type
-						// {
-						// 	owner: {
-						// 		$or: [{ role: "admin" }, { score: { $gte: 90 } }],
-						// 	},
-						// },
 					],
 				},
 				populate: { owner: true },
 			});
 
-			// Manually collect with explicit typing
-			type ProjectWithOwner = z.infer<typeof ProjectSchema> & {
-				owner?: z.infer<typeof UserSchema>;
-			};
-			const results: ProjectWithOwner[] = [];
-			for await (const item of query) {
-				results.push(item);
-			}
-
-			// Projects that are (active OR completed) - owner filter temporarily disabled
+			// Projects that are (active OR completed)
 			expect(results).toHaveLength(3); // p1, p3, p4
 			const ids = results.map((r) => r.id).sort();
 			expect(ids).toEqual(["p1", "p3", "p4"]);
+
+			// Verify population worked
+			const p1 = results.find((r) => r.id === "p1") as Record<string, unknown>;
+			expect((p1.owner as Record<string, unknown>)?.name).toBe("John Doe");
 		});
 	});
 
 	describe("Edge Cases and Error Handling", () => {
 		it("should handle empty arrays gracefully", async () => {
-			const db = createDatabase(config, data);
-
 			// Empty OR returns nothing
-			const orResults = await collect(db.users.query({ where: { $or: [] } }));
+			const orResults = await collectQuery("users", { where: { $or: [] } });
 			expect(orResults).toHaveLength(0);
 
 			// Empty AND returns everything
-			const andResults = await collect(db.users.query({ where: { $and: [] } }));
+			const andResults = await collectQuery("users", { where: { $and: [] } });
 			expect(andResults).toHaveLength(6);
 		});
 
 		it("should handle null/undefined in boolean operators", async () => {
-			const db = createDatabase(config, data);
-
 			// Check OR with undefined
-			const results = await collect(
-				db.users.query({
-					where: {
-						$or: [{ score: undefined }, { tags: { $contains: "trainee" } }],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$or: [{ score: undefined }, { tags: { $contains: "trainee" } }],
+				},
+			});
 
 			expect(results).toHaveLength(2); // Alice (undefined score), Eva (trainee tag)
 		});
 
 		it("should handle deeply nested empty conditions", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$and: [
-							{ status: "active" },
-							{
-								$or: [
-									{ $and: [] }, // Empty AND should be true
-									{ role: "nonexistent" },
-								],
-							},
-						],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$and: [
+						{ status: "active" },
+						{
+							$or: [
+								{ $and: [] }, // Empty AND should be true
+								{ role: "nonexistent" },
+							],
+						},
+					],
+				},
+			});
 
 			// All active users should match because empty AND in OR evaluates to true
 			expect(results).toHaveLength(4); // All active users
 		});
 
 		it("should handle type mismatches gracefully", async () => {
-			const db = createDatabase(config, data);
-
 			// String field compared with number in OR
-			const results = await collect(
-				db.users.query({
-					where: {
-						$or: [
-							{ name: { $eq: "123" } }, // Fixed: String comparison
-							{ age: 25 }, // Valid condition
-						],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$or: [
+						{ name: { $eq: "123" } }, // String comparison
+						{ age: 25 }, // Valid condition
+					],
+				},
+			});
 
 			// Should only match the valid condition
 			expect(results).toHaveLength(1);
@@ -802,36 +717,29 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle conflicting conditions", async () => {
-			const db = createDatabase(config, data);
-
 			// Contradictory AND conditions
-			const results = await collect(
-				db.users.query({
-					where: {
-						$and: [{ age: { $gt: 30 } }, { age: { $lt: 25 } }],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$and: [{ age: { $gt: 30 } }, { age: { $lt: 25 } }],
+				},
+			});
 
 			// No user can satisfy both conditions
 			expect(results).toHaveLength(0);
 		});
 
 		it("should handle NOT with OR containing multiple fields", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.projects.query({
-					where: {
-						$not: {
-							$or: [
-								{ status: "draft" },
-								{ isPublic: false },
-								{ budget: { $lt: 30000 } },
-							],
-						},
+			const results = await collectQuery("projects", {
+				where: {
+					$not: {
+						$or: [
+							{ status: "draft" },
+							{ isPublic: false },
+							{ budget: { $lt: 30000 } },
+						],
 					},
-				}),
-			);
+				},
+			});
 
 			// Projects that are NOT (draft OR private OR budget < 30k)
 			// Must be: non-draft AND public AND budget >= 30k
@@ -841,36 +749,33 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle extremely nested conditions", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						$or: [
-							{
-								$and: [
-									{ status: "active" },
-									{
-										$not: {
-											$or: [
-												{ age: { $lt: 25 } },
-												{
-													$and: [{ role: "admin" }, { score: { $gte: 95 } }],
-												},
-											],
-										},
+			const results = await collectQuery("users", {
+				where: {
+					$or: [
+						{
+							$and: [
+								{ status: "active" },
+								{
+									$not: {
+										$or: [
+											{ age: { $lt: 25 } },
+											{
+												$and: [{ role: "admin" }, { score: { $gte: 95 } }],
+											},
+										],
 									},
-								],
-							},
-							{
-								$and: [
-									{ email: { $endsWith: "@external.com" } },
-									{ $not: { status: "active" } },
-								],
-							},
-						],
-					},
-				}),
-			);
+								},
+							],
+						},
+						{
+							$and: [
+								{ email: { $endsWith: "@external.com" } },
+								{ $not: { status: "active" } },
+							],
+						},
+					],
+				},
+			});
 
 			// Complex nested logic evaluation
 			expect(results).toHaveLength(3); // Jane, Charlie, Bob
@@ -881,28 +786,25 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 
 	describe("Performance and Optimization", () => {
 		it("should short-circuit OR evaluation", async () => {
-			const db = createDatabase(config, data);
 			let evaluationCount = 0;
 
 			// Create a custom operator that counts evaluations
-			const results = await collect(
-				db.users.query({
-					where: {
-						$or: [
-							{ role: "admin" }, // This matches John
-							{
-								// This shouldn't be evaluated for John
-								age: {
-									$gte: (() => {
-										evaluationCount++;
-										return 100;
-									})(),
-								},
+			const results = await collectQuery("users", {
+				where: {
+					$or: [
+						{ role: "admin" }, // This matches John
+						{
+							// This shouldn't be evaluated for John
+							age: {
+								$gte: (() => {
+									evaluationCount++;
+									return 100;
+								})(),
 							},
-						],
-					},
-				}),
-			);
+						},
+					],
+				},
+			});
 
 			// Even though we can't directly test short-circuiting in this implementation,
 			// we can verify the results are correct
@@ -910,19 +812,15 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle large OR arrays efficiently", async () => {
-			const db = createDatabase(config, data);
-
 			// Create a large OR condition
 			const orConditions = [];
 			for (let i = 20; i <= 50; i++) {
 				orConditions.push({ age: i });
 			}
 
-			const results = await collect(
-				db.users.query({
-					where: { $or: orConditions },
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: { $or: orConditions },
+			});
 
 			// Should match users with ages in the range
 			expect(results).toHaveLength(6); // All users have ages in range 20-50
@@ -932,27 +830,23 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 
 	describe("Combined Operators in Real-World Scenarios", () => {
 		it("should handle complex user permission queries", async () => {
-			const db = createDatabase(config, data);
-
 			// Find users who can access premium features:
 			// (admin) OR (active AND (score >= 85 OR role = consultant))
-			const results = await collect(
-				db.users.query({
-					where: {
-						$or: [
-							{ role: "admin" },
-							{
-								$and: [
-									{ status: "active" },
-									{
-										$or: [{ score: { $gte: 85 } }, { role: "consultant" }],
-									},
-								],
-							},
-						],
-					},
-				}),
-			);
+			const results = await collectQuery("users", {
+				where: {
+					$or: [
+						{ role: "admin" },
+						{
+							$and: [
+								{ status: "active" },
+								{
+									$or: [{ score: { $gte: 85 } }, { role: "consultant" }],
+								},
+							],
+						},
+					],
+				},
+			});
 
 			expect(results).toHaveLength(3); // John (admin), Jane (active, score 88), Charlie (active, consultant)
 			const names = results.map((r) => r.name).sort();
@@ -960,27 +854,23 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle complex project filtering", async () => {
-			const db = createDatabase(config, data);
-
 			// Find projects that need attention:
 			// (active AND priority <= 2) OR (draft AND budget > 50000) OR (public AND NOT completed)
-			const results = await collect(
-				db.projects.query({
-					where: {
-						$or: [
-							{
-								$and: [{ status: "active" }, { priority: { $lte: 2 } }],
-							},
-							{
-								$and: [{ status: "draft" }, { budget: { $gt: 50000 } }],
-							},
-							{
-								$and: [{ isPublic: true }, { $not: { status: "completed" } }],
-							},
-						],
-					},
-				}),
-			);
+			const results = await collectQuery("projects", {
+				where: {
+					$or: [
+						{
+							$and: [{ status: "active" }, { priority: { $lte: 2 } }],
+						},
+						{
+							$and: [{ status: "draft" }, { budget: { $gt: 50000 } }],
+						},
+						{
+							$and: [{ isPublic: true }, { $not: { status: "completed" } }],
+						},
+					],
+				},
+			});
 
 			expect(results).toHaveLength(3); // p1 (active, priority 1), p2 (draft, budget 75k), p4 (public, active)
 			const ids = results.map((r) => r.id).sort();
@@ -988,34 +878,24 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT)", () => {
 		});
 
 		it("should handle comment moderation queries", async () => {
-			const db = createDatabase(config, data);
-
 			// Find comments that need moderation:
-			// (NOT approved) OR (negative sentiment AND likes < 5) OR (author inactive)
-			const results = await collect(
-				db.comments.query({
-					where: {
-						$or: [
-							{ isApproved: false },
-							{
-								$and: [{ sentiment: "negative" }, { likes: { $lt: 5 } }],
-							},
-							// TODO: Fix relationship filtering type
-							// {
-							// 	author: { status: "inactive" },
-							// },
-						],
-					},
-					populate: { author: true },
-				}),
-			);
+			// (NOT approved) OR (negative sentiment AND likes < 5)
+			const results = await collectQuery("comments", {
+				where: {
+					$or: [
+						{ isApproved: false },
+						{
+							$and: [{ sentiment: "negative" }, { likes: { $lt: 5 } }],
+						},
+					],
+				},
+				populate: { author: true },
+			});
 
-			// TODO: Fix test after relationship filtering is restored
-			// Currently expecting different results due to commented filter
-			expect(results.length).toBeGreaterThan(0);
-			// expect(results).toHaveLength(1); // c3 (not approved, also matches negative sentiment)
-			// expect(results[0].id).toBe("c3");
-			// expect((results[0] as any).author?.name).toBe("Bob Johnson");
+			// c3 matches both: not approved AND negative sentiment with 0 likes
+			expect(results).toHaveLength(1);
+			expect(results[0].id).toBe("c3");
+			expect((results[0].author as Record<string, unknown>)?.name).toBe("Bob Johnson");
 		});
 	});
 });

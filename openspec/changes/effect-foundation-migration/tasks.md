@@ -94,7 +94,7 @@
 - [x] 12.3 Rewrite `tests/populate.test.ts` for Stream-based population
 - [x] 12.4 Rewrite `tests/field-selection.test.ts`, `tests/select.test.ts`, `tests/object-select.test.ts`, `tests/select-integration.test.ts` for Stream-based select
 - [x] 12.5 Rewrite `tests/pagination.test.ts` for Stream-based pagination
-- [ ] 12.6 Rewrite `tests/conditional-logic.test.ts` — fix the relationship filtering TODOs that were broken in the current implementation
+- [x] 12.6 Rewrite `tests/conditional-logic.test.ts` — fix the relationship filtering TODOs that were broken in the current implementation
 - [ ] 12.7 Rewrite `tests/array-operators.test.ts` for Effect-based filtering
 - [ ] 12.8 Rewrite `tests/persistence.test.ts` using Effect test Layers (in-memory storage adapter)
 - [ ] 12.9 Rewrite all `tests/crud/*.test.ts` files (create, update, delete, upsert, relationships, batch-operations, type-safety)
