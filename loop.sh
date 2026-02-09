@@ -23,7 +23,7 @@ while true; do
   fi
 
   echo "=== Iteration $ITERATION | $REMAINING tasks remaining ==="
-  cat PROMPT_build.md | claude -p --dangerously-skip-permissions
+  claude -p --dangerously-skip-permissions --verbose < PROMPT_build.md
   git add -A && git push origin "$(git branch --show-current)" 2>/dev/null || true
   echo ""
 done
