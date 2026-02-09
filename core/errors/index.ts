@@ -28,28 +28,16 @@ export {
 export type { QueryError } from "./query-errors.js"
 
 // ============================================================================
-// Storage Errors
+// Storage Errors (re-exported from storage-errors.ts)
 // ============================================================================
 
-import { Data } from "effect"
+export {
+	StorageError,
+	SerializationError,
+	UnsupportedFormatError,
+} from "./storage-errors.js"
 
-export class StorageError extends Data.TaggedError("StorageError")<{
-	readonly path: string
-	readonly operation: "read" | "write" | "watch" | "delete"
-	readonly message: string
-	readonly cause?: unknown
-}> {}
-
-export class SerializationError extends Data.TaggedError("SerializationError")<{
-	readonly format: string
-	readonly message: string
-	readonly cause?: unknown
-}> {}
-
-export class UnsupportedFormatError extends Data.TaggedError("UnsupportedFormatError")<{
-	readonly format: string
-	readonly message: string
-}> {}
+export type { PersistenceError } from "./storage-errors.js"
 
 // ============================================================================
 // Union Types
@@ -57,11 +45,7 @@ export class UnsupportedFormatError extends Data.TaggedError("UnsupportedFormatE
 
 import type { CrudError } from "./crud-errors.js"
 import type { QueryError } from "./query-errors.js"
-
-export type PersistenceError =
-	| StorageError
-	| SerializationError
-	| UnsupportedFormatError
+import type { PersistenceError } from "./storage-errors.js"
 
 export type DatabaseError =
 	| CrudError
