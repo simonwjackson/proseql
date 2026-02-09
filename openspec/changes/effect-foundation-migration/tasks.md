@@ -65,7 +65,7 @@
 
 ## 9. Persistence Integration
 
-- [ ] 9.1 Create `core/storage/persistence-effect.ts`: loadData using StorageAdapter + SerializerRegistry services, decode through Schema, return Effect. saveData encoding through Schema before serializing
+- [x] 9.1 Create `core/storage/persistence-effect.ts`: loadData using StorageAdapter + SerializerRegistry services, decode through Schema, return Effect. saveData encoding through Schema before serializing
 - [ ] 9.2 Implement debounced writes using Effect.schedule with configurable delay. Multiple rapid mutations coalesce into one write
 - [ ] 9.3 Implement file watching using Effect.acquireRelease for managed lifecycle. File changes update collection Refs
 - [ ] 9.4 Migrate `core/storage/transforms.ts` to work with ReadonlyMap (arrayToMap, mapToObject for file format)
