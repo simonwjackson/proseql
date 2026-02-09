@@ -18,6 +18,7 @@ import {
 	ForeignKeyError,
 	OperationError,
 } from "../../errors/crud-errors.js"
+import { checkDeleteConstraintsEffect } from "../../validators/foreign-key.js"
 
 // ============================================================================
 // Types
@@ -39,56 +40,6 @@ type DeleteManyOptions = {
 	readonly soft?: boolean
 	readonly limit?: number
 }
-
-// ============================================================================
-// Foreign Key Constraint Checking (Effect-based)
-// ============================================================================
-
-/**
- * Check if deleting an entity would violate foreign key constraints.
- * Scans all collections for "ref" relationships targeting this collection
- * whose foreign key field references the entity being deleted.
- *
- * Returns Effect that fails with ForeignKeyError if violations exist.
- */
-const checkDeleteConstraintsEffect = (
-	entityId: string,
-	collectionName: string,
-	allRelationships: Record<string, Record<string, RelationshipConfig>>,
-	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
-): Effect.Effect<void, ForeignKeyError> =>
-	Effect.gen(function* () {
-		for (const [otherCollection, relationships] of Object.entries(allRelationships)) {
-			for (const [field, rel] of Object.entries(relationships)) {
-				if (rel.type === "ref" && rel.target === collectionName) {
-					const foreignKey = rel.foreignKey || `${field}Id`
-					const otherRef = stateRefs[otherCollection]
-					if (otherRef === undefined) continue
-
-					const otherMap = yield* Ref.get(otherRef)
-					let refCount = 0
-
-					for (const entity of otherMap.values()) {
-						if ((entity as Record<string, unknown>)[foreignKey] === entityId) {
-							refCount++
-						}
-					}
-
-					if (refCount > 0) {
-						return yield* Effect.fail(
-							new ForeignKeyError({
-								collection: collectionName,
-								field: foreignKey,
-								value: entityId,
-								targetCollection: otherCollection,
-								message: `Cannot delete: ${refCount} ${otherCollection} entities reference this ${collectionName}`,
-							}),
-						)
-					}
-				}
-			}
-		}
-	})
 
 // ============================================================================
 // Delete Single Entity

@@ -23,7 +23,7 @@ import {
 } from "../../errors/crud-errors.js"
 import { validateEntity } from "../../validators/schema-validator.js"
 import { generateId } from "../../utils/id-generator.js"
-import { extractForeignKeyConfigs } from "../../validators/foreign-key.js"
+import { validateForeignKeysEffect } from "../../validators/foreign-key.js"
 
 // ============================================================================
 // Types
@@ -324,62 +324,6 @@ const processRelationshipOperations = (
 		create: allCreate,
 		connectOrCreate: allConnectOrCreate,
 	}
-}
-
-// ============================================================================
-// Validate foreign keys using Ref-based state
-// ============================================================================
-
-const validateForeignKeysEffect = <T extends HasId>(
-	entity: T,
-	collectionName: string,
-	relationships: Record<string, RelationshipConfig>,
-	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
-): Effect.Effect<void, ForeignKeyError> => {
-	const configs = extractForeignKeyConfigs(
-		relationships as Record<string, { type: "ref" | "inverse"; foreignKey?: string; target?: string }>,
-	)
-
-	if (configs.length === 0) {
-		return Effect.void
-	}
-
-	return Effect.forEach(configs, (config) => {
-		const value = (entity as Record<string, unknown>)[config.foreignKey]
-		if (value === undefined || value === null) {
-			return Effect.void
-		}
-
-		const targetRef = stateRefs[config.targetCollection]
-		if (targetRef === undefined) {
-			return Effect.fail(
-				new ForeignKeyError({
-					collection: collectionName,
-					field: config.foreignKey,
-					value: String(value),
-					targetCollection: config.targetCollection,
-					message: `Foreign key constraint violated: '${config.foreignKey}' references non-existent collection '${config.targetCollection}'`,
-				}),
-			)
-		}
-
-		return Ref.get(targetRef).pipe(
-			Effect.flatMap((targetMap) => {
-				if (targetMap.has(String(value))) {
-					return Effect.void
-				}
-				return Effect.fail(
-					new ForeignKeyError({
-						collection: collectionName,
-						field: config.foreignKey,
-						value: String(value),
-						targetCollection: config.targetCollection,
-						message: `Foreign key constraint violated: '${config.foreignKey}' references non-existent ${config.targetCollection} '${value}'`,
-					}),
-				)
-			}),
-		)
-	}, { discard: true })
 }
 
 // ============================================================================
