@@ -1,5 +1,6 @@
 import { Effect, Ref, Stream } from "effect";
 import type { CollectionConfig } from "../../types/database-config-types.js";
+import { DanglingReferenceError } from "../../errors/query-errors.js";
 
 /**
  * Maximum recursion depth for nested population (mirrors PopulateConfig type depth limit).
@@ -84,7 +85,7 @@ function populateItem(
   dbConfig: Record<string, CollectionConfig>,
   collectionName: string,
   depth: number,
-): Effect.Effect<Record<string, unknown>> {
+): Effect.Effect<Record<string, unknown>, DanglingReferenceError> {
   return Effect.gen(function* () {
     const sourceConfig = dbConfig[collectionName];
     if (!sourceConfig) return item;
@@ -111,12 +112,17 @@ function populateItem(
 
         if (typeof foreignKeyValue === "string") {
           const related = targetMap.get(foreignKeyValue);
-          if (related && (value === true || isRecord(value))) {
+          if (related) {
             populated[key] = yield* maybeRecurse(
               related, value, relationship.target, stateRefs, dbConfig, depth,
             );
           } else {
-            populated[key] = undefined;
+            yield* new DanglingReferenceError({
+              collection: relationship.target,
+              field: foreignKeyField,
+              targetId: foreignKeyValue,
+              message: `Entity in "${collectionName}" references missing "${relationship.target}" with ${foreignKeyField}="${foreignKeyValue}"`,
+            });
           }
         } else {
           populated[key] = undefined;
@@ -166,7 +172,7 @@ function maybeRecurse(
   stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, Record<string, unknown>>>>,
   dbConfig: Record<string, CollectionConfig>,
   depth: number,
-): Effect.Effect<Record<string, unknown>> {
+): Effect.Effect<Record<string, unknown>, DanglingReferenceError> {
   if (value === true || !isPopulateConfig(value) || depth >= MAX_POPULATE_DEPTH) {
     return Effect.succeed(entity);
   }
@@ -199,7 +205,7 @@ export const applyPopulate = <T extends Record<string, unknown>>(
   dbConfig: Record<string, CollectionConfig>,
   collectionName: string,
 ) =>
-  <E, R>(stream: Stream.Stream<T, E, R>): Stream.Stream<T, E, R> => {
+  <E, R>(stream: Stream.Stream<T, E, R>): Stream.Stream<T, E | DanglingReferenceError, R> => {
     if (!populateConfig || !isPopulateConfig(populateConfig)) return stream;
 
     const sourceConfig = dbConfig[collectionName];
@@ -215,6 +221,6 @@ export const applyPopulate = <T extends Record<string, unknown>>(
     return Stream.mapEffect(stream, (item: T) =>
       populateItem(
         item, populateConfig, stateRefs, dbConfig, collectionName, 0,
-      ) as Effect.Effect<T, never, never>,
+      ) as Effect.Effect<T, DanglingReferenceError>,
     );
   };
