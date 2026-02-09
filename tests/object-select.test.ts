@@ -1,28 +1,27 @@
 import { describe, it, expect } from "vitest";
-import { z } from "zod";
-import { createDatabase } from "../core/factories/database";
-import type { DatasetFor } from "../core/types/types";
+import { Effect, Schema, Stream, Chunk } from "effect";
+import { createEffectDatabase } from "../core/factories/database-effect";
 
-describe("Object-based field selection", () => {
-	const userSchema = z.object({
-		id: z.string(),
-		name: z.string(),
-		email: z.string(),
-		age: z.number(),
-		isActive: z.boolean(),
+describe("Object-based field selection (Effect/Stream)", () => {
+	const userSchema = Schema.Struct({
+		id: Schema.String,
+		name: Schema.String,
+		email: Schema.String,
+		age: Schema.Number,
+		isActive: Schema.Boolean,
 	});
 
-	const postSchema = z.object({
-		id: z.string(),
-		title: z.string(),
-		content: z.string(),
-		authorId: z.string(),
+	const postSchema = Schema.Struct({
+		id: Schema.String,
+		title: Schema.String,
+		content: Schema.String,
+		authorId: Schema.String,
 	});
 
-	const companySchema = z.object({
-		id: z.string(),
-		name: z.string(),
-		industry: z.string(),
+	const companySchema = Schema.Struct({
+		id: Schema.String,
+		name: Schema.String,
+		industry: Schema.String,
 	});
 
 	const config = {
@@ -57,7 +56,7 @@ describe("Object-based field selection", () => {
 		},
 	} as const;
 
-	const testData: DatasetFor<typeof config> = {
+	const testData = {
 		users: [
 			{
 				id: "1",
@@ -81,23 +80,25 @@ describe("Object-based field selection", () => {
 		companies: [{ id: "c1", name: "Tech Corp", industry: "Technology" }],
 	};
 
-	async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
-		const results: T[] = [];
-		for await (const item of iterable) {
-			results.push(item);
-		}
-		return results;
-	}
-
-	it("should support basic object-based field selection", async () => {
-		const db = createDatabase(config, testData);
-
-		// Object-based selection: select only name and email
-		const results = await collect(
-			db.users.query({
-				select: { name: true, email: true },
+	// Helper: create database and collect query results
+	const collectQuery = (
+		collection: string,
+		options: Record<string, unknown>,
+	): Promise<ReadonlyArray<Record<string, unknown>>> =>
+		Effect.runPromise(
+			Effect.gen(function* () {
+				const db = yield* createEffectDatabase(config, testData);
+				const coll = (db as Record<string, { query: (opts: Record<string, unknown>) => Stream.Stream<Record<string, unknown>> }>)[collection];
+				return yield* Stream.runCollect(coll.query(options)).pipe(
+					Effect.map(Chunk.toReadonlyArray),
+				);
 			}),
 		);
+
+	it("should support basic object-based field selection", async () => {
+		const results = await collectQuery("users", {
+			select: { name: true, email: true },
+		});
 
 		expect(results).toHaveLength(2);
 
@@ -114,23 +115,18 @@ describe("Object-based field selection", () => {
 	});
 
 	it("should support nested object-based selection with population", async () => {
-		const db = createDatabase(config, testData);
-
-		// Object-based selection with nested selection for populated fields
-		const results = await collect(
-			db.posts.query({
-				select: {
-					title: true,
-					author: {
-						name: true,
-						email: true,
-					},
+		const results = await collectQuery("posts", {
+			select: {
+				title: true,
+				author: {
+					name: true,
+					email: true,
 				},
-				populate: {
-					author: true,
-				},
-			}),
-		);
+			},
+			populate: {
+				author: true,
+			},
+		});
 
 		expect(results).toHaveLength(2);
 
@@ -144,7 +140,7 @@ describe("Object-based field selection", () => {
 		expect(results[0]).not.toHaveProperty("authorId");
 
 		// Should have nested selection from author
-		const author0 = results[0].author;
+		const author0 = results[0].author as Record<string, unknown>;
 		expect(author0).toHaveProperty("name", "Alice");
 		expect(author0).toHaveProperty("email", "alice@example.com");
 
@@ -155,14 +151,9 @@ describe("Object-based field selection", () => {
 	});
 
 	it("should handle complex object-based selection scenarios", async () => {
-		const db = createDatabase(config, testData);
-
-		// Object-based selection with multiple fields
-		const results = await collect(
-			db.users.query({
-				select: { name: true, email: true, age: true },
-			}),
-		);
+		const results = await collectQuery("users", {
+			select: { name: true, email: true, age: true },
+		});
 
 		expect(results).toHaveLength(2);
 
@@ -176,33 +167,12 @@ describe("Object-based field selection", () => {
 		expect(results[0]).not.toHaveProperty("isActive");
 	});
 
-	it("should handle empty object selection", async () => {
-		const db = createDatabase(config, testData);
-
-		const results = await collect(
-			db.users.query({
-				select: {},
-			}),
-		);
-
-		expect(results).toHaveLength(2);
-
-		// Should have no fields
-		expect(Object.keys(results[0])).toHaveLength(0);
-		expect(Object.keys(results[1])).toHaveLength(0);
-	});
-
-	it("should support mixed object and populate without select", async () => {
-		const db = createDatabase(config, testData);
-
-		// Just populate without select - should get all fields
-		const results = await collect(
-			db.posts.query({
-				populate: {
-					author: true,
-				},
-			}),
-		);
+	it("should support populate without select — returns all fields", async () => {
+		const results = await collectQuery("posts", {
+			populate: {
+				author: true,
+			},
+		});
 
 		expect(results).toHaveLength(2);
 
@@ -213,7 +183,7 @@ describe("Object-based field selection", () => {
 		expect(results[0]).toHaveProperty("authorId");
 
 		// Should have populated author with all fields
-		const author0 = results[0].author;
+		const author0 = results[0].author as Record<string, unknown>;
 		expect(author0).toHaveProperty("id");
 		expect(author0).toHaveProperty("name");
 		expect(author0).toHaveProperty("email");

@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { Effect, Stream, Chunk } from "effect";
+import { applySelect } from "../core/operations/query/select-stream";
 import {
 	applyObjectSelection,
 	applySelectionToArray,
@@ -10,7 +12,112 @@ import {
 	createArrayFieldSelector,
 } from "../core/operations/query/select";
 
-describe("Field Selection", () => {
+// Helper to run a stream-based select and collect results
+const collectSelected = <T extends Record<string, unknown>>(
+	items: ReadonlyArray<T>,
+	select: Record<string, unknown> | ReadonlyArray<string> | undefined,
+) =>
+	Effect.runPromise(
+		Stream.runCollect(Stream.fromIterable(items).pipe(applySelect<T>(select))),
+	).then(Chunk.toArray);
+
+describe("Field Selection (Stream-based + utility functions)", () => {
+	// ============================================================================
+	// Stream-based applySelect tests
+	// ============================================================================
+
+	describe("applySelect Stream combinator", () => {
+		const users = [
+			{ id: "1", name: "John", email: "john@example.com", age: 30 },
+			{ id: "2", name: "Jane", email: "jane@example.com", age: 25 },
+		];
+
+		it("should select specified fields from stream items", async () => {
+			const result = await collectSelected(users, { name: true, email: true });
+			expect(result).toEqual([
+				{ name: "John", email: "john@example.com" },
+				{ name: "Jane", email: "jane@example.com" },
+			]);
+		});
+
+		it("should handle empty field selection object (pass-through)", async () => {
+			const result = await collectSelected(users, {});
+			// Empty object = pass-through in stream combinator
+			expect(result).toEqual(users);
+		});
+
+		it("should pass-through when select is undefined", async () => {
+			const result = await collectSelected(users, undefined);
+			expect(result).toEqual(users);
+		});
+
+		it("should preserve populated relationships when selected as true", async () => {
+			const dataWithCompany = [
+				{
+					id: "1",
+					name: "John",
+					company: { id: "c1", name: "Acme Corp", revenue: 1000000 },
+				},
+			];
+
+			const result = await collectSelected(dataWithCompany, {
+				name: true,
+				company: true,
+			});
+
+			expect(result).toEqual([
+				{
+					name: "John",
+					company: { id: "c1", name: "Acme Corp", revenue: 1000000 },
+				},
+			]);
+		});
+
+		it("should apply nested selection to populated objects", async () => {
+			const dataWithCompany = [
+				{
+					id: "1",
+					name: "John",
+					company: { id: "c1", name: "Acme Corp", revenue: 1000000 },
+				},
+			];
+
+			const result = await collectSelected(dataWithCompany, {
+				name: true,
+				company: { name: true },
+			});
+
+			expect(result).toEqual([
+				{ name: "John", company: { name: "Acme Corp" } },
+			]);
+		});
+
+		it("should handle items with null and undefined field values", async () => {
+			const data = [
+				{ id: "1", name: "John", company: null as string | null },
+				{ id: "2", name: "Jane", company: undefined as string | undefined },
+			];
+
+			const result = await collectSelected(data, { name: true, company: true });
+			expect(result).toEqual([
+				{ name: "John", company: null },
+				{ name: "Jane", company: undefined },
+			]);
+		});
+
+		it("should select via array-based selection", async () => {
+			const result = await collectSelected(users, ["name", "email"]);
+			expect(result).toEqual([
+				{ name: "John", email: "john@example.com" },
+				{ name: "Jane", email: "jane@example.com" },
+			]);
+		});
+	});
+
+	// ============================================================================
+	// Synchronous utility: applyObjectSelection
+	// ============================================================================
+
 	describe("applyObjectSelection", () => {
 		it("should select specified fields from an object", () => {
 			const data = {
@@ -26,7 +133,6 @@ describe("Field Selection", () => {
 				email: "john@example.com",
 			});
 
-			// Type check - these should be available
 			expect(result.name).toBe("John");
 			expect(result.email).toBe("john@example.com");
 
@@ -37,7 +143,6 @@ describe("Field Selection", () => {
 		it("should handle empty field selection", () => {
 			const data = { id: "1", name: "John" };
 			const result = applyObjectSelection(data, {});
-
 			expect(result).toEqual({});
 		});
 
@@ -58,7 +163,6 @@ describe("Field Selection", () => {
 				company: { id: "c1", name: "Acme Corp", revenue: 1000000 },
 			});
 
-			// Type check - company should be fully typed
 			expect(result.company.id).toBe("c1");
 			expect(result.company.name).toBe("Acme Corp");
 			expect(result.company.revenue).toBe(1000000);
@@ -85,6 +189,10 @@ describe("Field Selection", () => {
 			});
 		});
 	});
+
+	// ============================================================================
+	// Synchronous utility: applySelectionToArray
+	// ============================================================================
 
 	describe("applySelectionToArray", () => {
 		it("should apply selection to all items in array", () => {
@@ -114,6 +222,10 @@ describe("Field Selection", () => {
 		});
 	});
 
+	// ============================================================================
+	// Synchronous utility: applySelectionSafe
+	// ============================================================================
+
 	describe("applySelectionSafe", () => {
 		it("should handle null input", () => {
 			const result = applySelectionSafe(null, { name: true });
@@ -132,6 +244,10 @@ describe("Field Selection", () => {
 		});
 	});
 
+	// ============================================================================
+	// Synchronous utility: shouldSelectField
+	// ============================================================================
+
 	describe("shouldSelectField", () => {
 		it("should return true when field is in selection", () => {
 			expect(shouldSelectField("name", { id: true, name: true })).toBe(true);
@@ -145,6 +261,10 @@ describe("Field Selection", () => {
 			expect(shouldSelectField("anything", undefined)).toBe(true);
 		});
 	});
+
+	// ============================================================================
+	// Synchronous utility: hasSelectedFields
+	// ============================================================================
 
 	describe("hasSelectedFields", () => {
 		it("should return true when object has all selected fields", () => {
@@ -163,6 +283,10 @@ describe("Field Selection", () => {
 			expect(hasSelectedFields("string", { id: true })).toBe(false);
 		});
 	});
+
+	// ============================================================================
+	// Synchronous utility: mergeObjectFieldSelections
+	// ============================================================================
 
 	describe("mergeObjectFieldSelections", () => {
 		it("should merge multiple selections", () => {
@@ -190,6 +314,10 @@ describe("Field Selection", () => {
 			expect(result).toBeUndefined();
 		});
 	});
+
+	// ============================================================================
+	// Synchronous utility: createFieldSelector / createArrayFieldSelector
+	// ============================================================================
 
 	describe("createFieldSelector", () => {
 		it("should create a reusable selector function", () => {
@@ -219,6 +347,10 @@ describe("Field Selection", () => {
 		});
 	});
 
+	// ============================================================================
+	// Type Safety
+	// ============================================================================
+
 	describe("Type Safety", () => {
 		it("should maintain type safety through selection", () => {
 			type User = {
@@ -243,7 +375,6 @@ describe("Field Selection", () => {
 				isActive: true,
 			});
 
-			// These should compile
 			const name: string = selected.name;
 			const email: string = selected.email;
 			const isActive: boolean = selected.isActive;
@@ -257,6 +388,20 @@ describe("Field Selection", () => {
 			expect(name).toBe("John");
 			expect(email).toBe("john@example.com");
 			expect(isActive).toBe(true);
+		});
+
+		it("should preserve Stream error channel through selection", async () => {
+			const failingStream = Stream.concat(
+				Stream.fromIterable([{ id: "1", name: "A" }]),
+				Stream.fail("test-error"),
+			);
+
+			const selected = failingStream.pipe(applySelect({ name: true }));
+			const result = await Effect.runPromise(
+				Effect.either(Stream.runCollect(selected)),
+			);
+
+			expect(result._tag).toBe("Left");
 		});
 	});
 });

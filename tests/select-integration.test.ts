@@ -1,14 +1,34 @@
 import { describe, it, expect } from "vitest";
+import { Effect, Stream, Chunk } from "effect";
+import { applySelect } from "../core/operations/query/select-stream";
+import { applyFilter } from "../core/operations/query/filter-stream";
+import { applySort } from "../core/operations/query/sort-stream";
 import {
 	applyObjectSelection,
 	applySelectionToArray,
 	createFieldSelector,
 } from "../core/operations/query/select";
-import { filterData } from "../core/operations/query/filter";
-import { sortData } from "../core/operations/query/sort";
-import type { UnknownRecord } from "../core/types/types";
 
-describe("Field Selection Integration", () => {
+// Helper to collect stream-based pipeline results
+const collectPipeline = <T extends Record<string, unknown>>(
+	data: ReadonlyArray<T>,
+	options: {
+		where?: Record<string, unknown>;
+		sort?: Record<string, "asc" | "desc">;
+		select?: Record<string, unknown> | ReadonlyArray<string>;
+	},
+): Promise<ReadonlyArray<T>> =>
+	Effect.runPromise(
+		Stream.fromIterable(data).pipe(
+			applyFilter<T>(options.where),
+			applySort<T>(options.sort),
+			applySelect<T>(options.select),
+			Stream.runCollect,
+			Effect.map(Chunk.toReadonlyArray),
+		),
+	);
+
+describe("Field Selection Integration (Stream-based)", () => {
 	// Sample data
 	const users = [
 		{
@@ -55,25 +75,16 @@ describe("Field Selection Integration", () => {
 		},
 	];
 
-	describe("Query Pipeline Integration", () => {
-		it("should work with filter -> select pipeline", () => {
-			// Filter for engineering employees
-			// Since the filter doesn't support dot notation, we need to filter manually
+	describe("Query Pipeline Integration (Stream)", () => {
+		it("should work with filter -> select pipeline", async () => {
+			// Filter for engineering employees, then select public fields
 			const engineeringUsers = users.filter(
 				(user) => user.department.name === "Engineering",
 			);
 
-			// Select only public fields
-			const publicFieldSelector = createFieldSelector({
-				id: true,
-				name: true,
-				email: true,
-				role: true,
-				department: true,
+			const result = await collectPipeline(engineeringUsers, {
+				select: { id: true, name: true, email: true, role: true, department: true },
 			});
-
-			// Apply pipeline
-			const result = engineeringUsers.map(publicFieldSelector);
 
 			expect(result).toHaveLength(2);
 			expect(result[0]).toEqual({
@@ -93,23 +104,12 @@ describe("Field Selection Integration", () => {
 			expect(result[1]).not.toHaveProperty("salary");
 		});
 
-		it("should work with filter -> sort -> select pipeline", () => {
-			// Filter for high earners using the correct filter syntax
-			const highEarners = users.filter((user) => user.salary >= 90000);
-
-			// Sort by age descending
-			const sorted = sortData(highEarners, { age: "desc" });
-
-			// Select summary fields
-			const summarySelector = createFieldSelector({
-				id: true,
-				name: true,
-				age: true,
-				role: true,
+		it("should work with filter -> sort -> select pipeline", async () => {
+			const result = await collectPipeline(users, {
+				where: { salary: { $gte: 90000 } },
+				sort: { age: "desc" },
+				select: { id: true, name: true, age: true, role: true },
 			});
-
-			// Apply full pipeline
-			const result = sorted.map(summarySelector);
 
 			expect(result).toEqual([
 				{ id: "user-3", name: "Charlie Davis", age: 42, role: "manager" },
@@ -117,8 +117,7 @@ describe("Field Selection Integration", () => {
 			]);
 		});
 
-		it("should handle complex field selection with nested objects", () => {
-			// Create a user with more complex nested structure
+		it("should handle complex field selection with nested objects", async () => {
 			const complexUser = {
 				id: "user-4",
 				name: "Diana Evans",
@@ -165,7 +164,7 @@ describe("Field Selection Integration", () => {
 	});
 
 	describe("Performance Considerations", () => {
-		it("should efficiently handle large datasets", () => {
+		it("should efficiently handle large datasets via Stream", async () => {
 			// Generate large dataset
 			const largeDataset = Array.from({ length: 10000 }, (_, i) => ({
 				id: `user-${i}`,
@@ -175,8 +174,8 @@ describe("Field Selection Integration", () => {
 				salary: 50000 + i * 100,
 				department: `dept-${i % 10}`,
 				metadata: {
-					createdAt: new Date(),
-					updatedAt: new Date(),
+					createdAt: new Date().toISOString(),
+					updatedAt: new Date().toISOString(),
 					tags: [`tag-${i % 5}`, `tag-${i % 7}`],
 					preferences: {
 						theme: i % 2 === 0 ? "dark" : "light",
@@ -187,7 +186,39 @@ describe("Field Selection Integration", () => {
 
 			const start = performance.now();
 
-			// Apply selection to reduce data size
+			const selected = await Effect.runPromise(
+				Stream.fromIterable(largeDataset).pipe(
+					applySelect({ id: true, name: true, department: true }),
+					Stream.runCollect,
+					Effect.map(Chunk.toArray),
+				),
+			);
+
+			const end = performance.now();
+
+			expect(selected).toHaveLength(10000);
+			expect(selected[0]).toEqual({
+				id: "user-0",
+				name: "User 0",
+				department: "dept-0",
+			});
+
+			// Should complete in reasonable time (less than 200ms)
+			expect(end - start).toBeLessThan(200);
+		});
+
+		it("should also efficiently handle large datasets via sync utility", () => {
+			const largeDataset = Array.from({ length: 10000 }, (_, i) => ({
+				id: `user-${i}`,
+				name: `User ${i}`,
+				email: `user${i}@example.com`,
+				age: 20 + (i % 50),
+				salary: 50000 + i * 100,
+				department: `dept-${i % 10}`,
+			}));
+
+			const start = performance.now();
+
 			const selected = applySelectionToArray(largeDataset, {
 				id: true,
 				name: true,
@@ -203,7 +234,6 @@ describe("Field Selection Integration", () => {
 				department: "dept-0",
 			});
 
-			// Should complete in reasonable time (less than 100ms)
 			expect(end - start).toBeLessThan(100);
 		});
 	});
@@ -238,7 +268,6 @@ describe("Field Selection Integration", () => {
 				},
 			];
 
-			// Create typed selector
 			const catalogSelector = createFieldSelector({
 				id: true,
 				name: true,
@@ -248,8 +277,6 @@ describe("Field Selection Integration", () => {
 
 			const selected = catalogSelector(products[0]);
 
-			// Type checks - these should compile
-			// Using type assertion because selector creates unknown type
 			const typedSelected = selected as {
 				id: string;
 				name: string;
@@ -261,10 +288,6 @@ describe("Field Selection Integration", () => {
 			const price: number = typedSelected.price;
 			const inStock: boolean = typedSelected.inStock;
 
-			// These should not compile - category not selected
-			const category: string = (selected as unknown as { category: string })
-				.category;
-
 			// @ts-expect-error - supplier not selected
 			const supplier = selected.supplier;
 
@@ -274,16 +297,14 @@ describe("Field Selection Integration", () => {
 	});
 
 	describe("Edge Cases", () => {
-		it("should handle selection on empty arrays", () => {
-			const emptyArray: UnknownRecord[] = [];
-			const result = applySelectionToArray(emptyArray, {
-				id: true,
-				name: true,
+		it("should handle selection on empty stream", async () => {
+			const result = await collectPipeline([], {
+				select: { id: true, name: true },
 			});
 			expect(result).toEqual([]);
 		});
 
-		it("should handle selection with no fields", () => {
+		it("should handle selection with no fields (sync utility)", () => {
 			const data = { id: "1", name: "Test", value: 42 };
 			const result = applyObjectSelection(data, {});
 			expect(result).toEqual({});
@@ -291,7 +312,6 @@ describe("Field Selection Integration", () => {
 
 		it("should handle selection of non-existent fields gracefully", () => {
 			const data = { id: "1", name: "Test" };
-			// intentionally selecting non-existent field for edge case test
 			const result = applyObjectSelection(data, {
 				id: true,
 				name: true,
@@ -318,6 +338,26 @@ describe("Field Selection Integration", () => {
 				optional: undefined,
 				nullable: null,
 			});
+		});
+
+		it("should preserve Stream error channel through full pipeline", async () => {
+			const failingStream = Stream.concat(
+				Stream.fromIterable([
+					{ id: "1", name: "A", age: 30 } as Record<string, unknown>,
+				]),
+				Stream.fail("pipeline-error"),
+			);
+
+			const selected = failingStream.pipe(
+				applySort({ name: "asc" }),
+				applySelect({ name: true }),
+			);
+
+			const result = await Effect.runPromise(
+				Effect.either(Stream.runCollect(selected)),
+			);
+
+			expect(result._tag).toBe("Left");
 		});
 	});
 });

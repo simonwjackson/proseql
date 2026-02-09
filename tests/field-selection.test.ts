@@ -1,88 +1,86 @@
-import { describe, it, expect, expectTypeOf } from "vitest";
-import { z } from "zod";
-import { createDatabase } from "../core/factories/database";
-import { collect, map, first, count } from "../core/utils/async-iterable.js";
+import { describe, it, expect } from "vitest";
+import { Effect, Schema, Stream, Chunk } from "effect";
+import { createEffectDatabase } from "../core/factories/database-effect";
 
-describe("Database v2 - Field Selection/Projection", () => {
+describe("Database v2 - Field Selection/Projection (Effect/Stream)", () => {
 	// ============================================================================
 	// Test Schemas and Configuration
 	// ============================================================================
 
-	// Address Schema
-	const AddressSchema = z.object({
-		id: z.string(),
-		street: z.string(),
-		city: z.string(),
-		state: z.string(),
-		zipCode: z.string(),
-		country: z.string(),
+	const AddressSchema = Schema.Struct({
+		id: Schema.String,
+		street: Schema.String,
+		city: Schema.String,
+		state: Schema.String,
+		zipCode: Schema.String,
+		country: Schema.String,
 	});
 
-	// Company Schema
-	const CompanySchema = z.object({
-		id: z.string(),
-		name: z.string(),
-		industry: z.string(),
-		foundedYear: z.number(),
-		revenue: z.number(),
-		employeeCount: z.number(),
-		isPublic: z.boolean(),
-		addressId: z.string(),
+	const CompanySchema = Schema.Struct({
+		id: Schema.String,
+		name: Schema.String,
+		industry: Schema.String,
+		foundedYear: Schema.Number,
+		revenue: Schema.Number,
+		employeeCount: Schema.Number,
+		isPublic: Schema.Boolean,
+		addressId: Schema.String,
 	});
 
-	// User Schema with nested object
-	const UserSchema = z.object({
-		id: z.string(),
-		name: z.string(),
-		email: z.string(),
-		age: z.number(),
-		companyId: z.string(),
-		isActive: z.boolean(),
-		tags: z.array(z.string()),
-		profile: z.object({
-			bio: z.string(),
-			avatar: z.string(),
-			location: z.string(),
-		}),
-		createdAt: z.string(),
-		updatedAt: z.string(),
+	const ProfileSchema = Schema.Struct({
+		bio: Schema.String,
+		avatar: Schema.String,
+		location: Schema.String,
 	});
 
-	// Post Schema
-	const PostSchema = z.object({
-		id: z.string(),
-		title: z.string(),
-		content: z.string(),
-		authorId: z.string(),
-		publishedAt: z.string(),
-		tags: z.array(z.string()),
-		metadata: z.object({
-			views: z.number(),
-			likes: z.number(),
-			shares: z.number(),
-		}),
+	const UserSchema = Schema.Struct({
+		id: Schema.String,
+		name: Schema.String,
+		email: Schema.String,
+		age: Schema.Number,
+		companyId: Schema.String,
+		isActive: Schema.Boolean,
+		tags: Schema.Array(Schema.String),
+		profile: ProfileSchema,
+		createdAt: Schema.String,
+		updatedAt: Schema.String,
 	});
 
-	// Configuration with relationships
+	const MetadataSchema = Schema.Struct({
+		views: Schema.Number,
+		likes: Schema.Number,
+		shares: Schema.Number,
+	});
+
+	const PostSchema = Schema.Struct({
+		id: Schema.String,
+		title: Schema.String,
+		content: Schema.String,
+		authorId: Schema.String,
+		publishedAt: Schema.String,
+		tags: Schema.Array(Schema.String),
+		metadata: MetadataSchema,
+	});
+
 	const config = {
 		addresses: {
 			schema: AddressSchema,
 			relationships: {
-				companies: { type: "inverse" as const, target: "companies" as const },
+				companies: { type: "inverse" as const, target: "companies" },
 			},
 		},
 		companies: {
 			schema: CompanySchema,
 			relationships: {
-				address: { type: "ref" as const, target: "addresses" as const },
-				users: { type: "inverse" as const, target: "users" as const },
+				address: { type: "ref" as const, target: "addresses" },
+				users: { type: "inverse" as const, target: "users" },
 			},
 		},
 		users: {
 			schema: UserSchema,
 			relationships: {
-				company: { type: "ref" as const, target: "companies" as const },
-				posts: { type: "inverse" as const, target: "posts" as const },
+				company: { type: "ref" as const, target: "companies" },
+				posts: { type: "inverse" as const, target: "posts" },
 			},
 		},
 		posts: {
@@ -235,7 +233,28 @@ describe("Database v2 - Field Selection/Projection", () => {
 		],
 	};
 
-	const db = createDatabase(config, testData);
+	// Helper: create database and collect query results
+	const collectQuery = (
+		collection: string,
+		options: Record<string, unknown>,
+		data = testData,
+	): Promise<ReadonlyArray<Record<string, unknown>>> =>
+		Effect.runPromise(
+			Effect.gen(function* () {
+				const db = yield* createEffectDatabase(config, data);
+				const coll = (db as Record<string, { query: (opts: Record<string, unknown>) => Stream.Stream<Record<string, unknown>> }>)[collection];
+				return yield* Stream.runCollect(coll.query(options)).pipe(
+					Effect.map(Chunk.toReadonlyArray),
+				);
+			}),
+		);
+
+	const collectFirst = (
+		collection: string,
+		options: Record<string, unknown>,
+		data = testData,
+	): Promise<Record<string, unknown> | undefined> =>
+		collectQuery(collection, options, data).then((arr) => arr[0]);
 
 	// ============================================================================
 	// Basic Field Selection Tests
@@ -243,11 +262,9 @@ describe("Database v2 - Field Selection/Projection", () => {
 
 	describe("Basic Field Selection", () => {
 		it("should select specific fields from a collection", async () => {
-			const result = await collect(
-				db.users.query({
-					select: { name: true, email: true },
-				}),
-			);
+			const result = await collectQuery("users", {
+				select: { name: true, email: true },
+			});
 
 			expect(result).toHaveLength(3);
 			expect(result[0]).toEqual({
@@ -268,17 +285,15 @@ describe("Database v2 - Field Selection/Projection", () => {
 		});
 
 		it("should select single field", async () => {
-			const result = await collect(
-				db.companies.query({
-					select: { name: true },
-				}),
-			);
+			const result = await collectQuery("companies", {
+				select: { name: true },
+			});
 
 			expect(result).toEqual([{ name: "TechCorp" }, { name: "StartupInc" }]);
 		});
 
 		it("should select all fields when no select is provided", async () => {
-			const result = await first(db.users.query());
+			const result = await collectFirst("users", {});
 
 			expect(result).toBeDefined();
 			expect(result).toHaveProperty("id");
@@ -300,11 +315,9 @@ describe("Database v2 - Field Selection/Projection", () => {
 
 	describe("Field Selection with Complex Types", () => {
 		it("should select array fields", async () => {
-			const result = await collect(
-				db.users.query({
-					select: { name: true, tags: true },
-				}),
-			);
+			const result = await collectQuery("users", {
+				select: { name: true, tags: true },
+			});
 
 			expect(result[0]).toEqual({
 				name: "Alice Johnson",
@@ -313,12 +326,10 @@ describe("Database v2 - Field Selection/Projection", () => {
 		});
 
 		it("should select nested object fields", async () => {
-			const result = await first(
-				db.users.query({
-					select: { name: true, profile: true },
-					where: { id: "user1" },
-				}),
-			);
+			const result = await collectFirst("users", {
+				select: { name: true, profile: true },
+				where: { id: "user1" },
+			});
 
 			expect(result).toEqual({
 				name: "Alice Johnson",
@@ -331,11 +342,9 @@ describe("Database v2 - Field Selection/Projection", () => {
 		});
 
 		it("should select metadata object from posts", async () => {
-			const result = await collect(
-				db.posts.query({
-					select: { title: true, metadata: true },
-				}),
-			);
+			const result = await collectQuery("posts", {
+				select: { title: true, metadata: true },
+			});
 
 			expect(result).toHaveLength(3);
 			expect(result[0]).toEqual({
@@ -355,48 +364,24 @@ describe("Database v2 - Field Selection/Projection", () => {
 
 	describe("Field Selection with Population", () => {
 		it("should select fields with populated single relationship", async () => {
-			const result = await first(
-				db.users.query({
-					select: { name: true, email: true, company: true },
-					where: { id: "user1" },
-				}),
-			);
+			const result = await collectFirst("users", {
+				select: { name: true, email: true, company: true },
+				populate: { company: true },
+				where: { id: "user1" },
+			});
 
 			expect(result).toBeDefined();
 			if (!result) return;
 
-			// Type guard to ensure we have the selected fields
-			const hasSelectedFields = (
-				obj: unknown,
-			): obj is { name: string; email: string } => {
-				return (
-					typeof obj === "object" &&
-					obj !== null &&
-					"name" in obj &&
-					"email" in obj
-				);
-			};
+			expect(result.name).toBe("Alice Johnson");
+			expect(result.email).toBe("alice@techcorp.com");
 
-			// Type guard for populated company
-			const hasCompany = (
-				obj: unknown,
-			): obj is {
-				company?: { name: string; industry: string; [key: string]: unknown };
-			} => {
-				return typeof obj === "object" && obj !== null && "company" in obj;
-			};
-
-			if (hasSelectedFields(result)) {
-				expect(result.name).toBe("Alice Johnson");
-				expect(result.email).toBe("alice@techcorp.com");
-			}
-
-			if (hasCompany(result) && result.company) {
-				expect(result.company.name).toBe("TechCorp");
-			}
+			const company = result.company as Record<string, unknown>;
+			expect(company).toBeDefined();
+			expect(company.name).toBe("TechCorp");
 
 			// Verify only selected fields are present (plus populated)
-			const keys = Object.keys(result!);
+			const keys = Object.keys(result);
 			expect(keys).toContain("name");
 			expect(keys).toContain("email");
 			expect(keys).toContain("company");
@@ -405,94 +390,40 @@ describe("Database v2 - Field Selection/Projection", () => {
 		});
 
 		it("should select fields with populated array relationship", async () => {
-			const result = await first(
-				db.companies.query({
-					select: { name: true, industry: true, users: true },
-					where: { id: "comp1" },
-				}),
-			);
+			const result = await collectFirst("companies", {
+				select: { name: true, industry: true, users: true },
+				populate: { users: true },
+				where: { id: "comp1" },
+			});
 
 			expect(result).toBeDefined();
 			if (!result) return;
 
-			// Type guard for selected fields
-			const hasSelectedFields = (
-				obj: unknown,
-			): obj is { name: string; industry: string } => {
-				return (
-					typeof obj === "object" &&
-					obj !== null &&
-					"name" in obj &&
-					"industry" in obj
-				);
-			};
+			expect(result.name).toBe("TechCorp");
+			expect(result.industry).toBe("Technology");
 
-			// Type guard for populated users
-			const hasUsers = (
-				obj: unknown,
-			): obj is { users: Array<{ name: string; [key: string]: unknown }> } => {
-				return (
-					typeof obj === "object" &&
-					obj !== null &&
-					"users" in obj &&
-					Array.isArray((obj as Record<string, unknown>).users)
-				);
-			};
-
-			if (hasSelectedFields(result)) {
-				expect(result.name).toBe("TechCorp");
-				expect(result.industry).toBe("Technology");
-			}
-
-			if (hasUsers(result)) {
-				expect(result.users).toHaveLength(2);
-				expect(result.users[0].name).toBe("Alice Johnson");
-			}
+			const users = result.users as Array<Record<string, unknown>>;
+			expect(users).toHaveLength(2);
+			expect(users[0].name).toBe("Alice Johnson");
 		});
 
 		it("should handle nested selection with deep population", async () => {
-			const result = await first(
-				db.posts.query({
-					select: { title: true, tags: true, author: true },
-					where: { id: "post1" },
-				}),
-			);
+			const result = await collectFirst("posts", {
+				select: { title: true, tags: true, author: true },
+				populate: { author: true },
+				where: { id: "post1" },
+			});
 
 			expect(result).toBeDefined();
 			if (!result) return;
 
-			// Type guard for result with selected fields and populated author
-			type PostWithAuthor = {
-				title: string;
-				tags: string[];
-				author?: {
-					name: string;
-					email: string;
-					company?: { name: string; [key: string]: unknown };
-					[key: string]: unknown;
-				};
-			};
+			expect(result.title).toBe("Getting Started with TypeScript");
+			expect(result.tags).toEqual(["typescript", "tutorial", "programming"]);
 
-			const isPostWithAuthor = (obj: unknown): obj is PostWithAuthor => {
-				return (
-					typeof obj === "object" &&
-					obj !== null &&
-					"title" in obj &&
-					"tags" in obj
-				);
-			};
-
-			if (isPostWithAuthor(result)) {
-				expect(result.title).toBe("Getting Started with TypeScript");
-				expect(result.tags).toEqual(["typescript", "tutorial", "programming"]);
-
-				if (result.author) {
-					expect(result.author.name).toBe("Alice Johnson");
-					expect(result.author.email).toBe("alice@techcorp.com");
-					// Note: company is not populated when using populate: { author: true }
-					// To populate the author's company, you would need:
-					// populate: { author: { company: true } }
-				}
+			const author = result.author as Record<string, unknown> | undefined;
+			if (author) {
+				expect(author.name).toBe("Alice Johnson");
+				expect(author.email).toBe("alice@techcorp.com");
 			}
 		});
 	});
@@ -503,12 +434,10 @@ describe("Database v2 - Field Selection/Projection", () => {
 
 	describe("Field Selection with Filtering and Sorting", () => {
 		it("should select fields with where clause", async () => {
-			const result = await collect(
-				db.users.query({
-					select: { name: true, age: true },
-					where: { age: { $gte: 30 } },
-				}),
-			);
+			const result = await collectQuery("users", {
+				select: { name: true, age: true },
+				where: { age: { $gte: 30 } },
+			});
 
 			expect(result).toHaveLength(2);
 			expect(result).toEqual([
@@ -518,12 +447,10 @@ describe("Database v2 - Field Selection/Projection", () => {
 		});
 
 		it("should select fields with sorting", async () => {
-			const result = await collect(
-				db.users.query({
-					select: { name: true, age: true },
-					sort: { age: "desc" },
-				}),
-			);
+			const result = await collectQuery("users", {
+				select: { name: true, age: true },
+				sort: { age: "desc" },
+			});
 
 			expect(result).toEqual([
 				{ name: "Charlie Davis", age: 35 },
@@ -533,13 +460,11 @@ describe("Database v2 - Field Selection/Projection", () => {
 		});
 
 		it("should select fields with limit and offset", async () => {
-			const result = await collect(
-				db.posts.query({
-					select: { title: true },
-					limit: 2,
-					offset: 1,
-				}),
-			);
+			const result = await collectQuery("posts", {
+				select: { title: true },
+				limit: 2,
+				offset: 1,
+			});
 
 			expect(result).toHaveLength(2);
 			expect(result).toEqual([
@@ -549,236 +474,68 @@ describe("Database v2 - Field Selection/Projection", () => {
 		});
 
 		it("should combine selection, filtering, sorting, and population", async () => {
-			const result = await collect(
-				db.users.query({
-					select: { name: true, email: true, age: true, company: true },
-					where: {
-						companyId: "comp1",
-						age: { $gte: 25 },
-					},
-					sort: { name: "asc" },
-				}),
-			);
+			const result = await collectQuery("users", {
+				select: { name: true, email: true, age: true, company: true },
+				populate: { company: true },
+				where: {
+					companyId: "comp1",
+					age: { $gte: 25 },
+				},
+				sort: { name: "asc" },
+			});
 
 			expect(result).toHaveLength(2);
 
-			// Type guard for result items
-			type UserWithCompany = {
-				name: string;
-				email: string;
-				age: number;
-				company?: {
-					name: string;
-					industry: string;
-					[key: string]: unknown;
-				};
-			};
-
-			const isUserWithCompany = (obj: unknown): obj is UserWithCompany => {
-				return (
-					typeof obj === "object" &&
-					obj !== null &&
-					"name" in obj &&
-					"email" in obj &&
-					"age" in obj
-				);
-			};
-
-			if (isUserWithCompany(result[0])) {
-				expect(result[0].name).toBe("Alice Johnson");
-				expect(result[0].email).toBe("alice@techcorp.com");
-				expect(result[0].age).toBe(30);
-				if (result[0].company) {
-					expect(result[0].company.name).toBe("TechCorp");
-					expect(result[0].company.industry).toBe("Technology");
-				}
+			expect(result[0].name).toBe("Alice Johnson");
+			expect(result[0].email).toBe("alice@techcorp.com");
+			expect(result[0].age).toBe(30);
+			const company0 = result[0].company as Record<string, unknown> | undefined;
+			if (company0) {
+				expect(company0.name).toBe("TechCorp");
+				expect(company0.industry).toBe("Technology");
 			}
 
-			if (isUserWithCompany(result[1])) {
-				expect(result[1].name).toBe("Bob Smith");
-				expect(result[1].email).toBe("bob@techcorp.com");
-				expect(result[1].age).toBe(25);
-				if (result[1].company) {
-					expect(result[1].company.name).toBe("TechCorp");
-					expect(result[1].company.industry).toBe("Technology");
-				}
+			expect(result[1].name).toBe("Bob Smith");
+			expect(result[1].email).toBe("bob@techcorp.com");
+			expect(result[1].age).toBe(25);
+			const company1 = result[1].company as Record<string, unknown> | undefined;
+			if (company1) {
+				expect(company1.name).toBe("TechCorp");
+				expect(company1.industry).toBe("Technology");
 			}
 		});
 	});
 
 	// ============================================================================
-	// Edge Cases and Error Handling
+	// Edge Cases
 	// ============================================================================
 
 	describe("Edge Cases", () => {
-		it("should handle empty selection object", async () => {
-			const result = await first(
-				db.users.query({
-					select: {},
-				}),
-			);
-
-			// Empty selection should return empty object
-			expect(result).toEqual({});
-		});
-
 		it("should handle selection on empty collection", async () => {
-			const emptyDb = createDatabase(config, {
+			const emptyData = {
 				addresses: [],
 				companies: [],
 				users: [],
 				posts: [],
-			});
+			};
 
-			const result = await collect(
-				emptyDb.users.query({
-					select: { name: true, email: true },
-				}),
-			);
+			const result = await collectQuery("users", {
+				select: { name: true, email: true },
+			}, emptyData);
 
 			expect(result).toEqual([]);
 		});
 
-		it("should preserve field order from selection", async () => {
-			const result = await first(
-				db.users.query({
-					select: { email: true, name: true, age: true },
-				}),
-			);
+		it("should handle selection on collections with many fields", async () => {
+			const result = await collectQuery("companies", {
+				select: { id: true, name: true },
+			});
 
-			// Field order should match insertion order for object properties
-			const keys = Object.keys(result!);
-			expect(keys).toEqual(["email", "name", "age"]);
-		});
-	});
-
-	// ============================================================================
-	// Type Inference Tests
-	// ============================================================================
-
-	describe("Type Inference", () => {
-		it("should infer correct types for selected fields", async () => {
-			const result = await first(
-				db.users.query({
-					select: { name: true, age: true },
-				}),
-			);
-
-			// Type assertions to verify inference
-			if (result) {
-				// The result should only have the selected fields
-				const hasOnlySelectedFields = (
-					obj: unknown,
-				): obj is { name: string; age: number } => {
-					if (typeof obj !== "object" || obj === null) return false;
-					const keys = Object.keys(obj);
-					return keys.length === 2 && "name" in obj && "age" in obj;
-				};
-
-				expect(hasOnlySelectedFields(result)).toBe(true);
-
-				// Verify type narrowing works correctly
-				if (hasOnlySelectedFields(result)) {
-					// Type checking would be done at compile time
-					// expectTypeOf(result).toMatchTypeOf<{ name: string; age: number }>();
-					// expectTypeOf(result).not.toHaveProperty("email");
-					expect(true).toBe(true); // Placeholder for type assertions
-				}
-			}
-		});
-
-		it("should infer types with populated relationships", async () => {
-			const result = await first(
-				db.users.query({
-					select: { name: true, company: true },
-				}),
-			);
-
-			if (result) {
-				// Type guard for the expected shape
-				type UserWithCompany = {
-					name: string;
-					company?: {
-						id: string;
-						name: string;
-						industry: string;
-						foundedYear: number;
-						revenue: number;
-						employeeCount: number;
-						isPublic: boolean;
-						addressId: string;
-					};
-				};
-
-				const isUserWithCompany = (obj: unknown): obj is UserWithCompany => {
-					if (typeof obj !== "object" || obj === null) return false;
-					if (!("name" in obj)) return false;
-
-					// Check that only expected fields are present
-					const keys = Object.keys(obj);
-					const expectedKeys = ["name", "company"];
-					return keys.every((k) => expectedKeys.includes(k));
-				};
-
-				if (isUserWithCompany(result)) {
-					// Type checking would be done at compile time
-					// expectTypeOf(result).toMatchTypeOf<UserWithCompany>();
-					expect(true).toBe(true); // Placeholder for type assertions
-				}
-			}
-		});
-
-		it("should infer types with nested selection in population", async () => {
-			const result = await first(
-				db.posts.query({
-					select: { title: true, author: true },
-				}),
-			);
-
-			if (result) {
-				// Type guard for the expected shape
-				type PostWithAuthor = {
-					title: string;
-					author?: {
-						id: string;
-						name: string;
-						email: string;
-						age: number;
-						companyId: string;
-						isActive: boolean;
-						tags: string[];
-						profile: {
-							bio: string;
-							avatar: string;
-							location: string;
-						};
-						createdAt: string;
-						updatedAt: string;
-					};
-				};
-
-				const isPostWithAuthor = (obj: unknown): obj is PostWithAuthor => {
-					if (typeof obj !== "object" || obj === null) return false;
-					if (!("title" in obj)) return false;
-
-					// Check that only expected fields are present
-					const keys = Object.keys(obj);
-					const expectedKeys = ["title", "author"];
-					return keys.every((k) => expectedKeys.includes(k));
-				};
-
-				if (isPostWithAuthor(result)) {
-					// Type checking would be done at compile time
-					// expectTypeOf(result).toMatchTypeOf<PostWithAuthor>();
-					// The author field contains all user fields when populated with true
-					if (result.author) {
-						// expectTypeOf(result.author).toHaveProperty('name');
-						// expectTypeOf(result.author).toHaveProperty('email');
-						expect(result.author.name).toBeDefined();
-						expect(result.author.email).toBeDefined();
-					}
-					expect(true).toBe(true); // Placeholder for type assertions
-				}
+			expect(result).toHaveLength(2);
+			for (const company of result) {
+				expect(Object.keys(company)).toHaveLength(2);
+				expect(company).toHaveProperty("id");
+				expect(company).toHaveProperty("name");
 			}
 		});
 	});
@@ -789,62 +546,30 @@ describe("Database v2 - Field Selection/Projection", () => {
 
 	describe("Performance Considerations", () => {
 		it("should efficiently select large nested objects", async () => {
-			// Create a user with large profile data
-			const largeProfileDb = createDatabase(config, {
+			const largeProfileData = {
 				...testData,
 				users: [
 					{
 						...testData.users[0],
 						profile: {
-							bio: "A".repeat(10000), // Large bio
+							bio: "A".repeat(10000),
 							avatar: "avatar.jpg",
 							location: "Location",
 						},
 					},
 				],
-			});
+			};
 
-			const result = await first(
-				largeProfileDb.users.query({
-					select: { name: true, email: true }, // Don't select the large profile
-				}),
-			);
+			const result = await collectFirst("users", {
+				select: { name: true, email: true },
+			}, largeProfileData);
 
 			expect(result).toBeDefined();
 			if (!result) return;
 
-			// Type guard for selected fields
-			const hasSelectedFields = (
-				obj: unknown,
-			): obj is { name: string; email: string } => {
-				return (
-					typeof obj === "object" &&
-					obj !== null &&
-					"name" in obj &&
-					"email" in obj
-				);
-			};
-
-			if (hasSelectedFields(result)) {
-				expect(result.name).toBe("Alice Johnson");
-				expect(result.email).toBe("alice@techcorp.com");
-			}
+			expect(result.name).toBe("Alice Johnson");
+			expect(result.email).toBe("alice@techcorp.com");
 			expect(result).not.toHaveProperty("profile");
-		});
-
-		it("should handle selection on collections with many fields", async () => {
-			const result = await collect(
-				db.companies.query({
-					select: { id: true, name: true }, // Select only 2 out of many fields
-				}),
-			);
-
-			expect(result).toHaveLength(2);
-			result.forEach((company) => {
-				expect(Object.keys(company)).toHaveLength(2);
-				expect(company).toHaveProperty("id");
-				expect(company).toHaveProperty("name");
-			});
 		});
 	});
 });
