@@ -133,7 +133,7 @@ describe("CRUD Upsert Operations (Effect-based)", () => {
 			it("should create new entity when ID not found", async () => {
 				const result = await db.users.upsert({
 					where: { id: "user3" },
-					create: { email: "bob@example.com", username: "bobsmith", name: "Bob Smith", age: 35, companyId: "comp1" },
+					create: { email: "bob@example.com", username: "bobsmith", name: "Bob Smith", age: 35, companyId: "comp1", loginCount: 0 },
 					update: { loginCount: { $increment: 1 }, lastLoginAt: new Date().toISOString() },
 				}).runPromise
 
@@ -374,7 +374,7 @@ describe("CRUD Upsert Operations (Effect-based)", () => {
 						},
 						{
 							where: { email: "invalid@example.com" },
-							create: { email: "invalid", username: "invaliduser", name: "Invalid User", age: 25, companyId: "comp1" },
+							create: { email: 12345 as unknown as string, username: "invaliduser", name: "Invalid User", age: 25, companyId: "comp1" },
 							update: { age: 26 },
 						},
 					]).pipe(Effect.flip),

@@ -458,8 +458,10 @@ const buildCollection = <T extends HasId>(
 	const createManyFn = wrapEffect(createMany(collectionName, schema, relationships, ref, stateRefs))
 	const updateFn = wrapEffect(update(collectionName, schema, relationships, ref, stateRefs))
 	const updateManyFn = wrapEffect(updateMany(collectionName, schema, relationships, ref, stateRefs))
-	const deleteFn = wrapEffect(del(collectionName, allRelationships, ref, stateRefs))
-	const deleteManyFn = wrapEffect(deleteMany(collectionName, allRelationships, ref, stateRefs))
+	// Check if schema defines a deletedAt field for soft delete support
+	const supportsSoftDelete = "fields" in schema && "deletedAt" in (schema as Record<string, unknown> & { fields: Record<string, unknown> }).fields
+	const deleteFn = wrapEffect(del(collectionName, allRelationships, ref, stateRefs, supportsSoftDelete))
+	const deleteManyFn = wrapEffect(deleteMany(collectionName, allRelationships, ref, stateRefs, supportsSoftDelete))
 	const upsertFn = wrapEffect(upsert(collectionName, schema, relationships, ref, stateRefs))
 	const upsertManyFn = wrapEffect(upsertMany(collectionName, schema, relationships, ref, stateRefs))
 	const createWithRelsFn = wrapEffect(createWithRelationships(

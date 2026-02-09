@@ -268,6 +268,7 @@ describe("Effect-based CRUD Delete Operations", () => {
 						allRelationships,
 						usersRef,
 						stateRefs,
+						true,
 					)("user1", { soft: true })
 
 					return { deleted, map: yield* Ref.get(usersRef) }
@@ -300,6 +301,7 @@ describe("Effect-based CRUD Delete Operations", () => {
 						allRelationships,
 						usersRef,
 						stateRefs,
+						true,
 					)("user3", { soft: true })
 				}),
 			)
@@ -543,6 +545,7 @@ describe("Effect-based CRUD Delete Operations", () => {
 						allRelationships,
 						usersRef,
 						stateRefs,
+						true,
 					)(
 						(u) => u.companyId === "comp1",
 						{ soft: true },
@@ -579,6 +582,7 @@ describe("Effect-based CRUD Delete Operations", () => {
 						allRelationships,
 						usersRef,
 						stateRefs,
+						true,
 					)(
 						(u) => u.companyId === "comp1",
 						{ soft: true },
@@ -687,6 +691,7 @@ describe("Effect-based CRUD Delete Operations", () => {
 						allRelationships,
 						usersRef,
 						stateRefs,
+						true,
 					)(() => true, { soft: true, limit: 1 })
 
 					return { batch, map: yield* Ref.get(usersRef) }
@@ -716,6 +721,7 @@ describe("Effect-based CRUD Delete Operations", () => {
 						allRelationships,
 						usersRef,
 						stateRefs,
+						true,
 					)((u) => u.id === "user1", { soft: true })
 				}),
 			)

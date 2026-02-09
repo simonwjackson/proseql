@@ -491,7 +491,7 @@ describe("CRUD Update Operations (Effect-based)", () => {
 				const error = await Effect.runPromise(
 					db.users.updateMany(
 						() => true,
-						{ age: -10 },
+						{ age: "not-a-number" as unknown as number },
 					).pipe(Effect.flip),
 				)
 

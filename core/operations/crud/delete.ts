@@ -12,7 +12,6 @@ import { Effect, Ref } from "effect"
 import type {
 	DeleteManyResult,
 } from "../../types/crud-types.js"
-import { hasSoftDelete } from "../../types/crud-types.js"
 import {
 	NotFoundError,
 	ForeignKeyError,
@@ -60,6 +59,7 @@ export const del = <T extends HasId>(
 	allRelationships: Record<string, Record<string, RelationshipConfig>>,
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+	supportsSoftDelete: boolean = false,
 ) =>
 (id: string, options?: DeleteOptions): Effect.Effect<T, NotFoundError | OperationError | ForeignKeyError> =>
 	Effect.gen(function* () {
@@ -79,7 +79,7 @@ export const del = <T extends HasId>(
 		const isSoft = options?.soft === true
 
 		// Check if soft delete is requested but entity doesn't support it
-		if (isSoft && !hasSoftDelete(entity)) {
+		if (isSoft && !supportsSoftDelete) {
 			return yield* Effect.fail(
 				new OperationError({
 					operation: "soft delete",
@@ -97,7 +97,7 @@ export const del = <T extends HasId>(
 			stateRefs,
 		)
 
-		if (isSoft && hasSoftDelete(entity)) {
+		if (isSoft) {
 			// Soft delete: mark with deletedAt timestamp
 			// If already soft-deleted, preserve the original deletedAt
 			const existingDeletedAt = (entity as Record<string, unknown>).deletedAt
@@ -145,6 +145,7 @@ export const deleteMany = <T extends HasId>(
 	allRelationships: Record<string, Record<string, RelationshipConfig>>,
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+	supportsSoftDelete: boolean = false,
 ) =>
 (
 	predicate: (entity: T) => boolean,
@@ -172,7 +173,7 @@ export const deleteMany = <T extends HasId>(
 		const isSoft = options?.soft === true
 
 		// Check if soft delete is requested but entities don't support it
-		if (isSoft && !hasSoftDelete(matchingEntities[0]!)) {
+		if (isSoft && !supportsSoftDelete) {
 			return yield* Effect.fail(
 				new OperationError({
 					operation: "soft delete",

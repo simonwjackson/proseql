@@ -234,14 +234,14 @@ describe("CRUD Delete Operations (Effect-based)", () => {
 				const error = await Effect.runPromise(
 					db.users.delete("user1").pipe(Effect.flip),
 				)
-				expect(error._tag).toBe("OperationError")
+				expect(error._tag).toBe("ForeignKeyError")
 			})
 
 			it("should handle cascade delete restrictions", async () => {
 				const error = await Effect.runPromise(
 					db.companies.delete("comp1").pipe(Effect.flip),
 				)
-				expect(error._tag).toBe("OperationError")
+				expect(error._tag).toBe("ForeignKeyError")
 			})
 		})
 	})
@@ -384,7 +384,7 @@ describe("CRUD Delete Operations (Effect-based)", () => {
 				const error = await Effect.runPromise(
 					db.users.delete("user2").pipe(Effect.flip),
 				)
-				expect(error._tag).toBe("OperationError")
+				expect(error._tag).toBe("ForeignKeyError")
 
 				const users = await db.users.query().runPromise
 				expect(users.find((u: Record<string, unknown>) => u.id === "user2")).toBeDefined()
@@ -394,7 +394,7 @@ describe("CRUD Delete Operations (Effect-based)", () => {
 				const error = await Effect.runPromise(
 					db.categories.delete("cat1").pipe(Effect.flip),
 				)
-				expect(error._tag).toBe("OperationError")
+				expect(error._tag).toBe("ForeignKeyError")
 
 				const categories = await db.categories.query().runPromise
 				expect(categories.find((c: Record<string, unknown>) => c.id === "cat1")).toBeDefined()

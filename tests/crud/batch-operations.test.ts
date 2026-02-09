@@ -135,16 +135,18 @@ describe("CRUD Batch Operations and Edge Cases (Effect-based)", () => {
 		})
 
 		it("should handle large deleteMany operations", async () => {
+			const baseTime = Date.now()
 			const logs = Array.from({ length: 100 }, (_, i) => ({
 				action: "test",
 				entityType: "test",
 				entityId: `test${i}`,
-				timestamp: new Date(Date.now() - i * 60000).toISOString(),
+				timestamp: new Date(baseTime - i * 60000).toISOString(),
 			}))
 
 			await db.auditLogs.createMany(logs).runPromise
 
-			const cutoffTime = new Date(Date.now() - 50 * 60000).toISOString()
+			// Entries with timestamp < cutoff: i=50..99 from batch (50) + initial "yesterday" log (1) = 51
+			const cutoffTime = new Date(baseTime - 49.5 * 60000).toISOString()
 			const result = await db.auditLogs.deleteMany(
 				(l) => l.timestamp < cutoffTime,
 			).runPromise
