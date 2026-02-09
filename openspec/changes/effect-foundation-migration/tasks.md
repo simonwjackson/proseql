@@ -58,7 +58,7 @@
 - [x] 8.3 Migrate `core/operations/crud/delete.ts`: delete and deleteMany return Effect. Preserve soft delete, foreign key constraint checking, cascade handling
 - [x] 8.4 Migrate `core/operations/crud/upsert.ts`: upsert and upsertMany return Effect
 - [x] 8.5 Migrate `core/operations/crud/create-with-relationships.ts`: createWithRelationships returns Effect
-- [ ] 8.6 Migrate `core/operations/crud/update-with-relationships.ts`: updateWithRelationships returns Effect
+- [x] 8.6 Migrate `core/operations/crud/update-with-relationships.ts`: updateWithRelationships returns Effect
 - [ ] 8.7 Migrate `core/operations/crud/delete-with-relationships.ts`: deleteWithRelationships and deleteManyWithRelationships return Effect
 - [ ] 8.8 Migrate `core/validators/foreign-key.ts` to return Effect values for validation checks
 - [ ] 8.9 Write tests for all CRUD operations: create with validation, update with operators, delete with cascade, upsert, relationship operations
