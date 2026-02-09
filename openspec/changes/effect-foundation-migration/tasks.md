@@ -74,7 +74,7 @@
 ## 10. Database Factory
 
 - [x] 10.1 Rewrite `core/factories/database.ts`: createDatabase returns `Effect<Database, DatabaseError, DatabaseEnv>`. Wire Ref state, query pipeline (Stream-based), CRUD methods (Effect-based), persistence (Service-based)
-- [ ] 10.2 Implement the composable query function: read Ref snapshot → Stream.fromIterable → pipe(filter, populate, sort, paginate, select). Return Stream with typed error channel
+- [x] 10.2 Implement the composable query function: read Ref snapshot → Stream.fromIterable → pipe(filter, populate, sort, paginate, select). Return Stream with typed error channel
 - [ ] 10.3 Add convenience `.runPromise` property/method to query results and CRUD return values for non-Effect consumers
 - [ ] 10.4 Wire persistence hooks: after each CRUD mutation, trigger debounced save via Effect.fork
 - [ ] 10.5 Wire database cleanup via Effect.acquireRelease: stop watchers, flush writes on scope close
