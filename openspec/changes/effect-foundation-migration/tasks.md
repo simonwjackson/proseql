@@ -97,7 +97,14 @@
 - [x] 12.6 Rewrite `tests/conditional-logic.test.ts` — fix the relationship filtering TODOs that were broken in the current implementation
 - [x] 12.7 Rewrite `tests/array-operators.test.ts` for Effect-based filtering
 - [x] 12.8 Rewrite `tests/persistence.test.ts` using Effect test Layers (in-memory storage adapter)
-- [ ] 12.9 Rewrite all `tests/crud/*.test.ts` files (create, update, delete, upsert, relationships, batch-operations, type-safety)
+- [x] 12.9a Rewrite `tests/crud/test-helpers.ts` for Effect/Stream API
+- [x] 12.9b Rewrite `tests/crud/create.test.ts` for Effect/Stream API
+- [x] 12.9c Rewrite `tests/crud/update.test.ts` for Effect/Stream API
+- [x] 12.9d Rewrite `tests/crud/delete.test.ts` for Effect/Stream API
+- [x] 12.9e Rewrite `tests/crud/upsert.test.ts` for Effect/Stream API
+- [x] 12.9f Rewrite `tests/crud/batch-operations.test.ts` for Effect/Stream API
+- [ ] 12.9g Rewrite `tests/crud/relationships.test.ts` for Effect/Stream API
+- [ ] 12.9h Rewrite `tests/crud/type-safety.test.ts` for Effect/Stream API
 - [ ] 12.10 Delete debug test files: cascade-debug, connect-debug, disconnect-debug, nested-create-debug, relationships-debug, type-trace
 - [ ] 12.11 Rewrite at least 3 example files demonstrating the new API: basic CRUD, query with population, persistence setup
 

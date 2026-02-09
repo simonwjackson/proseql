@@ -26,7 +26,7 @@ while true; do
   fi
 
   echo "=== Iteration $ITERATION | $REMAINING tasks remaining ==="
-  nix run nixpkgs#bun -- x '@anthropic-ai/claude-code' --dangerously-skip-permissions --print --verbose --output-format stream-json <PROMPT_build.md |
+  nix run nixpkgs#bun -- x '@anthropic-ai/claude-code' --dangerously-skip-permissions --print --verbose --output-format stream-json --max-budget-usd 2 <PROMPT_build.md |
     jq -r '
       if .type == "assistant" then
         .message.content[]? |
