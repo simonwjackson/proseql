@@ -46,7 +46,7 @@
 
 ## 7. Population (Stream-based)
 
-- [ ] 7.1 Create `core/operations/relationships/populate-stream.ts` implementing population as a Stream combinator: `applyPopulate(config, stateRefs, dbConfig)` returning `<T>(stream: Stream<T>) => Stream<T & Populated>`. Resolve ref and inverse relationships from Ref state
+- [x] 7.1 Create `core/operations/relationships/populate-stream.ts` implementing population as a Stream combinator: `applyPopulate(config, stateRefs, dbConfig)` returning `<T>(stream: Stream<T>) => Stream<T & Populated>`. Resolve ref and inverse relationships from Ref state
 - [ ] 7.2 Handle nested population recursively (depth limit of 5 from current PopulateConfig type)
 - [ ] 7.3 Handle population errors: produce DanglingReferenceError for missing targets in error channel
 - [ ] 7.4 Write tests for population: ref relationships, inverse relationships, nested population, population with select, dangling reference handling
