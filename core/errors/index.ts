@@ -16,26 +16,22 @@ export {
 export type { CrudError } from "./crud-errors.js"
 
 // ============================================================================
-// Query Errors
+// Query Errors (re-exported from query-errors.ts)
 // ============================================================================
 
-import { Data } from "effect"
+export {
+	DanglingReferenceError,
+	CollectionNotFoundError,
+	PopulationError,
+} from "./query-errors.js"
 
-export class DanglingReferenceError extends Data.TaggedError("DanglingReferenceError")<{
-	readonly collection: string
-	readonly field: string
-	readonly targetId: string
-	readonly message: string
-}> {}
-
-export class CollectionNotFoundError extends Data.TaggedError("CollectionNotFoundError")<{
-	readonly collection: string
-	readonly message: string
-}> {}
+export type { QueryError } from "./query-errors.js"
 
 // ============================================================================
 // Storage Errors
 // ============================================================================
+
+import { Data } from "effect"
 
 export class StorageError extends Data.TaggedError("StorageError")<{
 	readonly path: string
@@ -60,10 +56,7 @@ export class UnsupportedFormatError extends Data.TaggedError("UnsupportedFormatE
 // ============================================================================
 
 import type { CrudError } from "./crud-errors.js"
-
-export type QueryError =
-	| DanglingReferenceError
-	| CollectionNotFoundError
+import type { QueryError } from "./query-errors.js"
 
 export type PersistenceError =
 	| StorageError
