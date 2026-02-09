@@ -4,6 +4,7 @@
   "description": "YAML-based database utilities",
   "dependencies": {
     "effect": "^3.15.2",
+    "msgpackr": "^1.11.8",
     "yaml": "^2.3.4"
   },
   "devDependencies": {
