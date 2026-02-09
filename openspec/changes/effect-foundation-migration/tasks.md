@@ -83,7 +83,7 @@
 ## 11. Type System Update
 
 - [x] 11.1 Update `core/types/types.ts`: replace z.ZodType references with Schema.Schema. Simplify GenerateDatabase, SmartCollection, QueryReturnType to leverage pipe composition instead of deep conditional nesting
-- [ ] 11.2 Update QueryConfig to support Stream return type. Ensure WhereClause, PopulateConfig, SelectConfig, SortConfig types work with Effect Schema entity types
+- [x] 11.2 Update QueryConfig to support Stream return type. Ensure WhereClause, PopulateConfig, SelectConfig, SortConfig types work with Effect Schema entity types
 - [ ] 11.3 Update CrudMethodsWithRelationships interface: all methods return Effect instead of Promise<Result<T, E>>
 - [ ] 11.4 Update `core/index.ts` exports: export new error types, Effect-based factory, Stream-based query, remove old Result/AsyncIterable exports
 

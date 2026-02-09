@@ -1,6 +1,7 @@
 import type { Schema, Stream } from "effect";
-import type { EffectCollection } from "../factories/database-effect.js";
+import type { EffectCollection, RunnableStream } from "../factories/database-effect.js";
 import type { MinimalEntity } from "./crud-types.js";
+import type { DanglingReferenceError } from "../errors/query-errors.js";
 
 // ============================================================================
 // Core Types
@@ -40,7 +41,7 @@ export type FilterOperators<T> = T extends string
 					$eq?: T;
 					$ne?: T;
 				}
-			: T extends (infer U)[]
+			: T extends readonly (infer U)[]
 				? {
 						$eq?: T;
 						$ne?: T;
@@ -695,25 +696,25 @@ export type QueryConfig<T, Relations, DB> =
 	  };
 
 // Enhanced query return type that supports both object and array-based selection
-// Uses Stream.Stream instead of AsyncIterable for composable query pipelines with typed errors
+// Uses RunnableStream (Stream.Stream + .runPromise) for composable query pipelines with typed errors
 export type QueryReturnType<T, Relations, Config, DB> = Config extends {
 	populate: infer P;
 	select: infer S;
 }
 	? P extends PopulateConfig<Relations, DB>
 		? S extends SelectConfig<T, Relations, DB>
-			? Stream.Stream<ApplySelectAndPopulate<T, Relations, S, P, DB>>
-			: Stream.Stream<ApplyPopulateObject<T, Relations, P, DB>>
-		: Stream.Stream<T>
+			? RunnableStream<ApplySelectAndPopulate<T, Relations, S, P, DB>, DanglingReferenceError>
+			: RunnableStream<ApplyPopulateObject<T, Relations, P, DB>, DanglingReferenceError>
+		: RunnableStream<T, DanglingReferenceError>
 	: Config extends { populate: infer P }
 		? P extends PopulateConfig<Relations, DB>
-			? Stream.Stream<ApplyPopulateObject<T, Relations, P, DB>>
-			: Stream.Stream<T>
+			? RunnableStream<ApplyPopulateObject<T, Relations, P, DB>, DanglingReferenceError>
+			: RunnableStream<T, DanglingReferenceError>
 		: Config extends { select: infer S }
 			? S extends SelectConfig<T, Relations, DB>
-				? Stream.Stream<ApplySelectConfig<T, S, Relations, DB>>
-				: Stream.Stream<T>
-			: Stream.Stream<T>;
+				? RunnableStream<ApplySelectConfig<T, S, Relations, DB>, DanglingReferenceError>
+				: RunnableStream<T, DanglingReferenceError>
+			: RunnableStream<T, DanglingReferenceError>;
 
 export type SmartCollection<
 	T,
