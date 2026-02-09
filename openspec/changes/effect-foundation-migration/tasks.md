@@ -29,7 +29,7 @@
 
 - [x] 5.1 Create `core/storage/storage-service.ts` defining StorageAdapter as an Effect Service with Context.Tag. Methods return Effect<T, StorageError>
 - [x] 5.2 Create `core/storage/node-adapter-layer.ts` implementing the StorageAdapter service as a Layer using Node.js fs with atomic writes and retry via Effect.retry + Schedule.exponential
-- [ ] 5.3 Create `core/storage/in-memory-adapter-layer.ts` implementing StorageAdapter as an in-memory Map for testing
+- [x] 5.3 Create `core/storage/in-memory-adapter-layer.ts` implementing StorageAdapter as an in-memory Map for testing
 - [ ] 5.4 Create `core/serializers/serializer-service.ts` defining SerializerRegistry as an Effect Service. Methods: `serialize(data, extension)` and `deserialize(content, extension)` returning Effect
 - [ ] 5.5 Migrate `core/serializers/json.ts` to return Effect values. Create JsonSerializerLayer
 - [ ] 5.6 Implement real YAML serializer in `core/serializers/yaml.ts` using js-yaml (replace mock). Create YamlSerializerLayer
