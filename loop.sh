@@ -18,7 +18,8 @@ while true; do
   fi
 
   ITERATION=$((ITERATION + 1))
-  REMAINING=$(grep -c '^\- \[ \]' openspec/changes/effect-foundation-migration/tasks.md 2>/dev/null || echo 0)
+  REMAINING=$(grep -c '^\- \[ \]' openspec/changes/effect-foundation-migration/tasks.md 2>/dev/null || true)
+  REMAINING=${REMAINING:-0}
 
   if [ "$REMAINING" -eq 0 ]; then
     echo "All tasks complete! Stopping."
