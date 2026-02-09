@@ -24,7 +24,7 @@ import type {
 	DeleteWithRelationshipsOptions,
 	DeleteWithRelationshipsResult,
 } from "../types/crud-relationship-types.js";
-import type { CrudError, Result } from "../errors/crud-errors.js";
+import type { LegacyCrudError as CrudError, Result } from "../errors/crud-errors.js";
 import { isErr } from "../errors/crud-errors.js";
 import type { RelationshipDef, WhereClause } from "../types/types.js";
 import { CrudMethods } from "./crud-factory.js";

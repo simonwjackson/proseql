@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createDatabase } from "../../core/factories/database";
 import { isOk, isErr } from "../../core/errors/crud-errors";
 import { collect } from "../../core/utils/async-iterable.js";
-import type { CrudError } from "../../core/errors/crud-errors";
+import type { LegacyCrudError as CrudError } from "../../core/errors/crud-errors";
 import type {
 	CreateInput,
 	CreateManyResult,

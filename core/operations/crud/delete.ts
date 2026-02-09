@@ -9,7 +9,7 @@ import type {
 	DeleteManyResult,
 } from "../../types/crud-types.js";
 import { hasSoftDelete } from "../../types/crud-types.js";
-import type { CrudError } from "../../errors/crud-errors.js";
+import type { LegacyCrudError as CrudError } from "../../errors/crud-errors.js";
 import type { WhereClause } from "../../types/types.js";
 import {
 	createNotFoundError,

@@ -12,7 +12,7 @@ import type {
 	UpsertManyResult,
 	ExtractUniqueFields,
 } from "../../types/crud-types.js";
-import type { CrudError } from "../../errors/crud-errors.js";
+import type { LegacyCrudError as CrudError } from "../../errors/crud-errors.js";
 import {
 	createValidationError,
 	createUnknownError,

@@ -5,7 +5,7 @@
 
 import type { z } from "zod";
 import type { MinimalEntity } from "../../types/crud-types.js";
-import type { CrudError } from "../../errors/crud-errors.js";
+import type { LegacyCrudError as CrudError } from "../../errors/crud-errors.js";
 import { isErr } from "../../errors/crud-errors.js";
 import type { RelationshipDef } from "../../types/types.js";
 import type {

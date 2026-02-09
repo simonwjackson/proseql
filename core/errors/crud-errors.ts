@@ -1,310 +1,374 @@
-/**
- * Tagged union error types for CRUD operations with exhaustive type checking
- */
+import { Data } from "effect"
 
 // ============================================================================
-// Error Type Definitions
+// Effect TaggedError CRUD Error Types
 // ============================================================================
 
-/**
- * Base error type with common properties
- */
-interface BaseError {
-	readonly code: string;
-	readonly timestamp: string;
-	context?: Record<string, unknown>;
-}
+export class NotFoundError extends Data.TaggedError("NotFoundError")<{
+	readonly collection: string
+	readonly id: string
+	readonly message: string
+}> {}
 
-/**
- * Entity not found error
- */
-export interface NotFoundError<TEntity = unknown> extends BaseError {
-	readonly code: "NOT_FOUND";
-	readonly entity: string;
-	readonly id: string;
-	readonly message: string;
-	readonly _phantom?: TEntity; // Phantom type for type inference
-}
+export class DuplicateKeyError extends Data.TaggedError("DuplicateKeyError")<{
+	readonly collection: string
+	readonly field: string
+	readonly value: string
+	readonly existingId: string
+	readonly message: string
+}> {}
 
-/**
- * Duplicate key constraint violation
- */
-export interface DuplicateKeyError extends BaseError {
-	readonly code: "DUPLICATE_KEY";
-	readonly field: string;
-	readonly value: unknown;
-	readonly existingId: string;
-	readonly message: string;
-	constraint?: string;
-}
+export class ForeignKeyError extends Data.TaggedError("ForeignKeyError")<{
+	readonly collection: string
+	readonly field: string
+	readonly value: string
+	readonly targetCollection: string
+	readonly message: string
+}> {}
 
-/**
- * Foreign key constraint violation
- */
-export interface ForeignKeyError extends BaseError {
-	readonly code: "FOREIGN_KEY_VIOLATION";
-	readonly field: string;
-	readonly value: unknown;
-	readonly targetCollection: string;
-	readonly message: string;
-	constraint?: string;
-}
+export class ValidationError extends Data.TaggedError("ValidationError")<{
+	readonly message: string
+	readonly issues: ReadonlyArray<{
+		readonly field: string
+		readonly message: string
+		readonly value?: unknown
+		readonly expected?: string
+		readonly received?: string
+	}>
+}> {}
 
-/**
- * Validation error with field-level details
- */
-export interface ValidationError extends BaseError {
-	readonly code: "VALIDATION_ERROR";
-	readonly message: string;
-	readonly errors: ReadonlyArray<{
-		readonly field: string;
-		readonly message: string;
-		readonly value?: unknown;
-		readonly expected?: string;
-		readonly received?: string;
-	}>;
-}
+export class UniqueConstraintError extends Data.TaggedError("UniqueConstraintError")<{
+	readonly collection: string
+	readonly constraint: string
+	readonly fields: ReadonlyArray<string>
+	readonly values: Readonly<Record<string, unknown>>
+	readonly existingId: string
+	readonly message: string
+}> {}
 
-/**
- * Unique constraint violation (different from duplicate key)
- */
-export interface UniqueConstraintError extends BaseError {
-	readonly code: "UNIQUE_CONSTRAINT";
-	readonly fields: ReadonlyArray<string>;
-	readonly values: Record<string, unknown>;
-	readonly existingId: string;
-	readonly message: string;
-	readonly constraint: string;
-}
+export class ConcurrencyError extends Data.TaggedError("ConcurrencyError")<{
+	readonly collection: string
+	readonly id: string
+	readonly message: string
+}> {}
 
-/**
- * Operation not allowed error
- */
-export interface OperationNotAllowedError extends BaseError {
-	readonly code: "OPERATION_NOT_ALLOWED";
-	readonly operation: string;
-	readonly reason: string;
-	readonly message: string;
-}
+export class OperationError extends Data.TaggedError("OperationError")<{
+	readonly operation: string
+	readonly reason: string
+	readonly message: string
+}> {}
 
-/**
- * Transaction error
- */
-export interface TransactionError extends BaseError {
-	readonly code: "TRANSACTION_ERROR";
-	readonly operation: "begin" | "commit" | "rollback";
-	readonly reason: string;
-	readonly message: string;
-}
+export class TransactionError extends Data.TaggedError("TransactionError")<{
+	readonly operation: "begin" | "commit" | "rollback"
+	readonly reason: string
+	readonly message: string
+}> {}
 
-/**
- * Unknown/unexpected error
- */
-export interface UnknownError extends BaseError {
-	readonly code: "UNKNOWN";
-	readonly message: string;
-	originalError?: unknown;
-}
+// ============================================================================
+// Effect CRUD Error Union
+// ============================================================================
 
-/**
- * Tagged union of all CRUD errors
- */
-export type CrudError<TEntity = unknown> =
-	| NotFoundError<TEntity>
+export type CrudError =
+	| NotFoundError
 	| DuplicateKeyError
 	| ForeignKeyError
 	| ValidationError
 	| UniqueConstraintError
-	| OperationNotAllowedError
+	| ConcurrencyError
+	| OperationError
 	| TransactionError
-	| UnknownError;
 
 // ============================================================================
-// Type Guards
+// Legacy Types (used by existing CRUD operations, will be removed in task 3.4)
 // ============================================================================
 
-/**
- * Type guard for NotFoundError
- */
+interface LegacyBaseError {
+	readonly code: string
+	readonly timestamp: string
+	context?: Record<string, unknown>
+}
+
+interface LegacyNotFoundError<TEntity = unknown> extends LegacyBaseError {
+	readonly code: "NOT_FOUND"
+	readonly entity: string
+	readonly id: string
+	readonly message: string
+	readonly _phantom?: TEntity
+}
+
+interface LegacyDuplicateKeyError extends LegacyBaseError {
+	readonly code: "DUPLICATE_KEY"
+	readonly field: string
+	readonly value: unknown
+	readonly existingId: string
+	readonly message: string
+	constraint?: string
+}
+
+interface LegacyForeignKeyError extends LegacyBaseError {
+	readonly code: "FOREIGN_KEY_VIOLATION"
+	readonly field: string
+	readonly value: unknown
+	readonly targetCollection: string
+	readonly message: string
+	constraint?: string
+}
+
+interface LegacyValidationError extends LegacyBaseError {
+	readonly code: "VALIDATION_ERROR"
+	readonly message: string
+	readonly errors: ReadonlyArray<{
+		readonly field: string
+		readonly message: string
+		readonly value?: unknown
+		readonly expected?: string
+		readonly received?: string
+	}>
+}
+
+interface LegacyUniqueConstraintError extends LegacyBaseError {
+	readonly code: "UNIQUE_CONSTRAINT"
+	readonly fields: ReadonlyArray<string>
+	readonly values: Record<string, unknown>
+	readonly existingId: string
+	readonly message: string
+	readonly constraint: string
+}
+
+interface LegacyOperationNotAllowedError extends LegacyBaseError {
+	readonly code: "OPERATION_NOT_ALLOWED"
+	readonly operation: string
+	readonly reason: string
+	readonly message: string
+}
+
+interface LegacyTransactionError extends LegacyBaseError {
+	readonly code: "TRANSACTION_ERROR"
+	readonly operation: "begin" | "commit" | "rollback"
+	readonly reason: string
+	readonly message: string
+}
+
+interface LegacyUnknownError extends LegacyBaseError {
+	readonly code: "UNKNOWN"
+	readonly message: string
+	originalError?: unknown
+}
+
+/** @deprecated Use CrudError (Effect TaggedError union) instead. Will be removed in task 3.4. */
+export type LegacyCrudError<TEntity = unknown> =
+	| LegacyNotFoundError<TEntity>
+	| LegacyDuplicateKeyError
+	| LegacyForeignKeyError
+	| LegacyValidationError
+	| LegacyUniqueConstraintError
+	| LegacyOperationNotAllowedError
+	| LegacyTransactionError
+	| LegacyUnknownError
+
+// ============================================================================
+// Legacy Result Type (will be removed in task 3.4)
+// ============================================================================
+
+/** @deprecated Use Effect<T, E> instead. Will be removed in task 3.4. */
+export type Result<T, E = LegacyCrudError> =
+	| { success: true; data: T }
+	| { success: false; error: E }
+
+export function ok<T>(data: T): Result<T, never> {
+	return { success: true, data }
+}
+
+export function err<E>(error: E): Result<never, E> {
+	return { success: false, error }
+}
+
+export function isOk<T, E>(
+	result: Result<T, E>,
+): result is { success: true; data: T } {
+	return result.success === true
+}
+
+export function isErr<T, E>(
+	result: Result<T, E>,
+): result is { success: false; error: E } {
+	return result.success === false
+}
+
+export function mapResult<T, U, E>(
+	result: Result<T, E>,
+	fn: (value: T) => U,
+): Result<U, E> {
+	if (isOk(result)) {
+		return ok(fn(result.data))
+	}
+	return result
+}
+
+export function mapError<T, E, F>(
+	result: Result<T, E>,
+	fn: (error: E) => F,
+): Result<T, F> {
+	if (isErr(result)) {
+		return err(fn(result.error))
+	}
+	return result
+}
+
+export async function chainResult<T, U, E>(
+	result: Result<T, E>,
+	fn: (value: T) => Promise<Result<U, E>>,
+): Promise<Result<U, E>> {
+	if (isOk(result)) {
+		return fn(result.data)
+	}
+	return result
+}
+
+// ============================================================================
+// Legacy Type Guards (will be removed in task 3.4)
+// ============================================================================
+
 export function isNotFoundError<T>(
-	error: CrudError<T>,
-): error is NotFoundError<T> {
-	return error.code === "NOT_FOUND";
+	error: LegacyCrudError<T>,
+): error is LegacyNotFoundError<T> {
+	return error.code === "NOT_FOUND"
 }
 
-/**
- * Type guard for DuplicateKeyError
- */
 export function isDuplicateKeyError(
-	error: CrudError,
-): error is DuplicateKeyError {
-	return error.code === "DUPLICATE_KEY";
+	error: LegacyCrudError,
+): error is LegacyDuplicateKeyError {
+	return error.code === "DUPLICATE_KEY"
 }
 
-/**
- * Type guard for ForeignKeyError
- */
-export function isForeignKeyError(error: CrudError): error is ForeignKeyError {
-	return error.code === "FOREIGN_KEY_VIOLATION";
+export function isForeignKeyError(error: LegacyCrudError): error is LegacyForeignKeyError {
+	return error.code === "FOREIGN_KEY_VIOLATION"
 }
 
-/**
- * Type guard for ValidationError
- */
-export function isValidationError(error: CrudError): error is ValidationError {
-	return error.code === "VALIDATION_ERROR";
+export function isValidationError(error: LegacyCrudError): error is LegacyValidationError {
+	return error.code === "VALIDATION_ERROR"
 }
 
-/**
- * Type guard for UniqueConstraintError
- */
 export function isUniqueConstraintError(
-	error: CrudError,
-): error is UniqueConstraintError {
-	return error.code === "UNIQUE_CONSTRAINT";
+	error: LegacyCrudError,
+): error is LegacyUniqueConstraintError {
+	return error.code === "UNIQUE_CONSTRAINT"
 }
 
-/**
- * Type guard for OperationNotAllowedError
- */
 export function isOperationNotAllowedError(
-	error: CrudError,
-): error is OperationNotAllowedError {
-	return error.code === "OPERATION_NOT_ALLOWED";
+	error: LegacyCrudError,
+): error is LegacyOperationNotAllowedError {
+	return error.code === "OPERATION_NOT_ALLOWED"
 }
 
-/**
- * Type guard for TransactionError
- */
 export function isTransactionError(
-	error: CrudError,
-): error is TransactionError {
-	return error.code === "TRANSACTION_ERROR";
+	error: LegacyCrudError,
+): error is LegacyTransactionError {
+	return error.code === "TRANSACTION_ERROR"
 }
 
-/**
- * Type guard for UnknownError
- */
-export function isUnknownError(error: CrudError): error is UnknownError {
-	return error.code === "UNKNOWN";
+export function isUnknownError(error: LegacyCrudError): error is LegacyUnknownError {
+	return error.code === "UNKNOWN"
 }
 
-/**
- * Type guard to check if a value is a CrudError
- */
-export function isCrudError(value: unknown): value is CrudError {
-	if (typeof value !== "object" || value === null) return false;
-	const error = value as Record<string, unknown>;
+export function isCrudError(value: unknown): value is LegacyCrudError {
+	if (typeof value !== "object" || value === null) return false
+	const error = value as Record<string, unknown>
 	return (
 		typeof error.code === "string" &&
 		typeof error.message === "string" &&
 		typeof error.timestamp === "string"
-	);
+	)
 }
 
 // ============================================================================
-// Error Factory Functions
+// Legacy Factory Functions (will be removed in task 3.4)
 // ============================================================================
 
-/**
- * Create a NotFoundError
- */
 export function createNotFoundError<TEntity>(
 	entity: string,
 	id: string,
 	context?: Record<string, unknown>,
-): NotFoundError<TEntity> {
-	const error: NotFoundError<TEntity> = {
+): LegacyNotFoundError<TEntity> {
+	const error: LegacyNotFoundError<TEntity> = {
 		code: "NOT_FOUND",
 		entity,
 		id,
 		message: `${entity} with id '${id}' not found`,
 		timestamp: new Date().toISOString(),
-	};
-	if (context !== undefined) {
-		error.context = context;
 	}
-	return error;
+	if (context !== undefined) {
+		error.context = context
+	}
+	return error
 }
 
-/**
- * Create a DuplicateKeyError
- */
 export function createDuplicateKeyError(
 	field: string,
 	value: unknown,
 	existingId: string,
 	constraint?: string,
-): DuplicateKeyError {
-	const error: DuplicateKeyError = {
+): LegacyDuplicateKeyError {
+	const error: LegacyDuplicateKeyError = {
 		code: "DUPLICATE_KEY",
 		field,
 		value,
 		existingId,
 		message: `Duplicate value for field '${field}': ${JSON.stringify(value)}`,
 		timestamp: new Date().toISOString(),
-	};
-	if (constraint !== undefined) {
-		error.constraint = constraint;
 	}
-	return error;
+	if (constraint !== undefined) {
+		error.constraint = constraint
+	}
+	return error
 }
 
-/**
- * Create a ForeignKeyError
- */
 export function createForeignKeyError(
 	field: string,
 	value: unknown,
 	targetCollection: string,
 	constraint?: string,
-): ForeignKeyError {
-	const error: ForeignKeyError = {
+): LegacyForeignKeyError {
+	const error: LegacyForeignKeyError = {
 		code: "FOREIGN_KEY_VIOLATION",
 		field,
 		value,
 		targetCollection,
 		message: `Foreign key constraint violated: '${field}' references non-existent ${targetCollection} '${value}'`,
 		timestamp: new Date().toISOString(),
-	};
-	if (constraint !== undefined) {
-		error.constraint = constraint;
 	}
-	return error;
+	if (constraint !== undefined) {
+		error.constraint = constraint
+	}
+	return error
 }
 
-/**
- * Create a ValidationError from Zod errors or custom validation
- */
 export function createValidationError(
 	errors: Array<{
-		field: string;
-		message: string;
-		value?: unknown;
-		expected?: string;
-		received?: string;
+		field: string
+		message: string
+		value?: unknown
+		expected?: string
+		received?: string
 	}>,
 	message?: string,
-): ValidationError {
-	const defaultMessage = `Validation failed: ${errors.length} error(s)`;
+): LegacyValidationError {
+	const defaultMessage = `Validation failed: ${errors.length} error(s)`
 	return {
 		code: "VALIDATION_ERROR",
 		message: message || defaultMessage,
 		errors,
 		timestamp: new Date().toISOString(),
-	};
+	}
 }
 
-/**
- * Create a UniqueConstraintError
- */
 export function createUniqueConstraintError(
 	constraint: string,
 	fields: string[],
 	values: Record<string, unknown>,
 	existingId: string,
-): UniqueConstraintError {
-	const fieldList = fields.join(", ");
+): LegacyUniqueConstraintError {
+	const fieldList = fields.join(", ")
 	return {
 		code: "UNIQUE_CONSTRAINT",
 		fields,
@@ -313,203 +377,101 @@ export function createUniqueConstraintError(
 		constraint,
 		message: `Unique constraint '${constraint}' violated on fields: ${fieldList}`,
 		timestamp: new Date().toISOString(),
-	};
+	}
 }
 
-/**
- * Create an OperationNotAllowedError
- */
 export function createOperationNotAllowedError(
 	operation: string,
 	reason: string,
-): OperationNotAllowedError {
+): LegacyOperationNotAllowedError {
 	return {
 		code: "OPERATION_NOT_ALLOWED",
 		operation,
 		reason,
 		message: `Operation '${operation}' not allowed: ${reason}`,
 		timestamp: new Date().toISOString(),
-	};
+	}
 }
 
-/**
- * Create a TransactionError
- */
 export function createTransactionError(
 	operation: "begin" | "commit" | "rollback",
 	reason: string,
-): TransactionError {
+): LegacyTransactionError {
 	return {
 		code: "TRANSACTION_ERROR",
 		operation,
 		reason,
 		message: `Transaction ${operation} failed: ${reason}`,
 		timestamp: new Date().toISOString(),
-	};
+	}
 }
 
-/**
- * Create an UnknownError
- */
 export function createUnknownError(
 	message: string,
 	originalError?: unknown,
-): UnknownError {
-	const error: UnknownError = {
+): LegacyUnknownError {
+	const error: LegacyUnknownError = {
 		code: "UNKNOWN",
 		message,
 		timestamp: new Date().toISOString(),
-	};
+	}
 	if (originalError !== undefined) {
-		error.originalError = originalError;
+		error.originalError = originalError
 	}
-	return error;
+	return error
 }
 
-// ============================================================================
-// Result Type for Operations
-// ============================================================================
-
-/**
- * Result type that can be either success or error
- * This enables railway-oriented programming
- */
-export type Result<T, E = CrudError> =
-	| { success: true; data: T }
-	| { success: false; error: E };
-
-/**
- * Create a success result
- */
-export function ok<T>(data: T): Result<T, never> {
-	return { success: true, data };
-}
-
-/**
- * Create an error result
- */
-export function err<E>(error: E): Result<never, E> {
-	return { success: false, error };
-}
-
-/**
- * Type guard for success result
- */
-export function isOk<T, E>(
-	result: Result<T, E>,
-): result is { success: true; data: T } {
-	return result.success === true;
-}
-
-/**
- * Type guard for error result
- */
-export function isErr<T, E>(
-	result: Result<T, E>,
-): result is { success: false; error: E } {
-	return result.success === false;
-}
-
-/**
- * Map a result value
- */
-export function mapResult<T, U, E>(
-	result: Result<T, E>,
-	fn: (value: T) => U,
-): Result<U, E> {
-	if (isOk(result)) {
-		return ok(fn(result.data));
-	}
-	return result;
-}
-
-/**
- * Map a result error
- */
-export function mapError<T, E, F>(
-	result: Result<T, E>,
-	fn: (error: E) => F,
-): Result<T, F> {
-	if (isErr(result)) {
-		return err(fn(result.error));
-	}
-	return result;
-}
-
-/**
- * Chain results together
- */
-export async function chainResult<T, U, E>(
-	result: Result<T, E>,
-	fn: (value: T) => Promise<Result<U, E>>,
-): Promise<Result<U, E>> {
-	if (isOk(result)) {
-		return fn(result.data);
-	}
-	return result;
-}
-
-// ============================================================================
-// Error Handling Utilities
-// ============================================================================
-
-/**
- * Convert unknown errors to CrudError
- */
-export function toCrudError(error: unknown, context?: string): CrudError {
+export function toCrudError(error: unknown, context?: string): LegacyCrudError {
 	if (isCrudError(error)) {
-		return error;
+		return error
 	}
 
 	if (error instanceof Error) {
 		return createUnknownError(
 			context ? `${context}: ${error.message}` : error.message,
 			error,
-		);
+		)
 	}
 
 	return createUnknownError(
 		context ? `${context}: Unknown error occurred` : "Unknown error occurred",
 		error,
-	);
+	)
 }
 
-/**
- * Exhaustive error handler with type safety
- */
 export function handleCrudError<T>(
-	error: CrudError<T>,
+	error: LegacyCrudError<T>,
 	handlers: {
-		notFound: (error: NotFoundError<T>) => void;
-		duplicateKey: (error: DuplicateKeyError) => void;
-		foreignKey: (error: ForeignKeyError) => void;
-		validation: (error: ValidationError) => void;
-		uniqueConstraint: (error: UniqueConstraintError) => void;
-		operationNotAllowed: (error: OperationNotAllowedError) => void;
-		transaction: (error: TransactionError) => void;
-		unknown: (error: UnknownError) => void;
+		notFound: (error: LegacyNotFoundError<T>) => void
+		duplicateKey: (error: LegacyDuplicateKeyError) => void
+		foreignKey: (error: LegacyForeignKeyError) => void
+		validation: (error: LegacyValidationError) => void
+		uniqueConstraint: (error: LegacyUniqueConstraintError) => void
+		operationNotAllowed: (error: LegacyOperationNotAllowedError) => void
+		transaction: (error: LegacyTransactionError) => void
+		unknown: (error: LegacyUnknownError) => void
 	},
 ): void {
 	switch (error.code) {
 		case "NOT_FOUND":
-			return handlers.notFound(error);
+			return handlers.notFound(error)
 		case "DUPLICATE_KEY":
-			return handlers.duplicateKey(error);
+			return handlers.duplicateKey(error)
 		case "FOREIGN_KEY_VIOLATION":
-			return handlers.foreignKey(error);
+			return handlers.foreignKey(error)
 		case "VALIDATION_ERROR":
-			return handlers.validation(error);
+			return handlers.validation(error)
 		case "UNIQUE_CONSTRAINT":
-			return handlers.uniqueConstraint(error);
+			return handlers.uniqueConstraint(error)
 		case "OPERATION_NOT_ALLOWED":
-			return handlers.operationNotAllowed(error);
+			return handlers.operationNotAllowed(error)
 		case "TRANSACTION_ERROR":
-			return handlers.transaction(error);
+			return handlers.transaction(error)
 		case "UNKNOWN":
-			return handlers.unknown(error);
-		default:
-			// This ensures exhaustive checking at compile time
-			const _exhaustive: never = error;
-			throw new Error(`Unhandled error type: ${(error as CrudError).code}`);
+			return handlers.unknown(error)
+		default: {
+			const _exhaustive: never = error
+			throw new Error(`Unhandled error type: ${(error as LegacyCrudError).code}`)
+		}
 	}
 }

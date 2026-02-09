@@ -152,6 +152,7 @@ export {
 
 export type {
 	CrudError,
+	LegacyCrudError,
 	Result,
 } from "./errors/crud-errors.js";
 
