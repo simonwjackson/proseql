@@ -13,6 +13,7 @@ import { StorageError } from "../errors/storage-errors.js"
 
 const makeInMemoryAdapter = (
 	store: Map<string, string> = new Map(),
+	watchers: Map<string, Set<() => void>> = new Map(),
 ): StorageAdapterShape => ({
 	read: (path: string) =>
 		Effect.suspend(() => {
@@ -32,6 +33,13 @@ const makeInMemoryAdapter = (
 	write: (path: string, data: string) =>
 		Effect.sync(() => {
 			store.set(path, data)
+			// Notify watchers for this path
+			const pathWatchers = watchers.get(path)
+			if (pathWatchers) {
+				for (const cb of pathWatchers) {
+					cb()
+				}
+			}
 		}),
 
 	exists: (path: string) => Effect.sync(() => store.has(path)),
@@ -52,6 +60,19 @@ const makeInMemoryAdapter = (
 		}),
 
 	ensureDir: (_path: string) => Effect.void,
+
+	watch: (path: string, onChange: () => void) =>
+		Effect.sync(() => {
+			const pathWatchers = watchers.get(path) ?? new Set()
+			pathWatchers.add(onChange)
+			watchers.set(path, pathWatchers)
+			return () => {
+				pathWatchers.delete(onChange)
+				if (pathWatchers.size === 0) {
+					watchers.delete(path)
+				}
+			}
+		}),
 })
 
 // ============================================================================

@@ -11,6 +11,10 @@ export interface StorageAdapterShape {
 	readonly exists: (path: string) => Effect.Effect<boolean, StorageError>
 	readonly remove: (path: string) => Effect.Effect<void, StorageError>
 	readonly ensureDir: (path: string) => Effect.Effect<void, StorageError>
+	readonly watch: (
+		path: string,
+		onChange: () => void,
+	) => Effect.Effect</** stop watching */ () => void, StorageError>
 }
 
 export class StorageAdapter extends Context.Tag("StorageAdapter")<

@@ -3,7 +3,7 @@
  * Provides atomic writes (temp file + rename) and retry with exponential backoff.
  */
 
-import { promises as fs } from "fs"
+import { promises as fs, watch as fsWatch } from "fs"
 import { dirname } from "path"
 import { randomBytes } from "crypto"
 import { Effect, Layer, Schedule } from "effect"
@@ -137,6 +137,30 @@ const makeEnsureDir =
 // Layer construction
 // ============================================================================
 
+const makeWatch =
+	(_config: Required<NodeAdapterConfig>) =>
+	(
+		path: string,
+		onChange: () => void,
+	): Effect.Effect<() => void, StorageError> =>
+		Effect.try({
+			try: () => {
+				const watcher = fsWatch(
+					path,
+					{ persistent: false },
+					(eventType) => {
+						if (eventType === "change") {
+							onChange()
+						}
+					},
+				)
+				return () => {
+					watcher.close()
+				}
+			},
+			catch: (error) => toStorageError(path, "watch", error),
+		})
+
 const makeAdapter = (
 	config: Required<NodeAdapterConfig>,
 ): StorageAdapterShape => ({
@@ -145,6 +169,7 @@ const makeAdapter = (
 	exists: makeExists(config),
 	remove: makeRemove(config),
 	ensureDir: makeEnsureDir(config),
+	watch: makeWatch(config),
 })
 
 /**

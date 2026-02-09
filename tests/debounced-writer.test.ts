@@ -49,6 +49,8 @@ const makeCountingStorageLayer = () => {
 		exists: (path: string) => Effect.sync(() => store.has(path)),
 		remove: (path: string) => Effect.void,
 		ensureDir: (_path: string) => Effect.void,
+		watch: (_path: string, _onChange: () => void) =>
+			Effect.succeed(() => {}),
 	}
 
 	return {

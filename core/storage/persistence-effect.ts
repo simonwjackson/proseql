@@ -6,7 +6,7 @@
  * Includes DebouncedWriter for coalescing rapid mutations into single file writes.
  */
 
-import { Effect, Fiber, Option, Ref, Schema } from "effect"
+import { Effect, Fiber, Option, Queue, Ref, Runtime, Schema, Scope } from "effect"
 import { StorageAdapter } from "./storage-service.js"
 import { SerializerRegistry } from "../serializers/serializer-service.js"
 import {
@@ -433,3 +433,156 @@ export const createDebouncedWriter = (
 
 		return { triggerSave, flush, pendingCount } as const
 	})
+
+// ============================================================================
+// FileWatcher
+// ============================================================================
+
+/**
+ * Handle returned by `createFileWatcher`. Provides the ability to check
+ * whether the watcher is active. The watcher is automatically cleaned up
+ * when the enclosing Effect Scope closes.
+ */
+export interface FileWatcher {
+	/**
+	 * Returns true if the watcher is still active (has not been closed).
+	 */
+	readonly isActive: () => Effect.Effect<boolean>
+}
+
+/**
+ * Configuration for a single file watcher.
+ */
+export interface FileWatcherConfig<A extends { readonly id: string }, I, R> {
+	/** Path to the file to watch */
+	readonly filePath: string
+	/** Schema to decode loaded data through */
+	readonly schema: Schema.Schema<A, I, R>
+	/** Ref holding the collection state to update on file change */
+	readonly ref: Ref.Ref<ReadonlyMap<string, A>>
+	/** Optional debounce delay in ms for reload after change (default 50) */
+	readonly debounceMs?: number
+}
+
+/**
+ * Create a managed file watcher using Effect.acquireRelease.
+ *
+ * The watcher monitors a file for external changes. When a change is detected,
+ * it reloads the file through the Schema and updates the collection Ref.
+ *
+ * The watcher lifecycle is managed by Effect's Scope — it is automatically
+ * closed when the Scope finalizes (database shutdown, test cleanup, etc.).
+ *
+ * Reload is debounced to avoid redundant reloads when editors write
+ * multiple change events in quick succession.
+ *
+ * @param config - File watcher configuration
+ * @returns Effect that yields a FileWatcher handle (requires Scope)
+ */
+export const createFileWatcher = <
+	A extends { readonly id: string },
+	I,
+	R,
+>(
+	config: FileWatcherConfig<A, I, R>,
+): Effect.Effect<
+	FileWatcher,
+	StorageError,
+	Scope.Scope | StorageAdapter | SerializerRegistry | R
+> => {
+	const debounceMs = config.debounceMs ?? 50
+
+	return Effect.gen(function* () {
+		const storage = yield* StorageAdapter
+		const active = yield* Ref.make(true)
+
+		// Queue bridges the sync onChange callback to the Effect world.
+		// The callback pushes a signal; a background fiber consumes it.
+		const changeQueue = yield* Queue.unbounded<void>()
+
+		// Ref to hold the debounce timer fiber so it can be cancelled on new events
+		const pendingReload = yield* Ref.make<Fiber.RuntimeFiber<void, StorageError | SerializationError | UnsupportedFormatError | ValidationError> | null>(null)
+
+		// Background fiber: waits for change signals, debounces, then reloads.
+		const processorFiber = yield* Effect.fork(
+			Effect.forever(
+				Effect.gen(function* () {
+					// Block until a change signal arrives
+					yield* Queue.take(changeQueue)
+					// Drain any queued signals (batch rapid events)
+					yield* Queue.takeAll(changeQueue)
+
+					const isActive = yield* Ref.get(active)
+					if (!isActive) return
+
+					// Cancel any existing pending reload
+					const existing = yield* Ref.get(pendingReload)
+					if (existing !== null) {
+						yield* Fiber.interrupt(existing)
+					}
+
+					// Fork a debounced reload
+					const fiber = yield* Effect.fork(
+						Effect.gen(function* () {
+							yield* Effect.sleep(debounceMs)
+							const newData = yield* loadData(config.filePath, config.schema)
+							yield* Ref.set(config.ref, newData)
+						}),
+					)
+
+					yield* Ref.set(pendingReload, fiber)
+				}),
+			),
+		)
+
+		// Acquire the watcher via StorageAdapter.watch, release by calling the
+		// returned stop function. acquireRelease ties the lifetime to the Scope.
+		yield* Effect.acquireRelease(
+			storage.watch(config.filePath, () => {
+				// Push a change signal into the queue (sync-safe)
+				Queue.unsafeOffer(changeQueue, undefined)
+			}),
+			(stopWatching) =>
+				Effect.gen(function* () {
+					yield* Ref.set(active, false)
+					// Stop the processor fiber
+					yield* Fiber.interrupt(processorFiber)
+					// Cancel any pending reload
+					const pending = yield* Ref.get(pendingReload)
+					if (pending !== null) {
+						yield* Fiber.interrupt(pending)
+					}
+					stopWatching()
+				}),
+		)
+
+		return {
+			isActive: () => Ref.get(active),
+		} satisfies FileWatcher
+	})
+}
+
+/**
+ * Create managed file watchers for multiple files at once.
+ *
+ * Convenience wrapper that creates a watcher for each config entry.
+ * All watchers share the enclosing Scope and are cleaned up together.
+ *
+ * @param configs - Array of file watcher configurations
+ * @returns Effect yielding an array of FileWatcher handles
+ */
+export const createFileWatchers = <
+	A extends { readonly id: string },
+	I,
+	R,
+>(
+	configs: ReadonlyArray<FileWatcherConfig<A, I, R>>,
+): Effect.Effect<
+	ReadonlyArray<FileWatcher>,
+	StorageError,
+	Scope.Scope | StorageAdapter | SerializerRegistry | R
+> =>
+	Effect.all(
+		configs.map((cfg) => createFileWatcher(cfg)),
+		{ concurrency: "unbounded" },
+	)
