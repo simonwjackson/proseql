@@ -57,7 +57,7 @@
 - [x] 8.2 Migrate `core/operations/crud/update.ts`: update and updateMany return Effect. Preserve all update operators ($increment, $decrement, $multiply, $append, $prepend, $remove, $toggle, $set)
 - [x] 8.3 Migrate `core/operations/crud/delete.ts`: delete and deleteMany return Effect. Preserve soft delete, foreign key constraint checking, cascade handling
 - [x] 8.4 Migrate `core/operations/crud/upsert.ts`: upsert and upsertMany return Effect
-- [ ] 8.5 Migrate `core/operations/crud/create-with-relationships.ts`: createWithRelationships returns Effect
+- [x] 8.5 Migrate `core/operations/crud/create-with-relationships.ts`: createWithRelationships returns Effect
 - [ ] 8.6 Migrate `core/operations/crud/update-with-relationships.ts`: updateWithRelationships returns Effect
 - [ ] 8.7 Migrate `core/operations/crud/delete-with-relationships.ts`: deleteWithRelationships and deleteManyWithRelationships return Effect
 - [ ] 8.8 Migrate `core/validators/foreign-key.ts` to return Effect values for validation checks

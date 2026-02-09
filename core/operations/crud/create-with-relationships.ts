@@ -1,309 +1,385 @@
 /**
- * Create operations with relationship support
- * Implements Phase 2 create with relationships features
+ * Effect-based create operations with relationship support.
+ *
+ * Uses Ref<ReadonlyMap> for atomic state mutation, Effect Schema for validation,
+ * and typed errors. Supports $connect, $create, and $connectOrCreate operations
+ * for both ref (single) and inverse (many) relationship types.
  */
 
-import type { z } from "zod";
-import type { MinimalEntity, CreateInput } from "../../types/crud-types.js";
-import type { LegacyCrudError as CrudError } from "../../errors/legacy.js";
-import { isErr } from "../../errors/legacy.js";
-import type { RelationshipDef } from "../../types/types.js";
+import { Effect, Ref, Schema } from "effect"
+import type { CreateInput } from "../../types/crud-types.js"
+import type { RelationshipDef } from "../../types/types.js"
 import type {
 	CreateWithRelationshipsInput,
 	ConnectInput,
-	ConnectOrCreateInput,
 	SingleRelationshipInput,
 	ManyRelationshipInput,
-} from "../../types/crud-relationship-types.js";
-import { isRelationshipOperation } from "../../types/crud-relationship-types.js";
+} from "../../types/crud-relationship-types.js"
+import { isRelationshipOperation } from "../../types/crud-relationship-types.js"
 import {
-	createValidationError,
-	createForeignKeyError,
-	createUnknownError,
-	ok,
-	err,
-	type Result,
-} from "../../errors/legacy.js";
-import { generateId } from "../../utils/id-generator.js";
-import { validateForeignKeys } from "../../validators/foreign-key.js";
+	ForeignKeyError,
+	ValidationError,
+	OperationError,
+} from "../../errors/crud-errors.js"
+import { validateEntity } from "../../validators/schema-validator.js"
+import { generateId } from "../../utils/id-generator.js"
+import { extractForeignKeyConfigs } from "../../validators/foreign-key.js"
 
 // ============================================================================
-// Helper Types
+// Types
 // ============================================================================
 
-type DatabaseConfig = Record<
-	string,
-	{
-		schema: z.ZodType<unknown>;
-		relationships: Record<
-			string,
-			RelationshipDef<unknown, "ref" | "inverse", string>
-		>;
-	}
->;
+type HasId = { readonly id: string }
+
+type RelationshipConfig = {
+	readonly type: "ref" | "inverse"
+	readonly target?: string
+	readonly __targetCollection?: string
+	readonly foreignKey?: string
+}
+
+type CollectionConfig = {
+	readonly schema: Schema.Schema<HasId, unknown>
+	readonly relationships: Record<string, RelationshipConfig>
+}
+
+type DatabaseConfig = Record<string, CollectionConfig>
 
 type ProcessedRelationships = {
-	connect: Array<{ field: string; targetId: string; targetCollection: string }>;
-	create: Array<{ field: string; data: unknown; targetCollection: string }>;
-	connectOrCreate: Array<{
-		field: string;
-		where: ConnectInput<unknown>;
-		create: CreateInput<unknown>;
-		targetCollection: string;
-	}>;
-};
+	readonly connect: ReadonlyArray<{ readonly field: string; readonly targetId: string; readonly targetCollection: string }>
+	readonly create: ReadonlyArray<{ readonly field: string; readonly data: unknown; readonly targetCollection: string }>
+	readonly connectOrCreate: ReadonlyArray<{
+		readonly field: string
+		readonly where: ConnectInput<unknown>
+		readonly create: CreateInput<unknown>
+		readonly targetCollection: string
+	}>
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+const getTargetCollection = (rel: RelationshipConfig): string | undefined =>
+	rel.target || rel.__targetCollection
+
+/**
+ * Resolve a connect input to a target entity's ID by looking up the Ref state.
+ */
+const resolveConnectInput = (
+	input: ConnectInput<unknown>,
+	targetCollection: string,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+): Effect.Effect<string, ForeignKeyError> =>
+	Effect.gen(function* () {
+		const targetRef = stateRefs[targetCollection]
+		if (targetRef === undefined) {
+			return yield* Effect.fail(
+				new ForeignKeyError({
+					collection: targetCollection,
+					field: "",
+					value: "",
+					targetCollection,
+					message: `Target collection '${targetCollection}' not found`,
+				}),
+			)
+		}
+
+		const targetMap = yield* Ref.get(targetRef)
+
+		// If input has id, use it directly
+		if ("id" in input && typeof (input as Record<string, unknown>).id === "string") {
+			const id = (input as { readonly id: string }).id
+			if (targetMap.has(id)) {
+				return id
+			}
+			return yield* Effect.fail(
+				new ForeignKeyError({
+					collection: targetCollection,
+					field: "id",
+					value: id,
+					targetCollection,
+					message: `Entity with ID '${id}' not found in '${targetCollection}'`,
+				}),
+			)
+		}
+
+		// Otherwise, find by matching fields
+		const inputEntries = Object.entries(input as Record<string, unknown>)
+		for (const [id, entity] of targetMap) {
+			const entityRecord = entity as Record<string, unknown>
+			const matches = inputEntries.every(([key, value]) => entityRecord[key] === value)
+			if (matches) {
+				return id
+			}
+		}
+
+		return yield* Effect.fail(
+			new ForeignKeyError({
+				collection: targetCollection,
+				field: "",
+				value: JSON.stringify(input),
+				targetCollection,
+				message: `No matching entity found in '${targetCollection}'`,
+			}),
+		)
+	})
+
+/**
+ * Find the inverse relationship field name in the target collection
+ * that points back to the source collection.
+ */
+const findInverseRelationship = (
+	sourceCollection: string,
+	targetRelationships: Record<string, RelationshipConfig>,
+): string | null => {
+	for (const [field, rel] of Object.entries(targetRelationships)) {
+		const target = getTargetCollection(rel)
+		if (target === sourceCollection) {
+			return field
+		}
+	}
+	return null
+}
 
 // ============================================================================
 // Relationship Processing
 // ============================================================================
 
 /**
- * Process relationship operations from input
+ * Process a single (ref) relationship input into connect/create/connectOrCreate ops.
  */
-async function processRelationshipOperations<T extends MinimalEntity>(
-	input: CreateWithRelationshipsInput<T, Record<string, RelationshipDef>>,
-	relationships: Record<
-		string,
-		RelationshipDef<unknown, "ref" | "inverse", string>
-	>,
-	allData: Record<string, unknown[]>,
-	config: DatabaseConfig,
-): Promise<Result<ProcessedRelationships, CrudError<T>>> {
-	const processed: ProcessedRelationships = {
-		connect: [],
-		create: [],
-		connectOrCreate: [],
-	};
-
-	for (const [field, value] of Object.entries(input)) {
-		const relationship = relationships[field];
-		if (!relationship || !value) continue;
-
-		const targetCollection =
-			relationship.target || relationship.__targetCollection;
-		if (!targetCollection) continue;
-
-		try {
-			if (relationship.type === "ref") {
-				// Process single relationship
-				const result = await processSingleRelationship(
-					field,
-					value as SingleRelationshipInput<unknown> | ConnectInput<unknown>,
-					targetCollection,
-					allData,
-					config,
-				);
-				if (isErr(result)) return err(result.error as CrudError<T>);
-				if (result.data) {
-					mergeProcessedRelationships(processed, result.data);
-				}
-			} else {
-				// Process many relationship
-				const result = await processManyRelationship(
-					field,
-					value as ManyRelationshipInput<unknown>,
-					targetCollection,
-					allData,
-					config,
-				);
-				if (isErr(result)) return err(result.error as CrudError<T>);
-				if (result.data) {
-					mergeProcessedRelationships(processed, result.data);
-				}
-			}
-		} catch (error) {
-			return err(
-				createUnknownError(`Failed to process relationship ${field}`, error),
-			);
-		}
-	}
-
-	return ok(processed);
-}
-
-/**
- * Process single (ref) relationship operations
- */
-async function processSingleRelationship(
+const processSingleRelationship = (
 	field: string,
 	value: SingleRelationshipInput<unknown> | ConnectInput<unknown>,
 	targetCollection: string,
-	allData: Record<string, unknown[]>,
-	config: DatabaseConfig,
-): Promise<Result<ProcessedRelationships, CrudError<unknown>>> {
-	const processed: ProcessedRelationships = {
-		connect: [],
-		create: [],
-		connectOrCreate: [],
-	};
+): ProcessedRelationships => {
+	const connect: Array<{ field: string; targetId: string; targetCollection: string }> = []
+	const create: Array<{ field: string; data: unknown; targetCollection: string }> = []
+	const connectOrCreate: Array<{
+		field: string
+		where: ConnectInput<unknown>
+		create: CreateInput<unknown>
+		targetCollection: string
+	}> = []
 
-	// Check if it's a direct connect (shorthand syntax)
+	// Direct connect (shorthand syntax — not a relationship operation object)
 	if (!isRelationshipOperation(value)) {
-		const targetId = await resolveConnectInput(
-			value as ConnectInput<unknown>,
-			targetCollection,
-			allData,
-		);
-		if (!targetId) {
-			return err(createForeignKeyError(field, "", targetCollection));
-		}
-		processed.connect.push({ field, targetId, targetCollection });
-		return ok(processed);
+		connect.push({ field, targetId: "__pending__", targetCollection })
+		return { connect, create, connectOrCreate }
 	}
 
-	const ops = value as SingleRelationshipInput<unknown>;
+	const ops = value as SingleRelationshipInput<unknown>
 
-	// Process $connect
 	if (ops.$connect) {
-		const targetId = await resolveConnectInput(
-			ops.$connect,
-			targetCollection,
-			allData,
-		);
-		if (!targetId) {
-			return err(createForeignKeyError(field, "", targetCollection));
-		}
-		processed.connect.push({ field, targetId, targetCollection });
+		connect.push({ field, targetId: "__pending__", targetCollection })
 	}
-
-	// Process $create
 	if (ops.$create) {
-		processed.create.push({ field, data: ops.$create, targetCollection });
+		create.push({ field, data: ops.$create, targetCollection })
 	}
-
-	// Process $connectOrCreate
 	if (ops.$connectOrCreate) {
-		processed.connectOrCreate.push({
+		connectOrCreate.push({
 			field,
 			where: ops.$connectOrCreate.where,
 			create: ops.$connectOrCreate.create,
 			targetCollection,
-		});
+		})
 	}
 
-	return ok(processed);
+	return { connect, create, connectOrCreate }
 }
 
 /**
- * Process many (inverse) relationship operations
+ * Process a many (inverse) relationship input into connect/create/connectOrCreate ops.
  */
-async function processManyRelationship(
+const processManyRelationship = (
 	field: string,
 	value: ManyRelationshipInput<unknown>,
 	targetCollection: string,
-	allData: Record<string, unknown[]>,
-	config: DatabaseConfig,
-): Promise<Result<ProcessedRelationships, CrudError<unknown>>> {
-	const processed: ProcessedRelationships = {
-		connect: [],
-		create: [],
-		connectOrCreate: [],
-	};
+): ProcessedRelationships => {
+	const connect: Array<{ field: string; targetId: string; targetCollection: string }> = []
+	const create: Array<{ field: string; data: unknown; targetCollection: string }> = []
+	const connectOrCreate: Array<{
+		field: string
+		where: ConnectInput<unknown>
+		create: CreateInput<unknown>
+		targetCollection: string
+	}> = []
 
-	// Process $connect
 	if (value.$connect) {
-		const connects = Array.isArray(value.$connect)
-			? value.$connect
-			: [value.$connect];
-		for (const connect of connects) {
-			const targetId = await resolveConnectInput(
-				connect,
-				targetCollection,
-				allData,
-			);
-			if (!targetId) {
-				return err(createForeignKeyError(field, "", targetCollection));
-			}
-			processed.connect.push({ field, targetId, targetCollection });
+		const connects = Array.isArray(value.$connect) ? value.$connect : [value.$connect]
+		for (const _ of connects) {
+			connect.push({ field, targetId: "__pending__", targetCollection })
 		}
 	}
 
-	// Process $create
 	if (value.$create) {
-		const creates = Array.isArray(value.$create)
-			? value.$create
-			: [value.$create];
-		for (const create of creates) {
-			processed.create.push({ field, data: create, targetCollection });
+		const creates = Array.isArray(value.$create) ? value.$create : [value.$create]
+		for (const c of creates) {
+			create.push({ field, data: c, targetCollection })
 		}
 	}
 
-	// Process $createMany
 	if (value.$createMany) {
-		for (const create of value.$createMany) {
-			processed.create.push({ field, data: create, targetCollection });
+		for (const c of value.$createMany) {
+			create.push({ field, data: c, targetCollection })
 		}
 	}
 
-	// Process $connectOrCreate
 	if (value.$connectOrCreate) {
-		const items = Array.isArray(value.$connectOrCreate)
-			? value.$connectOrCreate
-			: [value.$connectOrCreate];
+		const items = Array.isArray(value.$connectOrCreate) ? value.$connectOrCreate : [value.$connectOrCreate]
 		for (const item of items) {
-			processed.connectOrCreate.push({
+			connectOrCreate.push({
 				field,
 				where: item.where,
 				create: item.create,
 				targetCollection,
-			});
+			})
 		}
 	}
 
-	return ok(processed);
+	return { connect, create, connectOrCreate }
 }
 
 /**
- * Resolve connect input to target ID
+ * Extract the original connect inputs from the raw input for later resolution.
  */
-async function resolveConnectInput(
-	input: ConnectInput<unknown>,
-	targetCollection: string,
-	allData: Record<string, unknown[]>,
-): Promise<string | null> {
-	const targetData = allData[targetCollection];
-	if (!Array.isArray(targetData)) return null;
+const extractConnectInputs = (
+	input: Record<string, unknown>,
+	relationships: Record<string, RelationshipConfig>,
+): Record<string, ReadonlyArray<ConnectInput<unknown>>> => {
+	const result: Record<string, Array<ConnectInput<unknown>>> = {}
 
-	// If input has id, use it directly
-	if ("id" in input && typeof input.id === "string") {
-		const exists = targetData.some(
-			(item: unknown) =>
-				typeof item === "object" &&
-				item !== null &&
-				"id" in item &&
-				item.id === input.id,
-		);
-		return exists ? input.id : null;
+	for (const [field, value] of Object.entries(input)) {
+		const rel = relationships[field]
+		if (!rel || value === undefined || value === null) continue
+
+		if (rel.type === "ref") {
+			if (!isRelationshipOperation(value)) {
+				result[field] = [value as ConnectInput<unknown>]
+			} else {
+				const ops = value as SingleRelationshipInput<unknown>
+				if (ops.$connect) {
+					result[field] = [ops.$connect]
+				}
+			}
+		} else {
+			const ops = value as ManyRelationshipInput<unknown>
+			if (ops.$connect) {
+				const connects = Array.isArray(ops.$connect) ? ops.$connect : [ops.$connect]
+				result[field] = connects
+			}
+		}
 	}
 
-	// Otherwise, find by unique fields
-	const found = targetData.find((item: unknown) => {
-		if (typeof item !== "object" || item === null) return false;
-
-		return Object.entries(input).every(([key, value]) => {
-			return (item as Record<string, unknown>)[key] === value;
-		});
-	});
-
-	return found &&
-		typeof found === "object" &&
-		found !== null &&
-		"id" in found &&
-		typeof found.id === "string"
-		? found.id
-		: null;
+	return result
 }
 
 /**
- * Merge processed relationships
+ * Process all relationship operations from the input.
  */
-function mergeProcessedRelationships(
-	target: ProcessedRelationships,
-	source: ProcessedRelationships,
-): void {
-	target.connect.push(...source.connect);
-	target.create.push(...source.create);
-	target.connectOrCreate.push(...source.connectOrCreate);
+const processRelationshipOperations = (
+	input: Record<string, unknown>,
+	relationships: Record<string, RelationshipConfig>,
+): ProcessedRelationships => {
+	const allConnect: Array<{ field: string; targetId: string; targetCollection: string }> = []
+	const allCreate: Array<{ field: string; data: unknown; targetCollection: string }> = []
+	const allConnectOrCreate: Array<{
+		field: string
+		where: ConnectInput<unknown>
+		create: CreateInput<unknown>
+		targetCollection: string
+	}> = []
+
+	for (const [field, value] of Object.entries(input)) {
+		const rel = relationships[field]
+		if (!rel || value === undefined || value === null) continue
+
+		const targetCollection = getTargetCollection(rel)
+		if (!targetCollection) continue
+
+		let processed: ProcessedRelationships
+
+		if (rel.type === "ref") {
+			processed = processSingleRelationship(
+				field,
+				value as SingleRelationshipInput<unknown> | ConnectInput<unknown>,
+				targetCollection,
+			)
+		} else {
+			processed = processManyRelationship(
+				field,
+				value as ManyRelationshipInput<unknown>,
+				targetCollection,
+			)
+		}
+
+		allConnect.push(...processed.connect)
+		allCreate.push(...processed.create)
+		allConnectOrCreate.push(...processed.connectOrCreate)
+	}
+
+	return {
+		connect: allConnect,
+		create: allCreate,
+		connectOrCreate: allConnectOrCreate,
+	}
+}
+
+// ============================================================================
+// Validate foreign keys using Ref-based state
+// ============================================================================
+
+const validateForeignKeysEffect = <T extends HasId>(
+	entity: T,
+	collectionName: string,
+	relationships: Record<string, RelationshipConfig>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+): Effect.Effect<void, ForeignKeyError> => {
+	const configs = extractForeignKeyConfigs(
+		relationships as Record<string, { type: "ref" | "inverse"; foreignKey?: string; target?: string }>,
+	)
+
+	if (configs.length === 0) {
+		return Effect.void
+	}
+
+	return Effect.forEach(configs, (config) => {
+		const value = (entity as Record<string, unknown>)[config.foreignKey]
+		if (value === undefined || value === null) {
+			return Effect.void
+		}
+
+		const targetRef = stateRefs[config.targetCollection]
+		if (targetRef === undefined) {
+			return Effect.fail(
+				new ForeignKeyError({
+					collection: collectionName,
+					field: config.foreignKey,
+					value: String(value),
+					targetCollection: config.targetCollection,
+					message: `Foreign key constraint violated: '${config.foreignKey}' references non-existent collection '${config.targetCollection}'`,
+				}),
+			)
+		}
+
+		return Ref.get(targetRef).pipe(
+			Effect.flatMap((targetMap) => {
+				if (targetMap.has(String(value))) {
+					return Effect.void
+				}
+				return Effect.fail(
+					new ForeignKeyError({
+						collection: collectionName,
+						field: config.foreignKey,
+						value: String(value),
+						targetCollection: config.targetCollection,
+						message: `Foreign key constraint violated: '${config.foreignKey}' references non-existent ${config.targetCollection} '${value}'`,
+					}),
+				)
+			}),
+		)
+	}, { discard: true })
 }
 
 // ============================================================================
@@ -311,316 +387,288 @@ function mergeProcessedRelationships(
 // ============================================================================
 
 /**
- * Create a single entity with relationship support
+ * Create a single entity with relationship support.
+ *
+ * Steps:
+ * 1. Parse relationship operations from input
+ * 2. Generate parent ID early for use in inverse relationships
+ * 3. Process $create: create nested entities in target collections
+ * 4. Process $connectOrCreate: find or create target entities
+ * 5. Process $connect: resolve target entity IDs
+ * 6. Set foreign keys from resolved relationships
+ * 7. Validate and create the parent entity
+ * 8. Update inverse relationship foreign keys on connected entities
  */
-export function createCreateWithRelationshipsMethod<
-	T extends MinimalEntity,
-	TRelations extends Record<
-		string,
-		RelationshipDef<unknown, "ref" | "inverse", string>
-	>,
->(
+export const createWithRelationships = <T extends HasId, I = T>(
 	collectionName: string,
-	schema: z.ZodType<T>,
-	relationships: TRelations,
-	getData: () => T[],
-	setData: (data: T[]) => void,
-	allData: Record<string, unknown[]>,
-	config: DatabaseConfig,
-): (
-	input: CreateWithRelationshipsInput<T, TRelations>,
-) => Promise<Result<T, CrudError<T>>> {
-	return async (
-		input: CreateWithRelationshipsInput<T, TRelations>,
-	): Promise<Result<T, CrudError<T>>> => {
-		try {
-			// Process relationship operations
-			const relationshipOps = await processRelationshipOperations(
-				input,
-				relationships,
-				allData,
-				config,
-			);
-			if (isErr(relationshipOps)) return err(relationshipOps.error);
+	schema: Schema.Schema<T, I>,
+	relationships: Record<string, RelationshipConfig>,
+	ref: Ref.Ref<ReadonlyMap<string, T>>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+	dbConfig: DatabaseConfig,
+) =>
+(
+	input: CreateWithRelationshipsInput<T, Record<string, RelationshipDef>>,
+): Effect.Effect<T, ValidationError | ForeignKeyError | OperationError> =>
+	Effect.gen(function* () {
+		// 1. Process relationship operations
+		const relationshipOps = processRelationshipOperations(
+			input as Record<string, unknown>,
+			relationships,
+		)
 
-			// Extract base entity data (without relationship operations)
-			const baseInput: Record<string, unknown> = {};
-			for (const [key, value] of Object.entries(input)) {
-				if (!(key in relationships)) {
-					baseInput[key] = value;
-				}
+		// Extract connect inputs for later resolution
+		const connectInputMap = extractConnectInputs(
+			input as Record<string, unknown>,
+			relationships,
+		)
+		// Make a mutable copy for tracking which have been consumed
+		const pendingConnects: Record<string, Array<ConnectInput<unknown>>> = {}
+		for (const [k, v] of Object.entries(connectInputMap)) {
+			pendingConnects[k] = [...v]
+		}
+
+		// 2. Extract base entity data (non-relationship fields)
+		const baseInput: Record<string, unknown> = {}
+		for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+			if (!(key in relationships)) {
+				baseInput[key] = value
 			}
+		}
 
-			// Generate parent ID early so we can use it for inverse relationships
-			const parentId = (baseInput.id as string) || generateId();
+		// Generate parent ID early
+		const parentId = (baseInput.id as string | undefined) || generateId()
+		const now = new Date().toISOString()
 
-			// Handle nested creates first
-			const nestedCreates: Array<{
-				field: string;
-				collection: string;
-				data: unknown;
-			}> = [];
-			for (const create of relationshipOps.data.create) {
-				nestedCreates.push({
-					field: create.field,
-					collection: create.targetCollection,
-					data: create.data,
-				});
+		// 3. Process $create: create nested entities
+		for (const nestedCreate of relationshipOps.create) {
+			const targetConfig = dbConfig[nestedCreate.targetCollection]
+			if (!targetConfig) continue
+
+			const targetRef = stateRefs[nestedCreate.targetCollection]
+			if (!targetRef) continue
+
+			const id = generateId()
+			const relationship = relationships[nestedCreate.field]
+
+			let entityData = nestedCreate.data as Record<string, unknown>
+			if (typeof entityData !== "object" || entityData === null) {
+				entityData = {}
 			}
+			entityData = { ...entityData }
 
-			// Create nested entities
-			const createdIds: Record<string, { field: string; id: string }[]> = {};
-			for (const nested of nestedCreates) {
-				const targetConfig = config[nested.collection];
-				if (!targetConfig) continue;
-
-				const targetData = allData[nested.collection] || [];
-				const id = generateId();
-				const now = new Date().toISOString();
-
-				// Handle foreign key based on relationship type
-				const relationship = relationships[nested.field];
-				let entityData = nested.data as Record<string, unknown>;
-				if (typeof entityData !== "object" || entityData === null) {
-					entityData = {};
-				}
-				entityData = { ...entityData };
-
-				if (relationship && relationship.type === "inverse") {
-					// For inverse relationships, set foreign key on the nested entity
-					const targetConfig = config[nested.collection];
-					if (targetConfig) {
-						const inverseField = findInverseRelationship(
-							collectionName,
-							nested.field,
-							targetConfig.relationships,
-						);
-						if (inverseField) {
-							const inverseRel = targetConfig.relationships[inverseField];
-							const foreignKey = inverseRel.foreignKey || `${inverseField}Id`;
-							// Set the foreign key to the parent's ID
-							entityData[foreignKey] = parentId;
-						}
+			// For inverse relationships, set the foreign key on the nested entity
+			if (relationship && relationship.type === "inverse") {
+				const targetRels = targetConfig.relationships
+				const inverseField = findInverseRelationship(collectionName, targetRels)
+				if (inverseField) {
+					const inverseRel = targetRels[inverseField]
+					if (inverseRel) {
+						const foreignKey = inverseRel.foreignKey || `${inverseField}Id`
+						entityData[foreignKey] = parentId
 					}
 				}
-
-				const entity = {
-					...entityData,
-					id,
-					createdAt: now,
-					updatedAt: now,
-				};
-
-				// Validate nested entity
-				const parseResult = targetConfig.schema.safeParse(entity);
-				if (!parseResult.success) {
-					return err(
-						createValidationError([
-							{
-								field: `${nested.collection}`,
-								message: parseResult.error.errors[0].message,
-							},
-						]),
-					);
-				}
-
-				// Add to collection
-				allData[nested.collection] = [...targetData, parseResult.data];
-
-				if (!createdIds[nested.collection]) {
-					createdIds[nested.collection] = [];
-				}
-				createdIds[nested.collection].push({ field: nested.field, id });
-
-				// If this is a ref relationship, set the foreign key on parent
-				if (relationship && relationship.type === "ref") {
-					const foreignKey = relationship.foreignKey || `${nested.field}Id`;
-					baseInput[foreignKey] = id;
-				}
 			}
 
-			// Handle connectOrCreate operations
-			for (const op of relationshipOps.data.connectOrCreate) {
-				const existingId = await resolveConnectInput(
-					op.where,
-					op.targetCollection,
-					allData,
-				);
-
-				if (!existingId) {
-					// Create new entity
-					const targetConfig = config[op.targetCollection];
-					if (!targetConfig) continue;
-
-					const targetData = allData[op.targetCollection] || [];
-					const id = generateId();
-					const now = new Date().toISOString();
-
-					const createData = op.create as Record<string, unknown>;
-					const entity = {
-						...createData,
-						id,
-						createdAt: now,
-						updatedAt: now,
-					};
-
-					// Validate entity
-					const parseResult = targetConfig.schema.safeParse(entity);
-					if (!parseResult.success) {
-						return err(
-							createValidationError([
-								{
-									field: op.field,
-									message: parseResult.error.errors[0].message,
-								},
-							]),
-						);
-					}
-
-					// Add to collection
-					allData[op.targetCollection] = [...targetData, parseResult.data];
-					relationshipOps.data.connect.push({
-						field: op.field,
-						targetId: id,
-						targetCollection: op.targetCollection,
-					});
-				} else {
-					// Use existing entity
-					relationshipOps.data.connect.push({
-						field: op.field,
-						targetId: existingId,
-						targetCollection: op.targetCollection,
-					});
-				}
-			}
-
-			// Set foreign keys from connect operations
-			for (const connect of relationshipOps.data.connect) {
-				const relationship = relationships[connect.field];
-				if (relationship && relationship.type === "ref") {
-					const foreignKey = relationship.foreignKey || `${connect.field}Id`;
-					baseInput[foreignKey] = connect.targetId;
-				}
-			}
-
-			// Use the parent ID we generated earlier
-			const id = parentId;
-			const now = new Date().toISOString();
-
-			// Construct complete entity
 			const entity = {
-				...baseInput,
+				...entityData,
 				id,
 				createdAt: now,
 				updatedAt: now,
-			} as unknown as T;
-
-			// Validate with Zod schema
-			const parseResult = schema.safeParse(entity);
-			if (!parseResult.success) {
-				const errors = parseResult.error.errors.map((e) => ({
-					field: e.path.join("."),
-					message: e.message,
-					value: (entity as Record<string, unknown>)[e.path[0]],
-				}));
-				return err(createValidationError(errors));
 			}
 
-			// Check for duplicate ID
-			const existingData = getData();
-			if (existingData.some((item) => item.id === id)) {
-				return err(
-					createValidationError([
-						{
-							field: "id",
-							message: `Entity with ID ${id} already exists`,
-							value: id,
-						},
-					]),
-				);
+			// Validate nested entity
+			const validated = yield* validateEntity(targetConfig.schema, entity).pipe(
+				Effect.mapError((ve) => new ValidationError({
+					message: `Nested create in '${nestedCreate.targetCollection}' failed: ${ve.message}`,
+					issues: ve.issues,
+				})),
+			)
+
+			// Add to target collection Ref
+			yield* Ref.update(targetRef, (map) => {
+				const next = new Map(map)
+				next.set(id, validated)
+				return next
+			})
+
+			// For ref relationships, set the foreign key on the parent
+			if (relationship && relationship.type === "ref") {
+				const foreignKey = relationship.foreignKey || `${nestedCreate.field}Id`
+				baseInput[foreignKey] = id
+			}
+		}
+
+		// 4. Process $connectOrCreate operations
+		for (const op of relationshipOps.connectOrCreate) {
+			const targetRef = stateRefs[op.targetCollection]
+			if (!targetRef) continue
+
+			const targetConfig = dbConfig[op.targetCollection]
+
+			// Try to resolve existing entity
+			const existingResult = yield* resolveConnectInput(
+				op.where,
+				op.targetCollection,
+				stateRefs,
+			).pipe(
+				Effect.map((id) => ({ found: true as const, id })),
+				Effect.catchTag("ForeignKeyError", () =>
+					Effect.succeed({ found: false as const, id: "" }),
+				),
+			)
+
+			let resolvedId: string
+
+			if (existingResult.found) {
+				resolvedId = existingResult.id
+			} else {
+				// Create new entity
+				if (!targetConfig) continue
+
+				const id = generateId()
+				const createData = op.create as Record<string, unknown>
+				const entity = {
+					...createData,
+					id,
+					createdAt: now,
+					updatedAt: now,
+				}
+
+				const validated = yield* validateEntity(targetConfig.schema, entity).pipe(
+					Effect.mapError((ve) => new ValidationError({
+						message: `ConnectOrCreate in '${op.targetCollection}' failed: ${ve.message}`,
+						issues: ve.issues,
+					})),
+				)
+
+				yield* Ref.update(targetRef, (map) => {
+					const next = new Map(map)
+					next.set(id, validated)
+					return next
+				})
+
+				resolvedId = id
 			}
 
-			// Validate foreign keys
-			const fkValidation = await validateForeignKeys(
-				parseResult.data,
-				relationships,
-				allData,
-			);
-			if (!fkValidation.valid) {
-				return err(createValidationError(fkValidation.errors));
+			// Set the foreign key on the parent for ref relationships
+			const relationship = relationships[op.field]
+			if (relationship && relationship.type === "ref") {
+				const foreignKey = relationship.foreignKey || `${op.field}Id`
+				baseInput[foreignKey] = resolvedId
 			}
+		}
 
-			// Add to collection
-			setData([...existingData, parseResult.data]);
+		// 5. Process $connect operations — resolve target IDs
+		const resolvedConnects: Array<{ field: string; targetId: string; targetCollection: string }> = []
 
-			// Update inverse relationships
-			for (const connect of relationshipOps.data.connect) {
-				const relationship = relationships[connect.field];
-				if (relationship && relationship.type === "inverse") {
-					// Find the inverse relationship in the target collection
-					const targetConfig = config[connect.targetCollection];
-					if (!targetConfig) continue;
+		// Deduplicate connect ops by field — each field's pending inputs are consumed once
+		const seenFields = new Set<string>()
+		for (const conn of relationshipOps.connect) {
+			if (seenFields.has(conn.field)) continue
+			seenFields.add(conn.field)
 
-					const inverseField = findInverseRelationship(
-						collectionName,
-						connect.field,
-						targetConfig.relationships,
-					);
+			const fieldInputs = pendingConnects[conn.field]
+			if (!fieldInputs || fieldInputs.length === 0) continue
 
-					if (inverseField) {
-						// Update the target entity's foreign key
-						const targetData = allData[connect.targetCollection] as unknown[];
-						const updatedTargetData = targetData.map((item: unknown) => {
-							if (
-								typeof item === "object" &&
-								item !== null &&
-								"id" in item &&
-								item.id === connect.targetId
-							) {
-								const foreignKey =
-									targetConfig.relationships[inverseField].foreignKey ||
-									`${inverseField}Id`;
-								return {
-									...item,
-									[foreignKey]: id,
-									updatedAt: now,
-								};
-							}
-							return item;
-						});
-						allData[connect.targetCollection] = updatedTargetData;
-					}
+			for (const connectInput of fieldInputs) {
+				const targetId = yield* resolveConnectInput(
+					connectInput,
+					conn.targetCollection,
+					stateRefs,
+				)
+				resolvedConnects.push({ field: conn.field, targetId, targetCollection: conn.targetCollection })
+			}
+		}
+
+		// 6. Set foreign keys from connect operations (ref relationships)
+		for (const connect of resolvedConnects) {
+			const relationship = relationships[connect.field]
+			if (relationship && relationship.type === "ref") {
+				const foreignKey = relationship.foreignKey || `${connect.field}Id`
+				baseInput[foreignKey] = connect.targetId
+			}
+		}
+
+		// 7. Construct, validate, and create the parent entity
+		const rawEntity = {
+			...baseInput,
+			id: parentId,
+			createdAt: now,
+			updatedAt: now,
+		}
+
+		const validated = yield* validateEntity(schema, rawEntity)
+
+		// Check for duplicate ID
+		const currentMap = yield* Ref.get(ref)
+		if (currentMap.has(parentId)) {
+			return yield* Effect.fail(
+				new ValidationError({
+					message: `Entity with ID '${parentId}' already exists in '${collectionName}'`,
+					issues: [{ field: "id", message: `Entity with ID ${parentId} already exists`, value: parentId }],
+				}),
+			)
+		}
+
+		// Validate foreign keys
+		yield* validateForeignKeysEffect(
+			validated,
+			collectionName,
+			relationships,
+			stateRefs,
+		)
+
+		// Add to collection
+		yield* Ref.update(ref, (map) => {
+			const next = new Map(map)
+			next.set(parentId, validated)
+			return next
+		})
+
+		// 8. Update inverse relationship foreign keys on connected entities
+		for (const connect of resolvedConnects) {
+			const relationship = relationships[connect.field]
+			if (relationship && relationship.type === "inverse") {
+				const targetConfig = dbConfig[connect.targetCollection]
+				if (!targetConfig) continue
+
+				const inverseField = findInverseRelationship(
+					collectionName,
+					targetConfig.relationships,
+				)
+
+				if (inverseField) {
+					const inverseRel = targetConfig.relationships[inverseField]
+					if (!inverseRel) continue
+					const foreignKey = inverseRel.foreignKey || `${inverseField}Id`
+
+					const targetRef = stateRefs[connect.targetCollection]
+					if (!targetRef) continue
+
+					yield* Ref.update(targetRef, (map) => {
+						const existing = map.get(connect.targetId)
+						if (!existing) return map
+
+						const updated = {
+							...existing,
+							[foreignKey]: parentId,
+							updatedAt: now,
+						} as HasId
+						const next = new Map(map)
+						next.set(connect.targetId, updated)
+						return next
+					})
 				}
 			}
-
-			return ok(parseResult.data);
-		} catch (error) {
-			return err(
-				createUnknownError("Failed to create entity with relationships", error),
-			);
 		}
-	};
-}
 
-/**
- * Find inverse relationship field
- */
-function findInverseRelationship(
-	sourceCollection: string,
-	sourceField: string,
-	targetRelationships: Record<
-		string,
-		RelationshipDef<unknown, "ref" | "inverse", string>
-	>,
-): string | null {
-	for (const [field, rel] of Object.entries(targetRelationships)) {
-		if (
-			rel.target === sourceCollection ||
-			rel.__targetCollection === sourceCollection
-		) {
-			// This is a relationship back to the source collection
-			return field;
-		}
-	}
-	return null;
-}
+		return validated
+	})
+
+// ============================================================================
+// Legacy Exports (backward compatibility for unmigrated factory)
+// These will be removed when core/factories/database.ts is migrated (task 10)
+// ============================================================================
+
+export { createCreateWithRelationshipsMethod } from "./create-with-relationships-legacy.js"
