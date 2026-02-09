@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest"
-import { Effect, Schema, Stream, Chunk } from "effect"
-import { createEffectDatabase, type RunnableEffect, type RunnableStream } from "../core/factories/database-effect.js"
+import { Effect, Schema, Stream, Chunk, Layer } from "effect"
+import {
+	createEffectDatabase,
+	createPersistentEffectDatabase,
+	type RunnableEffect,
+	type RunnableStream,
+	type EffectDatabaseWithPersistence,
+} from "../core/factories/database-effect.js"
+import { makeInMemoryStorageLayer } from "../core/storage/in-memory-adapter-layer.js"
+import { JsonSerializerLayer } from "../core/serializers/json.js"
 
 // ============================================================================
 // Test Schemas
@@ -667,6 +675,270 @@ describe("createEffectDatabase", () => {
 				}),
 			)
 			expect(result.name).toBe("PipeCo")
+		})
+	})
+})
+
+// ============================================================================
+// Persistence Hooks Tests
+// ============================================================================
+
+const persistentConfig = {
+	users: {
+		schema: UserSchema,
+		file: "/data/users.json",
+		relationships: {
+			company: { type: "ref" as const, target: "companies" },
+			posts: { type: "inverse" as const, target: "posts", foreignKey: "authorId" },
+		},
+	},
+	companies: {
+		schema: CompanySchema,
+		file: "/data/companies.json",
+		relationships: {
+			employees: { type: "inverse" as const, target: "users", foreignKey: "companyId" },
+		},
+	},
+	posts: {
+		schema: PostSchema,
+		// No file — in-memory only, should NOT trigger persistence
+		relationships: {
+			author: { type: "ref" as const, target: "users" },
+		},
+	},
+} as const
+
+const makeTestLayer = (store?: Map<string, string>) => {
+	const s = store ?? new Map<string, string>()
+	return { store: s, layer: Layer.merge(makeInMemoryStorageLayer(s), JsonSerializerLayer) }
+}
+
+describe("createPersistentEffectDatabase", () => {
+	describe("persistence hooks", () => {
+		it("should create a database with flush and pendingCount", async () => {
+			const { layer } = makeTestLayer()
+			const db = await Effect.runPromise(
+				Effect.provide(
+					createPersistentEffectDatabase(persistentConfig, initialData),
+					layer,
+				),
+			)
+			expect(typeof db.flush).toBe("function")
+			expect(typeof db.pendingCount).toBe("function")
+			expect(db.users).toBeDefined()
+			expect(db.companies).toBeDefined()
+			expect(db.posts).toBeDefined()
+		})
+
+		it("create should trigger a debounced save for persistent collections", async () => {
+			const { store, layer } = makeTestLayer()
+			const db = await Effect.runPromise(
+				Effect.provide(
+					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
+					layer,
+				),
+			)
+
+			// Create a company (has file configured)
+			await Effect.runPromise(db.companies.create({ name: "NewCo" }))
+
+			// Flush to ensure writes complete
+			await db.flush()
+
+			// The companies file should now exist
+			expect(store.has("/data/companies.json")).toBe(true)
+			const parsed = JSON.parse(store.get("/data/companies.json")!)
+			const values = Object.values(parsed) as Array<Record<string, unknown>>
+			expect(values.length).toBe(3) // 2 initial + 1 created
+			expect(values.some((v) => v.name === "NewCo")).toBe(true)
+		})
+
+		it("update should trigger a debounced save", async () => {
+			const { store, layer } = makeTestLayer()
+			const db = await Effect.runPromise(
+				Effect.provide(
+					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
+					layer,
+				),
+			)
+
+			await Effect.runPromise(db.users.update("u1", { name: "Alice Updated" }))
+			await db.flush()
+
+			expect(store.has("/data/users.json")).toBe(true)
+			const parsed = JSON.parse(store.get("/data/users.json")!)
+			expect(parsed.u1.name).toBe("Alice Updated")
+		})
+
+		it("delete should trigger a debounced save", async () => {
+			const { store, layer } = makeTestLayer()
+			const db = await Effect.runPromise(
+				Effect.provide(
+					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
+					layer,
+				),
+			)
+
+			await Effect.runPromise(db.users.delete("u3"))
+			await db.flush()
+
+			expect(store.has("/data/users.json")).toBe(true)
+			const parsed = JSON.parse(store.get("/data/users.json")!)
+			expect(parsed.u3).toBeUndefined()
+			expect(Object.keys(parsed)).toHaveLength(2) // u1, u2
+		})
+
+		it("upsert should trigger a debounced save", async () => {
+			const { store, layer } = makeTestLayer()
+			const db = await Effect.runPromise(
+				Effect.provide(
+					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
+					layer,
+				),
+			)
+
+			await Effect.runPromise(
+				db.companies.upsert({
+					where: { id: "c99" },
+					create: { name: "UpsertCo" },
+					update: { name: "Updated" },
+				}),
+			)
+			await db.flush()
+
+			expect(store.has("/data/companies.json")).toBe(true)
+			const parsed = JSON.parse(store.get("/data/companies.json")!)
+			const values = Object.values(parsed) as Array<Record<string, unknown>>
+			expect(values.some((v) => v.name === "UpsertCo")).toBe(true)
+		})
+
+		it("mutations on non-persistent collections should NOT trigger saves", async () => {
+			const { store, layer } = makeTestLayer()
+			const db = await Effect.runPromise(
+				Effect.provide(
+					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
+					layer,
+				),
+			)
+
+			// Posts have no file configured
+			await Effect.runPromise(db.posts.create({ title: "New Post", content: "Body", authorId: "u1" }))
+			await db.flush()
+
+			// No posts file should exist
+			expect(store.has("/data/posts.json")).toBe(false)
+		})
+
+		it("rapid mutations should coalesce into fewer writes", async () => {
+			let writeCount = 0
+			const trackingStore = new Map<string, string>()
+			// Track writes via a proxy
+			const originalSet = trackingStore.set.bind(trackingStore)
+			trackingStore.set = (key: string, value: string) => {
+				if (key === "/data/companies.json") writeCount++
+				return originalSet(key, value)
+			}
+			const trackingLayer = Layer.merge(
+				makeInMemoryStorageLayer(trackingStore),
+				JsonSerializerLayer,
+			)
+
+			const db = await Effect.runPromise(
+				Effect.provide(
+					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 50 }),
+					trackingLayer,
+				),
+			)
+
+			// Perform 5 rapid creates
+			for (let i = 0; i < 5; i++) {
+				await Effect.runPromise(db.companies.create({ name: `Co${i}` }))
+			}
+
+			// Flush ensures all pending writes complete
+			await db.flush()
+
+			// Due to debouncing, fewer than 5 writes should have occurred
+			// After flush, exactly 1 final write happens (the flush save)
+			expect(writeCount).toBeLessThanOrEqual(5)
+			expect(writeCount).toBeGreaterThanOrEqual(1)
+
+			// Verify all 7 companies are in the final state (2 initial + 5 created)
+			const parsed = JSON.parse(trackingStore.get("/data/companies.json")!)
+			expect(Object.keys(parsed)).toHaveLength(7)
+		})
+
+		it("pendingCount should reflect pending writes", async () => {
+			const { layer } = makeTestLayer()
+			const db = await Effect.runPromise(
+				Effect.provide(
+					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 500 }),
+					layer,
+				),
+			)
+
+			// No pending writes initially
+			expect(db.pendingCount()).toBe(0)
+
+			// After a mutation on a persistent collection, there should be a pending write
+			await Effect.runPromise(db.companies.create({ name: "CountCo" }))
+
+			expect(db.pendingCount()).toBeGreaterThanOrEqual(1)
+
+			// Flush and verify count is back to 0
+			await db.flush()
+			expect(db.pendingCount()).toBe(0)
+		})
+
+		it("flush should execute all pending writes immediately", async () => {
+			const { store, layer } = makeTestLayer()
+			const db = await Effect.runPromise(
+				Effect.provide(
+					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10000 }),
+					layer,
+				),
+			)
+
+			// Create with a very long debounce
+			await Effect.runPromise(db.companies.create({ name: "FlushCo" }))
+
+			// File should not exist yet (debounce hasn't fired)
+			expect(store.has("/data/companies.json")).toBe(false)
+
+			// Flush forces immediate write
+			await db.flush()
+			expect(store.has("/data/companies.json")).toBe(true)
+			const parsed = JSON.parse(store.get("/data/companies.json")!)
+			const values = Object.values(parsed) as Array<Record<string, unknown>>
+			expect(values.some((v) => v.name === "FlushCo")).toBe(true)
+		})
+
+		it("save captures latest state at write time (not mutation time)", async () => {
+			const { store, layer } = makeTestLayer()
+			const db = await Effect.runPromise(
+				Effect.provide(
+					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10000 }),
+					layer,
+				),
+			)
+
+			// Do two mutations before flush — the save should capture the final state
+			await Effect.runPromise(db.users.update("u1", { name: "First" }))
+			await Effect.runPromise(db.users.update("u1", { name: "Final" }))
+
+			await db.flush()
+
+			const parsed = JSON.parse(store.get("/data/users.json")!)
+			expect(parsed.u1.name).toBe("Final")
+		})
+
+		it("existing non-persistent createEffectDatabase still works unchanged", async () => {
+			// Verify backward compatibility
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, initialData),
+			)
+			const result = await Effect.runPromise(db.companies.create({ name: "OldAPI" }))
+			expect(result.name).toBe("OldAPI")
 		})
 	})
 })

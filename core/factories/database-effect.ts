@@ -6,9 +6,10 @@
  *
  * Query pipeline: Ref snapshot → Stream.fromIterable → filter → populate → sort → paginate → select
  * CRUD: Effect-based operations with typed error channels
+ * Persistence: Optional debounced save after each CRUD mutation via Effect.fork
  */
 
-import { Effect, Ref, Stream, Schema, Chunk } from "effect"
+import { Effect, Ref, Stream, Schema, Chunk, Layer } from "effect"
 import type { DatabaseConfig } from "../types/database-config-types.js"
 import type { CollectionConfig } from "../types/database-config-types.js"
 import type {
@@ -53,6 +54,14 @@ import type {
 	ValidationError,
 	OperationError,
 } from "../errors/crud-errors.js"
+import type {
+	StorageError,
+	SerializationError,
+	UnsupportedFormatError,
+} from "../errors/storage-errors.js"
+import { StorageAdapter } from "../storage/storage-service.js"
+import { SerializerRegistry } from "../serializers/serializer-service.js"
+import { saveData } from "../storage/persistence-effect.js"
 
 // ============================================================================
 // Convenience API: runPromise
@@ -223,6 +232,87 @@ export type EffectDatabase<Config extends DatabaseConfig> = {
 }
 
 /**
+ * Configuration for database persistence.
+ * When provided, CRUD mutations trigger debounced saves to disk.
+ */
+export interface EffectDatabasePersistenceConfig {
+	/** Debounce delay in milliseconds (default 100) */
+	readonly writeDebounce?: number
+}
+
+/**
+ * Extended database type with persistence control methods.
+ */
+export type EffectDatabaseWithPersistence<Config extends DatabaseConfig> =
+	EffectDatabase<Config> & {
+		/** Flush all pending debounced writes immediately. Returns a Promise. */
+		readonly flush: () => Promise<void>
+		/** Returns the number of writes currently pending. */
+		readonly pendingCount: () => number
+	}
+
+// ============================================================================
+// Runtime-independent Debounced Persistence Trigger
+// ============================================================================
+
+/**
+ * A runtime-independent debounced writer that uses JS setTimeout for debouncing
+ * and Effect.runPromise to execute save effects when timers fire.
+ *
+ * This design allows debounce timers to survive across individual Effect.runPromise
+ * calls, which is necessary because each CRUD call may be run in its own runtime.
+ */
+interface PersistenceTrigger {
+	/** Schedule a debounced save for the given key */
+	readonly schedule: (key: string) => void
+	/** Flush all pending writes immediately */
+	readonly flush: () => Promise<void>
+	/** Number of pending writes */
+	readonly pendingCount: () => number
+}
+
+const createPersistenceTrigger = (
+	delayMs: number,
+	makeSaveEffect: (key: string) => Effect.Effect<void, unknown>,
+): PersistenceTrigger => {
+	const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+	const executeSave = (key: string): Promise<void> =>
+		Effect.runPromise(
+			makeSaveEffect(key).pipe(Effect.catchAll(() => Effect.void)),
+		)
+
+	const schedule = (key: string): void => {
+		// Cancel existing timer for this key
+		const existing = pendingTimers.get(key)
+		if (existing !== undefined) {
+			clearTimeout(existing)
+		}
+		// Schedule new debounced write
+		const timer = setTimeout(() => {
+			pendingTimers.delete(key)
+			executeSave(key)
+		}, delayMs)
+		pendingTimers.set(key, timer)
+	}
+
+	const flush = async (): Promise<void> => {
+		// Take all pending keys, clear timers, execute saves
+		const keys = Array.from(pendingTimers.keys())
+		for (const [, timer] of pendingTimers) {
+			clearTimeout(timer)
+		}
+		pendingTimers.clear()
+		// Execute all saves
+		await Promise.all(keys.map((key) => executeSave(key)))
+	}
+
+	const pendingCount = (): number => pendingTimers.size
+
+	return { schedule, flush, pendingCount }
+}
+
+/**
  * Internal ref map type used for cross-collection references.
  */
 type StateRefs = Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>
@@ -259,6 +349,9 @@ function extractPopulateFromSelect(
 
 /**
  * Build a single Effect-based collection from its config, Ref, and shared state refs.
+ *
+ * When `afterMutation` is provided, each CRUD method will fork a fire-and-forget
+ * call to it after a successful mutation. This is used to trigger debounced saves.
  */
 const buildCollection = <T extends HasId>(
 	collectionName: string,
@@ -266,6 +359,7 @@ const buildCollection = <T extends HasId>(
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: StateRefs,
 	dbConfig: DatabaseConfig,
+	afterMutation?: () => Effect.Effect<void>,
 ): EffectCollection<T> => {
 	const schema = collectionConfig.schema as Schema.Schema<T, unknown>
 	const relationships = collectionConfig.relationships as Record<
@@ -332,11 +426,19 @@ const buildCollection = <T extends HasId>(
 		return withStreamRunPromise(stream)
 	}
 
-	// Helper to wrap a function so its return value gets .runPromise
+	// Helper to wrap a function so its return value gets .runPromise.
+	// When afterMutation is configured, each CRUD method triggers a
+	// persistence save schedule after the mutation succeeds (synchronous,
+	// non-blocking — the actual save runs in a debounced setTimeout).
 	const wrapEffect = <Args extends ReadonlyArray<unknown>, A, E>(
 		fn: (...args: Args) => Effect.Effect<A, E, never>,
 	) =>
-		(...args: Args): RunnableEffect<A, E> => withRunPromise(fn(...args))
+		(...args: Args): RunnableEffect<A, E> => {
+			const effect = afterMutation
+				? fn(...args).pipe(Effect.tap(() => afterMutation()))
+				: fn(...args)
+			return withRunPromise(effect)
+		}
 
 	// Wire CRUD operations with runPromise convenience
 	const createFn = wrapEffect(create(collectionName, schema, relationships, ref, stateRefs))
@@ -435,4 +537,118 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 		}
 
 		return collections as EffectDatabase<Config>
+	})
+
+/**
+ * Create an Effect-based in-memory database with persistence.
+ *
+ * Like `createEffectDatabase`, but additionally wires debounced persistence hooks
+ * so that each CRUD mutation triggers a fire-and-forget save to disk.
+ *
+ * Collections with a `file` field in their config are persisted. Collections
+ * without a `file` are in-memory only.
+ *
+ * Requires `StorageAdapter` and `SerializerRegistry` services in the environment.
+ *
+ * Usage:
+ * ```ts
+ * const db = yield* createPersistentEffectDatabase(config, initialData, { writeDebounce: 200 })
+ * // CRUD mutations now trigger debounced saves
+ * yield* db.users.create({ name: "Alice", age: 30 })
+ * // Flush all pending writes before shutdown
+ * yield* db.flush()
+ * ```
+ */
+export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
+	config: Config,
+	initialData?: { readonly [K in keyof Config]?: ReadonlyArray<Record<string, unknown>> },
+	persistenceConfig?: EffectDatabasePersistenceConfig,
+): Effect.Effect<
+	EffectDatabaseWithPersistence<Config>,
+	never,
+	StorageAdapter | SerializerRegistry
+> =>
+	Effect.gen(function* () {
+		// 1. Resolve services from the environment and capture as a Layer
+		// so save effects can be executed outside the creation runtime.
+		const storageAdapter = yield* StorageAdapter
+		const serializerRegistry = yield* SerializerRegistry
+		const serviceLayer = Layer.merge(
+			Layer.succeed(StorageAdapter, storageAdapter),
+			Layer.succeed(SerializerRegistry, serializerRegistry),
+		)
+
+		// 2. Create Ref for each collection from initial data
+		const stateRefs: StateRefs = {}
+		const typedRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>> = {}
+
+		for (const collectionName of Object.keys(config)) {
+			const items = (initialData?.[collectionName] ?? []) as ReadonlyArray<HasId>
+			const map: ReadonlyMap<string, HasId> = new Map(
+				items.map((item) => [item.id, item]),
+			)
+			const ref = yield* Ref.make(map)
+			stateRefs[collectionName] = ref
+			typedRefs[collectionName] = ref
+		}
+
+		// 3. Build the save effect factory. Each save reads the Ref at execution
+		// time (capturing latest state) and writes through saveData with services.
+		const collectionFilePaths: Record<string, string> = {}
+		for (const collectionName of Object.keys(config)) {
+			const filePath = config[collectionName].file
+			if (filePath) {
+				collectionFilePaths[collectionName] = filePath
+			}
+		}
+
+		const makeSaveEffect = (collectionName: string): Effect.Effect<void, unknown> => {
+			const filePath = collectionFilePaths[collectionName]
+			if (!filePath) return Effect.void
+			const collectionConfig = config[collectionName]
+			return Effect.provide(
+				Effect.gen(function* () {
+					const currentData = yield* Ref.get(typedRefs[collectionName])
+					yield* saveData(
+						filePath,
+						collectionConfig.schema as Schema.Schema<HasId, unknown>,
+						currentData,
+					)
+				}),
+				serviceLayer,
+			)
+		}
+
+		// 4. Create the runtime-independent persistence trigger
+		const trigger = createPersistenceTrigger(
+			persistenceConfig?.writeDebounce ?? 100,
+			makeSaveEffect,
+		)
+
+		// 5. Build each collection with its Ref, state refs, and persistence hooks
+		const collections: Record<string, EffectCollection<HasId>> = {}
+
+		for (const collectionName of Object.keys(config)) {
+			const filePath = config[collectionName].file
+
+			// afterMutation: synchronously schedule a debounced save (fire-and-forget)
+			const afterMutation = filePath
+				? () => Effect.sync(() => trigger.schedule(collectionName))
+				: undefined
+
+			collections[collectionName] = buildCollection(
+				collectionName,
+				config[collectionName],
+				typedRefs[collectionName],
+				stateRefs,
+				config,
+				afterMutation,
+			)
+		}
+
+		const db = collections as EffectDatabase<Config>
+		return Object.assign(db, {
+			flush: () => trigger.flush(),
+			pendingCount: () => trigger.pendingCount(),
+		}) as EffectDatabaseWithPersistence<Config>
 	})
