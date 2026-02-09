@@ -22,8 +22,8 @@ import { populateRelationships } from "../operations/relationships/populate.js";
 import type { PopulateValue } from "../operations/relationships/populate.js";
 import { sortData } from "../operations/query/sort.js";
 import { applyObjectSelection } from "../operations/query/select.js";
-import { createCrudMethodsWithRelationships } from "./crud-factory-with-relationships.js";
-import type { CrudMethodsWithRelationships } from "./crud-factory-with-relationships.js";
+import { createCrudMethodsWithRelationships } from "./crud-factory-with-relationships-legacy.js";
+import type { LegacyCrudMethodsWithRelationships as CrudMethodsWithRelationships } from "./crud-factory-with-relationships-legacy.js";
 import { withToArray } from "../operations/query/query-helpers.js";
 import type { MinimalEntity } from "../types/crud-types.js";
 
