@@ -2,9 +2,14 @@ import { Effect, Ref, Stream } from "effect";
 import type { CollectionConfig } from "../../types/database-config-types.js";
 
 /**
+ * Maximum recursion depth for nested population (mirrors PopulateConfig type depth limit).
+ */
+const MAX_POPULATE_DEPTH = 5;
+
+/**
  * PopulateValue can be:
  * - `true` to populate a relationship with all fields
- * - An object with nested populate config (handled in task 7.2)
+ * - An object with nested populate config for recursive population
  */
 type PopulateValue = boolean | Record<string, unknown>;
 
@@ -59,10 +64,124 @@ function resolveInverseForeignKey(
 }
 
 /**
+ * Populate a single item's relationships recursively.
+ *
+ * For each relationship key in the populate config:
+ * - `ref`: look up a single entity in the target collection by foreign key
+ * - `inverse`: find all entities whose foreign key points back to this item
+ *
+ * When the populate value is a nested config object (not just `true`),
+ * recursively populate the related entity's relationships using the
+ * target collection's relationship definitions.
+ *
+ * Recursion stops at MAX_POPULATE_DEPTH (5) to prevent infinite loops
+ * in circular relationship graphs.
+ */
+function populateItem(
+  item: Record<string, unknown>,
+  populateConfig: Record<string, PopulateValue>,
+  stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, Record<string, unknown>>>>,
+  dbConfig: Record<string, CollectionConfig>,
+  collectionName: string,
+  depth: number,
+): Effect.Effect<Record<string, unknown>> {
+  return Effect.gen(function* () {
+    const sourceConfig = dbConfig[collectionName];
+    if (!sourceConfig) return item;
+
+    const relationships = sourceConfig.relationships;
+    const populateEntries = Object.entries(populateConfig).filter(
+      ([key]) => relationships[key] !== undefined,
+    );
+
+    if (populateEntries.length === 0) return item;
+
+    const populated: Record<string, unknown> = { ...item };
+
+    for (const [key, value] of populateEntries) {
+      const relationship = relationships[key];
+      const targetRef = stateRefs[relationship.target];
+      if (!targetRef) continue;
+
+      const targetMap = yield* Ref.get(targetRef);
+
+      if (relationship.type === "ref") {
+        const foreignKeyField = relationship.foreignKey || key + "Id";
+        const foreignKeyValue = item[foreignKeyField];
+
+        if (typeof foreignKeyValue === "string") {
+          const related = targetMap.get(foreignKeyValue);
+          if (related && (value === true || isRecord(value))) {
+            populated[key] = yield* maybeRecurse(
+              related, value, relationship.target, stateRefs, dbConfig, depth,
+            );
+          } else {
+            populated[key] = undefined;
+          }
+        } else {
+          populated[key] = undefined;
+        }
+      } else if (relationship.type === "inverse") {
+        const foreignKeyField = resolveInverseForeignKey(
+          relationship,
+          collectionName,
+          dbConfig,
+        );
+
+        const relatedItems: Record<string, unknown>[] = [];
+        for (const entity of targetMap.values()) {
+          if (entity[foreignKeyField] === item.id) {
+            relatedItems.push(entity);
+          }
+        }
+
+        if (value === true || !isRecord(value)) {
+          populated[key] = relatedItems;
+        } else {
+          const populatedRelated: Record<string, unknown>[] = [];
+          for (const relItem of relatedItems) {
+            populatedRelated.push(
+              yield* maybeRecurse(
+                relItem, value, relationship.target, stateRefs, dbConfig, depth,
+              ),
+            );
+          }
+          populated[key] = populatedRelated;
+        }
+      }
+    }
+
+    return populated;
+  });
+}
+
+/**
+ * If the populate value is a nested config and we haven't hit the depth limit,
+ * recursively populate the related entity. Otherwise return the entity as-is.
+ */
+function maybeRecurse(
+  entity: Record<string, unknown>,
+  value: PopulateValue,
+  targetCollectionName: string,
+  stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, Record<string, unknown>>>>,
+  dbConfig: Record<string, CollectionConfig>,
+  depth: number,
+): Effect.Effect<Record<string, unknown>> {
+  if (value === true || !isPopulateConfig(value) || depth >= MAX_POPULATE_DEPTH) {
+    return Effect.succeed(entity);
+  }
+
+  return populateItem(
+    entity, value, stateRefs, dbConfig, targetCollectionName, depth + 1,
+  );
+}
+
+/**
  * Apply relationship population as a Stream combinator.
  *
  * For each item in the stream, resolves relationships by reading related
- * entities from collection Refs.
+ * entities from collection Refs. Supports nested population recursively
+ * up to a depth of 5.
  *
  * - `ref` relationships: look up a single entity in the target collection
  *   using the foreign key field (default: `<relationName>Id`)
@@ -94,49 +213,8 @@ export const applyPopulate = <T extends Record<string, unknown>>(
     if (populateEntries.length === 0) return stream;
 
     return Stream.mapEffect(stream, (item: T) =>
-      Effect.gen(function* () {
-        const populated: Record<string, unknown> = { ...item };
-
-        for (const [key, value] of populateEntries) {
-          const relationship = relationships[key];
-          const targetRef = stateRefs[relationship.target];
-          if (!targetRef) continue;
-
-          const targetMap = yield* Ref.get(targetRef);
-
-          if (relationship.type === "ref") {
-            const foreignKeyField = relationship.foreignKey || key + "Id";
-            const foreignKeyValue = (item as Record<string, unknown>)[foreignKeyField];
-
-            if (typeof foreignKeyValue === "string") {
-              const related = targetMap.get(foreignKeyValue);
-              if (related && (value === true || isRecord(value))) {
-                populated[key] = related;
-              } else {
-                populated[key] = undefined;
-              }
-            } else {
-              populated[key] = undefined;
-            }
-          } else if (relationship.type === "inverse") {
-            const foreignKeyField = resolveInverseForeignKey(
-              relationship,
-              collectionName,
-              dbConfig,
-            );
-
-            const relatedItems: Record<string, unknown>[] = [];
-            for (const entity of targetMap.values()) {
-              if ((entity as Record<string, unknown>)[foreignKeyField] === (item as Record<string, unknown>).id) {
-                relatedItems.push(entity as Record<string, unknown>);
-              }
-            }
-
-            populated[key] = relatedItems;
-          }
-        }
-
-        return populated as T;
-      }),
+      populateItem(
+        item, populateConfig, stateRefs, dbConfig, collectionName, 0,
+      ) as Effect.Effect<T, never, never>,
     );
   };
