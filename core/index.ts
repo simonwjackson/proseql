@@ -150,11 +150,8 @@ export {
 // CRUD Operations (Existing)
 // ============================================================================
 
-export type {
-	CrudError,
-	LegacyCrudError,
-	Result,
-} from "./errors/crud-errors.js";
+export type { CrudError } from "./errors/crud-errors.js";
+export type { LegacyCrudError, Result } from "./errors/legacy.js";
 
 export type { CrudMethodsWithRelationships } from "./factories/crud-factory-with-relationships.js";
 

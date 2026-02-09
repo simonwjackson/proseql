@@ -17,8 +17,8 @@ import type {
 	UpsertResult,
 	UpsertManyResult,
 } from "../types/crud-types.js";
-import type { LegacyCrudError as CrudError, Result } from "../errors/crud-errors.js";
-import { isErr } from "../errors/crud-errors.js";
+import type { LegacyCrudError as CrudError, Result } from "../errors/legacy.js";
+import { isErr } from "../errors/legacy.js";
 import type { RelationshipDef, WhereClause } from "../types/types.js";
 import {
 	createCreateMethod,

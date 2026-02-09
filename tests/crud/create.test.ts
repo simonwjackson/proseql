@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { z } from "zod";
 import { createDatabase } from "../../core/factories/database";
-import { isOk, isErr } from "../../core/errors/crud-errors";
+import { isOk, isErr } from "../../core/errors/legacy";
 import { collect } from "../../core/utils/async-iterable.js";
-import type { LegacyCrudError as CrudError } from "../../core/errors/crud-errors";
+import type { LegacyCrudError as CrudError } from "../../core/errors/legacy";
 import type {
 	CreateInput,
 	CreateManyResult,

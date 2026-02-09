@@ -6,7 +6,7 @@ import type {
 	ValidationResult,
 	ForeignKeyValidation,
 } from "../types/crud-types.js";
-import { createForeignKeyError } from "../errors/crud-errors.js";
+import { createForeignKeyError } from "../errors/legacy.js";
 import type { RelationshipDef } from "../types/types.js";
 
 // ============================================================================

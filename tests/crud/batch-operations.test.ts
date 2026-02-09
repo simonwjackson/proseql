@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { z } from "zod";
 import { createDatabase } from "../../core/factories/database";
-import { isOk, isErr } from "../../core/errors/crud-errors";
+import { isOk, isErr } from "../../core/errors/legacy";
 import { collect } from "../../core/utils/async-iterable.js";
 
 describe("CRUD Batch Operations and Edge Cases", () => {

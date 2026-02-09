@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { z } from "zod";
 import { createDatabase } from "../../core/factories/database";
-import { isOk, isErr, type Result } from "../../core/errors/crud-errors";
+import { isOk, isErr, type Result } from "../../core/errors/legacy";
 import type { GenerateDatabase } from "../../core/types/types";
 
 /**

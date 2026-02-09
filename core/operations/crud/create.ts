@@ -9,7 +9,7 @@ import type {
 	CreateManyOptions,
 	CreateManyResult,
 } from "../../types/crud-types.js";
-import type { LegacyCrudError as CrudError } from "../../errors/crud-errors.js";
+import type { LegacyCrudError as CrudError } from "../../errors/legacy.js";
 import {
 	createDuplicateKeyError,
 	createValidationError,
@@ -17,7 +17,7 @@ import {
 	ok,
 	err,
 	type Result,
-} from "../../errors/crud-errors.js";
+} from "../../errors/legacy.js";
 import { generateId } from "../../utils/id-generator.js";
 import { validateForeignKeys } from "../../validators/foreign-key.js";
 import type { RelationshipDef } from "../../types/types.js";

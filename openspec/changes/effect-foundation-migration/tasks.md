@@ -16,7 +16,7 @@
 - [x] 3.1 Define all CRUD error types as Data.TaggedError classes in `core/errors/crud-errors.ts` (replace the current tagged union). Preserve all existing error fields (collection, id, field, value, message)
 - [x] 3.2 Define query error types: DanglingReferenceError, CollectionNotFoundError, PopulationError in `core/errors/query-errors.ts`
 - [x] 3.3 Define storage error types: StorageError, SerializationError, UnsupportedFormatError in `core/errors/storage-errors.ts`
-- [ ] 3.4 Remove the hand-rolled Result<T, E> type, isOk/isErr helpers, and error factory functions. Export new error types from `core/errors/index.ts`
+- [x] 3.4 Remove the hand-rolled Result<T, E> type, isOk/isErr helpers, and error factory functions. Export new error types from `core/errors/index.ts`
 - [ ] 3.5 Write tests for error creation, _tag discrimination, and Effect.catchTag pattern matching
 
 ## 4. State Management (Ref)

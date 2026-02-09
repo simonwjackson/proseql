@@ -8,7 +8,7 @@ import type {
 	UpdateWithOperators,
 	UpdateManyResult,
 } from "../../types/crud-types.js";
-import type { LegacyCrudError as CrudError } from "../../errors/crud-errors.js";
+import type { LegacyCrudError as CrudError } from "../../errors/legacy.js";
 import type { WhereClause } from "../../types/types.js";
 import {
 	createNotFoundError,
@@ -17,7 +17,7 @@ import {
 	ok,
 	err,
 	type Result,
-} from "../../errors/crud-errors.js";
+} from "../../errors/legacy.js";
 import { validateForeignKeys } from "../../validators/foreign-key.js";
 import { filterData } from "../query/filter.js";
 import type { RelationshipDef } from "../../types/types.js";

@@ -9,7 +9,7 @@ import { createNodeStorageAdapter } from "../core/storage/node-adapter.js";
 import { createJsonSerializer } from "../core/serializers/json.js";
 import { createSerializerRegistry } from "../core/utils/file-extensions.js";
 import { collect } from "../core/utils/async-iterable.js";
-import type { Result } from "../core/errors/crud-errors.js";
+import type { Result } from "../core/errors/legacy.js";
 
 /**
  * Unwraps a Result type, throwing an error if the operation failed

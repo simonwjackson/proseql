@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { z } from "zod";
 import { createDatabase } from "../../core/factories/database";
 import type { GenerateDatabase } from "../../core/types/types";
-import { isOk, isErr, type Result } from "../../core/errors/crud-errors";
+import { isOk, isErr, type Result } from "../../core/errors/legacy";
 import { collect } from "../../core/utils/async-iterable.js";
 
 /**

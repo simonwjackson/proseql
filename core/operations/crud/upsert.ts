@@ -12,7 +12,7 @@ import type {
 	UpsertManyResult,
 	ExtractUniqueFields,
 } from "../../types/crud-types.js";
-import type { LegacyCrudError as CrudError } from "../../errors/crud-errors.js";
+import type { LegacyCrudError as CrudError } from "../../errors/legacy.js";
 import {
 	createValidationError,
 	createUnknownError,
@@ -20,7 +20,7 @@ import {
 	ok,
 	err,
 	type Result,
-} from "../../errors/crud-errors.js";
+} from "../../errors/legacy.js";
 import { generateId } from "../../utils/id-generator.js";
 import { validateForeignKeys } from "../../validators/foreign-key.js";
 import { filterData } from "../query/filter.js";

@@ -6,7 +6,7 @@ import {
 	isErr,
 	isNotFoundError,
 	isValidationError,
-} from "../../core/errors/crud-errors";
+} from "../../core/errors/legacy";
 import type { UpdateInput } from "../../core/types/crud-types";
 import { collect } from "../../core/utils/async-iterable.js";
 

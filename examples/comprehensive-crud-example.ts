@@ -20,7 +20,7 @@ import type {
 	ForeignKeyError,
 	ValidationError,
 	UniqueConstraintError,
-} from "../core/errors/crud-errors";
+} from "../core/errors/legacy";
 import {
 	isOk,
 	isErr,
@@ -30,7 +30,7 @@ import {
 	isValidationError,
 	isUniqueConstraintError,
 	handleCrudError,
-} from "../core/errors/crud-errors";
+} from "../core/errors/legacy";
 import { createDatabase } from "../core/factories/database";
 import type { UpdateWithOperators } from "../core/types/crud-types";
 

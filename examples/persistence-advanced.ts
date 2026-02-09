@@ -11,7 +11,7 @@ import { createYamlSerializer } from "../core/serializers/yaml.js";
 import { createMessagePackSerializer } from "../core/serializers/messagepack.js";
 import { createSerializerRegistry } from "../core/utils/file-extensions.js";
 import { collect } from "../core/utils/async-iterable.js";
-import type { Result } from "../core/errors/crud-errors.js";
+import type { Result } from "../core/errors/legacy.js";
 
 // ============================================================================
 // Schema Definitions

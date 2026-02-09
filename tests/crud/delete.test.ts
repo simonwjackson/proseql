@@ -6,7 +6,7 @@ import {
 	isErr,
 	type Result,
 	type CrudError,
-} from "../../core/errors/crud-errors";
+} from "../../core/errors/legacy";
 import { collect } from "../../core/utils/async-iterable.js";
 import { softDeleteOptions, softDeleteManyOptions } from "./test-helpers";
 

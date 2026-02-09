@@ -6,7 +6,7 @@ import { createJsonSerializer } from "../core/serializers/json.js";
 import { createYamlSerializer } from "../core/serializers/yaml.js";
 import { createMessagePackSerializer } from "../core/serializers/messagepack.js";
 import { createSerializerRegistry } from "../core/utils/file-extensions.js";
-import { isOk, isErr } from "../core/errors/crud-errors.js";
+import { isOk, isErr } from "../core/errors/legacy.js";
 import { collect } from "../core/utils/async-iterable.js";
 import type { DatasetFor } from "../core/types/types.js";
 import type { StorageAdapter } from "../core/storage/types.js";

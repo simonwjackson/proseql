@@ -14,7 +14,7 @@ import { defaultYamlSerializer } from "../core/serializers/yaml.js";
 import { defaultMessagePackSerializer } from "../core/serializers/messagepack.js";
 import { createSerializerRegistry } from "../core/utils/file-extensions.js";
 import { collect } from "../core/utils/async-iterable.js";
-import type { Result } from "../core/errors/crud-errors.js";
+import type { Result } from "../core/errors/legacy.js";
 import { SerializationError } from "../core/serializers/types.js";
 import { StorageError } from "../core/storage/types.js";
 
