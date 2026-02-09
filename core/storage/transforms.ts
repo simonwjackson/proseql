@@ -1,6 +1,7 @@
 /**
- * Data transformation utilities for converting between internal array format
- * and storage object format, plus collection file grouping utilities.
+ * Data transformation utilities for converting between internal formats
+ * (ReadonlyMap and array) and storage object format, plus collection
+ * file grouping utilities.
  */
 
 /**
@@ -205,4 +206,134 @@ export function mergeFileDataIntoDataset<T extends Record<string, unknown[]>>(
 	}
 
 	return result;
+}
+
+// ============================================================================
+// ReadonlyMap-aware transforms (Effect migration)
+// ============================================================================
+
+/**
+ * Convert an array of entities to a ReadonlyMap keyed by entity ID.
+ *
+ * @param items - Array of entities, each must have an 'id' field
+ * @returns ReadonlyMap keyed by entity id
+ *
+ * @example
+ * arrayToMap([
+ *   { id: 'user-1', name: 'Alice' },
+ *   { id: 'user-2', name: 'Bob' }
+ * ])
+ * // Returns: Map { 'user-1' => { id: 'user-1', name: 'Alice' }, 'user-2' => { id: 'user-2', name: 'Bob' } }
+ */
+export function arrayToMap<T extends { readonly id: string }>(
+	items: readonly T[],
+): ReadonlyMap<string, T> {
+	return new Map(items.map((item) => [item.id, item]))
+}
+
+/**
+ * Convert a ReadonlyMap to a Record keyed by entity ID (the on-disk object format).
+ *
+ * @param map - ReadonlyMap of entities keyed by ID
+ * @returns Record keyed by entity id
+ *
+ * @example
+ * mapToObject(new Map([
+ *   ['user-1', { id: 'user-1', name: 'Alice' }],
+ *   ['user-2', { id: 'user-2', name: 'Bob' }],
+ * ]))
+ * // Returns: { 'user-1': { id: 'user-1', name: 'Alice' }, 'user-2': { id: 'user-2', name: 'Bob' } }
+ */
+export function mapToObject<T>(
+	map: ReadonlyMap<string, T>,
+): Record<string, T> {
+	const result: Record<string, T> = {}
+	for (const [key, value] of map) {
+		result[key] = value
+	}
+	return result
+}
+
+/**
+ * Convert a Record keyed by entity ID to a ReadonlyMap.
+ * Inverse of mapToObject.
+ *
+ * @param obj - Record keyed by entity id
+ * @returns ReadonlyMap keyed by entity id
+ *
+ * @example
+ * objectToMap({
+ *   'user-1': { id: 'user-1', name: 'Alice' },
+ *   'user-2': { id: 'user-2', name: 'Bob' },
+ * })
+ * // Returns: Map { 'user-1' => { id: 'user-1', name: 'Alice' }, 'user-2' => { id: 'user-2', name: 'Bob' } }
+ */
+export function objectToMap<T>(
+	obj: Readonly<Record<string, T>>,
+): ReadonlyMap<string, T> {
+	return new Map(Object.entries(obj))
+}
+
+/**
+ * Convert a ReadonlyMap to an array of its values.
+ *
+ * @param map - ReadonlyMap of entities
+ * @returns Array of entity values
+ */
+export function mapToArray<T>(map: ReadonlyMap<string, T>): readonly T[] {
+	return Array.from(map.values())
+}
+
+/**
+ * Extract collections from ReadonlyMap-based state for file storage.
+ *
+ * Takes a Record of collection name → ReadonlyMap and a list of collection
+ * names to include, returning nested Record format suitable for serialization.
+ *
+ * @param stateMaps - Record mapping collection names to their ReadonlyMap state
+ * @param collectionsForFile - Collection names to extract
+ * @returns Nested Record: { collectionName: { id: entity, ... }, ... }
+ */
+export function extractCollectionsFromMaps<T extends { readonly id: string }>(
+	stateMaps: Readonly<Record<string, ReadonlyMap<string, T>>>,
+	collectionsForFile: readonly string[],
+): Record<string, Record<string, T>> {
+	const result: Record<string, Record<string, T>> = {}
+
+	for (const collectionName of collectionsForFile) {
+		const collectionMap = stateMaps[collectionName]
+		if (collectionMap !== undefined) {
+			result[collectionName] = mapToObject(collectionMap)
+		}
+	}
+
+	return result
+}
+
+/**
+ * Merge file data (nested Record format) back into ReadonlyMap-based state.
+ *
+ * Takes existing state maps, file data in Record format, and collection names,
+ * returning updated state maps with the file data merged in.
+ *
+ * @param stateMaps - Current state: Record of collection name → ReadonlyMap
+ * @param fileData - Data from file: { collectionName: { id: entity, ... }, ... }
+ * @param collectionsFromFile - Collection names to update from file data
+ * @returns Updated state maps
+ */
+export function mergeFileDataIntoMaps<T extends { readonly id: string }>(
+	stateMaps: Readonly<Record<string, ReadonlyMap<string, T>>>,
+	fileData: Readonly<Record<string, Readonly<Record<string, T>>>>,
+	collectionsFromFile: readonly string[],
+): Record<string, ReadonlyMap<string, T>> {
+	const result: Record<string, ReadonlyMap<string, T>> = { ...stateMaps }
+
+	for (const collectionName of collectionsFromFile) {
+		const collectionFileData = fileData[collectionName]
+		if (collectionFileData !== undefined) {
+			result[collectionName] = objectToMap(collectionFileData)
+		}
+	}
+
+	return result
 }
