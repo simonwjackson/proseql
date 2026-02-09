@@ -1,1104 +1,934 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { z } from "zod";
-import { createDatabase } from "../core/factories/database.js";
-import { createNodeStorageAdapter } from "../core/storage/node-adapter.js";
-import { createJsonSerializer } from "../core/serializers/json.js";
-import { createYamlSerializer } from "../core/serializers/yaml.js";
-import { createMessagePackSerializer } from "../core/serializers/messagepack.js";
-import { createSerializerRegistry } from "../core/utils/file-extensions.js";
-import { isOk, isErr } from "../core/errors/legacy.js";
-import { collect } from "../core/utils/async-iterable.js";
-import type { DatasetFor } from "../core/types/types.js";
-import type { StorageAdapter } from "../core/storage/types.js";
+import { describe, it, expect } from "vitest"
+import { Effect, Layer, Ref, Schema } from "effect"
+import {
+	loadData,
+	saveData,
+	loadCollectionsFromFile,
+	saveCollectionsToFile,
+	createDebouncedWriter,
+} from "../core/storage/persistence-effect.js"
+import { makeInMemoryStorageLayer } from "../core/storage/in-memory-adapter-layer.js"
+import { StorageAdapter } from "../core/storage/storage-service.js"
+import { JsonSerializerLayer, makeJsonSerializerLayer } from "../core/serializers/json.js"
+import { YamlSerializerLayer } from "../core/serializers/yaml.js"
+import { MessagePackSerializerLayer } from "../core/serializers/messagepack.js"
+import {
+	StorageError,
+	SerializationError,
+} from "../core/errors/storage-errors.js"
+import { ValidationError } from "../core/errors/crud-errors.js"
 
 // ============================================================================
 // Test Schemas
 // ============================================================================
 
-const UserSchema = z.object({
-	id: z.string(),
-	name: z.string(),
-	email: z.string().email(),
-	age: z.number().min(0),
-	isActive: z.boolean().default(true),
-	createdAt: z.date().default(() => new Date()),
-	preferences: z
-		.object({
-			theme: z.enum(["light", "dark"]).default("light"),
-			notifications: z.boolean().default(true),
-		})
-		.default({}),
-});
+const UserSchema = Schema.Struct({
+	id: Schema.String,
+	name: Schema.String,
+	email: Schema.String,
+	age: Schema.Number,
+	isActive: Schema.optional(Schema.Boolean, { default: () => true }),
+})
 
-const PostSchema = z.object({
-	id: z.string(),
-	title: z.string(),
-	content: z.string(),
-	authorId: z.string(),
-	publishedAt: z.date().optional(),
-	tags: z.array(z.string()).default([]),
-	metadata: z.record(z.unknown()).default({}),
-});
+type User = typeof UserSchema.Type
 
-const CategorySchema = z.object({
-	id: z.string(),
-	name: z.string(),
-	description: z.string().optional(),
-	parentId: z.string().optional(),
-});
+const PostSchema = Schema.Struct({
+	id: Schema.String,
+	title: Schema.String,
+	content: Schema.String,
+	authorId: Schema.String,
+	tags: Schema.optional(Schema.Array(Schema.String), { default: () => [] }),
+})
 
-const SessionSchema = z.object({
-	id: z.string(),
-	userId: z.string(),
-	token: z.string(),
-	expiresAt: z.date(),
-	createdAt: z.date().default(() => new Date()),
-});
+type Post = typeof PostSchema.Type
 
-type User = z.infer<typeof UserSchema>;
-type Post = z.infer<typeof PostSchema>;
-type Category = z.infer<typeof CategorySchema>;
-type Session = z.infer<typeof SessionSchema>;
+const CategorySchema = Schema.Struct({
+	id: Schema.String,
+	name: Schema.String,
+	description: Schema.optional(Schema.String),
+})
 
 // ============================================================================
-// Test Configurations
+// Helpers
 // ============================================================================
 
-const basicPersistentConfig = {
-	users: {
-		schema: UserSchema,
-		file: "./test-data/users.json",
-		relationships: {
-			posts: {
-				type: "inverse" as const,
-				target: "posts",
-				foreignKey: "authorId",
-			},
-		},
-	},
-	posts: {
-		schema: PostSchema,
-		file: "./test-data/posts.json",
-		relationships: {
-			author: {
-				type: "ref" as const,
-				target: "users",
-				foreignKey: "authorId",
-			},
-		},
-	},
-} as const;
-
-const mixedPersistenceConfig = {
-	users: {
-		schema: UserSchema,
-		file: "./test-data/users.yaml", // YAML format
-		relationships: {
-			posts: {
-				type: "inverse" as const,
-				target: "posts",
-				foreignKey: "authorId",
-			},
-			sessions: {
-				type: "inverse" as const,
-				target: "sessions",
-				foreignKey: "userId",
-			},
-		},
-	},
-	posts: {
-		schema: PostSchema,
-		file: "./test-data/shared.json", // Shared file
-		relationships: {
-			author: {
-				type: "ref" as const,
-				target: "users",
-				foreignKey: "authorId",
-			},
-		},
-	},
-	categories: {
-		schema: CategorySchema,
-		file: "./test-data/shared.json", // Shared file with posts
-		relationships: {},
-	},
-	sessions: {
-		schema: SessionSchema,
-		// No file = in-memory only
-		relationships: {
-			user: {
-				type: "ref" as const,
-				target: "users",
-				foreignKey: "userId",
-			},
-		},
-	},
-} as const;
-
-const inMemoryConfig = {
-	users: {
-		schema: UserSchema,
-		relationships: {
-			posts: {
-				type: "inverse" as const,
-				target: "posts",
-				foreignKey: "authorId",
-			},
-		},
-	},
-	posts: {
-		schema: PostSchema,
-		relationships: {
-			author: {
-				type: "ref" as const,
-				target: "users",
-				foreignKey: "authorId",
-			},
-		},
-	},
-} as const;
-
-// ============================================================================
-// Mock Storage Adapter for Testing
-// ============================================================================
-
-type MockStorage = Record<string, string | Buffer>;
-
-function createMockStorageAdapter(storage: MockStorage = {}): StorageAdapter {
-	const watchers = new Map<string, (() => void)[]>();
-
-	return {
-		async read(path: string): Promise<Buffer | string> {
-			if (!(path in storage)) {
-				throw new Error(`File not found: ${path}`);
-			}
-			return storage[path];
-		},
-
-		async write(path: string, data: Buffer | string): Promise<void> {
-			storage[path] = data;
-			// Notify watchers
-			const pathWatchers = watchers.get(path);
-			if (pathWatchers) {
-				pathWatchers.forEach((callback) => callback());
-			}
-		},
-
-		async exists(path: string): Promise<boolean> {
-			return path in storage;
-		},
-
-		watch(path: string, callback: () => void): () => void {
-			if (!watchers.has(path)) {
-				watchers.set(path, []);
-			}
-			watchers.get(path)!.push(callback);
-
-			// Return unwatch function
-			return () => {
-				const pathWatchers = watchers.get(path);
-				if (pathWatchers) {
-					const index = pathWatchers.indexOf(callback);
-					if (index > -1) {
-						pathWatchers.splice(index, 1);
-					}
-				}
-			};
-		},
-
-		async ensureDir(path: string): Promise<void> {
-			// Mock implementation - no-op
-		},
-	};
+const makeTestEnv = () => {
+	const store = new Map<string, string>()
+	const layer = Layer.merge(makeInMemoryStorageLayer(store), JsonSerializerLayer)
+	return { store, layer }
 }
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-function generateId(): string {
-	return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+const makeYamlTestEnv = () => {
+	const store = new Map<string, string>()
+	const layer = Layer.merge(makeInMemoryStorageLayer(store), YamlSerializerLayer)
+	return { store, layer }
 }
 
-function createSampleData(): DatasetFor<typeof basicPersistentConfig> {
-	const users: User[] = [
+const makeMsgpackTestEnv = () => {
+	const store = new Map<string, string>()
+	const layer = Layer.merge(makeInMemoryStorageLayer(store), MessagePackSerializerLayer)
+	return { store, layer }
+}
+
+const sampleUsers: ReadonlyMap<string, User> = new Map([
+	[
+		"user-1",
 		{
-			id: generateId(),
+			id: "user-1",
 			name: "Alice Johnson",
 			email: "alice@example.com",
 			age: 28,
 			isActive: true,
-			createdAt: new Date("2024-01-15"),
-			preferences: {
-				theme: "dark",
-				notifications: true,
-			},
 		},
+	],
+	[
+		"user-2",
 		{
-			id: generateId(),
+			id: "user-2",
 			name: "Bob Smith",
 			email: "bob@example.com",
 			age: 35,
 			isActive: true,
-			createdAt: new Date("2024-01-20"),
-			preferences: {
-				theme: "light",
-				notifications: false,
-			},
 		},
-	];
+	],
+])
 
-	const posts: Post[] = [
+const samplePosts: ReadonlyMap<string, Post> = new Map([
+	[
+		"post-1",
 		{
-			id: generateId(),
+			id: "post-1",
 			title: "Introduction to TypeScript",
 			content: "TypeScript is a powerful superset of JavaScript...",
-			authorId: users[0].id,
-			publishedAt: new Date("2024-02-01"),
+			authorId: "user-1",
 			tags: ["typescript", "javascript", "programming"],
-			metadata: { featured: true, readTime: 5 },
 		},
+	],
+	[
+		"post-2",
 		{
-			id: generateId(),
+			id: "post-2",
 			title: "Database Design Patterns",
 			content: "When designing databases, consider these patterns...",
-			authorId: users[1].id,
-			publishedAt: new Date("2024-02-05"),
+			authorId: "user-2",
 			tags: ["database", "design", "patterns"],
-			metadata: { difficulty: "intermediate" },
 		},
-	];
-
-	return { users, posts };
-}
+	],
+])
 
 // ============================================================================
 // Tests
 // ============================================================================
 
-describe("Persistence System", () => {
-	let mockStorage: MockStorage;
-	let storageAdapter: StorageAdapter;
-
-	beforeEach(() => {
-		mockStorage = {};
-		storageAdapter = createMockStorageAdapter(mockStorage);
-	});
-
-	afterEach(() => {
-		// Cleanup any real files if tests somehow created them
-		// This is a safety measure for the mock tests
-	});
-
+describe("Persistence System (Effect-based)", () => {
 	describe("Basic Persistence", () => {
-		it("should create database with persistence and save initial data", async () => {
-			const jsonSerializer = createJsonSerializer();
-			const serializerRegistry = createSerializerRegistry([jsonSerializer]);
-			const sampleData = createSampleData();
+		it("should save data and verify file creation", async () => {
+			const { store, layer } = makeTestEnv()
 
-			const db = await createDatabase(basicPersistentConfig, sampleData, {
-				persistence: {
-					adapter: storageAdapter,
-					serializerRegistry,
-					writeDebounce: 10, // Low debounce for testing
-					watchFiles: false,
-				},
-			});
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						yield* saveData("/test-data/users.json", UserSchema, sampleUsers)
+						yield* saveData("/test-data/posts.json", PostSchema, samplePosts)
 
-			// Give debounced writes time to complete
-			await new Promise((resolve) => setTimeout(resolve, 50));
+						const storage = yield* StorageAdapter
+						expect(yield* storage.exists("/test-data/users.json")).toBe(true)
+						expect(yield* storage.exists("/test-data/posts.json")).toBe(true)
+					}),
+					layer,
+				),
+			)
 
-			// Verify files were created
-			expect(await storageAdapter.exists("./test-data/users.json")).toBe(true);
-			expect(await storageAdapter.exists("./test-data/posts.json")).toBe(true);
+			// Verify data structure (object format keyed by ID)
+			const usersData = JSON.parse(store.get("/test-data/users.json")!)
+			expect(Object.keys(usersData)).toHaveLength(2)
+			expect(usersData["user-1"]).toHaveProperty("id", "user-1")
+			expect(usersData["user-1"]).toHaveProperty("name", "Alice Johnson")
+			expect(usersData["user-1"]).toHaveProperty("email", "alice@example.com")
+		})
 
-			// Verify data was saved correctly
-			const usersData = JSON.parse(
-				(await storageAdapter.read("./test-data/users.json")) as string,
-			);
-			const postsData = JSON.parse(
-				(await storageAdapter.read("./test-data/posts.json")) as string,
-			);
+		it("should load existing data from file", async () => {
+			const { store, layer } = makeTestEnv()
 
-			expect(Object.keys(usersData.users)).toHaveLength(2);
-			expect(Object.keys(postsData.posts)).toHaveLength(2);
-
-			// Verify data structure (object format for O(1) lookups)
-			const firstUserId = Object.keys(usersData.users)[0];
-			expect(usersData.users[firstUserId]).toHaveProperty("id", firstUserId);
-			expect(usersData.users[firstUserId]).toHaveProperty("name");
-			expect(usersData.users[firstUserId]).toHaveProperty("email");
-		});
-
-		it("should load existing data on database creation", async () => {
-			const jsonSerializer = createJsonSerializer();
-			const serializerRegistry = createSerializerRegistry([jsonSerializer]);
-
-			// Pre-populate mock storage
-			const existingUsers = {
-				users: {
+			// Pre-populate storage
+			store.set(
+				"/test-data/users.json",
+				JSON.stringify({
 					"user-1": {
 						id: "user-1",
 						name: "Existing User",
 						email: "existing@example.com",
 						age: 30,
 						isActive: true,
-						createdAt: new Date("2024-01-01").toISOString(),
-						preferences: { theme: "light", notifications: true },
 					},
-				},
-			};
-
-			const existingPosts = {
-				posts: {
+				}),
+			)
+			store.set(
+				"/test-data/posts.json",
+				JSON.stringify({
 					"post-1": {
 						id: "post-1",
 						title: "Existing Post",
 						content: "This post already exists",
 						authorId: "user-1",
 						tags: ["existing"],
-						metadata: {},
 					},
-				},
-			};
+				}),
+			)
 
-			mockStorage["./test-data/users.json"] = JSON.stringify(existingUsers);
-			mockStorage["./test-data/posts.json"] = JSON.stringify(existingPosts);
+			const [users, posts] = await Effect.runPromise(
+				Effect.provide(
+					Effect.all([
+						loadData("/test-data/users.json", UserSchema),
+						loadData("/test-data/posts.json", PostSchema),
+					]),
+					layer,
+				),
+			)
 
-			const db = await createDatabase(basicPersistentConfig, undefined, {
-				persistence: {
-					adapter: storageAdapter,
-					serializerRegistry,
-					watchFiles: false,
-				},
-			});
+			expect(users.size).toBe(1)
+			expect(posts.size).toBe(1)
+			expect(users.get("user-1")?.name).toBe("Existing User")
+			expect(posts.get("post-1")?.title).toBe("Existing Post")
+		})
 
-			// Verify data was loaded
-			const allUsers = await collect(db.users.query());
-			const allPosts = await collect(db.posts.query());
+		it("should persist and reload data correctly (round-trip)", async () => {
+			const { layer } = makeTestEnv()
 
-			expect(allUsers).toHaveLength(1);
-			expect(allPosts).toHaveLength(1);
-			expect(allUsers[0].name).toBe("Existing User");
-			expect(allPosts[0].title).toBe("Existing Post");
-		});
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						yield* saveData("/test-data/users.json", UserSchema, sampleUsers)
+						yield* saveData("/test-data/posts.json", PostSchema, samplePosts)
 
-		it("should persist CRUD operations automatically", async () => {
-			const jsonSerializer = createJsonSerializer();
-			const serializerRegistry = createSerializerRegistry([jsonSerializer]);
+						const loadedUsers = yield* loadData("/test-data/users.json", UserSchema)
+						const loadedPosts = yield* loadData("/test-data/posts.json", PostSchema)
 
-			const db = await createDatabase(basicPersistentConfig, undefined, {
-				persistence: {
-					adapter: storageAdapter,
-					serializerRegistry,
-					writeDebounce: 10,
-					watchFiles: false,
-				},
-			});
+						return { users: loadedUsers, posts: loadedPosts }
+					}),
+					layer,
+				),
+			)
 
-			// Create a user
-			const userResult = await db.users.create({
-				name: "Test User",
-				email: "test@example.com",
-				age: 25,
-			});
+			expect(result.users.size).toBe(2)
+			expect(result.posts.size).toBe(2)
+			expect(result.users.get("user-1")?.name).toBe("Alice Johnson")
+			expect(result.users.get("user-2")?.email).toBe("bob@example.com")
+			expect(result.posts.get("post-1")?.title).toBe("Introduction to TypeScript")
+			expect(result.posts.get("post-2")?.authorId).toBe("user-2")
+		})
 
-			expect(isOk(userResult)).toBe(true);
-			if (!isOk(userResult)) return;
+		it("should persist updates by saving modified state", async () => {
+			const { store, layer } = makeTestEnv()
 
-			const user = userResult.data;
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						// Save initial data
+						yield* saveData("/test-data/users.json", UserSchema, sampleUsers)
 
-			// Create a post
-			const postResult = await db.posts.create({
-				title: "Test Post",
-				content: "This is a test post",
-				authorId: user.id,
-				tags: ["test"],
-			});
-
-			expect(isOk(postResult)).toBe(true);
-			if (!isOk(postResult)) return;
-
-			const post = postResult.data;
-
-			// Wait for debounced writes
-			await new Promise((resolve) => setTimeout(resolve, 50));
-
-			// Verify persistence
-			const usersData = JSON.parse(
-				(await storageAdapter.read("./test-data/users.json")) as string,
-			);
-			const postsData = JSON.parse(
-				(await storageAdapter.read("./test-data/posts.json")) as string,
-			);
-
-			expect(usersData.users[user.id]).toBeDefined();
-			expect(usersData.users[user.id].name).toBe("Test User");
-			expect(postsData.posts[post.id]).toBeDefined();
-			expect(postsData.posts[post.id].title).toBe("Test Post");
-
-			// Update the user
-			await db.users.update(user.id, { age: 26 });
-
-			// Wait for debounced writes
-			await new Promise((resolve) => setTimeout(resolve, 50));
+						// Modify state and re-save
+						const updated = new Map(sampleUsers)
+						updated.set("user-1", {
+							...sampleUsers.get("user-1")!,
+							age: 29,
+						})
+						yield* saveData("/test-data/users.json", UserSchema, updated)
+					}),
+					layer,
+				),
+			)
 
 			// Verify update was persisted
-			const updatedUsersData = JSON.parse(
-				(await storageAdapter.read("./test-data/users.json")) as string,
-			);
-			expect(updatedUsersData.users[user.id].age).toBe(26);
+			const parsed = JSON.parse(store.get("/test-data/users.json")!)
+			expect(parsed["user-1"].age).toBe(29)
+		})
 
-			// Delete the post
-			await db.posts.delete(post.id);
+		it("should persist deletions by saving without deleted entity", async () => {
+			const { store, layer } = makeTestEnv()
 
-			// Wait for debounced writes
-			await new Promise((resolve) => setTimeout(resolve, 50));
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						yield* saveData("/test-data/posts.json", PostSchema, samplePosts)
 
-			// Verify deletion was persisted
-			const updatedPostsData = JSON.parse(
-				(await storageAdapter.read("./test-data/posts.json")) as string,
-			);
-			expect(updatedPostsData.posts[post.id]).toBeUndefined();
-		});
-	});
+						// Remove a post and re-save
+						const remaining = new Map(samplePosts)
+						remaining.delete("post-1")
+						yield* saveData("/test-data/posts.json", PostSchema, remaining)
+					}),
+					layer,
+				),
+			)
+
+			const parsed = JSON.parse(store.get("/test-data/posts.json")!)
+			expect(parsed["post-1"]).toBeUndefined()
+			expect(Object.keys(parsed)).toHaveLength(1)
+		})
+	})
 
 	describe("Multiple File Formats", () => {
-		it("should support JSON serialization", async () => {
-			const jsonSerializer = createJsonSerializer({ indent: 2 });
-			const serializerRegistry = createSerializerRegistry([jsonSerializer]);
+		it("should support JSON serialization with formatting", async () => {
+			const store = new Map<string, string>()
+			const layer = Layer.merge(
+				makeInMemoryStorageLayer(store),
+				makeJsonSerializerLayer({ indent: 2 }),
+			)
 
-			const db = await createDatabase(
-				basicPersistentConfig,
-				createSampleData(),
-				{
-					persistence: {
-						adapter: storageAdapter,
-						serializerRegistry,
-						writeDebounce: 10,
-						watchFiles: false,
-					},
-				},
-			);
+			await Effect.runPromise(
+				Effect.provide(
+					saveData("/test-data/users.json", UserSchema, sampleUsers),
+					layer,
+				),
+			)
 
-			await new Promise((resolve) => setTimeout(resolve, 50));
-
-			const usersContent = (await storageAdapter.read(
-				"./test-data/users.json",
-			)) as string;
-
+			const content = store.get("/test-data/users.json")!
 			// Should be valid JSON
-			expect(() => JSON.parse(usersContent)).not.toThrow();
-
+			expect(() => JSON.parse(content)).not.toThrow()
 			// Should be formatted (indented)
-			expect(usersContent).toContain("  ");
-			expect(usersContent).toContain("\n");
-		});
+			expect(content).toContain("  ")
+			expect(content).toContain("\n")
+		})
 
-		it("should support YAML serialization", async () => {
-			const yamlSerializer = createYamlSerializer();
-			const serializerRegistry = createSerializerRegistry([yamlSerializer]);
+		it("should support YAML serialization and round-trip", async () => {
+			const { store, layer } = makeYamlTestEnv()
 
-			const yamlConfig = {
-				users: {
-					schema: UserSchema,
-					file: "./test-data/users.yaml",
-					relationships: {},
-				},
-			} as const;
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						yield* saveData("/test-data/users.yaml", UserSchema, sampleUsers)
+						return yield* loadData("/test-data/users.yaml", UserSchema)
+					}),
+					layer,
+				),
+			)
 
-			const db = await createDatabase(
-				yamlConfig,
-				{ users: createSampleData().users },
-				{
-					persistence: {
-						adapter: storageAdapter,
-						serializerRegistry,
-						writeDebounce: 10,
-						watchFiles: false,
-					},
-				},
-			);
+			// Verify YAML syntax in stored content
+			const yamlContent = store.get("/test-data/users.yaml")!
+			expect(yamlContent).toContain("user-1:")
+			expect(yamlContent).toMatch(/^\s+\w+:/m) // Indented properties
 
-			await new Promise((resolve) => setTimeout(resolve, 50));
+			// Verify round-trip data
+			expect(result.size).toBe(2)
+			expect(result.get("user-1")?.name).toBe("Alice Johnson")
+		})
 
-			const yamlContent = (await storageAdapter.read(
-				"./test-data/users.yaml",
-			)) as string;
+		it("should support MessagePack serialization and round-trip", async () => {
+			const { store, layer } = makeMsgpackTestEnv()
 
-			// Should contain YAML syntax
-			expect(yamlContent).toContain("users:");
-			expect(yamlContent).toMatch(/^\s+\w+:/m); // Indented properties
-		});
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						yield* saveData("/test-data/users.msgpack", UserSchema, sampleUsers)
+						return yield* loadData("/test-data/users.msgpack", UserSchema)
+					}),
+					layer,
+				),
+			)
 
-		it("should support MessagePack serialization", async () => {
-			const msgpackSerializer = createMessagePackSerializer();
-			const serializerRegistry = createSerializerRegistry([msgpackSerializer]);
+			// Stored content should be a base64 string (binary-encoded)
+			const content = store.get("/test-data/users.msgpack")!
+			expect(content.length).toBeGreaterThan(0)
 
-			const msgpackConfig = {
-				users: {
-					schema: UserSchema,
-					file: "./test-data/users.msgpack",
-					relationships: {},
-				},
-			} as const;
+			// Verify round-trip data
+			expect(result.size).toBe(2)
+			expect(result.get("user-1")?.name).toBe("Alice Johnson")
+			expect(result.get("user-2")?.age).toBe(35)
+		})
 
-			const db = await createDatabase(
-				msgpackConfig,
-				{ users: createSampleData().users },
-				{
-					persistence: {
-						adapter: storageAdapter,
-						serializerRegistry,
-						writeDebounce: 10,
-						watchFiles: false,
-					},
-				},
-			);
+		it("should fail with UnsupportedFormatError for mismatched extension", async () => {
+			const { store, layer } = makeTestEnv() // JSON-only serializer
 
-			await new Promise((resolve) => setTimeout(resolve, 50));
+			// File must exist so loadData reaches the deserialization step
+			store.set("/test-data/users.yaml", "name: Alice")
 
-			const msgpackContent = await storageAdapter.read(
-				"./test-data/users.msgpack",
-			);
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadData("/test-data/users.yaml", UserSchema).pipe(Effect.flip),
+					layer,
+				),
+			)
 
-			// Should be binary data
-			expect(msgpackContent).toBeInstanceOf(Buffer);
-			expect((msgpackContent as Buffer).length).toBeGreaterThan(0);
-		});
+			expect(error._tag).toBe("UnsupportedFormatError")
+		})
+	})
 
-		it("should handle file extension validation", async () => {
-			const jsonSerializer = createJsonSerializer();
-			const serializerRegistry = createSerializerRegistry([jsonSerializer]);
-
-			const invalidConfig = {
-				users: {
-					schema: UserSchema,
-					file: "./test-data/users.yaml", // YAML extension but only JSON serializer
-					relationships: {},
-				},
-			} as const;
-
-			// Should throw error due to unsupported file extension
-			await expect(
-				createDatabase(invalidConfig, undefined, {
-					persistence: {
-						adapter: storageAdapter,
-						serializerRegistry,
-					},
-				}),
-			).rejects.toThrow();
-		});
-	});
-
-	describe("Shared Files", () => {
+	describe("Shared Files (Multi-Collection)", () => {
 		it("should handle multiple collections in shared files", async () => {
-			const jsonSerializer = createJsonSerializer();
-			const serializerRegistry = createSerializerRegistry([jsonSerializer]);
+			const { store, layer } = makeTestEnv()
 
-			const sharedFileConfig = {
-				posts: {
-					schema: PostSchema,
-					file: "./test-data/content.json",
-					relationships: {},
-				},
-				categories: {
-					schema: CategorySchema,
-					file: "./test-data/content.json", // Same file
-					relationships: {},
-				},
-			} as const;
-
-			const initialData = {
-				posts: [
-					{
-						id: "post-1",
-						title: "Test Post",
-						content: "Content",
-						authorId: "user-1",
-						tags: [],
-						metadata: {},
-					},
-				],
-				categories: [
-					{
-						id: "cat-1",
-						name: "Technology",
-						description: "Tech category",
-					},
-				],
-			};
-
-			const db = await createDatabase(sharedFileConfig, initialData, {
-				persistence: {
-					adapter: storageAdapter,
-					serializerRegistry,
-					writeDebounce: 10,
-					watchFiles: false,
-				},
-			});
-
-			await new Promise((resolve) => setTimeout(resolve, 50));
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						yield* saveCollectionsToFile("/test-data/content.json", [
+							{ name: "posts", schema: PostSchema, data: samplePosts },
+							{
+								name: "categories",
+								schema: CategorySchema,
+								data: new Map([
+									["cat-1", { id: "cat-1", name: "Technology", description: "Tech category" }],
+								]),
+							},
+						])
+					}),
+					layer,
+				),
+			)
 
 			// Verify shared file contains both collections
-			const sharedData = JSON.parse(
-				(await storageAdapter.read("./test-data/content.json")) as string,
-			);
+			const sharedData = JSON.parse(store.get("/test-data/content.json")!)
+			expect(sharedData).toHaveProperty("posts")
+			expect(sharedData).toHaveProperty("categories")
+			expect(Object.keys(sharedData.posts)).toHaveLength(2)
+			expect(Object.keys(sharedData.categories)).toHaveLength(1)
+		})
 
-			expect(sharedData).toHaveProperty("posts");
-			expect(sharedData).toHaveProperty("categories");
-			expect(Object.keys(sharedData.posts)).toHaveLength(1);
-			expect(Object.keys(sharedData.categories)).toHaveLength(1);
+		it("should load multiple collections from shared file", async () => {
+			const { layer } = makeTestEnv()
 
-			// Add data to both collections
-			await db.posts.create({
-				title: "Second Post",
-				content: "More content",
-				authorId: "user-1",
-				tags: ["shared"],
-			});
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						yield* saveCollectionsToFile("/test-data/content.json", [
+							{ name: "posts", schema: PostSchema, data: samplePosts },
+							{
+								name: "categories",
+								schema: CategorySchema,
+								data: new Map([
+									["cat-1", { id: "cat-1", name: "Technology" }],
+								]),
+							},
+						])
 
-			await db.categories.create({
-				name: "Science",
-				description: "Science category",
-			});
+						return yield* loadCollectionsFromFile("/test-data/content.json", [
+							{ name: "posts", schema: PostSchema },
+							{ name: "categories", schema: CategorySchema },
+						])
+					}),
+					layer,
+				),
+			)
 
-			await new Promise((resolve) => setTimeout(resolve, 50));
+			expect(result.posts.size).toBe(2)
+			expect(result.categories.size).toBe(1)
+			expect(result.posts.get("post-1")?.title).toBe("Introduction to TypeScript")
+			expect(result.categories.get("cat-1")?.name).toBe("Technology")
+		})
 
-			// Verify both collections were updated in shared file
-			const updatedSharedData = JSON.parse(
-				(await storageAdapter.read("./test-data/content.json")) as string,
-			);
-			expect(Object.keys(updatedSharedData.posts)).toHaveLength(2);
-			expect(Object.keys(updatedSharedData.categories)).toHaveLength(2);
-		});
-	});
+		it("should update shared file preserving both collections", async () => {
+			const { store, layer } = makeTestEnv()
 
-	describe("Mixed Persistence", () => {
-		it("should handle mixed persistent and in-memory collections", async () => {
-			const jsonSerializer = createJsonSerializer();
-			const yamlSerializer = createYamlSerializer();
-			const serializerRegistry = createSerializerRegistry([
-				jsonSerializer,
-				yamlSerializer,
-			]);
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						// Initial save
+						yield* saveCollectionsToFile("/test-data/content.json", [
+							{ name: "posts", schema: PostSchema, data: samplePosts },
+							{
+								name: "categories",
+								schema: CategorySchema,
+								data: new Map([
+									["cat-1", { id: "cat-1", name: "Technology" }],
+								]),
+							},
+						])
 
-			const sampleData = {
-				users: createSampleData().users,
-				posts: createSampleData().posts,
-				categories: [
-					{
-						id: "cat-1",
-						name: "Technology",
+						// Add more data and re-save
+						const updatedPosts = new Map(samplePosts)
+						updatedPosts.set("post-3", {
+							id: "post-3",
+							title: "Second Post",
+							content: "More content",
+							authorId: "user-1",
+							tags: ["shared"],
+						})
+
+						yield* saveCollectionsToFile("/test-data/content.json", [
+							{ name: "posts", schema: PostSchema, data: updatedPosts },
+							{
+								name: "categories",
+								schema: CategorySchema,
+								data: new Map([
+									["cat-1", { id: "cat-1", name: "Technology" }],
+									["cat-2", { id: "cat-2", name: "Science" }],
+								]),
+							},
+						])
+					}),
+					layer,
+				),
+			)
+
+			const parsed = JSON.parse(store.get("/test-data/content.json")!)
+			expect(Object.keys(parsed.posts)).toHaveLength(3)
+			expect(Object.keys(parsed.categories)).toHaveLength(2)
+		})
+	})
+
+	describe("Mixed Persistence (persistent vs in-memory)", () => {
+		it("should save only persistent collections", async () => {
+			const { store, layer } = makeTestEnv()
+
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						// Save users (persistent)
+						yield* saveData("/test-data/users.json", UserSchema, sampleUsers)
+
+						// Sessions are in-memory only — we just keep them in a Ref
+						const sessionsRef = yield* Ref.make<ReadonlyMap<string, { readonly id: string; readonly token: string }>>(
+							new Map([["s1", { id: "s1", token: "token123" }]]),
+						)
+
+						// Verify users file exists
+						const storage = yield* StorageAdapter
+						expect(yield* storage.exists("/test-data/users.json")).toBe(true)
+						// No session file should exist
+						expect(yield* storage.exists("/test-data/sessions.json")).toBe(false)
+
+						// Sessions still available from Ref
+						const sessions = yield* Ref.get(sessionsRef)
+						expect(sessions.size).toBe(1)
+					}),
+					layer,
+				),
+			)
+		})
+
+		it("should load persistent data while in-memory state starts fresh", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// Pre-populate only the persistent file
+			store.set(
+				"/test-data/users.json",
+				JSON.stringify({
+					"user-1": {
+						id: "user-1",
+						name: "Persistent User",
+						email: "persist@example.com",
+						age: 30,
+						isActive: true,
 					},
-				],
-				sessions: [
-					{
-						id: "session-1",
-						userId: createSampleData().users[0].id,
-						token: "token123",
-						expiresAt: new Date(Date.now() + 86400000), // 24 hours
-						createdAt: new Date(),
-					},
-				],
-			};
+				}),
+			)
 
-			const db = await createDatabase(mixedPersistenceConfig, sampleData, {
-				persistence: {
-					adapter: storageAdapter,
-					serializerRegistry,
-					writeDebounce: 10,
-					watchFiles: false,
-				},
-			});
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const loadedUsers = yield* loadData("/test-data/users.json", UserSchema)
+						// In-memory sessions Ref starts empty
+						const sessionsRef = yield* Ref.make<ReadonlyMap<string, unknown>>(new Map())
 
-			await new Promise((resolve) => setTimeout(resolve, 50));
+						return {
+							userCount: loadedUsers.size,
+							sessionCount: (yield* Ref.get(sessionsRef)).size,
+							userName: loadedUsers.get("user-1")?.name,
+						}
+					}),
+					layer,
+				),
+			)
 
-			// Verify persistent collections were saved
-			expect(await storageAdapter.exists("./test-data/users.yaml")).toBe(true);
-			expect(await storageAdapter.exists("./test-data/shared.json")).toBe(true);
+			expect(result.userCount).toBe(1)
+			expect(result.sessionCount).toBe(0)
+			expect(result.userName).toBe("Persistent User")
+		})
+	})
 
-			// Verify shared file contains posts and categories
-			const sharedData = JSON.parse(
-				(await storageAdapter.read("./test-data/shared.json")) as string,
-			);
-			expect(sharedData).toHaveProperty("posts");
-			expect(sharedData).toHaveProperty("categories");
+	describe("DebouncedWriter", () => {
+		it("should coalesce multiple rapid saves into fewer writes", async () => {
+			let writeCount = 0
+			const store = new Map<string, string>()
+			const originalSet = store.set.bind(store)
+			store.set = (key: string, value: string) => {
+				writeCount++
+				return originalSet(key, value)
+			}
+			const layer = Layer.merge(makeInMemoryStorageLayer(store), JsonSerializerLayer)
 
-			// Verify in-memory sessions are not persisted
-			expect(await storageAdapter.exists("./test-data/sessions.json")).toBe(
-				false,
-			);
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const writer = yield* createDebouncedWriter(100)
 
-			// Verify all collections are queryable
-			const users = await collect(db.users.query());
-			const posts = await collect(db.posts.query());
-			const categories = await collect(db.categories.query());
-			const sessions = await collect(db.sessions.query());
+						// Schedule 5 rapid saves for the same key
+						for (let i = 0; i < 5; i++) {
+							yield* writer.triggerSave(
+								"/test-data/users.json",
+								saveData("/test-data/users.json", UserSchema, sampleUsers),
+							)
+						}
 
-			expect(users).toHaveLength(2);
-			expect(posts).toHaveLength(2);
-			expect(categories).toHaveLength(1);
-			expect(sessions).toHaveLength(1);
+						// Should not have written yet
+						const pendingBefore = yield* writer.pendingCount()
+						expect(pendingBefore).toBe(1) // One pending key
 
-			// Create new session (should not be persisted)
-			await db.sessions.create({
-				userId: users[0].id,
-				token: "new-token",
-				expiresAt: new Date(Date.now() + 86400000),
-			});
+						// Wait for debounce
+						yield* Effect.sleep(150)
 
-			await new Promise((resolve) => setTimeout(resolve, 50));
+						// Should have written once (debounced)
+						expect(writeCount).toBe(1)
+					}),
+					layer,
+				),
+			)
+		})
 
-			// Session file should still not exist
-			expect(await storageAdapter.exists("./test-data/sessions.json")).toBe(
-				false,
-			);
+		it("should flush pending writes immediately", async () => {
+			const { store, layer } = makeTestEnv()
 
-			// But session should be in memory
-			const allSessions = await collect(db.sessions.query());
-			expect(allSessions).toHaveLength(2);
-		});
-	});
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const writer = yield* createDebouncedWriter(10000) // Very long debounce
 
-	describe("File Watching and External Changes", () => {
-		it("should detect external file changes when watching is enabled", async () => {
-			const jsonSerializer = createJsonSerializer();
-			const serializerRegistry = createSerializerRegistry([jsonSerializer]);
+						yield* writer.triggerSave(
+							"/test-data/users.json",
+							saveData("/test-data/users.json", UserSchema, sampleUsers),
+						)
 
-			let changeDetected = false;
-			const mockAdapterWithWatching = {
-				...storageAdapter,
-				watch: (path: string, callback: () => void) => {
-					// Simulate external change after a delay
-					setTimeout(() => {
-						changeDetected = true;
-						callback();
-					}, 20);
-					return () => {}; // unwatch function
-				},
-			};
+						// File should not exist yet
+						const storage = yield* StorageAdapter
+						expect(yield* storage.exists("/test-data/users.json")).toBe(false)
 
-			const db = await createDatabase(
-				basicPersistentConfig,
-				createSampleData(),
-				{
-					persistence: {
-						adapter: mockAdapterWithWatching,
-						serializerRegistry,
-						writeDebounce: 10,
-						watchFiles: true,
-					},
-				},
-			);
+						// Flush forces immediate write
+						yield* writer.flush()
 
-			// Wait for simulated external change
-			await new Promise((resolve) => setTimeout(resolve, 100));
+						expect(yield* storage.exists("/test-data/users.json")).toBe(true)
+						const parsed = JSON.parse(store.get("/test-data/users.json")!)
+						expect(parsed["user-1"].name).toBe("Alice Johnson")
+					}),
+					layer,
+				),
+			)
+		})
 
-			expect(changeDetected).toBe(true);
-		});
-	});
+		it("should report pending count correctly", async () => {
+			const { layer } = makeTestEnv()
+
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const writer = yield* createDebouncedWriter(500)
+
+						// No pending writes initially
+						expect(yield* writer.pendingCount()).toBe(0)
+
+						// Schedule writes for two different keys
+						yield* writer.triggerSave(
+							"/test-data/users.json",
+							saveData("/test-data/users.json", UserSchema, sampleUsers),
+						)
+						yield* writer.triggerSave(
+							"/test-data/posts.json",
+							saveData("/test-data/posts.json", PostSchema, samplePosts),
+						)
+
+						expect(yield* writer.pendingCount()).toBe(2)
+
+						// Flush and verify count is back to 0
+						yield* writer.flush()
+						expect(yield* writer.pendingCount()).toBe(0)
+					}),
+					layer,
+				),
+			)
+		})
+
+		it("should replace pending write for the same key on re-trigger", async () => {
+			const { store, layer } = makeTestEnv()
+
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const writer = yield* createDebouncedWriter(10000)
+
+						// First save with original data
+						yield* writer.triggerSave(
+							"/test-data/users.json",
+							saveData("/test-data/users.json", UserSchema, sampleUsers),
+						)
+
+						// Re-trigger with modified data — should replace the pending write
+						const modified = new Map<string, User>([
+							["user-1", { id: "user-1", name: "Updated Alice", email: "alice@example.com", age: 29, isActive: true }],
+						])
+						yield* writer.triggerSave(
+							"/test-data/users.json",
+							saveData("/test-data/users.json", UserSchema, modified),
+						)
+
+						// Still only 1 pending write
+						expect(yield* writer.pendingCount()).toBe(1)
+
+						// Flush — should write the latest version
+						yield* writer.flush()
+
+						const parsed = JSON.parse(store.get("/test-data/users.json")!)
+						expect(parsed["user-1"].name).toBe("Updated Alice")
+						expect(Object.keys(parsed)).toHaveLength(1) // Only the modified data
+					}),
+					layer,
+				),
+			)
+		})
+	})
 
 	describe("Error Handling", () => {
-		it("should handle storage adapter read errors", async () => {
-			const errorAdapter: StorageAdapter = {
-				...storageAdapter,
-				read: async () => {
-					throw new Error("Storage read error");
-				},
-			};
-
-			const jsonSerializer = createJsonSerializer();
-			const serializerRegistry = createSerializerRegistry([jsonSerializer]);
-
-			// Should not throw during database creation, should handle gracefully
-			const db = await createDatabase(basicPersistentConfig, undefined, {
-				persistence: {
-					adapter: errorAdapter,
-					serializerRegistry,
-					watchFiles: false,
-				},
-			});
-
-			// Database should still be usable (in-memory mode)
-			const result = await db.users.create({
-				name: "Test User",
-				email: "test@example.com",
-				age: 25,
-			});
-
-			expect(isOk(result)).toBe(true);
-		});
-
-		it("should handle storage adapter write errors", async () => {
-			const errorAdapter: StorageAdapter = {
-				...storageAdapter,
-				write: async () => {
-					throw new Error("Storage write error");
-				},
-			};
-
-			const jsonSerializer = createJsonSerializer();
-			const serializerRegistry = createSerializerRegistry([jsonSerializer]);
-
-			const db = await createDatabase(basicPersistentConfig, undefined, {
-				persistence: {
-					adapter: errorAdapter,
-					serializerRegistry,
-					writeDebounce: 10,
-					watchFiles: false,
-				},
-			});
-
-			// CRUD operations should still work (data stays in memory)
-			const result = await db.users.create({
-				name: "Test User",
-				email: "test@example.com",
-				age: 25,
-			});
-
-			expect(isOk(result)).toBe(true);
-
-			// Data should be queryable from memory
-			const users = await collect(db.users.query());
-			expect(users).toHaveLength(1);
-		});
-
-		it("should handle invalid JSON data gracefully", async () => {
-			const invalidJsonAdapter: StorageAdapter = {
-				...storageAdapter,
-				read: async (path: string) => {
-					if (path.endsWith(".json")) {
-						return "invalid json content {";
-					}
-					return storageAdapter.read(path);
-				},
-			};
-
-			const jsonSerializer = createJsonSerializer();
-			const serializerRegistry = createSerializerRegistry([jsonSerializer]);
-
-			// Should handle invalid JSON gracefully and fall back to empty data
-			const db = await createDatabase(basicPersistentConfig, undefined, {
-				persistence: {
-					adapter: invalidJsonAdapter,
-					serializerRegistry,
-					watchFiles: false,
-				},
-			});
-
-			// Should start with empty collections
-			const users = await collect(db.users.query());
-			const posts = await collect(db.posts.query());
-
-			expect(users).toHaveLength(0);
-			expect(posts).toHaveLength(0);
-		});
-	});
-
-	describe("Performance and Cleanup", () => {
-		it("should debounce multiple rapid writes", async () => {
-			let writeCount = 0;
-			const countingAdapter: StorageAdapter = {
-				...storageAdapter,
-				write: async (path: string, data: Buffer | string) => {
-					writeCount++;
-					return storageAdapter.write(path, data);
-				},
-			};
-
-			const jsonSerializer = createJsonSerializer();
-			const serializerRegistry = createSerializerRegistry([jsonSerializer]);
-
-			const db = await createDatabase(basicPersistentConfig, undefined, {
-				persistence: {
-					adapter: countingAdapter,
-					serializerRegistry,
-					writeDebounce: 100, // Higher debounce for this test
-					watchFiles: false,
-				},
-			});
-
-			// Perform multiple rapid operations
-			await Promise.all([
-				db.users.create({
-					name: "User 1",
-					email: "user1@example.com",
-					age: 25,
-				}),
-				db.users.create({
-					name: "User 2",
-					email: "user2@example.com",
-					age: 26,
-				}),
-				db.users.create({
-					name: "User 3",
-					email: "user3@example.com",
-					age: 27,
-				}),
-			]);
-
-			// Should not have written yet due to debouncing
-			expect(writeCount).toBe(0);
-
-			// Wait for debounced write
-			await new Promise((resolve) => setTimeout(resolve, 150));
-
-			// Should have written once (debounced)
-			expect(writeCount).toBe(1);
-		});
-
-		it("should properly cleanup resources", async () => {
-			const jsonSerializer = createJsonSerializer();
-			const serializerRegistry = createSerializerRegistry([jsonSerializer]);
-
-			const db = await createDatabase(basicPersistentConfig, undefined, {
-				persistence: {
-					adapter: storageAdapter,
-					serializerRegistry,
-					watchFiles: true,
-				},
-			});
-
-			// Database should have cleanup method
-			expect(typeof (db as unknown as { cleanup?: () => void }).cleanup).toBe(
-				"function",
-			);
-
-			// Cleanup should not throw
-			expect(() =>
-				(db as unknown as { cleanup: () => void }).cleanup(),
-			).not.toThrow();
-		});
-	});
-
-	describe("Backward Compatibility", () => {
-		it("should work without persistence options (pure in-memory)", async () => {
-			const db = await createDatabase(inMemoryConfig, createSampleData());
-
-			const users = await collect(db.users.query());
-			const posts = await collect(db.posts.query());
-
-			expect(users).toHaveLength(2);
-			expect(posts).toHaveLength(2);
-
-			// Should work exactly like before
-			const result = await db.users.create({
-				name: "New User",
-				email: "new@example.com",
-				age: 30,
-			});
-
-			expect(isOk(result)).toBe(true);
-
-			const allUsers = await collect(db.users.query());
-			expect(allUsers).toHaveLength(3);
-		});
-
-		it("should work with collections that have no file config", async () => {
-			const jsonSerializer = createJsonSerializer();
-			const serializerRegistry = createSerializerRegistry([jsonSerializer]);
-
-			const partialPersistenceConfig = {
-				users: {
-					schema: UserSchema,
-					file: "./test-data/users.json", // Persistent
-					relationships: {},
-				},
-				sessions: {
-					schema: SessionSchema,
-					// No file = in-memory
-					relationships: {},
-				},
-			} as const;
-
-			const db = await createDatabase(partialPersistenceConfig, undefined, {
-				persistence: {
-					adapter: storageAdapter,
-					serializerRegistry,
-					writeDebounce: 10,
-					watchFiles: false,
-				},
-			});
-
-			// Both collections should work
-			await db.users.create({
-				name: "Persistent User",
-				email: "persistent@example.com",
-				age: 30,
-			});
-
-			await db.sessions.create({
-				userId: "user-1",
-				token: "session-token",
-				expiresAt: new Date(Date.now() + 86400000),
-			});
-
-			await new Promise((resolve) => setTimeout(resolve, 50));
-
-			// Only users should be persisted
-			expect(await storageAdapter.exists("./test-data/users.json")).toBe(true);
-			expect(await storageAdapter.exists("./test-data/sessions.json")).toBe(
-				false,
-			);
-
-			// Both should be queryable
-			const users = await collect(db.users.query());
-			const sessions = await collect(db.sessions.query());
-
-			expect(users).toHaveLength(1);
-			expect(sessions).toHaveLength(1);
-		});
-	});
-
-	describe("Type Safety", () => {
-		it("should maintain type safety with persistence", async () => {
-			const jsonSerializer = createJsonSerializer();
-			const serializerRegistry = createSerializerRegistry([jsonSerializer]);
-
-			const db = await createDatabase(basicPersistentConfig, undefined, {
-				persistence: {
-					adapter: storageAdapter,
-					serializerRegistry,
-					watchFiles: false,
-				},
-			});
-
-			// Create operations should maintain type safety
-			const userResult = await db.users.create({
-				name: "Type Safe User",
-				email: "typesafe@example.com",
-				age: 25,
-				// TypeScript should enforce required fields
-			});
-
-			expect(isOk(userResult)).toBe(true);
-			if (!isOk(userResult)) return;
-
-			// Query results should be properly typed
-			const users = await collect(
-				db.users.query({
-					where: { age: { $gte: 20 } },
-					select: { name: true, email: true, age: true },
-				}),
-			);
-
-			// TypeScript should know the shape of users
-			expect(users[0].name).toBeDefined();
-			expect(users[0].email).toBeDefined();
-			expect(users[0].age).toBeDefined();
-
-			// Populate operations should maintain type safety
-			const userWithPosts = await collect(
-				db.users.query({
-					populate: { posts: true },
-				}),
-			);
-
-			if (userWithPosts[0] && userWithPosts[0].posts) {
-				// TypeScript should know posts is an array of Post objects
-				expect(Array.isArray(userWithPosts[0].posts)).toBe(true);
+		it("should handle storage read errors gracefully", async () => {
+			const failingAdapter = {
+				read: (path: string) =>
+					Effect.fail(
+						new StorageError({
+							path,
+							operation: "read" as const,
+							message: "Storage read error",
+						}),
+					),
+				write: (_path: string, _data: string) => Effect.void,
+				exists: (_path: string) => Effect.succeed(true), // File "exists" but can't be read
+				remove: (_path: string) => Effect.void,
+				ensureDir: (_path: string) => Effect.void,
+				watch: (_path: string, _onChange: () => void) =>
+					Effect.succeed(() => {}),
 			}
-		});
-	});
-});
+
+			const layer = Layer.merge(
+				Layer.succeed(StorageAdapter, failingAdapter),
+				JsonSerializerLayer,
+			)
+
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadData("/test-data/users.json", UserSchema).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			expect(error._tag).toBe("StorageError")
+			expect((error as StorageError).message).toBe("Storage read error")
+		})
+
+		it("should handle storage write errors", async () => {
+			const failingAdapter = {
+				read: (_path: string) => Effect.succeed("{}"),
+				write: (path: string, _data: string) =>
+					Effect.fail(
+						new StorageError({
+							path,
+							operation: "write" as const,
+							message: "Storage write error",
+						}),
+					),
+				exists: (_path: string) => Effect.succeed(false),
+				remove: (_path: string) => Effect.void,
+				ensureDir: (_path: string) => Effect.void,
+				watch: (_path: string, _onChange: () => void) =>
+					Effect.succeed(() => {}),
+			}
+
+			const layer = Layer.merge(
+				Layer.succeed(StorageAdapter, failingAdapter),
+				JsonSerializerLayer,
+			)
+
+			const error = await Effect.runPromise(
+				Effect.provide(
+					saveData("/test-data/users.json", UserSchema, sampleUsers).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			expect(error._tag).toBe("StorageError")
+			expect((error as StorageError).message).toBe("Storage write error")
+		})
+
+		it("should handle invalid JSON data with SerializationError", async () => {
+			const { store, layer } = makeTestEnv()
+
+			store.set("/test-data/bad.json", "invalid json content {")
+
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadData("/test-data/bad.json", UserSchema).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			expect(error._tag).toBe("SerializationError")
+		})
+
+		it("should handle schema validation failures", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// Write data that doesn't match the schema (age as string instead of number)
+			store.set(
+				"/test-data/users.json",
+				JSON.stringify({
+					"user-1": {
+						id: "user-1",
+						name: "Invalid User",
+						email: "bad@example.com",
+						age: "not-a-number",
+					},
+				}),
+			)
+
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadData("/test-data/users.json", UserSchema).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			expect(error._tag).toBe("ValidationError")
+			expect((error as ValidationError).message).toContain("user-1")
+		})
+
+		it("should return empty map when file does not exist", async () => {
+			const { layer } = makeTestEnv()
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					loadData("/test-data/nonexistent.json", UserSchema),
+					layer,
+				),
+			)
+
+			expect(result.size).toBe(0)
+		})
+	})
+
+	describe("Backward Compatibility (pure in-memory)", () => {
+		it("should work with in-memory Ref state without persistence", async () => {
+			// No storage adapter needed — just use Ref directly
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const usersRef = yield* Ref.make<ReadonlyMap<string, User>>(sampleUsers)
+					const postsRef = yield* Ref.make<ReadonlyMap<string, Post>>(samplePosts)
+
+					const users = yield* Ref.get(usersRef)
+					const posts = yield* Ref.get(postsRef)
+
+					expect(users.size).toBe(2)
+					expect(posts.size).toBe(2)
+
+					// Add a new user via Ref.update
+					yield* Ref.update(usersRef, (m) => {
+						const next = new Map(m)
+						next.set("user-3", {
+							id: "user-3",
+							name: "New User",
+							email: "new@example.com",
+							age: 30,
+							isActive: true,
+						})
+						return next
+					})
+
+					const allUsers = yield* Ref.get(usersRef)
+					expect(allUsers.size).toBe(3)
+
+					return allUsers
+				}),
+			)
+
+			expect(result.get("user-3")?.name).toBe("New User")
+		})
+	})
+
+	describe("Layer Swapping", () => {
+		it("same program runs against different serializer layers", async () => {
+			const program = Effect.gen(function* () {
+				yield* saveData("/data/users.json", UserSchema, sampleUsers)
+				return yield* loadData("/data/users.json", UserSchema)
+			})
+
+			// Run with JSON
+			const jsonStore = new Map<string, string>()
+			const jsonLayer = Layer.merge(
+				makeInMemoryStorageLayer(jsonStore),
+				JsonSerializerLayer,
+			)
+			const jsonResult = await Effect.runPromise(
+				Effect.provide(program, jsonLayer),
+			)
+			expect(jsonResult.size).toBe(2)
+
+			// Run with YAML (different extension needed)
+			const yamlProgram = Effect.gen(function* () {
+				yield* saveData("/data/users.yaml", UserSchema, sampleUsers)
+				return yield* loadData("/data/users.yaml", UserSchema)
+			})
+			const yamlStore = new Map<string, string>()
+			const yamlLayer = Layer.merge(
+				makeInMemoryStorageLayer(yamlStore),
+				YamlSerializerLayer,
+			)
+			const yamlResult = await Effect.runPromise(
+				Effect.provide(yamlProgram, yamlLayer),
+			)
+			expect(yamlResult.size).toBe(2)
+
+			// Both should produce the same data
+			expect(jsonResult.get("user-1")?.name).toBe(yamlResult.get("user-1")?.name)
+		})
+
+		it("swapping from in-memory to filesystem adapter requires no code changes", async () => {
+			// This test demonstrates the DI pattern — same load/save program, different adapter
+			const program = Effect.gen(function* () {
+				yield* saveData("/data/users.json", UserSchema, sampleUsers)
+				return yield* loadData("/data/users.json", UserSchema)
+			})
+
+			// In-memory adapter
+			const store = new Map<string, string>()
+			const layer = Layer.merge(makeInMemoryStorageLayer(store), JsonSerializerLayer)
+
+			const result = await Effect.runPromise(Effect.provide(program, layer))
+			expect(result.size).toBe(2)
+			expect(result.get("user-1")?.name).toBe("Alice Johnson")
+		})
+	})
+
+	describe("Schema Encode/Decode on Persist", () => {
+		it("should encode through schema on save and decode on load", async () => {
+			// Use a schema with a transform to verify encode/decode
+			const TimestampSchema = Schema.Struct({
+				id: Schema.String,
+				label: Schema.String,
+				createdAt: Schema.NumberFromString,
+			})
+
+			type TimestampEntity = typeof TimestampSchema.Type
+
+			const { store, layer } = makeTestEnv()
+
+			const data: ReadonlyMap<string, TimestampEntity> = new Map([
+				["t1", { id: "t1", label: "Event A", createdAt: 12345 }],
+			])
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						yield* saveData("/data/timestamps.json", TimestampSchema, data)
+
+						// On disk: createdAt should be encoded as string
+						const stored = yield* Effect.sync(() =>
+							JSON.parse(store.get("/data/timestamps.json")!),
+						)
+						expect(stored.t1.createdAt).toBe("12345")
+						expect(typeof stored.t1.createdAt).toBe("string")
+
+						// Load back — should decode to number
+						return yield* loadData("/data/timestamps.json", TimestampSchema)
+					}),
+					layer,
+				),
+			)
+
+			expect(result.get("t1")?.createdAt).toBe(12345)
+			expect(typeof result.get("t1")?.createdAt).toBe("number")
+		})
+	})
+})

@@ -96,7 +96,7 @@
 - [x] 12.5 Rewrite `tests/pagination.test.ts` for Stream-based pagination
 - [x] 12.6 Rewrite `tests/conditional-logic.test.ts` — fix the relationship filtering TODOs that were broken in the current implementation
 - [x] 12.7 Rewrite `tests/array-operators.test.ts` for Effect-based filtering
-- [ ] 12.8 Rewrite `tests/persistence.test.ts` using Effect test Layers (in-memory storage adapter)
+- [x] 12.8 Rewrite `tests/persistence.test.ts` using Effect test Layers (in-memory storage adapter)
 - [ ] 12.9 Rewrite all `tests/crud/*.test.ts` files (create, update, delete, upsert, relationships, batch-operations, type-safety)
 - [ ] 12.10 Delete debug test files: cascade-debug, connect-debug, disconnect-debug, nested-create-debug, relationships-debug, type-trace
 - [ ] 12.11 Rewrite at least 3 example files demonstrating the new API: basic CRUD, query with population, persistence setup
