@@ -717,116 +717,138 @@ describe("createPersistentEffectDatabase", () => {
 	describe("persistence hooks", () => {
 		it("should create a database with flush and pendingCount", async () => {
 			const { layer } = makeTestLayer()
-			const db = await Effect.runPromise(
-				Effect.provide(
-					createPersistentEffectDatabase(persistentConfig, initialData),
-					layer,
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, initialData),
+							layer,
+						)
+						expect(typeof db.flush).toBe("function")
+						expect(typeof db.pendingCount).toBe("function")
+						expect(db.users).toBeDefined()
+						expect(db.companies).toBeDefined()
+						expect(db.posts).toBeDefined()
+					}),
 				),
 			)
-			expect(typeof db.flush).toBe("function")
-			expect(typeof db.pendingCount).toBe("function")
-			expect(db.users).toBeDefined()
-			expect(db.companies).toBeDefined()
-			expect(db.posts).toBeDefined()
 		})
 
 		it("create should trigger a debounced save for persistent collections", async () => {
 			const { store, layer } = makeTestLayer()
-			const db = await Effect.runPromise(
-				Effect.provide(
-					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
-					layer,
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
+							layer,
+						)
+
+						// Create a company (has file configured)
+						yield* db.companies.create({ name: "NewCo" })
+
+						// Flush to ensure writes complete
+						yield* Effect.promise(() => db.flush())
+
+						// The companies file should now exist
+						expect(store.has("/data/companies.json")).toBe(true)
+						const parsed = JSON.parse(store.get("/data/companies.json")!)
+						const values = Object.values(parsed) as Array<Record<string, unknown>>
+						expect(values.length).toBe(3) // 2 initial + 1 created
+						expect(values.some((v) => v.name === "NewCo")).toBe(true)
+					}),
 				),
 			)
-
-			// Create a company (has file configured)
-			await Effect.runPromise(db.companies.create({ name: "NewCo" }))
-
-			// Flush to ensure writes complete
-			await db.flush()
-
-			// The companies file should now exist
-			expect(store.has("/data/companies.json")).toBe(true)
-			const parsed = JSON.parse(store.get("/data/companies.json")!)
-			const values = Object.values(parsed) as Array<Record<string, unknown>>
-			expect(values.length).toBe(3) // 2 initial + 1 created
-			expect(values.some((v) => v.name === "NewCo")).toBe(true)
 		})
 
 		it("update should trigger a debounced save", async () => {
 			const { store, layer } = makeTestLayer()
-			const db = await Effect.runPromise(
-				Effect.provide(
-					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
-					layer,
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
+							layer,
+						)
+
+						yield* db.users.update("u1", { name: "Alice Updated" })
+						yield* Effect.promise(() => db.flush())
+
+						expect(store.has("/data/users.json")).toBe(true)
+						const parsed = JSON.parse(store.get("/data/users.json")!)
+						expect(parsed.u1.name).toBe("Alice Updated")
+					}),
 				),
 			)
-
-			await Effect.runPromise(db.users.update("u1", { name: "Alice Updated" }))
-			await db.flush()
-
-			expect(store.has("/data/users.json")).toBe(true)
-			const parsed = JSON.parse(store.get("/data/users.json")!)
-			expect(parsed.u1.name).toBe("Alice Updated")
 		})
 
 		it("delete should trigger a debounced save", async () => {
 			const { store, layer } = makeTestLayer()
-			const db = await Effect.runPromise(
-				Effect.provide(
-					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
-					layer,
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
+							layer,
+						)
+
+						yield* db.users.delete("u3")
+						yield* Effect.promise(() => db.flush())
+
+						expect(store.has("/data/users.json")).toBe(true)
+						const parsed = JSON.parse(store.get("/data/users.json")!)
+						expect(parsed.u3).toBeUndefined()
+						expect(Object.keys(parsed)).toHaveLength(2) // u1, u2
+					}),
 				),
 			)
-
-			await Effect.runPromise(db.users.delete("u3"))
-			await db.flush()
-
-			expect(store.has("/data/users.json")).toBe(true)
-			const parsed = JSON.parse(store.get("/data/users.json")!)
-			expect(parsed.u3).toBeUndefined()
-			expect(Object.keys(parsed)).toHaveLength(2) // u1, u2
 		})
 
 		it("upsert should trigger a debounced save", async () => {
 			const { store, layer } = makeTestLayer()
-			const db = await Effect.runPromise(
-				Effect.provide(
-					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
-					layer,
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
+							layer,
+						)
+
+						yield* db.companies.upsert({
+							where: { id: "c99" },
+							create: { name: "UpsertCo" },
+							update: { name: "Updated" },
+						})
+						yield* Effect.promise(() => db.flush())
+
+						expect(store.has("/data/companies.json")).toBe(true)
+						const parsed = JSON.parse(store.get("/data/companies.json")!)
+						const values = Object.values(parsed) as Array<Record<string, unknown>>
+						expect(values.some((v) => v.name === "UpsertCo")).toBe(true)
+					}),
 				),
 			)
-
-			await Effect.runPromise(
-				db.companies.upsert({
-					where: { id: "c99" },
-					create: { name: "UpsertCo" },
-					update: { name: "Updated" },
-				}),
-			)
-			await db.flush()
-
-			expect(store.has("/data/companies.json")).toBe(true)
-			const parsed = JSON.parse(store.get("/data/companies.json")!)
-			const values = Object.values(parsed) as Array<Record<string, unknown>>
-			expect(values.some((v) => v.name === "UpsertCo")).toBe(true)
 		})
 
 		it("mutations on non-persistent collections should NOT trigger saves", async () => {
 			const { store, layer } = makeTestLayer()
-			const db = await Effect.runPromise(
-				Effect.provide(
-					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
-					layer,
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10 }),
+							layer,
+						)
+
+						// Posts have no file configured
+						yield* db.posts.create({ title: "New Post", content: "Body", authorId: "u1" })
+						yield* Effect.promise(() => db.flush())
+
+						// No posts file should exist
+						expect(store.has("/data/posts.json")).toBe(false)
+					}),
 				),
 			)
-
-			// Posts have no file configured
-			await Effect.runPromise(db.posts.create({ title: "New Post", content: "Body", authorId: "u1" }))
-			await db.flush()
-
-			// No posts file should exist
-			expect(store.has("/data/posts.json")).toBe(false)
 		})
 
 		it("rapid mutations should coalesce into fewer writes", async () => {
@@ -843,93 +865,109 @@ describe("createPersistentEffectDatabase", () => {
 				JsonSerializerLayer,
 			)
 
-			const db = await Effect.runPromise(
-				Effect.provide(
-					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 50 }),
-					trackingLayer,
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 50 }),
+							trackingLayer,
+						)
+
+						// Perform 5 rapid creates
+						for (let i = 0; i < 5; i++) {
+							yield* db.companies.create({ name: `Co${i}` })
+						}
+
+						// Flush ensures all pending writes complete
+						yield* Effect.promise(() => db.flush())
+
+						// Due to debouncing, fewer than 5 writes should have occurred
+						// After flush, exactly 1 final write happens (the flush save)
+						expect(writeCount).toBeLessThanOrEqual(5)
+						expect(writeCount).toBeGreaterThanOrEqual(1)
+
+						// Verify all 7 companies are in the final state (2 initial + 5 created)
+						const parsed = JSON.parse(trackingStore.get("/data/companies.json")!)
+						expect(Object.keys(parsed)).toHaveLength(7)
+					}),
 				),
 			)
-
-			// Perform 5 rapid creates
-			for (let i = 0; i < 5; i++) {
-				await Effect.runPromise(db.companies.create({ name: `Co${i}` }))
-			}
-
-			// Flush ensures all pending writes complete
-			await db.flush()
-
-			// Due to debouncing, fewer than 5 writes should have occurred
-			// After flush, exactly 1 final write happens (the flush save)
-			expect(writeCount).toBeLessThanOrEqual(5)
-			expect(writeCount).toBeGreaterThanOrEqual(1)
-
-			// Verify all 7 companies are in the final state (2 initial + 5 created)
-			const parsed = JSON.parse(trackingStore.get("/data/companies.json")!)
-			expect(Object.keys(parsed)).toHaveLength(7)
 		})
 
 		it("pendingCount should reflect pending writes", async () => {
 			const { layer } = makeTestLayer()
-			const db = await Effect.runPromise(
-				Effect.provide(
-					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 500 }),
-					layer,
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 500 }),
+							layer,
+						)
+
+						// No pending writes initially
+						expect(db.pendingCount()).toBe(0)
+
+						// After a mutation on a persistent collection, there should be a pending write
+						yield* db.companies.create({ name: "CountCo" })
+
+						expect(db.pendingCount()).toBeGreaterThanOrEqual(1)
+
+						// Flush and verify count is back to 0
+						yield* Effect.promise(() => db.flush())
+						expect(db.pendingCount()).toBe(0)
+					}),
 				),
 			)
-
-			// No pending writes initially
-			expect(db.pendingCount()).toBe(0)
-
-			// After a mutation on a persistent collection, there should be a pending write
-			await Effect.runPromise(db.companies.create({ name: "CountCo" }))
-
-			expect(db.pendingCount()).toBeGreaterThanOrEqual(1)
-
-			// Flush and verify count is back to 0
-			await db.flush()
-			expect(db.pendingCount()).toBe(0)
 		})
 
 		it("flush should execute all pending writes immediately", async () => {
 			const { store, layer } = makeTestLayer()
-			const db = await Effect.runPromise(
-				Effect.provide(
-					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10000 }),
-					layer,
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10000 }),
+							layer,
+						)
+
+						// Create with a very long debounce
+						yield* db.companies.create({ name: "FlushCo" })
+
+						// File should not exist yet (debounce hasn't fired)
+						expect(store.has("/data/companies.json")).toBe(false)
+
+						// Flush forces immediate write
+						yield* Effect.promise(() => db.flush())
+						expect(store.has("/data/companies.json")).toBe(true)
+						const parsed = JSON.parse(store.get("/data/companies.json")!)
+						const values = Object.values(parsed) as Array<Record<string, unknown>>
+						expect(values.some((v) => v.name === "FlushCo")).toBe(true)
+					}),
 				),
 			)
-
-			// Create with a very long debounce
-			await Effect.runPromise(db.companies.create({ name: "FlushCo" }))
-
-			// File should not exist yet (debounce hasn't fired)
-			expect(store.has("/data/companies.json")).toBe(false)
-
-			// Flush forces immediate write
-			await db.flush()
-			expect(store.has("/data/companies.json")).toBe(true)
-			const parsed = JSON.parse(store.get("/data/companies.json")!)
-			const values = Object.values(parsed) as Array<Record<string, unknown>>
-			expect(values.some((v) => v.name === "FlushCo")).toBe(true)
 		})
 
 		it("save captures latest state at write time (not mutation time)", async () => {
 			const { store, layer } = makeTestLayer()
-			const db = await Effect.runPromise(
-				Effect.provide(
-					createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10000 }),
-					layer,
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 10000 }),
+							layer,
+						)
+
+						// Do two mutations before flush — the save should capture the final state
+						yield* db.users.update("u1", { name: "First" })
+						yield* db.users.update("u1", { name: "Final" })
+
+						yield* Effect.promise(() => db.flush())
+
+						const parsed = JSON.parse(store.get("/data/users.json")!)
+						expect(parsed.u1.name).toBe("Final")
+					}),
 				),
 			)
-
-			// Do two mutations before flush — the save should capture the final state
-			await Effect.runPromise(db.users.update("u1", { name: "First" }))
-			await Effect.runPromise(db.users.update("u1", { name: "Final" }))
-
-			await db.flush()
-
-			const parsed = JSON.parse(store.get("/data/users.json")!)
-			expect(parsed.u1.name).toBe("Final")
 		})
 
 		it("existing non-persistent createEffectDatabase still works unchanged", async () => {
@@ -939,6 +977,89 @@ describe("createPersistentEffectDatabase", () => {
 			)
 			const result = await Effect.runPromise(db.companies.create({ name: "OldAPI" }))
 			expect(result.name).toBe("OldAPI")
+		})
+	})
+
+	describe("scoped lifecycle (acquireRelease cleanup)", () => {
+		it("scope close should flush pending writes automatically", async () => {
+			const { store, layer } = makeTestLayer()
+
+			// Run the entire lifecycle within Effect.scoped — when the scope closes,
+			// the finalizer flushes all pending debounced writes.
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 60000 }),
+							layer,
+						)
+
+						// Create entities — debounce is very long so no natural write will fire
+						yield* db.companies.create({ name: "ScopedCo" })
+						yield* db.users.update("u1", { name: "ScopedAlice" })
+
+						// Verify writes have NOT happened yet (debounce hasn't fired)
+						expect(store.has("/data/companies.json")).toBe(false)
+						expect(store.has("/data/users.json")).toBe(false)
+
+						// Scope will close here, triggering the finalizer → flush
+					}),
+				),
+			)
+
+			// After scope close, finalizer should have flushed all pending writes
+			expect(store.has("/data/companies.json")).toBe(true)
+			expect(store.has("/data/users.json")).toBe(true)
+
+			const companies = JSON.parse(store.get("/data/companies.json")!)
+			const values = Object.values(companies) as Array<Record<string, unknown>>
+			expect(values.some((v) => v.name === "ScopedCo")).toBe(true)
+
+			const users = JSON.parse(store.get("/data/users.json")!)
+			expect(users.u1.name).toBe("ScopedAlice")
+		})
+
+		it("scope close should clear pending timers after flush", async () => {
+			const { store, layer } = makeTestLayer()
+
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 60000 }),
+							layer,
+						)
+
+						yield* db.companies.create({ name: "TimerCo" })
+						expect(db.pendingCount()).toBeGreaterThanOrEqual(1)
+
+						// Scope closes here — finalizer flushes and shuts down
+					}),
+				),
+			)
+
+			// After scope close, data should be written
+			expect(store.has("/data/companies.json")).toBe(true)
+		})
+
+		it("scope close with no pending writes should be a no-op", async () => {
+			const { store, layer } = makeTestLayer()
+
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, initialData, { writeDebounce: 100 }),
+							layer,
+						)
+						// No mutations — scope close should not write anything
+					}),
+				),
+			)
+
+			// No files should have been written
+			expect(store.has("/data/companies.json")).toBe(false)
+			expect(store.has("/data/users.json")).toBe(false)
 		})
 	})
 })

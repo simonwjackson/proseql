@@ -9,7 +9,7 @@
  * Persistence: Optional debounced save after each CRUD mutation via Effect.fork
  */
 
-import { Effect, Ref, Stream, Schema, Chunk, Layer } from "effect"
+import { Effect, Ref, Stream, Schema, Chunk, Layer, Scope } from "effect"
 import type { DatabaseConfig } from "../types/database-config-types.js"
 import type { CollectionConfig } from "../types/database-config-types.js"
 import type {
@@ -269,6 +269,8 @@ interface PersistenceTrigger {
 	readonly flush: () => Promise<void>
 	/** Number of pending writes */
 	readonly pendingCount: () => number
+	/** Cancel all pending timers without executing saves */
+	readonly shutdown: () => void
 }
 
 const createPersistenceTrigger = (
@@ -309,7 +311,14 @@ const createPersistenceTrigger = (
 
 	const pendingCount = (): number => pendingTimers.size
 
-	return { schedule, flush, pendingCount }
+	const shutdown = (): void => {
+		for (const [, timer] of pendingTimers) {
+			clearTimeout(timer)
+		}
+		pendingTimers.clear()
+	}
+
+	return { schedule, flush, pendingCount, shutdown }
 }
 
 /**
@@ -566,7 +575,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 ): Effect.Effect<
 	EffectDatabaseWithPersistence<Config>,
 	never,
-	StorageAdapter | SerializerRegistry
+	StorageAdapter | SerializerRegistry | Scope.Scope
 > =>
 	Effect.gen(function* () {
 		// 1. Resolve services from the environment and capture as a Layer
@@ -625,7 +634,15 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			makeSaveEffect,
 		)
 
-		// 5. Build each collection with its Ref, state refs, and persistence hooks
+		// 5. Register scope finalizer: flush pending writes and shut down timers
+		yield* Effect.addFinalizer(() =>
+			Effect.promise(() => trigger.flush()).pipe(
+				Effect.catchAll(() => Effect.void),
+				Effect.tap(() => Effect.sync(() => trigger.shutdown())),
+			),
+		)
+
+		// 6. Build each collection with its Ref, state refs, and persistence hooks
 		const collections: Record<string, EffectCollection<HasId>> = {}
 
 		for (const collectionName of Object.keys(config)) {

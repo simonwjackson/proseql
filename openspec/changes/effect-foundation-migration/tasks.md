@@ -77,7 +77,7 @@
 - [x] 10.2 Implement the composable query function: read Ref snapshot → Stream.fromIterable → pipe(filter, populate, sort, paginate, select). Return Stream with typed error channel
 - [x] 10.3 Add convenience `.runPromise` property/method to query results and CRUD return values for non-Effect consumers
 - [x] 10.4 Wire persistence hooks: after each CRUD mutation, trigger debounced save via Effect.fork
-- [ ] 10.5 Wire database cleanup via Effect.acquireRelease: stop watchers, flush writes on scope close
+- [x] 10.5 Wire database cleanup via Effect.acquireRelease: stop watchers, flush writes on scope close
 - [ ] 10.6 Implement `findById(id)` as a first-class method using O(1) ReadonlyMap lookup
 
 ## 11. Type System Update
