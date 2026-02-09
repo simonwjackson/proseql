@@ -40,7 +40,7 @@
 
 - [x] 6.1 Create `core/operations/query/filter-stream.ts` implementing filter as a Stream combinator: `applyFilter(where)` returning `<T>(stream: Stream<T>) => Stream<T>`. Migrate all operator matching logic from current filter.ts
 - [x] 6.2 Create `core/operations/query/sort-stream.ts` implementing sort as a Stream combinator: `applySort(sort)` returning `<T>(stream: Stream<T>) => Stream<T>`. Uses Stream.runCollect → sort → Stream.fromIterable
-- [ ] 6.3 Create `core/operations/query/select-stream.ts` implementing select as a Stream combinator: `applySelect(select)` returning `<T>(stream: Stream<T>) => Stream<Selected<T>>`. Support both object and array selection
+- [x] 6.3 Create `core/operations/query/select-stream.ts` implementing select as a Stream combinator: `applySelect(select)` returning `<T>(stream: Stream<T>) => Stream<Selected<T>>`. Support both object and array selection
 - [ ] 6.4 Create `core/operations/query/paginate-stream.ts` implementing pagination as Stream combinators: `applyPagination(offset, limit)` using Stream.drop/Stream.take
 - [ ] 6.5 Write tests for each query stage independently: filter with all operators ($eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $startsWith, $endsWith, $contains, $all, $size, $or, $and, $not), sort asc/desc, select object/array, pagination offset/limit
 
