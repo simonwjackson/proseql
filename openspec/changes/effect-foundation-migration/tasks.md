@@ -32,7 +32,7 @@
 - [x] 5.3 Create `core/storage/in-memory-adapter-layer.ts` implementing StorageAdapter as an in-memory Map for testing
 - [x] 5.4 Create `core/serializers/serializer-service.ts` defining SerializerRegistry as an Effect Service. Methods: `serialize(data, extension)` and `deserialize(content, extension)` returning Effect
 - [x] 5.5 Migrate `core/serializers/json.ts` to return Effect values. Create JsonSerializerLayer
-- [ ] 5.6 Implement real YAML serializer in `core/serializers/yaml.ts` using js-yaml (replace mock). Create YamlSerializerLayer
+- [x] 5.6 Implement real YAML serializer in `core/serializers/yaml.ts` using js-yaml (replace mock). Create YamlSerializerLayer
 - [ ] 5.7 Implement real MessagePack serializer in `core/serializers/messagepack.ts` using msgpackr (replace mock). Create MessagePackSerializerLayer
 - [ ] 5.8 Write tests for storage services: read/write via service, serialization round-trips, Layer swapping (in-memory vs filesystem)
 
