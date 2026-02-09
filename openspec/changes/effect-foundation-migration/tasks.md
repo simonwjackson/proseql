@@ -9,7 +9,7 @@
 - [x] 2.1 Create `core/types/schema-types.ts` with Effect Schema equivalents of the current entity types (Schema.Struct-based). Export helper types: `EntitySchema<T>`, `InferEntity<S>`, `InferEncoded<S>`
 - [x] 2.2 Update `core/types/database-config-types.ts` to accept `Schema.Schema` in the `schema` field instead of `z.ZodType`. Update CollectionConfig, DatabaseConfig types
 - [x] 2.3 Create `core/validators/schema-validator.ts` with Effect Schema decode/encode wrappers: `validateEntity(schema, data)` returning `Effect<T, ValidationError>`, `encodeEntity(schema, entity)` returning `Effect<Encoded, ValidationError>`
-- [ ] 2.4 Write tests for schema validation: valid data decodes, invalid data produces ParseError, round-trip encode/decode preserves data
+- [x] 2.4 Write tests for schema validation: valid data decodes, invalid data produces ParseError, round-trip encode/decode preserves data
 
 ## 3. Error Model Migration
 
