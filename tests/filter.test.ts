@@ -1,5 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { filterData } from "../core/operations/query/filter";
+import { Effect, Stream, Chunk } from "effect";
+import { applyFilter } from "../core/operations/query/filter-stream";
+
+const collectFiltered = <T extends Record<string, unknown>>(
+	data: T[],
+	where: Record<string, unknown> | undefined,
+): Promise<readonly T[]> =>
+	Effect.runPromise(
+		Stream.fromIterable(data).pipe(
+			applyFilter<T>(where),
+			Stream.runCollect,
+			Effect.map(Chunk.toReadonlyArray),
+		),
+	);
 
 describe("Conditional Logic Operators", () => {
 	const testData = [
@@ -47,8 +60,8 @@ describe("Conditional Logic Operators", () => {
 	];
 
 	describe("$or operator", () => {
-		it("should return items matching any condition", () => {
-			const result = filterData(testData, {
+		it("should return items matching any condition", async () => {
+			const result = await collectFiltered(testData, {
 				$or: [
 					{ name: { $startsWith: "John" } },
 					{ email: { $contains: "@company.com" } },
@@ -59,24 +72,24 @@ describe("Conditional Logic Operators", () => {
 			expect(result.map((r) => r.id)).toEqual([1, 3, 4]);
 		});
 
-		it("should return empty when no conditions match", () => {
-			const result = filterData(testData, {
+		it("should return empty when no conditions match", async () => {
+			const result = await collectFiltered(testData, {
 				$or: [{ age: { $gt: 50 } }, { role: "nonexistent" }],
 			});
 
 			expect(result).toHaveLength(0);
 		});
 
-		it("should handle empty array as false", () => {
-			const result = filterData(testData, {
+		it("should handle empty array as false", async () => {
+			const result = await collectFiltered(testData, {
 				$or: [],
 			});
 
 			expect(result).toHaveLength(0);
 		});
 
-		it("should handle nested conditions", () => {
-			const result = filterData(testData, {
+		it("should handle nested conditions", async () => {
+			const result = await collectFiltered(testData, {
 				$or: [
 					{ age: { $gte: 30 } },
 					{ $and: [{ role: "user" }, { active: true }] },
@@ -89,8 +102,8 @@ describe("Conditional Logic Operators", () => {
 	});
 
 	describe("$and operator", () => {
-		it("should return items matching all conditions", () => {
-			const result = filterData(testData, {
+		it("should return items matching all conditions", async () => {
+			const result = await collectFiltered(testData, {
 				$and: [{ age: { $gte: 18 } }, { active: true }],
 			});
 
@@ -98,24 +111,24 @@ describe("Conditional Logic Operators", () => {
 			expect(result.map((r) => r.id)).toEqual([1, 5]);
 		});
 
-		it("should return empty when any condition fails", () => {
-			const result = filterData(testData, {
+		it("should return empty when any condition fails", async () => {
+			const result = await collectFiltered(testData, {
 				$and: [{ role: "admin" }, { active: true }, { age: { $gt: 30 } }],
 			});
 
 			expect(result).toHaveLength(0);
 		});
 
-		it("should handle empty array as true (vacuous truth)", () => {
-			const result = filterData(testData, {
+		it("should handle empty array as true (vacuous truth)", async () => {
+			const result = await collectFiltered(testData, {
 				$and: [],
 			});
 
 			expect(result).toHaveLength(5);
 		});
 
-		it("should work with other field filters", () => {
-			const result = filterData(testData, {
+		it("should work with other field filters", async () => {
+			const result = await collectFiltered(testData, {
 				role: "admin",
 				$and: [{ active: false }, { age: { $gt: 30 } }],
 			});
@@ -126,8 +139,8 @@ describe("Conditional Logic Operators", () => {
 	});
 
 	describe("$not operator", () => {
-		it("should return items not matching the condition", () => {
-			const result = filterData(testData, {
+		it("should return items not matching the condition", async () => {
+			const result = await collectFiltered(testData, {
 				$not: { email: { $endsWith: "@spam.com" } },
 			});
 
@@ -135,8 +148,8 @@ describe("Conditional Logic Operators", () => {
 			expect(result.map((r) => r.id)).toEqual([1, 2, 4, 5]);
 		});
 
-		it("should handle complex nested conditions", () => {
-			const result = filterData(testData, {
+		it("should handle complex nested conditions", async () => {
+			const result = await collectFiltered(testData, {
 				$not: {
 					$and: [{ role: "admin" }, { active: true }],
 				},
@@ -146,8 +159,8 @@ describe("Conditional Logic Operators", () => {
 			expect(result.map((r) => r.id)).toEqual([2, 3, 4, 5]);
 		});
 
-		it("should work with direct equality", () => {
-			const result = filterData(testData, {
+		it("should work with direct equality", async () => {
+			const result = await collectFiltered(testData, {
 				$not: { role: "admin" },
 			});
 
@@ -157,8 +170,8 @@ describe("Conditional Logic Operators", () => {
 	});
 
 	describe("Complex nested combinations", () => {
-		it("should handle OR with nested AND conditions", () => {
-			const result = filterData(testData, {
+		it("should handle OR with nested AND conditions", async () => {
+			const result = await collectFiltered(testData, {
 				$or: [
 					{
 						$and: [{ role: "admin" }, { active: true }],
@@ -171,8 +184,8 @@ describe("Conditional Logic Operators", () => {
 			expect(result.map((r) => r.id)).toEqual([1, 5]);
 		});
 
-		it("should handle NOT with OR conditions", () => {
-			const result = filterData(testData, {
+		it("should handle NOT with OR conditions", async () => {
+			const result = await collectFiltered(testData, {
 				$not: {
 					$or: [{ age: { $lt: 20 } }, { role: "moderator" }],
 				},
@@ -182,8 +195,8 @@ describe("Conditional Logic Operators", () => {
 			expect(result.map((r) => r.id)).toEqual([1, 2, 3]);
 		});
 
-		it("should handle deeply nested conditions", () => {
-			const result = filterData(testData, {
+		it("should handle deeply nested conditions", async () => {
+			const result = await collectFiltered(testData, {
 				$and: [
 					{
 						$or: [{ age: { $gte: 30 } }, { role: "admin" }],
@@ -198,8 +211,8 @@ describe("Conditional Logic Operators", () => {
 			expect(result.map((r) => r.id)).toEqual([2, 3]);
 		});
 
-		it("should combine logical operators with regular field filters", () => {
-			const result = filterData(testData, {
+		it("should combine logical operators with regular field filters", async () => {
+			const result = await collectFiltered(testData, {
 				email: { $contains: ".com" },
 				$or: [
 					{ role: "admin" },
@@ -215,8 +228,8 @@ describe("Conditional Logic Operators", () => {
 	});
 
 	describe("Additional complex scenarios", () => {
-		it("should handle multiple levels of nesting", () => {
-			const result = filterData(testData, {
+		it("should handle multiple levels of nesting", async () => {
+			const result = await collectFiltered(testData, {
 				$or: [
 					{
 						$not: {
@@ -240,19 +253,22 @@ describe("Conditional Logic Operators", () => {
 			expect(result.map((r) => r.id).sort()).toEqual([1, 2, 4, 5]);
 		});
 
-		it("should handle field existence checks with operators", () => {
+		it("should handle field existence checks with operators", async () => {
 			// Add an item without certain fields
 			const dataWithMissing = [
 				...testData,
-				{ id: 6, name: "Test User" }, // Missing most fields
+				{ id: 6, name: "Test User" },
 			];
 
-			const result = filterData(dataWithMissing as typeof testData, {
-				$or: [
-					{ email: { $eq: undefined } }, // Should match item 6
-					{ role: "admin" },
-				],
-			});
+			const result = await collectFiltered(
+				dataWithMissing as typeof testData,
+				{
+					$or: [
+						{ email: { $eq: undefined } }, // Should match item 6
+						{ role: "admin" },
+					],
+				},
+			);
 
 			expect(result).toHaveLength(3);
 			expect(result.map((r) => r.id).sort()).toEqual([1, 3, 6]);
@@ -260,8 +276,8 @@ describe("Conditional Logic Operators", () => {
 	});
 
 	describe("Edge cases", () => {
-		it("should handle invalid where clause in $or", () => {
-			const result = filterData(testData, {
+		it("should handle invalid where clause in $or", async () => {
+			const result = await collectFiltered(testData, {
 				$or: [null, { name: "John Doe" }, undefined] as unknown as Array<
 					Record<string, unknown>
 				>,
@@ -271,16 +287,18 @@ describe("Conditional Logic Operators", () => {
 			expect(result[0].id).toBe(1);
 		});
 
-		it("should handle non-array value for $or", () => {
-			const result = filterData(testData, {
-				$or: { name: "John Doe" } as unknown as Array<Record<string, unknown>>,
+		it("should handle non-array value for $or", async () => {
+			const result = await collectFiltered(testData, {
+				$or: { name: "John Doe" } as unknown as Array<
+					Record<string, unknown>
+				>,
 			});
 
 			expect(result).toHaveLength(0);
 		});
 
-		it("should handle non-object value for $not", () => {
-			const result = filterData(testData, {
+		it("should handle non-object value for $not", async () => {
+			const result = await collectFiltered(testData, {
 				$not: "invalid" as unknown as Record<string, unknown>,
 			});
 

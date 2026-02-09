@@ -89,7 +89,7 @@
 
 ## 12. Tests and Examples
 
-- [ ] 12.1 Rewrite `tests/filtering.test.ts` and `tests/filter.test.ts` using Effect test utilities (Effect.runPromise, Stream.runCollect)
+- [x] 12.1 Rewrite `tests/filtering.test.ts` and `tests/filter.test.ts` using Effect test utilities (Effect.runPromise, Stream.runCollect)
 - [ ] 12.2 Rewrite `tests/sorting.test.ts` for Stream-based sort
 - [ ] 12.3 Rewrite `tests/populate.test.ts` for Stream-based population
 - [ ] 12.4 Rewrite `tests/field-selection.test.ts`, `tests/select.test.ts`, `tests/object-select.test.ts`, `tests/select-integration.test.ts` for Stream-based select
