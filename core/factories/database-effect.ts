@@ -8,7 +8,7 @@
  * CRUD: Effect-based operations with typed error channels
  */
 
-import { Effect, Ref, Stream, Schema } from "effect"
+import { Effect, Ref, Stream, Schema, Chunk } from "effect"
 import type { DatabaseConfig } from "../types/database-config-types.js"
 import type { CollectionConfig } from "../types/database-config-types.js"
 import type {
@@ -55,6 +55,70 @@ import type {
 } from "../errors/crud-errors.js"
 
 // ============================================================================
+// Convenience API: runPromise
+// ============================================================================
+
+/**
+ * An Effect with a lazy `runPromise` getter for non-Effect consumers.
+ * Accessing `.runPromise` runs the effect and returns a Promise.
+ */
+export type RunnableEffect<A, E> = Effect.Effect<A, E, never> & {
+	readonly runPromise: Promise<A>
+}
+
+/**
+ * A Stream with a lazy `runPromise` getter for non-Effect consumers.
+ * Accessing `.runPromise` collects the stream into an array and returns a Promise.
+ */
+export type RunnableStream<A, E> = Stream.Stream<A, E, never> & {
+	readonly runPromise: Promise<ReadonlyArray<A>>
+}
+
+/**
+ * Attach a lazy `runPromise` getter to an Effect value.
+ * The effect is only executed when `.runPromise` is accessed.
+ */
+const withRunPromise = <A, E>(
+	effect: Effect.Effect<A, E, never>,
+): RunnableEffect<A, E> => {
+	let cached: Promise<A> | undefined
+	Object.defineProperty(effect, "runPromise", {
+		get() {
+			if (cached === undefined) {
+				cached = Effect.runPromise(effect)
+			}
+			return cached
+		},
+		enumerable: false,
+		configurable: true,
+	})
+	return effect as RunnableEffect<A, E>
+}
+
+/**
+ * Attach a lazy `runPromise` getter to a Stream value.
+ * The stream is collected into an array when `.runPromise` is accessed.
+ */
+const withStreamRunPromise = <A, E>(
+	stream: Stream.Stream<A, E, never>,
+): RunnableStream<A, E> => {
+	let cached: Promise<ReadonlyArray<A>> | undefined
+	Object.defineProperty(stream, "runPromise", {
+		get() {
+			if (cached === undefined) {
+				cached = Effect.runPromise(
+					Stream.runCollect(stream).pipe(Effect.map(Chunk.toReadonlyArray)),
+				)
+			}
+			return cached
+		},
+		enumerable: false,
+		configurable: true,
+	})
+	return stream as RunnableStream<A, E>
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -62,7 +126,8 @@ type HasId = { readonly id: string }
 
 /**
  * Shape of a single Effect-based collection.
- * Query returns a Stream, CRUD methods return Effects.
+ * Query returns a RunnableStream, CRUD methods return RunnableEffects.
+ * Both have a `.runPromise` getter for non-Effect consumers.
  */
 export interface EffectCollection<T extends HasId> {
 	readonly query: (options?: {
@@ -72,15 +137,15 @@ export interface EffectCollection<T extends HasId> {
 		readonly select?: Record<string, unknown> | ReadonlyArray<string>
 		readonly limit?: number
 		readonly offset?: number
-	}) => Stream.Stream<Record<string, unknown>, DanglingReferenceError>
+	}) => RunnableStream<Record<string, unknown>, DanglingReferenceError>
 
 	readonly create: (
 		input: CreateInput<T>,
-	) => Effect.Effect<T, ValidationError | DuplicateKeyError | ForeignKeyError>
+	) => RunnableEffect<T, ValidationError | DuplicateKeyError | ForeignKeyError>
 	readonly createMany: (
 		inputs: ReadonlyArray<CreateInput<T>>,
 		options?: CreateManyOptions,
-	) => Effect.Effect<
+	) => RunnableEffect<
 		CreateManyResult<T>,
 		ValidationError | DuplicateKeyError | ForeignKeyError
 	>
@@ -88,48 +153,48 @@ export interface EffectCollection<T extends HasId> {
 	readonly update: (
 		id: string,
 		updates: UpdateWithOperators<T & MinimalEntity>,
-	) => Effect.Effect<T, ValidationError | NotFoundError | ForeignKeyError>
+	) => RunnableEffect<T, ValidationError | NotFoundError | ForeignKeyError>
 	readonly updateMany: (
 		predicate: (entity: T) => boolean,
 		updates: UpdateWithOperators<T & MinimalEntity>,
-	) => Effect.Effect<UpdateManyResult<T>, ValidationError | ForeignKeyError>
+	) => RunnableEffect<UpdateManyResult<T>, ValidationError | ForeignKeyError>
 
 	readonly delete: (
 		id: string,
 		options?: { readonly soft?: boolean },
-	) => Effect.Effect<T, NotFoundError | OperationError | ForeignKeyError>
+	) => RunnableEffect<T, NotFoundError | OperationError | ForeignKeyError>
 	readonly deleteMany: (
 		predicate: (entity: T) => boolean,
 		options?: { readonly soft?: boolean; readonly limit?: number },
-	) => Effect.Effect<
+	) => RunnableEffect<
 		DeleteManyResult<T>,
 		OperationError | ForeignKeyError
 	>
 
 	readonly upsert: (
 		input: UpsertInput<T>,
-	) => Effect.Effect<UpsertResult<T>, ValidationError | ForeignKeyError>
+	) => RunnableEffect<UpsertResult<T>, ValidationError | ForeignKeyError>
 	readonly upsertMany: (
 		inputs: ReadonlyArray<UpsertInput<T>>,
-	) => Effect.Effect<UpsertManyResult<T>, ValidationError | ForeignKeyError>
+	) => RunnableEffect<UpsertManyResult<T>, ValidationError | ForeignKeyError>
 
 	readonly createWithRelationships: (
 		input: CreateWithRelationshipsInput<T, Record<string, RelationshipDef>>,
-	) => Effect.Effect<
+	) => RunnableEffect<
 		T,
 		ValidationError | ForeignKeyError | OperationError
 	>
 	readonly updateWithRelationships: (
 		id: string,
 		input: UpdateWithRelationshipsInput<T, Record<string, RelationshipDef>>,
-	) => Effect.Effect<
+	) => RunnableEffect<
 		T,
 		ValidationError | NotFoundError | ForeignKeyError | OperationError
 	>
 	readonly deleteWithRelationships: (
 		id: string,
 		options?: DeleteWithRelationshipsOptions<T, Record<string, RelationshipDef>>,
-	) => Effect.Effect<
+	) => RunnableEffect<
 		DeleteWithRelationshipsResult<T>,
 		NotFoundError | ValidationError | OperationError
 	>
@@ -138,7 +203,7 @@ export interface EffectCollection<T extends HasId> {
 		options?: DeleteWithRelationshipsOptions<T, Record<string, RelationshipDef>> & {
 			readonly limit?: number
 		},
-	) => Effect.Effect<
+	) => RunnableEffect<
 		{
 			readonly count: number
 			readonly deleted: ReadonlyArray<T>
@@ -227,7 +292,7 @@ const buildCollection = <T extends HasId>(
 			readonly limit?: number
 			readonly offset?: number
 		},
-	): Stream.Stream<Record<string, unknown>, DanglingReferenceError> => {
+	): RunnableStream<Record<string, unknown>, DanglingReferenceError> => {
 		// Determine populate config: explicit populate or extract from object-based select
 		let populateConfig = options?.populate
 		if (
@@ -241,51 +306,59 @@ const buildCollection = <T extends HasId>(
 			)
 		}
 
-		return Stream.unwrap(
+		const stream = Stream.unwrap(
 			Effect.gen(function* () {
 				const map = yield* Ref.get(ref)
 				const items = Array.from(map.values()) as Array<Record<string, unknown>>
-				let stream: Stream.Stream<Record<string, unknown>, DanglingReferenceError> =
+				let s: Stream.Stream<Record<string, unknown>, DanglingReferenceError> =
 					Stream.fromIterable(items)
 
 				// Apply pipeline stages
-				stream = applyFilter(options?.where)(stream)
-				stream = applyPopulate(
+				s = applyFilter(options?.where)(s)
+				s = applyPopulate(
 					populateConfig as Record<string, boolean | Record<string, unknown>> | undefined,
 					stateRefs as Record<string, Ref.Ref<ReadonlyMap<string, Record<string, unknown>>>>,
 					dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target: string; readonly foreignKey?: string }> }>,
 					collectionName,
-				)(stream)
-				stream = applySort(options?.sort)(stream)
-				stream = applyPagination(options?.offset, options?.limit)(stream)
-				stream = applySelect(options?.select as Record<string, unknown> | ReadonlyArray<string> | undefined)(stream)
+				)(s)
+				s = applySort(options?.sort)(s)
+				s = applyPagination(options?.offset, options?.limit)(s)
+				s = applySelect(options?.select as Record<string, unknown> | ReadonlyArray<string> | undefined)(s)
 
-				return stream
+				return s
 			}),
 		)
+
+		return withStreamRunPromise(stream)
 	}
 
-	// Wire CRUD operations
-	const createFn = create(collectionName, schema, relationships, ref, stateRefs)
-	const createManyFn = createMany(collectionName, schema, relationships, ref, stateRefs)
-	const updateFn = update(collectionName, schema, relationships, ref, stateRefs)
-	const updateManyFn = updateMany(collectionName, schema, relationships, ref, stateRefs)
-	const deleteFn = del(collectionName, allRelationships, ref, stateRefs)
-	const deleteManyFn = deleteMany(collectionName, allRelationships, ref, stateRefs)
-	const upsertFn = upsert(collectionName, schema, relationships, ref, stateRefs)
-	const upsertManyFn = upsertMany(collectionName, schema, relationships, ref, stateRefs)
-	const createWithRelsFn = createWithRelationships(
+	// Helper to wrap a function so its return value gets .runPromise
+	const wrapEffect = <Args extends ReadonlyArray<unknown>, A, E>(
+		fn: (...args: Args) => Effect.Effect<A, E, never>,
+	) =>
+		(...args: Args): RunnableEffect<A, E> => withRunPromise(fn(...args))
+
+	// Wire CRUD operations with runPromise convenience
+	const createFn = wrapEffect(create(collectionName, schema, relationships, ref, stateRefs))
+	const createManyFn = wrapEffect(createMany(collectionName, schema, relationships, ref, stateRefs))
+	const updateFn = wrapEffect(update(collectionName, schema, relationships, ref, stateRefs))
+	const updateManyFn = wrapEffect(updateMany(collectionName, schema, relationships, ref, stateRefs))
+	const deleteFn = wrapEffect(del(collectionName, allRelationships, ref, stateRefs))
+	const deleteManyFn = wrapEffect(deleteMany(collectionName, allRelationships, ref, stateRefs))
+	const upsertFn = wrapEffect(upsert(collectionName, schema, relationships, ref, stateRefs))
+	const upsertManyFn = wrapEffect(upsertMany(collectionName, schema, relationships, ref, stateRefs))
+	const createWithRelsFn = wrapEffect(createWithRelationships(
 		collectionName, schema, relationships, ref, stateRefs, dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target?: string; readonly __targetCollection?: string; readonly foreignKey?: string }> }>,
-	)
-	const updateWithRelsFn = updateWithRelationships(
+	))
+	const updateWithRelsFn = wrapEffect(updateWithRelationships(
 		collectionName, schema, relationships, ref, stateRefs, dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target?: string; readonly __targetCollection?: string; readonly foreignKey?: string }> }>,
-	)
-	const deleteWithRelsFn = deleteWithRelationships(
+	))
+	const deleteWithRelsFn = wrapEffect(deleteWithRelationships(
 		collectionName, relationships, ref, stateRefs, dbConfig as Record<string, { readonly schema: unknown; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target?: string; readonly __targetCollection?: string; readonly foreignKey?: string }> }>,
-	)
-	const deleteManyWithRelsFn = deleteManyWithRelationships(
+	))
+	const deleteManyWithRelsFn = wrapEffect(deleteManyWithRelationships(
 		collectionName, relationships, ref, stateRefs, dbConfig as Record<string, { readonly schema: unknown; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target?: string; readonly __targetCollection?: string; readonly foreignKey?: string }> }>,
-	)
+	))
 
 	return {
 		query: queryFn,

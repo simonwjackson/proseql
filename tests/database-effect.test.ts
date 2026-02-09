@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Schema, Stream, Chunk } from "effect"
-import { createEffectDatabase } from "../core/factories/database-effect.js"
+import { createEffectDatabase, type RunnableEffect, type RunnableStream } from "../core/factories/database-effect.js"
 
 // ============================================================================
 // Test Schemas
@@ -529,6 +529,144 @@ describe("createEffectDatabase", () => {
 				}),
 			)
 			expect(result).toEqual({ tag: "NotFoundError" })
+		})
+	})
+
+	describe("runPromise convenience API", () => {
+		it("query().runPromise should return an array of entities", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, initialData),
+			)
+			const users = await db.users.query().runPromise
+			expect(Array.isArray(users)).toBe(true)
+			expect(users).toHaveLength(3)
+			expect(users.map((u) => u.name)).toContain("Alice")
+		})
+
+		it("query().runPromise with filter should return filtered array", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, initialData),
+			)
+			const users = await db.users.query({ where: { age: { $gt: 28 } } }).runPromise
+			expect(users).toHaveLength(2)
+			expect(users.map((u) => u.name)).toContain("Alice")
+			expect(users.map((u) => u.name)).toContain("Charlie")
+		})
+
+		it("query().runPromise with sort/limit should return sorted subset", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, initialData),
+			)
+			const users = await db.users.query({
+				sort: { age: "asc" },
+				limit: 2,
+			}).runPromise
+			expect(users).toHaveLength(2)
+			expect(users[0].name).toBe("Bob")
+			expect(users[1].name).toBe("Alice")
+		})
+
+		it("create().runPromise should return the created entity", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, initialData),
+			)
+			const company = await db.companies.create({
+				name: "RunPromiseCo",
+				industry: "Testing",
+			}).runPromise
+			expect(company.name).toBe("RunPromiseCo")
+			expect(company.id).toBeDefined()
+		})
+
+		it("update().runPromise should return the updated entity", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, initialData),
+			)
+			const user = await db.users.update("u1", { name: "Alice V2" }).runPromise
+			expect(user.name).toBe("Alice V2")
+			expect(user.id).toBe("u1")
+		})
+
+		it("delete().runPromise should return the deleted entity", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, initialData),
+			)
+			const post = await db.posts.delete("p3").runPromise
+			expect(post.title).toBe("TypeScript Tips")
+		})
+
+		it("upsert().runPromise should return the upserted entity", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, initialData),
+			)
+			const result = await db.companies.upsert({
+				where: { id: "c99" },
+				create: { name: "UpsertRunPromise" },
+				update: { name: "Updated" },
+			}).runPromise
+			expect(result.name).toBe("UpsertRunPromise")
+			expect(result.__action).toBe("created")
+		})
+
+		it("create().runPromise should reject on error", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, initialData),
+			)
+			await expect(
+				db.users.create({
+					id: "u1",
+					name: "Duplicate",
+					email: "dup@test.com",
+					age: 20,
+					companyId: "c1",
+				}).runPromise,
+			).rejects.toThrow()
+		})
+
+		it("runPromise on query should be cached (same promise instance)", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, initialData),
+			)
+			const stream = db.users.query()
+			const p1 = stream.runPromise
+			const p2 = stream.runPromise
+			expect(p1).toBe(p2)
+		})
+
+		it("runPromise on effect should be cached (same promise instance)", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, initialData),
+			)
+			const effect = db.companies.create({ name: "CacheCo" })
+			const p1 = effect.runPromise
+			const p2 = effect.runPromise
+			expect(p1).toBe(p2)
+		})
+
+		it("query result should still work as a Stream with Effect.gen", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, initialData),
+			)
+			// Use .runPromise for convenience
+			const viaPromise = await db.users.query().runPromise
+			// Also use as Stream (native Effect)
+			const viaStream = await Effect.runPromise(
+				Stream.runCollect(db.users.query()).pipe(Effect.map(Chunk.toArray)),
+			)
+			expect(viaPromise).toHaveLength(3)
+			expect(viaStream).toHaveLength(3)
+		})
+
+		it("CRUD result should still work as an Effect with pipe", async () => {
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createEffectDatabase(config, initialData)
+					// Use as Effect with pipe (native)
+					const company = yield* db.companies.create({ name: "PipeCo" })
+					return company
+				}),
+			)
+			expect(result.name).toBe("PipeCo")
 		})
 	})
 })
