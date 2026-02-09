@@ -1,76 +1,142 @@
-/**
- * JSON serializer implementation for the persistence system.
- * Provides JSON serialization with proper formatting and error handling.
- */
+import { Effect, Layer } from "effect"
+import { SerializationError, UnsupportedFormatError } from "../errors/storage-errors.js"
+import { SerializerRegistry, type SerializerRegistryShape } from "./serializer-service.js"
+import type { Serializer } from "./types.js"
+import { SerializationError as LegacySerializationError } from "./types.js"
 
-import type { Serializer } from "./types.js";
-import { SerializationError } from "./types.js";
+// ============================================================================
+// JSON serializer options
+// ============================================================================
 
-/**
- * Creates a JSON serializer with configurable formatting options.
- *
- * @param options - Configuration options for JSON serialization
- * @returns A JSON serializer instance
- */
+export interface JsonSerializerOptions {
+	readonly indent?: number
+	readonly replacer?: (key: string, value: unknown) => unknown
+	readonly reviver?: (key: string, value: unknown) => unknown
+}
+
+// ============================================================================
+// Effect-based serialize / deserialize
+// ============================================================================
+
+export const serializeJson = (
+	data: unknown,
+	options: JsonSerializerOptions = {},
+): Effect.Effect<string, SerializationError> => {
+	const { indent = 2, replacer } = options
+	return Effect.try({
+		try: () => JSON.stringify(data, replacer ?? undefined, indent),
+		catch: (error) =>
+			new SerializationError({
+				format: "json",
+				message: `Failed to serialize data to JSON: ${error instanceof Error ? error.message : "Unknown error"}`,
+				cause: error,
+			}),
+	})
+}
+
+export const deserializeJson = (
+	content: string,
+	options: JsonSerializerOptions = {},
+): Effect.Effect<unknown, SerializationError> => {
+	const { reviver } = options
+	return Effect.try({
+		try: () => JSON.parse(content, reviver ?? undefined) as unknown,
+		catch: (error) =>
+			new SerializationError({
+				format: "json",
+				message: `Failed to deserialize JSON data: ${error instanceof Error ? error.message : "Unknown error"}`,
+				cause: error,
+			}),
+	})
+}
+
+// ============================================================================
+// SerializerRegistry implementation for JSON
+// ============================================================================
+
+const SUPPORTED_EXTENSIONS: ReadonlySet<string> = new Set(["json"])
+
+const makeJsonSerializerRegistry = (
+	options: JsonSerializerOptions = {},
+): SerializerRegistryShape => ({
+	serialize: (data, extension) =>
+		SUPPORTED_EXTENSIONS.has(extension)
+			? serializeJson(data, options)
+			: Effect.fail(
+					new UnsupportedFormatError({
+						format: extension,
+						message: `JSON serializer does not support '.${extension}'`,
+					}),
+				),
+
+	deserialize: (content, extension) =>
+		SUPPORTED_EXTENSIONS.has(extension)
+			? deserializeJson(content, options)
+			: Effect.fail(
+					new UnsupportedFormatError({
+						format: extension,
+						message: `JSON serializer does not support '.${extension}'`,
+					}),
+				),
+})
+
+// ============================================================================
+// Layer construction
+// ============================================================================
+
+export const makeJsonSerializerLayer = (
+	options?: JsonSerializerOptions,
+): Layer.Layer<SerializerRegistry> =>
+	Layer.succeed(SerializerRegistry, makeJsonSerializerRegistry(options))
+
+export const JsonSerializerLayer: Layer.Layer<SerializerRegistry> =
+	makeJsonSerializerLayer()
+
+// ============================================================================
+// Legacy Serializer interface (pre-Effect migration)
+// Retained for backward compatibility with existing persistence code.
+// Will be removed when persistence tests are migrated (task 12.8).
+// ============================================================================
+
 export function createJsonSerializer(
 	options: {
-		/**
-		 * Number of spaces to use for indentation (default: 2)
-		 * Set to 0 for compact output
-		 */
-		readonly indent?: number;
-
-		/**
-		 * Custom replacer function for JSON.stringify
-		 */
-		readonly replacer?: (key: string, value: unknown) => unknown;
-
-		/**
-		 * Custom reviver function for JSON.parse
-		 */
-		readonly reviver?: (key: string, value: unknown) => unknown;
+		readonly indent?: number
+		readonly replacer?: (key: string, value: unknown) => unknown
+		readonly reviver?: (key: string, value: unknown) => unknown
 	} = {},
 ): Serializer {
-	const { indent = 2, replacer, reviver } = options;
+	const { indent = 2, replacer, reviver } = options
 
 	return {
 		serialize: (data: unknown): string => {
 			try {
-				return JSON.stringify(data, replacer ?? undefined, indent);
+				return JSON.stringify(data, replacer ?? undefined, indent)
 			} catch (error) {
-				throw new SerializationError(
+				throw new LegacySerializationError(
 					`Failed to serialize data to JSON: ${error instanceof Error ? error.message : "Unknown error"}`,
 					error,
 					"serialize",
-				);
+				)
 			}
 		},
 
 		deserialize: (raw: string | Buffer): unknown => {
 			try {
-				const jsonString = typeof raw === "string" ? raw : raw.toString("utf8");
-				return JSON.parse(jsonString, reviver ?? undefined);
+				const jsonString = typeof raw === "string" ? raw : raw.toString("utf8")
+				return JSON.parse(jsonString, reviver ?? undefined)
 			} catch (error) {
-				throw new SerializationError(
+				throw new LegacySerializationError(
 					`Failed to deserialize JSON data: ${error instanceof Error ? error.message : "Unknown error"}`,
 					error,
 					"deserialize",
-				);
+				)
 			}
 		},
 
 		fileExtensions: ["json"] as const,
-	};
+	}
 }
 
-/**
- * Default JSON serializer instance with standard formatting (2-space indentation).
- * This is the most commonly used configuration.
- */
-export const defaultJsonSerializer = createJsonSerializer();
+export const defaultJsonSerializer = createJsonSerializer()
 
-/**
- * Compact JSON serializer instance with no formatting (for minimal file size).
- * Useful for production environments where file size matters.
- */
-export const compactJsonSerializer = createJsonSerializer({ indent: 0 });
+export const compactJsonSerializer = createJsonSerializer({ indent: 0 })
