@@ -1,46 +1,39 @@
 /**
- * Update operation implementation with operators and validation
+ * Effect-based update operations for entities.
+ *
+ * Uses Ref<ReadonlyMap> for atomic state mutation, Effect Schema for validation,
+ * and typed errors (ValidationError, NotFoundError, ForeignKeyError).
+ *
+ * Preserves all update operators: $increment, $decrement, $multiply,
+ * $append, $prepend, $remove, $toggle, $set.
  */
 
-import type { z } from "zod";
+import { Effect, Ref, Schema } from "effect"
 import type {
 	MinimalEntity,
 	UpdateWithOperators,
 	UpdateManyResult,
-} from "../../types/crud-types.js";
-import type { LegacyCrudError as CrudError } from "../../errors/legacy.js";
-import type { WhereClause } from "../../types/types.js";
+} from "../../types/crud-types.js"
 import {
-	createNotFoundError,
-	createValidationError,
-	createUnknownError,
-	ok,
-	err,
-	type Result,
-} from "../../errors/legacy.js";
-import { validateForeignKeys } from "../../validators/foreign-key.js";
-import { filterData } from "../query/filter.js";
-import type { RelationshipDef } from "../../types/types.js";
+	NotFoundError,
+	ForeignKeyError,
+	ValidationError,
+} from "../../errors/crud-errors.js"
+import { validateEntity } from "../../validators/schema-validator.js"
+import {
+	extractForeignKeyConfigs,
+} from "../../validators/foreign-key.js"
 
-// Helper to transform relationships to the format expected by filterData
-function transformRelationships(
-	relationships: Record<string, RelationshipDef<unknown>>,
-): Record<string, { type: string; target: string; foreignKey?: string }> {
-	const transformed: Record<
-		string,
-		{ type: string; target: string; foreignKey?: string }
-	> = {};
-	for (const [key, rel] of Object.entries(relationships)) {
-		const entry: { type: string; target: string; foreignKey?: string } = {
-			type: rel.type,
-			target: rel.target || rel.__targetCollection || key,
-		};
-		if (rel.foreignKey !== undefined) {
-			entry.foreignKey = rel.foreignKey;
-		}
-		transformed[key] = entry;
-	}
-	return transformed;
+// ============================================================================
+// Types
+// ============================================================================
+
+type HasId = { readonly id: string }
+
+type RelationshipConfig = {
+	readonly type: "ref" | "inverse"
+	readonly target: string
+	readonly foreignKey?: string
 }
 
 // ============================================================================
@@ -48,7 +41,10 @@ function transformRelationships(
 // ============================================================================
 
 /**
- * Apply update operators to a value
+ * Apply update operators to a value.
+ * Supports: $increment, $decrement, $multiply (number),
+ *           $append, $prepend (string/array), $remove (array),
+ *           $toggle (boolean), $set (all types).
  */
 function applyOperator<T>(
 	currentValue: T,
@@ -57,29 +53,29 @@ function applyOperator<T>(
 	// Number operators
 	if (typeof currentValue === "number") {
 		if ("$increment" in operator && typeof operator.$increment === "number") {
-			return (currentValue + operator.$increment) as T;
+			return (currentValue + operator.$increment) as T
 		}
 		if ("$decrement" in operator && typeof operator.$decrement === "number") {
-			return (currentValue - operator.$decrement) as T;
+			return (currentValue - operator.$decrement) as T
 		}
 		if ("$multiply" in operator && typeof operator.$multiply === "number") {
-			return (currentValue * operator.$multiply) as T;
+			return (currentValue * operator.$multiply) as T
 		}
 		if ("$set" in operator) {
-			return operator.$set as T;
+			return operator.$set as T
 		}
 	}
 
 	// String operators
 	if (typeof currentValue === "string") {
 		if ("$append" in operator && typeof operator.$append === "string") {
-			return (currentValue + operator.$append) as T;
+			return (currentValue + operator.$append) as T
 		}
 		if ("$prepend" in operator && typeof operator.$prepend === "string") {
-			return (operator.$prepend + currentValue) as T;
+			return (operator.$prepend + currentValue) as T
 		}
 		if ("$set" in operator) {
-			return operator.$set as T;
+			return operator.$set as T
 		}
 	}
 
@@ -88,62 +84,63 @@ function applyOperator<T>(
 		if ("$append" in operator) {
 			const toAppend = Array.isArray(operator.$append)
 				? operator.$append
-				: [operator.$append];
-			return [...currentValue, ...toAppend] as T;
+				: [operator.$append]
+			return [...currentValue, ...toAppend] as T
 		}
 		if ("$prepend" in operator) {
 			const toPrepend = Array.isArray(operator.$prepend)
 				? operator.$prepend
-				: [operator.$prepend];
-			return [...toPrepend, ...currentValue] as T;
+				: [operator.$prepend]
+			return [...toPrepend, ...currentValue] as T
 		}
 		if ("$remove" in operator) {
 			if (typeof operator.$remove === "function") {
 				return currentValue.filter(
 					(item) => !(operator.$remove as (item: unknown) => boolean)(item),
-				) as T;
-			} else {
-				return currentValue.filter((item) => item !== operator.$remove) as T;
+				) as T
 			}
+			return currentValue.filter((item) => item !== operator.$remove) as T
 		}
 		if ("$set" in operator) {
-			return operator.$set as T;
+			return operator.$set as T
 		}
 	}
 
 	// Boolean operators
 	if (typeof currentValue === "boolean") {
 		if ("$toggle" in operator && operator.$toggle === true) {
-			return !currentValue as T;
+			return !currentValue as T
 		}
 		if ("$set" in operator) {
-			return operator.$set as T;
+			return operator.$set as T
 		}
 	}
 
 	// Default: just set the value
 	if ("$set" in operator) {
-		return operator.$set as T;
+		return operator.$set as T
 	}
 
 	// If no operator matched, return current value
-	return currentValue;
+	return currentValue
 }
 
 /**
- * Apply update operations to an entity
+ * Apply update operations to an entity.
+ * Handles both direct value assignments and operator objects.
+ * Automatically sets updatedAt timestamp.
  */
 export function applyUpdates<T extends MinimalEntity>(
 	entity: T,
 	updates: UpdateWithOperators<T>,
 ): T {
-	const updated = { ...entity };
-	const now = new Date().toISOString();
+	const updated = { ...entity }
+	const now = new Date().toISOString()
 
 	for (const [key, value] of Object.entries(updates)) {
 		if (key === "updatedAt" && !value) {
 			// Auto-set updatedAt if not provided
-			(updated as Record<string, unknown>).updatedAt = now;
+			(updated as Record<string, unknown>).updatedAt = now
 		} else if (value !== undefined || value === null) {
 			// Check if it's an operator
 			if (
@@ -151,31 +148,107 @@ export function applyUpdates<T extends MinimalEntity>(
 				value !== null &&
 				!Array.isArray(value)
 			) {
-				const hasOperator = Object.keys(value).some((k) => k.startsWith("$"));
+				const hasOperator = Object.keys(value).some((k) => k.startsWith("$"))
 				if (hasOperator) {
-					// Apply operator
-					const currentValue = (entity as Record<string, unknown>)[key];
-					(updated as Record<string, unknown>)[key] = applyOperator(
+					const currentValue = (entity as Record<string, unknown>)[key]
+					;(updated as Record<string, unknown>)[key] = applyOperator(
 						currentValue,
 						value,
-					);
+					)
 				} else {
 					// Direct assignment (for nested objects)
-					(updated as Record<string, unknown>)[key] = value;
+					(updated as Record<string, unknown>)[key] = value
 				}
 			} else {
 				// Direct assignment (including null values)
-				(updated as Record<string, unknown>)[key] = value;
+				(updated as Record<string, unknown>)[key] = value
 			}
 		}
 	}
 
 	// Ensure updatedAt is set
 	if (!("updatedAt" in updates)) {
-		(updated as Record<string, unknown>).updatedAt = now;
+		(updated as Record<string, unknown>).updatedAt = now
 	}
 
-	return updated;
+	return updated
+}
+
+/**
+ * Validate that an update doesn't violate immutable fields (id, createdAt).
+ */
+export function validateImmutableFields<T extends MinimalEntity>(
+	updates: UpdateWithOperators<T>,
+): { readonly valid: boolean; readonly field?: string } {
+	const immutableFields = ["id", "createdAt"] as const
+
+	for (const field of immutableFields) {
+		if (field in updates) {
+			return { valid: false, field }
+		}
+	}
+
+	return { valid: true }
+}
+
+// ============================================================================
+// Foreign Key Validation (Effect-based bridge)
+// ============================================================================
+
+/**
+ * Validate foreign keys for an entity using Ref-based state.
+ * Returns Effect that fails with ForeignKeyError if a violation is found.
+ */
+const validateForeignKeysEffect = <T extends HasId>(
+	entity: T,
+	collectionName: string,
+	relationships: Record<string, RelationshipConfig>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+): Effect.Effect<void, ForeignKeyError> => {
+	const configs = extractForeignKeyConfigs(
+		relationships as Record<string, { type: "ref" | "inverse"; foreignKey?: string; target?: string }>,
+	)
+
+	if (configs.length === 0) {
+		return Effect.void
+	}
+
+	return Effect.forEach(configs, (config) => {
+		const value = (entity as Record<string, unknown>)[config.foreignKey]
+		if (value === undefined || value === null) {
+			return Effect.void
+		}
+
+		const targetRef = stateRefs[config.targetCollection]
+		if (targetRef === undefined) {
+			return Effect.fail(
+				new ForeignKeyError({
+					collection: collectionName,
+					field: config.foreignKey,
+					value: String(value),
+					targetCollection: config.targetCollection,
+					message: `Foreign key constraint violated: '${config.foreignKey}' references non-existent collection '${config.targetCollection}'`,
+				}),
+			)
+		}
+
+		return Ref.get(targetRef).pipe(
+			Effect.flatMap((targetMap) => {
+				if (targetMap.has(String(value))) {
+					return Effect.void
+				}
+				return Effect.fail(
+					new ForeignKeyError({
+						collection: collectionName,
+						field: config.foreignKey,
+						value: String(value),
+						targetCollection: config.targetCollection,
+						message: `Foreign key constraint violated: '${config.foreignKey}' references non-existent ${config.targetCollection} '${value}'`,
+					}),
+				)
+			}),
+		)
+	}, { discard: true })
 }
 
 // ============================================================================
@@ -183,298 +256,205 @@ export function applyUpdates<T extends MinimalEntity>(
 // ============================================================================
 
 /**
- * Update a single entity by ID
+ * Update a single entity by ID with validation and foreign key checks.
+ *
+ * Steps:
+ * 1. Validate immutable fields are not being modified
+ * 2. Look up entity by ID in Ref state (O(1))
+ * 3. Apply update operators to produce new entity
+ * 4. Validate through Effect Schema
+ * 5. Validate foreign key constraints if relationship fields changed
+ * 6. Atomically update in Ref state
  */
-export function createUpdateMethod<
-	T extends MinimalEntity,
-	TRelations extends Record<
-		string,
-		RelationshipDef<unknown, "ref" | "inverse", string>
-	>,
->(
+export const update = <T extends HasId, I = T>(
 	collectionName: string,
-	schema: z.ZodType<T>,
-	relationships: TRelations,
-	getData: () => T[],
-	setData: (data: T[]) => void,
-	allData: Record<string, unknown[]>,
-): (
-	id: string,
-	updates: UpdateWithOperators<T>,
-) => Promise<Result<T, CrudError<T>>> {
-	return async (
-		id: string,
-		updates: UpdateWithOperators<T>,
-	): Promise<Result<T, CrudError<T>>> => {
-		try {
-			// Validate immutable fields
-			const immutableValidation = validateImmutableFields(updates);
-			if (!immutableValidation.valid) {
-				return err(
-					createValidationError([
-						{
-							field: immutableValidation.field!,
-							message: `Cannot update immutable field: ${immutableValidation.field}`,
-							value: (updates as Record<string, unknown>)[
-								immutableValidation.field!
-							],
-						},
-					]),
-				);
-			}
-
-			const existingData = getData();
-			const entityIndex = existingData.findIndex((item) => item.id === id);
-
-			if (entityIndex === -1) {
-				return err(createNotFoundError<T>(collectionName, id));
-			}
-
-			const entity = existingData[entityIndex];
-			const updated = applyUpdates(entity, updates);
-
-			// Validate with Zod schema
-			const parseResult = schema.safeParse(updated);
-			if (!parseResult.success) {
-				const errors = parseResult.error.errors.map((e) => ({
-					field: e.path.join("."),
-					message: e.message,
-					value: (updated as Record<string, unknown>)[e.path[0]],
-				}));
-
-				return err(createValidationError(errors));
-			}
-
-			// Validate foreign keys if any relationships were updated
-			const relationshipFields = Object.keys(relationships).map(
-				(field) => relationships[field].foreignKey || `${field}Id`,
-			);
-			const hasRelationshipUpdate = Object.keys(updates).some((key) =>
-				relationshipFields.includes(key),
-			);
-
-			if (hasRelationshipUpdate) {
-				const fkValidation = await validateForeignKeys(
-					parseResult.data,
-					relationships,
-					allData,
-				);
-				if (!fkValidation.valid) {
-					return err(createValidationError(fkValidation.errors));
-				}
-			}
-
-			// Update the data
-			const newData = [...existingData];
-			newData[entityIndex] = parseResult.data;
-			setData(newData);
-
-			return ok(parseResult.data);
-		} catch (error) {
-			return err(createUnknownError("Failed to update entity", error));
+	schema: Schema.Schema<T, I>,
+	relationships: Record<string, RelationshipConfig>,
+	ref: Ref.Ref<ReadonlyMap<string, T>>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+) =>
+(id: string, updates: UpdateWithOperators<T & MinimalEntity>): Effect.Effect<T, ValidationError | NotFoundError | ForeignKeyError> =>
+	Effect.gen(function* () {
+		// Validate immutable fields
+		const immutableCheck = validateImmutableFields(updates)
+		if (!immutableCheck.valid) {
+			return yield* Effect.fail(
+				new ValidationError({
+					message: `Cannot update immutable field: ${immutableCheck.field}`,
+					issues: [{
+						field: immutableCheck.field!,
+						message: `Cannot update immutable field: ${immutableCheck.field}`,
+					}],
+				}),
+			)
 		}
-	};
-}
+
+		// Look up entity by ID (O(1))
+		const currentMap = yield* Ref.get(ref)
+		const entity = currentMap.get(id)
+		if (entity === undefined) {
+			return yield* Effect.fail(
+				new NotFoundError({
+					collection: collectionName,
+					id,
+					message: `Entity '${id}' not found in collection '${collectionName}'`,
+				}),
+			)
+		}
+
+		// Apply update operators
+		const updated = applyUpdates(entity as T & MinimalEntity, updates)
+
+		// Validate through Effect Schema
+		const validated = yield* validateEntity(schema, updated)
+
+		// Validate foreign keys if any relationship fields were updated
+		const relationshipFields = Object.keys(relationships).map(
+			(field) => relationships[field].foreignKey || `${field}Id`,
+		)
+		const hasRelationshipUpdate = Object.keys(updates).some((key) =>
+			relationshipFields.includes(key),
+		)
+
+		if (hasRelationshipUpdate) {
+			yield* validateForeignKeysEffect(
+				validated,
+				collectionName,
+				relationships,
+				stateRefs,
+			)
+		}
+
+		// Atomically update in state
+		yield* Ref.update(ref, (map) => {
+			const next = new Map(map)
+			next.set(id, validated)
+			return next
+		})
+
+		return validated
+	})
 
 // ============================================================================
 // Update Multiple Entities
 // ============================================================================
 
 /**
- * Update multiple entities matching a query
+ * Update multiple entities matching a filter predicate.
+ *
+ * Uses a predicate function to select which entities to update.
+ * The caller (database factory) can use the Stream-based filter pipeline
+ * to build the predicate from a WhereClause.
+ *
+ * All matching entities are updated atomically in a single Ref.update call.
  */
-export function createUpdateManyMethod<
-	T extends MinimalEntity,
-	TRelations extends Record<
-		string,
-		RelationshipDef<unknown, "ref" | "inverse", string>
-	>,
-	TDB,
->(
+export const updateMany = <T extends HasId, I = T>(
 	collectionName: string,
-	schema: z.ZodType<T>,
-	relationships: TRelations,
-	getData: () => T[],
-	setData: (data: T[]) => void,
-	allData: Record<string, unknown[]>,
-	config: Record<
-		string,
-		{
-			schema: z.ZodType<unknown>;
-			relationships: Record<
-				string,
-				RelationshipDef<unknown, "ref" | "inverse", string>
-			>;
+	schema: Schema.Schema<T, I>,
+	relationships: Record<string, RelationshipConfig>,
+	ref: Ref.Ref<ReadonlyMap<string, T>>,
+	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+) =>
+(
+	predicate: (entity: T) => boolean,
+	updates: UpdateWithOperators<T & MinimalEntity>,
+): Effect.Effect<UpdateManyResult<T>, ValidationError | ForeignKeyError> =>
+	Effect.gen(function* () {
+		// Validate immutable fields
+		const immutableCheck = validateImmutableFields(updates)
+		if (!immutableCheck.valid) {
+			return yield* Effect.fail(
+				new ValidationError({
+					message: `Cannot update immutable field: ${immutableCheck.field}`,
+					issues: [{
+						field: immutableCheck.field!,
+						message: `Cannot update immutable field: ${immutableCheck.field}`,
+					}],
+				}),
+			)
 		}
-	>,
-): (
-	where: WhereClause<T, TRelations, TDB>,
-	updates: UpdateWithOperators<T>,
-) => Promise<Result<UpdateManyResult<T>, CrudError<T>>> {
-	return async (
-		where: WhereClause<T, TRelations, TDB>,
-		updates: UpdateWithOperators<T>,
-	): Promise<Result<UpdateManyResult<T>, CrudError<T>>> => {
-		try {
-			// Validate immutable fields
-			const immutableValidation = validateImmutableFields(updates);
-			if (!immutableValidation.valid) {
-				return err(
-					createValidationError([
-						{
-							field: immutableValidation.field!,
-							message: `Cannot update immutable field: ${immutableValidation.field}`,
-							value: (updates as Record<string, unknown>)[
-								immutableValidation.field!
-							],
-						},
-					]),
-				);
+
+		// Get current state and find matching entities
+		const currentMap = yield* Ref.get(ref)
+		const matchingEntities: T[] = []
+		for (const entity of currentMap.values()) {
+			if (predicate(entity)) {
+				matchingEntities.push(entity)
 			}
-
-			const existingData = getData();
-
-			// Filter entities to update
-			const entitiesToUpdate = filterData(
-				existingData as unknown as Record<string, unknown>[],
-				where,
-				allData,
-				transformRelationships(
-					relationships as Record<string, RelationshipDef<unknown>>,
-				),
-				collectionName,
-				config as Record<
-					string,
-					{
-						schema: unknown;
-						relationships: Record<
-							string,
-							{ type: string; target: string; foreignKey?: string }
-						>;
-					}
-				>,
-			) as unknown as T[];
-
-			if (entitiesToUpdate.length === 0) {
-				return ok({ count: 0, updated: [] });
-			}
-
-			// Apply updates to each entity
-			const updated: T[] = [];
-			const validationErrors: Array<{ index: number; errors: unknown[] }> = [];
-
-			for (let i = 0; i < entitiesToUpdate.length; i++) {
-				const entity = entitiesToUpdate[i];
-				const updatedEntity = applyUpdates(entity, updates);
-
-				// Validate with Zod
-				const parseResult = schema.safeParse(updatedEntity);
-				if (!parseResult.success) {
-					validationErrors.push({
-						index: i,
-						errors: parseResult.error.errors,
-					});
-					continue;
-				}
-
-				updated.push(parseResult.data);
-			}
-
-			// Return validation errors if any
-			if (validationErrors.length > 0) {
-				const firstError = validationErrors[0];
-				const errors = (firstError.errors as z.ZodError["errors"]).map((e) => ({
-					field: e.path.join("."),
-					message: e.message,
-					value: undefined,
-				}));
-
-				return err(createValidationError(errors));
-			}
-
-			// Validate foreign keys if relationships were updated
-			const relationshipFields = Object.keys(relationships).map(
-				(field) => relationships[field].foreignKey || `${field}Id`,
-			);
-			const hasRelationshipUpdate = Object.keys(updates).some((key) =>
-				relationshipFields.includes(key),
-			);
-
-			if (hasRelationshipUpdate && updated.length > 0) {
-				// Validate all updated entities
-				const fkValidationPromises = updated.map((entity) =>
-					validateForeignKeys(entity, relationships, allData),
-				);
-				const fkValidationResults = await Promise.all(fkValidationPromises);
-
-				// Check for any validation failures
-				const failedValidation = fkValidationResults.find(
-					(result) => !result.valid,
-				);
-				if (failedValidation) {
-					return err(createValidationError(failedValidation.errors));
-				}
-			}
-
-			// Update the data
-			const updatedIds = new Set(updated.map((e) => e.id));
-			const newData = existingData.map((entity) => {
-				if (updatedIds.has(entity.id)) {
-					return updated.find((u) => u.id === entity.id)!;
-				}
-				return entity;
-			});
-
-			setData(newData);
-
-			return ok({
-				count: updated.length,
-				updated,
-			});
-		} catch (error) {
-			return err(createUnknownError("Failed to update entities", error));
 		}
-	};
-}
+
+		if (matchingEntities.length === 0) {
+			return { count: 0, updated: [] }
+		}
+
+		// Apply updates and validate each entity
+		const validatedEntities: T[] = []
+
+		for (const entity of matchingEntities) {
+			const updated = applyUpdates(entity as T & MinimalEntity, updates)
+			const validated = yield* validateEntity(schema, updated)
+			validatedEntities.push(validated)
+		}
+
+		// Validate foreign keys if relationship fields were updated
+		const relationshipFields = Object.keys(relationships).map(
+			(field) => relationships[field].foreignKey || `${field}Id`,
+		)
+		const hasRelationshipUpdate = Object.keys(updates).some((key) =>
+			relationshipFields.includes(key),
+		)
+
+		if (hasRelationshipUpdate) {
+			for (const entity of validatedEntities) {
+				yield* validateForeignKeysEffect(
+					entity,
+					collectionName,
+					relationships,
+					stateRefs,
+				)
+			}
+		}
+
+		// Atomically update all matching entities in state
+		yield* Ref.update(ref, (map) => {
+			const next = new Map(map)
+			for (const entity of validatedEntities) {
+				next.set((entity as HasId).id, entity)
+			}
+			return next
+		})
+
+		return {
+			count: validatedEntities.length,
+			updated: validatedEntities,
+		}
+	})
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
 /**
- * Validate that an update doesn't violate immutable fields
- */
-export function validateImmutableFields<T extends MinimalEntity>(
-	updates: UpdateWithOperators<T>,
-): { valid: boolean; field?: string } {
-	const immutableFields = ["id", "createdAt"] as const;
-
-	for (const field of immutableFields) {
-		if (field in updates) {
-			return {
-				valid: false,
-				field,
-			};
-		}
-	}
-
-	return { valid: true };
-}
-
-/**
- * Extract fields that were actually changed
+ * Extract fields that were actually changed between two entity versions.
  */
 export function getChangedFields<T extends MinimalEntity>(
 	original: T,
 	updated: T,
 ): string[] {
-	const changed: string[] = [];
+	const changed: string[] = []
 
 	for (const key of Object.keys(updated) as Array<keyof T>) {
 		if (original[key] !== updated[key]) {
-			changed.push(String(key));
+			changed.push(String(key))
 		}
 	}
 
-	return changed;
+	return changed
 }
+
+// ============================================================================
+// Legacy Exports (backward compatibility for unmigrated factory)
+// These will be removed when core/factories/database.ts is migrated (task 10)
+// ============================================================================
+
+export { createUpdateMethod, createUpdateManyMethod } from "./update-legacy.js"
