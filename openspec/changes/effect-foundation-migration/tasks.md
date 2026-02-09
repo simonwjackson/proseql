@@ -61,7 +61,7 @@
 - [x] 8.6 Migrate `core/operations/crud/update-with-relationships.ts`: updateWithRelationships returns Effect
 - [x] 8.7 Migrate `core/operations/crud/delete-with-relationships.ts`: deleteWithRelationships and deleteManyWithRelationships return Effect
 - [x] 8.8 Migrate `core/validators/foreign-key.ts` to return Effect values for validation checks
-- [ ] 8.9 Write tests for all CRUD operations: create with validation, update with operators, delete with cascade, upsert, relationship operations
+- [x] 8.9 Write tests for all CRUD operations: create with validation, update with operators, delete with cascade, upsert, relationship operations
 
 ## 9. Persistence Integration
 
