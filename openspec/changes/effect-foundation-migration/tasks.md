@@ -103,7 +103,7 @@
 - [x] 12.9d Rewrite `tests/crud/delete.test.ts` for Effect/Stream API
 - [x] 12.9e Rewrite `tests/crud/upsert.test.ts` for Effect/Stream API
 - [x] 12.9f Rewrite `tests/crud/batch-operations.test.ts` for Effect/Stream API
-- [ ] 12.9g Rewrite `tests/crud/relationships.test.ts` for Effect/Stream API
+- [x] 12.9g Rewrite `tests/crud/relationships.test.ts` for Effect/Stream API
 - [ ] 12.9h Rewrite `tests/crud/type-safety.test.ts` for Effect/Stream API
 - [ ] 12.10 Delete debug test files: cascade-debug, connect-debug, disconnect-debug, nested-create-debug, relationships-debug, type-trace
 - [ ] 12.11 Rewrite at least 3 example files demonstrating the new API: basic CRUD, query with population, persistence setup

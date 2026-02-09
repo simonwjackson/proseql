@@ -471,7 +471,22 @@ export const createWithRelationships = <T extends HasId, I = T>(
 				if (!targetConfig) continue
 
 				const id = generateId()
-				const createData = op.create as Record<string, unknown>
+				const createData = { ...(op.create as Record<string, unknown>) }
+
+				// For inverse relationships, set the foreign key on the created entity
+				const relForCOC = relationships[op.field]
+				if (relForCOC && relForCOC.type === "inverse") {
+					const targetRels = targetConfig.relationships
+					const inverseField = findInverseRelationship(collectionName, targetRels)
+					if (inverseField) {
+						const inverseRel = targetRels[inverseField]
+						if (inverseRel) {
+							const foreignKey = inverseRel.foreignKey || `${inverseField}Id`
+							createData[foreignKey] = parentId
+						}
+					}
+				}
+
 				const entity = {
 					...createData,
 					id,
