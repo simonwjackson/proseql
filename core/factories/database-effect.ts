@@ -47,12 +47,12 @@ import { applySelect } from "../operations/query/select-stream.js"
 import { applyPagination } from "../operations/query/paginate-stream.js"
 import { applyPopulate } from "../operations/relationships/populate-stream.js"
 import type { DanglingReferenceError } from "../errors/query-errors.js"
-import type {
+import {
 	NotFoundError,
-	DuplicateKeyError,
-	ForeignKeyError,
-	ValidationError,
-	OperationError,
+	type DuplicateKeyError,
+	type ForeignKeyError,
+	type ValidationError,
+	type OperationError,
 } from "../errors/crud-errors.js"
 import type {
 	StorageError,
@@ -147,6 +147,10 @@ export interface EffectCollection<T extends HasId> {
 		readonly limit?: number
 		readonly offset?: number
 	}) => RunnableStream<Record<string, unknown>, DanglingReferenceError>
+
+	readonly findById: (
+		id: string,
+	) => RunnableEffect<T, NotFoundError>
 
 	readonly create: (
 		input: CreateInput<T>,
@@ -471,8 +475,26 @@ const buildCollection = <T extends HasId>(
 		collectionName, relationships, ref, stateRefs, dbConfig as Record<string, { readonly schema: unknown; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target?: string; readonly __targetCollection?: string; readonly foreignKey?: string }> }>,
 	))
 
+	// findById: O(1) lookup directly from the ReadonlyMap
+	const findByIdFn = (id: string): RunnableEffect<T, NotFoundError> => {
+		const effect = Effect.gen(function* () {
+			const map = yield* Ref.get(ref)
+			const entity = map.get(id)
+			if (entity === undefined) {
+				return yield* new NotFoundError({
+					collection: collectionName,
+					id,
+					message: `Entity with id "${id}" not found in collection "${collectionName}"`,
+				})
+			}
+			return entity
+		})
+		return withRunPromise(effect)
+	}
+
 	return {
 		query: queryFn,
+		findById: findByIdFn,
 		create: createFn,
 		createMany: createManyFn,
 		update: updateFn,

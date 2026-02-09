@@ -116,6 +116,7 @@ describe("createEffectDatabase", () => {
 			)
 			const users = db.users
 			expect(typeof users.query).toBe("function")
+			expect(typeof users.findById).toBe("function")
 			expect(typeof users.create).toBe("function")
 			expect(typeof users.createMany).toBe("function")
 			expect(typeof users.update).toBe("function")
@@ -296,6 +297,86 @@ describe("createEffectDatabase", () => {
 			expect(employees).toHaveLength(2)
 			expect(employees.map((e) => e.name)).toContain("Alice")
 			expect(employees.map((e) => e.name)).toContain("Bob")
+		})
+	})
+
+	describe("findById", () => {
+		it("should find an existing entity by id (O(1) lookup)", async () => {
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createEffectDatabase(config, initialData)
+					return yield* db.users.findById("u1")
+				}),
+			)
+			expect(result.id).toBe("u1")
+			expect(result.name).toBe("Alice")
+			expect(result.age).toBe(30)
+		})
+
+		it("should fail with NotFoundError for nonexistent id", async () => {
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createEffectDatabase(config, initialData)
+					return yield* db.users
+						.findById("nonexistent")
+						.pipe(
+							Effect.catchTag("NotFoundError", (e) =>
+								Effect.succeed({ tag: e._tag, id: e.id, collection: e.collection }),
+							),
+						)
+				}),
+			)
+			expect(result).toEqual({
+				tag: "NotFoundError",
+				id: "nonexistent",
+				collection: "users",
+			})
+		})
+
+		it("should reflect mutations (find after create)", async () => {
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createEffectDatabase(config, initialData)
+					const created = yield* db.companies.create({
+						name: "FindMeCo",
+						industry: "Search",
+					})
+					return yield* db.companies.findById(created.id)
+				}),
+			)
+			expect(result.name).toBe("FindMeCo")
+		})
+
+		it("should fail after entity is deleted", async () => {
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createEffectDatabase(config, initialData)
+					yield* db.posts.delete("p1")
+					return yield* db.posts
+						.findById("p1")
+						.pipe(
+							Effect.catchTag("NotFoundError", () =>
+								Effect.succeed("not_found"),
+							),
+						)
+				}),
+			)
+			expect(result).toBe("not_found")
+		})
+
+		it("should work with runPromise convenience API", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, initialData),
+			)
+			const user = await db.users.findById("u2").runPromise
+			expect(user.name).toBe("Bob")
+		})
+
+		it("runPromise should reject for nonexistent id", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, initialData),
+			)
+			await expect(db.users.findById("missing").runPromise).rejects.toThrow()
 		})
 	})
 
