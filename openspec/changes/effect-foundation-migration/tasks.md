@@ -69,7 +69,7 @@
 - [x] 9.2 Implement debounced writes using Effect.schedule with configurable delay. Multiple rapid mutations coalesce into one write
 - [x] 9.3 Implement file watching using Effect.acquireRelease for managed lifecycle. File changes update collection Refs
 - [x] 9.4 Migrate `core/storage/transforms.ts` to work with ReadonlyMap (arrayToMap, mapToObject for file format)
-- [ ] 9.5 Write tests for persistence: load/save round-trip, debounce coalescing, file watch reload, Schema decode on load, Schema encode on save
+- [x] 9.5 Write tests for persistence: load/save round-trip, debounce coalescing, file watch reload, Schema decode on load, Schema encode on save
 
 ## 10. Database Factory
 
