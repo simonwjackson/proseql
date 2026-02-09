@@ -1,233 +1,201 @@
 import { describe, it, expect } from "vitest";
-import { z } from "zod";
-import { createDatabase } from "../core/factories/database";
-import { collect, map, first, count } from "../core/utils/async-iterable.js";
+import { Effect, Stream, Chunk } from "effect";
+import { applySort } from "../core/operations/query/sort-stream";
+import { applyFilter } from "../core/operations/query/filter-stream";
 
-describe("Database v2 - Sorting", () => {
+const collectSorted = <T extends Record<string, unknown>>(
+	data: T[],
+	sort: Partial<Record<string, "asc" | "desc">> | undefined,
+): Promise<readonly T[]> =>
+	Effect.runPromise(
+		Stream.fromIterable(data).pipe(
+			applySort<T>(sort),
+			Stream.runCollect,
+			Effect.map(Chunk.toReadonlyArray),
+		),
+	);
+
+const collectFilteredSorted = <T extends Record<string, unknown>>(
+	data: T[],
+	where: Record<string, unknown> | undefined,
+	sort: Partial<Record<string, "asc" | "desc">> | undefined,
+): Promise<readonly T[]> =>
+	Effect.runPromise(
+		Stream.fromIterable(data).pipe(
+			applyFilter<T>(where),
+			applySort<T>(sort),
+			Stream.runCollect,
+			Effect.map(Chunk.toReadonlyArray),
+		),
+	);
+
+describe("Database v2 - Sorting (Stream-based)", () => {
 	// ============================================================================
-	// Test Schemas and Configuration
+	// Test Data
 	// ============================================================================
 
-	// User Schema with various field types for sorting
-	const UserSchema = z.object({
-		id: z.string(),
-		name: z.string(),
-		email: z.string(),
-		age: z.number(),
-		score: z.number().optional(),
-		active: z.boolean(),
-		createdAt: z.string(), // ISO date string
-		companyId: z.string().optional(),
-		role: z.string(),
-	});
-
-	// Company Schema for relationship sorting
-	const CompanySchema = z.object({
-		id: z.string(),
-		name: z.string(),
-		revenue: z.number(),
-		foundedYear: z.number(),
-		active: z.boolean(),
-	});
-
-	// Post Schema for additional sorting scenarios
-	const PostSchema = z.object({
-		id: z.string(),
-		title: z.string(),
-		content: z.string(),
-		authorId: z.string(),
-		likes: z.number(),
-		published: z.boolean(),
-		publishedAt: z.string().optional(), // ISO date string
-		tags: z.array(z.string()).optional(),
-	});
-
-	// Configuration with relationships
-	const config = {
-		users: {
-			schema: UserSchema,
-			relationships: {
-				company: { type: "ref" as const, target: "companies" as const },
-				posts: { type: "inverse" as const, target: "posts" as const },
-			},
+	const users = [
+		{
+			id: "u1",
+			name: "Alice Johnson",
+			email: "alice@example.com",
+			age: 30,
+			score: 95 as number | undefined,
+			active: true,
+			createdAt: "2023-01-15T10:00:00Z",
+			companyId: "c1" as string | undefined,
+			role: "admin",
 		},
-		companies: {
-			schema: CompanySchema,
-			relationships: {
-				users: { type: "inverse" as const, target: "users" as const },
-			},
+		{
+			id: "u2",
+			name: "Bob Smith",
+			email: "bob@example.com",
+			age: 25,
+			score: 82 as number | undefined,
+			active: true,
+			createdAt: "2023-02-20T14:30:00Z",
+			companyId: "c2" as string | undefined,
+			role: "user",
 		},
-		posts: {
-			schema: PostSchema,
-			relationships: {
-				author: { type: "ref" as const, target: "users" as const },
-			},
+		{
+			id: "u3",
+			name: "Charlie Brown",
+			email: "charlie@example.com",
+			age: 35,
+			score: undefined as number | undefined,
+			active: false,
+			createdAt: "2023-01-10T08:00:00Z",
+			companyId: "c3" as string | undefined,
+			role: "moderator",
 		},
-	};
+		{
+			id: "u4",
+			name: "Diana Prince",
+			email: "diana@example.com",
+			age: 28,
+			score: 90 as number | undefined,
+			active: true,
+			createdAt: "2023-03-05T16:45:00Z",
+			companyId: "c1" as string | undefined,
+			role: "user",
+		},
+		{
+			id: "u5",
+			name: "Eve Wilson",
+			email: "eve@example.com",
+			age: 32,
+			score: 88 as number | undefined,
+			active: true,
+			createdAt: "2023-02-01T12:00:00Z",
+			companyId: undefined as string | undefined,
+			role: "admin",
+		},
+		{
+			id: "u6",
+			name: "Frank Miller",
+			email: "frank@example.com",
+			age: 25,
+			score: 75 as number | undefined,
+			active: false,
+			createdAt: "2023-01-20T09:30:00Z",
+			companyId: "c4" as string | undefined,
+			role: "user",
+		},
+	];
 
-	// Test data
-	const data = {
-		companies: [
-			{
-				id: "c1",
-				name: "Tech Corp",
-				revenue: 1000000,
-				foundedYear: 2010,
-				active: true,
-			},
-			{
-				id: "c2",
-				name: "Design Studio",
-				revenue: 500000,
-				foundedYear: 2015,
-				active: true,
-			},
-			{
-				id: "c3",
-				name: "Old Industries",
-				revenue: 2000000,
-				foundedYear: 1995,
-				active: false,
-			},
-			{
-				id: "c4",
-				name: "Startup Inc",
-				revenue: 100000,
-				foundedYear: 2023,
-				active: true,
-			},
-		],
-		users: [
-			{
-				id: "u1",
-				name: "Alice Johnson",
-				email: "alice@example.com",
-				age: 30,
-				score: 95,
-				active: true,
-				createdAt: "2023-01-15T10:00:00Z",
-				companyId: "c1",
-				role: "admin",
-			},
-			{
-				id: "u2",
-				name: "Bob Smith",
-				email: "bob@example.com",
-				age: 25,
-				score: 82,
-				active: true,
-				createdAt: "2023-02-20T14:30:00Z",
-				companyId: "c2",
-				role: "user",
-			},
-			{
-				id: "u3",
-				name: "Charlie Brown",
-				email: "charlie@example.com",
-				age: 35,
-				score: undefined,
-				active: false,
-				createdAt: "2023-01-10T08:00:00Z",
-				companyId: "c3",
-				role: "moderator",
-			},
-			{
-				id: "u4",
-				name: "Diana Prince",
-				email: "diana@example.com",
-				age: 28,
-				score: 90,
-				active: true,
-				createdAt: "2023-03-05T16:45:00Z",
-				companyId: "c1",
-				role: "user",
-			},
-			{
-				id: "u5",
-				name: "Eve Wilson",
-				email: "eve@example.com",
-				age: 32,
-				score: 88,
-				active: true,
-				createdAt: "2023-02-01T12:00:00Z",
-				companyId: undefined,
-				role: "admin",
-			},
-			{
-				id: "u6",
-				name: "Frank Miller",
-				email: "frank@example.com",
-				age: 25,
-				score: 75,
-				active: false,
-				createdAt: "2023-01-20T09:30:00Z",
-				companyId: "c4",
-				role: "user",
-			},
-		],
-		posts: [
-			{
-				id: "p1",
-				title: "Getting Started with TypeScript",
-				content: "TypeScript is amazing...",
-				authorId: "u1",
-				likes: 42,
-				published: true,
-				publishedAt: "2023-04-01T10:00:00Z",
-				tags: ["typescript", "programming"],
-			},
-			{
-				id: "p2",
-				title: "Advanced React Patterns",
-				content: "Let's explore advanced patterns...",
-				authorId: "u1",
-				likes: 38,
-				published: true,
-				publishedAt: "2023-04-15T14:00:00Z",
-				tags: ["react", "javascript"],
-			},
-			{
-				id: "p3",
-				title: "Draft: CSS Grid Layout",
-				content: "Work in progress...",
-				authorId: "u2",
-				likes: 5,
-				published: false,
-				publishedAt: undefined,
-				tags: ["css"],
-			},
-			{
-				id: "p4",
-				title: "Database Design Best Practices",
-				content: "When designing databases...",
-				authorId: "u3",
-				likes: 28,
-				published: true,
-				publishedAt: "2023-03-20T11:30:00Z",
-				tags: ["database", "sql"],
-			},
-			{
-				id: "p5",
-				title: "Microservices Architecture",
-				content: "Breaking down monoliths...",
-				authorId: "u4",
-				likes: 65,
-				published: true,
-				publishedAt: "2023-05-01T09:00:00Z",
-				tags: ["architecture", "microservices"],
-			},
-			{
-				id: "p6",
-				title: "Draft: AI and Machine Learning",
-				content: "The future of AI...",
-				authorId: "u5",
-				likes: 12,
-				published: false,
-				publishedAt: undefined,
-				tags: [],
-			},
-		],
-	};
+	const companies = [
+		{
+			id: "c1",
+			name: "Tech Corp",
+			revenue: 1000000,
+			foundedYear: 2010,
+			active: true,
+		},
+		{
+			id: "c2",
+			name: "Design Studio",
+			revenue: 500000,
+			foundedYear: 2015,
+			active: true,
+		},
+		{
+			id: "c3",
+			name: "Old Industries",
+			revenue: 2000000,
+			foundedYear: 1995,
+			active: false,
+		},
+		{
+			id: "c4",
+			name: "Startup Inc",
+			revenue: 100000,
+			foundedYear: 2023,
+			active: true,
+		},
+	];
+
+	const posts = [
+		{
+			id: "p1",
+			title: "Getting Started with TypeScript",
+			content: "TypeScript is amazing...",
+			authorId: "u1",
+			likes: 42,
+			published: true,
+			publishedAt: "2023-04-01T10:00:00Z" as string | undefined,
+			tags: ["typescript", "programming"] as string[],
+		},
+		{
+			id: "p2",
+			title: "Advanced React Patterns",
+			content: "Let's explore advanced patterns...",
+			authorId: "u1",
+			likes: 38,
+			published: true,
+			publishedAt: "2023-04-15T14:00:00Z" as string | undefined,
+			tags: ["react", "javascript"] as string[],
+		},
+		{
+			id: "p3",
+			title: "Draft: CSS Grid Layout",
+			content: "Work in progress...",
+			authorId: "u2",
+			likes: 5,
+			published: false,
+			publishedAt: undefined as string | undefined,
+			tags: ["css"] as string[],
+		},
+		{
+			id: "p4",
+			title: "Database Design Best Practices",
+			content: "When designing databases...",
+			authorId: "u3",
+			likes: 28,
+			published: true,
+			publishedAt: "2023-03-20T11:30:00Z" as string | undefined,
+			tags: ["database", "sql"] as string[],
+		},
+		{
+			id: "p5",
+			title: "Microservices Architecture",
+			content: "Breaking down monoliths...",
+			authorId: "u4",
+			likes: 65,
+			published: true,
+			publishedAt: "2023-05-01T09:00:00Z" as string | undefined,
+			tags: ["architecture", "microservices"] as string[],
+		},
+		{
+			id: "p6",
+			title: "Draft: AI and Machine Learning",
+			content: "The future of AI...",
+			authorId: "u5",
+			likes: 12,
+			published: false,
+			publishedAt: undefined as string | undefined,
+			tags: [] as string[],
+		},
+	];
 
 	// ============================================================================
 	// Basic Sorting Tests
@@ -235,12 +203,7 @@ describe("Database v2 - Sorting", () => {
 
 	describe("Basic field sorting", () => {
 		it("should sort by string field ascending", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { name: "asc" },
-				}),
-			);
+			const results = await collectSorted(users, { name: "asc" });
 
 			expect(results).toHaveLength(6);
 			const names = results.map((r) => r.name);
@@ -255,12 +218,7 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should sort by string field descending", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { name: "desc" },
-				}),
-			);
+			const results = await collectSorted(users, { name: "desc" });
 
 			expect(results).toHaveLength(6);
 			const names = results.map((r) => r.name);
@@ -275,12 +233,7 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should sort by number field ascending", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { age: "asc" },
-				}),
-			);
+			const results = await collectSorted(users, { age: "asc" });
 
 			expect(results).toHaveLength(6);
 			const ages = results.map((r) => r.age);
@@ -293,12 +246,7 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should sort by number field descending", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { age: "desc" },
-				}),
-			);
+			const results = await collectSorted(users, { age: "desc" });
 
 			expect(results).toHaveLength(6);
 			const ages = results.map((r) => r.age);
@@ -306,12 +254,7 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should sort by boolean field", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { active: "asc" },
-				}),
-			);
+			const results = await collectSorted(users, { active: "asc" });
 
 			// false comes before true in ascending order
 			const activeStates = results.map((r) => r.active);
@@ -319,12 +262,7 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should sort by boolean field descending", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { active: "desc" },
-				}),
-			);
+			const results = await collectSorted(users, { active: "desc" });
 
 			// true comes before false in descending order
 			const activeStates = results.map((r) => r.active);
@@ -332,15 +270,9 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should sort by date string field", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { createdAt: "asc" },
-				}),
-			);
+			const results = await collectSorted(users, { createdAt: "asc" });
 
 			const dates = results.map((r) => r.createdAt);
-			// Verify chronological order
 			expect(dates).toEqual([
 				"2023-01-10T08:00:00Z",
 				"2023-01-15T10:00:00Z",
@@ -352,24 +284,20 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should sort with no results", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: { role: "nonexistent" },
-					sort: { name: "asc" },
-				}),
+			const results = await collectFilteredSorted(
+				users,
+				{ role: "nonexistent" },
+				{ name: "asc" },
 			);
 
 			expect(results).toHaveLength(0);
 		});
 
 		it("should sort with single result", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: { email: "alice@example.com" },
-					sort: { name: "asc" },
-				}),
+			const results = await collectFilteredSorted(
+				users,
+				{ email: "alice@example.com" },
+				{ name: "asc" },
 			);
 
 			expect(results).toHaveLength(1);
@@ -383,14 +311,11 @@ describe("Database v2 - Sorting", () => {
 
 	describe("Multiple field sorting", () => {
 		it("should sort by two fields with same direction", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { age: "asc", name: "asc" },
-				}),
-			);
+			const results = await collectSorted(users, {
+				age: "asc",
+				name: "asc",
+			});
 
-			// Should sort by age first, then by name for same ages
 			const sorted = results.map((r) => ({ age: r.age, name: r.name }));
 			expect(sorted).toEqual([
 				{ age: 25, name: "Bob Smith" },
@@ -403,14 +328,11 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should sort by two fields with different directions", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { active: "desc", score: "desc" },
-				}),
-			);
+			const results = await collectSorted(users, {
+				active: "desc",
+				score: "desc",
+			});
 
-			// Active users first (desc), then by score (desc)
 			const sorted = results.map((r) => ({
 				active: r.active,
 				score: r.score,
@@ -430,14 +352,11 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should respect sort priority order", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.companies.query({
-					sort: { active: "desc", revenue: "desc" },
-				}),
-			);
+			const results = await collectSorted(companies, {
+				active: "desc",
+				revenue: "desc",
+			});
 
-			// First sort by active status, then by revenue
 			const sorted = results.map((r) => ({
 				name: r.name,
 				active: r.active,
@@ -457,12 +376,11 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should handle three or more sort fields", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.posts.query({
-					sort: { published: "desc", likes: "desc", title: "asc" },
-				}),
-			);
+			const results = await collectSorted(posts, {
+				published: "desc",
+				likes: "desc",
+				title: "asc",
+			});
 
 			const sorted = results.map((r) => ({
 				published: r.published,
@@ -488,12 +406,7 @@ describe("Database v2 - Sorting", () => {
 
 	describe("Undefined/null value handling", () => {
 		it("should handle undefined values in ascending sort", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { score: "asc" },
-				}),
-			);
+			const results = await collectSorted(users, { score: "asc" });
 
 			// Undefined values should come last in ascending sort
 			const scores = results.map((r) => r.score);
@@ -505,12 +418,7 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should handle undefined values in descending sort", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { score: "desc" },
-				}),
-			);
+			const results = await collectSorted(users, { score: "desc" });
 
 			// Undefined values should come last in descending sort
 			const scores = results.map((r) => r.score);
@@ -522,25 +430,15 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should handle undefined values in relationship fields", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { companyId: "asc" },
-				}),
-			);
+			const results = await collectSorted(users, { companyId: "asc" });
 
 			// Users without companyId should come last
 			const companyIds = results.map((r) => r.companyId);
 			expect(companyIds[companyIds.length - 1]).toBeUndefined();
 		});
 
-		it("should handle mixed undefined/null/valid values", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.posts.query({
-					sort: { publishedAt: "asc" },
-				}),
-			);
+		it("should handle mixed undefined/valid values", async () => {
+			const results = await collectSorted(posts, { publishedAt: "asc" });
 
 			const publishedDates = results.map((r) => r.publishedAt);
 
@@ -569,12 +467,10 @@ describe("Database v2 - Sorting", () => {
 
 	describe("Sorting combined with filtering", () => {
 		it("should filter then sort", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: { active: true },
-					sort: { age: "asc" },
-				}),
+			const results = await collectFilteredSorted(
+				users,
+				{ active: true },
+				{ age: "asc" },
 			);
 
 			expect(results).toHaveLength(4);
@@ -583,15 +479,13 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should handle complex queries with where + sort", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.posts.query({
-					where: {
-						published: true,
-						likes: { $gte: 30 },
-					},
-					sort: { likes: "desc", title: "asc" },
-				}),
+			const results = await collectFilteredSorted(
+				posts,
+				{
+					published: true,
+					likes: { $gte: 30 },
+				},
+				{ likes: "desc", title: "asc" },
 			);
 
 			expect(results).toHaveLength(3);
@@ -604,14 +498,12 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should filter with $in operator and sort", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					where: {
-						role: { $in: ["admin", "moderator"] },
-					},
-					sort: { name: "asc" },
-				}),
+			const results = await collectFilteredSorted(
+				users,
+				{
+					role: { $in: ["admin", "moderator"] },
+				},
+				{ name: "asc" },
 			);
 
 			expect(results).toHaveLength(3);
@@ -620,14 +512,12 @@ describe("Database v2 - Sorting", () => {
 		});
 
 		it("should filter with string operators and sort", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.posts.query({
-					where: {
-						title: { $contains: "Draft" },
-					},
-					sort: { likes: "desc" },
-				}),
+			const results = await collectFilteredSorted(
+				posts,
+				{
+					title: { $contains: "Draft" },
+				},
+				{ likes: "desc" },
 			);
 
 			expect(results).toHaveLength(2);
@@ -637,22 +527,28 @@ describe("Database v2 - Sorting", () => {
 	});
 
 	// ============================================================================
-	// Relationship Sorting Tests
+	// Sorting by Nested (Populated) Fields Tests
 	// ============================================================================
 
-	describe("Sorting by relationship fields", () => {
-		it("should sort by populated ref relationship field", async () => {
-			const db = createDatabase(config, data);
-			const query = db.users.query({
-				populate: { company: true },
-				sort: { "company.name": "asc" } as any,
-			});
-			const results = await collect(query);
+	describe("Sorting by nested/populated fields", () => {
+		// Simulate populated data (users with resolved company objects)
+		const companyMap = new Map(companies.map((c) => [c.id, c]));
+
+		const usersWithCompany = users.map((u) => ({
+			...u,
+			company: u.companyId ? companyMap.get(u.companyId) : undefined,
+		}));
+
+		it("should sort by nested ref field (dot notation)", async () => {
+			const results = await collectSorted(
+				usersWithCompany as Record<string, unknown>[],
+				{ "company.name": "asc" },
+			);
 
 			// Extract company names in order
 			const companyNames: string[] = [];
 			for (const r of results) {
-				const company = (r as any).company;
+				const company = r.company as { name: string } | undefined;
 				if (company && company.name) {
 					companyNames.push(company.name);
 				}
@@ -668,22 +564,18 @@ describe("Database v2 - Sorting", () => {
 			]);
 
 			// User without company should come last
-			expect((results[results.length - 1] as any).company).toBeUndefined();
+			expect(results[results.length - 1].company).toBeUndefined();
 		});
 
-		it("should sort by populated ref relationship numeric field", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					populate: { company: true },
-					sort: { "company.revenue": "desc" } as any,
-				}),
+		it("should sort by nested numeric field (dot notation)", async () => {
+			const results = await collectSorted(
+				usersWithCompany as Record<string, unknown>[],
+				{ "company.revenue": "desc" },
 			);
 
-			// Users should be sorted by their company's revenue
 			const revenues: number[] = [];
 			for (const r of results) {
-				const company = (r as any).company;
+				const company = r.company as { revenue: number } | undefined;
 				if (company && company.revenue !== undefined) {
 					revenues.push(company.revenue);
 				}
@@ -698,110 +590,46 @@ describe("Database v2 - Sorting", () => {
 			]);
 		});
 
-		it("should sort by populated inverse relationship count", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					populate: { posts: true },
-					sort: { id: "asc" }, // Placeholder - would need post count
-				}),
+		it("should handle sort on unpopulated nested path gracefully", async () => {
+			// Sort by company.name on data without populated company objects
+			const results = await collectSorted(
+				users as Record<string, unknown>[],
+				{ "company.name": "asc" },
 			);
 
-			// Verify posts are populated
-			expect((results[0] as any).posts).toBeDefined();
-			expect(Array.isArray((results[0] as any).posts)).toBe(true);
-		});
-
-		it("should handle nested relationship sorting", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.posts.query({
-					populate: {
-						author: {
-							populate: { company: true },
-						} as any,
-					},
-					sort: { "author.company.name": "asc" } as any,
-				}),
-			);
-
-			// Posts should be sorted by author's company name
-			const companyNames: string[] = [];
-			for (const r of results) {
-				const author = (r as any).author;
-				if (author && author.company && author.company.name) {
-					companyNames.push(author.company.name);
-				}
-			}
-
-			// Verify alphabetical order
-			const uniqueCompanies = Array.from(new Set(companyNames));
-			expect(uniqueCompanies).toEqual(
-				["Design Studio", "Old Industries", "Startup Inc", "Tech Corp"].filter(
-					(company) => companyNames.includes(company),
-				),
-			);
-		});
-
-		it("should ignore sort by relationship when not populated", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					// Not populating company
-					sort: { "company.name": "asc" } as any,
-				}),
-			);
-
-			// Should return all users, but sorting by company.name won't work
+			// Should return all users (companyId is a string, not an object)
 			expect(results).toHaveLength(6);
-			// Results should fall back to default order or be unsorted by company
 		});
 
-		it("should handle multiple sorts with relationship fields", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					populate: { company: true },
-					sort: { "company.active": "desc", age: "asc" } as any,
-				}),
+		it("should handle multiple sorts with nested fields", async () => {
+			const results = await collectSorted(
+				usersWithCompany as Record<string, unknown>[],
+				{ "company.active": "desc", age: "asc" },
 			);
 
-			// First sort by company active status, then by age
-			// Using a for loop to avoid complex union type issues
-			const sorted = [];
-			for (const r of results) {
-				sorted.push({
-					name: r.name,
-					companyActive: (r as any).company?.active,
-					age: r.age,
-				});
-			}
+			const sorted = results.map((r) => ({
+				name: r.name,
+				companyActive: (r.company as { active: boolean } | undefined)?.active,
+				age: r.age,
+			}));
 
-			// Users with active companies should come first
-			const withActiveCompanies = [];
-			const withInactiveCompanies = [];
-			const withoutCompany = [];
-
-			for (const u of sorted) {
-				if (u.companyActive === true) {
-					withActiveCompanies.push(u);
-				} else if (u.companyActive === false) {
-					withInactiveCompanies.push(u);
-				} else if (u.companyActive === undefined) {
-					withoutCompany.push(u);
-				}
-			}
+			const withActiveCompanies = sorted.filter(
+				(u) => u.companyActive === true,
+			);
+			const withInactiveCompanies = sorted.filter(
+				(u) => u.companyActive === false,
+			);
+			const withoutCompany = sorted.filter(
+				(u) => u.companyActive === undefined,
+			);
 
 			expect(withActiveCompanies.length).toBeGreaterThan(0);
 			expect(withInactiveCompanies.length).toBeGreaterThan(0);
 			expect(withoutCompany.length).toBe(1);
 
 			// Within each group, should be sorted by age
-			const activeAges = [];
-			for (const u of withActiveCompanies) {
-				activeAges.push(u.age);
-			}
-			expect(activeAges).toEqual([...activeAges].sort((a, b) => a - b));
+			const activeAges = withActiveCompanies.map((u) => u.age);
+			expect(activeAges).toEqual([...activeAges].sort((a, b) => (a as number) - (b as number)));
 		});
 	});
 
@@ -811,82 +639,77 @@ describe("Database v2 - Sorting", () => {
 
 	describe("Edge cases", () => {
 		it("should handle empty sort object", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: {},
-				}),
-			);
+			const results = await collectSorted(users, {});
 
-			// Should return all users in default order
+			// Should return all users in original order
+			expect(results).toHaveLength(6);
+		});
+
+		it("should handle undefined sort", async () => {
+			const results = await collectSorted(users, undefined);
+
+			// Should return all users in original order
 			expect(results).toHaveLength(6);
 		});
 
 		it("should handle sort on non-existent fields", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { nonExistentField: "asc" } as any,
-				}),
+			const results = await collectSorted(
+				users as Record<string, unknown>[],
+				{ nonExistentField: "asc" },
 			);
 
-			// Should return all users, ignoring invalid sort field
+			// Should return all users
 			expect(results).toHaveLength(6);
 		});
 
 		it("should handle sort on array fields", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.posts.query({
-					sort: { tags: "asc" } as any,
-				}),
+			const results = await collectSorted(
+				posts as Record<string, unknown>[],
+				{ tags: "asc" },
 			);
 
-			// Should return all posts, but array sorting behavior is undefined
+			// Should return all posts
 			expect(results).toHaveLength(6);
 		});
 
-		it("should combine sort with limit", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { score: "desc" },
-					limit: 3,
-				}),
+		it("should combine sort with Stream.drop/Stream.take for pagination", async () => {
+			const results = await Effect.runPromise(
+				Stream.fromIterable(users).pipe(
+					applySort<(typeof users)[number]>({ score: "desc" }),
+					Stream.take(3),
+					Stream.runCollect,
+					Effect.map(Chunk.toReadonlyArray),
+				),
 			);
 
 			expect(results).toHaveLength(3);
-			// Should get top 3 scores
 			const scores = results.map((r) => r.score);
 			expect(scores).toEqual([95, 90, 88]);
 		});
 
-		it("should combine sort with offset", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { name: "asc" },
-					offset: 2,
-					limit: 2,
-				}),
+		it("should combine sort with Stream.drop for offset + limit", async () => {
+			const results = await Effect.runPromise(
+				Stream.fromIterable(users).pipe(
+					applySort<(typeof users)[number]>({ name: "asc" }),
+					Stream.drop(2),
+					Stream.take(2),
+					Stream.runCollect,
+					Effect.map(Chunk.toReadonlyArray),
+				),
 			);
 
 			expect(results).toHaveLength(2);
-			// Should skip first 2 and get next 2
 			const names = results.map((r) => r.name);
 			expect(names).toEqual(["Charlie Brown", "Diana Prince"]);
 		});
 
 		it("should handle invalid sort directions", async () => {
-			const db = createDatabase(config, data);
-			const results = await collect(
-				db.users.query({
-					sort: { name: "invalid" as any },
-				}),
+			const results = await collectSorted(
+				users as Record<string, unknown>[],
+				{ name: "invalid" as "asc" | "desc" },
 			);
 
-			// Should either throw error or fall back to default
-			// Implementation will determine behavior
+			// Should return all users
 			expect(results).toBeDefined();
 		});
 	});
@@ -897,32 +720,28 @@ describe("Database v2 - Sorting", () => {
 
 	describe("Performance considerations", () => {
 		it("should efficiently sort large datasets", async () => {
-			// Create a larger dataset
 			const generatedUsers = Array.from({ length: 100 }, (_, i) => ({
 				id: `u${i + 100}`,
 				name: `User ${String(i).padStart(3, "0")}`,
 				email: `user${i}@example.com`,
 				age: 20 + (i % 50),
-				score: i % 2 === 0 ? 50 + (i % 50) : undefined,
+				score: (i % 2 === 0 ? 50 + (i % 50) : undefined) as
+					| number
+					| undefined,
 				active: i % 3 !== 0,
 				createdAt: new Date(2023, 0, 1 + i).toISOString(),
-				companyId: data.companies[i % 4].id,
+				companyId: companies[i % 4].id as string | undefined,
 				role: ["user", "admin", "moderator"][i % 3],
 			}));
-			const largeData = {
-				companies: data.companies,
-				users: [...generatedUsers, ...data.users],
-				posts: data.posts,
-			};
+			const largeUsers = [...generatedUsers, ...users];
 
-			const db = createDatabase(config, largeData);
 			const startTime = Date.now();
 
-			const results = await collect(
-				db.users.query({
-					sort: { age: "asc", score: "desc", name: "asc" },
-				}),
-			);
+			const results = await collectSorted(largeUsers, {
+				age: "asc",
+				score: "desc",
+				name: "asc",
+			});
 
 			const endTime = Date.now();
 
@@ -935,37 +754,28 @@ describe("Database v2 - Sorting", () => {
 				const prev = results[i - 1];
 				const curr = results[i];
 
-				// First sort by age
 				if (prev.age !== curr.age) {
-					expect(prev.age).toBeLessThanOrEqual(curr.age);
+					expect(prev.age).toBeLessThanOrEqual(curr.age as number);
 				} else if (prev.score !== undefined && curr.score !== undefined) {
-					// Then by score (desc)
 					expect(prev.score).toBeGreaterThanOrEqual(curr.score);
 				}
-				// Name comparison would be the final tiebreaker
 			}
 		});
 
 		it("should handle multiple sort fields on large dataset efficiently", async () => {
-			const largeData = {
-				companies: Array.from({ length: 20 }, (_, i) => ({
-					id: `c${i + 100}`,
-					name: `Company ${String(i).padStart(2, "0")}`,
-					revenue: 100000 * (i + 1),
-					foundedYear: 2000 + i,
-					active: i % 4 !== 0,
-				})),
-				users: data.users,
-				posts: data.posts,
-			};
+			const largeCompanies = Array.from({ length: 20 }, (_, i) => ({
+				id: `c${i + 100}`,
+				name: `Company ${String(i).padStart(2, "0")}`,
+				revenue: 100000 * (i + 1),
+				foundedYear: 2000 + i,
+				active: i % 4 !== 0,
+			}));
 
-			const db = createDatabase(config, largeData);
-
-			const results = await collect(
-				db.companies.query({
-					sort: { active: "desc", revenue: "desc", name: "asc" },
-				}),
-			);
+			const results = await collectSorted(largeCompanies, {
+				active: "desc",
+				revenue: "desc",
+				name: "asc",
+			});
 
 			expect(results.length).toBeGreaterThanOrEqual(20);
 
@@ -985,40 +795,40 @@ describe("Database v2 - Sorting", () => {
 	});
 
 	// ============================================================================
-	// Type Safety Tests (these would be compile-time checks in actual usage)
+	// Type Safety Tests
 	// ============================================================================
 
 	describe("Type safety", () => {
 		it("should accept valid sort field keys", async () => {
-			const db = createDatabase(config, data);
-
-			// These should all be valid
-			const validQueries = [
-				{ sort: { name: "asc" } },
-				{ sort: { age: "desc" } },
-				{ sort: { active: "asc" } },
-				{ sort: { score: "desc" } },
-				{ sort: { createdAt: "asc" } },
+			const validSorts: Array<
+				Partial<Record<string, "asc" | "desc">>
+			> = [
+				{ name: "asc" },
+				{ age: "desc" },
+				{ active: "asc" },
+				{ score: "desc" },
+				{ createdAt: "asc" },
 			];
 
-			for (const query of validQueries) {
-				const results = await collect(db.users.query(query as any));
+			for (const sort of validSorts) {
+				const results = await collectSorted(users, sort);
 				expect(results).toBeDefined();
 			}
 		});
 
-		it("should handle populated field sort keys", async () => {
-			const db = createDatabase(config, data);
+		it("should handle sort on pre-populated nested fields", async () => {
+			const companyMap = new Map(companies.map((c) => [c.id, c]));
+			const usersWithCompany = users.map((u) => ({
+				...u,
+				company: u.companyId ? companyMap.get(u.companyId) : undefined,
+			}));
 
-			// Valid populated field sorts
-			const results = await collect(
-				db.users.query({
-					populate: { company: true },
-					sort: {
-						"company.name": "asc",
-						"company.revenue": "desc",
-					} as any,
-				}),
+			const results = await collectSorted(
+				usersWithCompany as Record<string, unknown>[],
+				{
+					"company.name": "asc",
+					"company.revenue": "desc",
+				},
 			);
 
 			expect(results).toBeDefined();
