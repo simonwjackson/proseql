@@ -22,7 +22,7 @@
 ## 4. State Management (Ref)
 
 - [x] 4.1 Create `core/state/collection-state.ts` with `createCollectionState(initialData: T[])` returning `Effect<Ref<ReadonlyMap<string, T>>>`. Convert array to ReadonlyMap keyed by ID
-- [ ] 4.2 Create `core/state/state-operations.ts` with atomic state helpers: `getEntity(ref, id)`, `getAllEntities(ref)`, `setEntity(ref, entity)`, `removeEntity(ref, id)`, `updateEntity(ref, id, updater)` — all returning Effect
+- [x] 4.2 Create `core/state/state-operations.ts` with atomic state helpers: `getEntity(ref, id)`, `getAllEntities(ref)`, `setEntity(ref, entity)`, `removeEntity(ref, id)`, `updateEntity(ref, id, updater)` — all returning Effect
 - [ ] 4.3 Write tests for Ref state: initial state from array, O(1) lookup by ID, atomic updates, snapshot consistency (read during write sees consistent state)
 
 ## 5. Storage Services
