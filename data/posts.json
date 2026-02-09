@@ -1,0 +1,26 @@
+{
+  "posts": {
+    "VnZPz3lQghIMR8NsMZgUh": {
+      "id": "VnZPz3lQghIMR8NsMZgUh",
+      "title": "Getting Started with TypeScript",
+      "content": "TypeScript is a powerful language that adds static typing to JavaScript...",
+      "authorId": "HwF_a8NodhGbX5sHxIwpS",
+      "tags": [
+        "typescript",
+        "javascript",
+        "programming"
+      ]
+    },
+    "R3szEi0TJu2sJsa4TzTiL": {
+      "id": "R3szEi0TJu2sJsa4TzTiL",
+      "title": "Database Design Best Practices",
+      "content": "When designing databases, it's important to consider normalization...",
+      "authorId": "My_PyQmWva2H3XqIrZ43F",
+      "tags": [
+        "database",
+        "design",
+        "best-practices"
+      ]
+    }
+  }
+}
