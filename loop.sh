@@ -26,7 +26,7 @@ while true; do
   fi
 
   echo "=== Iteration $ITERATION | $REMAINING tasks remaining ==="
-  nix run nixpkgs#bun -- x '@anthropic-ai/claude-code' --dangerously-skip-permissions --print --verbose --output-format stream-json --max-budget-usd 2 <PROMPT_build.md |
+  HOME=~/.claude-accounts/personal nix run nixpkgs#bun -- x '@anthropic-ai/claude-code' --dangerously-skip-permissions --print --verbose --output-format stream-json <PROMPT_build.md |
     jq -r '
       if .type == "assistant" then
         .message.content[]? |
@@ -39,7 +39,7 @@ while true; do
         "\n--- done: \(.duration_ms / 1000)s | cost: $\(.total_cost_usd | tostring | .[0:6]) | turns: \(.num_turns) ---"
       else empty
       end
-    '
+    ' || echo "!!! Claude exited with error (likely context overflow). Continuing loop..."
   git add -A && git push origin "$(git branch --show-current)" 2>/dev/null || true
   echo ""
 done
