@@ -120,6 +120,17 @@ export type {
 export { isGroupedAggregateConfig } from "./types/aggregate-types.js";
 
 // ============================================================================
+// Cursor Pagination Types
+// ============================================================================
+
+export type {
+	CursorConfig,
+	CursorPageInfo,
+	CursorPageResult,
+	RunnableCursorPage,
+} from "./types/cursor-types.js";
+
+// ============================================================================
 // Schema Validation
 // ============================================================================
 
