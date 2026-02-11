@@ -80,7 +80,7 @@ export interface LoadDataOptions {
  * Flow:
  * 1. Check file existence via StorageAdapter
  * 2. Read raw content
- * 3. Deserialize (JSON/YAML/MessagePack) via SerializerRegistry
+ * 3. Deserialize via SerializerRegistry (format determined by file extension)
  * 4. Validate the top-level structure is a Record<string, object>
  * 5. Extract `_version` (default 0 if absent) and remove from entity map
  * 6. Decode each entity value through the Schema
