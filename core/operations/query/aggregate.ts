@@ -25,6 +25,31 @@ const normalizeFields = (
 }
 
 /**
+ * Sentinel value to distinguish undefined from null in group keys.
+ * JSON.stringify converts both null and undefined to "null", so we need
+ * a custom approach to maintain strict equality semantics (null !== undefined).
+ */
+const UNDEFINED_SENTINEL = "__PTDB_UNDEFINED__"
+
+/**
+ * Create a group key from field values that distinguishes null from undefined.
+ * Uses a sentinel value to represent undefined since JSON.stringify([undefined])
+ * produces "[null]" which would collide with JSON.stringify([null]).
+ */
+const createGroupKey = (values: ReadonlyArray<unknown>): string => {
+	const mapped = values.map((v) => (v === undefined ? UNDEFINED_SENTINEL : v))
+	return JSON.stringify(mapped)
+}
+
+/**
+ * Parse a group key back into field values, restoring undefined from sentinel.
+ */
+const parseGroupKey = (key: string): ReadonlyArray<unknown> => {
+	const values = JSON.parse(key) as Array<unknown>
+	return values.map((v) => (v === UNDEFINED_SENTINEL ? undefined : v))
+}
+
+/**
  * Check if a value is numeric (finite number, not NaN).
  */
 const isNumeric = (value: unknown): value is number =>
@@ -243,7 +268,7 @@ export const computeGroupedAggregates = (
 
 	for (const entity of entities) {
 		// Build group key from grouping field values
-		const groupKey = JSON.stringify(groupByFields.map((f) => entity[f]))
+		const groupKey = createGroupKey(groupByFields.map((f) => entity[f]))
 
 		const existing = groups.get(groupKey)
 		if (existing !== undefined) {
@@ -258,7 +283,7 @@ export const computeGroupedAggregates = (
 
 	for (const [groupKey, groupEntities] of groups) {
 		// Parse back the group values
-		const groupValues = JSON.parse(groupKey) as Array<unknown>
+		const groupValues = parseGroupKey(groupKey)
 
 		// Build the group field object
 		const group: Record<string, unknown> = {}
