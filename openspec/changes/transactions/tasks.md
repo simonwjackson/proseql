@@ -58,7 +58,7 @@
 
 - [x] 8.1 Test no persistence writes during active transaction (use a spy/mock on persistence trigger)
 - [x] 8.2 Test batch persistence on commit: single save triggered per mutated collection
-- [ ] 8.3 Test no persistence on rollback: trigger never called after rollback
+- [x] 8.3 Test no persistence on rollback: trigger never called after rollback
 
 ## 9. Cleanup
 

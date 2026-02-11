@@ -2307,4 +2307,175 @@ describe("Persistence Integration", () => {
 			expect(setup.scheduleCalls).toHaveLength(0)
 		})
 	})
+
+	describe("no persistence on rollback", () => {
+		it("should not trigger persistence when transaction is manually rolled back", async () => {
+			const setup = await Effect.runPromise(createPersistenceSpySetup())
+
+			// Verify no persistence calls initially
+			expect(setup.scheduleCalls).toHaveLength(0)
+
+			// Create transaction context with persistence trigger
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					setup.persistenceTrigger,
+				),
+			)
+
+			// Perform multiple mutations within the transaction
+			await Effect.runPromise(ctx.users.create({ id: "u3", name: "Charlie", email: "c@t.com", age: 30 }))
+			await Effect.runPromise(ctx.posts.create({ id: "p3", title: "New Post", content: "Content", authorId: "u3" }))
+			await Effect.runPromise(ctx.users.update("u1", { name: "Alice Updated" }))
+
+			// Verify mutations are tracked
+			expect(ctx.mutatedCollections.size).toBe(2)
+			expect(ctx.mutatedCollections.has("users")).toBe(true)
+			expect(ctx.mutatedCollections.has("posts")).toBe(true)
+
+			// No persistence during active transaction
+			expect(setup.scheduleCalls).toHaveLength(0)
+
+			// Rollback the transaction (returns TransactionError, which is expected)
+			const rollbackResult = await Effect.runPromise(ctx.rollback().pipe(Effect.either))
+
+			// Verify rollback completed
+			expect(rollbackResult._tag).toBe("Left")
+			if (rollbackResult._tag === "Left") {
+				const error = rollbackResult.left as { readonly _tag?: string; readonly operation?: string }
+				expect(error._tag).toBe("TransactionError")
+				expect(error.operation).toBe("rollback")
+			}
+
+			// Transaction is no longer active
+			expect(ctx.isActive).toBe(false)
+
+			// CRITICAL: No persistence calls were made after rollback
+			// Even though mutations were tracked, rollback discards them without persisting
+			expect(setup.scheduleCalls).toHaveLength(0)
+		})
+
+		it("should not trigger persistence when $transaction fails with error and auto-rollbacks", async () => {
+			const setup = await Effect.runPromise(createPersistenceSpySetup())
+
+			// Verify no persistence calls initially
+			expect(setup.scheduleCalls).toHaveLength(0)
+
+			// Use $transaction callback wrapper that fails
+			const result = await Effect.runPromise(
+				$transactionImpl(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					setup.persistenceTrigger,
+					(ctx) =>
+						Effect.gen(function* () {
+							// Create entities (will be rolled back)
+							yield* ctx.users.create({ id: "u3", name: "Charlie", email: "c@t.com", age: 30 })
+							yield* ctx.posts.create({ id: "p3", title: "Post", content: "Content", authorId: "u3" })
+
+							// Verify no persistence during transaction
+							expect(setup.scheduleCalls).toHaveLength(0)
+
+							// Fail the transaction - triggers automatic rollback
+							return yield* Effect.fail(new TestBusinessError("Intentional failure"))
+						}),
+				).pipe(Effect.either),
+			)
+
+			// Verify transaction failed with our error
+			expect(result._tag).toBe("Left")
+			if (result._tag === "Left") {
+				expect(result.left).toBeInstanceOf(TestBusinessError)
+			}
+
+			// CRITICAL: No persistence calls after automatic rollback from error
+			expect(setup.scheduleCalls).toHaveLength(0)
+		})
+
+		it("should not trigger persistence when $transaction explicitly calls rollback", async () => {
+			const setup = await Effect.runPromise(createPersistenceSpySetup())
+
+			// Verify no persistence calls initially
+			expect(setup.scheduleCalls).toHaveLength(0)
+
+			// Use $transaction callback wrapper that explicitly rolls back
+			const result = await Effect.runPromise(
+				$transactionImpl(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					setup.persistenceTrigger,
+					(ctx) =>
+						Effect.gen(function* () {
+							// Create entities (will be rolled back)
+							yield* ctx.users.create({ id: "u3", name: "Charlie", email: "c@t.com", age: 30 })
+							yield* ctx.users.create({ id: "u4", name: "Diana", email: "d@t.com", age: 28 })
+							yield* ctx.posts.create({ id: "p3", title: "Post", content: "Content", authorId: "u3" })
+
+							// Verify no persistence during transaction
+							expect(setup.scheduleCalls).toHaveLength(0)
+
+							// Verify mutations tracked
+							expect(ctx.mutatedCollections.size).toBe(2)
+
+							// Explicitly rollback
+							return yield* ctx.rollback()
+						}),
+				).pipe(Effect.either),
+			)
+
+			// Verify transaction resulted in TransactionError from rollback
+			expect(result._tag).toBe("Left")
+			if (result._tag === "Left") {
+				const error = result.left as { readonly _tag?: string; readonly operation?: string }
+				expect(error._tag).toBe("TransactionError")
+				expect(error.operation).toBe("rollback")
+			}
+
+			// CRITICAL: No persistence calls after explicit rollback
+			expect(setup.scheduleCalls).toHaveLength(0)
+		})
+
+		it("should contrast rollback (no persistence) vs commit (persistence triggered)", async () => {
+			// First: transaction that commits - persistence IS triggered
+			const setupCommit = await Effect.runPromise(createPersistenceSpySetup())
+
+			const ctxCommit = await Effect.runPromise(
+				createTransaction(
+					setupCommit.stateRefs,
+					setupCommit.transactionLock,
+					setupCommit.buildCollectionForTx,
+					setupCommit.persistenceTrigger,
+				),
+			)
+
+			await Effect.runPromise(ctxCommit.users.create({ id: "u3", name: "Charlie", email: "c@t.com", age: 30 }))
+			await Effect.runPromise(ctxCommit.commit())
+
+			// Commit triggers persistence
+			expect(setupCommit.scheduleCalls).toHaveLength(1)
+			expect(setupCommit.scheduleCalls[0]).toBe("users")
+
+			// Second: transaction that rollbacks - persistence is NOT triggered
+			const setupRollback = await Effect.runPromise(createPersistenceSpySetup())
+
+			const ctxRollback = await Effect.runPromise(
+				createTransaction(
+					setupRollback.stateRefs,
+					setupRollback.transactionLock,
+					setupRollback.buildCollectionForTx,
+					setupRollback.persistenceTrigger,
+				),
+			)
+
+			await Effect.runPromise(ctxRollback.users.create({ id: "u3", name: "Charlie", email: "c@t.com", age: 30 }))
+			await Effect.runPromise(ctxRollback.rollback().pipe(Effect.either))
+
+			// Rollback does NOT trigger persistence
+			expect(setupRollback.scheduleCalls).toHaveLength(0)
+		})
+	})
 })
