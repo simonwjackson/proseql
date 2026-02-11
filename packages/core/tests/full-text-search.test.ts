@@ -772,4 +772,78 @@ describe("Full-text search: Relevance Scoring (task 11)", () => {
 			expect(results[1].title).toBe("The Left Hand of Darkness")
 		})
 	})
+
+	describe("11.2: Explicit sort overrides relevance", () => {
+		it("should sort by explicit sort option instead of relevance", async () => {
+			const db = await createRelevanceTestDatabase()
+			// Search for "dark" which matches "The Dark Tower" (1982) and "The Left Hand of Darkness" (1969)
+			// By relevance, "The Dark Tower" should come first (exact match)
+			// But with sort: { year: "asc" }, "The Left Hand of Darkness" (1969) should come first
+			const results = await db.books.query({
+				where: { $search: { query: "dark", fields: ["title"] } },
+				sort: { year: "asc" },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			// Sorted by year ascending: 1969 comes before 1982
+			expect(results[0].title).toBe("The Left Hand of Darkness")
+			expect(results[0].year).toBe(1969)
+			expect(results[1].title).toBe("The Dark Tower")
+			expect(results[1].year).toBe(1982)
+		})
+
+		it("should sort by year descending when specified", async () => {
+			const db = await createRelevanceTestDatabase()
+			const results = await db.books.query({
+				where: { $search: { query: "dark", fields: ["title"] } },
+				sort: { year: "desc" },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			// Sorted by year descending: 1982 comes before 1969
+			expect(results[0].title).toBe("The Dark Tower")
+			expect(results[0].year).toBe(1982)
+			expect(results[1].title).toBe("The Left Hand of Darkness")
+			expect(results[1].year).toBe(1969)
+		})
+
+		it("should sort by title when specified, ignoring relevance", async () => {
+			const db = await createRelevanceTestDatabase()
+			const results = await db.books.query({
+				where: { $search: { query: "dark", fields: ["title"] } },
+				sort: { title: "asc" },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			// Alphabetically: "The Dark Tower" < "The Left Hand of Darkness"
+			expect(results[0].title).toBe("The Dark Tower")
+			expect(results[1].title).toBe("The Left Hand of Darkness")
+		})
+
+		it("should apply explicit sort with field-level $search", async () => {
+			const db = await createRelevanceTestDatabase()
+			// Field-level $search with explicit sort
+			const results = await db.books.query({
+				where: { title: { $search: "dark" } },
+				sort: { year: "asc" },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			expect(results[0].year).toBe(1969)
+			expect(results[1].year).toBe(1982)
+		})
+
+		it("should apply explicit sort with top-level $search without fields", async () => {
+			const db = await createRelevanceTestDatabase()
+			// Top-level $search (all string fields) with explicit sort
+			const results = await db.books.query({
+				where: { $search: { query: "dark" } },
+				sort: { year: "asc" },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			expect(results[0].year).toBe(1969)
+			expect(results[1].year).toBe(1982)
+		})
+	})
 })
