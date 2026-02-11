@@ -9,9 +9,9 @@ import {
 } from "../core/storage/persistence-effect.js"
 import { makeInMemoryStorageLayer } from "../core/storage/in-memory-adapter-layer.js"
 import { StorageAdapter } from "../core/storage/storage-service.js"
-import { JsonSerializerLayer, makeJsonSerializerLayer } from "../core/serializers/json.js"
-import { YamlSerializerLayer } from "../core/serializers/yaml.js"
-import { MessagePackSerializerLayer } from "../core/serializers/messagepack.js"
+import { makeSerializerLayer } from "../core/serializers/format-codec.js"
+import { jsonCodec } from "../core/serializers/codecs/json.js"
+import { yamlCodec } from "../core/serializers/codecs/yaml.js"
 import {
 	StorageError,
 	SerializationError,
@@ -54,19 +54,13 @@ const CategorySchema = Schema.Struct({
 
 const makeTestEnv = () => {
 	const store = new Map<string, string>()
-	const layer = Layer.merge(makeInMemoryStorageLayer(store), JsonSerializerLayer)
+	const layer = Layer.merge(makeInMemoryStorageLayer(store), makeSerializerLayer([jsonCodec()]))
 	return { store, layer }
 }
 
 const makeYamlTestEnv = () => {
 	const store = new Map<string, string>()
-	const layer = Layer.merge(makeInMemoryStorageLayer(store), YamlSerializerLayer)
-	return { store, layer }
-}
-
-const makeMsgpackTestEnv = () => {
-	const store = new Map<string, string>()
-	const layer = Layer.merge(makeInMemoryStorageLayer(store), MessagePackSerializerLayer)
+	const layer = Layer.merge(makeInMemoryStorageLayer(store), makeSerializerLayer([yamlCodec()]))
 	return { store, layer }
 }
 
@@ -272,7 +266,7 @@ describe("Persistence System (Effect-based)", () => {
 			const store = new Map<string, string>()
 			const layer = Layer.merge(
 				makeInMemoryStorageLayer(store),
-				makeJsonSerializerLayer({ indent: 2 }),
+				makeSerializerLayer([jsonCodec({ indent: 2 })]),
 			)
 
 			await Effect.runPromise(
@@ -311,29 +305,6 @@ describe("Persistence System (Effect-based)", () => {
 			// Verify round-trip data
 			expect(result.size).toBe(2)
 			expect(result.get("user-1")?.name).toBe("Alice Johnson")
-		})
-
-		it("should support MessagePack serialization and round-trip", async () => {
-			const { store, layer } = makeMsgpackTestEnv()
-
-			const result = await Effect.runPromise(
-				Effect.provide(
-					Effect.gen(function* () {
-						yield* saveData("/test-data/users.msgpack", UserSchema, sampleUsers)
-						return yield* loadData("/test-data/users.msgpack", UserSchema)
-					}),
-					layer,
-				),
-			)
-
-			// Stored content should be a base64 string (binary-encoded)
-			const content = store.get("/test-data/users.msgpack")!
-			expect(content.length).toBeGreaterThan(0)
-
-			// Verify round-trip data
-			expect(result.size).toBe(2)
-			expect(result.get("user-1")?.name).toBe("Alice Johnson")
-			expect(result.get("user-2")?.age).toBe(35)
 		})
 
 		it("should fail with UnsupportedFormatError for mismatched extension", async () => {
@@ -544,7 +515,7 @@ describe("Persistence System (Effect-based)", () => {
 				writeCount++
 				return originalSet(key, value)
 			}
-			const layer = Layer.merge(makeInMemoryStorageLayer(store), JsonSerializerLayer)
+			const layer = Layer.merge(makeInMemoryStorageLayer(store), makeSerializerLayer([jsonCodec()]))
 
 			await Effect.runPromise(
 				Effect.provide(
@@ -695,7 +666,7 @@ describe("Persistence System (Effect-based)", () => {
 
 			const layer = Layer.merge(
 				Layer.succeed(StorageAdapter, failingAdapter),
-				JsonSerializerLayer,
+				makeSerializerLayer([jsonCodec()]),
 			)
 
 			const error = await Effect.runPromise(
@@ -729,7 +700,7 @@ describe("Persistence System (Effect-based)", () => {
 
 			const layer = Layer.merge(
 				Layer.succeed(StorageAdapter, failingAdapter),
-				JsonSerializerLayer,
+				makeSerializerLayer([jsonCodec()]),
 			)
 
 			const error = await Effect.runPromise(
@@ -848,7 +819,7 @@ describe("Persistence System (Effect-based)", () => {
 			const jsonStore = new Map<string, string>()
 			const jsonLayer = Layer.merge(
 				makeInMemoryStorageLayer(jsonStore),
-				JsonSerializerLayer,
+				makeSerializerLayer([jsonCodec()]),
 			)
 			const jsonResult = await Effect.runPromise(
 				Effect.provide(program, jsonLayer),
@@ -863,7 +834,7 @@ describe("Persistence System (Effect-based)", () => {
 			const yamlStore = new Map<string, string>()
 			const yamlLayer = Layer.merge(
 				makeInMemoryStorageLayer(yamlStore),
-				YamlSerializerLayer,
+				makeSerializerLayer([yamlCodec()]),
 			)
 			const yamlResult = await Effect.runPromise(
 				Effect.provide(yamlProgram, yamlLayer),
@@ -883,7 +854,7 @@ describe("Persistence System (Effect-based)", () => {
 
 			// In-memory adapter
 			const store = new Map<string, string>()
-			const layer = Layer.merge(makeInMemoryStorageLayer(store), JsonSerializerLayer)
+			const layer = Layer.merge(makeInMemoryStorageLayer(store), makeSerializerLayer([jsonCodec()]))
 
 			const result = await Effect.runPromise(Effect.provide(program, layer))
 			expect(result.size).toBe(2)
