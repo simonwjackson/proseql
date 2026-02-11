@@ -136,7 +136,109 @@ const existingProfile: Profile = {
 describe("Upsert Where-Clause Validation", () => {
 	describe("upsert with { id }", () => {
 		it("should accept where: { id } regardless of uniqueFields config", async () => {
-			// TODO: Task 7.2
+			// Test with collection that has uniqueFields configured
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<User>([existingUser])
+				const stateRefs = yield* makeStateRefs({ users: [existingUser] })
+
+				// Upsert using { id } — should always be valid, even when uniqueFields are configured
+				const result = yield* upsert(
+					"users",
+					UserSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					userUniqueFields, // ["email", "username"] configured
+				)({
+					where: { id: "user1" }, // Using id as where clause
+					create: {
+						name: "Alice Updated",
+						email: "alice-new@example.com",
+						username: "alice-new",
+						age: 31,
+					},
+					update: { age: 35 },
+				})
+
+				// Should update the existing user (not create)
+				expect(result.__action).toBe("updated")
+				expect(result.age).toBe(35)
+
+				return result
+			})
+
+			await Effect.runPromise(program)
+		})
+
+		it("should accept where: { id } when collection has no uniqueFields", async () => {
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<Profile>([existingProfile])
+				const stateRefs = yield* makeStateRefs({ profiles: [existingProfile] })
+
+				// Upsert using { id } — always valid even with empty uniqueFields
+				const result = yield* upsert(
+					"profiles",
+					ProfileSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					noUniqueFields, // no uniqueFields configured
+				)({
+					where: { id: "profile1" },
+					create: {
+						name: "New Profile",
+						bio: "New bio",
+					},
+					update: { bio: "Updated bio" },
+				})
+
+				expect(result.__action).toBe("updated")
+				expect(result.bio).toBe("Updated bio")
+
+				return result
+			})
+
+			await Effect.runPromise(program)
+		})
+
+		it("should create entity when where: { id } does not match", async () => {
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<User>([existingUser])
+				const stateRefs = yield* makeStateRefs({ users: [existingUser] })
+
+				// Upsert with new id — should create
+				const result = yield* upsert(
+					"users",
+					UserSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					userUniqueFields,
+				)({
+					where: { id: "user-new" },
+					create: {
+						name: "Bob",
+						email: "bob@example.com",
+						username: "bob",
+						age: 25,
+					},
+					update: { age: 30 },
+				})
+
+				expect(result.__action).toBe("created")
+				expect(result.id).toBe("user-new")
+				expect(result.name).toBe("Bob")
+
+				return result
+			})
+
+			await Effect.runPromise(program)
 		})
 	})
 
