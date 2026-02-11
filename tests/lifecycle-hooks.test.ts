@@ -776,5 +776,96 @@ describe("lifecycle-hooks", () => {
 			// The entity should be the same as what was returned from delete
 			expect(ctx.entity).toEqual(result)
 		})
+
+		it("after-hook error does not fail the CRUD operation", async () => {
+			// Create after-hooks that throw errors
+			const failingAfterCreateHook: AfterCreateHook<User> = () =>
+				Effect.fail(new Error("afterCreate hook failed!"))
+
+			const failingAfterUpdateHook: AfterUpdateHook<User> = () =>
+				Effect.fail(new Error("afterUpdate hook failed!"))
+
+			const failingAfterDeleteHook: AfterDeleteHook<User> = () =>
+				Effect.fail(new Error("afterDelete hook failed!"))
+
+			// Track that hooks are actually called (even if they fail)
+			const hookCallOrder: Array<string> = []
+
+			const trackingFailingAfterCreateHook: AfterCreateHook<User> = () => {
+				hookCallOrder.push("afterCreate")
+				return Effect.fail(new Error("afterCreate hook failed!"))
+			}
+
+			const trackingFailingAfterUpdateHook: AfterUpdateHook<User> = () => {
+				hookCallOrder.push("afterUpdate")
+				return Effect.fail(new Error("afterUpdate hook failed!"))
+			}
+
+			const trackingFailingAfterDeleteHook: AfterDeleteHook<User> = () => {
+				hookCallOrder.push("afterDelete")
+				return Effect.fail(new Error("afterDelete hook failed!"))
+			}
+
+			const hooks: HooksConfig<User> = {
+				afterCreate: [trackingFailingAfterCreateHook],
+				afterUpdate: [trackingFailingAfterUpdateHook],
+				afterDelete: [trackingFailingAfterDeleteHook],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, { users: [] })
+
+					// Create should succeed despite afterCreate hook failing
+					const created = yield* db.users.create({
+						name: "Test User",
+						email: "test@example.com",
+						age: 25,
+					})
+
+					// Verify entity was created
+					const foundAfterCreate = yield* db.users.findById(created.id)
+
+					// Update should succeed despite afterUpdate hook failing
+					const updated = yield* db.users.update(created.id, {
+						name: "Updated User",
+					})
+
+					// Verify entity was updated
+					const foundAfterUpdate = yield* db.users.findById(created.id)
+
+					// Delete should succeed despite afterDelete hook failing
+					const deleted = yield* db.users.delete(created.id)
+
+					// Verify entity was deleted (should fail to find)
+					const findAfterDelete = yield* db.users.findById(created.id).pipe(
+						Effect.matchEffect({
+							onFailure: (error) => Effect.succeed({ type: "error" as const, error }),
+							onSuccess: (user) => Effect.succeed({ type: "found" as const, user }),
+						}),
+					)
+
+					return {
+						created,
+						foundAfterCreate,
+						updated,
+						foundAfterUpdate,
+						deleted,
+						findAfterDelete,
+					}
+				}),
+			)
+
+			// All CRUD operations should have succeeded
+			expect(result.created.name).toBe("Test User")
+			expect(result.foundAfterCreate.name).toBe("Test User")
+			expect(result.updated.name).toBe("Updated User")
+			expect(result.foundAfterUpdate.name).toBe("Updated User")
+			expect(result.deleted.name).toBe("Updated User")
+			expect(result.findAfterDelete.type).toBe("error") // Entity no longer exists
+
+			// Verify all hooks were actually called (even though they failed)
+			expect(hookCallOrder).toEqual(["afterCreate", "afterUpdate", "afterDelete"])
+		})
 	})
 })
