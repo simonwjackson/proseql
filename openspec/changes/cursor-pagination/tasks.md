@@ -23,7 +23,7 @@
 
 ## 4. Tests
 
-- [ ] 4.1 Create `tests/cursor-pagination.test.ts` with test helpers: generate N sequentially-IDed items, helper to run cursor queries against an in-memory database
+- [x] 4.1 Create `tests/cursor-pagination.test.ts` with test helpers: generate N sequentially-IDed items, helper to run cursor queries against an in-memory database
 - [ ] 4.2 Test forward pagination: first page returns correct items and `hasNextPage = true`, second page via `after: endCursor` returns next items, final page has `hasNextPage = false`
 - [ ] 4.3 Test backward pagination: page via `before` cursor returns previous items, first page has `hasPreviousPage = false`
 - [ ] 4.4 Test empty results: query matching no items returns empty items, null cursors, both has-flags false
