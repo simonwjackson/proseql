@@ -58,7 +58,7 @@ export const normalizeConstraints = (
 // ============================================================================
 
 import { Effect } from "effect"
-import { UniqueConstraintError } from "../../errors/crud-errors.js"
+import { UniqueConstraintError, ValidationError } from "../../errors/crud-errors.js"
 
 type HasId = { readonly id: string }
 
@@ -265,4 +265,90 @@ export const checkBatchUniqueConstraints = <T extends HasId>(
 	}
 
 	return Effect.void
+}
+
+// ============================================================================
+// Upsert Where Clause Validation
+// ============================================================================
+
+/**
+ * Validate that an upsert where clause targets a declared unique field or id.
+ *
+ * The where clause must fully cover at least one declared constraint:
+ * - `{ id: "..." }` — always valid (id is implicitly unique)
+ * - `{ email: "..." }` — valid if `[["email"]]` is in constraints
+ * - `{ userId: "u1", settingKey: "theme" }` — valid if `[["userId", "settingKey"]]` is in constraints
+ * - Extra fields beyond the constraint are allowed (for additional filtering)
+ *
+ * If no constraint is fully covered by the where clause, fail with ValidationError
+ * listing the valid unique fields.
+ *
+ * @param where - The where clause object from upsert
+ * @param constraints - Normalized constraints (array of field name arrays)
+ * @param collectionName - Name of the collection for error messages
+ * @returns Effect that succeeds with void or fails with ValidationError
+ */
+export const validateUpsertWhere = (
+	where: Readonly<Record<string, unknown>>,
+	constraints: NormalizedConstraints,
+	collectionName: string,
+): Effect.Effect<void, ValidationError> => {
+	const whereKeys = Object.keys(where)
+
+	// `id` is always a valid constraint (implicitly unique)
+	if (whereKeys.includes("id")) {
+		return Effect.void
+	}
+
+	// Check if where keys cover at least one declared constraint
+	for (const constraintFields of constraints) {
+		// All fields in the constraint must be present in where keys
+		const coversConstraint = constraintFields.every((field) =>
+			whereKeys.includes(field),
+		)
+		if (coversConstraint) {
+			return Effect.void
+		}
+	}
+
+	// No constraint is covered — build error message
+	const validFields = buildValidFieldsDescription(constraints)
+
+	return Effect.fail(
+		new ValidationError({
+			message: `Upsert where clause must target a unique field or id`,
+			issues: [
+				{
+					field: "where",
+					message: `Where clause does not match any declared unique field in collection '${collectionName}'. Valid unique fields: ${validFields}`,
+					value: where,
+				},
+			],
+		}),
+	)
+}
+
+/**
+ * Build a human-readable description of valid unique fields for error messages.
+ *
+ * @param constraints - Normalized constraints
+ * @returns String like "email, username" or "(userId, settingKey)" for compounds
+ */
+const buildValidFieldsDescription = (
+	constraints: NormalizedConstraints,
+): string => {
+	if (constraints.length === 0) {
+		return "id"
+	}
+
+	const descriptions = constraints.map((constraintFields) => {
+		if (constraintFields.length === 1) {
+			return constraintFields[0]
+		}
+		// Compound constraint: show as tuple notation
+		return `(${constraintFields.join(", ")})`
+	})
+
+	// Always include id as valid
+	return [...descriptions, "id"].join(", ")
 }
