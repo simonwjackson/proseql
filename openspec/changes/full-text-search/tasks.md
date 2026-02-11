@@ -83,7 +83,7 @@
 - [x] 13.1 Test `$search` with other field operators: `{ title: { $search: "dark" }, year: { $gt: 1960 } }` filters by both
 - [x] 13.2 Test `$search` inside `$or`: `{ $or: [{ title: { $search: "dark" } }, { author: { $search: "gibson" } }] }` matches either
 - [x] 13.3 Test `$search` inside `$and`: both conditions must match
-- [ ] 13.4 Test `$search` combined with pagination: results are paginated after search filtering and relevance sort
+- [x] 13.4 Test `$search` combined with pagination: results are paginated after search filtering and relevance sort
 
 ## 14. Cleanup
 

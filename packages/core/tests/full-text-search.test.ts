@@ -2581,4 +2581,439 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 			expect(results[0].year).toBe(1969)
 		})
 	})
+
+	describe("13.4: $search combined with pagination", () => {
+		// Test data with more books to test pagination properly
+		const paginationTestBooks: ReadonlyArray<Book> = [
+			{
+				id: "1",
+				title: "The Dark Tower",
+				author: "Stephen King",
+				year: 1982,
+				description: "A dark fantasy novel with dark themes",
+			},
+			{
+				id: "2",
+				title: "The Left Hand of Darkness",
+				author: "Ursula K. Le Guin",
+				year: 1969,
+				description: "A story exploring gender on a winter planet",
+			},
+			{
+				id: "3",
+				title: "Heart of Darkness",
+				author: "Joseph Conrad",
+				year: 1899,
+				description: "A novella about a voyage into the dark African interior",
+			},
+			{
+				id: "4",
+				title: "Darkness at Noon",
+				author: "Arthur Koestler",
+				year: 1940,
+				description: "A dark political novel about totalitarianism",
+			},
+			{
+				id: "5",
+				title: "Out of the Dark",
+				author: "David Weber",
+				year: 2010,
+				description: "Aliens invade a dark future Earth",
+			},
+		]
+
+		const createPaginationTestDatabase = () =>
+			Effect.runPromise(
+				createEffectDatabase(
+					{
+						books: { schema: BookSchema, relationships: {} },
+					},
+					{ books: paginationTestBooks },
+				),
+			)
+
+		const createPaginationTestDatabaseWithIndex = () =>
+			Effect.runPromise(
+				createEffectDatabase(
+					{
+						books: {
+							schema: BookSchema,
+							relationships: {},
+							searchIndex: ["title", "author", "description"] as const,
+						},
+					},
+					{ books: paginationTestBooks },
+				),
+			)
+
+		describe("offset-based pagination with $search", () => {
+			it("should paginate search results with limit only", async () => {
+				const db = await createPaginationTestDatabase()
+				// Search for "dark" which matches all 5 books
+				const results = await db.books.query({
+					where: { title: { $search: "dark" } },
+					limit: 3,
+				}).runPromise
+
+				expect(results.length).toBe(3)
+			})
+
+			it("should paginate search results with offset only", async () => {
+				const db = await createPaginationTestDatabase()
+				// Search for "dark" which matches all 5 books
+				const allResults = await db.books.query({
+					where: { title: { $search: "dark" } },
+				}).runPromise
+
+				const offsetResults = await db.books.query({
+					where: { title: { $search: "dark" } },
+					offset: 2,
+				}).runPromise
+
+				// Offset 2 should skip first 2, return remaining
+				expect(offsetResults.length).toBe(allResults.length - 2)
+			})
+
+			it("should paginate search results with limit and offset", async () => {
+				const db = await createPaginationTestDatabase()
+				// Get all matching results first
+				const allResults = await db.books.query({
+					where: { title: { $search: "dark" } },
+				}).runPromise
+
+				// Get page 2 (offset 2, limit 2)
+				const page2 = await db.books.query({
+					where: { title: { $search: "dark" } },
+					offset: 2,
+					limit: 2,
+				}).runPromise
+
+				expect(page2.length).toBe(2)
+				// Should be items at index 2 and 3 of the full results
+				expect(page2[0].id).toBe(allResults[2].id)
+				expect(page2[1].id).toBe(allResults[3].id)
+			})
+
+			it("should maintain relevance order when paginating", async () => {
+				const db = await createPaginationTestDatabase()
+				// Get all results sorted by relevance
+				const allResults = await db.books.query({
+					where: { title: { $search: "dark" } },
+				}).runPromise
+
+				// Get first page
+				const page1 = await db.books.query({
+					where: { title: { $search: "dark" } },
+					limit: 2,
+				}).runPromise
+
+				// Get second page
+				const page2 = await db.books.query({
+					where: { title: { $search: "dark" } },
+					offset: 2,
+					limit: 2,
+				}).runPromise
+
+				// Page 1 should have items 0 and 1 from all results
+				expect(page1[0].id).toBe(allResults[0].id)
+				expect(page1[1].id).toBe(allResults[1].id)
+
+				// Page 2 should have items 2 and 3 from all results
+				expect(page2[0].id).toBe(allResults[2].id)
+				expect(page2[1].id).toBe(allResults[3].id)
+			})
+
+			it("should return empty when offset exceeds search result count", async () => {
+				const db = await createPaginationTestDatabase()
+				const results = await db.books.query({
+					where: { title: { $search: "dark" } },
+					offset: 100,
+				}).runPromise
+
+				expect(results.length).toBe(0)
+			})
+
+			it("should return fewer items when limit exceeds remaining after offset", async () => {
+				const db = await createPaginationTestDatabase()
+				// 5 books match "dark", offset 3 means 2 remain
+				const results = await db.books.query({
+					where: { title: { $search: "dark" } },
+					offset: 3,
+					limit: 10,
+				}).runPromise
+
+				expect(results.length).toBe(2)
+			})
+
+			it("should paginate with explicit sort (overriding relevance)", async () => {
+				const db = await createPaginationTestDatabase()
+				// Get all results sorted by year
+				const allSortedByYear = await db.books.query({
+					where: { title: { $search: "dark" } },
+					sort: { year: "asc" },
+				}).runPromise
+
+				// Get first 2 by year
+				const page1 = await db.books.query({
+					where: { title: { $search: "dark" } },
+					sort: { year: "asc" },
+					limit: 2,
+				}).runPromise
+
+				expect(page1.length).toBe(2)
+				// Should be the two oldest books
+				expect(page1[0].id).toBe(allSortedByYear[0].id)
+				expect(page1[1].id).toBe(allSortedByYear[1].id)
+				expect(page1[0].year).toBeLessThanOrEqual(page1[1].year)
+			})
+
+			it("should paginate with top-level $search", async () => {
+				const db = await createPaginationTestDatabase()
+				// Top-level search across multiple fields
+				const allResults = await db.books.query({
+					where: { $search: { query: "dark" } },
+				}).runPromise
+
+				const page1 = await db.books.query({
+					where: { $search: { query: "dark" } },
+					limit: 2,
+				}).runPromise
+
+				expect(page1.length).toBe(2)
+				expect(page1[0].id).toBe(allResults[0].id)
+				expect(page1[1].id).toBe(allResults[1].id)
+			})
+
+			it("should paginate with $search combined with other filters", async () => {
+				const db = await createPaginationTestDatabase()
+				// Search with additional year filter
+				const allFiltered = await db.books.query({
+					where: { title: { $search: "dark" }, year: { $gt: 1950 } },
+				}).runPromise
+
+				const paginated = await db.books.query({
+					where: { title: { $search: "dark" }, year: { $gt: 1950 } },
+					limit: 2,
+				}).runPromise
+
+				expect(paginated.length).toBe(2)
+				// All results should be after 1950
+				for (const book of paginated) {
+					expect(book.year).toBeGreaterThan(1950)
+				}
+				expect(paginated[0].id).toBe(allFiltered[0].id)
+				expect(paginated[1].id).toBe(allFiltered[1].id)
+			})
+
+			it("should paginate search results with indexed database", async () => {
+				const db = await createPaginationTestDatabaseWithIndex()
+				const allResults = await db.books.query({
+					where: { title: { $search: "dark" } },
+				}).runPromise
+
+				const page1 = await db.books.query({
+					where: { title: { $search: "dark" } },
+					limit: 2,
+				}).runPromise
+
+				const page2 = await db.books.query({
+					where: { title: { $search: "dark" } },
+					offset: 2,
+					limit: 2,
+				}).runPromise
+
+				expect(page1.length).toBe(2)
+				expect(page2.length).toBe(2)
+				expect(page1[0].id).toBe(allResults[0].id)
+				expect(page2[0].id).toBe(allResults[2].id)
+			})
+		})
+
+		describe("cursor-based pagination with $search", () => {
+			it("should cursor-paginate search results forward", async () => {
+				const db = await createPaginationTestDatabase()
+				// First page with cursor
+				const page1 = await db.books.query({
+					where: { title: { $search: "dark" } },
+					sort: { id: "asc" },
+					cursor: { key: "id", limit: 2 },
+				}).runPromise
+
+				expect(page1.items.length).toBe(2)
+				expect(page1.pageInfo.hasNextPage).toBe(true)
+				expect(page1.pageInfo.hasPreviousPage).toBe(false)
+
+				// Second page using cursor
+				const page2 = await db.books.query({
+					where: { title: { $search: "dark" } },
+					sort: { id: "asc" },
+					cursor: { key: "id", after: page1.pageInfo.endCursor!, limit: 2 },
+				}).runPromise
+
+				expect(page2.items.length).toBe(2)
+				expect(page2.pageInfo.hasPreviousPage).toBe(true)
+
+				// Items should be different
+				const page1Ids = page1.items.map((b) => b.id)
+				const page2Ids = page2.items.map((b) => b.id)
+				expect(page1Ids).not.toEqual(page2Ids)
+
+				// Page 2 IDs should be greater than page 1 IDs (sorted by id asc)
+				for (const id of page2Ids) {
+					for (const p1Id of page1Ids) {
+						expect(id > p1Id).toBe(true)
+					}
+				}
+			})
+
+			it("should cursor-paginate search results backward", async () => {
+				const db = await createPaginationTestDatabase()
+				// Get last page first
+				const allResults = await db.books.query({
+					where: { title: { $search: "dark" } },
+					sort: { id: "asc" },
+				}).runPromise
+
+				// Start from end (last 2 items)
+				const lastPage = await db.books.query({
+					where: { title: { $search: "dark" } },
+					sort: { id: "asc" },
+					cursor: { key: "id", limit: 2, before: allResults[allResults.length - 1].id },
+				}).runPromise
+
+				// Should get items before the last one
+				expect(lastPage.items.length).toBeGreaterThan(0)
+			})
+
+			it("should cursor-paginate with explicit sort on search results", async () => {
+				const db = await createPaginationTestDatabase()
+				// Paginate by year instead of relevance
+				const page1 = await db.books.query({
+					where: { title: { $search: "dark" } },
+					sort: { year: "asc" },
+					cursor: { key: "year", limit: 2 },
+				}).runPromise
+
+				expect(page1.items.length).toBe(2)
+				// Should be oldest books first
+				expect(page1.items[0].year).toBeLessThanOrEqual(page1.items[1].year)
+			})
+
+			it("should cursor-paginate with top-level $search", async () => {
+				const db = await createPaginationTestDatabase()
+				const page1 = await db.books.query({
+					where: { $search: { query: "dark", fields: ["title", "description"] } },
+					sort: { id: "asc" },
+					cursor: { key: "id", limit: 2 },
+				}).runPromise
+
+				expect(page1.items.length).toBe(2)
+				expect(page1.pageInfo.hasNextPage).toBe(true)
+			})
+
+			it("should cursor-paginate search results with combined filters", async () => {
+				const db = await createPaginationTestDatabase()
+				// Search with additional filter
+				const page1 = await db.books.query({
+					where: {
+						title: { $search: "dark" },
+						year: { $gt: 1950 },
+					},
+					sort: { year: "asc" },
+					cursor: { key: "year", limit: 2 },
+				}).runPromise
+
+				expect(page1.items.length).toBe(2)
+				// All results should be after 1950
+				for (const book of page1.items) {
+					expect(book.year).toBeGreaterThan(1950)
+				}
+			})
+
+			it("should cursor-paginate search results with indexed database", async () => {
+				const db = await createPaginationTestDatabaseWithIndex()
+				const page1 = await db.books.query({
+					where: { title: { $search: "dark" } },
+					sort: { id: "asc" },
+					cursor: { key: "id", limit: 2 },
+				}).runPromise
+
+				expect(page1.items.length).toBe(2)
+				expect(page1.pageInfo.hasNextPage).toBe(true)
+
+				const page2 = await db.books.query({
+					where: { title: { $search: "dark" } },
+					sort: { id: "asc" },
+					cursor: { key: "id", after: page1.pageInfo.endCursor!, limit: 2 },
+				}).runPromise
+
+				expect(page2.items.length).toBe(2)
+				// Should have different items
+				expect(page1.items[0].id).not.toBe(page2.items[0].id)
+			})
+		})
+
+		describe("pagination edge cases with $search", () => {
+			it("should return empty results with pagination when no search matches", async () => {
+				const db = await createPaginationTestDatabase()
+				const results = await db.books.query({
+					where: { title: { $search: "xyz123nonexistent" } },
+					limit: 10,
+					offset: 0,
+				}).runPromise
+
+				expect(results.length).toBe(0)
+			})
+
+			it("should handle limit=0 with search results", async () => {
+				const db = await createPaginationTestDatabase()
+				const results = await db.books.query({
+					where: { title: { $search: "dark" } },
+					limit: 0,
+				}).runPromise
+
+				expect(results.length).toBe(0)
+			})
+
+			it("should handle pagination with single search match", async () => {
+				// Only one book has "Conrad" in author
+				const db = await createPaginationTestDatabase()
+				const results = await db.books.query({
+					where: { author: { $search: "conrad" } },
+					limit: 10,
+				}).runPromise
+
+				expect(results.length).toBe(1)
+				expect(results[0].author).toBe("Joseph Conrad")
+			})
+
+			it("should correctly paginate through all search results", async () => {
+				const db = await createPaginationTestDatabase()
+				const allResults = await db.books.query({
+					where: { title: { $search: "dark" } },
+				}).runPromise
+
+				// Collect all items via pagination
+				const collectedIds: string[] = []
+				const pageSize = 2
+				let offset = 0
+
+				while (true) {
+					const page = await db.books.query({
+						where: { title: { $search: "dark" } },
+						offset,
+						limit: pageSize,
+					}).runPromise
+
+					if (page.length === 0) break
+					collectedIds.push(...page.map((b) => b.id))
+					offset += pageSize
+				}
+
+				// Should have collected all matching items
+				expect(collectedIds.length).toBe(allResults.length)
+				expect(collectedIds.sort()).toEqual(allResults.map((b) => b.id).sort())
+			})
+		})
+	})
 })
