@@ -1,4 +1,5 @@
 import { tokenize } from "../operations/query/search.js";
+import type { CustomOperator } from "../plugins/plugin-types.js";
 import type { FilterOperators } from "./types.js";
 
 // ============================================================================
@@ -129,6 +130,7 @@ export function isFilterOperatorObject<T>(
 export function matchesFilter<T>(
 	value: T,
 	filter: T | FilterOperators<T>,
+	customOperators?: Map<string, CustomOperator>,
 ): boolean {
 	// Check if filter is an object with operators
 	if (isFilterOperatorObject(filter)) {
@@ -350,6 +352,51 @@ export function matchesFilter<T>(
 		if (typeof value !== "number" && typeof value !== "string") {
 			if ("$gt" in ops || "$gte" in ops || "$lt" in ops || "$lte" in ops) {
 				return false;
+			}
+		}
+
+		// Check custom operators for any unrecognized $-prefixed keys
+		if (customOperators && customOperators.size > 0) {
+			const builtInOperators = new Set([
+				"$eq",
+				"$ne",
+				"$in",
+				"$nin",
+				"$gt",
+				"$gte",
+				"$lt",
+				"$lte",
+				"$startsWith",
+				"$endsWith",
+				"$contains",
+				"$all",
+				"$size",
+				"$search",
+			]);
+
+			for (const key of Object.keys(ops)) {
+				// Skip non-operator keys and built-in operators
+				if (!key.startsWith("$") || builtInOperators.has(key)) {
+					continue;
+				}
+
+				// Look up custom operator
+				const customOp = customOperators.get(key);
+				if (customOp) {
+					// Check if the value type is compatible with the operator
+					const valueType = Array.isArray(value)
+						? "array"
+						: (typeof value as "string" | "number" | "boolean");
+
+					// Only evaluate if the operator supports this value type
+					if (customOp.types.includes(valueType)) {
+						const result = customOp.evaluate(value, ops[key]);
+						results.push(result);
+					}
+					// If type is not supported, the operator is silently ignored
+					// (consistent with how built-in type-specific operators work)
+				}
+				// Unknown operators are silently ignored (no error thrown)
 			}
 		}
 
