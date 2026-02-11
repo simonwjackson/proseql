@@ -598,5 +598,65 @@ describe("lifecycle-hooks", () => {
 			expect(result.afterAttempt.email).toBe(result.originalUser.email)
 			expect(result.afterAttempt.age).toBe(result.originalUser.age)
 		})
+
+		it("hook receives correct context (collection, operation, data)", async () => {
+			// Track contexts received by each hook type
+			const beforeCreateContexts: Array<BeforeCreateContext<User>> = []
+			const beforeUpdateContexts: Array<BeforeUpdateContext<User>> = []
+			const beforeDeleteContexts: Array<BeforeDeleteContext<User>> = []
+
+			const hooks: HooksConfig<User> = {
+				beforeCreate: [makeTrackingBeforeCreateHook(beforeCreateContexts)],
+				beforeUpdate: [makeTrackingBeforeUpdateHook(beforeUpdateContexts)],
+				beforeDelete: [makeTrackingBeforeDeleteHook(beforeDeleteContexts)],
+			}
+
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, { users: [] })
+
+					// Create a user
+					const created = yield* db.users.create({
+						name: "Context Test User",
+						email: "context@test.com",
+						age: 30,
+					})
+
+					// Update the user
+					yield* db.users.update(created.id, {
+						name: "Updated Name",
+					})
+
+					// Delete the user
+					yield* db.users.delete(created.id)
+				}),
+			)
+
+			// Verify beforeCreate context
+			expect(beforeCreateContexts).toHaveLength(1)
+			const createCtx = beforeCreateContexts[0]
+			expect(createCtx.operation).toBe("create")
+			expect(createCtx.collection).toBe("users")
+			expect(createCtx.data.name).toBe("Context Test User")
+			expect(createCtx.data.email).toBe("context@test.com")
+			expect(createCtx.data.age).toBe(30)
+
+			// Verify beforeUpdate context
+			expect(beforeUpdateContexts).toHaveLength(1)
+			const updateCtx = beforeUpdateContexts[0]
+			expect(updateCtx.operation).toBe("update")
+			expect(updateCtx.collection).toBe("users")
+			expect(updateCtx.id).toBeDefined()
+			expect(updateCtx.existing.name).toBe("Context Test User")
+			expect(updateCtx.update).toEqual({ name: "Updated Name" })
+
+			// Verify beforeDelete context
+			expect(beforeDeleteContexts).toHaveLength(1)
+			const deleteCtx = beforeDeleteContexts[0]
+			expect(deleteCtx.operation).toBe("delete")
+			expect(deleteCtx.collection).toBe("users")
+			expect(deleteCtx.id).toBeDefined()
+			expect(deleteCtx.entity.name).toBe("Updated Name") // Reflects the update
+		})
 	})
 })
