@@ -64,7 +64,7 @@
 - [x] 8.1 Delete old `core/` directory (all content moved to packages)
 - [x] 8.2 Delete old `tests/` directory (all content moved to packages)
 - [x] 8.3 Update `examples/*.ts` imports: change `../core/...` to `@proseql/core` or `@proseql/node`
-- [ ] 8.4 Update `CLAUDE.md`: change `core/` references to `packages/core/src/`, update test commands, add workspace context
+- [x] 8.4 Update `CLAUDE.md`: change `core/` references to `packages/core/src/`, update test commands, add workspace context
 
 ## 9. Verification
 
