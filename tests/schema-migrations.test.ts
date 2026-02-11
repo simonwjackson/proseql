@@ -7,8 +7,9 @@ import {
 	saveCollectionsToFile,
 } from "../core/storage/persistence-effect.js"
 import { makeInMemoryStorageLayer } from "../core/storage/in-memory-adapter-layer.js"
-import { JsonSerializerLayer } from "../core/serializers/json.js"
-import { YamlSerializerLayer } from "../core/serializers/yaml.js"
+import { makeSerializerLayer } from "../core/serializers/format-codec.js"
+import { jsonCodec } from "../core/serializers/codecs/json.js"
+import { yamlCodec } from "../core/serializers/codecs/yaml.js"
 import { MigrationError } from "../core/errors/migration-errors.js"
 import { validateMigrationRegistry } from "../core/migrations/migration-runner.js"
 import type { Migration } from "../core/migrations/migration-types.js"
@@ -23,7 +24,7 @@ import type { Migration } from "../core/migrations/migration-types.js"
  */
 const makeTestEnv = () => {
 	const store = new Map<string, string>()
-	const layer = Layer.merge(makeInMemoryStorageLayer(store), JsonSerializerLayer)
+	const layer = Layer.merge(makeInMemoryStorageLayer(store), makeSerializerLayer([jsonCodec()]))
 	return { store, layer }
 }
 
@@ -32,7 +33,7 @@ const makeTestEnv = () => {
  */
 const makeYamlTestEnv = () => {
 	const store = new Map<string, string>()
-	const layer = Layer.merge(makeInMemoryStorageLayer(store), YamlSerializerLayer)
+	const layer = Layer.merge(makeInMemoryStorageLayer(store), makeSerializerLayer([yamlCodec()]))
 	return { store, layer }
 }
 
@@ -564,6 +565,46 @@ describe("schema-migrations: migration registry validation", () => {
 				),
 			)
 			expect(result).toBe("success")
+		})
+	})
+
+	describe("gap in chain → error (task 10.2)", () => {
+		it("rejects chain with gap (0→1, 2→3 missing 1→2)", async () => {
+			// Gap: have 0→1 and 2→3, but missing 1→2
+			const migrationsWithGap: ReadonlyArray<Migration> = [
+				migration0to1,
+				migration2to3,
+			]
+
+			const error = await Effect.runPromise(
+				validateMigrationRegistry("users", 3, migrationsWithGap).pipe(
+					Effect.flip,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			expect(error.reason).toBe("gap-in-chain")
+			expect(error.message).toContain("Gap in migration chain")
+			expect(error.message).toContain("1")
+			expect(error.message).toContain("2")
+		})
+
+		it("rejects chain that doesn't start at 0", async () => {
+			// Missing the start - have 1→2 and 2→3 but no 0→1
+			const migrationsWithoutStart: ReadonlyArray<Migration> = [
+				migration1to2,
+				migration2to3,
+			]
+
+			const error = await Effect.runPromise(
+				validateMigrationRegistry("users", 3, migrationsWithoutStart).pipe(
+					Effect.flip,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			expect(error.reason).toBe("missing-start")
+			expect(error.message).toContain("must start at version 0")
 		})
 	})
 })
