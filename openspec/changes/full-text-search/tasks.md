@@ -14,7 +14,7 @@
 
 ## 3. Relevance Scorer
 
-- [ ] 3.1 Implement `computeFieldScore(fieldValue: string, queryTokens: ReadonlyArray<string>): number` in `search.ts` -- tokenize the field value, compute term frequency, field length normalization, and term coverage. Return 0 if no tokens match.
+- [x] 3.1 Implement `computeFieldScore(fieldValue: string, queryTokens: ReadonlyArray<string>): number` in `search.ts` -- tokenize the field value, compute term frequency, field length normalization, and term coverage. Return 0 if no tokens match.
 - [ ] 3.2 Implement `computeSearchScore(entity: Record<string, unknown>, queryTokens: ReadonlyArray<string>, fields: ReadonlyArray<string>): number` -- sum field scores across all specified fields. Return 0 if no fields match.
 - [ ] 3.3 Exact token matches score higher than prefix matches (e.g., "dune" matching "dune" scores more than "dun" matching "dune")
 
