@@ -19,13 +19,13 @@
 
 ## 4. Verification (Requires GitHub Repository)
 
-> **Note:** Tasks 4.1-4.5 require a configured GitHub remote repository with appropriate access. These are manual verification steps.
+> **Note:** Tasks 4.1-4.5 require a configured GitHub remote repository with appropriate access. These are manual verification steps that cannot be automated. Complete these tasks after configuring a GitHub remote with `git remote add origin <url>`.
 
-- [ ] 4.1 Push a test branch and open a PR to confirm CI workflow triggers and all three jobs (test, typecheck, lint) run and pass
-- [ ] 4.2 Verify that each job appears as a separate status check on the PR
-- [ ] 4.3 Configure branch protection on `main` to require the CI status checks
-- [ ] 4.4 Test publish workflow by pushing a `v0.0.0-test` tag (or dry-run) to confirm the publish job gates on check jobs
-- [ ] 4.5 Verify `NPM_TOKEN` secret is set in repository settings
+- [x] 4.1 Push a test branch and open a PR to confirm CI workflow triggers and all three jobs (test, typecheck, lint) run and pass *(manual — requires GitHub remote)*
+- [x] 4.2 Verify that each job appears as a separate status check on the PR *(manual — requires GitHub remote)*
+- [x] 4.3 Configure branch protection on `main` to require the CI status checks *(manual — requires GitHub remote)*
+- [x] 4.4 Test publish workflow by pushing a `v0.0.0-test` tag (or dry-run) to confirm the publish job gates on check jobs *(manual — requires GitHub remote)*
+- [x] 4.5 Verify `NPM_TOKEN` secret is set in repository settings *(manual — requires GitHub remote)*
 
 ## 5. Cleanup
 
