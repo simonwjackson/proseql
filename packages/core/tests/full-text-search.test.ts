@@ -141,4 +141,42 @@ describe("Full-text search: Basic Search (task 9)", () => {
 			})
 		})
 	})
+
+	describe("9.3: Case insensitivity", () => {
+		it("should match 'Dune' when searching for 'DUNE' (uppercase)", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "DUNE" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should match 'Dune' when searching for 'DuNe' (mixed case)", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "DuNe" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should match 'Neuromancer' when searching for 'NEUROMANCER'", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "NEUROMANCER" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Neuromancer")
+		})
+
+		it("should match author case-insensitively", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { author: { $search: "FRANK HERBERT" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].author).toBe("Frank Herbert")
+		})
+	})
 })
