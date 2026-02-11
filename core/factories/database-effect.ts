@@ -79,7 +79,7 @@ import type {
 } from "../errors/storage-errors.js"
 import { StorageAdapter } from "../storage/storage-service.js"
 import { SerializerRegistry } from "../serializers/serializer-service.js"
-import { saveData } from "../storage/persistence-effect.js"
+import { saveData, loadData } from "../storage/persistence-effect.js"
 
 // ============================================================================
 // Convenience API: runPromise
@@ -792,7 +792,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 	persistenceConfig?: EffectDatabasePersistenceConfig,
 ): Effect.Effect<
 	EffectDatabaseWithPersistence<Config>,
-	MigrationError,
+	MigrationError | StorageError | SerializationError | UnsupportedFormatError | ValidationError,
 	StorageAdapter | SerializerRegistry | Scope.Scope
 > =>
 	Effect.gen(function* () {
@@ -817,27 +817,58 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			Layer.succeed(SerializerRegistry, serializerRegistry),
 		)
 
-		// 2. Create Ref for each collection from initial data
+		// 2. Load data from files for persistent collections, then merge with initialData.
+		// initialData takes precedence (allows overriding file data for testing/seeding).
 		const stateRefs: StateRefs = {}
 		const typedRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>> = {}
 
 		for (const collectionName of Object.keys(config)) {
-			const items = (initialData?.[collectionName] ?? []) as ReadonlyArray<HasId>
-			const map: ReadonlyMap<string, HasId> = new Map(
-				items.map((item) => [item.id, item]),
-			)
-			const ref = yield* Ref.make(map)
+			const collectionConfig = config[collectionName]
+			const filePath = collectionConfig.file
+
+			// Load from file if configured, passing version and migrations for auto-migration
+			let loadedData: ReadonlyMap<string, HasId> = new Map()
+			if (filePath) {
+				// Only pass version options when collection is versioned
+				// Build options object conditionally to satisfy exactOptionalPropertyTypes
+				const loadOptions =
+					collectionConfig.version !== undefined
+						? collectionConfig.migrations !== undefined
+							? {
+									version: collectionConfig.version,
+									migrations: collectionConfig.migrations,
+									collectionName,
+								}
+							: { version: collectionConfig.version, collectionName }
+						: undefined
+				loadedData = yield* loadData(
+					filePath,
+					collectionConfig.schema as Schema.Schema<HasId, unknown>,
+					loadOptions,
+				)
+			}
+
+			// Merge with initialData (initialData takes precedence)
+			const providedItems = (initialData?.[collectionName] ?? []) as ReadonlyArray<HasId>
+			const mergedMap = new Map(loadedData)
+			for (const item of providedItems) {
+				mergedMap.set(item.id, item)
+			}
+
+			const ref = yield* Ref.make(mergedMap as ReadonlyMap<string, HasId>)
 			stateRefs[collectionName] = ref
 			typedRefs[collectionName] = ref
 		}
 
-		// 3. Build indexes for each collection from initial data
+		// 3. Build indexes for each collection from loaded/merged data
 		const collectionIndexes: Record<string, CollectionIndexes> = {}
 
 		for (const collectionName of Object.keys(config)) {
 			const collectionConfig = config[collectionName]
 			const normalizedIndexes = normalizeIndexes(collectionConfig.indexes)
-			const items = (initialData?.[collectionName] ?? []) as ReadonlyArray<HasId>
+			// Use actual data from the Ref (loaded from file + initialData)
+			const dataMap = yield* Ref.get(typedRefs[collectionName])
+			const items = Array.from(dataMap.values()) as ReadonlyArray<HasId>
 			const indexes = yield* buildIndexes(normalizedIndexes, items)
 			collectionIndexes[collectionName] = indexes
 		}
@@ -863,6 +894,10 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 						filePath,
 						collectionConfig.schema as Schema.Schema<HasId, unknown>,
 						currentData,
+						// Pass version option to stamp _version in output for versioned collections
+						collectionConfig.version !== undefined
+							? { version: collectionConfig.version }
+							: undefined,
 					)
 				}),
 				serviceLayer,
