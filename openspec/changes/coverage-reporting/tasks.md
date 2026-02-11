@@ -26,7 +26,7 @@
 
 - [x] 3.1 Add `coverage` recipe to `justfile`: `bun test --coverage packages/*/tests/`
 - [x] 3.2 Add `coverage-core` recipe to `justfile`: `bun test --coverage packages/core/tests/`
-- [ ] 3.3 Add `coverage-node` recipe to `justfile`: `bun test --coverage packages/node/tests/`
+- [x] 3.3 Add `coverage-node` recipe to `justfile`: `bun test --coverage packages/node/tests/`
 
 ## 4. Verification
 
