@@ -33,7 +33,7 @@
 ## 6. Post-Migration Validation
 
 - [x] 6.1 After running all transforms, decode each entity through `Schema.decodeUnknown(currentSchema)`. On failure, produce `MigrationError` with `step: -1` and the parse error details.
-- [ ] 6.2 Ensure original file is untouched if validation fails (write-back only happens after successful decode).
+- [x] 6.2 Ensure original file is untouched if validation fails (write-back only happens after successful decode).
 
 ## 7. Factory Integration
 

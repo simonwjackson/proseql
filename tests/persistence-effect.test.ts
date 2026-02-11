@@ -11,6 +11,8 @@ import { JsonSerializerLayer } from "../core/serializers/json.js"
 import { YamlSerializerLayer } from "../core/serializers/yaml.js"
 import { StorageError, SerializationError } from "../core/errors/storage-errors.js"
 import { ValidationError } from "../core/errors/crud-errors.js"
+import { MigrationError } from "../core/errors/migration-errors.js"
+import type { Migration } from "../core/migrations/migration-types.js"
 
 // ============================================================================
 // Test schemas
@@ -457,6 +459,109 @@ describe("persistence-effect: loadData & saveData", () => {
 
 			// File content should be exactly the same (no write-back occurred)
 			expect(store.get("/data/unchanged.json")).toBe(originalContent)
+		})
+	})
+
+	// ============================================================================
+	// Post-migration validation
+	// ============================================================================
+
+	describe("post-migration validation", () => {
+		// Schema at version 2 expects a 'role' field that didn't exist in version 1
+		const UserSchemaV2 = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+			age: Schema.Number,
+			role: Schema.String, // Required field added in v2
+		})
+
+		it("original file is untouched if post-migration validation fails (loadData)", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File at version 0 with data missing 'role' field
+			const originalContent = JSON.stringify({
+				_version: 0,
+				u1: { id: "u1", name: "Alice", age: 30 },
+				u2: { id: "u2", name: "Bob", age: 25 },
+			})
+			store.set("/data/users.json", originalContent)
+
+			// Migration that renames but doesn't add 'role' (incomplete migration)
+			const migrations: ReadonlyArray<Migration> = [
+				{
+					from: 0,
+					to: 1,
+					transform: (data) => {
+						// Just pass through - doesn't add 'role' field
+						return data
+					},
+				},
+			]
+
+			// Attempt to load with schema that requires 'role' field
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV2, {
+						version: 1,
+						collectionName: "users",
+						migrations,
+					}).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			// Should fail with MigrationError (step: -1 for validation failure)
+			expect(error._tag).toBe("MigrationError")
+			expect((error as MigrationError).step).toBe(-1)
+			expect((error as MigrationError).reason).toBe("post-migration-validation-failed")
+
+			// Original file should be completely unchanged
+			expect(store.get("/data/users.json")).toBe(originalContent)
+		})
+
+		it("original file is untouched if post-migration validation fails (loadCollectionsFromFile)", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File at version 0 with data missing 'role' field
+			const originalContent = JSON.stringify({
+				users: {
+					_version: 0,
+					u1: { id: "u1", name: "Alice", age: 30 },
+				},
+			})
+			store.set("/data/db.json", originalContent)
+
+			// Migration that doesn't add 'role' field
+			const migrations: ReadonlyArray<Migration> = [
+				{
+					from: 0,
+					to: 1,
+					transform: (data) => data,
+				},
+			]
+
+			// Attempt to load with schema that requires 'role' field
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadCollectionsFromFile("/data/db.json", [
+						{
+							name: "users",
+							schema: UserSchemaV2,
+							version: 1,
+							migrations,
+						},
+					]).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			// Should fail with MigrationError (step: -1 for validation failure)
+			expect(error._tag).toBe("MigrationError")
+			expect((error as MigrationError).step).toBe(-1)
+			expect((error as MigrationError).reason).toBe("post-migration-validation-failed")
+
+			// Original file should be completely unchanged
+			expect(store.get("/data/db.json")).toBe(originalContent)
 		})
 	})
 
