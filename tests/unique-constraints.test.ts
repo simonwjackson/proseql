@@ -597,6 +597,66 @@ describe("Unique Constraints - Compound Fields", () => {
 		})
 	})
 
+	describe("error shape", () => {
+		it("should have constraint name, fields array, and values reflecting compound key", async () => {
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const settingsRef = yield* makeRef<Setting>([existingSetting])
+					const stateRefs = yield* makeStateRefs({ settings: [existingSetting] })
+
+					const doCreate = create(
+						"settings",
+						SettingSchema,
+						noRelationships,
+						settingsRef,
+						stateRefs,
+						undefined,
+						undefined,
+						settingUniqueFields,
+					)
+
+					// Create a duplicate compound tuple to trigger the error
+					return yield* doCreate({
+						userId: "user1",
+						settingKey: "theme", // same as existingSetting
+						value: "light",
+					}).pipe(Effect.flip)
+				}),
+			)
+
+			// Verify it's a UniqueConstraintError
+			expect(result._tag).toBe("UniqueConstraintError")
+			expect(result).toBeInstanceOf(UniqueConstraintError)
+
+			if (result._tag === "UniqueConstraintError") {
+				// Verify constraint name follows pattern: "unique_" + fields.join("_")
+				expect(result.constraint).toBe("unique_userId_settingKey")
+				expect(result.constraint).toMatch(/^unique_/)
+				expect(result.constraint.replace("unique_", "").split("_")).toEqual(["userId", "settingKey"])
+
+				// Verify fields array contains all compound key fields
+				expect(result.fields).toEqual(["userId", "settingKey"])
+				expect(result.fields).toHaveLength(2)
+				expect(result.fields).toContain("userId")
+				expect(result.fields).toContain("settingKey")
+
+				// Verify values object contains the conflicting values for ALL compound fields
+				expect(result.values).toEqual({ userId: "user1", settingKey: "theme" })
+				expect(Object.keys(result.values)).toEqual(["userId", "settingKey"])
+				expect(result.values.userId).toBe("user1")
+				expect(result.values.settingKey).toBe("theme")
+
+				// Verify collection and existingId are also correct
+				expect(result.collection).toBe("settings")
+				expect(result.existingId).toBe("setting1")
+
+				// Verify message contains useful information
+				expect(result.message).toContain("Unique constraint")
+				expect(result.message).toContain("settings")
+			}
+		})
+	})
+
 	describe("mixed single + compound constraints", () => {
 		/**
 		 * Member schema with both single-field (email) and compound ([teamId, role]) unique constraints.

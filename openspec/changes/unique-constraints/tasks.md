@@ -43,7 +43,7 @@
 - [x] 6.3 Test create: partial overlap (one field matches, other differs) → succeeds
 - [x] 6.4 Test create: null in one compound field → skipped, succeeds
 - [x] 6.5 Test mixed single + compound constraints on same collection → both enforced
-- [ ] 6.6 Test error shape: constraint name, fields array, and values reflect compound key
+- [x] 6.6 Test error shape: constraint name, fields array, and values reflect compound key
 
 ## 7. Tests — Upsert Validation
 
