@@ -941,5 +941,113 @@ describe("lifecycle-hooks", () => {
 			// Verify afterDelete hooks ran in registration order
 			expect(deleteHookOrder).toEqual([1, 2, 3])
 		})
+
+		it("after-hooks run after state mutation is complete", async () => {
+			// This test verifies that when after-hooks run, the database state
+			// has already been updated. The hook queries the database to confirm
+			// the mutation has been applied before the hook runs.
+
+			// We need to capture the database reference to query inside hooks
+			let dbRef: Awaited<ReturnType<typeof Effect.runPromise<ReturnType<typeof createHookedDatabase>>>> | null = null
+
+			// Track what we find when querying the database from inside hooks
+			const afterCreateFindings: Array<{ found: boolean; entity: User | null }> = []
+			const afterUpdateFindings: Array<{ found: boolean; entity: User | null; nameUpdated: boolean }> = []
+			const afterDeleteFindings: Array<{ found: boolean }> = []
+
+			// afterCreate hook that verifies the entity exists in the database
+			const verifyingAfterCreateHook: AfterCreateHook<User> = (ctx) =>
+				Effect.gen(function* () {
+					if (!dbRef) return
+					// Try to find the entity that was just created
+					const result = yield* dbRef.users.findById(ctx.entity.id).pipe(
+						Effect.matchEffect({
+							onFailure: () => Effect.succeed(null),
+							onSuccess: (user) => Effect.succeed(user),
+						}),
+					)
+					afterCreateFindings.push({
+						found: result !== null,
+						entity: result,
+					})
+				})
+
+			// afterUpdate hook that verifies the entity is updated in the database
+			const verifyingAfterUpdateHook: AfterUpdateHook<User> = (ctx) =>
+				Effect.gen(function* () {
+					if (!dbRef) return
+					// Try to find the entity and check if it has the new values
+					const result = yield* dbRef.users.findById(ctx.id).pipe(
+						Effect.matchEffect({
+							onFailure: () => Effect.succeed(null),
+							onSuccess: (user) => Effect.succeed(user),
+						}),
+					)
+					afterUpdateFindings.push({
+						found: result !== null,
+						entity: result,
+						nameUpdated: result?.name === ctx.current.name,
+					})
+				})
+
+			// afterDelete hook that verifies the entity is deleted from the database
+			const verifyingAfterDeleteHook: AfterDeleteHook<User> = (ctx) =>
+				Effect.gen(function* () {
+					if (!dbRef) return
+					// Try to find the entity - it should NOT exist
+					const result = yield* dbRef.users.findById(ctx.id).pipe(
+						Effect.matchEffect({
+							onFailure: () => Effect.succeed(null),
+							onSuccess: (user) => Effect.succeed(user),
+						}),
+					)
+					afterDeleteFindings.push({
+						found: result !== null,
+					})
+				})
+
+			const hooks: HooksConfig<User> = {
+				afterCreate: [verifyingAfterCreateHook],
+				afterUpdate: [verifyingAfterUpdateHook],
+				afterDelete: [verifyingAfterDeleteHook],
+			}
+
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, { users: [] })
+					dbRef = db
+
+					// Create a user - afterCreate hook should see the entity in the database
+					const created = yield* db.users.create({
+						name: "State Test User",
+						email: "state@test.com",
+						age: 25,
+					})
+
+					// Update the user - afterUpdate hook should see the updated entity
+					yield* db.users.update(created.id, {
+						name: "Updated State Test User",
+					})
+
+					// Delete the user - afterDelete hook should NOT find the entity
+					yield* db.users.delete(created.id)
+				}),
+			)
+
+			// Verify afterCreate saw the entity in the database
+			expect(afterCreateFindings).toHaveLength(1)
+			expect(afterCreateFindings[0].found).toBe(true)
+			expect(afterCreateFindings[0].entity?.name).toBe("State Test User")
+
+			// Verify afterUpdate saw the updated entity in the database
+			expect(afterUpdateFindings).toHaveLength(1)
+			expect(afterUpdateFindings[0].found).toBe(true)
+			expect(afterUpdateFindings[0].nameUpdated).toBe(true)
+			expect(afterUpdateFindings[0].entity?.name).toBe("Updated State Test User")
+
+			// Verify afterDelete did NOT find the entity (it was already deleted)
+			expect(afterDeleteFindings).toHaveLength(1)
+			expect(afterDeleteFindings[0].found).toBe(false)
+		})
 	})
 })
