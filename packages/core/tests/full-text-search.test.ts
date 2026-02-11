@@ -1156,4 +1156,204 @@ describe("Full-text search: Search Index (task 12)", () => {
 			expect(resultsWithIndex[1].title).toBe("Duneland")
 		})
 	})
+
+	describe("12.2: Index maintenance on create", () => {
+		it("should find a newly created entity via search", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Create a new book
+			await db.books.create({
+				id: "new-book",
+				title: "Hyperion",
+				author: "Dan Simmons",
+				year: 1989,
+				description: "A pilgrimage to the Time Tombs",
+			}).runPromise
+
+			// Search for the new book by title
+			const results = await db.books.query({
+				where: { title: { $search: "hyperion" } },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].id).toBe("new-book")
+			expect(results[0].title).toBe("Hyperion")
+		})
+
+		it("should find a newly created entity via author search", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Create a new book
+			await db.books.create({
+				id: "new-book",
+				title: "Hyperion",
+				author: "Dan Simmons",
+				year: 1989,
+				description: "A pilgrimage to the Time Tombs",
+			}).runPromise
+
+			// Search for the new book by author
+			const results = await db.books.query({
+				where: { author: { $search: "simmons" } },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].author).toBe("Dan Simmons")
+		})
+
+		it("should find a newly created entity via description search", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Create a new book
+			await db.books.create({
+				id: "new-book",
+				title: "Hyperion",
+				author: "Dan Simmons",
+				year: 1989,
+				description: "A pilgrimage to the Time Tombs",
+			}).runPromise
+
+			// Search for the new book by description content
+			const results = await db.books.query({
+				where: { description: { $search: "pilgrimage" } },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Hyperion")
+		})
+
+		it("should find a newly created entity via top-level multi-field search", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Create a new book
+			await db.books.create({
+				id: "new-book",
+				title: "Hyperion",
+				author: "Dan Simmons",
+				year: 1989,
+				description: "A pilgrimage to the Time Tombs",
+			}).runPromise
+
+			// Search using top-level $search with terms spanning fields
+			const results = await db.books.query({
+				where: { $search: { query: "simmons hyperion", fields: ["title", "author"] } },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].id).toBe("new-book")
+		})
+
+		it("should find a newly created entity via prefix search", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Create a new book
+			await db.books.create({
+				id: "new-book",
+				title: "Hyperion",
+				author: "Dan Simmons",
+				year: 1989,
+				description: "A pilgrimage to the Time Tombs",
+			}).runPromise
+
+			// Search using prefix
+			const results = await db.books.query({
+				where: { title: { $search: "hyper" } },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Hyperion")
+		})
+
+		it("should find multiple newly created entities", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Create multiple new books
+			await db.books.create({
+				id: "new-book-1",
+				title: "Hyperion",
+				author: "Dan Simmons",
+				year: 1989,
+				description: "A pilgrimage to the Time Tombs",
+			}).runPromise
+
+			await db.books.create({
+				id: "new-book-2",
+				title: "The Fall of Hyperion",
+				author: "Dan Simmons",
+				year: 1990,
+				description: "Continuation of the Hyperion story",
+			}).runPromise
+
+			// Search for both new books
+			const results = await db.books.query({
+				where: { title: { $search: "hyperion" } },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((b) => b.id).sort()
+			expect(ids).toEqual(["new-book-1", "new-book-2"])
+		})
+
+		it("should find entity created with createMany via search", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Create multiple books at once
+			await db.books.createMany([
+				{
+					id: "batch-1",
+					title: "Ringworld",
+					author: "Larry Niven",
+					year: 1970,
+					description: "A massive artificial ring around a star",
+				},
+				{
+					id: "batch-2",
+					title: "Rendezvous with Rama",
+					author: "Arthur C. Clarke",
+					year: 1973,
+					description: "An alien spacecraft enters the solar system",
+				},
+			]).runPromise
+
+			// Search for first batch entity
+			const results1 = await db.books.query({
+				where: { title: { $search: "ringworld" } },
+			}).runPromise
+			expect(results1.length).toBe(1)
+			expect(results1[0].id).toBe("batch-1")
+
+			// Search for second batch entity
+			const results2 = await db.books.query({
+				where: { author: { $search: "clarke" } },
+			}).runPromise
+			expect(results2.length).toBe(1)
+			expect(results2[0].id).toBe("batch-2")
+		})
+
+		it("should still find original entities after creating new ones", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Create a new book
+			await db.books.create({
+				id: "new-book",
+				title: "Hyperion",
+				author: "Dan Simmons",
+				year: 1989,
+				description: "A pilgrimage to the Time Tombs",
+			}).runPromise
+
+			// Verify original books are still searchable
+			const duneResults = await db.books.query({
+				where: { title: { $search: "dune" } },
+			}).runPromise
+			expect(duneResults.length).toBe(1)
+			expect(duneResults[0].title).toBe("Dune")
+
+			const gibsonResults = await db.books.query({
+				where: { author: { $search: "gibson" } },
+			}).runPromise
+			expect(gibsonResults.length).toBe(1)
+			expect(gibsonResults[0].author).toBe("William Gibson")
+		})
+	})
 })
