@@ -1805,6 +1805,272 @@ describe("Indexing - Index Maintenance", () => {
 		})
 	})
 
+	describe("Task 7.8: index consistency after mixed CRUD sequence", () => {
+		it("should maintain correct index state after interleaved creates, updates, deletes", async () => {
+			const config = createIndexedUsersConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Phase 1: Create initial users
+			await db.users.create({ id: "u1", email: "alice@example.com", name: "Alice", age: 30 }).runPromise
+			await db.users.create({ id: "u2", email: "bob@example.com", name: "Bob", age: 25 }).runPromise
+
+			// Verify phase 1 state
+			let aliceResults = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceResults.length).toBe(1)
+			let bobResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(bobResults.length).toBe(1)
+
+			// Phase 2: Update Alice's email
+			await db.users.update("u1", { email: "alice.new@example.com" }).runPromise
+
+			// Verify phase 2 state
+			aliceResults = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceResults.length).toBe(0)
+			aliceResults = await db.users.query({ where: { email: "alice.new@example.com" } }).runPromise
+			expect(aliceResults.length).toBe(1)
+			bobResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(bobResults.length).toBe(1)
+
+			// Phase 3: Create a new user with Alice's old email
+			await db.users.create({ id: "u3", email: "alice@example.com", name: "Charlie", age: 35 }).runPromise
+
+			// Verify phase 3 state
+			aliceResults = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceResults.length).toBe(1)
+			expect((aliceResults[0] as { id: string }).id).toBe("u3")
+
+			// Phase 4: Delete Bob
+			await db.users.delete("u2").runPromise
+
+			// Verify phase 4 state
+			bobResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(bobResults.length).toBe(0)
+
+			// Phase 5: Upsert (create path) - new user
+			await db.users.upsert({
+				where: { email: "dave@example.com" },
+				update: { name: "Updated Dave" },
+				create: { name: "Dave", age: 40 },
+			}).runPromise
+
+			// Verify phase 5 state
+			const daveResults = await db.users.query({ where: { email: "dave@example.com" } }).runPromise
+			expect(daveResults.length).toBe(1)
+			expect((daveResults[0] as { name: string }).name).toBe("Dave")
+
+			// Phase 6: Upsert (update path) - update Dave's email
+			await db.users.upsert({
+				where: { id: (daveResults[0] as { id: string }).id },
+				update: { email: "bob@example.com" }, // Reuse Bob's old email
+				create: { email: "unused@example.com", name: "Unused", age: 99 },
+			}).runPromise
+
+			// Verify phase 6 state - dave now has bob's old email
+			const daveNewResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(daveNewResults.length).toBe(1)
+			const daveOldResults = await db.users.query({ where: { email: "dave@example.com" } }).runPromise
+			expect(daveOldResults.length).toBe(0)
+
+			// Final verification: query all and check consistency
+			const allUsers = await db.users.query().runPromise
+			expect(allUsers.length).toBe(3) // u1 (alice.new), u3 (alice), dave (bob's email)
+
+			// Verify each user is correctly indexed
+			const u1Results = await db.users.query({ where: { email: "alice.new@example.com" } }).runPromise
+			expect(u1Results.length).toBe(1)
+			expect((u1Results[0] as { id: string }).id).toBe("u1")
+
+			const u3Results = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(u3Results.length).toBe(1)
+			expect((u3Results[0] as { id: string }).id).toBe("u3")
+
+			// dave has bob@example.com now
+			const renamedDaveResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(renamedDaveResults.length).toBe(1)
+		})
+
+		it("should maintain compound index consistency after mixed CRUD", async () => {
+			const config = createMultiIndexConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Phase 1: Create products
+			await db.products.create({ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 }).runPromise
+			await db.products.create({ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 }).runPromise
+
+			// Verify initial state
+			let computersResults = await db.products.query({ where: { category: "electronics", subcategory: "computers" } }).runPromise
+			expect(computersResults.length).toBe(1)
+			let phonesResults = await db.products.query({ where: { category: "electronics", subcategory: "phones" } }).runPromise
+			expect(phonesResults.length).toBe(1)
+
+			// Phase 2: Move Laptop to phones category
+			await db.products.update("p1", { subcategory: "phones" }).runPromise
+
+			// Verify phase 2 state
+			computersResults = await db.products.query({ where: { category: "electronics", subcategory: "computers" } }).runPromise
+			expect(computersResults.length).toBe(0)
+			phonesResults = await db.products.query({ where: { category: "electronics", subcategory: "phones" } }).runPromise
+			expect(phonesResults.length).toBe(2)
+
+			// Phase 3: Create another product with the empty compound key
+			await db.products.create({ id: "p3", name: "Desktop", category: "electronics", subcategory: "computers", price: 1299 }).runPromise
+
+			// Verify phase 3 state
+			computersResults = await db.products.query({ where: { category: "electronics", subcategory: "computers" } }).runPromise
+			expect(computersResults.length).toBe(1)
+			expect((computersResults[0] as { id: string }).id).toBe("p3")
+
+			// Phase 4: Delete Phone (p2)
+			await db.products.delete("p2").runPromise
+
+			// Verify phase 4 state
+			phonesResults = await db.products.query({ where: { category: "electronics", subcategory: "phones" } }).runPromise
+			expect(phonesResults.length).toBe(1)
+			expect((phonesResults[0] as { id: string }).id).toBe("p1")
+
+			// Phase 5: Update Desktop to change both category and subcategory
+			await db.products.update("p3", { category: "furniture", subcategory: "office" }).runPromise
+
+			// Verify phase 5 state
+			computersResults = await db.products.query({ where: { category: "electronics", subcategory: "computers" } }).runPromise
+			expect(computersResults.length).toBe(0)
+			const officeResults = await db.products.query({ where: { category: "furniture", subcategory: "office" } }).runPromise
+			expect(officeResults.length).toBe(1)
+			expect((officeResults[0] as { id: string }).id).toBe("p3")
+
+			// Final verification
+			const allProducts = await db.products.query().runPromise
+			expect(allProducts.length).toBe(2) // p1 (phones), p3 (office)
+		})
+
+		it("should handle batch operations mixed with single operations", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "initial@example.com", name: "Initial", age: 30 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Phase 1: createMany
+			await db.users.createMany([
+				{ id: "u2", email: "batch1@example.com", name: "Batch One", age: 25 },
+				{ id: "u3", email: "batch2@example.com", name: "Batch Two", age: 35 },
+				{ id: "u4", email: "batch3@example.com", name: "Batch Three", age: 40 },
+			]).runPromise
+
+			// Verify phase 1 state
+			const allAfterBatch = await db.users.query().runPromise
+			expect(allAfterBatch.length).toBe(4)
+
+			// Phase 2: Single update
+			await db.users.update("u1", { email: "initial.updated@example.com" }).runPromise
+
+			// Phase 3: Single delete
+			await db.users.delete("u2").runPromise
+
+			// Phase 4: Single create
+			await db.users.create({ id: "u5", email: "batch1@example.com", name: "Reused Email", age: 45 }).runPromise
+
+			// Final verification
+			const allFinal = await db.users.query().runPromise
+			expect(allFinal.length).toBe(4) // u1, u3, u4, u5 (u2 deleted)
+
+			// Verify each email is correctly indexed
+			const initialResults = await db.users.query({ where: { email: "initial@example.com" } }).runPromise
+			expect(initialResults.length).toBe(0) // Moved to initial.updated@example.com
+
+			const updatedResults = await db.users.query({ where: { email: "initial.updated@example.com" } }).runPromise
+			expect(updatedResults.length).toBe(1)
+			expect((updatedResults[0] as { id: string }).id).toBe("u1")
+
+			// batch1 email was deleted with u2 and reused by u5
+			const batch1Results = await db.users.query({ where: { email: "batch1@example.com" } }).runPromise
+			expect(batch1Results.length).toBe(1)
+			expect((batch1Results[0] as { id: string }).id).toBe("u5")
+
+			const batch2Results = await db.users.query({ where: { email: "batch2@example.com" } }).runPromise
+			expect(batch2Results.length).toBe(1)
+			expect((batch2Results[0] as { id: string }).id).toBe("u3")
+
+			const batch3Results = await db.users.query({ where: { email: "batch3@example.com" } }).runPromise
+			expect(batch3Results.length).toBe(1)
+			expect((batch3Results[0] as { id: string }).id).toBe("u4")
+		})
+
+		it("should maintain multiple single-field indexes consistently after mixed CRUD", async () => {
+			// createMultiIndexConfig has users with indexes on both "email" and "role"
+			const config = createMultiIndexConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Phase 1: Create initial users with different roles
+			await db.users.create({ id: "u1", email: "alice@example.com", name: "Alice", age: 30, role: "admin" }).runPromise
+			await db.users.create({ id: "u2", email: "bob@example.com", name: "Bob", age: 25, role: "user" }).runPromise
+			await db.users.create({ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35, role: "user" }).runPromise
+
+			// Verify initial state
+			let adminResults = await db.users.query({ where: { role: "admin" } }).runPromise
+			expect(adminResults.length).toBe(1)
+			let userResults = await db.users.query({ where: { role: "user" } }).runPromise
+			expect(userResults.length).toBe(2)
+
+			// Phase 2: Bob becomes admin
+			await db.users.update("u2", { role: "admin" }).runPromise
+
+			// Verify phase 2 state
+			adminResults = await db.users.query({ where: { role: "admin" } }).runPromise
+			expect(adminResults.length).toBe(2)
+			userResults = await db.users.query({ where: { role: "user" } }).runPromise
+			expect(userResults.length).toBe(1)
+
+			// Phase 3: Delete Alice (admin)
+			await db.users.delete("u1").runPromise
+
+			// Verify phase 3 state
+			adminResults = await db.users.query({ where: { role: "admin" } }).runPromise
+			expect(adminResults.length).toBe(1)
+			expect((adminResults[0] as { id: string }).id).toBe("u2")
+
+			// Phase 4: Update Bob's email (tests that both indexes are updated)
+			await db.users.update("u2", { email: "bob.new@example.com" }).runPromise
+
+			// Verify phase 4 state
+			const bobOldEmail = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(bobOldEmail.length).toBe(0)
+			const bobNewEmail = await db.users.query({ where: { email: "bob.new@example.com" } }).runPromise
+			expect(bobNewEmail.length).toBe(1)
+			// Role should still be correct
+			adminResults = await db.users.query({ where: { role: "admin" } }).runPromise
+			expect(adminResults.length).toBe(1)
+			expect((adminResults[0] as { id: string }).id).toBe("u2")
+
+			// Phase 5: Upsert that changes both email and role
+			await db.users.upsert({
+				where: { id: "u3" },
+				update: { email: "charlie.new@example.com", role: "moderator" },
+				create: { email: "unused@example.com", name: "Unused", age: 99 },
+			}).runPromise
+
+			// Verify phase 5 state
+			userResults = await db.users.query({ where: { role: "user" } }).runPromise
+			expect(userResults.length).toBe(0)
+			const moderatorResults = await db.users.query({ where: { role: "moderator" } }).runPromise
+			expect(moderatorResults.length).toBe(1)
+			expect((moderatorResults[0] as { id: string }).id).toBe("u3")
+
+			// Final verification
+			const allUsers = await db.users.query().runPromise
+			expect(allUsers.length).toBe(2) // u2, u3 (u1 deleted)
+
+			// Verify all index lookups are consistent
+			expect((await db.users.query({ where: { email: "alice@example.com" } }).runPromise).length).toBe(0)
+			expect((await db.users.query({ where: { email: "bob.new@example.com" } }).runPromise).length).toBe(1)
+			expect((await db.users.query({ where: { email: "charlie.new@example.com" } }).runPromise).length).toBe(1)
+			expect((await db.users.query({ where: { role: "admin" } }).runPromise).length).toBe(1)
+			expect((await db.users.query({ where: { role: "moderator" } }).runPromise).length).toBe(1)
+		})
+	})
+
 	describe("Task 7.1: create → index entry added", () => {
 		it("should add new entity to index when created", async () => {
 			// Start with an empty indexed database

@@ -53,7 +53,7 @@
 - [x] 7.5 Test createMany → batch index update
 - [x] 7.6 Test upsert (create path) → index added
 - [x] 7.7 Test upsert (update path) → index updated
-- [ ] 7.8 Test index consistency after mixed CRUD sequence
+- [x] 7.8 Test index consistency after mixed CRUD sequence
 
 ## 8. Tests — Query Acceleration
 
