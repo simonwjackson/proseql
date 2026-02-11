@@ -244,7 +244,40 @@ describe("Upsert Where-Clause Validation", () => {
 
 	describe("upsert with single unique field", () => {
 		it("should accept where clause targeting a declared unique field", async () => {
-			// TODO: Task 7.3
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<User>([existingUser])
+				const stateRefs = yield* makeStateRefs({ users: [existingUser] })
+
+				// Upsert using { email } — valid because email is in uniqueFields
+				const result = yield* upsert(
+					"users",
+					UserSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					userUniqueFields, // ["email", "username"] configured
+				)({
+					where: { email: "alice@example.com" }, // Using declared unique field
+					create: {
+						name: "Alice New",
+						email: "alice@example.com",
+						username: "alice-new",
+						age: 25,
+					},
+					update: { age: 32 },
+				})
+
+				// Should update existing user (matched by email)
+				expect(result.__action).toBe("updated")
+				expect(result.id).toBe("user1")
+				expect(result.age).toBe(32)
+
+				return result
+			})
+
+			await Effect.runPromise(program)
 		})
 
 		it("should reject where clause targeting a non-unique field", async () => {
