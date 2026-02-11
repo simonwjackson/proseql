@@ -37,7 +37,7 @@
 
 - [x] 5.1 Create `packages/rpc/` directory structure: `src/`, `tests/`
 - [x] 5.2 Copy `../proseql-rpc/src/index.ts` to `packages/rpc/src/index.ts`
-- [ ] 5.3 Create `packages/rpc/package.json`: name `@proseql/rpc`, version `0.0.0`, type `module`, main `src/index.ts`, dependencies: `{ "@proseql/core": "workspace:*", "@effect/rpc": "^0.51.0" }`, peerDependencies: `{ "effect": "^3.15.0" }`
+- [x] 5.3 Create `packages/rpc/package.json`: name `@proseql/rpc`, version `0.0.0`, type `module`, main `src/index.ts`, dependencies: `{ "@proseql/core": "workspace:*", "@effect/rpc": "^0.51.0" }`, peerDependencies: `{ "effect": "^3.15.0" }`
 - [ ] 5.4 Create `packages/rpc/tsconfig.json`: extends `../../tsconfig.base.json`, rootDir `src`, outDir `dist`, references `[{ "path": "../core" }]`
 
 ## 6. Build Infrastructure

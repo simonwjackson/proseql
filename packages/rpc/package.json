@@ -1,0 +1,13 @@
+{
+  "name": "@proseql/rpc",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@proseql/core": "workspace:*",
+    "@effect/rpc": "^0.51.0"
+  },
+  "peerDependencies": {
+    "effect": "^3.15.0"
+  }
+}
