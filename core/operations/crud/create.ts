@@ -21,6 +21,8 @@ import { generateId } from "../../utils/id-generator.js"
 import {
 	validateForeignKeysEffect,
 } from "../../validators/foreign-key.js"
+import type { CollectionIndexes } from "../../types/index-types.js"
+import { addToIndex, addManyToIndex } from "../../indexes/index-manager.js"
 
 // ============================================================================
 // Types
@@ -47,6 +49,7 @@ type RelationshipConfig = {
  * 3. Check for duplicate ID in Ref state
  * 4. Validate foreign key constraints
  * 5. Atomically add to Ref state
+ * 6. Update indexes if provided
  */
 export const create = <T extends HasId, I = T>(
 	collectionName: string,
@@ -54,6 +57,7 @@ export const create = <T extends HasId, I = T>(
 	relationships: Record<string, RelationshipConfig>,
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+	indexes?: CollectionIndexes,
 ) =>
 (input: CreateInput<T>): Effect.Effect<T, ValidationError | DuplicateKeyError | ForeignKeyError> =>
 	Effect.gen(function* () {
@@ -100,6 +104,11 @@ export const create = <T extends HasId, I = T>(
 			return next
 		})
 
+		// Update indexes if provided
+		if (indexes && indexes.size > 0) {
+			yield* addToIndex(indexes, validated)
+		}
+
 		return validated
 	})
 
@@ -119,6 +128,7 @@ export const createMany = <T extends HasId, I = T>(
 	relationships: Record<string, RelationshipConfig>,
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+	indexes?: CollectionIndexes,
 ) =>
 (
 	inputs: ReadonlyArray<CreateInput<T>>,
@@ -240,6 +250,11 @@ export const createMany = <T extends HasId, I = T>(
 					return next
 				})
 			}
+		}
+
+		// Update indexes for all created entities using batch operation
+		if (indexes && indexes.size > 0 && created.length > 0) {
+			yield* addManyToIndex(indexes, created)
 		}
 
 		return {
