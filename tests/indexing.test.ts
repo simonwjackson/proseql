@@ -3150,6 +3150,295 @@ describe("Indexing - Query Acceleration", () => {
 			expect((results[0] as { name: string }).name).toBe("Alice")
 		})
 	})
+
+	describe("Task 8.6: $or/$and/$not queries fall back to full scan", () => {
+		it("should return correct results with $or on indexed field (falls back to full scan)", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $or - should fall back to full scan but return correct results
+			const results = await db.users.query({
+				where: {
+					$or: [
+						{ email: "alice@example.com" },
+						{ email: "charlie@example.com" },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u3"])
+		})
+
+		it("should return correct results with $and on indexed field (falls back to full scan)", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30, role: "admin" },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25, role: "user" },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35, role: "admin" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $and - should fall back to full scan but return correct results
+			const results = await db.users.query({
+				where: {
+					$and: [
+						{ email: "alice@example.com" },
+						{ role: "admin" },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("u1")
+		})
+
+		it("should return correct results with $not on indexed field (falls back to full scan)", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $not - should fall back to full scan but return correct results
+			const results = await db.users.query({
+				where: {
+					$not: { email: "alice@example.com" },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u2", "u3"])
+		})
+
+		it("should return correct results with nested $or inside $and (falls back to full scan)", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30, role: "admin" },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25, role: "user" },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35, role: "admin" },
+				{ id: "u4", email: "diana@example.com", name: "Diana", age: 28, role: "admin" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with nested logical operators
+			const results = await db.users.query({
+				where: {
+					$and: [
+						{ role: "admin" },
+						{
+							$or: [
+								{ email: "alice@example.com" },
+								{ email: "charlie@example.com" },
+							],
+						},
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u3"])
+		})
+
+		it("should return correct results with $or containing multiple conditions", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+				{ id: "u4", email: "diana@example.com", name: "Diana", age: 28 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $or containing various conditions
+			const results = await db.users.query({
+				where: {
+					$or: [
+						{ email: "alice@example.com" },
+						{ age: { $gt: 30 } },
+						{ name: "Diana" },
+					],
+				},
+			}).runPromise
+
+			// u1 matches email, u3 matches age > 30, u4 matches name
+			expect(results.length).toBe(3)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u3", "u4"])
+		})
+
+		it("should return empty array when $and conditions cannot all be satisfied", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $and that cannot be satisfied
+			const results = await db.users.query({
+				where: {
+					$and: [
+						{ email: "alice@example.com" },
+						{ email: "bob@example.com" },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should return empty array when $or contains no matching conditions", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $or that has no matches
+			const results = await db.users.query({
+				where: {
+					$or: [
+						{ email: "nonexistent@example.com" },
+						{ age: 100 },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should handle $not with $eq correctly", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $not containing $eq
+			const results = await db.users.query({
+				where: {
+					$not: { email: { $eq: "bob@example.com" } },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u3"])
+		})
+
+		it("should handle logical operators combined with sorting", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $or and sorting
+			const results = await db.users.query({
+				where: {
+					$or: [
+						{ email: "alice@example.com" },
+						{ email: "charlie@example.com" },
+					],
+				},
+				sort: { age: "desc" },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			// Sorted by age descending: u3 (35), u1 (30)
+			expect((results[0] as { id: string }).id).toBe("u3")
+			expect((results[1] as { id: string }).id).toBe("u1")
+		})
+
+		it("should handle logical operators combined with pagination", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "a@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "b@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "c@example.com", name: "Charlie", age: 35 },
+				{ id: "u4", email: "d@example.com", name: "Diana", age: 28 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $or, sorting, and limit
+			const results = await db.users.query({
+				where: {
+					$or: [
+						{ email: "a@example.com" },
+						{ email: "b@example.com" },
+						{ email: "c@example.com" },
+					],
+				},
+				sort: { age: "asc" },
+				limit: 2,
+			}).runPromise
+
+			// All three match, sorted by age asc (25, 30, 35), limited to 2
+			expect(results.length).toBe(2)
+			expect((results[0] as { id: string }).id).toBe("u2") // age 25
+			expect((results[1] as { id: string }).id).toBe("u1") // age 30
+		})
+
+		it("should handle logical operators combined with select", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $not and select
+			const results = await db.users.query({
+				where: {
+					$not: { email: "bob@example.com" },
+				},
+				select: { id: true, name: true },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u3"])
+		})
+	})
 })
 
 // Export helpers for use in other test files
