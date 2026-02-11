@@ -6,7 +6,7 @@
 
 ## 2. Transaction Core
 
-- [ ] 2.1 Create `core/transactions/transaction.ts` with `createTransaction` factory function. Parameters: `stateRefs`, `transactionLock: Ref<boolean>`, `buildCollectionForTx` callback, optional `persistenceTrigger`. Returns `Effect<TransactionContext, TransactionError>`.
+- [x] 2.1 Create `core/transactions/transaction.ts` with `createTransaction` factory function. Parameters: `stateRefs`, `transactionLock: Ref<boolean>`, `buildCollectionForTx` callback, optional `persistenceTrigger`. Returns `Effect<TransactionContext, TransactionError>`.
 - [ ] 2.2 Implement snapshot capture: on begin, `Ref.get` each collection's ReadonlyMap and store in a local `Map<string, ReadonlyMap<string, HasId>>`.
 - [ ] 2.3 Implement single-writer lock: use `Ref.modify` on `transactionLock` to atomically check-and-acquire. Fail with `TransactionError { operation: "begin", reason: "another transaction is already active" }` if already locked.
 - [ ] 2.4 Implement `commit()`: verify `isActive`, trigger `persistenceTrigger.schedule` for each collection in `mutatedCollections`, release lock via `Ref.set(transactionLock, false)`, mark inactive.
