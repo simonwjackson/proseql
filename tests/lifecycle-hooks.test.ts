@@ -1560,5 +1560,106 @@ describe("lifecycle-hooks", () => {
 				"User3-transformed",
 			])
 		})
+
+		it("updateMany: hooks run per entity", async () => {
+			// Track all hook calls to verify they run once per entity
+			const beforeUpdateCalls: Array<BeforeUpdateContext<User>> = []
+			const afterUpdateCalls: Array<AfterUpdateContext<User>> = []
+			const onChangeCalls: Array<OnChangeContext<User>> = []
+
+			// beforeUpdate: transform by appending "-modified" to the update name
+			const beforeUpdateHook: BeforeUpdateHook<User> = (ctx) => {
+				beforeUpdateCalls.push(ctx)
+				const update = ctx.update as Partial<User>
+				return Effect.succeed({
+					...update,
+					name: update.name ? `${update.name}-modified` : update.name,
+				})
+			}
+
+			const hooks: HooksConfig<User> = {
+				beforeUpdate: [beforeUpdateHook],
+				afterUpdate: [makeTrackingAfterUpdateHook(afterUpdateCalls)],
+				onChange: [makeTrackingOnChangeHook(onChangeCalls)],
+			}
+
+			// Initial data with 3 users
+			const testData = {
+				users: [
+					{ id: "u1", name: "Alice", email: "alice@test.com", age: 25 },
+					{ id: "u2", name: "Bob", email: "bob@test.com", age: 30 },
+					{ id: "u3", name: "Charlie", email: "charlie@test.com", age: 35 },
+				],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, testData)
+
+					// Update all users with age >= 25 (all of them) using a predicate function
+					const updateResult = yield* db.users.updateMany(
+						(entity) => entity.age >= 25,
+						{ name: "Updated" },
+					)
+
+					// Read all users to verify the transformations were applied
+					const allUsersChunk = yield* Stream.runCollect(
+						db.users.query({}) as Stream.Stream<User>,
+					)
+					const allUsers = Chunk.toReadonlyArray(allUsersChunk)
+
+					return { updateResult, allUsers }
+				}),
+			)
+
+			// Verify beforeUpdate was called once per entity (3 times)
+			expect(beforeUpdateCalls).toHaveLength(3)
+			// beforeUpdate receives the original names
+			expect(beforeUpdateCalls.map((c) => c.existing.name).sort()).toEqual([
+				"Alice",
+				"Bob",
+				"Charlie",
+			])
+			// Each beforeUpdate receives the same update payload
+			for (const call of beforeUpdateCalls) {
+				expect(call.update).toEqual({ name: "Updated" })
+			}
+
+			// Verify all entities have the beforeUpdate transformation applied
+			expect(result.updateResult.count).toBe(3)
+			expect(result.updateResult.updated.map((u) => u.name).sort()).toEqual([
+				"Updated-modified",
+				"Updated-modified",
+				"Updated-modified",
+			])
+
+			// Verify afterUpdate was called once per entity (3 times)
+			expect(afterUpdateCalls).toHaveLength(3)
+			// afterUpdate receives previous and current state
+			for (const call of afterUpdateCalls) {
+				expect(["Alice", "Bob", "Charlie"]).toContain(call.previous.name)
+				expect(call.current.name).toBe("Updated-modified")
+			}
+
+			// Verify onChange was called once per entity (3 times) with type "update"
+			expect(onChangeCalls).toHaveLength(3)
+			for (const ctx of onChangeCalls) {
+				expect(ctx.type).toBe("update")
+			}
+			const updateContexts = onChangeCalls.filter(
+				(c): c is Extract<OnChangeContext<User>, { type: "update" }> => c.type === "update",
+			)
+			for (const ctx of updateContexts) {
+				expect(["Alice", "Bob", "Charlie"]).toContain(ctx.previous.name)
+				expect(ctx.current.name).toBe("Updated-modified")
+			}
+
+			// Verify all users in the database have the transformation
+			expect(result.allUsers.map((u) => u.name).sort()).toEqual([
+				"Updated-modified",
+				"Updated-modified",
+				"Updated-modified",
+			])
+		})
 	})
 })

@@ -77,7 +77,7 @@
 ## 11. Tests — Batch and Upsert
 
 - [x] 11.1 Test createMany: hooks run per entity
-- [ ] 11.2 Test updateMany: hooks run per entity
+- [x] 11.2 Test updateMany: hooks run per entity
 - [ ] 11.3 Test deleteMany: hooks run per entity
 - [ ] 11.4 Test upsert create path: triggers beforeCreate/afterCreate/onChange("create")
 - [ ] 11.5 Test upsert update path: triggers beforeUpdate/afterUpdate/onChange("update")
