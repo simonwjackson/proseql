@@ -31,6 +31,7 @@ export type FilterOperators<T> = T extends string
 			$startsWith?: string;
 			$endsWith?: string;
 			$contains?: string;
+			$search?: string;
 			$in?: T[];
 			$nin?: T[];
 		}

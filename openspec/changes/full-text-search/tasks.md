@@ -1,7 +1,7 @@
 ## 1. Types
 
 - [x] 1.1 Create `core/types/search-types.ts` with `SearchConfig` (query: string, fields?: ReadonlyArray<string>), `SearchScore` (entityId: string, score: number), `SearchIndexMap` (type alias for `Map<string, Set<string>>`), and `STOP_WORDS` constant (Set of common English stop words: the, a, an, of, in, to, is, it, for, etc.)
-- [ ] 1.2 Add `$search: string` to `FilterOperators<string>` in `core/types/types.ts` (field-level search operator for string fields only)
+- [x] 1.2 Add `$search: string` to `FilterOperators<string>` in `core/types/types.ts` (field-level search operator for string fields only)
 - [ ] 1.3 Add top-level `$search: SearchConfig` to the `WhereClause` type in `core/types/types.ts` alongside `$and`, `$or`, `$not`
 - [ ] 1.4 Add optional `searchIndex: ReadonlyArray<string>` to collection config types in `core/types/database-config-types.ts` (fields to build the inverted index on)
 - [ ] 1.5 Export search types from `core/index.ts`
