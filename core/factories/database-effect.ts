@@ -688,6 +688,57 @@ const buildCollection = <T extends HasId>(
 }
 
 // ============================================================================
+// Transaction Collection Factory
+// ============================================================================
+
+/**
+ * Callback type for building a collection with transaction-aware afterMutation.
+ * The afterMutation adds the collection name to the mutation set instead of
+ * scheduling a persistence write.
+ */
+type BuildCollectionForTx = (
+	collectionName: string,
+	addMutation: (name: string) => void,
+) => EffectCollection<HasId>
+
+/**
+ * Create a `buildCollectionForTx` callback that mirrors `buildCollection` but
+ * accepts a transaction-aware `afterMutation`. The returned callback creates
+ * collection accessors that record mutations to the transaction's set instead
+ * of triggering persistence writes.
+ *
+ * Used by `createTransaction` and `$transaction` to provide collection accessors
+ * that participate in transaction semantics.
+ *
+ * @param config - The database configuration
+ * @param stateRefs - Shared state refs for cross-collection access
+ * @param typedRefs - Typed refs for each collection
+ * @param collectionIndexes - Pre-built indexes for each collection
+ * @returns A callback matching the BuildCollectionForTx type
+ */
+const makeBuildCollectionForTx = (
+	config: DatabaseConfig,
+	stateRefs: StateRefs,
+	typedRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+	collectionIndexes: Record<string, CollectionIndexes>,
+): BuildCollectionForTx => {
+	return (collectionName: string, addMutation: (name: string) => void) => {
+		// Transaction-aware afterMutation: records mutation instead of scheduling persistence
+		const afterMutation = () => Effect.sync(() => addMutation(collectionName))
+
+		return buildCollection(
+			collectionName,
+			config[collectionName],
+			typedRefs[collectionName],
+			stateRefs,
+			config,
+			afterMutation,
+			collectionIndexes[collectionName],
+		)
+	}
+}
+
+// ============================================================================
 // Database Factory
 // ============================================================================
 

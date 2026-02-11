@@ -86,7 +86,7 @@ core/
     crud-types.ts           (modified — TransactionContext shape)
     types.ts                (modified — database type gains $transaction)
   factories/
-    database-effect.ts      (modified — wire transactionLock, $transaction, afterMutation gating)
+    database-effect.ts      (modified — wire transactionLock, $transaction, afterMutation gating, makeBuildCollectionForTx)
 tests/
   transactions.test.ts      (new — full test suite)
 ```

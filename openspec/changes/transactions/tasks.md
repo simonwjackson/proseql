@@ -22,7 +22,7 @@
 ## 4. Factory Integration
 
 - [x] 4.1 Add `transactionLock: Ref<boolean>` to `createEffectDatabase` in `core/factories/database-effect.ts`. Initialize as `Ref.make(false)`.
-- [ ] 4.2 Create a `buildCollectionForTx` function that mirrors `buildCollection` but accepts a transaction-aware `afterMutation` that records mutations to the transaction's set instead of scheduling persistence.
+- [x] 4.2 Create a `buildCollectionForTx` function that mirrors `buildCollection` but accepts a transaction-aware `afterMutation` that records mutations to the transaction's set instead of scheduling persistence.
 - [ ] 4.3 Wire `$transaction` method on the database object: call `createTransaction` with `stateRefs`, `transactionLock`, `buildCollectionForTx`, and `persistenceTrigger`.
 - [ ] 4.4 Update `afterMutation` in regular (non-tx) `buildCollection`: add a check against a `transactionActive` flag. If active, add collection to mutation set instead of scheduling write. (This handles the case where non-tx CRUD methods are called during a transaction via the ctx's collection accessors which share the same Refs.)
 
