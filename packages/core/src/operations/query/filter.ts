@@ -268,6 +268,7 @@ export function filterData<T extends Record<string, unknown>>(
 						"$contains",
 						"$all",
 						"$size",
+						"$search",
 					];
 					const logicalOperatorKeys = ["$or", "$and", "$not"];
 					const hasOperators = Object.keys(ops).some((key) =>
