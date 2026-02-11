@@ -2,7 +2,7 @@
 
 - [x] 1.1 Create `core/types/aggregate-types.ts` with `ScalarAggregateConfig` (where?, count?, sum?, avg?, min?, max?), `GroupedAggregateConfig` (extends scalar + groupBy), `AggregateConfig` (union of both), `AggregateResult` (scalar result object), `GroupedAggregateResult` (array of group objects)
 - [x] 1.2 Add `aggregate` method signature to `SmartCollection` in `core/types/types.ts`. Generic over config, return type branches on `groupBy` presence: `RunnableEffect<GroupedAggregateResult>` or `RunnableEffect<AggregateResult>`
-- [ ] 1.3 Export aggregate types from `core/index.ts`
+- [x] 1.3 Export aggregate types from `core/index.ts`
 
 ## 2. Scalar Aggregation
 

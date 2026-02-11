@@ -104,6 +104,22 @@ export type {
 } from "./types/database-config-types.js";
 
 // ============================================================================
+// Aggregate Types
+// ============================================================================
+
+export type {
+	AggregateResult,
+	GroupResult,
+	GroupedAggregateResult,
+	ScalarAggregateConfig,
+	GroupedAggregateConfig,
+	AggregateConfig,
+	InferAggregateResult,
+} from "./types/aggregate-types.js";
+
+export { isGroupedAggregateConfig } from "./types/aggregate-types.js";
+
+// ============================================================================
 // Schema Validation
 // ============================================================================
 
