@@ -51,7 +51,7 @@
 ## 8. Factory Integration
 
 - [x] 8.1 In `core/factories/database-effect.ts` `buildCollection`: read `computed` from the collection config. When present, insert `resolveComputedStream` into the query pipeline after population and before filter.
-- [ ] 8.2 Wire the lazy skip optimization: check select keys against computed keys, bypass resolution when no computed fields are selected.
+- [x] 8.2 Wire the lazy skip optimization: check select keys against computed keys, bypass resolution when no computed fields are selected.
 - [ ] 8.3 Verify that collections without `computed` config have zero overhead (no resolution step inserted).
 
 ## 9. Tests — Core Behavior

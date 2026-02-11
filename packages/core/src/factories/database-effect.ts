@@ -53,7 +53,10 @@ import { applySort } from "../operations/query/sort-stream.js"
 import { applySelect, applySelectToArray } from "../operations/query/select-stream.js"
 import { applyPagination } from "../operations/query/paginate-stream.js"
 import { applyPopulate } from "../operations/relationships/populate-stream.js"
-import { resolveComputedStream } from "../operations/query/resolve-computed.js"
+import {
+	resolveComputedStream,
+	resolveComputedStreamWithLazySkip,
+} from "../operations/query/resolve-computed.js"
 import type { CursorConfig, CursorPageResult, RunnableCursorPage } from "../types/cursor-types.js"
 import { applyCursor } from "../operations/query/cursor-stream.js"
 import {
@@ -403,6 +406,23 @@ type StateRefs = Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>
 // Extract Populate Config from Object-based Select
 // ============================================================================
 
+/**
+ * Normalize select config for lazy skip optimization.
+ * Returns the select config as a Record if it's object-based, or undefined if it's array-based.
+ * The lazy skip optimization only works with object-based select.
+ */
+function normalizeSelectForLazySkip(
+	select: Record<string, unknown> | ReadonlyArray<string> | undefined,
+): Record<string, unknown> | undefined {
+	if (select === undefined || Array.isArray(select)) {
+		// Array-based select or undefined: fall back to full resolution
+		// (undefined means select all, which includes computed fields)
+		// (array-based select is rare and we don't optimize for it)
+		return undefined
+	}
+	return select
+}
+
 function extractPopulateFromSelect(
 	select: Record<string, unknown>,
 	relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target: string; readonly foreignKey?: string }>,
@@ -541,14 +561,17 @@ const buildCollection = <T extends HasId>(
 				let s: Stream.Stream<Record<string, unknown>, DanglingReferenceError> =
 					Stream.fromIterable(items)
 
-				// Apply pipeline stages: populate → resolve computed → filter → sort
+				// Apply pipeline stages: populate → resolve computed (with lazy skip) → filter → sort
 				s = applyPopulate(
 					populateConfig as Record<string, boolean | Record<string, unknown>> | undefined,
 					stateRefs as unknown as Record<string, Ref.Ref<ReadonlyMap<string, Record<string, unknown>>>>,
 					dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target: string; readonly foreignKey?: string }> }>,
 					collectionName,
 				)(s)
-				s = resolveComputedStream(computed)(s)
+				s = resolveComputedStreamWithLazySkip(
+					computed,
+					normalizeSelectForLazySkip(options?.select),
+				)(s)
 				s = applyFilter(options?.where)(s)
 				s = applySort(effectiveSort)(s)
 
@@ -583,14 +606,17 @@ const buildCollection = <T extends HasId>(
 				let s: Stream.Stream<Record<string, unknown>, DanglingReferenceError> =
 					Stream.fromIterable(items)
 
-				// Apply pipeline stages: populate → resolve computed → filter → sort → paginate → select
+				// Apply pipeline stages: populate → resolve computed (with lazy skip) → filter → sort → paginate → select
 				s = applyPopulate(
 					populateConfig as Record<string, boolean | Record<string, unknown>> | undefined,
 					stateRefs as unknown as Record<string, Ref.Ref<ReadonlyMap<string, Record<string, unknown>>>>,
 					dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target: string; readonly foreignKey?: string }> }>,
 					collectionName,
 				)(s)
-				s = resolveComputedStream(computed)(s)
+				s = resolveComputedStreamWithLazySkip(
+					computed,
+					normalizeSelectForLazySkip(options?.select),
+				)(s)
 				s = applyFilter(options?.where)(s)
 				s = applySort(effectiveSort)(s)
 				s = applyPagination(options?.offset, options?.limit)(s)
