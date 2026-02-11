@@ -17,6 +17,10 @@ test-core:
 test-node:
     bun test packages/node/tests/
 
+# Test with coverage for all packages
+coverage:
+    bun test --coverage packages/*/tests/
+
 # Type check
 typecheck:
     bunx tsc --build
