@@ -1,3 +1,4 @@
+import { hjsonCodec } from "./codecs/hjson.js"
 import { jsonCodec } from "./codecs/json.js"
 import { json5Codec } from "./codecs/json5.js"
 import { jsoncCodec } from "./codecs/jsonc.js"
@@ -11,13 +12,14 @@ import { makeSerializerLayer } from "./format-codec.js"
 // ============================================================================
 
 /**
- * A SerializerRegistry Layer that supports all 6 text formats:
+ * A SerializerRegistry Layer that supports all 7 text formats:
  * - JSON (.json)
  * - YAML (.yaml, .yml)
  * - JSON5 (.json5)
  * - JSONC (.jsonc)
  * - TOML (.toml)
  * - TOON (.toon)
+ * - Hjson (.hjson)
  *
  * Use this when you need maximum format flexibility.
  *
@@ -40,6 +42,7 @@ export const AllTextFormatsLayer = makeSerializerLayer([
 	jsoncCodec(),
 	tomlCodec(),
 	toonCodec(),
+	hjsonCodec(),
 ])
 
 /**

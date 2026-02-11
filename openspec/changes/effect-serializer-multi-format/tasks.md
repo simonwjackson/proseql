@@ -17,7 +17,7 @@
 
 ## 3. Preset Layers
 
-- [ ] 3.1 Update `core/serializers/presets.ts`: add `hjsonCodec()` to `AllTextFormatsLayer` (now 7 codecs). `DefaultSerializerLayer` (json + yaml) unchanged.
+- [x] 3.1 Update `core/serializers/presets.ts`: add `hjsonCodec()` to `AllTextFormatsLayer` (now 7 codecs). `DefaultSerializerLayer` (json + yaml) unchanged.
 
 ## 4. Extract getFileExtension
 
