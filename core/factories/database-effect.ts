@@ -14,6 +14,7 @@ import type { DatabaseConfig } from "../types/database-config-types.js"
 import type { CollectionConfig } from "../types/database-config-types.js"
 import type { CollectionIndexes } from "../types/index-types.js"
 import { normalizeIndexes, buildIndexes } from "../indexes/index-manager.js"
+import { resolveWithIndex } from "../indexes/index-lookup.js"
 import type {
 	CreateInput,
 	CreateManyOptions,
@@ -501,7 +502,11 @@ const buildCollection = <T extends HasId>(
 			// Cursor pagination branch: filter → populate → sort → applyCursor → select
 			const cursorEffect = Effect.gen(function* () {
 				const map = yield* Ref.get(ref)
-				const items = Array.from(map.values()) as Array<Record<string, unknown>>
+				// Try index-accelerated lookup first
+				const narrowed = indexes
+					? yield* resolveWithIndex(options?.where, indexes, map)
+					: undefined
+				const items = (narrowed ?? Array.from(map.values())) as Array<Record<string, unknown>>
 				let s: Stream.Stream<Record<string, unknown>, DanglingReferenceError> =
 					Stream.fromIterable(items)
 
@@ -538,7 +543,11 @@ const buildCollection = <T extends HasId>(
 		const stream = Stream.unwrap(
 			Effect.gen(function* () {
 				const map = yield* Ref.get(ref)
-				const items = Array.from(map.values()) as Array<Record<string, unknown>>
+				// Try index-accelerated lookup first
+				const narrowed = indexes
+					? yield* resolveWithIndex(options?.where, indexes, map)
+					: undefined
+				const items = (narrowed ?? Array.from(map.values())) as Array<Record<string, unknown>>
 				let s: Stream.Stream<Record<string, unknown>, DanglingReferenceError> =
 					Stream.fromIterable(items)
 

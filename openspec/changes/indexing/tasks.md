@@ -33,7 +33,7 @@
 
 - [x] 5.1 In `core/factories/database-effect.ts` `buildCollection`: read `indexes` from collection config, normalize via `normalizeIndexes`, call `buildIndexes` with initial data.
 - [x] 5.2 Pass `CollectionIndexes` to all CRUD factory function calls (create, createMany, update, updateMany, delete, deleteMany, upsert, upsertMany).
-- [ ] 5.3 Update `queryFn`: before creating the stream, call `resolveWithIndex(options?.where, indexes, map)`. If it returns entities, use those as the initial stream instead of `map.values()`.
+- [x] 5.3 Update `queryFn`: before creating the stream, call `resolveWithIndex(options?.where, indexes, map)`. If it returns entities, use those as the initial stream instead of `map.values()`.
 - [ ] 5.4 Default to empty `CollectionIndexes` when `indexes` is not configured (preserves existing behavior).
 
 ## 6. Tests — Index Declaration and Building
