@@ -67,7 +67,7 @@
 ## 11. Tests — Auto-Migrate on Load
 
 - [x] 11.1 Test file at version 0, config at version 3 → all migrations run, data correct
-- [ ] 11.2 Test file at version 2, config at version 3 → only migration 2→3 runs
+- [x] 11.2 Test file at version 2, config at version 3 → only migration 2→3 runs
 - [ ] 11.3 Test migrated data written back to file with new `_version`
 - [ ] 11.4 Test file at current version → no migrations, normal load
 - [ ] 11.5 Test failed transform → original file untouched, `MigrationError`
