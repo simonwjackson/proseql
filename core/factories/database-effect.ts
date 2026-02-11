@@ -46,6 +46,16 @@ import { applySort } from "../operations/query/sort-stream.js"
 import { applySelect } from "../operations/query/select-stream.js"
 import { applyPagination } from "../operations/query/paginate-stream.js"
 import { applyPopulate } from "../operations/relationships/populate-stream.js"
+import {
+	computeAggregates,
+	computeGroupedAggregates,
+} from "../operations/query/aggregate.js"
+import {
+	isGroupedAggregateConfig,
+	type AggregateConfig,
+	type AggregateResult,
+	type GroupedAggregateResult,
+} from "../types/aggregate-types.js"
 import type { DanglingReferenceError } from "../errors/query-errors.js"
 import {
 	NotFoundError,
@@ -224,6 +234,12 @@ export interface EffectCollection<T extends HasId> {
 		},
 		ValidationError | OperationError
 	>
+
+	readonly aggregate: <C extends AggregateConfig>(
+		config: C,
+	) => C extends { readonly groupBy: string | ReadonlyArray<string> }
+		? RunnableEffect<GroupedAggregateResult, never>
+		: RunnableEffect<AggregateResult, never>
 }
 
 /**
@@ -494,6 +510,38 @@ const buildCollection = <T extends HasId>(
 		return withRunPromise(effect)
 	}
 
+	// aggregate: read Ref → filter → collect → delegate to aggregate functions
+	const aggregateFn = <C extends AggregateConfig>(
+		config: C,
+	): C extends { readonly groupBy: string | ReadonlyArray<string> }
+		? RunnableEffect<GroupedAggregateResult, never>
+		: RunnableEffect<AggregateResult, never> => {
+		const effect = Effect.gen(function* () {
+			// 1. Read Ref snapshot
+			const map = yield* Ref.get(ref)
+			const items = Array.from(map.values()) as Array<Record<string, unknown>>
+
+			// 2. Create stream and apply filter
+			let s: Stream.Stream<Record<string, unknown>, never> = Stream.fromIterable(items)
+			s = applyFilter(config.where as Record<string, unknown> | undefined)(s)
+
+			// 3. Collect filtered entities
+			const chunk = yield* Stream.runCollect(s)
+			const entities = Chunk.toReadonlyArray(chunk)
+
+			// 4. Delegate to appropriate aggregate function based on groupBy presence
+			if (isGroupedAggregateConfig(config)) {
+				return computeGroupedAggregates(entities, config)
+			}
+			return computeAggregates(entities, config)
+		})
+
+		// Type assertion needed because TypeScript can't infer the conditional return type
+		return withRunPromise(effect) as C extends { readonly groupBy: string | ReadonlyArray<string> }
+			? RunnableEffect<GroupedAggregateResult, never>
+			: RunnableEffect<AggregateResult, never>
+	}
+
 	return {
 		query: queryFn,
 		findById: findByIdFn,
@@ -509,6 +557,7 @@ const buildCollection = <T extends HasId>(
 		updateWithRelationships: updateWithRelsFn,
 		deleteWithRelationships: deleteWithRelsFn,
 		deleteManyWithRelationships: deleteManyWithRelsFn,
+		aggregate: aggregateFn,
 	}
 }
 
