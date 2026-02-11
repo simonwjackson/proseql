@@ -68,7 +68,7 @@
 
 ## 9. Verification
 
-- [ ] 9.1 Run `bun install` at workspace root — verify all packages link correctly, `node_modules/@proseql/core` etc. resolve
+- [x] 9.1 Run `bun install` at workspace root — verify all packages link correctly, `node_modules/@proseql/core` etc. resolve
 - [ ] 9.2 Run `bun test packages/core/tests/` — verify all core tests pass (should be ~1590 tests)
 - [ ] 9.3 Run `bun test packages/node/tests/` — verify node adapter tests pass
 - [ ] 9.4 Run `bun test` (all packages) — verify total test count matches 1591
