@@ -59,7 +59,7 @@
 
 - [x] 10.1 Test valid contiguous chain → accepted
 - [x] 10.2 Test gap in chain → error
-- [ ] 10.3 Test last `to` doesn't match version → error
+- [x] 10.3 Test last `to` doesn't match version → error
 - [ ] 10.4 Test duplicate `from` → error
 - [ ] 10.5 Test `to !== from + 1` → error
 - [ ] 10.6 Test empty migrations with version > 0 → error

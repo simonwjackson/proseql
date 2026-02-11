@@ -607,6 +607,50 @@ describe("schema-migrations: migration registry validation", () => {
 			expect(error.message).toContain("must start at version 0")
 		})
 	})
+
+	describe("last 'to' doesn't match version → error (task 10.3)", () => {
+		it("rejects when last migration ends before target version", async () => {
+			// Migrations go 0→1→2, but config version is 3
+			const error = await Effect.runPromise(
+				validateMigrationRegistry("users", 3, migrationsTo2).pipe(
+					Effect.flip,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			expect(error.reason).toBe("version-mismatch")
+			expect(error.message).toContain("Last migration goes to version 2")
+			expect(error.message).toContain("collection version is 3")
+		})
+
+		it("rejects when last migration ends after target version", async () => {
+			// Migrations go 0→1→2→3, but config version is 2
+			const error = await Effect.runPromise(
+				validateMigrationRegistry("users", 2, allMigrations).pipe(
+					Effect.flip,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			expect(error.reason).toBe("version-mismatch")
+			expect(error.message).toContain("Last migration goes to version 3")
+			expect(error.message).toContain("collection version is 2")
+		})
+
+		it("rejects single migration with wrong target", async () => {
+			// Migration 0→1, but config version is 2
+			const error = await Effect.runPromise(
+				validateMigrationRegistry("users", 2, migrationsTo1).pipe(
+					Effect.flip,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			expect(error.reason).toBe("version-mismatch")
+			expect(error.message).toContain("Last migration goes to version 1")
+			expect(error.message).toContain("collection version is 2")
+		})
+	})
 })
 
 // ============================================================================
