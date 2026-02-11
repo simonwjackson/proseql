@@ -10,6 +10,69 @@ import { MigrationError } from "../errors/migration-errors.js"
 import type { Migration } from "./migration-types.js"
 
 // ============================================================================
+// Migration Execution
+// ============================================================================
+
+/**
+ * Run migrations to transform data from one version to another.
+ *
+ * Filters migrations to only those applicable for the version transition,
+ * then runs each transform in order, piping the output of one to the input
+ * of the next.
+ *
+ * @param data - The raw entity map to migrate
+ * @param fileVersion - The version of the data (from file's _version, or 0 if absent)
+ * @param targetVersion - The target schema version from collection config
+ * @param migrations - The full migration registry for this collection
+ * @param collectionName - Name of the collection (for error messages)
+ * @returns Effect<Record<string, unknown>, MigrationError> - the migrated data
+ */
+export const runMigrations = (
+	data: Record<string, unknown>,
+	fileVersion: number,
+	targetVersion: number,
+	migrations: ReadonlyArray<Migration>,
+	collectionName: string,
+): Effect.Effect<Record<string, unknown>, MigrationError> => {
+	// If already at target version, no migrations needed
+	if (fileVersion >= targetVersion) {
+		return Effect.succeed(data)
+	}
+
+	// Filter to migrations that apply: from >= fileVersion and to <= targetVersion
+	// Then sort by `from` to ensure correct execution order
+	const applicableMigrations = migrations
+		.filter((m) => m.from >= fileVersion && m.to <= targetVersion)
+		.sort((a, b) => a.from - b.from)
+
+	// Run a single migration step, catching any thrown exceptions
+	const runStep = (
+		currentData: Record<string, unknown>,
+		migration: Migration,
+		stepIndex: number,
+	): Effect.Effect<Record<string, unknown>, MigrationError> =>
+		Effect.try({
+			try: () => migration.transform(currentData),
+			catch: (error) =>
+				new MigrationError({
+					collection: collectionName,
+					fromVersion: migration.from,
+					toVersion: migration.to,
+					step: stepIndex,
+					reason: "transform-failed",
+					message: `Migration ${migration.from}→${migration.to} failed: ${error instanceof Error ? error.message : String(error)}`,
+				}),
+		})
+
+	// Chain all migrations using reduce
+	return applicableMigrations.reduce(
+		(acc, migration, stepIndex) =>
+			acc.pipe(Effect.flatMap((d) => runStep(d, migration, stepIndex))),
+		Effect.succeed(data) as Effect.Effect<Record<string, unknown>, MigrationError>,
+	)
+}
+
+// ============================================================================
 // Migration Registry Validation
 // ============================================================================
 
