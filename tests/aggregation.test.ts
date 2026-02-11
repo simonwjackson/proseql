@@ -308,5 +308,37 @@ describe("Aggregation", () => {
 			expect(gadget50?.count).toBe(1)
 			expect(gadget100?.count).toBe(1)
 		})
+
+		it("6.4 groupBy with where → groups from filtered subset only", async () => {
+			const db = await createTestDb()
+			const result = await db.products.aggregate({
+				groupBy: "category",
+				count: true,
+				sum: "price",
+				where: { price: { $gt: 20 } },
+			}).runPromise
+
+			// Test data with price > 20:
+			// p2 (electronics, 25.50)
+			// p4 (gadgets, 35.00)
+			// tools category (p5, 5.25) is EXCLUDED — no group should exist
+
+			expect(result).toHaveLength(2)
+
+			const electronics = result.find(g => g.group.category === "electronics")
+			const gadgets = result.find(g => g.group.category === "gadgets")
+			const tools = result.find(g => g.group.category === "tools")
+
+			// electronics: 1 item (p2), sum = 25.50
+			expect(electronics?.count).toBe(1)
+			expect(electronics?.sum?.price).toBeCloseTo(25.50)
+
+			// gadgets: 1 item (p4), sum = 35.00
+			expect(gadgets?.count).toBe(1)
+			expect(gadgets?.sum?.price).toBeCloseTo(35.00)
+
+			// tools: should NOT exist as a group
+			expect(tools).toBeUndefined()
+		})
 	})
 })
