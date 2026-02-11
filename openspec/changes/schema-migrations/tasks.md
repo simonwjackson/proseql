@@ -14,7 +14,7 @@
 
 - [x] 3.1 Implement `runMigrations(data, fileVersion, targetVersion, migrations, collectionName)` returning `Effect<Record<string, unknown>, MigrationError>`. Filter to applicable migrations (`from >= fileVersion`), run transforms in order, catch exceptions and wrap in `MigrationError`.
 - [x] 3.2 Handle the transform chain: pipe output of each transform to input of next. Track which step is executing for error reporting.
-- [ ] 3.3 Handle version 0 (no `_version` in file) as the starting point.
+- [x] 3.3 Handle version 0 (no `_version` in file) as the starting point.
 
 ## 4. Persistence Integration — saveData
 
