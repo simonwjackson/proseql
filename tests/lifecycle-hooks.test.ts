@@ -1396,5 +1396,79 @@ describe("lifecycle-hooks", () => {
 			expect(result.updated.name).toBe("UpdatedUser")
 			expect(result.deleted.name).toBe("UpdatedUser")
 		})
+
+		it("onChange error does not fail the operation", async () => {
+			// Track that hooks are actually called (even if they fail)
+			const hookCallOrder: Array<string> = []
+
+			// Create an onChange hook that throws errors
+			const failingOnChangeHook: OnChangeHook<User> = (ctx) => {
+				hookCallOrder.push(`onChange:${ctx.type}`)
+				return Effect.fail(new Error(`onChange hook failed for ${ctx.type}!`))
+			}
+
+			const hooks: HooksConfig<User> = {
+				onChange: [failingOnChangeHook],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, { users: [] })
+
+					// Create should succeed despite onChange hook failing
+					const created = yield* db.users.create({
+						name: "Test User",
+						email: "test@example.com",
+						age: 25,
+					})
+
+					// Verify entity was created
+					const foundAfterCreate = yield* db.users.findById(created.id)
+
+					// Update should succeed despite onChange hook failing
+					const updated = yield* db.users.update(created.id, {
+						name: "Updated User",
+					})
+
+					// Verify entity was updated
+					const foundAfterUpdate = yield* db.users.findById(created.id)
+
+					// Delete should succeed despite onChange hook failing
+					const deleted = yield* db.users.delete(created.id)
+
+					// Verify entity was deleted (should fail to find)
+					const findAfterDelete = yield* db.users.findById(created.id).pipe(
+						Effect.matchEffect({
+							onFailure: (error) => Effect.succeed({ type: "error" as const, error }),
+							onSuccess: (user) => Effect.succeed({ type: "found" as const, user }),
+						}),
+					)
+
+					return {
+						created,
+						foundAfterCreate,
+						updated,
+						foundAfterUpdate,
+						deleted,
+						findAfterDelete,
+					}
+				}),
+			)
+
+			// All CRUD operations should have succeeded
+			expect(result.created.name).toBe("Test User")
+			expect(result.foundAfterCreate.name).toBe("Test User")
+			expect(result.updated.name).toBe("Updated User")
+			expect(result.foundAfterUpdate.name).toBe("Updated User")
+			expect(result.deleted.name).toBe("Updated User")
+			expect(result.findAfterDelete.type).toBe("error") // Entity no longer exists
+
+			// Verify all onChange hooks were actually called (even though they failed)
+			expect(hookCallOrder).toEqual([
+				"onChange:create",
+				"onChange:update",
+				"onChange:delete",
+			])
+		})
 	})
 })
