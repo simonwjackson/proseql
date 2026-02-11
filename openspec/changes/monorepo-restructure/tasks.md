@@ -14,7 +14,7 @@
 - [x] 2.6 Move all test files from `tests/` to `packages/core/tests/` EXCEPT the Node-adapter-specific test (the `makeNodeStorageLayer` test in `storage-services.test.ts`)
 - [x] 2.7 Update all import paths in `packages/core/tests/*.test.ts`: change `../core/` to `../src/`
 - [x] 2.8 Split `tests/storage-services.test.ts`: keep the in-memory adapter tests in `packages/core/tests/storage-services.test.ts`, extract the Node adapter test to `packages/node/tests/`
-- [ ] 2.9 Move `tests/crud/` subdirectory to `packages/core/tests/crud/`, update imports within
+- [x] 2.9 Move `tests/crud/` subdirectory to `packages/core/tests/crud/`, update imports within
 
 ## 3. Package: @proseql/node
 
