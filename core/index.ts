@@ -377,25 +377,6 @@ export {
 
 export type { IdGeneratorConfig } from "./utils/id-generator.js";
 
-// Legacy serializer factories
-export {
-	createJsonSerializer,
-	defaultJsonSerializer,
-	compactJsonSerializer,
-} from "./serializers/json.js";
-
-export {
-	createYamlSerializer,
-	defaultYamlSerializer,
-	compactYamlSerializer,
-	prettyYamlSerializer,
-} from "./serializers/yaml.js";
-
-export {
-	createMessagePackSerializer,
-	defaultMessagePackSerializer,
-} from "./serializers/messagepack.js";
-
 // ============================================================================
 // Legacy Persistence Functions (for backward compatibility)
 // ============================================================================
