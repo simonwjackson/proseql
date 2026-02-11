@@ -2115,6 +2115,228 @@ describe("schema-migrations: auto-migrate on load", () => {
 })
 
 // ============================================================================
+// Tests: Dry Run (Tasks 12.1-12.4)
+// ============================================================================
+
+import { dryRunMigrations } from "../core/migrations/migration-runner.js"
+import { Ref } from "effect"
+
+describe("schema-migrations: dry run", () => {
+	describe("collection needing migration → listed with correct chain (task 12.1)", () => {
+		it("dryRunMigrations reports collection at version 0 needing full migration chain", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File at version 0 (no _version) with V0 data
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					u1: { id: "u1", name: "Alice Smith" },
+				}),
+			)
+
+			// Database config: users collection at version 3 with full migration chain
+			const config = {
+				users: {
+					schema: UserSchemaV3,
+					file: "/data/users.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+			}
+
+			// Create empty state refs (not needed for dry-run file inspection)
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			// Should report one collection
+			expect(result.collections).toHaveLength(1)
+
+			const usersResult = result.collections[0]
+			expect(usersResult.name).toBe("users")
+			expect(usersResult.filePath).toBe("/data/users.json")
+			expect(usersResult.currentVersion).toBe(0)
+			expect(usersResult.targetVersion).toBe(3)
+			expect(usersResult.status).toBe("needs-migration")
+
+			// Should list all three migrations in correct order
+			expect(usersResult.migrationsToApply).toHaveLength(3)
+			expect(usersResult.migrationsToApply[0]).toEqual({
+				from: 0,
+				to: 1,
+				description: "Add email field",
+			})
+			expect(usersResult.migrationsToApply[1]).toEqual({
+				from: 1,
+				to: 2,
+				description: "Split name into firstName and lastName",
+			})
+			expect(usersResult.migrationsToApply[2]).toEqual({
+				from: 2,
+				to: 3,
+				description: "Add age field",
+			})
+		})
+
+		it("dryRunMigrations reports collection at version 2 needing only 2→3 migration", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File at version 2 with V2 data
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					_version: 2,
+					u1: {
+						id: "u1",
+						firstName: "Alice",
+						lastName: "Smith",
+						email: "alice@example.com",
+					},
+				}),
+			)
+
+			const config = {
+				users: {
+					schema: UserSchemaV3,
+					file: "/data/users.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			expect(result.collections).toHaveLength(1)
+
+			const usersResult = result.collections[0]
+			expect(usersResult.name).toBe("users")
+			expect(usersResult.currentVersion).toBe(2)
+			expect(usersResult.targetVersion).toBe(3)
+			expect(usersResult.status).toBe("needs-migration")
+
+			// Should only list the 2→3 migration
+			expect(usersResult.migrationsToApply).toHaveLength(1)
+			expect(usersResult.migrationsToApply[0]).toEqual({
+				from: 2,
+				to: 3,
+				description: "Add age field",
+			})
+		})
+
+		it("dryRunMigrations reports multiple collections needing migration", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// Two collections at different versions
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					u1: { id: "u1", name: "Alice" },
+				}),
+			)
+			store.set(
+				"/data/profiles.json",
+				JSON.stringify({
+					_version: 1,
+					p1: { id: "p1", name: "Alice", email: "a@b.c" },
+				}),
+			)
+
+			const config = {
+				users: {
+					schema: UserSchemaV3,
+					file: "/data/users.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+				profiles: {
+					schema: UserSchemaV3,
+					file: "/data/profiles.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			expect(result.collections).toHaveLength(2)
+
+			// Find results by name (order may vary)
+			const usersResult = result.collections.find((c) => c.name === "users")!
+			const profilesResult = result.collections.find((c) => c.name === "profiles")!
+
+			// Users at version 0 → needs all 3 migrations
+			expect(usersResult.currentVersion).toBe(0)
+			expect(usersResult.status).toBe("needs-migration")
+			expect(usersResult.migrationsToApply).toHaveLength(3)
+
+			// Profiles at version 1 → needs migrations 1→2 and 2→3
+			expect(profilesResult.currentVersion).toBe(1)
+			expect(profilesResult.status).toBe("needs-migration")
+			expect(profilesResult.migrationsToApply).toHaveLength(2)
+			expect(profilesResult.migrationsToApply[0].from).toBe(1)
+			expect(profilesResult.migrationsToApply[1].from).toBe(2)
+		})
+
+		it("dryRunMigrations handles migration without description", async () => {
+			const { store, layer } = makeTestEnv()
+
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					u1: { id: "u1", name: "Alice", email: "a@b.c" },
+				}),
+			)
+
+			// Migration without description field
+			const migrationNoDesc: Migration = {
+				from: 0,
+				to: 1,
+				transform: (data) => data,
+			}
+
+			const config = {
+				users: {
+					schema: UserSchemaV1,
+					file: "/data/users.json",
+					version: 1,
+					migrations: [migrationNoDesc],
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			expect(result.collections).toHaveLength(1)
+			expect(result.collections[0].migrationsToApply).toHaveLength(1)
+			// Migration without description should not have description field
+			expect(result.collections[0].migrationsToApply[0]).toEqual({
+				from: 0,
+				to: 1,
+			})
+			expect(result.collections[0].migrationsToApply[0].description).toBeUndefined()
+		})
+	})
+})
+
+// ============================================================================
 // Exported test helpers and schemas for use in other test files
 // ============================================================================
 
