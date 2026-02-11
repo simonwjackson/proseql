@@ -88,6 +88,19 @@ export const applyCursor = (config: CursorConfig) =>
 				const chunk = yield* Stream.runCollect(limitedStream)
 				const items = Chunk.toReadonlyArray(chunk) as ReadonlyArray<T>
 
+				// Handle empty results: return empty items, null cursors, both has-flags false
+				if (items.length === 0) {
+					return {
+						items: [],
+						pageInfo: {
+							startCursor: null,
+							endCursor: null,
+							hasNextPage: false,
+							hasPreviousPage: false,
+						},
+					} as CursorPageResult<T>
+				}
+
 				// Check if we have overflow (more items than limit)
 				const hasOverflow = items.length > limit
 				const hasPreviousPage = hasOverflow
@@ -100,14 +113,11 @@ export const applyCursor = (config: CursorConfig) =>
 				const pageItems = hasOverflow ? items.slice(1) : items
 
 				// Extract cursors from first and last items
-				const startCursor =
-					pageItems.length > 0
-						? extractCursorValue(pageItems[0] as T, key)
-						: null
-				const endCursor =
-					pageItems.length > 0
-						? extractCursorValue(pageItems[pageItems.length - 1] as T, key)
-						: null
+				const startCursor = extractCursorValue(pageItems[0] as T, key)
+				const endCursor = extractCursorValue(
+					pageItems[pageItems.length - 1] as T,
+					key,
+				)
 
 				return {
 					items: pageItems,
@@ -127,6 +137,19 @@ export const applyCursor = (config: CursorConfig) =>
 				const chunk = yield* Stream.runCollect(limitedStream)
 				const items = Chunk.toReadonlyArray(chunk) as ReadonlyArray<T>
 
+				// Handle empty results: return empty items, null cursors, both has-flags false
+				if (items.length === 0) {
+					return {
+						items: [],
+						pageInfo: {
+							startCursor: null,
+							endCursor: null,
+							hasNextPage: false,
+							hasPreviousPage: false,
+						},
+					} as CursorPageResult<T>
+				}
+
 				// Check if we have overflow (more items than limit)
 				const hasOverflow = items.length > limit
 				const hasNextPage = hasOverflow
@@ -139,14 +162,11 @@ export const applyCursor = (config: CursorConfig) =>
 				const pageItems = hasOverflow ? items.slice(0, limit) : items
 
 				// Extract cursors from first and last items
-				const startCursor =
-					pageItems.length > 0
-						? extractCursorValue(pageItems[0] as T, key)
-						: null
-				const endCursor =
-					pageItems.length > 0
-						? extractCursorValue(pageItems[pageItems.length - 1] as T, key)
-						: null
+				const startCursor = extractCursorValue(pageItems[0] as T, key)
+				const endCursor = extractCursorValue(
+					pageItems[pageItems.length - 1] as T,
+					key,
+				)
 
 				return {
 					items: pageItems,
