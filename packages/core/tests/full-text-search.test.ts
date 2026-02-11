@@ -290,4 +290,47 @@ describe("Full-text search: Basic Search (task 9)", () => {
 			expect(results[0].title).toBe("Snow Crash")
 		})
 	})
+
+	describe("9.6: No match", () => {
+		it("should return no results when searching for 'xyz123' in title", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "xyz123" } },
+			}).runPromise
+			expect(results.length).toBe(0)
+		})
+
+		it("should return no results when searching for nonexistent term in author", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { author: { $search: "xyz123" } },
+			}).runPromise
+			expect(results.length).toBe(0)
+		})
+
+		it("should return no results when searching for nonexistent term in description", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { description: { $search: "xyz123" } },
+			}).runPromise
+			expect(results.length).toBe(0)
+		})
+
+		it("should return no results when no tokens match any field", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "notaword faketerm randomstring" } },
+			}).runPromise
+			expect(results.length).toBe(0)
+		})
+
+		it("should return no results for partial mismatch where only some tokens match", async () => {
+			const db = await createTestDatabase()
+			// "dune" matches but "xyz123" doesn't, so overall should not match
+			const results = await db.books.query({
+				where: { title: { $search: "dune xyz123" } },
+			}).runPromise
+			expect(results.length).toBe(0)
+		})
+	})
 })
