@@ -218,3 +218,82 @@ export const removeFromIndex = <T extends HasId>(
 			});
 		}
 	});
+
+/**
+ * Compare two index keys for equality.
+ *
+ * Uses strict equality for primitives. For compound indexes (string keys),
+ * this works directly since JSON.stringify produces identical strings for
+ * identical value arrays.
+ */
+const keysEqual = (a: unknown, b: unknown): boolean => a === b;
+
+/**
+ * Update an entity's position in all applicable indexes after a mutation.
+ *
+ * For each index in the collection:
+ * - Computes the old and new index keys
+ * - If keys are the same (or both undefined), no action needed
+ * - If keys differ, removes the old entry and adds the new entry
+ *
+ * This efficiently handles the common case where most indexed fields don't
+ * change during an update.
+ *
+ * @param indexes - The collection's indexes
+ * @param oldEntity - The entity before the update
+ * @param newEntity - The entity after the update
+ * @returns Effect that updates all affected index Refs
+ */
+export const updateInIndex = <T extends HasId>(
+	indexes: CollectionIndexes,
+	oldEntity: T,
+	newEntity: T,
+): Effect.Effect<void> =>
+	Effect.gen(function* () {
+		for (const [indexKey, indexRef] of indexes) {
+			const fields: NormalizedIndex = JSON.parse(indexKey);
+			const oldKey = computeIndexKey(oldEntity, fields);
+			const newKey = computeIndexKey(newEntity, fields);
+
+			// Both undefined or both equal - no change needed
+			if (oldKey === undefined && newKey === undefined) {
+				continue;
+			}
+			if (oldKey !== undefined && newKey !== undefined && keysEqual(oldKey, newKey)) {
+				continue;
+			}
+
+			// Keys differ - update the index
+			yield* Ref.update(indexRef, (indexMap) => {
+				const newMap = new Map(indexMap);
+
+				// Remove from old key if it existed
+				if (oldKey !== undefined) {
+					const oldSet = newMap.get(oldKey);
+					if (oldSet) {
+						const updatedSet = new Set(oldSet);
+						updatedSet.delete(oldEntity.id);
+						if (updatedSet.size === 0) {
+							newMap.delete(oldKey);
+						} else {
+							newMap.set(oldKey, updatedSet);
+						}
+					}
+				}
+
+				// Add to new key if indexable
+				if (newKey !== undefined) {
+					const existingSet = newMap.get(newKey);
+					if (existingSet) {
+						const updatedSet = new Set(existingSet);
+						updatedSet.add(newEntity.id);
+						newMap.set(newKey, updatedSet);
+					} else {
+						newMap.set(newKey, new Set([newEntity.id]));
+					}
+				}
+
+				return newMap;
+			});
+		}
+	});
