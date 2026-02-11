@@ -454,7 +454,86 @@ describe("Upsert Where-Clause Validation", () => {
 
 	describe("collection without uniqueFields", () => {
 		it("should only accept { id } as where clause", async () => {
-			// TODO: Task 7.7
+			// Test that a collection with no uniqueFields configured only accepts { id } in where clause
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<Profile>([existingProfile])
+				const stateRefs = yield* makeStateRefs({ profiles: [existingProfile] })
+
+				// Upsert using { name } — should fail because no uniqueFields are configured
+				// and "name" is not a valid unique field (only "id" is implicitly valid)
+				const result = yield* upsert(
+					"profiles",
+					ProfileSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					noUniqueFields, // no uniqueFields configured
+				)({
+					where: { name: "Alice Profile" }, // Using non-id field when no uniqueFields configured
+					create: {
+						name: "Alice Profile",
+						bio: "New bio",
+					},
+					update: { bio: "Updated bio" },
+				})
+
+				return result
+			})
+
+			const error = await Effect.runPromise(
+				program.pipe(
+					Effect.flip, // Convert failure to success for assertion
+				),
+			)
+
+			// Should fail with ValidationError because only { id } is valid when no uniqueFields are configured
+			expect(error).toBeInstanceOf(ValidationError)
+			expect(error._tag).toBe("ValidationError")
+			expect(error.message).toContain("unique")
+			expect(error.issues).toHaveLength(1)
+			expect(error.issues[0].field).toBe("where")
+			// Should mention the collection
+			expect(error.issues[0].message).toContain("profiles")
+			// Should mention that only "id" is valid (the value object with "name" is in the value property)
+			expect(error.issues[0].message).toContain("id")
+			// The where clause value is captured in the issue
+			expect(error.issues[0].value).toEqual({ name: "Alice Profile" })
+		})
+
+		it("should accept { id } when no uniqueFields are configured", async () => {
+			// This is a positive test confirming { id } works with no uniqueFields
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<Profile>([existingProfile])
+				const stateRefs = yield* makeStateRefs({ profiles: [existingProfile] })
+
+				// Upsert using { id } — always valid, even with no uniqueFields
+				const result = yield* upsert(
+					"profiles",
+					ProfileSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					noUniqueFields, // no uniqueFields configured
+				)({
+					where: { id: "profile1" },
+					create: {
+						name: "New Profile",
+						bio: "New bio",
+					},
+					update: { bio: "Updated via id" },
+				})
+
+				expect(result.__action).toBe("updated")
+				expect(result.bio).toBe("Updated via id")
+
+				return result
+			})
+
+			await Effect.runPromise(program)
 		})
 	})
 

@@ -53,7 +53,7 @@
 - [x] 7.4 Test upsert `where: { name }` when name is NOT unique → `ValidationError`
 - [x] 7.5 Test upsert with compound where matching compound constraint → valid
 - [x] 7.6 Test upsert with partial compound where → `ValidationError`
-- [ ] 7.7 Test collection without uniqueFields → only `{ id }` accepted
+- [x] 7.7 Test collection without uniqueFields → only `{ id }` accepted
 - [ ] 7.8 Test upsert where with extra fields beyond constraint → valid
 - [ ] 7.9 Test upsertMany with invalid where → fails on first invalid
 
