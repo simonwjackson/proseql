@@ -696,5 +696,51 @@ describe("lifecycle-hooks", () => {
 			// The entity should be the same as what was returned from create
 			expect(ctx.entity).toEqual(result)
 		})
+
+		it("afterUpdate receives previous and current state", async () => {
+			const afterUpdateCalls: Array<AfterUpdateContext<User>> = []
+			const hooks: HooksConfig<User> = {
+				afterUpdate: [makeTrackingAfterUpdateHook(afterUpdateCalls)],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks)
+					// u1 starts as: { id: "u1", name: "Alice", email: "alice@test.com", age: 30 }
+					const updated = yield* db.users.update("u1", {
+						name: "Alice Updated",
+						age: 31,
+					})
+					return updated
+				}),
+			)
+
+			// Verify afterUpdate was called
+			expect(afterUpdateCalls).toHaveLength(1)
+			const ctx = afterUpdateCalls[0]
+
+			// Verify context structure
+			expect(ctx.operation).toBe("update")
+			expect(ctx.collection).toBe("users")
+			expect(ctx.id).toBe("u1")
+
+			// Verify previous state (before update)
+			expect(ctx.previous.id).toBe("u1")
+			expect(ctx.previous.name).toBe("Alice")
+			expect(ctx.previous.email).toBe("alice@test.com")
+			expect(ctx.previous.age).toBe(30)
+
+			// Verify current state (after update)
+			expect(ctx.current.id).toBe("u1")
+			expect(ctx.current.name).toBe("Alice Updated")
+			expect(ctx.current.email).toBe("alice@test.com") // unchanged
+			expect(ctx.current.age).toBe(31)
+
+			// The current should match what was returned from update
+			expect(ctx.current).toEqual(result)
+
+			// Verify the update payload is present
+			expect(ctx.update).toEqual({ name: "Alice Updated", age: 31 })
+		})
 	})
 })

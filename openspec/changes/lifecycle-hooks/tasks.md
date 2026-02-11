@@ -59,7 +59,7 @@
 ## 9. Tests — After Hooks
 
 - [x] 9.1 Test afterCreate receives created entity
-- [ ] 9.2 Test afterUpdate receives previous and current state
+- [x] 9.2 Test afterUpdate receives previous and current state
 - [ ] 9.3 Test afterDelete receives deleted entity
 - [ ] 9.4 Test after-hook error does not fail the CRUD operation
 - [ ] 9.5 Test multiple after-hooks run in order
