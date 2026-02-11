@@ -6,6 +6,7 @@
 import type { Schema } from "effect";
 import type { StorageAdapter } from "../storage/types.js";
 import type { SerializerRegistry } from "../serializers/types.js";
+import type { HooksConfig } from "./hook-types.js";
 
 /**
  * Configuration for a single collection, now with optional persistence support.
@@ -41,6 +42,14 @@ export type CollectionConfig = {
 	 * Indexes accelerate equality queries on the specified fields.
 	 */
 	readonly indexes?: ReadonlyArray<string | ReadonlyArray<string>>;
+
+	/**
+	 * Lifecycle hooks for this collection.
+	 * Hooks intercept CRUD operations for transformation, validation, or side effects.
+	 * Before-hooks can transform data or reject operations.
+	 * After-hooks and onChange run fire-and-forget after mutation.
+	 */
+	readonly hooks?: HooksConfig<unknown>;
 };
 
 /**
