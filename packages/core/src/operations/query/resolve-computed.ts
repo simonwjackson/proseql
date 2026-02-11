@@ -87,3 +87,56 @@ export const resolveComputedStream = <
 			resolveComputedFields(entity, config),
 		);
 	};
+
+/**
+ * Strip computed field keys from an entity object.
+ * Used as a safety net before persistence to ensure computed fields
+ * are never written to storage.
+ *
+ * @template T - The original entity type (stored fields only)
+ * @template C - The computed fields config type
+ *
+ * @param entity - The entity (possibly with computed fields attached)
+ * @param config - The computed fields configuration that defines which keys to strip
+ * @returns A new object with only stored fields (computed fields removed)
+ *
+ * @example
+ * ```ts
+ * const entityWithComputed = {
+ *   id: "1",
+ *   title: "Dune",
+ *   year: 1965,
+ *   displayName: "Dune (1965)",  // computed
+ *   isClassic: true,              // computed
+ * }
+ * const config = {
+ *   displayName: (b) => `${b.title} (${b.year})`,
+ *   isClassic: (b) => b.year < 1980,
+ * }
+ * const stored = stripComputedFields(entityWithComputed, config)
+ * // { id: "1", title: "Dune", year: 1965 }
+ * ```
+ */
+export const stripComputedFields = <
+	T extends Record<string, unknown>,
+	C extends ComputedFieldsConfig<T>,
+>(
+	entity: Record<string, unknown>,
+	config: C | undefined,
+): T => {
+	// When config is empty or undefined, return entity unchanged
+	if (config === undefined || Object.keys(config).length === 0) {
+		return entity as T;
+	}
+
+	const computedKeys = new Set(Object.keys(config));
+	const result: Record<string, unknown> = {};
+
+	for (const key of Object.keys(entity)) {
+		if (!computedKeys.has(key)) {
+			result[key] = entity[key];
+		}
+	}
+
+	return result as T;
+};

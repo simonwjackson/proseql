@@ -368,6 +368,13 @@ export type {
 	ComputedFieldKeys,
 } from "./types/computed-types.js";
 
+// Computed field resolution functions
+export {
+	resolveComputedFields,
+	resolveComputedStream,
+	stripComputedFields,
+} from "./operations/query/resolve-computed.js";
+
 // ============================================================================
 // ID Generation Utilities
 // ============================================================================
