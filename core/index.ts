@@ -377,21 +377,6 @@ export {
 
 export type { IdGeneratorConfig } from "./utils/id-generator.js";
 
-// ============================================================================
-// Legacy Persistence Functions (for backward compatibility)
-// ============================================================================
-
-export {
-	createPersistenceContext,
-	loadData as legacyLoadData,
-	saveData as legacySaveData,
-	saveDataImmediate,
-	watchFile,
-	fileExists,
-	flushPendingWrites,
-	type PersistenceContext,
-} from "./storage/persistence.js";
-
 // Legacy storage adapter types
 export type {
 	StorageAdapter as LegacyStorageAdapter,
