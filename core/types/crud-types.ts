@@ -26,14 +26,6 @@ export interface MinimalEntity {
 	id: string;
 }
 
-/**
- * Extract fields that have unique constraints from a schema type
- * This is used to determine valid fields for upsert operations
- */
-export type ExtractUniqueFields<T> = {
-	[K in keyof T]: T extends Record<K, { unique: true }> ? K : never;
-}[keyof T];
-
 // ============================================================================
 // Create Operation Types
 // ============================================================================
