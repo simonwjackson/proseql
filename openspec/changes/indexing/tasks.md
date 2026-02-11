@@ -1,7 +1,7 @@
 ## 1. Types and Configuration
 
 - [x] 1.1 Create `core/types/index-types.ts` with `IndexMap` (`Map<unknown, Set<string>>`), `IndexRef` (`Ref<IndexMap>`), `CollectionIndexes` (`Map<string, IndexRef>`), and `NormalizedIndex` (`ReadonlyArray<string>`) types
-- [ ] 1.2 Add `readonly indexes?: ReadonlyArray<string | ReadonlyArray<string>>` to `CollectionConfig` in `core/types/database-config-types.ts`
+- [x] 1.2 Add `readonly indexes?: ReadonlyArray<string | ReadonlyArray<string>>` to `CollectionConfig` in `core/types/database-config-types.ts`
 - [ ] 1.3 Export new index types from `core/types/index.ts` or `core/index.ts`
 
 ## 2. Index Manager

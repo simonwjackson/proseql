@@ -34,6 +34,13 @@ export type CollectionConfig = {
 			readonly foreignKey?: string;
 		}
 	>;
+
+	/**
+	 * Index definitions for this collection.
+	 * Each entry can be a single field name (string) or an array of field names (compound index).
+	 * Indexes accelerate equality queries on the specified fields.
+	 */
+	readonly indexes?: ReadonlyArray<string | ReadonlyArray<string>>;
 };
 
 /**
