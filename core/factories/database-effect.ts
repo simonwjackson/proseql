@@ -15,6 +15,8 @@ import type { CollectionConfig } from "../types/database-config-types.js"
 import type { CollectionIndexes } from "../types/index-types.js"
 import { normalizeIndexes, buildIndexes } from "../indexes/index-manager.js"
 import { resolveWithIndex } from "../indexes/index-lookup.js"
+import { validateMigrationRegistry } from "../migrations/migration-runner.js"
+import type { MigrationError } from "../errors/migration-errors.js"
 import type {
 	CreateInput,
 	CreateManyOptions,
@@ -707,8 +709,20 @@ const buildCollection = <T extends HasId>(
 export const createEffectDatabase = <Config extends DatabaseConfig>(
 	config: Config,
 	initialData?: { readonly [K in keyof Config]?: ReadonlyArray<Record<string, unknown>> },
-): Effect.Effect<EffectDatabase<Config>> =>
+): Effect.Effect<EffectDatabase<Config>, MigrationError> =>
 	Effect.gen(function* () {
+		// 0. Validate migration registries for all versioned collections at startup
+		for (const collectionName of Object.keys(config)) {
+			const collectionConfig = config[collectionName]
+			if (collectionConfig.version !== undefined) {
+				yield* validateMigrationRegistry(
+					collectionName,
+					collectionConfig.version,
+					collectionConfig.migrations ?? [],
+				)
+			}
+		}
+
 		// 1. Create Ref for each collection from initial data
 		const stateRefs: StateRefs = {}
 		const typedRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>> = {}
@@ -778,10 +792,22 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 	persistenceConfig?: EffectDatabasePersistenceConfig,
 ): Effect.Effect<
 	EffectDatabaseWithPersistence<Config>,
-	never,
+	MigrationError,
 	StorageAdapter | SerializerRegistry | Scope.Scope
 > =>
 	Effect.gen(function* () {
+		// 0. Validate migration registries for all versioned collections at startup
+		for (const collectionName of Object.keys(config)) {
+			const collectionConfig = config[collectionName]
+			if (collectionConfig.version !== undefined) {
+				yield* validateMigrationRegistry(
+					collectionName,
+					collectionConfig.version,
+					collectionConfig.migrations ?? [],
+				)
+			}
+		}
+
 		// 1. Resolve services from the environment and capture as a Layer
 		// so save effects can be executed outside the creation runtime.
 		const storageAdapter = yield* StorageAdapter
