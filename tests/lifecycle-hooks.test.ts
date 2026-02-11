@@ -1186,5 +1186,76 @@ describe("lifecycle-hooks", () => {
 				expect.fail("Expected onChange context type to be 'delete'")
 			}
 		})
+
+		it("onChange fires after specific after-hooks", async () => {
+			// Track the order in which hooks are called
+			// Execution order should be:
+			// 1. Before-hooks (not tested here)
+			// 2. State mutation
+			// 3. Specific after-hooks (afterCreate/afterUpdate/afterDelete)
+			// 4. onChange hooks (after specific after-hooks)
+			const hookOrder: Array<string> = []
+
+			// Specific after-hooks
+			const afterCreateHook: AfterCreateHook<User> = () => {
+				hookOrder.push("afterCreate")
+				return Effect.void
+			}
+
+			const afterUpdateHook: AfterUpdateHook<User> = () => {
+				hookOrder.push("afterUpdate")
+				return Effect.void
+			}
+
+			const afterDeleteHook: AfterDeleteHook<User> = () => {
+				hookOrder.push("afterDelete")
+				return Effect.void
+			}
+
+			// onChange hook
+			const onChangeHook: OnChangeHook<User> = (ctx) => {
+				hookOrder.push(`onChange:${ctx.type}`)
+				return Effect.void
+			}
+
+			const hooks: HooksConfig<User> = {
+				afterCreate: [afterCreateHook],
+				afterUpdate: [afterUpdateHook],
+				afterDelete: [afterDeleteHook],
+				onChange: [onChangeHook],
+			}
+
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, { users: [] })
+
+					// Create a user - afterCreate should run before onChange
+					const created = yield* db.users.create({
+						name: "Order Test User",
+						email: "order@test.com",
+						age: 30,
+					})
+
+					// Update the user - afterUpdate should run before onChange
+					yield* db.users.update(created.id, {
+						name: "Updated Order Test User",
+					})
+
+					// Delete the user - afterDelete should run before onChange
+					yield* db.users.delete(created.id)
+				}),
+			)
+
+			// Verify the hook execution order:
+			// - For each operation, the specific after-hook should run before onChange
+			expect(hookOrder).toEqual([
+				"afterCreate",    // specific after-hook runs first
+				"onChange:create", // then onChange fires
+				"afterUpdate",    // specific after-hook runs first
+				"onChange:update", // then onChange fires
+				"afterDelete",    // specific after-hook runs first
+				"onChange:delete", // then onChange fires
+			])
+		})
 	})
 })
