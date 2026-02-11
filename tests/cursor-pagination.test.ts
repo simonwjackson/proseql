@@ -1218,4 +1218,232 @@ describe("Cursor Pagination", () => {
 			expect(result.pageInfo.hasPreviousPage).toBe(false)
 		})
 	})
+
+	describe("combined with explicit sort", () => {
+		it("cursor key matches primary sort field with ascending order", async () => {
+			const items = generateItems(10)
+
+			// Explicit ascending sort on id (matches cursor key)
+			const result = await runCursorQuery(items, {
+				sort: { id: "asc" },
+				cursor: { key: "id", limit: 3 },
+			})
+
+			// Should return first 3 items in ascending order
+			expect(result.items).toHaveLength(3)
+			expect(result.items.map((i) => i.id)).toEqual([
+				"item-001",
+				"item-002",
+				"item-003",
+			])
+
+			expect(result.pageInfo.hasNextPage).toBe(true)
+			expect(result.pageInfo.hasPreviousPage).toBe(false)
+			expect(result.pageInfo.startCursor).toBe("item-001")
+			expect(result.pageInfo.endCursor).toBe("item-003")
+		})
+
+		it("forward pagination works with explicit ascending sort", async () => {
+			const items = generateItems(10)
+
+			// First page with ascending sort
+			const firstPage = await runCursorQuery(items, {
+				sort: { id: "asc" },
+				cursor: { key: "id", limit: 3 },
+			})
+
+			expect(firstPage.items.map((i) => i.id)).toEqual([
+				"item-001",
+				"item-002",
+				"item-003",
+			])
+
+			// Second page using after cursor
+			const secondPage = await runCursorQuery(items, {
+				sort: { id: "asc" },
+				cursor: {
+					key: "id",
+					limit: 3,
+					after: firstPage.pageInfo.endCursor!,
+				},
+			})
+
+			expect(secondPage.items).toHaveLength(3)
+			expect(secondPage.items.map((i) => i.id)).toEqual([
+				"item-004",
+				"item-005",
+				"item-006",
+			])
+
+			expect(secondPage.pageInfo.hasNextPage).toBe(true)
+			expect(secondPage.pageInfo.hasPreviousPage).toBe(true)
+		})
+
+		it("backward pagination works with explicit ascending sort", async () => {
+			const items = generateItems(10)
+
+			// Get items before item-007 with ascending sort
+			const page = await runCursorQuery(items, {
+				sort: { id: "asc" },
+				cursor: {
+					key: "id",
+					limit: 3,
+					before: "item-007",
+				},
+			})
+
+			// Should return items 4-6 (last 3 items before item-007)
+			expect(page.items).toHaveLength(3)
+			expect(page.items.map((i) => i.id)).toEqual([
+				"item-004",
+				"item-005",
+				"item-006",
+			])
+
+			expect(page.pageInfo.hasPreviousPage).toBe(true)
+			expect(page.pageInfo.hasNextPage).toBe(true)
+		})
+
+		it("sort on non-id field with matching cursor key", async () => {
+			const items = generateItems(10)
+
+			// Sort by price (numeric, ascending) with cursor on price
+			const result = await runCursorQuery(items, {
+				sort: { price: "asc" },
+				cursor: { key: "price", limit: 3 },
+			})
+
+			// Prices are 10, 20, 30, ... 100
+			expect(result.items).toHaveLength(3)
+			// First 3 items by price: item-001 (10), item-002 (20), item-003 (30)
+			expect(result.items.map((i) => i.price)).toEqual([10, 20, 30])
+
+			// Cursor values are string representations of the price
+			expect(result.pageInfo.startCursor).toBe("10")
+			expect(result.pageInfo.endCursor).toBe("30")
+			expect(result.pageInfo.hasNextPage).toBe(true)
+		})
+
+		it("forward pagination on price field", async () => {
+			const items = generateItems(10)
+
+			// First page sorted by price
+			const firstPage = await runCursorQuery(items, {
+				sort: { price: "asc" },
+				cursor: { key: "price", limit: 3 },
+			})
+
+			expect(firstPage.items.map((i) => i.price)).toEqual([10, 20, 30])
+
+			// Second page: after price 30
+			const secondPage = await runCursorQuery(items, {
+				sort: { price: "asc" },
+				cursor: {
+					key: "price",
+					limit: 3,
+					after: firstPage.pageInfo.endCursor!,
+				},
+			})
+
+			expect(secondPage.items.map((i) => i.price)).toEqual([40, 50, 60])
+			expect(secondPage.pageInfo.hasPreviousPage).toBe(true)
+			expect(secondPage.pageInfo.hasNextPage).toBe(true)
+		})
+
+		it("multi-field sort with cursor key matching primary sort field", async () => {
+			const items = generateItems(10)
+
+			// Sort by category (primary), then by id (secondary)
+			// Cursor key must match the primary sort field (category)
+			const result = await runCursorQuery(items, {
+				sort: { category: "asc", id: "asc" },
+				cursor: { key: "category", limit: 4 },
+			})
+
+			// Categories in ascending order: books, clothing, electronics
+			// First 4 items should be from books (items 2, 4, 8, 10 have category books)
+			expect(result.items).toHaveLength(4)
+
+			// All should be books (first category alphabetically)
+			expect(result.items.every((i) => i.category === "books")).toBe(true)
+
+			expect(result.pageInfo.startCursor).toBe("books")
+			expect(result.pageInfo.endCursor).toBe("books")
+			expect(result.pageInfo.hasNextPage).toBe(true)
+		})
+
+		it("explicit sort combined with where filter", async () => {
+			const items = generateItems(15)
+
+			// Filter electronics, sort by price ascending, paginate
+			const result = await runCursorQuery(items, {
+				where: { category: "electronics" },
+				sort: { price: "asc" },
+				cursor: { key: "price", limit: 2 },
+			})
+
+			// Electronics: items 3 (30), 6 (60), 9 (90), 12 (120), 15 (150)
+			// Ascending: 30, 60, 90, 120, 150
+			expect(result.items).toHaveLength(2)
+			expect(result.items.map((i) => i.price)).toEqual([30, 60])
+
+			expect(result.pageInfo.startCursor).toBe("30")
+			expect(result.pageInfo.endCursor).toBe("60")
+			expect(result.pageInfo.hasNextPage).toBe(true)
+		})
+
+		it("empty sort object injects implicit ascending sort on cursor key", async () => {
+			const items = generateItems(10)
+
+			// Empty sort object should be treated as implicit ascending sort on cursor key
+			const result = await runCursorQuery(items, {
+				sort: {},
+				cursor: { key: "id", limit: 3 },
+			})
+
+			// Should return first 3 items in ascending order
+			expect(result.items).toHaveLength(3)
+			expect(result.items.map((i) => i.id)).toEqual([
+				"item-001",
+				"item-002",
+				"item-003",
+			])
+
+			expect(result.pageInfo.hasNextPage).toBe(true)
+			expect(result.pageInfo.hasPreviousPage).toBe(false)
+		})
+
+		it("can paginate through all items with explicit ascending sort", async () => {
+			const items = generateItems(7)
+			const collectedItems: Array<Record<string, unknown>> = []
+			let cursor: string | undefined
+
+			// Paginate forward collecting all items
+			while (true) {
+				const page = await runCursorQuery(items, {
+					sort: { id: "asc" },
+					cursor: { key: "id", limit: 2, after: cursor },
+				})
+
+				collectedItems.push(...page.items)
+
+				if (!page.pageInfo.hasNextPage) {
+					break
+				}
+				cursor = page.pageInfo.endCursor!
+			}
+
+			// Should have collected all 7 items in order
+			expect(collectedItems).toHaveLength(7)
+			expect(collectedItems.map((i) => i.id)).toEqual([
+				"item-001",
+				"item-002",
+				"item-003",
+				"item-004",
+				"item-005",
+				"item-006",
+				"item-007",
+			])
+		})
+	})
 })
