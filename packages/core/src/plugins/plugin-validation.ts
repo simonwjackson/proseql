@@ -200,6 +200,58 @@ const validateIdGenerator = (
 };
 
 // ============================================================================
+// Dependency Validation
+// ============================================================================
+
+/**
+ * Validates that all plugin dependencies are satisfied.
+ * For each plugin with `dependencies`, verifies that every dependency name
+ * appears in the plugin array.
+ *
+ * @param plugins - Array of plugins to validate
+ * @returns Effect<void, PluginError> - Succeeds if all dependencies satisfied, fails with PluginError listing missing dependencies
+ */
+export const validateDependencies = (
+	plugins: ReadonlyArray<ProseQLPlugin>,
+): Effect.Effect<void, PluginError> => {
+	return Effect.gen(function* () {
+		// Build a set of all available plugin names
+		const availablePlugins = new Set<string>();
+		for (const plugin of plugins) {
+			availablePlugins.add(plugin.name);
+		}
+
+		// Check each plugin's dependencies
+		for (const plugin of plugins) {
+			if (plugin.dependencies === undefined || plugin.dependencies.length === 0) {
+				continue;
+			}
+
+			const missingDependencies: string[] = [];
+			for (const dependency of plugin.dependencies) {
+				if (!availablePlugins.has(dependency)) {
+					missingDependencies.push(dependency);
+				}
+			}
+
+			if (missingDependencies.length > 0) {
+				const missingList = missingDependencies.join(", ");
+				return yield* Effect.fail(
+					new PluginError({
+						plugin: plugin.name,
+						reason: "missing_dependencies",
+						message:
+							missingDependencies.length === 1
+								? `Missing dependency: ${missingList}`
+								: `Missing dependencies: ${missingList}`,
+					}),
+				);
+			}
+		}
+	});
+};
+
+// ============================================================================
 // Operator Conflict Validation
 // ============================================================================
 

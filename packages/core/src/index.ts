@@ -412,6 +412,7 @@ export { PluginError } from "./errors/plugin-errors.js";
 
 // Plugin validation
 export {
+	validateDependencies,
 	validateOperatorConflicts,
 	validatePlugin,
 } from "./plugins/plugin-validation.js";
