@@ -672,6 +672,77 @@ const createManualTransactionTestSetup = () =>
 	})
 
 describe("createTransaction (Manual)", () => {
+	describe("manual rollback", () => {
+		it("should revert changes when rollback() is called after operations", async () => {
+			const setup = await Effect.runPromise(createManualTransactionTestSetup())
+
+			// Verify initial state
+			const initialUsers = await Effect.runPromise(Ref.get(setup.usersRef))
+			expect(initialUsers.size).toBe(2)
+			expect(initialUsers.get("u3")).toBeUndefined()
+
+			// Create transaction context manually
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined, // no persistence trigger
+				),
+			)
+
+			// Verify transaction is active
+			expect(ctx.isActive).toBe(true)
+
+			// Perform operations within transaction
+			await Effect.runPromise(
+				ctx.users.create({
+					id: "u3",
+					name: "Charlie",
+					email: "charlie@test.com",
+					age: 35,
+				}),
+			)
+
+			// Verify entity exists in the live state (read-own-writes)
+			const userInTx = await Effect.runPromise(ctx.users.findById("u3"))
+			expect(userInTx.name).toBe("Charlie")
+
+			// Verify mutatedCollections tracks the mutation
+			expect(ctx.mutatedCollections.has("users")).toBe(true)
+
+			// Manually rollback
+			const rollbackResult = await Effect.runPromise(
+				ctx.rollback().pipe(Effect.either),
+			)
+
+			// Verify rollback returns TransactionError
+			expect(rollbackResult._tag).toBe("Left")
+			if (rollbackResult._tag === "Left") {
+				const error = rollbackResult.left as {
+					readonly _tag?: string
+					readonly operation?: string
+				}
+				expect(error._tag).toBe("TransactionError")
+				expect(error.operation).toBe("rollback")
+			}
+
+			// Verify transaction is no longer active
+			expect(ctx.isActive).toBe(false)
+
+			// Verify changes were reverted in the underlying Ref
+			const finalUsers = await Effect.runPromise(Ref.get(setup.usersRef))
+			expect(finalUsers.size).toBe(2)
+			expect(finalUsers.get("u3")).toBeUndefined()
+
+			// Verify original data is still intact
+			expect(finalUsers.get("u1")).toBeDefined()
+			expect((finalUsers.get("u1") as { name: string }).name).toBe("Alice")
+			expect(finalUsers.get("u2")).toBeDefined()
+			expect((finalUsers.get("u2") as { name: string }).name).toBe("Bob")
+		})
+	})
+
 	describe("manual commit", () => {
 		it("should persist changes when commit() is called after operations", async () => {
 			const setup = await Effect.runPromise(createManualTransactionTestSetup())
