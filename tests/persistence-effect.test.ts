@@ -7,8 +7,9 @@ import {
 	saveCollectionsToFile,
 } from "../core/storage/persistence-effect.js"
 import { makeInMemoryStorageLayer } from "../core/storage/in-memory-adapter-layer.js"
-import { JsonSerializerLayer } from "../core/serializers/json.js"
-import { YamlSerializerLayer } from "../core/serializers/yaml.js"
+import { makeSerializerLayer } from "../core/serializers/format-codec.js"
+import { jsonCodec } from "../core/serializers/codecs/json.js"
+import { yamlCodec } from "../core/serializers/codecs/yaml.js"
 import { StorageError, SerializationError } from "../core/errors/storage-errors.js"
 import { ValidationError } from "../core/errors/crud-errors.js"
 import { MigrationError } from "../core/errors/migration-errors.js"
@@ -41,13 +42,13 @@ type TimestampEntity = typeof TimestampSchema.Type
 
 const makeTestEnv = () => {
 	const store = new Map<string, string>()
-	const layer = Layer.merge(makeInMemoryStorageLayer(store), JsonSerializerLayer)
+	const layer = Layer.merge(makeInMemoryStorageLayer(store), makeSerializerLayer([jsonCodec()]))
 	return { store, layer }
 }
 
 const makeYamlTestEnv = () => {
 	const store = new Map<string, string>()
-	const layer = Layer.merge(makeInMemoryStorageLayer(store), YamlSerializerLayer)
+	const layer = Layer.merge(makeInMemoryStorageLayer(store), makeSerializerLayer([yamlCodec()]))
 	return { store, layer }
 }
 

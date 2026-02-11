@@ -43,7 +43,7 @@
 - [x] 7.3 Update `tests/messagepack-serializer.test.ts`: delete file (MessagePack removed).
 - [x] 7.4 Update `tests/serializer-service.test.ts`: replace test registry with `makeSerializerLayer`. Verify multi-format dispatch.
 - [x] 7.5 Update `tests/storage-services.test.ts`: replace all `JsonSerializerLayer`/`YamlSerializerLayer`/`MessagePackSerializerLayer` with codec-based layers. Remove MessagePack tests.
-- [ ] 7.6 Update `tests/persistence-effect.test.ts`: replace serializer layer imports.
+- [x] 7.6 Update `tests/persistence-effect.test.ts`: replace serializer layer imports.
 - [ ] 7.7 Update `tests/persistence.test.ts`: replace serializer layer imports. Remove MessagePack test helpers.
 - [ ] 7.8 Update `tests/file-watcher.test.ts`: replace serializer layer imports.
 - [ ] 7.9 Update `tests/debounced-writer.test.ts`: replace serializer layer imports.
