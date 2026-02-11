@@ -136,7 +136,6 @@ export const createTransaction = <DB extends Record<string, EffectCollection<Has
 				isActive = false
 			})
 
-		// TODO 2.5: Implement rollback
 		const rollback = (): Effect.Effect<never, TransactionError> =>
 			Effect.gen(function* () {
 				if (!isActive) {
