@@ -7,6 +7,7 @@ import type {
 	AggregateResult,
 	GroupedAggregateResult,
 } from "./aggregate-types.js";
+import type { CursorConfig } from "./cursor-types.js";
 
 // ============================================================================
 // Core Types
@@ -678,7 +679,9 @@ export type SortConfig<T, Relations, Config, DB> = Partial<
 
 // Enhanced query config that properly discriminates between populated and non-populated queries
 // Now supports both object-based and array-based selection
+// Cursor variants exclude limit/offset (limit lives inside CursorConfig)
 export type QueryConfig<T, Relations, DB> =
+	// Offset pagination without populate
 	| {
 			where?: WhereClause<T, Relations, DB>;
 			sort?: SortConfig<T, Relations, {}, DB>;
@@ -686,6 +689,7 @@ export type QueryConfig<T, Relations, DB> =
 			limit?: number;
 			offset?: number;
 	  }
+	// Offset pagination with populate
 	| {
 			populate: PopulateConfig<Relations, DB>;
 			where?: WhereClause<T, Relations, DB>;
@@ -698,6 +702,26 @@ export type QueryConfig<T, Relations, DB> =
 			select?: SelectConfig<T, Relations, DB>;
 			limit?: number;
 			offset?: number;
+	  }
+	// Cursor pagination without populate
+	| {
+			cursor: CursorConfig;
+			where?: WhereClause<T, Relations, DB>;
+			sort?: SortConfig<T, Relations, {}, DB>;
+			select?: SelectConfig<T, Relations, DB>;
+	  }
+	// Cursor pagination with populate
+	| {
+			cursor: CursorConfig;
+			populate: PopulateConfig<Relations, DB>;
+			where?: WhereClause<T, Relations, DB>;
+			sort?: SortConfig<
+				T,
+				Relations,
+				{ populate: PopulateConfig<Relations, DB> },
+				DB
+			>;
+			select?: SelectConfig<T, Relations, DB>;
 	  };
 
 // Enhanced query return type that supports both object and array-based selection
