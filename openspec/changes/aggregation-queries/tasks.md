@@ -25,7 +25,7 @@
 
 - [x] 4.1 In `core/factories/database-effect.ts` `buildCollection`: create an `aggregateFn` that reads Ref snapshot, optionally narrows via index, applies filter, collects via `Stream.runCollect`, then delegates to `computeAggregates` or `computeGroupedAggregates` based on `groupBy` presence.
 - [x] 4.2 Wrap `aggregateFn` with `withRunPromise` to provide `.runPromise` convenience.
-- [ ] 4.3 Wire `aggregate` onto the collection object alongside `query` and CRUD methods.
+- [x] 4.3 Wire `aggregate` onto the collection object alongside `query` and CRUD methods.
 
 ## 5. Tests — Scalar Aggregates
 
