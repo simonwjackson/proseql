@@ -19,7 +19,7 @@
 ## 4. Extract getFileExtension
 
 - [x] 4.1 Create `core/utils/path.ts` with `getFileExtension` function (extracted from `core/utils/file-extensions.ts`).
-- [ ] 4.2 Update `core/storage/persistence-effect.ts` to import `getFileExtension` from `../utils/path.js` instead of `../utils/file-extensions.js`.
+- [x] 4.2 Update `core/storage/persistence-effect.ts` to import `getFileExtension` from `../utils/path.js` instead of `../utils/file-extensions.js`.
 
 ## 5. Update index.ts Exports
 

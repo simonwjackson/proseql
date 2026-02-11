@@ -18,7 +18,7 @@ import { ValidationError } from "../errors/crud-errors.js"
 import { MigrationError } from "../errors/migration-errors.js"
 import type { Migration } from "../migrations/migration-types.js"
 import { runMigrations } from "../migrations/migration-runner.js"
-import { getFileExtension } from "../utils/file-extensions.js"
+import { getFileExtension } from "../utils/path.js"
 
 // ============================================================================
 // Helpers
