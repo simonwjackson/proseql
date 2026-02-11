@@ -403,4 +403,125 @@ describe("Cursor Pagination", () => {
 			expect(page.pageInfo.endCursor).toBe("item-002")
 		})
 	})
+
+	describe("empty results", () => {
+		it("query matching no items returns empty items, null cursors, both has-flags false", async () => {
+			// Empty database
+			const result = await runCursorQuery([], {
+				cursor: { key: "id", limit: 10 },
+			})
+
+			// Should return empty items
+			expect(result.items).toHaveLength(0)
+			expect(result.items).toEqual([])
+
+			// Should have null cursors
+			expect(result.pageInfo.startCursor).toBeNull()
+			expect(result.pageInfo.endCursor).toBeNull()
+
+			// Should have both has-flags false
+			expect(result.pageInfo.hasNextPage).toBe(false)
+			expect(result.pageInfo.hasPreviousPage).toBe(false)
+		})
+
+		it("forward pagination after last item returns empty result", async () => {
+			const items = generateItems(5)
+
+			// Try to get items after the last item
+			const result = await runCursorQuery(items, {
+				cursor: {
+					key: "id",
+					limit: 3,
+					after: "item-005", // Last item
+				},
+			})
+
+			// Should return empty items
+			expect(result.items).toHaveLength(0)
+			expect(result.items).toEqual([])
+
+			// Should have null cursors
+			expect(result.pageInfo.startCursor).toBeNull()
+			expect(result.pageInfo.endCursor).toBeNull()
+
+			// Should have both has-flags false
+			expect(result.pageInfo.hasNextPage).toBe(false)
+			expect(result.pageInfo.hasPreviousPage).toBe(false)
+		})
+
+		it("backward pagination before first item returns empty result", async () => {
+			const items = generateItems(5)
+
+			// Try to get items before the first item
+			const result = await runCursorQuery(items, {
+				cursor: {
+					key: "id",
+					limit: 3,
+					before: "item-001", // First item
+				},
+			})
+
+			// Should return empty items
+			expect(result.items).toHaveLength(0)
+			expect(result.items).toEqual([])
+
+			// Should have null cursors
+			expect(result.pageInfo.startCursor).toBeNull()
+			expect(result.pageInfo.endCursor).toBeNull()
+
+			// Should have both has-flags false
+			expect(result.pageInfo.hasNextPage).toBe(false)
+			expect(result.pageInfo.hasPreviousPage).toBe(false)
+		})
+
+		it("forward pagination with non-existent after cursor returns empty result", async () => {
+			const items = generateItems(5)
+
+			// Use a cursor value that's beyond all items
+			const result = await runCursorQuery(items, {
+				cursor: {
+					key: "id",
+					limit: 3,
+					after: "item-999", // Way beyond any item
+				},
+			})
+
+			// Should return empty items
+			expect(result.items).toHaveLength(0)
+			expect(result.items).toEqual([])
+
+			// Should have null cursors
+			expect(result.pageInfo.startCursor).toBeNull()
+			expect(result.pageInfo.endCursor).toBeNull()
+
+			// Should have both has-flags false
+			expect(result.pageInfo.hasNextPage).toBe(false)
+			expect(result.pageInfo.hasPreviousPage).toBe(false)
+		})
+
+		it("backward pagination with non-existent before cursor before all items returns empty result", async () => {
+			const items = generateItems(5)
+
+			// Use a cursor value that's before all items
+			const result = await runCursorQuery(items, {
+				cursor: {
+					key: "id",
+					limit: 3,
+					before: "item-000", // Before any item
+				},
+			})
+
+			// Should return empty items
+			expect(result.items).toHaveLength(0)
+			expect(result.items).toEqual([])
+
+			// Should have null cursors
+			expect(result.pageInfo.startCursor).toBeNull()
+			expect(result.pageInfo.endCursor).toBeNull()
+
+			// Should have both has-flags false
+			expect(result.pageInfo.hasNextPage).toBe(false)
+			expect(result.pageInfo.hasPreviousPage).toBe(false)
+		})
+	})
 })
