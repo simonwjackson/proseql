@@ -10,6 +10,7 @@ import { makeInMemoryStorageLayer } from "../core/storage/in-memory-adapter-laye
 import { JsonSerializerLayer } from "../core/serializers/json.js"
 import { YamlSerializerLayer } from "../core/serializers/yaml.js"
 import { MigrationError } from "../core/errors/migration-errors.js"
+import { validateMigrationRegistry } from "../core/migrations/migration-runner.js"
 import type { Migration } from "../core/migrations/migration-types.js"
 
 // ============================================================================
@@ -509,6 +510,60 @@ describe("schema-migrations: schema versioning", () => {
 
 			expect(result.users.size).toBe(1)
 			expect(result.users.has("_version")).toBe(false)
+		})
+	})
+})
+
+// ============================================================================
+// Tests: Migration Registry Validation (Tasks 10.1-10.6)
+// ============================================================================
+
+describe("schema-migrations: migration registry validation", () => {
+	describe("valid contiguous chain → accepted (task 10.1)", () => {
+		it("accepts valid chain 0→1→2→3", async () => {
+			const result = await Effect.runPromise(
+				validateMigrationRegistry("users", 3, allMigrations).pipe(
+					Effect.map(() => "success"),
+					Effect.catchAll((e) => Effect.succeed(e)),
+				),
+			)
+			expect(result).toBe("success")
+		})
+
+		it("accepts single migration 0→1", async () => {
+			const result = await Effect.runPromise(
+				validateMigrationRegistry("users", 1, migrationsTo1).pipe(
+					Effect.map(() => "success"),
+					Effect.catchAll((e) => Effect.succeed(e)),
+				),
+			)
+			expect(result).toBe("success")
+		})
+
+		it("accepts version 0 with no migrations", async () => {
+			const result = await Effect.runPromise(
+				validateMigrationRegistry("users", 0, []).pipe(
+					Effect.map(() => "success"),
+					Effect.catchAll((e) => Effect.succeed(e)),
+				),
+			)
+			expect(result).toBe("success")
+		})
+
+		it("accepts unordered migrations that form valid chain", async () => {
+			// Pass migrations out of order - validation should still work
+			const unordered: ReadonlyArray<Migration> = [
+				migration2to3,
+				migration0to1,
+				migration1to2,
+			]
+			const result = await Effect.runPromise(
+				validateMigrationRegistry("users", 3, unordered).pipe(
+					Effect.map(() => "success"),
+					Effect.catchAll((e) => Effect.succeed(e)),
+				),
+			)
+			expect(result).toBe("success")
 		})
 	})
 })

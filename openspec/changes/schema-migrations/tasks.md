@@ -57,7 +57,7 @@
 
 ## 10. Tests — Migration Registry Validation
 
-- [ ] 10.1 Test valid contiguous chain → accepted
+- [x] 10.1 Test valid contiguous chain → accepted
 - [ ] 10.2 Test gap in chain → error
 - [ ] 10.3 Test last `to` doesn't match version → error
 - [ ] 10.4 Test duplicate `from` → error
