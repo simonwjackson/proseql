@@ -54,7 +54,7 @@
 
 - [x] 8.1 Delete `core/serializers/types.ts`
 - [x] 8.2 Delete `core/serializers/json.ts`
-- [ ] 8.3 Delete `core/serializers/yaml.ts`
+- [x] 8.3 Delete `core/serializers/yaml.ts`
 - [ ] 8.4 Delete `core/serializers/messagepack.ts`
 - [ ] 8.5 Delete `core/storage/persistence.ts`
 - [ ] 8.6 Delete `core/storage/types.ts`
