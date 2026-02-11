@@ -18,6 +18,7 @@ import {
 	NotFoundError,
 	ForeignKeyError,
 	ValidationError,
+	HookError,
 } from "../../errors/crud-errors.js"
 import { validateEntity } from "../../validators/schema-validator.js"
 import {
@@ -25,6 +26,8 @@ import {
 } from "../../validators/foreign-key.js"
 import type { CollectionIndexes } from "../../types/index-types.js"
 import { updateInIndex } from "../../indexes/index-manager.js"
+import type { HooksConfig } from "../../types/hook-types.js"
+import { runBeforeUpdateHooks } from "../../hooks/hook-runner.js"
 
 // ============================================================================
 // Types
@@ -198,15 +201,17 @@ export function validateImmutableFields<T extends MinimalEntity>(
 // ============================================================================
 
 /**
- * Update a single entity by ID with validation and foreign key checks.
+ * Update a single entity by ID with validation, hooks, and foreign key checks.
  *
  * Steps:
  * 1. Validate immutable fields are not being modified
- * 2. Look up entity by ID in Ref state (O(1))
- * 3. Apply update operators to produce new entity
- * 4. Validate through Effect Schema
- * 5. Validate foreign key constraints if relationship fields changed
- * 6. Atomically update in Ref state
+ * 2. Look up entity by ID in Ref state (O(1)) - capture as previous
+ * 3. Run beforeUpdate hooks (can transform update payload)
+ * 4. Apply update operators to produce new entity
+ * 5. Validate through Effect Schema
+ * 6. Validate foreign key constraints if relationship fields changed
+ * 7. Atomically update in Ref state
+ * 8. Update indexes if provided
  */
 export const update = <T extends HasId, I = T>(
 	collectionName: string,
@@ -215,8 +220,9 @@ export const update = <T extends HasId, I = T>(
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	indexes?: CollectionIndexes,
+	hooks?: HooksConfig<T>,
 ) =>
-(id: string, updates: UpdateWithOperators<T & MinimalEntity>): Effect.Effect<T, ValidationError | NotFoundError | ForeignKeyError> =>
+(id: string, updates: UpdateWithOperators<T & MinimalEntity>): Effect.Effect<T, ValidationError | NotFoundError | ForeignKeyError | HookError> =>
 	Effect.gen(function* () {
 		// Validate immutable fields
 		const immutableCheck = validateImmutableFields(updates)
@@ -232,10 +238,10 @@ export const update = <T extends HasId, I = T>(
 			)
 		}
 
-		// Look up entity by ID (O(1))
+		// Look up entity by ID (O(1)) - capture as previous for hooks
 		const currentMap = yield* Ref.get(ref)
-		const entity = currentMap.get(id)
-		if (entity === undefined) {
+		const previous = currentMap.get(id)
+		if (previous === undefined) {
 			return yield* Effect.fail(
 				new NotFoundError({
 					collection: collectionName,
@@ -245,8 +251,17 @@ export const update = <T extends HasId, I = T>(
 			)
 		}
 
-		// Apply update operators
-		const updated = applyUpdates(entity as T & MinimalEntity, updates)
+		// Run beforeUpdate hooks (can transform the update payload)
+		const transformedUpdates = yield* runBeforeUpdateHooks(hooks?.beforeUpdate, {
+			operation: "update",
+			collection: collectionName,
+			id,
+			existing: previous,
+			update: updates,
+		})
+
+		// Apply update operators with (possibly transformed) updates
+		const updated = applyUpdates(previous as T & MinimalEntity, transformedUpdates as UpdateWithOperators<T & MinimalEntity>)
 
 		// Validate through Effect Schema
 		const validated = yield* validateEntity(schema, updated)
@@ -255,7 +270,7 @@ export const update = <T extends HasId, I = T>(
 		const relationshipFields = Object.keys(relationships).map(
 			(field) => relationships[field].foreignKey || `${field}Id`,
 		)
-		const hasRelationshipUpdate = Object.keys(updates).some((key) =>
+		const hasRelationshipUpdate = Object.keys(transformedUpdates).some((key) =>
 			relationshipFields.includes(key),
 		)
 
@@ -277,7 +292,7 @@ export const update = <T extends HasId, I = T>(
 
 		// Update indexes if provided
 		if (indexes && indexes.size > 0) {
-			yield* updateInIndex(indexes, entity, validated)
+			yield* updateInIndex(indexes, previous, validated)
 		}
 
 		return validated
