@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { Effect, Schema, Layer } from "effect";
+import { Effect, Schema, Layer, Stream, Chunk } from "effect";
 import {
 	createEffectDatabase,
 	createPersistentEffectDatabase,
@@ -9,6 +9,7 @@ import { makeInMemoryStorageLayer } from "../src/storage/in-memory-adapter-layer
 import { makeSerializerLayer } from "../src/serializers/format-codec";
 import { jsonCodec } from "../src/serializers/codecs/json";
 import { yamlCodec } from "../src/serializers/codecs/yaml";
+import { resolveComputedFields } from "../src/operations/query/resolve-computed";
 
 /**
  * Task 6.1: Verify that computed fields are never written into the Ref.
@@ -623,6 +624,598 @@ describe("Task 6.2: Serialized output contains only stored fields (no computed f
 			// Verify no computed field pollution from other collections
 			expect(authorData.displayName).toBeUndefined();
 			expect(authorData.isClassic).toBeUndefined();
+		});
+	});
+});
+
+/**
+ * Task 6.3: Test round-trip: save to disk, reload from disk, query with
+ * computed fields — computed values re-derived correctly from stored data.
+ *
+ * This test verifies the complete persistence lifecycle at the DATA level:
+ * 1. Create entities and persist to storage
+ * 2. Create a fresh database instance that loads from storage
+ * 3. Read stored entities and manually apply computed field resolution
+ * 4. Verify computed values are correctly re-derived from persisted stored data
+ *
+ * Note: This tests the data round-trip. Full pipeline integration (automatic
+ * computed field resolution in query()) is covered in task 8 (Factory Integration).
+ * Here we verify that stored data persists correctly and can be re-enriched
+ * with computed fields by calling resolveComputedFields manually.
+ */
+
+// Computed fields config for manual resolution testing
+const booksComputedConfig = {
+	displayName: (book: Book) => `${book.title} (${book.year})`,
+	isClassic: (book: Book) => book.year < 1980,
+	yearsSincePublication: (book: Book) => 2024 - book.year,
+} as const;
+
+describe("Task 6.3: Round-trip persistence with computed fields", () => {
+	describe("JSON format round-trip", () => {
+		it("should re-derive computed fields after reload from disk", async () => {
+			// Use a shared store that persists across database instances
+			const { store, layer } = makeTestLayer();
+
+			// Phase 1: Create database, add entities, persist to disk
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								books: [],
+								authors: [{ id: "author1", name: "Frank Herbert" }],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						// Create books with varying years (affects computed fields)
+						yield* db.books.createMany([
+							{ id: "book1", title: "Dune", year: 1965, genre: "sci-fi", authorId: "author1" },
+							{ id: "book2", title: "Neuromancer", year: 1984, genre: "sci-fi", authorId: "author1" },
+							{ id: "book3", title: "Snow Crash", year: 1992, genre: "sci-fi", authorId: "author1" },
+						]);
+
+						// Flush to ensure all data is persisted
+						yield* Effect.promise(() => db.flush());
+					}),
+				),
+			);
+
+			// Verify data was persisted (stored fields only)
+			expect(store.has("/data/books.json")).toBe(true);
+			const persistedContent = store.get("/data/books.json")!;
+			expect(persistedContent).toContain('"Dune"');
+			expect(persistedContent).not.toContain('"displayName"');
+			expect(persistedContent).not.toContain('"isClassic"');
+
+			// Phase 2: Create a fresh database instance that loads from the stored data
+			const storedEntities = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						// Create new database instance - should load data from the store
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								// Note: NOT passing initial data - should load from store
+								books: [],
+								authors: [{ id: "author1", name: "Frank Herbert" }],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						// Query all books (stored fields only, no computed resolution in pipeline yet)
+						const chunk = yield* Stream.runCollect(db.books.query({}));
+						return Chunk.toReadonlyArray(chunk);
+					}),
+				),
+			);
+
+			// Phase 3: Manually resolve computed fields and verify they are correctly re-derived
+			expect(storedEntities.length).toBe(3);
+
+			// Apply computed field resolution manually (simulates what task 8 will wire into pipeline)
+			const results = storedEntities.map((entity) =>
+				resolveComputedFields(entity as Book, booksComputedConfig),
+			);
+
+			// Find each book and verify its computed fields
+			const dune = results.find((b) => b.title === "Dune");
+			const neuromancer = results.find((b) => b.title === "Neuromancer");
+			const snowCrash = results.find((b) => b.title === "Snow Crash");
+
+			expect(dune).toBeDefined();
+			expect(neuromancer).toBeDefined();
+			expect(snowCrash).toBeDefined();
+
+			// Verify computed displayName
+			expect(dune!.displayName).toBe("Dune (1965)");
+			expect(neuromancer!.displayName).toBe("Neuromancer (1984)");
+			expect(snowCrash!.displayName).toBe("Snow Crash (1992)");
+
+			// Verify computed isClassic (year < 1980)
+			expect(dune!.isClassic).toBe(true);
+			expect(neuromancer!.isClassic).toBe(false);
+			expect(snowCrash!.isClassic).toBe(false);
+
+			// Verify computed yearsSincePublication
+			expect(dune!.yearsSincePublication).toBe(2024 - 1965);
+			expect(neuromancer!.yearsSincePublication).toBe(2024 - 1984);
+			expect(snowCrash!.yearsSincePublication).toBe(2024 - 1992);
+		});
+
+		it("should support filtering by re-derived computed fields after reload", async () => {
+			const { store, layer } = makeTestLayer();
+
+			// Phase 1: Persist books to storage
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								books: [],
+								authors: [{ id: "author1", name: "Frank Herbert" }],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						yield* db.books.createMany([
+							{ id: "book1", title: "Dune", year: 1965, genre: "sci-fi", authorId: "author1" },
+							{ id: "book2", title: "Neuromancer", year: 1984, genre: "sci-fi", authorId: "author1" },
+							{ id: "book3", title: "Foundation", year: 1951, genre: "sci-fi", authorId: "author1" },
+						]);
+
+						yield* Effect.promise(() => db.flush());
+					}),
+				),
+			);
+
+			// Phase 2: Reload and manually resolve computed fields, then filter
+			const storedEntities = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								books: [],
+								authors: [{ id: "author1", name: "Frank Herbert" }],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						const chunk = yield* Stream.runCollect(db.books.query({}));
+						return Chunk.toReadonlyArray(chunk);
+					}),
+				),
+			);
+
+			// Manually resolve computed fields and filter by isClassic
+			const withComputed = storedEntities.map((entity) =>
+				resolveComputedFields(entity as Book, booksComputedConfig),
+			);
+			const classics = withComputed.filter((b) => b.isClassic === true);
+
+			// Only Dune (1965) and Foundation (1951) should match
+			expect(classics.length).toBe(2);
+			expect(classics.every((b) => b.isClassic === true)).toBe(true);
+
+			const titles = classics.map((b) => b.title);
+			expect(titles).toContain("Dune");
+			expect(titles).toContain("Foundation");
+			expect(titles).not.toContain("Neuromancer");
+		});
+
+		it("should support sorting by re-derived computed fields after reload", async () => {
+			const { store, layer } = makeTestLayer();
+
+			// Phase 1: Persist books to storage
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								books: [],
+								authors: [{ id: "author1", name: "Frank Herbert" }],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						yield* db.books.createMany([
+							{ id: "book1", title: "Dune", year: 1965, genre: "sci-fi", authorId: "author1" },
+							{ id: "book2", title: "Neuromancer", year: 1984, genre: "sci-fi", authorId: "author1" },
+							{ id: "book3", title: "Foundation", year: 1951, genre: "sci-fi", authorId: "author1" },
+						]);
+
+						yield* Effect.promise(() => db.flush());
+					}),
+				),
+			);
+
+			// Phase 2: Reload and manually resolve computed fields, then sort
+			const storedEntities = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								books: [],
+								authors: [{ id: "author1", name: "Frank Herbert" }],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						const chunk = yield* Stream.runCollect(db.books.query({}));
+						return Chunk.toReadonlyArray(chunk);
+					}),
+				),
+			);
+
+			// Manually resolve computed fields and sort by displayName ascending
+			const withComputed = storedEntities.map((entity) =>
+				resolveComputedFields(entity as Book, booksComputedConfig),
+			);
+			const sorted = [...withComputed].sort((a, b) =>
+				a.displayName.localeCompare(b.displayName),
+			);
+
+			// Should be sorted alphabetically by displayName
+			expect(sorted.length).toBe(3);
+			expect(sorted[0].displayName).toBe("Dune (1965)");
+			expect(sorted[1].displayName).toBe("Foundation (1951)");
+			expect(sorted[2].displayName).toBe("Neuromancer (1984)");
+		});
+
+		it("should handle update-persist-reload cycle with computed field re-derivation", async () => {
+			const { store, layer } = makeTestLayer();
+
+			// Phase 1: Create and persist
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								books: [],
+								authors: [{ id: "author1", name: "Frank Herbert" }],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						yield* db.books.create({
+							id: "book1",
+							title: "Dune",
+							year: 1985, // Initially 1985, not a classic
+							genre: "sci-fi",
+							authorId: "author1",
+						});
+
+						yield* Effect.promise(() => db.flush());
+					}),
+				),
+			);
+
+			// Phase 2: Reload, verify initial state, update, persist
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								books: [],
+								authors: [{ id: "author1", name: "Frank Herbert" }],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						// Query and manually verify initial computed state
+						const initialChunk = yield* Stream.runCollect(db.books.query({}));
+						const initialStored = Chunk.toReadonlyArray(initialChunk);
+						const initialResults = initialStored.map((entity) =>
+							resolveComputedFields(entity as Book, booksComputedConfig),
+						);
+						expect(initialResults[0].isClassic).toBe(false);
+						expect(initialResults[0].displayName).toBe("Dune (1985)");
+
+						// Update to make it a classic
+						yield* db.books.update("book1", { year: 1965 });
+
+						yield* Effect.promise(() => db.flush());
+					}),
+				),
+			);
+
+			// Phase 3: Reload again and verify computed fields are re-derived with updated data
+			const finalStored = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								books: [],
+								authors: [{ id: "author1", name: "Frank Herbert" }],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						const chunk = yield* Stream.runCollect(db.books.query({}));
+						return Chunk.toReadonlyArray(chunk);
+					}),
+				),
+			);
+
+			// Manually resolve computed fields
+			const finalResults = finalStored.map((entity) =>
+				resolveComputedFields(entity as Book, booksComputedConfig),
+			);
+
+			// Now should be a classic with updated displayName
+			expect(finalResults.length).toBe(1);
+			expect(finalResults[0].year).toBe(1965);
+			expect(finalResults[0].isClassic).toBe(true);
+			expect(finalResults[0].displayName).toBe("Dune (1965)");
+			expect(finalResults[0].yearsSincePublication).toBe(2024 - 1965);
+		});
+	});
+
+	describe("YAML format round-trip", () => {
+		it("should re-derive computed fields after reload from YAML", async () => {
+			const { store, layer } = makeTestLayer();
+
+			// YAML computed config (fewer fields than JSON config)
+			const yamlComputedConfig = {
+				displayName: (book: Book) => `${book.title} (${book.year})`,
+				isClassic: (book: Book) => book.year < 1980,
+			} as const;
+
+			// Phase 1: Create and persist to YAML
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfigYaml, {
+								books: [],
+								authors: [{ id: "author1", name: "Frank Herbert" }],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						yield* db.books.create({
+							id: "book1",
+							title: "Dune",
+							year: 1965,
+							genre: "sci-fi",
+							authorId: "author1",
+						});
+
+						yield* Effect.promise(() => db.flush());
+					}),
+				),
+			);
+
+			// Verify YAML was persisted without computed fields
+			expect(store.has("/data/books.yaml")).toBe(true);
+			const yamlContent = store.get("/data/books.yaml")!;
+			expect(yamlContent).toContain("Dune");
+			expect(yamlContent).not.toContain("displayName:");
+			expect(yamlContent).not.toContain("isClassic:");
+
+			// Phase 2: Reload from YAML and manually resolve computed fields
+			const storedEntities = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfigYaml, {
+								books: [],
+								authors: [{ id: "author1", name: "Frank Herbert" }],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						const chunk = yield* Stream.runCollect(db.books.query({}));
+						return Chunk.toReadonlyArray(chunk);
+					}),
+				),
+			);
+
+			const results = storedEntities.map((entity) =>
+				resolveComputedFields(entity as Book, yamlComputedConfig),
+			);
+
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+			expect(results[0].displayName).toBe("Dune (1965)");
+			expect(results[0].isClassic).toBe(true);
+		});
+	});
+
+	describe("Collection without computed fields (baseline)", () => {
+		it("should round-trip normally without computed field interference", async () => {
+			const { store, layer } = makeTestLayer();
+
+			// Phase 1: Persist authors (no computed fields)
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								books: [],
+								authors: [],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						yield* db.authors.createMany([
+							{ id: "author1", name: "Frank Herbert" },
+							{ id: "author2", name: "William Gibson" },
+						]);
+
+						yield* Effect.promise(() => db.flush());
+					}),
+				),
+			);
+
+			// Phase 2: Reload and verify
+			const results = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								books: [],
+								authors: [],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						const chunk = yield* Stream.runCollect(db.authors.query({}));
+						return Chunk.toReadonlyArray(chunk);
+					}),
+				),
+			);
+
+			// Authors have no computed fields, so results should just have stored fields
+			expect(results.length).toBe(2);
+			const names = results.map((a) => a.name);
+			expect(names).toContain("Frank Herbert");
+			expect(names).toContain("William Gibson");
+
+			// Verify no computed field contamination
+			for (const author of results) {
+				const record = author as Record<string, unknown>;
+				expect(record.displayName).toBeUndefined();
+				expect(record.isClassic).toBeUndefined();
+			}
+		});
+	});
+
+	describe("Mixed collections round-trip", () => {
+		it("should handle round-trip with both computed and non-computed collections", async () => {
+			const { store, layer } = makeTestLayer();
+
+			// Phase 1: Create and persist both books and authors
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								books: [],
+								authors: [],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						yield* db.authors.create({ id: "author1", name: "Frank Herbert" });
+						yield* db.books.create({
+							id: "book1",
+							title: "Dune",
+							year: 1965,
+							genre: "sci-fi",
+							authorId: "author1",
+						});
+
+						yield* Effect.promise(() => db.flush());
+					}),
+				),
+			);
+
+			// Phase 2: Reload and verify both collections
+			const { storedBooks, storedAuthors } = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								books: [],
+								authors: [],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						const booksChunk = yield* Stream.runCollect(db.books.query({}));
+						const authorsChunk = yield* Stream.runCollect(db.authors.query({}));
+						return {
+							storedBooks: Chunk.toReadonlyArray(booksChunk),
+							storedAuthors: Chunk.toReadonlyArray(authorsChunk),
+						};
+					}),
+				),
+			);
+
+			// Manually resolve computed fields for books
+			const books = storedBooks.map((entity) =>
+				resolveComputedFields(entity as Book, booksComputedConfig),
+			);
+
+			// Books should have computed fields after manual resolution
+			expect(books.length).toBe(1);
+			expect(books[0].title).toBe("Dune");
+			expect(books[0].displayName).toBe("Dune (1965)");
+			expect(books[0].isClassic).toBe(true);
+
+			// Authors should NOT have computed fields (no computed config for authors)
+			expect(storedAuthors.length).toBe(1);
+			expect(storedAuthors[0].name).toBe("Frank Herbert");
+			expect((storedAuthors[0] as Record<string, unknown>).displayName).toBeUndefined();
+		});
+	});
+
+	describe("Stored data integrity", () => {
+		it("should preserve all stored fields through persist-reload cycle", async () => {
+			const { store, layer } = makeTestLayer();
+
+			const originalBook = {
+				id: "book1",
+				title: "Dune",
+				year: 1965,
+				genre: "sci-fi",
+				authorId: "author1",
+			};
+
+			// Phase 1: Persist
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								books: [],
+								authors: [{ id: "author1", name: "Frank Herbert" }],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						yield* db.books.create(originalBook);
+						yield* Effect.promise(() => db.flush());
+					}),
+				),
+			);
+
+			// Phase 2: Reload and verify all stored fields
+			const reloaded = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* Effect.provide(
+							createPersistentEffectDatabase(persistentConfig, {
+								books: [],
+								authors: [{ id: "author1", name: "Frank Herbert" }],
+							}, { writeDebounce: 10 }),
+							layer,
+						);
+
+						return yield* db.books.findById("book1");
+					}),
+				),
+			);
+
+			// All original stored fields should be preserved
+			expect(reloaded.id).toBe(originalBook.id);
+			expect(reloaded.title).toBe(originalBook.title);
+			expect(reloaded.year).toBe(originalBook.year);
+			expect(reloaded.genre).toBe(originalBook.genre);
+			expect(reloaded.authorId).toBe(originalBook.authorId);
+
+			// Computed fields should NOT be in the reloaded stored data
+			const record = reloaded as unknown as Record<string, unknown>;
+			expect(record.displayName).toBeUndefined();
+			expect(record.isClassic).toBeUndefined();
+			expect(record.yearsSincePublication).toBeUndefined();
+
+			// But we can derive them from the stored data
+			const withComputed = resolveComputedFields(reloaded, booksComputedConfig);
+			expect(withComputed.displayName).toBe("Dune (1965)");
+			expect(withComputed.isClassic).toBe(true);
+			expect(withComputed.yearsSincePublication).toBe(2024 - 1965);
 		});
 	});
 });
