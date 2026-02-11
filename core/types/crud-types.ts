@@ -2,6 +2,10 @@
  * Core type definitions for CRUD operations with full type safety
  */
 
+import type { Effect } from "effect";
+import type { TransactionError } from "../errors/crud-errors.js";
+import type { SmartCollection } from "./types.js";
+
 // ============================================================================
 // Base Entity Types
 // ============================================================================
@@ -249,12 +253,21 @@ export type ForeignKeyValidation = {
 // ============================================================================
 
 /**
- * Transaction context for multi-operation atomicity
+ * Transaction context for multi-operation atomicity.
+ * Provides collection accessors, lifecycle methods, and introspection.
  */
-export type TransactionContext = {
-	rollback: () => void;
-	commit: () => void;
-	isActive: boolean;
+export type TransactionContext<DB = Record<string, SmartCollection<unknown>>> = {
+	/** Finalize changes, trigger persistence for mutated collections, mark inactive */
+	readonly commit: () => Effect.Effect<void, TransactionError>;
+	/** Restore all snapshots, mark inactive, trigger no persistence. Always fails to short-circuit. */
+	readonly rollback: () => Effect.Effect<never, TransactionError>;
+	/** Whether the transaction is still open */
+	readonly isActive: boolean;
+	/** Which collections have been written to during the transaction */
+	readonly mutatedCollections: ReadonlySet<string>;
+} & {
+	/** Collection accessors — same interface as db.collectionName */
+	readonly [K in keyof DB]: DB[K];
 };
 
 /**
