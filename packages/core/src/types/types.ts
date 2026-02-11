@@ -11,6 +11,7 @@ import type {
 import type { CursorConfig, RunnableCursorPage } from "./cursor-types.js";
 import type { ValidationError } from "../errors/crud-errors.js";
 import type { ComputedFieldsConfig, InferComputedFields } from "./computed-types.js";
+import type { SearchConfig } from "./search-types.js";
 
 // ============================================================================
 // Core Types
@@ -173,6 +174,8 @@ export type WhereClause<T, Relations, DB> = {
 	$or?: Array<WhereClause<T, Relations, DB>>;
 	$and?: Array<WhereClause<T, Relations, DB>>;
 	$not?: WhereClause<T, Relations, DB>;
+	// Full-text search operator
+	$search?: SearchConfig;
 };
 
 // ============================================================================
