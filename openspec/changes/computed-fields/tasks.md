@@ -74,7 +74,7 @@
 
 - [x] 10.1 Test computed field returning `null` or `undefined` — handled gracefully in filter/sort.
 - [x] 10.2 Test computed field on empty collection — no errors, empty results.
-- [ ] 10.3 Test computed field with population: `authorName: (book) => book.author?.name ?? "Unknown"` with and without `populate`.
+- [x] 10.3 Test computed field with population: `authorName: (book) => book.author?.name ?? "Unknown"` with and without `populate`.
 - [ ] 10.4 Test that create ignores computed field names in input.
 - [ ] 10.5 Test that update ignores computed field names in input.
 - [ ] 10.6 Test persistence round-trip: save, reload, verify computed fields re-derive correctly.

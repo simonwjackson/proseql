@@ -829,6 +829,355 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 	});
 
 	// =========================================================================
+	// Task 10.3: Computed field with population — deriving from related data
+	// =========================================================================
+	describe("Task 10.3: Computed field with population", () => {
+		// Schema and config with computed field that accesses populated relationship
+		const BookWithPopulateSchema = Schema.Struct({
+			id: Schema.String,
+			title: Schema.String,
+			year: Schema.Number,
+			authorId: Schema.optional(Schema.String),
+		});
+
+		const AuthorForPopulateSchema = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+			nationality: Schema.optional(Schema.String),
+		});
+
+		// The computed field accesses the populated author relationship
+		// When author is populated, it returns the author's name
+		// When author is not populated (undefined), it returns "Unknown"
+		const populateComputedConfig = {
+			books: {
+				schema: BookWithPopulateSchema,
+				relationships: {
+					author: {
+						type: "ref" as const,
+						target: "authors" as const,
+						foreignKey: "authorId",
+					},
+				},
+				computed: {
+					// Accesses populated author.name with fallback
+					authorName: (book: Record<string, unknown>) => {
+						const author = book.author as
+							| { name: string; nationality?: string }
+							| undefined;
+						return author?.name ?? "Unknown";
+					},
+					// Accesses populated author.nationality with fallback
+					authorNationality: (book: Record<string, unknown>) => {
+						const author = book.author as
+							| { name: string; nationality?: string }
+							| undefined;
+						return author?.nationality ?? "Unknown";
+					},
+					// Combines stored field with populated field
+					fullDisplay: (book: Record<string, unknown>) => {
+						const title = book.title as string;
+						const year = book.year as number;
+						const author = book.author as
+							| { name: string }
+							| undefined;
+						const authorName = author?.name ?? "Unknown";
+						return `${title} (${year}) by ${authorName}`;
+					},
+				},
+			},
+			authors: {
+				schema: AuthorForPopulateSchema,
+				relationships: {
+					books: {
+						type: "inverse" as const,
+						target: "books" as const,
+						foreignKey: "authorId",
+					},
+				},
+			},
+		} as const;
+
+		const testAuthors = [
+			{ id: "author1", name: "Frank Herbert", nationality: "American" },
+			{ id: "author2", name: "William Gibson", nationality: "Canadian" },
+			{ id: "author3", name: "Ursula K. Le Guin" }, // No nationality
+		];
+
+		const testBooks = [
+			{ id: "book1", title: "Dune", year: 1965, authorId: "author1" },
+			{ id: "book2", title: "Neuromancer", year: 1984, authorId: "author2" },
+			{ id: "book3", title: "The Left Hand of Darkness", year: 1969, authorId: "author3" },
+			{ id: "book4", title: "Unknown Book", year: 2000 }, // No authorId
+		];
+
+		it("should return 'Unknown' for computed field when populate is not used", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateComputedConfig, {
+					books: testBooks,
+					authors: testAuthors,
+				}),
+			);
+
+			// Query without populate - author relationship is not populated
+			const results = await db.books.query({ sort: { id: "asc" } }).runPromise;
+
+			expect(results).toHaveLength(4);
+
+			// All should have "Unknown" because author is not populated
+			expect(results[0].authorName).toBe("Unknown");
+			expect(results[1].authorName).toBe("Unknown");
+			expect(results[2].authorName).toBe("Unknown");
+			expect(results[3].authorName).toBe("Unknown");
+
+			// fullDisplay should use "Unknown" for author name
+			expect(results[0].fullDisplay).toBe("Dune (1965) by Unknown");
+			expect(results[1].fullDisplay).toBe("Neuromancer (1984) by Unknown");
+		});
+
+		it("should derive computed field from populated relationship data", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateComputedConfig, {
+					books: testBooks,
+					authors: testAuthors,
+				}),
+			);
+
+			// Query with populate - author relationship is populated
+			const results = await db.books
+				.query({
+					populate: { author: true },
+					sort: { id: "asc" },
+				})
+				.runPromise;
+
+			expect(results).toHaveLength(4);
+
+			// Books with authors should have the author's name
+			expect(results[0].authorName).toBe("Frank Herbert");
+			expect(results[1].authorName).toBe("William Gibson");
+			expect(results[2].authorName).toBe("Ursula K. Le Guin");
+
+			// Book without authorId should still have "Unknown"
+			expect(results[3].authorName).toBe("Unknown");
+		});
+
+		it("should access nested populated fields (author.nationality)", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateComputedConfig, {
+					books: testBooks,
+					authors: testAuthors,
+				}),
+			);
+
+			const results = await db.books
+				.query({
+					populate: { author: true },
+					sort: { id: "asc" },
+				})
+				.runPromise;
+
+			// Authors with nationality
+			expect(results[0].authorNationality).toBe("American");
+			expect(results[1].authorNationality).toBe("Canadian");
+
+			// Author without nationality (Ursula K. Le Guin)
+			expect(results[2].authorNationality).toBe("Unknown");
+
+			// Book without author
+			expect(results[3].authorNationality).toBe("Unknown");
+		});
+
+		it("should combine stored and populated fields in computed field", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateComputedConfig, {
+					books: testBooks,
+					authors: testAuthors,
+				}),
+			);
+
+			const results = await db.books
+				.query({
+					populate: { author: true },
+					sort: { id: "asc" },
+				})
+				.runPromise;
+
+			// fullDisplay combines title (stored), year (stored), author.name (populated)
+			expect(results[0].fullDisplay).toBe("Dune (1965) by Frank Herbert");
+			expect(results[1].fullDisplay).toBe("Neuromancer (1984) by William Gibson");
+			expect(results[2].fullDisplay).toBe(
+				"The Left Hand of Darkness (1969) by Ursula K. Le Guin",
+			);
+			expect(results[3].fullDisplay).toBe("Unknown Book (2000) by Unknown");
+		});
+
+		it("should filter by computed field derived from populated data", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateComputedConfig, {
+					books: testBooks,
+					authors: testAuthors,
+				}),
+			);
+
+			// Filter for books by Frank Herbert
+			const results = await db.books
+				.query({
+					populate: { author: true },
+					where: { authorName: "Frank Herbert" },
+				})
+				.runPromise;
+
+			expect(results).toHaveLength(1);
+			expect(results[0].title).toBe("Dune");
+		});
+
+		it("should filter by computed field with $contains on populated data", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateComputedConfig, {
+					books: testBooks,
+					authors: testAuthors,
+				}),
+			);
+
+			// Filter for books where authorName contains "Gibson"
+			const results = await db.books
+				.query({
+					populate: { author: true },
+					where: { authorName: { $contains: "Gibson" } },
+				})
+				.runPromise;
+
+			expect(results).toHaveLength(1);
+			expect(results[0].title).toBe("Neuromancer");
+		});
+
+		it("should sort by computed field derived from populated data", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateComputedConfig, {
+					books: testBooks,
+					authors: testAuthors,
+				}),
+			);
+
+			const results = await db.books
+				.query({
+					populate: { author: true },
+					sort: { authorName: "asc" },
+				})
+				.runPromise;
+
+			// Sorted by authorName ascending: Frank Herbert, Unknown, Ursula K. Le Guin, William Gibson
+			expect(results).toHaveLength(4);
+			expect(results[0].authorName).toBe("Frank Herbert");
+			expect(results[1].authorName).toBe("Unknown"); // Unknown sorts between F and U
+			expect(results[2].authorName).toBe("Ursula K. Le Guin");
+			expect(results[3].authorName).toBe("William Gibson");
+		});
+
+		it("should select computed fields derived from populated data", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateComputedConfig, {
+					books: testBooks,
+					authors: testAuthors,
+				}),
+			);
+
+			const results = await db.books
+				.query({
+					populate: { author: true },
+					select: { title: true, authorName: true },
+					sort: { id: "asc" },
+				})
+				.runPromise;
+
+			expect(results).toHaveLength(4);
+
+			// Only selected fields should be present
+			for (const result of results) {
+				expect(Object.keys(result).sort()).toEqual(["authorName", "title"]);
+			}
+
+			expect(results[0]).toEqual({ title: "Dune", authorName: "Frank Herbert" });
+			expect(results[1]).toEqual({
+				title: "Neuromancer",
+				authorName: "William Gibson",
+			});
+		});
+
+		it("should handle combined filter + sort + select with population-based computed fields", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateComputedConfig, {
+					books: testBooks,
+					authors: testAuthors,
+				}),
+			);
+
+			// Filter for books where authorNationality is not "Unknown"
+			// Sort by fullDisplay descending
+			// Select specific fields
+			const results = await db.books
+				.query({
+					populate: { author: true },
+					where: { authorNationality: { $ne: "Unknown" } },
+					sort: { fullDisplay: "asc" },
+					select: { title: true, authorName: true, fullDisplay: true },
+				})
+				.runPromise;
+
+			// Only books with authors that have nationality: book1 (American), book2 (Canadian)
+			expect(results).toHaveLength(2);
+
+			// Sorted by fullDisplay ascending
+			expect(results[0].fullDisplay).toBe("Dune (1965) by Frank Herbert");
+			expect(results[1].fullDisplay).toBe("Neuromancer (1984) by William Gibson");
+		});
+
+		it("should handle book without authorId in query without populate", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateComputedConfig, {
+					books: testBooks,
+					authors: testAuthors,
+				}),
+			);
+
+			// Query without populate for book without author
+			const results = await db.books
+				.query({ where: { id: "book4" } })
+				.runPromise;
+
+			expect(results).toHaveLength(1);
+			expect(results[0].title).toBe("Unknown Book");
+			// Without populate, all books use "Unknown" for author-derived computed fields
+			expect(results[0].authorName).toBe("Unknown");
+			expect(results[0].fullDisplay).toBe("Unknown Book (2000) by Unknown");
+		});
+
+		it("should handle book without authorId in query with populate", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateComputedConfig, {
+					books: testBooks,
+					authors: testAuthors,
+				}),
+			);
+
+			// Query with populate for book without author
+			const results = await db.books
+				.query({
+					populate: { author: true },
+					where: { id: "book4" },
+				})
+				.runPromise;
+
+			expect(results).toHaveLength(1);
+			expect(results[0].title).toBe("Unknown Book");
+			// Book has no authorId, so author is not populated, fallback is used
+			expect(results[0].authorName).toBe("Unknown");
+			expect(results[0].fullDisplay).toBe("Unknown Book (2000) by Unknown");
+		});
+	});
+
+	// =========================================================================
 	// Task 10.2: Computed field on empty collection — no errors, empty results
 	// =========================================================================
 	describe("Task 10.2: Computed field on empty collection", () => {
