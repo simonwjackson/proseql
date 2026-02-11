@@ -68,7 +68,7 @@
 - [x] 9.10 Test sort by computed field descending.
 - [x] 9.11 Test combined: filter by computed + sort by computed + select computed.
 - [x] 9.12 Test multiple computed fields on the same collection.
-- [ ] 9.13 Test collection with no computed fields — behaves identically to before (regression check).
+- [x] 9.13 Test collection with no computed fields — behaves identically to before (regression check).
 
 ## 10. Tests — Edge Cases
 
