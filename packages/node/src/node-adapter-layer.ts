@@ -7,8 +7,11 @@ import { promises as fs, watch as fsWatch } from "fs"
 import { dirname } from "path"
 import { randomBytes } from "crypto"
 import { Effect, Layer, Schedule } from "effect"
-import { StorageAdapter, type StorageAdapterShape } from "./storage-service.js"
-import { StorageError } from "../errors/storage-errors.js"
+import {
+	StorageAdapterService as StorageAdapter,
+	type StorageAdapterShape,
+	StorageError,
+} from "@proseql/core"
 
 // ============================================================================
 // Configuration
