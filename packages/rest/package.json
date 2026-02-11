@@ -1,0 +1,12 @@
+{
+  "name": "@proseql/rest",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@proseql/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "effect": "^3.15.0"
+  }
+}
