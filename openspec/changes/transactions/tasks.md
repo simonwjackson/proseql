@@ -47,7 +47,7 @@
 
 ## 7. Tests — Snapshot Isolation
 
-- [ ] 7.1 Test read-own-writes: create entity within transaction, query sees it immediately
+- [x] 7.1 Test read-own-writes: create entity within transaction, query sees it immediately
 - [ ] 7.2 Test snapshot immutability: rollback restores exact pre-transaction state including entities that were deleted during transaction
 - [ ] 7.3 Test lock release on commit: new transaction can begin after previous commits
 - [ ] 7.4 Test lock release on rollback: new transaction can begin after previous rolls back

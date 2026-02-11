@@ -1241,3 +1241,67 @@ describe("createTransaction (Manual)", () => {
 		})
 	})
 })
+
+// ============================================================================
+// Snapshot Isolation Tests
+// ============================================================================
+
+describe("Snapshot Isolation", () => {
+	describe("read-own-writes", () => {
+		it("should see created entity immediately via query within transaction", async () => {
+			const db = await Effect.runPromise(createTestDb())
+
+			// Verify initial state
+			const initialUsers = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(initialUsers).toHaveLength(2)
+
+			// Execute transaction that creates an entity and queries for it
+			const result = await db
+				.$transaction((ctx) =>
+					Effect.gen(function* () {
+						// Create a new user
+						const newUser = yield* ctx.users.create({
+							id: "u3",
+							name: "Charlie",
+							email: "charlie@test.com",
+							age: 35,
+						})
+
+						// Query for the user immediately - should find it (read-own-writes)
+						const queryResult = yield* Stream.runCollect(
+							ctx.users.query({ where: { id: "u3" } }),
+						).pipe(Effect.map(Chunk.toArray))
+
+						expect(queryResult).toHaveLength(1)
+						expect(queryResult[0].id).toBe("u3")
+						expect(queryResult[0].name).toBe("Charlie")
+
+						// Also query all users - should see all 3
+						const allUsers = yield* Stream.runCollect(
+							ctx.users.query({}),
+						).pipe(Effect.map(Chunk.toArray))
+
+						expect(allUsers).toHaveLength(3)
+						expect(allUsers.find((u) => u.id === "u3")).toBeDefined()
+
+						return { created: newUser, queriedCount: allUsers.length }
+					}),
+				)
+				.pipe(Effect.runPromise)
+
+			// Verify the transaction succeeded and returned expected data
+			expect(result.created.name).toBe("Charlie")
+			expect(result.queriedCount).toBe(3)
+
+			// Verify data persists after commit
+			const finalUsers = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(finalUsers).toHaveLength(3)
+		})
+	})
+})
