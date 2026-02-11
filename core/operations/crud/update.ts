@@ -27,7 +27,7 @@ import {
 import type { CollectionIndexes } from "../../types/index-types.js"
 import { updateInIndex } from "../../indexes/index-manager.js"
 import type { HooksConfig } from "../../types/hook-types.js"
-import { runBeforeUpdateHooks } from "../../hooks/hook-runner.js"
+import { runBeforeUpdateHooks, runAfterUpdateHooks, runOnChangeHooks } from "../../hooks/hook-runner.js"
 
 // ============================================================================
 // Types
@@ -294,6 +294,25 @@ export const update = <T extends HasId, I = T>(
 		if (indexes && indexes.size > 0) {
 			yield* updateInIndex(indexes, previous, validated)
 		}
+
+		// Run afterUpdate hooks (fire-and-forget, errors swallowed)
+		yield* runAfterUpdateHooks(hooks?.afterUpdate, {
+			operation: "update",
+			collection: collectionName,
+			id,
+			previous,
+			current: validated,
+			update: transformedUpdates,
+		})
+
+		// Run onChange hooks with type: "update" (fire-and-forget, errors swallowed)
+		yield* runOnChangeHooks(hooks?.onChange, {
+			type: "update",
+			collection: collectionName,
+			id,
+			previous,
+			current: validated,
+		})
 
 		return validated
 	})
