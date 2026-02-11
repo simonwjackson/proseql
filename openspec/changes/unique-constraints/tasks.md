@@ -26,15 +26,15 @@
 ## 5. Tests — Unique Enforcement
 
 - [x] 5.1 Create `tests/unique-constraints.test.ts` with test helpers: create a database with a collection configured with `uniqueFields: ["email", "username"]`
-- [ ] 5.2 Test create: duplicate email → `UniqueConstraintError` with correct fields/values/existingId
-- [ ] 5.3 Test create: unique values → succeeds
-- [ ] 5.4 Test create: null/undefined on unique field → succeeds (nulls not checked)
-- [ ] 5.5 Test createMany: inter-batch duplicates → fails on conflicting entity
-- [ ] 5.6 Test createMany with `skipDuplicates: true` → skips unique violations, inserts non-violating
-- [ ] 5.7 Test update: change unique field to conflicting value → `UniqueConstraintError`
-- [ ] 5.8 Test update: change unique field to non-conflicting value → succeeds
-- [ ] 5.9 Test update: change non-unique field → succeeds without check
-- [ ] 5.10 Test collection without uniqueFields → only ID uniqueness enforced
+- [x] 5.2 Test create: duplicate email → `UniqueConstraintError` with correct fields/values/existingId
+- [x] 5.3 Test create: unique values → succeeds
+- [x] 5.4 Test create: null/undefined on unique field → succeeds (nulls not checked)
+- [x] 5.5 Test createMany: inter-batch duplicates → fails on conflicting entity
+- [x] 5.6 Test createMany with `skipDuplicates: true` → skips unique violations, inserts non-violating
+- [x] 5.7 Test update: change unique field to conflicting value → `UniqueConstraintError`
+- [x] 5.8 Test update: change unique field to non-conflicting value → succeeds
+- [x] 5.9 Test update: change non-unique field → succeeds without check
+- [x] 5.10 Test collection without uniqueFields → only ID uniqueness enforced
 
 ## 6. Tests — Compound Constraints
 
