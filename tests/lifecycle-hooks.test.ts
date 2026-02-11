@@ -409,5 +409,65 @@ describe("lifecycle-hooks", () => {
 			// No entity should exist in the collection
 			expect(result.allUsers).toHaveLength(0)
 		})
+
+		it("multiple beforeCreate hooks chain in order", async () => {
+			// Track the order hooks are called and what data they receive
+			const hookOrder: Array<{ hookIndex: number; receivedName: string }> = []
+
+			// Hook 1: Appends "-hook1" to name
+			const hook1: BeforeCreateHook<User> = (ctx) => {
+				hookOrder.push({ hookIndex: 1, receivedName: ctx.data.name })
+				return Effect.succeed({
+					...ctx.data,
+					name: `${ctx.data.name}-hook1`,
+				})
+			}
+
+			// Hook 2: Appends "-hook2" to name (should receive name with "-hook1" already)
+			const hook2: BeforeCreateHook<User> = (ctx) => {
+				hookOrder.push({ hookIndex: 2, receivedName: ctx.data.name })
+				return Effect.succeed({
+					...ctx.data,
+					name: `${ctx.data.name}-hook2`,
+				})
+			}
+
+			// Hook 3: Appends "-hook3" to name (should receive name with "-hook1-hook2" already)
+			const hook3: BeforeCreateHook<User> = (ctx) => {
+				hookOrder.push({ hookIndex: 3, receivedName: ctx.data.name })
+				return Effect.succeed({
+					...ctx.data,
+					name: `${ctx.data.name}-hook3`,
+				})
+			}
+
+			const hooks: HooksConfig<User> = {
+				beforeCreate: [hook1, hook2, hook3],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, { users: [] })
+					const created = yield* db.users.create({
+						name: "Original",
+						email: "test@example.com",
+						age: 25,
+					})
+					// Also verify by reading back from collection
+					const found = yield* db.users.findById(created.id)
+					return { created, found }
+				}),
+			)
+
+			// Verify hooks ran in order
+			expect(hookOrder).toHaveLength(3)
+			expect(hookOrder[0]).toEqual({ hookIndex: 1, receivedName: "Original" })
+			expect(hookOrder[1]).toEqual({ hookIndex: 2, receivedName: "Original-hook1" })
+			expect(hookOrder[2]).toEqual({ hookIndex: 3, receivedName: "Original-hook1-hook2" })
+
+			// Verify final entity has all transformations applied
+			expect(result.created.name).toBe("Original-hook1-hook2-hook3")
+			expect(result.found.name).toBe("Original-hook1-hook2-hook3")
+		})
 	})
 })
