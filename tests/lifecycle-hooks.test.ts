@@ -552,5 +552,51 @@ describe("lifecycle-hooks", () => {
 			expect(result.afterAttempt.email).toBe(result.originalUser.email)
 			expect(result.afterAttempt.age).toBe(result.originalUser.age)
 		})
+
+		it("beforeDelete rejects → delete fails, entity still exists", async () => {
+			const hooks: HooksConfig<User> = {
+				beforeDelete: [makeRejectingBeforeDeleteHook("Deletion not allowed")],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks)
+
+					// Capture original state of u1
+					const originalUser = yield* db.users.findById("u1")
+
+					// Attempt to delete - should fail with HookError
+					const deleteResult = yield* db.users
+						.delete("u1")
+						.pipe(
+							Effect.matchEffect({
+								onFailure: (error) => Effect.succeed({ type: "error" as const, error }),
+								onSuccess: (user) => Effect.succeed({ type: "success" as const, user }),
+							}),
+						)
+
+					// Verify entity still exists
+					const afterAttempt = yield* db.users.findById("u1")
+
+					return { originalUser, deleteResult, afterAttempt }
+				}),
+			)
+
+			// The delete should have failed
+			expect(result.deleteResult.type).toBe("error")
+			if (result.deleteResult.type === "error") {
+				expect(result.deleteResult.error._tag).toBe("HookError")
+				const hookError = result.deleteResult.error as HookError
+				expect(hookError.hook).toBe("beforeDelete")
+				expect(hookError.operation).toBe("delete")
+				expect(hookError.reason).toBe("Deletion not allowed")
+			}
+
+			// Entity should still exist and be unchanged
+			expect(result.afterAttempt.id).toBe(result.originalUser.id)
+			expect(result.afterAttempt.name).toBe(result.originalUser.name)
+			expect(result.afterAttempt.email).toBe(result.originalUser.email)
+			expect(result.afterAttempt.age).toBe(result.originalUser.age)
+		})
 	})
 })
