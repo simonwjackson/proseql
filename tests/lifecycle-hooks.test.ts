@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Stream, Chunk } from "effect"
 import { createEffectDatabase } from "../core/factories/database-effect.js"
 import { HookError } from "../core/errors/crud-errors.js"
 import type {
@@ -361,6 +361,53 @@ describe("lifecycle-hooks", () => {
 			// The entity in the collection should also have the transformed data
 			expect(result.found.email).toBe("test@example.com")
 			expect(result.found.createdAt).toBe("2024-01-01T00:00:00Z")
+		})
+
+		it("beforeCreate rejects → create fails with HookError, no state change", async () => {
+			const hooks: HooksConfig<User> = {
+				beforeCreate: [makeRejectingBeforeCreateHook("User creation not allowed")],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, { users: [] })
+
+					// Attempt to create - should fail with HookError
+					const createResult = yield* db.users
+						.create({
+							name: "Rejected User",
+							email: "rejected@test.com",
+							age: 25,
+						})
+						.pipe(
+							Effect.matchEffect({
+								onFailure: (error) => Effect.succeed({ type: "error" as const, error }),
+								onSuccess: (user) => Effect.succeed({ type: "success" as const, user }),
+							}),
+						)
+
+					// Verify no entity was added to the collection
+					const allUsersChunk = yield* Stream.runCollect(
+						db.users.query({}) as Stream.Stream<User>,
+					)
+					const allUsers = Chunk.toReadonlyArray(allUsersChunk)
+
+					return { createResult, allUsers }
+				}),
+			)
+
+			// The create should have failed
+			expect(result.createResult.type).toBe("error")
+			if (result.createResult.type === "error") {
+				expect(result.createResult.error._tag).toBe("HookError")
+				const hookError = result.createResult.error as HookError
+				expect(hookError.hook).toBe("beforeCreate")
+				expect(hookError.operation).toBe("create")
+				expect(hookError.reason).toBe("User creation not allowed")
+			}
+
+			// No entity should exist in the collection
+			expect(result.allUsers).toHaveLength(0)
 		})
 	})
 })
