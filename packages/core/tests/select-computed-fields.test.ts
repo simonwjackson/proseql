@@ -256,6 +256,68 @@ describe("selectFields with computed fields", () => {
 		});
 	});
 
+	describe("Task 5.5: Verify default (no select) returns all stored and computed fields", () => {
+		it("should return all stored and computed fields when select is undefined", async () => {
+			const result = await collectSelected(booksWithComputed, undefined);
+
+			expect(result).toHaveLength(5);
+
+			// First book: Dune (1965) - verify all stored fields are present
+			expect(result[0]).toHaveProperty("id", "1");
+			expect(result[0]).toHaveProperty("title", "Dune");
+			expect(result[0]).toHaveProperty("year", 1965);
+			expect(result[0]).toHaveProperty("genre", "sci-fi");
+
+			// Verify all computed fields are present
+			expect(result[0]).toHaveProperty("displayName", "Dune (1965)");
+			expect(result[0]).toHaveProperty("isClassic", true);
+			expect(result[0]).toHaveProperty("yearsSincePublication", 59);
+
+			// Second book: Neuromancer (1984) - verify all fields
+			expect(result[1]).toHaveProperty("id", "2");
+			expect(result[1]).toHaveProperty("title", "Neuromancer");
+			expect(result[1]).toHaveProperty("year", 1984);
+			expect(result[1]).toHaveProperty("genre", "sci-fi");
+			expect(result[1]).toHaveProperty("displayName", "Neuromancer (1984)");
+			expect(result[1]).toHaveProperty("isClassic", false);
+			expect(result[1]).toHaveProperty("yearsSincePublication", 40);
+		});
+
+		it("should return all stored and computed fields when select is empty object", async () => {
+			const result = await collectSelected(booksWithComputed, {});
+
+			expect(result).toHaveLength(5);
+
+			// Verify all stored fields are present
+			expect(result[0]).toHaveProperty("id", "1");
+			expect(result[0]).toHaveProperty("title", "Dune");
+			expect(result[0]).toHaveProperty("year", 1965);
+			expect(result[0]).toHaveProperty("genre", "sci-fi");
+
+			// Verify all computed fields are present
+			expect(result[0]).toHaveProperty("displayName", "Dune (1965)");
+			expect(result[0]).toHaveProperty("isClassic", true);
+			expect(result[0]).toHaveProperty("yearsSincePublication", 59);
+		});
+
+		it("should verify exact field count matches stored + computed fields", async () => {
+			const result = await collectSelected(booksWithComputed, undefined);
+
+			// 4 stored fields + 3 computed fields = 7 total
+			const keys = Object.keys(result[0]);
+			expect(keys).toHaveLength(7);
+			expect(keys.sort()).toEqual([
+				"displayName",
+				"genre",
+				"id",
+				"isClassic",
+				"title",
+				"year",
+				"yearsSincePublication",
+			]);
+		});
+	});
+
 	describe("Edge cases with computed fields in select", () => {
 		it("should handle single entity selection", () => {
 			const book = booksWithComputed[0];
