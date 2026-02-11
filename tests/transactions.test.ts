@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest"
-import { Effect, Schema, Stream, Chunk } from "effect"
+import { Effect, Schema, Stream, Chunk, Ref } from "effect"
 import { createEffectDatabase } from "../core/factories/database-effect.js"
-import { NotFoundError } from "../core/errors/crud-errors.js"
+import { NotFoundError, TransactionError } from "../core/errors/crud-errors.js"
+import { createTransaction } from "../core/transactions/transaction.js"
+import { normalizeIndexes, buildIndexes } from "../core/indexes/index-manager.js"
 
 // ============================================================================
 // Test Schemas
@@ -494,6 +496,231 @@ describe("$transaction", () => {
 			expect(users).toHaveLength(4)
 			expect(users.find((u) => u.id === "u3")?.name).toBe("Charlie")
 			expect(users.find((u) => u.id === "u4")?.name).toBe("Diana")
+		})
+	})
+})
+
+// ============================================================================
+// createTransaction (Manual) Tests
+// ============================================================================
+
+/**
+ * Helper to create minimal infrastructure for testing createTransaction directly.
+ * This mirrors the internal setup of createEffectDatabase but exposes the components
+ * needed to call createTransaction.
+ */
+const createManualTransactionTestSetup = () =>
+	Effect.gen(function* () {
+		type HasId = { readonly id: string }
+
+		// State refs for each collection
+		const usersRef = yield* Ref.make<ReadonlyMap<string, HasId>>(
+			new Map([
+				["u1", { id: "u1", name: "Alice", email: "alice@test.com", age: 30 }],
+				["u2", { id: "u2", name: "Bob", email: "bob@test.com", age: 25 }],
+			]),
+		)
+		const postsRef = yield* Ref.make<ReadonlyMap<string, HasId>>(
+			new Map([
+				["p1", { id: "p1", title: "Hello World", content: "First post", authorId: "u1" }],
+				["p2", { id: "p2", title: "TypeScript Tips", content: "Type safety", authorId: "u2" }],
+			]),
+		)
+
+		const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>> = {
+			users: usersRef,
+			posts: postsRef,
+		}
+
+		// Transaction lock
+		const transactionLock = yield* Ref.make(false)
+
+		// Collection config for building collections
+		const collectionConfigs: Record<string, { readonly schema: typeof UserSchema; readonly relationships: Record<string, unknown> }> = {
+			users: { schema: UserSchema, relationships: {} },
+			posts: { schema: PostSchema, relationships: {} },
+		}
+
+		// Build indexes (empty for simplicity)
+		const collectionIndexes: Record<string, Awaited<ReturnType<typeof buildIndexes>>> = {}
+		for (const name of Object.keys(stateRefs)) {
+			const currentData = yield* Ref.get(stateRefs[name])
+			const items = Array.from(currentData.values())
+			collectionIndexes[name] = yield* buildIndexes(normalizeIndexes(undefined), items)
+		}
+
+		// Minimal buildCollectionForTx that creates CRUD wrappers
+		// This is a simplified version - we only need create/findById for tests
+		const buildCollectionForTx = (
+			collectionName: string,
+			addMutation: (name: string) => void,
+		) => {
+			const ref = stateRefs[collectionName]
+			const collectionConfig = collectionConfigs[collectionName]
+
+			return {
+				create: (input: HasId) => {
+					const effect = Effect.gen(function* () {
+						// Validate input has id
+						const entity = { ...input, id: input.id ?? `generated-${Date.now()}` } as HasId
+						yield* Ref.update(ref, (map) => {
+							const newMap = new Map(map)
+							newMap.set(entity.id, entity)
+							return newMap
+						})
+						addMutation(collectionName)
+						return entity
+					})
+					return Object.assign(effect, {
+						get runPromise() {
+							return Effect.runPromise(effect)
+						},
+					})
+				},
+				findById: (id: string) => {
+					const effect = Effect.gen(function* () {
+						const map = yield* Ref.get(ref)
+						const entity = map.get(id)
+						if (!entity) {
+							return yield* new NotFoundError({
+								collection: collectionName,
+								id,
+								message: `Entity with id "${id}" not found`,
+							})
+						}
+						return entity
+					})
+					return Object.assign(effect, {
+						get runPromise() {
+							return Effect.runPromise(effect)
+						},
+					})
+				},
+				update: (id: string, changes: Partial<HasId>) => {
+					const effect = Effect.gen(function* () {
+						const map = yield* Ref.get(ref)
+						const existing = map.get(id)
+						if (!existing) {
+							return yield* new NotFoundError({
+								collection: collectionName,
+								id,
+								message: `Entity with id "${id}" not found`,
+							})
+						}
+						const updated = { ...existing, ...changes, id } as HasId
+						yield* Ref.update(ref, (m) => {
+							const newMap = new Map(m)
+							newMap.set(id, updated)
+							return newMap
+						})
+						addMutation(collectionName)
+						return updated
+					})
+					return Object.assign(effect, {
+						get runPromise() {
+							return Effect.runPromise(effect)
+						},
+					})
+				},
+				delete: (id: string) => {
+					const effect = Effect.gen(function* () {
+						const map = yield* Ref.get(ref)
+						const existing = map.get(id)
+						if (!existing) {
+							return yield* new NotFoundError({
+								collection: collectionName,
+								id,
+								message: `Entity with id "${id}" not found`,
+							})
+						}
+						yield* Ref.update(ref, (m) => {
+							const newMap = new Map(m)
+							newMap.delete(id)
+							return newMap
+						})
+						addMutation(collectionName)
+						return existing
+					})
+					return Object.assign(effect, {
+						get runPromise() {
+							return Effect.runPromise(effect)
+						},
+					})
+				},
+				// Stub methods for the interface
+				createMany: () => Effect.succeed({ created: [], failed: [] }),
+				updateMany: () => Effect.succeed({ updated: [], count: 0 }),
+				deleteMany: () => Effect.succeed({ deleted: [], count: 0 }),
+				upsert: () => Effect.succeed({ entity: {} as HasId, operation: "created" as const }),
+				upsertMany: () => Effect.succeed({ results: [] }),
+				query: () => Stream.empty,
+				createWithRelationships: () => Effect.succeed({} as HasId),
+				updateWithRelationships: () => Effect.succeed({} as HasId),
+				deleteWithRelationships: () => Effect.succeed({ entity: {} as HasId }),
+				deleteManyWithRelationships: () => Effect.succeed({ count: 0, deleted: [] }),
+				aggregate: () => Effect.succeed({}),
+			}
+		}
+
+		return {
+			stateRefs,
+			transactionLock,
+			buildCollectionForTx,
+			usersRef,
+			postsRef,
+		}
+	})
+
+describe("createTransaction (Manual)", () => {
+	describe("manual commit", () => {
+		it("should persist changes when commit() is called after operations", async () => {
+			const setup = await Effect.runPromise(createManualTransactionTestSetup())
+
+			// Verify initial state
+			const initialUsers = await Effect.runPromise(Ref.get(setup.usersRef))
+			expect(initialUsers.size).toBe(2)
+
+			// Create transaction context manually
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined, // no persistence trigger
+				),
+			)
+
+			// Verify transaction is active
+			expect(ctx.isActive).toBe(true)
+
+			// Perform operations within transaction
+			await Effect.runPromise(
+				ctx.users.create({
+					id: "u3",
+					name: "Charlie",
+					email: "charlie@test.com",
+					age: 35,
+				}),
+			)
+
+			// Verify entity exists in the live state (read-own-writes)
+			const userInTx = await Effect.runPromise(ctx.users.findById("u3"))
+			expect(userInTx.name).toBe("Charlie")
+
+			// Verify mutatedCollections tracks the mutation
+			expect(ctx.mutatedCollections.has("users")).toBe(true)
+
+			// Manually commit
+			await Effect.runPromise(ctx.commit())
+
+			// Verify transaction is no longer active
+			expect(ctx.isActive).toBe(false)
+
+			// Verify changes persist in the underlying Ref
+			const finalUsers = await Effect.runPromise(Ref.get(setup.usersRef))
+			expect(finalUsers.size).toBe(3)
+			expect(finalUsers.get("u3")).toBeDefined()
+			expect((finalUsers.get("u3") as { name: string }).name).toBe("Charlie")
 		})
 	})
 })
