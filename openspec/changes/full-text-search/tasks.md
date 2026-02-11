@@ -8,7 +8,7 @@
 
 ## 2. Tokenizer
 
-- [ ] 2.1 Create `core/operations/query/search.ts` with `tokenize(text: string): ReadonlyArray<string>` -- split on whitespace, strip leading/trailing punctuation, lowercase, filter empty strings
+- [x] 2.1 Create `core/operations/query/search.ts` with `tokenize(text: string): ReadonlyArray<string>` -- split on whitespace, strip leading/trailing punctuation, lowercase, filter empty strings
 - [ ] 2.2 Add `tokenizeWithStopWords(text: string, removeStopWords: boolean): ReadonlyArray<string>` -- calls `tokenize` then optionally filters out stop words
 - [ ] 2.3 Handle edge cases: empty string returns empty array, whitespace-only returns empty array, punctuation-only tokens are dropped
 
