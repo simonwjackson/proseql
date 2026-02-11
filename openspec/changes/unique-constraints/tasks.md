@@ -25,7 +25,7 @@
 
 ## 5. Tests — Unique Enforcement
 
-- [ ] 5.1 Create `tests/unique-constraints.test.ts` with test helpers: create a database with a collection configured with `uniqueFields: ["email", "username"]`
+- [x] 5.1 Create `tests/unique-constraints.test.ts` with test helpers: create a database with a collection configured with `uniqueFields: ["email", "username"]`
 - [ ] 5.2 Test create: duplicate email → `UniqueConstraintError` with correct fields/values/existingId
 - [ ] 5.3 Test create: unique values → succeeds
 - [ ] 5.4 Test create: null/undefined on unique field → succeeds (nulls not checked)
