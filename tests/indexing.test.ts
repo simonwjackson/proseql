@@ -1498,6 +1498,313 @@ describe("Indexing - Index Maintenance", () => {
 		})
 	})
 
+	describe("Task 7.7: upsert (update path) → index updated", () => {
+		it("should update index when upsert updates an existing entity's indexed field", async () => {
+			// Start with an existing user
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Verify initial query works
+			const aliceInitial = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceInitial.length).toBe(1)
+			expect((aliceInitial[0] as { id: string }).id).toBe("u1")
+
+			// Upsert that matches existing user and updates their email
+			const result = await db.users.upsert({
+				where: { id: "u1" },
+				update: { email: "alice.new@example.com" },
+				create: { email: "unused@example.com", name: "Unused", age: 99 },
+			}).runPromise
+
+			expect(result.__action).toBe("updated")
+			expect(result.email).toBe("alice.new@example.com")
+
+			// Query by OLD email - should not find Alice anymore
+			const oldEmailResults = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(oldEmailResults.length).toBe(0)
+
+			// Query by NEW email - should find Alice
+			const newEmailResults = await db.users.query({ where: { email: "alice.new@example.com" } }).runPromise
+			expect(newEmailResults.length).toBe(1)
+			expect((newEmailResults[0] as { id: string }).id).toBe("u1")
+		})
+
+		it("should keep index unchanged when upsert updates only non-indexed fields", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Upsert that matches existing user but only updates non-indexed field
+			const result = await db.users.upsert({
+				where: { id: "u1" },
+				update: { name: "Alice Updated", age: 31 },
+				create: { email: "unused@example.com", name: "Unused", age: 99 },
+			}).runPromise
+
+			expect(result.__action).toBe("updated")
+			expect(result.name).toBe("Alice Updated")
+			expect(result.age).toBe(31)
+
+			// Query by email - should still find Alice
+			const results = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("u1")
+			expect((results[0] as { name: string }).name).toBe("Alice Updated")
+		})
+
+		it("should update compound index when upsert updates compound key fields", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Verify initial compound index query
+			const computersInitial = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(computersInitial.length).toBe(1)
+
+			// Upsert that updates the subcategory
+			const result = await db.products.upsert({
+				where: { id: "p1" },
+				update: { subcategory: "phones" },
+				create: { name: "Unused", category: "unused", subcategory: "unused", price: 0 },
+			}).runPromise
+
+			expect(result.__action).toBe("updated")
+			expect(result.subcategory).toBe("phones")
+
+			// Query old compound key - should be empty
+			const oldCompound = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(oldCompound.length).toBe(0)
+
+			// Query new compound key - should have the product
+			const newCompound = await db.products.query({
+				where: { category: "electronics", subcategory: "phones" },
+			}).runPromise
+			expect(newCompound.length).toBe(1)
+			expect((newCompound[0] as { id: string }).id).toBe("p1")
+		})
+
+		it("should handle upsert moving entity to shared index Set", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Upsert Alice to have Bob's email
+			const result = await db.users.upsert({
+				where: { id: "u1" },
+				update: { email: "bob@example.com" },
+				create: { email: "unused@example.com", name: "Unused", age: 99 },
+			}).runPromise
+
+			expect(result.__action).toBe("updated")
+
+			// Query by old email - should be empty
+			const aliceOldEmail = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceOldEmail.length).toBe(0)
+
+			// Query by shared email - should return both
+			const sharedEmailResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(sharedEmailResults.length).toBe(2)
+
+			const ids = sharedEmailResults.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u2"])
+		})
+
+		it("should handle upsert splitting a shared index entry", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "shared@example.com", name: "User One", age: 30 },
+				{ id: "u2", email: "shared@example.com", name: "User Two", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Verify both are at shared email initially
+			const sharedInitial = await db.users.query({ where: { email: "shared@example.com" } }).runPromise
+			expect(sharedInitial.length).toBe(2)
+
+			// Upsert u1 to have a unique email
+			const result = await db.users.upsert({
+				where: { id: "u1" },
+				update: { email: "unique@example.com" },
+				create: { email: "unused@example.com", name: "Unused", age: 99 },
+			}).runPromise
+
+			expect(result.__action).toBe("updated")
+
+			// Query shared email - should now only have u2
+			const sharedAfter = await db.users.query({ where: { email: "shared@example.com" } }).runPromise
+			expect(sharedAfter.length).toBe(1)
+			expect((sharedAfter[0] as { id: string }).id).toBe("u2")
+
+			// Query unique email - should have u1
+			const uniqueResults = await db.users.query({ where: { email: "unique@example.com" } }).runPromise
+			expect(uniqueResults.length).toBe(1)
+			expect((uniqueResults[0] as { id: string }).id).toBe("u1")
+		})
+
+		it("should update index via upsertMany update path", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Upsert both users with new emails
+			const result = await db.users.upsertMany([
+				{ where: { id: "u1" }, update: { email: "alice.new@example.com" }, create: { email: "unused1@example.com", name: "Unused", age: 99 } },
+				{ where: { id: "u2" }, update: { email: "bob.new@example.com" }, create: { email: "unused2@example.com", name: "Unused", age: 99 } },
+			]).runPromise
+
+			expect(result.updated.length).toBe(2)
+			expect(result.created.length).toBe(0)
+
+			// Old emails should not find anyone
+			const aliceOld = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceOld.length).toBe(0)
+
+			const bobOld = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(bobOld.length).toBe(0)
+
+			// New emails should find the users
+			const aliceNew = await db.users.query({ where: { email: "alice.new@example.com" } }).runPromise
+			expect(aliceNew.length).toBe(1)
+			expect((aliceNew[0] as { id: string }).id).toBe("u1")
+
+			const bobNew = await db.users.query({ where: { email: "bob.new@example.com" } }).runPromise
+			expect(bobNew.length).toBe(1)
+			expect((bobNew[0] as { id: string }).id).toBe("u2")
+		})
+
+		it("should handle mixed create and update paths in upsertMany", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Upsert: u1 exists (update), u2 doesn't (create)
+			const result = await db.users.upsertMany([
+				{ where: { id: "u1" }, update: { email: "alice.new@example.com" }, create: { email: "unused@example.com", name: "Unused", age: 99 } },
+				{ where: { id: "u2" }, update: { email: "should.not.apply@example.com" }, create: { email: "bob@example.com", name: "Bob", age: 25 } },
+			]).runPromise
+
+			expect(result.updated.length).toBe(1)
+			expect(result.created.length).toBe(1)
+
+			// u1's old email should not find anyone
+			const aliceOld = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceOld.length).toBe(0)
+
+			// u1's new email should find them
+			const aliceNew = await db.users.query({ where: { email: "alice.new@example.com" } }).runPromise
+			expect(aliceNew.length).toBe(1)
+			expect((aliceNew[0] as { id: string }).id).toBe("u1")
+
+			// u2 should be at their create email
+			const bobResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(bobResults.length).toBe(1)
+			expect((bobResults[0] as { id: string }).id).toBe("u2")
+		})
+
+		it("should not change index when upsert update results in unchanged entity", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Upsert with update that sets email to same value
+			const result = await db.users.upsert({
+				where: { id: "u1" },
+				update: { email: "alice@example.com" },
+				create: { email: "unused@example.com", name: "Unused", age: 99 },
+			}).runPromise
+
+			expect(result.__action).toBe("updated")
+
+			// Should still be queryable by email
+			const results = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("u1")
+		})
+
+		it("should update multiple indexes when upsert changes multiple indexed fields", async () => {
+			// createMultiIndexConfig has users with indexes on both "email" and "role"
+			const config = createMultiIndexConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30, role: "admin" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Verify initial index state
+			const byEmailInitial = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(byEmailInitial.length).toBe(1)
+			const byRoleInitial = await db.users.query({ where: { role: "admin" } }).runPromise
+			expect(byRoleInitial.length).toBe(1)
+
+			// Upsert that updates both email and role
+			const result = await db.users.upsert({
+				where: { id: "u1" },
+				update: { email: "alice.new@example.com", role: "user" },
+				create: { email: "unused@example.com", name: "Unused", age: 99 },
+			}).runPromise
+
+			expect(result.__action).toBe("updated")
+			expect(result.email).toBe("alice.new@example.com")
+			expect(result.role).toBe("user")
+
+			// Old email should not find anyone
+			const byOldEmail = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(byOldEmail.length).toBe(0)
+
+			// Old role should not find anyone
+			const byOldRole = await db.users.query({ where: { role: "admin" } }).runPromise
+			expect(byOldRole.length).toBe(0)
+
+			// New email should find user
+			const byNewEmail = await db.users.query({ where: { email: "alice.new@example.com" } }).runPromise
+			expect(byNewEmail.length).toBe(1)
+			expect((byNewEmail[0] as { id: string }).id).toBe("u1")
+
+			// New role should find user
+			const byNewRole = await db.users.query({ where: { role: "user" } }).runPromise
+			expect(byNewRole.length).toBe(1)
+			expect((byNewRole[0] as { id: string }).id).toBe("u1")
+		})
+	})
+
 	describe("Task 7.1: create → index entry added", () => {
 		it("should add new entity to index when created", async () => {
 			// Start with an empty indexed database
