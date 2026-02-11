@@ -262,5 +262,51 @@ describe("Aggregation", () => {
 			expect(gadgets?.sum?.price).toBeCloseTo(50.75)
 			expect(tools?.sum?.price).toBeCloseTo(5.25)
 		})
+
+		it("6.3 multi-field groupBy → correct group partitioning", async () => {
+			// Create data with multiple grouping dimensions
+			// category + stock level (high: >50, low: <=50)
+			// We'll use a "tier" field to create meaningful multi-field groups
+			const multiGroupProducts = [
+				{ id: "p1", name: "Widget A", price: 10.00, category: "electronics", stock: 100 },
+				{ id: "p2", name: "Widget B", price: 25.50, category: "electronics", stock: 50 },
+				{ id: "p3", name: "Gadget X", price: 15.75, category: "electronics", stock: 100 },
+				{ id: "p4", name: "Gadget Y", price: 35.00, category: "gadgets", stock: 50 },
+				{ id: "p5", name: "Tool Z", price: 5.25, category: "gadgets", stock: 100 },
+			]
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { products: multiGroupProducts }),
+			)
+
+			const result = await db.products.aggregate({
+				groupBy: ["category", "stock"],
+				count: true,
+			}).runPromise
+
+			// Expected groups:
+			// (electronics, 100): p1, p3 → count: 2
+			// (electronics, 50): p2 → count: 1
+			// (gadgets, 50): p4 → count: 1
+			// (gadgets, 100): p5 → count: 1
+			expect(result).toHaveLength(4)
+
+			const elec100 = result.find(g =>
+				g.group.category === "electronics" && g.group.stock === 100
+			)
+			const elec50 = result.find(g =>
+				g.group.category === "electronics" && g.group.stock === 50
+			)
+			const gadget50 = result.find(g =>
+				g.group.category === "gadgets" && g.group.stock === 50
+			)
+			const gadget100 = result.find(g =>
+				g.group.category === "gadgets" && g.group.stock === 100
+			)
+
+			expect(elec100?.count).toBe(2)
+			expect(elec50?.count).toBe(1)
+			expect(gadget50?.count).toBe(1)
+			expect(gadget100?.count).toBe(1)
+		})
 	})
 })
