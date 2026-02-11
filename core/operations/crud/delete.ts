@@ -18,6 +18,8 @@ import {
 	OperationError,
 } from "../../errors/crud-errors.js"
 import { checkDeleteConstraintsEffect } from "../../validators/foreign-key.js"
+import type { CollectionIndexes } from "../../types/index-types.js"
+import { removeFromIndex, removeManyFromIndex } from "../../indexes/index-manager.js"
 
 // ============================================================================
 // Types
@@ -60,6 +62,7 @@ export const del = <T extends HasId>(
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	supportsSoftDelete: boolean = false,
+	indexes?: CollectionIndexes,
 ) =>
 (id: string, options?: DeleteOptions): Effect.Effect<T, NotFoundError | OperationError | ForeignKeyError> =>
 	Effect.gen(function* () {
@@ -117,6 +120,11 @@ export const del = <T extends HasId>(
 			return softDeleted
 		}
 
+		// Hard delete: remove from indexes first (while entity is still accessible)
+		if (indexes && indexes.size > 0) {
+			yield* removeFromIndex(indexes, entity)
+		}
+
 		// Hard delete: remove from state
 		yield* Ref.update(ref, (map) => {
 			const next = new Map(map)
@@ -146,6 +154,7 @@ export const deleteMany = <T extends HasId>(
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	supportsSoftDelete: boolean = false,
+	indexes?: CollectionIndexes,
 ) =>
 (
 	predicate: (entity: T) => boolean,
@@ -220,6 +229,11 @@ export const deleteMany = <T extends HasId>(
 				return next
 			})
 		} else {
+			// Hard delete: remove from indexes first (while entities are still accessible)
+			if (indexes && indexes.size > 0) {
+				yield* removeManyFromIndex(indexes, matchingEntities)
+			}
+
 			// Hard delete: remove matching entities from state
 			const deletedIds = new Set(matchingEntities.map((e) => e.id))
 			deleted.push(...matchingEntities)
