@@ -60,7 +60,7 @@
 - [x] 8.6 Delete `core/storage/types.ts`
 - [x] 8.7 Delete `core/utils/file-extensions.ts`
 - [x] 8.8 Delete `core/storage/node-adapter.ts` (legacy adapter; Effect version in `node-adapter-layer.ts`)
-- [ ] 8.9 Remove `msgpackr` dependency: `bun remove msgpackr`
+- [x] 8.9 Remove `msgpackr` dependency: `bun remove msgpackr`
 
 ## 9. New Tests
 
