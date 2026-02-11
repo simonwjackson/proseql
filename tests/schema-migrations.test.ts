@@ -714,6 +714,121 @@ describe("schema-migrations: migration registry validation", () => {
 			expect(error.message).toContain("Duplicate migration from version 1")
 		})
 	})
+
+	describe("to !== from + 1 → error (task 10.5)", () => {
+		it("rejects migration where to > from + 1 (skips versions)", async () => {
+			// Migration 0→3 is invalid - it skips versions 1 and 2
+			const invalidMigration: ReadonlyArray<Migration> = [
+				{
+					from: 0,
+					to: 3,
+					description: "Skips versions 1 and 2",
+					transform: (data) => data,
+				},
+			]
+
+			const error = await Effect.runPromise(
+				validateMigrationRegistry("users", 3, invalidMigration).pipe(
+					Effect.flip,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			expect(error.reason).toBe("invalid-increment")
+			expect(error.message).toContain("from=0")
+			expect(error.message).toContain("to=3")
+			expect(error.message).toContain("to must equal from + 1")
+		})
+
+		it("rejects migration where to < from + 1 (same or goes backward)", async () => {
+			// Migration 2→2 is invalid - to equals from (no progression)
+			const invalidMigration: ReadonlyArray<Migration> = [
+				{
+					from: 0,
+					to: 1,
+					transform: (data) => data,
+				},
+				{
+					from: 1,
+					to: 2,
+					transform: (data) => data,
+				},
+				{
+					from: 2,
+					to: 2, // Invalid: stays at same version
+					description: "Invalid same-version migration",
+					transform: (data) => data,
+				},
+			]
+
+			const error = await Effect.runPromise(
+				validateMigrationRegistry("users", 3, invalidMigration).pipe(
+					Effect.flip,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			expect(error.reason).toBe("invalid-increment")
+			expect(error.message).toContain("from=2")
+			expect(error.message).toContain("to=2")
+		})
+
+		it("rejects migration where to < from (goes backward)", async () => {
+			// Migration 2→1 is invalid - goes backward
+			const invalidMigration: ReadonlyArray<Migration> = [
+				{
+					from: 0,
+					to: 1,
+					transform: (data) => data,
+				},
+				{
+					from: 1,
+					to: 2,
+					transform: (data) => data,
+				},
+				{
+					from: 2,
+					to: 1, // Invalid: goes backward
+					description: "Invalid backward migration",
+					transform: (data) => data,
+				},
+			]
+
+			const error = await Effect.runPromise(
+				validateMigrationRegistry("users", 3, invalidMigration).pipe(
+					Effect.flip,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			expect(error.reason).toBe("invalid-increment")
+			expect(error.message).toContain("from=2")
+			expect(error.message).toContain("to=1")
+		})
+
+		it("rejects first migration in chain with invalid increment", async () => {
+			// First migration 0→2 is invalid
+			const invalidMigration: ReadonlyArray<Migration> = [
+				{
+					from: 0,
+					to: 2, // Invalid: should be 0→1
+					description: "Invalid first migration",
+					transform: (data) => data,
+				},
+			]
+
+			const error = await Effect.runPromise(
+				validateMigrationRegistry("users", 2, invalidMigration).pipe(
+					Effect.flip,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			expect(error.reason).toBe("invalid-increment")
+			expect(error.message).toContain("from=0")
+			expect(error.message).toContain("to=2")
+		})
+	})
 })
 
 // ============================================================================
