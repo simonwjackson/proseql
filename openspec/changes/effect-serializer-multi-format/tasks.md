@@ -41,7 +41,7 @@
 - [x] 7.1 Update `tests/json-serializer.test.ts`: replace `JsonSerializerLayer`/`makeJsonSerializerLayer` imports with `makeSerializerLayer([jsonCodec()])`. Adapt tests for new API.
 - [x] 7.2 Update `tests/yaml-serializer.test.ts`: replace `YamlSerializerLayer`/`makeYamlSerializerLayer` imports with `makeSerializerLayer([yamlCodec()])`. Adapt tests.
 - [x] 7.3 Update `tests/messagepack-serializer.test.ts`: delete file (MessagePack removed).
-- [ ] 7.4 Update `tests/serializer-service.test.ts`: replace test registry with `makeSerializerLayer`. Verify multi-format dispatch.
+- [x] 7.4 Update `tests/serializer-service.test.ts`: replace test registry with `makeSerializerLayer`. Verify multi-format dispatch.
 - [ ] 7.5 Update `tests/storage-services.test.ts`: replace all `JsonSerializerLayer`/`YamlSerializerLayer`/`MessagePackSerializerLayer` with codec-based layers. Remove MessagePack tests.
 - [ ] 7.6 Update `tests/persistence-effect.test.ts`: replace serializer layer imports.
 - [ ] 7.7 Update `tests/persistence.test.ts`: replace serializer layer imports. Remove MessagePack test helpers.
