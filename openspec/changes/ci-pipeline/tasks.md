@@ -17,7 +17,9 @@
 - [x] 3.1 Verify `setup-bun` cache option is configured in all jobs, using `bun.lock` as cache key
 - [x] 3.2 Test that a second workflow run (same lockfile) hits the cache and skips full install
 
-## 4. Verification
+## 4. Verification (Requires GitHub Repository)
+
+> **Note:** Tasks 4.1-4.5 require a configured GitHub remote repository with appropriate access. These are manual verification steps.
 
 - [ ] 4.1 Push a test branch and open a PR to confirm CI workflow triggers and all three jobs (test, typecheck, lint) run and pass
 - [ ] 4.2 Verify that each job appears as a separate status check on the PR
@@ -28,5 +30,5 @@
 ## 5. Cleanup
 
 - [ ] 5.1 Remove any test tags or test branches created during verification
-- [ ] 5.2 Run full test suite locally (`bun test`) to confirm no regressions
-- [ ] 5.3 Run type check locally (`bunx tsc --build`) to confirm no type errors
+- [x] 5.2 Run full test suite locally (`bun test`) to confirm no regressions
+- [x] 5.3 Run type check locally (`bunx tsc --build`) to confirm no type errors
