@@ -321,3 +321,197 @@ describe("Task 7.4: Create with computed field names in input", () => {
 		});
 	});
 });
+
+describe("Task 7.5: Update with computed field names in input", () => {
+	let db: EffectDatabase<typeof config>;
+	let bookId: string;
+
+	beforeEach(async () => {
+		db = await Effect.runPromise(
+			createEffectDatabase(config, {
+				books: [],
+				authors: [{ id: "author1", name: "Frank Herbert" }],
+			}),
+		);
+
+		// Create a book for update tests
+		const created = await db.books
+			.create({
+				title: "Dune",
+				year: 1965,
+				genre: "sci-fi",
+				authorId: "author1",
+			})
+			.runPromise;
+		bookId = created.id;
+	});
+
+	describe("update() ignores computed field values in input", () => {
+		it("should ignore displayName in update input and only update stored fields", async () => {
+			// Update with a computed field in the input
+			const updated = await db.books.update(bookId, {
+				title: "Dune - Updated",
+				// Pass a wrong displayName - this should be IGNORED
+				displayName: "WRONG VALUE - should be ignored",
+			} as Parameters<typeof db.books.update>[1]).runPromise;
+
+			// Read from Ref to verify stored value
+			const stored = await db.books.findById(bookId).runPromise;
+
+			// Stored entity should NOT have displayName (it's a computed field)
+			const storedRecord = stored as unknown as Record<string, unknown>;
+			expect(storedRecord.displayName).toBeUndefined();
+			expect("displayName" in storedRecord).toBe(false);
+
+			// Verify stored fields are correct
+			expect(stored.title).toBe("Dune - Updated");
+			expect(stored.year).toBe(1965); // Unchanged
+		});
+
+		it("should ignore isClassic boolean in update input", async () => {
+			// Update year to something >= 1980 (isClassic should become false)
+			// But pass isClassic: true in the input - this should be IGNORED
+			const updated = await db.books.update(bookId, {
+				year: 2020, // This makes isClassic = false
+				// Pass wrong isClassic - this should be IGNORED
+				isClassic: true,
+			} as Parameters<typeof db.books.update>[1]).runPromise;
+
+			// Read from Ref
+			const stored = await db.books.findById(bookId).runPromise;
+
+			// Stored entity should NOT have isClassic
+			const storedRecord = stored as unknown as Record<string, unknown>;
+			expect(storedRecord.isClassic).toBeUndefined();
+			expect("isClassic" in storedRecord).toBe(false);
+
+			// The stored year is correct (from which isClassic would be derived)
+			expect(stored.year).toBe(2020);
+		});
+
+		it("should ignore yearsSincePublication in update input", async () => {
+			const updated = await db.books.update(bookId, {
+				genre: "classic sci-fi",
+				// Pass wrong yearsSincePublication - this should be IGNORED
+				yearsSincePublication: 999,
+			} as Parameters<typeof db.books.update>[1]).runPromise;
+
+			// Read from Ref
+			const stored = await db.books.findById(bookId).runPromise;
+
+			// Stored entity should NOT have yearsSincePublication
+			const storedRecord = stored as unknown as Record<string, unknown>;
+			expect(storedRecord.yearsSincePublication).toBeUndefined();
+			expect("yearsSincePublication" in storedRecord).toBe(false);
+
+			// Stored genre is updated correctly
+			expect(stored.genre).toBe("classic sci-fi");
+		});
+
+		it("should ignore ALL computed fields when multiple are provided in update input", async () => {
+			// Update with all computed fields having wrong values
+			const updated = await db.books.update(bookId, {
+				title: "Dune Messiah",
+				year: 1969,
+				// All computed fields with wrong values - ALL should be IGNORED
+				displayName: "WRONG DISPLAY NAME",
+				isClassic: false, // Wrong: 1969 is < 1980, so isClassic should be true
+				yearsSincePublication: 0,
+			} as Parameters<typeof db.books.update>[1]).runPromise;
+
+			// Read from Ref
+			const stored = await db.books.findById(bookId).runPromise;
+
+			// None of the computed fields should be stored
+			const storedRecord = stored as unknown as Record<string, unknown>;
+			expect(storedRecord.displayName).toBeUndefined();
+			expect(storedRecord.isClassic).toBeUndefined();
+			expect(storedRecord.yearsSincePublication).toBeUndefined();
+
+			// Only stored fields should be present
+			const keys = Object.keys(stored);
+			expect(keys).not.toContain("displayName");
+			expect(keys).not.toContain("isClassic");
+			expect(keys).not.toContain("yearsSincePublication");
+
+			// Stored fields are correctly updated
+			expect(stored.title).toBe("Dune Messiah");
+			expect(stored.year).toBe(1969);
+		});
+
+		it("should preserve all stored fields while stripping computed fields on update", async () => {
+			// First, verify the initial state
+			const initial = await db.books.findById(bookId).runPromise;
+			expect(initial.title).toBe("Dune");
+			expect(initial.year).toBe(1965);
+			expect(initial.genre).toBe("sci-fi");
+			expect(initial.authorId).toBe("author1");
+
+			// Update with a computed field
+			const updated = await db.books.update(bookId, {
+				title: "Children of Dune",
+				year: 1976,
+				// Computed field - should be ignored
+				displayName: "IGNORED",
+			} as Parameters<typeof db.books.update>[1]).runPromise;
+
+			// All stored fields should be preserved/updated correctly
+			expect(updated.id).toBe(bookId);
+			expect(updated.title).toBe("Children of Dune");
+			expect(updated.year).toBe(1976);
+			expect(updated.genre).toBe("sci-fi"); // Unchanged
+			expect(updated.authorId).toBe("author1"); // Unchanged
+			expect(updated.updatedAt).toBeDefined();
+		});
+
+		it("should update only specified stored fields, ignoring computed fields entirely", async () => {
+			// Only pass computed field (and one stored field)
+			// The computed field should be ignored, only the stored field should be updated
+			const updated = await db.books.update(bookId, {
+				genre: "space opera",
+				displayName: "This should not exist in storage",
+				isClassic: false,
+			} as Parameters<typeof db.books.update>[1]).runPromise;
+
+			// Read from Ref
+			const stored = await db.books.findById(bookId).runPromise;
+
+			// Verify only the stored field was updated
+			expect(stored.genre).toBe("space opera");
+			expect(stored.title).toBe("Dune"); // Unchanged
+			expect(stored.year).toBe(1965); // Unchanged
+
+			// Verify no computed fields are stored
+			const storedRecord = stored as unknown as Record<string, unknown>;
+			expect(storedRecord.displayName).toBeUndefined();
+			expect(storedRecord.isClassic).toBeUndefined();
+		});
+	});
+
+	describe("Schema validation still works after stripping computed fields on update", () => {
+		it("should validate stored field types correctly after stripping on update", async () => {
+			// Pass invalid type for stored field, but valid computed field
+			const effect = db.books.update(bookId, {
+				year: "not a number" as unknown as number, // Invalid type
+				displayName: "Dune (1965)", // Correct value, but should be stripped
+			} as Parameters<typeof db.books.update>[1]);
+
+			const result = await Effect.runPromise(Effect.flip(effect));
+
+			expect(result._tag).toBe("ValidationError");
+		});
+	});
+
+	describe("Foreign key validation still works after stripping computed fields on update", () => {
+		it("should validate foreign keys correctly when computed fields are in update input", async () => {
+			const effect = db.books.update(bookId, {
+				authorId: "nonexistent-author", // Invalid FK
+				displayName: "Dune (1965)", // computed, gets stripped
+			} as Parameters<typeof db.books.update>[1]);
+
+			const result = await Effect.runPromise(Effect.flip(effect));
+
+			expect(result._tag).toBe("ForeignKeyError");
+		});
+	});
+});
