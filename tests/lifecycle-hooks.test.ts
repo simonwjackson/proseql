@@ -1845,5 +1845,112 @@ describe("lifecycle-hooks", () => {
 			// Verify hook execution order: beforeCreate → afterCreate → onChange
 			expect(hookOrder).toEqual(["beforeCreate", "afterCreate", "onChange:create"])
 		})
+
+		it("upsert update path: triggers beforeUpdate/afterUpdate/onChange('update')", async () => {
+			// Track all hook calls for the update path
+			const beforeUpdateCalls: Array<BeforeUpdateContext<User>> = []
+			const afterUpdateCalls: Array<AfterUpdateContext<User>> = []
+			const onChangeCalls: Array<OnChangeContext<User>> = []
+
+			// Track order of execution
+			const hookOrder: Array<string> = []
+
+			// beforeUpdate: transform by appending "-modified" to the update
+			const beforeUpdateHook: BeforeUpdateHook<User> = (ctx) => {
+				hookOrder.push("beforeUpdate")
+				beforeUpdateCalls.push(ctx)
+				const update = ctx.update as Partial<User>
+				return Effect.succeed({
+					...update,
+					name: update.name ? `${update.name}-modified` : update.name,
+				})
+			}
+
+			// afterUpdate: record the update
+			const afterUpdateHook: AfterUpdateHook<User> = (ctx) => {
+				hookOrder.push("afterUpdate")
+				afterUpdateCalls.push(ctx)
+				return Effect.void
+			}
+
+			// onChange: record the change
+			const onChangeHook: OnChangeHook<User> = (ctx) => {
+				hookOrder.push(`onChange:${ctx.type}`)
+				onChangeCalls.push(ctx)
+				return Effect.void
+			}
+
+			const hooks: HooksConfig<User> = {
+				beforeUpdate: [beforeUpdateHook],
+				afterUpdate: [afterUpdateHook],
+				onChange: [onChangeHook],
+			}
+
+			// Start with existing user so upsert takes the update path
+			const testData = {
+				users: [
+					{ id: "u1", name: "Alice", email: "alice@test.com", age: 30 },
+				],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, testData)
+
+					// Upsert a user that exists - should take update path
+					const upserted = yield* db.users.upsert({
+						where: { email: "alice@test.com" },
+						create: { name: "NewUser", email: "alice@test.com", age: 28 },
+						update: { name: "UpdatedAlice", age: 31 },
+					})
+
+					// Read the user back to verify it was updated with transformation
+					const found = yield* db.users.findById("u1")
+
+					return { upserted, found }
+				}),
+			)
+
+			// Verify the upsert took the update path
+			expect(result.upserted.__action).toBe("updated")
+
+			// Verify beforeUpdate was called with correct context
+			expect(beforeUpdateCalls).toHaveLength(1)
+			expect(beforeUpdateCalls[0].operation).toBe("update")
+			expect(beforeUpdateCalls[0].collection).toBe("users")
+			expect(beforeUpdateCalls[0].id).toBe("u1")
+			expect(beforeUpdateCalls[0].existing.name).toBe("Alice")
+			expect(beforeUpdateCalls[0].existing.email).toBe("alice@test.com")
+			expect(beforeUpdateCalls[0].update).toEqual({ name: "UpdatedAlice", age: 31 })
+
+			// Verify the transformation from beforeUpdate was applied
+			expect(result.upserted.name).toBe("UpdatedAlice-modified")
+			expect(result.upserted.age).toBe(31)
+			expect(result.found.name).toBe("UpdatedAlice-modified")
+			expect(result.found.age).toBe(31)
+
+			// Verify afterUpdate was called with previous and current state
+			expect(afterUpdateCalls).toHaveLength(1)
+			expect(afterUpdateCalls[0].operation).toBe("update")
+			expect(afterUpdateCalls[0].collection).toBe("users")
+			expect(afterUpdateCalls[0].id).toBe("u1")
+			expect(afterUpdateCalls[0].previous.name).toBe("Alice")
+			expect(afterUpdateCalls[0].previous.age).toBe(30)
+			expect(afterUpdateCalls[0].current.name).toBe("UpdatedAlice-modified")
+			expect(afterUpdateCalls[0].current.age).toBe(31)
+
+			// Verify onChange was called with type "update"
+			expect(onChangeCalls).toHaveLength(1)
+			expect(onChangeCalls[0].type).toBe("update")
+			expect(onChangeCalls[0].collection).toBe("users")
+			if (onChangeCalls[0].type === "update") {
+				expect(onChangeCalls[0].id).toBe("u1")
+				expect(onChangeCalls[0].previous.name).toBe("Alice")
+				expect(onChangeCalls[0].current.name).toBe("UpdatedAlice-modified")
+			}
+
+			// Verify hook execution order: beforeUpdate → afterUpdate → onChange
+			expect(hookOrder).toEqual(["beforeUpdate", "afterUpdate", "onChange:update"])
+		})
 	})
 })
