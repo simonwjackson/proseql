@@ -2075,6 +2075,274 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 		})
 	})
 
+	describe("13.3: $search inside $and", () => {
+		it("should match only when both $search conditions are true", async () => {
+			const db = await createTestDatabase()
+			// $and: title search for "dune" AND author search for "herbert"
+			// Only Dune matches both conditions
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{ title: { $search: "dune" } },
+						{ author: { $search: "herbert" } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+			expect(results[0].author).toBe("Frank Herbert")
+		})
+
+		it("should return empty when first $search condition fails", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{ title: { $search: "nonexistent" } },
+						{ author: { $search: "herbert" } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should return empty when second $search condition fails", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{ title: { $search: "dune" } },
+						{ author: { $search: "nonexistent" } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should return empty when neither $search condition matches", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{ title: { $search: "xyz123" } },
+						{ author: { $search: "abc456" } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should work with top-level $search inside $and", async () => {
+			const db = await createTestDatabase()
+			// $and with top-level $search (multi-field search)
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{ $search: { query: "herbert", fields: ["author"] } },
+						{ $search: { query: "dune", fields: ["title"] } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should work with $search combined with other operators inside $and", async () => {
+			const db = await createTestDatabase()
+			// $and: ($search on title) AND (year filter)
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{ title: { $search: "dune" } },
+						{ year: { $lt: 1980 } },
+					],
+				},
+			}).runPromise
+
+			// "Dune" (1965) matches via $search AND year < 1980
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+			expect(results[0].year).toBe(1965)
+		})
+
+		it("should return empty when $search matches but other operator excludes in $and", async () => {
+			const db = await createTestDatabase()
+			// $and: ($search on title) AND (year filter that excludes)
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{ title: { $search: "dune" } },
+						{ year: { $gt: 1980 } },
+					],
+				},
+			}).runPromise
+
+			// "Dune" (1965) matches $search but year is not > 1980
+			expect(results.length).toBe(0)
+		})
+
+		it("should work with $and containing three $search conditions", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{ title: { $search: "dune" } },
+						{ author: { $search: "frank" } },
+						{ description: { $search: "spice" } },
+					],
+				},
+			}).runPromise
+
+			// Only Dune matches all three conditions
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should return empty when any one of multiple $and conditions fails", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{ title: { $search: "dune" } },
+						{ author: { $search: "frank" } },
+						{ description: { $search: "nonexistent" } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should work with nested $and containing $search", async () => {
+			const db = await createTestDatabase()
+			// Nested $and: ((title: dune) AND (author: herbert)) AND (year < 1970)
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{
+							$and: [
+								{ title: { $search: "dune" } },
+								{ author: { $search: "herbert" } },
+							],
+						},
+						{ year: { $lt: 1970 } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+			expect(results[0].year).toBe(1965)
+		})
+
+		it("should work with prefix search inside $and", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{ title: { $search: "du" } },
+						{ author: { $search: "herb" } },
+					],
+				},
+			}).runPromise
+
+			// "du" is prefix for "Dune", "herb" is prefix for "Herbert"
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should respect case-insensitivity inside $and", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{ title: { $search: "DUNE" } },
+						{ author: { $search: "HERBERT" } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should work with multi-term $search inside $and", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{ title: { $search: "left hand" } },
+						{ author: { $search: "le guin" } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("The Left Hand of Darkness")
+		})
+
+		it("should combine $and and $or with $search", async () => {
+			const db = await createTestDatabase()
+			// $and: (year < 1970) AND ($or: title="dune" OR title="darkness")
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{ year: { $lt: 1970 } },
+						{
+							$or: [
+								{ title: { $search: "dune" } },
+								{ title: { $search: "darkness" } },
+							],
+						},
+					],
+				},
+			}).runPromise
+
+			// Dune (1965) and The Left Hand of Darkness (1969) both match
+			expect(results.length).toBe(2)
+			const titles = results.map((b) => b.title).sort()
+			expect(titles).toEqual(["Dune", "The Left Hand of Darkness"])
+		})
+
+		it("should work with $or inside $and where $or fails", async () => {
+			const db = await createTestDatabase()
+			// $and: (year > 1990) AND ($or: title="dune" OR title="foundation")
+			const results = await db.books.query({
+				where: {
+					$and: [
+						{ year: { $gt: 1990 } },
+						{
+							$or: [
+								{ title: { $search: "dune" } },
+								{ title: { $search: "foundation" } },
+							],
+						},
+					],
+				},
+			}).runPromise
+
+			// Dune (1965) and Foundation (1951) both match $or but neither is > 1990
+			expect(results.length).toBe(0)
+		})
+
+		it("should work with empty $and array (match all)", async () => {
+			const db = await createTestDatabase()
+			// Empty $and should match all
+			const results = await db.books.query({
+				where: {
+					$and: [],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(5)
+		})
+	})
+
 	describe("13.1: $search with other field operators", () => {
 		it("should filter by both $search and $gt operator", async () => {
 			const db = await createTestDatabase()
