@@ -273,4 +273,134 @@ describe("Cursor Pagination", () => {
 			])
 		})
 	})
+
+	describe("backward pagination", () => {
+		it("page via before cursor returns previous items", async () => {
+			const items = generateItems(10)
+
+			// Use before cursor to get items before item-007
+			const page = await runCursorQuery(items, {
+				cursor: {
+					key: "id",
+					limit: 3,
+					before: "item-007",
+				},
+			})
+
+			// Should return items 4-6 (the last 3 items before item-007)
+			expect(page.items).toHaveLength(3)
+			expect(page.items.map((i) => i.id)).toEqual([
+				"item-004",
+				"item-005",
+				"item-006",
+			])
+
+			// Should have previous page (items 1-3)
+			expect(page.pageInfo.hasPreviousPage).toBe(true)
+			// Should have next page (items 7-10)
+			expect(page.pageInfo.hasNextPage).toBe(true)
+
+			// Cursors should match first and last items
+			expect(page.pageInfo.startCursor).toBe("item-004")
+			expect(page.pageInfo.endCursor).toBe("item-006")
+		})
+
+		it("first page (before earliest) has hasPreviousPage = false", async () => {
+			const items = generateItems(10)
+
+			// Use before cursor to get items before item-004
+			// This should return items 1-3
+			const page = await runCursorQuery(items, {
+				cursor: {
+					key: "id",
+					limit: 3,
+					before: "item-004",
+				},
+			})
+
+			// Should return items 1-3
+			expect(page.items).toHaveLength(3)
+			expect(page.items.map((i) => i.id)).toEqual([
+				"item-001",
+				"item-002",
+				"item-003",
+			])
+
+			// Should not have previous page (this is the first page)
+			expect(page.pageInfo.hasPreviousPage).toBe(false)
+			// Should have next page (items 4-10)
+			expect(page.pageInfo.hasNextPage).toBe(true)
+
+			// Cursors should match first and last items
+			expect(page.pageInfo.startCursor).toBe("item-001")
+			expect(page.pageInfo.endCursor).toBe("item-003")
+		})
+
+		it("can paginate backward through items", async () => {
+			const items = generateItems(10)
+
+			// Start from the end and paginate backward
+			// First backward page: items before item-011 (doesn't exist, so all items match)
+			// Actually, let's use a real cursor from a forward pagination
+			// Navigate to item-010 first
+			const lastPage = await runCursorQuery(items, {
+				cursor: {
+					key: "id",
+					limit: 3,
+					after: "item-007",
+				},
+			})
+			// This returns items 8-10
+
+			// Now go backward from item-008 (startCursor of last page)
+			const prevPage = await runCursorQuery(items, {
+				cursor: {
+					key: "id",
+					limit: 3,
+					before: lastPage.pageInfo.startCursor!,
+				},
+			})
+
+			// Should return items 5-7
+			expect(prevPage.items).toHaveLength(3)
+			expect(prevPage.items.map((i) => i.id)).toEqual([
+				"item-005",
+				"item-006",
+				"item-007",
+			])
+
+			expect(prevPage.pageInfo.hasPreviousPage).toBe(true)
+			expect(prevPage.pageInfo.hasNextPage).toBe(true)
+		})
+
+		it("returns fewer items when near the beginning", async () => {
+			const items = generateItems(10)
+
+			// Request 5 items before item-003
+			// Only items 1-2 exist before item-003
+			const page = await runCursorQuery(items, {
+				cursor: {
+					key: "id",
+					limit: 5,
+					before: "item-003",
+				},
+			})
+
+			// Should return only 2 items (items 1-2)
+			expect(page.items).toHaveLength(2)
+			expect(page.items.map((i) => i.id)).toEqual([
+				"item-001",
+				"item-002",
+			])
+
+			// Should not have previous page (these are the first items)
+			expect(page.pageInfo.hasPreviousPage).toBe(false)
+			// Should have next page
+			expect(page.pageInfo.hasNextPage).toBe(true)
+
+			// Cursors should match first and last items
+			expect(page.pageInfo.startCursor).toBe("item-001")
+			expect(page.pageInfo.endCursor).toBe("item-002")
+		})
+	})
 })
