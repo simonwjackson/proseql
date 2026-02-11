@@ -199,7 +199,7 @@ export interface EffectCollection<T extends HasId> {
 		options?: CreateManyOptions,
 	) => RunnableEffect<
 		CreateManyResult<T>,
-		ValidationError | DuplicateKeyError | ForeignKeyError
+		ValidationError | DuplicateKeyError | ForeignKeyError | HookError
 	>
 
 	readonly update: (

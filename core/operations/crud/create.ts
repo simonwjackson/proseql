@@ -143,10 +143,11 @@ export const create = <T extends HasId, I = T>(
 // ============================================================================
 
 /**
- * Create multiple entities with batch validation and optional duplicate skipping.
+ * Create multiple entities with batch validation, hooks, and optional duplicate skipping.
  *
- * When `skipDuplicates` is true, entities that fail validation or have duplicate IDs
- * are skipped and reported in the result. Otherwise, the first error stops the operation.
+ * When `skipDuplicates` is true, entities that fail validation, have duplicate IDs,
+ * or have a HookError are skipped and reported in the result. Otherwise, the first error
+ * stops the operation.
  */
 export const createMany = <T extends HasId, I = T>(
 	collectionName: string,
@@ -155,11 +156,12 @@ export const createMany = <T extends HasId, I = T>(
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	indexes?: CollectionIndexes,
+	hooks?: HooksConfig<T>,
 ) =>
 (
 	inputs: ReadonlyArray<CreateInput<T>>,
 	options?: CreateManyOptions,
-): Effect.Effect<CreateManyResult<T>, ValidationError | DuplicateKeyError | ForeignKeyError> =>
+): Effect.Effect<CreateManyResult<T>, ValidationError | DuplicateKeyError | ForeignKeyError | HookError> =>
 	Effect.gen(function* () {
 		const created: T[] = []
 		const skipped: Array<{ data: Partial<T>; reason: string }> = []
@@ -172,7 +174,7 @@ export const createMany = <T extends HasId, I = T>(
 		// Track IDs we're adding in this batch
 		const batchIds = new Set<string>()
 
-		// Phase 1: Validate all entities and collect valid ones
+		// Phase 1: Validate all entities and run beforeCreate hooks
 		const validEntities: T[] = []
 
 		for (const input of inputs) {
@@ -219,8 +221,31 @@ export const createMany = <T extends HasId, I = T>(
 			}
 
 			const validated = validationResult.validated
+
+			// Run beforeCreate hooks (can transform or reject the entity)
+			const hookResult = yield* runBeforeCreateHooks(hooks?.beforeCreate, {
+				operation: "create",
+				collection: collectionName,
+				data: validated,
+			}).pipe(
+				Effect.map((entity) => ({ _tag: "ok" as const, entity })),
+				Effect.catchTag("HookError", (err) =>
+					skipOnError
+						? Effect.succeed({ _tag: "skipped" as const, error: err })
+						: Effect.fail(err),
+				),
+			)
+
+			if (hookResult._tag === "skipped") {
+				skipped.push({
+					data: { ...input, id } as Partial<T>,
+					reason: `Hook rejected: ${hookResult.error.message}`,
+				})
+				continue
+			}
+
 			batchIds.add(id)
-			validEntities.push(validated)
+			validEntities.push(hookResult.entity)
 		}
 
 		// Phase 2: Validate foreign keys if requested
@@ -281,6 +306,21 @@ export const createMany = <T extends HasId, I = T>(
 		// Update indexes for all created entities using batch operation
 		if (indexes && indexes.size > 0 && created.length > 0) {
 			yield* addManyToIndex(indexes, created)
+		}
+
+		// Phase 3: Run afterCreate and onChange hooks for each created entity
+		for (const entity of created) {
+			yield* runAfterCreateHooks(hooks?.afterCreate, {
+				operation: "create",
+				collection: collectionName,
+				entity,
+			})
+
+			yield* runOnChangeHooks(hooks?.onChange, {
+				type: "create",
+				collection: collectionName,
+				entity,
+			})
 		}
 
 		return {
