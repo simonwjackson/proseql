@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Schema, Stream, Chunk } from "effect"
 import { createEffectDatabase } from "../core/factories/database-effect.js"
+import { NotFoundError } from "../core/errors/crud-errors.js"
 
 // ============================================================================
 // Test Schemas
@@ -301,6 +302,97 @@ describe("$transaction", () => {
 			// Verify original users are still intact
 			expect(finalUsers.find((u) => u.id === "u1")?.name).toBe("Alice")
 			expect(finalUsers.find((u) => u.id === "u2")?.name).toBe("Bob")
+		})
+
+		it("should preserve original CRUD error type accessible via catchTag after rollback", async () => {
+			const db = await Effect.runPromise(createTestDb())
+
+			// Execute transaction that triggers a CRUD error (NotFoundError)
+			const result = await db
+				.$transaction((ctx) =>
+					Effect.gen(function* () {
+						// Try to find a non-existent user - this will fail with NotFoundError
+						const user = yield* ctx.users.findById("non-existent-id")
+						return user
+					}),
+				)
+				.pipe(
+					// Use catchTag to verify the original error type is preserved
+					Effect.catchTag("NotFoundError", (error) =>
+						Effect.succeed({
+							caught: true,
+							errorTag: error._tag,
+							collection: error.collection,
+							id: error.id,
+						}),
+					),
+					Effect.runPromise,
+				)
+
+			// Verify the NotFoundError was caught and its properties are accessible
+			expect(result).toEqual({
+				caught: true,
+				errorTag: "NotFoundError",
+				collection: "users",
+				id: "non-existent-id",
+			})
+
+			// Verify database state is unchanged (rollback happened)
+			const users = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(users).toHaveLength(2)
+		})
+
+		it("should preserve custom business error type accessible via catchTag after rollback", async () => {
+			const db = await Effect.runPromise(createTestDb())
+
+			// Execute transaction that fails with custom error after successful operation
+			const result = await db
+				.$transaction((ctx) =>
+					Effect.gen(function* () {
+						// Create a user (this will be rolled back)
+						yield* ctx.users.create({
+							id: "u3",
+							name: "Charlie",
+							email: "charlie@test.com",
+							age: 35,
+						})
+
+						// Fail with our custom error
+						return yield* Effect.fail(new TestBusinessError("Custom failure message"))
+					}),
+				)
+				.pipe(
+					// Catch by checking the _tag property (since TestBusinessError uses _tag)
+					Effect.catchIf(
+						(error): error is TestBusinessError =>
+							error instanceof TestBusinessError && error._tag === "TestBusinessError",
+						(error) =>
+							Effect.succeed({
+								caught: true,
+								errorTag: error._tag,
+								message: error.message,
+							}),
+					),
+					Effect.runPromise,
+				)
+
+			// Verify the custom error was caught with full properties
+			expect(result).toEqual({
+				caught: true,
+				errorTag: "TestBusinessError",
+				message: "Custom failure message",
+			})
+
+			// Verify user creation was rolled back
+			const users = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(users).toHaveLength(2)
+			expect(users.find((u) => u.id === "u3")).toBeUndefined()
 		})
 	})
 })
