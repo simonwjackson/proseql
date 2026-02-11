@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { Effect, Schema, Chunk, Stream, Runtime, Cause } from "effect"
-import { createEffectDatabase } from "../core/factories/database-effect.js"
-import type { CursorPageResult } from "../core/types/cursor-types.js"
-import { ValidationError } from "../core/errors/crud-errors.js"
+import { createEffectDatabase } from "../src/factories/database-effect.js"
+import type { CursorPageResult } from "../src/types/cursor-types.js"
+import { ValidationError } from "../src/errors/crud-errors.js"
 
 // ============================================================================
 // Test Schema

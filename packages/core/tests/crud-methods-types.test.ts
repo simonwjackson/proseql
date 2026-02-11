@@ -1,16 +1,16 @@
 import { describe, it, expect } from "vitest"
 import { Schema, Effect, Stream } from "effect"
-import type { CrudMethods } from "../core/factories/crud-factory"
-import type { CrudMethodsWithRelationships } from "../core/factories/crud-factory-with-relationships"
-import type { RunnableEffect } from "../core/factories/database-effect"
-import type { RelationshipDef } from "../core/types/types"
+import type { CrudMethods } from "../src/factories/crud-factory"
+import type { CrudMethodsWithRelationships } from "../src/factories/crud-factory-with-relationships"
+import type { RunnableEffect } from "../src/factories/database-effect"
+import type { RelationshipDef } from "../src/types/types"
 import type {
 	NotFoundError,
 	DuplicateKeyError,
 	ForeignKeyError,
 	ValidationError,
 	OperationError,
-} from "../core/errors/crud-errors"
+} from "../src/errors/crud-errors"
 
 // ============================================================================
 // Test schemas

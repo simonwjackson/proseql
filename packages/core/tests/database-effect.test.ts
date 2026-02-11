@@ -6,10 +6,10 @@ import {
 	type RunnableEffect,
 	type RunnableStream,
 	type EffectDatabaseWithPersistence,
-} from "../core/factories/database-effect.js"
-import { makeInMemoryStorageLayer } from "../core/storage/in-memory-adapter-layer.js"
-import { makeSerializerLayer } from "../core/serializers/format-codec.js"
-import { jsonCodec } from "../core/serializers/codecs/json.js"
+} from "../src/factories/database-effect.js"
+import { makeInMemoryStorageLayer } from "../src/storage/in-memory-adapter-layer.js"
+import { makeSerializerLayer } from "../src/serializers/format-codec.js"
+import { jsonCodec } from "../src/serializers/codecs/json.js"
 
 // ============================================================================
 // Test Schemas

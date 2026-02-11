@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Stream, Chunk, Ref } from "effect";
-import { applyPopulate } from "../core/operations/relationships/populate-stream.js";
-import { applySelect } from "../core/operations/query/select-stream.js";
-import type { CollectionConfig } from "../core/types/database-config-types.js";
-import { DanglingReferenceError } from "../core/errors/query-errors.js";
+import { applyPopulate } from "../src/operations/relationships/populate-stream.js";
+import { applySelect } from "../src/operations/query/select-stream.js";
+import type { CollectionConfig } from "../src/types/database-config-types.js";
+import { DanglingReferenceError } from "../src/errors/query-errors.js";
 
 // ============================================================================
 // Helpers

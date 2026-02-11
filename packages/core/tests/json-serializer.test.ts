@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { Effect } from "effect"
-import { makeSerializerLayer } from "../core/serializers/format-codec.js"
-import { jsonCodec } from "../core/serializers/codecs/json.js"
-import { SerializerRegistry } from "../core/serializers/serializer-service.js"
+import { makeSerializerLayer } from "../src/serializers/format-codec.js"
+import { jsonCodec } from "../src/serializers/codecs/json.js"
+import { SerializerRegistry } from "../src/serializers/serializer-service.js"
 
 // ============================================================================
 // JSON serialization via SerializerRegistry

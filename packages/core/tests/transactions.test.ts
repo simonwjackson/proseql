@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Schema, Stream, Chunk, Ref } from "effect"
-import { createEffectDatabase, type EffectCollection } from "../core/factories/database-effect.js"
-import { NotFoundError, TransactionError } from "../core/errors/crud-errors.js"
-import { createTransaction } from "../core/transactions/transaction.js"
-import { normalizeIndexes, buildIndexes } from "../core/indexes/index-manager.js"
+import { createEffectDatabase, type EffectCollection } from "../src/factories/database-effect.js"
+import { NotFoundError, TransactionError } from "../src/errors/crud-errors.js"
+import { createTransaction } from "../src/transactions/transaction.js"
+import { normalizeIndexes, buildIndexes } from "../src/indexes/index-manager.js"
 
 // ============================================================================
 // Test Schemas
@@ -1848,7 +1848,7 @@ describe("Snapshot Isolation", () => {
 // Persistence Integration Tests
 // ============================================================================
 
-import { $transaction as $transactionImpl } from "../core/transactions/transaction.js"
+import { $transaction as $transactionImpl } from "../src/transactions/transaction.js"
 
 /**
  * Helper to create a manual transaction test setup with a spy on the persistence trigger.

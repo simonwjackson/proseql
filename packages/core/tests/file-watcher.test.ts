@@ -4,12 +4,12 @@ import {
 	createFileWatcher,
 	createFileWatchers,
 	type FileWatcher,
-} from "../core/storage/persistence-effect.js"
-import { StorageAdapter } from "../core/storage/storage-service.js"
-import { makeInMemoryStorageLayer } from "../core/storage/in-memory-adapter-layer.js"
-import { makeSerializerLayer } from "../core/serializers/format-codec.js"
-import { jsonCodec } from "../core/serializers/codecs/json.js"
-import { StorageError } from "../core/errors/storage-errors.js"
+} from "../src/storage/persistence-effect.js"
+import { StorageAdapter } from "../src/storage/storage-service.js"
+import { makeInMemoryStorageLayer } from "../src/storage/in-memory-adapter-layer.js"
+import { makeSerializerLayer } from "../src/serializers/format-codec.js"
+import { jsonCodec } from "../src/serializers/codecs/json.js"
+import { StorageError } from "../src/errors/storage-errors.js"
 
 // ============================================================================
 // Helpers

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Schema, Stream, Chunk } from "effect";
-import { createEffectDatabase } from "../core/factories/database-effect";
+import { createEffectDatabase } from "../src/factories/database-effect";
 
 describe("Database v2 - Conditional Logic (OR/AND/NOT) (Effect/Stream)", () => {
 	// Test schemas

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Stream, Chunk } from "effect";
-import { applyPagination } from "../core/operations/query/paginate-stream.js";
+import { applyPagination } from "../src/operations/query/paginate-stream.js";
 
 describe("applyPagination Stream combinator", () => {
   const items = [

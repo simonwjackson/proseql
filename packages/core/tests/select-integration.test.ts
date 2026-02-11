@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Stream, Chunk } from "effect";
-import { applySelect } from "../core/operations/query/select-stream";
-import { applyFilter } from "../core/operations/query/filter-stream";
-import { applySort } from "../core/operations/query/sort-stream";
+import { applySelect } from "../src/operations/query/select-stream";
+import { applyFilter } from "../src/operations/query/filter-stream";
+import { applySort } from "../src/operations/query/sort-stream";
 import {
 	applyObjectSelection,
 	applySelectionToArray,
 	createFieldSelector,
-} from "../core/operations/query/select";
+} from "../src/operations/query/select";
 
 // Helper to collect stream-based pipeline results
 const collectPipeline = <T extends Record<string, unknown>>(

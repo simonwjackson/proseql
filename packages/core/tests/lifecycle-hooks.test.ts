@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Schema, Stream, Chunk } from "effect"
-import { createEffectDatabase } from "../core/factories/database-effect.js"
-import { HookError } from "../core/errors/crud-errors.js"
+import { createEffectDatabase } from "../src/factories/database-effect.js"
+import { HookError } from "../src/errors/crud-errors.js"
 import type {
 	HooksConfig,
 	BeforeCreateHook,
@@ -18,7 +18,7 @@ import type {
 	AfterUpdateContext,
 	AfterDeleteContext,
 	OnChangeContext,
-} from "../core/types/hook-types.js"
+} from "../src/types/hook-types.js"
 
 // ============================================================================
 // Test Schemas

@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Ref } from "effect"
-import { del, deleteMany } from "../core/operations/crud/delete.js"
+import { del, deleteMany } from "../src/operations/crud/delete.js"
 import {
 	NotFoundError,
 	ForeignKeyError,
 	OperationError,
-} from "../core/errors/crud-errors.js"
+} from "../src/errors/crud-errors.js"
 
 // ============================================================================
 // Types

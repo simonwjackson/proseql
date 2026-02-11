@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { tomlCodec } from "../core/serializers/codecs/toml.js"
+import { tomlCodec } from "../src/serializers/codecs/toml.js"
 
 /**
  * TOML-specific null stripping tests.

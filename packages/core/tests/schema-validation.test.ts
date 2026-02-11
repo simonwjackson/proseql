@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { Effect, Schema } from "effect"
-import { validateEntity, encodeEntity } from "../core/validators/schema-validator.js"
-import { ValidationError } from "../core/errors/index.js"
+import { validateEntity, encodeEntity } from "../src/validators/schema-validator.js"
+import { ValidationError } from "../src/errors/index.js"
 
 const UserSchema = Schema.Struct({
 	id: Schema.String,

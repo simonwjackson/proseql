@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest"
 import { Effect } from "effect"
-import { SerializerRegistry } from "../core/serializers/serializer-service.js"
+import { SerializerRegistry } from "../src/serializers/serializer-service.js"
 import {
 	SerializationError,
 	UnsupportedFormatError,
-} from "../core/errors/storage-errors.js"
+} from "../src/errors/storage-errors.js"
 import {
 	AllTextFormatsLayer,
 	DefaultSerializerLayer,
-} from "../core/serializers/presets.js"
+} from "../src/serializers/presets.js"
 
 /**
  * Tests for preset Layers:

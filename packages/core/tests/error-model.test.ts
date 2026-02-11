@@ -15,7 +15,7 @@ import {
 	StorageError,
 	SerializationError,
 	UnsupportedFormatError,
-} from "../core/errors/index.js"
+} from "../src/errors/index.js"
 
 describe("CRUD error creation and _tag discrimination", () => {
 	it("NotFoundError has correct _tag and fields", () => {

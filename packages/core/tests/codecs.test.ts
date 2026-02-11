@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest"
-import { jsonCodec } from "../core/serializers/codecs/json.js"
-import { yamlCodec } from "../core/serializers/codecs/yaml.js"
-import { json5Codec } from "../core/serializers/codecs/json5.js"
-import { jsoncCodec } from "../core/serializers/codecs/jsonc.js"
-import { tomlCodec } from "../core/serializers/codecs/toml.js"
-import { toonCodec } from "../core/serializers/codecs/toon.js"
-import { hjsonCodec } from "../core/serializers/codecs/hjson.js"
-import type { FormatCodec } from "../core/serializers/format-codec.js"
+import { jsonCodec } from "../src/serializers/codecs/json.js"
+import { yamlCodec } from "../src/serializers/codecs/yaml.js"
+import { json5Codec } from "../src/serializers/codecs/json5.js"
+import { jsoncCodec } from "../src/serializers/codecs/jsonc.js"
+import { tomlCodec } from "../src/serializers/codecs/toml.js"
+import { toonCodec } from "../src/serializers/codecs/toon.js"
+import { hjsonCodec } from "../src/serializers/codecs/hjson.js"
+import type { FormatCodec } from "../src/serializers/format-codec.js"
 
 /**
  * Round-trip tests for all 7 codecs.

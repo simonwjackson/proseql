@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { Effect } from "effect"
-import { makeSerializerLayer } from "../core/serializers/format-codec.js"
-import { yamlCodec } from "../core/serializers/codecs/yaml.js"
-import { SerializerRegistry } from "../core/serializers/serializer-service.js"
+import { makeSerializerLayer } from "../src/serializers/format-codec.js"
+import { yamlCodec } from "../src/serializers/codecs/yaml.js"
+import { SerializerRegistry } from "../src/serializers/serializer-service.js"
 
 // ============================================================================
 // YAML serialization via SerializerRegistry

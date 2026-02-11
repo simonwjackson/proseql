@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Schema, Ref } from "effect"
-import { createEffectDatabase } from "../core/factories/database-effect.js"
-import type { CollectionIndexes } from "../core/types/index-types.js"
-import { buildIndexes, normalizeIndexes } from "../core/indexes/index-manager.js"
+import { createEffectDatabase } from "../src/factories/database-effect.js"
+import type { CollectionIndexes } from "../src/types/index-types.js"
+import { buildIndexes, normalizeIndexes } from "../src/indexes/index-manager.js"
 
 // ============================================================================
 // Test Schemas

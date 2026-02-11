@@ -6,17 +6,17 @@ import {
 	loadCollectionsFromFile,
 	saveCollectionsToFile,
 	createDebouncedWriter,
-} from "../core/storage/persistence-effect.js"
-import { makeInMemoryStorageLayer } from "../core/storage/in-memory-adapter-layer.js"
-import { StorageAdapter } from "../core/storage/storage-service.js"
-import { makeSerializerLayer } from "../core/serializers/format-codec.js"
-import { jsonCodec } from "../core/serializers/codecs/json.js"
-import { yamlCodec } from "../core/serializers/codecs/yaml.js"
+} from "../src/storage/persistence-effect.js"
+import { makeInMemoryStorageLayer } from "../src/storage/in-memory-adapter-layer.js"
+import { StorageAdapter } from "../src/storage/storage-service.js"
+import { makeSerializerLayer } from "../src/serializers/format-codec.js"
+import { jsonCodec } from "../src/serializers/codecs/json.js"
+import { yamlCodec } from "../src/serializers/codecs/yaml.js"
 import {
 	StorageError,
 	SerializationError,
-} from "../core/errors/storage-errors.js"
-import { ValidationError } from "../core/errors/crud-errors.js"
+} from "../src/errors/storage-errors.js"
+import { ValidationError } from "../src/errors/crud-errors.js"
 
 // ============================================================================
 // Test Schemas

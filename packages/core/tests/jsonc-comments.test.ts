@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { jsoncCodec } from "../core/serializers/codecs/jsonc.js"
+import { jsoncCodec } from "../src/serializers/codecs/jsonc.js"
 
 /**
  * JSONC-specific comment handling tests.

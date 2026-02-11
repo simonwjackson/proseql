@@ -10,7 +10,7 @@ import type {
 	GenerateDatabase,
 	SmartCollection,
 	RelationshipDef,
-} from "../core/types/types"
+} from "../src/types/types"
 
 // ============================================================================
 // Test schemas using Effect Schema (not Zod)

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Stream, Chunk } from "effect";
-import { applyFilter } from "../core/operations/query/filter-stream";
+import { applyFilter } from "../src/operations/query/filter-stream";
 
 const collectFiltered = <T extends Record<string, unknown>>(
   data: T[],

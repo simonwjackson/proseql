@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Ref, Schema } from "effect"
-import { update, updateMany } from "../core/operations/crud/update.js"
+import { update, updateMany } from "../src/operations/crud/update.js"
 import {
 	NotFoundError,
 	ForeignKeyError,
 	ValidationError,
-} from "../core/errors/crud-errors.js"
+} from "../src/errors/crud-errors.js"
 
 // ============================================================================
 // Test Schemas

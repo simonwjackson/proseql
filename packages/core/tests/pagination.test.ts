@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Stream, Chunk } from "effect";
-import { applyPagination } from "../core/operations/query/paginate-stream";
-import { applyFilter } from "../core/operations/query/filter-stream";
-import { applySort } from "../core/operations/query/sort-stream";
+import { applyPagination } from "../src/operations/query/paginate-stream";
+import { applyFilter } from "../src/operations/query/filter-stream";
+import { applySort } from "../src/operations/query/sort-stream";
 
 // Helper to run a stream through pagination and collect results
 const collectPaginated = <T>(

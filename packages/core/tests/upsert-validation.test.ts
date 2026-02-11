@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Ref, Schema } from "effect"
-import { upsert, upsertMany } from "../core/operations/crud/upsert.js"
-import { ValidationError } from "../core/errors/crud-errors.js"
-import { normalizeConstraints } from "../core/operations/crud/unique-check.js"
+import { upsert, upsertMany } from "../src/operations/crud/upsert.js"
+import { ValidationError } from "../src/errors/crud-errors.js"
+import { normalizeConstraints } from "../src/operations/crud/unique-check.js"
 
 // ============================================================================
 // Test Schemas

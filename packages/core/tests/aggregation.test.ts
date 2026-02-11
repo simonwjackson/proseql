@@ -3,7 +3,7 @@ import { Effect, Schema } from "effect"
 import {
 	createEffectDatabase,
 	type EffectDatabase,
-} from "../core/factories/database-effect.js"
+} from "../src/factories/database-effect.js"
 
 // ============================================================================
 // Test Schema: Products

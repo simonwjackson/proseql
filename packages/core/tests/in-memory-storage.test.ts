@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest"
 import { Effect } from "effect"
-import { StorageAdapter } from "../core/storage/storage-service.js"
+import { StorageAdapter } from "../src/storage/storage-service.js"
 import {
 	makeInMemoryStorageLayer,
 	InMemoryStorageLayer,
-} from "../core/storage/in-memory-adapter-layer.js"
-import { StorageError } from "../core/errors/storage-errors.js"
+} from "../src/storage/in-memory-adapter-layer.js"
+import { StorageError } from "../src/errors/storage-errors.js"
 
 const run = <A>(effect: Effect.Effect<A, StorageError, StorageAdapter>) =>
 	Effect.runPromise(Effect.provide(effect, InMemoryStorageLayer))

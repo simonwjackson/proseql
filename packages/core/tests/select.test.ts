@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Stream, Chunk } from "effect";
-import { applySelect } from "../core/operations/query/select-stream";
+import { applySelect } from "../src/operations/query/select-stream";
 import {
 	applyObjectSelection,
 	applySelectionToArray,
@@ -10,7 +10,7 @@ import {
 	mergeObjectFieldSelections,
 	createFieldSelector,
 	createArrayFieldSelector,
-} from "../core/operations/query/select";
+} from "../src/operations/query/select";
 
 // Helper to run a stream-based select and collect results
 const collectSelected = <T extends Record<string, unknown>>(

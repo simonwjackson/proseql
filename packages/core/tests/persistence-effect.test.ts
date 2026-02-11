@@ -5,15 +5,15 @@ import {
 	saveData,
 	loadCollectionsFromFile,
 	saveCollectionsToFile,
-} from "../core/storage/persistence-effect.js"
-import { makeInMemoryStorageLayer } from "../core/storage/in-memory-adapter-layer.js"
-import { makeSerializerLayer } from "../core/serializers/format-codec.js"
-import { jsonCodec } from "../core/serializers/codecs/json.js"
-import { yamlCodec } from "../core/serializers/codecs/yaml.js"
-import { StorageError, SerializationError } from "../core/errors/storage-errors.js"
-import { ValidationError } from "../core/errors/crud-errors.js"
-import { MigrationError } from "../core/errors/migration-errors.js"
-import type { Migration } from "../core/migrations/migration-types.js"
+} from "../src/storage/persistence-effect.js"
+import { makeInMemoryStorageLayer } from "../src/storage/in-memory-adapter-layer.js"
+import { makeSerializerLayer } from "../src/serializers/format-codec.js"
+import { jsonCodec } from "../src/serializers/codecs/json.js"
+import { yamlCodec } from "../src/serializers/codecs/yaml.js"
+import { StorageError, SerializationError } from "../src/errors/storage-errors.js"
+import { ValidationError } from "../src/errors/crud-errors.js"
+import { MigrationError } from "../src/errors/migration-errors.js"
+import type { Migration } from "../src/migrations/migration-types.js"
 
 // ============================================================================
 // Test schemas

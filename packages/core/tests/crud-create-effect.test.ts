@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Ref, Schema, Chunk } from "effect"
-import { create, createMany } from "../core/operations/crud/create.js"
+import { create, createMany } from "../src/operations/crud/create.js"
 import {
 	DuplicateKeyError,
 	ForeignKeyError,
 	ValidationError,
-} from "../core/errors/crud-errors.js"
+} from "../src/errors/crud-errors.js"
 
 // ============================================================================
 // Test Schemas

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Stream } from "effect"
-import { applyCursor } from "../core/operations/query/cursor-stream.js"
-import type { CursorPageResult } from "../core/types/cursor-types.js"
+import { applyCursor } from "../src/operations/query/cursor-stream.js"
+import type { CursorPageResult } from "../src/types/cursor-types.js"
 
 describe("applyCursor", () => {
 	// Use zero-padded IDs for correct string sorting (01, 02, ... 10)

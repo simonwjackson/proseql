@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Stream, Chunk } from "effect";
-import { applySelect } from "../core/operations/query/select-stream.js";
+import { applySelect } from "../src/operations/query/select-stream.js";
 
 describe("applySelect Stream combinator", () => {
   // Test data

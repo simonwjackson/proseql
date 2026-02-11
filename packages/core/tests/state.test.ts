@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { Effect, Option, Ref } from "effect"
-import { createCollectionState } from "../core/state/collection-state.js"
+import { createCollectionState } from "../src/state/collection-state.js"
 import {
 	getEntity,
 	getEntityOrFail,
@@ -8,8 +8,8 @@ import {
 	setEntity,
 	removeEntity,
 	updateEntity,
-} from "../core/state/state-operations.js"
-import { NotFoundError } from "../core/errors/crud-errors.js"
+} from "../src/state/state-operations.js"
+import { NotFoundError } from "../src/errors/crud-errors.js"
 
 type User = {
 	readonly id: string

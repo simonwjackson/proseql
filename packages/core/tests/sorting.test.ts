@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Stream, Chunk } from "effect";
-import { applySort } from "../core/operations/query/sort-stream";
-import { applyFilter } from "../core/operations/query/filter-stream";
+import { applySort } from "../src/operations/query/sort-stream";
+import { applyFilter } from "../src/operations/query/filter-stream";
 
 const collectSorted = <T extends Record<string, unknown>>(
 	data: T[],

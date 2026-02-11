@@ -5,14 +5,14 @@ import {
 	saveData,
 	loadCollectionsFromFile,
 	saveCollectionsToFile,
-} from "../core/storage/persistence-effect.js"
-import { makeInMemoryStorageLayer } from "../core/storage/in-memory-adapter-layer.js"
-import { makeSerializerLayer } from "../core/serializers/format-codec.js"
-import { jsonCodec } from "../core/serializers/codecs/json.js"
-import { yamlCodec } from "../core/serializers/codecs/yaml.js"
-import { MigrationError } from "../core/errors/migration-errors.js"
-import { validateMigrationRegistry } from "../core/migrations/migration-runner.js"
-import type { Migration } from "../core/migrations/migration-types.js"
+} from "../src/storage/persistence-effect.js"
+import { makeInMemoryStorageLayer } from "../src/storage/in-memory-adapter-layer.js"
+import { makeSerializerLayer } from "../src/serializers/format-codec.js"
+import { jsonCodec } from "../src/serializers/codecs/json.js"
+import { yamlCodec } from "../src/serializers/codecs/yaml.js"
+import { MigrationError } from "../src/errors/migration-errors.js"
+import { validateMigrationRegistry } from "../src/migrations/migration-runner.js"
+import type { Migration } from "../src/migrations/migration-types.js"
 
 // ============================================================================
 // Test Helpers: In-memory storage and layer factories
@@ -2118,7 +2118,7 @@ describe("schema-migrations: auto-migrate on load", () => {
 // Tests: Dry Run (Tasks 12.1-12.4)
 // ============================================================================
 
-import { dryRunMigrations } from "../core/migrations/migration-runner.js"
+import { dryRunMigrations } from "../src/migrations/migration-runner.js"
 import { Ref } from "effect"
 
 describe("schema-migrations: dry run", () => {

@@ -8,17 +8,17 @@ import {
 	type MockInstance,
 } from "vitest"
 import { Effect } from "effect"
-import { SerializerRegistry } from "../core/serializers/serializer-service.js"
+import { SerializerRegistry } from "../src/serializers/serializer-service.js"
 import {
 	SerializationError,
 	UnsupportedFormatError,
-} from "../core/errors/storage-errors.js"
+} from "../src/errors/storage-errors.js"
 import {
 	makeSerializerLayer,
 	type FormatCodec,
-} from "../core/serializers/format-codec.js"
-import { jsonCodec } from "../core/serializers/codecs/json.js"
-import { yamlCodec } from "../core/serializers/codecs/yaml.js"
+} from "../src/serializers/format-codec.js"
+import { jsonCodec } from "../src/serializers/codecs/json.js"
+import { yamlCodec } from "../src/serializers/codecs/yaml.js"
 
 describe("makeSerializerLayer", () => {
 	describe("multi-format dispatch", () => {

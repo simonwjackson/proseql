@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Ref, Schema } from "effect"
-import { create, createMany } from "../core/operations/crud/create.js"
-import { update, updateMany } from "../core/operations/crud/update.js"
-import { UniqueConstraintError } from "../core/errors/crud-errors.js"
-import { normalizeConstraints } from "../core/operations/crud/unique-check.js"
+import { create, createMany } from "../src/operations/crud/create.js"
+import { update, updateMany } from "../src/operations/crud/update.js"
+import { UniqueConstraintError } from "../src/errors/crud-errors.js"
+import { normalizeConstraints } from "../src/operations/crud/unique-check.js"
 
 // ============================================================================
 // Test Schemas

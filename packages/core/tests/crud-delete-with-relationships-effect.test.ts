@@ -3,11 +3,11 @@ import { Effect, Ref, Schema } from "effect"
 import {
 	deleteWithRelationships,
 	deleteManyWithRelationships,
-} from "../core/operations/crud/delete-with-relationships.js"
+} from "../src/operations/crud/delete-with-relationships.js"
 import {
 	NotFoundError,
 	ValidationError,
-} from "../core/errors/crud-errors.js"
+} from "../src/errors/crud-errors.js"
 
 // ============================================================================
 // Test Schemas

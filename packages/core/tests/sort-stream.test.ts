@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Effect, Stream, Chunk } from "effect";
-import { applySort } from "../core/operations/query/sort-stream.js";
+import { applySort } from "../src/operations/query/sort-stream.js";
 
 describe("applySort Stream combinator", () => {
   // Test data

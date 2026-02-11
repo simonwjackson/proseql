@@ -13,7 +13,7 @@ import {
 	isCollectionPersistent,
 	extractCollectionsForFile,
 	mergeFileDataIntoDataset,
-} from "../core/storage/transforms.js"
+} from "../src/storage/transforms.js"
 
 // ============================================================================
 // Test data
