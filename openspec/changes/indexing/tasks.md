@@ -73,7 +73,7 @@
 - [x] 9.3 Test compound query with extra non-indexed fields → index used, extras post-filtered
 - [x] 9.4 Test `$in` on one compound field → Cartesian product lookup
 - [x] 9.5 Test compound index maintenance (create/update/delete)
-- [ ] 9.6 Test compound key handles mixed types (string + number)
+- [x] 9.6 Test compound key handles mixed types (string + number)
 
 ## 10. Cleanup
 

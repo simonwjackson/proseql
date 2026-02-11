@@ -4889,6 +4889,299 @@ describe("Indexing - Query Acceleration", () => {
 			expect((phonesResults[0] as { id: string }).id).toBe("p3")
 		})
 	})
+
+	describe("Task 9.6: compound key handles mixed types (string + number)", () => {
+		// Schema for testing mixed-type compound indexes
+		const OrderSchema = Schema.Struct({
+			id: Schema.String,
+			userId: Schema.String,
+			quantity: Schema.Number,
+			product: Schema.String,
+			status: Schema.optional(Schema.String),
+		})
+
+		type Order = Schema.Schema.Type<typeof OrderSchema>
+
+		const createMixedTypeIndexConfig = () =>
+			({
+				orders: {
+					schema: OrderSchema,
+					indexes: [
+						["userId", "quantity"], // string + number compound index
+					] as ReadonlyArray<string | ReadonlyArray<string>>,
+					relationships: {} as const,
+				},
+			}) as const
+
+		it("should build compound index with string + number fields", async () => {
+			const config = createMixedTypeIndexConfig()
+			const initialOrders: ReadonlyArray<Order> = [
+				{ id: "o1", userId: "u1", quantity: 5, product: "Laptop" },
+				{ id: "o2", userId: "u1", quantity: 10, product: "Phone" },
+				{ id: "o3", userId: "u2", quantity: 5, product: "Desk" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { orders: initialOrders }),
+			)
+
+			// Query with string + number compound key
+			const results = await db.orders.query({
+				where: { userId: "u1", quantity: 5 },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("o1")
+		})
+
+		it("should distinguish between same values of different types in compound index", async () => {
+			// This tests that "5" (string) and 5 (number) create different index keys
+			const MixedSchema = Schema.Struct({
+				id: Schema.String,
+				strField: Schema.String,
+				numField: Schema.Number,
+				data: Schema.optional(Schema.String),
+			})
+
+			const config = {
+				items: {
+					schema: MixedSchema,
+					indexes: [["strField", "numField"]] as ReadonlyArray<ReadonlyArray<string>>,
+					relationships: {} as const,
+				},
+			} as const
+
+			type MixedItem = Schema.Schema.Type<typeof MixedSchema>
+			const initialItems: ReadonlyArray<MixedItem> = [
+				{ id: "i1", strField: "a", numField: 1, data: "first" },
+				{ id: "i2", strField: "a", numField: 2, data: "second" },
+				{ id: "i3", strField: "b", numField: 1, data: "third" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { items: initialItems }),
+			)
+
+			// Query for strField="a", numField=1 should return only i1
+			const results1 = await db.items.query({
+				where: { strField: "a", numField: 1 },
+			}).runPromise
+			expect(results1.length).toBe(1)
+			expect((results1[0] as { id: string }).id).toBe("i1")
+
+			// Query for strField="a", numField=2 should return only i2
+			const results2 = await db.items.query({
+				where: { strField: "a", numField: 2 },
+			}).runPromise
+			expect(results2.length).toBe(1)
+			expect((results2[0] as { id: string }).id).toBe("i2")
+
+			// Query for strField="b", numField=1 should return only i3
+			const results3 = await db.items.query({
+				where: { strField: "b", numField: 1 },
+			}).runPromise
+			expect(results3.length).toBe(1)
+			expect((results3[0] as { id: string }).id).toBe("i3")
+		})
+
+		it("should handle $in on number field in mixed-type compound index", async () => {
+			const config = createMixedTypeIndexConfig()
+			const initialOrders: ReadonlyArray<Order> = [
+				{ id: "o1", userId: "u1", quantity: 5, product: "Laptop" },
+				{ id: "o2", userId: "u1", quantity: 10, product: "Phone" },
+				{ id: "o3", userId: "u1", quantity: 15, product: "Desk" },
+				{ id: "o4", userId: "u2", quantity: 5, product: "Chair" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { orders: initialOrders }),
+			)
+
+			// Query with string field exact match and $in on number field
+			const results = await db.orders.query({
+				where: { userId: "u1", quantity: { $in: [5, 10] } },
+			}).runPromise
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["o1", "o2"])
+		})
+
+		it("should handle $in on string field in mixed-type compound index", async () => {
+			const config = createMixedTypeIndexConfig()
+			const initialOrders: ReadonlyArray<Order> = [
+				{ id: "o1", userId: "u1", quantity: 5, product: "Laptop" },
+				{ id: "o2", userId: "u2", quantity: 5, product: "Phone" },
+				{ id: "o3", userId: "u3", quantity: 5, product: "Desk" },
+				{ id: "o4", userId: "u1", quantity: 10, product: "Chair" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { orders: initialOrders }),
+			)
+
+			// Query with $in on string field and exact match on number field
+			const results = await db.orders.query({
+				where: { userId: { $in: ["u1", "u2"] }, quantity: 5 },
+			}).runPromise
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["o1", "o2"])
+		})
+
+		it("should maintain mixed-type compound index on create", async () => {
+			const config = createMixedTypeIndexConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			await db.orders.create({
+				id: "o1",
+				userId: "u1",
+				quantity: 5,
+				product: "Laptop",
+			}).runPromise
+
+			const results = await db.orders.query({
+				where: { userId: "u1", quantity: 5 },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("o1")
+		})
+
+		it("should maintain mixed-type compound index on update (changing number field)", async () => {
+			const config = createMixedTypeIndexConfig()
+			const initialOrders: ReadonlyArray<Order> = [
+				{ id: "o1", userId: "u1", quantity: 5, product: "Laptop" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { orders: initialOrders }),
+			)
+
+			// Update quantity from 5 to 10
+			await db.orders.update("o1", { quantity: 10 }).runPromise
+
+			// Old compound key should be empty
+			const oldResults = await db.orders.query({
+				where: { userId: "u1", quantity: 5 },
+			}).runPromise
+			expect(oldResults.length).toBe(0)
+
+			// New compound key should have the order
+			const newResults = await db.orders.query({
+				where: { userId: "u1", quantity: 10 },
+			}).runPromise
+			expect(newResults.length).toBe(1)
+			expect((newResults[0] as { id: string }).id).toBe("o1")
+		})
+
+		it("should maintain mixed-type compound index on update (changing string field)", async () => {
+			const config = createMixedTypeIndexConfig()
+			const initialOrders: ReadonlyArray<Order> = [
+				{ id: "o1", userId: "u1", quantity: 5, product: "Laptop" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { orders: initialOrders }),
+			)
+
+			// Update userId from "u1" to "u2"
+			await db.orders.update("o1", { userId: "u2" }).runPromise
+
+			// Old compound key should be empty
+			const oldResults = await db.orders.query({
+				where: { userId: "u1", quantity: 5 },
+			}).runPromise
+			expect(oldResults.length).toBe(0)
+
+			// New compound key should have the order
+			const newResults = await db.orders.query({
+				where: { userId: "u2", quantity: 5 },
+			}).runPromise
+			expect(newResults.length).toBe(1)
+			expect((newResults[0] as { id: string }).id).toBe("o1")
+		})
+
+		it("should maintain mixed-type compound index on delete", async () => {
+			const config = createMixedTypeIndexConfig()
+			const initialOrders: ReadonlyArray<Order> = [
+				{ id: "o1", userId: "u1", quantity: 5, product: "Laptop" },
+				{ id: "o2", userId: "u1", quantity: 5, product: "Phone" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { orders: initialOrders }),
+			)
+
+			// Both orders should be found initially
+			let results = await db.orders.query({
+				where: { userId: "u1", quantity: 5 },
+			}).runPromise
+			expect(results.length).toBe(2)
+
+			// Delete one order
+			await db.orders.delete("o1").runPromise
+
+			// Only one order should remain
+			results = await db.orders.query({
+				where: { userId: "u1", quantity: 5 },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("o2")
+		})
+
+		it("should handle zero and negative numbers in compound index", async () => {
+			const config = createMixedTypeIndexConfig()
+			const initialOrders: ReadonlyArray<Order> = [
+				{ id: "o1", userId: "u1", quantity: 0, product: "Free Sample" },
+				{ id: "o2", userId: "u1", quantity: -1, product: "Return" },
+				{ id: "o3", userId: "u1", quantity: 1, product: "Purchase" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { orders: initialOrders }),
+			)
+
+			// Query for zero quantity
+			const zeroResults = await db.orders.query({
+				where: { userId: "u1", quantity: 0 },
+			}).runPromise
+			expect(zeroResults.length).toBe(1)
+			expect((zeroResults[0] as { id: string }).id).toBe("o1")
+
+			// Query for negative quantity
+			const negResults = await db.orders.query({
+				where: { userId: "u1", quantity: -1 },
+			}).runPromise
+			expect(negResults.length).toBe(1)
+			expect((negResults[0] as { id: string }).id).toBe("o2")
+		})
+
+		it("should handle floating point numbers in compound index", async () => {
+			const PriceSchema = Schema.Struct({
+				id: Schema.String,
+				category: Schema.String,
+				price: Schema.Number,
+				name: Schema.optional(Schema.String),
+			})
+
+			type PriceItem = Schema.Schema.Type<typeof PriceSchema>
+
+			const config = {
+				prices: {
+					schema: PriceSchema,
+					indexes: [["category", "price"]] as ReadonlyArray<ReadonlyArray<string>>,
+					relationships: {} as const,
+				},
+			} as const
+
+			const initialItems: ReadonlyArray<PriceItem> = [
+				{ id: "p1", category: "electronics", price: 9.99, name: "Cable" },
+				{ id: "p2", category: "electronics", price: 9.99, name: "Adapter" },
+				{ id: "p3", category: "electronics", price: 19.99, name: "Charger" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { prices: initialItems }),
+			)
+
+			// Query for floating point price
+			const results = await db.prices.query({
+				where: { category: "electronics", price: 9.99 },
+			}).runPromise
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p2"])
+		})
+	})
 })
 
 // Export helpers for use in other test files
