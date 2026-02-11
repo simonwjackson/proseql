@@ -34,7 +34,7 @@ describe("Relevance sort for $search", () => {
     expect(result[1].id).toBe("2")
   })
 
-  it("6.1: explicit sort overrides relevance sort", async () => {
+  it("6.3: explicit sort overrides relevance sort", async () => {
     const db = await Effect.runPromise(createEffectDatabase({
       books: { schema: BookSchema, relationships: {} },
     }, {
