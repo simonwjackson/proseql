@@ -23,13 +23,27 @@
         nixpkgs.lib.genAttrs (import systems) (
           system:
           function {
-            pkgs = nixpkgs.legacyPackages.${system};
+            pkgs = import nixpkgs {
+              inherit system;
+              overlays = [ bun2nix.overlays.default ];
+            };
             bun2nixPkgs = bun2nix.packages.${system};
           }
         );
     in
     {
       formatter = forAllSystems ({ pkgs, ... }: pkgs.nixfmt-rfc-style);
+
+      packages = forAllSystems (
+        { pkgs, ... }:
+        {
+          core = pkgs.callPackage ./packages/core/default.nix { };
+          node = pkgs.callPackage ./packages/node/default.nix { };
+          rest = pkgs.callPackage ./packages/rest/default.nix { };
+          rpc = pkgs.callPackage ./packages/rpc/default.nix { };
+          default = pkgs.callPackage ./packages/core/default.nix { };
+        }
+      );
 
       devShells = forAllSystems (
         { pkgs, bun2nixPkgs }:
