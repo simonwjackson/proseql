@@ -391,5 +391,49 @@ describe("Aggregation", () => {
 
 			expect(result).toEqual([])
 		})
+
+		it("6.7 groupBy with all aggregate types → all present per group", async () => {
+			const db = await createTestDb()
+			const result = await db.products.aggregate({
+				groupBy: "category",
+				count: true,
+				sum: "price",
+				avg: "price",
+				min: "price",
+				max: "price",
+			}).runPromise
+
+			// Test data by category:
+			// electronics: p1 (10.00), p2 (25.50) → count: 2, sum: 35.50, avg: 17.75, min: 10.00, max: 25.50
+			// gadgets: p3 (15.75), p4 (35.00) → count: 2, sum: 50.75, avg: 25.375, min: 15.75, max: 35.00
+			// tools: p5 (5.25) → count: 1, sum: 5.25, avg: 5.25, min: 5.25, max: 5.25
+
+			expect(result).toHaveLength(3)
+
+			const electronics = result.find(g => g.group.category === "electronics")
+			const gadgets = result.find(g => g.group.category === "gadgets")
+			const tools = result.find(g => g.group.category === "tools")
+
+			// Verify all aggregate types are present for electronics
+			expect(electronics?.count).toBe(2)
+			expect(electronics?.sum?.price).toBeCloseTo(35.50)
+			expect(electronics?.avg?.price).toBeCloseTo(17.75)
+			expect(electronics?.min?.price).toBe(10.00)
+			expect(electronics?.max?.price).toBe(25.50)
+
+			// Verify all aggregate types are present for gadgets
+			expect(gadgets?.count).toBe(2)
+			expect(gadgets?.sum?.price).toBeCloseTo(50.75)
+			expect(gadgets?.avg?.price).toBeCloseTo(25.375)
+			expect(gadgets?.min?.price).toBe(15.75)
+			expect(gadgets?.max?.price).toBe(35.00)
+
+			// Verify all aggregate types are present for tools
+			expect(tools?.count).toBe(1)
+			expect(tools?.sum?.price).toBeCloseTo(5.25)
+			expect(tools?.avg?.price).toBeCloseTo(5.25)
+			expect(tools?.min?.price).toBe(5.25)
+			expect(tools?.max?.price).toBe(5.25)
+		})
 	})
 })
