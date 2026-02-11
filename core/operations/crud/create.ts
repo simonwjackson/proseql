@@ -14,6 +14,7 @@ import type {
 import {
 	DuplicateKeyError,
 	ForeignKeyError,
+	HookError,
 	ValidationError,
 } from "../../errors/crud-errors.js"
 import { validateEntity } from "../../validators/schema-validator.js"
@@ -23,6 +24,8 @@ import {
 } from "../../validators/foreign-key.js"
 import type { CollectionIndexes } from "../../types/index-types.js"
 import { addToIndex, addManyToIndex } from "../../indexes/index-manager.js"
+import type { HooksConfig } from "../../types/hook-types.js"
+import { runBeforeCreateHooks } from "../../hooks/hook-runner.js"
 
 // ============================================================================
 // Types
@@ -41,15 +44,16 @@ type RelationshipConfig = {
 // ============================================================================
 
 /**
- * Create a single entity with validation and foreign key checks.
+ * Create a single entity with validation, hooks, and foreign key checks.
  *
  * Steps:
  * 1. Generate ID if not provided, add timestamps
  * 2. Validate through Effect Schema
- * 3. Check for duplicate ID in Ref state
- * 4. Validate foreign key constraints
- * 5. Atomically add to Ref state
- * 6. Update indexes if provided
+ * 3. Run beforeCreate hooks (can transform entity)
+ * 4. Check for duplicate ID in Ref state
+ * 5. Validate foreign key constraints
+ * 6. Atomically add to Ref state
+ * 7. Update indexes if provided
  */
 export const create = <T extends HasId, I = T>(
 	collectionName: string,
@@ -58,8 +62,9 @@ export const create = <T extends HasId, I = T>(
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	indexes?: CollectionIndexes,
+	hooks?: HooksConfig<T>,
 ) =>
-(input: CreateInput<T>): Effect.Effect<T, ValidationError | DuplicateKeyError | ForeignKeyError> =>
+(input: CreateInput<T>): Effect.Effect<T, ValidationError | DuplicateKeyError | ForeignKeyError | HookError> =>
 	Effect.gen(function* () {
 		const id = (input as Record<string, unknown>).id as string | undefined || generateId()
 		const now = new Date().toISOString()
@@ -74,6 +79,13 @@ export const create = <T extends HasId, I = T>(
 
 		// Validate through Effect Schema
 		const validated = yield* validateEntity(schema, raw)
+
+		// Run beforeCreate hooks (can transform the entity)
+		const entity = yield* runBeforeCreateHooks(hooks?.beforeCreate, {
+			operation: "create",
+			collection: collectionName,
+			data: validated,
+		})
 
 		// Check for duplicate ID atomically
 		const currentMap = yield* Ref.get(ref)
@@ -91,7 +103,7 @@ export const create = <T extends HasId, I = T>(
 
 		// Validate foreign keys
 		yield* validateForeignKeysEffect(
-			validated,
+			entity,
 			collectionName,
 			relationships,
 			stateRefs,
@@ -100,16 +112,16 @@ export const create = <T extends HasId, I = T>(
 		// Atomically add to state
 		yield* Ref.update(ref, (map) => {
 			const next = new Map(map)
-			next.set(id, validated)
+			next.set(id, entity)
 			return next
 		})
 
 		// Update indexes if provided
 		if (indexes && indexes.size > 0) {
-			yield* addToIndex(indexes, validated)
+			yield* addToIndex(indexes, entity)
 		}
 
-		return validated
+		return entity
 	})
 
 // ============================================================================
