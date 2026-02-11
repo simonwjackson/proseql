@@ -3,7 +3,7 @@
 - [x] 1.1 Create `core/types/computed-types.ts` with `ComputedFieldDefinition<T, R>` (function type `(entity: T) => R`), `ComputedFieldsConfig<T>` (record mapping field names to `ComputedFieldDefinition<T, unknown>`), `InferComputedFields<C>` (maps config to `{ [K]: ReturnType<C[K]> }`), `WithComputed<T, C>` (intersection `T & InferComputedFields<C>`)
 - [x] 1.2 Add optional `computed` property to `CollectionConfig` in `core/types/database-config-types.ts`
 - [x] 1.3 Modify `GenerateDatabase` in `core/types/types.ts` to extract `computed` from each collection config and merge `InferComputedFields` into the entity type `T`, so `SmartCollection<T & InferComputedFields<Computed>, Relations, DB>`
-- [ ] 1.4 Verify `WhereClause`, `SortConfig`, `ObjectSelectConfig`, and `QueryReturnType` automatically pick up computed field keys through the widened `T`
+- [x] 1.4 Verify `WhereClause`, `SortConfig`, `ObjectSelectConfig`, and `QueryReturnType` automatically pick up computed field keys through the widened `T`
 - [ ] 1.5 Export computed types from `core/index.ts`
 
 ## 2. Computed Field Resolution
