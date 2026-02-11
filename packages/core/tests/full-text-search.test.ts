@@ -333,4 +333,56 @@ describe("Full-text search: Basic Search (task 9)", () => {
 			expect(results.length).toBe(0)
 		})
 	})
+
+	describe("9.7: Empty search string", () => {
+		it("should return all results when searching with empty string in title", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "" } },
+			}).runPromise
+			expect(results.length).toBe(5)
+		})
+
+		it("should return all results when searching with empty string in author", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { author: { $search: "" } },
+			}).runPromise
+			expect(results.length).toBe(5)
+		})
+
+		it("should return all results when searching with empty string in description", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { description: { $search: "" } },
+			}).runPromise
+			expect(results.length).toBe(5)
+		})
+
+		it("should apply other filters when $search is empty", async () => {
+			const db = await createTestDatabase()
+			// Empty $search should not filter anything, but year filter should apply
+			const results = await db.books.query({
+				where: { title: { $search: "" }, year: { $gt: 1980 } },
+			}).runPromise
+			// Books with year > 1980: Neuromancer (1984), Snow Crash (1992)
+			expect(results.length).toBe(2)
+			expect(results.map((b) => b.title).sort()).toEqual([
+				"Neuromancer",
+				"Snow Crash",
+			])
+		})
+
+		it("should return same results as query without $search filter", async () => {
+			const db = await createTestDatabase()
+			const withEmptySearch = await db.books.query({
+				where: { title: { $search: "" } },
+			}).runPromise
+			const withoutSearch = await db.books.query().runPromise
+			expect(withEmptySearch.length).toBe(withoutSearch.length)
+			expect(withEmptySearch.map((b) => b.id).sort()).toEqual(
+				withoutSearch.map((b) => b.id).sort(),
+			)
+		})
+	})
 })
