@@ -26,6 +26,8 @@ import { applyUpdates } from "./update.js"
 import {
 	validateForeignKeysEffect,
 } from "../../validators/foreign-key.js"
+import type { CollectionIndexes } from "../../types/index-types.js"
+import { addToIndex, updateInIndex, addManyToIndex } from "../../indexes/index-manager.js"
 
 // ============================================================================
 // Types
@@ -99,6 +101,7 @@ export const upsert = <T extends HasId, I = T>(
 	relationships: Record<string, RelationshipConfig>,
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+	indexes?: CollectionIndexes,
 ) =>
 (input: UpsertInput<T>): Effect.Effect<UpsertResult<T>, ValidationError | ForeignKeyError> =>
 	Effect.gen(function* () {
@@ -140,6 +143,11 @@ export const upsert = <T extends HasId, I = T>(
 				return next
 			})
 
+			// Update indexes if provided
+			if (indexes && indexes.size > 0) {
+				yield* updateInIndex(indexes, existing, validated)
+			}
+
 			return { ...validated, __action: "updated" as const }
 		}
 
@@ -173,6 +181,11 @@ export const upsert = <T extends HasId, I = T>(
 			return next
 		})
 
+		// Update indexes if provided
+		if (indexes && indexes.size > 0) {
+			yield* addToIndex(indexes, validated)
+		}
+
 		return { ...validated, __action: "created" as const }
 	})
 
@@ -196,6 +209,7 @@ export const upsertMany = <T extends HasId, I = T>(
 	relationships: Record<string, RelationshipConfig>,
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+	indexes?: CollectionIndexes,
 ) =>
 (inputs: ReadonlyArray<UpsertInput<T>>): Effect.Effect<UpsertManyResult<T>, ValidationError | ForeignKeyError> =>
 	Effect.gen(function* () {
@@ -207,7 +221,7 @@ export const upsertMany = <T extends HasId, I = T>(
 
 		// Phase 1: Process all inputs, validate, and categorize
 		const toCreate: T[] = []
-		const toUpdate: T[] = []
+		const toUpdate: Array<{ oldEntity: T; newEntity: T }> = []
 
 		for (let i = 0; i < inputs.length; i++) {
 			const input = inputs[i]!
@@ -245,7 +259,7 @@ export const upsertMany = <T extends HasId, I = T>(
 
 				// Validate
 				const validated = yield* validateEntity(schema, updatedEntity)
-				toUpdate.push(validated)
+				toUpdate.push({ oldEntity: existing, newEntity: validated })
 			} else {
 				// Create new entity
 				const id = (typeof where.id === "string" ? where.id : undefined) || generateId()
@@ -265,9 +279,17 @@ export const upsertMany = <T extends HasId, I = T>(
 		}
 
 		// Phase 2: Validate foreign keys for all entities being created or updated
-		for (const entity of [...toCreate, ...toUpdate]) {
+		for (const entity of toCreate) {
 			yield* validateForeignKeysEffect(
 				entity,
+				collectionName,
+				relationships,
+				stateRefs,
+			)
+		}
+		for (const { newEntity } of toUpdate) {
+			yield* validateForeignKeysEffect(
+				newEntity,
 				collectionName,
 				relationships,
 				stateRefs,
@@ -281,15 +303,27 @@ export const upsertMany = <T extends HasId, I = T>(
 				for (const entity of toCreate) {
 					next.set(entity.id, entity)
 				}
-				for (const entity of toUpdate) {
-					next.set(entity.id, entity)
+				for (const { newEntity } of toUpdate) {
+					next.set(newEntity.id, newEntity)
 				}
 				return next
 			})
 		}
 
+		// Phase 4: Update indexes if provided
+		if (indexes && indexes.size > 0) {
+			// Use batch operation for created entities
+			if (toCreate.length > 0) {
+				yield* addManyToIndex(indexes, toCreate)
+			}
+			// Update indexes for updated entities
+			for (const { oldEntity, newEntity } of toUpdate) {
+				yield* updateInIndex(indexes, oldEntity, newEntity)
+			}
+		}
+
 		created.push(...toCreate)
-		updated.push(...toUpdate)
+		updated.push(...toUpdate.map(({ newEntity }) => newEntity))
 
 		return { created, updated, unchanged }
 	})

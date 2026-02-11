@@ -27,7 +27,7 @@
 - [x] 4.1 Add `indexes?: CollectionIndexes` parameter to `create` and `createMany` in `core/operations/crud/create.ts`. After entity insertion into data Ref, call `addToIndex`. For `createMany`, use batch variant.
 - [x] 4.2 Add `indexes?: CollectionIndexes` parameter to `update` and `updateMany` in `core/operations/crud/update.ts`. After entity update, call `updateInIndex` with old and new entity.
 - [x] 4.3 Add `indexes?: CollectionIndexes` parameter to `delete` and `deleteMany` in `core/operations/crud/delete.ts`. Before removing entity from data Ref (while entity is still accessible), call `removeFromIndex`.
-- [ ] 4.4 Add `indexes?: CollectionIndexes` parameter to `upsert` and `upsertMany` in `core/operations/crud/upsert.ts`. Route to addToIndex (create path) or updateInIndex (update path).
+- [x] 4.4 Add `indexes?: CollectionIndexes` parameter to `upsert` and `upsertMany` in `core/operations/crud/upsert.ts`. Route to addToIndex (create path) or updateInIndex (update path).
 
 ## 5. Factory Integration
 
