@@ -66,7 +66,7 @@
 
 - [x] 9.1 Create `tests/format-codec.test.ts`: test `makeSerializerLayer` — multi-format dispatch, unknown extension error, duplicate extension warning, error propagation from codecs.
 - [x] 9.2 Create `tests/codecs.test.ts`: round-trip tests for all 7 codecs (json, yaml, json5, jsonc, toml, toon, hjson). Test nested objects, arrays, strings, numbers, booleans, null handling.
-- [ ] 9.3 Create `tests/toml-nulls.test.ts`: TOML-specific null stripping — nested nulls, arrays with nulls, empty objects after stripping, deeply nested structures.
+- [x] 9.3 Create `tests/toml-nulls.test.ts`: TOML-specific null stripping — nested nulls, arrays with nulls, empty objects after stripping, deeply nested structures.
 - [ ] 9.4 Create `tests/jsonc-comments.test.ts`: JSONC decode with line comments, block comments, mixed comments. Verify encode outputs clean JSON.
 - [ ] 9.5 Test preset Layers: `AllTextFormatsLayer` dispatches all 7 extensions (json, yaml, json5, jsonc, toml, toon, hjson), `DefaultSerializerLayer` dispatches json/yaml only.
 
