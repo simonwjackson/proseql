@@ -73,11 +73,7 @@ export const createTransaction = <DB extends Record<string, EffectCollection<Has
 	persistenceTrigger?: PersistenceTrigger,
 ): Effect.Effect<TransactionContext<DB>, TransactionError> =>
 	Effect.gen(function* () {
-		// TODO 2.3: Implement single-writer lock acquisition
-		// TODO 2.7: Implement mutation tracking set
-		// TODO 2.6: Implement isActive flag
-
-		// Placeholder: acquire lock (will be implemented in task 2.3)
+		// Task 2.3: Single-writer lock - atomically check and acquire via Ref.modify
 		const lockAcquired = yield* Ref.modify(transactionLock, (locked) => {
 			if (locked) {
 				return [false, true] as const // Lock not acquired, stays locked
