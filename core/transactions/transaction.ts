@@ -228,3 +228,75 @@ export const createTransaction = <DB extends Record<string, EffectCollection<Has
 
 		return ctx
 	})
+
+// ============================================================================
+// $transaction Callback Wrapper
+// ============================================================================
+
+/**
+ * Execute a callback within an atomic transaction context.
+ *
+ * All CRUD operations inside the callback operate against the live in-memory state.
+ * On success, changes are committed and persistence is triggered.
+ * On failure (error thrown or explicit rollback), all mutations are reverted.
+ *
+ * Usage:
+ * ```ts
+ * const result = await db.$transaction((ctx) =>
+ *   Effect.gen(function* () {
+ *     const user = yield* ctx.users.create({ name: "Alice" })
+ *     const post = yield* ctx.posts.create({ authorId: user.id, title: "Hello" })
+ *     return { user, post }
+ *   })
+ * ).pipe(Effect.runPromise)
+ * ```
+ *
+ * @param stateRefs - The database's collection Refs
+ * @param transactionLock - Single-writer lock Ref
+ * @param buildCollectionForTx - Callback to create collection accessors
+ * @param persistenceTrigger - Optional trigger for scheduling saves on commit
+ * @param fn - The callback to execute within the transaction
+ * @returns Effect that yields the callback result, with TransactionError in error channel
+ */
+export const $transaction = <DB extends Record<string, EffectCollection<HasId>>, A, E>(
+	stateRefs: StateRefs,
+	transactionLock: Ref.Ref<boolean>,
+	buildCollectionForTx: BuildCollectionForTx,
+	persistenceTrigger: PersistenceTrigger | undefined,
+	fn: (ctx: TransactionContext<DB>) => Effect.Effect<A, E>,
+): Effect.Effect<A, E | TransactionError> =>
+	Effect.gen(function* () {
+		// Create the transaction context
+		const ctx = yield* createTransaction<DB>(
+			stateRefs,
+			transactionLock,
+			buildCollectionForTx,
+			persistenceTrigger,
+		)
+
+		// Run the callback and handle success/failure
+		const result = yield* fn(ctx).pipe(
+			// On success: commit and return the result
+			Effect.flatMap((value) =>
+				Effect.gen(function* () {
+					yield* ctx.commit()
+					return value
+				}),
+			),
+			// On failure: rollback and re-raise the original error
+			Effect.catchAll((error) =>
+				Effect.gen(function* () {
+					// Only rollback if still active (might have been explicitly rolled back)
+					if (ctx.isActive) {
+						// Rollback always fails with TransactionError, but we want to
+						// re-raise the original error, so we catch the rollback error
+						yield* ctx.rollback().pipe(Effect.catchAll(() => Effect.void))
+					}
+					// Re-raise the original error
+					return yield* Effect.fail(error)
+				}),
+			),
+		)
+
+		return result
+	})
