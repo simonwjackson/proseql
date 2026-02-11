@@ -198,3 +198,79 @@ const validateIdGenerator = (
 
 	return null;
 };
+
+// ============================================================================
+// Operator Conflict Validation
+// ============================================================================
+
+/**
+ * Built-in operator names that custom operators cannot use.
+ */
+const BUILT_IN_OPERATORS = new Set([
+	"$eq",
+	"$ne",
+	"$in",
+	"$nin",
+	"$gt",
+	"$gte",
+	"$lt",
+	"$lte",
+	"$startsWith",
+	"$endsWith",
+	"$contains",
+	"$all",
+	"$size",
+	"$search",
+]);
+
+/**
+ * Validates that no custom operators conflict with built-in operators
+ * and that no two plugins register operators with the same name.
+ *
+ * @param plugins - Array of plugins to validate
+ * @returns Effect<void, PluginError> - Succeeds if no conflicts, fails with PluginError listing the conflict
+ */
+export const validateOperatorConflicts = (
+	plugins: ReadonlyArray<ProseQLPlugin>,
+): Effect.Effect<void, PluginError> => {
+	return Effect.gen(function* () {
+		// Track which plugin registered which operator
+		const operatorRegistry = new Map<string, string>();
+
+		for (const plugin of plugins) {
+			if (plugin.operators === undefined) {
+				continue;
+			}
+
+			for (const operator of plugin.operators) {
+				const operatorName = operator.name;
+
+				// Check for conflict with built-in operators
+				if (BUILT_IN_OPERATORS.has(operatorName)) {
+					return yield* Effect.fail(
+						new PluginError({
+							plugin: plugin.name,
+							reason: "operator_conflict",
+							message: `Operator '${operatorName}' conflicts with built-in operator`,
+						}),
+					);
+				}
+
+				// Check for conflict with another plugin's operator
+				const existingPlugin = operatorRegistry.get(operatorName);
+				if (existingPlugin !== undefined) {
+					return yield* Effect.fail(
+						new PluginError({
+							plugin: plugin.name,
+							reason: "operator_conflict",
+							message: `Operator '${operatorName}' conflicts with operator from plugin '${existingPlugin}'`,
+						}),
+					);
+				}
+
+				// Register this operator
+				operatorRegistry.set(operatorName, plugin.name);
+			}
+		}
+	});
+};

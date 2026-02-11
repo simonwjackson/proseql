@@ -409,3 +409,9 @@ export type {
 
 // Plugin errors
 export { PluginError } from "./errors/plugin-errors.js";
+
+// Plugin validation
+export {
+	validateOperatorConflicts,
+	validatePlugin,
+} from "./plugins/plugin-validation.js";
