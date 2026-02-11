@@ -596,4 +596,132 @@ describe("Unique Constraints - Compound Fields", () => {
 			expect(result.settingKey).toBe("theme")
 		})
 	})
+
+	describe("mixed single + compound constraints", () => {
+		/**
+		 * Member schema with both single-field (email) and compound ([teamId, role]) unique constraints.
+		 * This tests that both types of constraints are enforced simultaneously.
+		 */
+		const MemberSchema = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+			email: Schema.String,
+			teamId: Schema.String,
+			role: Schema.String,
+			createdAt: Schema.optional(Schema.String),
+			updatedAt: Schema.optional(Schema.String),
+		})
+
+		type Member = typeof MemberSchema.Type
+
+		/**
+		 * Mixed constraints: single "email" + compound ["teamId", "role"]
+		 */
+		const memberUniqueFields = normalizeConstraints(["email", ["teamId", "role"]])
+
+		const existingMember: Member = {
+			id: "member1",
+			name: "Alice",
+			email: "alice@example.com",
+			teamId: "team1",
+			role: "admin",
+		}
+
+		it("should enforce both single and compound constraints", async () => {
+			// Test 1: Violate single-field constraint (email)
+			const emailViolation = await Effect.runPromise(
+				Effect.gen(function* () {
+					const membersRef = yield* makeRef<Member>([existingMember])
+					const stateRefs = yield* makeStateRefs({ members: [existingMember] })
+
+					const doCreate = create(
+						"members",
+						MemberSchema,
+						noRelationships,
+						membersRef,
+						stateRefs,
+						undefined,
+						undefined,
+						memberUniqueFields,
+					)
+
+					return yield* doCreate({
+						name: "Duplicate Email",
+						email: "alice@example.com", // conflicts with existingMember
+						teamId: "team2", // different team
+						role: "member", // different role
+					}).pipe(Effect.flip)
+				}),
+			)
+
+			expect(emailViolation._tag).toBe("UniqueConstraintError")
+			if (emailViolation._tag === "UniqueConstraintError") {
+				expect(emailViolation.constraint).toBe("unique_email")
+				expect(emailViolation.fields).toEqual(["email"])
+			}
+
+			// Test 2: Violate compound constraint (teamId + role)
+			const compoundViolation = await Effect.runPromise(
+				Effect.gen(function* () {
+					const membersRef = yield* makeRef<Member>([existingMember])
+					const stateRefs = yield* makeStateRefs({ members: [existingMember] })
+
+					const doCreate = create(
+						"members",
+						MemberSchema,
+						noRelationships,
+						membersRef,
+						stateRefs,
+						undefined,
+						undefined,
+						memberUniqueFields,
+					)
+
+					return yield* doCreate({
+						name: "Duplicate Role",
+						email: "different@example.com", // unique email
+						teamId: "team1", // same as existingMember
+						role: "admin", // same as existingMember → compound violation
+					}).pipe(Effect.flip)
+				}),
+			)
+
+			expect(compoundViolation._tag).toBe("UniqueConstraintError")
+			if (compoundViolation._tag === "UniqueConstraintError") {
+				expect(compoundViolation.constraint).toBe("unique_teamId_role")
+				expect(compoundViolation.fields).toEqual(["teamId", "role"])
+			}
+
+			// Test 3: All unique → succeeds
+			const success = await Effect.runPromise(
+				Effect.gen(function* () {
+					const membersRef = yield* makeRef<Member>([existingMember])
+					const stateRefs = yield* makeStateRefs({ members: [existingMember] })
+
+					const doCreate = create(
+						"members",
+						MemberSchema,
+						noRelationships,
+						membersRef,
+						stateRefs,
+						undefined,
+						undefined,
+						memberUniqueFields,
+					)
+
+					return yield* doCreate({
+						name: "New Member",
+						email: "new@example.com", // unique email
+						teamId: "team1", // same team
+						role: "member", // different role → no compound violation
+					})
+				}),
+			)
+
+			expect(success.name).toBe("New Member")
+			expect(success.email).toBe("new@example.com")
+			expect(success.teamId).toBe("team1")
+			expect(success.role).toBe("member")
+		})
+	})
 })
