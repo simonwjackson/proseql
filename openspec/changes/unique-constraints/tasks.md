@@ -61,4 +61,4 @@
 
 - [x] 8.1 Remove unused `ExtractUniqueFields` type from `core/types/crud-types.ts` if no longer needed (replaced by runtime config)
 - [x] 8.2 Run full test suite (`bun test`) to verify no regressions
-- [ ] 8.3 Run type check (`bunx tsc --noEmit`) to verify no type errors
+- [x] 8.3 Run type check (`bunx tsc --noEmit`) to verify no type errors

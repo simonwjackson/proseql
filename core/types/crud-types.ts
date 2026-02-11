@@ -145,6 +145,17 @@ export type UpsertInput<T, UniqueFields extends keyof T = never> = {
 };
 
 /**
+ * Internal input type for upsert operations.
+ * Allows any where clause since validation is done at runtime.
+ * Use this for internal implementation; UpsertInput provides compile-time safety.
+ */
+export type UpsertInternalInput<T> = {
+	where: Partial<T> | { id: string };
+	create: CreateInput<T>;
+	update: UpdateWithOperators<T>;
+};
+
+/**
  * Result type for upsert operations
  * Includes metadata about whether entity was created or updated
  */

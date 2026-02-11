@@ -12,7 +12,7 @@ import type {
 	CreateInput,
 	UpdateWithOperators,
 	MinimalEntity,
-	UpsertInput,
+	UpsertInternalInput,
 	UpsertResult,
 	UpsertManyResult,
 } from "../../types/crud-types.js"
@@ -121,7 +121,7 @@ export const upsert = <T extends HasId, I = T>(
 	hooks?: HooksConfig<T>,
 	uniqueFields: NormalizedConstraints = [],
 ) =>
-(input: UpsertInput<T>): Effect.Effect<UpsertResult<T>, ValidationError | ForeignKeyError | HookError | UniqueConstraintError> =>
+(input: UpsertInternalInput<T>): Effect.Effect<UpsertResult<T>, ValidationError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
 		const where = input.where as Record<string, unknown>
 
@@ -291,7 +291,7 @@ export const upsertMany = <T extends HasId, I = T>(
 	hooks?: HooksConfig<T>,
 	uniqueFields: NormalizedConstraints = [],
 ) =>
-(inputs: ReadonlyArray<UpsertInput<T>>): Effect.Effect<UpsertManyResult<T>, ValidationError | ForeignKeyError | HookError | UniqueConstraintError> =>
+(inputs: ReadonlyArray<UpsertInternalInput<T>>): Effect.Effect<UpsertManyResult<T>, ValidationError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
 		// Validate all where clauses target unique fields or id
 		for (const input of inputs) {
