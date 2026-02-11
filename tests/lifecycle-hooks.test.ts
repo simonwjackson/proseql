@@ -1257,5 +1257,144 @@ describe("lifecycle-hooks", () => {
 				"onChange:delete", // then onChange fires
 			])
 		})
+
+		it("onChange works alongside specific hooks (both fire)", async () => {
+			// This test verifies that when both specific hooks (before/after) and
+			// onChange are configured, all of them fire and receive correct data.
+			// This covers the use case where someone wants specific hooks for
+			// targeted logic and onChange for generic cross-cutting concerns.
+
+			// Track all hook calls with their received data
+			const beforeCreateCalls: Array<{ name: string }> = []
+			const afterCreateCalls: Array<{ name: string }> = []
+			const onChangeCalls: Array<{ type: string; name: string }> = []
+
+			const beforeUpdateCalls: Array<{ existing: string; update: Partial<User> }> = []
+			const afterUpdateCalls: Array<{ previous: string; current: string }> = []
+
+			const beforeDeleteCalls: Array<{ name: string }> = []
+			const afterDeleteCalls: Array<{ name: string }> = []
+
+			// beforeCreate: transform the data (add a suffix)
+			const beforeCreateHook: BeforeCreateHook<User> = (ctx) => {
+				beforeCreateCalls.push({ name: ctx.data.name })
+				return Effect.succeed({
+					...ctx.data,
+					name: `${ctx.data.name}-transformed`,
+				})
+			}
+
+			// afterCreate: record the final entity
+			const afterCreateHook: AfterCreateHook<User> = (ctx) => {
+				afterCreateCalls.push({ name: ctx.entity.name })
+				return Effect.void
+			}
+
+			// beforeUpdate: record what we're updating
+			const beforeUpdateHook: BeforeUpdateHook<User> = (ctx) => {
+				beforeUpdateCalls.push({ existing: ctx.existing.name, update: ctx.update })
+				return Effect.succeed(ctx.update)
+			}
+
+			// afterUpdate: record previous and current
+			const afterUpdateHook: AfterUpdateHook<User> = (ctx) => {
+				afterUpdateCalls.push({ previous: ctx.previous.name, current: ctx.current.name })
+				return Effect.void
+			}
+
+			// beforeDelete: record what we're deleting
+			const beforeDeleteHook: BeforeDeleteHook<User> = (ctx) => {
+				beforeDeleteCalls.push({ name: ctx.entity.name })
+				return Effect.void
+			}
+
+			// afterDelete: record the deleted entity
+			const afterDeleteHook: AfterDeleteHook<User> = (ctx) => {
+				afterDeleteCalls.push({ name: ctx.entity.name })
+				return Effect.void
+			}
+
+			// onChange: generic listener that records all changes
+			const onChangeHook: OnChangeHook<User> = (ctx) => {
+				if (ctx.type === "create") {
+					onChangeCalls.push({ type: ctx.type, name: ctx.entity.name })
+				} else if (ctx.type === "update") {
+					onChangeCalls.push({ type: ctx.type, name: ctx.current.name })
+				} else if (ctx.type === "delete") {
+					onChangeCalls.push({ type: ctx.type, name: ctx.entity.name })
+				}
+				return Effect.void
+			}
+
+			const hooks: HooksConfig<User> = {
+				beforeCreate: [beforeCreateHook],
+				afterCreate: [afterCreateHook],
+				beforeUpdate: [beforeUpdateHook],
+				afterUpdate: [afterUpdateHook],
+				beforeDelete: [beforeDeleteHook],
+				afterDelete: [afterDeleteHook],
+				onChange: [onChangeHook],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, { users: [] })
+
+					// Create a user
+					const created = yield* db.users.create({
+						name: "TestUser",
+						email: "test@example.com",
+						age: 25,
+					})
+
+					// Update the user
+					const updated = yield* db.users.update(created.id, {
+						name: "UpdatedUser",
+					})
+
+					// Delete the user
+					const deleted = yield* db.users.delete(created.id)
+
+					return { created, updated, deleted }
+				}),
+			)
+
+			// Verify all beforeCreate hooks were called with original data
+			expect(beforeCreateCalls).toHaveLength(1)
+			expect(beforeCreateCalls[0].name).toBe("TestUser")
+
+			// Verify afterCreate received the transformed entity
+			expect(afterCreateCalls).toHaveLength(1)
+			expect(afterCreateCalls[0].name).toBe("TestUser-transformed")
+
+			// Verify beforeUpdate received the existing entity and update
+			expect(beforeUpdateCalls).toHaveLength(1)
+			expect(beforeUpdateCalls[0].existing).toBe("TestUser-transformed")
+			expect(beforeUpdateCalls[0].update).toEqual({ name: "UpdatedUser" })
+
+			// Verify afterUpdate received both previous and current
+			expect(afterUpdateCalls).toHaveLength(1)
+			expect(afterUpdateCalls[0].previous).toBe("TestUser-transformed")
+			expect(afterUpdateCalls[0].current).toBe("UpdatedUser")
+
+			// Verify beforeDelete received the entity to be deleted
+			expect(beforeDeleteCalls).toHaveLength(1)
+			expect(beforeDeleteCalls[0].name).toBe("UpdatedUser")
+
+			// Verify afterDelete received the deleted entity
+			expect(afterDeleteCalls).toHaveLength(1)
+			expect(afterDeleteCalls[0].name).toBe("UpdatedUser")
+
+			// Verify onChange fired for all three operations with correct data
+			expect(onChangeCalls).toHaveLength(3)
+			expect(onChangeCalls[0]).toEqual({ type: "create", name: "TestUser-transformed" })
+			expect(onChangeCalls[1]).toEqual({ type: "update", name: "UpdatedUser" })
+			expect(onChangeCalls[2]).toEqual({ type: "delete", name: "UpdatedUser" })
+
+			// Verify the returned results are correct
+			expect(result.created.name).toBe("TestUser-transformed")
+			expect(result.updated.name).toBe("UpdatedUser")
+			expect(result.deleted.name).toBe("UpdatedUser")
+		})
 	})
 })
