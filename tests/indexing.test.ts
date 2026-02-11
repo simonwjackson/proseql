@@ -2695,6 +2695,203 @@ describe("Indexing - Query Acceleration", () => {
 			expect(results.length).toBe(2)
 		})
 	})
+
+	describe("Task 8.4: query on non-indexed field returns correct results (full scan)", () => {
+		it("should return correct results when querying a non-indexed field with equality", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+				{ id: "u4", email: "diana@example.com", name: "Diana", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by non-indexed "age" field (full scan)
+			const results = await db.users.query({
+				where: { age: 25 },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u2", "u4"])
+		})
+
+		it("should return correct results when querying a non-indexed field with $eq operator", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by non-indexed "name" field with $eq (full scan)
+			const results = await db.users.query({
+				where: { name: { $eq: "Bob" } },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("u2")
+		})
+
+		it("should return correct results when querying a non-indexed field with $in operator", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+				{ id: "u4", email: "diana@example.com", name: "Diana", age: 28 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by non-indexed "name" field with $in (full scan)
+			const results = await db.users.query({
+				where: { name: { $in: ["Alice", "Charlie"] } },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u3"])
+		})
+
+		it("should return correct results when querying a non-indexed field with comparison operators", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+				{ id: "u4", email: "diana@example.com", name: "Diana", age: 28 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by non-indexed "age" field with $gt (full scan)
+			const results = await db.users.query({
+				where: { age: { $gt: 28 } },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u3"])
+		})
+
+		it("should return empty array when non-indexed field query matches no entities", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query for a non-existent name (full scan)
+			const results = await db.users.query({
+				where: { name: "NonExistent" },
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should work correctly with unindexed database (no indexes configured)", async () => {
+			const config = createUnindexedConfig() // No indexes at all
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by email - no index, so it's a full scan
+			const emailResults = await db.users.query({
+				where: { email: "bob@example.com" },
+			}).runPromise
+			expect(emailResults.length).toBe(1)
+			expect((emailResults[0] as { id: string }).id).toBe("u2")
+
+			// Query by name - also full scan
+			const nameResults = await db.users.query({
+				where: { name: "Alice" },
+			}).runPromise
+			expect(nameResults.length).toBe(1)
+			expect((nameResults[0] as { id: string }).id).toBe("u1")
+		})
+
+		it("should correctly handle non-indexed field query after CRUD operations", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Create users
+			await db.users.create({ id: "u1", email: "alice@example.com", name: "Alice", age: 30 }).runPromise
+			await db.users.create({ id: "u2", email: "bob@example.com", name: "Bob", age: 25 }).runPromise
+
+			// Query non-indexed field after creation
+			const results1 = await db.users.query({
+				where: { age: 25 },
+			}).runPromise
+			expect(results1.length).toBe(1)
+			expect((results1[0] as { id: string }).id).toBe("u2")
+
+			// Update the age
+			await db.users.update("u2", { age: 26 }).runPromise
+
+			// Query should reflect the update
+			const results2 = await db.users.query({
+				where: { age: 25 },
+			}).runPromise
+			expect(results2.length).toBe(0)
+
+			const results3 = await db.users.query({
+				where: { age: 26 },
+			}).runPromise
+			expect(results3.length).toBe(1)
+			expect((results3[0] as { id: string }).id).toBe("u2")
+		})
+
+		it("should apply sorting and pagination correctly with non-indexed field query", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+				{ id: "u4", email: "diana@example.com", name: "Diana", age: 28 },
+				{ id: "u5", email: "eve@example.com", name: "Eve", age: 22 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query non-indexed field with sorting
+			const sortedResults = await db.users.query({
+				where: { age: { $lt: 30 } },
+				sort: { age: "asc" },
+			}).runPromise
+			expect(sortedResults.length).toBe(3)
+			expect((sortedResults[0] as { id: string }).id).toBe("u5") // Eve, age 22
+			expect((sortedResults[1] as { id: string }).id).toBe("u2") // Bob, age 25
+			expect((sortedResults[2] as { id: string }).id).toBe("u4") // Diana, age 28
+
+			// Query non-indexed field with pagination
+			const paginatedResults = await db.users.query({
+				where: { age: { $gt: 20 } },
+				sort: { age: "asc" },
+				limit: 2,
+			}).runPromise
+			expect(paginatedResults.length).toBe(2)
+			expect((paginatedResults[0] as { id: string }).id).toBe("u5") // Eve, age 22
+			expect((paginatedResults[1] as { id: string }).id).toBe("u2") // Bob, age 25
+		})
+	})
 })
 
 // Export helpers for use in other test files
