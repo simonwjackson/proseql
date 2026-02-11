@@ -14,7 +14,7 @@
 
 ## 3. Preset Layers
 
-- [ ] 3.1 Create `core/serializers/presets.ts`: export `AllTextFormatsLayer` (all 5 codecs), `DefaultSerializerLayer` (json + yaml).
+- [x] 3.1 Create `core/serializers/presets.ts`: export `AllTextFormatsLayer` (all 5 codecs), `DefaultSerializerLayer` (json + yaml).
 
 ## 4. Extract getFileExtension
 
