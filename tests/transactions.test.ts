@@ -849,4 +849,76 @@ describe("createTransaction (Manual)", () => {
 			expect(finalUsers.get("u3")).toBeDefined()
 		})
 	})
+
+	describe("double rollback", () => {
+		it("should fail with TransactionError when rollback() is called twice", async () => {
+			const setup = await Effect.runPromise(createManualTransactionTestSetup())
+
+			// Create transaction context manually
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined, // no persistence trigger
+				),
+			)
+
+			// Verify transaction is active
+			expect(ctx.isActive).toBe(true)
+
+			// Perform operations within transaction
+			await Effect.runPromise(
+				ctx.users.create({
+					id: "u3",
+					name: "Charlie",
+					email: "charlie@test.com",
+					age: 35,
+				}),
+			)
+
+			// First rollback should succeed (returns TransactionError, but that's expected)
+			const firstRollbackResult = await Effect.runPromise(
+				ctx.rollback().pipe(Effect.either),
+			)
+
+			// Verify first rollback returns TransactionError with operation "rollback"
+			expect(firstRollbackResult._tag).toBe("Left")
+			if (firstRollbackResult._tag === "Left") {
+				const error = firstRollbackResult.left as {
+					readonly _tag?: string
+					readonly operation?: string
+					readonly reason?: string
+				}
+				expect(error._tag).toBe("TransactionError")
+				expect(error.operation).toBe("rollback")
+				expect(error.reason).toBe("transaction rolled back")
+			}
+
+			// Verify transaction is no longer active
+			expect(ctx.isActive).toBe(false)
+
+			// Second rollback should fail with TransactionError
+			const secondRollbackResult = await Effect.runPromise(
+				ctx.rollback().pipe(Effect.either),
+			)
+
+			expect(secondRollbackResult._tag).toBe("Left")
+			if (secondRollbackResult._tag === "Left") {
+				const error = secondRollbackResult.left as {
+					readonly _tag?: string
+					readonly operation?: string
+					readonly reason?: string
+				}
+				expect(error._tag).toBe("TransactionError")
+				expect(error.operation).toBe("rollback")
+				expect(error.reason).toBe("transaction is no longer active")
+			}
+
+			// Verify the data was reverted by the first rollback
+			const finalUsers = await Effect.runPromise(Ref.get(setup.usersRef))
+			expect(finalUsers.size).toBe(2)
+			expect(finalUsers.get("u3")).toBeUndefined()
+		})
+	})
 })
