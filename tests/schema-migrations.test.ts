@@ -1151,6 +1151,214 @@ describe("schema-migrations: auto-migrate on load", () => {
 			expect(david.age).toBe(0)
 		})
 	})
+
+	describe("migrated data written back to file with new _version (task 11.3)", () => {
+		it("loadData writes migrated data back to file after successful migration", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File at version 0 (no _version field) with V0 data
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					u1: { id: "u1", name: "Alice Smith" },
+				}),
+			)
+
+			// Load with version 3 config - triggers migration 0→1→2→3
+			await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV3, {
+						version: 3,
+						collectionName: "users",
+						migrations: allMigrations,
+					}),
+					layer,
+				),
+			)
+
+			// Verify file was rewritten with migrated data
+			const stored = store.get("/data/users.json")
+			expect(stored).toBeDefined()
+			const parsed = JSON.parse(stored!)
+
+			// Should have new _version stamped
+			expect(parsed._version).toBe(3)
+
+			// Should contain migrated entity data (V3 format)
+			const alice = parsed.u1
+			expect(alice.firstName).toBe("Alice")
+			expect(alice.lastName).toBe("Smith")
+			expect(alice.email).toBe("alice.smith@example.com")
+			expect(alice.age).toBe(0)
+
+			// Should not have 'name' field (was split into firstName/lastName)
+			expect(alice.name).toBeUndefined()
+		})
+
+		it("loadData writes correct version after partial migration (2→3)", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File at version 2 with V2 data
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					_version: 2,
+					u1: {
+						id: "u1",
+						firstName: "Bob",
+						lastName: "Jones",
+						email: "bob@custom.org",
+					},
+				}),
+			)
+
+			// Load with version 3 config - triggers migration 2→3 only
+			await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV3, {
+						version: 3,
+						collectionName: "users",
+						migrations: allMigrations,
+					}),
+					layer,
+				),
+			)
+
+			// Verify file was rewritten
+			const stored = store.get("/data/users.json")
+			const parsed = JSON.parse(stored!)
+
+			// Should have new _version 3
+			expect(parsed._version).toBe(3)
+
+			// Entity should have age added (from 2→3 migration)
+			expect(parsed.u1.age).toBe(0)
+
+			// Original fields preserved
+			expect(parsed.u1.firstName).toBe("Bob")
+			expect(parsed.u1.lastName).toBe("Jones")
+			expect(parsed.u1.email).toBe("bob@custom.org")
+		})
+
+		it("loadCollectionsFromFile writes migrated collection back to file", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File with version 0 (no _version) in users collection
+			store.set(
+				"/data/db.json",
+				JSON.stringify({
+					users: {
+						u1: { id: "u1", name: "Charlie Brown" },
+					},
+				}),
+			)
+
+			// Load with version 3 config
+			await Effect.runPromise(
+				Effect.provide(
+					loadCollectionsFromFile("/data/db.json", [
+						{
+							name: "users",
+							schema: UserSchemaV3,
+							version: 3,
+							migrations: allMigrations,
+						},
+					]),
+					layer,
+				),
+			)
+
+			// Verify file was rewritten
+			const stored = store.get("/data/db.json")
+			expect(stored).toBeDefined()
+			const parsed = JSON.parse(stored!)
+
+			// Collection should have new _version
+			expect(parsed.users._version).toBe(3)
+
+			// Entity should be migrated
+			const charlie = parsed.users.u1
+			expect(charlie.firstName).toBe("Charlie")
+			expect(charlie.lastName).toBe("Brown")
+			expect(charlie.email).toBe("charlie.brown@example.com")
+			expect(charlie.age).toBe(0)
+		})
+
+		it("file unchanged when already at target version (no migration needed)", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File already at version 3 with valid V3 data
+			const originalContent = JSON.stringify({
+				_version: 3,
+				u1: {
+					id: "u1",
+					firstName: "David",
+					lastName: "Lee",
+					email: "david@example.com",
+					age: 25,
+				},
+			})
+			store.set("/data/users.json", originalContent)
+
+			// Load with version 3 config - no migration should run
+			await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV3, {
+						version: 3,
+						collectionName: "users",
+						migrations: allMigrations,
+					}),
+					layer,
+				),
+			)
+
+			// File content should be unchanged (no write-back when no migration)
+			const stored = store.get("/data/users.json")
+			expect(stored).toBe(originalContent)
+		})
+
+		it("multiple entities all migrated and written back", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File at version 0 with multiple entities
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					u1: { id: "u1", name: "Alice Smith" },
+					u2: { id: "u2", name: "Bob Jones" },
+					u3: { id: "u3", name: "Charlie Brown" },
+				}),
+			)
+
+			await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV3, {
+						version: 3,
+						collectionName: "users",
+						migrations: allMigrations,
+					}),
+					layer,
+				),
+			)
+
+			const stored = store.get("/data/users.json")
+			const parsed = JSON.parse(stored!)
+
+			// All entities should be migrated
+			expect(parsed._version).toBe(3)
+			expect(Object.keys(parsed).filter((k) => k !== "_version")).toHaveLength(3)
+
+			// Verify each entity
+			expect(parsed.u1.firstName).toBe("Alice")
+			expect(parsed.u1.age).toBe(0)
+
+			expect(parsed.u2.firstName).toBe("Bob")
+			expect(parsed.u2.age).toBe(0)
+
+			expect(parsed.u3.firstName).toBe("Charlie")
+			expect(parsed.u3.age).toBe(0)
+		})
+	})
 })
 
 // ============================================================================
