@@ -234,6 +234,102 @@ describe("Indexing - Test Helpers", () => {
 	})
 })
 
+// ============================================================================
+// Tests - Index Declaration and Building (Task 6.2+)
+// ============================================================================
+
+describe("Indexing - Index Built from Initial Data", () => {
+	describe("Task 6.2: correct field values mapped to correct entity IDs", () => {
+		it("should map each unique email to the correct user ID", async () => {
+			// Build indexes from users with unique emails
+			const normalized = normalizeIndexes(["email"])
+			const users = createSampleUsers().slice(0, 3) // alice, bob, charlie (unique emails)
+			const indexes = await inspectIndexState(normalized, users)
+			const indexMap = await getIndexMap(indexes, ["email"])
+
+			// Verify each email maps to exactly the correct user ID
+			const aliceIds = indexMap.get("alice@example.com")
+			expect(aliceIds).toBeDefined()
+			expect(aliceIds?.size).toBe(1)
+			expect(aliceIds?.has("u1")).toBe(true)
+
+			const bobIds = indexMap.get("bob@example.com")
+			expect(bobIds).toBeDefined()
+			expect(bobIds?.size).toBe(1)
+			expect(bobIds?.has("u2")).toBe(true)
+
+			const charlieIds = indexMap.get("charlie@example.com")
+			expect(charlieIds).toBeDefined()
+			expect(charlieIds?.size).toBe(1)
+			expect(charlieIds?.has("u3")).toBe(true)
+		})
+
+		it("should map compound index keys to correct entity IDs", async () => {
+			// Build compound indexes from products
+			const normalized = normalizeIndexes([["category", "subcategory"]])
+			const products = createSampleProducts()
+			const indexes = await inspectIndexState(normalized, products)
+			const indexMap = await getIndexMap(indexes, ["category", "subcategory"])
+
+			// Compound key for ["electronics", "computers"] should have laptop (p1) and monitor (p5)
+			const electronicsComputersKey = JSON.stringify(["electronics", "computers"])
+			const electronicsComputers = indexMap.get(electronicsComputersKey)
+			expect(electronicsComputers).toBeDefined()
+			expect(electronicsComputers?.size).toBe(2)
+			expect(electronicsComputers?.has("p1")).toBe(true) // Laptop
+			expect(electronicsComputers?.has("p5")).toBe(true) // Monitor
+
+			// Compound key for ["electronics", "phones"] should have phone (p2)
+			const electronicsPhonesKey = JSON.stringify(["electronics", "phones"])
+			const electronicsPhones = indexMap.get(electronicsPhonesKey)
+			expect(electronicsPhones).toBeDefined()
+			expect(electronicsPhones?.size).toBe(1)
+			expect(electronicsPhones?.has("p2")).toBe(true) // Phone
+
+			// Compound key for ["furniture", "office"] should have desk (p3) and chair (p4)
+			const furnitureOfficeKey = JSON.stringify(["furniture", "office"])
+			const furnitureOffice = indexMap.get(furnitureOfficeKey)
+			expect(furnitureOffice).toBeDefined()
+			expect(furnitureOffice?.size).toBe(2)
+			expect(furnitureOffice?.has("p3")).toBe(true) // Desk
+			expect(furnitureOffice?.has("p4")).toBe(true) // Chair
+		})
+
+		it("should only contain indexed field values (no extra entries)", async () => {
+			const normalized = normalizeIndexes(["email"])
+			const users = createSampleUsers().slice(0, 3)
+			const indexes = await inspectIndexState(normalized, users)
+			const indexMap = await getIndexMap(indexes, ["email"])
+
+			// Index should have exactly 3 entries (one per unique email)
+			expect(indexMap.size).toBe(3)
+
+			// Should not have any non-existent emails
+			expect(indexMap.has("nonexistent@example.com")).toBe(false)
+		})
+
+		it("should index role field correctly with single-field index", async () => {
+			const normalized = normalizeIndexes(["role"])
+			const users = createSampleUsers().slice(0, 3) // alice (admin), bob (user), charlie (user)
+			const indexes = await inspectIndexState(normalized, users)
+			const indexMap = await getIndexMap(indexes, ["role"])
+
+			// "admin" should map to u1
+			const adminIds = indexMap.get("admin")
+			expect(adminIds).toBeDefined()
+			expect(adminIds?.size).toBe(1)
+			expect(adminIds?.has("u1")).toBe(true)
+
+			// "user" should map to u2 and u3
+			const userIds = indexMap.get("user")
+			expect(userIds).toBeDefined()
+			expect(userIds?.size).toBe(2)
+			expect(userIds?.has("u2")).toBe(true)
+			expect(userIds?.has("u3")).toBe(true)
+		})
+	})
+})
+
 // Export helpers for use in other test files
 export {
 	UserSchema,

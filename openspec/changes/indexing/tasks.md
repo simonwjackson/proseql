@@ -39,7 +39,7 @@
 ## 6. Tests — Index Declaration and Building
 
 - [x] 6.1 Create `tests/indexing.test.ts` with test helpers: create database with indexed collection
-- [ ] 6.2 Test index built from initial data: correct field values mapped to correct entity IDs
+- [x] 6.2 Test index built from initial data: correct field values mapped to correct entity IDs
 - [ ] 6.3 Test multiple entities with same field value: all IDs in the index Set
 - [ ] 6.4 Test null/undefined values not indexed
 - [ ] 6.5 Test collection without indexes: empty CollectionIndexes
