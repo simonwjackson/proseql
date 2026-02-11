@@ -276,6 +276,8 @@ export type {
 	DebouncedWriter,
 	FileWatcher,
 	FileWatcherConfig,
+	SaveDataOptions,
+	SaveCollectionConfig,
 } from "./storage/persistence-effect.js";
 
 // ============================================================================

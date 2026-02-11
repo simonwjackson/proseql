@@ -288,18 +288,31 @@ export const loadCollectionsFromFile = (
 // ============================================================================
 
 /**
+ * Configuration for a collection to be saved to a multi-collection file.
+ */
+export interface SaveCollectionConfig {
+	readonly name: string
+	readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>
+	readonly data: ReadonlyMap<string, { readonly id: string }>
+	/**
+	 * Optional schema version to stamp into this collection's section.
+	 * When provided, `_version` is injected first in the collection object.
+	 */
+	readonly version?: number
+}
+
+/**
  * Save multiple collections to a single file.
  *
  * Encodes each entity in each collection through its schema, then writes
- * the combined data as { collectionName: { id: encodedEntity, ... }, ... }.
+ * the combined data as { collectionName: { _version?, id: encodedEntity, ... }, ... }.
+ *
+ * If a collection has a `version` specified, `_version` is stamped first
+ * in that collection's object for readability.
  */
 export const saveCollectionsToFile = (
 	filePath: string,
-	collections: ReadonlyArray<{
-		readonly name: string
-		readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>
-		readonly data: ReadonlyMap<string, { readonly id: string }>
-	}>,
+	collections: ReadonlyArray<SaveCollectionConfig>,
 ): Effect.Effect<
 	void,
 	StorageError | SerializationError | UnsupportedFormatError | ValidationError,
@@ -314,7 +327,7 @@ export const saveCollectionsToFile = (
 
 		for (const col of collections) {
 			const encode = Schema.encode(col.schema)
-			const collectionObj: Record<string, unknown> = {}
+			const entityMap: Record<string, unknown> = {}
 
 			for (const [id, entity] of col.data) {
 				const encoded = yield* encode(entity).pipe(
@@ -331,10 +344,14 @@ export const saveCollectionsToFile = (
 							}),
 					),
 				)
-				collectionObj[id] = encoded
+				entityMap[id] = encoded
 			}
 
-			fileObj[col.name] = collectionObj
+			// Inject _version first if provided for readability
+			fileObj[col.name] =
+				col.version !== undefined
+					? { _version: col.version, ...entityMap }
+					: entityMap
 		}
 
 		const content = yield* serializer.serialize(fileObj, ext)
