@@ -61,7 +61,7 @@
 - [x] 8.2 Test `$eq` on indexed field returns correct results
 - [x] 8.3 Test `$in` on indexed field returns correct results (union)
 - [x] 8.4 Test query on non-indexed field returns correct results (full scan)
-- [ ] 8.5 Test mixed indexed + non-indexed conditions: narrowed then filtered
+- [x] 8.5 Test mixed indexed + non-indexed conditions: narrowed then filtered
 - [ ] 8.6 Test `$or`/`$and`/`$not` queries fall back to full scan
 - [ ] 8.7 Test empty index entry (no matches) returns empty result
 - [ ] 8.8 Test result parity: same results with and without index configured

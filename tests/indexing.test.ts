@@ -2892,6 +2892,264 @@ describe("Indexing - Query Acceleration", () => {
 			expect((paginatedResults[1] as { id: string }).id).toBe("u2") // Bob, age 25
 		})
 	})
+
+	describe("Task 8.5: mixed indexed + non-indexed conditions: narrowed then filtered", () => {
+		it("should narrow by indexed field then filter by non-indexed field", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "alice@example.com", name: "Alice Smith", age: 25 }, // Same email, different age
+				{ id: "u3", email: "bob@example.com", name: "Bob", age: 30 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by indexed field (email) + non-indexed field (age)
+			// Should first narrow by email index, then filter by age
+			const results = await db.users.query({
+				where: { email: "alice@example.com", age: 30 },
+			}).runPromise
+
+			// Only u1 matches both conditions
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("u1")
+		})
+
+		it("should narrow by indexed field then filter by non-indexed field with $eq operator", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "shared@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "shared@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "shared@example.com", name: "Charlie", age: 35 },
+				{ id: "u4", email: "other@example.com", name: "Diana", age: 30 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by indexed email with $eq, then filter by non-indexed name
+			const results = await db.users.query({
+				where: { email: { $eq: "shared@example.com" }, name: "Bob" },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("u2")
+		})
+
+		it("should narrow by indexed $in then filter by non-indexed comparison", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "a@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "b@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "c@example.com", name: "Charlie", age: 35 },
+				{ id: "u4", email: "d@example.com", name: "Diana", age: 28 },
+				{ id: "u5", email: "e@example.com", name: "Eve", age: 22 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by indexed email with $in, then filter by non-indexed age with $gt
+			const results = await db.users.query({
+				where: {
+					email: { $in: ["a@example.com", "b@example.com", "c@example.com"] },
+					age: { $gt: 28 },
+				},
+			}).runPromise
+
+			// From the $in matches (u1, u2, u3), only u1 (age 30) and u3 (age 35) have age > 28
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u3"])
+		})
+
+		it("should narrow by indexed field then filter by multiple non-indexed conditions", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "shared@example.com", name: "Alice", age: 30, role: "admin" },
+				{ id: "u2", email: "shared@example.com", name: "Bob", age: 25, role: "user" },
+				{ id: "u3", email: "shared@example.com", name: "Charlie", age: 35, role: "admin" },
+				{ id: "u4", email: "shared@example.com", name: "Diana", age: 28, role: "user" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by indexed email + multiple non-indexed conditions (age and role)
+			const results = await db.users.query({
+				where: {
+					email: "shared@example.com",
+					age: { $gte: 28 },
+					role: "admin",
+				},
+			}).runPromise
+
+			// From shared email (u1-u4), age >= 28 (u1, u3, u4), role = admin (u1, u3)
+			// Intersection: u1 and u3
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u3"])
+		})
+
+		it("should return empty array when indexed condition matches but non-indexed does not", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by indexed email that exists, but age that doesn't match
+			const results = await db.users.query({
+				where: { email: "alice@example.com", age: 100 },
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should handle mixed conditions with compound indexed field", async () => {
+			const config = createMultiIndexConfig() // products has ["category", "subcategory"] compound index
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Desktop", category: "electronics", subcategory: "computers", price: 799 },
+				{ id: "p3", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p4", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Query by compound indexed fields + non-indexed field (price)
+			const results = await db.products.query({
+				where: {
+					category: "electronics",
+					subcategory: "computers",
+					price: { $gt: 800 },
+				},
+			}).runPromise
+
+			// From electronics/computers (p1, p2), only p1 has price > 800
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("p1")
+		})
+
+		it("should apply mixed conditions with sorting on non-indexed field", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "shared@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "shared@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "shared@example.com", name: "Charlie", age: 35 },
+				{ id: "u4", email: "other@example.com", name: "Diana", age: 28 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by indexed email + non-indexed age filter + sort by age
+			const results = await db.users.query({
+				where: {
+					email: "shared@example.com",
+					age: { $gte: 28 },
+				},
+				sort: { age: "asc" },
+			}).runPromise
+
+			// From shared email (u1, u2, u3), age >= 28 (u1, u3), sorted by age ascending
+			expect(results.length).toBe(2)
+			expect((results[0] as { id: string }).id).toBe("u1") // age 30
+			expect((results[1] as { id: string }).id).toBe("u3") // age 35
+		})
+
+		it("should apply mixed conditions with pagination", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "shared@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "shared@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "shared@example.com", name: "Charlie", age: 35 },
+				{ id: "u4", email: "shared@example.com", name: "Diana", age: 40 },
+				{ id: "u5", email: "other@example.com", name: "Eve", age: 45 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by indexed email + non-indexed age filter + pagination
+			const results = await db.users.query({
+				where: {
+					email: "shared@example.com",
+					age: { $gte: 30 },
+				},
+				sort: { age: "asc" },
+				limit: 2,
+			}).runPromise
+
+			// From shared email (u1-u4), age >= 30 (u1, u3, u4), sorted, limited to 2
+			expect(results.length).toBe(2)
+			expect((results[0] as { id: string }).id).toBe("u1") // age 30
+			expect((results[1] as { id: string }).id).toBe("u3") // age 35
+		})
+
+		it("should handle mixed conditions after CRUD operations", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Create users with shared email
+			await db.users.create({ id: "u1", email: "shared@example.com", name: "Alice", age: 30 }).runPromise
+			await db.users.create({ id: "u2", email: "shared@example.com", name: "Bob", age: 25 }).runPromise
+			await db.users.create({ id: "u3", email: "shared@example.com", name: "Charlie", age: 35 }).runPromise
+
+			// Query with mixed conditions
+			const results1 = await db.users.query({
+				where: { email: "shared@example.com", age: { $gt: 28 } },
+			}).runPromise
+			expect(results1.length).toBe(2) // u1 (30) and u3 (35)
+
+			// Update u1's age below threshold
+			await db.users.update("u1", { age: 20 }).runPromise
+
+			// Query again - should only return u3
+			const results2 = await db.users.query({
+				where: { email: "shared@example.com", age: { $gt: 28 } },
+			}).runPromise
+			expect(results2.length).toBe(1)
+			expect((results2[0] as { id: string }).id).toBe("u3")
+
+			// Update u1's email to something else
+			await db.users.update("u1", { email: "other@example.com", age: 30 }).runPromise
+
+			// Query again - u1 no longer matches email condition
+			const results3 = await db.users.query({
+				where: { email: "shared@example.com", age: { $gt: 28 } },
+			}).runPromise
+			expect(results3.length).toBe(1)
+			expect((results3[0] as { id: string }).id).toBe("u3")
+		})
+
+		it("should work with select option on mixed conditions", async () => {
+			const config = createIndexedUsersConfig() // Only "email" is indexed
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "shared@example.com", name: "Alice", age: 30, role: "admin" },
+				{ id: "u2", email: "shared@example.com", name: "Bob", age: 25, role: "user" },
+				{ id: "u3", email: "other@example.com", name: "Charlie", age: 35, role: "admin" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with mixed conditions and select
+			const results = await db.users.query({
+				where: { email: "shared@example.com", role: "admin" },
+				select: { id: true, name: true },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("u1")
+			expect((results[0] as { name: string }).name).toBe("Alice")
+		})
+	})
 })
 
 // Export helpers for use in other test files
