@@ -11,7 +11,7 @@
 - [x] 2.4 Create `core/serializers/codecs/jsonc.ts`: `jsoncCodec(options?: { indent?: number }): FormatCodec`. Extensions: `["jsonc"]`. Uses `jsonc-parser` to strip comments on decode; `JSON.stringify` on encode.
 - [x] 2.5 Create `core/serializers/codecs/toml.ts`: `tomlCodec(): FormatCodec`. Extensions: `["toml"]`. Uses `smol-toml`. Implement `stripNulls` recursive helper for encode.
 - [x] 2.6 Create `core/serializers/codecs/toon.ts`: `toonCodec(): FormatCodec`. Extensions: `["toon"]`. Uses `@toon-format/toon` (`encode`/`decode`). JSON-equivalent data model — no special handling needed.
-- [ ] 2.7 Install `@toon-format/toon` dependency: `bun add @toon-format/toon`
+- [x] 2.7 Install `@toon-format/toon` dependency: `bun add @toon-format/toon`
 
 ## 3. Preset Layers
 
