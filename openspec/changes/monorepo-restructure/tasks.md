@@ -8,7 +8,7 @@
 
 - [x] 2.1 Create `packages/core/` directory structure: `src/`, `tests/`
 - [x] 2.2 Move all files from `core/` to `packages/core/src/` EXCEPT `storage/node-adapter-layer.ts`
-- [ ] 2.3 Update `packages/core/src/index.ts`: remove exports for `NodeStorageLayer`, `makeNodeStorageLayer`, `NodeAdapterConfig`
+- [x] 2.3 Update `packages/core/src/index.ts`: remove exports for `NodeStorageLayer`, `makeNodeStorageLayer`, `NodeAdapterConfig`
 - [ ] 2.4 Create `packages/core/package.json`: name `@proseql/core`, version `0.1.0`, type `module`, main `src/index.ts`, dependencies: `effect`, `yaml`, `json5`, `jsonc-parser`, `smol-toml`, `@toon-format/toon`, `hjson`
 - [ ] 2.5 Create `packages/core/tsconfig.json`: extends `../../tsconfig.base.json`, rootDir `src`, outDir `dist`, include `["src"]`, no references
 - [ ] 2.6 Move all test files from `tests/` to `packages/core/tests/` EXCEPT the Node-adapter-specific test (the `makeNodeStorageLayer` test in `storage-services.test.ts`)

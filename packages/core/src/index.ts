@@ -257,14 +257,6 @@ export {
 
 export type { StorageAdapterShape } from "./storage/storage-service.js";
 
-// Node.js filesystem adapter
-export {
-	NodeStorageLayer,
-	makeNodeStorageLayer,
-} from "./storage/node-adapter-layer.js";
-
-export type { NodeAdapterConfig } from "./storage/node-adapter-layer.js";
-
 // In-memory adapter (for testing)
 export {
 	InMemoryStorageLayer,
