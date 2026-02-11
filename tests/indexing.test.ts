@@ -3966,6 +3966,190 @@ describe("Indexing - Query Acceleration", () => {
 			expect(ids).toEqual(["p2", "p3"])
 		})
 	})
+
+	describe("Task 9.2: partial compound query → falls back to full scan", () => {
+		it("should return correct results when querying only first field of compound index", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+				{ id: "p4", name: "Monitor", category: "electronics", subcategory: "computers", price: 399 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Query only on "category" - compound index ["category", "subcategory"] can't be used
+			// But there's a single-field index on "category" that should be used
+			const results = await db.products.query({
+				where: { category: "electronics" },
+			}).runPromise
+
+			// Should return all electronics products
+			expect(results.length).toBe(3)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p2", "p4"])
+		})
+
+		it("should return correct results when querying only second field of compound index", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Workstation", category: "workstations", subcategory: "computers", price: 2999 },
+				{ id: "p3", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p4", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Query only on "subcategory" - compound index ["category", "subcategory"] can't be used
+			// No single-field index on "subcategory" either, so must fall back to full scan
+			const results = await db.products.query({
+				where: { subcategory: "computers" },
+			}).runPromise
+
+			// Should return all products with subcategory "computers" via full scan
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p2"])
+		})
+
+		it("should fall back correctly when no single-field index exists for partial query", async () => {
+			// Config with ONLY compound index, no single-field index on "category"
+			const compoundOnlyConfig = {
+				products: {
+					schema: ProductSchema,
+					indexes: [["category", "subcategory"]] as ReadonlyArray<ReadonlyArray<string>>,
+					relationships: {} as const,
+				},
+			} as const
+
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(compoundOnlyConfig, { products: testProducts }),
+			)
+
+			// Query only on "category" - compound index can't be used, must do full scan
+			const results = await db.products.query({
+				where: { category: "electronics" },
+			}).runPromise
+
+			// Should still return correct results via full scan
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p2"])
+		})
+
+		it("should return same results as unindexed query for partial compound match", async () => {
+			// Config with compound index
+			const indexedConfig = {
+				products: {
+					schema: ProductSchema,
+					indexes: [["category", "subcategory"]] as ReadonlyArray<ReadonlyArray<string>>,
+					relationships: {} as const,
+				},
+			} as const
+
+			// Config without any indexes
+			const unindexedConfig = {
+				products: {
+					schema: ProductSchema,
+					relationships: {} as const,
+				},
+			} as const
+
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+				{ id: "p4", name: "Chair", category: "furniture", subcategory: "office", price: 199 },
+			]
+
+			const indexedDb = await Effect.runPromise(
+				createIndexedDatabase(indexedConfig, { products: testProducts }),
+			)
+			const unindexedDb = await Effect.runPromise(
+				createIndexedDatabase(unindexedConfig, { products: testProducts }),
+			)
+
+			// Partial query (only first field)
+			const indexedResults = await indexedDb.products.query({
+				where: { category: "furniture" },
+			}).runPromise
+			const unindexedResults = await unindexedDb.products.query({
+				where: { category: "furniture" },
+			}).runPromise
+
+			const indexedIds = indexedResults.map((r) => (r as { id: string }).id).sort()
+			const unindexedIds = unindexedResults.map((r) => (r as { id: string }).id).sort()
+
+			expect(indexedIds).toEqual(unindexedIds)
+			expect(indexedIds).toEqual(["p3", "p4"])
+		})
+
+		it("should handle partial query with $eq operator", async () => {
+			const config = {
+				products: {
+					schema: ProductSchema,
+					indexes: [["category", "subcategory"]] as ReadonlyArray<ReadonlyArray<string>>,
+					relationships: {} as const,
+				},
+			} as const
+
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: testProducts }),
+			)
+
+			// Partial query using $eq - compound index still can't be used
+			const results = await db.products.query({
+				where: { category: { $eq: "electronics" } },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p2"])
+		})
+
+		it("should handle partial query with $in operator", async () => {
+			const config = {
+				products: {
+					schema: ProductSchema,
+					indexes: [["category", "subcategory"]] as ReadonlyArray<ReadonlyArray<string>>,
+					relationships: {} as const,
+				},
+			} as const
+
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+				{ id: "p4", name: "Toy", category: "toys", subcategory: "games", price: 49 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: testProducts }),
+			)
+
+			// Partial query using $in - compound index still can't be used
+			const results = await db.products.query({
+				where: { category: { $in: ["electronics", "toys"] } },
+			}).runPromise
+
+			expect(results.length).toBe(3)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p2", "p4"])
+		})
+	})
 })
 
 // Export helpers for use in other test files
