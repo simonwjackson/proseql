@@ -2339,6 +2339,133 @@ describe("Indexing - Query Acceleration", () => {
 			expect((results3[0] as { id: string }).id).toBe("u1")
 		})
 	})
+
+	describe("Task 8.2: $eq on indexed field returns correct results", () => {
+		it("should return correct results when querying indexed field with $eq operator", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by indexed email field with $eq operator
+			const results = await db.users.query({ where: { email: { $eq: "bob@example.com" } } }).runPromise
+
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("u2")
+			expect((results[0] as { email: string }).email).toBe("bob@example.com")
+			expect((results[0] as { name: string }).name).toBe("Bob")
+		})
+
+		it("should return multiple results when multiple entities share indexed field value with $eq", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "shared@example.com", name: "User One", age: 30 },
+				{ id: "u2", email: "unique@example.com", name: "User Two", age: 25 },
+				{ id: "u3", email: "shared@example.com", name: "User Three", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by shared email with $eq - should return both users
+			const results = await db.users.query({ where: { email: { $eq: "shared@example.com" } } }).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u3"])
+		})
+
+		it("should return empty array when no entity matches $eq query", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by non-existent email with $eq
+			const results = await db.users.query({ where: { email: { $eq: "nonexistent@example.com" } } }).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should return same results for direct equality and $eq operator", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with direct equality
+			const directResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+
+			// Query with $eq operator
+			const eqResults = await db.users.query({ where: { email: { $eq: "bob@example.com" } } }).runPromise
+
+			// Both should return the same result
+			expect(eqResults.length).toBe(directResults.length)
+			expect((eqResults[0] as { id: string }).id).toBe((directResults[0] as { id: string }).id)
+		})
+
+		it("should handle $eq query on indexed field after data modification", async () => {
+			const config = createIndexedUsersConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Create some users
+			await db.users.create({ id: "u1", email: "alice@example.com", name: "Alice", age: 30 }).runPromise
+			await db.users.create({ id: "u2", email: "bob@example.com", name: "Bob", age: 25 }).runPromise
+
+			// Query should work after create with $eq
+			const results1 = await db.users.query({ where: { email: { $eq: "alice@example.com" } } }).runPromise
+			expect(results1.length).toBe(1)
+			expect((results1[0] as { id: string }).id).toBe("u1")
+
+			// Update the email
+			await db.users.update("u1", { email: "alice.new@example.com" }).runPromise
+
+			// Query old email with $eq should return empty
+			const results2 = await db.users.query({ where: { email: { $eq: "alice@example.com" } } }).runPromise
+			expect(results2.length).toBe(0)
+
+			// Query new email with $eq should return the user
+			const results3 = await db.users.query({ where: { email: { $eq: "alice.new@example.com" } } }).runPromise
+			expect(results3.length).toBe(1)
+			expect((results3[0] as { id: string }).id).toBe("u1")
+		})
+
+		it("should handle $eq query combined with other query options", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $eq on indexed field and select specific fields
+			const results = await db.users.query({
+				where: { email: { $eq: "charlie@example.com" } },
+				select: { id: true, name: true },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("u3")
+			expect((results[0] as { name: string }).name).toBe("Charlie")
+		})
+	})
 })
 
 // Export helpers for use in other test files
