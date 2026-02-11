@@ -1754,5 +1754,96 @@ describe("lifecycle-hooks", () => {
 			// Verify all users are deleted from the database
 			expect(result.allUsers).toHaveLength(0)
 		})
+
+		it("upsert create path: triggers beforeCreate/afterCreate/onChange('create')", async () => {
+			// Track all hook calls for the create path
+			const beforeCreateCalls: Array<BeforeCreateContext<User>> = []
+			const afterCreateCalls: Array<AfterCreateContext<User>> = []
+			const onChangeCalls: Array<OnChangeContext<User>> = []
+
+			// Track order of execution
+			const hookOrder: Array<string> = []
+
+			// beforeCreate: transform by adding a suffix
+			const beforeCreateHook: BeforeCreateHook<User> = (ctx) => {
+				hookOrder.push("beforeCreate")
+				beforeCreateCalls.push(ctx)
+				return Effect.succeed({
+					...ctx.data,
+					name: `${ctx.data.name}-transformed`,
+				})
+			}
+
+			// afterCreate: record the created entity
+			const afterCreateHook: AfterCreateHook<User> = (ctx) => {
+				hookOrder.push("afterCreate")
+				afterCreateCalls.push(ctx)
+				return Effect.void
+			}
+
+			// onChange: record the change
+			const onChangeHook: OnChangeHook<User> = (ctx) => {
+				hookOrder.push(`onChange:${ctx.type}`)
+				onChangeCalls.push(ctx)
+				return Effect.void
+			}
+
+			const hooks: HooksConfig<User> = {
+				beforeCreate: [beforeCreateHook],
+				afterCreate: [afterCreateHook],
+				onChange: [onChangeHook],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					// Start with empty database so upsert takes the create path
+					const db = yield* createHookedDatabase(hooks, { users: [] })
+
+					// Upsert a user that doesn't exist - should take create path
+					const upserted = yield* db.users.upsert({
+						where: { email: "newuser@test.com" },
+						create: { name: "NewUser", email: "newuser@test.com", age: 28 },
+						update: { name: "UpdatedUser" },
+					})
+
+					// Read the user back to verify it was created with transformation
+					const found = yield* db.users.findById(upserted.id)
+
+					return { upserted, found }
+				}),
+			)
+
+			// Verify the upsert took the create path
+			expect(result.upserted.__action).toBe("created")
+
+			// Verify beforeCreate was called with correct context
+			expect(beforeCreateCalls).toHaveLength(1)
+			expect(beforeCreateCalls[0].operation).toBe("create")
+			expect(beforeCreateCalls[0].collection).toBe("users")
+			expect(beforeCreateCalls[0].data.email).toBe("newuser@test.com")
+
+			// Verify the transformation from beforeCreate was applied
+			expect(result.upserted.name).toBe("NewUser-transformed")
+			expect(result.found.name).toBe("NewUser-transformed")
+
+			// Verify afterCreate was called with the transformed entity
+			expect(afterCreateCalls).toHaveLength(1)
+			expect(afterCreateCalls[0].operation).toBe("create")
+			expect(afterCreateCalls[0].collection).toBe("users")
+			expect(afterCreateCalls[0].entity.name).toBe("NewUser-transformed")
+			expect(afterCreateCalls[0].entity.id).toBe(result.upserted.id)
+
+			// Verify onChange was called with type "create"
+			expect(onChangeCalls).toHaveLength(1)
+			expect(onChangeCalls[0].type).toBe("create")
+			expect(onChangeCalls[0].collection).toBe("users")
+			if (onChangeCalls[0].type === "create") {
+				expect(onChangeCalls[0].entity.name).toBe("NewUser-transformed")
+				expect(onChangeCalls[0].entity.id).toBe(result.upserted.id)
+			}
+
+			// Verify hook execution order: beforeCreate → afterCreate → onChange
+			expect(hookOrder).toEqual(["beforeCreate", "afterCreate", "onChange:create"])
+		})
 	})
 })
