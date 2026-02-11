@@ -61,13 +61,31 @@ next_change() {
     return
   fi
 
-  # Get all changes, find first with remaining tasks
+  # Get all changes, ordered by matching spec number (001-xxx first, then unnumbered)
+  local ordered_changes=()
+  for spec_dir in openspec/specs/[0-9]*/; do
+    [ -d "$spec_dir" ] || continue
+    # Extract change name by stripping numeric prefix: 001-foo → foo
+    local spec_name change_name
+    spec_name=$(basename "$spec_dir")
+    change_name="${spec_name#[0-9][0-9][0-9]-}"
+    [ -d "openspec/changes/$change_name" ] && ordered_changes+=("$change_name")
+  done
+  # Append any changes that don't have a numbered spec
   for dir in openspec/changes/*/; do
     [ -d "$dir" ] || continue
     local name
     name=$(basename "$dir")
     [ "$name" = "archive" ] && continue
-    [ -f "$dir/tasks.md" ] || continue
+    local found=0
+    for oc in "${ordered_changes[@]+"${ordered_changes[@]}"}"; do
+      [ "$oc" = "$name" ] && found=1 && break
+    done
+    [ "$found" -eq 0 ] && ordered_changes+=("$name")
+  done
+
+  for name in "${ordered_changes[@]+"${ordered_changes[@]}"}"; do
+    [ -f "openspec/changes/$name/tasks.md" ] || continue
     local remaining
     remaining=$(count_remaining "$name")
     if [ "$remaining" -gt 0 ]; then
