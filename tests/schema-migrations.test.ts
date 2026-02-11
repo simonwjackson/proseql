@@ -651,6 +651,69 @@ describe("schema-migrations: migration registry validation", () => {
 			expect(error.message).toContain("collection version is 2")
 		})
 	})
+
+	describe("duplicate from → error (task 10.4)", () => {
+		it("rejects migrations with duplicate from values", async () => {
+			// Two migrations both starting from version 0
+			const duplicateMigrations: ReadonlyArray<Migration> = [
+				{
+					from: 0,
+					to: 1,
+					description: "First migration 0→1",
+					transform: (data) => data,
+				},
+				{
+					from: 0,
+					to: 1,
+					description: "Duplicate migration 0→1",
+					transform: (data) => data,
+				},
+			]
+
+			const error = await Effect.runPromise(
+				validateMigrationRegistry("users", 1, duplicateMigrations).pipe(
+					Effect.flip,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			expect(error.reason).toBe("duplicate-from")
+			expect(error.message).toContain("Duplicate migration from version 0")
+		})
+
+		it("rejects duplicates anywhere in the chain", async () => {
+			// Chain 0→1, 1→2, 1→2 (duplicate at version 1)
+			const migrationsWithDuplicate: ReadonlyArray<Migration> = [
+				{
+					from: 0,
+					to: 1,
+					transform: (data) => data,
+				},
+				{
+					from: 1,
+					to: 2,
+					description: "First 1→2",
+					transform: (data) => data,
+				},
+				{
+					from: 1,
+					to: 2,
+					description: "Duplicate 1→2",
+					transform: (data) => data,
+				},
+			]
+
+			const error = await Effect.runPromise(
+				validateMigrationRegistry("users", 2, migrationsWithDuplicate).pipe(
+					Effect.flip,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			expect(error.reason).toBe("duplicate-from")
+			expect(error.message).toContain("Duplicate migration from version 1")
+		})
+	})
 })
 
 // ============================================================================
