@@ -220,6 +220,125 @@ export const removeFromIndex = <T extends HasId>(
 	});
 
 /**
+ * Add multiple entities to all applicable indexes in a single batch.
+ *
+ * For each index in the collection, computes all index keys and applies
+ * all additions in one Ref.update call per index. This is more efficient
+ * than calling addToIndex for each entity individually.
+ *
+ * Entities with null/undefined values in indexed fields are skipped for that index.
+ *
+ * @param indexes - The collection's indexes
+ * @param entities - The entities to add
+ * @returns Effect that updates all index Refs
+ */
+export const addManyToIndex = <T extends HasId>(
+	indexes: CollectionIndexes,
+	entities: ReadonlyArray<T>,
+): Effect.Effect<void> =>
+	Effect.gen(function* () {
+		if (entities.length === 0) {
+			return;
+		}
+
+		for (const [indexKey, indexRef] of indexes) {
+			const fields: NormalizedIndex = JSON.parse(indexKey);
+
+			// Collect all additions for this index
+			const additions: Array<{ key: unknown; id: string }> = [];
+			for (const entity of entities) {
+				const key = computeIndexKey(entity, fields);
+				if (key !== undefined) {
+					additions.push({ key, id: entity.id });
+				}
+			}
+
+			if (additions.length === 0) {
+				continue;
+			}
+
+			// Apply all additions in one update
+			yield* Ref.update(indexRef, (indexMap) => {
+				const newMap = new Map(indexMap);
+				for (const { key, id } of additions) {
+					const existing = newMap.get(key);
+					if (existing) {
+						const newSet = new Set(existing);
+						newSet.add(id);
+						newMap.set(key, newSet);
+					} else {
+						newMap.set(key, new Set([id]));
+					}
+				}
+				return newMap;
+			});
+		}
+	});
+
+/**
+ * Remove multiple entities from all applicable indexes in a single batch.
+ *
+ * For each index in the collection, computes all index keys and applies
+ * all removals in one Ref.update call per index. This is more efficient
+ * than calling removeFromIndex for each entity individually.
+ * Empty Sets are cleaned up (deleted from the index).
+ *
+ * Entities with null/undefined values in indexed fields are skipped for that index
+ * (they wouldn't have been indexed in the first place).
+ *
+ * @param indexes - The collection's indexes
+ * @param entities - The entities to remove
+ * @returns Effect that updates all index Refs
+ */
+export const removeManyFromIndex = <T extends HasId>(
+	indexes: CollectionIndexes,
+	entities: ReadonlyArray<T>,
+): Effect.Effect<void> =>
+	Effect.gen(function* () {
+		if (entities.length === 0) {
+			return;
+		}
+
+		for (const [indexKey, indexRef] of indexes) {
+			const fields: NormalizedIndex = JSON.parse(indexKey);
+
+			// Collect all removals for this index
+			const removals: Array<{ key: unknown; id: string }> = [];
+			for (const entity of entities) {
+				const key = computeIndexKey(entity, fields);
+				if (key !== undefined) {
+					removals.push({ key, id: entity.id });
+				}
+			}
+
+			if (removals.length === 0) {
+				continue;
+			}
+
+			// Apply all removals in one update
+			yield* Ref.update(indexRef, (indexMap) => {
+				const newMap = new Map(indexMap);
+				for (const { key, id } of removals) {
+					const existing = newMap.get(key);
+					if (!existing) {
+						continue;
+					}
+
+					const newSet = new Set(existing);
+					newSet.delete(id);
+
+					if (newSet.size === 0) {
+						newMap.delete(key);
+					} else {
+						newMap.set(key, newSet);
+					}
+				}
+				return newMap;
+			});
+		}
+	});
+
+/**
  * Compare two index keys for equality.
  *
  * Uses strict equality for primitives. For compound indexes (string keys),

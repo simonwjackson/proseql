@@ -11,7 +11,7 @@
 - [x] 2.3 Implement `addToIndex(indexes, entity)` — add an entity's field values to all applicable indexes. Returns `Effect<void>` operating on index Refs.
 - [x] 2.4 Implement `removeFromIndex(indexes, entity)` — remove an entity's ID from all applicable index entries. Clean up empty Sets. Returns `Effect<void>`.
 - [x] 2.5 Implement `updateInIndex(indexes, oldEntity, newEntity)` — for each index, check if the indexed field(s) changed. If so, remove old entry and add new. Returns `Effect<void>`.
-- [ ] 2.6 Implement batch variants: `addManyToIndex`, `removeManyFromIndex` — collect all changes and apply in one `Ref.update` per index Ref.
+- [x] 2.6 Implement batch variants: `addManyToIndex`, `removeManyFromIndex` — collect all changes and apply in one `Ref.update` per index Ref.
 
 ## 3. Index Lookup
 
