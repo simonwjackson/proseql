@@ -47,7 +47,7 @@
 - [x] 8.1 Implement `addToSearchIndex(indexRef: Ref<SearchIndexMap>, entity: Record<string, unknown>, fields: ReadonlyArray<string>): Effect<void>` -- tokenize the entity's indexed fields, add entity ID to each token's Set
 - [x] 8.2 Implement `removeFromSearchIndex(indexRef: Ref<SearchIndexMap>, entity: Record<string, unknown>, fields: ReadonlyArray<string>): Effect<void>` -- tokenize the entity's indexed fields, remove entity ID from each token's Set, clean up empty Sets
 - [x] 8.3 Implement `updateInSearchIndex(indexRef: Ref<SearchIndexMap>, oldEntity: Record<string, unknown>, newEntity: Record<string, unknown>, fields: ReadonlyArray<string>): Effect<void>` -- remove old tokens, add new tokens (only for changed fields)
-- [ ] 8.4 Wire search index maintenance into `buildCollection` in `database-effect.ts`: call add/remove/update search index functions alongside existing equality index maintenance in create, update, updateMany, delete, deleteMany paths
+- [x] 8.4 Wire search index maintenance into `buildCollection` in `database-effect.ts`: call add/remove/update search index functions alongside existing equality index maintenance in create, update, updateMany, delete, deleteMany paths
 
 ## 9. Tests -- Basic Search
 

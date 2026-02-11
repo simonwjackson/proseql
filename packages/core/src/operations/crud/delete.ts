@@ -21,6 +21,8 @@ import {
 import { checkDeleteConstraintsEffect } from "../../validators/foreign-key.js"
 import type { CollectionIndexes } from "../../types/index-types.js"
 import { removeFromIndex, removeManyFromIndex } from "../../indexes/index-manager.js"
+import type { SearchIndexMap } from "../../types/search-types.js"
+import { removeFromSearchIndex } from "../../indexes/search-index.js"
 import type { HooksConfig } from "../../types/hook-types.js"
 import { runBeforeDeleteHooks, runAfterDeleteHooks, runOnChangeHooks } from "../../hooks/hook-runner.js"
 
@@ -68,6 +70,8 @@ export const del = <T extends HasId>(
 	supportsSoftDelete: boolean = false,
 	indexes?: CollectionIndexes,
 	hooks?: HooksConfig<T>,
+	searchIndexRef?: Ref.Ref<SearchIndexMap>,
+	searchIndexFields?: ReadonlyArray<string>,
 ) =>
 (id: string, options?: DeleteOptions): Effect.Effect<T, NotFoundError | OperationError | ForeignKeyError | HookError> =>
 	Effect.gen(function* () {
@@ -154,6 +158,11 @@ export const del = <T extends HasId>(
 			yield* removeFromIndex(indexes, entity)
 		}
 
+		// Hard delete: remove from search index first (while entity is still accessible)
+		if (searchIndexRef && searchIndexFields && searchIndexFields.length > 0) {
+			yield* removeFromSearchIndex(searchIndexRef, entity, searchIndexFields)
+		}
+
 		// Hard delete: remove from state
 		yield* Ref.update(ref, (map) => {
 			const next = new Map(map)
@@ -204,6 +213,8 @@ export const deleteMany = <T extends HasId>(
 	supportsSoftDelete: boolean = false,
 	indexes?: CollectionIndexes,
 	hooks?: HooksConfig<T>,
+	searchIndexRef?: Ref.Ref<SearchIndexMap>,
+	searchIndexFields?: ReadonlyArray<string>,
 ) =>
 (
 	predicate: (entity: T) => boolean,
@@ -291,6 +302,13 @@ export const deleteMany = <T extends HasId>(
 			// Hard delete: remove from indexes first (while entities are still accessible)
 			if (indexes && indexes.size > 0) {
 				yield* removeManyFromIndex(indexes, matchingEntities)
+			}
+
+			// Hard delete: remove from search index first (while entities are still accessible)
+			if (searchIndexRef && searchIndexFields && searchIndexFields.length > 0) {
+				for (const entity of matchingEntities) {
+					yield* removeFromSearchIndex(searchIndexRef, entity, searchIndexFields)
+				}
 			}
 
 			// Hard delete: remove matching entities from state

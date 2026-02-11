@@ -30,6 +30,8 @@ import {
 } from "../../validators/foreign-key.js"
 import type { CollectionIndexes } from "../../types/index-types.js"
 import { addToIndex, updateInIndex, addManyToIndex } from "../../indexes/index-manager.js"
+import type { SearchIndexMap } from "../../types/search-types.js"
+import { addToSearchIndex, updateInSearchIndex } from "../../indexes/search-index.js"
 import type { HooksConfig } from "../../types/hook-types.js"
 import {
 	runBeforeCreateHooks,
@@ -120,6 +122,8 @@ export const upsert = <T extends HasId, I = T>(
 	indexes?: CollectionIndexes,
 	hooks?: HooksConfig<T>,
 	uniqueFields: NormalizedConstraints = [],
+	searchIndexRef?: Ref.Ref<SearchIndexMap>,
+	searchIndexFields?: ReadonlyArray<string>,
 ) =>
 (input: UpsertInternalInput<T>): Effect.Effect<UpsertResult<T>, ValidationError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
@@ -177,6 +181,11 @@ export const upsert = <T extends HasId, I = T>(
 			// Update indexes if provided
 			if (indexes && indexes.size > 0) {
 				yield* updateInIndex(indexes, existing, validated)
+			}
+
+			// Update search index if configured
+			if (searchIndexRef && searchIndexFields && searchIndexFields.length > 0) {
+				yield* updateInSearchIndex(searchIndexRef, existing, validated, searchIndexFields)
 			}
 
 			// Run afterUpdate hooks (fire-and-forget, errors swallowed)
@@ -246,6 +255,11 @@ export const upsert = <T extends HasId, I = T>(
 			yield* addToIndex(indexes, entity)
 		}
 
+		// Update search index if configured
+		if (searchIndexRef && searchIndexFields && searchIndexFields.length > 0) {
+			yield* addToSearchIndex(searchIndexRef, entity, searchIndexFields)
+		}
+
 		// Run afterCreate hooks (fire-and-forget, errors swallowed)
 		yield* runAfterCreateHooks(hooks?.afterCreate, {
 			operation: "create",
@@ -290,6 +304,8 @@ export const upsertMany = <T extends HasId, I = T>(
 	indexes?: CollectionIndexes,
 	hooks?: HooksConfig<T>,
 	uniqueFields: NormalizedConstraints = [],
+	searchIndexRef?: Ref.Ref<SearchIndexMap>,
+	searchIndexFields?: ReadonlyArray<string>,
 ) =>
 (inputs: ReadonlyArray<UpsertInternalInput<T>>): Effect.Effect<UpsertManyResult<T>, ValidationError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
@@ -429,6 +445,18 @@ export const upsertMany = <T extends HasId, I = T>(
 			// Update indexes for updated entities
 			for (const { oldEntity, newEntity } of toUpdate) {
 				yield* updateInIndex(indexes, oldEntity, newEntity)
+			}
+		}
+
+		// Update search index if configured
+		if (searchIndexRef && searchIndexFields && searchIndexFields.length > 0) {
+			// Add created entities to search index
+			for (const entity of toCreate) {
+				yield* addToSearchIndex(searchIndexRef, entity, searchIndexFields)
+			}
+			// Update search index for updated entities
+			for (const { oldEntity, newEntity } of toUpdate) {
+				yield* updateInSearchIndex(searchIndexRef, oldEntity, newEntity, searchIndexFields)
 			}
 		}
 

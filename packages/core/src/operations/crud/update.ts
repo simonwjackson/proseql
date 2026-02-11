@@ -27,6 +27,8 @@ import {
 } from "../../validators/foreign-key.js"
 import type { CollectionIndexes } from "../../types/index-types.js"
 import { updateInIndex } from "../../indexes/index-manager.js"
+import type { SearchIndexMap } from "../../types/search-types.js"
+import { updateInSearchIndex } from "../../indexes/search-index.js"
 import type { HooksConfig } from "../../types/hook-types.js"
 import { runBeforeUpdateHooks, runAfterUpdateHooks, runOnChangeHooks } from "../../hooks/hook-runner.js"
 import { checkUniqueConstraints, type NormalizedConstraints } from "./unique-check.js"
@@ -309,6 +311,8 @@ export const update = <T extends HasId, I = T>(
 	hooks?: HooksConfig<T>,
 	uniqueFields: NormalizedConstraints = [],
 	computed?: ComputedFieldsConfig<unknown>,
+	searchIndexRef?: Ref.Ref<SearchIndexMap>,
+	searchIndexFields?: ReadonlyArray<string>,
 ) =>
 (id: string, updates: UpdateWithOperators<T & MinimalEntity>): Effect.Effect<T, ValidationError | NotFoundError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
@@ -391,6 +395,11 @@ export const update = <T extends HasId, I = T>(
 			yield* updateInIndex(indexes, previous, validated)
 		}
 
+		// Update search index if configured
+		if (searchIndexRef && searchIndexFields && searchIndexFields.length > 0) {
+			yield* updateInSearchIndex(searchIndexRef, previous, validated, searchIndexFields)
+		}
+
 		// Run afterUpdate hooks (fire-and-forget, errors swallowed)
 		yield* runAfterUpdateHooks(hooks?.afterUpdate, {
 			operation: "update",
@@ -439,6 +448,8 @@ export const updateMany = <T extends HasId, I = T>(
 	hooks?: HooksConfig<T>,
 	uniqueFields: NormalizedConstraints = [],
 	computed?: ComputedFieldsConfig<unknown>,
+	searchIndexRef?: Ref.Ref<SearchIndexMap>,
+	searchIndexFields?: ReadonlyArray<string>,
 ) =>
 (
 	predicate: (entity: T) => boolean,
@@ -544,6 +555,13 @@ export const updateMany = <T extends HasId, I = T>(
 		if (indexes && indexes.size > 0) {
 			for (const { previous, validated } of entityPairs) {
 				yield* updateInIndex(indexes, previous, validated)
+			}
+		}
+
+		// Update search index if configured
+		if (searchIndexRef && searchIndexFields && searchIndexFields.length > 0) {
+			for (const { previous, validated } of entityPairs) {
+				yield* updateInSearchIndex(searchIndexRef, previous, validated, searchIndexFields)
 			}
 		}
 

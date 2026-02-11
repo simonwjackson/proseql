@@ -25,6 +25,8 @@ import {
 } from "../../validators/foreign-key.js"
 import type { CollectionIndexes } from "../../types/index-types.js"
 import { addToIndex, addManyToIndex } from "../../indexes/index-manager.js"
+import type { SearchIndexMap } from "../../types/search-types.js"
+import { addToSearchIndex } from "../../indexes/search-index.js"
 import type { HooksConfig } from "../../types/hook-types.js"
 import { runBeforeCreateHooks, runAfterCreateHooks, runOnChangeHooks } from "../../hooks/hook-runner.js"
 import { checkUniqueConstraints, checkEntityUniqueConstraints, addEntityToBatchIndex, type NormalizedConstraints } from "./unique-check.js"
@@ -97,6 +99,8 @@ export const create = <T extends HasId, I = T>(
 	hooks?: HooksConfig<T>,
 	uniqueFields: NormalizedConstraints = [],
 	computed?: ComputedFieldsConfig<unknown>,
+	searchIndexRef?: Ref.Ref<SearchIndexMap>,
+	searchIndexFields?: ReadonlyArray<string>,
 ) =>
 (input: CreateInput<T>): Effect.Effect<T, ValidationError | DuplicateKeyError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
@@ -161,6 +165,11 @@ export const create = <T extends HasId, I = T>(
 			yield* addToIndex(indexes, entity)
 		}
 
+		// Update search index if configured
+		if (searchIndexRef && searchIndexFields && searchIndexFields.length > 0) {
+			yield* addToSearchIndex(searchIndexRef, entity, searchIndexFields)
+		}
+
 		// Run afterCreate hooks (fire-and-forget, errors swallowed)
 		yield* runAfterCreateHooks(hooks?.afterCreate, {
 			operation: "create",
@@ -199,6 +208,8 @@ export const createMany = <T extends HasId, I = T>(
 	hooks?: HooksConfig<T>,
 	uniqueFields: NormalizedConstraints = [],
 	computed?: ComputedFieldsConfig<unknown>,
+	searchIndexRef?: Ref.Ref<SearchIndexMap>,
+	searchIndexFields?: ReadonlyArray<string>,
 ) =>
 (
 	inputs: ReadonlyArray<CreateInput<T>>,
@@ -390,6 +401,13 @@ export const createMany = <T extends HasId, I = T>(
 		// Update indexes for all created entities using batch operation
 		if (indexes && indexes.size > 0 && created.length > 0) {
 			yield* addManyToIndex(indexes, created)
+		}
+
+		// Update search index for all created entities
+		if (searchIndexRef && searchIndexFields && searchIndexFields.length > 0 && created.length > 0) {
+			for (const entity of created) {
+				yield* addToSearchIndex(searchIndexRef, entity, searchIndexFields)
+			}
 		}
 
 		// Phase 3: Run afterCreate and onChange hooks for each created entity
