@@ -1178,6 +1178,132 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 	});
 
 	// =========================================================================
+	// Task 10.4: Test that create ignores computed field names in input
+	// =========================================================================
+	describe("Task 10.4: Create ignores computed field names in input", () => {
+		const BookSchema = Schema.Struct({
+			id: Schema.String,
+			title: Schema.String,
+			year: Schema.Number,
+		});
+
+		type Book = typeof BookSchema.Type;
+
+		const configWithComputed = {
+			books: {
+				schema: BookSchema,
+				relationships: {},
+				computed: {
+					displayName: (book: Book) => `${book.title} (${book.year})`,
+					isClassic: (book: Book) => book.year < 1980,
+				},
+			},
+		} as const;
+
+		it("should ignore computed field values provided in create input", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(configWithComputed, { books: [] }),
+			);
+
+			// Try to create with explicit computed field values
+			// These should be ignored and the derivation function should be used
+			const created = await db.books
+				.create({
+					id: "book1",
+					title: "Dune",
+					year: 1965,
+					// @ts-expect-error - intentionally providing computed fields in input
+					displayName: "WRONG VALUE",
+					// @ts-expect-error - intentionally providing computed fields in input
+					isClassic: false, // should be true since year < 1980
+				})
+				.runPromise;
+
+			// Verify the created entity has stored fields only
+			expect(created.id).toBe("book1");
+			expect(created.title).toBe("Dune");
+			expect(created.year).toBe(1965);
+			// The computed fields should NOT be present on the stored entity
+			expect(created).not.toHaveProperty("displayName");
+			expect(created).not.toHaveProperty("isClassic");
+
+			// Query to get the entity with computed fields
+			const results = await db.books.query({ where: { id: "book1" } }).runPromise;
+			expect(results).toHaveLength(1);
+
+			// Computed fields should be derived from the actual data, not the provided values
+			expect(results[0].displayName).toBe("Dune (1965)");
+			expect(results[0].isClassic).toBe(true); // year 1965 < 1980, so true
+		});
+
+		it("should strip all computed field keys from create input", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(configWithComputed, { books: [] }),
+			);
+
+			// Create with computed fields in input (they should be stripped)
+			await db.books
+				.create({
+					id: "book2",
+					title: "Neuromancer",
+					year: 1984,
+					// @ts-expect-error - intentionally providing computed fields
+					displayName: "Custom Display Name",
+				})
+				.runPromise;
+
+			// Query and verify derived value is used
+			const results = await db.books.query({ where: { id: "book2" } }).runPromise;
+			expect(results).toHaveLength(1);
+			expect(results[0].displayName).toBe("Neuromancer (1984)");
+			expect(results[0].isClassic).toBe(false); // year 1984 >= 1980
+		});
+
+		it("should work correctly with createMany ignoring computed fields", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(configWithComputed, { books: [] }),
+			);
+
+			// Create multiple with computed fields in input (they should be stripped)
+			const result = await db.books
+				.createMany([
+					{
+						id: "book3",
+						title: "Snow Crash",
+						year: 1992,
+						// @ts-expect-error - intentionally providing computed fields
+						displayName: "Wrong Name",
+						isClassic: true, // should be false
+					},
+					{
+						id: "book4",
+						title: "The Left Hand of Darkness",
+						year: 1969,
+						// @ts-expect-error - intentionally providing computed fields
+						isClassic: false, // should be true
+					},
+				])
+				.runPromise;
+
+			expect(result.created).toHaveLength(2);
+
+			// Query and verify derived values are correct
+			const results = await db.books
+				.query({ sort: { id: "asc" } })
+				.runPromise;
+			expect(results).toHaveLength(2);
+
+			// Snow Crash (1992)
+			expect(results[0].displayName).toBe("Snow Crash (1992)");
+			expect(results[0].isClassic).toBe(false); // year 1992 >= 1980
+
+			// The Left Hand of Darkness (1969)
+			expect(results[1].displayName).toBe("The Left Hand of Darkness (1969)");
+			expect(results[1].isClassic).toBe(true); // year 1969 < 1980
+		});
+	});
+
+	// =========================================================================
 	// Task 10.2: Computed field on empty collection — no errors, empty results
 	// =========================================================================
 	describe("Task 10.2: Computed field on empty collection", () => {
