@@ -3575,6 +3575,285 @@ describe("Indexing - Query Acceleration", () => {
 			expect(results.length).toBe(0)
 		})
 	})
+
+	describe("Task 8.8: result parity between indexed and non-indexed queries", () => {
+		const testUsers: ReadonlyArray<User> = [
+			{ id: "u1", email: "alice@example.com", name: "Alice", age: 30, role: "admin" },
+			{ id: "u2", email: "bob@example.com", name: "Bob", age: 25, role: "user" },
+			{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35, role: "user" },
+			{ id: "u4", email: "alice@example.com", name: "Alice Smith", age: 28, role: "admin" },
+			{ id: "u5", email: "dave@example.com", name: "Dave", age: 40, role: "moderator" },
+		]
+
+		it("should return same results for direct equality query with and without index", async () => {
+			// Create indexed database
+			const indexedConfig = createIndexedUsersConfig()
+			const indexedDb = await Effect.runPromise(
+				createIndexedDatabase(indexedConfig, { users: testUsers }),
+			)
+
+			// Create non-indexed database
+			const unindexedConfig = createUnindexedConfig()
+			const unindexedDb = await Effect.runPromise(
+				createIndexedDatabase(unindexedConfig, { users: testUsers }),
+			)
+
+			// Query both with same condition
+			const indexedResults = await indexedDb.users.query({
+				where: { email: "alice@example.com" },
+			}).runPromise
+			const unindexedResults = await unindexedDb.users.query({
+				where: { email: "alice@example.com" },
+			}).runPromise
+
+			// Should return same entities
+			expect(indexedResults.length).toBe(unindexedResults.length)
+			const indexedIds = indexedResults.map((r) => (r as { id: string }).id).sort()
+			const unindexedIds = unindexedResults.map((r) => (r as { id: string }).id).sort()
+			expect(indexedIds).toEqual(unindexedIds)
+			expect(indexedIds).toEqual(["u1", "u4"])
+		})
+
+		it("should return same results for $eq query with and without index", async () => {
+			const indexedConfig = createIndexedUsersConfig()
+			const indexedDb = await Effect.runPromise(
+				createIndexedDatabase(indexedConfig, { users: testUsers }),
+			)
+
+			const unindexedConfig = createUnindexedConfig()
+			const unindexedDb = await Effect.runPromise(
+				createIndexedDatabase(unindexedConfig, { users: testUsers }),
+			)
+
+			const indexedResults = await indexedDb.users.query({
+				where: { email: { $eq: "bob@example.com" } },
+			}).runPromise
+			const unindexedResults = await unindexedDb.users.query({
+				where: { email: { $eq: "bob@example.com" } },
+			}).runPromise
+
+			expect(indexedResults.length).toBe(unindexedResults.length)
+			const indexedIds = indexedResults.map((r) => (r as { id: string }).id).sort()
+			const unindexedIds = unindexedResults.map((r) => (r as { id: string }).id).sort()
+			expect(indexedIds).toEqual(unindexedIds)
+			expect(indexedIds).toEqual(["u2"])
+		})
+
+		it("should return same results for $in query with and without index", async () => {
+			const indexedConfig = createIndexedUsersConfig()
+			const indexedDb = await Effect.runPromise(
+				createIndexedDatabase(indexedConfig, { users: testUsers }),
+			)
+
+			const unindexedConfig = createUnindexedConfig()
+			const unindexedDb = await Effect.runPromise(
+				createIndexedDatabase(unindexedConfig, { users: testUsers }),
+			)
+
+			const indexedResults = await indexedDb.users.query({
+				where: { email: { $in: ["alice@example.com", "charlie@example.com"] } },
+			}).runPromise
+			const unindexedResults = await unindexedDb.users.query({
+				where: { email: { $in: ["alice@example.com", "charlie@example.com"] } },
+			}).runPromise
+
+			expect(indexedResults.length).toBe(unindexedResults.length)
+			const indexedIds = indexedResults.map((r) => (r as { id: string }).id).sort()
+			const unindexedIds = unindexedResults.map((r) => (r as { id: string }).id).sort()
+			expect(indexedIds).toEqual(unindexedIds)
+			expect(indexedIds).toEqual(["u1", "u3", "u4"])
+		})
+
+		it("should return same results for no-match query with and without index", async () => {
+			const indexedConfig = createIndexedUsersConfig()
+			const indexedDb = await Effect.runPromise(
+				createIndexedDatabase(indexedConfig, { users: testUsers }),
+			)
+
+			const unindexedConfig = createUnindexedConfig()
+			const unindexedDb = await Effect.runPromise(
+				createIndexedDatabase(unindexedConfig, { users: testUsers }),
+			)
+
+			const indexedResults = await indexedDb.users.query({
+				where: { email: "nonexistent@example.com" },
+			}).runPromise
+			const unindexedResults = await unindexedDb.users.query({
+				where: { email: "nonexistent@example.com" },
+			}).runPromise
+
+			expect(indexedResults.length).toBe(0)
+			expect(unindexedResults.length).toBe(0)
+		})
+
+		it("should return same results after CRUD operations with and without index", async () => {
+			const indexedConfig = createIndexedUsersConfig()
+			const indexedDb = await Effect.runPromise(
+				createIndexedDatabase(indexedConfig, { users: testUsers }),
+			)
+
+			const unindexedConfig = createUnindexedConfig()
+			const unindexedDb = await Effect.runPromise(
+				createIndexedDatabase(unindexedConfig, { users: testUsers }),
+			)
+
+			// Perform same CRUD operations on both
+			const newUser: User = { id: "u6", email: "eve@example.com", name: "Eve", age: 32 }
+			await indexedDb.users.create(newUser).runPromise
+			await unindexedDb.users.create(newUser).runPromise
+
+			await indexedDb.users.update("u2", { email: "bobby@example.com" }).runPromise
+			await unindexedDb.users.update("u2", { email: "bobby@example.com" }).runPromise
+
+			await indexedDb.users.delete("u5").runPromise
+			await unindexedDb.users.delete("u5").runPromise
+
+			// Query for new email
+			const indexedNew = await indexedDb.users.query({
+				where: { email: "eve@example.com" },
+			}).runPromise
+			const unindexedNew = await unindexedDb.users.query({
+				where: { email: "eve@example.com" },
+			}).runPromise
+
+			expect(indexedNew.length).toBe(unindexedNew.length)
+			expect(indexedNew.map((r) => (r as { id: string }).id)).toEqual(
+				unindexedNew.map((r) => (r as { id: string }).id),
+			)
+
+			// Query for updated email
+			const indexedUpdated = await indexedDb.users.query({
+				where: { email: "bobby@example.com" },
+			}).runPromise
+			const unindexedUpdated = await unindexedDb.users.query({
+				where: { email: "bobby@example.com" },
+			}).runPromise
+
+			expect(indexedUpdated.length).toBe(unindexedUpdated.length)
+			expect(indexedUpdated.map((r) => (r as { id: string }).id)).toEqual(
+				unindexedUpdated.map((r) => (r as { id: string }).id),
+			)
+
+			// Query for old email (should no longer match u2)
+			const indexedOld = await indexedDb.users.query({
+				where: { email: "bob@example.com" },
+			}).runPromise
+			const unindexedOld = await unindexedDb.users.query({
+				where: { email: "bob@example.com" },
+			}).runPromise
+
+			expect(indexedOld.length).toBe(0)
+			expect(unindexedOld.length).toBe(0)
+
+			// Query for deleted user's email
+			const indexedDeleted = await indexedDb.users.query({
+				where: { email: "dave@example.com" },
+			}).runPromise
+			const unindexedDeleted = await unindexedDb.users.query({
+				where: { email: "dave@example.com" },
+			}).runPromise
+
+			expect(indexedDeleted.length).toBe(0)
+			expect(unindexedDeleted.length).toBe(0)
+		})
+
+		it("should return same results for query with sorting", async () => {
+			const indexedConfig = createIndexedUsersConfig()
+			const indexedDb = await Effect.runPromise(
+				createIndexedDatabase(indexedConfig, { users: testUsers }),
+			)
+
+			const unindexedConfig = createUnindexedConfig()
+			const unindexedDb = await Effect.runPromise(
+				createIndexedDatabase(unindexedConfig, { users: testUsers }),
+			)
+
+			// Query with sort on different field
+			const indexedResults = await indexedDb.users.query({
+				where: { email: "alice@example.com" },
+				sort: [{ field: "age", order: "asc" }],
+			}).runPromise
+			const unindexedResults = await unindexedDb.users.query({
+				where: { email: "alice@example.com" },
+				sort: [{ field: "age", order: "asc" }],
+			}).runPromise
+
+			// Results should be identical including order
+			expect(indexedResults.length).toBe(unindexedResults.length)
+			expect(indexedResults.length).toBe(2)
+			const indexedIds = indexedResults.map((r) => (r as { id: string }).id)
+			const unindexedIds = unindexedResults.map((r) => (r as { id: string }).id)
+			// Both should return u4 before u1 (sorted by age ascending: 28 < 30)
+			expect(indexedIds).toEqual(unindexedIds)
+		})
+
+		it("should return same results for query with limit", async () => {
+			const indexedConfig = createIndexedUsersConfig()
+			const indexedDb = await Effect.runPromise(
+				createIndexedDatabase(indexedConfig, { users: testUsers }),
+			)
+
+			const unindexedConfig = createUnindexedConfig()
+			const unindexedDb = await Effect.runPromise(
+				createIndexedDatabase(unindexedConfig, { users: testUsers }),
+			)
+
+			// Query with limit
+			const indexedResults = await indexedDb.users.query({
+				where: { email: { $in: ["alice@example.com", "bob@example.com", "charlie@example.com"] } },
+				limit: 2,
+			}).runPromise
+			const unindexedResults = await unindexedDb.users.query({
+				where: { email: { $in: ["alice@example.com", "bob@example.com", "charlie@example.com"] } },
+				limit: 2,
+			}).runPromise
+
+			// Both should return exactly 2 results
+			expect(indexedResults.length).toBe(2)
+			expect(unindexedResults.length).toBe(2)
+		})
+
+		it("should return same results for compound index query with and without index", async () => {
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+				{ id: "p4", name: "Monitor", category: "electronics", subcategory: "computers", price: 399 },
+				{ id: "p5", name: "Chair", category: "furniture", subcategory: "office", price: 199 },
+			]
+
+			// Indexed config with compound index
+			const indexedConfig = createMultiIndexConfig()
+			const indexedDb = await Effect.runPromise(
+				createIndexedDatabase(indexedConfig, { users: [], products: testProducts }),
+			)
+
+			// Non-indexed config for products
+			const unindexedConfig = {
+				products: {
+					schema: ProductSchema,
+					relationships: {} as const,
+				},
+			} as const
+			const unindexedDb = await Effect.runPromise(
+				createIndexedDatabase(unindexedConfig, { products: testProducts }),
+			)
+
+			// Query on compound indexed fields
+			const indexedResults = await indexedDb.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			const unindexedResults = await unindexedDb.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+
+			expect(indexedResults.length).toBe(unindexedResults.length)
+			const indexedIds = indexedResults.map((r) => (r as { id: string }).id).sort()
+			const unindexedIds = unindexedResults.map((r) => (r as { id: string }).id).sort()
+			expect(indexedIds).toEqual(unindexedIds)
+			expect(indexedIds).toEqual(["p1", "p4"])
+		})
+	})
 })
 
 // Export helpers for use in other test files

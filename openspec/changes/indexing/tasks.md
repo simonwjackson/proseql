@@ -64,7 +64,7 @@
 - [x] 8.5 Test mixed indexed + non-indexed conditions: narrowed then filtered
 - [x] 8.6 Test `$or`/`$and`/`$not` queries fall back to full scan
 - [x] 8.7 Test empty index entry (no matches) returns empty result
-- [ ] 8.8 Test result parity: same results with and without index configured
+- [x] 8.8 Test result parity: same results with and without index configured
 
 ## 9. Tests — Compound Indexes
 
