@@ -846,4 +846,107 @@ describe("Full-text search: Relevance Scoring (task 11)", () => {
 			expect(results[1].year).toBe(1982)
 		})
 	})
+
+	describe("11.3: Exact match scores higher than prefix match", () => {
+		it("should rank exact 'Dune' above 'Duneland' when searching for 'dune'", async () => {
+			const db = await createRelevanceTestDatabase()
+			// "dune" query:
+			// - "Dune" has exact match for "dune" in title
+			// - "Duneland" has prefix match (duneland starts with "dune")
+			// Exact match should score higher (1.0) than prefix match (0.5)
+			const results = await db.books.query({
+				where: { $search: { query: "dune", fields: ["title"] } },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			// Exact match "Dune" should rank first
+			expect(results[0].title).toBe("Dune")
+			// Prefix match "Duneland" should rank second
+			expect(results[1].title).toBe("Duneland")
+		})
+
+		it("should rank exact match higher even when prefix match is in a longer title", async () => {
+			const db = await createRelevanceTestDatabase()
+			// Using field-level $search to test the same behavior
+			const results = await db.books.query({
+				where: { title: { $search: "dune" } },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			expect(results[0].title).toBe("Dune")
+			expect(results[1].title).toBe("Duneland")
+		})
+
+		it("should rank exact match higher with top-level $search (all string fields)", async () => {
+			const db = await createRelevanceTestDatabase()
+			// Top-level $search without explicit fields
+			const results = await db.books.query({
+				where: { $search: { query: "dune" } },
+			}).runPromise
+
+			// Both "Dune" and "Duneland" should match
+			expect(results.length).toBe(2)
+			// Exact match should rank first
+			expect(results[0].title).toBe("Dune")
+			expect(results[1].title).toBe("Duneland")
+		})
+
+		it("should correctly rank when multiple terms have different match types", async () => {
+			// Create test data where one entity has an exact match on one term
+			// and a prefix match on another
+			const mixedMatchBooks: ReadonlyArray<Book> = [
+				{
+					id: "1",
+					title: "Dark Stories",
+					author: "Unknown",
+					year: 2000,
+					description: "A collection",
+				},
+				{
+					id: "2",
+					title: "Darkness Falls",
+					author: "Unknown",
+					year: 2001,
+					description: "A story",
+				},
+			]
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(
+					{ books: { schema: BookSchema, relationships: {} } },
+					{ books: mixedMatchBooks },
+				),
+			)
+
+			// Search for "dark" - "Dark Stories" has exact match, "Darkness Falls" has prefix
+			const results = await db.books.query({
+				where: { $search: { query: "dark", fields: ["title"] } },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			// Exact "dark" in "Dark Stories" should score higher than prefix "dark" in "Darkness"
+			expect(results[0].title).toBe("Dark Stories")
+			expect(results[1].title).toBe("Darkness Falls")
+		})
+
+		it("should verify scoring difference between exact and prefix matches", async () => {
+			const db = await createRelevanceTestDatabase()
+			// Get results and verify the order reflects scoring rules
+			const results = await db.books.query({
+				where: { $search: { query: "dune", fields: ["title"] } },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+
+			// First result should be exact match
+			expect(results[0].title).toBe("Dune")
+			// Second result should be prefix match
+			expect(results[1].title).toBe("Duneland")
+
+			// The scoring formula gives:
+			// - "Dune" exact match: coverage=1, tf=1+1/1=2, lengthNorm=1/log(2)≈1.44 → score≈2.88
+			// - "Duneland" prefix match: coverage=1, tf=1+0.5/1=1.5, lengthNorm=1/log(2)≈1.44 → score≈2.16
+			// The ratio should be approximately 2:1.5 = 1.33x difference
+		})
+	})
 })

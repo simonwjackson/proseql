@@ -69,7 +69,7 @@
 
 - [x] 11.1 Test relevance ordering: search for "dark hand" returns "The Left Hand of Darkness" (both terms match) above an entity with only one term match
 - [x] 11.2 Test explicit sort overrides relevance: `{ where: { title: { $search: "dark" } }, sort: { year: "asc" } }` sorts by year, not relevance
-- [ ] 11.3 Test exact match scores higher than prefix match: "dune" query ranks exact "Dune" above "Duneland" (if it existed)
+- [x] 11.3 Test exact match scores higher than prefix match: "dune" query ranks exact "Dune" above "Duneland" (if it existed)
 
 ## 12. Tests -- Search Index
 
