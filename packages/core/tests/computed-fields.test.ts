@@ -535,3 +535,296 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 		});
 	});
 });
+
+// =============================================================================
+// Task 10: Edge Cases
+// =============================================================================
+
+describe("Computed Fields — Edge Cases (Task 10)", () => {
+	// =========================================================================
+	// Task 10.1: Computed field returning null or undefined — handled gracefully
+	// =========================================================================
+	describe("Task 10.1: Computed field returning null or undefined", () => {
+		// Schema with optional fields to enable nullable computed field scenarios
+		const ItemSchema = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+			description: Schema.optional(Schema.String),
+			rating: Schema.optional(Schema.Number),
+		});
+
+		type Item = typeof ItemSchema.Type;
+
+		const nullableComputedConfig = {
+			items: {
+				schema: ItemSchema,
+				relationships: {},
+				computed: {
+					// Returns null when description is missing
+					descriptionLength: (item: Item): number | null =>
+						item.description != null ? item.description.length : null,
+					// Returns undefined when rating is missing
+					ratingCategory: (item: Item): string | undefined => {
+						if (item.rating === undefined) return undefined;
+						if (item.rating >= 4) return "excellent";
+						if (item.rating >= 2) return "average";
+						return "poor";
+					},
+					// Returns null for items without description
+					descriptionPreview: (item: Item): string | null =>
+						item.description != null
+							? item.description.substring(0, 10)
+							: null,
+				},
+			},
+		} as const;
+
+		const initialItems = [
+			{
+				id: "item1",
+				name: "Complete Item",
+				description: "A full description",
+				rating: 5,
+			},
+			{ id: "item2", name: "No Description", rating: 3 },
+			{ id: "item3", name: "No Rating", description: "Has description only" },
+			{ id: "item4", name: "Minimal Item" }, // No optional fields
+		];
+
+		it("should include computed fields even when they return null or undefined", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
+			);
+
+			const results = await db.items.query({ sort: { id: "asc" } }).runPromise;
+
+			expect(results).toHaveLength(4);
+
+			// Complete item - all computed fields have values
+			expect(results[0].descriptionLength).toBe(18); // "A full description".length
+			expect(results[0].ratingCategory).toBe("excellent");
+			expect(results[0].descriptionPreview).toBe("A full des");
+
+			// No description - null for description-based fields
+			expect(results[1].descriptionLength).toBeNull();
+			expect(results[1].ratingCategory).toBe("average");
+			expect(results[1].descriptionPreview).toBeNull();
+
+			// No rating - undefined for rating-based field
+			expect(results[2].descriptionLength).toBe(20); // "Has description only".length
+			expect(results[2].ratingCategory).toBeUndefined();
+			expect(results[2].descriptionPreview).toBe("Has descri");
+
+			// Minimal item - all optional-based computed fields are null/undefined
+			expect(results[3].descriptionLength).toBeNull();
+			expect(results[3].ratingCategory).toBeUndefined();
+			expect(results[3].descriptionPreview).toBeNull();
+		});
+
+		it("should handle filtering where computed field is null (using $eq: null)", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
+			);
+
+			const results = await db.items
+				.query({ where: { descriptionLength: { $eq: null } } })
+				.runPromise;
+
+			// Items without description: item2 "No Description", item4 "Minimal Item"
+			expect(results).toHaveLength(2);
+			const names = results.map((r) => r.name);
+			expect(names).toContain("No Description");
+			expect(names).toContain("Minimal Item");
+		});
+
+		it("should handle filtering where computed field is not null (using $ne: null)", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
+			);
+
+			const results = await db.items
+				.query({ where: { descriptionLength: { $ne: null } } })
+				.runPromise;
+
+			// Items with description: item1 "Complete Item", item3 "No Rating"
+			expect(results).toHaveLength(2);
+			const names = results.map((r) => r.name);
+			expect(names).toContain("Complete Item");
+			expect(names).toContain("No Rating");
+		});
+
+		it("should handle filtering by computed string field that may be undefined", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
+			);
+
+			// Filter for "excellent" rating category
+			const excellent = await db.items
+				.query({ where: { ratingCategory: "excellent" } })
+				.runPromise;
+
+			expect(excellent).toHaveLength(1);
+			expect(excellent[0].name).toBe("Complete Item");
+
+			// Filter for "average" rating category
+			const average = await db.items
+				.query({ where: { ratingCategory: "average" } })
+				.runPromise;
+
+			expect(average).toHaveLength(1);
+			expect(average[0].name).toBe("No Description");
+		});
+
+		it("should handle string operators gracefully when computed field returns null", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
+			);
+
+			// $contains on null/undefined should not match (not throw)
+			const results = await db.items
+				.query({ where: { descriptionPreview: { $contains: "full" } } })
+				.runPromise;
+
+			// Only "Complete Item" has "A full des" as preview which contains "full"
+			// Note: substring 0-10 is "A full des", which does contain "full"
+			expect(results).toHaveLength(1);
+			expect(results[0].name).toBe("Complete Item");
+		});
+
+		it("should handle $startsWith on computed field that may be null", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
+			);
+
+			const results = await db.items
+				.query({ where: { descriptionPreview: { $startsWith: "A" } } })
+				.runPromise;
+
+			// Only "Complete Item" has preview starting with "A"
+			expect(results).toHaveLength(1);
+			expect(results[0].name).toBe("Complete Item");
+		});
+
+		it("should sort by computed numeric field with null values (null sorts to end)", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
+			);
+
+			// Sort ascending - nulls should go to the end
+			const ascResults = await db.items
+				.query({ sort: { descriptionLength: "asc" } })
+				.runPromise;
+
+			// Non-null values first (18, 20), then nulls
+			expect(ascResults).toHaveLength(4);
+			// First two have description lengths: 18 (Complete Item), 20 (No Rating)
+			expect(ascResults[0].descriptionLength).toBe(18);
+			expect(ascResults[1].descriptionLength).toBe(20);
+			// Last two have null
+			expect(ascResults[2].descriptionLength).toBeNull();
+			expect(ascResults[3].descriptionLength).toBeNull();
+		});
+
+		it("should sort by computed numeric field descending with null values (null sorts to end)", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
+			);
+
+			// Sort descending - nulls should still go to the end
+			const descResults = await db.items
+				.query({ sort: { descriptionLength: "desc" } })
+				.runPromise;
+
+			// Non-null values first in descending order (20, 18), then nulls
+			expect(descResults).toHaveLength(4);
+			expect(descResults[0].descriptionLength).toBe(20);
+			expect(descResults[1].descriptionLength).toBe(18);
+			// Last two have null
+			expect(descResults[2].descriptionLength).toBeNull();
+			expect(descResults[3].descriptionLength).toBeNull();
+		});
+
+		it("should sort by computed string field with undefined values (undefined sorts to end)", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
+			);
+
+			// Sort ascending by ratingCategory (string)
+			const results = await db.items
+				.query({ sort: { ratingCategory: "asc" } })
+				.runPromise;
+
+			expect(results).toHaveLength(4);
+			// Non-undefined values first: "average", "excellent"
+			expect(results[0].ratingCategory).toBe("average");
+			expect(results[1].ratingCategory).toBe("excellent");
+			// Last two have undefined
+			expect(results[2].ratingCategory).toBeUndefined();
+			expect(results[3].ratingCategory).toBeUndefined();
+		});
+
+		it("should handle combined filter and sort with nullable computed fields", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
+			);
+
+			// Filter to items that have a description, sort by descriptionLength
+			const results = await db.items
+				.query({
+					where: { descriptionLength: { $ne: null } },
+					sort: { descriptionLength: "desc" },
+				})
+				.runPromise;
+
+			expect(results).toHaveLength(2);
+			expect(results[0].name).toBe("No Rating"); // descriptionLength: 20
+			expect(results[1].name).toBe("Complete Item"); // descriptionLength: 18
+		});
+
+		it("should select nullable computed fields correctly", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
+			);
+
+			const results = await db.items
+				.query({
+					select: { name: true, descriptionLength: true, ratingCategory: true },
+					sort: { id: "asc" },
+				})
+				.runPromise;
+
+			expect(results).toHaveLength(4);
+
+			// Verify only selected fields are present
+			for (const result of results) {
+				expect(Object.keys(result).sort()).toEqual([
+					"descriptionLength",
+					"name",
+					"ratingCategory",
+				]);
+			}
+
+			// Verify values including null/undefined
+			expect(results[0]).toEqual({
+				name: "Complete Item",
+				descriptionLength: 18,
+				ratingCategory: "excellent",
+			});
+			expect(results[1]).toEqual({
+				name: "No Description",
+				descriptionLength: null,
+				ratingCategory: "average",
+			});
+			expect(results[2]).toEqual({
+				name: "No Rating",
+				descriptionLength: 20,
+				ratingCategory: undefined,
+			});
+			expect(results[3]).toEqual({
+				name: "Minimal Item",
+				descriptionLength: null,
+				ratingCategory: undefined,
+			});
+		});
+	});
+});
