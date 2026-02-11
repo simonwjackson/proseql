@@ -179,4 +179,50 @@ describe("Full-text search: Basic Search (task 9)", () => {
 			expect(results[0].author).toBe("Frank Herbert")
 		})
 	})
+
+	describe("9.4: Multi-term search", () => {
+		it("should match 'The Left Hand of Darkness' when searching for 'left hand darkness'", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "left hand darkness" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("The Left Hand of Darkness")
+		})
+
+		it("should match when search terms are in different order than in title", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "darkness hand left" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("The Left Hand of Darkness")
+		})
+
+		it("should not match if any search term is missing from the field", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "left hand xyz" } },
+			}).runPromise
+			expect(results.length).toBe(0)
+		})
+
+		it("should match 'Foundation' when searching for 'foundation'", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "foundation" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Foundation")
+		})
+
+		it("should match 'Snow Crash' when searching for 'snow crash'", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "snow crash" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Snow Crash")
+		})
+	})
 })
