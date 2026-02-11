@@ -150,7 +150,6 @@ export type DeleteWithRelationshipsResult<T> = {
 export type BatchRelationshipOptions = {
 	validateRelationships?: boolean;
 	skipDuplicates?: boolean;
-	transaction?: boolean;
 };
 
 /**
