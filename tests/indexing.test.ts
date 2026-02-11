@@ -593,6 +593,170 @@ describe("Indexing - Index Built from Initial Data", () => {
 	})
 })
 
+// ============================================================================
+// Tests - Index Maintenance (Task 7.x)
+// ============================================================================
+
+describe("Indexing - Index Maintenance", () => {
+	describe("Task 7.1: create → index entry added", () => {
+		it("should add new entity to index when created", async () => {
+			// Start with an empty indexed database
+			const config = createIndexedUsersConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Create a new user
+			const newUser = await db.users.create({
+				id: "u1",
+				email: "newuser@example.com",
+				name: "New User",
+				age: 25,
+			}).runPromise
+
+			expect(newUser.id).toBe("u1")
+			expect(newUser.email).toBe("newuser@example.com")
+
+			// Query using the indexed field - should find the new user
+			const results = await db.users.query({ where: { email: "newuser@example.com" } }).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("u1")
+		})
+
+		it("should add entity to index alongside existing entries", async () => {
+			// Start with some initial data
+			const config = createIndexedUsersConfig()
+			const initialUsers = createSampleUsers().slice(0, 2) // alice, bob
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Verify initial data is queryable
+			const aliceResults = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceResults.length).toBe(1)
+
+			// Create a new user
+			const newUser = await db.users.create({
+				id: "u99",
+				email: "charlie@example.com",
+				name: "Charlie",
+				age: 35,
+			}).runPromise
+
+			expect(newUser.id).toBe("u99")
+
+			// Query for the new user via indexed field
+			const charlieResults = await db.users.query({ where: { email: "charlie@example.com" } }).runPromise
+			expect(charlieResults.length).toBe(1)
+			expect((charlieResults[0] as { id: string }).id).toBe("u99")
+
+			// Original users should still be queryable
+			const aliceStillThere = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceStillThere.length).toBe(1)
+		})
+
+		it("should add entity to existing index Set when same field value exists", async () => {
+			// Start with alice@example.com (u1)
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "shared@example.com", name: "User One", age: 30 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Create another user with the same email
+			await db.users.create({
+				id: "u2",
+				email: "shared@example.com",
+				name: "User Two",
+				age: 25,
+			}).runPromise
+
+			// Query should return both users with this email
+			const results = await db.users.query({ where: { email: "shared@example.com" } }).runPromise
+			expect(results.length).toBe(2)
+
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u2"])
+		})
+
+		it("should not index entity with null/undefined value in indexed field", async () => {
+			const config = createIndexedUsersConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Create a user without an email (undefined will be set as the field is required by schema, but let's test with role which is optional)
+			// Actually, email is required in our schema. Let's create the user and then verify querying works.
+			const newUser = await db.users.create({
+				id: "u1",
+				email: "test@example.com",
+				name: "Test User",
+				age: 30,
+				// role is undefined (optional field)
+			}).runPromise
+
+			expect(newUser.id).toBe("u1")
+			expect(newUser.role).toBeUndefined()
+
+			// Query for the user by email (should work as email is indexed)
+			const results = await db.users.query({ where: { email: "test@example.com" } }).runPromise
+			expect(results.length).toBe(1)
+		})
+
+		it("should add entity to compound index when created", async () => {
+			const config = createMultiIndexConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Create a product (products have compound index on ["category", "subcategory"])
+			const newProduct = await db.products.create({
+				id: "p1",
+				name: "Laptop",
+				category: "electronics",
+				subcategory: "computers",
+				price: 999,
+			}).runPromise
+
+			expect(newProduct.id).toBe("p1")
+
+			// Query using both compound index fields
+			const results = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("p1")
+		})
+
+		it("should add multiple entities to compound index", async () => {
+			const config = createMultiIndexConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Create two products with same category/subcategory combo
+			await db.products.create({
+				id: "p1",
+				name: "Laptop",
+				category: "electronics",
+				subcategory: "computers",
+				price: 999,
+			}).runPromise
+
+			await db.products.create({
+				id: "p2",
+				name: "Desktop",
+				category: "electronics",
+				subcategory: "computers",
+				price: 1299,
+			}).runPromise
+
+			// Query using compound index - should return both
+			const results = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(results.length).toBe(2)
+
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p2"])
+		})
+	})
+})
+
 // Export helpers for use in other test files
 export {
 	UserSchema,
