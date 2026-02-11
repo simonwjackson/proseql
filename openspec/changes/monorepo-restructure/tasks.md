@@ -6,7 +6,7 @@
 
 ## 2. Package: @proseql/core
 
-- [ ] 2.1 Create `packages/core/` directory structure: `src/`, `tests/`
+- [x] 2.1 Create `packages/core/` directory structure: `src/`, `tests/`
 - [ ] 2.2 Move all files from `core/` to `packages/core/src/` EXCEPT `storage/node-adapter-layer.ts`
 - [ ] 2.3 Update `packages/core/src/index.ts`: remove exports for `NodeStorageLayer`, `makeNodeStorageLayer`, `NodeAdapterConfig`
 - [ ] 2.4 Create `packages/core/package.json`: name `@proseql/core`, version `0.1.0`, type `module`, main `src/index.ts`, dependencies: `effect`, `yaml`, `json5`, `jsonc-parser`, `smol-toml`, `@toon-format/toon`, `hjson`
