@@ -53,6 +53,7 @@ import { applySort } from "../operations/query/sort-stream.js"
 import { applySelect, applySelectToArray } from "../operations/query/select-stream.js"
 import { applyPagination } from "../operations/query/paginate-stream.js"
 import { applyPopulate } from "../operations/relationships/populate-stream.js"
+import { resolveComputedStream } from "../operations/query/resolve-computed.js"
 import type { CursorConfig, CursorPageResult, RunnableCursorPage } from "../types/cursor-types.js"
 import { applyCursor } from "../operations/query/cursor-stream.js"
 import {
@@ -529,7 +530,7 @@ const buildCollection = <T extends HasId>(
 				effectiveSort = { [cursorKey]: "asc" as const }
 			}
 
-			// Cursor pagination branch: filter → populate → sort → applyCursor → select
+			// Cursor pagination branch: populate → resolve computed → filter → sort → applyCursor → select
 			const cursorEffect = Effect.gen(function* () {
 				const map = yield* Ref.get(ref)
 				// Try index-accelerated lookup first
@@ -540,14 +541,15 @@ const buildCollection = <T extends HasId>(
 				let s: Stream.Stream<Record<string, unknown>, DanglingReferenceError> =
 					Stream.fromIterable(items)
 
-				// Apply pipeline stages: filter → populate → sort
-				s = applyFilter(options?.where)(s)
+				// Apply pipeline stages: populate → resolve computed → filter → sort
 				s = applyPopulate(
 					populateConfig as Record<string, boolean | Record<string, unknown>> | undefined,
 					stateRefs as unknown as Record<string, Ref.Ref<ReadonlyMap<string, Record<string, unknown>>>>,
 					dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target: string; readonly foreignKey?: string }> }>,
 					collectionName,
 				)(s)
+				s = resolveComputedStream(computed)(s)
+				s = applyFilter(options?.where)(s)
 				s = applySort(effectiveSort)(s)
 
 				// Collect via applyCursor (extracts cursor values from pre-select items)
@@ -569,7 +571,7 @@ const buildCollection = <T extends HasId>(
 			return withCursorRunPromise(cursorEffect)
 		}
 
-		// Standard stream branch: filter → populate → sort → paginate → select
+		// Standard stream branch: populate → resolve computed → filter → sort → paginate → select
 		const stream = Stream.unwrap(
 			Effect.gen(function* () {
 				const map = yield* Ref.get(ref)
@@ -581,14 +583,15 @@ const buildCollection = <T extends HasId>(
 				let s: Stream.Stream<Record<string, unknown>, DanglingReferenceError> =
 					Stream.fromIterable(items)
 
-				// Apply pipeline stages
-				s = applyFilter(options?.where)(s)
+				// Apply pipeline stages: populate → resolve computed → filter → sort → paginate → select
 				s = applyPopulate(
 					populateConfig as Record<string, boolean | Record<string, unknown>> | undefined,
 					stateRefs as unknown as Record<string, Ref.Ref<ReadonlyMap<string, Record<string, unknown>>>>,
 					dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target: string; readonly foreignKey?: string }> }>,
 					collectionName,
 				)(s)
+				s = resolveComputedStream(computed)(s)
+				s = applyFilter(options?.where)(s)
 				s = applySort(effectiveSort)(s)
 				s = applyPagination(options?.offset, options?.limit)(s)
 				s = applySelect(options?.select as Record<string, unknown> | ReadonlyArray<string> | undefined)(s)
