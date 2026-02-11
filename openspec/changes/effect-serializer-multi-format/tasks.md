@@ -10,11 +10,12 @@
 - [x] 2.3 Create `core/serializers/codecs/json5.ts`: `json5Codec(options?: { indent?: number }): FormatCodec`. Extensions: `["json5"]`. Uses `json5` package.
 - [x] 2.4 Create `core/serializers/codecs/jsonc.ts`: `jsoncCodec(options?: { indent?: number }): FormatCodec`. Extensions: `["jsonc"]`. Uses `jsonc-parser` to strip comments on decode; `JSON.stringify` on encode.
 - [x] 2.5 Create `core/serializers/codecs/toml.ts`: `tomlCodec(): FormatCodec`. Extensions: `["toml"]`. Uses `smol-toml`. Implement `stripNulls` recursive helper for encode.
-- [x] 2.6 Install dependencies: `bun add json5 jsonc-parser smol-toml`
+- [x] 2.6 Create `core/serializers/codecs/toon.ts`: `toonCodec(): FormatCodec`. Extensions: `["toon"]`. Uses `@toon-format/toon` (`encode`/`decode`). JSON-equivalent data model — no special handling needed.
+- [ ] 2.7 Install `@toon-format/toon` dependency: `bun add @toon-format/toon`
 
 ## 3. Preset Layers
 
-- [x] 3.1 Create `core/serializers/presets.ts`: export `AllTextFormatsLayer` (all 5 codecs), `DefaultSerializerLayer` (json + yaml).
+- [ ] 3.1 Update `core/serializers/presets.ts`: add `toonCodec()` to `AllTextFormatsLayer` (now 6 codecs). `DefaultSerializerLayer` (json + yaml) unchanged.
 
 ## 4. Extract getFileExtension
 
@@ -27,7 +28,7 @@
 - [ ] 5.2 Remove all legacy serializer factory exports (`createJsonSerializer`, `defaultJsonSerializer`, `compactJsonSerializer`, `createYamlSerializer`, `defaultYamlSerializer`, `compactYamlSerializer`, `prettyYamlSerializer`, `createMessagePackSerializer`, `defaultMessagePackSerializer`)
 - [ ] 5.3 Remove all legacy persistence exports (`createPersistenceContext`, `legacyLoadData`, `legacySaveData`, `saveDataImmediate`, `watchFile`, `fileExists`, `flushPendingWrites`, `PersistenceContext`)
 - [ ] 5.4 Remove legacy storage adapter exports (`LegacyStorageAdapter`, `StorageAdapterOptions`, `createNodeStorageAdapter`, `defaultNodeStorageAdapter`)
-- [ ] 5.5 Add new exports: `FormatCodec`, `FormatOptions` types, `makeSerializerLayer`, codec factories (`jsonCodec`, `yamlCodec`, `json5Codec`, `jsoncCodec`, `tomlCodec`), preset Layers (`AllTextFormatsLayer`, `DefaultSerializerLayer`)
+- [ ] 5.5 Add new exports: `FormatCodec`, `FormatOptions` types, `makeSerializerLayer`, codec factories (`jsonCodec`, `yamlCodec`, `json5Codec`, `jsoncCodec`, `tomlCodec`, `toonCodec`), preset Layers (`AllTextFormatsLayer`, `DefaultSerializerLayer`)
 
 ## 6. Remove PersistenceOptions/DatabaseOptions
 
@@ -62,10 +63,10 @@
 ## 9. New Tests
 
 - [ ] 9.1 Create `tests/format-codec.test.ts`: test `makeSerializerLayer` — multi-format dispatch, unknown extension error, duplicate extension warning, error propagation from codecs.
-- [ ] 9.2 Create `tests/codecs.test.ts`: round-trip tests for all 5 codecs (json, yaml, json5, jsonc, toml). Test nested objects, arrays, strings, numbers, booleans, null handling.
+- [ ] 9.2 Create `tests/codecs.test.ts`: round-trip tests for all 6 codecs (json, yaml, json5, jsonc, toml, toon). Test nested objects, arrays, strings, numbers, booleans, null handling.
 - [ ] 9.3 Create `tests/toml-nulls.test.ts`: TOML-specific null stripping — nested nulls, arrays with nulls, empty objects after stripping, deeply nested structures.
 - [ ] 9.4 Create `tests/jsonc-comments.test.ts`: JSONC decode with line comments, block comments, mixed comments. Verify encode outputs clean JSON.
-- [ ] 9.5 Test preset Layers: `AllTextFormatsLayer` dispatches all 5 extensions, `DefaultSerializerLayer` dispatches json/yaml only.
+- [ ] 9.5 Test preset Layers: `AllTextFormatsLayer` dispatches all 6 extensions (json, yaml, json5, jsonc, toml, toon), `DefaultSerializerLayer` dispatches json/yaml only.
 
 ## 10. Verification
 
