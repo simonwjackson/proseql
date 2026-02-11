@@ -1,20 +1,18 @@
 {
-  "users": {
-    "HwF_a8NodhGbX5sHxIwpS": {
-      "id": "HwF_a8NodhGbX5sHxIwpS",
-      "name": "Alice Johnson",
-      "email": "alice@example.com",
-      "age": 29,
-      "isActive": true,
-      "createdAt": "2025-08-16T01:03:35.709Z"
-    },
-    "My_PyQmWva2H3XqIrZ43F": {
-      "id": "My_PyQmWva2H3XqIrZ43F",
-      "name": "Bob Smith",
-      "email": "bob@example.com",
-      "age": 35,
-      "isActive": true,
-      "createdAt": "2025-08-16T01:03:35.762Z"
-    }
+  "OOGZKCmMhYLxTSbZsrq-y": {
+    "id": "OOGZKCmMhYLxTSbZsrq-y",
+    "name": "Alice Johnson",
+    "email": "alice@example.com",
+    "age": 29,
+    "createdAt": "2026-02-09T15:13:16.330Z",
+    "updatedAt": "2026-02-09T15:13:16.331Z"
+  },
+  "rJvXSxUnB1YL186SdnH2k": {
+    "id": "rJvXSxUnB1YL186SdnH2k",
+    "name": "Bob Smith",
+    "email": "bob@example.com",
+    "age": 35,
+    "createdAt": "2026-02-09T15:13:16.331Z",
+    "updatedAt": "2026-02-09T15:13:16.331Z"
   }
 }

@@ -1,0 +1,64 @@
+## 1. Configuration
+
+- [ ] 1.1 Add `readonly uniqueFields?: ReadonlyArray<string | ReadonlyArray<string>>` to `CollectionConfig` in `core/types/database-config-types.ts`
+- [ ] 1.2 Export `uniqueFields` type from `core/types/index.ts` if a separate type alias is needed
+
+## 2. Unique Check Module
+
+- [ ] 2.1 Create `core/operations/crud/unique-check.ts` with `normalizeConstraints(uniqueFields)` — converts `["email", ["userId", "settingKey"]]` to `[["email"], ["userId", "settingKey"]]`
+- [ ] 2.2 Implement `checkUniqueConstraints(entity, existingMap, constraints, collectionName)` returning `Effect<void, UniqueConstraintError>`. For each normalized constraint, check if all fields match any existing entity (excluding same ID). Skip null/undefined values. Fail-fast on first violation.
+- [ ] 2.3 Implement `checkBatchUniqueConstraints(entities, existingMap, constraints, collectionName)` — same as above but also checks entities within the batch against each other
+- [ ] 2.4 Implement `validateUpsertWhere(where, constraints, collectionName)` returning `Effect<void, ValidationError>`. Verify the where clause keys fully cover at least one declared constraint or `id`. Produce a `ValidationError` listing valid unique fields on failure.
+- [ ] 2.5 Delete the old `checkUniqueConstraints` helper from `core/operations/crud/create.ts` (lines 259-279)
+
+## 3. Wire Into CRUD Operations
+
+- [ ] 3.1 Add `uniqueFields: ReadonlyArray<ReadonlyArray<string>>` parameter to `create` and `createMany` in `core/operations/crud/create.ts`. Call `checkUniqueConstraints` after schema validation, before Ref.update. Add `UniqueConstraintError` to the error channel.
+- [ ] 3.2 In `createMany`, respect `skipDuplicates` for unique violations: catch `UniqueConstraintError`, add to skipped list, continue with remaining entities
+- [ ] 3.3 Add `uniqueFields` parameter to `update` and `updateMany` in `core/operations/crud/update.ts`. Before checking, determine if the update touches any unique field (intersect update keys with constraint fields). If so, call `checkUniqueConstraints` on the post-update entity. Add `UniqueConstraintError` to the error channel.
+- [ ] 3.4 Add `uniqueFields` parameter to `upsert` and `upsertMany` in `core/operations/crud/upsert.ts`. At the top of each function, call `validateUpsertWhere`. On the create path, call `checkUniqueConstraints`. Add `UniqueConstraintError` to the error channel.
+
+## 4. Factory Integration
+
+- [ ] 4.1 In `core/factories/database-effect.ts` `buildCollection`: read `uniqueFields` from collection config, normalize via `normalizeConstraints`, pass to all CRUD factory function calls (create, createMany, update, updateMany, upsert, upsertMany)
+- [ ] 4.2 Default to `[]` when `uniqueFields` is not configured (preserves existing behavior)
+
+## 5. Tests — Unique Enforcement
+
+- [ ] 5.1 Create `tests/unique-constraints.test.ts` with test helpers: create a database with a collection configured with `uniqueFields: ["email", "username"]`
+- [ ] 5.2 Test create: duplicate email → `UniqueConstraintError` with correct fields/values/existingId
+- [ ] 5.3 Test create: unique values → succeeds
+- [ ] 5.4 Test create: null/undefined on unique field → succeeds (nulls not checked)
+- [ ] 5.5 Test createMany: inter-batch duplicates → fails on conflicting entity
+- [ ] 5.6 Test createMany with `skipDuplicates: true` → skips unique violations, inserts non-violating
+- [ ] 5.7 Test update: change unique field to conflicting value → `UniqueConstraintError`
+- [ ] 5.8 Test update: change unique field to non-conflicting value → succeeds
+- [ ] 5.9 Test update: change non-unique field → succeeds without check
+- [ ] 5.10 Test collection without uniqueFields → only ID uniqueness enforced
+
+## 6. Tests — Compound Constraints
+
+- [ ] 6.1 Create test database with `uniqueFields: [["userId", "settingKey"]]`
+- [ ] 6.2 Test create: duplicate compound tuple → `UniqueConstraintError`
+- [ ] 6.3 Test create: partial overlap (one field matches, other differs) → succeeds
+- [ ] 6.4 Test create: null in one compound field → skipped, succeeds
+- [ ] 6.5 Test mixed single + compound constraints on same collection → both enforced
+- [ ] 6.6 Test error shape: constraint name, fields array, and values reflect compound key
+
+## 7. Tests — Upsert Validation
+
+- [ ] 7.1 Create `tests/upsert-validation.test.ts` with test helpers
+- [ ] 7.2 Test upsert `where: { id }` → always valid
+- [ ] 7.3 Test upsert `where: { email }` when email is unique → valid
+- [ ] 7.4 Test upsert `where: { name }` when name is NOT unique → `ValidationError`
+- [ ] 7.5 Test upsert with compound where matching compound constraint → valid
+- [ ] 7.6 Test upsert with partial compound where → `ValidationError`
+- [ ] 7.7 Test collection without uniqueFields → only `{ id }` accepted
+- [ ] 7.8 Test upsert where with extra fields beyond constraint → valid
+- [ ] 7.9 Test upsertMany with invalid where → fails on first invalid
+
+## 8. Cleanup
+
+- [ ] 8.1 Remove unused `ExtractUniqueFields` type from `core/types/crud-types.ts` if no longer needed (replaced by runtime config)
+- [ ] 8.2 Run full test suite (`bun test`) to verify no regressions
+- [ ] 8.3 Run type check (`bunx tsc --noEmit`) to verify no type errors

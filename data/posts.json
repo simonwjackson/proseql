@@ -1,26 +1,26 @@
 {
-  "posts": {
-    "VnZPz3lQghIMR8NsMZgUh": {
-      "id": "VnZPz3lQghIMR8NsMZgUh",
-      "title": "Getting Started with TypeScript",
-      "content": "TypeScript is a powerful language that adds static typing to JavaScript...",
-      "authorId": "HwF_a8NodhGbX5sHxIwpS",
-      "tags": [
-        "typescript",
-        "javascript",
-        "programming"
-      ]
-    },
-    "R3szEi0TJu2sJsa4TzTiL": {
-      "id": "R3szEi0TJu2sJsa4TzTiL",
-      "title": "Database Design Best Practices",
-      "content": "When designing databases, it's important to consider normalization...",
-      "authorId": "My_PyQmWva2H3XqIrZ43F",
-      "tags": [
-        "database",
-        "design",
-        "best-practices"
-      ]
-    }
+  "cEFdfKBt5j56TR8mATDky": {
+    "id": "cEFdfKBt5j56TR8mATDky",
+    "title": "Getting Started with Effect",
+    "content": "Effect is a powerful library for TypeScript...",
+    "authorId": "OOGZKCmMhYLxTSbZsrq-y",
+    "tags": [
+      "effect",
+      "typescript"
+    ],
+    "createdAt": "2026-02-09T15:13:16.331Z",
+    "updatedAt": "2026-02-09T15:13:16.331Z"
+  },
+  "60J7zS7HgWnNt-a-FDyVK": {
+    "id": "60J7zS7HgWnNt-a-FDyVK",
+    "title": "Database Design",
+    "content": "Choosing the right persistence strategy...",
+    "authorId": "rJvXSxUnB1YL186SdnH2k",
+    "tags": [
+      "database",
+      "design"
+    ],
+    "createdAt": "2026-02-09T15:13:16.331Z",
+    "updatedAt": "2026-02-09T15:13:16.331Z"
   }
 }

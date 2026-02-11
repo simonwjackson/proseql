@@ -30,7 +30,7 @@
 ## 5. Tests — Scalar Aggregates
 
 - [x] 5.1 Create `tests/aggregation.test.ts` with test helpers: database with products collection (id, name, price, category, stock)
-- [ ] 5.2 Test `count` with no where → total collection size
+- [x] 5.2 Test `count` with no where → total collection size
 - [ ] 5.3 Test `count` with where → filtered count
 - [ ] 5.4 Test `count` on empty collection → 0
 - [ ] 5.5 Test `sum` on numeric field → correct total

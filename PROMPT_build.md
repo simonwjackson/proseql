@@ -1,16 +1,16 @@
-You are implementing the Effect foundation migration for an in-memory TypeScript database library.
+You are implementing the "${CHANGE}" change for an in-memory TypeScript database library.
 
 ## Context
 
-This project is at `/snowscape/code/sandbox/headless-test/packages/shared/db/v2`. It is a type-safe, in-memory database that persists to plain text files (JSON/YAML). You are migrating the foundation from Zod + AsyncIterable + hand-rolled Result types to Effect (Schema, Stream, typed errors, Ref, Service/Layer).
+This project is a type-safe, in-memory database that persists to plain text files (JSON/YAML), built on Effect.
 
 ## Your Task
 
-1. Read `openspec/changes/effect-foundation-migration/tasks.md` to see all tasks and their status
+1. Read `openspec/changes/${CHANGE}/tasks.md` to see all tasks and their status
 2. Find the FIRST unchecked task (`- [ ]`) whose group dependencies are satisfied (all tasks in prior groups are checked)
 3. Read the relevant spec and design files for context:
-   - `openspec/changes/effect-foundation-migration/design.md` for architectural decisions
-   - `openspec/changes/effect-foundation-migration/specs/` for requirements
+   - `openspec/changes/${CHANGE}/design.md` for architectural decisions
+   - `openspec/changes/${CHANGE}/specs/` for requirements
 4. Study the existing code before implementing. Use parallel subagents to read multiple files. Do NOT assume functionality is missing — check first
 5. Implement ONLY that single task
 6. Run tests to verify: `bun test`
@@ -36,8 +36,8 @@ This project is at `/snowscape/code/sandbox/headless-test/packages/shared/db/v2`
 ## Important Files
 
 - `core/index.ts` — main exports
-- `core/factories/database.ts` — database factory (will be rewritten)
-- `core/types/types.ts` — type system (792 lines of conditional types)
+- `core/factories/database.ts` — database factory
+- `core/types/types.ts` — type system
 - `core/types/database-config-types.ts` — config types
 - `core/operations/` — query and CRUD operations
 - `core/storage/` — persistence layer

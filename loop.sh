@@ -1,33 +1,143 @@
-#!/usr/bin/env bash
+#!/usr/bin/env nix-shell
+#!nix-shell -i bash -p gettext jq
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-MAX_ITERATIONS=${1:-0}
+# Usage:
+#   ./loop.sh                  # loop over ALL changes with remaining tasks
+#   ./loop.sh indexing          # loop over a single change
+#   ./loop.sh indexing 10       # single change, max 10 iterations
+#   ./loop.sh --all 50         # all changes, max 50 total iterations
+
+MAX_ITERATIONS=0
+SINGLE_CHANGE=""
+
+case "${1:-}" in
+  --help|-h)
+    echo "Usage:"
+    echo "  ./loop.sh                  # all changes, unlimited"
+    echo "  ./loop.sh --all 50         # all changes, max 50 iterations"
+    echo "  ./loop.sh <change> [max]   # single change"
+    exit 0
+    ;;
+  --all)
+    MAX_ITERATIONS="${2:-0}"
+    ;;
+  "")
+    # No args = all changes, unlimited
+    ;;
+  *)
+    SINGLE_CHANGE="$1"
+    MAX_ITERATIONS="${2:-0}"
+    ;;
+esac
+
 ITERATION=0
 
-echo "Starting Ralph Wiggum loop for effect-foundation-migration"
-echo "Max iterations: ${MAX_ITERATIONS:-unlimited}"
+# Count tasks in a tasks.md file
+count_remaining() {
+  local n
+  n=$(grep -c '^\- \[ \]' "openspec/changes/$1/tasks.md" 2>/dev/null) || true
+  echo "${n:-0}"
+}
+
+count_complete() {
+  local n
+  n=$(grep -c '^\- \[x\]' "openspec/changes/$1/tasks.md" 2>/dev/null) || true
+  echo "${n:-0}"
+}
+
+# Find the next change with remaining tasks
+# Returns the change name, or empty string if all done
+next_change() {
+  if [ -n "$SINGLE_CHANGE" ]; then
+    local remaining
+    remaining=$(count_remaining "$SINGLE_CHANGE")
+    if [ "$remaining" -gt 0 ]; then
+      echo "$SINGLE_CHANGE"
+    fi
+    return
+  fi
+
+  # Get all changes, find first with remaining tasks
+  for dir in openspec/changes/*/; do
+    [ -d "$dir" ] || continue
+    local name
+    name=$(basename "$dir")
+    [ "$name" = "archive" ] && continue
+    [ -f "$dir/tasks.md" ] || continue
+    local remaining
+    remaining=$(count_remaining "$name")
+    if [ "$remaining" -gt 0 ]; then
+      echo "$name"
+      return
+    fi
+  done
+}
+
+echo "============================================"
+echo "  OpenSpec Implementation Loop"
+echo "============================================"
+if [ -n "$SINGLE_CHANGE" ]; then
+  echo "  Change: $SINGLE_CHANGE"
+else
+  echo "  Mode: all changes with remaining tasks"
+fi
+echo "  Max iterations: $([ "$MAX_ITERATIONS" -gt 0 ] && echo "$MAX_ITERATIONS" || echo "unlimited")"
+echo "============================================"
 echo ""
 
+CURRENT_CHANGE=""
+
 while true; do
+  # Check iteration cap
   if [ "$MAX_ITERATIONS" -gt 0 ] && [ "$ITERATION" -ge "$MAX_ITERATIONS" ]; then
+    echo ""
     echo "Reached max iterations ($MAX_ITERATIONS). Stopping."
     break
   fi
 
-  ITERATION=$((ITERATION + 1))
-  REMAINING=$(grep -c '^\- \[ \]' openspec/changes/effect-foundation-migration/tasks.md 2>/dev/null || true)
-  REMAINING=${REMAINING:-0}
-
-  if [ "$REMAINING" -eq 0 ]; then
-    echo "All tasks complete! Stopping."
+  # Find next change with work
+  CHANGE=$(next_change)
+  if [ -z "$CHANGE" ]; then
+    echo ""
+    echo "All tasks across all changes complete!"
     break
   fi
 
-  echo "=== Iteration $ITERATION | $REMAINING tasks remaining ==="
-  HOME=~/.claude-accounts/personal nix run nixpkgs#bun -- x '@anthropic-ai/claude-code' --dangerously-skip-permissions --print --verbose --output-format stream-json <PROMPT_build.md |
+  # Announce change transitions
+  if [ "$CHANGE" != "$CURRENT_CHANGE" ]; then
+    if [ -n "$CURRENT_CHANGE" ]; then
+      echo ""
+      echo ">>> Change '$CURRENT_CHANGE' complete! Moving to '$CHANGE'"
+      echo ""
+    fi
+    CURRENT_CHANGE="$CHANGE"
+
+    # Verify tasks file exists
+    if [ ! -f "openspec/changes/${CHANGE}/tasks.md" ]; then
+      echo "Error: openspec/changes/${CHANGE}/tasks.md not found. Skipping."
+      SINGLE_CHANGE=""
+      continue
+    fi
+  fi
+
+  ITERATION=$((ITERATION + 1))
+
+  # Get progress
+  REMAINING=$(count_remaining "$CHANGE")
+  COMPLETE=$(count_complete "$CHANGE")
+  TOTAL=$((REMAINING + COMPLETE))
+
+  echo "=== Iteration $ITERATION | change: $CHANGE | $COMPLETE/$TOTAL done ($REMAINING remaining) ==="
+
+  # Build prompt with change name
+  PROMPT=$(CHANGE="$CHANGE" envsubst '$CHANGE' < PROMPT_build.md)
+
+  # Run Claude
+  claude --dangerously-skip-permissions --print --verbose --output-format stream-json <<< "$PROMPT" |
     jq -r '
       if .type == "assistant" then
         .message.content[]? |
@@ -41,8 +151,10 @@ while true; do
       else empty
       end
     ' || echo "!!! Claude exited with error (likely context overflow). Continuing loop..."
-  git add -A && git push origin "$(git branch --show-current)" 2>/dev/null || true
   echo ""
 done
 
-echo "Loop finished after $ITERATION iterations."
+echo ""
+echo "============================================"
+echo "  Loop finished after $ITERATION iterations"
+echo "============================================"
