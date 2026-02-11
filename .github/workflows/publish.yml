@@ -43,6 +43,8 @@ jobs:
   publish:
     needs: [test, typecheck, lint]
     runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
