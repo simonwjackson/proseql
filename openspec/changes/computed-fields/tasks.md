@@ -30,7 +30,7 @@
 
 - [x] 5.1 Verify that `selectFields` in `core/operations/query/select.ts` works on entities with computed fields. Object-based select picks keys from the widened entity.
 - [x] 5.2 Test selecting only stored fields — computed fields should be absent from results.
-- [ ] 5.3 Test selecting a mix of stored and computed fields — both present.
+- [x] 5.3 Test selecting a mix of stored and computed fields — both present.
 - [ ] 5.4 Test selecting only computed fields — stored fields absent, computed fields present.
 - [ ] 5.5 Test default (no select) — all stored fields and all computed fields present.
 
