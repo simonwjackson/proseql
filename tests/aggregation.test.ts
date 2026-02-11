@@ -219,4 +219,26 @@ describe("Aggregation", () => {
 			expect(result.avg?.stock).toBe(90)
 		})
 	})
+
+	describe("groupBy", () => {
+		it("6.1 single-field groupBy with count → correct group counts", async () => {
+			const db = await createTestDb()
+			const result = await db.products.aggregate({
+				groupBy: "category",
+				count: true,
+			}).runPromise
+
+			// Test data has: electronics (2), gadgets (2), tools (1)
+			expect(result).toHaveLength(3)
+
+			// Find each group and verify count
+			const electronics = result.find(g => g.group.category === "electronics")
+			const gadgets = result.find(g => g.group.category === "gadgets")
+			const tools = result.find(g => g.group.category === "tools")
+
+			expect(electronics?.count).toBe(2)
+			expect(gadgets?.count).toBe(2)
+			expect(tools?.count).toBe(1)
+		})
+	})
 })
