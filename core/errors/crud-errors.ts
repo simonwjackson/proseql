@@ -64,6 +64,14 @@ export class TransactionError extends Data.TaggedError("TransactionError")<{
 	readonly message: string
 }> {}
 
+export class HookError extends Data.TaggedError("HookError")<{
+	readonly hook: string
+	readonly collection: string
+	readonly operation: "create" | "update" | "delete"
+	readonly reason: string
+	readonly message: string
+}> {}
+
 // ============================================================================
 // Effect CRUD Error Union
 // ============================================================================
@@ -77,3 +85,4 @@ export type CrudError =
 	| ConcurrencyError
 	| OperationError
 	| TransactionError
+	| HookError

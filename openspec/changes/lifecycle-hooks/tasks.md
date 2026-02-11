@@ -1,9 +1,9 @@
 ## 1. Types
 
 - [x] 1.1 Create `core/types/hook-types.ts` with all context types: `BeforeCreateContext<T>`, `BeforeUpdateContext<T>`, `BeforeDeleteContext<T>`, `AfterCreateContext<T>`, `AfterUpdateContext<T>`, `AfterDeleteContext<T>`, `OnChangeContext<T>` (discriminated union on `type`)
-- [ ] 1.2 Define hook function signatures: `BeforeCreateHook<T>`, `BeforeUpdateHook<T>`, `BeforeDeleteHook<T>`, `AfterCreateHook<T>`, `AfterUpdateHook<T>`, `AfterDeleteHook<T>`, `OnChangeHook<T>`
+- [x] 1.2 Define hook function signatures: `BeforeCreateHook<T>`, `BeforeUpdateHook<T>`, `BeforeDeleteHook<T>`, `AfterCreateHook<T>`, `AfterUpdateHook<T>`, `AfterDeleteHook<T>`, `OnChangeHook<T>`
 - [ ] 1.3 Define `HooksConfig<T>` interface with optional arrays for each hook type
-- [ ] 1.4 Add `HookError` to `core/errors/crud-errors.ts`: `Data.TaggedError("HookError")<{ hook, collection, operation, reason, message }>`
+- [x] 1.4 Add `HookError` to `core/errors/crud-errors.ts`: `Data.TaggedError("HookError")<{ hook, collection, operation, reason, message }>`
 - [ ] 1.5 Add `readonly hooks?: HooksConfig<T>` to `CollectionConfig` in `core/types/database-config-types.ts`
 - [ ] 1.6 Export new types from `core/index.ts`
 

@@ -3,7 +3,9 @@
  * Hooks intercept operations before/after mutation for transformation, validation, or side effects.
  */
 
+import type { Effect } from "effect";
 import type { UpdateWithOperators } from "./crud-types.js";
+import type { HookError } from "../errors/crud-errors.js";
 
 // ============================================================================
 // Before Hook Context Types
@@ -122,3 +124,70 @@ export type OnChangeContext<T> =
 	| OnChangeCreateContext<T>
 	| OnChangeUpdateContext<T>
 	| OnChangeDeleteContext<T>;
+
+// ============================================================================
+// Hook Function Signatures
+// ============================================================================
+
+/**
+ * Before-hook for create operations.
+ * Receives the validated entity about to be inserted and can transform it.
+ * Return the (possibly transformed) entity, or fail with HookError to abort.
+ */
+export type BeforeCreateHook<T> = (
+	ctx: BeforeCreateContext<T>,
+) => Effect.Effect<T, HookError>;
+
+/**
+ * Before-hook for update operations.
+ * Receives the current entity state and the update payload.
+ * Return the (possibly transformed) update payload, or fail with HookError to abort.
+ */
+export type BeforeUpdateHook<T> = (
+	ctx: BeforeUpdateContext<T>,
+) => Effect.Effect<UpdateWithOperators<T>, HookError>;
+
+/**
+ * Before-hook for delete operations.
+ * Can inspect the entity about to be deleted and reject if needed.
+ * Return void to proceed, or fail with HookError to abort.
+ */
+export type BeforeDeleteHook<T> = (
+	ctx: BeforeDeleteContext<T>,
+) => Effect.Effect<void, HookError>;
+
+/**
+ * After-hook for create operations.
+ * Receives the entity as it was stored. Used for side effects.
+ * Errors are swallowed (fire-and-forget).
+ */
+export type AfterCreateHook<T> = (
+	ctx: AfterCreateContext<T>,
+) => Effect.Effect<void, never>;
+
+/**
+ * After-hook for update operations.
+ * Receives both previous and current state to enable diffing.
+ * Errors are swallowed (fire-and-forget).
+ */
+export type AfterUpdateHook<T> = (
+	ctx: AfterUpdateContext<T>,
+) => Effect.Effect<void, never>;
+
+/**
+ * After-hook for delete operations.
+ * Receives the entity that was deleted.
+ * Errors are swallowed (fire-and-forget).
+ */
+export type AfterDeleteHook<T> = (
+	ctx: AfterDeleteContext<T>,
+) => Effect.Effect<void, never>;
+
+/**
+ * Generic change hook that fires after any mutation.
+ * Receives a discriminated union context with type "create", "update", or "delete".
+ * Errors are swallowed (fire-and-forget).
+ */
+export type OnChangeHook<T> = (
+	ctx: OnChangeContext<T>,
+) => Effect.Effect<void, never>;
