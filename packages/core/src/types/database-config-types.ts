@@ -6,6 +6,7 @@
 import type { Schema } from "effect";
 import type { HooksConfig } from "./hook-types.js";
 import type { Migration } from "../migrations/migration-types.js";
+import type { ComputedFieldsConfig } from "./computed-types.js";
 
 /**
  * Configuration for a single collection, now with optional persistence support.
@@ -74,6 +75,24 @@ export type CollectionConfig = {
 	 *   - The combination of "userId" + "settingKey" must be unique
 	 */
 	readonly uniqueFields?: ReadonlyArray<string | ReadonlyArray<string>>;
+
+	/**
+	 * Computed field definitions for this collection.
+	 * Computed fields are derived at query time from stored entity data.
+	 * They are never persisted to disk - only materialized in the query pipeline.
+	 *
+	 * Each entry maps a field name to a derivation function.
+	 * The function receives the entity (with populated relationships if applicable) and returns the computed value.
+	 *
+	 * @example
+	 * ```ts
+	 * computed: {
+	 *   displayName: (book) => `${book.title} (${book.year})`,
+	 *   isClassic: (book) => book.year < 1980,
+	 * }
+	 * ```
+	 */
+	readonly computed?: ComputedFieldsConfig<unknown>;
 };
 
 /**
