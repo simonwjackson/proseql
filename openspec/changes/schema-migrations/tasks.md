@@ -76,7 +76,7 @@
 ## 12. Tests — Dry Run
 
 - [x] 12.1 Test collection needing migration → listed with correct chain
-- [ ] 12.2 Test collection at current version → "up-to-date"
+- [x] 12.2 Test collection at current version → "up-to-date"
 - [ ] 12.3 Test collection with no file → "no-file"
 - [ ] 12.4 Test no files modified after dry run
 

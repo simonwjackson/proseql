@@ -2334,6 +2334,196 @@ describe("schema-migrations: dry run", () => {
 			expect(result.collections[0].migrationsToApply[0].description).toBeUndefined()
 		})
 	})
+
+	describe("collection at current version → up-to-date (task 12.2)", () => {
+		it("dryRunMigrations reports 'up-to-date' when file version matches config version", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File at version 3 (matches config version)
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					_version: 3,
+					u1: {
+						id: "u1",
+						firstName: "Alice",
+						lastName: "Smith",
+						email: "alice@example.com",
+						age: 25,
+					},
+				}),
+			)
+
+			const config = {
+				users: {
+					schema: UserSchemaV3,
+					file: "/data/users.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			expect(result.collections).toHaveLength(1)
+
+			const usersResult = result.collections[0]
+			expect(usersResult.name).toBe("users")
+			expect(usersResult.filePath).toBe("/data/users.json")
+			expect(usersResult.currentVersion).toBe(3)
+			expect(usersResult.targetVersion).toBe(3)
+			expect(usersResult.status).toBe("up-to-date")
+
+			// No migrations should be applied
+			expect(usersResult.migrationsToApply).toHaveLength(0)
+		})
+
+		it("dryRunMigrations reports 'up-to-date' for single-version collection at version 1", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File at version 1
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					_version: 1,
+					u1: { id: "u1", name: "Alice", email: "alice@example.com" },
+				}),
+			)
+
+			const config = {
+				users: {
+					schema: UserSchemaV1,
+					file: "/data/users.json",
+					version: 1,
+					migrations: migrationsTo1,
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			expect(result.collections).toHaveLength(1)
+
+			const usersResult = result.collections[0]
+			expect(usersResult.status).toBe("up-to-date")
+			expect(usersResult.currentVersion).toBe(1)
+			expect(usersResult.targetVersion).toBe(1)
+			expect(usersResult.migrationsToApply).toHaveLength(0)
+		})
+
+		it("dryRunMigrations reports 'up-to-date' for version 0 collection (no migrations needed)", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File without _version (implicitly version 0)
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					u1: { id: "u1", name: "Alice" },
+				}),
+			)
+
+			// Config at version 0 with no migrations
+			const config = {
+				users: {
+					schema: UserSchemaV0,
+					file: "/data/users.json",
+					version: 0,
+					migrations: [],
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			expect(result.collections).toHaveLength(1)
+
+			const usersResult = result.collections[0]
+			expect(usersResult.status).toBe("up-to-date")
+			expect(usersResult.currentVersion).toBe(0)
+			expect(usersResult.targetVersion).toBe(0)
+			expect(usersResult.migrationsToApply).toHaveLength(0)
+		})
+
+		it("dryRunMigrations reports mixed statuses when some collections up-to-date and others need migration", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// Users already at version 3
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					_version: 3,
+					u1: {
+						id: "u1",
+						firstName: "Alice",
+						lastName: "Smith",
+						email: "alice@example.com",
+						age: 25,
+					},
+				}),
+			)
+
+			// Products at version 1 needing migration to version 3
+			store.set(
+				"/data/products.json",
+				JSON.stringify({
+					_version: 1,
+					p1: { id: "p1", name: "Widget", email: "widget@example.com" },
+				}),
+			)
+
+			const config = {
+				users: {
+					schema: UserSchemaV3,
+					file: "/data/users.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+				products: {
+					schema: UserSchemaV3,
+					file: "/data/products.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			expect(result.collections).toHaveLength(2)
+
+			// Find results by name
+			const usersResult = result.collections.find((c) => c.name === "users")!
+			const productsResult = result.collections.find((c) => c.name === "products")!
+
+			// Users should be up-to-date
+			expect(usersResult.status).toBe("up-to-date")
+			expect(usersResult.migrationsToApply).toHaveLength(0)
+
+			// Products should need migration
+			expect(productsResult.status).toBe("needs-migration")
+			expect(productsResult.migrationsToApply).toHaveLength(2)
+			expect(productsResult.migrationsToApply[0].from).toBe(1)
+			expect(productsResult.migrationsToApply[1].from).toBe(2)
+		})
+	})
 })
 
 // ============================================================================
