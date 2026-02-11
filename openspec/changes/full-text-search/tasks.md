@@ -32,7 +32,7 @@
 
 ## 6. Relevance Sort Integration
 
-- [ ] 6.1 Modify the query pipeline so that when `$search` is active and no explicit `sort` is provided, results are sorted by relevance score descending
+- [x] 6.1 Modify the query pipeline so that when `$search` is active and no explicit `sort` is provided, results are sorted by relevance score descending
 - [ ] 6.2 Compute relevance scores during the filter phase and attach as metadata (or compute in a post-filter pass) so the sort stage can consume them
 - [ ] 6.3 When an explicit `sort` is provided alongside `$search`, use the explicit sort and discard relevance ordering
 

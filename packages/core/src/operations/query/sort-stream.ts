@@ -1,9 +1,27 @@
 import { Chunk, Effect, Stream } from "effect";
+import type { SearchConfig } from "../../types/search-types.js";
+import { tokenize, computeSearchScore } from "./search.js";
 
 /**
  * A sort configuration mapping field names to sort direction.
  */
 type SortConfig = Partial<Record<string, "asc" | "desc">>;
+
+/**
+ * Extract SearchConfig from a where clause if present at top level.
+ * Returns undefined if no top-level $search is found.
+ */
+export function extractSearchConfig(
+  where: Record<string, unknown> | undefined,
+): SearchConfig | undefined {
+  if (!where) return undefined;
+  const searchValue = where.$search;
+  if (searchValue === null || typeof searchValue !== "object") return undefined;
+  const config = searchValue as SearchConfig;
+  // Validate that it has the required 'query' property
+  if (typeof config.query !== "string") return undefined;
+  return config;
+}
 
 /**
  * Get a nested value from an object using dot notation.
@@ -59,6 +77,48 @@ function compareValues(aValue: unknown, bValue: unknown): number {
   // Fallback: convert to string
   return String(aValue).localeCompare(String(bValue));
 }
+
+/**
+ * Apply relevance-based sorting for search results.
+ * Sorts items by their search relevance score in descending order.
+ *
+ * @param searchConfig - The search configuration containing query and optional fields
+ * @returns A stream combinator that sorts by relevance score
+ */
+export const applyRelevanceSort = <T extends Record<string, unknown>>(
+  searchConfig: SearchConfig,
+) =>
+  <E, R>(stream: Stream.Stream<T, E, R>): Stream.Stream<T, E, R> => {
+    const queryTokens = tokenize(searchConfig.query);
+    // Empty query: no relevance to sort by
+    if (queryTokens.length === 0) return stream;
+
+    return Stream.unwrap(
+      Effect.map(Stream.runCollect(stream), (chunk: Chunk.Chunk<T>) => {
+        const arr = Chunk.toArray(chunk) as Array<T>;
+
+        // Compute scores for all items
+        const scored = arr.map((item) => {
+          // Determine target fields: explicit or all string fields
+          let targetFields: ReadonlyArray<string>;
+          if (searchConfig.fields && searchConfig.fields.length > 0) {
+            targetFields = searchConfig.fields;
+          } else {
+            targetFields = Object.keys(item).filter(
+              (k) => typeof item[k] === "string",
+            );
+          }
+          const score = computeSearchScore(item, queryTokens, targetFields);
+          return { item, score };
+        });
+
+        // Sort by score descending (higher scores first)
+        scored.sort((a, b) => b.score - a.score);
+
+        return Stream.fromIterable(scored.map(({ item }) => item));
+      }),
+    );
+  };
 
 /**
  * Apply a sort configuration as a Stream combinator.

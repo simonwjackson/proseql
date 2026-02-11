@@ -49,7 +49,7 @@ import {
 	deleteManyWithRelationships,
 } from "../operations/crud/delete-with-relationships.js"
 import { applyFilter } from "../operations/query/filter-stream.js"
-import { applySort } from "../operations/query/sort-stream.js"
+import { applySort, applyRelevanceSort, extractSearchConfig } from "../operations/query/sort-stream.js"
 import { applySelect, applySelectToArray } from "../operations/query/select-stream.js"
 import { applyPagination } from "../operations/query/paginate-stream.js"
 import { applyPopulate } from "../operations/relationships/populate-stream.js"
@@ -618,7 +618,13 @@ const buildCollection = <T extends HasId>(
 					normalizeSelectForLazySkip(options?.select),
 				)(s)
 				s = applyFilter(options?.where)(s)
-				s = applySort(effectiveSort)(s)
+				// When $search is active and no explicit sort provided, use relevance sort
+				const searchConfig = extractSearchConfig(options?.where)
+				if (searchConfig && !options?.sort) {
+					s = applyRelevanceSort(searchConfig)(s)
+				} else {
+					s = applySort(effectiveSort)(s)
+				}
 				s = applyPagination(options?.offset, options?.limit)(s)
 				s = applySelect(options?.select as Record<string, unknown> | ReadonlyArray<string> | undefined)(s)
 
