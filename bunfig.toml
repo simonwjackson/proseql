@@ -19,3 +19,9 @@ coveragePathIgnorePatterns = [
   "**/index.ts",     # Barrel files (re-exports only)
   "**/*.d.ts",       # Type declaration files
 ]
+
+# Coverage thresholds based on baseline measurement (task 1.1):
+# - Functions: 82.68% → threshold 82%
+# - Lines: 85.44% → threshold 84% (using 84% to accommodate minor fluctuation)
+# Rounded down to nearest integer to allow minor fluctuation without false failures
+coverageThreshold = { functions = 0.82, lines = 0.84 }
