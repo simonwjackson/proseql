@@ -11,3 +11,11 @@ root = "packages"
 # Coverage configuration (only used when --coverage flag is passed)
 coverageReporter = ["text", "lcov"]
 coverageDir = "coverage"
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = [
+  "**/tests/**",     # Test directories
+  "examples/**",     # Example code
+  "effect/**",       # Vendored Effect reference codebase
+  "**/index.ts",     # Barrel files (re-exports only)
+  "**/*.d.ts",       # Type declaration files
+]
