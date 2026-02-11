@@ -373,6 +373,8 @@ export {
 	resolveComputedFields,
 	resolveComputedStream,
 	stripComputedFields,
+	hasSelectedComputedFields,
+	resolveComputedStreamWithLazySkip,
 } from "./operations/query/resolve-computed.js";
 
 // ============================================================================

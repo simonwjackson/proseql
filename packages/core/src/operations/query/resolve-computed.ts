@@ -140,3 +140,110 @@ export const stripComputedFields = <
 
 	return result as T;
 };
+
+/**
+ * Check if any computed fields are selected based on the select configuration.
+ *
+ * @param computedConfig - The computed fields configuration
+ * @param select - The select configuration (object with true values for selected fields)
+ * @returns true if any computed field is selected (or select is undefined meaning all fields)
+ *
+ * @example
+ * ```ts
+ * const computedConfig = {
+ *   displayName: (b) => `${b.title} (${b.year})`,
+ *   isClassic: (b) => b.year < 1980,
+ * }
+ *
+ * // No select = all fields including computed
+ * hasSelectedComputedFields(computedConfig, undefined) // true
+ *
+ * // Select includes computed field
+ * hasSelectedComputedFields(computedConfig, { title: true, displayName: true }) // true
+ *
+ * // Select excludes all computed fields
+ * hasSelectedComputedFields(computedConfig, { title: true, year: true }) // false
+ * ```
+ */
+export const hasSelectedComputedFields = <
+	T extends Record<string, unknown>,
+	C extends ComputedFieldsConfig<T>,
+>(
+	computedConfig: C | undefined,
+	select: Record<string, unknown> | undefined,
+): boolean => {
+	// No computed config means no computed fields to select
+	if (computedConfig === undefined || Object.keys(computedConfig).length === 0) {
+		return false;
+	}
+
+	// No select means all fields are selected (including computed)
+	if (select === undefined) {
+		return true;
+	}
+
+	// Check if any computed field key is in the select config
+	const computedKeys = Object.keys(computedConfig);
+	const selectKeys = Object.keys(select);
+
+	for (const computedKey of computedKeys) {
+		if (selectKeys.includes(computedKey) && select[computedKey] === true) {
+			return true;
+		}
+	}
+
+	return false;
+};
+
+/**
+ * Apply computed field resolution with lazy skip optimization.
+ *
+ * When `select` is provided and has no intersection with computed field keys,
+ * bypasses resolution entirely by returning the stream unchanged. This avoids
+ * unnecessary computation when only stored fields are needed.
+ *
+ * @template T - The entity type (stored fields, possibly with populated relationships)
+ * @template C - The computed fields config type
+ *
+ * @param config - The computed fields configuration (field name → derivation function), or undefined
+ * @param select - The select configuration (object with true values for selected fields), or undefined
+ * @returns A stream combinator function
+ *
+ * @example
+ * ```ts
+ * const config = {
+ *   displayName: (b) => `${b.title} (${b.year})`,
+ *   isClassic: (b) => b.year < 1980,
+ * }
+ *
+ * // When select includes computed fields, resolution is applied
+ * const enrichedStream = stream.pipe(
+ *   resolveComputedStreamWithLazySkip(config, { title: true, displayName: true })
+ * )
+ *
+ * // When select excludes all computed fields, resolution is skipped
+ * const storedOnlyStream = stream.pipe(
+ *   resolveComputedStreamWithLazySkip(config, { title: true, year: true })
+ * )
+ * // → stream returned unchanged, no resolution overhead
+ * ```
+ */
+export const resolveComputedStreamWithLazySkip = <
+	T extends Record<string, unknown>,
+	C extends ComputedFieldsConfig<T>,
+>(
+	config: C | undefined,
+	select: Record<string, unknown> | undefined,
+) =>
+	<E, R>(stream: Stream.Stream<T, E, R>): Stream.Stream<WithComputed<T, C>, E, R> => {
+		// Check if any computed fields are selected
+		if (!hasSelectedComputedFields(config, select)) {
+			// No computed fields selected, return stream unchanged
+			return stream as unknown as Stream.Stream<WithComputed<T, C>, E, R>;
+		}
+
+		// Computed fields are selected, apply resolution
+		return Stream.map(stream, (entity: T) =>
+			resolveComputedFields(entity, config as C),
+		);
+	};
