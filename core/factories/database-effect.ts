@@ -214,7 +214,7 @@ export interface EffectCollection<T extends HasId> {
 	readonly delete: (
 		id: string,
 		options?: { readonly soft?: boolean },
-	) => RunnableEffect<T, NotFoundError | OperationError | ForeignKeyError>
+	) => RunnableEffect<T, NotFoundError | OperationError | ForeignKeyError | HookError>
 	readonly deleteMany: (
 		predicate: (entity: T) => boolean,
 		options?: { readonly soft?: boolean; readonly limit?: number },

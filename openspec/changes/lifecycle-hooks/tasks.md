@@ -32,7 +32,7 @@
 
 - [x] 5.1 Add `hooks` parameter to `delete` in `core/operations/crud/delete.ts`. Before removing, run `beforeDelete` hooks with the entity about to be deleted.
 - [x] 5.2 After state mutation, run `afterDelete` hooks with the deleted entity. Then run `onChange` hooks with `type: "delete"`.
-- [ ] 5.3 Add `HookError` to `delete`'s error channel.
+- [x] 5.3 Add `HookError` to `delete`'s error channel.
 - [ ] 5.4 In `deleteMany`, run hooks per entity.
 
 ## 6. CRUD Integration — Upsert
