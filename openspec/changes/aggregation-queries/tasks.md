@@ -34,7 +34,7 @@
 - [x] 5.3 Test `count` with where → filtered count
 - [x] 5.4 Test `count` on empty collection → 0
 - [x] 5.5 Test `sum` on numeric field → correct total
-- [ ] 5.6 Test `sum` with non-numeric/null values → skipped
+- [x] 5.6 Test `sum` with non-numeric/null values → skipped
 - [ ] 5.7 Test `sum` on empty result set → 0
 - [ ] 5.8 Test `avg` on numeric field → correct mean
 - [ ] 5.9 Test `avg` with all non-numeric → null
