@@ -18,6 +18,7 @@ import type {
 } from "../../types/crud-types.js"
 import {
 	ForeignKeyError,
+	HookError,
 	ValidationError,
 } from "../../errors/crud-errors.js"
 import { validateEntity } from "../../validators/schema-validator.js"
@@ -28,6 +29,14 @@ import {
 } from "../../validators/foreign-key.js"
 import type { CollectionIndexes } from "../../types/index-types.js"
 import { addToIndex, updateInIndex, addManyToIndex } from "../../indexes/index-manager.js"
+import type { HooksConfig } from "../../types/hook-types.js"
+import {
+	runBeforeCreateHooks,
+	runAfterCreateHooks,
+	runBeforeUpdateHooks,
+	runAfterUpdateHooks,
+	runOnChangeHooks,
+} from "../../hooks/hook-runner.js"
 
 // ============================================================================
 // Types
@@ -90,8 +99,8 @@ const findByWhere = <T extends HasId>(
  *
  * Steps:
  * 1. Look up entity by where clause in Ref state
- * 2a. If found: apply update operators, validate, update in state
- * 2b. If not found: merge where + create data, generate ID/timestamps, validate, add to state
+ * 2a. If found: run beforeUpdate hooks, apply update operators, validate, update in state, run afterUpdate/onChange
+ * 2b. If not found: merge where + create data, generate ID/timestamps, validate, run beforeCreate hooks, add to state, run afterCreate/onChange
  * 3. Validate foreign key constraints
  * 4. Return entity with __action metadata
  */
@@ -102,8 +111,9 @@ export const upsert = <T extends HasId, I = T>(
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	indexes?: CollectionIndexes,
+	hooks?: HooksConfig<T>,
 ) =>
-(input: UpsertInput<T>): Effect.Effect<UpsertResult<T>, ValidationError | ForeignKeyError> =>
+(input: UpsertInput<T>): Effect.Effect<UpsertResult<T>, ValidationError | ForeignKeyError | HookError> =>
 	Effect.gen(function* () {
 		const currentMap = yield* Ref.get(ref)
 		const where = input.where as Record<string, unknown>
@@ -111,9 +121,18 @@ export const upsert = <T extends HasId, I = T>(
 
 		if (existing !== undefined) {
 			// === UPDATE PATH ===
+			// Run beforeUpdate hooks (can transform the update payload)
+			const transformedUpdates = yield* runBeforeUpdateHooks(hooks?.beforeUpdate, {
+				operation: "update",
+				collection: collectionName,
+				id: existing.id,
+				existing,
+				update: input.update as UpdateWithOperators<T>,
+			})
+
 			const updated = applyUpdates(
 				existing as T & MinimalEntity,
-				input.update as UpdateWithOperators<T & MinimalEntity>,
+				transformedUpdates as UpdateWithOperators<T & MinimalEntity>,
 			)
 
 			// Validate through Effect Schema
@@ -123,7 +142,7 @@ export const upsert = <T extends HasId, I = T>(
 			const relationshipFields = Object.keys(relationships).map(
 				(field) => relationships[field].foreignKey || `${field}Id`,
 			)
-			const hasRelationshipUpdate = Object.keys(input.update).some((key) =>
+			const hasRelationshipUpdate = Object.keys(transformedUpdates).some((key) =>
 				relationshipFields.includes(key),
 			)
 
@@ -148,6 +167,25 @@ export const upsert = <T extends HasId, I = T>(
 				yield* updateInIndex(indexes, existing, validated)
 			}
 
+			// Run afterUpdate hooks (fire-and-forget, errors swallowed)
+			yield* runAfterUpdateHooks(hooks?.afterUpdate, {
+				operation: "update",
+				collection: collectionName,
+				id: existing.id,
+				previous: existing,
+				current: validated,
+				update: transformedUpdates,
+			})
+
+			// Run onChange hooks with type: "update" (fire-and-forget, errors swallowed)
+			yield* runOnChangeHooks(hooks?.onChange, {
+				type: "update",
+				collection: collectionName,
+				id: existing.id,
+				previous: existing,
+				current: validated,
+			})
+
 			return { ...validated, __action: "updated" as const }
 		}
 
@@ -166,9 +204,16 @@ export const upsert = <T extends HasId, I = T>(
 		// Validate through Effect Schema
 		const validated = yield* validateEntity(schema, createData)
 
+		// Run beforeCreate hooks (can transform the entity)
+		const entity = yield* runBeforeCreateHooks(hooks?.beforeCreate, {
+			operation: "create",
+			collection: collectionName,
+			data: validated,
+		})
+
 		// Validate foreign keys
 		yield* validateForeignKeysEffect(
-			validated,
+			entity,
 			collectionName,
 			relationships,
 			stateRefs,
@@ -177,16 +222,30 @@ export const upsert = <T extends HasId, I = T>(
 		// Atomically add to state
 		yield* Ref.update(ref, (map) => {
 			const next = new Map(map)
-			next.set(id, validated)
+			next.set(id, entity)
 			return next
 		})
 
 		// Update indexes if provided
 		if (indexes && indexes.size > 0) {
-			yield* addToIndex(indexes, validated)
+			yield* addToIndex(indexes, entity)
 		}
 
-		return { ...validated, __action: "created" as const }
+		// Run afterCreate hooks (fire-and-forget, errors swallowed)
+		yield* runAfterCreateHooks(hooks?.afterCreate, {
+			operation: "create",
+			collection: collectionName,
+			entity,
+		})
+
+		// Run onChange hooks with type: "create" (fire-and-forget, errors swallowed)
+		yield* runOnChangeHooks(hooks?.onChange, {
+			type: "create",
+			collection: collectionName,
+			entity,
+		})
+
+		return { ...entity, __action: "created" as const }
 	})
 
 // ============================================================================
