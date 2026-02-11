@@ -1304,6 +1304,187 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 	});
 
 	// =========================================================================
+	// Task 10.5: Test that update ignores computed field names in input
+	// =========================================================================
+	describe("Task 10.5: Update ignores computed field names in input", () => {
+		const BookSchema = Schema.Struct({
+			id: Schema.String,
+			title: Schema.String,
+			year: Schema.Number,
+			genre: Schema.optional(Schema.String),
+		});
+
+		type Book = typeof BookSchema.Type;
+
+		const configWithComputed = {
+			books: {
+				schema: BookSchema,
+				relationships: {},
+				computed: {
+					displayName: (book: Book) => `${book.title} (${book.year})`,
+					isClassic: (book: Book) => book.year < 1980,
+				},
+			},
+		} as const;
+
+		it("should ignore computed field values provided in update input", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(configWithComputed, {
+					books: [{ id: "book1", title: "Dune", year: 1965, genre: "sci-fi" }],
+				}),
+			);
+
+			// Update with explicit computed field values
+			// These should be ignored and the derivation function should be used
+			const updated = await db.books
+				.update("book1", {
+					title: "Dune (Revised Edition)",
+					// @ts-expect-error - intentionally providing computed fields in input
+					displayName: "WRONG VALUE",
+					// @ts-expect-error - intentionally providing computed fields in input
+					isClassic: false, // should still be true since year < 1980
+				})
+				.runPromise;
+
+			// Verify the updated entity has stored fields only
+			expect(updated.id).toBe("book1");
+			expect(updated.title).toBe("Dune (Revised Edition)");
+			expect(updated.year).toBe(1965); // unchanged
+			// The computed fields should NOT be present on the stored entity
+			expect(updated).not.toHaveProperty("displayName");
+			expect(updated).not.toHaveProperty("isClassic");
+
+			// Query to get the entity with computed fields
+			const results = await db.books.query({ where: { id: "book1" } }).runPromise;
+			expect(results).toHaveLength(1);
+
+			// Computed fields should be derived from the actual data, not the provided values
+			expect(results[0].displayName).toBe("Dune (Revised Edition) (1965)");
+			expect(results[0].isClassic).toBe(true); // year 1965 < 1980, so true
+		});
+
+		it("should strip all computed field keys from update input", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(configWithComputed, {
+					books: [{ id: "book2", title: "Neuromancer", year: 1984, genre: "cyberpunk" }],
+				}),
+			);
+
+			// Update with computed fields in input (they should be stripped)
+			await db.books
+				.update("book2", {
+					year: 1985, // changing year changes isClassic and displayName
+					// @ts-expect-error - intentionally providing computed fields
+					displayName: "Custom Display Name",
+				})
+				.runPromise;
+
+			// Query and verify derived value is used
+			const results = await db.books.query({ where: { id: "book2" } }).runPromise;
+			expect(results).toHaveLength(1);
+			expect(results[0].displayName).toBe("Neuromancer (1985)");
+			expect(results[0].isClassic).toBe(false); // year 1985 >= 1980
+		});
+
+		it("should update stored fields correctly while ignoring computed fields", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(configWithComputed, {
+					books: [{ id: "book3", title: "Snow Crash", year: 1992, genre: "sci-fi" }],
+				}),
+			);
+
+			// Update year to make the book a "classic" (year < 1980)
+			// But try to pass isClassic: false - this should be IGNORED
+			await db.books
+				.update("book3", {
+					year: 1970, // This makes isClassic = true
+					// @ts-expect-error - intentionally providing computed fields
+					isClassic: false, // WRONG - should be true
+				})
+				.runPromise;
+
+			// Query and verify derived values
+			const results = await db.books.query({ where: { id: "book3" } }).runPromise;
+			expect(results).toHaveLength(1);
+			expect(results[0].year).toBe(1970);
+			expect(results[0].displayName).toBe("Snow Crash (1970)");
+			expect(results[0].isClassic).toBe(true); // year 1970 < 1980
+		});
+
+		it("should preserve unmodified stored fields when updating with computed field attempts", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(configWithComputed, {
+					books: [{ id: "book4", title: "The Left Hand of Darkness", year: 1969, genre: "sci-fi" }],
+				}),
+			);
+
+			// Get initial state
+			const initial = await db.books.query({ where: { id: "book4" } }).runPromise;
+			expect(initial[0].title).toBe("The Left Hand of Darkness");
+			expect(initial[0].year).toBe(1969);
+			expect(initial[0].genre).toBe("sci-fi");
+
+			// Update only genre, but try to pass computed fields too
+			await db.books
+				.update("book4", {
+					genre: "speculative fiction",
+					// @ts-expect-error - intentionally providing computed fields
+					displayName: "WRONG NAME",
+					// @ts-expect-error - intentionally providing computed fields
+					isClassic: false,
+				})
+				.runPromise;
+
+			// Query and verify
+			const results = await db.books.query({ where: { id: "book4" } }).runPromise;
+			expect(results).toHaveLength(1);
+
+			// Stored fields
+			expect(results[0].title).toBe("The Left Hand of Darkness"); // unchanged
+			expect(results[0].year).toBe(1969); // unchanged
+			expect(results[0].genre).toBe("speculative fiction"); // updated
+
+			// Computed fields derived correctly
+			expect(results[0].displayName).toBe("The Left Hand of Darkness (1969)");
+			expect(results[0].isClassic).toBe(true); // year 1969 < 1980
+		});
+
+		it("should work correctly with multiple updates ignoring computed fields", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(configWithComputed, {
+					books: [{ id: "book5", title: "Project Hail Mary", year: 2021, genre: "sci-fi" }],
+				}),
+			);
+
+			// First update
+			await db.books
+				.update("book5", {
+					title: "Project Hail Mary (Updated)",
+					// @ts-expect-error - intentionally providing computed fields
+					displayName: "WRONG1",
+				})
+				.runPromise;
+
+			let results = await db.books.query({ where: { id: "book5" } }).runPromise;
+			expect(results[0].displayName).toBe("Project Hail Mary (Updated) (2021)");
+			expect(results[0].isClassic).toBe(false);
+
+			// Second update - change year to before 1980
+			await db.books
+				.update("book5", {
+					year: 1975,
+					// @ts-expect-error - intentionally providing computed fields
+					isClassic: false, // WRONG - should be true
+				})
+				.runPromise;
+
+			results = await db.books.query({ where: { id: "book5" } }).runPromise;
+			expect(results[0].displayName).toBe("Project Hail Mary (Updated) (1975)");
+			expect(results[0].isClassic).toBe(true); // year 1975 < 1980
+		});
+	});
+
+	// =========================================================================
 	// Task 10.2: Computed field on empty collection — no errors, empty results
 	// =========================================================================
 	describe("Task 10.2: Computed field on empty collection", () => {
