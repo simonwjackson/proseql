@@ -950,3 +950,210 @@ describe("Full-text search: Relevance Scoring (task 11)", () => {
 		})
 	})
 })
+
+// ============================================================================
+// 12. Search Index Tests
+// ============================================================================
+
+describe("Full-text search: Search Index (task 12)", () => {
+	describe("12.1: Indexed search returns same results as unindexed search", () => {
+		it("should return same results for field-level $search with and without index", async () => {
+			// Create databases with and without search index
+			const dbWithoutIndex = await createTestDatabase()
+			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+
+			// Field-level search for "dune"
+			const resultsWithoutIndex = await dbWithoutIndex.books.query({
+				where: { title: { $search: "dune" } },
+			}).runPromise
+			const resultsWithIndex = await dbWithIndex.books.query({
+				where: { title: { $search: "dune" } },
+			}).runPromise
+
+			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length)
+			expect(resultsWithIndex.map((b) => b.id).sort()).toEqual(
+				resultsWithoutIndex.map((b) => b.id).sort(),
+			)
+		})
+
+		it("should return same results for top-level $search with explicit fields", async () => {
+			const dbWithoutIndex = await createTestDatabase()
+			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+
+			// Top-level search with explicit fields
+			const resultsWithoutIndex = await dbWithoutIndex.books.query({
+				where: { $search: { query: "herbert dune", fields: ["title", "author"] } },
+			}).runPromise
+			const resultsWithIndex = await dbWithIndex.books.query({
+				where: { $search: { query: "herbert dune", fields: ["title", "author"] } },
+			}).runPromise
+
+			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length)
+			expect(resultsWithIndex.map((b) => b.id).sort()).toEqual(
+				resultsWithoutIndex.map((b) => b.id).sort(),
+			)
+		})
+
+		it("should return same results for top-level $search without fields (all string fields)", async () => {
+			const dbWithoutIndex = await createTestDatabase()
+			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+
+			// Top-level search without fields (searches all string fields)
+			const resultsWithoutIndex = await dbWithoutIndex.books.query({
+				where: { $search: { query: "gibson" } },
+			}).runPromise
+			const resultsWithIndex = await dbWithIndex.books.query({
+				where: { $search: { query: "gibson" } },
+			}).runPromise
+
+			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length)
+			expect(resultsWithIndex.map((b) => b.id).sort()).toEqual(
+				resultsWithoutIndex.map((b) => b.id).sort(),
+			)
+		})
+
+		it("should return same results for prefix matching", async () => {
+			const dbWithoutIndex = await createTestDatabase()
+			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+
+			// Prefix search
+			const resultsWithoutIndex = await dbWithoutIndex.books.query({
+				where: { title: { $search: "neuro" } },
+			}).runPromise
+			const resultsWithIndex = await dbWithIndex.books.query({
+				where: { title: { $search: "neuro" } },
+			}).runPromise
+
+			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length)
+			expect(resultsWithIndex.map((b) => b.id).sort()).toEqual(
+				resultsWithoutIndex.map((b) => b.id).sort(),
+			)
+		})
+
+		it("should return same results for multi-term search", async () => {
+			const dbWithoutIndex = await createTestDatabase()
+			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+
+			// Multi-term search
+			const resultsWithoutIndex = await dbWithoutIndex.books.query({
+				where: { title: { $search: "left hand darkness" } },
+			}).runPromise
+			const resultsWithIndex = await dbWithIndex.books.query({
+				where: { title: { $search: "left hand darkness" } },
+			}).runPromise
+
+			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length)
+			expect(resultsWithIndex.map((b) => b.id).sort()).toEqual(
+				resultsWithoutIndex.map((b) => b.id).sort(),
+			)
+		})
+
+		it("should return same empty results when no match", async () => {
+			const dbWithoutIndex = await createTestDatabase()
+			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+
+			// Search with no matches
+			const resultsWithoutIndex = await dbWithoutIndex.books.query({
+				where: { title: { $search: "xyz123notexist" } },
+			}).runPromise
+			const resultsWithIndex = await dbWithIndex.books.query({
+				where: { title: { $search: "xyz123notexist" } },
+			}).runPromise
+
+			expect(resultsWithoutIndex.length).toBe(0)
+			expect(resultsWithIndex.length).toBe(0)
+		})
+
+		it("should return same results for search across description field", async () => {
+			const dbWithoutIndex = await createTestDatabase()
+			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+
+			// Search in description field
+			const resultsWithoutIndex = await dbWithoutIndex.books.query({
+				where: { description: { $search: "cyberpunk" } },
+			}).runPromise
+			const resultsWithIndex = await dbWithIndex.books.query({
+				where: { description: { $search: "cyberpunk" } },
+			}).runPromise
+
+			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length)
+			expect(resultsWithIndex.map((b) => b.id).sort()).toEqual(
+				resultsWithoutIndex.map((b) => b.id).sort(),
+			)
+		})
+
+		it("should return same results with case-insensitive search", async () => {
+			const dbWithoutIndex = await createTestDatabase()
+			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+
+			// Case-insensitive search
+			const resultsWithoutIndex = await dbWithoutIndex.books.query({
+				where: { author: { $search: "WILLIAM GIBSON" } },
+			}).runPromise
+			const resultsWithIndex = await dbWithIndex.books.query({
+				where: { author: { $search: "WILLIAM GIBSON" } },
+			}).runPromise
+
+			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length)
+			expect(resultsWithIndex.map((b) => b.id).sort()).toEqual(
+				resultsWithoutIndex.map((b) => b.id).sort(),
+			)
+		})
+
+		it("should preserve relevance ordering for indexed search", async () => {
+			// Create databases for relevance testing - need exact/prefix match scenario
+			const relevanceBooks: ReadonlyArray<Book> = [
+				{
+					id: "1",
+					title: "Dune",
+					author: "Frank Herbert",
+					year: 1965,
+					description: "A desert planet story",
+				},
+				{
+					id: "2",
+					title: "Duneland",
+					author: "Various",
+					year: 2020,
+					description: "An anthology",
+				},
+			]
+
+			const dbWithoutIndex = await Effect.runPromise(
+				createEffectDatabase(
+					{ books: { schema: BookSchema, relationships: {} } },
+					{ books: relevanceBooks },
+				),
+			)
+			const dbWithIndex = await Effect.runPromise(
+				createEffectDatabase(
+					{
+						books: {
+							schema: BookSchema,
+							relationships: {},
+							searchIndex: ["title", "author", "description"] as const,
+						},
+					},
+					{ books: relevanceBooks },
+				),
+			)
+
+			// Search for "dune" - "Dune" should rank higher than "Duneland" (exact vs prefix)
+			const resultsWithoutIndex = await dbWithoutIndex.books.query({
+				where: { $search: { query: "dune", fields: ["title"] } },
+			}).runPromise
+			const resultsWithIndex = await dbWithIndex.books.query({
+				where: { $search: { query: "dune", fields: ["title"] } },
+			}).runPromise
+
+			// Should have same results in same order (relevance preserved)
+			expect(resultsWithIndex.length).toBe(2)
+			expect(resultsWithIndex.map((b) => b.id)).toEqual(
+				resultsWithoutIndex.map((b) => b.id),
+			)
+			// Verify ordering: "Dune" (exact) before "Duneland" (prefix)
+			expect(resultsWithIndex[0].title).toBe("Dune")
+			expect(resultsWithIndex[1].title).toBe("Duneland")
+		})
+	})
+})
