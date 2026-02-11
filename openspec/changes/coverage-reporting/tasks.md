@@ -33,7 +33,9 @@
 - [x] 4.1 Run `just coverage` and verify terminal summary prints per-file and total coverage percentages
 
 **Verified:** Terminal output shows per-file coverage (% Funcs, % Lines, Uncovered Line #s) for each file and totals under "All files" row (82.00% functions, 84.87% lines). Exit code 1 is expected due to threshold enforcement (verified separately in 4.5)
-- [ ] 4.2 Verify `coverage/lcov.info` is generated and contains valid LCOV data
+- [x] 4.2 Verify `coverage/lcov.info` is generated and contains valid LCOV data
+
+**Verified:** `coverage/lcov.info` (67,932 bytes) contains valid LCOV format data with 51 source files. Structure includes TN (test name), SF (source file), FNF/FNH (functions found/hit), DA (line data), LF/LH (lines found/hit), and end_of_record markers. File has proper Unix line endings
 - [ ] 4.3 Verify excluded files (`tests/`, `effect/`, `index.ts`, `.d.ts`) do not appear in coverage output
 - [ ] 4.4 Verify `just test` (without coverage) still runs at normal speed with no coverage overhead
 - [ ] 4.5 Temporarily lower a threshold below measured coverage and verify the coverage command exits with non-zero code, then restore the correct threshold
