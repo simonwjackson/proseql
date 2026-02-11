@@ -386,3 +386,82 @@ describe("Full-text search: Basic Search (task 9)", () => {
 		})
 	})
 })
+
+// ============================================================================
+// 10. Multi-Field Search Tests
+// ============================================================================
+
+describe("Full-text search: Multi-Field Search (task 10)", () => {
+	describe("10.1: Top-level multi-field search", () => {
+		it("should match when terms span across specified fields", async () => {
+			const db = await createTestDatabase()
+			// "herbert" is in author field, "dune" is in title field
+			const results = await db.books.query({
+				where: { $search: { query: "herbert dune", fields: ["title", "author"] } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+			expect(results[0].author).toBe("Frank Herbert")
+		})
+
+		it("should match when all terms are in a single field", async () => {
+			const db = await createTestDatabase()
+			// Both "frank" and "herbert" are in author field
+			const results = await db.books.query({
+				where: { $search: { query: "frank herbert", fields: ["title", "author"] } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].author).toBe("Frank Herbert")
+		})
+
+		it("should return multiple matches when terms span different entities", async () => {
+			const db = await createTestDatabase()
+			// "gibson" is in Neuromancer's author, search for "william gibson"
+			// Both terms should be found in the author field "William Gibson"
+			const results = await db.books.query({
+				where: { $search: { query: "william gibson", fields: ["author"] } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Neuromancer")
+		})
+
+		it("should not match when a term is missing from all specified fields", async () => {
+			const db = await createTestDatabase()
+			// "herbert" is in author but "xyz123" is not in any field
+			const results = await db.books.query({
+				where: { $search: { query: "herbert xyz123", fields: ["title", "author"] } },
+			}).runPromise
+			expect(results.length).toBe(0)
+		})
+
+		it("should support case-insensitive matching across fields", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { $search: { query: "HERBERT DUNE", fields: ["title", "author"] } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should support prefix matching across fields", async () => {
+			const db = await createTestDatabase()
+			// "herb" is a prefix of "Herbert", "du" is a prefix of "Dune"
+			const results = await db.books.query({
+				where: { $search: { query: "herb du", fields: ["title", "author"] } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should match multiple books when terms are shared", async () => {
+			const db = await createTestDatabase()
+			// "darkness" matches "The Left Hand of Darkness" in title
+			// "dark" also matches via prefix
+			const results = await db.books.query({
+				where: { $search: { query: "dark", fields: ["title", "description"] } },
+			}).runPromise
+			expect(results.length).toBeGreaterThanOrEqual(1)
+			expect(results.some((r) => r.title === "The Left Hand of Darkness")).toBe(true)
+		})
+	})
+})

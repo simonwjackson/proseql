@@ -61,7 +61,7 @@
 
 ## 10. Tests -- Multi-Field Search
 
-- [ ] 10.1 Test top-level multi-field search: `{ $search: { query: "herbert dune", fields: ["title", "author"] } }` matches when terms span across fields
+- [x] 10.1 Test top-level multi-field search: `{ $search: { query: "herbert dune", fields: ["title", "author"] } }` matches when terms span across fields
 - [ ] 10.2 Test default all string fields: `{ $search: { query: "gibson" } }` without `fields` searches all string fields
 - [ ] 10.3 Test single-field explicit: `{ $search: { query: "dune", fields: ["title"] } }` only searches title
 
