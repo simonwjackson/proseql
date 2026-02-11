@@ -1471,4 +1471,94 @@ describe("lifecycle-hooks", () => {
 			])
 		})
 	})
+
+	describe("batch and upsert", () => {
+		it("createMany: hooks run per entity", async () => {
+			// Track all hook calls to verify they run once per entity
+			const beforeCreateCalls: Array<BeforeCreateContext<User>> = []
+			const afterCreateCalls: Array<AfterCreateContext<User>> = []
+			const onChangeCalls: Array<OnChangeContext<User>> = []
+
+			// beforeCreate: transform by adding a suffix based on the entity name
+			const beforeCreateHook: BeforeCreateHook<User> = (ctx) => {
+				beforeCreateCalls.push(ctx)
+				return Effect.succeed({
+					...ctx.data,
+					name: `${ctx.data.name}-transformed`,
+				})
+			}
+
+			const hooks: HooksConfig<User> = {
+				beforeCreate: [beforeCreateHook],
+				afterCreate: [makeTrackingAfterCreateHook(afterCreateCalls)],
+				onChange: [makeTrackingOnChangeHook(onChangeCalls)],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, { users: [] })
+
+					// Create multiple users in one batch
+					const createResult = yield* db.users.createMany([
+						{ name: "User1", email: "user1@test.com", age: 20 },
+						{ name: "User2", email: "user2@test.com", age: 25 },
+						{ name: "User3", email: "user3@test.com", age: 30 },
+					])
+
+					// Read all users to verify the transformations were applied
+					const allUsersChunk = yield* Stream.runCollect(
+						db.users.query({}) as Stream.Stream<User>,
+					)
+					const allUsers = Chunk.toReadonlyArray(allUsersChunk)
+
+					return { createResult, allUsers }
+				}),
+			)
+
+			// Verify beforeCreate was called once per entity (3 times)
+			expect(beforeCreateCalls).toHaveLength(3)
+			expect(beforeCreateCalls.map((c) => c.data.name)).toEqual([
+				"User1",
+				"User2",
+				"User3",
+			])
+
+			// Verify all entities have the beforeCreate transformation applied
+			expect(result.createResult.created.map((u) => u.name)).toEqual([
+				"User1-transformed",
+				"User2-transformed",
+				"User3-transformed",
+			])
+
+			// Verify afterCreate was called once per entity (3 times)
+			expect(afterCreateCalls).toHaveLength(3)
+			expect(afterCreateCalls.map((c) => c.entity.name)).toEqual([
+				"User1-transformed",
+				"User2-transformed",
+				"User3-transformed",
+			])
+
+			// Verify onChange was called once per entity (3 times) with type "create"
+			expect(onChangeCalls).toHaveLength(3)
+			for (const ctx of onChangeCalls) {
+				expect(ctx.type).toBe("create")
+			}
+			expect(
+				onChangeCalls
+					.filter((c): c is Extract<OnChangeContext<User>, { type: "create" }> => c.type === "create")
+					.map((c) => c.entity.name),
+			).toEqual([
+				"User1-transformed",
+				"User2-transformed",
+				"User3-transformed",
+			])
+
+			// Verify all users in the database have the transformation
+			expect(result.allUsers.map((u) => u.name).sort()).toEqual([
+				"User1-transformed",
+				"User2-transformed",
+				"User3-transformed",
+			])
+		})
+	})
 })
