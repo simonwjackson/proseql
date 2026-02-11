@@ -2165,4 +2165,146 @@ describe("Persistence Integration", () => {
 			expect(setup.scheduleCalls).toHaveLength(2)
 		})
 	})
+
+	describe("batch persistence on commit", () => {
+		it("should trigger single save per mutated collection on commit, regardless of mutation count", async () => {
+			const setup = await Effect.runPromise(createPersistenceSpySetup())
+
+			// Verify no persistence calls initially
+			expect(setup.scheduleCalls).toHaveLength(0)
+
+			// Create transaction context with persistence trigger
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					setup.persistenceTrigger,
+				),
+			)
+
+			// Perform MANY mutations to the same collection (users)
+			// 5 mutations: 3 creates + 2 updates
+			await Effect.runPromise(ctx.users.create({ id: "u3", name: "Charlie", email: "c@t.com", age: 30 }))
+			await Effect.runPromise(ctx.users.create({ id: "u4", name: "Diana", email: "d@t.com", age: 28 }))
+			await Effect.runPromise(ctx.users.create({ id: "u5", name: "Eve", email: "e@t.com", age: 32 }))
+			await Effect.runPromise(ctx.users.update("u1", { name: "Alice Updated" }))
+			await Effect.runPromise(ctx.users.update("u2", { name: "Bob Updated" }))
+
+			// 5 mutations to users collection, but mutatedCollections should only have 1 entry
+			expect(ctx.mutatedCollections.size).toBe(1)
+			expect(ctx.mutatedCollections.has("users")).toBe(true)
+
+			// No persistence calls during active transaction
+			expect(setup.scheduleCalls).toHaveLength(0)
+
+			// Commit the transaction
+			await Effect.runPromise(ctx.commit())
+
+			// After commit: exactly 1 persistence call for users, not 5
+			expect(setup.scheduleCalls).toHaveLength(1)
+			expect(setup.scheduleCalls[0]).toBe("users")
+		})
+
+		it("should trigger exactly one save per unique mutated collection", async () => {
+			const setup = await Effect.runPromise(createPersistenceSpySetup())
+
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					setup.persistenceTrigger,
+				),
+			)
+
+			// Mutate both collections multiple times in interleaved order
+			// 7 mutations total: 4 to users, 3 to posts
+			await Effect.runPromise(ctx.users.create({ id: "u3", name: "Charlie", email: "c@t.com", age: 30 }))
+			await Effect.runPromise(ctx.posts.create({ id: "p3", title: "Post 3", content: "C3", authorId: "u3" }))
+			await Effect.runPromise(ctx.users.update("u1", { name: "Alice v2" }))
+			await Effect.runPromise(ctx.posts.create({ id: "p4", title: "Post 4", content: "C4", authorId: "u3" }))
+			await Effect.runPromise(ctx.users.create({ id: "u4", name: "Diana", email: "d@t.com", age: 25 }))
+			await Effect.runPromise(ctx.posts.update("p1", { title: "Hello World v2" }))
+			await Effect.runPromise(ctx.users.update("u2", { name: "Bob v2" }))
+
+			// 7 total mutations, but only 2 unique collections
+			expect(ctx.mutatedCollections.size).toBe(2)
+			expect(ctx.mutatedCollections.has("users")).toBe(true)
+			expect(ctx.mutatedCollections.has("posts")).toBe(true)
+
+			// No persistence during transaction
+			expect(setup.scheduleCalls).toHaveLength(0)
+
+			// Commit
+			await Effect.runPromise(ctx.commit())
+
+			// Exactly 2 persistence calls (one per collection), not 7
+			expect(setup.scheduleCalls).toHaveLength(2)
+			expect(setup.scheduleCalls).toContain("users")
+			expect(setup.scheduleCalls).toContain("posts")
+
+			// Each collection appears exactly once
+			const usersCalls = setup.scheduleCalls.filter((c) => c === "users")
+			const postsCalls = setup.scheduleCalls.filter((c) => c === "posts")
+			expect(usersCalls).toHaveLength(1)
+			expect(postsCalls).toHaveLength(1)
+		})
+
+		it("should trigger persistence only for collections that were actually mutated", async () => {
+			const setup = await Effect.runPromise(createPersistenceSpySetup())
+
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					setup.persistenceTrigger,
+				),
+			)
+
+			// Only mutate posts collection, not users
+			await Effect.runPromise(ctx.posts.create({ id: "p3", title: "New Post", content: "Content", authorId: "u1" }))
+			await Effect.runPromise(ctx.posts.update("p1", { title: "Updated Title" }))
+
+			// Only posts should be in mutatedCollections
+			expect(ctx.mutatedCollections.size).toBe(1)
+			expect(ctx.mutatedCollections.has("posts")).toBe(true)
+			expect(ctx.mutatedCollections.has("users")).toBe(false)
+
+			// Commit
+			await Effect.runPromise(ctx.commit())
+
+			// Only posts persistence triggered, users untouched
+			expect(setup.scheduleCalls).toHaveLength(1)
+			expect(setup.scheduleCalls[0]).toBe("posts")
+			expect(setup.scheduleCalls).not.toContain("users")
+		})
+
+		it("should not trigger any persistence when transaction has no mutations", async () => {
+			const setup = await Effect.runPromise(createPersistenceSpySetup())
+
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					setup.persistenceTrigger,
+				),
+			)
+
+			// Read-only operations (no mutations)
+			await Effect.runPromise(ctx.users.findById("u1"))
+			await Effect.runPromise(ctx.posts.findById("p1"))
+
+			// No mutations tracked
+			expect(ctx.mutatedCollections.size).toBe(0)
+
+			// Commit
+			await Effect.runPromise(ctx.commit())
+
+			// No persistence calls since nothing was mutated
+			expect(setup.scheduleCalls).toHaveLength(0)
+		})
+	})
 })
