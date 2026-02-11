@@ -64,6 +64,16 @@ export type CollectionConfig = {
 	 * and the last migration's `to` must match the config `version`.
 	 */
 	readonly migrations?: ReadonlyArray<Migration>;
+
+	/**
+	 * Unique field constraints for this collection.
+	 * Each entry can be a single field name (string) or an array of field names (compound unique constraint).
+	 * Single strings are normalized to single-element arrays internally.
+	 * Example: ["email", ["userId", "settingKey"]] means:
+	 *   - "email" must be unique across all entities
+	 *   - The combination of "userId" + "settingKey" must be unique
+	 */
+	readonly uniqueFields?: ReadonlyArray<string | ReadonlyArray<string>>;
 };
 
 /**

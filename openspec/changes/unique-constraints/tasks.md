@@ -1,6 +1,6 @@
 ## 1. Configuration
 
-- [ ] 1.1 Add `readonly uniqueFields?: ReadonlyArray<string | ReadonlyArray<string>>` to `CollectionConfig` in `core/types/database-config-types.ts`
+- [x] 1.1 Add `readonly uniqueFields?: ReadonlyArray<string | ReadonlyArray<string>>` to `CollectionConfig` in `core/types/database-config-types.ts`
 - [ ] 1.2 Export `uniqueFields` type from `core/types/index.ts` if a separate type alias is needed
 
 ## 2. Unique Check Module
