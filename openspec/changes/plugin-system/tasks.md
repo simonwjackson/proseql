@@ -1,6 +1,6 @@
 ## 1. Types
 
-- [ ] 1.1 Create `core/plugins/plugin-types.ts` with `ProseQLPlugin` interface: `name: string`, `version?: string`, optional `codecs: ReadonlyArray<FormatCodec>`, `operators: ReadonlyArray<CustomOperator>`, `idGenerators: ReadonlyArray<CustomIdGenerator>`, `hooks: GlobalHooksConfig`, `dependencies?: ReadonlyArray<string>`, `initialize?: () => Effect.Effect<void>`, `shutdown?: () => Effect.Effect<void>`
+- [x] 1.1 Create `core/plugins/plugin-types.ts` with `ProseQLPlugin` interface: `name: string`, `version?: string`, optional `codecs: ReadonlyArray<FormatCodec>`, `operators: ReadonlyArray<CustomOperator>`, `idGenerators: ReadonlyArray<CustomIdGenerator>`, `hooks: GlobalHooksConfig`, `dependencies?: ReadonlyArray<string>`, `initialize?: () => Effect.Effect<void>`, `shutdown?: () => Effect.Effect<void>`
 - [ ] 1.2 Define `CustomOperator` interface: `name: string` (must start with `$`), `types: ReadonlyArray<"string" | "number" | "boolean" | "array">`, `evaluate: (fieldValue: unknown, operand: unknown) => boolean`
 - [ ] 1.3 Define `CustomIdGenerator` interface: `name: string`, `generate: () => string`
 - [ ] 1.4 Define `GlobalHooksConfig` type: same shape as `HooksConfig<Record<string, unknown>>` (untyped, since global hooks span all collections)
