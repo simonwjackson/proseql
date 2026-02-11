@@ -1,7 +1,12 @@
 import type { Schema, Stream } from "effect";
-import type { EffectCollection, RunnableStream } from "../factories/database-effect.js";
+import type { EffectCollection, RunnableEffect, RunnableStream } from "../factories/database-effect.js";
 import type { MinimalEntity } from "./crud-types.js";
 import type { DanglingReferenceError } from "../errors/query-errors.js";
+import type {
+	AggregateConfig,
+	AggregateResult,
+	GroupedAggregateResult,
+} from "./aggregate-types.js";
 
 // ============================================================================
 // Core Types
@@ -729,6 +734,18 @@ export type SmartCollection<
 			where?: WhereClause<T, Relations, DB>;
 		},
 	>(config?: C): QueryReturnType<T, Relations, C, DB>;
+
+	/**
+	 * Compute aggregates over the collection.
+	 *
+	 * @param config - Aggregation configuration: which aggregates to compute and optional where/groupBy
+	 * @returns Effect with AggregateResult (scalar) or GroupedAggregateResult (when groupBy is present)
+	 */
+	aggregate<C extends AggregateConfig<T, Relations, DB>>(
+		config: C,
+	): C extends { readonly groupBy: string | ReadonlyArray<string> }
+		? RunnableEffect<GroupedAggregateResult, never>
+		: RunnableEffect<AggregateResult, never>;
 } & EffectCollection<T & MinimalEntity>;
 
 // Extract all entity types from config
