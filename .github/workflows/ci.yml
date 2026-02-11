@@ -20,3 +20,13 @@ jobs:
           cache: true
       - run: bun install
       - run: bun test
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          cache: true
+      - run: bun install
+      - run: bunx tsc --build

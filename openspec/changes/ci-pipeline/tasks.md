@@ -2,7 +2,7 @@
 
 - [x] 1.1 Create `.github/workflows/ci.yml` with trigger configuration: `on: push: branches: [main]` and `on: pull_request: branches: [main]`
 - [x] 1.2 Define `test` job: runs-on `ubuntu-latest`, strategy matrix with Bun versions (`latest`, `1.2`), steps: checkout, setup-bun (with cache enabled), `bun install`, `bun test`
-- [ ] 1.3 Define `typecheck` job: runs-on `ubuntu-latest`, steps: checkout, setup-bun (with cache enabled), `bun install`, `bunx tsc --build`
+- [x] 1.3 Define `typecheck` job: runs-on `ubuntu-latest`, steps: checkout, setup-bun (with cache enabled), `bun install`, `bunx tsc --build`
 - [ ] 1.4 Define `lint` job: runs-on `ubuntu-latest`, steps: checkout, setup-bun (with cache enabled), `bun install`, `biome check .`
 
 ## 2. Publish Workflow
