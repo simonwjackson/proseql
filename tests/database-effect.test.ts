@@ -8,7 +8,8 @@ import {
 	type EffectDatabaseWithPersistence,
 } from "../core/factories/database-effect.js"
 import { makeInMemoryStorageLayer } from "../core/storage/in-memory-adapter-layer.js"
-import { JsonSerializerLayer } from "../core/serializers/json.js"
+import { makeSerializerLayer } from "../core/serializers/format-codec.js"
+import { jsonCodec } from "../core/serializers/codecs/json.js"
 
 // ============================================================================
 // Test Schemas
@@ -791,7 +792,7 @@ const persistentConfig = {
 
 const makeTestLayer = (store?: Map<string, string>) => {
 	const s = store ?? new Map<string, string>()
-	return { store: s, layer: Layer.merge(makeInMemoryStorageLayer(s), JsonSerializerLayer) }
+	return { store: s, layer: Layer.merge(makeInMemoryStorageLayer(s), makeSerializerLayer([jsonCodec()])) }
 }
 
 describe("createPersistentEffectDatabase", () => {
@@ -943,7 +944,7 @@ describe("createPersistentEffectDatabase", () => {
 			}
 			const trackingLayer = Layer.merge(
 				makeInMemoryStorageLayer(trackingStore),
-				JsonSerializerLayer,
+				makeSerializerLayer([jsonCodec()]),
 			)
 
 			await Effect.runPromise(
