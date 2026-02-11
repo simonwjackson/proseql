@@ -386,4 +386,131 @@ describe("makeSerializerLayer", () => {
 			}
 		});
 	});
+
+	describe("plugin codecs parameter", () => {
+		let warnSpy: MockInstance;
+
+		beforeEach(() => {
+			warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		});
+
+		afterEach(() => {
+			warnSpy.mockRestore();
+		});
+
+		it("accepts plugin codecs as second parameter", async () => {
+			const customCodec: FormatCodec = {
+				name: "custom",
+				extensions: ["custom"],
+				encode: (data) => `CUSTOM:${JSON.stringify(data)}`,
+				decode: (raw) => JSON.parse(raw.replace("CUSTOM:", "")),
+			};
+
+			const layer = makeSerializerLayer([jsonCodec()], [customCodec]);
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const registry = yield* SerializerRegistry;
+						const encoded = yield* registry.serialize({ a: 1 }, "custom");
+						return encoded;
+					}),
+					layer,
+				),
+			);
+
+			expect(result).toBe('CUSTOM:{"a":1}');
+		});
+
+		it("plugin codecs can override base codecs for the same extension", async () => {
+			const customJsonCodec: FormatCodec = {
+				name: "custom-json",
+				extensions: ["json"],
+				encode: (data) => JSON.stringify(data, null, 4), // 4-space indentation
+				decode: (raw) => JSON.parse(raw),
+			};
+
+			const layer = makeSerializerLayer([jsonCodec()], [customJsonCodec]);
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const registry = yield* SerializerRegistry;
+						return yield* registry.serialize({ a: 1 }, "json");
+					}),
+					layer,
+				),
+			);
+
+			// Should use the plugin codec's 4-space indentation
+			expect(result).toBe('{\n    "a": 1\n}');
+			expect(warnSpy).toHaveBeenCalledWith(
+				"Duplicate extension '.json': 'json' overwritten by 'custom-json'",
+			);
+		});
+
+		it("combines base codecs and plugin codecs", async () => {
+			const customCodec: FormatCodec = {
+				name: "custom",
+				extensions: ["custom"],
+				encode: (data) => `CUSTOM:${JSON.stringify(data)}`,
+				decode: (raw) => JSON.parse(raw.replace("CUSTOM:", "")),
+			};
+
+			const layer = makeSerializerLayer([jsonCodec(), yamlCodec()], [customCodec]);
+
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const registry = yield* SerializerRegistry;
+
+						// Base JSON codec still works
+						const json = yield* registry.serialize({ a: 1 }, "json");
+						expect(json).toContain('"a"');
+
+						// Base YAML codec still works
+						const yaml = yield* registry.serialize({ a: 1 }, "yaml");
+						expect(yaml).toContain("a:");
+
+						// Plugin codec works
+						const custom = yield* registry.serialize({ a: 1 }, "custom");
+						expect(custom).toBe('CUSTOM:{"a":1}');
+					}),
+					layer,
+				),
+			);
+		});
+
+		it("works with undefined pluginCodecs parameter", async () => {
+			const layer = makeSerializerLayer([jsonCodec()], undefined);
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const registry = yield* SerializerRegistry;
+						return yield* registry.serialize({ a: 1 }, "json");
+					}),
+					layer,
+				),
+			);
+
+			expect(result).toContain('"a"');
+		});
+
+		it("works with empty pluginCodecs array", async () => {
+			const layer = makeSerializerLayer([jsonCodec()], []);
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const registry = yield* SerializerRegistry;
+						return yield* registry.serialize({ a: 1 }, "json");
+					}),
+					layer,
+				),
+			);
+
+			expect(result).toContain('"a"');
+		});
+	});
 });

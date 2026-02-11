@@ -22,7 +22,7 @@
 
 ## 4. Codec Plugin Integration
 
-- [ ] 4.1 Modify `makeSerializerLayer` in `core/serializers/format-codec.ts` to accept an optional second parameter `pluginCodecs: ReadonlyArray<FormatCodec>`. Append plugin codecs after the base codecs (plugin codecs can override base codecs for the same extension, with the existing console.warn on duplicates).
+- [x] 4.1 Modify `makeSerializerLayer` in `core/serializers/format-codec.ts` to accept an optional second parameter `pluginCodecs: ReadonlyArray<FormatCodec>`. Append plugin codecs after the base codecs (plugin codecs can override base codecs for the same extension, with the existing console.warn on duplicates).
 - [ ] 4.2 In `createPersistentEffectDatabase`, when plugins provide codecs, pass them to `makeSerializerLayer` or merge them into the serializer layer construction.
 
 ## 5. Custom Operator Integration

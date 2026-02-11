@@ -47,13 +47,22 @@ export interface FormatCodec {
  * 2. Wraps encode/decode in Effect.try with SerializationError
  * 3. Produces UnsupportedFormatError for unknown extensions
  * 4. Logs console.warn on duplicate extensions (last wins)
+ *
+ * @param codecs - Base codecs to register
+ * @param pluginCodecs - Optional plugin codecs to append after base codecs (can override base codecs for the same extension)
  */
 export const makeSerializerLayer = (
 	codecs: ReadonlyArray<FormatCodec>,
+	pluginCodecs?: ReadonlyArray<FormatCodec>,
 ): Layer.Layer<SerializerRegistry> => {
+	// Merge base codecs with plugin codecs (plugin codecs come last, can override)
+	const allCodecs = pluginCodecs
+		? [...codecs, ...pluginCodecs]
+		: codecs;
+
 	// Build extension → codec lookup map
 	const extensionMap = new Map<string, FormatCodec>();
-	for (const codec of codecs) {
+	for (const codec of allCodecs) {
 		for (const ext of codec.extensions) {
 			if (extensionMap.has(ext)) {
 				const existing = extensionMap.get(ext);
