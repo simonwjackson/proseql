@@ -7,3 +7,7 @@
 [test]
 # Limit test discovery to packages/ to exclude the effect/ reference codebase
 root = "packages"
+
+# Coverage configuration (only used when --coverage flag is passed)
+coverageReporter = ["text", "lcov"]
+coverageDir = "coverage"
