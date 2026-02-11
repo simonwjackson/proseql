@@ -92,6 +92,22 @@ export const validateMigrationRegistry = (
 	// Sort migrations by `from` to check for contiguous chain
 	const sortedMigrations = [...migrations].sort((a, b) => a.from - b.from)
 
+	// Check that first migration starts from version 0
+	// (data without _version is treated as version 0, so we need a path from 0)
+	const firstMigration = sortedMigrations[0]
+	if (firstMigration.from !== 0) {
+		return Effect.fail(
+			new MigrationError({
+				collection: collectionName,
+				fromVersion: 0,
+				toVersion: firstMigration.from,
+				step: -1,
+				reason: "missing-start",
+				message: `First migration starts at version ${firstMigration.from}, but must start at version 0. No path from version 0 to ${firstMigration.from}.`,
+			}),
+		)
+	}
+
 	// Check for contiguous chain (no gaps)
 	for (let i = 1; i < sortedMigrations.length; i++) {
 		const prev = sortedMigrations[i - 1]
