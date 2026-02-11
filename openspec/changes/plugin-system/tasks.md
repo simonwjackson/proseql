@@ -11,7 +11,7 @@
 
 ## 2. Plugin Validation
 
-- [ ] 2.1 Create `core/plugins/plugin-validation.ts` with `validatePlugin(plugin)`: verify `name` is a non-empty string, `codecs` entries have `name`/`extensions`/`encode`/`decode`, `operators` entries have `name` starting with `$` and an `evaluate` function, `idGenerators` entries have `name` and `generate`. Return `Effect<void, PluginError>`.
+- [x] 2.1 Create `core/plugins/plugin-validation.ts` with `validatePlugin(plugin)`: verify `name` is a non-empty string, `codecs` entries have `name`/`extensions`/`encode`/`decode`, `operators` entries have `name` starting with `$` and an `evaluate` function, `idGenerators` entries have `name` and `generate`. Return `Effect<void, PluginError>`.
 - [ ] 2.2 Implement `validateOperatorConflicts(plugins)`: check that no two plugins register operators with the same name. Also check that no custom operator conflicts with a built-in operator name (`$eq`, `$ne`, `$in`, `$nin`, `$gt`, `$gte`, `$lt`, `$lte`, `$startsWith`, `$endsWith`, `$contains`, `$all`, `$size`). Fail with `PluginError` listing the conflict.
 - [ ] 2.3 Implement `validateDependencies(plugins)`: for each plugin with `dependencies`, verify every dependency name appears in the plugin array. Fail with `PluginError` listing missing dependencies.
 
