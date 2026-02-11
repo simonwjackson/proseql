@@ -1,4 +1,6 @@
 import { matchesFilter } from "../../types/operators.js";
+import { tokenize } from "./search.js";
+import type { SearchConfig } from "../../types/search-types.js";
 
 // Type guard to check if where clause is a valid object
 export function isValidWhereClause(
@@ -102,6 +104,60 @@ export function filterData<T extends Record<string, unknown>>(
 					config,
 				);
 				if (filtered.length > 0) {
+					shouldInclude = false;
+					break;
+				}
+			} else if (key === "$search") {
+				// Top-level multi-field search: check if entity matches across specified fields
+				// If $search is present, extract the query and fields from SearchConfig
+				if (value === null || typeof value !== "object") {
+					// Invalid search config
+					shouldInclude = false;
+					break;
+				}
+				const searchConfig = value as SearchConfig;
+				const query = searchConfig.query;
+
+				// Empty query matches everything
+				if (!query || query.trim() === "") {
+					continue;
+				}
+
+				const queryTokens = tokenize(query);
+				if (queryTokens.length === 0) {
+					// After tokenization, no tokens means match all
+					continue;
+				}
+
+				// Determine target fields: explicit or all string fields on the entity
+				let targetFields: ReadonlyArray<string>;
+				if (searchConfig.fields && searchConfig.fields.length > 0) {
+					targetFields = searchConfig.fields;
+				} else {
+					// Find all string fields on the entity
+					targetFields = Object.keys(item).filter(
+						(k) => typeof item[k] === "string",
+					);
+				}
+
+				// Check if all query tokens are found across the target fields
+				// Each query token must match in at least one field (exact or prefix)
+				const allTokensMatch = queryTokens.every((qt) => {
+					// Check if this query token matches in any of the target fields
+					return targetFields.some((field) => {
+						const fieldValue = item[field];
+						if (typeof fieldValue !== "string") {
+							return false;
+						}
+						const fieldTokens = tokenize(fieldValue);
+						// Check if any field token matches (exact or prefix)
+						return fieldTokens.some(
+							(ft) => ft === qt || ft.startsWith(qt),
+						);
+					});
+				});
+
+				if (!allTokensMatch) {
 					shouldInclude = false;
 					break;
 				}
