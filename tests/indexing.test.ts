@@ -2466,6 +2466,235 @@ describe("Indexing - Query Acceleration", () => {
 			expect((results[0] as { name: string }).name).toBe("Charlie")
 		})
 	})
+
+	describe("Task 8.3: $in on indexed field returns correct results (union)", () => {
+		it("should return union of results when querying indexed field with $in operator", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+				{ id: "u4", email: "diana@example.com", name: "Diana", age: 28 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query by indexed email field with $in operator
+			const results = await db.users.query({
+				where: { email: { $in: ["alice@example.com", "charlie@example.com"] } },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u3"])
+		})
+
+		it("should return all matching entities when $in matches multiple entities per value", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "shared@example.com", name: "User One", age: 30 },
+				{ id: "u2", email: "unique@example.com", name: "User Two", age: 25 },
+				{ id: "u3", email: "shared@example.com", name: "User Three", age: 35 },
+				{ id: "u4", email: "other@example.com", name: "User Four", age: 28 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $in on shared email - should return all entities matching any value
+			const results = await db.users.query({
+				where: { email: { $in: ["shared@example.com", "unique@example.com"] } },
+			}).runPromise
+
+			expect(results.length).toBe(3)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u2", "u3"])
+		})
+
+		it("should return empty array when $in matches no entities", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $in for non-existent emails
+			const results = await db.users.query({
+				where: { email: { $in: ["nonexistent@example.com", "fake@example.com"] } },
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should return partial matches when $in contains some existing and some non-existing values", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $in containing mix of existing and non-existing emails
+			const results = await db.users.query({
+				where: { email: { $in: ["alice@example.com", "nonexistent@example.com", "charlie@example.com"] } },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u3"])
+		})
+
+		it("should handle $in with single value (equivalent to $eq)", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $in containing single value
+			const inResults = await db.users.query({
+				where: { email: { $in: ["alice@example.com"] } },
+			}).runPromise
+
+			// Query with $eq for comparison
+			const eqResults = await db.users.query({
+				where: { email: { $eq: "alice@example.com" } },
+			}).runPromise
+
+			expect(inResults.length).toBe(eqResults.length)
+			expect((inResults[0] as { id: string }).id).toBe((eqResults[0] as { id: string }).id)
+		})
+
+		it("should handle $in with empty array (returns no results)", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $in containing empty array
+			const results = await db.users.query({
+				where: { email: { $in: [] } },
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should handle $in query after data modification", async () => {
+			const config = createIndexedUsersConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Create some users
+			await db.users.create({ id: "u1", email: "alice@example.com", name: "Alice", age: 30 }).runPromise
+			await db.users.create({ id: "u2", email: "bob@example.com", name: "Bob", age: 25 }).runPromise
+			await db.users.create({ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 }).runPromise
+
+			// Query with $in should work
+			const results1 = await db.users.query({
+				where: { email: { $in: ["alice@example.com", "bob@example.com"] } },
+			}).runPromise
+			expect(results1.length).toBe(2)
+
+			// Update one user's email
+			await db.users.update("u1", { email: "alice.new@example.com" }).runPromise
+
+			// Query old email should only return bob
+			const results2 = await db.users.query({
+				where: { email: { $in: ["alice@example.com", "bob@example.com"] } },
+			}).runPromise
+			expect(results2.length).toBe(1)
+			expect((results2[0] as { id: string }).id).toBe("u2")
+
+			// Query new email should include alice
+			const results3 = await db.users.query({
+				where: { email: { $in: ["alice.new@example.com", "bob@example.com"] } },
+			}).runPromise
+			expect(results3.length).toBe(2)
+			const ids = results3.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u2"])
+		})
+
+		it("should handle $in query combined with other query options", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $in on indexed field and select specific fields
+			const results = await db.users.query({
+				where: { email: { $in: ["alice@example.com", "charlie@example.com"] } },
+				select: { id: true, name: true },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u3"])
+		})
+
+		it("should handle $in combined with sorting", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+				{ id: "u4", email: "diana@example.com", name: "Diana", age: 28 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $in and sort by age
+			const results = await db.users.query({
+				where: { email: { $in: ["alice@example.com", "charlie@example.com", "diana@example.com"] } },
+				sort: { age: "asc" },
+			}).runPromise
+
+			expect(results.length).toBe(3)
+			expect((results[0] as { id: string }).id).toBe("u4") // Diana, age 28
+			expect((results[1] as { id: string }).id).toBe("u1") // Alice, age 30
+			expect((results[2] as { id: string }).id).toBe("u3") // Charlie, age 35
+		})
+
+		it("should handle $in combined with pagination", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "a@example.com", name: "User A", age: 30 },
+				{ id: "u2", email: "b@example.com", name: "User B", age: 25 },
+				{ id: "u3", email: "c@example.com", name: "User C", age: 35 },
+				{ id: "u4", email: "d@example.com", name: "User D", age: 28 },
+				{ id: "u5", email: "e@example.com", name: "User E", age: 22 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $in and limit
+			const results = await db.users.query({
+				where: { email: { $in: ["a@example.com", "b@example.com", "c@example.com", "d@example.com"] } },
+				limit: 2,
+			}).runPromise
+
+			expect(results.length).toBe(2)
+		})
+	})
 })
 
 // Export helpers for use in other test files
