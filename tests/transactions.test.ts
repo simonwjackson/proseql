@@ -793,5 +793,60 @@ describe("createTransaction (Manual)", () => {
 			expect(finalUsers.get("u3")).toBeDefined()
 			expect((finalUsers.get("u3") as { name: string }).name).toBe("Charlie")
 		})
+
+		it("should fail with TransactionError when commit() is called twice", async () => {
+			const setup = await Effect.runPromise(createManualTransactionTestSetup())
+
+			// Create transaction context manually
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined, // no persistence trigger
+				),
+			)
+
+			// Verify transaction is active
+			expect(ctx.isActive).toBe(true)
+
+			// Perform operations within transaction
+			await Effect.runPromise(
+				ctx.users.create({
+					id: "u3",
+					name: "Charlie",
+					email: "charlie@test.com",
+					age: 35,
+				}),
+			)
+
+			// First commit should succeed
+			await Effect.runPromise(ctx.commit())
+
+			// Verify transaction is no longer active
+			expect(ctx.isActive).toBe(false)
+
+			// Second commit should fail with TransactionError
+			const secondCommitResult = await Effect.runPromise(
+				ctx.commit().pipe(Effect.either),
+			)
+
+			expect(secondCommitResult._tag).toBe("Left")
+			if (secondCommitResult._tag === "Left") {
+				const error = secondCommitResult.left as {
+					readonly _tag?: string
+					readonly operation?: string
+					readonly reason?: string
+				}
+				expect(error._tag).toBe("TransactionError")
+				expect(error.operation).toBe("commit")
+				expect(error.reason).toBe("transaction is no longer active")
+			}
+
+			// Verify the data from first commit is still persisted
+			const finalUsers = await Effect.runPromise(Ref.get(setup.usersRef))
+			expect(finalUsers.size).toBe(3)
+			expect(finalUsers.get("u3")).toBeDefined()
+		})
 	})
 })

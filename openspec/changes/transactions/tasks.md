@@ -39,7 +39,7 @@
 
 - [x] 6.1 Test manual commit: `createTransaction` → operations → `commit()` → changes persist
 - [x] 6.2 Test manual rollback: `createTransaction` → operations → `rollback()` → changes reverted
-- [ ] 6.3 Test double commit → `TransactionError`
+- [x] 6.3 Test double commit → `TransactionError`
 - [ ] 6.4 Test double rollback → `TransactionError`
 - [ ] 6.5 Test commit after rollback → `TransactionError`
 - [ ] 6.6 Test `mutatedCollections` tracks correct collection names
