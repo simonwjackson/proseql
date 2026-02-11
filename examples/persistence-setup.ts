@@ -131,9 +131,9 @@ const program = Effect.gen(function* () {
 	yield* db.users.update(alice.id, { age: 29 })
 	console.log("Updated Alice's age to 29")
 
-	// --- Query with population ---
+	// --- Query with population (stream mode, no cursor) ---
 	const postsWithAuthors = yield* Effect.promise(() =>
-		db.posts.query({ populate: { author: true } }).runPromise,
+		db.posts.query({ populate: { author: true } }).runPromise as Promise<readonly Record<string, unknown>[]>,
 	)
 
 	console.log("\nAll posts with authors:")

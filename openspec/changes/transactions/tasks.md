@@ -65,4 +65,4 @@
 - [x] 9.1 Remove or update the inert `TransactionalOptions` type if no longer needed
 - [x] 9.2 Update `BatchRelationshipOptions.transaction` to use the real transaction mechanism or remove the boolean flag
 - [x] 9.3 Run full test suite (`bun test`) to verify no regressions
-- [ ] 9.4 Run type check (`bunx tsc --noEmit`) to verify no type errors
+- [x] 9.4 Run type check (`bunx tsc --noEmit`) to verify no type errors

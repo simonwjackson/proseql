@@ -91,15 +91,15 @@ async function main() {
 	const found = await db.users.findById(alice.id).runPromise
 	console.log("Found by ID:", found.name)
 
-	// Query all users
-	const allUsers = await db.users.query().runPromise
+	// Query all users (stream mode, no cursor)
+	const allUsers = await db.users.query().runPromise as ReadonlyArray<Record<string, unknown>>
 	console.log(`Total users: ${allUsers.length}`)
 
-	// Query with filter and sort
+	// Query with filter and sort (stream mode, no cursor)
 	const filtered = await db.users.query({
 		where: { age: { $gte: 30 } },
 		sort: { name: "asc" },
-	}).runPromise
+	}).runPromise as ReadonlyArray<Record<string, unknown>>
 	console.log(`Users >= 30: ${filtered.length}`)
 
 	// --- UPDATE ---

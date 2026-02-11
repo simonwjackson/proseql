@@ -19,7 +19,7 @@ type HasId = { readonly id: string }
 
 type RelationshipConfig = {
 	readonly type: "ref" | "inverse"
-	readonly target: string
+	readonly target?: string
 	readonly foreignKey?: string
 }
 

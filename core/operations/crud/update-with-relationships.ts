@@ -304,7 +304,7 @@ const processRelationshipOperations = (
 		const allConnect: Array<{ field: string; targetId: string; targetCollection: string }> = []
 		const allUpdate: Array<{ field: string; data: UpdateInput<unknown>; targetCollection: string; targetId?: string }> = []
 		const allDelete: Array<{ field: string; targetId?: string; targetCollection: string }> = []
-		const allSet: Array<{ field: string; targetIds: string[]; targetCollection: string }> = []
+		const allSet: Array<{ field: string; targetIds: readonly string[]; targetCollection: string }> = []
 
 		for (const [field, value] of Object.entries(input)) {
 			const rel = relationships[field]

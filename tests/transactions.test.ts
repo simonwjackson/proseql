@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Schema, Stream, Chunk, Ref } from "effect"
-import { createEffectDatabase } from "../core/factories/database-effect.js"
+import { createEffectDatabase, type EffectCollection } from "../core/factories/database-effect.js"
 import { NotFoundError, TransactionError } from "../core/errors/crud-errors.js"
 import { createTransaction } from "../core/transactions/transaction.js"
 import { normalizeIndexes, buildIndexes } from "../core/indexes/index-manager.js"
@@ -659,7 +659,7 @@ const createManualTransactionTestSetup = () =>
 				deleteWithRelationships: () => Effect.succeed({ entity: {} as HasId }),
 				deleteManyWithRelationships: () => Effect.succeed({ count: 0, deleted: [] }),
 				aggregate: () => Effect.succeed({}),
-			}
+			} as unknown as EffectCollection<HasId>
 		}
 
 		return {
@@ -1995,7 +1995,7 @@ const createPersistenceSpySetup = () =>
 				deleteWithRelationships: () => Effect.succeed({ entity: {} as HasId }),
 				deleteManyWithRelationships: () => Effect.succeed({ count: 0, deleted: [] }),
 				aggregate: () => Effect.succeed({}),
-			}
+			} as unknown as EffectCollection<HasId>
 		}
 
 		return {

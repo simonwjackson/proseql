@@ -16,7 +16,7 @@ import { StorageError } from "../errors/storage-errors.js"
 
 export interface NodeAdapterConfig {
 	readonly maxRetries?: number
-	readonly baseDelay?: string
+	readonly baseDelay?: number // milliseconds
 	readonly createMissingDirectories?: boolean
 	readonly fileMode?: number
 	readonly dirMode?: number
@@ -24,7 +24,7 @@ export interface NodeAdapterConfig {
 
 const defaultConfig: Required<NodeAdapterConfig> = {
 	maxRetries: 3,
-	baseDelay: "100 millis",
+	baseDelay: 100,
 	createMissingDirectories: true,
 	fileMode: 0o644,
 	dirMode: 0o755,

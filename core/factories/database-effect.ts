@@ -278,12 +278,22 @@ export interface EffectCollection<T extends HasId> {
 }
 
 /**
- * Database type: a record of collection names to EffectCollections.
+ * Database type: a record of collection names to EffectCollections,
+ * plus the $transaction method for atomic operations.
  */
 export type EffectDatabase<Config extends DatabaseConfig> = {
 	readonly [K in keyof Config]: EffectCollection<
 		Schema.Schema.Type<Config[K]["schema"]> & HasId
 	>
+} & {
+	/**
+	 * Execute multiple operations atomically within a transaction.
+	 * On success, all changes are committed and persistence is triggered.
+	 * On failure, all changes are rolled back and the original error is re-raised.
+	 */
+	readonly $transaction: <A, E>(
+		fn: (ctx: TransactionContext) => Effect.Effect<A, E>,
+	) => RunnableEffect<A, E | TransactionError>
 }
 
 /**
@@ -528,7 +538,7 @@ const buildCollection = <T extends HasId>(
 				s = applyFilter(options?.where)(s)
 				s = applyPopulate(
 					populateConfig as Record<string, boolean | Record<string, unknown>> | undefined,
-					stateRefs as Record<string, Ref.Ref<ReadonlyMap<string, Record<string, unknown>>>>,
+					stateRefs as unknown as Record<string, Ref.Ref<ReadonlyMap<string, Record<string, unknown>>>>,
 					dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target: string; readonly foreignKey?: string }> }>,
 					collectionName,
 				)(s)
@@ -569,7 +579,7 @@ const buildCollection = <T extends HasId>(
 				s = applyFilter(options?.where)(s)
 				s = applyPopulate(
 					populateConfig as Record<string, boolean | Record<string, unknown>> | undefined,
-					stateRefs as Record<string, Ref.Ref<ReadonlyMap<string, Record<string, unknown>>>>,
+					stateRefs as unknown as Record<string, Ref.Ref<ReadonlyMap<string, Record<string, unknown>>>>,
 					dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target: string; readonly foreignKey?: string }> }>,
 					collectionName,
 				)(s)
@@ -1044,7 +1054,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			)
 		}
 
-		const db = collections as EffectDatabase<Config>
+		const db = collections as unknown as EffectDatabase<Config>
 
 		// Build the $dryRunMigrations method
 		const dryRunMigrationsFn = (): RunnableEffect<
