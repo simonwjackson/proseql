@@ -523,13 +523,21 @@ export const loadCollectionsFromFile = (
 // saveCollectionsToFile
 // ============================================================================
 
+type HasId = { readonly id: string }
+
 /**
  * Configuration for a collection to be saved to a multi-collection file.
+ *
+ * @template T - The decoded entity type (must have `id` field)
+ * @template I - The encoded/serialized type (defaults to T for simple schemas)
  */
-export interface SaveCollectionConfig {
+export interface SaveCollectionConfig<
+	T extends HasId = HasId,
+	I = T,
+> {
 	readonly name: string
-	readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>
-	readonly data: ReadonlyMap<string, { readonly id: string }>
+	readonly schema: Schema.Schema<T, I, never>
+	readonly data: ReadonlyMap<string, T>
 	/**
 	 * Optional schema version to stamp into this collection's section.
 	 * When provided, `_version` is injected first in the collection object.
@@ -546,15 +554,15 @@ export interface SaveCollectionConfig {
  * If a collection has a `version` specified, `_version` is stamped first
  * in that collection's object for readability.
  */
-export const saveCollectionsToFile = (
+export function saveCollectionsToFile<T extends HasId, I>(
 	filePath: string,
-	collections: ReadonlyArray<SaveCollectionConfig>,
+	collections: ReadonlyArray<SaveCollectionConfig<T, I>>,
 ): Effect.Effect<
 	void,
 	StorageError | SerializationError | UnsupportedFormatError | ValidationError,
 	StorageAdapter | SerializerRegistry
-> =>
-	Effect.gen(function* () {
+> {
+	return Effect.gen(function* () {
 		const storage = yield* StorageAdapter
 		const serializer = yield* SerializerRegistry
 		const ext = yield* resolveExtension(filePath)
@@ -594,6 +602,7 @@ export const saveCollectionsToFile = (
 		yield* storage.ensureDir(filePath)
 		yield* storage.write(filePath, content)
 	})
+}
 
 // ============================================================================
 // DebouncedWriter
