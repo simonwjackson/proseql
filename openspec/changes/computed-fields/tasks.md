@@ -22,7 +22,7 @@
 
 ## 4. Query Pipeline Integration — Sort
 
-- [ ] 4.1 Verify that `sortData` in `core/operations/query/sort.ts` works on entities with computed fields attached. No code changes expected; confirm with a targeted test.
+- [x] 4.1 Verify that `sortData` in `core/operations/query/sort.ts` works on entities with computed fields attached. No code changes expected; confirm with a targeted test.
 - [ ] 4.2 Test sorting by a computed string field ascending and descending.
 - [ ] 4.3 Test sorting by a computed numeric field.
 
