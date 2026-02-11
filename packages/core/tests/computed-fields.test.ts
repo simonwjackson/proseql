@@ -827,4 +827,141 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			});
 		});
 	});
+
+	// =========================================================================
+	// Task 10.2: Computed field on empty collection — no errors, empty results
+	// =========================================================================
+	describe("Task 10.2: Computed field on empty collection", () => {
+		const BookSchema = Schema.Struct({
+			id: Schema.String,
+			title: Schema.String,
+			year: Schema.Number,
+		});
+
+		type Book = typeof BookSchema.Type;
+
+		const emptyCollectionConfig = {
+			books: {
+				schema: BookSchema,
+				relationships: {},
+				computed: {
+					displayName: (book: Book) => `${book.title} (${book.year})`,
+					isClassic: (book: Book) => book.year < 1980,
+					decade: (book: Book) => Math.floor(book.year / 10) * 10,
+				},
+			},
+		} as const;
+
+		it("should return empty array when querying empty collection with computed fields", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(emptyCollectionConfig, { books: [] }),
+			);
+
+			const results = await db.books.query().runPromise;
+
+			expect(results).toEqual([]);
+			expect(results).toHaveLength(0);
+		});
+
+		it("should return empty array when filtering empty collection with computed fields", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(emptyCollectionConfig, { books: [] }),
+			);
+
+			const results = await db.books
+				.query({ where: { isClassic: true } })
+				.runPromise;
+
+			expect(results).toEqual([]);
+		});
+
+		it("should return empty array when sorting empty collection by computed field", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(emptyCollectionConfig, { books: [] }),
+			);
+
+			const results = await db.books
+				.query({ sort: { displayName: "asc" } })
+				.runPromise;
+
+			expect(results).toEqual([]);
+		});
+
+		it("should return empty array when selecting computed fields from empty collection", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(emptyCollectionConfig, { books: [] }),
+			);
+
+			const results = await db.books
+				.query({ select: { title: true, displayName: true, isClassic: true } })
+				.runPromise;
+
+			expect(results).toEqual([]);
+		});
+
+		it("should return empty array with combined filter, sort, select on empty collection", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(emptyCollectionConfig, { books: [] }),
+			);
+
+			const results = await db.books
+				.query({
+					where: { isClassic: true },
+					sort: { displayName: "desc" },
+					select: { title: true, displayName: true },
+				})
+				.runPromise;
+
+			expect(results).toEqual([]);
+		});
+
+		it("should work with pagination on empty collection with computed fields", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(emptyCollectionConfig, { books: [] }),
+			);
+
+			const results = await db.books
+				.query({ limit: 10, offset: 0 })
+				.runPromise;
+
+			expect(results).toEqual([]);
+		});
+
+		it("should allow adding items to empty collection and computed fields work correctly", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(emptyCollectionConfig, { books: [] }),
+			);
+
+			// Verify empty first
+			const emptyResults = await db.books.query().runPromise;
+			expect(emptyResults).toHaveLength(0);
+
+			// Add an item
+			await db.books
+				.create({ id: "book1", title: "Dune", year: 1965 })
+				.runPromise;
+
+			// Query should now return the item with computed fields
+			const results = await db.books.query().runPromise;
+			expect(results).toHaveLength(1);
+			expect(results[0].displayName).toBe("Dune (1965)");
+			expect(results[0].isClassic).toBe(true);
+			expect(results[0].decade).toBe(1960);
+		});
+
+		it("should handle findById returning NotFoundError on empty collection with computed fields", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(emptyCollectionConfig, { books: [] }),
+			);
+
+			const result = await Effect.runPromise(
+				db.books.findById("nonexistent").pipe(
+					Effect.map(() => "found" as const),
+					Effect.catchTag("NotFoundError", () => Effect.succeed("not_found" as const)),
+				),
+			);
+
+			expect(result).toBe("not_found");
+		});
+	});
 });

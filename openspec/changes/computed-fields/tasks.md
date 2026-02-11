@@ -73,7 +73,7 @@
 ## 10. Tests — Edge Cases
 
 - [x] 10.1 Test computed field returning `null` or `undefined` — handled gracefully in filter/sort.
-- [ ] 10.2 Test computed field on empty collection — no errors, empty results.
+- [x] 10.2 Test computed field on empty collection — no errors, empty results.
 - [ ] 10.3 Test computed field with population: `authorName: (book) => book.author?.name ?? "Unknown"` with and without `populate`.
 - [ ] 10.4 Test that create ignores computed field names in input.
 - [ ] 10.5 Test that update ignores computed field names in input.
