@@ -19,6 +19,7 @@ import {
 	ForeignKeyError,
 	ValidationError,
 	HookError,
+	UniqueConstraintError,
 } from "../../errors/crud-errors.js"
 import { validateEntity } from "../../validators/schema-validator.js"
 import {
@@ -28,6 +29,7 @@ import type { CollectionIndexes } from "../../types/index-types.js"
 import { updateInIndex } from "../../indexes/index-manager.js"
 import type { HooksConfig } from "../../types/hook-types.js"
 import { runBeforeUpdateHooks, runAfterUpdateHooks, runOnChangeHooks } from "../../hooks/hook-runner.js"
+import { checkUniqueConstraints, type NormalizedConstraints } from "./unique-check.js"
 
 // ============================================================================
 // Types
@@ -197,6 +199,57 @@ export function validateImmutableFields<T extends MinimalEntity>(
 }
 
 // ============================================================================
+// Unique Constraint Helpers
+// ============================================================================
+
+/**
+ * Check if an update operation touches any unique fields.
+ *
+ * Extracts the update keys (handling $set operators) and checks if any
+ * intersect with the fields in the unique constraints.
+ *
+ * @param updates - The update payload (may contain direct values or operators)
+ * @param constraints - Normalized unique constraints
+ * @returns True if the update modifies any field that's part of a unique constraint
+ */
+function updateTouchesUniqueFields<T>(
+	updates: UpdateWithOperators<T & MinimalEntity>,
+	constraints: NormalizedConstraints,
+): boolean {
+	if (constraints.length === 0) {
+		return false
+	}
+
+	// Extract the fields being updated
+	const updateKeys = new Set<string>()
+	for (const [key, value] of Object.entries(updates)) {
+		// Check if it's a $set operator
+		if (
+			typeof value === "object" &&
+			value !== null &&
+			!Array.isArray(value) &&
+			"$set" in value
+		) {
+			updateKeys.add(key)
+		} else if (value !== undefined) {
+			// Direct value assignment or other operators
+			updateKeys.add(key)
+		}
+	}
+
+	// Check if any update key is in any constraint
+	for (const constraintFields of constraints) {
+		for (const field of constraintFields) {
+			if (updateKeys.has(field)) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// ============================================================================
 // Update Single Entity
 // ============================================================================
 
@@ -221,8 +274,9 @@ export const update = <T extends HasId, I = T>(
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	indexes?: CollectionIndexes,
 	hooks?: HooksConfig<T>,
+	uniqueFields: NormalizedConstraints = [],
 ) =>
-(id: string, updates: UpdateWithOperators<T & MinimalEntity>): Effect.Effect<T, ValidationError | NotFoundError | ForeignKeyError | HookError> =>
+(id: string, updates: UpdateWithOperators<T & MinimalEntity>): Effect.Effect<T, ValidationError | NotFoundError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
 		// Validate immutable fields
 		const immutableCheck = validateImmutableFields(updates)
@@ -283,6 +337,11 @@ export const update = <T extends HasId, I = T>(
 			)
 		}
 
+		// Check unique constraints if the update touches any unique fields
+		if (updateTouchesUniqueFields(transformedUpdates as UpdateWithOperators<T & MinimalEntity>, uniqueFields)) {
+			yield* checkUniqueConstraints(validated, currentMap, uniqueFields, collectionName)
+		}
+
 		// Atomically update in state
 		yield* Ref.update(ref, (map) => {
 			const next = new Map(map)
@@ -341,11 +400,12 @@ export const updateMany = <T extends HasId, I = T>(
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	indexes?: CollectionIndexes,
 	hooks?: HooksConfig<T>,
+	uniqueFields: NormalizedConstraints = [],
 ) =>
 (
 	predicate: (entity: T) => boolean,
 	updates: UpdateWithOperators<T & MinimalEntity>,
-): Effect.Effect<UpdateManyResult<T>, ValidationError | ForeignKeyError | HookError> =>
+): Effect.Effect<UpdateManyResult<T>, ValidationError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
 		// Validate immutable fields
 		const immutableCheck = validateImmutableFields(updates)
@@ -409,6 +469,24 @@ export const updateMany = <T extends HasId, I = T>(
 					relationships,
 					stateRefs,
 				)
+			}
+		}
+
+		// Check unique constraints if the update touches any unique fields
+		if (updateTouchesUniqueFields(updates, uniqueFields)) {
+			// For updateMany, we need to check each entity against:
+			// 1. Existing entities (excluding entities being updated)
+			// 2. Other entities in the batch (they might conflict with each other)
+
+			// Create a temporary map that includes our updates for checking
+			const checkMap = new Map(currentMap)
+			for (const { validated } of entityPairs) {
+				checkMap.set((validated as HasId).id, validated)
+			}
+
+			for (const { validated } of entityPairs) {
+				// Check against all other entities (excluding self)
+				yield* checkUniqueConstraints(validated, checkMap, uniqueFields, collectionName)
 			}
 		}
 

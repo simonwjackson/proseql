@@ -212,11 +212,11 @@ export interface EffectCollection<T extends HasId> {
 	readonly update: (
 		id: string,
 		updates: UpdateWithOperators<T & MinimalEntity>,
-	) => RunnableEffect<T, ValidationError | NotFoundError | ForeignKeyError | HookError>
+	) => RunnableEffect<T, ValidationError | NotFoundError | ForeignKeyError | HookError | UniqueConstraintError>
 	readonly updateMany: (
 		predicate: (entity: T) => boolean,
 		updates: UpdateWithOperators<T & MinimalEntity>,
-	) => RunnableEffect<UpdateManyResult<T>, ValidationError | ForeignKeyError | HookError>
+	) => RunnableEffect<UpdateManyResult<T>, ValidationError | ForeignKeyError | HookError | UniqueConstraintError>
 
 	readonly delete: (
 		id: string,
