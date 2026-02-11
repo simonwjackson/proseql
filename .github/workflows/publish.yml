@@ -39,3 +39,21 @@ jobs:
           cache: true
       - run: bun install
       - run: biome check .
+
+  publish:
+    needs: [test, typecheck, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          cache: true
+      - run: bun install
+      - name: Publish @proseql/core
+        run: bun publish --cwd packages/core
+      - name: Publish @proseql/node
+        run: bun publish --cwd packages/node
+      - name: Publish @proseql/rest
+        run: bun publish --cwd packages/rest
+      - name: Publish @proseql/rpc
+        run: bun publish --cwd packages/rpc

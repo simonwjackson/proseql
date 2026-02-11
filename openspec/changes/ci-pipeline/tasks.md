@@ -9,7 +9,7 @@
 
 - [x] 2.1 Create `.github/workflows/publish.yml` with trigger configuration: `on: push: tags: ['v*']`
 - [x] 2.2 Define `test`, `typecheck`, and `lint` jobs identical to the CI workflow (or use a reusable workflow reference)
-- [ ] 2.3 Define `publish` job with `needs: [test, typecheck, lint]`, runs-on `ubuntu-latest`, steps: checkout, setup-bun (with cache enabled), `bun install`, publish each workspace package
+- [x] 2.3 Define `publish` job with `needs: [test, typecheck, lint]`, runs-on `ubuntu-latest`, steps: checkout, setup-bun (with cache enabled), `bun install`, publish each workspace package
 - [ ] 2.4 Configure `NPM_TOKEN` environment variable from `${{ secrets.NPM_TOKEN }}` for the publish step
 
 ## 3. Caching
