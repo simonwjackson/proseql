@@ -45,7 +45,7 @@
 - [x] 7.5 Update `tests/storage-services.test.ts`: replace all `JsonSerializerLayer`/`YamlSerializerLayer`/`MessagePackSerializerLayer` with codec-based layers. Remove MessagePack tests.
 - [x] 7.6 Update `tests/persistence-effect.test.ts`: replace serializer layer imports.
 - [x] 7.7 Update `tests/persistence.test.ts`: replace serializer layer imports. Remove MessagePack test helpers.
-- [ ] 7.8 Update `tests/file-watcher.test.ts`: replace serializer layer imports.
+- [x] 7.8 Update `tests/file-watcher.test.ts`: replace serializer layer imports.
 - [ ] 7.9 Update `tests/debounced-writer.test.ts`: replace serializer layer imports.
 - [ ] 7.10 Update `tests/database-effect.test.ts`: replace serializer layer imports.
 - [ ] 7.11 Update `tests/schema-migrations.test.ts`: replace serializer layer imports.

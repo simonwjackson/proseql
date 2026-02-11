@@ -7,7 +7,8 @@ import {
 } from "../core/storage/persistence-effect.js"
 import { StorageAdapter } from "../core/storage/storage-service.js"
 import { makeInMemoryStorageLayer } from "../core/storage/in-memory-adapter-layer.js"
-import { JsonSerializerLayer } from "../core/serializers/json.js"
+import { makeSerializerLayer } from "../core/serializers/format-codec.js"
+import { jsonCodec } from "../core/serializers/codecs/json.js"
 import { StorageError } from "../core/errors/storage-errors.js"
 
 // ============================================================================
@@ -27,7 +28,7 @@ type User = typeof UserSchema.Type
  */
 const makeTestEnv = () => {
 	const store = new Map<string, string>()
-	const layer = Layer.merge(makeInMemoryStorageLayer(store), JsonSerializerLayer)
+	const layer = Layer.merge(makeInMemoryStorageLayer(store), makeSerializerLayer([jsonCodec()]))
 	return { store, layer }
 }
 
@@ -400,7 +401,7 @@ describe("FileWatcher", () => {
 
 			const failingLayer = Layer.merge(
 				Layer.succeed(StorageAdapter, failingAdapter),
-				JsonSerializerLayer,
+				makeSerializerLayer([jsonCodec()]),
 			)
 
 			await Effect.runPromise(
