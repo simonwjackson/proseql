@@ -46,7 +46,9 @@
 - `examples/**` - No example files appear
 
 All 51 source files in `lcov.info` are from `packages/core/src/` and `packages/node/src/` production code only
-- [ ] 4.4 Verify `just test` (without coverage) still runs at normal speed with no coverage overhead
+- [x] 4.4 Verify `just test` (without coverage) still runs at normal speed with no coverage overhead
+
+**Verified:** `just test` runs in ~2.05s while `just coverage` runs in ~2.19s. The difference (~7% overhead) only applies when coverage is explicitly requested via `--coverage` flag. The `test` recipe does not include coverage instrumentation, confirming no coverage overhead during normal test runs
 - [ ] 4.5 Temporarily lower a threshold below measured coverage and verify the coverage command exits with non-zero code, then restore the correct threshold
 
 ## 5. Cleanup
