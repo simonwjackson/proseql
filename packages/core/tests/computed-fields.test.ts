@@ -2319,4 +2319,268 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			expect(results.every((r) => r.isClassic === false)).toBe(true);
 		});
 	});
+
+	// =========================================================================
+	// Task 10.7: Test that computed fields do not appear in aggregation input
+	// (aggregation operates on stored fields only)
+	// =========================================================================
+	describe("Task 10.7: Computed fields do not appear in aggregation input", () => {
+		// Book schema with numeric fields for aggregation testing
+		const AggBookSchema = Schema.Struct({
+			id: Schema.String,
+			title: Schema.String,
+			year: Schema.Number,
+			price: Schema.Number,
+			salesCount: Schema.Number,
+		});
+
+		type AggBook = typeof AggBookSchema.Type;
+
+		// Config with computed fields that should NOT be aggregatable
+		const aggConfig = {
+			books: {
+				schema: AggBookSchema,
+				relationships: {},
+				computed: {
+					// Computed string field
+					displayName: (book: AggBook) => `${book.title} (${book.year})`,
+					// Computed boolean field
+					isClassic: (book: AggBook) => book.year < 1980,
+					// Computed numeric field - this is the key test case
+					// If aggregation incorrectly included computed fields, sum/avg would include this
+					revenue: (book: AggBook) => book.price * book.salesCount,
+					// Another computed numeric field
+					discountedPrice: (book: AggBook) => book.price * 0.9,
+				},
+			},
+		} as const;
+
+		const testBooks = [
+			{ id: "book1", title: "Dune", year: 1965, price: 10, salesCount: 100 },
+			{ id: "book2", title: "Neuromancer", year: 1984, price: 15, salesCount: 200 },
+			{ id: "book3", title: "Snow Crash", year: 1992, price: 20, salesCount: 150 },
+		];
+
+		it("should aggregate only stored numeric fields, not computed numeric fields", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(aggConfig, { books: testBooks }),
+			);
+
+			// Sum of stored field "price": 10 + 15 + 20 = 45
+			const result = await db.books.aggregate({ sum: "price" }).runPromise;
+			expect(result.sum?.price).toBe(45);
+
+			// Sum of stored field "salesCount": 100 + 200 + 150 = 450
+			const result2 = await db.books.aggregate({ sum: "salesCount" }).runPromise;
+			expect(result2.sum?.salesCount).toBe(450);
+
+			// The computed field "revenue" (price * salesCount) values would be:
+			// book1: 10 * 100 = 1000
+			// book2: 15 * 200 = 3000
+			// book3: 20 * 150 = 3000
+			// Total if revenue were aggregated: 7000
+
+			// But if we try to aggregate "revenue" (a computed field), it should
+			// return 0 because aggregation operates only on stored fields.
+			// The field simply doesn't exist in the raw stored data.
+			const result3 = await db.books.aggregate({ sum: "revenue" }).runPromise;
+			// The sum should be 0 because "revenue" doesn't exist in stored data
+			expect(result3.sum?.revenue).toBe(0);
+
+			// Same for discountedPrice
+			const result4 = await db.books
+				.aggregate({ sum: "discountedPrice" })
+				.runPromise;
+			expect(result4.sum?.discountedPrice).toBe(0);
+		});
+
+		it("should compute average only on stored fields, not computed fields", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(aggConfig, { books: testBooks }),
+			);
+
+			// Average of stored field "price": (10 + 15 + 20) / 3 = 15
+			const result = await db.books.aggregate({ avg: "price" }).runPromise;
+			expect(result.avg?.price).toBe(15);
+
+			// Average of computed field "revenue" should be null (no numeric values found)
+			// because the field doesn't exist in stored data
+			const result2 = await db.books.aggregate({ avg: "revenue" }).runPromise;
+			expect(result2.avg?.revenue).toBeNull();
+		});
+
+		it("should find min/max only on stored fields, not computed fields", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(aggConfig, { books: testBooks }),
+			);
+
+			// Min/max of stored field "price"
+			const result = await db.books
+				.aggregate({ min: "price", max: "price" })
+				.runPromise;
+			expect(result.min?.price).toBe(10);
+			expect(result.max?.price).toBe(20);
+
+			// Min/max of stored field "year"
+			const result2 = await db.books
+				.aggregate({ min: "year", max: "year" })
+				.runPromise;
+			expect(result2.min?.year).toBe(1965);
+			expect(result2.max?.year).toBe(1992);
+
+			// Min/max of computed field "revenue" should be undefined
+			// because the field doesn't exist in stored data
+			const result3 = await db.books
+				.aggregate({ min: "revenue", max: "revenue" })
+				.runPromise;
+			expect(result3.min?.revenue).toBeUndefined();
+			expect(result3.max?.revenue).toBeUndefined();
+		});
+
+		it("should support groupBy on stored fields only", async () => {
+			// Add more books with different years for grouping
+			const booksForGrouping = [
+				{ id: "book1", title: "Dune", year: 1965, price: 10, salesCount: 100 },
+				{
+					id: "book2",
+					title: "Left Hand",
+					year: 1969,
+					price: 12,
+					salesCount: 80,
+				},
+				{
+					id: "book3",
+					title: "Neuromancer",
+					year: 1984,
+					price: 15,
+					salesCount: 200,
+				},
+				{
+					id: "book4",
+					title: "Snow Crash",
+					year: 1992,
+					price: 20,
+					salesCount: 150,
+				},
+			];
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(aggConfig, { books: booksForGrouping }),
+			);
+
+			// Group by stored field "year" and count
+			const result = await db.books
+				.aggregate({ groupBy: "year", count: true })
+				.runPromise;
+
+			expect(result).toHaveLength(4);
+			const groups = new Map(result.map((r) => [r.group.year, r.count]));
+			expect(groups.get(1965)).toBe(1);
+			expect(groups.get(1969)).toBe(1);
+			expect(groups.get(1984)).toBe(1);
+			expect(groups.get(1992)).toBe(1);
+		});
+
+		it("should filter by stored field in aggregate where clause", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(aggConfig, { books: testBooks }),
+			);
+
+			// Filter by stored field
+			const result = await db.books
+				.aggregate({
+					count: true,
+					sum: "price",
+					where: { year: { $lt: 1980 } },
+				})
+				.runPromise;
+
+			// Only Dune (1965) matches
+			expect(result.count).toBe(1);
+			expect(result.sum?.price).toBe(10);
+		});
+
+		it("should verify computed fields appear in query results but not in aggregation data", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(aggConfig, { books: testBooks }),
+			);
+
+			// Query returns computed fields
+			const queryResults = await db.books.query({ sort: { id: "asc" } }).runPromise;
+			expect(queryResults).toHaveLength(3);
+
+			// Verify computed fields ARE present in query results
+			expect(queryResults[0]).toHaveProperty("displayName");
+			expect(queryResults[0]).toHaveProperty("isClassic");
+			expect(queryResults[0]).toHaveProperty("revenue");
+			expect(queryResults[0]).toHaveProperty("discountedPrice");
+
+			// Verify computed field values are correct
+			expect(queryResults[0].displayName).toBe("Dune (1965)");
+			expect(queryResults[0].isClassic).toBe(true);
+			expect(queryResults[0].revenue).toBe(1000); // 10 * 100
+			expect(queryResults[0].discountedPrice).toBe(9); // 10 * 0.9
+
+			// But aggregation on computed fields returns empty/null results
+			const aggResult = await db.books
+				.aggregate({
+					sum: ["revenue", "discountedPrice", "price"],
+					avg: ["revenue", "discountedPrice", "price"],
+				})
+				.runPromise;
+
+			// Stored field "price" is aggregated correctly
+			expect(aggResult.sum?.price).toBe(45);
+			expect(aggResult.avg?.price).toBe(15);
+
+			// Computed fields are NOT aggregated (no values found in stored data)
+			expect(aggResult.sum?.revenue).toBe(0);
+			expect(aggResult.sum?.discountedPrice).toBe(0);
+			expect(aggResult.avg?.revenue).toBeNull();
+			expect(aggResult.avg?.discountedPrice).toBeNull();
+		});
+
+		it("should handle collection with both stored and computed numeric fields correctly", async () => {
+			const db = await Effect.runPromise(
+				createEffectDatabase(aggConfig, { books: testBooks }),
+			);
+
+			// Comprehensive aggregate request mixing stored and computed field names
+			const result = await db.books
+				.aggregate({
+					count: true,
+					sum: ["price", "salesCount", "year", "revenue", "discountedPrice"],
+					avg: ["price", "year"],
+					min: ["price", "year", "revenue"],
+					max: ["price", "year", "revenue"],
+				})
+				.runPromise;
+
+			// Count is always based on entities
+			expect(result.count).toBe(3);
+
+			// Sum of stored fields
+			expect(result.sum?.price).toBe(45); // 10 + 15 + 20
+			expect(result.sum?.salesCount).toBe(450); // 100 + 200 + 150
+			expect(result.sum?.year).toBe(5941); // 1965 + 1984 + 1992
+
+			// Sum of computed fields (should be 0 - fields don't exist in stored data)
+			expect(result.sum?.revenue).toBe(0);
+			expect(result.sum?.discountedPrice).toBe(0);
+
+			// Avg of stored fields
+			expect(result.avg?.price).toBe(15);
+			expect(result.avg?.year).toBeCloseTo(1980.33, 1);
+
+			// Min/max of stored fields
+			expect(result.min?.price).toBe(10);
+			expect(result.max?.price).toBe(20);
+			expect(result.min?.year).toBe(1965);
+			expect(result.max?.year).toBe(1992);
+
+			// Min/max of computed fields (undefined - fields don't exist in stored data)
+			expect(result.min?.revenue).toBeUndefined();
+			expect(result.max?.revenue).toBeUndefined();
+		});
+	});
 });

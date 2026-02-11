@@ -78,7 +78,7 @@
 - [x] 10.4 Test that create ignores computed field names in input.
 - [x] 10.5 Test that update ignores computed field names in input.
 - [x] 10.6 Test persistence round-trip: save, reload, verify computed fields re-derive correctly.
-- [ ] 10.7 Test that computed fields do not appear in aggregation input (aggregation operates on stored fields).
+- [x] 10.7 Test that computed fields do not appear in aggregation input (aggregation operates on stored fields).
 
 ## 11. Cleanup
 
