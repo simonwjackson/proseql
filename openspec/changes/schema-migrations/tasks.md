@@ -20,7 +20,7 @@
 
 - [x] 4.1 Modify `saveData` in `core/storage/persistence-effect.ts`: accept optional `version` parameter. When provided, inject `_version` field into the serialized output before the entity map.
 - [x] 4.2 Modify `saveCollectionsToFile`: stamp `_version` per-collection section if versioned.
-- [ ] 4.3 Ensure `_version` appears first in the output object for readability in YAML/JSON files.
+- [x] 4.3 Ensure `_version` appears first in the output object for readability in YAML/JSON files.
 
 ## 5. Persistence Integration — loadData
 

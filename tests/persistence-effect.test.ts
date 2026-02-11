@@ -317,6 +317,56 @@ describe("persistence-effect: loadData & saveData", () => {
 	})
 
 	// ============================================================================
+	// Version stamping
+	// ============================================================================
+
+	describe("version stamping", () => {
+		it("saveData stamps _version first in output when version option provided", async () => {
+			const { store, layer } = makeTestEnv()
+
+			const data: ReadonlyMap<string, User> = new Map([
+				["u1", { id: "u1", name: "Alice", age: 30 }],
+				["u2", { id: "u2", name: "Bob", age: 25 }],
+			])
+
+			await Effect.runPromise(
+				Effect.provide(
+					saveData("/data/versioned.json", UserSchema, data, { version: 5 }),
+					layer,
+				),
+			)
+
+			const stored = store.get("/data/versioned.json")
+			expect(stored).toBeDefined()
+			// Verify _version is the first key in the output
+			const parsed = JSON.parse(stored!)
+			const keys = Object.keys(parsed)
+			expect(keys[0]).toBe("_version")
+			expect(parsed._version).toBe(5)
+		})
+
+		it("saveData omits _version when version option not provided", async () => {
+			const { store, layer } = makeTestEnv()
+
+			const data: ReadonlyMap<string, User> = new Map([
+				["u1", { id: "u1", name: "Alice", age: 30 }],
+			])
+
+			await Effect.runPromise(
+				Effect.provide(
+					saveData("/data/unversioned.json", UserSchema, data),
+					layer,
+				),
+			)
+
+			const stored = store.get("/data/unversioned.json")
+			expect(stored).toBeDefined()
+			const parsed = JSON.parse(stored!)
+			expect(parsed._version).toBeUndefined()
+		})
+	})
+
+	// ============================================================================
 	// Error cases
 	// ============================================================================
 
@@ -458,6 +508,57 @@ describe("persistence-effect: multi-collection file operations", () => {
 			)
 
 			expect(exit._tag).toBe("Failure")
+		})
+	})
+
+	describe("version stamping", () => {
+		it("saveCollectionsToFile stamps _version first in collection object", async () => {
+			const { store, layer } = makeTestEnv()
+
+			await Effect.runPromise(
+				Effect.provide(
+					saveCollectionsToFile("/data/versioned.json", [
+						{
+							name: "users",
+							schema: UserSchema,
+							data: new Map([["u1", { id: "u1", name: "Alice", age: 30 }]]),
+							version: 3,
+						},
+					]),
+					layer,
+				),
+			)
+
+			const stored = store.get("/data/versioned.json")
+			expect(stored).toBeDefined()
+			// Verify _version is the first key in the users collection
+			const parsed = JSON.parse(stored!)
+			const keys = Object.keys(parsed.users)
+			expect(keys[0]).toBe("_version")
+			expect(parsed.users._version).toBe(3)
+		})
+
+		it("saveCollectionsToFile omits _version when not provided", async () => {
+			const { store, layer } = makeTestEnv()
+
+			await Effect.runPromise(
+				Effect.provide(
+					saveCollectionsToFile("/data/unversioned.json", [
+						{
+							name: "users",
+							schema: UserSchema,
+							data: new Map([["u1", { id: "u1", name: "Alice", age: 30 }]]),
+							// no version specified
+						},
+					]),
+					layer,
+				),
+			)
+
+			const stored = store.get("/data/unversioned.json")
+			expect(stored).toBeDefined()
+			const parsed = JSON.parse(stored!)
+			expect(parsed.users._version).toBeUndefined()
 		})
 	})
 
