@@ -36,7 +36,16 @@
 - [x] 4.2 Verify `coverage/lcov.info` is generated and contains valid LCOV data
 
 **Verified:** `coverage/lcov.info` (67,932 bytes) contains valid LCOV format data with 51 source files. Structure includes TN (test name), SF (source file), FNF/FNH (functions found/hit), DA (line data), LF/LH (lines found/hit), and end_of_record markers. File has proper Unix line endings
-- [ ] 4.3 Verify excluded files (`tests/`, `effect/`, `index.ts`, `.d.ts`) do not appear in coverage output
+- [x] 4.3 Verify excluded files (`tests/`, `effect/`, `index.ts`, `.d.ts`) do not appear in coverage output
+
+**Verified:** Coverage output (both terminal and `lcov.info`) excludes all configured patterns:
+- `**/tests/**` - No test files appear
+- `effect/**` - No Effect reference codebase files appear
+- `**/index.ts` - No barrel/re-export files appear
+- `**/*.d.ts` - No TypeScript declaration files appear
+- `examples/**` - No example files appear
+
+All 51 source files in `lcov.info` are from `packages/core/src/` and `packages/node/src/` production code only
 - [ ] 4.4 Verify `just test` (without coverage) still runs at normal speed with no coverage overhead
 - [ ] 4.5 Temporarily lower a threshold below measured coverage and verify the coverage command exits with non-zero code, then restore the correct threshold
 
