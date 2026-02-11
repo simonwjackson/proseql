@@ -145,11 +145,16 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 		let dataToLoad: Record<string, unknown> = entityMap
 		let needsWriteBack = false
 		let targetVersion: number | undefined
+		// Track if migrations were run (for post-migration validation error type)
+		let migrationsRan = false
+		let fromVersionForError = fileVersion
+		let collectionNameForError = "unknown"
 
 		// If version checking is enabled, validate version compatibility
 		if (options?.version !== undefined) {
 			const configVersion = options.version
 			const collectionName = options.collectionName ?? "unknown"
+			collectionNameForError = collectionName
 
 			// File version ahead of config version is an error
 			if (fileVersion > configVersion) {
@@ -176,6 +181,7 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 				)
 				needsWriteBack = true
 				targetVersion = configVersion
+				migrationsRan = true
 			}
 		}
 
@@ -187,15 +193,26 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 			const decoded = yield* decode(value).pipe(
 				Effect.mapError(
 					(parseError) =>
-						new ValidationError({
-							message: `Failed to decode entity '${id}' in '${filePath}': ${parseError.message}`,
-							issues: [
-								{
-									field: id,
-									message: parseError.message,
-								},
-							],
-						}),
+						// If migrations were run, produce MigrationError with step: -1
+						// Otherwise, produce ValidationError for normal schema mismatch
+						migrationsRan
+							? new MigrationError({
+									collection: collectionNameForError,
+									fromVersion: fromVersionForError,
+									toVersion: targetVersion!,
+									step: -1,
+									reason: "post-migration-validation-failed",
+									message: `Post-migration validation failed for entity '${id}': ${parseError.message}`,
+								})
+							: new ValidationError({
+									message: `Failed to decode entity '${id}' in '${filePath}': ${parseError.message}`,
+									issues: [
+										{
+											field: id,
+											message: parseError.message,
+										},
+									],
+								}),
 				),
 			)
 			entries.push([id, decoded])
@@ -447,15 +464,26 @@ export const loadCollectionsFromFile = (
 				const decoded = yield* decode(value).pipe(
 					Effect.mapError(
 						(parseError) =>
-							new ValidationError({
-								message: `Failed to decode entity '${id}' in collection '${col.name}' from '${filePath}': ${parseError.message}`,
-								issues: [
-									{
-										field: `${col.name}.${id}`,
-										message: parseError.message,
-									},
-								],
-							}),
+							// If migrations were run, produce MigrationError with step: -1
+							// Otherwise, produce ValidationError for normal schema mismatch
+							collectionNeedsMigration
+								? new MigrationError({
+										collection: col.name,
+										fromVersion: fileVersion,
+										toVersion: col.version!,
+										step: -1,
+										reason: "post-migration-validation-failed",
+										message: `Post-migration validation failed for entity '${id}': ${parseError.message}`,
+									})
+								: new ValidationError({
+										message: `Failed to decode entity '${id}' in collection '${col.name}' from '${filePath}': ${parseError.message}`,
+										issues: [
+											{
+												field: `${col.name}.${id}`,
+												message: parseError.message,
+											},
+										],
+									}),
 					),
 				)
 				entries.push([id, decoded])
