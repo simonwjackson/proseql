@@ -61,7 +61,7 @@
 - [x] 9.3 Test that computed field values are correct (displayName format, isClassic boolean logic).
 - [x] 9.4 Test computed field with no select clause — all stored + computed fields present.
 - [x] 9.5 Test computed field with select including computed — only selected fields present.
-- [ ] 9.6 Test computed field with select excluding computed — computed fields absent, not evaluated.
+- [x] 9.6 Test computed field with select excluding computed — computed fields absent, not evaluated.
 - [ ] 9.7 Test filter by computed boolean field.
 - [ ] 9.8 Test filter by computed string field with operator.
 - [ ] 9.9 Test sort by computed field ascending.
