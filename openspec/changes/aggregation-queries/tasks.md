@@ -16,7 +16,7 @@
 ## 3. Grouped Aggregation
 
 - [x] 3.1 Implement `computeGroupedAggregates(entities, config)` returning `GroupedAggregateResult`. Partition entities into groups, then apply `computeAggregates` within each group.
-- [ ] 3.2 Implement grouping: use `Map<string, Array<T>>` keyed by `JSON.stringify(groupFields.map(f => entity[f]))`. Preserve first-encounter ordering.
+- [x] 3.2 Implement grouping: use `Map<string, Array<T>>` keyed by `JSON.stringify(groupFields.map(f => entity[f]))`. Preserve first-encounter ordering.
 - [ ] 3.3 Handle single-field and multi-field groupBy (normalize string to array).
 - [ ] 3.4 Handle null/undefined grouping values: form their own group.
 - [ ] 3.5 Build group result objects with `group` field containing the grouping field values.
