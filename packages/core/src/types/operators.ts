@@ -1,4 +1,5 @@
 import type { FilterOperators } from "./types.js";
+import { tokenize } from "../operations/query/search.js";
 
 // ============================================================================
 // Modular Operator Checking Functions
@@ -115,6 +116,7 @@ export function isFilterOperatorObject<T>(
 		"$contains",
 		"$all",
 		"$size",
+		"$search",
 	];
 	const filterKeys = Object.keys(filter);
 	return (
@@ -205,6 +207,29 @@ export function matchesFilter<T>(
 					true,
 				);
 				if (result !== null) results.push(result);
+			}
+
+			if ("$search" in ops) {
+				const searchQuery = ops.$search as string | undefined;
+				if (searchQuery !== undefined) {
+					// Empty search string matches everything
+					if (searchQuery === "") {
+						results.push(true);
+					} else {
+						const queryTokens = tokenize(searchQuery);
+						const fieldTokens = tokenize(value);
+
+						// All query tokens must match at least one field token (exact or prefix)
+						const allTokensMatch = queryTokens.every((queryToken) =>
+							fieldTokens.some(
+								(fieldToken) =>
+									fieldToken === queryToken ||
+									fieldToken.startsWith(queryToken),
+							),
+						);
+						results.push(allTokensMatch);
+					}
+				}
 			}
 		} else if (value === undefined || value === null || value === "") {
 			// For non-string values (undefined, null, empty), string operators should fail

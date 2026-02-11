@@ -20,7 +20,7 @@
 
 ## 4. $search Operator Integration
 
-- [ ] 4.1 Add `$search` branch to `matchesFilter` in `core/types/operators.ts`: when `$search` is present and value is a string, tokenize both the search string and the field value, return true if every query token matches at least one field token (exact or prefix via `startsWith`)
+- [x] 4.1 Add `$search` branch to `matchesFilter` in `core/types/operators.ts`: when `$search` is present and value is a string, tokenize both the search string and the field value, return true if every query token matches at least one field token (exact or prefix via `startsWith`)
 - [ ] 4.2 Add `$search` to the operator key lists in `isFilterOperatorObject` and the non-existent field handling in `filterData` so that `$search` is recognized as a valid operator
 - [ ] 4.3 Handle top-level `$search` in `filterData` in `core/operations/query/filter.ts`: when the where clause contains a `$search` key, tokenize the query, determine target fields (explicit or all string fields on the entity), check if any field matches all query tokens
 
