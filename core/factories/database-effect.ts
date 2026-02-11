@@ -81,6 +81,9 @@ import type {
 import { StorageAdapter } from "../storage/storage-service.js"
 import { SerializerRegistry } from "../serializers/serializer-service.js"
 import { saveData, loadData } from "../storage/persistence-effect.js"
+import { $transaction as $transactionImpl } from "../transactions/transaction.js"
+import type { TransactionContext } from "../types/crud-types.js"
+import { TransactionError } from "../errors/crud-errors.js"
 
 // ============================================================================
 // Convenience API: runPromise
@@ -823,7 +826,34 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 			)
 		}
 
-		return collections as EffectDatabase<Config>
+		// 5. Build transaction support
+		const buildCollectionForTx = makeBuildCollectionForTx(
+			config,
+			stateRefs,
+			typedRefs,
+			collectionIndexes,
+		)
+
+		// Create the $transaction method
+		const $transactionMethod = <A, E>(
+			fn: (ctx: TransactionContext<EffectDatabase<Config>>) => Effect.Effect<A, E>,
+		): Effect.Effect<A, E | TransactionError> =>
+			$transactionImpl(
+				stateRefs,
+				transactionLock,
+				buildCollectionForTx,
+				undefined, // no persistence trigger for in-memory database
+				fn as (ctx: TransactionContext<Record<string, EffectCollection<HasId>>>) => Effect.Effect<A, E>,
+			)
+
+		// Return database with $transaction method
+		return Object.assign(collections, {
+			$transaction: $transactionMethod,
+		}) as EffectDatabase<Config> & {
+			$transaction<A, E>(
+				fn: (ctx: TransactionContext<EffectDatabase<Config>>) => Effect.Effect<A, E>,
+			): Effect.Effect<A, E | TransactionError>
+		}
 	})
 
 /**
@@ -1017,9 +1047,30 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			return withRunPromise(effect)
 		}
 
+		// Build transaction support
+		const buildCollectionForTx = makeBuildCollectionForTx(
+			config,
+			stateRefs,
+			typedRefs,
+			collectionIndexes,
+		)
+
+		// Create the $transaction method with persistence trigger
+		const $transactionMethod = <A, E>(
+			fn: (ctx: TransactionContext<EffectDatabase<Config>>) => Effect.Effect<A, E>,
+		): Effect.Effect<A, E | TransactionError> =>
+			$transactionImpl(
+				stateRefs,
+				transactionLock,
+				buildCollectionForTx,
+				trigger, // persistence trigger for debounced saves on commit
+				fn as (ctx: TransactionContext<Record<string, EffectCollection<HasId>>>) => Effect.Effect<A, E>,
+			)
+
 		return Object.assign(db, {
 			flush: () => trigger.flush(),
 			pendingCount: () => trigger.pendingCount(),
 			$dryRunMigrations: dryRunMigrationsFn,
+			$transaction: $transactionMethod,
 		}) as EffectDatabaseWithPersistence<Config>
 	})
