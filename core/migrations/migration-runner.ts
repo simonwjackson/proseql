@@ -5,9 +5,13 @@
  * and preview migrations via dry-run.
  */
 
-import { Effect } from "effect"
+import { Effect, Ref, Schema } from "effect"
 import { MigrationError } from "../errors/migration-errors.js"
-import type { Migration } from "./migration-types.js"
+import type { SerializationError, StorageError, UnsupportedFormatError } from "../errors/storage-errors.js"
+import { StorageAdapter } from "../storage/storage-service.js"
+import { SerializerRegistry } from "../serializers/serializer-service.js"
+import type { DatabaseConfig } from "../types/database-config-types.js"
+import type { Migration, DryRunResult } from "./migration-types.js"
 
 // ============================================================================
 // Migration Execution
@@ -206,3 +210,39 @@ export const validateMigrationRegistry = (
 
 	return Effect.void
 }
+
+// ============================================================================
+// Dry-Run Migrations
+// ============================================================================
+
+/**
+ * Internal Ref map type for cross-collection access.
+ */
+type HasId = { readonly id: string }
+type StateRefs = Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>
+
+/**
+ * Preview which files need migration and what transforms would apply.
+ *
+ * For each versioned collection with a file path:
+ * - Read the file and extract `_version`
+ * - Compare to config `version`
+ * - List which migrations would apply (without running transforms)
+ * - Report status
+ *
+ * No transforms are executed. No files are written.
+ *
+ * @param config - The database configuration
+ * @param _stateRefs - State refs (unused, but kept for API consistency)
+ * @returns Effect<DryRunResult, MigrationError | StorageError | SerializationError | UnsupportedFormatError>
+ */
+export const dryRunMigrations = (
+	config: DatabaseConfig,
+	_stateRefs: StateRefs,
+): Effect.Effect<
+	DryRunResult,
+	MigrationError | StorageError | SerializationError | UnsupportedFormatError,
+	StorageAdapter | SerializerRegistry
+> =>
+	// Stub implementation: task 8.1 will implement the actual logic
+	Effect.succeed({ collections: [] })

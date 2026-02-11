@@ -39,7 +39,7 @@
 
 - [x] 7.1 In `core/factories/database-effect.ts` `createEffectDatabase`: validate migration registries for all versioned collections at startup via `validateMigrationRegistry`. Fail early if any registry is invalid.
 - [x] 7.2 Pass `version` and `migrations` from collection config to `loadData` calls during database initialization.
-- [ ] 7.3 Wire `$dryRunMigrations()` method onto the database object.
+- [x] 7.3 Wire `$dryRunMigrations()` method onto the database object.
 
 ## 8. Dry-Run Migrations
 

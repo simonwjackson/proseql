@@ -15,8 +15,9 @@ import type { CollectionConfig } from "../types/database-config-types.js"
 import type { CollectionIndexes } from "../types/index-types.js"
 import { normalizeIndexes, buildIndexes } from "../indexes/index-manager.js"
 import { resolveWithIndex } from "../indexes/index-lookup.js"
-import { validateMigrationRegistry } from "../migrations/migration-runner.js"
+import { validateMigrationRegistry, dryRunMigrations } from "../migrations/migration-runner.js"
 import type { MigrationError } from "../errors/migration-errors.js"
+import type { DryRunResult } from "../migrations/migration-types.js"
 import type {
 	CreateInput,
 	CreateManyOptions,
@@ -300,6 +301,11 @@ export type EffectDatabaseWithPersistence<Config extends DatabaseConfig> =
 		readonly flush: () => Promise<void>
 		/** Returns the number of writes currently pending. */
 		readonly pendingCount: () => number
+		/**
+		 * Preview which files need migration and what transforms would apply.
+		 * No transforms are executed. No files are written.
+		 */
+		readonly $dryRunMigrations: () => RunnableEffect<DryRunResult, MigrationError | StorageError | SerializationError | UnsupportedFormatError>
 	}
 
 // ============================================================================
@@ -941,8 +947,22 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		}
 
 		const db = collections as EffectDatabase<Config>
+
+		// Build the $dryRunMigrations method
+		const dryRunMigrationsFn = (): RunnableEffect<
+			DryRunResult,
+			MigrationError | StorageError | SerializationError | UnsupportedFormatError
+		> => {
+			const effect = Effect.provide(
+				dryRunMigrations(config, stateRefs),
+				serviceLayer,
+			)
+			return withRunPromise(effect)
+		}
+
 		return Object.assign(db, {
 			flush: () => trigger.flush(),
 			pendingCount: () => trigger.pendingCount(),
+			$dryRunMigrations: dryRunMigrationsFn,
 		}) as EffectDatabaseWithPersistence<Config>
 	})
