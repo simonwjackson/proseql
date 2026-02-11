@@ -10,7 +10,7 @@
 - [x] 2.3 Create `core/serializers/codecs/json5.ts`: `json5Codec(options?: { indent?: number }): FormatCodec`. Extensions: `["json5"]`. Uses `json5` package.
 - [x] 2.4 Create `core/serializers/codecs/jsonc.ts`: `jsoncCodec(options?: { indent?: number }): FormatCodec`. Extensions: `["jsonc"]`. Uses `jsonc-parser` to strip comments on decode; `JSON.stringify` on encode.
 - [x] 2.5 Create `core/serializers/codecs/toml.ts`: `tomlCodec(): FormatCodec`. Extensions: `["toml"]`. Uses `smol-toml`. Implement `stripNulls` recursive helper for encode.
-- [ ] 2.6 Install dependencies: `bun add json5 jsonc-parser smol-toml`
+- [x] 2.6 Install dependencies: `bun add json5 jsonc-parser smol-toml`
 
 ## 3. Preset Layers
 
