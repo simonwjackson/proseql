@@ -15,7 +15,7 @@
 
 ## 3. Preset Layers
 
-- [ ] 3.1 Update `core/serializers/presets.ts`: add `toonCodec()` to `AllTextFormatsLayer` (now 6 codecs). `DefaultSerializerLayer` (json + yaml) unchanged.
+- [x] 3.1 Update `core/serializers/presets.ts`: add `toonCodec()` to `AllTextFormatsLayer` (now 6 codecs). `DefaultSerializerLayer` (json + yaml) unchanged.
 
 ## 4. Extract getFileExtension
 
