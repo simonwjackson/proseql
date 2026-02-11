@@ -58,6 +58,11 @@ export {
 
 export type { QueryError } from "./errors/query-errors.js";
 
+// Migration errors
+export { MigrationError } from "./errors/migration-errors.js";
+
+export type { MigrationErrors } from "./errors/migration-errors.js";
+
 // Storage errors
 export {
 	StorageError,
@@ -79,6 +84,18 @@ export type {
 	InferEntity,
 	InferEncoded,
 } from "./types/schema-types.js";
+
+// ============================================================================
+// Migration Types
+// ============================================================================
+
+export type {
+	Migration,
+	DryRunResult,
+	DryRunStatus,
+	DryRunMigration,
+	DryRunCollectionResult,
+} from "./migrations/migration-types.js";
 
 // ============================================================================
 // Core Types and Configurations
