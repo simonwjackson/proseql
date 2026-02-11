@@ -51,7 +51,7 @@
 
 ## 9. Tests -- Basic Search
 
-- [ ] 9.1 Create `tests/full-text-search.test.ts` with test helpers: database with books collection (id, title, author, year, description)
+- [x] 9.1 Create `tests/full-text-search.test.ts` with test helpers: database with books collection (id, title, author, year, description)
 - [ ] 9.2 Test field-level `$search` basic match: `{ title: { $search: "dune" } }` matches "Dune"
 - [ ] 9.3 Test case insensitivity: `{ title: { $search: "DUNE" } }` matches "Dune"
 - [ ] 9.4 Test multi-term search: `{ title: { $search: "left hand darkness" } }` matches "The Left Hand of Darkness"
