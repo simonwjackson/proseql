@@ -367,6 +367,100 @@ describe("persistence-effect: loadData & saveData", () => {
 	})
 
 	// ============================================================================
+	// Version handling on load
+	// ============================================================================
+
+	describe("version handling on load", () => {
+		it("loads normally when file version equals config version (no migration)", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File already at version 3
+			store.set(
+				"/data/current.json",
+				JSON.stringify({
+					_version: 3,
+					u1: { id: "u1", name: "Alice", age: 30 },
+					u2: { id: "u2", name: "Bob", age: 25 },
+				}),
+			)
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/current.json", UserSchema, {
+						version: 3,
+						collectionName: "users",
+						// No migrations needed since versions match
+						migrations: [],
+					}),
+					layer,
+				),
+			)
+
+			// Data loads correctly
+			expect(result.size).toBe(2)
+			expect(result.get("u1")).toEqual({ id: "u1", name: "Alice", age: 30 })
+			expect(result.get("u2")).toEqual({ id: "u2", name: "Bob", age: 25 })
+
+			// File should NOT be rewritten (no migration needed)
+			const stored = store.get("/data/current.json")
+			const parsed = JSON.parse(stored!)
+			// _version should still be there since we didn't rewrite
+			expect(parsed._version).toBe(3)
+		})
+
+		it("strips _version from loaded entities when versions match", async () => {
+			const { store, layer } = makeTestEnv()
+
+			store.set(
+				"/data/versioned.json",
+				JSON.stringify({
+					_version: 5,
+					u1: { id: "u1", name: "Alice", age: 30 },
+				}),
+			)
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/versioned.json", UserSchema, {
+						version: 5,
+						collectionName: "users",
+					}),
+					layer,
+				),
+			)
+
+			// _version should not appear as an entity
+			expect(result.has("_version")).toBe(false)
+			expect(result.size).toBe(1)
+			expect(result.get("u1")).toEqual({ id: "u1", name: "Alice", age: 30 })
+		})
+
+		it("file is not modified when versions match (no write-back)", async () => {
+			const { store, layer } = makeTestEnv()
+
+			const originalContent = JSON.stringify({
+				_version: 2,
+				u1: { id: "u1", name: "Alice", age: 30 },
+			})
+			store.set("/data/unchanged.json", originalContent)
+
+			await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/unchanged.json", UserSchema, {
+						version: 2,
+						collectionName: "users",
+						migrations: [],
+					}),
+					layer,
+				),
+			)
+
+			// File content should be exactly the same (no write-back occurred)
+			expect(store.get("/data/unchanged.json")).toBe(originalContent)
+		})
+	})
+
+	// ============================================================================
 	// Error cases
 	// ============================================================================
 

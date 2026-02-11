@@ -27,7 +27,7 @@
 - [x] 5.1 Modify `loadData` in `core/storage/persistence-effect.ts`: accept optional `version` and `migrations` parameters. After deserialization, extract `_version` from parsed data (default 0 if absent), remove it from the entity map.
 - [x] 5.2 If file version < config version and migrations are provided: run `runMigrations`, then decode the migrated data through schema, then write back to disk via `saveData` with new version. Return the decoded data.
 - [x] 5.3 If file version > config version: fail with `MigrationError` (data from future version).
-- [ ] 5.4 If file version === config version: proceed normally (no migration needed).
+- [x] 5.4 If file version === config version: proceed normally (no migration needed).
 - [ ] 5.5 Modify `loadCollectionsFromFile`: apply per-collection migration independently.
 
 ## 6. Post-Migration Validation
