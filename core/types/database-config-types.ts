@@ -7,6 +7,7 @@ import type { Schema } from "effect";
 import type { StorageAdapter } from "../storage/types.js";
 import type { SerializerRegistry } from "../serializers/types.js";
 import type { HooksConfig } from "./hook-types.js";
+import type { Migration } from "../migrations/migration-types.js";
 
 /**
  * Configuration for a single collection, now with optional persistence support.
@@ -50,6 +51,21 @@ export type CollectionConfig = {
 	 * After-hooks and onChange run fire-and-forget after mutation.
 	 */
 	readonly hooks?: HooksConfig<unknown>;
+
+	/**
+	 * Schema version for this collection.
+	 * When defined, the collection participates in schema migrations.
+	 * The version number is stored in the persisted file as `_version`.
+	 */
+	readonly version?: number;
+
+	/**
+	 * Migration chain for this collection.
+	 * Each migration transforms data from one version to the next.
+	 * The chain must be contiguous: migrations[i].to === migrations[i].from + 1
+	 * and the last migration's `to` must match the config `version`.
+	 */
+	readonly migrations?: ReadonlyArray<Migration>;
 };
 
 /**
