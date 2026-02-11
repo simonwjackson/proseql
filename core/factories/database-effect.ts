@@ -12,6 +12,8 @@
 import { Effect, Ref, Stream, Schema, Chunk, Layer, Scope } from "effect"
 import type { DatabaseConfig } from "../types/database-config-types.js"
 import type { CollectionConfig } from "../types/database-config-types.js"
+import type { CollectionIndexes } from "../types/index-types.js"
+import { normalizeIndexes, buildIndexes } from "../indexes/index-manager.js"
 import type {
 	CreateInput,
 	CreateManyOptions,
@@ -406,6 +408,9 @@ function extractPopulateFromSelect(
  *
  * When `afterMutation` is provided, each CRUD method will fork a fire-and-forget
  * call to it after a successful mutation. This is used to trigger debounced saves.
+ *
+ * When `indexes` is provided, CRUD operations will maintain the indexes and
+ * query operations will use indexes for accelerated lookups.
  */
 const buildCollection = <T extends HasId>(
 	collectionName: string,
@@ -414,6 +419,7 @@ const buildCollection = <T extends HasId>(
 	stateRefs: StateRefs,
 	dbConfig: DatabaseConfig,
 	afterMutation?: () => Effect.Effect<void>,
+	indexes?: CollectionIndexes,
 ): EffectCollection<T> => {
 	const schema = collectionConfig.schema as Schema.Schema<T, unknown>
 	const relationships = collectionConfig.relationships as Record<
@@ -705,7 +711,18 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 			typedRefs[collectionName] = ref
 		}
 
-		// 2. Build each collection with its Ref and shared state refs
+		// 2. Build indexes for each collection from initial data
+		const collectionIndexes: Record<string, CollectionIndexes> = {}
+
+		for (const collectionName of Object.keys(config)) {
+			const collectionConfig = config[collectionName]
+			const normalizedIndexes = normalizeIndexes(collectionConfig.indexes)
+			const items = (initialData?.[collectionName] ?? []) as ReadonlyArray<HasId>
+			const indexes = yield* buildIndexes(normalizedIndexes, items)
+			collectionIndexes[collectionName] = indexes
+		}
+
+		// 3. Build each collection with its Ref, indexes, and shared state refs
 		const collections: Record<string, EffectCollection<HasId>> = {}
 
 		for (const collectionName of Object.keys(config)) {
@@ -715,6 +732,8 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 				typedRefs[collectionName],
 				stateRefs,
 				config,
+				undefined, // afterMutation
+				collectionIndexes[collectionName],
 			)
 		}
 
@@ -774,7 +793,18 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			typedRefs[collectionName] = ref
 		}
 
-		// 3. Build the save effect factory. Each save reads the Ref at execution
+		// 3. Build indexes for each collection from initial data
+		const collectionIndexes: Record<string, CollectionIndexes> = {}
+
+		for (const collectionName of Object.keys(config)) {
+			const collectionConfig = config[collectionName]
+			const normalizedIndexes = normalizeIndexes(collectionConfig.indexes)
+			const items = (initialData?.[collectionName] ?? []) as ReadonlyArray<HasId>
+			const indexes = yield* buildIndexes(normalizedIndexes, items)
+			collectionIndexes[collectionName] = indexes
+		}
+
+		// 4. Build the save effect factory. Each save reads the Ref at execution
 		// time (capturing latest state) and writes through saveData with services.
 		const collectionFilePaths: Record<string, string> = {}
 		for (const collectionName of Object.keys(config)) {
@@ -801,13 +831,13 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			)
 		}
 
-		// 4. Create the runtime-independent persistence trigger
+		// 5. Create the runtime-independent persistence trigger
 		const trigger = createPersistenceTrigger(
 			persistenceConfig?.writeDebounce ?? 100,
 			makeSaveEffect,
 		)
 
-		// 5. Register scope finalizer: flush pending writes and shut down timers
+		// 6. Register scope finalizer: flush pending writes and shut down timers
 		yield* Effect.addFinalizer(() =>
 			Effect.promise(() => trigger.flush()).pipe(
 				Effect.catchAll(() => Effect.void),
@@ -815,7 +845,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			),
 		)
 
-		// 6. Build each collection with its Ref, state refs, and persistence hooks
+		// 7. Build each collection with its Ref, indexes, state refs, and persistence hooks
 		const collections: Record<string, EffectCollection<HasId>> = {}
 
 		for (const collectionName of Object.keys(config)) {
@@ -833,6 +863,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				stateRefs,
 				config,
 				afterMutation,
+				collectionIndexes[collectionName],
 			)
 		}
 
