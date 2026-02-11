@@ -52,7 +52,7 @@
 - [x] 7.1 Create `flake.nix`: inputs (`nixpkgs`, `systems`, `bun2nix`), devShell with `bun`, `biome`, `just`, `bun2nix`, `git`
 - [x] 7.2 Add `packages` output to `flake.nix`: `core`, `node`, `rest`, `rpc` — each calls its `default.nix` with `mkBunDerivation`
 - [x] 7.3 Add `checks` output to `flake.nix`: runs tests and typecheck
-- [ ] 7.4 Create `packages/core/default.nix`: `mkBunDerivation` with `pname = "proseql-core"`, workspace-aware src
+- [x] 7.4 Create `packages/core/default.nix`: `mkBunDerivation` with `pname = "proseql-core"`, workspace-aware src
 - [ ] 7.5 Create `packages/node/default.nix`: `mkBunDerivation` with `pname = "proseql-node"`
 - [ ] 7.6 Create `packages/rest/default.nix`: `mkBunDerivation` with `pname = "proseql-rest"`
 - [ ] 7.7 Create `packages/rpc/default.nix`: `mkBunDerivation` with `pname = "proseql-rpc"`
