@@ -108,6 +108,21 @@ export type CollectionConfig = {
 	 * ```
 	 */
 	readonly searchIndex?: ReadonlyArray<string>;
+
+	/**
+	 * Name of an ID generator provided by a plugin.
+	 * When specified and no `id` is provided during entity creation,
+	 * the named generator is used to produce the ID.
+	 *
+	 * The generator must be registered by a plugin in the database options.
+	 * At init time, validation ensures the named generator exists in the plugin registry.
+	 *
+	 * @example
+	 * ```ts
+	 * idGenerator: "snowflake"  // uses generator from a plugin
+	 * ```
+	 */
+	readonly idGenerator?: string;
 };
 
 /**
