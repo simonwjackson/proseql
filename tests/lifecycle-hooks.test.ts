@@ -1661,5 +1661,98 @@ describe("lifecycle-hooks", () => {
 				"Updated-modified",
 			])
 		})
+
+		it("deleteMany: hooks run per entity", async () => {
+			// Track all hook calls to verify they run once per entity
+			const beforeDeleteCalls: Array<BeforeDeleteContext<User>> = []
+			const afterDeleteCalls: Array<AfterDeleteContext<User>> = []
+			const onChangeCalls: Array<OnChangeContext<User>> = []
+
+			const hooks: HooksConfig<User> = {
+				beforeDelete: [makeTrackingBeforeDeleteHook(beforeDeleteCalls)],
+				afterDelete: [makeTrackingAfterDeleteHook(afterDeleteCalls)],
+				onChange: [makeTrackingOnChangeHook(onChangeCalls)],
+			}
+
+			// Initial data with 3 users
+			const testData = {
+				users: [
+					{ id: "u1", name: "Alice", email: "alice@test.com", age: 25 },
+					{ id: "u2", name: "Bob", email: "bob@test.com", age: 30 },
+					{ id: "u3", name: "Charlie", email: "charlie@test.com", age: 35 },
+				],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, testData)
+
+					// Delete all users with age >= 25 (all of them) using a predicate function
+					const deleteResult = yield* db.users.deleteMany(
+						(entity) => entity.age >= 25,
+					)
+
+					// Read all users to verify deletion
+					const allUsersChunk = yield* Stream.runCollect(
+						db.users.query({}) as Stream.Stream<User>,
+					)
+					const allUsers = Chunk.toReadonlyArray(allUsersChunk)
+
+					return { deleteResult, allUsers }
+				}),
+			)
+
+			// Verify beforeDelete was called once per entity (3 times)
+			expect(beforeDeleteCalls).toHaveLength(3)
+			expect(beforeDeleteCalls.map((c) => c.entity.name).sort()).toEqual([
+				"Alice",
+				"Bob",
+				"Charlie",
+			])
+			// Each beforeDelete receives the correct entity
+			for (const call of beforeDeleteCalls) {
+				expect(call.operation).toBe("delete")
+				expect(call.collection).toBe("users")
+				expect(call.id).toBe(call.entity.id)
+			}
+
+			// Verify all entities were deleted
+			expect(result.deleteResult.count).toBe(3)
+			expect(result.deleteResult.deleted.map((u) => u.name).sort()).toEqual([
+				"Alice",
+				"Bob",
+				"Charlie",
+			])
+
+			// Verify afterDelete was called once per entity (3 times)
+			expect(afterDeleteCalls).toHaveLength(3)
+			expect(afterDeleteCalls.map((c) => c.entity.name).sort()).toEqual([
+				"Alice",
+				"Bob",
+				"Charlie",
+			])
+			for (const call of afterDeleteCalls) {
+				expect(call.operation).toBe("delete")
+				expect(call.collection).toBe("users")
+				expect(call.id).toBe(call.entity.id)
+			}
+
+			// Verify onChange was called once per entity (3 times) with type "delete"
+			expect(onChangeCalls).toHaveLength(3)
+			for (const ctx of onChangeCalls) {
+				expect(ctx.type).toBe("delete")
+			}
+			const deleteContexts = onChangeCalls.filter(
+				(c): c is Extract<OnChangeContext<User>, { type: "delete" }> => c.type === "delete",
+			)
+			expect(deleteContexts.map((c) => c.entity.name).sort()).toEqual([
+				"Alice",
+				"Bob",
+				"Charlie",
+			])
+
+			// Verify all users are deleted from the database
+			expect(result.allUsers).toHaveLength(0)
+		})
 	})
 })
