@@ -55,7 +55,7 @@
 - [x] 9.2 Test field-level `$search` basic match: `{ title: { $search: "dune" } }` matches "Dune"
 - [x] 9.3 Test case insensitivity: `{ title: { $search: "DUNE" } }` matches "Dune"
 - [x] 9.4 Test multi-term search: `{ title: { $search: "left hand darkness" } }` matches "The Left Hand of Darkness"
-- [ ] 9.5 Test prefix matching: `{ title: { $search: "neuro" } }` matches "Neuromancer"
+- [x] 9.5 Test prefix matching: `{ title: { $search: "neuro" } }` matches "Neuromancer"
 - [ ] 9.6 Test no match: `{ title: { $search: "xyz123" } }` returns no results
 - [ ] 9.7 Test empty search string: `{ title: { $search: "" } }` returns all results (no filter applied)
 

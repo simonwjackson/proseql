@@ -225,4 +225,69 @@ describe("Full-text search: Basic Search (task 9)", () => {
 			expect(results[0].title).toBe("Snow Crash")
 		})
 	})
+
+	describe("9.5: Prefix matching", () => {
+		it("should match 'Neuromancer' when searching for prefix 'neuro'", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "neuro" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Neuromancer")
+		})
+
+		it("should match 'Foundation' when searching for prefix 'found'", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "found" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Foundation")
+		})
+
+		it("should match 'Dune' when searching for prefix 'du'", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "du" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should match 'Snow Crash' when searching for prefix 'cra'", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "cra" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Snow Crash")
+		})
+
+		it("should match with multi-term prefix search", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "sno cra" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Snow Crash")
+		})
+
+		it("should match author with prefix search", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { author: { $search: "herb" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].author).toBe("Frank Herbert")
+		})
+
+		it("should match description with prefix search", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { description: { $search: "cyber" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Snow Crash")
+		})
+	})
 })
