@@ -12,7 +12,7 @@
 - [x] 2.3 Implement backward pagination (before): filter to `record[key] < before`, take last `limit + 1`, set `hasPreviousPage` if overflow, `hasNextPage = true`, maintain ascending item order
 - [x] 2.4 Implement first page (no after/before): take first `limit + 1`, set `hasNextPage` if overflow, `hasPreviousPage = false`
 - [x] 2.5 Handle empty results: return empty items, null cursors, both has-flags false
-- [ ] 2.6 Add validation: reject `after` + `before` both set, reject `limit <= 0`, validate cursor key exists on items. All produce `ValidationError`
+- [x] 2.6 Add validation: reject `after` + `before` both set, reject `limit <= 0`, validate cursor key exists on items. All produce `ValidationError`
 
 ## 3. Factory Integration
 

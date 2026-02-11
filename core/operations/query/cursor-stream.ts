@@ -25,6 +25,31 @@ function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
 }
 
 /**
+ * Check if a key exists on a record (returns undefined only if property doesn't exist).
+ */
+function keyExistsOnRecord(
+	record: Record<string, unknown>,
+	key: string,
+): boolean {
+	const parts = key.split(".")
+	let current: unknown = record
+
+	for (const part of parts) {
+		if (current === null || current === undefined) {
+			return false
+		}
+
+		if (typeof current === "object" && part in (current as object)) {
+			current = (current as Record<string, unknown>)[part]
+		} else {
+			return false
+		}
+	}
+
+	return true
+}
+
+/**
  * Extract cursor value from a record using the cursor key.
  * Cursor values are string representations of the sort key value via String().
  */
@@ -34,6 +59,35 @@ function extractCursorValue<T extends Record<string, unknown>>(
 ): string {
 	const value = getNestedValue(record, key)
 	return String(value)
+}
+
+/**
+ * Validate that the cursor key exists on the items.
+ * Returns a ValidationError if the key doesn't exist.
+ */
+function validateKeyExists<T extends Record<string, unknown>>(
+	items: ReadonlyArray<T>,
+	key: string,
+): ValidationError | null {
+	if (items.length === 0) {
+		return null
+	}
+
+	// Check the first item to validate the key exists
+	const firstItem = items[0]
+	if (!keyExistsOnRecord(firstItem as Record<string, unknown>, key)) {
+		return new ValidationError({
+			message: "Invalid cursor configuration",
+			issues: [
+				{
+					field: "cursor.key",
+					message: `key '${key}' does not exist on entity`,
+				},
+			],
+		})
+	}
+
+	return null
 }
 
 /**
@@ -55,8 +109,36 @@ export const applyCursor = (config: CursorConfig) =>
 	): Effect.Effect<CursorPageResult<T>, E | ValidationError, R> => {
 		const { key, after, before, limit } = config
 
-		// --- Validation (stub for task 2.6) ---
-		// Validation will be implemented in task 2.6
+		// --- Validation ---
+		// Reject after + before both set
+		if (after !== undefined && before !== undefined) {
+			return Effect.fail(
+				new ValidationError({
+					message: "Invalid cursor configuration",
+					issues: [
+						{
+							field: "cursor",
+							message: "after and before are mutually exclusive",
+						},
+					],
+				}),
+			)
+		}
+
+		// Reject limit <= 0
+		if (limit <= 0) {
+			return Effect.fail(
+				new ValidationError({
+					message: "Invalid cursor configuration",
+					issues: [
+						{
+							field: "cursor.limit",
+							message: "limit must be a positive integer",
+						},
+					],
+				}),
+			)
+		}
 
 		// --- Cursor boundary filtering ---
 		let filteredStream = stream
@@ -99,6 +181,12 @@ export const applyCursor = (config: CursorConfig) =>
 							hasPreviousPage: false,
 						},
 					} as CursorPageResult<T>
+				}
+
+				// Validate cursor key exists on items
+				const keyError = validateKeyExists(items, key)
+				if (keyError !== null) {
+					return yield* Effect.fail(keyError)
 				}
 
 				// Check if we have overflow (more items than limit)
@@ -148,6 +236,12 @@ export const applyCursor = (config: CursorConfig) =>
 							hasPreviousPage: false,
 						},
 					} as CursorPageResult<T>
+				}
+
+				// Validate cursor key exists on items
+				const keyError = validateKeyExists(items, key)
+				if (keyError !== null) {
+					return yield* Effect.fail(keyError)
 				}
 
 				// Check if we have overflow (more items than limit)
