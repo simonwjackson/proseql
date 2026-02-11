@@ -1,15 +1,8 @@
 {
-  "name": "proseql",
-  "version": "0.0.0",
-  "description": "A type-safe relational database that persists to plain text files",
-  "dependencies": {
-    "@toon-format/toon": "^2.1.0",
-    "effect": "^3.15.2",
-    "hjson": "^3.2.2",
-    "json5": "^2.2.3",
-    "jsonc-parser": "^3.3.1",
-    "smol-toml": "^1.6.0",
-    "yaml": "^2.3.4"
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "postinstall": "bun2nix -o bun.nix"
   },
   "devDependencies": {
     "@types/bun": "^1.2.17",
