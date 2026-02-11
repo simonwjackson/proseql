@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import { Effect, Schema, Chunk, Stream } from "effect"
+import { Effect, Schema, Chunk, Stream, Runtime, Cause } from "effect"
 import { createEffectDatabase } from "../core/factories/database-effect.js"
 import type { CursorPageResult } from "../core/types/cursor-types.js"
+import { ValidationError } from "../core/errors/crud-errors.js"
 
 // ============================================================================
 // Test Schema
@@ -1659,6 +1660,292 @@ describe("Cursor Pagination", () => {
 				expect(item.name).toBeDefined()
 				expect(item.price).toBeUndefined()
 				expect(item.category).toBeUndefined()
+			}
+		})
+	})
+
+	describe("validation errors", () => {
+		/**
+		 * Helper to extract the actual error from Effect's FiberFailure wrapper.
+		 * When Effect.runPromise rejects, it wraps the error in a FiberFailure.
+		 */
+		const extractEffectError = (e: unknown): unknown => {
+			if (Runtime.isFiberFailure(e) && Cause.isCause((e as Record<symbol, unknown>)[Runtime.FiberFailureCauseId])) {
+				const cause = (e as Record<symbol, unknown>)[Runtime.FiberFailureCauseId] as Cause.Cause<unknown>
+				if (Cause.isFailType(cause)) {
+					return cause.error
+				}
+			}
+			return e
+		}
+
+		it("both after and before set produces ValidationError", async () => {
+			const items = generateItems(10)
+			const db = await createTestDatabase(items)
+
+			// Query with both after and before set - should fail
+			const queryEffect = db.items.query({
+				cursor: {
+					key: "id",
+					limit: 3,
+					after: "item-003",
+					before: "item-007",
+				},
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }
+
+			try {
+				await queryEffect.runPromise
+				expect.fail("Should have thrown ValidationError")
+			} catch (e) {
+				const error = extractEffectError(e) as ValidationError
+				expect(error._tag).toBe("ValidationError")
+				expect(error.message).toBe("Invalid cursor configuration")
+				expect(error.issues).toEqual([
+					{
+						field: "cursor",
+						message: "after and before are mutually exclusive",
+					},
+				])
+			}
+		})
+
+		it("limit <= 0 produces ValidationError (zero)", async () => {
+			const items = generateItems(10)
+			const db = await createTestDatabase(items)
+
+			// Query with limit = 0 - should fail
+			const queryEffect = db.items.query({
+				cursor: {
+					key: "id",
+					limit: 0,
+				},
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }
+
+			try {
+				await queryEffect.runPromise
+				expect.fail("Should have thrown ValidationError")
+			} catch (e) {
+				const error = extractEffectError(e) as ValidationError
+				expect(error._tag).toBe("ValidationError")
+				expect(error.message).toBe("Invalid cursor configuration")
+				expect(error.issues).toEqual([
+					{
+						field: "cursor.limit",
+						message: "limit must be a positive integer",
+					},
+				])
+			}
+		})
+
+		it("limit <= 0 produces ValidationError (negative)", async () => {
+			const items = generateItems(10)
+			const db = await createTestDatabase(items)
+
+			// Query with negative limit - should fail
+			const queryEffect = db.items.query({
+				cursor: {
+					key: "id",
+					limit: -5,
+				},
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }
+
+			try {
+				await queryEffect.runPromise
+				expect.fail("Should have thrown ValidationError")
+			} catch (e) {
+				const error = extractEffectError(e) as ValidationError
+				expect(error._tag).toBe("ValidationError")
+				expect(error.message).toBe("Invalid cursor configuration")
+				expect(error.issues).toEqual([
+					{
+						field: "cursor.limit",
+						message: "limit must be a positive integer",
+					},
+				])
+			}
+		})
+
+		it("invalid cursor key that does not exist on entity produces ValidationError", async () => {
+			const items = generateItems(10)
+			const db = await createTestDatabase(items)
+
+			// Query with a key that doesn't exist on the items
+			const queryEffect = db.items.query({
+				cursor: {
+					key: "nonexistentField",
+					limit: 3,
+				},
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }
+
+			try {
+				await queryEffect.runPromise
+				expect.fail("Should have thrown ValidationError")
+			} catch (e) {
+				const error = extractEffectError(e) as ValidationError
+				expect(error._tag).toBe("ValidationError")
+				expect(error.message).toBe("Invalid cursor configuration")
+				expect(error.issues).toEqual([
+					{
+						field: "cursor.key",
+						message: "key 'nonexistentField' does not exist on entity",
+					},
+				])
+			}
+		})
+
+		it("invalid nested cursor key produces ValidationError", async () => {
+			const items = generateItems(10)
+			const db = await createTestDatabase(items)
+
+			// Query with a nested key that doesn't exist
+			const queryEffect = db.items.query({
+				cursor: {
+					key: "nested.path.field",
+					limit: 3,
+				},
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }
+
+			try {
+				await queryEffect.runPromise
+				expect.fail("Should have thrown ValidationError")
+			} catch (e) {
+				const error = extractEffectError(e) as ValidationError
+				expect(error._tag).toBe("ValidationError")
+				expect(error.message).toBe("Invalid cursor configuration")
+				expect(error.issues).toEqual([
+					{
+						field: "cursor.key",
+						message: "key 'nested.path.field' does not exist on entity",
+					},
+				])
+			}
+		})
+
+		it("cursor key mismatch with explicit sort field produces ValidationError", async () => {
+			const items = generateItems(10)
+			const db = await createTestDatabase(items)
+
+			// Sort by 'name' but cursor key is 'id' - should fail
+			const queryEffect = db.items.query({
+				sort: { name: "asc" },
+				cursor: {
+					key: "id",
+					limit: 3,
+				},
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }
+
+			try {
+				await queryEffect.runPromise
+				expect.fail("Should have thrown ValidationError")
+			} catch (e) {
+				const error = extractEffectError(e) as ValidationError
+				expect(error._tag).toBe("ValidationError")
+				expect(error.message).toBe("Invalid cursor configuration")
+				expect(error.issues).toEqual([
+					{
+						field: "cursor.key",
+						message: "cursor key 'id' must match primary sort field 'name'",
+					},
+				])
+			}
+		})
+
+		it("cursor key mismatch with first field in multi-field sort produces ValidationError", async () => {
+			const items = generateItems(10)
+			const db = await createTestDatabase(items)
+
+			// Sort by category (primary), id (secondary) but cursor key is 'id' - should fail
+			// because cursor key must match the PRIMARY sort field
+			const queryEffect = db.items.query({
+				sort: { category: "asc", id: "asc" },
+				cursor: {
+					key: "id",
+					limit: 3,
+				},
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }
+
+			try {
+				await queryEffect.runPromise
+				expect.fail("Should have thrown ValidationError")
+			} catch (e) {
+				const error = extractEffectError(e) as ValidationError
+				expect(error._tag).toBe("ValidationError")
+				expect(error.message).toBe("Invalid cursor configuration")
+				expect(error.issues).toEqual([
+					{
+						field: "cursor.key",
+						message: "cursor key 'id' must match primary sort field 'category'",
+					},
+				])
+			}
+		})
+
+		it("cursor key matching primary sort field does not produce error", async () => {
+			const items = generateItems(10)
+
+			// Sort by 'id' and cursor key is 'id' - should succeed
+			const result = await runCursorQuery(items, {
+				sort: { id: "asc" },
+				cursor: {
+					key: "id",
+					limit: 3,
+				},
+			})
+
+			// Should succeed and return items
+			expect(result.items).toHaveLength(3)
+			expect(result.items.map((i) => i.id)).toEqual([
+				"item-001",
+				"item-002",
+				"item-003",
+			])
+		})
+
+		it("cursor key matching primary field in multi-field sort does not produce error", async () => {
+			const items = generateItems(10)
+
+			// Sort by category (primary), id (secondary) and cursor key is 'category' - should succeed
+			const result = await runCursorQuery(items, {
+				sort: { category: "asc", id: "asc" },
+				cursor: {
+					key: "category",
+					limit: 4,
+				},
+			})
+
+			// Should succeed and return items
+			expect(result.items).toHaveLength(4)
+			// All should be 'books' (first category alphabetically)
+			expect(result.items.every((i) => i.category === "books")).toBe(true)
+		})
+
+		it("validation error includes proper error structure", async () => {
+			const items = generateItems(10)
+			const db = await createTestDatabase(items)
+
+			// Use both after and before to trigger validation error
+			const queryEffect = db.items.query({
+				cursor: {
+					key: "id",
+					limit: 3,
+					after: "item-003",
+					before: "item-007",
+				},
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }
+
+			try {
+				await queryEffect.runPromise
+				expect.fail("Should have thrown ValidationError")
+			} catch (e) {
+				const error = extractEffectError(e) as ValidationError
+				// Verify error is a ValidationError with expected structure
+				expect(error._tag).toBe("ValidationError")
+				expect(error.message).toBeDefined()
+				expect(error.issues).toBeDefined()
+				expect(Array.isArray(error.issues)).toBe(true)
+				expect(error.issues.length).toBeGreaterThan(0)
+				expect(error.issues[0]).toHaveProperty("field")
+				expect(error.issues[0]).toHaveProperty("message")
 			}
 		})
 	})
