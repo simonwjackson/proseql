@@ -504,5 +504,53 @@ describe("lifecycle-hooks", () => {
 			expect(result.found.email).toBe("alice_new@example.com")
 			expect(result.found.updatedAt).toBe("2024-01-15T12:00:00Z")
 		})
+
+		it("beforeUpdate rejects → update fails, entity unchanged", async () => {
+			const hooks: HooksConfig<User> = {
+				beforeUpdate: [makeRejectingBeforeUpdateHook("Update not allowed")],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks)
+
+					// Capture original state of u1
+					const originalUser = yield* db.users.findById("u1")
+
+					// Attempt to update - should fail with HookError
+					const updateResult = yield* db.users
+						.update("u1", {
+							name: "Alice Updated",
+							email: "alice_updated@test.com",
+						})
+						.pipe(
+							Effect.matchEffect({
+								onFailure: (error) => Effect.succeed({ type: "error" as const, error }),
+								onSuccess: (user) => Effect.succeed({ type: "success" as const, user }),
+							}),
+						)
+
+					// Verify entity was not changed
+					const afterAttempt = yield* db.users.findById("u1")
+
+					return { originalUser, updateResult, afterAttempt }
+				}),
+			)
+
+			// The update should have failed
+			expect(result.updateResult.type).toBe("error")
+			if (result.updateResult.type === "error") {
+				expect(result.updateResult.error._tag).toBe("HookError")
+				const hookError = result.updateResult.error as HookError
+				expect(hookError.hook).toBe("beforeUpdate")
+				expect(hookError.operation).toBe("update")
+				expect(hookError.reason).toBe("Update not allowed")
+			}
+
+			// Entity should be unchanged
+			expect(result.afterAttempt.name).toBe(result.originalUser.name)
+			expect(result.afterAttempt.email).toBe(result.originalUser.email)
+			expect(result.afterAttempt.age).toBe(result.originalUser.age)
+		})
 	})
 })
