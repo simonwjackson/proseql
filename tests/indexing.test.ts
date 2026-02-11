@@ -598,6 +598,181 @@ describe("Indexing - Index Built from Initial Data", () => {
 // ============================================================================
 
 describe("Indexing - Index Maintenance", () => {
+	describe("Task 7.2: update changing indexed field → old removed, new added", () => {
+		it("should remove entity from old index entry and add to new when indexed field changes", async () => {
+			// Start with a user with email "alice@example.com"
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Verify initial index state via query
+			const aliceInitial = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceInitial.length).toBe(1)
+			expect((aliceInitial[0] as { id: string }).id).toBe("u1")
+
+			// Update Alice's email to a new value
+			await db.users.update("u1", { email: "alice.new@example.com" }).runPromise
+
+			// Query by OLD email - should not find Alice anymore
+			const oldEmailResults = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(oldEmailResults.length).toBe(0)
+
+			// Query by NEW email - should find Alice
+			const newEmailResults = await db.users.query({ where: { email: "alice.new@example.com" } }).runPromise
+			expect(newEmailResults.length).toBe(1)
+			expect((newEmailResults[0] as { id: string }).id).toBe("u1")
+			expect((newEmailResults[0] as { email: string }).email).toBe("alice.new@example.com")
+
+			// Bob should still be queryable by his unchanged email
+			const bobResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(bobResults.length).toBe(1)
+			expect((bobResults[0] as { id: string }).id).toBe("u2")
+		})
+
+		it("should move entity between existing index Sets when changing to a shared value", async () => {
+			// Start with two users with different emails
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Update Alice's email to match Bob's
+			await db.users.update("u1", { email: "bob@example.com" }).runPromise
+
+			// Query by OLD email - should be empty
+			const oldEmailResults = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(oldEmailResults.length).toBe(0)
+
+			// Query by shared email - should return both users
+			const sharedEmailResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(sharedEmailResults.length).toBe(2)
+
+			const ids = sharedEmailResults.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u2"])
+		})
+
+		it("should handle update that splits a shared index entry", async () => {
+			// Start with two users sharing the same email
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "shared@example.com", name: "User One", age: 30 },
+				{ id: "u2", email: "shared@example.com", name: "User Two", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Verify both are at shared email initially
+			const sharedInitial = await db.users.query({ where: { email: "shared@example.com" } }).runPromise
+			expect(sharedInitial.length).toBe(2)
+
+			// Update u1's email to a unique value
+			await db.users.update("u1", { email: "unique@example.com" }).runPromise
+
+			// Query shared email - should now only have u2
+			const sharedAfter = await db.users.query({ where: { email: "shared@example.com" } }).runPromise
+			expect(sharedAfter.length).toBe(1)
+			expect((sharedAfter[0] as { id: string }).id).toBe("u2")
+
+			// Query unique email - should have u1
+			const uniqueResults = await db.users.query({ where: { email: "unique@example.com" } }).runPromise
+			expect(uniqueResults.length).toBe(1)
+			expect((uniqueResults[0] as { id: string }).id).toBe("u1")
+		})
+
+		it("should update compound index when compound key fields change", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Verify initial compound index state
+			const electronicsComputers = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(electronicsComputers.length).toBe(1)
+			expect((electronicsComputers[0] as { id: string }).id).toBe("p1")
+
+			// Update Laptop's subcategory from "computers" to "phones"
+			await db.products.update("p1", { subcategory: "phones" }).runPromise
+
+			// Query old compound key - should be empty
+			const oldCompound = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(oldCompound.length).toBe(0)
+
+			// Query new compound key - should have both products
+			const newCompound = await db.products.query({
+				where: { category: "electronics", subcategory: "phones" },
+			}).runPromise
+			expect(newCompound.length).toBe(2)
+
+			const ids = newCompound.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p2"])
+		})
+
+		it("should handle updating both fields of a compound index", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Update both category and subcategory
+			await db.products.update("p1", { category: "furniture", subcategory: "office" }).runPromise
+
+			// Query old compound key - should be empty
+			const oldResults = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(oldResults.length).toBe(0)
+
+			// Query new compound key - should have the product
+			const newResults = await db.products.query({
+				where: { category: "furniture", subcategory: "office" },
+			}).runPromise
+			expect(newResults.length).toBe(1)
+			expect((newResults[0] as { id: string }).id).toBe("p1")
+		})
+
+		it("should handle update that sets indexed field to a value already used by same entity", async () => {
+			// This tests the edge case where the update doesn't actually change the value
+			// (covered more in 7.3, but including a basic check here)
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Update email to the same value (plus update name to trigger the update)
+			await db.users.update("u1", { email: "alice@example.com", name: "Alice Updated" }).runPromise
+
+			// Should still be queryable by the same email
+			const results = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("u1")
+			expect((results[0] as { name: string }).name).toBe("Alice Updated")
+		})
+	})
+
 	describe("Task 7.1: create → index entry added", () => {
 		it("should add new entity to index when created", async () => {
 			// Start with an empty indexed database

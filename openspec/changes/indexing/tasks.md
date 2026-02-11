@@ -47,7 +47,7 @@
 ## 7. Tests — Index Maintenance
 
 - [x] 7.1 Test create → index entry added
-- [ ] 7.2 Test update changing indexed field → old removed, new added
+- [x] 7.2 Test update changing indexed field → old removed, new added
 - [ ] 7.3 Test update not changing indexed field → index unchanged
 - [ ] 7.4 Test delete → index entries removed, empty Sets cleaned up
 - [ ] 7.5 Test createMany → batch index update
