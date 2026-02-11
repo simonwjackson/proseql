@@ -48,7 +48,7 @@
 ## 8. Tests — Before Hooks
 
 - [x] 8.1 Create `tests/lifecycle-hooks.test.ts` with test helpers: database with hooked collection
-- [ ] 8.2 Test beforeCreate transforms data → inserted entity reflects transformation
+- [x] 8.2 Test beforeCreate transforms data → inserted entity reflects transformation
 - [ ] 8.3 Test beforeCreate rejects → create fails with HookError, no state change
 - [ ] 8.4 Test multiple beforeCreate hooks chain in order
 - [ ] 8.5 Test beforeUpdate modifies update payload

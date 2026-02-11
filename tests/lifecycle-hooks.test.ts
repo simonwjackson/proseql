@@ -326,4 +326,41 @@ describe("lifecycle-hooks", () => {
 			expect(onChangeCalls[0].type).toBe("create")
 		})
 	})
+
+	describe("before hooks", () => {
+		it("beforeCreate transforms data → inserted entity reflects transformation", async () => {
+			// Hook that normalizes email to lowercase and adds a createdAt timestamp
+			const hooks: HooksConfig<User> = {
+				beforeCreate: [
+					makeBeforeCreateHook((user) => ({
+						...user,
+						email: user.email.toLowerCase(),
+						createdAt: "2024-01-01T00:00:00Z",
+					})),
+				],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, { users: [] })
+					const created = yield* db.users.create({
+						name: "Test User",
+						email: "TEST@EXAMPLE.COM",
+						age: 30,
+					})
+					// Also verify by reading back from the collection
+					const found = yield* db.users.findById(created.id)
+					return { created, found }
+				}),
+			)
+
+			// The created entity should have transformed data
+			expect(result.created.email).toBe("test@example.com")
+			expect(result.created.createdAt).toBe("2024-01-01T00:00:00Z")
+
+			// The entity in the collection should also have the transformed data
+			expect(result.found.email).toBe("test@example.com")
+			expect(result.found.createdAt).toBe("2024-01-01T00:00:00Z")
+		})
+	})
 })
