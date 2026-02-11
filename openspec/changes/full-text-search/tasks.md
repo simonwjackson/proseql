@@ -26,9 +26,9 @@
 
 ## 5. Multi-Field Search
 
-- [ ] 5.1 Implement multi-field search path: when `$search` is a top-level object with `query` and optional `fields`, tokenize the query, iterate over specified fields (or all string-typed fields on the entity), return true if the combined field matches satisfy all query tokens
-- [ ] 5.2 Handle `fields` omission: introspect the entity to find all keys with string values, use those as the search fields
-- [ ] 5.3 A query token can match in any of the specified fields (not required to match in the same field) -- "herbert dune" should match when "herbert" is in `author` and "dune" is in `title`
+- [x] 5.1 Implement multi-field search path: when `$search` is a top-level object with `query` and optional `fields`, tokenize the query, iterate over specified fields (or all string-typed fields on the entity), return true if the combined field matches satisfy all query tokens
+- [x] 5.2 Handle `fields` omission: introspect the entity to find all keys with string values, use those as the search fields
+- [x] 5.3 A query token can match in any of the specified fields (not required to match in the same field) -- "herbert dune" should match when "herbert" is in `author` and "dune" is in `title`
 
 ## 6. Relevance Sort Integration
 
