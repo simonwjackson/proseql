@@ -36,14 +36,14 @@
 - [x] 5.5 Test `sum` on numeric field → correct total
 - [x] 5.6 Test `sum` with non-numeric/null values → skipped
 - [x] 5.7 Test `sum` on empty result set → 0
-- [ ] 5.8 Test `avg` on numeric field → correct mean
-- [ ] 5.9 Test `avg` with all non-numeric → null
-- [ ] 5.10 Test `avg` on empty result set → null
-- [ ] 5.11 Test `min`/`max` on numeric field → correct extremes
-- [ ] 5.12 Test `min`/`max` on string field → lexicographic comparison
-- [ ] 5.13 Test `min`/`max` on empty result set → undefined
-- [ ] 5.14 Test multiple aggregations in one call → all present in result
-- [ ] 5.15 Test multiple fields per aggregation → all fields computed
+- [x] 5.8 Test `avg` on numeric field → correct mean
+- [x] 5.9 Test `avg` with all non-numeric → null
+- [x] 5.10 Test `avg` on empty result set → null
+- [x] 5.11 Test `min`/`max` on numeric field → correct extremes
+- [x] 5.12 Test `min`/`max` on string field → lexicographic comparison
+- [x] 5.13 Test `min`/`max` on empty result set → undefined
+- [x] 5.14 Test multiple aggregations in one call → all present in result
+- [x] 5.15 Test multiple fields per aggregation → all fields computed
 
 ## 6. Tests — Group By
 
