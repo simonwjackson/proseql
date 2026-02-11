@@ -1,16 +1,25 @@
-import type { Effect, Schema, Stream } from "effect";
-import type { EffectCollection, RunnableEffect, RunnableStream } from "../factories/database-effect.js";
-import type { MinimalEntity, TransactionContext } from "./crud-types.js";
+import type { Effect, Schema } from "effect";
+import type {
+	TransactionError,
+	ValidationError,
+} from "../errors/crud-errors.js";
 import type { DanglingReferenceError } from "../errors/query-errors.js";
-import type { TransactionError } from "../errors/crud-errors.js";
+import type {
+	EffectCollection,
+	RunnableEffect,
+	RunnableStream,
+} from "../factories/database-effect.js";
 import type {
 	AggregateConfig,
 	AggregateResult,
 	GroupedAggregateResult,
 } from "./aggregate-types.js";
+import type {
+	ComputedFieldsConfig,
+	InferComputedFields,
+} from "./computed-types.js";
+import type { MinimalEntity, TransactionContext } from "./crud-types.js";
 import type { CursorConfig, RunnableCursorPage } from "./cursor-types.js";
-import type { ValidationError } from "../errors/crud-errors.js";
-import type { ComputedFieldsConfig, InferComputedFields } from "./computed-types.js";
 import type { SearchConfig } from "./search-types.js";
 
 // ============================================================================
@@ -106,16 +115,11 @@ export type FindRelationsByCollection<
 	: Record<string, never>;
 
 // Keep the old one for backward compatibility but simplified
-export type FindRelationsForEntity<DB, T> = Record<string, never>; // Simplified for now
+export type FindRelationsForEntity<_DB, _T> = Record<string, never>; // Simplified for now
 
 // Helper type to extract the target collection from a relationship
-type GetRelationshipTargetCollection<R> = R extends RelationshipDef<
-	infer _,
-	infer __,
-	infer Target
->
-	? Target
-	: never;
+type GetRelationshipTargetCollection<R> =
+	R extends RelationshipDef<infer _, infer __, infer Target> ? Target : never;
 
 // Helper to extract nested object field paths (for dot notation) - limited to 2 levels deep to avoid infinite recursion
 type ExtractNestedPaths<T> = {
@@ -229,32 +233,28 @@ export type SelectConfig<T, Relations, DB> =
 	| ArraySelectConfig<T>;
 
 // Helper type to apply nested object selection
-type ApplyNestedObjectSelect<T, Config> = Config extends Record<string, unknown>
-	? {
-			[K in keyof Config & keyof T]: Config[K] extends true
-				? T[K]
-				: Config[K] extends Record<string, unknown>
-					? T[K] extends Record<string, unknown>
-						? ApplyNestedObjectSelect<T[K], Config[K]>
-						: never
-					: never;
-		}
-	: T;
+type ApplyNestedObjectSelect<T, Config> =
+	Config extends Record<string, unknown>
+		? {
+				[K in keyof Config & keyof T]: Config[K] extends true
+					? T[K]
+					: Config[K] extends Record<string, unknown>
+						? T[K] extends Record<string, unknown>
+							? ApplyNestedObjectSelect<T[K], Config[K]>
+							: never
+						: never;
+			}
+		: T;
 
 // Apply object-based select configuration to transform entity type
-export type ApplyObjectSelectConfig<T, Config> = Config extends Record<
-	string,
-	unknown
->
-	? ApplyNestedObjectSelect<T, Config>
-	: T;
+export type ApplyObjectSelectConfig<T, Config> =
+	Config extends Record<string, unknown>
+		? ApplyNestedObjectSelect<T, Config>
+		: T;
 
 // Apply array-based select configuration (legacy support)
-export type ApplyArraySelectConfig<T, Config> = Config extends ReadonlyArray<
-	keyof T
->
-	? Pick<T, Config[number] & keyof T>
-	: T;
+export type ApplyArraySelectConfig<T, Config> =
+	Config extends ReadonlyArray<keyof T> ? Pick<T, Config[number] & keyof T> : T;
 
 // Apply object-based select with relationship population
 export type ApplyObjectSelectWithPopulation<T, Config, Relations, DB> =
@@ -501,7 +501,8 @@ export type ApplySelectAndPopulate<T, Relations, SelectConf, PopulateConf, DB> =
 												>
 											: never
 										: never;
-							} & { // Required fields for inverse relationships
+							} & {
+								// Required fields for inverse relationships
 								[K in keyof PopulateConf &
 									InverseRelationKeys<Relations>]: PopulateConf[K] extends true
 									? GetTargetCollection<Relations, K> extends keyof DB
@@ -594,7 +595,8 @@ export type GetEntityFromCollection<
 	: never;
 
 // Apply populate configuration to transform entity type
-export type ApplyPopulateObject<T, Relations, Config, DB> = T & { // Optional fields for ref relationships
+export type ApplyPopulateObject<T, Relations, Config, DB> = T & {
+	// Optional fields for ref relationships
 	[K in keyof Config & RefRelationKeys<Relations>]?: Config[K] extends true
 		? GetTargetCollection<Relations, K> extends keyof DB
 			? GetEntityFromCollection<DB, GetTargetCollection<Relations, K>>
@@ -609,7 +611,8 @@ export type ApplyPopulateObject<T, Relations, Config, DB> = T & { // Optional fi
 					>
 				: never
 			: never;
-} & { // Required fields for inverse relationships
+} & {
+	// Required fields for inverse relationships
 	[K in keyof Config & InverseRelationKeys<Relations>]: Config[K] extends true
 		? GetTargetCollection<Relations, K> extends keyof DB
 			? Array<GetEntityFromCollection<DB, GetTargetCollection<Relations, K>>>
@@ -754,27 +757,41 @@ type QueryItemType<T, Relations, Config, DB> = Config extends {
 // Enhanced query return type that supports both object and array-based selection
 // Uses RunnableStream (Stream.Stream + .runPromise) for composable query pipelines with typed errors
 // Cursor pagination returns RunnableCursorPage instead of RunnableStream
-export type QueryReturnType<T, Relations, Config, DB> = Config extends { cursor: CursorConfig }
+export type QueryReturnType<T, Relations, Config, DB> = Config extends {
+	cursor: CursorConfig;
+}
 	? RunnableCursorPage<
 			QueryItemType<T, Relations, Config, DB>,
 			DanglingReferenceError | ValidationError
 		>
 	: Config extends {
-			populate: infer P;
-			select: infer S;
-		}
+				populate: infer P;
+				select: infer S;
+			}
 		? P extends PopulateConfig<Relations, DB>
 			? S extends SelectConfig<T, Relations, DB>
-				? RunnableStream<ApplySelectAndPopulate<T, Relations, S, P, DB>, DanglingReferenceError>
-				: RunnableStream<ApplyPopulateObject<T, Relations, P, DB>, DanglingReferenceError>
+				? RunnableStream<
+						ApplySelectAndPopulate<T, Relations, S, P, DB>,
+						DanglingReferenceError
+					>
+				: RunnableStream<
+						ApplyPopulateObject<T, Relations, P, DB>,
+						DanglingReferenceError
+					>
 			: RunnableStream<T, DanglingReferenceError>
 		: Config extends { populate: infer P }
 			? P extends PopulateConfig<Relations, DB>
-				? RunnableStream<ApplyPopulateObject<T, Relations, P, DB>, DanglingReferenceError>
+				? RunnableStream<
+						ApplyPopulateObject<T, Relations, P, DB>,
+						DanglingReferenceError
+					>
 				: RunnableStream<T, DanglingReferenceError>
 			: Config extends { select: infer S }
 				? S extends SelectConfig<T, Relations, DB>
-					? RunnableStream<ApplySelectConfig<T, S, Relations, DB>, DanglingReferenceError>
+					? RunnableStream<
+							ApplySelectConfig<T, S, Relations, DB>,
+							DanglingReferenceError
+						>
 					: RunnableStream<T, DanglingReferenceError>
 				: RunnableStream<T, DanglingReferenceError>;
 
@@ -807,7 +824,9 @@ export type SmartCollection<
 
 // Extract all entity types from config
 export type ExtractEntityTypes<Config> = {
-	[K in keyof Config]: Config[K] extends { schema: Schema.Schema<infer T, infer _E, infer _R> }
+	[K in keyof Config]: Config[K] extends {
+		schema: Schema.Schema<infer T, infer _E, infer _R>;
+	}
 		? T
 		: never;
 };
@@ -833,9 +852,10 @@ export type ResolveRelationships<Relations, AllEntities> = {
 };
 
 // Helper type to merge entity with computed fields when computed config is present
-type EntityWithComputed<Entity, Computed> = Computed extends ComputedFieldsConfig<Entity>
-	? Entity & InferComputedFields<Computed>
-	: Entity;
+type EntityWithComputed<Entity, Computed> =
+	Computed extends ComputedFieldsConfig<Entity>
+		? Entity & InferComputedFields<Computed>
+		: Entity;
 
 // Generate the full database type automatically
 export type GenerateDatabase<Config> = {
@@ -857,7 +877,9 @@ export type GenerateDatabase<Config> = {
 	 * On failure, all changes are rolled back and the original error is re-raised.
 	 */
 	$transaction<A, E>(
-		fn: (ctx: TransactionContext<GenerateDatabase<Config>>) => Effect.Effect<A, E>,
+		fn: (
+			ctx: TransactionContext<GenerateDatabase<Config>>,
+		) => Effect.Effect<A, E>,
 	): Effect.Effect<A, E | TransactionError>;
 };
 
@@ -875,7 +897,9 @@ export type TypedPopulate<
 
 // Type for the dataset that matches the config
 export type DatasetFor<Config> = {
-	[K in keyof Config]: Config[K] extends { schema: Schema.Schema<infer T, infer _E, infer _R> }
+	[K in keyof Config]: Config[K] extends {
+		schema: Schema.Schema<infer T, infer _E, infer _R>;
+	}
 		? T[]
 		: never;
 };

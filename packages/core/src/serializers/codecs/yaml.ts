@@ -1,12 +1,12 @@
-import YAML from "yaml"
-import type { FormatCodec, FormatOptions } from "../format-codec.js"
+import YAML from "yaml";
+import type { FormatCodec, FormatOptions } from "../format-codec.js";
 
 /**
  * Options for the YAML codec.
  */
 export interface YamlCodecOptions {
-	readonly indent?: number
-	readonly lineWidth?: number
+	readonly indent?: number;
+	readonly lineWidth?: number;
 }
 
 /**
@@ -24,18 +24,18 @@ export interface YamlCodecOptions {
  * ```
  */
 export const yamlCodec = (options?: YamlCodecOptions): FormatCodec => {
-	const indent = options?.indent ?? 2
-	const lineWidth = options?.lineWidth ?? 80
+	const indent = options?.indent ?? 2;
+	const lineWidth = options?.lineWidth ?? 80;
 
 	return {
 		name: "yaml",
 		extensions: ["yaml", "yml"],
 		encode: (data: unknown, formatOptions?: FormatOptions): string => {
-			const actualIndent = formatOptions?.indent ?? indent
-			return YAML.stringify(data, { indent: actualIndent, lineWidth })
+			const actualIndent = formatOptions?.indent ?? indent;
+			return YAML.stringify(data, { indent: actualIndent, lineWidth });
 		},
 		decode: (raw: string): unknown => {
-			return YAML.parse(raw)
+			return YAML.parse(raw);
 		},
-	}
-}
+	};
+};

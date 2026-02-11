@@ -3,9 +3,9 @@
  * Intended for testing — stores data in a Map<string, string> instead of the filesystem.
  */
 
-import { Effect, Layer } from "effect"
-import { StorageAdapter, type StorageAdapterShape } from "./storage-service.js"
-import { StorageError } from "../errors/storage-errors.js"
+import { Effect, Layer } from "effect";
+import { StorageError } from "../errors/storage-errors.js";
+import { StorageAdapter, type StorageAdapterShape } from "./storage-service.js";
 
 // ============================================================================
 // In-memory storage adapter
@@ -17,7 +17,7 @@ const makeInMemoryAdapter = (
 ): StorageAdapterShape => ({
 	read: (path: string) =>
 		Effect.suspend(() => {
-			const content = store.get(path)
+			const content = store.get(path);
 			if (content === undefined) {
 				return Effect.fail(
 					new StorageError({
@@ -25,19 +25,19 @@ const makeInMemoryAdapter = (
 						operation: "read",
 						message: `File not found: ${path}`,
 					}),
-				)
+				);
 			}
-			return Effect.succeed(content)
+			return Effect.succeed(content);
 		}),
 
 	write: (path: string, data: string) =>
 		Effect.sync(() => {
-			store.set(path, data)
+			store.set(path, data);
 			// Notify watchers for this path
-			const pathWatchers = watchers.get(path)
+			const pathWatchers = watchers.get(path);
 			if (pathWatchers) {
 				for (const cb of pathWatchers) {
-					cb()
+					cb();
 				}
 			}
 		}),
@@ -53,27 +53,27 @@ const makeInMemoryAdapter = (
 						operation: "delete",
 						message: `File not found: ${path}`,
 					}),
-				)
+				);
 			}
-			store.delete(path)
-			return Effect.void
+			store.delete(path);
+			return Effect.void;
 		}),
 
 	ensureDir: (_path: string) => Effect.void,
 
 	watch: (path: string, onChange: () => void) =>
 		Effect.sync(() => {
-			const pathWatchers = watchers.get(path) ?? new Set()
-			pathWatchers.add(onChange)
-			watchers.set(path, pathWatchers)
+			const pathWatchers = watchers.get(path) ?? new Set();
+			pathWatchers.add(onChange);
+			watchers.set(path, pathWatchers);
 			return () => {
-				pathWatchers.delete(onChange)
+				pathWatchers.delete(onChange);
 				if (pathWatchers.size === 0) {
-					watchers.delete(path)
+					watchers.delete(path);
 				}
-			}
+			};
 		}),
-})
+});
 
 // ============================================================================
 // Layer construction
@@ -86,10 +86,10 @@ const makeInMemoryAdapter = (
 export const makeInMemoryStorageLayer = (
 	store?: Map<string, string>,
 ): Layer.Layer<StorageAdapter> =>
-	Layer.succeed(StorageAdapter, makeInMemoryAdapter(store))
+	Layer.succeed(StorageAdapter, makeInMemoryAdapter(store));
 
 /**
  * Default InMemoryStorageLayer with a fresh empty Map.
  */
 export const InMemoryStorageLayer: Layer.Layer<StorageAdapter> =
-	makeInMemoryStorageLayer()
+	makeInMemoryStorageLayer();

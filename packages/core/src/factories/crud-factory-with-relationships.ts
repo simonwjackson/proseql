@@ -6,23 +6,21 @@
  */
 
 import type {
-	MinimalEntity,
-} from "../types/crud-types.js";
+	ForeignKeyError,
+	NotFoundError,
+	OperationError,
+	ValidationError,
+} from "../errors/crud-errors.js";
 import type {
 	CreateWithRelationshipsInput,
-	UpdateWithRelationshipsInput,
 	DeleteWithRelationshipsOptions,
 	DeleteWithRelationshipsResult,
+	UpdateWithRelationshipsInput,
 } from "../types/crud-relationship-types.js";
+import type { MinimalEntity } from "../types/crud-types.js";
 import type { RelationshipDef } from "../types/types.js";
-import type {
-	NotFoundError,
-	ValidationError,
-	ForeignKeyError,
-	OperationError,
-} from "../errors/crud-errors.js";
-import type { RunnableEffect } from "./database-effect.js";
 import type { CrudMethods } from "./crud-factory.js";
+import type { RunnableEffect } from "./database-effect.js";
 
 // ============================================================================
 // Extended CRUD Methods Type (Effect-based)
@@ -37,10 +35,7 @@ export interface CrudMethodsWithRelationships<
 > extends CrudMethods<T> {
 	readonly createWithRelationships: (
 		input: CreateWithRelationshipsInput<T, TRelations>,
-	) => RunnableEffect<
-		T,
-		ValidationError | ForeignKeyError | OperationError
-	>
+	) => RunnableEffect<T, ValidationError | ForeignKeyError | OperationError>;
 
 	readonly updateWithRelationships: (
 		id: string,
@@ -48,7 +43,7 @@ export interface CrudMethodsWithRelationships<
 	) => RunnableEffect<
 		T,
 		ValidationError | NotFoundError | ForeignKeyError | OperationError
-	>
+	>;
 
 	readonly deleteWithRelationships: (
 		id: string,
@@ -56,19 +51,22 @@ export interface CrudMethodsWithRelationships<
 	) => RunnableEffect<
 		DeleteWithRelationshipsResult<T>,
 		NotFoundError | ValidationError | OperationError
-	>
+	>;
 
 	readonly deleteManyWithRelationships: (
 		predicate: (entity: T) => boolean,
 		options?: DeleteWithRelationshipsOptions<T, TRelations> & {
-			readonly limit?: number
+			readonly limit?: number;
 		},
 	) => RunnableEffect<
 		{
-			readonly count: number
-			readonly deleted: ReadonlyArray<T>
-			readonly cascaded?: Record<string, { readonly count: number; readonly ids: ReadonlyArray<string> }>
+			readonly count: number;
+			readonly deleted: ReadonlyArray<T>;
+			readonly cascaded?: Record<
+				string,
+				{ readonly count: number; readonly ids: ReadonlyArray<string> }
+			>;
 		},
 		ValidationError | OperationError
-	>
+	>;
 }

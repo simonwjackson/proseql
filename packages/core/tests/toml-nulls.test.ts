@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest"
-import { tomlCodec } from "../src/serializers/codecs/toml.js"
+import { describe, expect, it } from "vitest";
+import { tomlCodec } from "../src/serializers/codecs/toml.js";
 
 /**
  * TOML-specific null stripping tests.
@@ -13,15 +13,15 @@ import { tomlCodec } from "../src/serializers/codecs/toml.js"
  */
 
 describe("tomlCodec null stripping", () => {
-	const codec = tomlCodec()
+	const codec = tomlCodec();
 
 	describe("nested nulls", () => {
 		it("strips null at root level", () => {
-			const input = { a: 1, b: null, c: 3 }
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
-			expect(decoded).toEqual({ a: 1, c: 3 })
-		})
+			const input = { a: 1, b: null, c: 3 };
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
+			expect(decoded).toEqual({ a: 1, c: 3 });
+		});
 
 		it("strips null in nested objects", () => {
 			const input = {
@@ -30,16 +30,16 @@ describe("tomlCodec null stripping", () => {
 					nickname: null,
 					age: 30,
 				},
-			}
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
+			};
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
 			expect(decoded).toEqual({
 				user: {
 					name: "Alice",
 					age: 30,
 				},
-			})
-		})
+			});
+		});
 
 		it("strips undefined values", () => {
 			const input = {
@@ -49,14 +49,14 @@ describe("tomlCodec null stripping", () => {
 					d: undefined,
 					e: 2,
 				},
-			}
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
+			};
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
 			expect(decoded).toEqual({
 				a: 1,
 				c: { e: 2 },
-			})
-		})
+			});
+		});
 
 		it("strips mixed null and undefined", () => {
 			const input = {
@@ -68,30 +68,30 @@ describe("tomlCodec null stripping", () => {
 					e: undefined,
 					f: "also kept",
 				},
-			}
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
+			};
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
 			expect(decoded).toEqual({
 				c: "kept",
 				nested: { f: "also kept" },
-			})
-		})
-	})
+			});
+		});
+	});
 
 	describe("arrays with nulls", () => {
 		it("removes null elements from arrays", () => {
-			const input = { items: [1, null, 2, null, 3] }
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
-			expect(decoded).toEqual({ items: [1, 2, 3] })
-		})
+			const input = { items: [1, null, 2, null, 3] };
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
+			expect(decoded).toEqual({ items: [1, 2, 3] });
+		});
 
 		it("removes undefined elements from arrays", () => {
-			const input = { items: [1, undefined, 2, undefined, 3] }
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
-			expect(decoded).toEqual({ items: [1, 2, 3] })
-		})
+			const input = { items: [1, undefined, 2, undefined, 3] };
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
+			expect(decoded).toEqual({ items: [1, 2, 3] });
+		});
 
 		it("handles array of objects with null fields", () => {
 			const input = {
@@ -99,24 +99,24 @@ describe("tomlCodec null stripping", () => {
 					{ id: 1, name: "Alice", nickname: null },
 					{ id: 2, name: "Bob", nickname: "Bobby" },
 				],
-			}
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
+			};
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
 			expect(decoded).toEqual({
 				users: [
 					{ id: 1, name: "Alice" },
 					{ id: 2, name: "Bob", nickname: "Bobby" },
 				],
-			})
-		})
+			});
+		});
 
 		it("handles arrays containing null objects", () => {
 			// Note: null elements are removed from the array
-			const input = { items: [{ a: 1 }, null, { b: 2 }] }
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
-			expect(decoded).toEqual({ items: [{ a: 1 }, { b: 2 }] })
-		})
+			const input = { items: [{ a: 1 }, null, { b: 2 }] };
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
+			expect(decoded).toEqual({ items: [{ a: 1 }, { b: 2 }] });
+		});
 
 		it("handles nested arrays with nulls", () => {
 			const input = {
@@ -124,24 +124,24 @@ describe("tomlCodec null stripping", () => {
 					[1, null, 2],
 					[null, 3, 4],
 				],
-			}
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
+			};
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
 			expect(decoded).toEqual({
 				matrix: [
 					[1, 2],
 					[3, 4],
 				],
-			})
-		})
+			});
+		});
 
 		it("returns empty array when all elements are null", () => {
-			const input = { items: [null, null, null] }
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
-			expect(decoded).toEqual({ items: [] })
-		})
-	})
+			const input = { items: [null, null, null] };
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
+			expect(decoded).toEqual({ items: [] });
+		});
+	});
 
 	describe("empty objects after stripping", () => {
 		it("keeps empty objects after null removal", () => {
@@ -150,12 +150,12 @@ describe("tomlCodec null stripping", () => {
 					setting1: null,
 					setting2: null,
 				},
-			}
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
+			};
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
 			// TOML tables that become empty after null stripping remain as empty tables
-			expect(decoded).toEqual({ config: {} })
-		})
+			expect(decoded).toEqual({ config: {} });
+		});
 
 		it("keeps nested empty objects", () => {
 			const input = {
@@ -164,32 +164,32 @@ describe("tomlCodec null stripping", () => {
 						value: null,
 					},
 				},
-			}
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
-			expect(decoded).toEqual({ outer: { inner: {} } })
-		})
+			};
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
+			expect(decoded).toEqual({ outer: { inner: {} } });
+		});
 
 		it("handles mix of empty and non-empty objects", () => {
 			const input = {
 				empty: { a: null, b: null },
 				notEmpty: { a: null, b: 1 },
-			}
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
+			};
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
 			expect(decoded).toEqual({
 				empty: {},
 				notEmpty: { b: 1 },
-			})
-		})
+			});
+		});
 
 		it("handles originally empty objects", () => {
-			const input = { config: {} }
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
-			expect(decoded).toEqual({ config: {} })
-		})
-	})
+			const input = { config: {} };
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
+			expect(decoded).toEqual({ config: {} });
+		});
+	});
 
 	describe("deeply nested structures", () => {
 		it("strips nulls at all levels", () => {
@@ -210,9 +210,9 @@ describe("tomlCodec null stripping", () => {
 						},
 					},
 				},
-			}
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
+			};
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
 			expect(decoded).toEqual({
 				level1: {
 					keep: 1,
@@ -226,8 +226,8 @@ describe("tomlCodec null stripping", () => {
 						},
 					},
 				},
-			})
-		})
+			});
+		});
 
 		it("handles deeply nested arrays with nulls", () => {
 			const input = {
@@ -241,22 +241,19 @@ describe("tomlCodec null stripping", () => {
 						},
 					],
 				},
-			}
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
+			};
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
 			expect(decoded).toEqual({
 				data: {
 					items: [
 						{
-							subitems: [
-								{ value: 1 },
-								{ value: 2, meta: "kept" },
-							],
+							subitems: [{ value: 1 }, { value: 2, meta: "kept" }],
 						},
 					],
 				},
-			})
-		})
+			});
+		});
 
 		it("handles complex mixed structure", () => {
 			const input = {
@@ -282,9 +279,9 @@ describe("tomlCodec null stripping", () => {
 					version: 1,
 					deprecated: null,
 				},
-			}
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
+			};
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
 			expect(decoded).toEqual({
 				users: [
 					{
@@ -303,46 +300,46 @@ describe("tomlCodec null stripping", () => {
 				metadata: {
 					version: 1,
 				},
-			})
-		})
-	})
+			});
+		});
+	});
 
 	describe("edge cases", () => {
 		it("handles root-level null (returns empty object)", () => {
 			// When the entire input is null, stripNulls returns undefined
 			// but smol-toml expects an object, so this tests the edge case
-			const input = { data: null }
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
-			expect(decoded).toEqual({})
-		})
+			const input = { data: null };
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
+			expect(decoded).toEqual({});
+		});
 
 		it("preserves empty strings (not null)", () => {
-			const input = { name: "", value: null }
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
-			expect(decoded).toEqual({ name: "" })
-		})
+			const input = { name: "", value: null };
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
+			expect(decoded).toEqual({ name: "" });
+		});
 
 		it("preserves zero (not null)", () => {
-			const input = { count: 0, removed: null }
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
-			expect(decoded).toEqual({ count: 0 })
-		})
+			const input = { count: 0, removed: null };
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
+			expect(decoded).toEqual({ count: 0 });
+		});
 
 		it("preserves false (not null)", () => {
-			const input = { active: false, removed: null }
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
-			expect(decoded).toEqual({ active: false })
-		})
+			const input = { active: false, removed: null };
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
+			expect(decoded).toEqual({ active: false });
+		});
 
 		it("handles object with only null values", () => {
-			const input = { a: null, b: null, c: null }
-			const encoded = codec.encode(input)
-			const decoded = codec.decode(encoded)
-			expect(decoded).toEqual({})
-		})
-	})
-})
+			const input = { a: null, b: null, c: null };
+			const encoded = codec.encode(input);
+			const decoded = codec.decode(encoded);
+			expect(decoded).toEqual({});
+		});
+	});
+});

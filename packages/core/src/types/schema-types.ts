@@ -5,7 +5,7 @@
  * All entity schemas are Schema.Struct-based and support bidirectional encode/decode.
  */
 
-import type { Schema } from "effect"
+import type { Schema } from "effect";
 
 /**
  * Constraint for entity schemas: the decoded Type must include `{ readonly id: string }`.
@@ -24,7 +24,11 @@ import type { Schema } from "effect"
  * type Check = typeof UserSchema extends EntitySchema<Schema.Schema.Type<typeof UserSchema>> ? true : false
  * ```
  */
-export type EntitySchema<T extends { readonly id: string }> = Schema.Schema<T, unknown, never>
+export type EntitySchema<T extends { readonly id: string }> = Schema.Schema<
+	T,
+	unknown,
+	never
+>;
 
 /**
  * Extract the runtime (decoded) type from a schema.
@@ -37,7 +41,7 @@ export type EntitySchema<T extends { readonly id: string }> = Schema.Schema<T, u
  * // => { readonly id: string; readonly name: string }
  * ```
  */
-export type InferEntity<S extends Schema.Schema.All> = Schema.Schema.Type<S>
+export type InferEntity<S extends Schema.Schema.All> = Schema.Schema.Type<S>;
 
 /**
  * Extract the encoded (on-disk) type from a schema.
@@ -54,4 +58,5 @@ export type InferEntity<S extends Schema.Schema.All> = Schema.Schema.Type<S>
  * // => { readonly id: string; readonly name: string }
  * ```
  */
-export type InferEncoded<S extends Schema.Schema.All> = Schema.Schema.Encoded<S>
+export type InferEncoded<S extends Schema.Schema.All> =
+	Schema.Schema.Encoded<S>;

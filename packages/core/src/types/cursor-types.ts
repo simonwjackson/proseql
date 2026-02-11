@@ -1,4 +1,4 @@
-import type { Effect } from "effect"
+import type { Effect } from "effect";
 
 // ============================================================================
 // Cursor Pagination Types
@@ -13,13 +13,13 @@ import type { Effect } from "effect"
  */
 export interface CursorConfig {
 	/** The field used as the cursor (sort key), e.g. "createdAt", "id" */
-	readonly key: string
+	readonly key: string;
 	/** Fetch items after this cursor value (forward pagination) */
-	readonly after?: string
+	readonly after?: string;
 	/** Fetch items before this cursor value (backward pagination) */
-	readonly before?: string
+	readonly before?: string;
 	/** Maximum items per page (required, no default) */
-	readonly limit: number
+	readonly limit: number;
 }
 
 /**
@@ -27,13 +27,13 @@ export interface CursorConfig {
  */
 export interface CursorPageInfo {
 	/** Cursor of the first item in the page (null if empty) */
-	readonly startCursor: string | null
+	readonly startCursor: string | null;
 	/** Cursor of the last item in the page (null if empty) */
-	readonly endCursor: string | null
+	readonly endCursor: string | null;
 	/** Whether more items exist after this page */
-	readonly hasNextPage: boolean
+	readonly hasNextPage: boolean;
 	/** Whether more items exist before this page */
-	readonly hasPreviousPage: boolean
+	readonly hasPreviousPage: boolean;
 }
 
 /**
@@ -43,9 +43,9 @@ export interface CursorPageInfo {
  */
 export interface CursorPageResult<T> {
 	/** The items in this page */
-	readonly items: ReadonlyArray<T>
+	readonly items: ReadonlyArray<T>;
 	/** Page boundary metadata */
-	readonly pageInfo: CursorPageInfo
+	readonly pageInfo: CursorPageInfo;
 }
 
 /**
@@ -54,6 +54,10 @@ export interface CursorPageResult<T> {
  *
  * Accessing `.runPromise` runs the effect and returns a Promise.
  */
-export type RunnableCursorPage<T, E> = Effect.Effect<CursorPageResult<T>, E, never> & {
-	readonly runPromise: Promise<CursorPageResult<T>>
-}
+export type RunnableCursorPage<T, E> = Effect.Effect<
+	CursorPageResult<T>,
+	E,
+	never
+> & {
+	readonly runPromise: Promise<CursorPageResult<T>>;
+};

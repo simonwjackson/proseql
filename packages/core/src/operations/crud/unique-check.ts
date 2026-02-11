@@ -15,14 +15,14 @@
  *
  * Example: ["email", ["userId", "settingKey"]]
  */
-export type UniqueFieldsConfig = ReadonlyArray<string | ReadonlyArray<string>>
+export type UniqueFieldsConfig = ReadonlyArray<string | ReadonlyArray<string>>;
 
 /**
  * Normalized constraints where all entries are arrays of field names.
  *
  * Example: [["email"], ["userId", "settingKey"]]
  */
-export type NormalizedConstraints = ReadonlyArray<ReadonlyArray<string>>
+export type NormalizedConstraints = ReadonlyArray<ReadonlyArray<string>>;
 
 // ============================================================================
 // Constraint Normalization
@@ -45,22 +45,25 @@ export const normalizeConstraints = (
 	uniqueFields: UniqueFieldsConfig | undefined,
 ): NormalizedConstraints => {
 	if (!uniqueFields || uniqueFields.length === 0) {
-		return []
+		return [];
 	}
 
 	return uniqueFields.map((constraint) =>
 		typeof constraint === "string" ? [constraint] : constraint,
-	)
-}
+	);
+};
 
 // ============================================================================
 // Unique Constraint Checking
 // ============================================================================
 
-import { Effect } from "effect"
-import { UniqueConstraintError, ValidationError } from "../../errors/crud-errors.js"
+import { Effect } from "effect";
+import {
+	UniqueConstraintError,
+	ValidationError,
+} from "../../errors/crud-errors.js";
 
-type HasId = { readonly id: string }
+type HasId = { readonly id: string };
 
 /**
  * Check for unique constraint violations when creating or updating an entity.
@@ -85,51 +88,51 @@ export const checkUniqueConstraints = <T extends HasId>(
 ): Effect.Effect<void, UniqueConstraintError> => {
 	// No constraints configured — nothing to check
 	if (constraints.length === 0) {
-		return Effect.void
+		return Effect.void;
 	}
 
-	const entityRecord = entity as Record<string, unknown>
+	const entityRecord = entity as Record<string, unknown>;
 
 	for (const constraintFields of constraints) {
 		// Extract values for this constraint
-		const constraintValues: Record<string, unknown> = {}
-		let hasNullOrUndefined = false
+		const constraintValues: Record<string, unknown> = {};
+		let hasNullOrUndefined = false;
 
 		for (const field of constraintFields) {
-			const value = entityRecord[field]
+			const value = entityRecord[field];
 			if (value === null || value === undefined) {
-				hasNullOrUndefined = true
-				break
+				hasNullOrUndefined = true;
+				break;
 			}
-			constraintValues[field] = value
+			constraintValues[field] = value;
 		}
 
 		// Skip constraint if any field is null/undefined
 		if (hasNullOrUndefined) {
-			continue
+			continue;
 		}
 
 		// Check against existing entities
 		for (const [existingId, existing] of existingMap) {
 			// Exclude the entity itself (for updates)
 			if (existingId === entity.id) {
-				continue
+				continue;
 			}
 
-			const existingRecord = existing as Record<string, unknown>
+			const existingRecord = existing as Record<string, unknown>;
 
 			// Check if ALL fields in the constraint match
-			let allFieldsMatch = true
+			let allFieldsMatch = true;
 			for (const field of constraintFields) {
 				if (existingRecord[field] !== constraintValues[field]) {
-					allFieldsMatch = false
-					break
+					allFieldsMatch = false;
+					break;
 				}
 			}
 
 			if (allFieldsMatch) {
 				// Generate constraint name: "unique_" + fields joined by "_"
-				const constraintName = `unique_${constraintFields.join("_")}`
+				const constraintName = `unique_${constraintFields.join("_")}`;
 
 				return Effect.fail(
 					new UniqueConstraintError({
@@ -140,13 +143,13 @@ export const checkUniqueConstraints = <T extends HasId>(
 						existingId,
 						message: `Unique constraint violation on ${collectionName}: ${constraintName} (${constraintFields.join(", ")}) = ${JSON.stringify(constraintValues)} already exists (id: ${existingId})`,
 					}),
-				)
+				);
 			}
 		}
 	}
 
-	return Effect.void
-}
+	return Effect.void;
+};
 
 /**
  * Check for unique constraint violations when creating multiple entities in a batch.
@@ -172,61 +175,63 @@ export const checkBatchUniqueConstraints = <T extends HasId>(
 ): Effect.Effect<void, UniqueConstraintError> => {
 	// No constraints configured — nothing to check
 	if (constraints.length === 0) {
-		return Effect.void
+		return Effect.void;
 	}
 
 	// No entities to check
 	if (entities.length === 0) {
-		return Effect.void
+		return Effect.void;
 	}
 
 	// Build a lookup index from entities processed so far in the batch
 	// Key: constraintName + ":" + serialized values, Value: entity id
-	const batchIndex = new Map<string, string>()
+	const batchIndex = new Map<string, string>();
 
 	for (const entity of entities) {
-		const entityRecord = entity as Record<string, unknown>
+		const entityRecord = entity as Record<string, unknown>;
 
 		for (const constraintFields of constraints) {
 			// Extract values for this constraint
-			const constraintValues: Record<string, unknown> = {}
-			let hasNullOrUndefined = false
+			const constraintValues: Record<string, unknown> = {};
+			let hasNullOrUndefined = false;
 
 			for (const field of constraintFields) {
-				const value = entityRecord[field]
+				const value = entityRecord[field];
 				if (value === null || value === undefined) {
-					hasNullOrUndefined = true
-					break
+					hasNullOrUndefined = true;
+					break;
 				}
-				constraintValues[field] = value
+				constraintValues[field] = value;
 			}
 
 			// Skip constraint if any field is null/undefined
 			if (hasNullOrUndefined) {
-				continue
+				continue;
 			}
 
-			const constraintName = `unique_${constraintFields.join("_")}`
+			const constraintName = `unique_${constraintFields.join("_")}`;
 
 			// Create a stable key for this constraint+values combination
-			const valuesKey = constraintFields.map((f) => constraintValues[f]).join("\0")
-			const indexKey = `${constraintName}:${valuesKey}`
+			const valuesKey = constraintFields
+				.map((f) => constraintValues[f])
+				.join("\0");
+			const indexKey = `${constraintName}:${valuesKey}`;
 
 			// Check against existing entities in the collection
 			for (const [existingId, existing] of existingMap) {
 				// Exclude the entity itself (for updates)
 				if (existingId === entity.id) {
-					continue
+					continue;
 				}
 
-				const existingRecord = existing as Record<string, unknown>
+				const existingRecord = existing as Record<string, unknown>;
 
 				// Check if ALL fields in the constraint match
-				let allFieldsMatch = true
+				let allFieldsMatch = true;
 				for (const field of constraintFields) {
 					if (existingRecord[field] !== constraintValues[field]) {
-						allFieldsMatch = false
-						break
+						allFieldsMatch = false;
+						break;
 					}
 				}
 
@@ -240,12 +245,12 @@ export const checkBatchUniqueConstraints = <T extends HasId>(
 							existingId,
 							message: `Unique constraint violation on ${collectionName}: ${constraintName} (${constraintFields.join(", ")}) = ${JSON.stringify(constraintValues)} already exists (id: ${existingId})`,
 						}),
-					)
+					);
 				}
 			}
 
 			// Check against entities already processed in this batch
-			const conflictingId = batchIndex.get(indexKey)
+			const conflictingId = batchIndex.get(indexKey);
 			if (conflictingId !== undefined && conflictingId !== entity.id) {
 				return Effect.fail(
 					new UniqueConstraintError({
@@ -256,16 +261,16 @@ export const checkBatchUniqueConstraints = <T extends HasId>(
 						existingId: conflictingId,
 						message: `Unique constraint violation on ${collectionName}: ${constraintName} (${constraintFields.join(", ")}) = ${JSON.stringify(constraintValues)} already exists in batch (id: ${conflictingId})`,
 					}),
-				)
+				);
 			}
 
 			// Add this entity to the batch index
-			batchIndex.set(indexKey, entity.id)
+			batchIndex.set(indexKey, entity.id);
 		}
 	}
 
-	return Effect.void
-}
+	return Effect.void;
+};
 
 // ============================================================================
 // Per-Entity Unique Constraint Checking (for skipDuplicates support)
@@ -293,49 +298,51 @@ export const checkEntityUniqueConstraints = <T extends HasId>(
 ): Effect.Effect<void, UniqueConstraintError> => {
 	// No constraints configured — nothing to check
 	if (constraints.length === 0) {
-		return Effect.void
+		return Effect.void;
 	}
 
 	for (const constraintFields of constraints) {
 		// Extract values for this constraint
-		const constraintValues: Record<string, unknown> = {}
-		let hasNullOrUndefined = false
+		const constraintValues: Record<string, unknown> = {};
+		let hasNullOrUndefined = false;
 
 		for (const field of constraintFields) {
-			const value = entityRecord[field]
+			const value = entityRecord[field];
 			if (value === null || value === undefined) {
-				hasNullOrUndefined = true
-				break
+				hasNullOrUndefined = true;
+				break;
 			}
-			constraintValues[field] = value
+			constraintValues[field] = value;
 		}
 
 		// Skip constraint if any field is null/undefined
 		if (hasNullOrUndefined) {
-			continue
+			continue;
 		}
 
-		const constraintName = `unique_${constraintFields.join("_")}`
+		const constraintName = `unique_${constraintFields.join("_")}`;
 
 		// Create a stable key for this constraint+values combination
-		const valuesKey = constraintFields.map((f) => constraintValues[f]).join("\0")
-		const indexKey = `${constraintName}:${valuesKey}`
+		const valuesKey = constraintFields
+			.map((f) => constraintValues[f])
+			.join("\0");
+		const indexKey = `${constraintName}:${valuesKey}`;
 
 		// Check against existing entities in the collection
 		for (const [existingId, existing] of existingMap) {
 			// Exclude the entity itself (for updates)
 			if (existingId === entity.id) {
-				continue
+				continue;
 			}
 
-			const existingRecord = existing as Record<string, unknown>
+			const existingRecord = existing as Record<string, unknown>;
 
 			// Check if ALL fields in the constraint match
-			let allFieldsMatch = true
+			let allFieldsMatch = true;
 			for (const field of constraintFields) {
 				if (existingRecord[field] !== constraintValues[field]) {
-					allFieldsMatch = false
-					break
+					allFieldsMatch = false;
+					break;
 				}
 			}
 
@@ -349,12 +356,12 @@ export const checkEntityUniqueConstraints = <T extends HasId>(
 						existingId,
 						message: `Unique constraint violation on ${collectionName}: ${constraintName} (${constraintFields.join(", ")}) = ${JSON.stringify(constraintValues)} already exists (id: ${existingId})`,
 					}),
-				)
+				);
 			}
 		}
 
 		// Check against entities already processed in this batch
-		const conflictingId = batchIndex.get(indexKey)
+		const conflictingId = batchIndex.get(indexKey);
 		if (conflictingId !== undefined && conflictingId !== entity.id) {
 			return Effect.fail(
 				new UniqueConstraintError({
@@ -365,12 +372,12 @@ export const checkEntityUniqueConstraints = <T extends HasId>(
 					existingId: conflictingId,
 					message: `Unique constraint violation on ${collectionName}: ${constraintName} (${constraintFields.join(", ")}) = ${JSON.stringify(constraintValues)} already exists in batch (id: ${conflictingId})`,
 				}),
-			)
+			);
 		}
 	}
 
-	return Effect.void
-}
+	return Effect.void;
+};
 
 /**
  * Add an entity's unique constraint values to the batch index.
@@ -389,31 +396,33 @@ export const addEntityToBatchIndex = <T extends HasId>(
 ): void => {
 	for (const constraintFields of constraints) {
 		// Extract values for this constraint
-		const constraintValues: Record<string, unknown> = {}
-		let hasNullOrUndefined = false
+		const constraintValues: Record<string, unknown> = {};
+		let hasNullOrUndefined = false;
 
 		for (const field of constraintFields) {
-			const value = entityRecord[field]
+			const value = entityRecord[field];
 			if (value === null || value === undefined) {
-				hasNullOrUndefined = true
-				break
+				hasNullOrUndefined = true;
+				break;
 			}
-			constraintValues[field] = value
+			constraintValues[field] = value;
 		}
 
 		// Skip constraint if any field is null/undefined
 		if (hasNullOrUndefined) {
-			continue
+			continue;
 		}
 
-		const constraintName = `unique_${constraintFields.join("_")}`
-		const valuesKey = constraintFields.map((f) => constraintValues[f]).join("\0")
-		const indexKey = `${constraintName}:${valuesKey}`
+		const constraintName = `unique_${constraintFields.join("_")}`;
+		const valuesKey = constraintFields
+			.map((f) => constraintValues[f])
+			.join("\0");
+		const indexKey = `${constraintName}:${valuesKey}`;
 
 		// Add this entity to the batch index
-		batchIndex.set(indexKey, entity.id)
+		batchIndex.set(indexKey, entity.id);
 	}
-}
+};
 
 // ============================================================================
 // Upsert Where Clause Validation
@@ -441,11 +450,11 @@ export const validateUpsertWhere = (
 	constraints: NormalizedConstraints,
 	collectionName: string,
 ): Effect.Effect<void, ValidationError> => {
-	const whereKeys = Object.keys(where)
+	const whereKeys = Object.keys(where);
 
 	// `id` is always a valid constraint (implicitly unique)
 	if (whereKeys.includes("id")) {
-		return Effect.void
+		return Effect.void;
 	}
 
 	// Check if where keys cover at least one declared constraint
@@ -453,14 +462,14 @@ export const validateUpsertWhere = (
 		// All fields in the constraint must be present in where keys
 		const coversConstraint = constraintFields.every((field) =>
 			whereKeys.includes(field),
-		)
+		);
 		if (coversConstraint) {
-			return Effect.void
+			return Effect.void;
 		}
 	}
 
 	// No constraint is covered — build error message
-	const validFields = buildValidFieldsDescription(constraints)
+	const validFields = buildValidFieldsDescription(constraints);
 
 	return Effect.fail(
 		new ValidationError({
@@ -473,8 +482,8 @@ export const validateUpsertWhere = (
 				},
 			],
 		}),
-	)
-}
+	);
+};
 
 /**
  * Build a human-readable description of valid unique fields for error messages.
@@ -486,17 +495,17 @@ const buildValidFieldsDescription = (
 	constraints: NormalizedConstraints,
 ): string => {
 	if (constraints.length === 0) {
-		return "id"
+		return "id";
 	}
 
 	const descriptions = constraints.map((constraintFields) => {
 		if (constraintFields.length === 1) {
-			return constraintFields[0]
+			return constraintFields[0];
 		}
 		// Compound constraint: show as tuple notation
-		return `(${constraintFields.join(", ")})`
-	})
+		return `(${constraintFields.join(", ")})`;
+	});
 
 	// Always include id as valid
-	return [...descriptions, "id"].join(", ")
-}
+	return [...descriptions, "id"].join(", ");
+};

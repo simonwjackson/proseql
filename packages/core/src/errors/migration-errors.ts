@@ -1,4 +1,4 @@
-import { Data } from "effect"
+import { Data } from "effect";
 
 // ============================================================================
 // Migration Errors
@@ -12,16 +12,16 @@ import { Data } from "effect"
  * - `step === -1`: Post-migration schema validation failed
  */
 export class MigrationError extends Data.TaggedError("MigrationError")<{
-	readonly collection: string
-	readonly fromVersion: number
-	readonly toVersion: number
-	readonly step: number
-	readonly reason: string
-	readonly message: string
+	readonly collection: string;
+	readonly fromVersion: number;
+	readonly toVersion: number;
+	readonly step: number;
+	readonly reason: string;
+	readonly message: string;
 }> {}
 
 // ============================================================================
 // Migration Error Union
 // ============================================================================
 
-export type MigrationErrors = MigrationError
+export type MigrationErrors = MigrationError;

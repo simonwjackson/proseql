@@ -27,4 +27,4 @@
  * @module
  */
 
-export {}
+export {};

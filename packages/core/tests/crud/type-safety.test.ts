@@ -1,11 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import type {
+	BaseEntity,
 	CreateInput,
+	DeleteOptions,
 	UpdateInput,
 	UpdateWithOperators,
-	DeleteOptions,
 	UpsertInput,
-	BaseEntity,
 } from "../../src/types/crud-types";
 
 // Type assertion helpers for compile-time type checking
@@ -50,7 +50,7 @@ describe("CRUD Type Safety", () => {
 			const _typeCheck2: CreateInput<User> = validInput2;
 
 			// Should not allow auto-generated fields
-			const invalid1: CreateInput<User> = {
+			const _invalid1: CreateInput<User> = {
 				name: "Bob",
 				email: "bob@example.com",
 				age: 40,
@@ -60,7 +60,7 @@ describe("CRUD Type Safety", () => {
 				createdAt: "2024-01-01",
 			};
 
-			const invalid2: CreateInput<User> = {
+			const _invalid2: CreateInput<User> = {
 				name: "Alice",
 				email: "alice@example.com",
 				age: 35,
@@ -98,13 +98,13 @@ describe("CRUD Type Safety", () => {
 			const _typeCheck3: UpdateInput<User> = emptyUpdate;
 
 			// Should not allow immutable fields
-			const invalid1: UpdateInput<User> = {
+			const _invalid1: UpdateInput<User> = {
 				// @ts-expect-error - id should not be allowed
 				id: "new-id",
 				name: "Updated",
 			};
 
-			const invalid2: UpdateInput<User> = {
+			const _invalid2: UpdateInput<User> = {
 				// @ts-expect-error - createdAt should not be allowed
 				createdAt: "2024-01-01",
 				name: "Updated",
@@ -121,11 +121,11 @@ describe("CRUD Type Safety", () => {
 				age: { $increment: 1 },
 			};
 
-			const numberUpdate2: UpdateWithOperators<User> = {
+			const _numberUpdate2: UpdateWithOperators<User> = {
 				age: { $decrement: 5 },
 			};
 
-			const numberUpdate3: UpdateWithOperators<User> = {
+			const _numberUpdate3: UpdateWithOperators<User> = {
 				age: { $multiply: 2 },
 			};
 
@@ -134,7 +134,7 @@ describe("CRUD Type Safety", () => {
 				name: { $set: "New Name" },
 			};
 
-			const stringUpdate2: UpdateWithOperators<User> = {
+			const _stringUpdate2: UpdateWithOperators<User> = {
 				email: { $append: ".backup" },
 			};
 
@@ -143,11 +143,11 @@ describe("CRUD Type Safety", () => {
 				tags: { $append: "new-tag" },
 			};
 
-			const arrayUpdate2: UpdateWithOperators<User> = {
+			const _arrayUpdate2: UpdateWithOperators<User> = {
 				tags: { $append: ["tag1", "tag2"] },
 			};
 
-			const arrayUpdate3: UpdateWithOperators<User> = {
+			const _arrayUpdate3: UpdateWithOperators<User> = {
 				tags: { $remove: "old-tag" },
 			};
 
@@ -174,17 +174,17 @@ describe("CRUD Type Safety", () => {
 		});
 
 		it("should not allow invalid operators for field types", () => {
-			const invalid1: UpdateWithOperators<User> = {
+			const _invalid1: UpdateWithOperators<User> = {
 				// @ts-expect-error - $increment not valid for strings
 				name: { $increment: 1 },
 			};
 
-			const invalid2: UpdateWithOperators<User> = {
+			const _invalid2: UpdateWithOperators<User> = {
 				// @ts-expect-error - $append not valid for numbers
 				age: { $append: 5 },
 			};
 
-			const invalid3: UpdateWithOperators<User> = {
+			const _invalid3: UpdateWithOperators<User> = {
 				// @ts-expect-error - $toggle not valid for strings
 				email: { $toggle: true },
 			};
@@ -196,7 +196,7 @@ describe("CRUD Type Safety", () => {
 	describe("DeleteOptions type", () => {
 		it("should only allow soft delete for entities with deletedAt", () => {
 			// Entity with deletedAt
-			const deleteOptions1: DeleteOptions<User> = {
+			const _deleteOptions1: DeleteOptions<User> = {
 				soft: true,
 				returnDeleted: true,
 			};
@@ -210,11 +210,11 @@ describe("CRUD Type Safety", () => {
 				updatedAt: string;
 			};
 
-			const deleteOptions2: DeleteOptions<Product> = {
+			const _deleteOptions2: DeleteOptions<Product> = {
 				returnDeleted: true,
 			};
 
-			const invalid: DeleteOptions<Product> = {
+			const _invalid: DeleteOptions<Product> = {
 				// @ts-expect-error - soft delete not available for Product
 				soft: true,
 			};

@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach } from "vitest"
-import { Effect, Schema } from "effect"
-import { createEffectDatabase } from "../../src/factories/database-effect"
-import type { EffectDatabase } from "../../src/factories/database-effect"
-import type { CreateInput } from "../../src/types/crud-types"
+import { Effect, Schema } from "effect";
+import { beforeEach, describe, expect, it } from "vitest";
+import type { EffectDatabase } from "../../src/factories/database-effect";
+import { createEffectDatabase } from "../../src/factories/database-effect";
+import type { CreateInput } from "../../src/types/crud-types";
 
 // Effect Schemas
 const UserSchema = Schema.Struct({
@@ -13,17 +13,17 @@ const UserSchema = Schema.Struct({
 	companyId: Schema.String,
 	createdAt: Schema.optional(Schema.String),
 	updatedAt: Schema.optional(Schema.String),
-})
+});
 
 const CompanySchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
 	createdAt: Schema.optional(Schema.String),
 	updatedAt: Schema.optional(Schema.String),
-})
+});
 
-type User = typeof UserSchema.Type
-type Company = typeof CompanySchema.Type
+type User = typeof UserSchema.Type;
+type Company = typeof CompanySchema.Type;
 
 const config = {
 	users: {
@@ -38,10 +38,10 @@ const config = {
 			users: { type: "inverse" as const, target: "users" as const },
 		},
 	},
-} as const
+} as const;
 
 describe("CRUD Create Operations (Effect-based)", () => {
-	let db: EffectDatabase<typeof config>
+	let db: EffectDatabase<typeof config>;
 
 	beforeEach(async () => {
 		db = await Effect.runPromise(
@@ -52,8 +52,8 @@ describe("CRUD Create Operations (Effect-based)", () => {
 					{ id: "comp2", name: "DataInc" },
 				],
 			}),
-		)
-	})
+		);
+	});
 
 	describe("create method", () => {
 		it("should create a new entity with auto-generated ID", async () => {
@@ -62,22 +62,22 @@ describe("CRUD Create Operations (Effect-based)", () => {
 				email: "john@example.com",
 				age: 30,
 				companyId: "comp1",
-			}).runPromise
+			}).runPromise;
 
-			expect(user.name).toBe("John Doe")
-			expect(user.email).toBe("john@example.com")
-			expect(user.age).toBe(30)
-			expect(user.companyId).toBe("comp1")
-			expect(user.id).toBeDefined()
-			expect(user.createdAt).toBeDefined()
-			expect(user.updatedAt).toBeDefined()
-			expect(user.createdAt).toBe(user.updatedAt)
+			expect(user.name).toBe("John Doe");
+			expect(user.email).toBe("john@example.com");
+			expect(user.age).toBe(30);
+			expect(user.companyId).toBe("comp1");
+			expect(user.id).toBeDefined();
+			expect(user.createdAt).toBeDefined();
+			expect(user.updatedAt).toBeDefined();
+			expect(user.createdAt).toBe(user.updatedAt);
 
 			// Verify entity was added to database
-			const allUsers = await db.users.query().runPromise
-			expect(allUsers).toHaveLength(1)
-			expect(allUsers[0]?.name).toBe("John Doe")
-		})
+			const allUsers = await db.users.query().runPromise;
+			expect(allUsers).toHaveLength(1);
+			expect(allUsers[0]?.name).toBe("John Doe");
+		});
 
 		it("should create entity with custom ID", async () => {
 			const user = await db.users.create({
@@ -86,11 +86,11 @@ describe("CRUD Create Operations (Effect-based)", () => {
 				email: "jane@example.com",
 				age: 25,
 				companyId: "comp2",
-			}).runPromise
+			}).runPromise;
 
-			expect(user.id).toBe("custom-user-id")
-			expect(user.name).toBe("Jane Smith")
-		})
+			expect(user.id).toBe("custom-user-id");
+			expect(user.name).toBe("Jane Smith");
+		});
 
 		it("should fail with duplicate ID", async () => {
 			await db.users.create({
@@ -99,50 +99,54 @@ describe("CRUD Create Operations (Effect-based)", () => {
 				email: "user1@example.com",
 				age: 30,
 				companyId: "comp1",
-			}).runPromise
+			}).runPromise;
 
 			const error = await Effect.runPromise(
-				db.users.create({
-					id: "user123",
-					name: "User Two",
-					email: "user2@example.com",
-					age: 35,
-					companyId: "comp1",
-				}).pipe(Effect.flip),
-			)
+				db.users
+					.create({
+						id: "user123",
+						name: "User Two",
+						email: "user2@example.com",
+						age: 35,
+						companyId: "comp1",
+					})
+					.pipe(Effect.flip),
+			);
 
-			expect(error._tag).toBe("DuplicateKeyError")
-		})
+			expect(error._tag).toBe("DuplicateKeyError");
+		});
 
 		it("should validate required fields", async () => {
 			const incompleteUser = {
 				name: "Invalid User",
 				age: 30,
 				companyId: "comp1",
-			}
+			};
 
 			const error = await Effect.runPromise(
-				db.users.create(
-					incompleteUser as CreateInput<User & { readonly id: string }>,
-				).pipe(Effect.flip),
-			)
+				db.users
+					.create(incompleteUser as CreateInput<User & { readonly id: string }>)
+					.pipe(Effect.flip),
+			);
 
-			expect(error._tag).toBe("ValidationError")
-		})
+			expect(error._tag).toBe("ValidationError");
+		});
 
 		it("should validate foreign key constraints", async () => {
 			const error = await Effect.runPromise(
-				db.users.create({
-					name: "John Doe",
-					email: "john@example.com",
-					age: 30,
-					companyId: "non-existent-company",
-				}).pipe(Effect.flip),
-			)
+				db.users
+					.create({
+						name: "John Doe",
+						email: "john@example.com",
+						age: 30,
+						companyId: "non-existent-company",
+					})
+					.pipe(Effect.flip),
+			);
 
-			expect(error._tag).toBe("ForeignKeyError")
-		})
-	})
+			expect(error._tag).toBe("ForeignKeyError");
+		});
+	});
 
 	describe("createMany method", () => {
 		it("should create multiple entities", async () => {
@@ -165,25 +169,25 @@ describe("CRUD Create Operations (Effect-based)", () => {
 					age: 35,
 					companyId: "comp1",
 				},
-			]).runPromise
+			]).runPromise;
 
-			expect(result.created).toHaveLength(3)
-			expect(result.skipped).toBeUndefined()
+			expect(result.created).toHaveLength(3);
+			expect(result.skipped).toBeUndefined();
 
 			// Verify all have unique IDs
-			const ids = result.created.map((u) => u.id)
-			expect(new Set(ids).size).toBe(3)
+			const ids = result.created.map((u) => u.id);
+			expect(new Set(ids).size).toBe(3);
 
 			// Verify all have timestamps
 			for (const user of result.created) {
-				expect(user.createdAt).toBeDefined()
-				expect(user.updatedAt).toBeDefined()
+				expect(user.createdAt).toBeDefined();
+				expect(user.updatedAt).toBeDefined();
 			}
 
 			// Verify in database
-			const allUsers = await db.users.query().runPromise
-			expect(allUsers).toHaveLength(3)
-		})
+			const allUsers = await db.users.query().runPromise;
+			expect(allUsers).toHaveLength(3);
+		});
 
 		it("should skip duplicates when option is set", async () => {
 			await db.users.create({
@@ -192,7 +196,7 @@ describe("CRUD Create Operations (Effect-based)", () => {
 				email: "existing@example.com",
 				age: 40,
 				companyId: "comp1",
-			}).runPromise
+			}).runPromise;
 
 			const result = await db.users.createMany(
 				[
@@ -211,13 +215,13 @@ describe("CRUD Create Operations (Effect-based)", () => {
 					},
 				],
 				{ skipDuplicates: true },
-			).runPromise
+			).runPromise;
 
-			expect(result.created).toHaveLength(1)
-			expect(result.created[0].name).toBe("New User")
-			expect(result.skipped).toHaveLength(1)
-			expect(result.skipped![0].reason).toContain("Duplicate ID")
-		})
+			expect(result.created).toHaveLength(1);
+			expect(result.created[0].name).toBe("New User");
+			expect(result.skipped).toHaveLength(1);
+			expect(result.skipped?.[0].reason).toContain("Duplicate ID");
+		});
 
 		it("should fail fast without skipDuplicates", async () => {
 			await db.users.create({
@@ -226,32 +230,34 @@ describe("CRUD Create Operations (Effect-based)", () => {
 				email: "existing@example.com",
 				age: 40,
 				companyId: "comp1",
-			}).runPromise
+			}).runPromise;
 
 			const error = await Effect.runPromise(
-				db.users.createMany([
-					{
-						name: "Valid User",
-						email: "valid@example.com",
-						age: 30,
-						companyId: "comp1",
-					},
-					{
-						id: "existing-user",
-						name: "Duplicate User",
-						email: "duplicate@example.com",
-						age: 45,
-						companyId: "comp1",
-					},
-				]).pipe(Effect.flip),
-			)
+				db.users
+					.createMany([
+						{
+							name: "Valid User",
+							email: "valid@example.com",
+							age: 30,
+							companyId: "comp1",
+						},
+						{
+							id: "existing-user",
+							name: "Duplicate User",
+							email: "duplicate@example.com",
+							age: 45,
+							companyId: "comp1",
+						},
+					])
+					.pipe(Effect.flip),
+			);
 
-			expect(error._tag).toBe("DuplicateKeyError")
+			expect(error._tag).toBe("DuplicateKeyError");
 
 			// Verify no new users were created (only the existing one)
-			const allUsers = await db.users.query().runPromise
-			expect(allUsers).toHaveLength(1)
-		})
+			const allUsers = await db.users.query().runPromise;
+			expect(allUsers).toHaveLength(1);
+		});
 
 		it("should validate all foreign keys with skipDuplicates", async () => {
 			const result = await db.users.createMany(
@@ -270,19 +276,19 @@ describe("CRUD Create Operations (Effect-based)", () => {
 					},
 				],
 				{ skipDuplicates: true },
-			).runPromise
+			).runPromise;
 
-			expect(result.created).toHaveLength(1)
-			expect(result.created[0]?.name).toBe("User 1")
-			expect(result.skipped).toHaveLength(1)
-			expect(result.skipped![0].reason).toContain("Foreign key violation")
-		})
+			expect(result.created).toHaveLength(1);
+			expect(result.created[0]?.name).toBe("User 1");
+			expect(result.skipped).toHaveLength(1);
+			expect(result.skipped?.[0].reason).toContain("Foreign key violation");
+		});
 
 		it("should handle empty array", async () => {
-			const result = await db.users.createMany([]).runPromise
+			const result = await db.users.createMany([]).runPromise;
 
-			expect(result.created).toHaveLength(0)
-			expect(result.skipped).toBeUndefined()
-		})
-	})
-})
+			expect(result.created).toHaveLength(0);
+			expect(result.skipped).toBeUndefined();
+		});
+	});
+});

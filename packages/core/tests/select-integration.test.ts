@@ -1,13 +1,13 @@
-import { describe, it, expect } from "vitest";
-import { Effect, Stream, Chunk } from "effect";
-import { applySelect } from "../src/operations/query/select-stream";
+import { Chunk, Effect, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import { applyFilter } from "../src/operations/query/filter-stream";
-import { applySort } from "../src/operations/query/sort-stream";
 import {
 	applyObjectSelection,
 	applySelectionToArray,
 	createFieldSelector,
 } from "../src/operations/query/select";
+import { applySelect } from "../src/operations/query/select-stream";
+import { applySort } from "../src/operations/query/sort-stream";
 
 // Helper to collect stream-based pipeline results
 const collectPipeline = <T extends Record<string, unknown>>(
@@ -83,7 +83,13 @@ describe("Field Selection Integration (Stream-based)", () => {
 			);
 
 			const result = await collectPipeline(engineeringUsers, {
-				select: { id: true, name: true, email: true, role: true, department: true },
+				select: {
+					id: true,
+					name: true,
+					email: true,
+					role: true,
+					department: true,
+				},
 			});
 
 			expect(result).toHaveLength(2);
@@ -284,12 +290,12 @@ describe("Field Selection Integration (Stream-based)", () => {
 				inStock: boolean;
 			};
 			const id: string = typedSelected.id;
-			const name: string = typedSelected.name;
+			const _name: string = typedSelected.name;
 			const price: number = typedSelected.price;
-			const inStock: boolean = typedSelected.inStock;
+			const _inStock: boolean = typedSelected.inStock;
 
 			// @ts-expect-error - supplier not selected
-			const supplier = selected.supplier;
+			const _supplier = selected.supplier;
 
 			expect(id).toBe("prod-1");
 			expect(price).toBe(999);

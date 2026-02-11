@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { Effect, Stream, Chunk } from "effect";
+import { Chunk, Effect, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import { applyFilter } from "../src/operations/query/filter-stream";
 
 const collectFiltered = <T extends Record<string, unknown>>(

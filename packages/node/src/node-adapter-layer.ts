@@ -3,26 +3,26 @@
  * Provides atomic writes (temp file + rename) and retry with exponential backoff.
  */
 
-import { promises as fs, watch as fsWatch } from "fs"
-import { dirname } from "path"
-import { randomBytes } from "crypto"
-import { Effect, Layer, Schedule } from "effect"
+import { randomBytes } from "node:crypto";
+import { promises as fs, watch as fsWatch } from "node:fs";
+import { dirname } from "node:path";
 import {
 	StorageAdapterService as StorageAdapter,
 	type StorageAdapterShape,
 	StorageError,
-} from "@proseql/core"
+} from "@proseql/core";
+import { Effect, Layer, Schedule } from "effect";
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
 export interface NodeAdapterConfig {
-	readonly maxRetries?: number
-	readonly baseDelay?: number // milliseconds
-	readonly createMissingDirectories?: boolean
-	readonly fileMode?: number
-	readonly dirMode?: number
+	readonly maxRetries?: number;
+	readonly baseDelay?: number; // milliseconds
+	readonly createMissingDirectories?: boolean;
+	readonly fileMode?: number;
+	readonly dirMode?: number;
 }
 
 const defaultConfig: Required<NodeAdapterConfig> = {
@@ -31,7 +31,7 @@ const defaultConfig: Required<NodeAdapterConfig> = {
 	createMissingDirectories: true,
 	fileMode: 0o644,
 	dirMode: 0o755,
-}
+};
 
 // ============================================================================
 // Helpers
@@ -48,13 +48,13 @@ const toStorageError = (
 		message:
 			error instanceof Error ? error.message : `Unknown ${operation} error`,
 		cause: error,
-	})
+	});
 
 const retryPolicy = (config: Required<NodeAdapterConfig>) =>
 	Schedule.intersect(
 		Schedule.exponential(config.baseDelay),
 		Schedule.recurs(config.maxRetries),
-	)
+	);
 
 // ============================================================================
 // Storage operations
@@ -66,12 +66,12 @@ const makeRead =
 		Effect.tryPromise({
 			try: () => fs.readFile(path, "utf-8"),
 			catch: (error) => toStorageError(path, "read", error),
-		}).pipe(Effect.retry(retryPolicy(config)))
+		}).pipe(Effect.retry(retryPolicy(config)));
 
 const makeWrite =
 	(config: Required<NodeAdapterConfig>) =>
 	(path: string, data: string): Effect.Effect<void, StorageError> => {
-		const tempPath = `${path}.tmp.${randomBytes(8).toString("hex")}`
+		const tempPath = `${path}.tmp.${randomBytes(8).toString("hex")}`;
 
 		const ensureParentDir = config.createMissingDirectories
 			? Effect.tryPromise({
@@ -82,7 +82,7 @@ const makeWrite =
 						}),
 					catch: (error) => toStorageError(dirname(path), "write", error),
 				}).pipe(Effect.asVoid)
-			: Effect.void
+			: Effect.void;
 
 		const writeAndRename = Effect.tryPromise({
 			try: () => fs.writeFile(tempPath, data, { mode: config.fileMode }),
@@ -98,18 +98,15 @@ const makeWrite =
 				Effect.tryPromise({
 					try: () => fs.unlink(tempPath),
 					catch: () => error,
-				}).pipe(
-					Effect.ignore,
-					Effect.andThen(Effect.fail(error)),
-				),
+				}).pipe(Effect.ignore, Effect.andThen(Effect.fail(error))),
 			),
-		)
+		);
 
 		return ensureParentDir.pipe(
 			Effect.andThen(writeAndRename),
 			Effect.retry(retryPolicy(config)),
-		)
-	}
+		);
+	};
 
 const makeExists =
 	(_config: Required<NodeAdapterConfig>) =>
@@ -117,7 +114,7 @@ const makeExists =
 		Effect.tryPromise({
 			try: () => fs.access(path).then(() => true),
 			catch: () => false as never,
-		}).pipe(Effect.catchAll(() => Effect.succeed(false)))
+		}).pipe(Effect.catchAll(() => Effect.succeed(false)));
 
 const makeRemove =
 	(config: Required<NodeAdapterConfig>) =>
@@ -125,7 +122,7 @@ const makeRemove =
 		Effect.tryPromise({
 			try: () => fs.unlink(path),
 			catch: (error) => toStorageError(path, "delete", error),
-		}).pipe(Effect.retry(retryPolicy(config)))
+		}).pipe(Effect.retry(retryPolicy(config)));
 
 const makeEnsureDir =
 	(config: Required<NodeAdapterConfig>) =>
@@ -134,7 +131,7 @@ const makeEnsureDir =
 			try: () =>
 				fs.mkdir(dirname(path), { recursive: true, mode: config.dirMode }),
 			catch: (error) => toStorageError(dirname(path), "write", error),
-		}).pipe(Effect.asVoid, Effect.retry(retryPolicy(config)))
+		}).pipe(Effect.asVoid, Effect.retry(retryPolicy(config)));
 
 // ============================================================================
 // Layer construction
@@ -148,21 +145,17 @@ const makeWatch =
 	): Effect.Effect<() => void, StorageError> =>
 		Effect.try({
 			try: () => {
-				const watcher = fsWatch(
-					path,
-					{ persistent: false },
-					(eventType) => {
-						if (eventType === "change") {
-							onChange()
-						}
-					},
-				)
+				const watcher = fsWatch(path, { persistent: false }, (eventType) => {
+					if (eventType === "change") {
+						onChange();
+					}
+				});
 				return () => {
-					watcher.close()
-				}
+					watcher.close();
+				};
 			},
 			catch: (error) => toStorageError(path, "watch", error),
-		})
+		});
 
 const makeAdapter = (
 	config: Required<NodeAdapterConfig>,
@@ -173,7 +166,7 @@ const makeAdapter = (
 	remove: makeRemove(config),
 	ensureDir: makeEnsureDir(config),
 	watch: makeWatch(config),
-})
+});
 
 /**
  * Creates a NodeStorageLayer with custom configuration.
@@ -181,12 +174,12 @@ const makeAdapter = (
 export const makeNodeStorageLayer = (
 	config: NodeAdapterConfig = {},
 ): Layer.Layer<StorageAdapter> => {
-	const resolved = { ...defaultConfig, ...config }
-	return Layer.succeed(StorageAdapter, makeAdapter(resolved))
-}
+	const resolved = { ...defaultConfig, ...config };
+	return Layer.succeed(StorageAdapter, makeAdapter(resolved));
+};
 
 /**
  * Default NodeStorageLayer with standard configuration.
  */
 export const NodeStorageLayer: Layer.Layer<StorageAdapter> =
-	makeNodeStorageLayer()
+	makeNodeStorageLayer();

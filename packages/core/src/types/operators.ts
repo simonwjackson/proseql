@@ -1,5 +1,5 @@
-import type { FilterOperators } from "./types.js";
 import { tokenize } from "../operations/query/search.js";
+import type { FilterOperators } from "./types.js";
 
 // ============================================================================
 // Modular Operator Checking Functions

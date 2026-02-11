@@ -1,11 +1,11 @@
-import { parse } from "jsonc-parser"
-import type { FormatCodec, FormatOptions } from "../format-codec.js"
+import { parse } from "jsonc-parser";
+import type { FormatCodec, FormatOptions } from "../format-codec.js";
 
 /**
  * Options for the JSONC codec.
  */
 export interface JsoncCodecOptions {
-	readonly indent?: number
+	readonly indent?: number;
 }
 
 /**
@@ -29,19 +29,19 @@ export interface JsoncCodecOptions {
  * ```
  */
 export const jsoncCodec = (options?: JsoncCodecOptions): FormatCodec => {
-	const indent = options?.indent ?? 2
+	const indent = options?.indent ?? 2;
 
 	return {
 		name: "jsonc",
 		extensions: ["jsonc"],
 		encode: (data: unknown, formatOptions?: FormatOptions): string => {
-			const actualIndent = formatOptions?.indent ?? indent
-			return JSON.stringify(data, null, actualIndent)
+			const actualIndent = formatOptions?.indent ?? indent;
+			return JSON.stringify(data, null, actualIndent);
 		},
 		decode: (raw: string): unknown => {
 			// jsonc-parser's parse function handles comments and trailing commas
 			// It returns the parsed JavaScript value, stripping comments automatically
-			return parse(raw)
+			return parse(raw);
 		},
-	}
-}
+	};
+};

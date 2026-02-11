@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { Effect, Stream, Chunk } from "effect";
-import { applySort } from "../src/operations/query/sort-stream";
+import { Chunk, Effect, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import { applyFilter } from "../src/operations/query/filter-stream";
+import { applySort } from "../src/operations/query/sort-stream";
 
 const collectSorted = <T extends Record<string, unknown>>(
 	data: T[],
@@ -549,7 +549,7 @@ describe("Database v2 - Sorting (Stream-based)", () => {
 			const companyNames: string[] = [];
 			for (const r of results) {
 				const company = r.company as { name: string } | undefined;
-				if (company && company.name) {
+				if (company?.name) {
 					companyNames.push(company.name);
 				}
 			}
@@ -592,10 +592,9 @@ describe("Database v2 - Sorting (Stream-based)", () => {
 
 		it("should handle sort on unpopulated nested path gracefully", async () => {
 			// Sort by company.name on data without populated company objects
-			const results = await collectSorted(
-				users as Record<string, unknown>[],
-				{ "company.name": "asc" },
-			);
+			const results = await collectSorted(users as Record<string, unknown>[], {
+				"company.name": "asc",
+			});
 
 			// Should return all users (companyId is a string, not an object)
 			expect(results).toHaveLength(6);
@@ -629,7 +628,9 @@ describe("Database v2 - Sorting (Stream-based)", () => {
 
 			// Within each group, should be sorted by age
 			const activeAges = withActiveCompanies.map((u) => u.age);
-			expect(activeAges).toEqual([...activeAges].sort((a, b) => (a as number) - (b as number)));
+			expect(activeAges).toEqual(
+				[...activeAges].sort((a, b) => (a as number) - (b as number)),
+			);
 		});
 	});
 
@@ -653,20 +654,18 @@ describe("Database v2 - Sorting (Stream-based)", () => {
 		});
 
 		it("should handle sort on non-existent fields", async () => {
-			const results = await collectSorted(
-				users as Record<string, unknown>[],
-				{ nonExistentField: "asc" },
-			);
+			const results = await collectSorted(users as Record<string, unknown>[], {
+				nonExistentField: "asc",
+			});
 
 			// Should return all users
 			expect(results).toHaveLength(6);
 		});
 
 		it("should handle sort on array fields", async () => {
-			const results = await collectSorted(
-				posts as Record<string, unknown>[],
-				{ tags: "asc" },
-			);
+			const results = await collectSorted(posts as Record<string, unknown>[], {
+				tags: "asc",
+			});
 
 			// Should return all posts
 			expect(results).toHaveLength(6);
@@ -704,10 +703,9 @@ describe("Database v2 - Sorting (Stream-based)", () => {
 		});
 
 		it("should handle invalid sort directions", async () => {
-			const results = await collectSorted(
-				users as Record<string, unknown>[],
-				{ name: "invalid" as "asc" | "desc" },
-			);
+			const results = await collectSorted(users as Record<string, unknown>[], {
+				name: "invalid" as "asc" | "desc",
+			});
 
 			// Should return all users
 			expect(results).toBeDefined();
@@ -725,9 +723,7 @@ describe("Database v2 - Sorting (Stream-based)", () => {
 				name: `User ${String(i).padStart(3, "0")}`,
 				email: `user${i}@example.com`,
 				age: 20 + (i % 50),
-				score: (i % 2 === 0 ? 50 + (i % 50) : undefined) as
-					| number
-					| undefined,
+				score: (i % 2 === 0 ? 50 + (i % 50) : undefined) as number | undefined,
 				active: i % 3 !== 0,
 				createdAt: new Date(2023, 0, 1 + i).toISOString(),
 				companyId: companies[i % 4].id as string | undefined,
@@ -787,9 +783,7 @@ describe("Database v2 - Sorting (Stream-based)", () => {
 			const lastActiveIndex = results.findIndex(
 				(c) => c === activeCompanies[activeCompanies.length - 1],
 			);
-			const firstInactiveIndex = results.findIndex(
-				(c) => c === inactiveCompanies[0],
-			);
+			const firstInactiveIndex = results.indexOf(inactiveCompanies[0]);
 			expect(lastActiveIndex).toBeLessThan(firstInactiveIndex);
 		});
 	});
@@ -800,9 +794,7 @@ describe("Database v2 - Sorting (Stream-based)", () => {
 
 	describe("Type safety", () => {
 		it("should accept valid sort field keys", async () => {
-			const validSorts: Array<
-				Partial<Record<string, "asc" | "desc">>
-			> = [
+			const validSorts: Array<Partial<Record<string, "asc" | "desc">>> = [
 				{ name: "asc" },
 				{ age: "desc" },
 				{ active: "asc" },

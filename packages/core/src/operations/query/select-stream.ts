@@ -5,15 +5,13 @@ import { Stream } from "effect";
  * - Object-based: `{ name: true, email: true, company: { name: true } }`
  * - Array-based: `["name", "email"]` (picks those fields)
  */
-type SelectConfig =
-  | Record<string, unknown>
-  | ReadonlyArray<string>;
+type SelectConfig = Record<string, unknown> | ReadonlyArray<string>;
 
 /**
  * Type guard to check if a value is a record (non-null, non-array object).
  */
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -21,30 +19,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Handles nested selection for populated relationships (both objects and arrays).
  */
 function applyObjectSelect(
-  item: Record<string, unknown>,
-  selection: Record<string, unknown>,
+	item: Record<string, unknown>,
+	selection: Record<string, unknown>,
 ): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
+	const result: Record<string, unknown> = {};
 
-  for (const [key, value] of Object.entries(selection)) {
-    if (!(key in item)) continue;
+	for (const [key, value] of Object.entries(selection)) {
+		if (!(key in item)) continue;
 
-    if (value === true) {
-      result[key] = item[key];
-    } else if (isRecord(value)) {
-      // Nested selection for populated relationships
-      const nestedData = item[key];
-      if (Array.isArray(nestedData)) {
-        result[key] = nestedData
-          .filter(isRecord)
-          .map((nested) => applyObjectSelect(nested, value));
-      } else if (isRecord(nestedData)) {
-        result[key] = applyObjectSelect(nestedData, value);
-      }
-    }
-  }
+		if (value === true) {
+			result[key] = item[key];
+		} else if (isRecord(value)) {
+			// Nested selection for populated relationships
+			const nestedData = item[key];
+			if (Array.isArray(nestedData)) {
+				result[key] = nestedData
+					.filter(isRecord)
+					.map((nested) => applyObjectSelect(nested, value));
+			} else if (isRecord(nestedData)) {
+				result[key] = applyObjectSelect(nestedData, value);
+			}
+		}
+	}
 
-  return result;
+	return result;
 }
 
 /**
@@ -52,13 +50,13 @@ function applyObjectSelect(
  * `["name", "email"]` becomes `{ name: true, email: true }`.
  */
 function arraySelectToObject(
-  fields: ReadonlyArray<string>,
+	fields: ReadonlyArray<string>,
 ): Record<string, true> {
-  const result: Record<string, true> = {};
-  for (const field of fields) {
-    result[field] = true;
-  }
-  return result;
+	const result: Record<string, true> = {};
+	for (const field of fields) {
+		result[field] = true;
+	}
+	return result;
 }
 
 /**
@@ -71,26 +69,28 @@ function arraySelectToObject(
  * Nested selection on populated relationships is supported via object-based config:
  * `{ name: true, company: { name: true } }`.
  */
-export const applySelect = <T extends Record<string, unknown>>(
-  select: SelectConfig | undefined,
-) =>
-  <E, R>(stream: Stream.Stream<T, E, R>): Stream.Stream<T, E, R> => {
-    if (select === undefined || select === null) return stream;
+export const applySelect =
+	<T extends Record<string, unknown>>(select: SelectConfig | undefined) =>
+	<E, R>(stream: Stream.Stream<T, E, R>): Stream.Stream<T, E, R> => {
+		if (select === undefined || select === null) return stream;
 
-    if (Array.isArray(select)) {
-      if (select.length === 0) return stream;
-      const objectSelect = arraySelectToObject(select);
-      return Stream.map(stream, (item: T) =>
-        applyObjectSelect(item, objectSelect) as T,
-      );
-    }
+		if (Array.isArray(select)) {
+			if (select.length === 0) return stream;
+			const objectSelect = arraySelectToObject(select);
+			return Stream.map(
+				stream,
+				(item: T) => applyObjectSelect(item, objectSelect) as T,
+			);
+		}
 
-    if (isRecord(select) && Object.keys(select).length === 0) return stream;
+		if (isRecord(select) && Object.keys(select).length === 0) return stream;
 
-    return Stream.map(stream, (item: T) =>
-      applyObjectSelect(item, select as Record<string, unknown>) as T,
-    );
-  };
+		return Stream.map(
+			stream,
+			(item: T) =>
+				applyObjectSelect(item, select as Record<string, unknown>) as T,
+		);
+	};
 
 /**
  * Apply a field selection to an array of items.
@@ -99,20 +99,20 @@ export const applySelect = <T extends Record<string, unknown>>(
  * Supports both object-based and array-based selection configs.
  */
 export const applySelectToArray = <T extends Record<string, unknown>>(
-  items: ReadonlyArray<T>,
-  select: SelectConfig | undefined,
+	items: ReadonlyArray<T>,
+	select: SelectConfig | undefined,
 ): ReadonlyArray<T> => {
-  if (select === undefined || select === null) return items;
+	if (select === undefined || select === null) return items;
 
-  if (Array.isArray(select)) {
-    if (select.length === 0) return items;
-    const objectSelect = arraySelectToObject(select);
-    return items.map((item) => applyObjectSelect(item, objectSelect) as T);
-  }
+	if (Array.isArray(select)) {
+		if (select.length === 0) return items;
+		const objectSelect = arraySelectToObject(select);
+		return items.map((item) => applyObjectSelect(item, objectSelect) as T);
+	}
 
-  if (isRecord(select) && Object.keys(select).length === 0) return items;
+	if (isRecord(select) && Object.keys(select).length === 0) return items;
 
-  return items.map((item) =>
-    applyObjectSelect(item, select as Record<string, unknown>) as T,
-  );
+	return items.map(
+		(item) => applyObjectSelect(item, select as Record<string, unknown>) as T,
+	);
 };

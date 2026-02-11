@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { Effect, Schema, Stream, Chunk } from "effect";
+import { Chunk, Effect, Schema, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../src/factories/database-effect";
 
 describe("Database v2 - Field Selection/Projection (Effect/Stream)", () => {
@@ -242,7 +242,16 @@ describe("Database v2 - Field Selection/Projection (Effect/Stream)", () => {
 		Effect.runPromise(
 			Effect.gen(function* () {
 				const db = yield* createEffectDatabase(config, data);
-				const coll = (db as Record<string, { query: (opts: Record<string, unknown>) => Stream.Stream<Record<string, unknown>> }>)[collection];
+				const coll = (
+					db as Record<
+						string,
+						{
+							query: (
+								opts: Record<string, unknown>,
+							) => Stream.Stream<Record<string, unknown>>;
+						}
+					>
+				)[collection];
 				return yield* Stream.runCollect(coll.query(options)).pipe(
 					Effect.map(Chunk.toReadonlyArray),
 				);
@@ -519,9 +528,13 @@ describe("Database v2 - Field Selection/Projection (Effect/Stream)", () => {
 				posts: [],
 			};
 
-			const result = await collectQuery("users", {
-				select: { name: true, email: true },
-			}, emptyData);
+			const result = await collectQuery(
+				"users",
+				{
+					select: { name: true, email: true },
+				},
+				emptyData,
+			);
 
 			expect(result).toEqual([]);
 		});
@@ -560,9 +573,13 @@ describe("Database v2 - Field Selection/Projection (Effect/Stream)", () => {
 				],
 			};
 
-			const result = await collectFirst("users", {
-				select: { name: true, email: true },
-			}, largeProfileData);
+			const result = await collectFirst(
+				"users",
+				{
+					select: { name: true, email: true },
+				},
+				largeProfileData,
+			);
 
 			expect(result).toBeDefined();
 			if (!result) return;

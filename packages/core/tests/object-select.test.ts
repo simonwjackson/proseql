@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { Effect, Schema, Stream, Chunk } from "effect";
+import { Chunk, Effect, Schema, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../src/factories/database-effect";
 
 describe("Object-based field selection (Effect/Stream)", () => {
@@ -88,7 +88,16 @@ describe("Object-based field selection (Effect/Stream)", () => {
 		Effect.runPromise(
 			Effect.gen(function* () {
 				const db = yield* createEffectDatabase(config, testData);
-				const coll = (db as Record<string, { query: (opts: Record<string, unknown>) => Stream.Stream<Record<string, unknown>> }>)[collection];
+				const coll = (
+					db as Record<
+						string,
+						{
+							query: (
+								opts: Record<string, unknown>,
+							) => Stream.Stream<Record<string, unknown>>;
+						}
+					>
+				)[collection];
 				return yield* Stream.runCollect(coll.query(options)).pipe(
 					Effect.map(Chunk.toReadonlyArray),
 				);

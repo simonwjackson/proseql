@@ -5,7 +5,7 @@
  * Grouped aggregates partition by field values and compute aggregates per group.
  */
 
-import type { WhereClause } from "./types.js"
+import type { WhereClause } from "./types.js";
 
 // ============================================================================
 // Aggregate Result Types
@@ -16,11 +16,11 @@ import type { WhereClause } from "./types.js"
  * Only requested aggregations appear in the result.
  */
 export interface AggregateResult {
-	readonly count?: number
-	readonly sum?: Record<string, number>
-	readonly avg?: Record<string, number | null>
-	readonly min?: Record<string, unknown>
-	readonly max?: Record<string, unknown>
+	readonly count?: number;
+	readonly sum?: Record<string, number>;
+	readonly avg?: Record<string, number | null>;
+	readonly min?: Record<string, unknown>;
+	readonly max?: Record<string, unknown>;
 }
 
 /**
@@ -28,14 +28,14 @@ export interface AggregateResult {
  * Contains the grouping field values and the computed aggregates.
  */
 export interface GroupResult extends AggregateResult {
-	readonly group: Record<string, unknown>
+	readonly group: Record<string, unknown>;
 }
 
 /**
  * Result of a grouped aggregate operation.
  * Array of group objects ordered by first-encounter.
  */
-export type GroupedAggregateResult = ReadonlyArray<GroupResult>
+export type GroupedAggregateResult = ReadonlyArray<GroupResult>;
 
 // ============================================================================
 // Aggregate Config Types
@@ -45,11 +45,11 @@ export type GroupedAggregateResult = ReadonlyArray<GroupResult>
  * Base aggregate options shared by both scalar and grouped configs.
  */
 interface AggregateOptions {
-	readonly count?: true
-	readonly sum?: string | ReadonlyArray<string>
-	readonly avg?: string | ReadonlyArray<string>
-	readonly min?: string | ReadonlyArray<string>
-	readonly max?: string | ReadonlyArray<string>
+	readonly count?: true;
+	readonly sum?: string | ReadonlyArray<string>;
+	readonly avg?: string | ReadonlyArray<string>;
+	readonly min?: string | ReadonlyArray<string>;
+	readonly max?: string | ReadonlyArray<string>;
 }
 
 /**
@@ -61,7 +61,7 @@ export interface ScalarAggregateConfig<
 	Relations = unknown,
 	DB = unknown,
 > extends AggregateOptions {
-	readonly where?: WhereClause<T, Relations, DB>
+	readonly where?: WhereClause<T, Relations, DB>;
 }
 
 /**
@@ -73,18 +73,16 @@ export interface GroupedAggregateConfig<
 	Relations = unknown,
 	DB = unknown,
 > extends ScalarAggregateConfig<T, Relations, DB> {
-	readonly groupBy: string | ReadonlyArray<string>
+	readonly groupBy: string | ReadonlyArray<string>;
 }
 
 /**
  * Union type for aggregate configuration.
  * The presence of `groupBy` distinguishes grouped from scalar aggregation.
  */
-export type AggregateConfig<
-	T = unknown,
-	Relations = unknown,
-	DB = unknown,
-> = ScalarAggregateConfig<T, Relations, DB> | GroupedAggregateConfig<T, Relations, DB>
+export type AggregateConfig<T = unknown, Relations = unknown, DB = unknown> =
+	| ScalarAggregateConfig<T, Relations, DB>
+	| GroupedAggregateConfig<T, Relations, DB>;
 
 // ============================================================================
 // Type Guards
@@ -96,7 +94,7 @@ export type AggregateConfig<
 export const isGroupedAggregateConfig = <T, Relations, DB>(
 	config: AggregateConfig<T, Relations, DB>,
 ): config is GroupedAggregateConfig<T, Relations, DB> =>
-	"groupBy" in config && config.groupBy !== undefined
+	"groupBy" in config && config.groupBy !== undefined;
 
 // ============================================================================
 // Return Type Inference
@@ -110,4 +108,4 @@ export const isGroupedAggregateConfig = <T, Relations, DB>(
 export type InferAggregateResult<Config extends AggregateConfig> =
 	Config extends { readonly groupBy: string | ReadonlyArray<string> }
 		? GroupedAggregateResult
-		: AggregateResult
+		: AggregateResult;

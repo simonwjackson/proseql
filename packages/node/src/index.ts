@@ -5,12 +5,10 @@
  */
 
 // Re-export everything from core
-export * from "@proseql/core"
-
+export * from "@proseql/core";
+export type { NodeAdapterConfig } from "./node-adapter-layer.js";
 // Export Node.js storage adapter
 export {
-	NodeStorageLayer,
 	makeNodeStorageLayer,
-} from "./node-adapter-layer.js"
-
-export type { NodeAdapterConfig } from "./node-adapter-layer.js"
+	NodeStorageLayer,
+} from "./node-adapter-layer.js";

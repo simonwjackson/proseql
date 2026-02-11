@@ -4,8 +4,8 @@
  */
 
 import type { Effect } from "effect";
-import type { UpdateWithOperators } from "./crud-types.js";
 import type { HookError } from "../errors/crud-errors.js";
+import type { UpdateWithOperators } from "./crud-types.js";
 
 // ============================================================================
 // Before Hook Context Types

@@ -228,7 +228,7 @@ export function mergeFileDataIntoDataset<T extends Record<string, unknown[]>>(
 export function arrayToMap<T extends { readonly id: string }>(
 	items: readonly T[],
 ): ReadonlyMap<string, T> {
-	return new Map(items.map((item) => [item.id, item]))
+	return new Map(items.map((item) => [item.id, item]));
 }
 
 /**
@@ -244,14 +244,12 @@ export function arrayToMap<T extends { readonly id: string }>(
  * ]))
  * // Returns: { 'user-1': { id: 'user-1', name: 'Alice' }, 'user-2': { id: 'user-2', name: 'Bob' } }
  */
-export function mapToObject<T>(
-	map: ReadonlyMap<string, T>,
-): Record<string, T> {
-	const result: Record<string, T> = {}
+export function mapToObject<T>(map: ReadonlyMap<string, T>): Record<string, T> {
+	const result: Record<string, T> = {};
 	for (const [key, value] of map) {
-		result[key] = value
+		result[key] = value;
 	}
-	return result
+	return result;
 }
 
 /**
@@ -271,7 +269,7 @@ export function mapToObject<T>(
 export function objectToMap<T>(
 	obj: Readonly<Record<string, T>>,
 ): ReadonlyMap<string, T> {
-	return new Map(Object.entries(obj))
+	return new Map(Object.entries(obj));
 }
 
 /**
@@ -281,7 +279,7 @@ export function objectToMap<T>(
  * @returns Array of entity values
  */
 export function mapToArray<T>(map: ReadonlyMap<string, T>): readonly T[] {
-	return Array.from(map.values())
+	return Array.from(map.values());
 }
 
 /**
@@ -298,16 +296,16 @@ export function extractCollectionsFromMaps<T extends { readonly id: string }>(
 	stateMaps: Readonly<Record<string, ReadonlyMap<string, T>>>,
 	collectionsForFile: readonly string[],
 ): Record<string, Record<string, T>> {
-	const result: Record<string, Record<string, T>> = {}
+	const result: Record<string, Record<string, T>> = {};
 
 	for (const collectionName of collectionsForFile) {
-		const collectionMap = stateMaps[collectionName]
+		const collectionMap = stateMaps[collectionName];
 		if (collectionMap !== undefined) {
-			result[collectionName] = mapToObject(collectionMap)
+			result[collectionName] = mapToObject(collectionMap);
 		}
 	}
 
-	return result
+	return result;
 }
 
 /**
@@ -326,14 +324,14 @@ export function mergeFileDataIntoMaps<T extends { readonly id: string }>(
 	fileData: Readonly<Record<string, Readonly<Record<string, T>>>>,
 	collectionsFromFile: readonly string[],
 ): Record<string, ReadonlyMap<string, T>> {
-	const result: Record<string, ReadonlyMap<string, T>> = { ...stateMaps }
+	const result: Record<string, ReadonlyMap<string, T>> = { ...stateMaps };
 
 	for (const collectionName of collectionsFromFile) {
-		const collectionFileData = fileData[collectionName]
+		const collectionFileData = fileData[collectionName];
 		if (collectionFileData !== undefined) {
-			result[collectionName] = objectToMap(collectionFileData)
+			result[collectionName] = objectToMap(collectionFileData);
 		}
 	}
 
-	return result
+	return result;
 }

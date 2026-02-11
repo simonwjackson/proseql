@@ -127,7 +127,7 @@ export function applyPopulate<T extends Record<string, unknown>>(
 
 		if (relationship.type === "ref") {
 			// Handle ref relationships
-			const foreignKeyField = relationship.foreignKey || key + "Id";
+			const foreignKeyField = relationship.foreignKey || `${key}Id`;
 			const relatedItem = findRelatedItem(
 				populated,
 				foreignKeyField,
@@ -185,7 +185,7 @@ export function applyPopulate<T extends Record<string, unknown>>(
 							finalResult = { ...selectedFields };
 
 							// Check relationships in the target config to know which fields are populated
-							for (const [relKey, relDef] of Object.entries(
+							for (const [relKey, _relDef] of Object.entries(
 								targetConfig.relationships,
 							)) {
 								if (nestedPopulate[relKey] && relKey in populatedRelated) {
@@ -222,21 +222,21 @@ export function applyPopulate<T extends Record<string, unknown>>(
 						([, rel]) => rel.type === "ref" && rel.target === collectionName,
 					);
 
-					if (reverseRelationship && reverseRelationship[1].foreignKey) {
+					if (reverseRelationship?.[1].foreignKey) {
 						foreignKeyField = reverseRelationship[1].foreignKey;
 					} else {
 						// Fall back to the default naming convention
 						const singularName = collectionName.endsWith("ies")
-							? collectionName.slice(0, -3) + "y" // companies -> company, industries -> industry
+							? `${collectionName.slice(0, -3)}y` // companies -> company, industries -> industry
 							: collectionName.replace(/s$/, ""); // users -> user, posts -> post
-						foreignKeyField = singularName + "Id";
+						foreignKeyField = `${singularName}Id`;
 					}
 				} else {
 					// Fall back to the default naming convention
 					const singularName = collectionName.endsWith("ies")
-						? collectionName.slice(0, -3) + "y" // companies -> company, industries -> industry
+						? `${collectionName.slice(0, -3)}y` // companies -> company, industries -> industry
 						: collectionName.replace(/s$/, ""); // users -> user, posts -> post
-					foreignKeyField = singularName + "Id";
+					foreignKeyField = `${singularName}Id`;
 				}
 			}
 
@@ -298,7 +298,7 @@ export function applyPopulate<T extends Record<string, unknown>>(
 								finalResult = { ...selectedFields };
 
 								// Check relationships in the target config to know which fields are populated
-								for (const [relKey, relDef] of Object.entries(
+								for (const [relKey, _relDef] of Object.entries(
 									targetConfig.relationships,
 								)) {
 									if (nestedPopulate[relKey] && relKey in populatedItem) {

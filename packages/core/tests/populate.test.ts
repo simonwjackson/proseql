@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { Effect, Schema, Stream, Chunk } from "effect";
+import { Chunk, Effect, Schema, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../src/factories/database-effect";
 
 describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
@@ -115,26 +115,108 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 		],
 		companies: [
 			{ id: "comp1", name: "TechCorp", industryId: "ind1", foundedYear: 2010 },
-			{ id: "comp2", name: "HealthPlus", industryId: "ind2", foundedYear: 2015 },
-			{ id: "comp3", name: "FinanceHub", industryId: "ind3", foundedYear: 2008 },
+			{
+				id: "comp2",
+				name: "HealthPlus",
+				industryId: "ind2",
+				foundedYear: 2015,
+			},
+			{
+				id: "comp3",
+				name: "FinanceHub",
+				industryId: "ind3",
+				foundedYear: 2008,
+			},
 		],
 		users: [
-			{ id: "u1", name: "Alice", email: "alice@techcorp.com", companyId: "comp1", age: 30 },
-			{ id: "u2", name: "Bob", email: "bob@techcorp.com", companyId: "comp1", age: 28 },
-			{ id: "u3", name: "Charlie", email: "charlie@healthplus.com", companyId: "comp2", age: 35 },
-			{ id: "u4", name: "David", email: "david@financehub.com", companyId: "comp3", age: 40 },
+			{
+				id: "u1",
+				name: "Alice",
+				email: "alice@techcorp.com",
+				companyId: "comp1",
+				age: 30,
+			},
+			{
+				id: "u2",
+				name: "Bob",
+				email: "bob@techcorp.com",
+				companyId: "comp1",
+				age: 28,
+			},
+			{
+				id: "u3",
+				name: "Charlie",
+				email: "charlie@healthplus.com",
+				companyId: "comp2",
+				age: 35,
+			},
+			{
+				id: "u4",
+				name: "David",
+				email: "david@financehub.com",
+				companyId: "comp3",
+				age: 40,
+			},
 		],
 		orders: [
-			{ id: "ord1", orderNumber: "ORD-001", userId: "u1", total: 299.99, status: "completed" },
-			{ id: "ord2", orderNumber: "ORD-002", userId: "u1", total: 599.99, status: "pending" },
-			{ id: "ord3", orderNumber: "ORD-003", userId: "u2", total: 149.99, status: "completed" },
-			{ id: "ord4", orderNumber: "ORD-004", userId: "u3", total: 89.99, status: "completed" },
+			{
+				id: "ord1",
+				orderNumber: "ORD-001",
+				userId: "u1",
+				total: 299.99,
+				status: "completed",
+			},
+			{
+				id: "ord2",
+				orderNumber: "ORD-002",
+				userId: "u1",
+				total: 599.99,
+				status: "pending",
+			},
+			{
+				id: "ord3",
+				orderNumber: "ORD-003",
+				userId: "u2",
+				total: 149.99,
+				status: "completed",
+			},
+			{
+				id: "ord4",
+				orderNumber: "ORD-004",
+				userId: "u3",
+				total: 89.99,
+				status: "completed",
+			},
 		],
 		orderItems: [
-			{ id: "item1", orderId: "ord1", productId: "prod1", quantity: 1, price: 299.99 },
-			{ id: "item2", orderId: "ord2", productId: "prod2", quantity: 2, price: 299.99 },
-			{ id: "item3", orderId: "ord3", productId: "prod3", quantity: 1, price: 149.99 },
-			{ id: "item4", orderId: "ord4", productId: "prod1", quantity: 1, price: 89.99 },
+			{
+				id: "item1",
+				orderId: "ord1",
+				productId: "prod1",
+				quantity: 1,
+				price: 299.99,
+			},
+			{
+				id: "item2",
+				orderId: "ord2",
+				productId: "prod2",
+				quantity: 2,
+				price: 299.99,
+			},
+			{
+				id: "item3",
+				orderId: "ord3",
+				productId: "prod3",
+				quantity: 1,
+				price: 149.99,
+			},
+			{
+				id: "item4",
+				orderId: "ord4",
+				productId: "prod1",
+				quantity: 1,
+				price: 89.99,
+			},
 		],
 		products: [
 			{ id: "prod1", name: "Laptop", price: 299.99, categoryId: "cat1" },
@@ -142,8 +224,16 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 			{ id: "prod3", name: "Keyboard", price: 149.99, categoryId: "cat1" },
 		],
 		categories: [
-			{ id: "cat1", name: "Electronics", description: "Electronic devices and accessories" },
-			{ id: "cat2", name: "Office Supplies", description: "Office equipment and supplies" },
+			{
+				id: "cat1",
+				name: "Electronics",
+				description: "Electronic devices and accessories",
+			},
+			{
+				id: "cat2",
+				name: "Office Supplies",
+				description: "Office equipment and supplies",
+			},
 		],
 	};
 
@@ -157,7 +247,16 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 		Effect.runPromise(
 			Effect.gen(function* () {
 				const db = yield* createEffectDatabase(cfg, data);
-				const coll = (db as Record<string, { query: (opts: Record<string, unknown>) => Stream.Stream<Record<string, unknown>> }>)[collection];
+				const coll = (
+					db as Record<
+						string,
+						{
+							query: (
+								opts: Record<string, unknown>,
+							) => Stream.Stream<Record<string, unknown>>;
+						}
+					>
+				)[collection];
 				return yield* Stream.runCollect(coll.query(options)).pipe(
 					Effect.map(Chunk.toReadonlyArray),
 				);
@@ -487,7 +586,10 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 			// The Effect populate-stream yields DanglingReferenceError for missing ref targets
 			const result = Effect.runPromise(
 				Effect.gen(function* () {
-					const db = yield* createEffectDatabase(config, emptyCompaniesData as typeof testData);
+					const db = yield* createEffectDatabase(
+						config,
+						emptyCompaniesData as typeof testData,
+					);
 					return yield* Stream.runCollect(
 						db.users.query({
 							populate: { company: true },
@@ -504,14 +606,23 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 			const modifiedData = {
 				...testData,
 				users: [
-					{ id: "u5", name: "Eve", email: "eve@test.com", companyId: "comp999", age: 25 },
+					{
+						id: "u5",
+						name: "Eve",
+						email: "eve@test.com",
+						companyId: "comp999",
+						age: 25,
+					},
 				],
 			};
 			// The Effect populate-stream produces DanglingReferenceError for missing targets.
 			// This test verifies the error is raised.
 			const result = Effect.runPromise(
 				Effect.gen(function* () {
-					const db = yield* createEffectDatabase(config, modifiedData as typeof testData);
+					const db = yield* createEffectDatabase(
+						config,
+						modifiedData as typeof testData,
+					);
 					return yield* Stream.runCollect(
 						db.users.query({
 							populate: { company: true },
@@ -638,12 +749,21 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 			const modifiedData = {
 				...testData,
 				users: [
-					{ id: "u6", name: "Frank", email: "frank@test.com", companyId: "nonexistent", age: 30 },
+					{
+						id: "u6",
+						name: "Frank",
+						email: "frank@test.com",
+						companyId: "nonexistent",
+						age: 30,
+					},
 				],
 			};
 			const result = Effect.runPromise(
 				Effect.gen(function* () {
-					const db = yield* createEffectDatabase(config, modifiedData as typeof testData);
+					const db = yield* createEffectDatabase(
+						config,
+						modifiedData as typeof testData,
+					);
 					return yield* Stream.runCollect(
 						db.users.query({
 							populate: { company: true },
@@ -661,10 +781,15 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 				...testData,
 				users: [], // No users
 			};
-			const companies = await collectQuery(config, modifiedData as typeof testData, "companies", {
-				populate: { users: true },
-				where: { id: "comp1" },
-			});
+			const companies = await collectQuery(
+				config,
+				modifiedData as typeof testData,
+				"companies",
+				{
+					populate: { users: true },
+					where: { id: "comp1" },
+				},
+			);
 
 			expect(companies).toHaveLength(1);
 			const comp = companies[0] as Record<string, unknown>;
@@ -746,15 +871,21 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 					expect(company).toHaveProperty("name");
 				}
 
-				const orders = user.orders as Array<Record<string, unknown>> | undefined;
+				const orders = user.orders as
+					| Array<Record<string, unknown>>
+					| undefined;
 				if (orders && orders.length > 0) {
 					for (const order of orders) {
 						expect(order).toHaveProperty("id");
-						const items = order.items as Array<Record<string, unknown>> | undefined;
+						const items = order.items as
+							| Array<Record<string, unknown>>
+							| undefined;
 						if (items && items.length > 0) {
 							for (const item of items) {
 								expect(item).toHaveProperty("id");
-								const product = item.product as Record<string, unknown> | undefined;
+								const product = item.product as
+									| Record<string, unknown>
+									| undefined;
 								if (product) {
 									expect(product).toHaveProperty("name");
 									expect(product).toHaveProperty("price");

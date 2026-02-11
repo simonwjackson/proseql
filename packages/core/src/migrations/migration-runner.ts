@@ -5,13 +5,23 @@
  * and preview migrations via dry-run.
  */
 
-import { Effect, Ref, Schema } from "effect"
-import { MigrationError } from "../errors/migration-errors.js"
-import type { SerializationError, StorageError, UnsupportedFormatError } from "../errors/storage-errors.js"
-import { StorageAdapter } from "../storage/storage-service.js"
-import { SerializerRegistry } from "../serializers/serializer-service.js"
-import type { DatabaseConfig } from "../types/database-config-types.js"
-import type { Migration, DryRunResult, DryRunCollectionResult, DryRunStatus, DryRunMigration } from "./migration-types.js"
+import { Effect, type Ref } from "effect";
+import { MigrationError } from "../errors/migration-errors.js";
+import type {
+	SerializationError,
+	StorageError,
+	UnsupportedFormatError,
+} from "../errors/storage-errors.js";
+import { SerializerRegistry } from "../serializers/serializer-service.js";
+import { StorageAdapter } from "../storage/storage-service.js";
+import type { DatabaseConfig } from "../types/database-config-types.js";
+import type {
+	DryRunCollectionResult,
+	DryRunMigration,
+	DryRunResult,
+	DryRunStatus,
+	Migration,
+} from "./migration-types.js";
 
 // ============================================================================
 // Migration Execution
@@ -40,14 +50,14 @@ export const runMigrations = (
 ): Effect.Effect<Record<string, unknown>, MigrationError> => {
 	// If already at target version, no migrations needed
 	if (fileVersion >= targetVersion) {
-		return Effect.succeed(data)
+		return Effect.succeed(data);
 	}
 
 	// Filter to migrations that apply: from >= fileVersion and to <= targetVersion
 	// Then sort by `from` to ensure correct execution order
 	const applicableMigrations = migrations
 		.filter((m) => m.from >= fileVersion && m.to <= targetVersion)
-		.sort((a, b) => a.from - b.from)
+		.sort((a, b) => a.from - b.from);
 
 	// Run a single migration step, catching any thrown exceptions
 	const runStep = (
@@ -66,15 +76,18 @@ export const runMigrations = (
 					reason: "transform-failed",
 					message: `Migration ${migration.from}→${migration.to} failed: ${error instanceof Error ? error.message : String(error)}`,
 				}),
-		})
+		});
 
 	// Chain all migrations using reduce
 	return applicableMigrations.reduce(
 		(acc, migration, stepIndex) =>
 			acc.pipe(Effect.flatMap((d) => runStep(d, migration, stepIndex))),
-		Effect.succeed(data) as Effect.Effect<Record<string, unknown>, MigrationError>,
-	)
-}
+		Effect.succeed(data) as Effect.Effect<
+			Record<string, unknown>,
+			MigrationError
+		>,
+	);
+};
 
 // ============================================================================
 // Migration Registry Validation
@@ -103,7 +116,7 @@ export const validateMigrationRegistry = (
 ): Effect.Effect<void, MigrationError> => {
 	// Version 0 with no migrations is valid (no migrations needed)
 	if (version === 0 && migrations.length === 0) {
-		return Effect.void
+		return Effect.void;
 	}
 
 	// Version > 0 with empty migrations is invalid (no path from 0 to current)
@@ -117,12 +130,12 @@ export const validateMigrationRegistry = (
 				reason: "empty-registry",
 				message: `Collection "${collectionName}" has version ${version} but no migrations defined. Cannot migrate from version 0 to ${version}.`,
 			}),
-		)
+		);
 	}
 
 	// Check each migration's to === from + 1
 	for (let i = 0; i < migrations.length; i++) {
-		const migration = migrations[i]
+		const migration = migrations[i];
 		if (migration.to !== migration.from + 1) {
 			return Effect.fail(
 				new MigrationError({
@@ -133,14 +146,14 @@ export const validateMigrationRegistry = (
 					reason: "invalid-increment",
 					message: `Migration at index ${i} has from=${migration.from} and to=${migration.to}, but to must equal from + 1.`,
 				}),
-			)
+			);
 		}
 	}
 
 	// Check for duplicate `from` values
-	const fromValues = new Set<number>()
+	const fromValues = new Set<number>();
 	for (let i = 0; i < migrations.length; i++) {
-		const migration = migrations[i]
+		const migration = migrations[i];
 		if (fromValues.has(migration.from)) {
 			return Effect.fail(
 				new MigrationError({
@@ -151,17 +164,17 @@ export const validateMigrationRegistry = (
 					reason: "duplicate-from",
 					message: `Duplicate migration from version ${migration.from}. Each version can only have one migration.`,
 				}),
-			)
+			);
 		}
-		fromValues.add(migration.from)
+		fromValues.add(migration.from);
 	}
 
 	// Sort migrations by `from` to check for contiguous chain
-	const sortedMigrations = [...migrations].sort((a, b) => a.from - b.from)
+	const sortedMigrations = [...migrations].sort((a, b) => a.from - b.from);
 
 	// Check that first migration starts from version 0
 	// (data without _version is treated as version 0, so we need a path from 0)
-	const firstMigration = sortedMigrations[0]
+	const firstMigration = sortedMigrations[0];
 	if (firstMigration.from !== 0) {
 		return Effect.fail(
 			new MigrationError({
@@ -172,13 +185,13 @@ export const validateMigrationRegistry = (
 				reason: "missing-start",
 				message: `First migration starts at version ${firstMigration.from}, but must start at version 0. No path from version 0 to ${firstMigration.from}.`,
 			}),
-		)
+		);
 	}
 
 	// Check for contiguous chain (no gaps)
 	for (let i = 1; i < sortedMigrations.length; i++) {
-		const prev = sortedMigrations[i - 1]
-		const curr = sortedMigrations[i]
+		const prev = sortedMigrations[i - 1];
+		const curr = sortedMigrations[i];
 		if (curr.from !== prev.to) {
 			return Effect.fail(
 				new MigrationError({
@@ -189,12 +202,12 @@ export const validateMigrationRegistry = (
 					reason: "gap-in-chain",
 					message: `Gap in migration chain: no migration from version ${prev.to} to ${curr.from}.`,
 				}),
-			)
+			);
 		}
 	}
 
 	// Check that last migration's `to` matches the version
-	const lastMigration = sortedMigrations[sortedMigrations.length - 1]
+	const lastMigration = sortedMigrations[sortedMigrations.length - 1];
 	if (lastMigration.to !== version) {
 		return Effect.fail(
 			new MigrationError({
@@ -205,11 +218,11 @@ export const validateMigrationRegistry = (
 				reason: "version-mismatch",
 				message: `Last migration goes to version ${lastMigration.to}, but collection version is ${version}.`,
 			}),
-		)
+		);
 	}
 
-	return Effect.void
-}
+	return Effect.void;
+};
 
 // ============================================================================
 // Dry-Run Migrations
@@ -218,8 +231,8 @@ export const validateMigrationRegistry = (
 /**
  * Internal Ref map type for cross-collection access.
  */
-type HasId = { readonly id: string }
-type StateRefs = Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>
+type HasId = { readonly id: string };
+type StateRefs = Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>;
 
 /**
  * Preview which files need migration and what transforms would apply.
@@ -245,29 +258,29 @@ export const dryRunMigrations = (
 	StorageAdapter | SerializerRegistry
 > =>
 	Effect.gen(function* () {
-		const storage = yield* StorageAdapter
-		const serializer = yield* SerializerRegistry
+		const storage = yield* StorageAdapter;
+		const serializer = yield* SerializerRegistry;
 
-		const collectionResults: Array<DryRunCollectionResult> = []
+		const collectionResults: Array<DryRunCollectionResult> = [];
 
 		for (const collectionName of Object.keys(config)) {
-			const collectionConfig = config[collectionName]
+			const collectionConfig = config[collectionName];
 
 			// Skip unversioned collections
 			if (collectionConfig.version === undefined) {
-				continue
+				continue;
 			}
 
-			const targetVersion = collectionConfig.version
-			const filePath = collectionConfig.file
+			const targetVersion = collectionConfig.version;
+			const filePath = collectionConfig.file;
 
 			// Skip collections without a file path
 			if (!filePath) {
-				continue
+				continue;
 			}
 
 			// Check if file exists
-			const fileExists = yield* storage.exists(filePath)
+			const fileExists = yield* storage.exists(filePath);
 
 			if (!fileExists) {
 				// File doesn't exist - report as no-file
@@ -278,21 +291,25 @@ export const dryRunMigrations = (
 					targetVersion,
 					migrationsToApply: [],
 					status: "no-file",
-				})
-				continue
+				});
+				continue;
 			}
 
 			// Read and deserialize the file to extract _version
-			const raw = yield* storage.read(filePath)
+			const raw = yield* storage.read(filePath);
 
 			// Extract file extension for deserializer
-			const extMatch = filePath.match(/\.([^.]+)$/)
-			const ext = extMatch ? extMatch[1] : "json"
+			const extMatch = filePath.match(/\.([^.]+)$/);
+			const ext = extMatch ? extMatch[1] : "json";
 
-			const parsed = yield* serializer.deserialize(raw, ext)
+			const parsed = yield* serializer.deserialize(raw, ext);
 
 			// Check if parsed is an object
-			if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+			if (
+				typeof parsed !== "object" ||
+				parsed === null ||
+				Array.isArray(parsed)
+			) {
 				return yield* Effect.fail(
 					new MigrationError({
 						collection: collectionName,
@@ -302,31 +319,31 @@ export const dryRunMigrations = (
 						reason: "invalid-file-format",
 						message: `File '${filePath}' does not contain a valid object`,
 					}),
-				)
+				);
 			}
 
 			// Extract _version from file (default 0 if absent)
 			const fileVersion =
 				typeof (parsed as Record<string, unknown>)._version === "number"
 					? ((parsed as Record<string, unknown>)._version as number)
-					: 0
+					: 0;
 
 			// Determine status and migrations to apply
-			let status: DryRunStatus
-			let migrationsToApply: ReadonlyArray<DryRunMigration> = []
+			let status: DryRunStatus;
+			let migrationsToApply: ReadonlyArray<DryRunMigration> = [];
 
 			if (fileVersion > targetVersion) {
 				// File version ahead of config - cannot migrate
-				status = "ahead"
+				status = "ahead";
 			} else if (fileVersion === targetVersion) {
 				// Already at target version
-				status = "up-to-date"
+				status = "up-to-date";
 			} else {
 				// File version < target version - needs migration
-				status = "needs-migration"
+				status = "needs-migration";
 
 				// Filter applicable migrations
-				const migrations = collectionConfig.migrations ?? []
+				const migrations = collectionConfig.migrations ?? [];
 				migrationsToApply = migrations
 					.filter((m) => m.from >= fileVersion && m.to <= targetVersion)
 					.sort((a, b) => a.from - b.from)
@@ -334,12 +351,12 @@ export const dryRunMigrations = (
 						const result: DryRunMigration = {
 							from: m.from,
 							to: m.to,
-						}
+						};
 						if (m.description !== undefined) {
-							return { ...result, description: m.description }
+							return { ...result, description: m.description };
 						}
-						return result
-					})
+						return result;
+					});
 			}
 
 			collectionResults.push({
@@ -349,8 +366,8 @@ export const dryRunMigrations = (
 				targetVersion,
 				migrationsToApply,
 				status,
-			})
+			});
 		}
 
-		return { collections: collectionResults }
-	})
+		return { collections: collectionResults };
+	});

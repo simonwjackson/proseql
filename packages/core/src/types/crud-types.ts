@@ -227,7 +227,7 @@ export type UpsertManyResult<T> = {
 /**
  * Result of validation operations
  */
-export type ValidationResult<T = unknown> = {
+export type ValidationResult<_T = unknown> = {
 	valid: boolean;
 	errors: Array<{
 		field: string;
@@ -259,19 +259,20 @@ export type ForeignKeyValidation = {
  * Transaction context for multi-operation atomicity.
  * Provides collection accessors, lifecycle methods, and introspection.
  */
-export type TransactionContext<DB = Record<string, SmartCollection<unknown>>> = {
-	/** Finalize changes, trigger persistence for mutated collections, mark inactive */
-	readonly commit: () => Effect.Effect<void, TransactionError>;
-	/** Restore all snapshots, mark inactive, trigger no persistence. Always fails to short-circuit. */
-	readonly rollback: () => Effect.Effect<never, TransactionError>;
-	/** Whether the transaction is still open */
-	readonly isActive: boolean;
-	/** Which collections have been written to during the transaction */
-	readonly mutatedCollections: ReadonlySet<string>;
-} & {
-	/** Collection accessors — same interface as db.collectionName */
-	readonly [K in keyof DB]: DB[K];
-};
+export type TransactionContext<DB = Record<string, SmartCollection<unknown>>> =
+	{
+		/** Finalize changes, trigger persistence for mutated collections, mark inactive */
+		readonly commit: () => Effect.Effect<void, TransactionError>;
+		/** Restore all snapshots, mark inactive, trigger no persistence. Always fails to short-circuit. */
+		readonly rollback: () => Effect.Effect<never, TransactionError>;
+		/** Whether the transaction is still open */
+		readonly isActive: boolean;
+		/** Which collections have been written to during the transaction */
+		readonly mutatedCollections: ReadonlySet<string>;
+	} & {
+		/** Collection accessors — same interface as db.collectionName */
+		readonly [K in keyof DB]: DB[K];
+	};
 
 // ============================================================================
 // Type Helpers

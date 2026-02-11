@@ -1,6 +1,6 @@
-import { Effect, Schema } from "effect"
-import { describe, it, expect } from "vitest"
-import { createEffectDatabase } from "../src/index.js"
+import { Effect, Schema } from "effect";
+import { describe, expect, it } from "vitest";
+import { createEffectDatabase } from "../src/index.js";
 
 // ============================================================================
 // Test Schema
@@ -12,9 +12,9 @@ const BookSchema = Schema.Struct({
 	author: Schema.String,
 	year: Schema.Number,
 	description: Schema.String,
-})
+});
 
-type Book = typeof BookSchema.Type
+type Book = typeof BookSchema.Type;
 
 // ============================================================================
 // Test Data
@@ -56,7 +56,7 @@ const testBooks: ReadonlyArray<Book> = [
 		year: 1992,
 		description: "Virtual reality and pizza delivery in a cyberpunk future",
 	},
-]
+];
 
 // ============================================================================
 // Test Helpers
@@ -70,7 +70,7 @@ const createTestDatabase = () =>
 			},
 			{ books: testBooks },
 		),
-	)
+	);
 
 const createTestDatabaseWithSearchIndex = () =>
 	Effect.runPromise(
@@ -84,7 +84,7 @@ const createTestDatabaseWithSearchIndex = () =>
 			},
 			{ books: testBooks },
 		),
-	)
+	);
 
 // ============================================================================
 // 9. Basic Search Tests
@@ -93,299 +93,299 @@ const createTestDatabaseWithSearchIndex = () =>
 describe("Full-text search: Basic Search (task 9)", () => {
 	describe("9.1: Test setup verification", () => {
 		it("should create database with books collection", async () => {
-			const db = await createTestDatabase()
-			expect(db.books).toBeDefined()
-		})
+			const db = await createTestDatabase();
+			expect(db.books).toBeDefined();
+		});
 
 		it("should have all test books loaded", async () => {
-			const db = await createTestDatabase()
-			const results = await db.books.query().runPromise
-			expect(results.length).toBe(5)
-		})
+			const db = await createTestDatabase();
+			const results = await db.books.query().runPromise;
+			expect(results.length).toBe(5);
+		});
 
 		it("should have correct book fields", async () => {
-			const db = await createTestDatabase()
-			const results = await db.books.query({ where: { id: "1" } }).runPromise
-			expect(results.length).toBe(1)
+			const db = await createTestDatabase();
+			const results = await db.books.query({ where: { id: "1" } }).runPromise;
+			expect(results.length).toBe(1);
 			expect(results[0]).toMatchObject({
 				id: "1",
 				title: "Dune",
 				author: "Frank Herbert",
 				year: 1965,
 				description: "A desert planet story about spice and sandworms",
-			})
-		})
-	})
+			});
+		});
+	});
 
 	describe("9.2: Field-level $search basic match", () => {
 		it("should match 'Dune' when searching for 'dune'", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "dune" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should return the full book object when matched", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "dune" } },
-			}).runPromise
-			expect(results.length).toBe(1)
+			}).runPromise;
+			expect(results.length).toBe(1);
 			expect(results[0]).toMatchObject({
 				id: "1",
 				title: "Dune",
 				author: "Frank Herbert",
 				year: 1965,
-			})
-		})
-	})
+			});
+		});
+	});
 
 	describe("9.3: Case insensitivity", () => {
 		it("should match 'Dune' when searching for 'DUNE' (uppercase)", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "DUNE" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should match 'Dune' when searching for 'DuNe' (mixed case)", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "DuNe" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should match 'Neuromancer' when searching for 'NEUROMANCER'", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "NEUROMANCER" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Neuromancer")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Neuromancer");
+		});
 
 		it("should match author case-insensitively", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { author: { $search: "FRANK HERBERT" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].author).toBe("Frank Herbert")
-		})
-	})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].author).toBe("Frank Herbert");
+		});
+	});
 
 	describe("9.4: Multi-term search", () => {
 		it("should match 'The Left Hand of Darkness' when searching for 'left hand darkness'", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "left hand darkness" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("The Left Hand of Darkness")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("The Left Hand of Darkness");
+		});
 
 		it("should match when search terms are in different order than in title", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "darkness hand left" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("The Left Hand of Darkness")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("The Left Hand of Darkness");
+		});
 
 		it("should not match if any search term is missing from the field", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "left hand xyz" } },
-			}).runPromise
-			expect(results.length).toBe(0)
-		})
+			}).runPromise;
+			expect(results.length).toBe(0);
+		});
 
 		it("should match 'Foundation' when searching for 'foundation'", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "foundation" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Foundation")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Foundation");
+		});
 
 		it("should match 'Snow Crash' when searching for 'snow crash'", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "snow crash" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Snow Crash")
-		})
-	})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Snow Crash");
+		});
+	});
 
 	describe("9.5: Prefix matching", () => {
 		it("should match 'Neuromancer' when searching for prefix 'neuro'", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "neuro" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Neuromancer")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Neuromancer");
+		});
 
 		it("should match 'Foundation' when searching for prefix 'found'", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "found" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Foundation")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Foundation");
+		});
 
 		it("should match 'Dune' when searching for prefix 'du'", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "du" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should match 'Snow Crash' when searching for prefix 'cra'", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "cra" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Snow Crash")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Snow Crash");
+		});
 
 		it("should match with multi-term prefix search", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "sno cra" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Snow Crash")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Snow Crash");
+		});
 
 		it("should match author with prefix search", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { author: { $search: "herb" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].author).toBe("Frank Herbert")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].author).toBe("Frank Herbert");
+		});
 
 		it("should match description with prefix search", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { description: { $search: "cyber" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Snow Crash")
-		})
-	})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Snow Crash");
+		});
+	});
 
 	describe("9.6: No match", () => {
 		it("should return no results when searching for 'xyz123' in title", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "xyz123" } },
-			}).runPromise
-			expect(results.length).toBe(0)
-		})
+			}).runPromise;
+			expect(results.length).toBe(0);
+		});
 
 		it("should return no results when searching for nonexistent term in author", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { author: { $search: "xyz123" } },
-			}).runPromise
-			expect(results.length).toBe(0)
-		})
+			}).runPromise;
+			expect(results.length).toBe(0);
+		});
 
 		it("should return no results when searching for nonexistent term in description", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { description: { $search: "xyz123" } },
-			}).runPromise
-			expect(results.length).toBe(0)
-		})
+			}).runPromise;
+			expect(results.length).toBe(0);
+		});
 
 		it("should return no results when no tokens match any field", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "notaword faketerm randomstring" } },
-			}).runPromise
-			expect(results.length).toBe(0)
-		})
+			}).runPromise;
+			expect(results.length).toBe(0);
+		});
 
 		it("should return no results for partial mismatch where only some tokens match", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "dune" matches but "xyz123" doesn't, so overall should not match
 			const results = await db.books.query({
 				where: { title: { $search: "dune xyz123" } },
-			}).runPromise
-			expect(results.length).toBe(0)
-		})
-	})
+			}).runPromise;
+			expect(results.length).toBe(0);
+		});
+	});
 
 	describe("9.7: Empty search string", () => {
 		it("should return all results when searching with empty string in title", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { title: { $search: "" } },
-			}).runPromise
-			expect(results.length).toBe(5)
-		})
+			}).runPromise;
+			expect(results.length).toBe(5);
+		});
 
 		it("should return all results when searching with empty string in author", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { author: { $search: "" } },
-			}).runPromise
-			expect(results.length).toBe(5)
-		})
+			}).runPromise;
+			expect(results.length).toBe(5);
+		});
 
 		it("should return all results when searching with empty string in description", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { description: { $search: "" } },
-			}).runPromise
-			expect(results.length).toBe(5)
-		})
+			}).runPromise;
+			expect(results.length).toBe(5);
+		});
 
 		it("should apply other filters when $search is empty", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Empty $search should not filter anything, but year filter should apply
 			const results = await db.books.query({
 				where: { title: { $search: "" }, year: { $gt: 1980 } },
-			}).runPromise
+			}).runPromise;
 			// Books with year > 1980: Neuromancer (1984), Snow Crash (1992)
-			expect(results.length).toBe(2)
+			expect(results.length).toBe(2);
 			expect(results.map((b) => b.title).sort()).toEqual([
 				"Neuromancer",
 				"Snow Crash",
-			])
-		})
+			]);
+		});
 
 		it("should return same results as query without $search filter", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const withEmptySearch = await db.books.query({
 				where: { title: { $search: "" } },
-			}).runPromise
-			const withoutSearch = await db.books.query().runPromise
-			expect(withEmptySearch.length).toBe(withoutSearch.length)
+			}).runPromise;
+			const withoutSearch = await db.books.query().runPromise;
+			expect(withEmptySearch.length).toBe(withoutSearch.length);
 			expect(withEmptySearch.map((b) => b.id).sort()).toEqual(
 				withoutSearch.map((b) => b.id).sort(),
-			)
-		})
-	})
-})
+			);
+		});
+	});
+});
 
 // ============================================================================
 // 10. Multi-Field Search Tests
@@ -394,262 +394,272 @@ describe("Full-text search: Basic Search (task 9)", () => {
 describe("Full-text search: Multi-Field Search (task 10)", () => {
 	describe("10.1: Top-level multi-field search", () => {
 		it("should match when terms span across specified fields", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "herbert" is in author field, "dune" is in title field
 			const results = await db.books.query({
-				where: { $search: { query: "herbert dune", fields: ["title", "author"] } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-			expect(results[0].author).toBe("Frank Herbert")
-		})
+				where: {
+					$search: { query: "herbert dune", fields: ["title", "author"] },
+				},
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+			expect(results[0].author).toBe("Frank Herbert");
+		});
 
 		it("should match when all terms are in a single field", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Both "frank" and "herbert" are in author field
 			const results = await db.books.query({
-				where: { $search: { query: "frank herbert", fields: ["title", "author"] } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].author).toBe("Frank Herbert")
-		})
+				where: {
+					$search: { query: "frank herbert", fields: ["title", "author"] },
+				},
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].author).toBe("Frank Herbert");
+		});
 
 		it("should return multiple matches when terms span different entities", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "gibson" is in Neuromancer's author, search for "william gibson"
 			// Both terms should be found in the author field "William Gibson"
 			const results = await db.books.query({
 				where: { $search: { query: "william gibson", fields: ["author"] } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Neuromancer")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Neuromancer");
+		});
 
 		it("should not match when a term is missing from all specified fields", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "herbert" is in author but "xyz123" is not in any field
 			const results = await db.books.query({
-				where: { $search: { query: "herbert xyz123", fields: ["title", "author"] } },
-			}).runPromise
-			expect(results.length).toBe(0)
-		})
+				where: {
+					$search: { query: "herbert xyz123", fields: ["title", "author"] },
+				},
+			}).runPromise;
+			expect(results.length).toBe(0);
+		});
 
 		it("should support case-insensitive matching across fields", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
-				where: { $search: { query: "HERBERT DUNE", fields: ["title", "author"] } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+				where: {
+					$search: { query: "HERBERT DUNE", fields: ["title", "author"] },
+				},
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should support prefix matching across fields", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "herb" is a prefix of "Herbert", "du" is a prefix of "Dune"
 			const results = await db.books.query({
 				where: { $search: { query: "herb du", fields: ["title", "author"] } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should match multiple books when terms are shared", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "darkness" matches "The Left Hand of Darkness" in title
 			// "dark" also matches via prefix
 			const results = await db.books.query({
 				where: { $search: { query: "dark", fields: ["title", "description"] } },
-			}).runPromise
-			expect(results.length).toBeGreaterThanOrEqual(1)
-			expect(results.some((r) => r.title === "The Left Hand of Darkness")).toBe(true)
-		})
-	})
+			}).runPromise;
+			expect(results.length).toBeGreaterThanOrEqual(1);
+			expect(results.some((r) => r.title === "The Left Hand of Darkness")).toBe(
+				true,
+			);
+		});
+	});
 
 	describe("10.2: Default all string fields search", () => {
 		it("should search all string fields when fields is omitted - author match", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "gibson" is in author field "William Gibson"
 			const results = await db.books.query({
 				where: { $search: { query: "gibson" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Neuromancer")
-			expect(results[0].author).toBe("William Gibson")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Neuromancer");
+			expect(results[0].author).toBe("William Gibson");
+		});
 
 		it("should search all string fields when fields is omitted - title match", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "dune" is in title field
 			const results = await db.books.query({
 				where: { $search: { query: "dune" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should search all string fields when fields is omitted - description match", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "sandworms" is in description field
 			const results = await db.books.query({
 				where: { $search: { query: "sandworms" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should match when terms span across different string fields without specifying fields", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "herbert" is in author, "spice" is in description
 			const results = await db.books.query({
 				where: { $search: { query: "herbert spice" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-			expect(results[0].author).toBe("Frank Herbert")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+			expect(results[0].author).toBe("Frank Herbert");
+		});
 
 		it("should search multiple string fields and find matches across entities", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "television" is in Neuromancer's description
 			const results = await db.books.query({
 				where: { $search: { query: "television" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Neuromancer")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Neuromancer");
+		});
 
 		it("should not search non-string fields like year", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "1965" is the year but it's a number field, not string
 			// The search should not find it (year field is type Number)
 			// Note: This searches string fields only
 			const results = await db.books.query({
 				where: { $search: { query: "1965" } },
-			}).runPromise
+			}).runPromise;
 			// Should not match because year is a number field
-			expect(results.length).toBe(0)
-		})
+			expect(results.length).toBe(0);
+		});
 
 		it("should return multiple matches when query matches different entities", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "planet" appears in both Dune's description ("desert planet") and
 			// The Left Hand of Darkness's description ("winter planet")
 			const results = await db.books.query({
 				where: { $search: { query: "planet" } },
-			}).runPromise
-			expect(results.length).toBe(2)
-			const titles = results.map((r) => r.title).sort()
-			expect(titles).toEqual(["Dune", "The Left Hand of Darkness"])
-		})
+			}).runPromise;
+			expect(results.length).toBe(2);
+			const titles = results.map((r) => r.title).sort();
+			expect(titles).toEqual(["Dune", "The Left Hand of Darkness"]);
+		});
 
 		it("should support prefix matching across all string fields", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "cyber" is a prefix for "cyberpunk" in Snow Crash's description
 			const results = await db.books.query({
 				where: { $search: { query: "cyber" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Snow Crash")
-		})
-	})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Snow Crash");
+		});
+	});
 
 	describe("10.3: Single-field explicit search", () => {
 		it("should only search the specified field - title match", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "dune" is in title field, should match when fields: ["title"]
 			const results = await db.books.query({
 				where: { $search: { query: "dune", fields: ["title"] } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should not match when term is in a non-specified field", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "herbert" is in author field, but we only search title
 			const results = await db.books.query({
 				where: { $search: { query: "herbert", fields: ["title"] } },
-			}).runPromise
-			expect(results.length).toBe(0)
-		})
+			}).runPromise;
+			expect(results.length).toBe(0);
+		});
 
 		it("should not match when term is in description but only title is specified", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "sandworms" is in description field, but we only search title
 			const results = await db.books.query({
 				where: { $search: { query: "sandworms", fields: ["title"] } },
-			}).runPromise
-			expect(results.length).toBe(0)
-		})
+			}).runPromise;
+			expect(results.length).toBe(0);
+		});
 
 		it("should only search author field when specified", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "gibson" is in author field "William Gibson"
 			const results = await db.books.query({
 				where: { $search: { query: "gibson", fields: ["author"] } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Neuromancer")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Neuromancer");
+		});
 
 		it("should not match title terms when only author is specified", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "neuromancer" is in title field, but we only search author
 			const results = await db.books.query({
 				where: { $search: { query: "neuromancer", fields: ["author"] } },
-			}).runPromise
-			expect(results.length).toBe(0)
-		})
+			}).runPromise;
+			expect(results.length).toBe(0);
+		});
 
 		it("should only search description field when specified", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "cyberpunk" is in description field
 			const results = await db.books.query({
 				where: { $search: { query: "cyberpunk", fields: ["description"] } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Snow Crash")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Snow Crash");
+		});
 
 		it("should support prefix matching in single specified field", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "du" is a prefix for "Dune" in title
 			const results = await db.books.query({
 				where: { $search: { query: "du", fields: ["title"] } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should support multi-term search in single specified field", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "left hand darkness" all in title field
 			const results = await db.books.query({
 				where: { $search: { query: "left hand darkness", fields: ["title"] } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("The Left Hand of Darkness")
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("The Left Hand of Darkness");
+		});
 
 		it("should fail multi-term search when terms span excluded fields", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "herbert" is in author, "dune" is in title -- but only title is searched
 			const results = await db.books.query({
 				where: { $search: { query: "herbert dune", fields: ["title"] } },
-			}).runPromise
-			expect(results.length).toBe(0)
-		})
+			}).runPromise;
+			expect(results.length).toBe(0);
+		});
 
 		it("should be case-insensitive in single-field search", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: { $search: { query: "DUNE", fields: ["title"] } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
-	})
-})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
+	});
+});
 
 // ============================================================================
 // 11. Relevance Scoring Tests
@@ -686,7 +696,7 @@ describe("Full-text search: Relevance Scoring (task 11)", () => {
 			year: 2020,
 			description: "An anthology about deserts", // "Duneland" for prefix test
 		},
-	]
+	];
 
 	const createRelevanceTestDatabase = () =>
 		Effect.runPromise(
@@ -696,27 +706,27 @@ describe("Full-text search: Relevance Scoring (task 11)", () => {
 				},
 				{ books: relevanceTestBooks },
 			),
-		)
+		);
 
 	describe("11.1: Relevance ordering", () => {
 		it("should rank entity with higher relevance score first when multiple entities match", async () => {
-			const db = await createRelevanceTestDatabase()
+			const db = await createRelevanceTestDatabase();
 			// "dark" search:
 			// - "The Left Hand of Darkness" matches "dark" as prefix of "darkness" in title
 			// - "The Dark Tower" matches "dark" as exact match in title
 			// Exact match should score higher than prefix match
 			const results = await db.books.query({
 				where: { $search: { query: "dark", fields: ["title"] } },
-			}).runPromise
+			}).runPromise;
 
 			// Should return both matching books
-			expect(results.length).toBe(2)
+			expect(results.length).toBe(2);
 
 			// "The Dark Tower" has exact "dark" match - should rank first
-			expect(results[0].title).toBe("The Dark Tower")
+			expect(results[0].title).toBe("The Dark Tower");
 			// "The Left Hand of Darkness" has prefix match "darkness" starting with "dark" - should rank second
-			expect(results[1].title).toBe("The Left Hand of Darkness")
-		})
+			expect(results[1].title).toBe("The Left Hand of Darkness");
+		});
 
 		it("should rank entities with more term matches higher", async () => {
 			// Add custom test data where one entity has more matches
@@ -735,161 +745,161 @@ describe("Full-text search: Relevance Scoring (task 11)", () => {
 					year: 2000,
 					description: "A short story",
 				},
-			]
+			];
 
 			const db = await Effect.runPromise(
 				createEffectDatabase(
 					{ books: { schema: BookSchema, relationships: {} } },
 					{ books: booksWithVaryingMatches },
 				),
-			)
+			);
 
 			// Search for "dark night" in all string fields
 			const results = await db.books.query({
 				where: { $search: { query: "dark night" } },
-			}).runPromise
+			}).runPromise;
 
 			// Only "The Dark Night Returns" matches BOTH terms (dark and night appear multiple times)
 			// "Dark" title book only matches "dark", not "night", so it shouldn't match at all
 			// (search requires ALL query terms to match)
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("The Dark Night Returns")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("The Dark Night Returns");
+		});
 
 		it("should order by relevance when multiple entities match the same query", async () => {
-			const db = await createRelevanceTestDatabase()
+			const db = await createRelevanceTestDatabase();
 			// "dark" matches two books, should be ordered by relevance score
 			const results = await db.books.query({
 				where: { $search: { query: "dark" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(2)
+			expect(results.length).toBe(2);
 			// Both match "dark" but with different score profiles:
 			// - "The Dark Tower" has exact match "dark"
 			// - "The Left Hand of Darkness" has prefix match "darkness"
 			// Exact match scores higher than prefix match
-			expect(results[0].title).toBe("The Dark Tower")
-			expect(results[1].title).toBe("The Left Hand of Darkness")
-		})
-	})
+			expect(results[0].title).toBe("The Dark Tower");
+			expect(results[1].title).toBe("The Left Hand of Darkness");
+		});
+	});
 
 	describe("11.2: Explicit sort overrides relevance", () => {
 		it("should sort by explicit sort option instead of relevance", async () => {
-			const db = await createRelevanceTestDatabase()
+			const db = await createRelevanceTestDatabase();
 			// Search for "dark" which matches "The Dark Tower" (1982) and "The Left Hand of Darkness" (1969)
 			// By relevance, "The Dark Tower" should come first (exact match)
 			// But with sort: { year: "asc" }, "The Left Hand of Darkness" (1969) should come first
 			const results = await db.books.query({
 				where: { $search: { query: "dark", fields: ["title"] } },
 				sort: { year: "asc" },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(2)
+			expect(results.length).toBe(2);
 			// Sorted by year ascending: 1969 comes before 1982
-			expect(results[0].title).toBe("The Left Hand of Darkness")
-			expect(results[0].year).toBe(1969)
-			expect(results[1].title).toBe("The Dark Tower")
-			expect(results[1].year).toBe(1982)
-		})
+			expect(results[0].title).toBe("The Left Hand of Darkness");
+			expect(results[0].year).toBe(1969);
+			expect(results[1].title).toBe("The Dark Tower");
+			expect(results[1].year).toBe(1982);
+		});
 
 		it("should sort by year descending when specified", async () => {
-			const db = await createRelevanceTestDatabase()
+			const db = await createRelevanceTestDatabase();
 			const results = await db.books.query({
 				where: { $search: { query: "dark", fields: ["title"] } },
 				sort: { year: "desc" },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(2)
+			expect(results.length).toBe(2);
 			// Sorted by year descending: 1982 comes before 1969
-			expect(results[0].title).toBe("The Dark Tower")
-			expect(results[0].year).toBe(1982)
-			expect(results[1].title).toBe("The Left Hand of Darkness")
-			expect(results[1].year).toBe(1969)
-		})
+			expect(results[0].title).toBe("The Dark Tower");
+			expect(results[0].year).toBe(1982);
+			expect(results[1].title).toBe("The Left Hand of Darkness");
+			expect(results[1].year).toBe(1969);
+		});
 
 		it("should sort by title when specified, ignoring relevance", async () => {
-			const db = await createRelevanceTestDatabase()
+			const db = await createRelevanceTestDatabase();
 			const results = await db.books.query({
 				where: { $search: { query: "dark", fields: ["title"] } },
 				sort: { title: "asc" },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(2)
+			expect(results.length).toBe(2);
 			// Alphabetically: "The Dark Tower" < "The Left Hand of Darkness"
-			expect(results[0].title).toBe("The Dark Tower")
-			expect(results[1].title).toBe("The Left Hand of Darkness")
-		})
+			expect(results[0].title).toBe("The Dark Tower");
+			expect(results[1].title).toBe("The Left Hand of Darkness");
+		});
 
 		it("should apply explicit sort with field-level $search", async () => {
-			const db = await createRelevanceTestDatabase()
+			const db = await createRelevanceTestDatabase();
 			// Field-level $search with explicit sort
 			const results = await db.books.query({
 				where: { title: { $search: "dark" } },
 				sort: { year: "asc" },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(2)
-			expect(results[0].year).toBe(1969)
-			expect(results[1].year).toBe(1982)
-		})
+			expect(results.length).toBe(2);
+			expect(results[0].year).toBe(1969);
+			expect(results[1].year).toBe(1982);
+		});
 
 		it("should apply explicit sort with top-level $search without fields", async () => {
-			const db = await createRelevanceTestDatabase()
+			const db = await createRelevanceTestDatabase();
 			// Top-level $search (all string fields) with explicit sort
 			const results = await db.books.query({
 				where: { $search: { query: "dark" } },
 				sort: { year: "asc" },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(2)
-			expect(results[0].year).toBe(1969)
-			expect(results[1].year).toBe(1982)
-		})
-	})
+			expect(results.length).toBe(2);
+			expect(results[0].year).toBe(1969);
+			expect(results[1].year).toBe(1982);
+		});
+	});
 
 	describe("11.3: Exact match scores higher than prefix match", () => {
 		it("should rank exact 'Dune' above 'Duneland' when searching for 'dune'", async () => {
-			const db = await createRelevanceTestDatabase()
+			const db = await createRelevanceTestDatabase();
 			// "dune" query:
 			// - "Dune" has exact match for "dune" in title
 			// - "Duneland" has prefix match (duneland starts with "dune")
 			// Exact match should score higher (1.0) than prefix match (0.5)
 			const results = await db.books.query({
 				where: { $search: { query: "dune", fields: ["title"] } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(2)
+			expect(results.length).toBe(2);
 			// Exact match "Dune" should rank first
-			expect(results[0].title).toBe("Dune")
+			expect(results[0].title).toBe("Dune");
 			// Prefix match "Duneland" should rank second
-			expect(results[1].title).toBe("Duneland")
-		})
+			expect(results[1].title).toBe("Duneland");
+		});
 
 		it("should rank exact match higher even when prefix match is in a longer title", async () => {
-			const db = await createRelevanceTestDatabase()
+			const db = await createRelevanceTestDatabase();
 			// Using field-level $search to test the same behavior
 			const results = await db.books.query({
 				where: { title: { $search: "dune" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(2)
-			expect(results[0].title).toBe("Dune")
-			expect(results[1].title).toBe("Duneland")
-		})
+			expect(results.length).toBe(2);
+			expect(results[0].title).toBe("Dune");
+			expect(results[1].title).toBe("Duneland");
+		});
 
 		it("should rank exact match higher with top-level $search (all string fields)", async () => {
-			const db = await createRelevanceTestDatabase()
+			const db = await createRelevanceTestDatabase();
 			// Top-level $search without explicit fields
 			const results = await db.books.query({
 				where: { $search: { query: "dune" } },
-			}).runPromise
+			}).runPromise;
 
 			// Both "Dune" and "Duneland" should match
-			expect(results.length).toBe(2)
+			expect(results.length).toBe(2);
 			// Exact match should rank first
-			expect(results[0].title).toBe("Dune")
-			expect(results[1].title).toBe("Duneland")
-		})
+			expect(results[0].title).toBe("Dune");
+			expect(results[1].title).toBe("Duneland");
+		});
 
 		it("should correctly rank when multiple terms have different match types", async () => {
 			// Create test data where one entity has an exact match on one term
@@ -909,47 +919,47 @@ describe("Full-text search: Relevance Scoring (task 11)", () => {
 					year: 2001,
 					description: "A story",
 				},
-			]
+			];
 
 			const db = await Effect.runPromise(
 				createEffectDatabase(
 					{ books: { schema: BookSchema, relationships: {} } },
 					{ books: mixedMatchBooks },
 				),
-			)
+			);
 
 			// Search for "dark" - "Dark Stories" has exact match, "Darkness Falls" has prefix
 			const results = await db.books.query({
 				where: { $search: { query: "dark", fields: ["title"] } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(2)
+			expect(results.length).toBe(2);
 			// Exact "dark" in "Dark Stories" should score higher than prefix "dark" in "Darkness"
-			expect(results[0].title).toBe("Dark Stories")
-			expect(results[1].title).toBe("Darkness Falls")
-		})
+			expect(results[0].title).toBe("Dark Stories");
+			expect(results[1].title).toBe("Darkness Falls");
+		});
 
 		it("should verify scoring difference between exact and prefix matches", async () => {
-			const db = await createRelevanceTestDatabase()
+			const db = await createRelevanceTestDatabase();
 			// Get results and verify the order reflects scoring rules
 			const results = await db.books.query({
 				where: { $search: { query: "dune", fields: ["title"] } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(2)
+			expect(results.length).toBe(2);
 
 			// First result should be exact match
-			expect(results[0].title).toBe("Dune")
+			expect(results[0].title).toBe("Dune");
 			// Second result should be prefix match
-			expect(results[1].title).toBe("Duneland")
+			expect(results[1].title).toBe("Duneland");
 
 			// The scoring formula gives:
 			// - "Dune" exact match: coverage=1, tf=1+1/1=2, lengthNorm=1/log(2)≈1.44 → score≈2.88
 			// - "Duneland" prefix match: coverage=1, tf=1+0.5/1=1.5, lengthNorm=1/log(2)≈1.44 → score≈2.16
 			// The ratio should be approximately 2:1.5 = 1.33x difference
-		})
-	})
-})
+		});
+	});
+});
 
 // ============================================================================
 // 12. Search Index Tests
@@ -959,146 +969,150 @@ describe("Full-text search: Search Index (task 12)", () => {
 	describe("12.1: Indexed search returns same results as unindexed search", () => {
 		it("should return same results for field-level $search with and without index", async () => {
 			// Create databases with and without search index
-			const dbWithoutIndex = await createTestDatabase()
-			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+			const dbWithoutIndex = await createTestDatabase();
+			const dbWithIndex = await createTestDatabaseWithSearchIndex();
 
 			// Field-level search for "dune"
 			const resultsWithoutIndex = await dbWithoutIndex.books.query({
 				where: { title: { $search: "dune" } },
-			}).runPromise
+			}).runPromise;
 			const resultsWithIndex = await dbWithIndex.books.query({
 				where: { title: { $search: "dune" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length)
+			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length);
 			expect(resultsWithIndex.map((b) => b.id).sort()).toEqual(
 				resultsWithoutIndex.map((b) => b.id).sort(),
-			)
-		})
+			);
+		});
 
 		it("should return same results for top-level $search with explicit fields", async () => {
-			const dbWithoutIndex = await createTestDatabase()
-			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+			const dbWithoutIndex = await createTestDatabase();
+			const dbWithIndex = await createTestDatabaseWithSearchIndex();
 
 			// Top-level search with explicit fields
 			const resultsWithoutIndex = await dbWithoutIndex.books.query({
-				where: { $search: { query: "herbert dune", fields: ["title", "author"] } },
-			}).runPromise
+				where: {
+					$search: { query: "herbert dune", fields: ["title", "author"] },
+				},
+			}).runPromise;
 			const resultsWithIndex = await dbWithIndex.books.query({
-				where: { $search: { query: "herbert dune", fields: ["title", "author"] } },
-			}).runPromise
+				where: {
+					$search: { query: "herbert dune", fields: ["title", "author"] },
+				},
+			}).runPromise;
 
-			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length)
+			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length);
 			expect(resultsWithIndex.map((b) => b.id).sort()).toEqual(
 				resultsWithoutIndex.map((b) => b.id).sort(),
-			)
-		})
+			);
+		});
 
 		it("should return same results for top-level $search without fields (all string fields)", async () => {
-			const dbWithoutIndex = await createTestDatabase()
-			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+			const dbWithoutIndex = await createTestDatabase();
+			const dbWithIndex = await createTestDatabaseWithSearchIndex();
 
 			// Top-level search without fields (searches all string fields)
 			const resultsWithoutIndex = await dbWithoutIndex.books.query({
 				where: { $search: { query: "gibson" } },
-			}).runPromise
+			}).runPromise;
 			const resultsWithIndex = await dbWithIndex.books.query({
 				where: { $search: { query: "gibson" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length)
+			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length);
 			expect(resultsWithIndex.map((b) => b.id).sort()).toEqual(
 				resultsWithoutIndex.map((b) => b.id).sort(),
-			)
-		})
+			);
+		});
 
 		it("should return same results for prefix matching", async () => {
-			const dbWithoutIndex = await createTestDatabase()
-			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+			const dbWithoutIndex = await createTestDatabase();
+			const dbWithIndex = await createTestDatabaseWithSearchIndex();
 
 			// Prefix search
 			const resultsWithoutIndex = await dbWithoutIndex.books.query({
 				where: { title: { $search: "neuro" } },
-			}).runPromise
+			}).runPromise;
 			const resultsWithIndex = await dbWithIndex.books.query({
 				where: { title: { $search: "neuro" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length)
+			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length);
 			expect(resultsWithIndex.map((b) => b.id).sort()).toEqual(
 				resultsWithoutIndex.map((b) => b.id).sort(),
-			)
-		})
+			);
+		});
 
 		it("should return same results for multi-term search", async () => {
-			const dbWithoutIndex = await createTestDatabase()
-			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+			const dbWithoutIndex = await createTestDatabase();
+			const dbWithIndex = await createTestDatabaseWithSearchIndex();
 
 			// Multi-term search
 			const resultsWithoutIndex = await dbWithoutIndex.books.query({
 				where: { title: { $search: "left hand darkness" } },
-			}).runPromise
+			}).runPromise;
 			const resultsWithIndex = await dbWithIndex.books.query({
 				where: { title: { $search: "left hand darkness" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length)
+			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length);
 			expect(resultsWithIndex.map((b) => b.id).sort()).toEqual(
 				resultsWithoutIndex.map((b) => b.id).sort(),
-			)
-		})
+			);
+		});
 
 		it("should return same empty results when no match", async () => {
-			const dbWithoutIndex = await createTestDatabase()
-			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+			const dbWithoutIndex = await createTestDatabase();
+			const dbWithIndex = await createTestDatabaseWithSearchIndex();
 
 			// Search with no matches
 			const resultsWithoutIndex = await dbWithoutIndex.books.query({
 				where: { title: { $search: "xyz123notexist" } },
-			}).runPromise
+			}).runPromise;
 			const resultsWithIndex = await dbWithIndex.books.query({
 				where: { title: { $search: "xyz123notexist" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(resultsWithoutIndex.length).toBe(0)
-			expect(resultsWithIndex.length).toBe(0)
-		})
+			expect(resultsWithoutIndex.length).toBe(0);
+			expect(resultsWithIndex.length).toBe(0);
+		});
 
 		it("should return same results for search across description field", async () => {
-			const dbWithoutIndex = await createTestDatabase()
-			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+			const dbWithoutIndex = await createTestDatabase();
+			const dbWithIndex = await createTestDatabaseWithSearchIndex();
 
 			// Search in description field
 			const resultsWithoutIndex = await dbWithoutIndex.books.query({
 				where: { description: { $search: "cyberpunk" } },
-			}).runPromise
+			}).runPromise;
 			const resultsWithIndex = await dbWithIndex.books.query({
 				where: { description: { $search: "cyberpunk" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length)
+			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length);
 			expect(resultsWithIndex.map((b) => b.id).sort()).toEqual(
 				resultsWithoutIndex.map((b) => b.id).sort(),
-			)
-		})
+			);
+		});
 
 		it("should return same results with case-insensitive search", async () => {
-			const dbWithoutIndex = await createTestDatabase()
-			const dbWithIndex = await createTestDatabaseWithSearchIndex()
+			const dbWithoutIndex = await createTestDatabase();
+			const dbWithIndex = await createTestDatabaseWithSearchIndex();
 
 			// Case-insensitive search
 			const resultsWithoutIndex = await dbWithoutIndex.books.query({
 				where: { author: { $search: "WILLIAM GIBSON" } },
-			}).runPromise
+			}).runPromise;
 			const resultsWithIndex = await dbWithIndex.books.query({
 				where: { author: { $search: "WILLIAM GIBSON" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length)
+			expect(resultsWithIndex.length).toBe(resultsWithoutIndex.length);
 			expect(resultsWithIndex.map((b) => b.id).sort()).toEqual(
 				resultsWithoutIndex.map((b) => b.id).sort(),
-			)
-		})
+			);
+		});
 
 		it("should preserve relevance ordering for indexed search", async () => {
 			// Create databases for relevance testing - need exact/prefix match scenario
@@ -1117,14 +1131,14 @@ describe("Full-text search: Search Index (task 12)", () => {
 					year: 2020,
 					description: "An anthology",
 				},
-			]
+			];
 
 			const dbWithoutIndex = await Effect.runPromise(
 				createEffectDatabase(
 					{ books: { schema: BookSchema, relationships: {} } },
 					{ books: relevanceBooks },
 				),
-			)
+			);
 			const dbWithIndex = await Effect.runPromise(
 				createEffectDatabase(
 					{
@@ -1136,30 +1150,30 @@ describe("Full-text search: Search Index (task 12)", () => {
 					},
 					{ books: relevanceBooks },
 				),
-			)
+			);
 
 			// Search for "dune" - "Dune" should rank higher than "Duneland" (exact vs prefix)
 			const resultsWithoutIndex = await dbWithoutIndex.books.query({
 				where: { $search: { query: "dune", fields: ["title"] } },
-			}).runPromise
+			}).runPromise;
 			const resultsWithIndex = await dbWithIndex.books.query({
 				where: { $search: { query: "dune", fields: ["title"] } },
-			}).runPromise
+			}).runPromise;
 
 			// Should have same results in same order (relevance preserved)
-			expect(resultsWithIndex.length).toBe(2)
+			expect(resultsWithIndex.length).toBe(2);
 			expect(resultsWithIndex.map((b) => b.id)).toEqual(
 				resultsWithoutIndex.map((b) => b.id),
-			)
+			);
 			// Verify ordering: "Dune" (exact) before "Duneland" (prefix)
-			expect(resultsWithIndex[0].title).toBe("Dune")
-			expect(resultsWithIndex[1].title).toBe("Duneland")
-		})
-	})
+			expect(resultsWithIndex[0].title).toBe("Dune");
+			expect(resultsWithIndex[1].title).toBe("Duneland");
+		});
+	});
 
 	describe("12.2: Index maintenance on create", () => {
 		it("should find a newly created entity via search", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Create a new book
 			await db.books.create({
@@ -1168,20 +1182,20 @@ describe("Full-text search: Search Index (task 12)", () => {
 				author: "Dan Simmons",
 				year: 1989,
 				description: "A pilgrimage to the Time Tombs",
-			}).runPromise
+			}).runPromise;
 
 			// Search for the new book by title
 			const results = await db.books.query({
 				where: { title: { $search: "hyperion" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].id).toBe("new-book")
-			expect(results[0].title).toBe("Hyperion")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("new-book");
+			expect(results[0].title).toBe("Hyperion");
+		});
 
 		it("should find a newly created entity via author search", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Create a new book
 			await db.books.create({
@@ -1190,19 +1204,19 @@ describe("Full-text search: Search Index (task 12)", () => {
 				author: "Dan Simmons",
 				year: 1989,
 				description: "A pilgrimage to the Time Tombs",
-			}).runPromise
+			}).runPromise;
 
 			// Search for the new book by author
 			const results = await db.books.query({
 				where: { author: { $search: "simmons" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].author).toBe("Dan Simmons")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].author).toBe("Dan Simmons");
+		});
 
 		it("should find a newly created entity via description search", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Create a new book
 			await db.books.create({
@@ -1211,19 +1225,19 @@ describe("Full-text search: Search Index (task 12)", () => {
 				author: "Dan Simmons",
 				year: 1989,
 				description: "A pilgrimage to the Time Tombs",
-			}).runPromise
+			}).runPromise;
 
 			// Search for the new book by description content
 			const results = await db.books.query({
 				where: { description: { $search: "pilgrimage" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Hyperion")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Hyperion");
+		});
 
 		it("should find a newly created entity via top-level multi-field search", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Create a new book
 			await db.books.create({
@@ -1232,19 +1246,21 @@ describe("Full-text search: Search Index (task 12)", () => {
 				author: "Dan Simmons",
 				year: 1989,
 				description: "A pilgrimage to the Time Tombs",
-			}).runPromise
+			}).runPromise;
 
 			// Search using top-level $search with terms spanning fields
 			const results = await db.books.query({
-				where: { $search: { query: "simmons hyperion", fields: ["title", "author"] } },
-			}).runPromise
+				where: {
+					$search: { query: "simmons hyperion", fields: ["title", "author"] },
+				},
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].id).toBe("new-book")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("new-book");
+		});
 
 		it("should find a newly created entity via prefix search", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Create a new book
 			await db.books.create({
@@ -1253,19 +1269,19 @@ describe("Full-text search: Search Index (task 12)", () => {
 				author: "Dan Simmons",
 				year: 1989,
 				description: "A pilgrimage to the Time Tombs",
-			}).runPromise
+			}).runPromise;
 
 			// Search using prefix
 			const results = await db.books.query({
 				where: { title: { $search: "hyper" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Hyperion")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Hyperion");
+		});
 
 		it("should find multiple newly created entities", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Create multiple new books
 			await db.books.create({
@@ -1274,7 +1290,7 @@ describe("Full-text search: Search Index (task 12)", () => {
 				author: "Dan Simmons",
 				year: 1989,
 				description: "A pilgrimage to the Time Tombs",
-			}).runPromise
+			}).runPromise;
 
 			await db.books.create({
 				id: "new-book-2",
@@ -1282,20 +1298,20 @@ describe("Full-text search: Search Index (task 12)", () => {
 				author: "Dan Simmons",
 				year: 1990,
 				description: "Continuation of the Hyperion story",
-			}).runPromise
+			}).runPromise;
 
 			// Search for both new books
 			const results = await db.books.query({
 				where: { title: { $search: "hyperion" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(2)
-			const ids = results.map((b) => b.id).sort()
-			expect(ids).toEqual(["new-book-1", "new-book-2"])
-		})
+			expect(results.length).toBe(2);
+			const ids = results.map((b) => b.id).sort();
+			expect(ids).toEqual(["new-book-1", "new-book-2"]);
+		});
 
 		it("should find entity created with createMany via search", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Create multiple books at once
 			await db.books.createMany([
@@ -1313,25 +1329,25 @@ describe("Full-text search: Search Index (task 12)", () => {
 					year: 1973,
 					description: "An alien spacecraft enters the solar system",
 				},
-			]).runPromise
+			]).runPromise;
 
 			// Search for first batch entity
 			const results1 = await db.books.query({
 				where: { title: { $search: "ringworld" } },
-			}).runPromise
-			expect(results1.length).toBe(1)
-			expect(results1[0].id).toBe("batch-1")
+			}).runPromise;
+			expect(results1.length).toBe(1);
+			expect(results1[0].id).toBe("batch-1");
 
 			// Search for second batch entity
 			const results2 = await db.books.query({
 				where: { author: { $search: "clarke" } },
-			}).runPromise
-			expect(results2.length).toBe(1)
-			expect(results2[0].id).toBe("batch-2")
-		})
+			}).runPromise;
+			expect(results2.length).toBe(1);
+			expect(results2[0].id).toBe("batch-2");
+		});
 
 		it("should still find original entities after creating new ones", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Create a new book
 			await db.books.create({
@@ -1340,406 +1356,415 @@ describe("Full-text search: Search Index (task 12)", () => {
 				author: "Dan Simmons",
 				year: 1989,
 				description: "A pilgrimage to the Time Tombs",
-			}).runPromise
+			}).runPromise;
 
 			// Verify original books are still searchable
 			const duneResults = await db.books.query({
 				where: { title: { $search: "dune" } },
-			}).runPromise
-			expect(duneResults.length).toBe(1)
-			expect(duneResults[0].title).toBe("Dune")
+			}).runPromise;
+			expect(duneResults.length).toBe(1);
+			expect(duneResults[0].title).toBe("Dune");
 
 			const gibsonResults = await db.books.query({
 				where: { author: { $search: "gibson" } },
-			}).runPromise
-			expect(gibsonResults.length).toBe(1)
-			expect(gibsonResults[0].author).toBe("William Gibson")
-		})
-	})
+			}).runPromise;
+			expect(gibsonResults.length).toBe(1);
+			expect(gibsonResults[0].author).toBe("William Gibson");
+		});
+	});
 
 	describe("12.3: Index maintenance on update", () => {
 		it("should find entity by new title after update", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Update Dune's title to something completely different
-			await db.books.update("1", { title: "Arrakis Chronicles" }).runPromise
+			await db.books.update("1", { title: "Arrakis Chronicles" }).runPromise;
 
 			// Search for the new title should find it
 			const results = await db.books.query({
 				where: { title: { $search: "arrakis" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].id).toBe("1")
-			expect(results[0].title).toBe("Arrakis Chronicles")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("1");
+			expect(results[0].title).toBe("Arrakis Chronicles");
+		});
 
 		it("should no longer find entity by old title after update", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// First verify original title is searchable
 			const beforeResults = await db.books.query({
 				where: { title: { $search: "dune" } },
-			}).runPromise
-			expect(beforeResults.length).toBe(1)
-			expect(beforeResults[0].id).toBe("1")
+			}).runPromise;
+			expect(beforeResults.length).toBe(1);
+			expect(beforeResults[0].id).toBe("1");
 
 			// Update the title
-			await db.books.update("1", { title: "Arrakis Chronicles" }).runPromise
+			await db.books.update("1", { title: "Arrakis Chronicles" }).runPromise;
 
 			// Old title should no longer match
 			const afterResults = await db.books.query({
 				where: { title: { $search: "dune" } },
-			}).runPromise
-			expect(afterResults.length).toBe(0)
-		})
+			}).runPromise;
+			expect(afterResults.length).toBe(0);
+		});
 
 		it("should update author field and find by new author", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Update author
-			await db.books.update("1", { author: "Anonymous Writer" }).runPromise
+			await db.books.update("1", { author: "Anonymous Writer" }).runPromise;
 
 			// Search for new author should find it
 			const results = await db.books.query({
 				where: { author: { $search: "anonymous" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].id).toBe("1")
-			expect(results[0].author).toBe("Anonymous Writer")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("1");
+			expect(results[0].author).toBe("Anonymous Writer");
+		});
 
 		it("should no longer find entity by old author after update", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// First verify original author is searchable
 			const beforeResults = await db.books.query({
 				where: { author: { $search: "herbert" } },
-			}).runPromise
-			expect(beforeResults.length).toBe(1)
+			}).runPromise;
+			expect(beforeResults.length).toBe(1);
 
 			// Update the author
-			await db.books.update("1", { author: "Anonymous Writer" }).runPromise
+			await db.books.update("1", { author: "Anonymous Writer" }).runPromise;
 
 			// Old author should no longer match
 			const afterResults = await db.books.query({
 				where: { author: { $search: "herbert" } },
-			}).runPromise
-			expect(afterResults.length).toBe(0)
-		})
+			}).runPromise;
+			expect(afterResults.length).toBe(0);
+		});
 
 		it("should update description field and find by new description", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Update description
 			await db.books.update("1", {
 				description: "The spice must flow on Arrakis",
-			}).runPromise
+			}).runPromise;
 
 			// Search for new description content should find it
 			const results = await db.books.query({
 				where: { description: { $search: "arrakis" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].id).toBe("1")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("1");
+		});
 
 		it("should no longer find entity by old description content after update", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// First verify original description is searchable
 			const beforeResults = await db.books.query({
 				where: { description: { $search: "sandworms" } },
-			}).runPromise
-			expect(beforeResults.length).toBe(1)
+			}).runPromise;
+			expect(beforeResults.length).toBe(1);
 
 			// Update the description
 			await db.books.update("1", {
 				description: "The spice must flow",
-			}).runPromise
+			}).runPromise;
 
 			// Old description content should no longer match
 			const afterResults = await db.books.query({
 				where: { description: { $search: "sandworms" } },
-			}).runPromise
-			expect(afterResults.length).toBe(0)
-		})
+			}).runPromise;
+			expect(afterResults.length).toBe(0);
+		});
 
 		it("should handle update of multiple indexed fields at once", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Update both title and author
 			await db.books.update("1", {
 				title: "Arrakis Chronicles",
 				author: "F. Herbert",
-			}).runPromise
+			}).runPromise;
 
 			// New title should be searchable
 			const titleResults = await db.books.query({
 				where: { title: { $search: "arrakis" } },
-			}).runPromise
-			expect(titleResults.length).toBe(1)
-			expect(titleResults[0].id).toBe("1")
+			}).runPromise;
+			expect(titleResults.length).toBe(1);
+			expect(titleResults[0].id).toBe("1");
 
 			// New author should be searchable
 			const authorResults = await db.books.query({
 				where: { author: { $search: "herbert" } },
-			}).runPromise
-			expect(authorResults.length).toBe(1)
-			expect(authorResults[0].id).toBe("1")
+			}).runPromise;
+			expect(authorResults.length).toBe(1);
+			expect(authorResults[0].id).toBe("1");
 
 			// Old title should not match
 			const oldTitleResults = await db.books.query({
 				where: { title: { $search: "dune" } },
-			}).runPromise
-			expect(oldTitleResults.length).toBe(0)
-		})
+			}).runPromise;
+			expect(oldTitleResults.length).toBe(0);
+		});
 
 		it("should still find other entities after updating one", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Update Dune's title
-			await db.books.update("1", { title: "Arrakis Chronicles" }).runPromise
+			await db.books.update("1", { title: "Arrakis Chronicles" }).runPromise;
 
 			// Other books should still be searchable
 			const neuroResults = await db.books.query({
 				where: { title: { $search: "neuromancer" } },
-			}).runPromise
-			expect(neuroResults.length).toBe(1)
-			expect(neuroResults[0].title).toBe("Neuromancer")
+			}).runPromise;
+			expect(neuroResults.length).toBe(1);
+			expect(neuroResults[0].title).toBe("Neuromancer");
 
 			const gibsonResults = await db.books.query({
 				where: { author: { $search: "gibson" } },
-			}).runPromise
-			expect(gibsonResults.length).toBe(1)
-			expect(gibsonResults[0].author).toBe("William Gibson")
-		})
+			}).runPromise;
+			expect(gibsonResults.length).toBe(1);
+			expect(gibsonResults[0].author).toBe("William Gibson");
+		});
 
 		it("should work with top-level $search after update", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Update title and description
 			await db.books.update("1", {
 				title: "Chronicles of Arrakis",
 				description: "A tale of spice and power",
-			}).runPromise
+			}).runPromise;
 
 			// Top-level search spanning multiple fields should work
 			const results = await db.books.query({
 				where: {
-					$search: { query: "chronicles spice", fields: ["title", "description"] },
+					$search: {
+						query: "chronicles spice",
+						fields: ["title", "description"],
+					},
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].id).toBe("1")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("1");
+		});
 
 		it("should update index correctly when only partial field content changes", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Update title from "Dune" to "Dune Messiah" - "dune" should still match
-			await db.books.update("1", { title: "Dune Messiah" }).runPromise
+			await db.books.update("1", { title: "Dune Messiah" }).runPromise;
 
 			// "dune" should still match (partial content preserved)
 			const duneResults = await db.books.query({
 				where: { title: { $search: "dune" } },
-			}).runPromise
-			expect(duneResults.length).toBe(1)
-			expect(duneResults[0].id).toBe("1")
+			}).runPromise;
+			expect(duneResults.length).toBe(1);
+			expect(duneResults[0].id).toBe("1");
 
 			// "messiah" should now also match (new content added)
 			const messiahResults = await db.books.query({
 				where: { title: { $search: "messiah" } },
-			}).runPromise
-			expect(messiahResults.length).toBe(1)
-			expect(messiahResults[0].id).toBe("1")
-		})
+			}).runPromise;
+			expect(messiahResults.length).toBe(1);
+			expect(messiahResults[0].id).toBe("1");
+		});
 
 		it("should handle update of non-indexed field without affecting search", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Update year (non-indexed field)
-			await db.books.update("1", { year: 2000 }).runPromise
+			await db.books.update("1", { year: 2000 }).runPromise;
 
 			// Title should still be searchable
 			const results = await db.books.query({
 				where: { title: { $search: "dune" } },
-			}).runPromise
-			expect(results.length).toBe(1)
-			expect(results[0].id).toBe("1")
-			expect(results[0].year).toBe(2000)
-		})
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("1");
+			expect(results[0].year).toBe(2000);
+		});
 
 		it("should find entity by prefix after update", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Update title
-			await db.books.update("1", { title: "Hyperspace Journey" }).runPromise
+			await db.books.update("1", { title: "Hyperspace Journey" }).runPromise;
 
 			// Prefix search should work
 			const results = await db.books.query({
 				where: { title: { $search: "hyper" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].id).toBe("1")
-			expect(results[0].title).toBe("Hyperspace Journey")
-		})
-	})
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("1");
+			expect(results[0].title).toBe("Hyperspace Journey");
+		});
+	});
 
 	describe("12.4: Index maintenance on delete", () => {
 		it("should no longer find entity by title after delete", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// First verify the entity is searchable
 			const beforeResults = await db.books.query({
 				where: { title: { $search: "dune" } },
-			}).runPromise
-			expect(beforeResults.length).toBe(1)
-			expect(beforeResults[0].id).toBe("1")
+			}).runPromise;
+			expect(beforeResults.length).toBe(1);
+			expect(beforeResults[0].id).toBe("1");
 
 			// Delete the entity
-			await db.books.delete("1").runPromise
+			await db.books.delete("1").runPromise;
 
 			// Search should no longer find it
 			const afterResults = await db.books.query({
 				where: { title: { $search: "dune" } },
-			}).runPromise
-			expect(afterResults.length).toBe(0)
-		})
+			}).runPromise;
+			expect(afterResults.length).toBe(0);
+		});
 
 		it("should no longer find entity by author after delete", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// First verify the entity is searchable by author
 			const beforeResults = await db.books.query({
 				where: { author: { $search: "herbert" } },
-			}).runPromise
-			expect(beforeResults.length).toBe(1)
-			expect(beforeResults[0].id).toBe("1")
+			}).runPromise;
+			expect(beforeResults.length).toBe(1);
+			expect(beforeResults[0].id).toBe("1");
 
 			// Delete the entity
-			await db.books.delete("1").runPromise
+			await db.books.delete("1").runPromise;
 
 			// Search by author should no longer find it
 			const afterResults = await db.books.query({
 				where: { author: { $search: "herbert" } },
-			}).runPromise
-			expect(afterResults.length).toBe(0)
-		})
+			}).runPromise;
+			expect(afterResults.length).toBe(0);
+		});
 
 		it("should no longer find entity by description after delete", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// First verify the entity is searchable by description
 			const beforeResults = await db.books.query({
 				where: { description: { $search: "sandworms" } },
-			}).runPromise
-			expect(beforeResults.length).toBe(1)
-			expect(beforeResults[0].id).toBe("1")
+			}).runPromise;
+			expect(beforeResults.length).toBe(1);
+			expect(beforeResults[0].id).toBe("1");
 
 			// Delete the entity
-			await db.books.delete("1").runPromise
+			await db.books.delete("1").runPromise;
 
 			// Search by description should no longer find it
 			const afterResults = await db.books.query({
 				where: { description: { $search: "sandworms" } },
-			}).runPromise
-			expect(afterResults.length).toBe(0)
-		})
+			}).runPromise;
+			expect(afterResults.length).toBe(0);
+		});
 
 		it("should no longer find entity via top-level $search after delete", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// First verify the entity is searchable via top-level search
 			const beforeResults = await db.books.query({
-				where: { $search: { query: "herbert dune", fields: ["title", "author"] } },
-			}).runPromise
-			expect(beforeResults.length).toBe(1)
-			expect(beforeResults[0].id).toBe("1")
+				where: {
+					$search: { query: "herbert dune", fields: ["title", "author"] },
+				},
+			}).runPromise;
+			expect(beforeResults.length).toBe(1);
+			expect(beforeResults[0].id).toBe("1");
 
 			// Delete the entity
-			await db.books.delete("1").runPromise
+			await db.books.delete("1").runPromise;
 
 			// Top-level search should no longer find it
 			const afterResults = await db.books.query({
-				where: { $search: { query: "herbert dune", fields: ["title", "author"] } },
-			}).runPromise
-			expect(afterResults.length).toBe(0)
-		})
+				where: {
+					$search: { query: "herbert dune", fields: ["title", "author"] },
+				},
+			}).runPromise;
+			expect(afterResults.length).toBe(0);
+		});
 
 		it("should no longer find entity via prefix search after delete", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// First verify the entity is findable via prefix search
 			const beforeResults = await db.books.query({
 				where: { title: { $search: "du" } },
-			}).runPromise
-			expect(beforeResults.length).toBe(1)
-			expect(beforeResults[0].id).toBe("1")
+			}).runPromise;
+			expect(beforeResults.length).toBe(1);
+			expect(beforeResults[0].id).toBe("1");
 
 			// Delete the entity
-			await db.books.delete("1").runPromise
+			await db.books.delete("1").runPromise;
 
 			// Prefix search should no longer find it
 			const afterResults = await db.books.query({
 				where: { title: { $search: "du" } },
-			}).runPromise
-			expect(afterResults.length).toBe(0)
-		})
+			}).runPromise;
+			expect(afterResults.length).toBe(0);
+		});
 
 		it("should still find other entities after deleting one", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Delete Dune (id: "1")
-			await db.books.delete("1").runPromise
+			await db.books.delete("1").runPromise;
 
 			// Other books should still be searchable
 			const neuroResults = await db.books.query({
 				where: { title: { $search: "neuromancer" } },
-			}).runPromise
-			expect(neuroResults.length).toBe(1)
-			expect(neuroResults[0].id).toBe("2")
-			expect(neuroResults[0].title).toBe("Neuromancer")
+			}).runPromise;
+			expect(neuroResults.length).toBe(1);
+			expect(neuroResults[0].id).toBe("2");
+			expect(neuroResults[0].title).toBe("Neuromancer");
 
 			const gibsonResults = await db.books.query({
 				where: { author: { $search: "gibson" } },
-			}).runPromise
-			expect(gibsonResults.length).toBe(1)
-			expect(gibsonResults[0].author).toBe("William Gibson")
+			}).runPromise;
+			expect(gibsonResults.length).toBe(1);
+			expect(gibsonResults[0].author).toBe("William Gibson");
 
 			const leGuinResults = await db.books.query({
 				where: { author: { $search: "guin" } },
-			}).runPromise
-			expect(leGuinResults.length).toBe(1)
-			expect(leGuinResults[0].title).toBe("The Left Hand of Darkness")
-		})
+			}).runPromise;
+			expect(leGuinResults.length).toBe(1);
+			expect(leGuinResults[0].title).toBe("The Left Hand of Darkness");
+		});
 
 		it("should handle deleteMany and remove all deleted entities from search", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// First verify both entities are searchable
 			const beforeResults = await db.books.query({
 				where: { $search: { query: "planet" } },
-			}).runPromise
+			}).runPromise;
 			// "planet" appears in Dune ("desert planet") and The Left Hand of Darkness ("winter planet")
-			expect(beforeResults.length).toBe(2)
+			expect(beforeResults.length).toBe(2);
 
 			// Delete both books using a predicate that matches ids "1" and "3"
-			await db.books.deleteMany((entity) => entity.id === "1" || entity.id === "3").runPromise
+			await db.books.deleteMany(
+				(entity) => entity.id === "1" || entity.id === "3",
+			).runPromise;
 
 			// Search should no longer find either
 			const afterResults = await db.books.query({
 				where: { $search: { query: "planet" } },
-			}).runPromise
-			expect(afterResults.length).toBe(0)
-		})
+			}).runPromise;
+			expect(afterResults.length).toBe(0);
+		});
 
 		it("should handle delete of entity that was just created", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Create a new entity
 			await db.books.create({
@@ -1748,59 +1773,59 @@ describe("Full-text search: Search Index (task 12)", () => {
 				author: "Dan Simmons",
 				year: 1989,
 				description: "A pilgrimage to the Time Tombs",
-			}).runPromise
+			}).runPromise;
 
 			// Verify it's searchable
 			const beforeResults = await db.books.query({
 				where: { title: { $search: "hyperion" } },
-			}).runPromise
-			expect(beforeResults.length).toBe(1)
+			}).runPromise;
+			expect(beforeResults.length).toBe(1);
 
 			// Delete it
-			await db.books.delete("new-book").runPromise
+			await db.books.delete("new-book").runPromise;
 
 			// Should no longer be searchable
 			const afterResults = await db.books.query({
 				where: { title: { $search: "hyperion" } },
-			}).runPromise
-			expect(afterResults.length).toBe(0)
-		})
+			}).runPromise;
+			expect(afterResults.length).toBe(0);
+		});
 
 		it("should handle delete of entity that was just updated", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// Update the entity first
-			await db.books.update("1", { title: "Arrakis Chronicles" }).runPromise
+			await db.books.update("1", { title: "Arrakis Chronicles" }).runPromise;
 
 			// Verify it's searchable by new title
 			const beforeResults = await db.books.query({
 				where: { title: { $search: "arrakis" } },
-			}).runPromise
-			expect(beforeResults.length).toBe(1)
+			}).runPromise;
+			expect(beforeResults.length).toBe(1);
 
 			// Delete it
-			await db.books.delete("1").runPromise
+			await db.books.delete("1").runPromise;
 
 			// Should no longer be searchable by new or old title
 			const afterNewTitle = await db.books.query({
 				where: { title: { $search: "arrakis" } },
-			}).runPromise
-			expect(afterNewTitle.length).toBe(0)
+			}).runPromise;
+			expect(afterNewTitle.length).toBe(0);
 
 			const afterOldTitle = await db.books.query({
 				where: { title: { $search: "dune" } },
-			}).runPromise
-			expect(afterOldTitle.length).toBe(0)
-		})
+			}).runPromise;
+			expect(afterOldTitle.length).toBe(0);
+		});
 
 		it("should clean up all tokens associated with deleted entity", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// This tests that the index properly removes all token -> entity mappings
 			// Dune has multiple tokens: "dune", "frank", "herbert", "desert", "planet", "spice", "sandworms"
 
 			// Delete Dune
-			await db.books.delete("1").runPromise
+			await db.books.delete("1").runPromise;
 
 			// None of the unique tokens from Dune's indexed fields should find it
 			// (but some tokens like "planet" appear in other books)
@@ -1808,53 +1833,53 @@ describe("Full-text search: Search Index (task 12)", () => {
 			// "dune" is unique to Dune (title)
 			const duneResults = await db.books.query({
 				where: { $search: { query: "dune" } },
-			}).runPromise
-			expect(duneResults.length).toBe(0)
+			}).runPromise;
+			expect(duneResults.length).toBe(0);
 
 			// "herbert" is unique to Dune (author: Frank Herbert)
 			const herbertResults = await db.books.query({
 				where: { $search: { query: "herbert" } },
-			}).runPromise
-			expect(herbertResults.length).toBe(0)
+			}).runPromise;
+			expect(herbertResults.length).toBe(0);
 
 			// "sandworms" is unique to Dune (description)
 			const sandwormsResults = await db.books.query({
 				where: { $search: { query: "sandworms" } },
-			}).runPromise
-			expect(sandwormsResults.length).toBe(0)
+			}).runPromise;
+			expect(sandwormsResults.length).toBe(0);
 
 			// "spice" is unique to Dune (description)
 			const spiceResults = await db.books.query({
 				where: { $search: { query: "spice" } },
-			}).runPromise
-			expect(spiceResults.length).toBe(0)
+			}).runPromise;
+			expect(spiceResults.length).toBe(0);
 
 			// "frank" is unique to Dune (author: Frank Herbert)
 			const frankResults = await db.books.query({
 				where: { $search: { query: "frank" } },
-			}).runPromise
-			expect(frankResults.length).toBe(0)
-		})
+			}).runPromise;
+			expect(frankResults.length).toBe(0);
+		});
 
 		it("should not affect tokens shared with other entities", async () => {
-			const db = await createTestDatabaseWithSearchIndex()
+			const db = await createTestDatabaseWithSearchIndex();
 
 			// "planet" appears in both Dune ("desert planet") and The Left Hand of Darkness ("winter planet")
 			// Deleting Dune should not affect finding "The Left Hand of Darkness" via "planet"
 
 			// Delete Dune
-			await db.books.delete("1").runPromise
+			await db.books.delete("1").runPromise;
 
 			// "planet" search should still find The Left Hand of Darkness
 			const planetResults = await db.books.query({
 				where: { $search: { query: "planet" } },
-			}).runPromise
-			expect(planetResults.length).toBe(1)
-			expect(planetResults[0].id).toBe("3")
-			expect(planetResults[0].title).toBe("The Left Hand of Darkness")
-		})
-	})
-})
+			}).runPromise;
+			expect(planetResults.length).toBe(1);
+			expect(planetResults[0].id).toBe("3");
+			expect(planetResults[0].title).toBe("The Left Hand of Darkness");
+		});
+	});
+});
 
 // ============================================================================
 // 13. Combined Filters Tests
@@ -1863,7 +1888,7 @@ describe("Full-text search: Search Index (task 12)", () => {
 describe("Full-text search: Combined Filters (task 13)", () => {
 	describe("13.2: $search inside $or", () => {
 		it("should match when either $search condition is true", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// $or: title search for "dark" OR author search for "gibson"
 			// "dark" matches "The Left Hand of Darkness" (title)
 			// "gibson" matches "Neuromancer" (author)
@@ -1874,15 +1899,15 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ author: { $search: "gibson" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(2)
-			const titles = results.map((b) => b.title).sort()
-			expect(titles).toEqual(["Neuromancer", "The Left Hand of Darkness"])
-		})
+			expect(results.length).toBe(2);
+			const titles = results.map((b) => b.title).sort();
+			expect(titles).toEqual(["Neuromancer", "The Left Hand of Darkness"]);
+		});
 
 		it("should match when first $search condition is true", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
 					$or: [
@@ -1890,14 +1915,14 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ title: { $search: "nonexistent" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should match when second $search condition is true", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
 					$or: [
@@ -1905,14 +1930,14 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ title: { $search: "dune" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should return empty when neither $search condition matches", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
 					$or: [
@@ -1920,13 +1945,13 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ author: { $search: "abc456" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(0)
-		})
+			expect(results.length).toBe(0);
+		});
 
 		it("should work with top-level $search inside $or", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// $or with top-level $search (multi-field search)
 			const results = await db.books.query({
 				where: {
@@ -1935,34 +1960,31 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ $search: { query: "gibson", fields: ["author"] } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(2)
-			const authors = results.map((b) => b.author).sort()
-			expect(authors).toEqual(["Frank Herbert", "William Gibson"])
-		})
+			expect(results.length).toBe(2);
+			const authors = results.map((b) => b.author).sort();
+			expect(authors).toEqual(["Frank Herbert", "William Gibson"]);
+		});
 
 		it("should work with $search combined with other operators inside $or", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// $or: ($search on title) OR (year filter)
 			const results = await db.books.query({
 				where: {
-					$or: [
-						{ title: { $search: "dune" } },
-						{ year: { $gt: 1990 } },
-					],
+					$or: [{ title: { $search: "dune" } }, { year: { $gt: 1990 } }],
 				},
-			}).runPromise
+			}).runPromise;
 
 			// "Dune" (1965) matches via $search
 			// "Snow Crash" (1992) matches via year > 1990
-			expect(results.length).toBe(2)
-			const titles = results.map((b) => b.title).sort()
-			expect(titles).toEqual(["Dune", "Snow Crash"])
-		})
+			expect(results.length).toBe(2);
+			const titles = results.map((b) => b.title).sort();
+			expect(titles).toEqual(["Dune", "Snow Crash"]);
+		});
 
 		it("should match same entity multiple times if it matches multiple $or branches", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// $or: search for "planet" in description OR author is "Frank Herbert"
 			// Dune matches both (description has "planet" AND author is "Frank Herbert")
 			// The Left Hand of Darkness matches only first (description has "planet")
@@ -1973,17 +1995,17 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ author: { $eq: "Frank Herbert" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
 			// Both conditions are satisfied by Dune, but it should only appear once
 			// The Left Hand of Darkness matches the first condition
-			expect(results.length).toBe(2)
-			const titles = results.map((b) => b.title).sort()
-			expect(titles).toEqual(["Dune", "The Left Hand of Darkness"])
-		})
+			expect(results.length).toBe(2);
+			const titles = results.map((b) => b.title).sort();
+			expect(titles).toEqual(["Dune", "The Left Hand of Darkness"]);
+		});
 
 		it("should work with $or containing three $search conditions", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
 					$or: [
@@ -1992,15 +2014,15 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ title: { $search: "foundation" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(3)
-			const titles = results.map((b) => b.title).sort()
-			expect(titles).toEqual(["Dune", "Foundation", "Neuromancer"])
-		})
+			expect(results.length).toBe(3);
+			const titles = results.map((b) => b.title).sort();
+			expect(titles).toEqual(["Dune", "Foundation", "Neuromancer"]);
+		});
 
 		it("should work with nested $or containing $search", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Nested $or: ((title: dune) OR (title: neuromancer)) OR (author: asimov)
 			const results = await db.books.query({
 				where: {
@@ -2014,16 +2036,16 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ author: { $search: "asimov" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
 			// "Dune", "Neuromancer", and "Foundation" (by Isaac Asimov)
-			expect(results.length).toBe(3)
-			const titles = results.map((b) => b.title).sort()
-			expect(titles).toEqual(["Dune", "Foundation", "Neuromancer"])
-		})
+			expect(results.length).toBe(3);
+			const titles = results.map((b) => b.title).sort();
+			expect(titles).toEqual(["Dune", "Foundation", "Neuromancer"]);
+		});
 
 		it("should work with prefix search inside $or", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
 					$or: [
@@ -2031,17 +2053,17 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ author: { $search: "herb" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
 			// "Neuromancer" matches "neuro" prefix
 			// "Dune" matches "herb" prefix in author "Frank Herbert"
-			expect(results.length).toBe(2)
-			const titles = results.map((b) => b.title).sort()
-			expect(titles).toEqual(["Dune", "Neuromancer"])
-		})
+			expect(results.length).toBe(2);
+			const titles = results.map((b) => b.title).sort();
+			expect(titles).toEqual(["Dune", "Neuromancer"]);
+		});
 
 		it("should respect case-insensitivity inside $or", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
 					$or: [
@@ -2049,15 +2071,15 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ author: { $search: "GIBSON" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(2)
-			const titles = results.map((b) => b.title).sort()
-			expect(titles).toEqual(["Dune", "Neuromancer"])
-		})
+			expect(results.length).toBe(2);
+			const titles = results.map((b) => b.title).sort();
+			expect(titles).toEqual(["Dune", "Neuromancer"]);
+		});
 
 		it("should work with multi-term $search inside $or", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
 					$or: [
@@ -2065,19 +2087,19 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ author: { $search: "neal stephenson" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
 			// "The Left Hand of Darkness" matches "left hand"
 			// "Snow Crash" matches "Neal Stephenson"
-			expect(results.length).toBe(2)
-			const titles = results.map((b) => b.title).sort()
-			expect(titles).toEqual(["Snow Crash", "The Left Hand of Darkness"])
-		})
-	})
+			expect(results.length).toBe(2);
+			const titles = results.map((b) => b.title).sort();
+			expect(titles).toEqual(["Snow Crash", "The Left Hand of Darkness"]);
+		});
+	});
 
 	describe("13.3: $search inside $and", () => {
 		it("should match only when both $search conditions are true", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// $and: title search for "dune" AND author search for "herbert"
 			// Only Dune matches both conditions
 			const results = await db.books.query({
@@ -2087,15 +2109,15 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ author: { $search: "herbert" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-			expect(results[0].author).toBe("Frank Herbert")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+			expect(results[0].author).toBe("Frank Herbert");
+		});
 
 		it("should return empty when first $search condition fails", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
 					$and: [
@@ -2103,13 +2125,13 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ author: { $search: "herbert" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(0)
-		})
+			expect(results.length).toBe(0);
+		});
 
 		it("should return empty when second $search condition fails", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
 					$and: [
@@ -2117,13 +2139,13 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ author: { $search: "nonexistent" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(0)
-		})
+			expect(results.length).toBe(0);
+		});
 
 		it("should return empty when neither $search condition matches", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
 					$and: [
@@ -2131,13 +2153,13 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ author: { $search: "abc456" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(0)
-		})
+			expect(results.length).toBe(0);
+		});
 
 		it("should work with top-level $search inside $and", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// $and with top-level $search (multi-field search)
 			const results = await db.books.query({
 				where: {
@@ -2146,48 +2168,42 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ $search: { query: "dune", fields: ["title"] } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should work with $search combined with other operators inside $and", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// $and: ($search on title) AND (year filter)
 			const results = await db.books.query({
 				where: {
-					$and: [
-						{ title: { $search: "dune" } },
-						{ year: { $lt: 1980 } },
-					],
+					$and: [{ title: { $search: "dune" } }, { year: { $lt: 1980 } }],
 				},
-			}).runPromise
+			}).runPromise;
 
 			// "Dune" (1965) matches via $search AND year < 1980
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-			expect(results[0].year).toBe(1965)
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+			expect(results[0].year).toBe(1965);
+		});
 
 		it("should return empty when $search matches but other operator excludes in $and", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// $and: ($search on title) AND (year filter that excludes)
 			const results = await db.books.query({
 				where: {
-					$and: [
-						{ title: { $search: "dune" } },
-						{ year: { $gt: 1980 } },
-					],
+					$and: [{ title: { $search: "dune" } }, { year: { $gt: 1980 } }],
 				},
-			}).runPromise
+			}).runPromise;
 
 			// "Dune" (1965) matches $search but year is not > 1980
-			expect(results.length).toBe(0)
-		})
+			expect(results.length).toBe(0);
+		});
 
 		it("should work with $and containing three $search conditions", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
 					$and: [
@@ -2196,15 +2212,15 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ description: { $search: "spice" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
 			// Only Dune matches all three conditions
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should return empty when any one of multiple $and conditions fails", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
 					$and: [
@@ -2213,13 +2229,13 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ description: { $search: "nonexistent" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(0)
-		})
+			expect(results.length).toBe(0);
+		});
 
 		it("should work with nested $and containing $search", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Nested $and: ((title: dune) AND (author: herbert)) AND (year < 1970)
 			const results = await db.books.query({
 				where: {
@@ -2233,31 +2249,28 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ year: { $lt: 1970 } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-			expect(results[0].year).toBe(1965)
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+			expect(results[0].year).toBe(1965);
+		});
 
 		it("should work with prefix search inside $and", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
-					$and: [
-						{ title: { $search: "du" } },
-						{ author: { $search: "herb" } },
-					],
+					$and: [{ title: { $search: "du" } }, { author: { $search: "herb" } }],
 				},
-			}).runPromise
+			}).runPromise;
 
 			// "du" is prefix for "Dune", "herb" is prefix for "Herbert"
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should respect case-insensitivity inside $and", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
 					$and: [
@@ -2265,14 +2278,14 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ author: { $search: "HERBERT" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should work with multi-term $search inside $and", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			const results = await db.books.query({
 				where: {
 					$and: [
@@ -2280,14 +2293,14 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						{ author: { $search: "le guin" } },
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("The Left Hand of Darkness")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("The Left Hand of Darkness");
+		});
 
 		it("should combine $and and $or with $search", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// $and: (year < 1970) AND ($or: title="dune" OR title="darkness")
 			const results = await db.books.query({
 				where: {
@@ -2301,16 +2314,16 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						},
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
 			// Dune (1965) and The Left Hand of Darkness (1969) both match
-			expect(results.length).toBe(2)
-			const titles = results.map((b) => b.title).sort()
-			expect(titles).toEqual(["Dune", "The Left Hand of Darkness"])
-		})
+			expect(results.length).toBe(2);
+			const titles = results.map((b) => b.title).sort();
+			expect(titles).toEqual(["Dune", "The Left Hand of Darkness"]);
+		});
 
 		it("should work with $or inside $and where $or fails", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// $and: (year > 1990) AND ($or: title="dune" OR title="foundation")
 			const results = await db.books.query({
 				where: {
@@ -2324,78 +2337,78 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 						},
 					],
 				},
-			}).runPromise
+			}).runPromise;
 
 			// Dune (1965) and Foundation (1951) both match $or but neither is > 1990
-			expect(results.length).toBe(0)
-		})
+			expect(results.length).toBe(0);
+		});
 
 		it("should work with empty $and array (match all)", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Empty $and should match all
 			const results = await db.books.query({
 				where: {
 					$and: [],
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(5)
-		})
-	})
+			expect(results.length).toBe(5);
+		});
+	});
 
 	describe("13.1: $search with other field operators", () => {
 		it("should filter by both $search and $gt operator", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "dark" matches "The Left Hand of Darkness" (1969) and "The Dark Tower" would if it existed
 			// year > 1960 filters to only books after 1960
 			// "The Left Hand of Darkness" is 1969, which is > 1960
 			const results = await db.books.query({
 				where: { title: { $search: "dark" }, year: { $gt: 1960 } },
-			}).runPromise
+			}).runPromise;
 
 			// Should match "The Left Hand of Darkness" (1969) - matches "dark" in title and year > 1960
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("The Left Hand of Darkness")
-			expect(results[0].year).toBe(1969)
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("The Left Hand of Darkness");
+			expect(results[0].year).toBe(1969);
+		});
 
 		it("should filter by both $search and $lt operator", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// year < 1970 filters to only books before 1970
 			const results = await db.books.query({
 				where: { title: { $search: "dark" }, year: { $lt: 1970 } },
-			}).runPromise
+			}).runPromise;
 
 			// "The Left Hand of Darkness" is 1969 which is < 1970
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("The Left Hand of Darkness")
-			expect(results[0].year).toBe(1969)
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("The Left Hand of Darkness");
+			expect(results[0].year).toBe(1969);
+		});
 
 		it("should return empty when $search matches but other operator excludes", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// "dark" matches "The Left Hand of Darkness" (1969) but year > 1980 excludes it
 			const results = await db.books.query({
 				where: { title: { $search: "dark" }, year: { $gt: 1980 } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(0)
-		})
+			expect(results.length).toBe(0);
+		});
 
 		it("should filter by $search and $eq operator", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Find books with "dune" in title AND author equals "Frank Herbert"
 			const results = await db.books.query({
 				where: { title: { $search: "dune" }, author: { $eq: "Frank Herbert" } },
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-			expect(results[0].author).toBe("Frank Herbert")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+			expect(results[0].author).toBe("Frank Herbert");
+		});
 
 		it("should filter by $search and $ne operator", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Find books matching "planet" in description where author is NOT "Frank Herbert"
 			// "planet" appears in Dune (Frank Herbert) and The Left Hand of Darkness (Ursula K. Le Guin)
 			const results = await db.books.query({
@@ -2403,170 +2416,170 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 					description: { $search: "planet" },
 					author: { $ne: "Frank Herbert" },
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("The Left Hand of Darkness")
-			expect(results[0].author).toBe("Ursula K. Le Guin")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("The Left Hand of Darkness");
+			expect(results[0].author).toBe("Ursula K. Le Guin");
+		});
 
 		it("should filter by $search and $in operator", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Find books matching search term where year is in specific list
 			const results = await db.books.query({
 				where: {
 					description: { $search: "story" },
 					year: { $in: [1965, 1969] },
 				},
-			}).runPromise
+			}).runPromise;
 
 			// "story" appears in Dune (1965) and The Left Hand of Darkness (1969)
-			expect(results.length).toBe(2)
-			const titles = results.map((b) => b.title).sort()
-			expect(titles).toEqual(["Dune", "The Left Hand of Darkness"])
-		})
+			expect(results.length).toBe(2);
+			const titles = results.map((b) => b.title).sort();
+			expect(titles).toEqual(["Dune", "The Left Hand of Darkness"]);
+		});
 
 		it("should filter by $search and $nin operator", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Find books matching search term where year is NOT in specific list
 			const results = await db.books.query({
 				where: {
 					description: { $search: "story" },
 					year: { $nin: [1965] },
 				},
-			}).runPromise
+			}).runPromise;
 
 			// "story" appears in Dune (1965) and The Left Hand of Darkness (1969)
 			// Excluding 1965, only The Left Hand of Darkness should match
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("The Left Hand of Darkness")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("The Left Hand of Darkness");
+		});
 
 		it("should filter by $search and $gte/$lte range", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Find books matching search term within a year range
 			const results = await db.books.query({
 				where: {
 					author: { $search: "gibson" },
 					year: { $gte: 1980, $lte: 1990 },
 				},
-			}).runPromise
+			}).runPromise;
 
 			// Gibson wrote Neuromancer in 1984
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Neuromancer")
-			expect(results[0].year).toBe(1984)
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Neuromancer");
+			expect(results[0].year).toBe(1984);
+		});
 
 		it("should filter by $search and $contains on strings", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Find books matching search term and author contains substring
 			const results = await db.books.query({
 				where: {
 					title: { $search: "dune" },
 					author: { $contains: "Herbert" },
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-			expect(results[0].author).toBe("Frank Herbert")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+			expect(results[0].author).toBe("Frank Herbert");
+		});
 
 		it("should filter by $search and $startsWith", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Find books matching search term and author starts with substring
 			const results = await db.books.query({
 				where: {
 					description: { $search: "planet" },
 					author: { $startsWith: "Frank" },
 				},
-			}).runPromise
+			}).runPromise;
 
 			// "planet" in Dune (Frank Herbert) and The Left Hand of Darkness (Ursula K. Le Guin)
 			// Only Frank Herbert starts with "Frank"
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+		});
 
 		it("should filter by $search and $endsWith", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Find books matching search term and author ends with substring
 			const results = await db.books.query({
 				where: {
 					description: { $search: "planet" },
 					author: { $endsWith: "Guin" },
 				},
-			}).runPromise
+			}).runPromise;
 
 			// Only Ursula K. Le Guin ends with "Guin"
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("The Left Hand of Darkness")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("The Left Hand of Darkness");
+		});
 
 		it("should filter by multiple $search operators on different fields", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// $search on title AND $search on author
 			const results = await db.books.query({
 				where: {
 					title: { $search: "dune" },
 					author: { $search: "herbert" },
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Dune")
-			expect(results[0].author).toBe("Frank Herbert")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Dune");
+			expect(results[0].author).toBe("Frank Herbert");
+		});
 
 		it("should return empty when $search matches one field but not the other", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// $search on title AND $search on author where they don't overlap
 			const results = await db.books.query({
 				where: {
 					title: { $search: "dune" },
 					author: { $search: "gibson" },
 				},
-			}).runPromise
+			}).runPromise;
 
 			// Dune is by Herbert, not Gibson
-			expect(results.length).toBe(0)
-		})
+			expect(results.length).toBe(0);
+		});
 
 		it("should filter by top-level $search combined with field-level operators", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Top-level $search with field-level $gt
 			const results = await db.books.query({
 				where: {
 					$search: { query: "gibson" },
 					year: { $gt: 1980 },
 				},
-			}).runPromise
+			}).runPromise;
 
 			// Gibson appears in author of Neuromancer (1984)
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("Neuromancer")
-		})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("Neuromancer");
+		});
 
 		it("should filter by top-level $search with explicit fields combined with other operators", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Top-level $search with explicit fields AND year filter
 			const results = await db.books.query({
 				where: {
 					$search: { query: "planet", fields: ["description"] },
 					year: { $lt: 1970 },
 				},
-			}).runPromise
+			}).runPromise;
 
 			// "planet" in description: Dune (1965), The Left Hand of Darkness (1969)
 			// year < 1970: both match
-			expect(results.length).toBe(2)
-			const years = results.map((b) => b.year).sort((a, b) => a - b)
-			expect(years).toEqual([1965, 1969])
-		})
+			expect(results.length).toBe(2);
+			const years = results.map((b) => b.year).sort((a, b) => a - b);
+			expect(years).toEqual([1965, 1969]);
+		});
 
 		it("should combine $search with complex filter chain", async () => {
-			const db = await createTestDatabase()
+			const db = await createTestDatabase();
 			// Complex filter: search + multiple field constraints
 			const results = await db.books.query({
 				where: {
@@ -2574,13 +2587,13 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 					year: { $gte: 1960, $lte: 1980 },
 					author: { $contains: "Guin" },
 				},
-			}).runPromise
+			}).runPromise;
 
-			expect(results.length).toBe(1)
-			expect(results[0].title).toBe("The Left Hand of Darkness")
-			expect(results[0].year).toBe(1969)
-		})
-	})
+			expect(results.length).toBe(1);
+			expect(results[0].title).toBe("The Left Hand of Darkness");
+			expect(results[0].year).toBe(1969);
+		});
+	});
 
 	describe("13.4: $search combined with pagination", () => {
 		// Test data with more books to test pagination properly
@@ -2620,7 +2633,7 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 				year: 2010,
 				description: "Aliens invade a dark future Earth",
 			},
-		]
+		];
 
 		const createPaginationTestDatabase = () =>
 			Effect.runPromise(
@@ -2630,7 +2643,7 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 					},
 					{ books: paginationTestBooks },
 				),
-			)
+			);
 
 		const createPaginationTestDatabaseWithIndex = () =>
 			Effect.runPromise(
@@ -2644,275 +2657,281 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 					},
 					{ books: paginationTestBooks },
 				),
-			)
+			);
 
 		describe("offset-based pagination with $search", () => {
 			it("should paginate search results with limit only", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				// Search for "dark" which matches all 5 books
 				const results = await db.books.query({
 					where: { title: { $search: "dark" } },
 					limit: 3,
-				}).runPromise
+				}).runPromise;
 
-				expect(results.length).toBe(3)
-			})
+				expect(results.length).toBe(3);
+			});
 
 			it("should paginate search results with offset only", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				// Search for "dark" which matches all 5 books
 				const allResults = await db.books.query({
 					where: { title: { $search: "dark" } },
-				}).runPromise
+				}).runPromise;
 
 				const offsetResults = await db.books.query({
 					where: { title: { $search: "dark" } },
 					offset: 2,
-				}).runPromise
+				}).runPromise;
 
 				// Offset 2 should skip first 2, return remaining
-				expect(offsetResults.length).toBe(allResults.length - 2)
-			})
+				expect(offsetResults.length).toBe(allResults.length - 2);
+			});
 
 			it("should paginate search results with limit and offset", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				// Get all matching results first
 				const allResults = await db.books.query({
 					where: { title: { $search: "dark" } },
-				}).runPromise
+				}).runPromise;
 
 				// Get page 2 (offset 2, limit 2)
 				const page2 = await db.books.query({
 					where: { title: { $search: "dark" } },
 					offset: 2,
 					limit: 2,
-				}).runPromise
+				}).runPromise;
 
-				expect(page2.length).toBe(2)
+				expect(page2.length).toBe(2);
 				// Should be items at index 2 and 3 of the full results
-				expect(page2[0].id).toBe(allResults[2].id)
-				expect(page2[1].id).toBe(allResults[3].id)
-			})
+				expect(page2[0].id).toBe(allResults[2].id);
+				expect(page2[1].id).toBe(allResults[3].id);
+			});
 
 			it("should maintain relevance order when paginating", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				// Get all results sorted by relevance
 				const allResults = await db.books.query({
 					where: { title: { $search: "dark" } },
-				}).runPromise
+				}).runPromise;
 
 				// Get first page
 				const page1 = await db.books.query({
 					where: { title: { $search: "dark" } },
 					limit: 2,
-				}).runPromise
+				}).runPromise;
 
 				// Get second page
 				const page2 = await db.books.query({
 					where: { title: { $search: "dark" } },
 					offset: 2,
 					limit: 2,
-				}).runPromise
+				}).runPromise;
 
 				// Page 1 should have items 0 and 1 from all results
-				expect(page1[0].id).toBe(allResults[0].id)
-				expect(page1[1].id).toBe(allResults[1].id)
+				expect(page1[0].id).toBe(allResults[0].id);
+				expect(page1[1].id).toBe(allResults[1].id);
 
 				// Page 2 should have items 2 and 3 from all results
-				expect(page2[0].id).toBe(allResults[2].id)
-				expect(page2[1].id).toBe(allResults[3].id)
-			})
+				expect(page2[0].id).toBe(allResults[2].id);
+				expect(page2[1].id).toBe(allResults[3].id);
+			});
 
 			it("should return empty when offset exceeds search result count", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				const results = await db.books.query({
 					where: { title: { $search: "dark" } },
 					offset: 100,
-				}).runPromise
+				}).runPromise;
 
-				expect(results.length).toBe(0)
-			})
+				expect(results.length).toBe(0);
+			});
 
 			it("should return fewer items when limit exceeds remaining after offset", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				// 5 books match "dark", offset 3 means 2 remain
 				const results = await db.books.query({
 					where: { title: { $search: "dark" } },
 					offset: 3,
 					limit: 10,
-				}).runPromise
+				}).runPromise;
 
-				expect(results.length).toBe(2)
-			})
+				expect(results.length).toBe(2);
+			});
 
 			it("should paginate with explicit sort (overriding relevance)", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				// Get all results sorted by year
 				const allSortedByYear = await db.books.query({
 					where: { title: { $search: "dark" } },
 					sort: { year: "asc" },
-				}).runPromise
+				}).runPromise;
 
 				// Get first 2 by year
 				const page1 = await db.books.query({
 					where: { title: { $search: "dark" } },
 					sort: { year: "asc" },
 					limit: 2,
-				}).runPromise
+				}).runPromise;
 
-				expect(page1.length).toBe(2)
+				expect(page1.length).toBe(2);
 				// Should be the two oldest books
-				expect(page1[0].id).toBe(allSortedByYear[0].id)
-				expect(page1[1].id).toBe(allSortedByYear[1].id)
-				expect(page1[0].year).toBeLessThanOrEqual(page1[1].year)
-			})
+				expect(page1[0].id).toBe(allSortedByYear[0].id);
+				expect(page1[1].id).toBe(allSortedByYear[1].id);
+				expect(page1[0].year).toBeLessThanOrEqual(page1[1].year);
+			});
 
 			it("should paginate with top-level $search", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				// Top-level search across multiple fields
 				const allResults = await db.books.query({
 					where: { $search: { query: "dark" } },
-				}).runPromise
+				}).runPromise;
 
 				const page1 = await db.books.query({
 					where: { $search: { query: "dark" } },
 					limit: 2,
-				}).runPromise
+				}).runPromise;
 
-				expect(page1.length).toBe(2)
-				expect(page1[0].id).toBe(allResults[0].id)
-				expect(page1[1].id).toBe(allResults[1].id)
-			})
+				expect(page1.length).toBe(2);
+				expect(page1[0].id).toBe(allResults[0].id);
+				expect(page1[1].id).toBe(allResults[1].id);
+			});
 
 			it("should paginate with $search combined with other filters", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				// Search with additional year filter
 				const allFiltered = await db.books.query({
 					where: { title: { $search: "dark" }, year: { $gt: 1950 } },
-				}).runPromise
+				}).runPromise;
 
 				const paginated = await db.books.query({
 					where: { title: { $search: "dark" }, year: { $gt: 1950 } },
 					limit: 2,
-				}).runPromise
+				}).runPromise;
 
-				expect(paginated.length).toBe(2)
+				expect(paginated.length).toBe(2);
 				// All results should be after 1950
 				for (const book of paginated) {
-					expect(book.year).toBeGreaterThan(1950)
+					expect(book.year).toBeGreaterThan(1950);
 				}
-				expect(paginated[0].id).toBe(allFiltered[0].id)
-				expect(paginated[1].id).toBe(allFiltered[1].id)
-			})
+				expect(paginated[0].id).toBe(allFiltered[0].id);
+				expect(paginated[1].id).toBe(allFiltered[1].id);
+			});
 
 			it("should paginate search results with indexed database", async () => {
-				const db = await createPaginationTestDatabaseWithIndex()
+				const db = await createPaginationTestDatabaseWithIndex();
 				const allResults = await db.books.query({
 					where: { title: { $search: "dark" } },
-				}).runPromise
+				}).runPromise;
 
 				const page1 = await db.books.query({
 					where: { title: { $search: "dark" } },
 					limit: 2,
-				}).runPromise
+				}).runPromise;
 
 				const page2 = await db.books.query({
 					where: { title: { $search: "dark" } },
 					offset: 2,
 					limit: 2,
-				}).runPromise
+				}).runPromise;
 
-				expect(page1.length).toBe(2)
-				expect(page2.length).toBe(2)
-				expect(page1[0].id).toBe(allResults[0].id)
-				expect(page2[0].id).toBe(allResults[2].id)
-			})
-		})
+				expect(page1.length).toBe(2);
+				expect(page2.length).toBe(2);
+				expect(page1[0].id).toBe(allResults[0].id);
+				expect(page2[0].id).toBe(allResults[2].id);
+			});
+		});
 
 		describe("cursor-based pagination with $search", () => {
 			it("should cursor-paginate search results forward", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				// First page with cursor
 				const page1 = await db.books.query({
 					where: { title: { $search: "dark" } },
 					sort: { id: "asc" },
 					cursor: { key: "id", limit: 2 },
-				}).runPromise
+				}).runPromise;
 
-				expect(page1.items.length).toBe(2)
-				expect(page1.pageInfo.hasNextPage).toBe(true)
-				expect(page1.pageInfo.hasPreviousPage).toBe(false)
+				expect(page1.items.length).toBe(2);
+				expect(page1.pageInfo.hasNextPage).toBe(true);
+				expect(page1.pageInfo.hasPreviousPage).toBe(false);
 
 				// Second page using cursor
 				const page2 = await db.books.query({
 					where: { title: { $search: "dark" } },
 					sort: { id: "asc" },
 					cursor: { key: "id", after: page1.pageInfo.endCursor!, limit: 2 },
-				}).runPromise
+				}).runPromise;
 
-				expect(page2.items.length).toBe(2)
-				expect(page2.pageInfo.hasPreviousPage).toBe(true)
+				expect(page2.items.length).toBe(2);
+				expect(page2.pageInfo.hasPreviousPage).toBe(true);
 
 				// Items should be different
-				const page1Ids = page1.items.map((b) => b.id)
-				const page2Ids = page2.items.map((b) => b.id)
-				expect(page1Ids).not.toEqual(page2Ids)
+				const page1Ids = page1.items.map((b) => b.id);
+				const page2Ids = page2.items.map((b) => b.id);
+				expect(page1Ids).not.toEqual(page2Ids);
 
 				// Page 2 IDs should be greater than page 1 IDs (sorted by id asc)
 				for (const id of page2Ids) {
 					for (const p1Id of page1Ids) {
-						expect(id > p1Id).toBe(true)
+						expect(id > p1Id).toBe(true);
 					}
 				}
-			})
+			});
 
 			it("should cursor-paginate search results backward", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				// Get last page first
 				const allResults = await db.books.query({
 					where: { title: { $search: "dark" } },
 					sort: { id: "asc" },
-				}).runPromise
+				}).runPromise;
 
 				// Start from end (last 2 items)
 				const lastPage = await db.books.query({
 					where: { title: { $search: "dark" } },
 					sort: { id: "asc" },
-					cursor: { key: "id", limit: 2, before: allResults[allResults.length - 1].id },
-				}).runPromise
+					cursor: {
+						key: "id",
+						limit: 2,
+						before: allResults[allResults.length - 1].id,
+					},
+				}).runPromise;
 
 				// Should get items before the last one
-				expect(lastPage.items.length).toBeGreaterThan(0)
-			})
+				expect(lastPage.items.length).toBeGreaterThan(0);
+			});
 
 			it("should cursor-paginate with explicit sort on search results", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				// Paginate by year instead of relevance
 				const page1 = await db.books.query({
 					where: { title: { $search: "dark" } },
 					sort: { year: "asc" },
 					cursor: { key: "year", limit: 2 },
-				}).runPromise
+				}).runPromise;
 
-				expect(page1.items.length).toBe(2)
+				expect(page1.items.length).toBe(2);
 				// Should be oldest books first
-				expect(page1.items[0].year).toBeLessThanOrEqual(page1.items[1].year)
-			})
+				expect(page1.items[0].year).toBeLessThanOrEqual(page1.items[1].year);
+			});
 
 			it("should cursor-paginate with top-level $search", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				const page1 = await db.books.query({
-					where: { $search: { query: "dark", fields: ["title", "description"] } },
+					where: {
+						$search: { query: "dark", fields: ["title", "description"] },
+					},
 					sort: { id: "asc" },
 					cursor: { key: "id", limit: 2 },
-				}).runPromise
+				}).runPromise;
 
-				expect(page1.items.length).toBe(2)
-				expect(page1.pageInfo.hasNextPage).toBe(true)
-			})
+				expect(page1.items.length).toBe(2);
+				expect(page1.pageInfo.hasNextPage).toBe(true);
+			});
 
 			it("should cursor-paginate search results with combined filters", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				// Search with additional filter
 				const page1 = await db.books.query({
 					where: {
@@ -2921,99 +2940,99 @@ describe("Full-text search: Combined Filters (task 13)", () => {
 					},
 					sort: { year: "asc" },
 					cursor: { key: "year", limit: 2 },
-				}).runPromise
+				}).runPromise;
 
-				expect(page1.items.length).toBe(2)
+				expect(page1.items.length).toBe(2);
 				// All results should be after 1950
 				for (const book of page1.items) {
-					expect(book.year).toBeGreaterThan(1950)
+					expect(book.year).toBeGreaterThan(1950);
 				}
-			})
+			});
 
 			it("should cursor-paginate search results with indexed database", async () => {
-				const db = await createPaginationTestDatabaseWithIndex()
+				const db = await createPaginationTestDatabaseWithIndex();
 				const page1 = await db.books.query({
 					where: { title: { $search: "dark" } },
 					sort: { id: "asc" },
 					cursor: { key: "id", limit: 2 },
-				}).runPromise
+				}).runPromise;
 
-				expect(page1.items.length).toBe(2)
-				expect(page1.pageInfo.hasNextPage).toBe(true)
+				expect(page1.items.length).toBe(2);
+				expect(page1.pageInfo.hasNextPage).toBe(true);
 
 				const page2 = await db.books.query({
 					where: { title: { $search: "dark" } },
 					sort: { id: "asc" },
 					cursor: { key: "id", after: page1.pageInfo.endCursor!, limit: 2 },
-				}).runPromise
+				}).runPromise;
 
-				expect(page2.items.length).toBe(2)
+				expect(page2.items.length).toBe(2);
 				// Should have different items
-				expect(page1.items[0].id).not.toBe(page2.items[0].id)
-			})
-		})
+				expect(page1.items[0].id).not.toBe(page2.items[0].id);
+			});
+		});
 
 		describe("pagination edge cases with $search", () => {
 			it("should return empty results with pagination when no search matches", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				const results = await db.books.query({
 					where: { title: { $search: "xyz123nonexistent" } },
 					limit: 10,
 					offset: 0,
-				}).runPromise
+				}).runPromise;
 
-				expect(results.length).toBe(0)
-			})
+				expect(results.length).toBe(0);
+			});
 
 			it("should handle limit=0 with search results", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				const results = await db.books.query({
 					where: { title: { $search: "dark" } },
 					limit: 0,
-				}).runPromise
+				}).runPromise;
 
-				expect(results.length).toBe(0)
-			})
+				expect(results.length).toBe(0);
+			});
 
 			it("should handle pagination with single search match", async () => {
 				// Only one book has "Conrad" in author
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				const results = await db.books.query({
 					where: { author: { $search: "conrad" } },
 					limit: 10,
-				}).runPromise
+				}).runPromise;
 
-				expect(results.length).toBe(1)
-				expect(results[0].author).toBe("Joseph Conrad")
-			})
+				expect(results.length).toBe(1);
+				expect(results[0].author).toBe("Joseph Conrad");
+			});
 
 			it("should correctly paginate through all search results", async () => {
-				const db = await createPaginationTestDatabase()
+				const db = await createPaginationTestDatabase();
 				const allResults = await db.books.query({
 					where: { title: { $search: "dark" } },
-				}).runPromise
+				}).runPromise;
 
 				// Collect all items via pagination
-				const collectedIds: string[] = []
-				const pageSize = 2
-				let offset = 0
+				const collectedIds: string[] = [];
+				const pageSize = 2;
+				let offset = 0;
 
 				while (true) {
 					const page = await db.books.query({
 						where: { title: { $search: "dark" } },
 						offset,
 						limit: pageSize,
-					}).runPromise
+					}).runPromise;
 
-					if (page.length === 0) break
-					collectedIds.push(...page.map((b) => b.id))
-					offset += pageSize
+					if (page.length === 0) break;
+					collectedIds.push(...page.map((b) => b.id));
+					offset += pageSize;
 				}
 
 				// Should have collected all matching items
-				expect(collectedIds.length).toBe(allResults.length)
-				expect(collectedIds.sort()).toEqual(allResults.map((b) => b.id).sort())
-			})
-		})
-	})
-})
+				expect(collectedIds.length).toBe(allResults.length);
+				expect(collectedIds.sort()).toEqual(allResults.map((b) => b.id).sort());
+			});
+		});
+	});
+});

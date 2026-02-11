@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
 import { Effect, Schema } from "effect";
-import { createEffectDatabase } from "../src/factories/database-effect";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { EffectDatabase } from "../src/factories/database-effect";
+import { createEffectDatabase } from "../src/factories/database-effect";
 
 /**
  * Task 7.4 & 7.5: Test CRUD input sanitization for computed fields.
@@ -46,7 +46,11 @@ const config = {
 	books: {
 		schema: BookSchema,
 		relationships: {
-			author: { type: "ref" as const, target: "authors" as const, foreignKey: "authorId" },
+			author: {
+				type: "ref" as const,
+				target: "authors" as const,
+				foreignKey: "authorId",
+			},
 		},
 		// Computed fields - these are derived, not stored
 		computed: {
@@ -58,7 +62,11 @@ const config = {
 	authors: {
 		schema: AuthorSchema,
 		relationships: {
-			books: { type: "inverse" as const, target: "books" as const, foreignKey: "authorId" },
+			books: {
+				type: "inverse" as const,
+				target: "books" as const,
+				foreignKey: "authorId",
+			},
 		},
 	},
 } as const;
@@ -335,21 +343,19 @@ describe("Task 7.5: Update with computed field names in input", () => {
 		);
 
 		// Create a book for update tests
-		const created = await db.books
-			.create({
-				title: "Dune",
-				year: 1965,
-				genre: "sci-fi",
-				authorId: "author1",
-			})
-			.runPromise;
+		const created = await db.books.create({
+			title: "Dune",
+			year: 1965,
+			genre: "sci-fi",
+			authorId: "author1",
+		}).runPromise;
 		bookId = created.id;
 	});
 
 	describe("update() ignores computed field values in input", () => {
 		it("should ignore displayName in update input and only update stored fields", async () => {
 			// Update with a computed field in the input
-			const updated = await db.books.update(bookId, {
+			const _updated = await db.books.update(bookId, {
 				title: "Dune - Updated",
 				// Pass a wrong displayName - this should be IGNORED
 				displayName: "WRONG VALUE - should be ignored",
@@ -371,7 +377,7 @@ describe("Task 7.5: Update with computed field names in input", () => {
 		it("should ignore isClassic boolean in update input", async () => {
 			// Update year to something >= 1980 (isClassic should become false)
 			// But pass isClassic: true in the input - this should be IGNORED
-			const updated = await db.books.update(bookId, {
+			const _updated = await db.books.update(bookId, {
 				year: 2020, // This makes isClassic = false
 				// Pass wrong isClassic - this should be IGNORED
 				isClassic: true,
@@ -390,7 +396,7 @@ describe("Task 7.5: Update with computed field names in input", () => {
 		});
 
 		it("should ignore yearsSincePublication in update input", async () => {
-			const updated = await db.books.update(bookId, {
+			const _updated = await db.books.update(bookId, {
 				genre: "classic sci-fi",
 				// Pass wrong yearsSincePublication - this should be IGNORED
 				yearsSincePublication: 999,
@@ -410,7 +416,7 @@ describe("Task 7.5: Update with computed field names in input", () => {
 
 		it("should ignore ALL computed fields when multiple are provided in update input", async () => {
 			// Update with all computed fields having wrong values
-			const updated = await db.books.update(bookId, {
+			const _updated = await db.books.update(bookId, {
 				title: "Dune Messiah",
 				year: 1969,
 				// All computed fields with wrong values - ALL should be IGNORED
@@ -467,7 +473,7 @@ describe("Task 7.5: Update with computed field names in input", () => {
 		it("should update only specified stored fields, ignoring computed fields entirely", async () => {
 			// Only pass computed field (and one stored field)
 			// The computed field should be ignored, only the stored field should be updated
-			const updated = await db.books.update(bookId, {
+			const _updated = await db.books.update(bookId, {
 				genre: "space opera",
 				displayName: "This should not exist in storage",
 				isClassic: false,

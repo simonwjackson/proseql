@@ -5,8 +5,8 @@
  * ValidationError type for consistent error handling across CRUD operations.
  */
 
-import { Effect, ParseResult, Schema } from "effect"
-import { ValidationError } from "../errors/index.js"
+import { Effect, ParseResult, Schema } from "effect";
+import { ValidationError } from "../errors/index.js";
 
 /**
  * Decode unknown data through an Effect Schema, producing a typed entity.
@@ -18,7 +18,7 @@ export const validateEntity = <A, I, R>(
 ): Effect.Effect<A, ValidationError, R> =>
 	Schema.decodeUnknown(schema)(data).pipe(
 		Effect.mapError((parseError) => parseErrorToValidationError(parseError)),
-	)
+	);
 
 /**
  * Encode a typed entity through an Effect Schema, producing the encoded (on-disk) form.
@@ -30,7 +30,7 @@ export const encodeEntity = <A, I, R>(
 ): Effect.Effect<I, ValidationError, R> =>
 	Schema.encode(schema)(entity).pipe(
 		Effect.mapError((parseError) => parseErrorToValidationError(parseError)),
-	)
+	);
 
 /**
  * Convert an Effect Schema ParseError into our ValidationError,
@@ -39,9 +39,8 @@ export const encodeEntity = <A, I, R>(
 const parseErrorToValidationError = (
 	parseError: ParseResult.ParseError,
 ): ValidationError => {
-	const arrayIssues =
-		ParseResult.ArrayFormatter.formatErrorSync(parseError)
-	const message = ParseResult.TreeFormatter.formatErrorSync(parseError)
+	const arrayIssues = ParseResult.ArrayFormatter.formatErrorSync(parseError);
+	const message = ParseResult.TreeFormatter.formatErrorSync(parseError);
 
 	return new ValidationError({
 		message,
@@ -49,5 +48,5 @@ const parseErrorToValidationError = (
 			field: issue.path.map(String).join(".") || "(root)",
 			message: issue.message,
 		})),
-	})
-}
+	});
+};

@@ -6,19 +6,19 @@
  * Includes DebouncedWriter for coalescing rapid mutations into single file writes.
  */
 
-import { Effect, Fiber, Option, Queue, Ref, Runtime, Schema, Scope } from "effect"
-import { StorageAdapter } from "./storage-service.js"
-import { SerializerRegistry } from "../serializers/serializer-service.js"
+import { Effect, Fiber, Queue, Ref, Schema, type Scope } from "effect";
+import { ValidationError } from "../errors/crud-errors.js";
+import { MigrationError } from "../errors/migration-errors.js";
 import {
-	StorageError,
 	SerializationError,
-	UnsupportedFormatError,
-} from "../errors/storage-errors.js"
-import { ValidationError } from "../errors/crud-errors.js"
-import { MigrationError } from "../errors/migration-errors.js"
-import type { Migration } from "../migrations/migration-types.js"
-import { runMigrations } from "../migrations/migration-runner.js"
-import { getFileExtension } from "../utils/path.js"
+	StorageError,
+	type UnsupportedFormatError,
+} from "../errors/storage-errors.js";
+import { runMigrations } from "../migrations/migration-runner.js";
+import type { Migration } from "../migrations/migration-types.js";
+import { SerializerRegistry } from "../serializers/serializer-service.js";
+import { getFileExtension } from "../utils/path.js";
+import { StorageAdapter } from "./storage-service.js";
 
 // ============================================================================
 // Helpers
@@ -30,7 +30,7 @@ import { getFileExtension } from "../utils/path.js"
 const resolveExtension = (
 	filePath: string,
 ): Effect.Effect<string, StorageError> => {
-	const ext = getFileExtension(filePath)
+	const ext = getFileExtension(filePath);
 	if (ext === "") {
 		return Effect.fail(
 			new StorageError({
@@ -38,16 +38,16 @@ const resolveExtension = (
 				operation: "read",
 				message: `Cannot determine file format: no extension in '${filePath}'`,
 			}),
-		)
+		);
 	}
-	return Effect.succeed(ext)
-}
+	return Effect.succeed(ext);
+};
 
 /**
  * Type guard: is the value a plain Record<string, unknown>?
  */
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value)
+	typeof value === "object" && value !== null && !Array.isArray(value);
 
 // ============================================================================
 // loadData
@@ -61,17 +61,17 @@ export interface LoadDataOptions {
 	 * Optional schema version from collection config.
 	 * When provided, enables version checking and migration support.
 	 */
-	readonly version?: number
+	readonly version?: number;
 	/**
 	 * Optional migrations array for automatic data migration.
 	 * Only used when version is also provided.
 	 */
-	readonly migrations?: ReadonlyArray<Migration>
+	readonly migrations?: ReadonlyArray<Migration>;
 	/**
 	 * Collection name for error messages.
 	 * Required when version is provided.
 	 */
-	readonly collectionName?: string
+	readonly collectionName?: string;
 }
 
 /**
@@ -101,23 +101,27 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 	options?: LoadDataOptions,
 ): Effect.Effect<
 	ReadonlyMap<string, A>,
-	StorageError | SerializationError | UnsupportedFormatError | ValidationError | MigrationError,
+	| StorageError
+	| SerializationError
+	| UnsupportedFormatError
+	| ValidationError
+	| MigrationError,
 	StorageAdapter | SerializerRegistry | R
 > =>
 	Effect.gen(function* () {
-		const storage = yield* StorageAdapter
-		const serializer = yield* SerializerRegistry
-		const ext = yield* resolveExtension(filePath)
+		const storage = yield* StorageAdapter;
+		const serializer = yield* SerializerRegistry;
+		const ext = yield* resolveExtension(filePath);
 
 		// If file doesn't exist, return empty map
-		const exists = yield* storage.exists(filePath)
+		const exists = yield* storage.exists(filePath);
 		if (!exists) {
-			return new Map<string, A>() as ReadonlyMap<string, A>
+			return new Map<string, A>() as ReadonlyMap<string, A>;
 		}
 
 		// Read and deserialize
-		const raw = yield* storage.read(filePath)
-		const parsed = yield* serializer.deserialize(raw, ext)
+		const raw = yield* storage.read(filePath);
+		const parsed = yield* serializer.deserialize(raw, ext);
 
 		// The on-disk format is { collectionName: { id: entity, ... } } or { id: entity, ... }
 		// For a single collection load, we expect a Record<string, unknown> of entities keyed by ID
@@ -127,34 +131,35 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 					format: ext,
 					message: `Invalid data format in '${filePath}': expected object, got ${typeof parsed}`,
 				}),
-			)
+			);
 		}
 
 		// Extract _version from parsed data (default 0 if absent)
-		const fileVersion = typeof parsed._version === "number" ? parsed._version : 0
+		const fileVersion =
+			typeof parsed._version === "number" ? parsed._version : 0;
 
 		// Create entity map without _version
-		const entityMap: Record<string, unknown> = {}
+		const entityMap: Record<string, unknown> = {};
 		for (const [key, value] of Object.entries(parsed)) {
 			if (key !== "_version") {
-				entityMap[key] = value
+				entityMap[key] = value;
 			}
 		}
 
 		// Determine the data to decode (may be migrated)
-		let dataToLoad: Record<string, unknown> = entityMap
-		let needsWriteBack = false
-		let targetVersion: number | undefined
+		let dataToLoad: Record<string, unknown> = entityMap;
+		let needsWriteBack = false;
+		let targetVersion: number | undefined;
 		// Track if migrations were run (for post-migration validation error type)
-		let migrationsRan = false
-		let fromVersionForError = fileVersion
-		let collectionNameForError = "unknown"
+		let migrationsRan = false;
+		const fromVersionForError = fileVersion;
+		let collectionNameForError = "unknown";
 
 		// If version checking is enabled, validate version compatibility
 		if (options?.version !== undefined) {
-			const configVersion = options.version
-			const collectionName = options.collectionName ?? "unknown"
-			collectionNameForError = collectionName
+			const configVersion = options.version;
+			const collectionName = options.collectionName ?? "unknown";
+			collectionNameForError = collectionName;
 
 			// File version ahead of config version is an error
 			if (fileVersion > configVersion) {
@@ -167,66 +172,69 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 						reason: "version-ahead",
 						message: `File version ${fileVersion} is ahead of config version ${configVersion}. Cannot load data from a future version.`,
 					}),
-				)
+				);
 			}
 
 			// If file version < config version and migrations are provided, run migrations
-			if (fileVersion < configVersion && options.migrations && options.migrations.length > 0) {
+			if (
+				fileVersion < configVersion &&
+				options.migrations &&
+				options.migrations.length > 0
+			) {
 				dataToLoad = yield* runMigrations(
 					entityMap,
 					fileVersion,
 					configVersion,
 					options.migrations,
 					collectionName,
-				)
-				needsWriteBack = true
-				targetVersion = configVersion
-				migrationsRan = true
+				);
+				needsWriteBack = true;
+				targetVersion = configVersion;
+				migrationsRan = true;
 			}
 		}
 
 		// Decode each entity through the schema
-		const decode = Schema.decodeUnknown(schema)
-		const entries: Array<[string, A]> = []
+		const decode = Schema.decodeUnknown(schema);
+		const entries: Array<[string, A]> = [];
 
 		for (const [id, value] of Object.entries(dataToLoad)) {
 			const decoded = yield* decode(value).pipe(
-				Effect.mapError(
-					(parseError) =>
-						// If migrations were run, produce MigrationError with step: -1
-						// Otherwise, produce ValidationError for normal schema mismatch
-						migrationsRan
-							? new MigrationError({
-									collection: collectionNameForError,
-									fromVersion: fromVersionForError,
-									toVersion: targetVersion!,
-									step: -1,
-									reason: "post-migration-validation-failed",
-									message: `Post-migration validation failed for entity '${id}': ${parseError.message}`,
-								})
-							: new ValidationError({
-									message: `Failed to decode entity '${id}' in '${filePath}': ${parseError.message}`,
-									issues: [
-										{
-											field: id,
-											message: parseError.message,
-										},
-									],
-								}),
+				Effect.mapError((parseError) =>
+					// If migrations were run, produce MigrationError with step: -1
+					// Otherwise, produce ValidationError for normal schema mismatch
+					migrationsRan
+						? new MigrationError({
+								collection: collectionNameForError,
+								fromVersion: fromVersionForError,
+								toVersion: targetVersion!,
+								step: -1,
+								reason: "post-migration-validation-failed",
+								message: `Post-migration validation failed for entity '${id}': ${parseError.message}`,
+							})
+						: new ValidationError({
+								message: `Failed to decode entity '${id}' in '${filePath}': ${parseError.message}`,
+								issues: [
+									{
+										field: id,
+										message: parseError.message,
+									},
+								],
+							}),
 				),
-			)
-			entries.push([id, decoded])
+			);
+			entries.push([id, decoded]);
 		}
 
-		const result = new Map(entries) as ReadonlyMap<string, A>
+		const result = new Map(entries) as ReadonlyMap<string, A>;
 
 		// If migrations were run, write the migrated data back to disk with new version
 		if (needsWriteBack && targetVersion !== undefined) {
-			yield* saveData(filePath, schema, result, { version: targetVersion })
+			yield* saveData(filePath, schema, result, { version: targetVersion });
 		}
 
-		return result
-	})
+		return result;
+	});
 
 // ============================================================================
 // saveData
@@ -240,7 +248,7 @@ export interface SaveDataOptions {
 	 * Optional schema version to stamp into the file.
 	 * When provided, `_version` is injected at the top level before entities.
 	 */
-	readonly version?: number
+	readonly version?: number;
 }
 
 /**
@@ -265,13 +273,13 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 	StorageAdapter | SerializerRegistry | R
 > =>
 	Effect.gen(function* () {
-		const storage = yield* StorageAdapter
-		const serializer = yield* SerializerRegistry
-		const ext = yield* resolveExtension(filePath)
+		const storage = yield* StorageAdapter;
+		const serializer = yield* SerializerRegistry;
+		const ext = yield* resolveExtension(filePath);
 
 		// Encode each entity through the schema
-		const encode = Schema.encode(schema)
-		const entityMap: Record<string, I> = {}
+		const encode = Schema.encode(schema);
+		const entityMap: Record<string, I> = {};
 
 		for (const [id, entity] of data) {
 			const encoded = yield* encode(entity).pipe(
@@ -287,21 +295,21 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 							],
 						}),
 				),
-			)
-			entityMap[id] = encoded
+			);
+			entityMap[id] = encoded;
 		}
 
 		// Build output object, injecting _version first if provided for readability
 		const output: Record<string, unknown> =
 			options?.version !== undefined
 				? { _version: options.version, ...entityMap }
-				: entityMap
+				: entityMap;
 
 		// Serialize and write
-		const content = yield* serializer.serialize(output, ext)
-		yield* storage.ensureDir(filePath)
-		yield* storage.write(filePath, content)
-	})
+		const content = yield* serializer.serialize(output, ext);
+		yield* storage.ensureDir(filePath);
+		yield* storage.write(filePath, content);
+	});
 
 // ============================================================================
 // loadCollectionsFromFile
@@ -311,18 +319,18 @@ export const saveData = <A extends { readonly id: string }, I, R>(
  * Configuration for loading a single collection from a multi-collection file.
  */
 export interface LoadCollectionConfig {
-	readonly name: string
-	readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>
+	readonly name: string;
+	readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>;
 	/**
 	 * Optional schema version from collection config.
 	 * When provided, enables version checking and migration support.
 	 */
-	readonly version?: number
+	readonly version?: number;
 	/**
 	 * Optional migrations array for automatic data migration.
 	 * Only used when version is also provided.
 	 */
-	readonly migrations?: ReadonlyArray<Migration>
+	readonly migrations?: ReadonlyArray<Migration>;
 }
 
 /**
@@ -346,25 +354,32 @@ export const loadCollectionsFromFile = (
 	collections: ReadonlyArray<LoadCollectionConfig>,
 ): Effect.Effect<
 	Record<string, ReadonlyMap<string, { readonly id: string }>>,
-	StorageError | SerializationError | UnsupportedFormatError | ValidationError | MigrationError,
+	| StorageError
+	| SerializationError
+	| UnsupportedFormatError
+	| ValidationError
+	| MigrationError,
 	StorageAdapter | SerializerRegistry
 > =>
 	Effect.gen(function* () {
-		const storage = yield* StorageAdapter
-		const serializer = yield* SerializerRegistry
-		const ext = yield* resolveExtension(filePath)
+		const storage = yield* StorageAdapter;
+		const serializer = yield* SerializerRegistry;
+		const ext = yield* resolveExtension(filePath);
 
-		const exists = yield* storage.exists(filePath)
+		const exists = yield* storage.exists(filePath);
 		if (!exists) {
-			const result: Record<string, ReadonlyMap<string, { readonly id: string }>> = {}
+			const result: Record<
+				string,
+				ReadonlyMap<string, { readonly id: string }>
+			> = {};
 			for (const col of collections) {
-				result[col.name] = new Map()
+				result[col.name] = new Map();
 			}
-			return result
+			return result;
 		}
 
-		const raw = yield* storage.read(filePath)
-		const parsed = yield* serializer.deserialize(raw, ext)
+		const raw = yield* storage.read(filePath);
+		const parsed = yield* serializer.deserialize(raw, ext);
 
 		if (!isRecord(parsed)) {
 			return yield* Effect.fail(
@@ -372,61 +387,71 @@ export const loadCollectionsFromFile = (
 					format: ext,
 					message: `Invalid data format in '${filePath}': expected object, got ${typeof parsed}`,
 				}),
-			)
+			);
 		}
 
-		const result: Record<string, ReadonlyMap<string, { readonly id: string }>> = {}
+		const result: Record<
+			string,
+			ReadonlyMap<string, { readonly id: string }>
+		> = {};
 		// Track which collections need write-back after migration
-		let needsWriteBack = false
+		let needsWriteBack = false;
 		// Store migrated data for write-back (maps collection name to encoded entities + version)
 		const writeBackData: Array<{
-			readonly name: string
-			readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>
-			readonly data: ReadonlyMap<string, { readonly id: string }>
-			readonly version?: number
-		}> = []
+			readonly name: string;
+			readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>;
+			readonly data: ReadonlyMap<string, { readonly id: string }>;
+			readonly version?: number;
+		}> = [];
 
 		for (const col of collections) {
-			const collectionData = parsed[col.name]
+			const collectionData = parsed[col.name];
 			if (collectionData === undefined || !isRecord(collectionData)) {
-				result[col.name] = new Map()
+				result[col.name] = new Map();
 				// Build write-back entry, only adding version if defined
 				const emptyEntry: {
-					readonly name: string
-					readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>
-					readonly data: ReadonlyMap<string, { readonly id: string }>
-					readonly version?: number
+					readonly name: string;
+					readonly schema: Schema.Schema<
+						{ readonly id: string },
+						unknown,
+						never
+					>;
+					readonly data: ReadonlyMap<string, { readonly id: string }>;
+					readonly version?: number;
 				} = {
 					name: col.name,
 					schema: col.schema,
 					data: new Map(),
-				}
+				};
 				if (col.version !== undefined) {
-					writeBackData.push({ ...emptyEntry, version: col.version })
+					writeBackData.push({ ...emptyEntry, version: col.version });
 				} else {
-					writeBackData.push(emptyEntry)
+					writeBackData.push(emptyEntry);
 				}
-				continue
+				continue;
 			}
 
 			// Extract _version from collection data (default 0 if absent)
-			const fileVersion = typeof collectionData._version === "number" ? collectionData._version : 0
+			const fileVersion =
+				typeof collectionData._version === "number"
+					? collectionData._version
+					: 0;
 
 			// Create entity map without _version
-			const entityMap: Record<string, unknown> = {}
+			const entityMap: Record<string, unknown> = {};
 			for (const [key, value] of Object.entries(collectionData)) {
 				if (key !== "_version") {
-					entityMap[key] = value
+					entityMap[key] = value;
 				}
 			}
 
 			// Determine the data to decode (may be migrated)
-			let dataToLoad: Record<string, unknown> = entityMap
-			let collectionNeedsMigration = false
+			let dataToLoad: Record<string, unknown> = entityMap;
+			let collectionNeedsMigration = false;
 
 			// If version checking is enabled, validate version compatibility
 			if (col.version !== undefined) {
-				const configVersion = col.version
+				const configVersion = col.version;
 
 				// File version ahead of config version is an error
 				if (fileVersion > configVersion) {
@@ -439,91 +464,97 @@ export const loadCollectionsFromFile = (
 							reason: "version-ahead",
 							message: `File version ${fileVersion} for collection "${col.name}" is ahead of config version ${configVersion}. Cannot load data from a future version.`,
 						}),
-					)
+					);
 				}
 
 				// If file version < config version and migrations are provided, run migrations
-				if (fileVersion < configVersion && col.migrations && col.migrations.length > 0) {
+				if (
+					fileVersion < configVersion &&
+					col.migrations &&
+					col.migrations.length > 0
+				) {
 					dataToLoad = yield* runMigrations(
 						entityMap,
 						fileVersion,
 						configVersion,
 						col.migrations,
 						col.name,
-					)
-					collectionNeedsMigration = true
-					needsWriteBack = true
+					);
+					collectionNeedsMigration = true;
+					needsWriteBack = true;
 				}
 			}
 
 			// Decode each entity through the schema
-			const decode = Schema.decodeUnknown(col.schema)
-			const entries: Array<[string, { readonly id: string }]> = []
+			const decode = Schema.decodeUnknown(col.schema);
+			const entries: Array<[string, { readonly id: string }]> = [];
 
 			for (const [id, value] of Object.entries(dataToLoad)) {
 				const decoded = yield* decode(value).pipe(
-					Effect.mapError(
-						(parseError) =>
-							// If migrations were run, produce MigrationError with step: -1
-							// Otherwise, produce ValidationError for normal schema mismatch
-							collectionNeedsMigration
-								? new MigrationError({
-										collection: col.name,
-										fromVersion: fileVersion,
-										toVersion: col.version!,
-										step: -1,
-										reason: "post-migration-validation-failed",
-										message: `Post-migration validation failed for entity '${id}': ${parseError.message}`,
-									})
-								: new ValidationError({
-										message: `Failed to decode entity '${id}' in collection '${col.name}' from '${filePath}': ${parseError.message}`,
-										issues: [
-											{
-												field: `${col.name}.${id}`,
-												message: parseError.message,
-											},
-										],
-									}),
+					Effect.mapError((parseError) =>
+						// If migrations were run, produce MigrationError with step: -1
+						// Otherwise, produce ValidationError for normal schema mismatch
+						collectionNeedsMigration
+							? new MigrationError({
+									collection: col.name,
+									fromVersion: fileVersion,
+									toVersion: col.version!,
+									step: -1,
+									reason: "post-migration-validation-failed",
+									message: `Post-migration validation failed for entity '${id}': ${parseError.message}`,
+								})
+							: new ValidationError({
+									message: `Failed to decode entity '${id}' in collection '${col.name}' from '${filePath}': ${parseError.message}`,
+									issues: [
+										{
+											field: `${col.name}.${id}`,
+											message: parseError.message,
+										},
+									],
+								}),
 					),
-				)
-				entries.push([id, decoded])
+				);
+				entries.push([id, decoded]);
 			}
 
-			const collectionMap = new Map(entries) as ReadonlyMap<string, { readonly id: string }>
-			result[col.name] = collectionMap
+			const collectionMap = new Map(entries) as ReadonlyMap<
+				string,
+				{ readonly id: string }
+			>;
+			result[col.name] = collectionMap;
 
 			// Track for write-back, only adding version if defined
 			const entry: {
-				readonly name: string
-				readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>
-				readonly data: ReadonlyMap<string, { readonly id: string }>
-				readonly version?: number
+				readonly name: string;
+				readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>;
+				readonly data: ReadonlyMap<string, { readonly id: string }>;
+				readonly version?: number;
 			} = {
 				name: col.name,
 				schema: col.schema,
 				data: collectionMap,
-			}
+			};
 			// Use the target version if versioned collection (whether migrated or not)
 			if (col.version !== undefined) {
-				writeBackData.push({ ...entry, version: col.version })
+				writeBackData.push({ ...entry, version: col.version });
 			} else {
-				writeBackData.push(entry)
+				writeBackData.push(entry);
 			}
 		}
 
 		// If any collection was migrated, write back the entire file
 		if (needsWriteBack) {
-			yield* saveCollectionsToFile(filePath, writeBackData)
+			yield* saveCollectionsToFile(filePath, writeBackData);
 		}
 
-		return result
-	})
+		return result;
+	});
 
 // ============================================================================
 // saveCollectionsToFile
 // ============================================================================
 
-type HasId = { readonly id: string }
+type HasId = { readonly id: string };
 
 /**
  * Configuration for a collection to be saved to a multi-collection file.
@@ -531,18 +562,15 @@ type HasId = { readonly id: string }
  * @template T - The decoded entity type (must have `id` field)
  * @template I - The encoded/serialized type (defaults to T for simple schemas)
  */
-export interface SaveCollectionConfig<
-	T extends HasId = HasId,
-	I = T,
-> {
-	readonly name: string
-	readonly schema: Schema.Schema<T, I, never>
-	readonly data: ReadonlyMap<string, T>
+export interface SaveCollectionConfig<T extends HasId = HasId, I = T> {
+	readonly name: string;
+	readonly schema: Schema.Schema<T, I, never>;
+	readonly data: ReadonlyMap<string, T>;
 	/**
 	 * Optional schema version to stamp into this collection's section.
 	 * When provided, `_version` is injected first in the collection object.
 	 */
-	readonly version?: number
+	readonly version?: number;
 }
 
 /**
@@ -563,15 +591,15 @@ export function saveCollectionsToFile<T extends HasId, I>(
 	StorageAdapter | SerializerRegistry
 > {
 	return Effect.gen(function* () {
-		const storage = yield* StorageAdapter
-		const serializer = yield* SerializerRegistry
-		const ext = yield* resolveExtension(filePath)
+		const storage = yield* StorageAdapter;
+		const serializer = yield* SerializerRegistry;
+		const ext = yield* resolveExtension(filePath);
 
-		const fileObj: Record<string, Record<string, unknown>> = {}
+		const fileObj: Record<string, Record<string, unknown>> = {};
 
 		for (const col of collections) {
-			const encode = Schema.encode(col.schema)
-			const entityMap: Record<string, unknown> = {}
+			const encode = Schema.encode(col.schema);
+			const entityMap: Record<string, unknown> = {};
 
 			for (const [id, entity] of col.data) {
 				const encoded = yield* encode(entity).pipe(
@@ -587,21 +615,21 @@ export function saveCollectionsToFile<T extends HasId, I>(
 								],
 							}),
 					),
-				)
-				entityMap[id] = encoded
+				);
+				entityMap[id] = encoded;
 			}
 
 			// Inject _version first if provided for readability
 			fileObj[col.name] =
 				col.version !== undefined
 					? { _version: col.version, ...entityMap }
-					: entityMap
+					: entityMap;
 		}
 
-		const content = yield* serializer.serialize(fileObj, ext)
-		yield* storage.ensureDir(filePath)
-		yield* storage.write(filePath, content)
-	})
+		const content = yield* serializer.serialize(fileObj, ext);
+		yield* storage.ensureDir(filePath);
+		yield* storage.write(filePath, content);
+	});
 }
 
 // ============================================================================
@@ -613,8 +641,18 @@ export function saveCollectionsToFile<T extends HasId, I>(
  * the save effect itself (so flush can execute it immediately).
  */
 interface PendingWrite {
-	readonly fiber: Fiber.RuntimeFiber<void, StorageError | SerializationError | UnsupportedFormatError | ValidationError>
-	readonly save: Effect.Effect<void, StorageError | SerializationError | UnsupportedFormatError | ValidationError, StorageAdapter | SerializerRegistry>
+	readonly fiber: Fiber.RuntimeFiber<
+		void,
+		StorageError | SerializationError | UnsupportedFormatError | ValidationError
+	>;
+	readonly save: Effect.Effect<
+		void,
+		| StorageError
+		| SerializationError
+		| UnsupportedFormatError
+		| ValidationError,
+		StorageAdapter | SerializerRegistry
+	>;
 }
 
 /**
@@ -629,21 +667,31 @@ export interface DebouncedWriter {
 	 */
 	readonly triggerSave: (
 		key: string,
-		save: Effect.Effect<void, StorageError | SerializationError | UnsupportedFormatError | ValidationError, StorageAdapter | SerializerRegistry>,
-	) => Effect.Effect<void, never, StorageAdapter | SerializerRegistry>
+		save: Effect.Effect<
+			void,
+			| StorageError
+			| SerializationError
+			| UnsupportedFormatError
+			| ValidationError,
+			StorageAdapter | SerializerRegistry
+		>,
+	) => Effect.Effect<void, never, StorageAdapter | SerializerRegistry>;
 	/**
 	 * Immediately execute all pending writes, cancelling their debounce timers.
 	 * Errors from individual saves are collected but do not prevent other saves.
 	 */
 	readonly flush: () => Effect.Effect<
 		void,
-		StorageError | SerializationError | UnsupportedFormatError | ValidationError,
+		| StorageError
+		| SerializationError
+		| UnsupportedFormatError
+		| ValidationError,
 		StorageAdapter | SerializerRegistry
-	>
+	>;
 	/**
 	 * Returns the number of writes currently pending.
 	 */
-	readonly pendingCount: () => Effect.Effect<number>
+	readonly pendingCount: () => Effect.Effect<number>;
 }
 
 /**
@@ -660,60 +708,62 @@ export const createDebouncedWriter = (
 	delayMs = 100,
 ): Effect.Effect<DebouncedWriter> =>
 	Effect.gen(function* () {
-		const pending = yield* Ref.make<ReadonlyMap<string, PendingWrite>>(new Map())
+		const pending = yield* Ref.make<ReadonlyMap<string, PendingWrite>>(
+			new Map(),
+		);
 
 		const triggerSave: DebouncedWriter["triggerSave"] = (key, save) =>
 			Effect.gen(function* () {
 				// Cancel existing pending write for this key if any
-				const current = yield* Ref.get(pending)
-				const existing = current.get(key)
+				const current = yield* Ref.get(pending);
+				const existing = current.get(key);
 				if (existing !== undefined) {
-					yield* Fiber.interrupt(existing.fiber)
+					yield* Fiber.interrupt(existing.fiber);
 				}
 
 				// Fork a fiber that sleeps then executes the save
 				const fiber = yield* Effect.fork(
 					Effect.gen(function* () {
-						yield* Effect.sleep(delayMs)
-						yield* save
+						yield* Effect.sleep(delayMs);
+						yield* save;
 						// Remove from pending after successful write
 						yield* Ref.update(pending, (m) => {
-							const next = new Map(m)
-							next.delete(key)
-							return next
-						})
+							const next = new Map(m);
+							next.delete(key);
+							return next;
+						});
 					}),
-				)
+				);
 
 				// Store the pending write
 				yield* Ref.update(pending, (m) => {
-					const next = new Map(m)
-					next.set(key, { fiber, save })
-					return next
-				})
-			})
+					const next = new Map(m);
+					next.set(key, { fiber, save });
+					return next;
+				});
+			});
 
 		const flush: DebouncedWriter["flush"] = () =>
 			Effect.gen(function* () {
 				// Atomically take all pending writes and clear the map
-				const writes = yield* Ref.getAndSet(pending, new Map())
+				const writes = yield* Ref.getAndSet(pending, new Map());
 
 				// Interrupt all pending fibers first
 				for (const [, entry] of writes) {
-					yield* Fiber.interrupt(entry.fiber)
+					yield* Fiber.interrupt(entry.fiber);
 				}
 
 				// Execute all saves immediately
 				for (const [, entry] of writes) {
-					yield* entry.save
+					yield* entry.save;
 				}
-			})
+			});
 
 		const pendingCount: DebouncedWriter["pendingCount"] = () =>
-			Ref.get(pending).pipe(Effect.map((m) => m.size))
+			Ref.get(pending).pipe(Effect.map((m) => m.size));
 
-		return { triggerSave, flush, pendingCount } as const
-	})
+		return { triggerSave, flush, pendingCount } as const;
+	});
 
 // ============================================================================
 // FileWatcher
@@ -728,7 +778,7 @@ export interface FileWatcher {
 	/**
 	 * Returns true if the watcher is still active (has not been closed).
 	 */
-	readonly isActive: () => Effect.Effect<boolean>
+	readonly isActive: () => Effect.Effect<boolean>;
 }
 
 /**
@@ -736,13 +786,13 @@ export interface FileWatcher {
  */
 export interface FileWatcherConfig<A extends { readonly id: string }, I, R> {
 	/** Path to the file to watch */
-	readonly filePath: string
+	readonly filePath: string;
 	/** Schema to decode loaded data through */
-	readonly schema: Schema.Schema<A, I, R>
+	readonly schema: Schema.Schema<A, I, R>;
 	/** Ref holding the collection state to update on file change */
-	readonly ref: Ref.Ref<ReadonlyMap<string, A>>
+	readonly ref: Ref.Ref<ReadonlyMap<string, A>>;
 	/** Optional debounce delay in ms for reload after change (default 50) */
-	readonly debounceMs?: number
+	readonly debounceMs?: number;
 }
 
 /**
@@ -760,88 +810,91 @@ export interface FileWatcherConfig<A extends { readonly id: string }, I, R> {
  * @param config - File watcher configuration
  * @returns Effect that yields a FileWatcher handle (requires Scope)
  */
-export const createFileWatcher = <
-	A extends { readonly id: string },
-	I,
-	R,
->(
+export const createFileWatcher = <A extends { readonly id: string }, I, R>(
 	config: FileWatcherConfig<A, I, R>,
 ): Effect.Effect<
 	FileWatcher,
 	StorageError,
 	Scope.Scope | StorageAdapter | SerializerRegistry | R
 > => {
-	const debounceMs = config.debounceMs ?? 50
+	const debounceMs = config.debounceMs ?? 50;
 
 	return Effect.gen(function* () {
-		const storage = yield* StorageAdapter
-		const active = yield* Ref.make(true)
+		const storage = yield* StorageAdapter;
+		const active = yield* Ref.make(true);
 
 		// Queue bridges the sync onChange callback to the Effect world.
 		// The callback pushes a signal; a background fiber consumes it.
-		const changeQueue = yield* Queue.unbounded<void>()
+		const changeQueue = yield* Queue.unbounded<void>();
 
 		// Ref to hold the debounce timer fiber so it can be cancelled on new events
-		const pendingReload = yield* Ref.make<Fiber.RuntimeFiber<void, StorageError | SerializationError | UnsupportedFormatError | ValidationError | MigrationError> | null>(null)
+		const pendingReload = yield* Ref.make<Fiber.RuntimeFiber<
+			void,
+			| StorageError
+			| SerializationError
+			| UnsupportedFormatError
+			| ValidationError
+			| MigrationError
+		> | null>(null);
 
 		// Background fiber: waits for change signals, debounces, then reloads.
 		const processorFiber = yield* Effect.fork(
 			Effect.forever(
 				Effect.gen(function* () {
 					// Block until a change signal arrives
-					yield* Queue.take(changeQueue)
+					yield* Queue.take(changeQueue);
 					// Drain any queued signals (batch rapid events)
-					yield* Queue.takeAll(changeQueue)
+					yield* Queue.takeAll(changeQueue);
 
-					const isActive = yield* Ref.get(active)
-					if (!isActive) return
+					const isActive = yield* Ref.get(active);
+					if (!isActive) return;
 
 					// Cancel any existing pending reload
-					const existing = yield* Ref.get(pendingReload)
+					const existing = yield* Ref.get(pendingReload);
 					if (existing !== null) {
-						yield* Fiber.interrupt(existing)
+						yield* Fiber.interrupt(existing);
 					}
 
 					// Fork a debounced reload
 					const fiber = yield* Effect.fork(
 						Effect.gen(function* () {
-							yield* Effect.sleep(debounceMs)
-							const newData = yield* loadData(config.filePath, config.schema)
-							yield* Ref.set(config.ref, newData)
+							yield* Effect.sleep(debounceMs);
+							const newData = yield* loadData(config.filePath, config.schema);
+							yield* Ref.set(config.ref, newData);
 						}),
-					)
+					);
 
-					yield* Ref.set(pendingReload, fiber)
+					yield* Ref.set(pendingReload, fiber);
 				}),
 			),
-		)
+		);
 
 		// Acquire the watcher via StorageAdapter.watch, release by calling the
 		// returned stop function. acquireRelease ties the lifetime to the Scope.
 		yield* Effect.acquireRelease(
 			storage.watch(config.filePath, () => {
 				// Push a change signal into the queue (sync-safe)
-				Queue.unsafeOffer(changeQueue, undefined)
+				Queue.unsafeOffer(changeQueue, undefined);
 			}),
 			(stopWatching) =>
 				Effect.gen(function* () {
-					yield* Ref.set(active, false)
+					yield* Ref.set(active, false);
 					// Stop the processor fiber
-					yield* Fiber.interrupt(processorFiber)
+					yield* Fiber.interrupt(processorFiber);
 					// Cancel any pending reload
-					const pending = yield* Ref.get(pendingReload)
+					const pending = yield* Ref.get(pendingReload);
 					if (pending !== null) {
-						yield* Fiber.interrupt(pending)
+						yield* Fiber.interrupt(pending);
 					}
-					stopWatching()
+					stopWatching();
 				}),
-		)
+		);
 
 		return {
 			isActive: () => Ref.get(active),
-		} satisfies FileWatcher
-	})
-}
+		} satisfies FileWatcher;
+	});
+};
 
 /**
  * Create managed file watchers for multiple files at once.
@@ -852,11 +905,7 @@ export const createFileWatcher = <
  * @param configs - Array of file watcher configurations
  * @returns Effect yielding an array of FileWatcher handles
  */
-export const createFileWatchers = <
-	A extends { readonly id: string },
-	I,
-	R,
->(
+export const createFileWatchers = <A extends { readonly id: string }, I, R>(
 	configs: ReadonlyArray<FileWatcherConfig<A, I, R>>,
 ): Effect.Effect<
 	ReadonlyArray<FileWatcher>,
@@ -866,4 +915,4 @@ export const createFileWatchers = <
 	Effect.all(
 		configs.map((cfg) => createFileWatcher(cfg)),
 		{ concurrency: "unbounded" },
-	)
+	);

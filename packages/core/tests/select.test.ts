@@ -1,16 +1,16 @@
-import { describe, it, expect } from "vitest";
-import { Effect, Stream, Chunk } from "effect";
-import { applySelect } from "../src/operations/query/select-stream";
+import { Chunk, Effect, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import {
 	applyObjectSelection,
-	applySelectionToArray,
 	applySelectionSafe,
-	shouldSelectField,
+	applySelectionToArray,
+	createArrayFieldSelector,
+	createFieldSelector,
 	hasSelectedFields,
 	mergeObjectFieldSelections,
-	createFieldSelector,
-	createArrayFieldSelector,
+	shouldSelectField,
 } from "../src/operations/query/select";
+import { applySelect } from "../src/operations/query/select-stream";
 
 // Helper to run a stream-based select and collect results
 const collectSelected = <T extends Record<string, unknown>>(
@@ -380,10 +380,10 @@ describe("Field Selection (Stream-based + utility functions)", () => {
 			const isActive: boolean = selected.isActive;
 
 			// @ts-expect-error - id not selected
-			const id: string = selected.id;
+			const _id: string = selected.id;
 
 			// @ts-expect-error - age not selected
-			const age: number = selected.age;
+			const _age: number = selected.age;
 
 			expect(name).toBe("John");
 			expect(email).toBe("john@example.com");

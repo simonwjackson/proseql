@@ -1,11 +1,11 @@
-import { parse, stringify } from "json5"
-import type { FormatCodec, FormatOptions } from "../format-codec.js"
+import { parse, stringify } from "json5";
+import type { FormatCodec, FormatOptions } from "../format-codec.js";
 
 /**
  * Options for the JSON5 codec.
  */
 export interface Json5CodecOptions {
-	readonly indent?: number
+	readonly indent?: number;
 }
 
 /**
@@ -26,17 +26,17 @@ export interface Json5CodecOptions {
  * ```
  */
 export const json5Codec = (options?: Json5CodecOptions): FormatCodec => {
-	const indent = options?.indent ?? 2
+	const indent = options?.indent ?? 2;
 
 	return {
 		name: "json5",
 		extensions: ["json5"],
 		encode: (data: unknown, formatOptions?: FormatOptions): string => {
-			const actualIndent = formatOptions?.indent ?? indent
-			return stringify(data, null, actualIndent)
+			const actualIndent = formatOptions?.indent ?? indent;
+			return stringify(data, null, actualIndent);
 		},
 		decode: (raw: string): unknown => {
-			return parse(raw)
+			return parse(raw);
 		},
-	}
-}
+	};
+};

@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { Effect, Schema, Layer, Stream, Chunk } from "effect";
+import { Chunk, Effect, Layer, Schema, Stream } from "effect";
+import { beforeEach, describe, expect, it } from "vitest";
+import type { EffectDatabase } from "../src/factories/database-effect";
 import {
 	createEffectDatabase,
 	createPersistentEffectDatabase,
 } from "../src/factories/database-effect";
-import type { EffectDatabase } from "../src/factories/database-effect";
-import { makeInMemoryStorageLayer } from "../src/storage/in-memory-adapter-layer";
-import { makeSerializerLayer } from "../src/serializers/format-codec";
 import { jsonCodec } from "../src/serializers/codecs/json";
 import { yamlCodec } from "../src/serializers/codecs/yaml";
+import { makeSerializerLayer } from "../src/serializers/format-codec";
+import { makeInMemoryStorageLayer } from "../src/storage/in-memory-adapter-layer";
 
 /**
  * Task 9: Comprehensive computed fields test suite.
@@ -117,7 +117,8 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 		});
 
 		it("should include computed fields alongside stored fields", async () => {
-			const result = await db.books.query({ where: { id: "book1" } }).runPromise;
+			const result = await db.books.query({ where: { id: "book1" } })
+				.runPromise;
 
 			expect(result).toHaveLength(1);
 			const dune = result[0];
@@ -211,11 +212,9 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 	// =========================================================================
 	describe("Task 9.5: Select including computed fields", () => {
 		it("should return only selected fields including computed", async () => {
-			const results = await db.books
-				.query({
-					select: { title: true, displayName: true },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				select: { title: true, displayName: true },
+			}).runPromise;
 
 			expect(results).toHaveLength(5);
 			for (const book of results) {
@@ -224,11 +223,9 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 		});
 
 		it("should return a mix of stored and computed when both selected", async () => {
-			const results = await db.books
-				.query({
-					select: { id: true, title: true, displayName: true, isClassic: true },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				select: { id: true, title: true, displayName: true, isClassic: true },
+			}).runPromise;
 
 			const dune = results.find((b) => b.id === "book1");
 			expect(dune).toEqual({
@@ -245,11 +242,9 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 	// =========================================================================
 	describe("Task 9.6: Select excluding computed fields", () => {
 		it("should return only stored fields when computed are not selected", async () => {
-			const results = await db.books
-				.query({
-					select: { id: true, title: true, year: true },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				select: { id: true, title: true, year: true },
+			}).runPromise;
 
 			expect(results).toHaveLength(5);
 			for (const book of results) {
@@ -261,11 +256,9 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 		});
 
 		it("should not include computed fields when only stored fields selected", async () => {
-			const results = await db.books
-				.query({
-					select: { title: true, authorId: true },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				select: { title: true, authorId: true },
+			}).runPromise;
 
 			for (const book of results) {
 				expect(Object.keys(book)).toContain("title");
@@ -281,8 +274,7 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 	// =========================================================================
 	describe("Task 9.7: Filter by computed boolean field", () => {
 		it("should filter where isClassic is true", async () => {
-			const results = await db.books
-				.query({ where: { isClassic: true } })
+			const results = await db.books.query({ where: { isClassic: true } })
 				.runPromise;
 
 			// Books before 1980: Dune (1965), Left Hand (1969)
@@ -293,8 +285,7 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 		});
 
 		it("should filter where isClassic is false", async () => {
-			const results = await db.books
-				.query({ where: { isClassic: false } })
+			const results = await db.books.query({ where: { isClassic: false } })
 				.runPromise;
 
 			// Books 1980+: Neuromancer (1984), Project Hail Mary (2021), Snow Crash (1992)
@@ -311,27 +302,27 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 	// =========================================================================
 	describe("Task 9.8: Filter by computed string field with operator", () => {
 		it("should filter by displayName with $contains", async () => {
-			const results = await db.books
-				.query({ where: { displayName: { $contains: "1965" } } })
-				.runPromise;
+			const results = await db.books.query({
+				where: { displayName: { $contains: "1965" } },
+			}).runPromise;
 
 			expect(results).toHaveLength(1);
 			expect(results[0].title).toBe("Dune");
 		});
 
 		it("should filter by displayName with $startsWith", async () => {
-			const results = await db.books
-				.query({ where: { displayName: { $startsWith: "Dune" } } })
-				.runPromise;
+			const results = await db.books.query({
+				where: { displayName: { $startsWith: "Dune" } },
+			}).runPromise;
 
 			expect(results).toHaveLength(1);
 			expect(results[0].displayName).toBe("Dune (1965)");
 		});
 
 		it("should filter by displayName with $endsWith", async () => {
-			const results = await db.books
-				.query({ where: { displayName: { $endsWith: "(1969)" } } })
-				.runPromise;
+			const results = await db.books.query({
+				where: { displayName: { $endsWith: "(1969)" } },
+			}).runPromise;
 
 			expect(results).toHaveLength(1);
 			expect(results[0].title).toBe("The Left Hand of Darkness");
@@ -343,8 +334,7 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 	// =========================================================================
 	describe("Task 9.9: Sort by computed field ascending", () => {
 		it("should sort by displayName ascending", async () => {
-			const results = await db.books
-				.query({ sort: { displayName: "asc" } })
+			const results = await db.books.query({ sort: { displayName: "asc" } })
 				.runPromise;
 
 			expect(results).toHaveLength(5);
@@ -364,8 +354,7 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 	// =========================================================================
 	describe("Task 9.10: Sort by computed field descending", () => {
 		it("should sort by displayName descending", async () => {
-			const results = await db.books
-				.query({ sort: { displayName: "desc" } })
+			const results = await db.books.query({ sort: { displayName: "desc" } })
 				.runPromise;
 
 			expect(results).toHaveLength(5);
@@ -380,9 +369,9 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 		});
 
 		it("should sort by isClassic descending (true before false)", async () => {
-			const results = await db.books
-				.query({ sort: { isClassic: "desc", title: "asc" } })
-				.runPromise;
+			const results = await db.books.query({
+				sort: { isClassic: "desc", title: "asc" },
+			}).runPromise;
 
 			// true (1) > false (0), so classics first, then by title
 			const classicStatus = results.map((b) => b.isClassic);
@@ -396,13 +385,11 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 	// =========================================================================
 	describe("Task 9.11: Combined filter, sort, and select with computed fields", () => {
 		it("should filter by computed, sort by computed, and select computed", async () => {
-			const results = await db.books
-				.query({
-					where: { isClassic: false },
-					sort: { displayName: "asc" },
-					select: { title: true, displayName: true, isClassic: true },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				where: { isClassic: false },
+				sort: { displayName: "asc" },
+				select: { title: true, displayName: true, isClassic: true },
+			}).runPromise;
 
 			// Filter: isClassic === false → Neuromancer, Project Hail Mary, Snow Crash
 			// Sort: displayName asc → Neuromancer, Project Hail Mary, Snow Crash
@@ -427,13 +414,11 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 		});
 
 		it("should filter by stored field, sort by computed, select mix", async () => {
-			const results = await db.books
-				.query({
-					where: { authorId: "author2" },
-					sort: { displayName: "desc" },
-					select: { title: true, displayName: true },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				where: { authorId: "author2" },
+				sort: { displayName: "desc" },
+				select: { title: true, displayName: true },
+			}).runPromise;
 
 			// Author2 books: Neuromancer, Project Hail Mary, Snow Crash
 			// Sort desc by displayName: Snow Crash, Project Hail Mary, Neuromancer
@@ -451,7 +436,8 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 	// =========================================================================
 	describe("Task 9.12: Multiple computed fields on the same collection", () => {
 		it("should support multiple computed fields simultaneously", async () => {
-			const results = await db.books.query({ where: { id: "book1" } }).runPromise;
+			const results = await db.books.query({ where: { id: "book1" } })
+				.runPromise;
 
 			expect(results).toHaveLength(1);
 			const dune = results[0];
@@ -462,11 +448,9 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 		});
 
 		it("should allow selecting both computed fields", async () => {
-			const results = await db.books
-				.query({
-					select: { displayName: true, isClassic: true },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				select: { displayName: true, isClassic: true },
+			}).runPromise;
 
 			expect(results).toHaveLength(5);
 			for (const book of results) {
@@ -475,12 +459,10 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 		});
 
 		it("should allow filtering by one computed and sorting by another", async () => {
-			const results = await db.books
-				.query({
-					where: { isClassic: true },
-					sort: { displayName: "asc" },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				where: { isClassic: true },
+				sort: { displayName: "asc" },
+			}).runPromise;
 
 			expect(results).toHaveLength(2);
 			// Classics sorted by displayName: Dune, Left Hand
@@ -512,17 +494,16 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 		});
 
 		it("should filter authors by stored fields correctly", async () => {
-			const results = await db.authors
-				.query({ where: { name: "Frank Herbert" } })
-				.runPromise;
+			const results = await db.authors.query({
+				where: { name: "Frank Herbert" },
+			}).runPromise;
 
 			expect(results).toHaveLength(1);
 			expect(results[0].id).toBe("author1");
 		});
 
 		it("should sort authors correctly", async () => {
-			const results = await db.authors
-				.query({ sort: { name: "asc" } })
+			const results = await db.authors.query({ sort: { name: "asc" } })
 				.runPromise;
 
 			expect(results).toHaveLength(2);
@@ -531,8 +512,7 @@ describe("Computed Fields — Core Behavior (Task 9)", () => {
 		});
 
 		it("should select authors fields correctly", async () => {
-			const results = await db.authors
-				.query({ select: { name: true } })
+			const results = await db.authors.query({ select: { name: true } })
 				.runPromise;
 
 			expect(results).toHaveLength(2);
@@ -579,9 +559,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 					},
 					// Returns null for items without description
 					descriptionPreview: (item: Item): string | null =>
-						item.description != null
-							? item.description.substring(0, 10)
-							: null,
+						item.description != null ? item.description.substring(0, 10) : null,
 				},
 			},
 		} as const;
@@ -633,9 +611,9 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
 			);
 
-			const results = await db.items
-				.query({ where: { descriptionLength: { $eq: null } } })
-				.runPromise;
+			const results = await db.items.query({
+				where: { descriptionLength: { $eq: null } },
+			}).runPromise;
 
 			// Items without description: item2 "No Description", item4 "Minimal Item"
 			expect(results).toHaveLength(2);
@@ -649,9 +627,9 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
 			);
 
-			const results = await db.items
-				.query({ where: { descriptionLength: { $ne: null } } })
-				.runPromise;
+			const results = await db.items.query({
+				where: { descriptionLength: { $ne: null } },
+			}).runPromise;
 
 			// Items with description: item1 "Complete Item", item3 "No Rating"
 			expect(results).toHaveLength(2);
@@ -666,17 +644,17 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Filter for "excellent" rating category
-			const excellent = await db.items
-				.query({ where: { ratingCategory: "excellent" } })
-				.runPromise;
+			const excellent = await db.items.query({
+				where: { ratingCategory: "excellent" },
+			}).runPromise;
 
 			expect(excellent).toHaveLength(1);
 			expect(excellent[0].name).toBe("Complete Item");
 
 			// Filter for "average" rating category
-			const average = await db.items
-				.query({ where: { ratingCategory: "average" } })
-				.runPromise;
+			const average = await db.items.query({
+				where: { ratingCategory: "average" },
+			}).runPromise;
 
 			expect(average).toHaveLength(1);
 			expect(average[0].name).toBe("No Description");
@@ -688,9 +666,9 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// $contains on null/undefined should not match (not throw)
-			const results = await db.items
-				.query({ where: { descriptionPreview: { $contains: "full" } } })
-				.runPromise;
+			const results = await db.items.query({
+				where: { descriptionPreview: { $contains: "full" } },
+			}).runPromise;
 
 			// Only "Complete Item" has "A full des" as preview which contains "full"
 			// Note: substring 0-10 is "A full des", which does contain "full"
@@ -703,9 +681,9 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
 			);
 
-			const results = await db.items
-				.query({ where: { descriptionPreview: { $startsWith: "A" } } })
-				.runPromise;
+			const results = await db.items.query({
+				where: { descriptionPreview: { $startsWith: "A" } },
+			}).runPromise;
 
 			// Only "Complete Item" has preview starting with "A"
 			expect(results).toHaveLength(1);
@@ -718,9 +696,9 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Sort ascending - nulls should go to the end
-			const ascResults = await db.items
-				.query({ sort: { descriptionLength: "asc" } })
-				.runPromise;
+			const ascResults = await db.items.query({
+				sort: { descriptionLength: "asc" },
+			}).runPromise;
 
 			// Non-null values first (18, 20), then nulls
 			expect(ascResults).toHaveLength(4);
@@ -738,9 +716,9 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Sort descending - nulls should still go to the end
-			const descResults = await db.items
-				.query({ sort: { descriptionLength: "desc" } })
-				.runPromise;
+			const descResults = await db.items.query({
+				sort: { descriptionLength: "desc" },
+			}).runPromise;
 
 			// Non-null values first in descending order (20, 18), then nulls
 			expect(descResults).toHaveLength(4);
@@ -757,8 +735,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Sort ascending by ratingCategory (string)
-			const results = await db.items
-				.query({ sort: { ratingCategory: "asc" } })
+			const results = await db.items.query({ sort: { ratingCategory: "asc" } })
 				.runPromise;
 
 			expect(results).toHaveLength(4);
@@ -776,12 +753,10 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Filter to items that have a description, sort by descriptionLength
-			const results = await db.items
-				.query({
-					where: { descriptionLength: { $ne: null } },
-					sort: { descriptionLength: "desc" },
-				})
-				.runPromise;
+			const results = await db.items.query({
+				where: { descriptionLength: { $ne: null } },
+				sort: { descriptionLength: "desc" },
+			}).runPromise;
 
 			expect(results).toHaveLength(2);
 			expect(results[0].name).toBe("No Rating"); // descriptionLength: 20
@@ -793,12 +768,10 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 				createEffectDatabase(nullableComputedConfig, { items: initialItems }),
 			);
 
-			const results = await db.items
-				.query({
-					select: { name: true, descriptionLength: true, ratingCategory: true },
-					sort: { id: "asc" },
-				})
-				.runPromise;
+			const results = await db.items.query({
+				select: { name: true, descriptionLength: true, ratingCategory: true },
+				sort: { id: "asc" },
+			}).runPromise;
 
 			expect(results).toHaveLength(4);
 
@@ -885,9 +858,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 					fullDisplay: (book: Record<string, unknown>) => {
 						const title = book.title as string;
 						const year = book.year as number;
-						const author = book.author as
-							| { name: string }
-							| undefined;
+						const author = book.author as { name: string } | undefined;
 						const authorName = author?.name ?? "Unknown";
 						return `${title} (${year}) by ${authorName}`;
 					},
@@ -914,7 +885,12 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 		const testBooks = [
 			{ id: "book1", title: "Dune", year: 1965, authorId: "author1" },
 			{ id: "book2", title: "Neuromancer", year: 1984, authorId: "author2" },
-			{ id: "book3", title: "The Left Hand of Darkness", year: 1969, authorId: "author3" },
+			{
+				id: "book3",
+				title: "The Left Hand of Darkness",
+				year: 1969,
+				authorId: "author3",
+			},
 			{ id: "book4", title: "Unknown Book", year: 2000 }, // No authorId
 		];
 
@@ -951,12 +927,10 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Query with populate - author relationship is populated
-			const results = await db.books
-				.query({
-					populate: { author: true },
-					sort: { id: "asc" },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				populate: { author: true },
+				sort: { id: "asc" },
+			}).runPromise;
 
 			expect(results).toHaveLength(4);
 
@@ -977,12 +951,10 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 				}),
 			);
 
-			const results = await db.books
-				.query({
-					populate: { author: true },
-					sort: { id: "asc" },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				populate: { author: true },
+				sort: { id: "asc" },
+			}).runPromise;
 
 			// Authors with nationality
 			expect(results[0].authorNationality).toBe("American");
@@ -1003,16 +975,16 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 				}),
 			);
 
-			const results = await db.books
-				.query({
-					populate: { author: true },
-					sort: { id: "asc" },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				populate: { author: true },
+				sort: { id: "asc" },
+			}).runPromise;
 
 			// fullDisplay combines title (stored), year (stored), author.name (populated)
 			expect(results[0].fullDisplay).toBe("Dune (1965) by Frank Herbert");
-			expect(results[1].fullDisplay).toBe("Neuromancer (1984) by William Gibson");
+			expect(results[1].fullDisplay).toBe(
+				"Neuromancer (1984) by William Gibson",
+			);
 			expect(results[2].fullDisplay).toBe(
 				"The Left Hand of Darkness (1969) by Ursula K. Le Guin",
 			);
@@ -1028,12 +1000,10 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Filter for books by Frank Herbert
-			const results = await db.books
-				.query({
-					populate: { author: true },
-					where: { authorName: "Frank Herbert" },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				populate: { author: true },
+				where: { authorName: "Frank Herbert" },
+			}).runPromise;
 
 			expect(results).toHaveLength(1);
 			expect(results[0].title).toBe("Dune");
@@ -1048,12 +1018,10 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Filter for books where authorName contains "Gibson"
-			const results = await db.books
-				.query({
-					populate: { author: true },
-					where: { authorName: { $contains: "Gibson" } },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				populate: { author: true },
+				where: { authorName: { $contains: "Gibson" } },
+			}).runPromise;
 
 			expect(results).toHaveLength(1);
 			expect(results[0].title).toBe("Neuromancer");
@@ -1067,12 +1035,10 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 				}),
 			);
 
-			const results = await db.books
-				.query({
-					populate: { author: true },
-					sort: { authorName: "asc" },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				populate: { author: true },
+				sort: { authorName: "asc" },
+			}).runPromise;
 
 			// Sorted by authorName ascending: Frank Herbert, Unknown, Ursula K. Le Guin, William Gibson
 			expect(results).toHaveLength(4);
@@ -1090,13 +1056,11 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 				}),
 			);
 
-			const results = await db.books
-				.query({
-					populate: { author: true },
-					select: { title: true, authorName: true },
-					sort: { id: "asc" },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				populate: { author: true },
+				select: { title: true, authorName: true },
+				sort: { id: "asc" },
+			}).runPromise;
 
 			expect(results).toHaveLength(4);
 
@@ -1105,7 +1069,10 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 				expect(Object.keys(result).sort()).toEqual(["authorName", "title"]);
 			}
 
-			expect(results[0]).toEqual({ title: "Dune", authorName: "Frank Herbert" });
+			expect(results[0]).toEqual({
+				title: "Dune",
+				authorName: "Frank Herbert",
+			});
 			expect(results[1]).toEqual({
 				title: "Neuromancer",
 				authorName: "William Gibson",
@@ -1123,21 +1090,21 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			// Filter for books where authorNationality is not "Unknown"
 			// Sort by fullDisplay descending
 			// Select specific fields
-			const results = await db.books
-				.query({
-					populate: { author: true },
-					where: { authorNationality: { $ne: "Unknown" } },
-					sort: { fullDisplay: "asc" },
-					select: { title: true, authorName: true, fullDisplay: true },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				populate: { author: true },
+				where: { authorNationality: { $ne: "Unknown" } },
+				sort: { fullDisplay: "asc" },
+				select: { title: true, authorName: true, fullDisplay: true },
+			}).runPromise;
 
 			// Only books with authors that have nationality: book1 (American), book2 (Canadian)
 			expect(results).toHaveLength(2);
 
 			// Sorted by fullDisplay ascending
 			expect(results[0].fullDisplay).toBe("Dune (1965) by Frank Herbert");
-			expect(results[1].fullDisplay).toBe("Neuromancer (1984) by William Gibson");
+			expect(results[1].fullDisplay).toBe(
+				"Neuromancer (1984) by William Gibson",
+			);
 		});
 
 		it("should handle book without authorId in query without populate", async () => {
@@ -1149,8 +1116,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Query without populate for book without author
-			const results = await db.books
-				.query({ where: { id: "book4" } })
+			const results = await db.books.query({ where: { id: "book4" } })
 				.runPromise;
 
 			expect(results).toHaveLength(1);
@@ -1169,12 +1135,10 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Query with populate for book without author
-			const results = await db.books
-				.query({
-					populate: { author: true },
-					where: { id: "book4" },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				populate: { author: true },
+				where: { id: "book4" },
+			}).runPromise;
 
 			expect(results).toHaveLength(1);
 			expect(results[0].title).toBe("Unknown Book");
@@ -1214,17 +1178,15 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 
 			// Try to create with explicit computed field values
 			// These should be ignored and the derivation function should be used
-			const created = await db.books
-				.create({
-					id: "book1",
-					title: "Dune",
-					year: 1965,
-					// @ts-expect-error - intentionally providing computed fields in input
-					displayName: "WRONG VALUE",
-					// @ts-expect-error - intentionally providing computed fields in input
-					isClassic: false, // should be true since year < 1980
-				})
-				.runPromise;
+			const created = await db.books.create({
+				id: "book1",
+				title: "Dune",
+				year: 1965,
+				// @ts-expect-error - intentionally providing computed fields in input
+				displayName: "WRONG VALUE",
+				// @ts-expect-error - intentionally providing computed fields in input
+				isClassic: false, // should be true since year < 1980
+			}).runPromise;
 
 			// Verify the created entity has stored fields only
 			expect(created.id).toBe("book1");
@@ -1235,7 +1197,8 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			expect(created).not.toHaveProperty("isClassic");
 
 			// Query to get the entity with computed fields
-			const results = await db.books.query({ where: { id: "book1" } }).runPromise;
+			const results = await db.books.query({ where: { id: "book1" } })
+				.runPromise;
 			expect(results).toHaveLength(1);
 
 			// Computed fields should be derived from the actual data, not the provided values
@@ -1249,18 +1212,17 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Create with computed fields in input (they should be stripped)
-			await db.books
-				.create({
-					id: "book2",
-					title: "Neuromancer",
-					year: 1984,
-					// @ts-expect-error - intentionally providing computed fields
-					displayName: "Custom Display Name",
-				})
-				.runPromise;
+			await db.books.create({
+				id: "book2",
+				title: "Neuromancer",
+				year: 1984,
+				// @ts-expect-error - intentionally providing computed fields
+				displayName: "Custom Display Name",
+			}).runPromise;
 
 			// Query and verify derived value is used
-			const results = await db.books.query({ where: { id: "book2" } }).runPromise;
+			const results = await db.books.query({ where: { id: "book2" } })
+				.runPromise;
 			expect(results).toHaveLength(1);
 			expect(results[0].displayName).toBe("Neuromancer (1984)");
 			expect(results[0].isClassic).toBe(false); // year 1984 >= 1980
@@ -1272,32 +1234,28 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Create multiple with computed fields in input (they should be stripped)
-			const result = await db.books
-				.createMany([
-					{
-						id: "book3",
-						title: "Snow Crash",
-						year: 1992,
-						// @ts-expect-error - intentionally providing computed fields
-						displayName: "Wrong Name",
-						isClassic: true, // should be false
-					},
-					{
-						id: "book4",
-						title: "The Left Hand of Darkness",
-						year: 1969,
-						// @ts-expect-error - intentionally providing computed fields
-						isClassic: false, // should be true
-					},
-				])
-				.runPromise;
+			const result = await db.books.createMany([
+				{
+					id: "book3",
+					title: "Snow Crash",
+					year: 1992,
+					// @ts-expect-error - intentionally providing computed fields
+					displayName: "Wrong Name",
+					isClassic: true, // should be false
+				},
+				{
+					id: "book4",
+					title: "The Left Hand of Darkness",
+					year: 1969,
+					// @ts-expect-error - intentionally providing computed fields
+					isClassic: false, // should be true
+				},
+			]).runPromise;
 
 			expect(result.created).toHaveLength(2);
 
 			// Query and verify derived values are correct
-			const results = await db.books
-				.query({ sort: { id: "asc" } })
-				.runPromise;
+			const results = await db.books.query({ sort: { id: "asc" } }).runPromise;
 			expect(results).toHaveLength(2);
 
 			// Snow Crash (1992)
@@ -1343,15 +1301,13 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 
 			// Update with explicit computed field values
 			// These should be ignored and the derivation function should be used
-			const updated = await db.books
-				.update("book1", {
-					title: "Dune (Revised Edition)",
-					// @ts-expect-error - intentionally providing computed fields in input
-					displayName: "WRONG VALUE",
-					// @ts-expect-error - intentionally providing computed fields in input
-					isClassic: false, // should still be true since year < 1980
-				})
-				.runPromise;
+			const updated = await db.books.update("book1", {
+				title: "Dune (Revised Edition)",
+				// @ts-expect-error - intentionally providing computed fields in input
+				displayName: "WRONG VALUE",
+				// @ts-expect-error - intentionally providing computed fields in input
+				isClassic: false, // should still be true since year < 1980
+			}).runPromise;
 
 			// Verify the updated entity has stored fields only
 			expect(updated.id).toBe("book1");
@@ -1362,7 +1318,8 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			expect(updated).not.toHaveProperty("isClassic");
 
 			// Query to get the entity with computed fields
-			const results = await db.books.query({ where: { id: "book1" } }).runPromise;
+			const results = await db.books.query({ where: { id: "book1" } })
+				.runPromise;
 			expect(results).toHaveLength(1);
 
 			// Computed fields should be derived from the actual data, not the provided values
@@ -1373,21 +1330,27 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 		it("should strip all computed field keys from update input", async () => {
 			const db = await Effect.runPromise(
 				createEffectDatabase(configWithComputed, {
-					books: [{ id: "book2", title: "Neuromancer", year: 1984, genre: "cyberpunk" }],
+					books: [
+						{
+							id: "book2",
+							title: "Neuromancer",
+							year: 1984,
+							genre: "cyberpunk",
+						},
+					],
 				}),
 			);
 
 			// Update with computed fields in input (they should be stripped)
-			await db.books
-				.update("book2", {
-					year: 1985, // changing year changes isClassic and displayName
-					// @ts-expect-error - intentionally providing computed fields
-					displayName: "Custom Display Name",
-				})
-				.runPromise;
+			await db.books.update("book2", {
+				year: 1985, // changing year changes isClassic and displayName
+				// @ts-expect-error - intentionally providing computed fields
+				displayName: "Custom Display Name",
+			}).runPromise;
 
 			// Query and verify derived value is used
-			const results = await db.books.query({ where: { id: "book2" } }).runPromise;
+			const results = await db.books.query({ where: { id: "book2" } })
+				.runPromise;
 			expect(results).toHaveLength(1);
 			expect(results[0].displayName).toBe("Neuromancer (1985)");
 			expect(results[0].isClassic).toBe(false); // year 1985 >= 1980
@@ -1396,22 +1359,23 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 		it("should update stored fields correctly while ignoring computed fields", async () => {
 			const db = await Effect.runPromise(
 				createEffectDatabase(configWithComputed, {
-					books: [{ id: "book3", title: "Snow Crash", year: 1992, genre: "sci-fi" }],
+					books: [
+						{ id: "book3", title: "Snow Crash", year: 1992, genre: "sci-fi" },
+					],
 				}),
 			);
 
 			// Update year to make the book a "classic" (year < 1980)
 			// But try to pass isClassic: false - this should be IGNORED
-			await db.books
-				.update("book3", {
-					year: 1970, // This makes isClassic = true
-					// @ts-expect-error - intentionally providing computed fields
-					isClassic: false, // WRONG - should be true
-				})
-				.runPromise;
+			await db.books.update("book3", {
+				year: 1970, // This makes isClassic = true
+				// @ts-expect-error - intentionally providing computed fields
+				isClassic: false, // WRONG - should be true
+			}).runPromise;
 
 			// Query and verify derived values
-			const results = await db.books.query({ where: { id: "book3" } }).runPromise;
+			const results = await db.books.query({ where: { id: "book3" } })
+				.runPromise;
 			expect(results).toHaveLength(1);
 			expect(results[0].year).toBe(1970);
 			expect(results[0].displayName).toBe("Snow Crash (1970)");
@@ -1421,29 +1385,36 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 		it("should preserve unmodified stored fields when updating with computed field attempts", async () => {
 			const db = await Effect.runPromise(
 				createEffectDatabase(configWithComputed, {
-					books: [{ id: "book4", title: "The Left Hand of Darkness", year: 1969, genre: "sci-fi" }],
+					books: [
+						{
+							id: "book4",
+							title: "The Left Hand of Darkness",
+							year: 1969,
+							genre: "sci-fi",
+						},
+					],
 				}),
 			);
 
 			// Get initial state
-			const initial = await db.books.query({ where: { id: "book4" } }).runPromise;
+			const initial = await db.books.query({ where: { id: "book4" } })
+				.runPromise;
 			expect(initial[0].title).toBe("The Left Hand of Darkness");
 			expect(initial[0].year).toBe(1969);
 			expect(initial[0].genre).toBe("sci-fi");
 
 			// Update only genre, but try to pass computed fields too
-			await db.books
-				.update("book4", {
-					genre: "speculative fiction",
-					// @ts-expect-error - intentionally providing computed fields
-					displayName: "WRONG NAME",
-					// @ts-expect-error - intentionally providing computed fields
-					isClassic: false,
-				})
-				.runPromise;
+			await db.books.update("book4", {
+				genre: "speculative fiction",
+				// @ts-expect-error - intentionally providing computed fields
+				displayName: "WRONG NAME",
+				// @ts-expect-error - intentionally providing computed fields
+				isClassic: false,
+			}).runPromise;
 
 			// Query and verify
-			const results = await db.books.query({ where: { id: "book4" } }).runPromise;
+			const results = await db.books.query({ where: { id: "book4" } })
+				.runPromise;
 			expect(results).toHaveLength(1);
 
 			// Stored fields
@@ -1459,31 +1430,34 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 		it("should work correctly with multiple updates ignoring computed fields", async () => {
 			const db = await Effect.runPromise(
 				createEffectDatabase(configWithComputed, {
-					books: [{ id: "book5", title: "Project Hail Mary", year: 2021, genre: "sci-fi" }],
+					books: [
+						{
+							id: "book5",
+							title: "Project Hail Mary",
+							year: 2021,
+							genre: "sci-fi",
+						},
+					],
 				}),
 			);
 
 			// First update
-			await db.books
-				.update("book5", {
-					title: "Project Hail Mary (Updated)",
-					// @ts-expect-error - intentionally providing computed fields
-					displayName: "WRONG1",
-				})
-				.runPromise;
+			await db.books.update("book5", {
+				title: "Project Hail Mary (Updated)",
+				// @ts-expect-error - intentionally providing computed fields
+				displayName: "WRONG1",
+			}).runPromise;
 
 			let results = await db.books.query({ where: { id: "book5" } }).runPromise;
 			expect(results[0].displayName).toBe("Project Hail Mary (Updated) (2021)");
 			expect(results[0].isClassic).toBe(false);
 
 			// Second update - change year to before 1980
-			await db.books
-				.update("book5", {
-					year: 1975,
-					// @ts-expect-error - intentionally providing computed fields
-					isClassic: false, // WRONG - should be true
-				})
-				.runPromise;
+			await db.books.update("book5", {
+				year: 1975,
+				// @ts-expect-error - intentionally providing computed fields
+				isClassic: false, // WRONG - should be true
+			}).runPromise;
 
 			results = await db.books.query({ where: { id: "book5" } }).runPromise;
 			expect(results[0].displayName).toBe("Project Hail Mary (Updated) (1975)");
@@ -1531,8 +1505,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 				createEffectDatabase(emptyCollectionConfig, { books: [] }),
 			);
 
-			const results = await db.books
-				.query({ where: { isClassic: true } })
+			const results = await db.books.query({ where: { isClassic: true } })
 				.runPromise;
 
 			expect(results).toEqual([]);
@@ -1543,8 +1516,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 				createEffectDatabase(emptyCollectionConfig, { books: [] }),
 			);
 
-			const results = await db.books
-				.query({ sort: { displayName: "asc" } })
+			const results = await db.books.query({ sort: { displayName: "asc" } })
 				.runPromise;
 
 			expect(results).toEqual([]);
@@ -1555,9 +1527,9 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 				createEffectDatabase(emptyCollectionConfig, { books: [] }),
 			);
 
-			const results = await db.books
-				.query({ select: { title: true, displayName: true, isClassic: true } })
-				.runPromise;
+			const results = await db.books.query({
+				select: { title: true, displayName: true, isClassic: true },
+			}).runPromise;
 
 			expect(results).toEqual([]);
 		});
@@ -1567,13 +1539,11 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 				createEffectDatabase(emptyCollectionConfig, { books: [] }),
 			);
 
-			const results = await db.books
-				.query({
-					where: { isClassic: true },
-					sort: { displayName: "desc" },
-					select: { title: true, displayName: true },
-				})
-				.runPromise;
+			const results = await db.books.query({
+				where: { isClassic: true },
+				sort: { displayName: "desc" },
+				select: { title: true, displayName: true },
+			}).runPromise;
 
 			expect(results).toEqual([]);
 		});
@@ -1583,9 +1553,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 				createEffectDatabase(emptyCollectionConfig, { books: [] }),
 			);
 
-			const results = await db.books
-				.query({ limit: 10, offset: 0 })
-				.runPromise;
+			const results = await db.books.query({ limit: 10, offset: 0 }).runPromise;
 
 			expect(results).toEqual([]);
 		});
@@ -1600,8 +1568,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			expect(emptyResults).toHaveLength(0);
 
 			// Add an item
-			await db.books
-				.create({ id: "book1", title: "Dune", year: 1965 })
+			await db.books.create({ id: "book1", title: "Dune", year: 1965 })
 				.runPromise;
 
 			// Query should now return the item with computed fields
@@ -1620,7 +1587,9 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			const result = await Effect.runPromise(
 				db.books.findById("nonexistent").pipe(
 					Effect.map(() => "found" as const),
-					Effect.catchTag("NotFoundError", () => Effect.succeed("not_found" as const)),
+					Effect.catchTag("NotFoundError", () =>
+						Effect.succeed("not_found" as const),
+					),
 				),
 			);
 
@@ -2357,8 +2326,20 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 
 		const testBooks = [
 			{ id: "book1", title: "Dune", year: 1965, price: 10, salesCount: 100 },
-			{ id: "book2", title: "Neuromancer", year: 1984, price: 15, salesCount: 200 },
-			{ id: "book3", title: "Snow Crash", year: 1992, price: 20, salesCount: 150 },
+			{
+				id: "book2",
+				title: "Neuromancer",
+				year: 1984,
+				price: 15,
+				salesCount: 200,
+			},
+			{
+				id: "book3",
+				title: "Snow Crash",
+				year: 1992,
+				price: 20,
+				salesCount: 150,
+			},
 		];
 
 		it("should aggregate only stored numeric fields, not computed numeric fields", async () => {
@@ -2371,7 +2352,8 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			expect(result.sum?.price).toBe(45);
 
 			// Sum of stored field "salesCount": 100 + 200 + 150 = 450
-			const result2 = await db.books.aggregate({ sum: "salesCount" }).runPromise;
+			const result2 = await db.books.aggregate({ sum: "salesCount" })
+				.runPromise;
 			expect(result2.sum?.salesCount).toBe(450);
 
 			// The computed field "revenue" (price * salesCount) values would be:
@@ -2388,8 +2370,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			expect(result3.sum?.revenue).toBe(0);
 
 			// Same for discountedPrice
-			const result4 = await db.books
-				.aggregate({ sum: "discountedPrice" })
+			const result4 = await db.books.aggregate({ sum: "discountedPrice" })
 				.runPromise;
 			expect(result4.sum?.discountedPrice).toBe(0);
 		});
@@ -2415,24 +2396,23 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Min/max of stored field "price"
-			const result = await db.books
-				.aggregate({ min: "price", max: "price" })
+			const result = await db.books.aggregate({ min: "price", max: "price" })
 				.runPromise;
 			expect(result.min?.price).toBe(10);
 			expect(result.max?.price).toBe(20);
 
 			// Min/max of stored field "year"
-			const result2 = await db.books
-				.aggregate({ min: "year", max: "year" })
+			const result2 = await db.books.aggregate({ min: "year", max: "year" })
 				.runPromise;
 			expect(result2.min?.year).toBe(1965);
 			expect(result2.max?.year).toBe(1992);
 
 			// Min/max of computed field "revenue" should be undefined
 			// because the field doesn't exist in stored data
-			const result3 = await db.books
-				.aggregate({ min: "revenue", max: "revenue" })
-				.runPromise;
+			const result3 = await db.books.aggregate({
+				min: "revenue",
+				max: "revenue",
+			}).runPromise;
 			expect(result3.min?.revenue).toBeUndefined();
 			expect(result3.max?.revenue).toBeUndefined();
 		});
@@ -2469,8 +2449,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Group by stored field "year" and count
-			const result = await db.books
-				.aggregate({ groupBy: "year", count: true })
+			const result = await db.books.aggregate({ groupBy: "year", count: true })
 				.runPromise;
 
 			expect(result).toHaveLength(4);
@@ -2487,13 +2466,11 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Filter by stored field
-			const result = await db.books
-				.aggregate({
-					count: true,
-					sum: "price",
-					where: { year: { $lt: 1980 } },
-				})
-				.runPromise;
+			const result = await db.books.aggregate({
+				count: true,
+				sum: "price",
+				where: { year: { $lt: 1980 } },
+			}).runPromise;
 
 			// Only Dune (1965) matches
 			expect(result.count).toBe(1);
@@ -2506,7 +2483,8 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Query returns computed fields
-			const queryResults = await db.books.query({ sort: { id: "asc" } }).runPromise;
+			const queryResults = await db.books.query({ sort: { id: "asc" } })
+				.runPromise;
 			expect(queryResults).toHaveLength(3);
 
 			// Verify computed fields ARE present in query results
@@ -2522,12 +2500,10 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			expect(queryResults[0].discountedPrice).toBe(9); // 10 * 0.9
 
 			// But aggregation on computed fields returns empty/null results
-			const aggResult = await db.books
-				.aggregate({
-					sum: ["revenue", "discountedPrice", "price"],
-					avg: ["revenue", "discountedPrice", "price"],
-				})
-				.runPromise;
+			const aggResult = await db.books.aggregate({
+				sum: ["revenue", "discountedPrice", "price"],
+				avg: ["revenue", "discountedPrice", "price"],
+			}).runPromise;
 
 			// Stored field "price" is aggregated correctly
 			expect(aggResult.sum?.price).toBe(45);
@@ -2546,15 +2522,13 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 			);
 
 			// Comprehensive aggregate request mixing stored and computed field names
-			const result = await db.books
-				.aggregate({
-					count: true,
-					sum: ["price", "salesCount", "year", "revenue", "discountedPrice"],
-					avg: ["price", "year"],
-					min: ["price", "year", "revenue"],
-					max: ["price", "year", "revenue"],
-				})
-				.runPromise;
+			const result = await db.books.aggregate({
+				count: true,
+				sum: ["price", "salesCount", "year", "revenue", "discountedPrice"],
+				avg: ["price", "year"],
+				min: ["price", "year", "revenue"],
+				max: ["price", "year", "revenue"],
+			}).runPromise;
 
 			// Count is always based on entities
 			expect(result.count).toBe(3);

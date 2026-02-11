@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { Effect, Stream, Chunk } from "effect";
-import { applySort } from "../src/operations/query/sort-stream";
-import { sortData } from "../src/operations/query/sort";
+import { Chunk, Effect, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import { resolveComputedFields } from "../src/operations/query/resolve-computed";
+import { sortData } from "../src/operations/query/sort";
+import { applySort } from "../src/operations/query/sort-stream";
 import type { ComputedFieldsConfig } from "../src/types/computed-types";
 
 /**

@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { Effect, Stream, Chunk } from "effect";
+import { Chunk, Effect, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import { applyFilter } from "../src/operations/query/filter-stream";
 
 const collectFiltered = <T extends Record<string, unknown>>(
@@ -255,20 +255,14 @@ describe("Conditional Logic Operators", () => {
 
 		it("should handle field existence checks with operators", async () => {
 			// Add an item without certain fields
-			const dataWithMissing = [
-				...testData,
-				{ id: 6, name: "Test User" },
-			];
+			const dataWithMissing = [...testData, { id: 6, name: "Test User" }];
 
-			const result = await collectFiltered(
-				dataWithMissing as typeof testData,
-				{
-					$or: [
-						{ email: { $eq: undefined } }, // Should match item 6
-						{ role: "admin" },
-					],
-				},
-			);
+			const result = await collectFiltered(dataWithMissing as typeof testData, {
+				$or: [
+					{ email: { $eq: undefined } }, // Should match item 6
+					{ role: "admin" },
+				],
+			});
 
 			expect(result).toHaveLength(3);
 			expect(result.map((r) => r.id).sort()).toEqual([1, 3, 6]);
@@ -289,9 +283,7 @@ describe("Conditional Logic Operators", () => {
 
 		it("should handle non-array value for $or", async () => {
 			const result = await collectFiltered(testData, {
-				$or: { name: "John Doe" } as unknown as Array<
-					Record<string, unknown>
-				>,
+				$or: { name: "John Doe" } as unknown as Array<Record<string, unknown>>,
 			});
 
 			expect(result).toHaveLength(0);

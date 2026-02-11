@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { Effect, Stream, Chunk } from "effect";
-import { applyFilter } from "../src/operations/query/filter-stream";
+import { Chunk, Effect, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import { filterData } from "../src/operations/query/filter";
+import { applyFilter } from "../src/operations/query/filter-stream";
 import { resolveComputedFields } from "../src/operations/query/resolve-computed";
 import type { ComputedFieldsConfig } from "../src/types/computed-types";
 
@@ -45,8 +45,8 @@ const storedBooks: readonly StoredBook[] = [
 ];
 
 // Books with computed fields resolved
-const booksWithComputed: readonly BookWithComputed[] = storedBooks.map(
-	(book) => resolveComputedFields(book, computedConfig),
+const booksWithComputed: readonly BookWithComputed[] = storedBooks.map((book) =>
+	resolveComputedFields(book, computedConfig),
 );
 
 // Helper to collect filtered stream
@@ -66,10 +66,9 @@ describe("filterData with computed fields", () => {
 	describe("Task 3.1: Verify filterData handles computed field keys via dynamic property access", () => {
 		it("should filter entities by computed field displayName (string)", () => {
 			// Direct call to filterData
-			const result = filterData(
-				[...booksWithComputed],
-				{ displayName: "Dune (1965)" },
-			);
+			const result = filterData([...booksWithComputed], {
+				displayName: "Dune (1965)",
+			});
 
 			expect(result).toHaveLength(1);
 			expect(result[0].id).toBe("1");
@@ -77,10 +76,7 @@ describe("filterData with computed fields", () => {
 		});
 
 		it("should filter entities by computed field isClassic (boolean)", () => {
-			const result = filterData(
-				[...booksWithComputed],
-				{ isClassic: true },
-			);
+			const result = filterData([...booksWithComputed], { isClassic: true });
 
 			// Books from before 1980: Dune (1965), Left Hand of Darkness (1969)
 			expect(result).toHaveLength(2);
@@ -88,10 +84,9 @@ describe("filterData with computed fields", () => {
 		});
 
 		it("should filter entities by computed field yearsSincePublication (number)", () => {
-			const result = filterData(
-				[...booksWithComputed],
-				{ yearsSincePublication: { $lt: 50 } },
-			);
+			const result = filterData([...booksWithComputed], {
+				yearsSincePublication: { $lt: 50 },
+			});
 
 			// Books from 1975 or later: Neuromancer (1984), Project Hail Mary (2021), Snow Crash (1992)
 			expect(result).toHaveLength(3);
@@ -99,13 +94,10 @@ describe("filterData with computed fields", () => {
 		});
 
 		it("should handle multiple computed fields in where clause", () => {
-			const result = filterData(
-				[...booksWithComputed],
-				{
-					isClassic: false,
-					yearsSincePublication: { $lt: 40 },
-				},
-			);
+			const result = filterData([...booksWithComputed], {
+				isClassic: false,
+				yearsSincePublication: { $lt: 40 },
+			});
 
 			// Not classic (1980+) AND less than 40 years old (after 1984)
 			// Neuromancer (1984, 40 years) - excluded (exactly 40)
@@ -116,13 +108,10 @@ describe("filterData with computed fields", () => {
 		});
 
 		it("should combine stored and computed fields in where clause", () => {
-			const result = filterData(
-				[...booksWithComputed],
-				{
-					genre: "sci-fi",
-					isClassic: true,
-				},
-			);
+			const result = filterData([...booksWithComputed], {
+				genre: "sci-fi",
+				isClassic: true,
+			});
 
 			expect(result).toHaveLength(2);
 			expect(result.map((r) => r.id).sort()).toEqual(["1", "3"]);
@@ -254,10 +243,7 @@ describe("filterData with computed fields", () => {
 	describe("Complex filters with computed and stored fields", () => {
 		it("should handle $or with computed fields", async () => {
 			const result = await collectFiltered(booksWithComputed, {
-				$or: [
-					{ isClassic: true },
-					{ title: "Project Hail Mary" },
-				],
+				$or: [{ isClassic: true }, { title: "Project Hail Mary" }],
 			});
 
 			// Classic books OR Project Hail Mary
@@ -267,10 +253,7 @@ describe("filterData with computed fields", () => {
 
 		it("should handle $and with computed fields", async () => {
 			const result = await collectFiltered(booksWithComputed, {
-				$and: [
-					{ isClassic: false },
-					{ yearsSincePublication: { $lt: 35 } },
-				],
+				$and: [{ isClassic: false }, { yearsSincePublication: { $lt: 35 } }],
 			});
 
 			// Not classic AND less than 35 years old
@@ -293,16 +276,10 @@ describe("filterData with computed fields", () => {
 			const result = await collectFiltered(booksWithComputed, {
 				$or: [
 					{
-						$and: [
-							{ isClassic: true },
-							{ displayName: { $contains: "Dune" } },
-						],
+						$and: [{ isClassic: true }, { displayName: { $contains: "Dune" } }],
 					},
 					{
-						$and: [
-							{ isClassic: false },
-							{ yearsSincePublication: { $lt: 5 } },
-						],
+						$and: [{ isClassic: false }, { yearsSincePublication: { $lt: 5 } }],
 					},
 				],
 			});

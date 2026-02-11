@@ -29,7 +29,9 @@ const computeIndexKey = <T extends HasId>(
 	entity: T,
 	fields: NormalizedIndex,
 ): unknown | undefined => {
-	const values = fields.map((field) => (entity as Record<string, unknown>)[field]);
+	const values = fields.map(
+		(field) => (entity as Record<string, unknown>)[field],
+	);
 
 	// Skip if any indexed field is null or undefined
 	if (values.some((v) => v === null || v === undefined)) {
@@ -378,7 +380,11 @@ export const updateInIndex = <T extends HasId>(
 			if (oldKey === undefined && newKey === undefined) {
 				continue;
 			}
-			if (oldKey !== undefined && newKey !== undefined && keysEqual(oldKey, newKey)) {
+			if (
+				oldKey !== undefined &&
+				newKey !== undefined &&
+				keysEqual(oldKey, newKey)
+			) {
 				continue;
 			}
 

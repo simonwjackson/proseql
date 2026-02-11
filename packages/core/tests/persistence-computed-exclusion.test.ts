@@ -1,15 +1,15 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { Effect, Schema, Layer, Stream, Chunk } from "effect";
+import { Chunk, Effect, Layer, Schema, Stream } from "effect";
+import { beforeEach, describe, expect, it } from "vitest";
+import type { EffectDatabase } from "../src/factories/database-effect";
 import {
 	createEffectDatabase,
 	createPersistentEffectDatabase,
 } from "../src/factories/database-effect";
-import type { EffectDatabase } from "../src/factories/database-effect";
-import { makeInMemoryStorageLayer } from "../src/storage/in-memory-adapter-layer";
-import { makeSerializerLayer } from "../src/serializers/format-codec";
+import { resolveComputedFields } from "../src/operations/query/resolve-computed";
 import { jsonCodec } from "../src/serializers/codecs/json";
 import { yamlCodec } from "../src/serializers/codecs/yaml";
-import { resolveComputedFields } from "../src/operations/query/resolve-computed";
+import { makeSerializerLayer } from "../src/serializers/format-codec";
+import { makeInMemoryStorageLayer } from "../src/storage/in-memory-adapter-layer";
 
 /**
  * Task 6.1: Verify that computed fields are never written into the Ref.
@@ -52,7 +52,11 @@ const config = {
 	books: {
 		schema: BookSchema,
 		relationships: {
-			author: { type: "ref" as const, target: "authors" as const, foreignKey: "authorId" },
+			author: {
+				type: "ref" as const,
+				target: "authors" as const,
+				foreignKey: "authorId",
+			},
 		},
 		// Computed fields defined here
 		computed: {
@@ -64,7 +68,11 @@ const config = {
 	authors: {
 		schema: AuthorSchema,
 		relationships: {
-			books: { type: "inverse" as const, target: "books" as const, foreignKey: "authorId" },
+			books: {
+				type: "inverse" as const,
+				target: "books" as const,
+				foreignKey: "authorId",
+			},
 		},
 	},
 } as const;
@@ -118,7 +126,12 @@ describe("Task 6.1: Computed fields are never written into the Ref", () => {
 			// Create multiple books
 			const result = await db.books.createMany([
 				{ title: "Dune", year: 1965, genre: "sci-fi", authorId: "author1" },
-				{ title: "Neuromancer", year: 1984, genre: "sci-fi", authorId: "author1" },
+				{
+					title: "Neuromancer",
+					year: 1984,
+					genre: "sci-fi",
+					authorId: "author1",
+				},
 			]).runPromise;
 
 			expect(result.created).toHaveLength(2);
@@ -246,7 +259,8 @@ describe("Task 6.1: Computed fields are never written into the Ref", () => {
 			);
 
 			// Read from Ref
-			const stored = await dbWithInitial.books.findById("initial-book").runPromise;
+			const stored =
+				await dbWithInitial.books.findById("initial-book").runPromise;
 			const keys = Object.keys(stored);
 
 			// Computed fields should NOT be present
@@ -299,7 +313,10 @@ const makeTestLayer = (store?: Map<string, string>) => {
 	const s = store ?? new Map<string, string>();
 	return {
 		store: s,
-		layer: Layer.merge(makeInMemoryStorageLayer(s), makeSerializerLayer([jsonCodec(), yamlCodec()])),
+		layer: Layer.merge(
+			makeInMemoryStorageLayer(s),
+			makeSerializerLayer([jsonCodec(), yamlCodec()]),
+		),
 	};
 };
 
@@ -309,7 +326,11 @@ const persistentConfig = {
 		schema: BookSchema,
 		file: "/data/books.json",
 		relationships: {
-			author: { type: "ref" as const, target: "authors" as const, foreignKey: "authorId" },
+			author: {
+				type: "ref" as const,
+				target: "authors" as const,
+				foreignKey: "authorId",
+			},
 		},
 		computed: {
 			displayName: (book: Book) => `${book.title} (${book.year})`,
@@ -321,7 +342,11 @@ const persistentConfig = {
 		schema: AuthorSchema,
 		file: "/data/authors.json",
 		relationships: {
-			books: { type: "inverse" as const, target: "books" as const, foreignKey: "authorId" },
+			books: {
+				type: "inverse" as const,
+				target: "books" as const,
+				foreignKey: "authorId",
+			},
 		},
 	},
 } as const;
@@ -332,7 +357,11 @@ const persistentConfigYaml = {
 		schema: BookSchema,
 		file: "/data/books.yaml",
 		relationships: {
-			author: { type: "ref" as const, target: "authors" as const, foreignKey: "authorId" },
+			author: {
+				type: "ref" as const,
+				target: "authors" as const,
+				foreignKey: "authorId",
+			},
 		},
 		computed: {
 			displayName: (book: Book) => `${book.title} (${book.year})`,
@@ -343,7 +372,11 @@ const persistentConfigYaml = {
 		schema: AuthorSchema,
 		file: "/data/authors.yaml",
 		relationships: {
-			books: { type: "inverse" as const, target: "books" as const, foreignKey: "authorId" },
+			books: {
+				type: "inverse" as const,
+				target: "books" as const,
+				foreignKey: "authorId",
+			},
 		},
 	},
 } as const;
@@ -357,10 +390,14 @@ describe("Task 6.2: Serialized output contains only stored fields (no computed f
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -383,10 +420,15 @@ describe("Task 6.2: Serialized output contains only stored fields (no computed f
 
 			// Parse the serialized content
 			const serialized = store.get("/data/books.json")!;
-			const parsed = JSON.parse(serialized) as Record<string, Record<string, unknown>>;
+			const parsed = JSON.parse(serialized) as Record<
+				string,
+				Record<string, unknown>
+			>;
 
 			// Get all book entities (values, excluding _version if present)
-			const bookEntries = Object.entries(parsed).filter(([key]) => key !== "_version");
+			const bookEntries = Object.entries(parsed).filter(
+				([key]) => key !== "_version",
+			);
 			expect(bookEntries.length).toBe(1);
 
 			const [, bookData] = bookEntries[0];
@@ -407,7 +449,15 @@ describe("Task 6.2: Serialized output contains only stored fields (no computed f
 			expect("yearsSincePublication" in bookData).toBe(false);
 
 			// Verify no unexpected keys (should only have schema fields)
-			const expectedKeys = ["id", "title", "year", "genre", "authorId", "createdAt", "updatedAt"];
+			const expectedKeys = [
+				"id",
+				"title",
+				"year",
+				"genre",
+				"authorId",
+				"createdAt",
+				"updatedAt",
+			];
 			const actualKeys = Object.keys(bookData);
 			for (const key of actualKeys) {
 				expect(expectedKeys).toContain(key);
@@ -421,12 +471,22 @@ describe("Task 6.2: Serialized output contains only stored fields (no computed f
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [
-									{ id: "book1", title: "Dune", year: 1965, genre: "sci-fi", authorId: "author1" },
-								],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [
+										{
+											id: "book1",
+											title: "Dune",
+											year: 1965,
+											genre: "sci-fi",
+											authorId: "author1",
+										},
+									],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -441,7 +501,10 @@ describe("Task 6.2: Serialized output contains only stored fields (no computed f
 
 			// Parse the serialized content
 			const serialized = store.get("/data/books.json")!;
-			const parsed = JSON.parse(serialized) as Record<string, Record<string, unknown>>;
+			const parsed = JSON.parse(serialized) as Record<
+				string,
+				Record<string, unknown>
+			>;
 
 			// Verify the updated book
 			expect(parsed.book1).toBeDefined();
@@ -460,18 +523,37 @@ describe("Task 6.2: Serialized output contains only stored fields (no computed f
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
 						// Create multiple books
 						yield* db.books.createMany([
-							{ title: "Dune", year: 1965, genre: "sci-fi", authorId: "author1" },
-							{ title: "Neuromancer", year: 1984, genre: "sci-fi", authorId: "author1" },
-							{ title: "Snow Crash", year: 1992, genre: "sci-fi", authorId: "author1" },
+							{
+								title: "Dune",
+								year: 1965,
+								genre: "sci-fi",
+								authorId: "author1",
+							},
+							{
+								title: "Neuromancer",
+								year: 1984,
+								genre: "sci-fi",
+								authorId: "author1",
+							},
+							{
+								title: "Snow Crash",
+								year: 1992,
+								genre: "sci-fi",
+								authorId: "author1",
+							},
 						]);
 
 						// Flush to ensure write completes
@@ -482,10 +564,15 @@ describe("Task 6.2: Serialized output contains only stored fields (no computed f
 
 			// Parse the serialized content
 			const serialized = store.get("/data/books.json")!;
-			const parsed = JSON.parse(serialized) as Record<string, Record<string, unknown>>;
+			const parsed = JSON.parse(serialized) as Record<
+				string,
+				Record<string, unknown>
+			>;
 
 			// Get all book entities
-			const bookEntries = Object.entries(parsed).filter(([key]) => key !== "_version");
+			const bookEntries = Object.entries(parsed).filter(
+				([key]) => key !== "_version",
+			);
 			expect(bookEntries.length).toBe(3);
 
 			// Verify NONE of the books have computed fields
@@ -506,10 +593,14 @@ describe("Task 6.2: Serialized output contains only stored fields (no computed f
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -548,10 +639,14 @@ describe("Task 6.2: Serialized output contains only stored fields (no computed f
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfigYaml, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfigYaml,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -592,10 +687,14 @@ describe("Task 6.2: Serialized output contains only stored fields (no computed f
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -609,10 +708,15 @@ describe("Task 6.2: Serialized output contains only stored fields (no computed f
 
 			// Parse the serialized content
 			const serialized = store.get("/data/authors.json")!;
-			const parsed = JSON.parse(serialized) as Record<string, Record<string, unknown>>;
+			const parsed = JSON.parse(serialized) as Record<
+				string,
+				Record<string, unknown>
+			>;
 
 			// Get author entries
-			const authorEntries = Object.entries(parsed).filter(([key]) => key !== "_version");
+			const authorEntries = Object.entries(parsed).filter(
+				([key]) => key !== "_version",
+			);
 			expect(authorEntries.length).toBe(1);
 
 			const [, authorData] = authorEntries[0];
@@ -662,18 +766,40 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
 						// Create books with varying years (affects computed fields)
 						yield* db.books.createMany([
-							{ id: "book1", title: "Dune", year: 1965, genre: "sci-fi", authorId: "author1" },
-							{ id: "book2", title: "Neuromancer", year: 1984, genre: "sci-fi", authorId: "author1" },
-							{ id: "book3", title: "Snow Crash", year: 1992, genre: "sci-fi", authorId: "author1" },
+							{
+								id: "book1",
+								title: "Dune",
+								year: 1965,
+								genre: "sci-fi",
+								authorId: "author1",
+							},
+							{
+								id: "book2",
+								title: "Neuromancer",
+								year: 1984,
+								genre: "sci-fi",
+								authorId: "author1",
+							},
+							{
+								id: "book3",
+								title: "Snow Crash",
+								year: 1992,
+								genre: "sci-fi",
+								authorId: "author1",
+							},
 						]);
 
 						// Flush to ensure all data is persisted
@@ -695,11 +821,15 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 					Effect.gen(function* () {
 						// Create new database instance - should load data from the store
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								// Note: NOT passing initial data - should load from store
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									// Note: NOT passing initial data - should load from store
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -728,19 +858,19 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 			expect(snowCrash).toBeDefined();
 
 			// Verify computed displayName
-			expect(dune!.displayName).toBe("Dune (1965)");
-			expect(neuromancer!.displayName).toBe("Neuromancer (1984)");
-			expect(snowCrash!.displayName).toBe("Snow Crash (1992)");
+			expect(dune?.displayName).toBe("Dune (1965)");
+			expect(neuromancer?.displayName).toBe("Neuromancer (1984)");
+			expect(snowCrash?.displayName).toBe("Snow Crash (1992)");
 
 			// Verify computed isClassic (year < 1980)
-			expect(dune!.isClassic).toBe(true);
-			expect(neuromancer!.isClassic).toBe(false);
-			expect(snowCrash!.isClassic).toBe(false);
+			expect(dune?.isClassic).toBe(true);
+			expect(neuromancer?.isClassic).toBe(false);
+			expect(snowCrash?.isClassic).toBe(false);
 
 			// Verify computed yearsSincePublication
-			expect(dune!.yearsSincePublication).toBe(2024 - 1965);
-			expect(neuromancer!.yearsSincePublication).toBe(2024 - 1984);
-			expect(snowCrash!.yearsSincePublication).toBe(2024 - 1992);
+			expect(dune?.yearsSincePublication).toBe(2024 - 1965);
+			expect(neuromancer?.yearsSincePublication).toBe(2024 - 1984);
+			expect(snowCrash?.yearsSincePublication).toBe(2024 - 1992);
 		});
 
 		it("should support filtering by re-derived computed fields after reload", async () => {
@@ -751,17 +881,39 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
 						yield* db.books.createMany([
-							{ id: "book1", title: "Dune", year: 1965, genre: "sci-fi", authorId: "author1" },
-							{ id: "book2", title: "Neuromancer", year: 1984, genre: "sci-fi", authorId: "author1" },
-							{ id: "book3", title: "Foundation", year: 1951, genre: "sci-fi", authorId: "author1" },
+							{
+								id: "book1",
+								title: "Dune",
+								year: 1965,
+								genre: "sci-fi",
+								authorId: "author1",
+							},
+							{
+								id: "book2",
+								title: "Neuromancer",
+								year: 1984,
+								genre: "sci-fi",
+								authorId: "author1",
+							},
+							{
+								id: "book3",
+								title: "Foundation",
+								year: 1951,
+								genre: "sci-fi",
+								authorId: "author1",
+							},
 						]);
 
 						yield* Effect.promise(() => db.flush());
@@ -774,10 +926,14 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -811,17 +967,39 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
 						yield* db.books.createMany([
-							{ id: "book1", title: "Dune", year: 1965, genre: "sci-fi", authorId: "author1" },
-							{ id: "book2", title: "Neuromancer", year: 1984, genre: "sci-fi", authorId: "author1" },
-							{ id: "book3", title: "Foundation", year: 1951, genre: "sci-fi", authorId: "author1" },
+							{
+								id: "book1",
+								title: "Dune",
+								year: 1965,
+								genre: "sci-fi",
+								authorId: "author1",
+							},
+							{
+								id: "book2",
+								title: "Neuromancer",
+								year: 1984,
+								genre: "sci-fi",
+								authorId: "author1",
+							},
+							{
+								id: "book3",
+								title: "Foundation",
+								year: 1951,
+								genre: "sci-fi",
+								authorId: "author1",
+							},
 						]);
 
 						yield* Effect.promise(() => db.flush());
@@ -834,10 +1012,14 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -870,10 +1052,14 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -895,10 +1081,14 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -924,10 +1114,14 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -966,10 +1160,14 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfigYaml, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfigYaml,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -998,10 +1196,14 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfigYaml, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfigYaml,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -1031,10 +1233,14 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -1053,10 +1259,14 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -1090,10 +1300,14 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -1116,10 +1330,14 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -1147,7 +1365,9 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 			// Authors should NOT have computed fields (no computed config for authors)
 			expect(storedAuthors.length).toBe(1);
 			expect(storedAuthors[0].name).toBe("Frank Herbert");
-			expect((storedAuthors[0] as Record<string, unknown>).displayName).toBeUndefined();
+			expect(
+				(storedAuthors[0] as Record<string, unknown>).displayName,
+			).toBeUndefined();
 		});
 	});
 
@@ -1168,10 +1388,14 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -1186,10 +1410,14 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(persistentConfig, {
-								books: [],
-								authors: [{ id: "author1", name: "Frank Herbert" }],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								persistentConfig,
+								{
+									books: [],
+									authors: [{ id: "author1", name: "Frank Herbert" }],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 

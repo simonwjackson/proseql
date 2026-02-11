@@ -1,10 +1,10 @@
-import type { FormatCodec, FormatOptions } from "../format-codec.js"
+import type { FormatCodec, FormatOptions } from "../format-codec.js";
 
 /**
  * Options for the JSON codec.
  */
 export interface JsonCodecOptions {
-	readonly indent?: number
+	readonly indent?: number;
 }
 
 /**
@@ -21,17 +21,17 @@ export interface JsonCodecOptions {
  * ```
  */
 export const jsonCodec = (options?: JsonCodecOptions): FormatCodec => {
-	const indent = options?.indent ?? 2
+	const indent = options?.indent ?? 2;
 
 	return {
 		name: "json",
 		extensions: ["json"],
 		encode: (data: unknown, formatOptions?: FormatOptions): string => {
-			const actualIndent = formatOptions?.indent ?? indent
-			return JSON.stringify(data, null, actualIndent)
+			const actualIndent = formatOptions?.indent ?? indent;
+			return JSON.stringify(data, null, actualIndent);
 		},
 		decode: (raw: string): unknown => {
-			return JSON.parse(raw)
+			return JSON.parse(raw);
 		},
-	}
-}
+	};
+};

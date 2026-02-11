@@ -71,13 +71,13 @@ export const resolveComputedFields = <
  * // Each entity in the resulting stream has displayName and isClassic attached
  * ```
  */
-export const resolveComputedStream = <
-	T extends Record<string, unknown>,
-	C extends ComputedFieldsConfig<T>,
->(
-	config: C | undefined,
-) =>
-	<E, R>(stream: Stream.Stream<T, E, R>): Stream.Stream<WithComputed<T, C>, E, R> => {
+export const resolveComputedStream =
+	<T extends Record<string, unknown>, C extends ComputedFieldsConfig<T>>(
+		config: C | undefined,
+	) =>
+	<E, R>(
+		stream: Stream.Stream<T, E, R>,
+	): Stream.Stream<WithComputed<T, C>, E, R> => {
 		// When config is empty or undefined, return stream unchanged
 		if (config === undefined || Object.keys(config).length === 0) {
 			return stream as unknown as Stream.Stream<WithComputed<T, C>, E, R>;
@@ -173,7 +173,10 @@ export const hasSelectedComputedFields = <
 	select: Record<string, unknown> | undefined,
 ): boolean => {
 	// No computed config means no computed fields to select
-	if (computedConfig === undefined || Object.keys(computedConfig).length === 0) {
+	if (
+		computedConfig === undefined ||
+		Object.keys(computedConfig).length === 0
+	) {
 		return false;
 	}
 
@@ -228,14 +231,14 @@ export const hasSelectedComputedFields = <
  * // → stream returned unchanged, no resolution overhead
  * ```
  */
-export const resolveComputedStreamWithLazySkip = <
-	T extends Record<string, unknown>,
-	C extends ComputedFieldsConfig<T>,
->(
-	config: C | undefined,
-	select: Record<string, unknown> | undefined,
-) =>
-	<E, R>(stream: Stream.Stream<T, E, R>): Stream.Stream<WithComputed<T, C>, E, R> => {
+export const resolveComputedStreamWithLazySkip =
+	<T extends Record<string, unknown>, C extends ComputedFieldsConfig<T>>(
+		config: C | undefined,
+		select: Record<string, unknown> | undefined,
+	) =>
+	<E, R>(
+		stream: Stream.Stream<T, E, R>,
+	): Stream.Stream<WithComputed<T, C>, E, R> => {
 		// Check if any computed fields are selected
 		if (!hasSelectedComputedFields(config, select)) {
 			// No computed fields selected, return stream unchanged

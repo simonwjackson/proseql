@@ -1,5 +1,5 @@
-import * as TOML from "smol-toml"
-import type { FormatCodec } from "../format-codec.js"
+import * as TOML from "smol-toml";
+import type { FormatCodec } from "../format-codec.js";
 
 /**
  * Recursively strips null and undefined values from an object for TOML compatibility.
@@ -13,28 +13,28 @@ import type { FormatCodec } from "../format-codec.js"
  */
 const stripNulls = (data: unknown): unknown => {
 	if (data === null || data === undefined) {
-		return undefined
+		return undefined;
 	}
 
 	if (Array.isArray(data)) {
 		return data
 			.filter((item) => item !== null && item !== undefined)
-			.map(stripNulls)
+			.map(stripNulls);
 	}
 
 	if (typeof data === "object" && data !== null) {
-		const result: Record<string, unknown> = {}
+		const result: Record<string, unknown> = {};
 		for (const [key, value] of Object.entries(data)) {
-			const stripped = stripNulls(value)
+			const stripped = stripNulls(value);
 			if (stripped !== undefined) {
-				result[key] = stripped
+				result[key] = stripped;
 			}
 		}
-		return result
+		return result;
 	}
 
-	return data
-}
+	return data;
+};
 
 /**
  * Creates a TOML codec.
@@ -61,11 +61,11 @@ export const tomlCodec = (): FormatCodec => {
 		name: "toml",
 		extensions: ["toml"],
 		encode: (data: unknown): string => {
-			const stripped = stripNulls(data)
-			return TOML.stringify(stripped as Record<string, unknown>)
+			const stripped = stripNulls(data);
+			return TOML.stringify(stripped as Record<string, unknown>);
 		},
 		decode: (raw: string): unknown => {
-			return TOML.parse(raw)
+			return TOML.parse(raw);
 		},
-	}
-}
+	};
+};

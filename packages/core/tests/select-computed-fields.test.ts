@@ -1,8 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { Effect, Stream, Chunk } from "effect";
-import { applySelect, applySelectToArray } from "../src/operations/query/select-stream";
-import { applyObjectSelection } from "../src/operations/query/select";
+import { Chunk, Effect, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import { resolveComputedFields } from "../src/operations/query/resolve-computed";
+import { applyObjectSelection } from "../src/operations/query/select";
+import {
+	applySelect,
+	applySelectToArray,
+} from "../src/operations/query/select-stream";
 import type { ComputedFieldsConfig } from "../src/types/computed-types";
 
 /**
@@ -166,7 +169,10 @@ describe("selectFields with computed fields", () => {
 
 			expect(result).toHaveLength(5);
 			expect(result[0]).toEqual({ isClassic: true, yearsSincePublication: 59 });
-			expect(result[1]).toEqual({ isClassic: false, yearsSincePublication: 40 });
+			expect(result[1]).toEqual({
+				isClassic: false,
+				yearsSincePublication: 40,
+			});
 		});
 
 		it("should select stored and computed fields via stream", async () => {
@@ -226,8 +232,14 @@ describe("selectFields with computed fields", () => {
 			);
 
 			expect(result).toHaveLength(5);
-			expect(result[0]).toEqual({ displayName: "Dune (1965)", isClassic: true });
-			expect(result[4]).toEqual({ displayName: "Snow Crash (1992)", isClassic: false });
+			expect(result[0]).toEqual({
+				displayName: "Dune (1965)",
+				isClassic: true,
+			});
+			expect(result[4]).toEqual({
+				displayName: "Snow Crash (1992)",
+				isClassic: false,
+			});
 		});
 
 		it("should handle undefined select (return all fields)", () => {
@@ -321,10 +333,9 @@ describe("selectFields with computed fields", () => {
 	describe("Edge cases with computed fields in select", () => {
 		it("should handle single entity selection", () => {
 			const book = booksWithComputed[0];
-			const result = applyObjectSelection(
-				book as Record<string, unknown>,
-				{ displayName: true },
-			);
+			const result = applyObjectSelection(book as Record<string, unknown>, {
+				displayName: true,
+			});
 
 			expect(result).toEqual({ displayName: "Dune (1965)" });
 		});

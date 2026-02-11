@@ -28,4 +28,4 @@
  * @module
  */
 
-export {}
+export {};

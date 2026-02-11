@@ -1,11 +1,11 @@
-import { describe, it, expect, vi } from "vitest";
-import { Effect, Stream, Chunk, Schema } from "effect";
+import { Chunk, Effect, Schema, Stream } from "effect";
+import { describe, expect, it } from "vitest";
+import { createEffectDatabase } from "../src/factories/database-effect";
 import {
+	hasSelectedComputedFields,
 	resolveComputedStream,
 	resolveComputedStreamWithLazySkip,
-	hasSelectedComputedFields,
 } from "../src/operations/query/resolve-computed";
-import { createEffectDatabase } from "../src/factories/database-effect";
 
 /**
  * Task 8.3: Verify that collections without `computed` config have zero overhead.
@@ -46,7 +46,9 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 			// The returned stream should be the same reference (no wrapping)
 			// We verify this by checking the streams produce identical results
 			const originalItems = await Effect.runPromise(
-				Stream.runCollect(originalStream).pipe(Effect.map(Chunk.toReadonlyArray)),
+				Stream.runCollect(originalStream).pipe(
+					Effect.map(Chunk.toReadonlyArray),
+				),
 			);
 			const resultItems = await Effect.runPromise(
 				Stream.runCollect(resultStream).pipe(Effect.map(Chunk.toReadonlyArray)),
@@ -128,7 +130,10 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 			const resultStream = resolveComputedStreamWithLazySkip<
 				Book,
 				Record<string, never>
-			>({} as Record<string, never>, undefined)(originalStream);
+			>(
+				{} as Record<string, never>,
+				undefined,
+			)(originalStream);
 
 			const items = await Effect.runPromise(
 				Stream.runCollect(resultStream).pipe(Effect.map(Chunk.toReadonlyArray)),
@@ -136,7 +141,12 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 
 			// Verify no extra fields were added
 			for (const item of items) {
-				expect(Object.keys(item).sort()).toEqual(["genre", "id", "title", "year"]);
+				expect(Object.keys(item).sort()).toEqual([
+					"genre",
+					"id",
+					"title",
+					"year",
+				]);
 			}
 		});
 	});
@@ -145,9 +155,9 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 		it("should return false when config is undefined", () => {
 			expect(hasSelectedComputedFields(undefined, undefined)).toBe(false);
 			expect(hasSelectedComputedFields(undefined, { title: true })).toBe(false);
-			expect(
-				hasSelectedComputedFields(undefined, { displayName: true }),
-			).toBe(false);
+			expect(hasSelectedComputedFields(undefined, { displayName: true })).toBe(
+				false,
+			);
 		});
 
 		it("should return false when config is empty object", () => {
@@ -199,8 +209,7 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 				createEffectDatabase(config, initialData),
 			);
 
-			const results = await db.books
-				.query({ where: { year: { $lt: 2000 } } })
+			const results = await db.books.query({ where: { year: { $lt: 2000 } } })
 				.runPromise;
 
 			expect(results).toHaveLength(2);
@@ -213,8 +222,7 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 				createEffectDatabase(config, initialData),
 			);
 
-			const results = await db.books
-				.query({ sort: { year: "asc" } })
+			const results = await db.books.query({ sort: { year: "asc" } })
 				.runPromise;
 
 			expect(results).toHaveLength(3);
@@ -228,9 +236,9 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 				createEffectDatabase(config, initialData),
 			);
 
-			const results = await db.books
-				.query({ select: { title: true, year: true } })
-				.runPromise;
+			const results = await db.books.query({
+				select: { title: true, year: true },
+			}).runPromise;
 
 			expect(results).toHaveLength(3);
 			for (const book of results) {
@@ -243,14 +251,12 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 				createEffectDatabase(config, initialData),
 			);
 
-			const results = await db.books
-				.query({
-					where: { genre: "sci-fi" },
-					sort: { year: "desc" },
-					select: { title: true },
-					limit: 2,
-				})
-				.runPromise;
+			const results = await db.books.query({
+				where: { genre: "sci-fi" },
+				sort: { year: "desc" },
+				select: { title: true },
+				limit: 2,
+			}).runPromise;
 
 			expect(results).toHaveLength(2);
 			expect(results[0]).toEqual({ title: "Project Hail Mary" });
@@ -336,11 +342,9 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 
 			const whereClause = { year: { $lt: 2000 } };
 
-			const resultsWithout = await dbWithout.books
-				.query({ where: whereClause })
+			const resultsWithout = await dbWithout.books.query({ where: whereClause })
 				.runPromise;
-			const resultsWith = await dbWith.books
-				.query({ where: whereClause })
+			const resultsWith = await dbWith.books.query({ where: whereClause })
 				.runPromise;
 
 			// Same number of results
@@ -363,11 +367,9 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 
 			const sortConfig = { year: "asc" as const };
 
-			const resultsWithout = await dbWithout.books
-				.query({ sort: sortConfig })
+			const resultsWithout = await dbWithout.books.query({ sort: sortConfig })
 				.runPromise;
-			const resultsWith = await dbWith.books
-				.query({ sort: sortConfig })
+			const resultsWith = await dbWith.books.query({ sort: sortConfig })
 				.runPromise;
 
 			// Same order

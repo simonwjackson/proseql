@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { Effect, Schema, Stream, Chunk } from "effect";
+import { Chunk, Effect, Schema, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../src/factories/database-effect";
 
 describe("Database v2 - Conditional Logic (OR/AND/NOT) (Effect/Stream)", () => {
@@ -260,7 +260,16 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT) (Effect/Stream)", () => {
 		Effect.runPromise(
 			Effect.gen(function* () {
 				const db = yield* createEffectDatabase(config, data);
-				const coll = (db as Record<string, { query: (opts: Record<string, unknown>) => Stream.Stream<Record<string, unknown>> }>)[collection];
+				const coll = (
+					db as Record<
+						string,
+						{
+							query: (
+								opts: Record<string, unknown>,
+							) => Stream.Stream<Record<string, unknown>>;
+						}
+					>
+				)[collection];
 				return yield* Stream.runCollect(coll.query(options)).pipe(
 					Effect.map(Chunk.toReadonlyArray),
 				);
@@ -291,11 +300,7 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT) (Effect/Stream)", () => {
 		it("should handle OR with multiple conditions", async () => {
 			const results = await collectQuery("users", {
 				where: {
-					$or: [
-						{ age: { $lt: 25 } },
-						{ role: "admin" },
-						{ status: "pending" },
-					],
+					$or: [{ age: { $lt: 25 } }, { role: "admin" }, { status: "pending" }],
 				},
 			});
 
@@ -607,10 +612,15 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT) (Effect/Stream)", () => {
 			expect(results).toHaveLength(2); // John, Charlie
 
 			// Check populated projects
-			const john = results.find((r) => r.name === "John Doe") as Record<string, unknown>;
+			const john = results.find((r) => r.name === "John Doe") as Record<
+				string,
+				unknown
+			>;
 			expect(john?.projects).toHaveLength(2); // p1, p3
 
-			const charlie = results.find((r) => r.name === "Charlie Wilson") as Record<string, unknown>;
+			const charlie = results.find(
+				(r) => r.name === "Charlie Wilson",
+			) as Record<string, unknown>;
 			expect(charlie?.projects).toHaveLength(2); // p4, p5
 		});
 
@@ -786,7 +796,7 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT) (Effect/Stream)", () => {
 
 	describe("Performance and Optimization", () => {
 		it("should short-circuit OR evaluation", async () => {
-			let evaluationCount = 0;
+			let _evaluationCount = 0;
 
 			// Create a custom operator that counts evaluations
 			const results = await collectQuery("users", {
@@ -797,7 +807,7 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT) (Effect/Stream)", () => {
 							// This shouldn't be evaluated for John
 							age: {
 								$gte: (() => {
-									evaluationCount++;
+									_evaluationCount++;
 									return 100;
 								})(),
 							},
@@ -895,7 +905,9 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT) (Effect/Stream)", () => {
 			// c3 matches both: not approved AND negative sentiment with 0 likes
 			expect(results).toHaveLength(1);
 			expect(results[0].id).toBe("c3");
-			expect((results[0].author as Record<string, unknown>)?.name).toBe("Bob Johnson");
+			expect((results[0].author as Record<string, unknown>)?.name).toBe(
+				"Bob Johnson",
+			);
 		});
 	});
 });

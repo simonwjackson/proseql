@@ -3,7 +3,7 @@
  * Implements Phase 2 relationship features with full type safety
  */
 
-import type { MinimalEntity, CreateInput, UpdateInput } from "./crud-types.js";
+import type { CreateInput, UpdateInput } from "./crud-types.js";
 import type { RelationshipDef } from "./types.js";
 
 // ============================================================================
@@ -72,11 +72,12 @@ export type ManyRelationshipInput<T> = {
 /**
  * Extract relationship input type based on relationship type
  */
-export type RelationshipInput<R> = R extends RelationshipDef<infer T, "ref">
-	? SingleRelationshipInput<T> | ConnectInput<T>
-	: R extends RelationshipDef<infer T, "inverse">
-		? ManyRelationshipInput<T>
-		: never;
+export type RelationshipInput<R> =
+	R extends RelationshipDef<infer T, "ref">
+		? SingleRelationshipInput<T> | ConnectInput<T>
+		: R extends RelationshipDef<infer T, "inverse">
+			? ManyRelationshipInput<T>
+			: never;
 
 // ============================================================================
 // Create with Relationships Types
@@ -119,7 +120,7 @@ export type CascadeOption =
 /**
  * Delete options with cascade configuration
  */
-export type DeleteWithRelationshipsOptions<T, Relations> = {
+export type DeleteWithRelationshipsOptions<_T, Relations> = {
 	soft?: boolean;
 	returnDeleted?: boolean;
 	include?: {
@@ -222,22 +223,14 @@ export function isRelationshipOperation(
 /**
  * Extract entity type from relationship definition
  */
-export type ExtractRelationshipEntity<R> = R extends RelationshipDef<
-	infer T,
-	infer _
->
-	? T
-	: never;
+export type ExtractRelationshipEntity<R> =
+	R extends RelationshipDef<infer T, infer _> ? T : never;
 
 /**
  * Extract relationship type (ref/inverse) from definition
  */
-export type ExtractRelationshipType<R> = R extends RelationshipDef<
-	infer _,
-	infer Type
->
-	? Type
-	: never;
+export type ExtractRelationshipType<R> =
+	R extends RelationshipDef<infer _, infer Type> ? Type : never;
 
 /**
  * Filter relationships by type

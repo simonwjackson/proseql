@@ -1,14 +1,14 @@
 // Alternative approach using function overloads for better type inference
 
 import type {
-	WhereClause,
+	ApplyPopulateObject,
+	ApplySelectAndPopulate,
+	ApplySelectConfig,
 	PopulateConfig,
+	RelationshipDef,
 	SelectConfig,
 	SortConfig,
-	ApplyPopulateObject,
-	ApplySelectConfig,
-	ApplySelectAndPopulate,
-	RelationshipDef,
+	WhereClause,
 } from "./types.js";
 
 // Define separate interfaces for each query variant

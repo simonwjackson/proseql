@@ -8,8 +8,8 @@
  */
 
 import { Effect, Ref } from "effect";
-import type { SearchIndexMap } from "../types/search-types.js";
 import { tokenize } from "../operations/query/search.js";
+import type { SearchIndexMap } from "../types/search-types.js";
 
 /**
  * Entity constraint: must have a readonly string `id` field.
@@ -172,7 +172,12 @@ export const resolveWithSearchIndex = <T extends HasId>(
 ): Effect.Effect<ReadonlyArray<T> | undefined> =>
 	Effect.gen(function* () {
 		// No where clause or no search index configured
-		if (!where || !searchIndexRef || !searchIndexFields || searchIndexFields.length === 0) {
+		if (
+			!where ||
+			!searchIndexRef ||
+			!searchIndexFields ||
+			searchIndexFields.length === 0
+		) {
 			return undefined;
 		}
 
@@ -224,20 +229,26 @@ export const resolveWithSearchIndex = <T extends HasId>(
 const extractSearchFromWhere = (
 	where: Record<string, unknown>,
 	defaultFields: ReadonlyArray<string>,
-): { queryTokens: ReadonlyArray<string>; queriedFields: ReadonlyArray<string> } | undefined => {
+):
+	| { queryTokens: ReadonlyArray<string>; queriedFields: ReadonlyArray<string> }
+	| undefined => {
 	// Check for top-level $search
 	if ("$search" in where) {
 		const searchValue = where.$search;
 		if (searchValue !== null && typeof searchValue === "object") {
-			const config = searchValue as { query?: string; fields?: ReadonlyArray<string> };
+			const config = searchValue as {
+				query?: string;
+				fields?: ReadonlyArray<string>;
+			};
 			if (typeof config.query === "string") {
 				const queryTokens = tokenize(config.query);
 				if (queryTokens.length === 0) {
 					return undefined; // Empty query matches everything, no index help
 				}
-				const queriedFields = config.fields && config.fields.length > 0
-					? config.fields
-					: defaultFields;
+				const queriedFields =
+					config.fields && config.fields.length > 0
+						? config.fields
+						: defaultFields;
 				return { queryTokens, queriedFields };
 			}
 		}
@@ -246,7 +257,12 @@ const extractSearchFromWhere = (
 	// Check for field-level $search on any field
 	for (const [field, value] of Object.entries(where)) {
 		// Skip logical operators
-		if (field === "$or" || field === "$and" || field === "$not" || field === "$search") {
+		if (
+			field === "$or" ||
+			field === "$and" ||
+			field === "$not" ||
+			field === "$search"
+		) {
 			continue;
 		}
 

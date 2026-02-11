@@ -162,7 +162,7 @@ export function hasSelectedFields<
  * Merge object-based field selections from multiple sources
  * Useful for combining field selections from different query parts
  */
-export function mergeObjectFieldSelections<T extends UnknownRecord>(
+export function mergeObjectFieldSelections<_T extends UnknownRecord>(
 	...selections: Array<Record<string, unknown> | undefined>
 ): Record<string, unknown> | undefined {
 	// Filter out undefined selections

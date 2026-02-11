@@ -1,5 +1,5 @@
-import { encode, decode } from "@toon-format/toon"
-import type { FormatCodec, FormatOptions } from "../format-codec.js"
+import { decode, encode } from "@toon-format/toon";
+import type { FormatCodec, FormatOptions } from "../format-codec.js";
 
 /**
  * Creates a TOON (Token-Oriented Object Notation) codec.
@@ -25,10 +25,10 @@ export const toonCodec = (): FormatCodec => {
 		encode: (data: unknown, _formatOptions?: FormatOptions): string => {
 			// TOON encode returns a string representation
 			// The FormatOptions (indent) is not applicable to TOON format
-			return encode(data)
+			return encode(data);
 		},
 		decode: (raw: string): unknown => {
-			return decode(raw)
+			return decode(raw);
 		},
-	}
-}
+	};
+};

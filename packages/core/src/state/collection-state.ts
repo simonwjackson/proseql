@@ -1,9 +1,9 @@
-import { Effect, Ref } from "effect"
+import { type Effect, Ref } from "effect";
 
 /**
  * Entity constraint: must have a readonly string `id` field.
  */
-type HasId = { readonly id: string }
+type HasId = { readonly id: string };
 
 /**
  * Creates a Ref holding a ReadonlyMap<string, T> from an initial array of entities.
@@ -19,6 +19,6 @@ export const createCollectionState = <T extends HasId>(
 ): Effect.Effect<Ref.Ref<ReadonlyMap<string, T>>> => {
 	const map: ReadonlyMap<string, T> = new Map(
 		initialData.map((entity) => [entity.id, entity]),
-	)
-	return Ref.make(map)
-}
+	);
+	return Ref.make(map);
+};

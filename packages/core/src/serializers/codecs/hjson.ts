@@ -1,11 +1,11 @@
-import { parse, stringify } from "hjson"
-import type { FormatCodec, FormatOptions } from "../format-codec.js"
+import { parse, stringify } from "hjson";
+import type { FormatCodec, FormatOptions } from "../format-codec.js";
 
 /**
  * Options for the Hjson codec.
  */
 export interface HjsonCodecOptions {
-	readonly indent?: number
+	readonly indent?: number;
 }
 
 /**
@@ -33,17 +33,17 @@ export interface HjsonCodecOptions {
  * @see https://hjson.github.io for format specification
  */
 export const hjsonCodec = (options?: HjsonCodecOptions): FormatCodec => {
-	const indent = options?.indent ?? 2
+	const indent = options?.indent ?? 2;
 
 	return {
 		name: "hjson",
 		extensions: ["hjson"],
 		encode: (data: unknown, formatOptions?: FormatOptions): string => {
-			const actualIndent = formatOptions?.indent ?? indent
-			return stringify(data, { space: actualIndent })
+			const actualIndent = formatOptions?.indent ?? indent;
+			return stringify(data, { space: actualIndent });
 		},
 		decode: (raw: string): unknown => {
-			return parse(raw)
+			return parse(raw);
 		},
-	}
-}
+	};
+};

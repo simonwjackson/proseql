@@ -48,16 +48,17 @@ export type ComputedFieldsConfig<T> = Record<
  * // { displayName: string; isClassic: boolean }
  * ```
  */
-export type InferComputedFields<C> = C extends ComputedFieldsConfig<infer _>
-	? {
-			readonly [K in keyof C]: C[K] extends ComputedFieldDefinition<
-				infer _T,
-				infer R
-			>
-				? R
-				: never;
-		}
-	: Record<string, never>;
+export type InferComputedFields<C> =
+	C extends ComputedFieldsConfig<infer _>
+		? {
+				readonly [K in keyof C]: C[K] extends ComputedFieldDefinition<
+					infer _T,
+					infer R
+				>
+					? R
+					: never;
+			}
+		: Record<string, never>;
 
 /**
  * Merge stored entity type with inferred computed fields.
@@ -82,6 +83,5 @@ export type WithComputed<T, C> = T & InferComputedFields<C>;
  *
  * @template C - The computed fields config object type
  */
-export type ComputedFieldKeys<C> = C extends ComputedFieldsConfig<infer _>
-	? keyof C
-	: never;
+export type ComputedFieldKeys<C> =
+	C extends ComputedFieldsConfig<infer _> ? keyof C : never;

@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { Effect, Stream, Chunk } from "effect";
-import { applyPagination } from "../src/operations/query/paginate-stream";
+import { Chunk, Effect, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import { applyFilter } from "../src/operations/query/filter-stream";
+import { applyPagination } from "../src/operations/query/paginate-stream";
 import { applySort } from "../src/operations/query/sort-stream";
 
 // Helper to run a stream through pagination and collect results
@@ -77,13 +77,7 @@ describe("Database v2 - Pagination (Stream-based)", () => {
 			const products = generateProducts(20);
 			const limited = await collectPaginated(products, undefined, 5);
 			expect(limited).toHaveLength(5);
-			expect(limited.map((p) => p.id)).toEqual([
-				"p1",
-				"p2",
-				"p3",
-				"p4",
-				"p5",
-			]);
+			expect(limited.map((p) => p.id)).toEqual(["p1", "p2", "p3", "p4", "p5"]);
 		});
 
 		it("should return all items when limit exceeds total", async () => {

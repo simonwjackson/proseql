@@ -5,25 +5,25 @@
  * After-hooks and onChange run independently with errors swallowed.
  */
 
-import { Effect } from "effect"
-import type { HookError } from "../errors/crud-errors.js"
+import { Effect } from "effect";
+import type { HookError } from "../errors/crud-errors.js";
+import type { UpdateWithOperators } from "../types/crud-types.js";
 import type {
-	BeforeCreateHook,
-	BeforeUpdateHook,
-	BeforeDeleteHook,
-	BeforeCreateContext,
-	BeforeUpdateContext,
-	BeforeDeleteContext,
-	AfterCreateHook,
-	AfterUpdateHook,
-	AfterDeleteHook,
 	AfterCreateContext,
-	AfterUpdateContext,
+	AfterCreateHook,
 	AfterDeleteContext,
-	OnChangeHook,
+	AfterDeleteHook,
+	AfterUpdateContext,
+	AfterUpdateHook,
+	BeforeCreateContext,
+	BeforeCreateHook,
+	BeforeDeleteContext,
+	BeforeDeleteHook,
+	BeforeUpdateContext,
+	BeforeUpdateHook,
 	OnChangeContext,
-} from "../types/hook-types.js"
-import type { UpdateWithOperators } from "../types/crud-types.js"
+	OnChangeHook,
+} from "../types/hook-types.js";
 
 // ============================================================================
 // Before Hooks - Chain in Order
@@ -40,7 +40,7 @@ export const runBeforeCreateHooks = <T>(
 	initialCtx: BeforeCreateContext<T>,
 ): Effect.Effect<T, HookError> => {
 	if (!hooks || hooks.length === 0) {
-		return Effect.succeed(initialCtx.data)
+		return Effect.succeed(initialCtx.data);
 	}
 
 	return Effect.reduce(hooks, initialCtx.data, (data, hook) =>
@@ -48,8 +48,8 @@ export const runBeforeCreateHooks = <T>(
 			...initialCtx,
 			data,
 		}),
-	)
-}
+	);
+};
 
 /**
  * Run beforeUpdate hooks in order, chaining each hook's output to the next.
@@ -62,7 +62,7 @@ export const runBeforeUpdateHooks = <T>(
 	initialCtx: BeforeUpdateContext<T>,
 ): Effect.Effect<UpdateWithOperators<T>, HookError> => {
 	if (!hooks || hooks.length === 0) {
-		return Effect.succeed(initialCtx.update)
+		return Effect.succeed(initialCtx.update);
 	}
 
 	return Effect.reduce(hooks, initialCtx.update, (update, hook) =>
@@ -70,8 +70,8 @@ export const runBeforeUpdateHooks = <T>(
 			...initialCtx,
 			update,
 		}),
-	)
-}
+	);
+};
 
 /**
  * Run beforeDelete hooks in order. Each hook receives the same context.
@@ -84,11 +84,11 @@ export const runBeforeDeleteHooks = <T>(
 	ctx: BeforeDeleteContext<T>,
 ): Effect.Effect<void, HookError> => {
 	if (!hooks || hooks.length === 0) {
-		return Effect.void
+		return Effect.void;
 	}
 
-	return Effect.forEach(hooks, (hook) => hook(ctx), { discard: true })
-}
+	return Effect.forEach(hooks, (hook) => hook(ctx), { discard: true });
+};
 
 // ============================================================================
 // After Hooks - Run In Order, Swallow Errors
@@ -105,15 +105,19 @@ export const runAfterCreateHooks = <T>(
 	ctx: AfterCreateContext<T>,
 ): Effect.Effect<void, never> => {
 	if (!hooks || hooks.length === 0) {
-		return Effect.void
+		return Effect.void;
 	}
 
 	return Effect.forEach(
 		hooks,
-		(hook) => Effect.catchAll(hook(ctx) as Effect.Effect<void, unknown>, () => Effect.void),
+		(hook) =>
+			Effect.catchAll(
+				hook(ctx) as Effect.Effect<void, unknown>,
+				() => Effect.void,
+			),
 		{ discard: true },
-	)
-}
+	);
+};
 
 /**
  * Run afterUpdate hooks in order. Each hook receives the same context.
@@ -126,15 +130,19 @@ export const runAfterUpdateHooks = <T>(
 	ctx: AfterUpdateContext<T>,
 ): Effect.Effect<void, never> => {
 	if (!hooks || hooks.length === 0) {
-		return Effect.void
+		return Effect.void;
 	}
 
 	return Effect.forEach(
 		hooks,
-		(hook) => Effect.catchAll(hook(ctx) as Effect.Effect<void, unknown>, () => Effect.void),
+		(hook) =>
+			Effect.catchAll(
+				hook(ctx) as Effect.Effect<void, unknown>,
+				() => Effect.void,
+			),
 		{ discard: true },
-	)
-}
+	);
+};
 
 /**
  * Run afterDelete hooks in order. Each hook receives the same context.
@@ -147,15 +155,19 @@ export const runAfterDeleteHooks = <T>(
 	ctx: AfterDeleteContext<T>,
 ): Effect.Effect<void, never> => {
 	if (!hooks || hooks.length === 0) {
-		return Effect.void
+		return Effect.void;
 	}
 
 	return Effect.forEach(
 		hooks,
-		(hook) => Effect.catchAll(hook(ctx) as Effect.Effect<void, unknown>, () => Effect.void),
+		(hook) =>
+			Effect.catchAll(
+				hook(ctx) as Effect.Effect<void, unknown>,
+				() => Effect.void,
+			),
 		{ discard: true },
-	)
-}
+	);
+};
 
 // ============================================================================
 // onChange Hooks - Run In Order, Swallow Errors
@@ -172,12 +184,16 @@ export const runOnChangeHooks = <T>(
 	ctx: OnChangeContext<T>,
 ): Effect.Effect<void, never> => {
 	if (!hooks || hooks.length === 0) {
-		return Effect.void
+		return Effect.void;
 	}
 
 	return Effect.forEach(
 		hooks,
-		(hook) => Effect.catchAll(hook(ctx) as Effect.Effect<void, unknown>, () => Effect.void),
+		(hook) =>
+			Effect.catchAll(
+				hook(ctx) as Effect.Effect<void, unknown>,
+				() => Effect.void,
+			),
 		{ discard: true },
-	)
-}
+	);
+};

@@ -1,11 +1,11 @@
-import { hjsonCodec } from "./codecs/hjson.js"
-import { jsonCodec } from "./codecs/json.js"
-import { json5Codec } from "./codecs/json5.js"
-import { jsoncCodec } from "./codecs/jsonc.js"
-import { tomlCodec } from "./codecs/toml.js"
-import { toonCodec } from "./codecs/toon.js"
-import { yamlCodec } from "./codecs/yaml.js"
-import { makeSerializerLayer } from "./format-codec.js"
+import { hjsonCodec } from "./codecs/hjson.js";
+import { jsonCodec } from "./codecs/json.js";
+import { json5Codec } from "./codecs/json5.js";
+import { jsoncCodec } from "./codecs/jsonc.js";
+import { tomlCodec } from "./codecs/toml.js";
+import { toonCodec } from "./codecs/toon.js";
+import { yamlCodec } from "./codecs/yaml.js";
+import { makeSerializerLayer } from "./format-codec.js";
 
 // ============================================================================
 // Preset Layers — Pre-configured SerializerRegistry Layers
@@ -43,7 +43,7 @@ export const AllTextFormatsLayer = makeSerializerLayer([
 	tomlCodec(),
 	toonCodec(),
 	hjsonCodec(),
-])
+]);
 
 /**
  * A SerializerRegistry Layer that supports the default formats:
@@ -68,4 +68,4 @@ export const AllTextFormatsLayer = makeSerializerLayer([
 export const DefaultSerializerLayer = makeSerializerLayer([
 	jsonCodec(),
 	yamlCodec(),
-])
+]);

@@ -1,12 +1,12 @@
-import { Effect, Layer } from "effect"
+import { Effect, Layer } from "effect";
 import {
 	SerializationError,
 	UnsupportedFormatError,
-} from "../errors/storage-errors.js"
+} from "../errors/storage-errors.js";
 import {
 	SerializerRegistry,
 	type SerializerRegistryShape,
-} from "./serializer-service.js"
+} from "./serializer-service.js";
 
 // ============================================================================
 // FormatCodec — Minimal plugin point for serialization formats
@@ -16,7 +16,7 @@ import {
  * Options for encoding data.
  */
 export interface FormatOptions {
-	readonly indent?: number
+	readonly indent?: number;
 }
 
 /**
@@ -29,10 +29,10 @@ export interface FormatOptions {
  * with proper error tagging.
  */
 export interface FormatCodec {
-	readonly name: string
-	readonly extensions: ReadonlyArray<string>
-	readonly encode: (data: unknown, options?: FormatOptions) => string
-	readonly decode: (raw: string) => unknown
+	readonly name: string;
+	readonly extensions: ReadonlyArray<string>;
+	readonly encode: (data: unknown, options?: FormatOptions) => string;
+	readonly decode: (raw: string) => unknown;
 }
 
 // ============================================================================
@@ -52,27 +52,27 @@ export const makeSerializerLayer = (
 	codecs: ReadonlyArray<FormatCodec>,
 ): Layer.Layer<SerializerRegistry> => {
 	// Build extension → codec lookup map
-	const extensionMap = new Map<string, FormatCodec>()
+	const extensionMap = new Map<string, FormatCodec>();
 	for (const codec of codecs) {
 		for (const ext of codec.extensions) {
 			if (extensionMap.has(ext)) {
-				const existing = extensionMap.get(ext)
+				const existing = extensionMap.get(ext);
 				console.warn(
 					`Duplicate extension '.${ext}': '${existing?.name}' overwritten by '${codec.name}'`,
-				)
+				);
 			}
-			extensionMap.set(ext, codec)
+			extensionMap.set(ext, codec);
 		}
 	}
 
 	// Collect all supported extensions for error messages
 	const supportedExtensions = Array.from(extensionMap.keys())
 		.map((ext) => `.${ext}`)
-		.join(", ")
+		.join(", ");
 
 	const registry: SerializerRegistryShape = {
 		serialize: (data, extension) => {
-			const codec = extensionMap.get(extension)
+			const codec = extensionMap.get(extension);
 			if (!codec) {
 				return Effect.fail(
 					new UnsupportedFormatError({
@@ -82,7 +82,7 @@ export const makeSerializerLayer = (
 								? `Unsupported format '.${extension}'. Available formats: ${supportedExtensions}`
 								: `Unsupported format '.${extension}'. No formats registered.`,
 					}),
-				)
+				);
 			}
 
 			return Effect.try({
@@ -93,11 +93,11 @@ export const makeSerializerLayer = (
 						message: `Failed to serialize data to ${codec.name}: ${error instanceof Error ? error.message : "Unknown error"}`,
 						cause: error,
 					}),
-			})
+			});
 		},
 
 		deserialize: (content, extension) => {
-			const codec = extensionMap.get(extension)
+			const codec = extensionMap.get(extension);
 			if (!codec) {
 				return Effect.fail(
 					new UnsupportedFormatError({
@@ -107,7 +107,7 @@ export const makeSerializerLayer = (
 								? `Unsupported format '.${extension}'. Available formats: ${supportedExtensions}`
 								: `Unsupported format '.${extension}'. No formats registered.`,
 					}),
-				)
+				);
 			}
 
 			return Effect.try({
@@ -118,9 +118,9 @@ export const makeSerializerLayer = (
 						message: `Failed to deserialize ${codec.name} data: ${error instanceof Error ? error.message : "Unknown error"}`,
 						cause: error,
 					}),
-			})
+			});
 		},
-	}
+	};
 
-	return Layer.succeed(SerializerRegistry, registry)
-}
+	return Layer.succeed(SerializerRegistry, registry);
+};

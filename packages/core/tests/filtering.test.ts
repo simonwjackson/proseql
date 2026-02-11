@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { Effect, Stream, Chunk } from "effect";
+import { Chunk, Effect, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import { applyFilter } from "../src/operations/query/filter-stream";
 
 const collectFiltered = <T extends Record<string, unknown>>(
@@ -213,10 +213,7 @@ describe("Comprehensive Filtering (Stream-based)", () => {
 			});
 
 			expect(results).toHaveLength(2);
-			expect(results.map((r) => r.role).sort()).toEqual([
-				"admin",
-				"moderator",
-			]);
+			expect(results.map((r) => r.role).sort()).toEqual(["admin", "moderator"]);
 		});
 
 		it("should handle $eq with undefined values", async () => {
@@ -327,9 +324,7 @@ describe("Comprehensive Filtering (Stream-based)", () => {
 
 			expect(results).toHaveLength(5);
 			expect(
-				results.every((r) =>
-					(r.email as string).endsWith("@example.com"),
-				),
+				results.every((r) => (r.email as string).endsWith("@example.com")),
 			).toBe(true);
 		});
 
@@ -340,9 +335,7 @@ describe("Comprehensive Filtering (Stream-based)", () => {
 
 			expect(results).toHaveLength(2);
 			expect(
-				results.every((r) =>
-					(r.description as string)?.includes("laptop"),
-				),
+				results.every((r) => (r.description as string)?.includes("laptop")),
 			).toBe(true);
 		});
 
@@ -373,9 +366,7 @@ describe("Comprehensive Filtering (Stream-based)", () => {
 			expect(
 				results
 					.map((r) => r.category)
-					.every((c) =>
-						["electronics", "storage"].includes(c as string),
-					),
+					.every((c) => ["electronics", "storage"].includes(c as string)),
 			).toBe(true);
 		});
 

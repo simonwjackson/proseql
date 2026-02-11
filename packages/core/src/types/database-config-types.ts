@@ -4,9 +4,9 @@
  */
 
 import type { Schema } from "effect";
-import type { HooksConfig } from "./hook-types.js";
 import type { Migration } from "../migrations/migration-types.js";
 import type { ComputedFieldsConfig } from "./computed-types.js";
+import type { HooksConfig } from "./hook-types.js";
 
 /**
  * Configuration for a single collection, now with optional persistence support.

@@ -1,12 +1,12 @@
-import { describe, it, expect } from "vitest";
 import { Schema } from "effect";
+import { describe, expect, it } from "vitest";
 import type {
 	GenerateDatabase,
-	WhereClause,
-	SortConfig,
 	ObjectSelectConfig,
 	QueryReturnType,
 	SelectConfig,
+	SortConfig,
+	WhereClause,
 } from "../src/types/types";
 
 /**

@@ -1,6 +1,6 @@
 import { matchesFilter } from "../../types/operators.js";
-import { tokenize } from "./search.js";
 import type { SearchConfig } from "../../types/search-types.js";
+import { tokenize } from "./search.js";
 
 // Type guard to check if where clause is a valid object
 export function isValidWhereClause(
@@ -151,9 +151,7 @@ export function filterData<T extends Record<string, unknown>>(
 						}
 						const fieldTokens = tokenize(fieldValue);
 						// Check if any field token matches (exact or prefix)
-						return fieldTokens.some(
-							(ft) => ft === qt || ft.startsWith(qt),
-						);
+						return fieldTokens.some((ft) => ft === qt || ft.startsWith(qt));
 					});
 				});
 
@@ -161,13 +159,7 @@ export function filterData<T extends Record<string, unknown>>(
 					shouldInclude = false;
 					break;
 				}
-			} else if (
-				relationships &&
-				relationships[key] &&
-				allData &&
-				collectionName &&
-				config
-			) {
+			} else if (relationships?.[key] && allData && collectionName && config) {
 				// Handle relationship filtering
 				const relationship = relationships[key];
 				const targetData = allData[relationship.target] as
@@ -176,7 +168,7 @@ export function filterData<T extends Record<string, unknown>>(
 
 				if (relationship.type === "ref") {
 					// For ref relationships, find the related item
-					const foreignKeyField = relationship.foreignKey || key + "Id";
+					const foreignKeyField = relationship.foreignKey || `${key}Id`;
 					const relatedItem = targetData?.find((target) => {
 						if (!isValidWhereClause(target)) return false;
 						return target.id === item[foreignKeyField];

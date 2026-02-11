@@ -9,18 +9,17 @@
 // Effect-Based Database Factory
 // ============================================================================
 
+export type {
+	EffectCollection,
+	EffectDatabase,
+	EffectDatabasePersistenceConfig,
+	EffectDatabaseWithPersistence,
+	RunnableEffect,
+	RunnableStream,
+} from "./factories/database-effect.js";
 export {
 	createEffectDatabase,
 	createPersistentEffectDatabase,
-} from "./factories/database-effect.js";
-
-export type {
-	RunnableEffect,
-	RunnableStream,
-	EffectCollection,
-	EffectDatabase,
-	EffectDatabaseWithPersistence,
-	EffectDatabasePersistenceConfig,
 } from "./factories/database-effect.js";
 
 // ============================================================================
@@ -34,46 +33,40 @@ export type { CrudMethodsWithRelationships } from "./factories/crud-factory-with
 // Error Types (Effect TaggedError)
 // ============================================================================
 
+export type { CrudError } from "./errors/crud-errors.js";
 // CRUD errors
 export {
-	NotFoundError,
+	ConcurrencyError,
 	DuplicateKeyError,
 	ForeignKeyError,
-	ValidationError,
-	UniqueConstraintError,
-	ConcurrencyError,
+	HookError,
+	NotFoundError,
 	OperationError,
 	TransactionError,
-	HookError,
+	UniqueConstraintError,
+	ValidationError,
 } from "./errors/crud-errors.js";
-
-export type { CrudError } from "./errors/crud-errors.js";
-
-// Query errors
-export {
-	DanglingReferenceError,
-	CollectionNotFoundError,
-	PopulationError,
-} from "./errors/query-errors.js";
-
-export type { QueryError } from "./errors/query-errors.js";
+// Union type
+export type { DatabaseError } from "./errors/index.js";
+export type { MigrationErrors } from "./errors/migration-errors.js";
 
 // Migration errors
 export { MigrationError } from "./errors/migration-errors.js";
-
-export type { MigrationErrors } from "./errors/migration-errors.js";
-
-// Storage errors
+export type { QueryError } from "./errors/query-errors.js";
+// Query errors
 export {
-	StorageError,
-	SerializationError,
-	UnsupportedFormatError,
-} from "./errors/storage-errors.js";
+	CollectionNotFoundError,
+	DanglingReferenceError,
+	PopulationError,
+} from "./errors/query-errors.js";
 
 export type { PersistenceError } from "./errors/storage-errors.js";
-
-// Union type
-export type { DatabaseError } from "./errors/index.js";
+// Storage errors
+export {
+	SerializationError,
+	StorageError,
+	UnsupportedFormatError,
+} from "./errors/storage-errors.js";
 
 // ============================================================================
 // Schema Types
@@ -81,8 +74,8 @@ export type { DatabaseError } from "./errors/index.js";
 
 export type {
 	EntitySchema,
-	InferEntity,
 	InferEncoded,
+	InferEntity,
 } from "./types/schema-types.js";
 
 // ============================================================================
@@ -90,11 +83,11 @@ export type {
 // ============================================================================
 
 export type {
-	Migration,
+	DryRunCollectionResult,
+	DryRunMigration,
 	DryRunResult,
 	DryRunStatus,
-	DryRunMigration,
-	DryRunCollectionResult,
+	Migration,
 } from "./migrations/migration-types.js";
 
 // ============================================================================
@@ -102,35 +95,34 @@ export type {
 // ============================================================================
 
 export type {
-	GenerateDatabase,
+	CollectionConfig,
+	DatabaseConfig,
+} from "./types/database-config-types.js";
+export type {
 	DatasetFor,
-	SmartCollection,
+	GenerateDatabase,
+	PopulateConfig,
 	QueryConfig,
 	QueryReturnType,
-	WhereClause,
-	SelectConfig,
-	PopulateConfig,
-	SortConfig,
 	RelationshipDef,
+	SelectConfig,
+	SmartCollection,
+	SortConfig,
+	WhereClause,
 } from "./types/types.js";
-
-export type {
-	DatabaseConfig,
-	CollectionConfig,
-} from "./types/database-config-types.js";
 
 // ============================================================================
 // Aggregate Types
 // ============================================================================
 
 export type {
-	AggregateResult,
-	GroupResult,
-	GroupedAggregateResult,
-	ScalarAggregateConfig,
-	GroupedAggregateConfig,
 	AggregateConfig,
+	AggregateResult,
+	GroupedAggregateConfig,
+	GroupedAggregateResult,
+	GroupResult,
 	InferAggregateResult,
+	ScalarAggregateConfig,
 } from "./types/aggregate-types.js";
 
 export { isGroupedAggregateConfig } from "./types/aggregate-types.js";
@@ -151,9 +143,9 @@ export type {
 // ============================================================================
 
 export type {
+	CollectionIndexes,
 	IndexMap,
 	IndexRef,
-	CollectionIndexes,
 	NormalizedIndex,
 } from "./types/index-types.js";
 
@@ -162,29 +154,29 @@ export type {
 // ============================================================================
 
 export type {
-	// Before hook contexts
-	BeforeCreateContext,
-	BeforeUpdateContext,
-	BeforeDeleteContext,
 	// After hook contexts
 	AfterCreateContext,
-	AfterUpdateContext,
+	AfterCreateHook,
 	AfterDeleteContext,
+	AfterDeleteHook,
+	AfterUpdateContext,
+	AfterUpdateHook,
+	// Before hook contexts
+	BeforeCreateContext,
+	// Hook function signatures
+	BeforeCreateHook,
+	BeforeDeleteContext,
+	BeforeDeleteHook,
+	BeforeUpdateContext,
+	BeforeUpdateHook,
+	// Hooks configuration
+	HooksConfig,
 	// onChange contexts (discriminated union)
 	OnChangeContext,
 	OnChangeCreateContext,
-	OnChangeUpdateContext,
 	OnChangeDeleteContext,
-	// Hook function signatures
-	BeforeCreateHook,
-	BeforeUpdateHook,
-	BeforeDeleteHook,
-	AfterCreateHook,
-	AfterUpdateHook,
-	AfterDeleteHook,
 	OnChangeHook,
-	// Hooks configuration
-	HooksConfig,
+	OnChangeUpdateContext,
 } from "./types/hook-types.js";
 
 // ============================================================================
@@ -197,29 +189,28 @@ export type { TransactionContext } from "./types/crud-types.js";
 // Transaction Functions
 // ============================================================================
 
-export { createTransaction, $transaction } from "./transactions/transaction.js";
+export { $transaction, createTransaction } from "./transactions/transaction.js";
 
 // ============================================================================
 // Index Functions
 // ============================================================================
 
-export {
-	normalizeIndexes,
-	buildIndexes,
-	addToIndex,
-	removeFromIndex,
-	updateInIndex,
-	addManyToIndex,
-	removeManyFromIndex,
-} from "./indexes/index-manager.js";
-
 export { resolveWithIndex } from "./indexes/index-lookup.js";
+export {
+	addManyToIndex,
+	addToIndex,
+	buildIndexes,
+	normalizeIndexes,
+	removeFromIndex,
+	removeManyFromIndex,
+	updateInIndex,
+} from "./indexes/index-manager.js";
 
 // ============================================================================
 // Schema Validation
 // ============================================================================
 
-export { validateEntity, encodeEntity } from "./validators/schema-validator.js";
+export { encodeEntity, validateEntity } from "./validators/schema-validator.js";
 
 // ============================================================================
 // State Management (Ref-based)
@@ -228,11 +219,11 @@ export { validateEntity, encodeEntity } from "./validators/schema-validator.js";
 export { createCollectionState } from "./state/collection-state.js";
 
 export {
+	getAllEntities,
 	getEntity,
 	getEntityOrFail,
-	getAllEntities,
-	setEntity,
 	removeEntity,
+	setEntity,
 	updateEntity,
 } from "./state/state-operations.js";
 
@@ -240,114 +231,99 @@ export {
 // Query Pipeline (Stream-based)
 // ============================================================================
 
-export { applyFilter } from "./operations/query/filter-stream.js";
-export { applySort } from "./operations/query/sort-stream.js";
-export { applySelect } from "./operations/query/select-stream.js";
-export { applyPagination } from "./operations/query/paginate-stream.js";
-export { applyPopulate } from "./operations/relationships/populate-stream.js";
-
 // Non-stream filter utility (for direct array filtering)
 export { filterData } from "./operations/query/filter.js";
-
+export { applyFilter } from "./operations/query/filter-stream.js";
+export { applyPagination } from "./operations/query/paginate-stream.js";
 // Object-based field selection utilities
 export {
 	applyObjectSelection,
-	applySelectionToArray,
 	applySelectionSafe,
+	applySelectionToArray,
 	createFieldSelector,
 	mergeObjectFieldSelections,
 } from "./operations/query/select.js";
+export { applySelect } from "./operations/query/select-stream.js";
+export { applySort } from "./operations/query/sort-stream.js";
+export { applyPopulate } from "./operations/relationships/populate-stream.js";
 
 // ============================================================================
 // Storage Services (Effect Layer)
 // ============================================================================
-
-// Storage adapter service
-export {
-	StorageAdapter as StorageAdapterService,
-} from "./storage/storage-service.js";
-
-export type { StorageAdapterShape } from "./storage/storage-service.js";
 
 // In-memory adapter (for testing)
 export {
 	InMemoryStorageLayer,
 	makeInMemoryStorageLayer,
 } from "./storage/in-memory-adapter-layer.js";
-
-// Persistence utilities
-export {
-	loadData,
-	saveData,
-	loadCollectionsFromFile,
-	saveCollectionsToFile,
-	createDebouncedWriter,
-	createFileWatcher,
-	createFileWatchers,
-} from "./storage/persistence-effect.js";
-
 export type {
 	DebouncedWriter,
 	FileWatcher,
 	FileWatcherConfig,
 	LoadCollectionConfig,
 	LoadDataOptions,
-	SaveDataOptions,
 	SaveCollectionConfig,
+	SaveDataOptions,
 } from "./storage/persistence-effect.js";
+// Persistence utilities
+export {
+	createDebouncedWriter,
+	createFileWatcher,
+	createFileWatchers,
+	loadCollectionsFromFile,
+	loadData,
+	saveCollectionsToFile,
+	saveData,
+} from "./storage/persistence-effect.js";
+export type { StorageAdapterShape } from "./storage/storage-service.js";
+// Storage adapter service
+export { StorageAdapter as StorageAdapterService } from "./storage/storage-service.js";
 
 // ============================================================================
 // Serializer Services (Effect Layer)
 // ============================================================================
 
-// Serializer registry service
-export {
-	SerializerRegistry as SerializerRegistryService,
-} from "./serializers/serializer-service.js";
-
-export type { SerializerRegistryShape } from "./serializers/serializer-service.js";
-
-// FormatCodec compositor and types
-export { makeSerializerLayer } from "./serializers/format-codec.js";
-
-export type {
-	FormatCodec,
-	FormatOptions,
-} from "./serializers/format-codec.js";
-
+export { hjsonCodec } from "./serializers/codecs/hjson.js";
 // Individual codec factories
 export { jsonCodec } from "./serializers/codecs/json.js";
-export { yamlCodec } from "./serializers/codecs/yaml.js";
 export { json5Codec } from "./serializers/codecs/json5.js";
 export { jsoncCodec } from "./serializers/codecs/jsonc.js";
 export { tomlCodec } from "./serializers/codecs/toml.js";
 export { toonCodec } from "./serializers/codecs/toon.js";
-export { hjsonCodec } from "./serializers/codecs/hjson.js";
-
+export { yamlCodec } from "./serializers/codecs/yaml.js";
+export type {
+	FormatCodec,
+	FormatOptions,
+} from "./serializers/format-codec.js";
+// FormatCodec compositor and types
+export { makeSerializerLayer } from "./serializers/format-codec.js";
 // Preset Layers
 export {
 	AllTextFormatsLayer,
 	DefaultSerializerLayer,
 } from "./serializers/presets.js";
+export type { SerializerRegistryShape } from "./serializers/serializer-service.js";
+// Serializer registry service
+export { SerializerRegistry as SerializerRegistryService } from "./serializers/serializer-service.js";
 
 // ============================================================================
 // Data Transformation Utilities
 // ============================================================================
 
 export {
-	arrayToObject,
-	objectToArray,
 	arrayToMap,
-	mapToObject,
-	objectToMap,
-	mapToArray,
-	groupByFile,
-	getConfigFilePaths,
-	isCollectionPersistent,
+	arrayToObject,
 	extractCollectionsForFile,
-	mergeFileDataIntoDataset,
 	extractCollectionsFromMaps,
+	getConfigFilePaths,
+	groupByFile,
+	isCollectionPersistent,
+	mapToArray,
+	mapToObject,
+	mergeFileDataIntoDataset,
 	mergeFileDataIntoMaps,
+	objectToArray,
+	objectToMap,
 } from "./storage/transforms.js";
 
 // ============================================================================
@@ -360,34 +336,25 @@ export { getFileExtension } from "./utils/path.js";
 // Computed Field Types
 // ============================================================================
 
+// Computed field resolution functions
+export {
+	hasSelectedComputedFields,
+	resolveComputedFields,
+	resolveComputedStream,
+	resolveComputedStreamWithLazySkip,
+	stripComputedFields,
+} from "./operations/query/resolve-computed.js";
 export type {
 	ComputedFieldDefinition,
+	ComputedFieldKeys,
 	ComputedFieldsConfig,
 	InferComputedFields,
 	WithComputed,
-	ComputedFieldKeys,
 } from "./types/computed-types.js";
-
-// Computed field resolution functions
-export {
-	resolveComputedFields,
-	resolveComputedStream,
-	stripComputedFields,
-	hasSelectedComputedFields,
-	resolveComputedStreamWithLazySkip,
-} from "./operations/query/resolve-computed.js";
 
 // ============================================================================
 // Search Types
 // ============================================================================
-
-export type {
-	SearchConfig,
-	SearchScore,
-	SearchIndexMap,
-} from "./types/search-types.js";
-
-export { STOP_WORDS, SEARCH_SCORE_KEY } from "./types/search-types.js";
 
 // Search index functions
 export {
@@ -398,28 +365,32 @@ export {
 	resolveWithSearchIndex,
 	updateInSearchIndex,
 } from "./indexes/search-index.js";
+export type {
+	SearchConfig,
+	SearchIndexMap,
+	SearchScore,
+} from "./types/search-types.js";
+export { SEARCH_SCORE_KEY, STOP_WORDS } from "./types/search-types.js";
 
 // ============================================================================
 // ID Generation Utilities
 // ============================================================================
 
+export type { IdGeneratorConfig } from "./utils/id-generator.js";
 export {
-	generateTimestampId,
-	generateNanoId,
-	generateUUID,
-	generatePrefixedId,
-	generateULID,
-	generateTypedId,
-	isValidId,
-	isValidIdFormat,
-	createIdGenerator,
-	generateId,
 	CollectionIdGenerators,
+	compareIds,
+	createIdGenerator,
+	defaultIdConfig,
 	extractTimestamp,
 	extractType,
-	compareIds,
-	defaultIdConfig,
+	generateId,
+	generateNanoId,
+	generatePrefixedId,
+	generateTimestampId,
+	generateTypedId,
+	generateULID,
+	generateUUID,
+	isValidId,
+	isValidIdFormat,
 } from "./utils/id-generator.js";
-
-export type { IdGeneratorConfig } from "./utils/id-generator.js";
-

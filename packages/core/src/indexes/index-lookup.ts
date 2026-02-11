@@ -149,7 +149,7 @@ const findEligibleIndex = (
 	where: Record<string, unknown>,
 	indexes: CollectionIndexes,
 ): EligibleIndex | undefined => {
-	let bestMatch: EligibleIndex | undefined = undefined;
+	let bestMatch: EligibleIndex | undefined;
 
 	for (const indexKey of indexes.keys()) {
 		const fields: NormalizedIndex = JSON.parse(indexKey);
