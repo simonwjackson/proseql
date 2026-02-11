@@ -28,6 +28,7 @@ import { addToIndex, addManyToIndex } from "../../indexes/index-manager.js"
 import type { HooksConfig } from "../../types/hook-types.js"
 import { runBeforeCreateHooks, runAfterCreateHooks, runOnChangeHooks } from "../../hooks/hook-runner.js"
 import { checkUniqueConstraints, checkEntityUniqueConstraints, addEntityToBatchIndex, type NormalizedConstraints } from "./unique-check.js"
+import type { ComputedFieldsConfig } from "../../types/computed-types.js"
 
 // ============================================================================
 // Types
@@ -46,16 +47,45 @@ type RelationshipConfig = {
 // ============================================================================
 
 /**
+ * Strip computed field keys from an input object.
+ * Used to remove computed field names from create/update input before schema validation.
+ *
+ * @param input - The input object (possibly with computed field keys)
+ * @param computed - The computed fields configuration that defines which keys to strip
+ * @returns A new object with computed field keys removed
+ */
+const stripComputedFromInput = <T>(
+	input: T,
+	computed: ComputedFieldsConfig<unknown> | undefined,
+): T => {
+	if (computed === undefined || Object.keys(computed).length === 0) {
+		return input
+	}
+
+	const computedKeys = new Set(Object.keys(computed))
+	const result: Record<string, unknown> = {}
+
+	for (const key of Object.keys(input as Record<string, unknown>)) {
+		if (!computedKeys.has(key)) {
+			result[key] = (input as Record<string, unknown>)[key]
+		}
+	}
+
+	return result as T
+}
+
+/**
  * Create a single entity with validation, hooks, and foreign key checks.
  *
  * Steps:
- * 1. Generate ID if not provided, add timestamps
- * 2. Validate through Effect Schema
- * 3. Run beforeCreate hooks (can transform entity)
- * 4. Check for duplicate ID in Ref state
- * 5. Validate foreign key constraints
- * 6. Atomically add to Ref state
- * 7. Update indexes if provided
+ * 1. Strip computed field keys from input (they are derived, not stored)
+ * 2. Generate ID if not provided, add timestamps
+ * 3. Validate through Effect Schema
+ * 4. Run beforeCreate hooks (can transform entity)
+ * 5. Check for duplicate ID in Ref state
+ * 6. Validate foreign key constraints
+ * 7. Atomically add to Ref state
+ * 8. Update indexes if provided
  */
 export const create = <T extends HasId, I = T>(
 	collectionName: string,
@@ -66,15 +96,19 @@ export const create = <T extends HasId, I = T>(
 	indexes?: CollectionIndexes,
 	hooks?: HooksConfig<T>,
 	uniqueFields: NormalizedConstraints = [],
+	computed?: ComputedFieldsConfig<unknown>,
 ) =>
 (input: CreateInput<T>): Effect.Effect<T, ValidationError | DuplicateKeyError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
-		const id = (input as Record<string, unknown>).id as string | undefined || generateId()
+		// Strip computed field keys from input (they are derived, not stored)
+		const sanitizedInput = stripComputedFromInput(input, computed)
+
+		const id = (sanitizedInput as Record<string, unknown>).id as string | undefined || generateId()
 		const now = new Date().toISOString()
 
 		// Build raw entity object for schema validation
 		const raw = {
-			...input,
+			...sanitizedInput,
 			id,
 			createdAt: now,
 			updatedAt: now,
@@ -164,6 +198,7 @@ export const createMany = <T extends HasId, I = T>(
 	indexes?: CollectionIndexes,
 	hooks?: HooksConfig<T>,
 	uniqueFields: NormalizedConstraints = [],
+	computed?: ComputedFieldsConfig<unknown>,
 ) =>
 (
 	inputs: ReadonlyArray<CreateInput<T>>,
@@ -185,13 +220,15 @@ export const createMany = <T extends HasId, I = T>(
 		const validEntities: T[] = []
 
 		for (const input of inputs) {
-			const id = (input as Record<string, unknown>).id as string | undefined || generateId()
+			// Strip computed field keys from input (they are derived, not stored)
+			const sanitizedInput = stripComputedFromInput(input, computed)
+			const id = (sanitizedInput as Record<string, unknown>).id as string | undefined || generateId()
 
 			// Check for duplicate ID
 			if (existingIds.has(id) || batchIds.has(id)) {
 				if (skipOnError) {
 					skipped.push({
-						data: { ...input, id } as Partial<T>,
+						data: { ...sanitizedInput, id } as Partial<T>,
 						reason: `Duplicate ID: ${id}`,
 					})
 					continue
@@ -207,7 +244,7 @@ export const createMany = <T extends HasId, I = T>(
 				)
 			}
 
-			const raw = { ...input, id, createdAt: now, updatedAt: now }
+			const raw = { ...sanitizedInput, id, createdAt: now, updatedAt: now }
 
 			// Validate through schema
 			const validationResult = yield* validateEntity(schema, raw).pipe(
@@ -221,7 +258,7 @@ export const createMany = <T extends HasId, I = T>(
 
 			if (validationResult._tag === "skipped") {
 				skipped.push({
-					data: { ...input, id } as Partial<T>,
+					data: { ...sanitizedInput, id } as Partial<T>,
 					reason: `Validation failed: ${validationResult.error.issues[0]?.message ?? "unknown"}`,
 				})
 				continue
@@ -245,7 +282,7 @@ export const createMany = <T extends HasId, I = T>(
 
 			if (hookResult._tag === "skipped") {
 				skipped.push({
-					data: { ...input, id } as Partial<T>,
+					data: { ...sanitizedInput, id } as Partial<T>,
 					reason: `Hook rejected: ${hookResult.error.message}`,
 				})
 				continue

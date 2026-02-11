@@ -455,6 +455,8 @@ const buildCollection = <T extends HasId>(
 	const hooks = (collectionConfig.hooks ?? {}) as import("../types/hook-types.js").HooksConfig<T>
 	// Normalize unique fields constraints (default to empty array if not configured)
 	const uniqueFields = normalizeConstraints(collectionConfig.uniqueFields)
+	// Get computed fields config (undefined means no computed fields)
+	const computed = collectionConfig.computed
 
 	// Build allRelationships map for delete (needs all collections' relationships)
 	const allRelationships: Record<
@@ -613,8 +615,8 @@ const buildCollection = <T extends HasId>(
 		}
 
 	// Wire CRUD operations with runPromise convenience
-	const createFn = wrapEffect(create(collectionName, schema, relationships, ref, stateRefs, indexes, hooks, uniqueFields))
-	const createManyFn = wrapEffect(createMany(collectionName, schema, relationships, ref, stateRefs, indexes, hooks, uniqueFields))
+	const createFn = wrapEffect(create(collectionName, schema, relationships, ref, stateRefs, indexes, hooks, uniqueFields, computed))
+	const createManyFn = wrapEffect(createMany(collectionName, schema, relationships, ref, stateRefs, indexes, hooks, uniqueFields, computed))
 	const updateFn = wrapEffect(update(collectionName, schema, relationships, ref, stateRefs, indexes, hooks, uniqueFields))
 	const updateManyFn = wrapEffect(updateMany(collectionName, schema, relationships, ref, stateRefs, indexes, hooks, uniqueFields))
 	// Check if schema defines a deletedAt field for soft delete support

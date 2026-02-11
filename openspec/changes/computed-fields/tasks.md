@@ -42,7 +42,7 @@
 
 ## 7. CRUD Input Sanitization
 
-- [ ] 7.1 In `core/factories/crud-factory.ts`, strip keys matching computed field names from create input before schema validation.
+- [x] 7.1 In `core/factories/crud-factory.ts`, strip keys matching computed field names from create input before schema validation.
 - [ ] 7.2 In `core/factories/crud-factory.ts`, strip keys matching computed field names from update input before schema validation.
 - [ ] 7.3 In `core/factories/crud-factory-with-relationships.ts`, apply the same stripping for create and update paths.
 - [ ] 7.4 Test that creating an entity with a computed field name in the input ignores the provided value and uses the derivation function.
