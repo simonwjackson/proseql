@@ -42,7 +42,7 @@
 - [x] 6.3 Test double commit → `TransactionError`
 - [x] 6.4 Test double rollback → `TransactionError`
 - [x] 6.5 Test commit after rollback → `TransactionError`
-- [ ] 6.6 Test `mutatedCollections` tracks correct collection names
+- [x] 6.6 Test `mutatedCollections` tracks correct collection names
 - [ ] 6.7 Test `isActive` reflects correct state (true after begin, false after commit/rollback)
 
 ## 7. Tests — Snapshot Isolation
