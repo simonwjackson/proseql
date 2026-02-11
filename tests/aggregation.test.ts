@@ -379,5 +379,17 @@ describe("Aggregation", () => {
 			expect(tools?.count).toBe(1)
 			expect(tools?.sum?.price).toBeCloseTo(5.25)
 		})
+
+		it("6.6 empty result (no matches) → empty array", async () => {
+			const db = await createTestDb()
+			// Use a where clause that matches nothing
+			const result = await db.products.aggregate({
+				groupBy: "category",
+				count: true,
+				where: { price: { $gt: 1000 } }, // No products have price > 1000
+			}).runPromise
+
+			expect(result).toEqual([])
+		})
 	})
 })
