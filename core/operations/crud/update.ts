@@ -328,6 +328,9 @@ export const update = <T extends HasId, I = T>(
  * The caller (database factory) can use the Stream-based filter pipeline
  * to build the predicate from a WhereClause.
  *
+ * Runs hooks per entity: beforeUpdate can transform the update payload,
+ * afterUpdate and onChange run after state mutation.
+ *
  * All matching entities are updated atomically in a single Ref.update call.
  */
 export const updateMany = <T extends HasId, I = T>(
@@ -337,11 +340,12 @@ export const updateMany = <T extends HasId, I = T>(
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	indexes?: CollectionIndexes,
+	hooks?: HooksConfig<T>,
 ) =>
 (
 	predicate: (entity: T) => boolean,
 	updates: UpdateWithOperators<T & MinimalEntity>,
-): Effect.Effect<UpdateManyResult<T>, ValidationError | ForeignKeyError> =>
+): Effect.Effect<UpdateManyResult<T>, ValidationError | ForeignKeyError | HookError> =>
 	Effect.gen(function* () {
 		// Validate immutable fields
 		const immutableCheck = validateImmutableFields(updates)
@@ -370,13 +374,23 @@ export const updateMany = <T extends HasId, I = T>(
 			return { count: 0, updated: [] }
 		}
 
-		// Apply updates and validate each entity
-		const validatedEntities: T[] = []
+		// Apply updates, run beforeUpdate hooks, and validate each entity
+		// We need to track both previous and validated for hooks later
+		const entityPairs: Array<{ previous: T; validated: T; transformedUpdates: UpdateWithOperators<T & MinimalEntity> }> = []
 
 		for (const entity of matchingEntities) {
-			const updated = applyUpdates(entity as T & MinimalEntity, updates)
+			// Run beforeUpdate hooks (can transform the update payload)
+			const transformedUpdates = yield* runBeforeUpdateHooks(hooks?.beforeUpdate, {
+				operation: "update",
+				collection: collectionName,
+				id: (entity as HasId).id,
+				existing: entity,
+				update: updates,
+			})
+
+			const updated = applyUpdates(entity as T & MinimalEntity, transformedUpdates as UpdateWithOperators<T & MinimalEntity>)
 			const validated = yield* validateEntity(schema, updated)
-			validatedEntities.push(validated)
+			entityPairs.push({ previous: entity, validated, transformedUpdates: transformedUpdates as UpdateWithOperators<T & MinimalEntity> })
 		}
 
 		// Validate foreign keys if relationship fields were updated
@@ -388,9 +402,9 @@ export const updateMany = <T extends HasId, I = T>(
 		)
 
 		if (hasRelationshipUpdate) {
-			for (const entity of validatedEntities) {
+			for (const { validated } of entityPairs) {
 				yield* validateForeignKeysEffect(
-					entity,
+					validated,
 					collectionName,
 					relationships,
 					stateRefs,
@@ -401,22 +415,44 @@ export const updateMany = <T extends HasId, I = T>(
 		// Atomically update all matching entities in state
 		yield* Ref.update(ref, (map) => {
 			const next = new Map(map)
-			for (const entity of validatedEntities) {
-				next.set((entity as HasId).id, entity)
+			for (const { validated } of entityPairs) {
+				next.set((validated as HasId).id, validated)
 			}
 			return next
 		})
 
 		// Update indexes if provided
 		if (indexes && indexes.size > 0) {
-			for (let i = 0; i < matchingEntities.length; i++) {
-				yield* updateInIndex(indexes, matchingEntities[i]!, validatedEntities[i]!)
+			for (const { previous, validated } of entityPairs) {
+				yield* updateInIndex(indexes, previous, validated)
 			}
 		}
 
+		// Run afterUpdate and onChange hooks for each updated entity
+		for (const { previous, validated, transformedUpdates } of entityPairs) {
+			// Run afterUpdate hooks (fire-and-forget, errors swallowed)
+			yield* runAfterUpdateHooks(hooks?.afterUpdate, {
+				operation: "update",
+				collection: collectionName,
+				id: (validated as HasId).id,
+				previous,
+				current: validated,
+				update: transformedUpdates,
+			})
+
+			// Run onChange hooks with type: "update" (fire-and-forget, errors swallowed)
+			yield* runOnChangeHooks(hooks?.onChange, {
+				type: "update",
+				collection: collectionName,
+				id: (validated as HasId).id,
+				previous,
+				current: validated,
+			})
+		}
+
 		return {
-			count: validatedEntities.length,
-			updated: validatedEntities,
+			count: entityPairs.length,
+			updated: entityPairs.map(p => p.validated),
 		}
 	})
 
