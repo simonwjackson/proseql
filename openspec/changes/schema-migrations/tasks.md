@@ -7,7 +7,7 @@
 
 ## 2. Migration Registry Validation
 
-- [ ] 2.1 Create `core/migrations/migration-runner.ts` with `validateMigrationRegistry(collectionName, version, migrations)` returning `Effect<void, MigrationError>`. Check: contiguous chain, no gaps, no duplicates, last `to` matches version, `to === from + 1`.
+- [x] 2.1 Create `core/migrations/migration-runner.ts` with `validateMigrationRegistry(collectionName, version, migrations)` returning `Effect<void, MigrationError>`. Check: contiguous chain, no gaps, no duplicates, last `to` matches version, `to === from + 1`.
 - [ ] 2.2 Handle edge cases: version 0 with no migrations (valid), version > 0 with empty migrations (invalid), no version config (skip validation).
 
 ## 3. Migration Execution
