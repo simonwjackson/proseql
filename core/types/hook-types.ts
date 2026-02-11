@@ -191,3 +191,23 @@ export type AfterDeleteHook<T> = (
 export type OnChangeHook<T> = (
 	ctx: OnChangeContext<T>,
 ) => Effect.Effect<void, never>;
+
+// ============================================================================
+// Hooks Configuration
+// ============================================================================
+
+/**
+ * Configuration object for lifecycle hooks on a collection.
+ * All fields are optional. Missing fields mean no hooks for that lifecycle point.
+ * Hooks run in array order: before-hooks chain (each receives previous output),
+ * after-hooks and onChange run independently (fire-and-forget).
+ */
+export interface HooksConfig<T> {
+	readonly beforeCreate?: ReadonlyArray<BeforeCreateHook<T>>;
+	readonly afterCreate?: ReadonlyArray<AfterCreateHook<T>>;
+	readonly beforeUpdate?: ReadonlyArray<BeforeUpdateHook<T>>;
+	readonly afterUpdate?: ReadonlyArray<AfterUpdateHook<T>>;
+	readonly beforeDelete?: ReadonlyArray<BeforeDeleteHook<T>>;
+	readonly afterDelete?: ReadonlyArray<AfterDeleteHook<T>>;
+	readonly onChange?: ReadonlyArray<OnChangeHook<T>>;
+}
