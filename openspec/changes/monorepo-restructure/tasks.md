@@ -45,7 +45,7 @@
 - [x] 6.1 Update `bunfig.toml`: remove the old `root = "./tests"` (tests now live inside packages)
 - [x] 6.2 Update `justfile`: replace recipes with workspace-aware versions — `test` runs `bun test packages/*/tests/`, `test-core` runs core only, `test-node` runs node only, `typecheck` runs `bunx tsc --build`, `lint`/`format`/`clean` updated for new paths
 - [x] 6.3 Update `biome.json` if needed: ensure it covers `packages/*/src/` and `packages/*/tests/`
-- [ ] 6.4 Update `.gitignore`: add `packages/*/dist/`, `bun.nix`, `packages/*/.tsbuildinfo`
+- [x] 6.4 Update `.gitignore`: add `packages/*/dist/`, `bun.nix`, `packages/*/.tsbuildinfo`
 
 ## 7. Nix Flake
 
