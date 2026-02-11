@@ -622,7 +622,191 @@ describe("Upsert Where-Clause Validation", () => {
 
 	describe("upsertMany validation", () => {
 		it("should fail on first invalid where clause", async () => {
-			// TODO: Task 7.9
+			// Test that upsertMany validates all where clauses and fails on the first invalid one.
+			// The first input is valid (uses email, a unique field), but the second uses "name"
+			// which is NOT in uniqueFields.
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<User>([existingUser])
+				const stateRefs = yield* makeStateRefs({ users: [existingUser] })
+
+				// First upsert: valid where clause using email (a declared unique field)
+				// Second upsert: invalid where clause using name (NOT a unique field)
+				const result = yield* upsertMany(
+					"users",
+					UserSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					userUniqueFields, // ["email", "username"] configured
+				)([
+					{
+						where: { email: "alice@example.com" }, // Valid: email is unique
+						create: {
+							name: "Alice",
+							email: "alice@example.com",
+							username: "alice",
+							age: 30,
+						},
+						update: { age: 31 },
+					},
+					{
+						where: { name: "Bob" }, // Invalid: name is NOT unique
+						create: {
+							name: "Bob",
+							email: "bob@example.com",
+							username: "bob",
+							age: 25,
+						},
+						update: { age: 26 },
+					},
+				])
+
+				return result
+			})
+
+			const error = await Effect.runPromise(
+				program.pipe(
+					Effect.flip, // Convert failure to success for assertion
+				),
+			)
+
+			// Should fail with ValidationError for the invalid where clause
+			expect(error).toBeInstanceOf(ValidationError)
+			expect(error._tag).toBe("ValidationError")
+			expect(error.message).toContain("unique")
+			expect(error.issues).toHaveLength(1)
+			expect(error.issues[0].field).toBe("where")
+			// Should mention the invalid field
+			expect(error.issues[0].message).toContain("name")
+			expect(error.issues[0].message).toContain("users")
+			// Should mention valid unique fields
+			expect(error.issues[0].message).toContain("email")
+			expect(error.issues[0].message).toContain("username")
+		})
+
+		it("should fail immediately on first invalid where in batch", async () => {
+			// Test that upsertMany fails on the FIRST invalid where clause,
+			// even if there are multiple invalid ones in the batch.
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<User>([])
+				const stateRefs = yield* makeStateRefs({ users: [] })
+
+				// All three use invalid where clauses (age is not unique)
+				const result = yield* upsertMany(
+					"users",
+					UserSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					userUniqueFields, // ["email", "username"] configured
+				)([
+					{
+						where: { age: 25 }, // Invalid: age is NOT unique
+						create: {
+							name: "First",
+							email: "first@example.com",
+							username: "first",
+							age: 25,
+						},
+						update: { age: 26 },
+					},
+					{
+						where: { age: 30 }, // Also invalid, but shouldn't be checked
+						create: {
+							name: "Second",
+							email: "second@example.com",
+							username: "second",
+							age: 30,
+						},
+						update: { age: 31 },
+					},
+				])
+
+				return result
+			})
+
+			const error = await Effect.runPromise(
+				program.pipe(
+					Effect.flip,
+				),
+			)
+
+			// Should fail with ValidationError for the first invalid where clause
+			expect(error).toBeInstanceOf(ValidationError)
+			expect(error._tag).toBe("ValidationError")
+			// The error value should contain the first invalid where clause (age: 25)
+			expect(error.issues[0].value).toEqual({ age: 25 })
+			// Should mention valid unique fields
+			expect(error.issues[0].message).toContain("email")
+			expect(error.issues[0].message).toContain("username")
+		})
+
+		it("should succeed when all where clauses are valid", async () => {
+			// Test that upsertMany succeeds when all where clauses use valid unique fields
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<User>([existingUser])
+				const stateRefs = yield* makeStateRefs({ users: [existingUser] })
+
+				const result = yield* upsertMany(
+					"users",
+					UserSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					userUniqueFields, // ["email", "username"] configured
+				)([
+					{
+						where: { email: "alice@example.com" }, // Valid: email is unique
+						create: {
+							name: "Alice",
+							email: "alice@example.com",
+							username: "alice",
+							age: 30,
+						},
+						update: { age: 32 },
+					},
+					{
+						where: { username: "bob" }, // Valid: username is unique
+						create: {
+							name: "Bob",
+							email: "bob@example.com",
+							username: "bob",
+							age: 25,
+						},
+						update: { age: 26 },
+					},
+					{
+						where: { id: "carol" }, // Valid: id is always accepted
+						create: {
+							name: "Carol",
+							email: "carol@example.com",
+							username: "carol",
+							age: 28,
+						},
+						update: { age: 29 },
+					},
+				])
+
+				// Should have updated Alice and created Bob and Carol
+				expect(result.updated).toHaveLength(1)
+				expect(result.updated[0].email).toBe("alice@example.com")
+				expect(result.updated[0].age).toBe(32)
+
+				expect(result.created).toHaveLength(2)
+				const createdUsernames = result.created.map((u) => u.username)
+				expect(createdUsernames).toContain("bob")
+				expect(createdUsernames).toContain("carol")
+
+				return result
+			})
+
+			await Effect.runPromise(program)
 		})
 	})
 })

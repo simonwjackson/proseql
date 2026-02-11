@@ -55,7 +55,7 @@
 - [x] 7.6 Test upsert with partial compound where → `ValidationError`
 - [x] 7.7 Test collection without uniqueFields → only `{ id }` accepted
 - [x] 7.8 Test upsert where with extra fields beyond constraint → valid
-- [ ] 7.9 Test upsertMany with invalid where → fails on first invalid
+- [x] 7.9 Test upsertMany with invalid where → fails on first invalid
 
 ## 8. Cleanup
 
