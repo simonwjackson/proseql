@@ -435,5 +435,38 @@ describe("Aggregation", () => {
 			expect(tools?.min?.price).toBe(5.25)
 			expect(tools?.max?.price).toBe(5.25)
 		})
+
+		it("6.8 group ordering → matches first-encounter order", async () => {
+			// Create products in a specific order that differs from alphabetical
+			// First encounter order should be: tools, gadgets, electronics
+			const orderedProducts = [
+				{ id: "p1", name: "Tool A", price: 5.00, category: "tools", stock: 100 },
+				{ id: "p2", name: "Gadget A", price: 15.00, category: "gadgets", stock: 50 },
+				{ id: "p3", name: "Gadget B", price: 25.00, category: "gadgets", stock: 75 },
+				{ id: "p4", name: "Widget A", price: 10.00, category: "electronics", stock: 25 },
+				{ id: "p5", name: "Tool B", price: 8.00, category: "tools", stock: 200 },
+				{ id: "p6", name: "Widget B", price: 20.00, category: "electronics", stock: 150 },
+			]
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { products: orderedProducts }),
+			)
+
+			const result = await db.products.aggregate({
+				groupBy: "category",
+				count: true,
+			}).runPromise
+
+			// Verify the order matches first-encounter: tools, gadgets, electronics
+			// NOT alphabetical (electronics, gadgets, tools)
+			expect(result).toHaveLength(3)
+			expect(result[0].group.category).toBe("tools")
+			expect(result[1].group.category).toBe("gadgets")
+			expect(result[2].group.category).toBe("electronics")
+
+			// Also verify counts are correct
+			expect(result[0].count).toBe(2) // tools: p1, p5
+			expect(result[1].count).toBe(2) // gadgets: p2, p3
+			expect(result[2].count).toBe(2) // electronics: p4, p6
+		})
 	})
 })
