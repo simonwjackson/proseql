@@ -34,4 +34,4 @@
 - [x] 4.9 Test combined with explicit `sort`: cursor key must match primary sort field, results in correct order
 - [x] 4.10 Test implicit sort: omitting sort with cursor key uses ascending order
 - [x] 4.11 Test validation errors: both `after` + `before` → `ValidationError`, invalid key → `ValidationError`, `limit <= 0` → `ValidationError`, sort mismatch → `ValidationError`
-- [ ] 4.12 Run full test suite (`bun test`) to verify no regressions in existing offset/limit pagination
+- [x] 4.12 Run full test suite (`bun test`) to verify no regressions in existing offset/limit pagination
