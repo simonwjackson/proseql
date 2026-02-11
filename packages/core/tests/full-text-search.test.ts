@@ -1855,3 +1855,248 @@ describe("Full-text search: Search Index (task 12)", () => {
 		})
 	})
 })
+
+// ============================================================================
+// 13. Combined Filters Tests
+// ============================================================================
+
+describe("Full-text search: Combined Filters (task 13)", () => {
+	describe("13.1: $search with other field operators", () => {
+		it("should filter by both $search and $gt operator", async () => {
+			const db = await createTestDatabase()
+			// "dark" matches "The Left Hand of Darkness" (1969) and "The Dark Tower" would if it existed
+			// year > 1960 filters to only books after 1960
+			// "The Left Hand of Darkness" is 1969, which is > 1960
+			const results = await db.books.query({
+				where: { title: { $search: "dark" }, year: { $gt: 1960 } },
+			}).runPromise
+
+			// Should match "The Left Hand of Darkness" (1969) - matches "dark" in title and year > 1960
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("The Left Hand of Darkness")
+			expect(results[0].year).toBe(1969)
+		})
+
+		it("should filter by both $search and $lt operator", async () => {
+			const db = await createTestDatabase()
+			// year < 1970 filters to only books before 1970
+			const results = await db.books.query({
+				where: { title: { $search: "dark" }, year: { $lt: 1970 } },
+			}).runPromise
+
+			// "The Left Hand of Darkness" is 1969 which is < 1970
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("The Left Hand of Darkness")
+			expect(results[0].year).toBe(1969)
+		})
+
+		it("should return empty when $search matches but other operator excludes", async () => {
+			const db = await createTestDatabase()
+			// "dark" matches "The Left Hand of Darkness" (1969) but year > 1980 excludes it
+			const results = await db.books.query({
+				where: { title: { $search: "dark" }, year: { $gt: 1980 } },
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should filter by $search and $eq operator", async () => {
+			const db = await createTestDatabase()
+			// Find books with "dune" in title AND author equals "Frank Herbert"
+			const results = await db.books.query({
+				where: { title: { $search: "dune" }, author: { $eq: "Frank Herbert" } },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+			expect(results[0].author).toBe("Frank Herbert")
+		})
+
+		it("should filter by $search and $ne operator", async () => {
+			const db = await createTestDatabase()
+			// Find books matching "planet" in description where author is NOT "Frank Herbert"
+			// "planet" appears in Dune (Frank Herbert) and The Left Hand of Darkness (Ursula K. Le Guin)
+			const results = await db.books.query({
+				where: {
+					description: { $search: "planet" },
+					author: { $ne: "Frank Herbert" },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("The Left Hand of Darkness")
+			expect(results[0].author).toBe("Ursula K. Le Guin")
+		})
+
+		it("should filter by $search and $in operator", async () => {
+			const db = await createTestDatabase()
+			// Find books matching search term where year is in specific list
+			const results = await db.books.query({
+				where: {
+					description: { $search: "story" },
+					year: { $in: [1965, 1969] },
+				},
+			}).runPromise
+
+			// "story" appears in Dune (1965) and The Left Hand of Darkness (1969)
+			expect(results.length).toBe(2)
+			const titles = results.map((b) => b.title).sort()
+			expect(titles).toEqual(["Dune", "The Left Hand of Darkness"])
+		})
+
+		it("should filter by $search and $nin operator", async () => {
+			const db = await createTestDatabase()
+			// Find books matching search term where year is NOT in specific list
+			const results = await db.books.query({
+				where: {
+					description: { $search: "story" },
+					year: { $nin: [1965] },
+				},
+			}).runPromise
+
+			// "story" appears in Dune (1965) and The Left Hand of Darkness (1969)
+			// Excluding 1965, only The Left Hand of Darkness should match
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("The Left Hand of Darkness")
+		})
+
+		it("should filter by $search and $gte/$lte range", async () => {
+			const db = await createTestDatabase()
+			// Find books matching search term within a year range
+			const results = await db.books.query({
+				where: {
+					author: { $search: "gibson" },
+					year: { $gte: 1980, $lte: 1990 },
+				},
+			}).runPromise
+
+			// Gibson wrote Neuromancer in 1984
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Neuromancer")
+			expect(results[0].year).toBe(1984)
+		})
+
+		it("should filter by $search and $contains on strings", async () => {
+			const db = await createTestDatabase()
+			// Find books matching search term and author contains substring
+			const results = await db.books.query({
+				where: {
+					title: { $search: "dune" },
+					author: { $contains: "Herbert" },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+			expect(results[0].author).toBe("Frank Herbert")
+		})
+
+		it("should filter by $search and $startsWith", async () => {
+			const db = await createTestDatabase()
+			// Find books matching search term and author starts with substring
+			const results = await db.books.query({
+				where: {
+					description: { $search: "planet" },
+					author: { $startsWith: "Frank" },
+				},
+			}).runPromise
+
+			// "planet" in Dune (Frank Herbert) and The Left Hand of Darkness (Ursula K. Le Guin)
+			// Only Frank Herbert starts with "Frank"
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should filter by $search and $endsWith", async () => {
+			const db = await createTestDatabase()
+			// Find books matching search term and author ends with substring
+			const results = await db.books.query({
+				where: {
+					description: { $search: "planet" },
+					author: { $endsWith: "Guin" },
+				},
+			}).runPromise
+
+			// Only Ursula K. Le Guin ends with "Guin"
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("The Left Hand of Darkness")
+		})
+
+		it("should filter by multiple $search operators on different fields", async () => {
+			const db = await createTestDatabase()
+			// $search on title AND $search on author
+			const results = await db.books.query({
+				where: {
+					title: { $search: "dune" },
+					author: { $search: "herbert" },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+			expect(results[0].author).toBe("Frank Herbert")
+		})
+
+		it("should return empty when $search matches one field but not the other", async () => {
+			const db = await createTestDatabase()
+			// $search on title AND $search on author where they don't overlap
+			const results = await db.books.query({
+				where: {
+					title: { $search: "dune" },
+					author: { $search: "gibson" },
+				},
+			}).runPromise
+
+			// Dune is by Herbert, not Gibson
+			expect(results.length).toBe(0)
+		})
+
+		it("should filter by top-level $search combined with field-level operators", async () => {
+			const db = await createTestDatabase()
+			// Top-level $search with field-level $gt
+			const results = await db.books.query({
+				where: {
+					$search: { query: "gibson" },
+					year: { $gt: 1980 },
+				},
+			}).runPromise
+
+			// Gibson appears in author of Neuromancer (1984)
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Neuromancer")
+		})
+
+		it("should filter by top-level $search with explicit fields combined with other operators", async () => {
+			const db = await createTestDatabase()
+			// Top-level $search with explicit fields AND year filter
+			const results = await db.books.query({
+				where: {
+					$search: { query: "planet", fields: ["description"] },
+					year: { $lt: 1970 },
+				},
+			}).runPromise
+
+			// "planet" in description: Dune (1965), The Left Hand of Darkness (1969)
+			// year < 1970: both match
+			expect(results.length).toBe(2)
+			const years = results.map((b) => b.year).sort((a, b) => a - b)
+			expect(years).toEqual([1965, 1969])
+		})
+
+		it("should combine $search with complex filter chain", async () => {
+			const db = await createTestDatabase()
+			// Complex filter: search + multiple field constraints
+			const results = await db.books.query({
+				where: {
+					title: { $search: "hand" },
+					year: { $gte: 1960, $lte: 1980 },
+					author: { $contains: "Guin" },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("The Left Hand of Darkness")
+			expect(results[0].year).toBe(1969)
+		})
+	})
+})
