@@ -5,7 +5,7 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     systems.url = "github:nix-systems/default";
     bun2nix = {
-      url = "github:nix-community/bun2nix";
+      url = "github:nix-community/bun2nix?ref=refs/tags/1.5.2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -23,9 +23,9 @@
         nixpkgs.lib.genAttrs (import systems) (
           system:
           function {
+            inherit system;
             pkgs = import nixpkgs {
               inherit system;
-              overlays = [ bun2nix.overlays.default ];
             };
             bun2nixPkgs = bun2nix.packages.${system};
           }
@@ -35,13 +35,16 @@
       formatter = forAllSystems ({ pkgs, ... }: pkgs.nixfmt-rfc-style);
 
       packages = forAllSystems (
-        { pkgs, ... }:
+        { pkgs, system, ... }:
+        let
+          mkBunDerivation = bun2nix.lib.${system}.mkBunDerivation;
+        in
         {
-          core = pkgs.callPackage ./packages/core/default.nix { };
-          node = pkgs.callPackage ./packages/node/default.nix { };
-          rest = pkgs.callPackage ./packages/rest/default.nix { };
-          rpc = pkgs.callPackage ./packages/rpc/default.nix { };
-          default = pkgs.callPackage ./packages/core/default.nix { };
+          core = pkgs.callPackage ./packages/core/default.nix { inherit mkBunDerivation; };
+          node = pkgs.callPackage ./packages/node/default.nix { inherit mkBunDerivation; };
+          rest = pkgs.callPackage ./packages/rest/default.nix { inherit mkBunDerivation; };
+          rpc = pkgs.callPackage ./packages/rpc/default.nix { inherit mkBunDerivation; };
+          default = pkgs.callPackage ./packages/core/default.nix { inherit mkBunDerivation; };
         }
       );
 

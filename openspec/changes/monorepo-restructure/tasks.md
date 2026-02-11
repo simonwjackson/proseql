@@ -74,5 +74,5 @@
 - [x] 9.4 Run `bun test` (all packages) — verify total test count matches 1591
 - [x] 9.5 Run `bunx tsc --build` — verify all packages typecheck cleanly
 - [x] 9.6 Run `nix develop` — verify dev shell has bun, biome, just, bun2nix
-- [ ] 9.7 Run `nix build .#core` — verify hermetic build succeeds
+- [x] 9.7 Run `nix build .#core` — verify hermetic build succeeds
 - [ ] 9.8 Run `nix flake check` — verify CI-equivalent passes
