@@ -340,5 +340,44 @@ describe("Aggregation", () => {
 			// tools: should NOT exist as a group
 			expect(tools).toBeUndefined()
 		})
+
+		it("6.5 null grouping field value → forms own group", async () => {
+			// Create products with null/undefined category values
+			const productsWithNulls = [
+				{ id: "p1", name: "Widget A", price: 10.00, category: "electronics", stock: 100 },
+				{ id: "p2", name: "Widget B", price: 25.50, category: null as unknown as string, stock: 50 },
+				{ id: "p3", name: "Gadget X", price: 15.75, category: "electronics", stock: 75 },
+				{ id: "p4", name: "Gadget Y", price: 35.00, category: null as unknown as string, stock: 25 },
+				{ id: "p5", name: "Tool Z", price: 5.25, category: "tools", stock: 200 },
+			]
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { products: productsWithNulls }),
+			)
+
+			const result = await db.products.aggregate({
+				groupBy: "category",
+				count: true,
+				sum: "price",
+			}).runPromise
+
+			// Expected groups:
+			// electronics: p1, p3 → count: 2, sum: 10.00 + 15.75 = 25.75
+			// null: p2, p4 → count: 2, sum: 25.50 + 35.00 = 60.50
+			// tools: p5 → count: 1, sum: 5.25
+			expect(result).toHaveLength(3)
+
+			const electronics = result.find(g => g.group.category === "electronics")
+			const nullGroup = result.find(g => g.group.category === null)
+			const tools = result.find(g => g.group.category === "tools")
+
+			expect(electronics?.count).toBe(2)
+			expect(electronics?.sum?.price).toBeCloseTo(25.75)
+
+			expect(nullGroup?.count).toBe(2)
+			expect(nullGroup?.sum?.price).toBeCloseTo(60.50)
+
+			expect(tools?.count).toBe(1)
+			expect(tools?.sum?.price).toBeCloseTo(5.25)
+		})
 	})
 })

@@ -51,7 +51,7 @@
 - [x] 6.2 Test single-field groupBy with sum → correct group sums
 - [x] 6.3 Test multi-field groupBy → correct group partitioning
 - [x] 6.4 Test groupBy with where → groups from filtered subset only
-- [ ] 6.5 Test null grouping field value → forms own group
+- [x] 6.5 Test null grouping field value → forms own group
 - [ ] 6.6 Test empty result (no matches) → empty array
 - [ ] 6.7 Test groupBy with all aggregate types → all present per group
 - [ ] 6.8 Test group ordering → matches first-encounter order
