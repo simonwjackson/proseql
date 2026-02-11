@@ -1,3 +1,4 @@
+import { Stream } from "effect";
 import type {
 	ComputedFieldsConfig,
 	WithComputed,
@@ -45,3 +46,44 @@ export const resolveComputedFields = <
 
 	return { ...entity, ...computedValues } as WithComputed<T, C>;
 };
+
+/**
+ * Apply computed field resolution as a Stream combinator.
+ * Returns a function that transforms Stream<T> → Stream<WithComputed<T, C>>,
+ * mapping the resolution function over each entity.
+ *
+ * When the config is undefined or has no keys, returns the stream unchanged
+ * (no resolution overhead).
+ *
+ * @template T - The entity type (stored fields, possibly with populated relationships)
+ * @template C - The computed fields config type
+ *
+ * @param config - The computed fields configuration (field name → derivation function), or undefined
+ * @returns A stream combinator function
+ *
+ * @example
+ * ```ts
+ * const config = {
+ *   displayName: (b) => `${b.title} (${b.year})`,
+ *   isClassic: (b) => b.year < 1980,
+ * }
+ * const enrichedStream = stream.pipe(resolveComputedStream(config))
+ * // Each entity in the resulting stream has displayName and isClassic attached
+ * ```
+ */
+export const resolveComputedStream = <
+	T extends Record<string, unknown>,
+	C extends ComputedFieldsConfig<T>,
+>(
+	config: C | undefined,
+) =>
+	<E, R>(stream: Stream.Stream<T, E, R>): Stream.Stream<WithComputed<T, C>, E, R> => {
+		// When config is empty or undefined, return stream unchanged
+		if (config === undefined || Object.keys(config).length === 0) {
+			return stream as unknown as Stream.Stream<WithComputed<T, C>, E, R>;
+		}
+
+		return Stream.map(stream, (entity: T) =>
+			resolveComputedFields(entity, config),
+		);
+	};

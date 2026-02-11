@@ -9,7 +9,7 @@
 ## 2. Computed Field Resolution
 
 - [x] 2.1 Create `core/operations/query/resolve-computed.ts` with `resolveComputedFields<T, C>(entity: T, config: C): WithComputed<T, C>`. Iterate `Object.keys(config)`, call each derivation function with `entity`, spread results onto a new object.
-- [ ] 2.2 Implement `resolveComputedStream(stream, config)` that maps the resolution function over a `Stream<T>`, returning `Stream<WithComputed<T, C>>`. When config is empty/undefined, return the stream unchanged.
+- [x] 2.2 Implement `resolveComputedStream(stream, config)` that maps the resolution function over a `Stream<T>`, returning `Stream<WithComputed<T, C>>`. When config is empty/undefined, return the stream unchanged.
 - [ ] 2.3 Implement `stripComputedFields<T, C>(entity, config): T` that removes computed keys from an entity object. Used as a safety net before persistence.
 - [ ] 2.4 Implement lazy skip: when `select` is provided and has no intersection with computed field keys, bypass resolution entirely by returning the stream unchanged.
 
