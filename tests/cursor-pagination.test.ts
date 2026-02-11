@@ -524,4 +524,140 @@ describe("Cursor Pagination", () => {
 			expect(result.pageInfo.hasPreviousPage).toBe(false)
 		})
 	})
+
+	describe("stability", () => {
+		it("insert between page fetches does not cause duplicates or skips", async () => {
+			// Start with items 1-10
+			const initialItems = generateItems(10)
+			const db = await createTestDatabase(initialItems)
+
+			// Fetch first page: items 1-3
+			const firstPage = await (db.items.query({
+				cursor: { key: "id", limit: 3 },
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }).runPromise
+
+			expect(firstPage.items).toHaveLength(3)
+			expect(firstPage.items.map((i) => i.id)).toEqual([
+				"item-001",
+				"item-002",
+				"item-003",
+			])
+			expect(firstPage.pageInfo.endCursor).toBe("item-003")
+
+			// Insert a new record BETWEEN existing records
+			// "item-002a" will sort after item-002 but before item-003
+			// However, since we already have the cursor at item-003, this insert
+			// should NOT affect the next page (which starts AFTER item-003)
+			await db.items.create({
+				id: "item-002a",
+				name: "Item 2a",
+				price: 25,
+				category: "clothing",
+			}).runPromise
+
+			// Fetch second page using cursor from first page
+			// Should start after item-003, returning items 4-6
+			// The newly inserted item-002a is BEFORE the cursor, so it should NOT appear
+			const secondPage = await (db.items.query({
+				cursor: {
+					key: "id",
+					limit: 3,
+					after: firstPage.pageInfo.endCursor!,
+				},
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }).runPromise
+
+			// Second page should NOT include the inserted item (it's before the cursor)
+			// and should NOT skip any items - it should correctly start at item-004
+			expect(secondPage.items).toHaveLength(3)
+			expect(secondPage.items.map((i) => i.id)).toEqual([
+				"item-004",
+				"item-005",
+				"item-006",
+			])
+
+			// Verify no duplicates: first page items should not appear in second page
+			const firstPageIds = new Set(firstPage.items.map((i) => i.id))
+			for (const item of secondPage.items) {
+				expect(firstPageIds.has(item.id as string)).toBe(false)
+			}
+		})
+
+		it("insert after cursor position appears in next page correctly", async () => {
+			// Start with items 1-10
+			const initialItems = generateItems(10)
+			const db = await createTestDatabase(initialItems)
+
+			// Fetch first page: items 1-3
+			const firstPage = await (db.items.query({
+				cursor: { key: "id", limit: 3 },
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }).runPromise
+
+			expect(firstPage.pageInfo.endCursor).toBe("item-003")
+
+			// Insert a new record AFTER the cursor position
+			// "item-003a" will sort after item-003 but before item-004
+			await db.items.create({
+				id: "item-003a",
+				name: "Item 3a",
+				price: 35,
+				category: "electronics",
+			}).runPromise
+
+			// Fetch second page - the inserted item should appear first
+			const secondPage = await (db.items.query({
+				cursor: {
+					key: "id",
+					limit: 3,
+					after: firstPage.pageInfo.endCursor!,
+				},
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }).runPromise
+
+			// The inserted item should appear in the second page
+			expect(secondPage.items).toHaveLength(3)
+			expect(secondPage.items.map((i) => i.id)).toEqual([
+				"item-003a", // Newly inserted item appears first
+				"item-004",
+				"item-005",
+			])
+		})
+
+		it("delete between page fetches maintains correct cursor position", async () => {
+			// Start with items 1-10
+			const initialItems = generateItems(10)
+			const db = await createTestDatabase(initialItems)
+
+			// Fetch first page: items 1-3
+			const firstPage = await (db.items.query({
+				cursor: { key: "id", limit: 3 },
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }).runPromise
+
+			expect(firstPage.pageInfo.endCursor).toBe("item-003")
+
+			// Delete item-004 (the first item that would appear in the next page)
+			await db.items.delete("item-004").runPromise
+
+			// Fetch second page - should skip deleted item and start at item-005
+			const secondPage = await (db.items.query({
+				cursor: {
+					key: "id",
+					limit: 3,
+					after: firstPage.pageInfo.endCursor!,
+				},
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }).runPromise
+
+			// Should get items 5, 6, 7 (skipping deleted item-004)
+			expect(secondPage.items).toHaveLength(3)
+			expect(secondPage.items.map((i) => i.id)).toEqual([
+				"item-005",
+				"item-006",
+				"item-007",
+			])
+
+			// No duplicates from first page
+			const firstPageIds = new Set(firstPage.items.map((i) => i.id))
+			for (const item of secondPage.items) {
+				expect(firstPageIds.has(item.id as string)).toBe(false)
+			}
+		})
+	})
 })

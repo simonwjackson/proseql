@@ -27,7 +27,7 @@
 - [x] 4.2 Test forward pagination: first page returns correct items and `hasNextPage = true`, second page via `after: endCursor` returns next items, final page has `hasNextPage = false`
 - [x] 4.3 Test backward pagination: page via `before` cursor returns previous items, first page has `hasPreviousPage = false`
 - [x] 4.4 Test empty results: query matching no items returns empty items, null cursors, both has-flags false
-- [ ] 4.5 Test stability: insert a record between page fetches, verify next page starts at correct cursor position without duplicates or skips
+- [x] 4.5 Test stability: insert a record between page fetches, verify next page starts at correct cursor position without duplicates or skips
 - [ ] 4.6 Test combined with `where`: cursor applies after filtering, correct subset paginated
 - [ ] 4.7 Test combined with `populate`: populated fields present in cursor page items
 - [ ] 4.8 Test combined with `select`: selected fields applied to page items, cursor metadata still correct
