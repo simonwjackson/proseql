@@ -377,13 +377,3 @@ export {
 
 export type { IdGeneratorConfig } from "./utils/id-generator.js";
 
-// Legacy storage adapter types
-export type {
-	StorageAdapter as LegacyStorageAdapter,
-	StorageAdapterOptions,
-} from "./storage/types.js";
-
-export {
-	createNodeStorageAdapter,
-	defaultNodeStorageAdapter,
-} from "./storage/node-adapter.js";

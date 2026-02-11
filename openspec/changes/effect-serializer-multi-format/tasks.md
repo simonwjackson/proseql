@@ -29,7 +29,7 @@
 - [x] 5.1 Remove all legacy serializer type exports (`Serializer`, `LegacySerializerRegistry`, `SerializationError` from types.ts, `UnsupportedFormatError` from types.ts)
 - [x] 5.2 Remove all legacy serializer factory exports (`createJsonSerializer`, `defaultJsonSerializer`, `compactJsonSerializer`, `createYamlSerializer`, `defaultYamlSerializer`, `compactYamlSerializer`, `prettyYamlSerializer`, `createMessagePackSerializer`, `defaultMessagePackSerializer`)
 - [x] 5.3 Remove all legacy persistence exports (`createPersistenceContext`, `legacyLoadData`, `legacySaveData`, `saveDataImmediate`, `watchFile`, `fileExists`, `flushPendingWrites`, `PersistenceContext`)
-- [ ] 5.4 Remove legacy storage adapter exports (`LegacyStorageAdapter`, `StorageAdapterOptions`, `createNodeStorageAdapter`, `defaultNodeStorageAdapter`)
+- [x] 5.4 Remove legacy storage adapter exports (`LegacyStorageAdapter`, `StorageAdapterOptions`, `createNodeStorageAdapter`, `defaultNodeStorageAdapter`)
 - [ ] 5.5 Add new exports: `FormatCodec`, `FormatOptions` types, `makeSerializerLayer`, codec factories (`jsonCodec`, `yamlCodec`, `json5Codec`, `jsoncCodec`, `tomlCodec`, `toonCodec`, `hjsonCodec`), preset Layers (`AllTextFormatsLayer`, `DefaultSerializerLayer`)
 
 ## 6. Remove PersistenceOptions/DatabaseOptions
