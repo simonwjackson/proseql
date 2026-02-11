@@ -47,7 +47,7 @@
 
 ## 7. Tests — Upsert Validation
 
-- [ ] 7.1 Create `tests/upsert-validation.test.ts` with test helpers
+- [x] 7.1 Create `tests/upsert-validation.test.ts` with test helpers
 - [ ] 7.2 Test upsert `where: { id }` → always valid
 - [ ] 7.3 Test upsert `where: { email }` when email is unique → valid
 - [ ] 7.4 Test upsert `where: { name }` when name is NOT unique → `ValidationError`
