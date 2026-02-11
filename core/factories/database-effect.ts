@@ -43,10 +43,11 @@ import {
 } from "../operations/crud/delete-with-relationships.js"
 import { applyFilter } from "../operations/query/filter-stream.js"
 import { applySort } from "../operations/query/sort-stream.js"
-import { applySelect } from "../operations/query/select-stream.js"
+import { applySelect, applySelectToArray } from "../operations/query/select-stream.js"
 import { applyPagination } from "../operations/query/paginate-stream.js"
 import { applyPopulate } from "../operations/relationships/populate-stream.js"
-import type { CursorConfig } from "../types/cursor-types.js"
+import type { CursorConfig, CursorPageResult, RunnableCursorPage } from "../types/cursor-types.js"
+import { applyCursor } from "../operations/query/cursor-stream.js"
 import {
 	computeAggregates,
 	computeGroupedAggregates,
@@ -138,6 +139,27 @@ const withStreamRunPromise = <A, E>(
 	return stream as RunnableStream<A, E>
 }
 
+/**
+ * Attach a lazy `runPromise` getter to an Effect returning CursorPageResult.
+ * The effect is only executed when `.runPromise` is accessed.
+ */
+const withCursorRunPromise = <T, E>(
+	effect: Effect.Effect<CursorPageResult<T>, E, never>,
+): RunnableCursorPage<T, E> => {
+	let cached: Promise<CursorPageResult<T>> | undefined
+	Object.defineProperty(effect, "runPromise", {
+		get() {
+			if (cached === undefined) {
+				cached = Effect.runPromise(effect)
+			}
+			return cached
+		},
+		enumerable: false,
+		configurable: true,
+	})
+	return effect as RunnableCursorPage<T, E>
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -146,7 +168,8 @@ type HasId = { readonly id: string }
 
 /**
  * Shape of a single Effect-based collection.
- * Query returns a RunnableStream, CRUD methods return RunnableEffects.
+ * Query returns a RunnableStream (or RunnableCursorPage when cursor is specified),
+ * CRUD methods return RunnableEffects.
  * Both have a `.runPromise` getter for non-Effect consumers.
  */
 export interface EffectCollection<T extends HasId> {
@@ -158,7 +181,7 @@ export interface EffectCollection<T extends HasId> {
 		readonly limit?: number
 		readonly offset?: number
 		readonly cursor?: CursorConfig
-	}) => RunnableStream<Record<string, unknown>, DanglingReferenceError | ValidationError>
+	}) => RunnableStream<Record<string, unknown>, DanglingReferenceError | ValidationError> | RunnableCursorPage<Record<string, unknown>, DanglingReferenceError | ValidationError>
 
 	readonly findById: (
 		id: string,
@@ -408,6 +431,7 @@ const buildCollection = <T extends HasId>(
 	}
 
 	// Query function: read Ref snapshot → Stream pipeline
+	// Returns RunnableStream for standard queries, RunnableCursorPage for cursor pagination
 	const queryFn = (
 		options?: {
 			readonly where?: Record<string, unknown>
@@ -418,7 +442,7 @@ const buildCollection = <T extends HasId>(
 			readonly offset?: number
 			readonly cursor?: CursorConfig
 		},
-	): RunnableStream<Record<string, unknown>, DanglingReferenceError | ValidationError> => {
+	): RunnableStream<Record<string, unknown>, DanglingReferenceError | ValidationError> | RunnableCursorPage<Record<string, unknown>, DanglingReferenceError | ValidationError> => {
 		// Determine populate config: explicit populate or extract from object-based select
 		let populateConfig = options?.populate
 		if (
@@ -448,8 +472,8 @@ const buildCollection = <T extends HasId>(
 				} else {
 					const primarySortKey = sortKeys[0]
 					if (primarySortKey !== cursorKey) {
-						// Sort mismatch: return stream that immediately fails
-						const errorStream = Stream.fail(
+						// Sort mismatch: return effect that immediately fails
+						const errorEffect = Effect.fail(
 							new ValidationError({
 								message: "Invalid cursor configuration",
 								issues: [
@@ -459,16 +483,52 @@ const buildCollection = <T extends HasId>(
 									},
 								],
 							}),
-						)
-						return withStreamRunPromise(errorStream)
+						) as Effect.Effect<CursorPageResult<Record<string, unknown>>, ValidationError, never>
+						return withCursorRunPromise(errorEffect)
 					}
 				}
 			} else {
 				// No explicit sort: inject implicit ascending sort on cursor key
 				effectiveSort = { [cursorKey]: "asc" as const }
 			}
+
+			// Cursor pagination branch: filter → populate → sort → applyCursor → select
+			const cursorEffect = Effect.gen(function* () {
+				const map = yield* Ref.get(ref)
+				const items = Array.from(map.values()) as Array<Record<string, unknown>>
+				let s: Stream.Stream<Record<string, unknown>, DanglingReferenceError> =
+					Stream.fromIterable(items)
+
+				// Apply pipeline stages: filter → populate → sort
+				s = applyFilter(options?.where)(s)
+				s = applyPopulate(
+					populateConfig as Record<string, boolean | Record<string, unknown>> | undefined,
+					stateRefs as Record<string, Ref.Ref<ReadonlyMap<string, Record<string, unknown>>>>,
+					dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target: string; readonly foreignKey?: string }> }>,
+					collectionName,
+				)(s)
+				s = applySort(effectiveSort)(s)
+
+				// Collect via applyCursor (extracts cursor values from pre-select items)
+				const cursorResult = yield* applyCursor(cursorConfig)(s)
+
+				// Apply select to collected items (after cursor extraction)
+				const selectedItems = applySelectToArray(
+					cursorResult.items,
+					options?.select as Record<string, unknown> | ReadonlyArray<string> | undefined,
+				)
+
+				// Return CursorPageResult with projected items but original cursor metadata
+				return {
+					items: selectedItems,
+					pageInfo: cursorResult.pageInfo,
+				} as CursorPageResult<Record<string, unknown>>
+			})
+
+			return withCursorRunPromise(cursorEffect)
 		}
 
+		// Standard stream branch: filter → populate → sort → paginate → select
 		const stream = Stream.unwrap(
 			Effect.gen(function* () {
 				const map = yield* Ref.get(ref)

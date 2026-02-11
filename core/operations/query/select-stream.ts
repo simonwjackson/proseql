@@ -91,3 +91,28 @@ export const applySelect = <T extends Record<string, unknown>>(
       applyObjectSelect(item, select as Record<string, unknown>) as T,
     );
   };
+
+/**
+ * Apply a field selection to an array of items.
+ *
+ * This is used by cursor pagination where items are collected before selection.
+ * Supports both object-based and array-based selection configs.
+ */
+export const applySelectToArray = <T extends Record<string, unknown>>(
+  items: ReadonlyArray<T>,
+  select: SelectConfig | undefined,
+): ReadonlyArray<T> => {
+  if (select === undefined || select === null) return items;
+
+  if (Array.isArray(select)) {
+    if (select.length === 0) return items;
+    const objectSelect = arraySelectToObject(select);
+    return items.map((item) => applyObjectSelect(item, objectSelect) as T);
+  }
+
+  if (isRecord(select) && Object.keys(select).length === 0) return items;
+
+  return items.map((item) =>
+    applyObjectSelect(item, select as Record<string, unknown>) as T,
+  );
+};
