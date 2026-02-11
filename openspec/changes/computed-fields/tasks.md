@@ -66,7 +66,7 @@
 - [x] 9.8 Test filter by computed string field with operator.
 - [x] 9.9 Test sort by computed field ascending.
 - [x] 9.10 Test sort by computed field descending.
-- [ ] 9.11 Test combined: filter by computed + sort by computed + select computed.
+- [x] 9.11 Test combined: filter by computed + sort by computed + select computed.
 - [ ] 9.12 Test multiple computed fields on the same collection.
 - [ ] 9.13 Test collection with no computed fields — behaves identically to before (regression check).
 
