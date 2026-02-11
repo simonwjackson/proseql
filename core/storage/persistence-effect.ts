@@ -127,19 +127,32 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 // ============================================================================
 
 /**
+ * Options for saveData.
+ */
+export interface SaveDataOptions {
+	/**
+	 * Optional schema version to stamp into the file.
+	 * When provided, `_version` is injected at the top level before entities.
+	 */
+	readonly version?: number
+}
+
+/**
  * Save collection data to a file, encoding each entity through the given Schema.
  *
  * Flow:
  * 1. Encode each entity through the Schema (Type → Encoded)
  * 2. Build a Record<string, I> keyed by entity ID
- * 3. Serialize via SerializerRegistry
- * 4. Ensure parent directory exists
- * 5. Write via StorageAdapter
+ * 3. Optionally inject `_version` at the top level if version is provided
+ * 4. Serialize via SerializerRegistry
+ * 5. Ensure parent directory exists
+ * 6. Write via StorageAdapter
  */
 export const saveData = <A extends { readonly id: string }, I, R>(
 	filePath: string,
 	schema: Schema.Schema<A, I, R>,
 	data: ReadonlyMap<string, A>,
+	options?: SaveDataOptions,
 ): Effect.Effect<
 	void,
 	StorageError | SerializationError | UnsupportedFormatError | ValidationError,
@@ -152,7 +165,7 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 
 		// Encode each entity through the schema
 		const encode = Schema.encode(schema)
-		const obj: Record<string, I> = {}
+		const entityMap: Record<string, I> = {}
 
 		for (const [id, entity] of data) {
 			const encoded = yield* encode(entity).pipe(
@@ -169,11 +182,17 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 						}),
 				),
 			)
-			obj[id] = encoded
+			entityMap[id] = encoded
 		}
 
+		// Build output object, injecting _version first if provided for readability
+		const output: Record<string, unknown> =
+			options?.version !== undefined
+				? { _version: options.version, ...entityMap }
+				: entityMap
+
 		// Serialize and write
-		const content = yield* serializer.serialize(obj, ext)
+		const content = yield* serializer.serialize(output, ext)
 		yield* storage.ensureDir(filePath)
 		yield* storage.write(filePath, content)
 	})
