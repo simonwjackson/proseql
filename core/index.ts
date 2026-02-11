@@ -377,15 +377,6 @@ export {
 
 export type { IdGeneratorConfig } from "./utils/id-generator.js";
 
-// ============================================================================
-// Legacy Serializer Types (for backward compatibility)
-// ============================================================================
-
-export type {
-	Serializer,
-	SerializerRegistry as LegacySerializerRegistry,
-} from "./serializers/types.js";
-
 // Legacy serializer factories
 export {
 	createJsonSerializer,
