@@ -7,7 +7,7 @@
 
 ## 2. Cursor Stream Implementation
 
-- [ ] 2.1 Create `core/operations/query/cursor-stream.ts` with `applyCursor(config: CursorConfig)` function. Takes a sorted `Stream<T>` and returns `Effect<CursorPageResult<T>, ValidationError>`. Implements: cursor boundary filtering (`> after` or `< before`), `limit + 1` fetch for has-more detection, cursor value extraction via `String(record[key])`
+- [x] 2.1 Create `core/operations/query/cursor-stream.ts` with `applyCursor(config: CursorConfig)` function. Takes a sorted `Stream<T>` and returns `Effect<CursorPageResult<T>, ValidationError>`. Implements: cursor boundary filtering (`> after` or `< before`), `limit + 1` fetch for has-more detection, cursor value extraction via `String(record[key])`
 - [ ] 2.2 Implement forward pagination (after): filter to `record[key] > after`, take first `limit + 1`, set `hasNextPage` if overflow, `hasPreviousPage = true`
 - [ ] 2.3 Implement backward pagination (before): filter to `record[key] < before`, take last `limit + 1`, set `hasPreviousPage` if overflow, `hasNextPage = true`, maintain ascending item order
 - [ ] 2.4 Implement first page (no after/before): take first `limit + 1`, set `hasNextPage` if overflow, `hasPreviousPage = false`
