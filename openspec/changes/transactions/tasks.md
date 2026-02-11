@@ -28,7 +28,7 @@
 
 ## 5. Tests — Transaction Callback
 
-- [ ] 5.1 Create `tests/transactions.test.ts` with test helpers: create a multi-collection database (users + posts with relationships)
+- [x] 5.1 Create `tests/transactions.test.ts` with test helpers: create a multi-collection database (users + posts with relationships)
 - [ ] 5.2 Test successful transaction: create user + create post in `$transaction`, both visible after commit
 - [ ] 5.3 Test failed transaction: create user, then fail (Effect.fail), user creation reverted
 - [ ] 5.4 Test explicit rollback: call `ctx.rollback()` mid-transaction, all changes reverted
