@@ -21,7 +21,7 @@
 - [x] 3.1 Create `packages/node/` directory structure: `src/`, `tests/`
 - [x] 3.2 Move `core/storage/node-adapter-layer.ts` to `packages/node/src/node-adapter-layer.ts`
 - [x] 3.3 Update imports in `node-adapter-layer.ts`: change `./storage-service.js` to `@proseql/core` (import `StorageAdapter`), change `../errors/storage-errors.js` to `@proseql/core` (import `StorageError`)
-- [ ] 3.4 Create `packages/node/src/index.ts`: `export * from "@proseql/core"` plus `export { NodeStorageLayer, makeNodeStorageLayer } from "./node-adapter-layer.js"` and `export type { NodeAdapterConfig } from "./node-adapter-layer.js"`
+- [x] 3.4 Create `packages/node/src/index.ts`: `export * from "@proseql/core"` plus `export { NodeStorageLayer, makeNodeStorageLayer } from "./node-adapter-layer.js"` and `export type { NodeAdapterConfig } from "./node-adapter-layer.js"`
 - [ ] 3.5 Create `packages/node/package.json`: name `@proseql/node`, version `0.1.0`, type `module`, main `src/index.ts`, dependencies: `{ "@proseql/core": "workspace:*" }`
 - [ ] 3.6 Create `packages/node/tsconfig.json`: extends `../../tsconfig.base.json`, rootDir `src`, outDir `dist`, references `[{ "path": "../core" }]`
 - [ ] 3.7 Create `packages/node/tests/node-storage.test.ts` with the Node adapter test extracted from `storage-services.test.ts`, update imports to use `../src/node-adapter-layer.js` and `@proseql/core`
