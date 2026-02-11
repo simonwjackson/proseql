@@ -464,4 +464,92 @@ describe("Full-text search: Multi-Field Search (task 10)", () => {
 			expect(results.some((r) => r.title === "The Left Hand of Darkness")).toBe(true)
 		})
 	})
+
+	describe("10.2: Default all string fields search", () => {
+		it("should search all string fields when fields is omitted - author match", async () => {
+			const db = await createTestDatabase()
+			// "gibson" is in author field "William Gibson"
+			const results = await db.books.query({
+				where: { $search: { query: "gibson" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Neuromancer")
+			expect(results[0].author).toBe("William Gibson")
+		})
+
+		it("should search all string fields when fields is omitted - title match", async () => {
+			const db = await createTestDatabase()
+			// "dune" is in title field
+			const results = await db.books.query({
+				where: { $search: { query: "dune" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should search all string fields when fields is omitted - description match", async () => {
+			const db = await createTestDatabase()
+			// "sandworms" is in description field
+			const results = await db.books.query({
+				where: { $search: { query: "sandworms" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should match when terms span across different string fields without specifying fields", async () => {
+			const db = await createTestDatabase()
+			// "herbert" is in author, "spice" is in description
+			const results = await db.books.query({
+				where: { $search: { query: "herbert spice" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+			expect(results[0].author).toBe("Frank Herbert")
+		})
+
+		it("should search multiple string fields and find matches across entities", async () => {
+			const db = await createTestDatabase()
+			// "television" is in Neuromancer's description
+			const results = await db.books.query({
+				where: { $search: { query: "television" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Neuromancer")
+		})
+
+		it("should not search non-string fields like year", async () => {
+			const db = await createTestDatabase()
+			// "1965" is the year but it's a number field, not string
+			// The search should not find it (year field is type Number)
+			// Note: This searches string fields only
+			const results = await db.books.query({
+				where: { $search: { query: "1965" } },
+			}).runPromise
+			// Should not match because year is a number field
+			expect(results.length).toBe(0)
+		})
+
+		it("should return multiple matches when query matches different entities", async () => {
+			const db = await createTestDatabase()
+			// "planet" appears in both Dune's description ("desert planet") and
+			// The Left Hand of Darkness's description ("winter planet")
+			const results = await db.books.query({
+				where: { $search: { query: "planet" } },
+			}).runPromise
+			expect(results.length).toBe(2)
+			const titles = results.map((r) => r.title).sort()
+			expect(titles).toEqual(["Dune", "The Left Hand of Darkness"])
+		})
+
+		it("should support prefix matching across all string fields", async () => {
+			const db = await createTestDatabase()
+			// "cyber" is a prefix for "cyberpunk" in Snow Crash's description
+			const results = await db.books.query({
+				where: { $search: { query: "cyber" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Snow Crash")
+		})
+	})
 })
