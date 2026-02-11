@@ -1,6 +1,6 @@
 ## 1. Types
 
-- [ ] 1.1 Create `core/types/hook-types.ts` with all context types: `BeforeCreateContext<T>`, `BeforeUpdateContext<T>`, `BeforeDeleteContext<T>`, `AfterCreateContext<T>`, `AfterUpdateContext<T>`, `AfterDeleteContext<T>`, `OnChangeContext<T>` (discriminated union on `type`)
+- [x] 1.1 Create `core/types/hook-types.ts` with all context types: `BeforeCreateContext<T>`, `BeforeUpdateContext<T>`, `BeforeDeleteContext<T>`, `AfterCreateContext<T>`, `AfterUpdateContext<T>`, `AfterDeleteContext<T>`, `OnChangeContext<T>` (discriminated union on `type`)
 - [ ] 1.2 Define hook function signatures: `BeforeCreateHook<T>`, `BeforeUpdateHook<T>`, `BeforeDeleteHook<T>`, `AfterCreateHook<T>`, `AfterUpdateHook<T>`, `AfterDeleteHook<T>`, `OnChangeHook<T>`
 - [ ] 1.3 Define `HooksConfig<T>` interface with optional arrays for each hook type
 - [ ] 1.4 Add `HookError` to `core/errors/crud-errors.ts`: `Data.TaggedError("HookError")<{ hook, collection, operation, reason, message }>`
