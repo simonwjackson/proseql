@@ -1,17 +1,15 @@
 /**
  * Node adapter storage tests - extracted from storage-services.test.ts
- *
- * NOTE: This test file is a placeholder until @proseql/node package is fully set up.
- * It will be updated in task 3.7 to use proper imports from the node package.
- * For now, it imports directly from the core package paths.
  */
 import { describe, it, expect } from "vitest"
 import { Effect, Layer } from "effect"
-import { StorageAdapter } from "../../core/src/storage/storage-service.js"
-import { SerializerRegistry } from "../../core/src/serializers/serializer-service.js"
-import { makeNodeStorageLayer } from "../../../core/storage/node-adapter-layer.js"
-import { makeSerializerLayer } from "../../core/src/serializers/format-codec.js"
-import { jsonCodec } from "../../core/src/serializers/codecs/json.js"
+import {
+	StorageAdapterService as StorageAdapter,
+	SerializerRegistryService as SerializerRegistry,
+	makeSerializerLayer,
+	jsonCodec,
+} from "@proseql/core"
+import { makeNodeStorageLayer } from "../src/node-adapter-layer.js"
 import { promises as fs } from "fs"
 import { join } from "path"
 import { tmpdir } from "os"

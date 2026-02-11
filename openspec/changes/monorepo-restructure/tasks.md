@@ -24,7 +24,7 @@
 - [x] 3.4 Create `packages/node/src/index.ts`: `export * from "@proseql/core"` plus `export { NodeStorageLayer, makeNodeStorageLayer } from "./node-adapter-layer.js"` and `export type { NodeAdapterConfig } from "./node-adapter-layer.js"`
 - [x] 3.5 Create `packages/node/package.json`: name `@proseql/node`, version `0.1.0`, type `module`, main `src/index.ts`, dependencies: `{ "@proseql/core": "workspace:*" }`
 - [x] 3.6 Create `packages/node/tsconfig.json`: extends `../../tsconfig.base.json`, rootDir `src`, outDir `dist`, references `[{ "path": "../core" }]`
-- [ ] 3.7 Create `packages/node/tests/node-storage.test.ts` with the Node adapter test extracted from `storage-services.test.ts`, update imports to use `../src/node-adapter-layer.js` and `@proseql/core`
+- [x] 3.7 Create `packages/node/tests/node-storage.test.ts` with the Node adapter test extracted from `storage-services.test.ts`, update imports to use `../src/node-adapter-layer.js` and `@proseql/core`
 
 ## 4. Package: @proseql/rest
 
