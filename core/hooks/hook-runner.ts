@@ -110,7 +110,7 @@ export const runAfterCreateHooks = <T>(
 
 	return Effect.forEach(
 		hooks,
-		(hook) => Effect.catchAll(hook(ctx), () => Effect.void),
+		(hook) => Effect.catchAll(hook(ctx) as Effect.Effect<void, unknown>, () => Effect.void),
 		{ discard: true },
 	)
 }
@@ -131,7 +131,7 @@ export const runAfterUpdateHooks = <T>(
 
 	return Effect.forEach(
 		hooks,
-		(hook) => Effect.catchAll(hook(ctx), () => Effect.void),
+		(hook) => Effect.catchAll(hook(ctx) as Effect.Effect<void, unknown>, () => Effect.void),
 		{ discard: true },
 	)
 }
@@ -152,7 +152,7 @@ export const runAfterDeleteHooks = <T>(
 
 	return Effect.forEach(
 		hooks,
-		(hook) => Effect.catchAll(hook(ctx), () => Effect.void),
+		(hook) => Effect.catchAll(hook(ctx) as Effect.Effect<void, unknown>, () => Effect.void),
 		{ discard: true },
 	)
 }
@@ -177,7 +177,7 @@ export const runOnChangeHooks = <T>(
 
 	return Effect.forEach(
 		hooks,
-		(hook) => Effect.catchAll(hook(ctx), () => Effect.void),
+		(hook) => Effect.catchAll(hook(ctx) as Effect.Effect<void, unknown>, () => Effect.void),
 		{ discard: true },
 	)
 }

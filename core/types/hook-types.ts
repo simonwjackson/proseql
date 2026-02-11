@@ -159,38 +159,38 @@ export type BeforeDeleteHook<T> = (
 /**
  * After-hook for create operations.
  * Receives the entity as it was stored. Used for side effects.
- * Errors are swallowed (fire-and-forget).
+ * Errors are swallowed (fire-and-forget) - hooks may fail but failures are ignored.
  */
 export type AfterCreateHook<T> = (
 	ctx: AfterCreateContext<T>,
-) => Effect.Effect<void, never>;
+) => Effect.Effect<void, unknown>;
 
 /**
  * After-hook for update operations.
  * Receives both previous and current state to enable diffing.
- * Errors are swallowed (fire-and-forget).
+ * Errors are swallowed (fire-and-forget) - hooks may fail but failures are ignored.
  */
 export type AfterUpdateHook<T> = (
 	ctx: AfterUpdateContext<T>,
-) => Effect.Effect<void, never>;
+) => Effect.Effect<void, unknown>;
 
 /**
  * After-hook for delete operations.
  * Receives the entity that was deleted.
- * Errors are swallowed (fire-and-forget).
+ * Errors are swallowed (fire-and-forget) - hooks may fail but failures are ignored.
  */
 export type AfterDeleteHook<T> = (
 	ctx: AfterDeleteContext<T>,
-) => Effect.Effect<void, never>;
+) => Effect.Effect<void, unknown>;
 
 /**
  * Generic change hook that fires after any mutation.
  * Receives a discriminated union context with type "create", "update", or "delete".
- * Errors are swallowed (fire-and-forget).
+ * Errors are swallowed (fire-and-forget) - hooks may fail but failures are ignored.
  */
 export type OnChangeHook<T> = (
 	ctx: OnChangeContext<T>,
-) => Effect.Effect<void, never>;
+) => Effect.Effect<void, unknown>;
 
 // ============================================================================
 // Hooks Configuration
