@@ -51,7 +51,7 @@
 - [x] 8.2 Test beforeCreate transforms data → inserted entity reflects transformation
 - [x] 8.3 Test beforeCreate rejects → create fails with HookError, no state change
 - [x] 8.4 Test multiple beforeCreate hooks chain in order
-- [ ] 8.5 Test beforeUpdate modifies update payload
+- [x] 8.5 Test beforeUpdate modifies update payload
 - [ ] 8.6 Test beforeUpdate rejects → update fails, entity unchanged
 - [ ] 8.7 Test beforeDelete rejects → delete fails, entity still exists
 - [ ] 8.8 Test hook receives correct context (collection, operation, data)

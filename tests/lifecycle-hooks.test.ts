@@ -469,5 +469,40 @@ describe("lifecycle-hooks", () => {
 			expect(result.created.name).toBe("Original-hook1-hook2-hook3")
 			expect(result.found.name).toBe("Original-hook1-hook2-hook3")
 		})
+
+		it("beforeUpdate modifies update payload", async () => {
+			// Hook that transforms the update: normalizes email to lowercase and adds updatedAt
+			const hooks: HooksConfig<User> = {
+				beforeUpdate: [
+					makeBeforeUpdateHook((update) => ({
+						...update,
+						email: typeof update.email === "string" ? update.email.toLowerCase() : update.email,
+						updatedAt: "2024-01-15T12:00:00Z",
+					})),
+				],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks)
+					// Update u1's email with uppercase - hook should normalize it
+					const updated = yield* db.users.update("u1", {
+						email: "ALICE_NEW@EXAMPLE.COM",
+					})
+					// Also verify by reading back from collection
+					const found = yield* db.users.findById("u1")
+					return { updated, found }
+				}),
+			)
+
+			// The updated entity should have transformed data
+			expect(result.updated.email).toBe("alice_new@example.com")
+			expect(result.updated.updatedAt).toBe("2024-01-15T12:00:00Z")
+			expect(result.updated.name).toBe("Alice") // Unchanged field preserved
+
+			// The entity in the collection should also have the transformed data
+			expect(result.found.email).toBe("alice_new@example.com")
+			expect(result.found.updatedAt).toBe("2024-01-15T12:00:00Z")
+		})
 	})
 })
