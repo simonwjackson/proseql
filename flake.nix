@@ -65,5 +65,29 @@
           };
         }
       );
+
+      checks = forAllSystems (
+        { pkgs, ... }:
+        {
+          default = pkgs.stdenvNoCC.mkDerivation {
+            name = "proseql-checks";
+            src = ./.;
+
+            nativeBuildInputs = [ pkgs.bun ];
+
+            buildPhase = ''
+              export HOME=$(mktemp -d)
+              bun install --frozen-lockfile
+              bun test packages/*/tests/
+              bunx tsc --build
+            '';
+
+            installPhase = ''
+              mkdir -p $out
+              echo "All checks passed" > $out/result
+            '';
+          };
+        }
+      );
     };
 }
