@@ -1843,3 +1843,326 @@ describe("Snapshot Isolation", () => {
 		})
 	})
 })
+
+// ============================================================================
+// Persistence Integration Tests
+// ============================================================================
+
+import { $transaction as $transactionImpl } from "../core/transactions/transaction.js"
+
+/**
+ * Helper to create a manual transaction test setup with a spy on the persistence trigger.
+ * This allows us to verify when persistence is triggered.
+ */
+const createPersistenceSpySetup = () =>
+	Effect.gen(function* () {
+		type HasId = { readonly id: string }
+
+		// State refs for each collection
+		const usersRef = yield* Ref.make<ReadonlyMap<string, HasId>>(
+			new Map([
+				["u1", { id: "u1", name: "Alice", email: "alice@test.com", age: 30 }],
+				["u2", { id: "u2", name: "Bob", email: "bob@test.com", age: 25 }],
+			]),
+		)
+		const postsRef = yield* Ref.make<ReadonlyMap<string, HasId>>(
+			new Map([
+				["p1", { id: "p1", title: "Hello World", content: "First post", authorId: "u1" }],
+				["p2", { id: "p2", title: "TypeScript Tips", content: "Type safety", authorId: "u2" }],
+			]),
+		)
+
+		const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>> = {
+			users: usersRef,
+			posts: postsRef,
+		}
+
+		// Transaction lock
+		const transactionLock = yield* Ref.make(false)
+
+		// Persistence trigger spy
+		const scheduleCalls: string[] = []
+		const persistenceTrigger = {
+			schedule: (key: string): void => {
+				scheduleCalls.push(key)
+			},
+		}
+
+		// Minimal buildCollectionForTx that creates CRUD wrappers
+		const buildCollectionForTx = (
+			collectionName: string,
+			addMutation: (name: string) => void,
+		) => {
+			const ref = stateRefs[collectionName]
+
+			return {
+				create: (input: HasId) => {
+					const effect = Effect.gen(function* () {
+						const entity = { ...input, id: input.id ?? `generated-${Date.now()}` } as HasId
+						yield* Ref.update(ref, (map) => {
+							const newMap = new Map(map)
+							newMap.set(entity.id, entity)
+							return newMap
+						})
+						addMutation(collectionName)
+						return entity
+					})
+					return Object.assign(effect, {
+						get runPromise() {
+							return Effect.runPromise(effect)
+						},
+					})
+				},
+				findById: (id: string) => {
+					const effect = Effect.gen(function* () {
+						const map = yield* Ref.get(ref)
+						const entity = map.get(id)
+						if (!entity) {
+							return yield* new NotFoundError({
+								collection: collectionName,
+								id,
+								message: `Entity with id "${id}" not found`,
+							})
+						}
+						return entity
+					})
+					return Object.assign(effect, {
+						get runPromise() {
+							return Effect.runPromise(effect)
+						},
+					})
+				},
+				update: (id: string, changes: Partial<HasId>) => {
+					const effect = Effect.gen(function* () {
+						const map = yield* Ref.get(ref)
+						const existing = map.get(id)
+						if (!existing) {
+							return yield* new NotFoundError({
+								collection: collectionName,
+								id,
+								message: `Entity with id "${id}" not found`,
+							})
+						}
+						const updated = { ...existing, ...changes, id } as HasId
+						yield* Ref.update(ref, (m) => {
+							const newMap = new Map(m)
+							newMap.set(id, updated)
+							return newMap
+						})
+						addMutation(collectionName)
+						return updated
+					})
+					return Object.assign(effect, {
+						get runPromise() {
+							return Effect.runPromise(effect)
+						},
+					})
+				},
+				delete: (id: string) => {
+					const effect = Effect.gen(function* () {
+						const map = yield* Ref.get(ref)
+						const existing = map.get(id)
+						if (!existing) {
+							return yield* new NotFoundError({
+								collection: collectionName,
+								id,
+								message: `Entity with id "${id}" not found`,
+							})
+						}
+						yield* Ref.update(ref, (m) => {
+							const newMap = new Map(m)
+							newMap.delete(id)
+							return newMap
+						})
+						addMutation(collectionName)
+						return existing
+					})
+					return Object.assign(effect, {
+						get runPromise() {
+							return Effect.runPromise(effect)
+						},
+					})
+				},
+				// Stub methods for the interface
+				createMany: () => Effect.succeed({ created: [], failed: [] }),
+				updateMany: () => Effect.succeed({ updated: [], count: 0 }),
+				deleteMany: () => Effect.succeed({ deleted: [], count: 0 }),
+				upsert: () => Effect.succeed({ entity: {} as HasId, operation: "created" as const }),
+				upsertMany: () => Effect.succeed({ results: [] }),
+				query: () => Stream.empty,
+				createWithRelationships: () => Effect.succeed({} as HasId),
+				updateWithRelationships: () => Effect.succeed({} as HasId),
+				deleteWithRelationships: () => Effect.succeed({ entity: {} as HasId }),
+				deleteManyWithRelationships: () => Effect.succeed({ count: 0, deleted: [] }),
+				aggregate: () => Effect.succeed({}),
+			}
+		}
+
+		return {
+			stateRefs,
+			transactionLock,
+			buildCollectionForTx,
+			persistenceTrigger,
+			scheduleCalls,
+			usersRef,
+			postsRef,
+		}
+	})
+
+describe("Persistence Integration", () => {
+	describe("no persistence during active transaction", () => {
+		it("should not trigger persistence schedule during active transaction", async () => {
+			const setup = await Effect.runPromise(createPersistenceSpySetup())
+
+			// Verify no persistence calls initially
+			expect(setup.scheduleCalls).toHaveLength(0)
+
+			// Create transaction context manually with persistence trigger
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					setup.persistenceTrigger,
+				),
+			)
+
+			// Verify transaction is active
+			expect(ctx.isActive).toBe(true)
+
+			// Perform multiple mutations within the transaction
+			await Effect.runPromise(
+				ctx.users.create({
+					id: "u3",
+					name: "Charlie",
+					email: "charlie@test.com",
+					age: 35,
+				}),
+			)
+
+			// Verify NO persistence calls were made during the transaction
+			// The mutations are tracked in mutatedCollections but not persisted yet
+			expect(setup.scheduleCalls).toHaveLength(0)
+			expect(ctx.mutatedCollections.has("users")).toBe(true)
+
+			// Perform another mutation
+			await Effect.runPromise(
+				ctx.posts.create({
+					id: "p3",
+					title: "Charlie's Post",
+					content: "Hello from Charlie",
+					authorId: "u3",
+				}),
+			)
+
+			// Still no persistence calls
+			expect(setup.scheduleCalls).toHaveLength(0)
+			expect(ctx.mutatedCollections.has("posts")).toBe(true)
+
+			// Update an existing entity
+			await Effect.runPromise(
+				ctx.users.update("u1", { name: "Alice Updated" }),
+			)
+
+			// Still no persistence calls - even after multiple mutations
+			expect(setup.scheduleCalls).toHaveLength(0)
+			expect(ctx.mutatedCollections.size).toBe(2)
+
+			// Now commit the transaction
+			await Effect.runPromise(ctx.commit())
+
+			// After commit, persistence should be triggered for all mutated collections
+			expect(setup.scheduleCalls).toHaveLength(2)
+			expect(setup.scheduleCalls).toContain("users")
+			expect(setup.scheduleCalls).toContain("posts")
+		})
+
+		it("should not trigger persistence schedule when using $transaction callback", async () => {
+			const setup = await Effect.runPromise(createPersistenceSpySetup())
+
+			// Verify no persistence calls initially
+			expect(setup.scheduleCalls).toHaveLength(0)
+
+			// Use $transaction callback wrapper
+			await Effect.runPromise(
+				$transactionImpl(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					setup.persistenceTrigger,
+					(ctx) =>
+						Effect.gen(function* () {
+							// Create a user
+							yield* ctx.users.create({
+								id: "u3",
+								name: "Charlie",
+								email: "charlie@test.com",
+								age: 35,
+							})
+
+							// At this point, no persistence should have been called
+							expect(setup.scheduleCalls).toHaveLength(0)
+
+							// Create a post
+							yield* ctx.posts.create({
+								id: "p3",
+								title: "Charlie's Post",
+								content: "Hello from Charlie",
+								authorId: "u3",
+							})
+
+							// Still no persistence calls during the transaction
+							expect(setup.scheduleCalls).toHaveLength(0)
+
+							return "completed"
+						}),
+				),
+			)
+
+			// After $transaction completes (auto-commits), persistence should be triggered
+			expect(setup.scheduleCalls).toHaveLength(2)
+			expect(setup.scheduleCalls).toContain("users")
+			expect(setup.scheduleCalls).toContain("posts")
+		})
+
+		it("should track mutations in mutatedCollections without triggering persistence", async () => {
+			const setup = await Effect.runPromise(createPersistenceSpySetup())
+
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					setup.persistenceTrigger,
+				),
+			)
+
+			// Initially no mutations tracked and no persistence calls
+			expect(ctx.mutatedCollections.size).toBe(0)
+			expect(setup.scheduleCalls).toHaveLength(0)
+
+			// Perform mutations on different collections
+			await Effect.runPromise(ctx.users.create({ id: "u3", name: "Charlie", email: "c@t.com", age: 30 }))
+			await Effect.runPromise(ctx.users.update("u1", { name: "Alice Updated" }))
+			await Effect.runPromise(ctx.posts.create({ id: "p3", title: "New Post", content: "Content", authorId: "u3" }))
+			await Effect.runPromise(ctx.users.create({ id: "u4", name: "Diana", email: "d@t.com", age: 25 }))
+
+			// Verify mutations are tracked
+			expect(ctx.mutatedCollections.size).toBe(2)
+			expect(ctx.mutatedCollections.has("users")).toBe(true)
+			expect(ctx.mutatedCollections.has("posts")).toBe(true)
+
+			// Verify NO persistence calls during active transaction
+			expect(setup.scheduleCalls).toHaveLength(0)
+
+			// Transaction still active
+			expect(ctx.isActive).toBe(true)
+
+			// Clean up - commit the transaction
+			await Effect.runPromise(ctx.commit())
+
+			// Now persistence is triggered
+			expect(setup.scheduleCalls).toHaveLength(2)
+		})
+	})
+})
