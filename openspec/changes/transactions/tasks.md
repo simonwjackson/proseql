@@ -52,7 +52,7 @@
 - [x] 7.3 Test lock release on commit: new transaction can begin after previous commits
 - [x] 7.4 Test lock release on rollback: new transaction can begin after previous rolls back
 - [x] 7.5 Test lock release on error: automatic rollback in `$transaction` releases lock
-- [ ] 7.6 Test concurrent transaction rejection: second `createTransaction` while first is active → `TransactionError`
+- [x] 7.6 Test concurrent transaction rejection: second `createTransaction` while first is active → `TransactionError`
 
 ## 8. Tests — Persistence Integration
 

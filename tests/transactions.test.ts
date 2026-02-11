@@ -1616,6 +1616,142 @@ describe("Snapshot Isolation", () => {
 		})
 	})
 
+	describe("concurrent transaction rejection", () => {
+		it("should reject second createTransaction while first is active with TransactionError", async () => {
+			const setup = await Effect.runPromise(createManualTransactionTestSetup())
+
+			// Create first transaction
+			const ctx1 = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined,
+				),
+			)
+
+			// Verify first transaction is active
+			expect(ctx1.isActive).toBe(true)
+
+			// Perform an operation in first transaction (to simulate it being "in use")
+			await Effect.runPromise(
+				ctx1.users.create({
+					id: "u3",
+					name: "Charlie",
+					email: "charlie@test.com",
+					age: 35,
+				}),
+			)
+
+			// Attempt to create a second transaction while first is still active
+			// This should fail with TransactionError
+			const secondTxResult = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined,
+				).pipe(Effect.either),
+			)
+
+			// Verify the second transaction was rejected
+			expect(secondTxResult._tag).toBe("Left")
+			if (secondTxResult._tag === "Left") {
+				const error = secondTxResult.left as {
+					readonly _tag?: string
+					readonly operation?: string
+					readonly reason?: string
+				}
+				expect(error._tag).toBe("TransactionError")
+				expect(error.operation).toBe("begin")
+				expect(error.reason).toBe("another transaction is already active")
+			}
+
+			// Verify first transaction is still active and operational
+			expect(ctx1.isActive).toBe(true)
+
+			// Verify the first transaction can still complete its operations
+			const userInTx = await Effect.runPromise(ctx1.users.findById("u3"))
+			expect(userInTx.name).toBe("Charlie")
+
+			// Commit first transaction
+			await Effect.runPromise(ctx1.commit())
+			expect(ctx1.isActive).toBe(false)
+
+			// Verify the user from first transaction persisted
+			const finalUsers = await Effect.runPromise(Ref.get(setup.usersRef))
+			expect(finalUsers.size).toBe(3)
+			expect(finalUsers.get("u3")).toBeDefined()
+			expect((finalUsers.get("u3") as { name: string }).name).toBe("Charlie")
+		})
+
+		it("should reject multiple concurrent createTransaction attempts while first is active", async () => {
+			const setup = await Effect.runPromise(createManualTransactionTestSetup())
+
+			// Create first transaction
+			const ctx1 = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined,
+				),
+			)
+
+			expect(ctx1.isActive).toBe(true)
+
+			// Attempt to create multiple concurrent transactions - all should fail
+			const [result2, result3, result4] = await Promise.all([
+				Effect.runPromise(
+					createTransaction(
+						setup.stateRefs,
+						setup.transactionLock,
+						setup.buildCollectionForTx,
+						undefined,
+					).pipe(Effect.either),
+				),
+				Effect.runPromise(
+					createTransaction(
+						setup.stateRefs,
+						setup.transactionLock,
+						setup.buildCollectionForTx,
+						undefined,
+					).pipe(Effect.either),
+				),
+				Effect.runPromise(
+					createTransaction(
+						setup.stateRefs,
+						setup.transactionLock,
+						setup.buildCollectionForTx,
+						undefined,
+					).pipe(Effect.either),
+				),
+			])
+
+			// All concurrent attempts should fail
+			for (const result of [result2, result3, result4]) {
+				expect(result._tag).toBe("Left")
+				if (result._tag === "Left") {
+					const error = result.left as {
+						readonly _tag?: string
+						readonly operation?: string
+						readonly reason?: string
+					}
+					expect(error._tag).toBe("TransactionError")
+					expect(error.operation).toBe("begin")
+					expect(error.reason).toBe("another transaction is already active")
+				}
+			}
+
+			// First transaction should still be active
+			expect(ctx1.isActive).toBe(true)
+
+			// Clean up - commit the first transaction
+			await Effect.runPromise(ctx1.commit())
+			expect(ctx1.isActive).toBe(false)
+		})
+	})
+
 	describe("lock release on rollback", () => {
 		it("should allow new transaction to begin after previous rolls back", async () => {
 			const setup = await Effect.runPromise(createManualTransactionTestSetup())
