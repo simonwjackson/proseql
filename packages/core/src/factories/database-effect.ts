@@ -857,13 +857,13 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 				transactionLock,
 				buildCollectionForTx,
 				undefined, // no persistence trigger for in-memory database
-				fn as (ctx: TransactionContext<Record<string, EffectCollection<HasId>>>) => Effect.Effect<A, E>,
+				fn as unknown as (ctx: TransactionContext<Record<string, EffectCollection<HasId>>>) => Effect.Effect<A, E>,
 			)
 
 		// Return database with $transaction method
 		return Object.assign(collections, {
 			$transaction: $transactionMethod,
-		}) as EffectDatabase<Config> & {
+		}) as unknown as EffectDatabase<Config> & {
 			$transaction<A, E>(
 				fn: (ctx: TransactionContext<EffectDatabase<Config>>) => Effect.Effect<A, E>,
 			): Effect.Effect<A, E | TransactionError>
@@ -1089,7 +1089,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				transactionLock,
 				buildCollectionForTx,
 				trigger, // persistence trigger for debounced saves on commit
-				fn as (ctx: TransactionContext<Record<string, EffectCollection<HasId>>>) => Effect.Effect<A, E>,
+				fn as unknown as (ctx: TransactionContext<Record<string, EffectCollection<HasId>>>) => Effect.Effect<A, E>,
 			)
 
 		return Object.assign(db, {
