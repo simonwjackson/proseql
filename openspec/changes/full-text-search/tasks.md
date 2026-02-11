@@ -38,7 +38,7 @@
 
 ## 7. Search Index
 
-- [ ] 7.1 Create `core/indexes/search-index.ts` with `buildSearchIndex(fields: ReadonlyArray<string>, entities: ReadonlyArray<Record<string, unknown>>): Effect<Ref<SearchIndexMap>>` -- tokenize each entity's indexed fields, populate the inverted index
+- [x] 7.1 Create `core/indexes/search-index.ts` with `buildSearchIndex(fields: ReadonlyArray<string>, entities: ReadonlyArray<Record<string, unknown>>): Effect<Ref<SearchIndexMap>>` -- tokenize each entity's indexed fields, populate the inverted index
 - [ ] 7.2 Implement `lookupSearchIndex(indexRef: Ref<SearchIndexMap>, queryTokens: ReadonlyArray<string>): Effect<Set<string>>` -- intersect ID sets for exact token matches, union with prefix-matched ID sets, return candidate entity IDs
 - [ ] 7.3 Wire search index into the query pipeline: when a search index is available and covers the queried fields, use `lookupSearchIndex` to narrow candidates before running `filterData`
 
