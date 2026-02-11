@@ -3,3 +3,4 @@ effect/
 packages/*/dist/
 bun.nix
 packages/*/*.tsbuildinfo
+coverage/

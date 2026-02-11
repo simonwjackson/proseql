@@ -17,7 +17,7 @@
 
 ## 2. Configuration
 
-- [ ] 2.1 Add `coverage/` to `.gitignore`
+- [x] 2.1 Add `coverage/` to `.gitignore`
 - [ ] 2.2 Add `[test.coverage]` section to `bunfig.toml` with coverage reporter configuration (`text` and `lcov`), output directory (`coverage`), and source inclusion/exclusion patterns
 - [ ] 2.3 Configure exclusion patterns in `bunfig.toml` to skip `tests/`, `examples/`, `effect/`, `**/index.ts`, and `**/*.d.ts` from coverage metrics
 - [ ] 2.4 Set coverage thresholds in `bunfig.toml` based on the actual values measured in 1.1, rounded down to the nearest integer to allow minor fluctuation without false failures
