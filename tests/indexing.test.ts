@@ -4539,6 +4539,356 @@ describe("Indexing - Query Acceleration", () => {
 			expect(ids).toEqual(["p1", "p3"])
 		})
 	})
+
+	describe("Task 9.5: compound index maintenance (create/update/delete)", () => {
+		it("should add entity to compound index when created", async () => {
+			const config = createMultiIndexConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Create a product with compound indexed fields
+			await db.products.create({
+				id: "p1",
+				name: "Laptop",
+				category: "electronics",
+				subcategory: "computers",
+				price: 999,
+			}).runPromise
+
+			// Query using compound index - should find the product
+			const results = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("p1")
+		})
+
+		it("should add multiple entities to compound index with createMany", async () => {
+			const config = createMultiIndexConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Batch create products
+			await db.products.createMany([
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Desktop", category: "electronics", subcategory: "computers", price: 799 },
+				{ id: "p3", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+			]).runPromise
+
+			// Query compound index - should find both computers
+			const computersResults = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(computersResults.length).toBe(2)
+			const computerIds = computersResults.map((r) => (r as { id: string }).id).sort()
+			expect(computerIds).toEqual(["p1", "p2"])
+
+			// Query another compound key - should find phones
+			const phonesResults = await db.products.query({
+				where: { category: "electronics", subcategory: "phones" },
+			}).runPromise
+			expect(phonesResults.length).toBe(1)
+			expect((phonesResults[0] as { id: string }).id).toBe("p3")
+		})
+
+		it("should update compound index when updating first field of compound key", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Update category (first field) from "electronics" to "refurbished"
+			await db.products.update("p1", { category: "refurbished" }).runPromise
+
+			// Old compound key should be empty
+			const oldResults = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(oldResults.length).toBe(0)
+
+			// New compound key should have the product
+			const newResults = await db.products.query({
+				where: { category: "refurbished", subcategory: "computers" },
+			}).runPromise
+			expect(newResults.length).toBe(1)
+			expect((newResults[0] as { id: string }).id).toBe("p1")
+		})
+
+		it("should update compound index when updating second field of compound key", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Update subcategory (second field) from "computers" to "laptops"
+			await db.products.update("p1", { subcategory: "laptops" }).runPromise
+
+			// Old compound key should be empty
+			const oldResults = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(oldResults.length).toBe(0)
+
+			// New compound key should have the product
+			const newResults = await db.products.query({
+				where: { category: "electronics", subcategory: "laptops" },
+			}).runPromise
+			expect(newResults.length).toBe(1)
+			expect((newResults[0] as { id: string }).id).toBe("p1")
+		})
+
+		it("should update compound index when updating both fields of compound key", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Update both fields
+			await db.products.update("p1", { category: "furniture", subcategory: "office" }).runPromise
+
+			// Old compound key should be empty
+			const oldResults = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(oldResults.length).toBe(0)
+
+			// New compound key should have the product
+			const newResults = await db.products.query({
+				where: { category: "furniture", subcategory: "office" },
+			}).runPromise
+			expect(newResults.length).toBe(1)
+			expect((newResults[0] as { id: string }).id).toBe("p1")
+		})
+
+		it("should not change compound index when updating non-indexed fields", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Update non-indexed fields only
+			await db.products.update("p1", { name: "Gaming Laptop", price: 1499 }).runPromise
+
+			// Compound index query should still find the product
+			const results = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("p1")
+			expect((results[0] as { name: string }).name).toBe("Gaming Laptop")
+			expect((results[0] as { price: number }).price).toBe(1499)
+		})
+
+		it("should remove entity from compound index when deleted", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Desktop", category: "electronics", subcategory: "computers", price: 799 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Verify both exist initially
+			const initialResults = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(initialResults.length).toBe(2)
+
+			// Delete one product
+			await db.products.delete("p1").runPromise
+
+			// Compound index should only have remaining product
+			const afterResults = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(afterResults.length).toBe(1)
+			expect((afterResults[0] as { id: string }).id).toBe("p2")
+		})
+
+		it("should clean up empty compound index Set when last entity is deleted", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Delete the only product with "computers" subcategory
+			await db.products.delete("p1").runPromise
+
+			// Compound index query for deleted key should return empty
+			const computersResults = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(computersResults.length).toBe(0)
+
+			// Other compound index entry should be unaffected
+			const phonesResults = await db.products.query({
+				where: { category: "electronics", subcategory: "phones" },
+			}).runPromise
+			expect(phonesResults.length).toBe(1)
+			expect((phonesResults[0] as { id: string }).id).toBe("p2")
+		})
+
+		it("should maintain compound index through mixed create/update/delete sequence", async () => {
+			const config = createMultiIndexConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Phase 1: Create initial products
+			await db.products.create({
+				id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999,
+			}).runPromise
+			await db.products.create({
+				id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699,
+			}).runPromise
+
+			let computersResults = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(computersResults.length).toBe(1)
+
+			// Phase 2: Update p1 to change compound key
+			await db.products.update("p1", { subcategory: "laptops" }).runPromise
+
+			computersResults = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(computersResults.length).toBe(0)
+
+			const laptopsResults = await db.products.query({
+				where: { category: "electronics", subcategory: "laptops" },
+			}).runPromise
+			expect(laptopsResults.length).toBe(1)
+
+			// Phase 3: Create new product with the now-empty compound key
+			await db.products.create({
+				id: "p3", name: "Desktop", category: "electronics", subcategory: "computers", price: 799,
+			}).runPromise
+
+			computersResults = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(computersResults.length).toBe(1)
+			expect((computersResults[0] as { id: string }).id).toBe("p3")
+
+			// Phase 4: Delete p2
+			await db.products.delete("p2").runPromise
+
+			const phonesResults = await db.products.query({
+				where: { category: "electronics", subcategory: "phones" },
+			}).runPromise
+			expect(phonesResults.length).toBe(0)
+
+			// Verify final state: laptops has p1, computers has p3
+			const finalLaptops = await db.products.query({
+				where: { category: "electronics", subcategory: "laptops" },
+			}).runPromise
+			expect(finalLaptops.length).toBe(1)
+			expect((finalLaptops[0] as { id: string }).id).toBe("p1")
+
+			const finalComputers = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(finalComputers.length).toBe(1)
+			expect((finalComputers[0] as { id: string }).id).toBe("p3")
+		})
+
+		it("should handle compound index with upsert (create path)", async () => {
+			const config = createMultiIndexConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Upsert a product that doesn't exist (create path)
+			const result = await db.products.upsert({
+				where: { id: "p1" },
+				update: { name: "Should Not Apply" },
+				create: { name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+			}).runPromise
+
+			expect(result.__action).toBe("created")
+
+			// Compound index should have the product
+			const results = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("p1")
+		})
+
+		it("should handle compound index with upsert (update path)", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Upsert to update compound key fields
+			const result = await db.products.upsert({
+				where: { id: "p1" },
+				update: { subcategory: "laptops" }, // changed from "computers"
+				create: { name: "Laptop", category: "electronics", subcategory: "laptops", price: 999 },
+			}).runPromise
+
+			expect(result.__action).toBe("updated")
+
+			// Old compound key should be empty
+			const oldResults = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(oldResults.length).toBe(0)
+
+			// New compound key should have the product
+			const newResults = await db.products.query({
+				where: { category: "electronics", subcategory: "laptops" },
+			}).runPromise
+			expect(newResults.length).toBe(1)
+			expect((newResults[0] as { id: string }).id).toBe("p1")
+		})
+
+		it("should handle deleteMany with compound index", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Desktop", category: "electronics", subcategory: "computers", price: 799 },
+				{ id: "p3", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Delete all computers (using predicate function)
+			await db.products.deleteMany(
+				(product) => (product as { subcategory: string }).subcategory === "computers"
+			).runPromise
+
+			// Compound index for computers should be empty
+			const computersResults = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(computersResults.length).toBe(0)
+
+			// Phones should be unaffected
+			const phonesResults = await db.products.query({
+				where: { category: "electronics", subcategory: "phones" },
+			}).runPromise
+			expect(phonesResults.length).toBe(1)
+			expect((phonesResults[0] as { id: string }).id).toBe("p3")
+		})
+	})
 })
 
 // Export helpers for use in other test files
