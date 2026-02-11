@@ -650,3 +650,126 @@ describe("Full-text search: Multi-Field Search (task 10)", () => {
 		})
 	})
 })
+
+// ============================================================================
+// 11. Relevance Scoring Tests
+// ============================================================================
+
+describe("Full-text search: Relevance Scoring (task 11)", () => {
+	// Extended test data for relevance scoring with entities that have varying degrees of match
+	const relevanceTestBooks: ReadonlyArray<Book> = [
+		{
+			id: "1",
+			title: "The Left Hand of Darkness",
+			author: "Ursula K. Le Guin",
+			year: 1969,
+			description: "A story exploring gender and society on a winter planet",
+		},
+		{
+			id: "2",
+			title: "The Dark Tower",
+			author: "Stephen King",
+			year: 1982,
+			description: "A gunslinger walks through a desert world", // no "hand"
+		},
+		{
+			id: "3",
+			title: "Dune",
+			author: "Frank Herbert",
+			year: 1965,
+			description: "A desert planet story about spice and sandworms",
+		},
+		{
+			id: "4",
+			title: "Duneland",
+			author: "Various",
+			year: 2020,
+			description: "An anthology about deserts", // "Duneland" for prefix test
+		},
+	]
+
+	const createRelevanceTestDatabase = () =>
+		Effect.runPromise(
+			createEffectDatabase(
+				{
+					books: { schema: BookSchema, relationships: {} },
+				},
+				{ books: relevanceTestBooks },
+			),
+		)
+
+	describe("11.1: Relevance ordering", () => {
+		it("should rank entity with higher relevance score first when multiple entities match", async () => {
+			const db = await createRelevanceTestDatabase()
+			// "dark" search:
+			// - "The Left Hand of Darkness" matches "dark" as prefix of "darkness" in title
+			// - "The Dark Tower" matches "dark" as exact match in title
+			// Exact match should score higher than prefix match
+			const results = await db.books.query({
+				where: { $search: { query: "dark", fields: ["title"] } },
+			}).runPromise
+
+			// Should return both matching books
+			expect(results.length).toBe(2)
+
+			// "The Dark Tower" has exact "dark" match - should rank first
+			expect(results[0].title).toBe("The Dark Tower")
+			// "The Left Hand of Darkness" has prefix match "darkness" starting with "dark" - should rank second
+			expect(results[1].title).toBe("The Left Hand of Darkness")
+		})
+
+		it("should rank entities with more term matches higher", async () => {
+			// Add custom test data where one entity has more matches
+			const booksWithVaryingMatches: ReadonlyArray<Book> = [
+				{
+					id: "1",
+					title: "The Dark Night Returns",
+					author: "Frank Miller",
+					year: 1986,
+					description: "Batman story with dark themes and night scenes",
+				},
+				{
+					id: "2",
+					title: "Dark",
+					author: "Unknown",
+					year: 2000,
+					description: "A short story",
+				},
+			]
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(
+					{ books: { schema: BookSchema, relationships: {} } },
+					{ books: booksWithVaryingMatches },
+				),
+			)
+
+			// Search for "dark night" in all string fields
+			const results = await db.books.query({
+				where: { $search: { query: "dark night" } },
+			}).runPromise
+
+			// Only "The Dark Night Returns" matches BOTH terms (dark and night appear multiple times)
+			// "Dark" title book only matches "dark", not "night", so it shouldn't match at all
+			// (search requires ALL query terms to match)
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("The Dark Night Returns")
+		})
+
+		it("should order by relevance when multiple entities match the same query", async () => {
+			const db = await createRelevanceTestDatabase()
+			// "dark" matches two books, should be ordered by relevance score
+			const results = await db.books.query({
+				where: { $search: { query: "dark" } },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			// Both match "dark" but with different score profiles:
+			// - "The Dark Tower" has exact match "dark"
+			// - "The Left Hand of Darkness" has prefix match "darkness"
+			// Exact match scores higher than prefix match
+			expect(results[0].title).toBe("The Dark Tower")
+			expect(results[1].title).toBe("The Left Hand of Darkness")
+		})
+	})
+})
