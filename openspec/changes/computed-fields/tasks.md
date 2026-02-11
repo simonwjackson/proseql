@@ -15,10 +15,10 @@
 
 ## 3. Query Pipeline Integration — Filter
 
-- [ ] 3.1 Verify that `filterData` in `core/operations/query/filter.ts` works on entities with computed fields attached (dynamic property access handles arbitrary keys). No code changes expected; confirm with a targeted test.
-- [ ] 3.2 Test filtering by a computed string field with `$contains` operator.
-- [ ] 3.3 Test filtering by a computed boolean field with direct equality (`where: { isClassic: true }`).
-- [ ] 3.4 Test filtering by a computed numeric field with `$gt`/`$lt` operators.
+- [x] 3.1 Verify that `filterData` in `core/operations/query/filter.ts` works on entities with computed fields attached (dynamic property access handles arbitrary keys). No code changes expected; confirm with a targeted test.
+- [x] 3.2 Test filtering by a computed string field with `$contains` operator.
+- [x] 3.3 Test filtering by a computed boolean field with direct equality (`where: { isClassic: true }`).
+- [x] 3.4 Test filtering by a computed numeric field with `$gt`/`$lt` operators.
 
 ## 4. Query Pipeline Integration — Sort
 
