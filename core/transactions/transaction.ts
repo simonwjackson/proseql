@@ -74,7 +74,6 @@ export const createTransaction = <DB extends Record<string, EffectCollection<Has
 ): Effect.Effect<TransactionContext<DB>, TransactionError> =>
 	Effect.gen(function* () {
 		// TODO 2.3: Implement single-writer lock acquisition
-		// TODO 2.2: Implement snapshot capture
 		// TODO 2.7: Implement mutation tracking set
 		// TODO 2.6: Implement isActive flag
 
@@ -94,7 +93,8 @@ export const createTransaction = <DB extends Record<string, EffectCollection<Has
 			})
 		}
 
-		// Placeholder: Capture snapshots (will be implemented in task 2.2)
+		// Task 2.2: Capture snapshots on begin
+		// Snapshot all collections upfront (O(n) Ref.get, each is O(1) - copies the reference)
 		const snapshots = new Map<string, ReadonlyMap<string, HasId>>()
 		for (const [name, ref] of Object.entries(stateRefs)) {
 			const snapshot = yield* Ref.get(ref)
