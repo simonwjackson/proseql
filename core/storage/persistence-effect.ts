@@ -15,6 +15,8 @@ import {
 	UnsupportedFormatError,
 } from "../errors/storage-errors.js"
 import { ValidationError } from "../errors/crud-errors.js"
+import { MigrationError } from "../errors/migration-errors.js"
+import type { Migration } from "../migrations/migration-types.js"
 import { getFileExtension } from "../utils/file-extensions.js"
 
 // ============================================================================
@@ -51,6 +53,27 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 // ============================================================================
 
 /**
+ * Options for loadData.
+ */
+export interface LoadDataOptions {
+	/**
+	 * Optional schema version from collection config.
+	 * When provided, enables version checking and migration support.
+	 */
+	readonly version?: number
+	/**
+	 * Optional migrations array for automatic data migration.
+	 * Only used when version is also provided.
+	 */
+	readonly migrations?: ReadonlyArray<Migration>
+	/**
+	 * Collection name for error messages.
+	 * Required when version is provided.
+	 */
+	readonly collectionName?: string
+}
+
+/**
  * Load collection data from a file, decode each entity through the given Schema.
  *
  * Flow:
@@ -58,17 +81,26 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * 2. Read raw content
  * 3. Deserialize (JSON/YAML/MessagePack) via SerializerRegistry
  * 4. Validate the top-level structure is a Record<string, object>
- * 5. Decode each entity value through the Schema
- * 6. Return a ReadonlyMap<string, A> keyed by entity ID
+ * 5. Extract `_version` (default 0 if absent) and remove from entity map
+ * 6. Decode each entity value through the Schema
+ * 7. Return a ReadonlyMap<string, A> keyed by entity ID
  *
  * If the file does not exist, returns an empty ReadonlyMap.
+ *
+ * When `options.version` is provided:
+ * - Extracts `_version` from the file (defaults to 0 if absent)
+ * - Compares file version to config version
+ * - If file version < config version: runs migrations (task 5.2)
+ * - If file version > config version: fails with MigrationError
+ * - If file version === config version: proceeds normally
  */
 export const loadData = <A extends { readonly id: string }, I, R>(
 	filePath: string,
 	schema: Schema.Schema<A, I, R>,
+	options?: LoadDataOptions,
 ): Effect.Effect<
 	ReadonlyMap<string, A>,
-	StorageError | SerializationError | UnsupportedFormatError | ValidationError,
+	StorageError | SerializationError | UnsupportedFormatError | ValidationError | MigrationError,
 	StorageAdapter | SerializerRegistry | R
 > =>
 	Effect.gen(function* () {
@@ -97,11 +129,45 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 			)
 		}
 
+		// Extract _version from parsed data (default 0 if absent)
+		const fileVersion = typeof parsed._version === "number" ? parsed._version : 0
+
+		// Create entity map without _version
+		const entityMap: Record<string, unknown> = {}
+		for (const [key, value] of Object.entries(parsed)) {
+			if (key !== "_version") {
+				entityMap[key] = value
+			}
+		}
+
+		// If version checking is enabled, validate version compatibility
+		if (options?.version !== undefined) {
+			const configVersion = options.version
+			const collectionName = options.collectionName ?? "unknown"
+
+			// File version ahead of config version is an error
+			if (fileVersion > configVersion) {
+				return yield* Effect.fail(
+					new MigrationError({
+						collection: collectionName,
+						fromVersion: configVersion,
+						toVersion: fileVersion,
+						step: -1,
+						reason: "version-ahead",
+						message: `File version ${fileVersion} is ahead of config version ${configVersion}. Cannot load data from a future version.`,
+					}),
+				)
+			}
+
+			// TODO (task 5.2): If file version < config version and migrations are provided,
+			// run migrations and write back to disk
+		}
+
 		// Decode each entity through the schema
 		const decode = Schema.decodeUnknown(schema)
 		const entries: Array<[string, A]> = []
 
-		for (const [id, value] of Object.entries(parsed)) {
+		for (const [id, value] of Object.entries(entityMap)) {
 			const decoded = yield* decode(value).pipe(
 				Effect.mapError(
 					(parseError) =>
@@ -537,7 +603,7 @@ export const createFileWatcher = <
 		const changeQueue = yield* Queue.unbounded<void>()
 
 		// Ref to hold the debounce timer fiber so it can be cancelled on new events
-		const pendingReload = yield* Ref.make<Fiber.RuntimeFiber<void, StorageError | SerializationError | UnsupportedFormatError | ValidationError> | null>(null)
+		const pendingReload = yield* Ref.make<Fiber.RuntimeFiber<void, StorageError | SerializationError | UnsupportedFormatError | ValidationError | MigrationError> | null>(null)
 
 		// Background fiber: waits for change signals, debounces, then reloads.
 		const processorFiber = yield* Effect.fork(
