@@ -131,3 +131,43 @@ export const normalizeIndexes = (
 		return index;
 	});
 };
+
+/**
+ * Add an entity to all applicable indexes.
+ *
+ * For each index in the collection, computes the index key from the entity's
+ * field values and adds the entity's ID to the corresponding Set in the index.
+ *
+ * Entities with null/undefined values in indexed fields are skipped for that index.
+ *
+ * @param indexes - The collection's indexes
+ * @param entity - The entity to add
+ * @returns Effect that updates all index Refs
+ */
+export const addToIndex = <T extends HasId>(
+	indexes: CollectionIndexes,
+	entity: T,
+): Effect.Effect<void> =>
+	Effect.gen(function* () {
+		for (const [indexKey, indexRef] of indexes) {
+			const fields: NormalizedIndex = JSON.parse(indexKey);
+			const key = computeIndexKey(entity, fields);
+
+			if (key === undefined) {
+				continue;
+			}
+
+			yield* Ref.update(indexRef, (indexMap) => {
+				const newMap = new Map(indexMap);
+				const existing = newMap.get(key);
+				if (existing) {
+					const newSet = new Set(existing);
+					newSet.add(entity.id);
+					newMap.set(key, newSet);
+				} else {
+					newMap.set(key, new Set([entity.id]));
+				}
+				return newMap;
+			});
+		}
+	});

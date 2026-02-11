@@ -8,7 +8,7 @@
 
 - [x] 2.1 Create `core/indexes/index-manager.ts` with `normalizeIndexes(indexes)` — converts `["email", ["userId", "category"]]` to `[["email"], ["userId", "category"]]`
 - [x] 2.2 Implement `buildIndexes(normalizedIndexes, initialData)` returning `Effect<CollectionIndexes>`. For each index, scan all entities and build the `Map<key, Set<id>>`. Single-field keys use the raw value. Compound keys use `JSON.stringify(fields.map(f => entity[f]))`. Skip null/undefined values.
-- [ ] 2.3 Implement `addToIndex(indexes, entity)` — add an entity's field values to all applicable indexes. Returns `Effect<void>` operating on index Refs.
+- [x] 2.3 Implement `addToIndex(indexes, entity)` — add an entity's field values to all applicable indexes. Returns `Effect<void>` operating on index Refs.
 - [ ] 2.4 Implement `removeFromIndex(indexes, entity)` — remove an entity's ID from all applicable index entries. Clean up empty Sets. Returns `Effect<void>`.
 - [ ] 2.5 Implement `updateInIndex(indexes, oldEntity, newEntity)` — for each index, check if the indexed field(s) changed. If so, remove old entry and add new. Returns `Effect<void>`.
 - [ ] 2.6 Implement batch variants: `addManyToIndex`, `removeManyFromIndex` — collect all changes and apply in one `Ref.update` per index Ref.
