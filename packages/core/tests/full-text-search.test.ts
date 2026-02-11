@@ -1861,6 +1861,220 @@ describe("Full-text search: Search Index (task 12)", () => {
 // ============================================================================
 
 describe("Full-text search: Combined Filters (task 13)", () => {
+	describe("13.2: $search inside $or", () => {
+		it("should match when either $search condition is true", async () => {
+			const db = await createTestDatabase()
+			// $or: title search for "dark" OR author search for "gibson"
+			// "dark" matches "The Left Hand of Darkness" (title)
+			// "gibson" matches "Neuromancer" (author)
+			const results = await db.books.query({
+				where: {
+					$or: [
+						{ title: { $search: "dark" } },
+						{ author: { $search: "gibson" } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const titles = results.map((b) => b.title).sort()
+			expect(titles).toEqual(["Neuromancer", "The Left Hand of Darkness"])
+		})
+
+		it("should match when first $search condition is true", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$or: [
+						{ title: { $search: "dune" } },
+						{ title: { $search: "nonexistent" } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should match when second $search condition is true", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$or: [
+						{ title: { $search: "nonexistent" } },
+						{ title: { $search: "dune" } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should return empty when neither $search condition matches", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$or: [
+						{ title: { $search: "xyz123" } },
+						{ author: { $search: "abc456" } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should work with top-level $search inside $or", async () => {
+			const db = await createTestDatabase()
+			// $or with top-level $search (multi-field search)
+			const results = await db.books.query({
+				where: {
+					$or: [
+						{ $search: { query: "herbert", fields: ["author"] } },
+						{ $search: { query: "gibson", fields: ["author"] } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const authors = results.map((b) => b.author).sort()
+			expect(authors).toEqual(["Frank Herbert", "William Gibson"])
+		})
+
+		it("should work with $search combined with other operators inside $or", async () => {
+			const db = await createTestDatabase()
+			// $or: ($search on title) OR (year filter)
+			const results = await db.books.query({
+				where: {
+					$or: [
+						{ title: { $search: "dune" } },
+						{ year: { $gt: 1990 } },
+					],
+				},
+			}).runPromise
+
+			// "Dune" (1965) matches via $search
+			// "Snow Crash" (1992) matches via year > 1990
+			expect(results.length).toBe(2)
+			const titles = results.map((b) => b.title).sort()
+			expect(titles).toEqual(["Dune", "Snow Crash"])
+		})
+
+		it("should match same entity multiple times if it matches multiple $or branches", async () => {
+			const db = await createTestDatabase()
+			// $or: search for "planet" in description OR author is "Frank Herbert"
+			// Dune matches both (description has "planet" AND author is "Frank Herbert")
+			// The Left Hand of Darkness matches only first (description has "planet")
+			const results = await db.books.query({
+				where: {
+					$or: [
+						{ description: { $search: "planet" } },
+						{ author: { $eq: "Frank Herbert" } },
+					],
+				},
+			}).runPromise
+
+			// Both conditions are satisfied by Dune, but it should only appear once
+			// The Left Hand of Darkness matches the first condition
+			expect(results.length).toBe(2)
+			const titles = results.map((b) => b.title).sort()
+			expect(titles).toEqual(["Dune", "The Left Hand of Darkness"])
+		})
+
+		it("should work with $or containing three $search conditions", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$or: [
+						{ title: { $search: "dune" } },
+						{ title: { $search: "neuromancer" } },
+						{ title: { $search: "foundation" } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(3)
+			const titles = results.map((b) => b.title).sort()
+			expect(titles).toEqual(["Dune", "Foundation", "Neuromancer"])
+		})
+
+		it("should work with nested $or containing $search", async () => {
+			const db = await createTestDatabase()
+			// Nested $or: ((title: dune) OR (title: neuromancer)) OR (author: asimov)
+			const results = await db.books.query({
+				where: {
+					$or: [
+						{
+							$or: [
+								{ title: { $search: "dune" } },
+								{ title: { $search: "neuromancer" } },
+							],
+						},
+						{ author: { $search: "asimov" } },
+					],
+				},
+			}).runPromise
+
+			// "Dune", "Neuromancer", and "Foundation" (by Isaac Asimov)
+			expect(results.length).toBe(3)
+			const titles = results.map((b) => b.title).sort()
+			expect(titles).toEqual(["Dune", "Foundation", "Neuromancer"])
+		})
+
+		it("should work with prefix search inside $or", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$or: [
+						{ title: { $search: "neuro" } },
+						{ author: { $search: "herb" } },
+					],
+				},
+			}).runPromise
+
+			// "Neuromancer" matches "neuro" prefix
+			// "Dune" matches "herb" prefix in author "Frank Herbert"
+			expect(results.length).toBe(2)
+			const titles = results.map((b) => b.title).sort()
+			expect(titles).toEqual(["Dune", "Neuromancer"])
+		})
+
+		it("should respect case-insensitivity inside $or", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$or: [
+						{ title: { $search: "DUNE" } },
+						{ author: { $search: "GIBSON" } },
+					],
+				},
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const titles = results.map((b) => b.title).sort()
+			expect(titles).toEqual(["Dune", "Neuromancer"])
+		})
+
+		it("should work with multi-term $search inside $or", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: {
+					$or: [
+						{ title: { $search: "left hand" } },
+						{ author: { $search: "neal stephenson" } },
+					],
+				},
+			}).runPromise
+
+			// "The Left Hand of Darkness" matches "left hand"
+			// "Snow Crash" matches "Neal Stephenson"
+			expect(results.length).toBe(2)
+			const titles = results.map((b) => b.title).sort()
+			expect(titles).toEqual(["Snow Crash", "The Left Hand of Darkness"])
+		})
+	})
+
 	describe("13.1: $search with other field operators", () => {
 		it("should filter by both $search and $gt operator", async () => {
 			const db = await createTestDatabase()
