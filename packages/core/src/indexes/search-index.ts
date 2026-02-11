@@ -339,3 +339,82 @@ export const addToSearchIndex = <T extends HasId>(
 		addEntityToIndexMut(newIndex, entity, fields);
 		return newIndex;
 	});
+
+/**
+ * Helper function to remove a single entity from a search index map.
+ *
+ * Tokenizes the values of the specified fields and removes the entity's ID
+ * from each token's set in the index. Cleans up empty sets.
+ *
+ * @param index - The search index map to mutate
+ * @param entity - The entity to remove
+ * @param fields - The fields that were indexed
+ */
+const removeEntityFromIndexMut = <T extends HasId>(
+	index: SearchIndexMap,
+	entity: T,
+	fields: ReadonlyArray<string>,
+): void => {
+	const entityRecord = entity as Record<string, unknown>;
+	const entityId = entity.id;
+
+	for (const field of fields) {
+		const fieldValue = entityRecord[field];
+
+		// Only process string fields
+		if (typeof fieldValue !== "string") {
+			continue;
+		}
+
+		// Tokenize the field value and remove from index
+		const tokens = tokenize(fieldValue);
+		for (const token of tokens) {
+			const existingSet = index.get(token);
+			if (existingSet) {
+				existingSet.delete(entityId);
+				// Clean up empty sets
+				if (existingSet.size === 0) {
+					index.delete(token);
+				}
+			}
+		}
+	}
+};
+
+/**
+ * Remove an entity from the search index.
+ *
+ * Tokenizes the entity's indexed fields and removes the entity ID from each
+ * token's set in the inverted index. Cleans up empty sets to avoid memory
+ * leaks. This should be called after deleting an entity to keep the search
+ * index up to date.
+ *
+ * @param indexRef - Ref containing the SearchIndexMap
+ * @param entity - The entity to remove from the index
+ * @param fields - The fields that were indexed for full-text search
+ * @returns Effect that completes when the entity is removed
+ *
+ * @example
+ * ```ts
+ * const bookToDelete = { id: "5", title: "Snow Crash", author: "Neal Stephenson" }
+ * yield* removeFromSearchIndex(indexRef, bookToDelete, ["title", "author"])
+ * // Index now has entity "5" removed from:
+ * // "snow", "crash", "neal", "stephenson" sets
+ * // Empty sets are deleted from the index
+ * ```
+ */
+export const removeFromSearchIndex = <T extends HasId>(
+	indexRef: Ref.Ref<SearchIndexMap>,
+	entity: T,
+	fields: ReadonlyArray<string>,
+): Effect.Effect<void> =>
+	Ref.update(indexRef, (index) => {
+		// Clone the index to avoid mutating the original
+		const newIndex: SearchIndexMap = new Map(index);
+		// Also clone the sets that we'll modify to maintain immutability
+		for (const [token, idSet] of index) {
+			newIndex.set(token, new Set(idSet));
+		}
+		removeEntityFromIndexMut(newIndex, entity, fields);
+		return newIndex;
+	});

@@ -394,6 +394,7 @@ export {
 	addToSearchIndex,
 	buildSearchIndex,
 	lookupSearchIndex,
+	removeFromSearchIndex,
 	resolveWithSearchIndex,
 } from "./indexes/search-index.js";
 
