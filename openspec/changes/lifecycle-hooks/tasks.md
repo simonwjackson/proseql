@@ -38,7 +38,7 @@
 ## 6. CRUD Integration — Upsert
 
 - [x] 6.1 Add `hooks` parameter to `upsert` in `core/operations/crud/upsert.ts`. On create path: run `beforeCreate`/`afterCreate`/`onChange("create")`. On update path: run `beforeUpdate`/`afterUpdate`/`onChange("update")`.
-- [ ] 6.2 In `upsertMany`, same per-entity routing.
+- [x] 6.2 In `upsertMany`, same per-entity routing.
 
 ## 7. Factory Integration
 

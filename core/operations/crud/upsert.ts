@@ -261,6 +261,10 @@ export const upsert = <T extends HasId, I = T>(
  *
  * All changes validated and applied atomically.
  * Returns categorized results: created, updated, unchanged.
+ *
+ * Runs hooks per entity:
+ * - Create path: beforeCreate → mutation → afterCreate → onChange("create")
+ * - Update path: beforeUpdate → mutation → afterUpdate → onChange("update")
  */
 export const upsertMany = <T extends HasId, I = T>(
 	collectionName: string,
@@ -269,8 +273,9 @@ export const upsertMany = <T extends HasId, I = T>(
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	indexes?: CollectionIndexes,
+	hooks?: HooksConfig<T>,
 ) =>
-(inputs: ReadonlyArray<UpsertInput<T>>): Effect.Effect<UpsertManyResult<T>, ValidationError | ForeignKeyError> =>
+(inputs: ReadonlyArray<UpsertInput<T>>): Effect.Effect<UpsertManyResult<T>, ValidationError | ForeignKeyError | HookError> =>
 	Effect.gen(function* () {
 		const currentMap = yield* Ref.get(ref)
 		const created: T[] = []
@@ -278,9 +283,9 @@ export const upsertMany = <T extends HasId, I = T>(
 		const unchanged: T[] = []
 		const now = new Date().toISOString()
 
-		// Phase 1: Process all inputs, validate, and categorize
+		// Phase 1: Process all inputs, validate, run before-hooks, and categorize
 		const toCreate: T[] = []
-		const toUpdate: Array<{ oldEntity: T; newEntity: T }> = []
+		const toUpdate: Array<{ oldEntity: T; newEntity: T; transformedUpdates: UpdateWithOperators<T> }> = []
 
 		for (let i = 0; i < inputs.length; i++) {
 			const input = inputs[i]!
@@ -288,6 +293,7 @@ export const upsertMany = <T extends HasId, I = T>(
 			const existing = findByWhere(currentMap, where)
 
 			if (existing !== undefined) {
+				// === UPDATE PATH ===
 				// Check if update would change anything
 				const wouldChange = Object.keys(input.update).some((key) => {
 					const updateValue = (input.update as Record<string, unknown>)[key]
@@ -310,17 +316,26 @@ export const upsertMany = <T extends HasId, I = T>(
 					continue
 				}
 
-				// Apply updates
+				// Run beforeUpdate hooks (can transform the update payload)
+				const transformedUpdates = yield* runBeforeUpdateHooks(hooks?.beforeUpdate, {
+					operation: "update",
+					collection: collectionName,
+					id: existing.id,
+					existing,
+					update: input.update as UpdateWithOperators<T>,
+				})
+
+				// Apply updates with (possibly transformed) payload
 				const updatedEntity = applyUpdates(
 					existing as T & MinimalEntity,
-					input.update as UpdateWithOperators<T & MinimalEntity>,
+					transformedUpdates as UpdateWithOperators<T & MinimalEntity>,
 				)
 
 				// Validate
 				const validated = yield* validateEntity(schema, updatedEntity)
-				toUpdate.push({ oldEntity: existing, newEntity: validated })
+				toUpdate.push({ oldEntity: existing, newEntity: validated, transformedUpdates })
 			} else {
-				// Create new entity
+				// === CREATE PATH ===
 				const id = (typeof where.id === "string" ? where.id : undefined) || generateId()
 
 				const createData = {
@@ -331,9 +346,17 @@ export const upsertMany = <T extends HasId, I = T>(
 					updatedAt: now,
 				}
 
-				// Validate
+				// Validate through schema first
 				const validated = yield* validateEntity(schema, createData)
-				toCreate.push(validated)
+
+				// Run beforeCreate hooks (can transform the entity)
+				const entity = yield* runBeforeCreateHooks(hooks?.beforeCreate, {
+					operation: "create",
+					collection: collectionName,
+					data: validated,
+				})
+
+				toCreate.push(entity)
 			}
 		}
 
@@ -379,6 +402,45 @@ export const upsertMany = <T extends HasId, I = T>(
 			for (const { oldEntity, newEntity } of toUpdate) {
 				yield* updateInIndex(indexes, oldEntity, newEntity)
 			}
+		}
+
+		// Phase 5: Run after-hooks and onChange hooks for created entities
+		for (const entity of toCreate) {
+			// Run afterCreate hooks (fire-and-forget, errors swallowed)
+			yield* runAfterCreateHooks(hooks?.afterCreate, {
+				operation: "create",
+				collection: collectionName,
+				entity,
+			})
+
+			// Run onChange hooks with type: "create" (fire-and-forget, errors swallowed)
+			yield* runOnChangeHooks(hooks?.onChange, {
+				type: "create",
+				collection: collectionName,
+				entity,
+			})
+		}
+
+		// Phase 6: Run after-hooks and onChange hooks for updated entities
+		for (const { oldEntity, newEntity, transformedUpdates } of toUpdate) {
+			// Run afterUpdate hooks (fire-and-forget, errors swallowed)
+			yield* runAfterUpdateHooks(hooks?.afterUpdate, {
+				operation: "update",
+				collection: collectionName,
+				id: newEntity.id,
+				previous: oldEntity,
+				current: newEntity,
+				update: transformedUpdates,
+			})
+
+			// Run onChange hooks with type: "update" (fire-and-forget, errors swallowed)
+			yield* runOnChangeHooks(hooks?.onChange, {
+				type: "update",
+				collection: collectionName,
+				id: newEntity.id,
+				previous: oldEntity,
+				current: newEntity,
+			})
 		}
 
 		created.push(...toCreate)

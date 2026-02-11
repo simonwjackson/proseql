@@ -228,7 +228,7 @@ export interface EffectCollection<T extends HasId> {
 	) => RunnableEffect<UpsertResult<T>, ValidationError | ForeignKeyError | HookError>
 	readonly upsertMany: (
 		inputs: ReadonlyArray<UpsertInput<T>>,
-	) => RunnableEffect<UpsertManyResult<T>, ValidationError | ForeignKeyError>
+	) => RunnableEffect<UpsertManyResult<T>, ValidationError | ForeignKeyError | HookError>
 
 	readonly createWithRelationships: (
 		input: CreateWithRelationshipsInput<T, Record<string, RelationshipDef>>,
