@@ -729,7 +729,10 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 			}
 		}
 
-		// 1. Create Ref for each collection from initial data
+		// 1. Create transaction lock for single-writer isolation
+		const transactionLock = yield* Ref.make(false)
+
+		// 2. Create Ref for each collection from initial data
 		const stateRefs: StateRefs = {}
 		const typedRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>> = {}
 
@@ -743,7 +746,7 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 			typedRefs[collectionName] = ref
 		}
 
-		// 2. Build indexes for each collection from initial data
+		// 3. Build indexes for each collection from initial data
 		const collectionIndexes: Record<string, CollectionIndexes> = {}
 
 		for (const collectionName of Object.keys(config)) {
@@ -754,7 +757,7 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 			collectionIndexes[collectionName] = indexes
 		}
 
-		// 3. Build each collection with its Ref, indexes, and shared state refs
+		// 4. Build each collection with its Ref, indexes, and shared state refs
 		const collections: Record<string, EffectCollection<HasId>> = {}
 
 		for (const collectionName of Object.keys(config)) {
@@ -823,7 +826,10 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			Layer.succeed(SerializerRegistry, serializerRegistry),
 		)
 
-		// 2. Load data from files for persistent collections, then merge with initialData.
+		// 2. Create transaction lock for single-writer isolation
+		const transactionLock = yield* Ref.make(false)
+
+		// 3. Load data from files for persistent collections, then merge with initialData.
 		// initialData takes precedence (allows overriding file data for testing/seeding).
 		const stateRefs: StateRefs = {}
 		const typedRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>> = {}
@@ -866,7 +872,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			typedRefs[collectionName] = ref
 		}
 
-		// 3. Build indexes for each collection from loaded/merged data
+		// 4. Build indexes for each collection from loaded/merged data
 		const collectionIndexes: Record<string, CollectionIndexes> = {}
 
 		for (const collectionName of Object.keys(config)) {
@@ -879,7 +885,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			collectionIndexes[collectionName] = indexes
 		}
 
-		// 4. Build the save effect factory. Each save reads the Ref at execution
+		// 5. Build the save effect factory. Each save reads the Ref at execution
 		// time (capturing latest state) and writes through saveData with services.
 		const collectionFilePaths: Record<string, string> = {}
 		for (const collectionName of Object.keys(config)) {
@@ -910,13 +916,13 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			)
 		}
 
-		// 5. Create the runtime-independent persistence trigger
+		// 6. Create the runtime-independent persistence trigger
 		const trigger = createPersistenceTrigger(
 			persistenceConfig?.writeDebounce ?? 100,
 			makeSaveEffect,
 		)
 
-		// 6. Register scope finalizer: flush pending writes and shut down timers
+		// 7. Register scope finalizer: flush pending writes and shut down timers
 		yield* Effect.addFinalizer(() =>
 			Effect.promise(() => trigger.flush()).pipe(
 				Effect.catchAll(() => Effect.void),
@@ -924,7 +930,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			),
 		)
 
-		// 7. Build each collection with its Ref, indexes, state refs, and persistence hooks
+		// 8. Build each collection with its Ref, indexes, state refs, and persistence hooks
 		const collections: Record<string, EffectCollection<HasId>> = {}
 
 		for (const collectionName of Object.keys(config)) {
