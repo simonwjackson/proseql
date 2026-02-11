@@ -20,6 +20,8 @@ import type {
 	AfterCreateContext,
 	AfterUpdateContext,
 	AfterDeleteContext,
+	OnChangeHook,
+	OnChangeContext,
 } from "../types/hook-types.js"
 import type { UpdateWithOperators } from "../types/crud-types.js"
 
@@ -143,6 +145,31 @@ export const runAfterUpdateHooks = <T>(
 export const runAfterDeleteHooks = <T>(
 	hooks: ReadonlyArray<AfterDeleteHook<T>> | undefined,
 	ctx: AfterDeleteContext<T>,
+): Effect.Effect<void, never> => {
+	if (!hooks || hooks.length === 0) {
+		return Effect.void
+	}
+
+	return Effect.forEach(
+		hooks,
+		(hook) => Effect.catchAll(hook(ctx), () => Effect.void),
+		{ discard: true },
+	)
+}
+
+// ============================================================================
+// onChange Hooks - Run In Order, Swallow Errors
+// ============================================================================
+
+/**
+ * Run onChange hooks in order. Each hook receives the same context.
+ * Errors are swallowed (fire-and-forget).
+ *
+ * If hooks array is empty or undefined, no-op.
+ */
+export const runOnChangeHooks = <T>(
+	hooks: ReadonlyArray<OnChangeHook<T>> | undefined,
+	ctx: OnChangeContext<T>,
 ): Effect.Effect<void, never> => {
 	if (!hooks || hooks.length === 0) {
 		return Effect.void
