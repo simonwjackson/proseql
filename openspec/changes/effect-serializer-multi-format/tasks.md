@@ -53,7 +53,7 @@
 ## 8. Delete Legacy Files
 
 - [x] 8.1 Delete `core/serializers/types.ts`
-- [ ] 8.2 Delete `core/serializers/json.ts`
+- [x] 8.2 Delete `core/serializers/json.ts`
 - [ ] 8.3 Delete `core/serializers/yaml.ts`
 - [ ] 8.4 Delete `core/serializers/messagepack.ts`
 - [ ] 8.5 Delete `core/storage/persistence.ts`

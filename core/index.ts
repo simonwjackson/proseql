@@ -314,33 +314,6 @@ export {
 	DefaultSerializerLayer,
 } from "./serializers/presets.js";
 
-// JSON serializer
-export {
-	JsonSerializerLayer,
-	makeJsonSerializerLayer,
-	serializeJson,
-	deserializeJson,
-} from "./serializers/json.js";
-
-export type { JsonSerializerOptions } from "./serializers/json.js";
-
-// YAML serializer
-export {
-	YamlSerializerLayer,
-	makeYamlSerializerLayer,
-	serializeYaml,
-	deserializeYaml,
-} from "./serializers/yaml.js";
-
-export type { YamlSerializerOptions } from "./serializers/yaml.js";
-
-// MessagePack serializer
-export {
-	MessagePackSerializerLayer,
-	serializeMessagePack,
-	deserializeMessagePack,
-} from "./serializers/messagepack.js";
-
 // ============================================================================
 // Data Transformation Utilities
 // ============================================================================
@@ -362,17 +335,10 @@ export {
 } from "./storage/transforms.js";
 
 // ============================================================================
-// File Extension Utilities
+// Path Utilities
 // ============================================================================
 
-export {
-	getFileExtension,
-	findSerializerForFile,
-	isSupportedExtension,
-	getSupportedExtensions,
-	createSerializerRegistry,
-	validateFileExtensions,
-} from "./utils/file-extensions.js";
+export { getFileExtension } from "./utils/path.js";
 
 // ============================================================================
 // ID Generation Utilities

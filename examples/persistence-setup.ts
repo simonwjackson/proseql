@@ -16,7 +16,8 @@ import {
 	type EffectDatabaseWithPersistence,
 } from "../core/factories/database-effect"
 import { NodeStorageLayer } from "../core/storage/node-adapter-layer"
-import { JsonSerializerLayer } from "../core/serializers/json"
+import { makeSerializerLayer } from "../core/serializers/format-codec"
+import { jsonCodec } from "../core/serializers/codecs/json"
 import { StorageAdapter } from "../core/storage/storage-service"
 import { SerializerRegistry } from "../core/serializers/serializer-service"
 
@@ -79,7 +80,7 @@ const config = {
 // Merge the Node.js filesystem adapter with the JSON serializer.
 // This satisfies the StorageAdapter + SerializerRegistry services
 // required by createPersistentEffectDatabase.
-const PersistenceLayer = Layer.merge(NodeStorageLayer, JsonSerializerLayer)
+const PersistenceLayer = Layer.merge(NodeStorageLayer, makeSerializerLayer([jsonCodec()]))
 
 // ============================================================================
 // 4. Main Program
