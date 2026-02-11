@@ -1,7 +1,7 @@
 ## 1. FormatCodec Type and Compositor
 
 - [x] 1.1 Create `core/serializers/format-codec.ts` with `FormatCodec` interface (`name`, `extensions`, `encode`, `decode`) and `FormatOptions` interface (`indent?`)
-- [ ] 1.2 Implement `makeSerializerLayer(codecs: ReadonlyArray<FormatCodec>): Layer.Layer<SerializerRegistry>` in the same file. Build extension→codec lookup map, wrap encode/decode in `Effect.try` producing `SerializationError`, produce `UnsupportedFormatError` for unknown extensions. Log `console.warn` on duplicate extensions (last wins).
+- [x] 1.2 Implement `makeSerializerLayer(codecs: ReadonlyArray<FormatCodec>): Layer.Layer<SerializerRegistry>` in the same file. Build extension→codec lookup map, wrap encode/decode in `Effect.try` producing `SerializationError`, produce `UnsupportedFormatError` for unknown extensions. Log `console.warn` on duplicate extensions (last wins).
 
 ## 2. Built-in Codecs
 
