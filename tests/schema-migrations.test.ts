@@ -829,6 +829,45 @@ describe("schema-migrations: migration registry validation", () => {
 			expect(error.message).toContain("to=2")
 		})
 	})
+
+	describe("empty migrations with version > 0 → error (task 10.6)", () => {
+		it("rejects version 1 with empty migrations array", async () => {
+			const error = await Effect.runPromise(
+				validateMigrationRegistry("users", 1, []).pipe(
+					Effect.flip,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			expect(error.reason).toBe("empty-registry")
+			expect(error.message).toContain("version 1")
+			expect(error.message).toContain("no migrations defined")
+		})
+
+		it("rejects version 5 with empty migrations array", async () => {
+			const error = await Effect.runPromise(
+				validateMigrationRegistry("products", 5, []).pipe(
+					Effect.flip,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			expect(error.reason).toBe("empty-registry")
+			expect(error.message).toContain("version 5")
+			expect(error.message).toContain("Cannot migrate from version 0 to 5")
+		})
+
+		it("accepts version 0 with empty migrations (valid edge case)", async () => {
+			// This is valid - version 0 means no migrations ever needed
+			const result = await Effect.runPromise(
+				validateMigrationRegistry("users", 0, []).pipe(
+					Effect.map(() => "success"),
+					Effect.catchAll((e) => Effect.succeed(e)),
+				),
+			)
+			expect(result).toBe("success")
+		})
+	})
 })
 
 // ============================================================================
