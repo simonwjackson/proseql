@@ -2524,6 +2524,177 @@ describe("schema-migrations: dry run", () => {
 			expect(productsResult.migrationsToApply[1].from).toBe(2)
 		})
 	})
+
+	describe("collection with no file → 'no-file' (task 12.3)", () => {
+		it("dryRunMigrations reports 'no-file' when file does not exist", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// Do NOT create any file in the store - file does not exist
+
+			const config = {
+				users: {
+					schema: UserSchemaV3,
+					file: "/data/users.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			expect(result.collections).toHaveLength(1)
+
+			const usersResult = result.collections[0]
+			expect(usersResult.name).toBe("users")
+			expect(usersResult.filePath).toBe("/data/users.json")
+			expect(usersResult.status).toBe("no-file")
+			// When no file exists, currentVersion defaults to 0
+			expect(usersResult.currentVersion).toBe(0)
+			expect(usersResult.targetVersion).toBe(3)
+			// No migrations listed when file doesn't exist
+			expect(usersResult.migrationsToApply).toHaveLength(0)
+		})
+
+		it("dryRunMigrations reports 'no-file' for multiple missing collections", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// No files created - both collections are missing files
+
+			const config = {
+				users: {
+					schema: UserSchemaV3,
+					file: "/data/users.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+				products: {
+					schema: UserSchemaV1,
+					file: "/data/products.json",
+					version: 1,
+					migrations: migrationsTo1,
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			expect(result.collections).toHaveLength(2)
+
+			// Both collections should report no-file
+			const usersResult = result.collections.find((c) => c.name === "users")!
+			const productsResult = result.collections.find((c) => c.name === "products")!
+
+			expect(usersResult.status).toBe("no-file")
+			expect(usersResult.currentVersion).toBe(0)
+			expect(usersResult.migrationsToApply).toHaveLength(0)
+
+			expect(productsResult.status).toBe("no-file")
+			expect(productsResult.currentVersion).toBe(0)
+			expect(productsResult.migrationsToApply).toHaveLength(0)
+		})
+
+		it("dryRunMigrations handles mixed: some files exist, some don't", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// Users file exists at version 2
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					_version: 2,
+					u1: {
+						id: "u1",
+						firstName: "Alice",
+						lastName: "Smith",
+						email: "alice@example.com",
+					},
+				}),
+			)
+
+			// Products file does NOT exist
+
+			const config = {
+				users: {
+					schema: UserSchemaV3,
+					file: "/data/users.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+				products: {
+					schema: UserSchemaV1,
+					file: "/data/products.json",
+					version: 1,
+					migrations: migrationsTo1,
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			expect(result.collections).toHaveLength(2)
+
+			// Find results by name
+			const usersResult = result.collections.find((c) => c.name === "users")!
+			const productsResult = result.collections.find((c) => c.name === "products")!
+
+			// Users should need migration (file exists at version 2, config is version 3)
+			expect(usersResult.status).toBe("needs-migration")
+			expect(usersResult.currentVersion).toBe(2)
+			expect(usersResult.targetVersion).toBe(3)
+			expect(usersResult.migrationsToApply).toHaveLength(1)
+			expect(usersResult.migrationsToApply[0].from).toBe(2)
+
+			// Products should report no-file
+			expect(productsResult.status).toBe("no-file")
+			expect(productsResult.currentVersion).toBe(0)
+			expect(productsResult.targetVersion).toBe(1)
+			expect(productsResult.migrationsToApply).toHaveLength(0)
+		})
+
+		it("dryRunMigrations reports 'no-file' for version 0 collection without file", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// No file created
+
+			const config = {
+				users: {
+					schema: UserSchemaV0,
+					file: "/data/users.json",
+					version: 0,
+					migrations: [],
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			expect(result.collections).toHaveLength(1)
+
+			const usersResult = result.collections[0]
+			expect(usersResult.status).toBe("no-file")
+			expect(usersResult.currentVersion).toBe(0)
+			expect(usersResult.targetVersion).toBe(0)
+			expect(usersResult.migrationsToApply).toHaveLength(0)
+		})
+	})
 })
 
 // ============================================================================
