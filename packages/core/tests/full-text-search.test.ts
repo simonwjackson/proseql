@@ -1356,4 +1356,237 @@ describe("Full-text search: Search Index (task 12)", () => {
 			expect(gibsonResults[0].author).toBe("William Gibson")
 		})
 	})
+
+	describe("12.3: Index maintenance on update", () => {
+		it("should find entity by new title after update", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Update Dune's title to something completely different
+			await db.books.update("1", { title: "Arrakis Chronicles" }).runPromise
+
+			// Search for the new title should find it
+			const results = await db.books.query({
+				where: { title: { $search: "arrakis" } },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].id).toBe("1")
+			expect(results[0].title).toBe("Arrakis Chronicles")
+		})
+
+		it("should no longer find entity by old title after update", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// First verify original title is searchable
+			const beforeResults = await db.books.query({
+				where: { title: { $search: "dune" } },
+			}).runPromise
+			expect(beforeResults.length).toBe(1)
+			expect(beforeResults[0].id).toBe("1")
+
+			// Update the title
+			await db.books.update("1", { title: "Arrakis Chronicles" }).runPromise
+
+			// Old title should no longer match
+			const afterResults = await db.books.query({
+				where: { title: { $search: "dune" } },
+			}).runPromise
+			expect(afterResults.length).toBe(0)
+		})
+
+		it("should update author field and find by new author", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Update author
+			await db.books.update("1", { author: "Anonymous Writer" }).runPromise
+
+			// Search for new author should find it
+			const results = await db.books.query({
+				where: { author: { $search: "anonymous" } },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].id).toBe("1")
+			expect(results[0].author).toBe("Anonymous Writer")
+		})
+
+		it("should no longer find entity by old author after update", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// First verify original author is searchable
+			const beforeResults = await db.books.query({
+				where: { author: { $search: "herbert" } },
+			}).runPromise
+			expect(beforeResults.length).toBe(1)
+
+			// Update the author
+			await db.books.update("1", { author: "Anonymous Writer" }).runPromise
+
+			// Old author should no longer match
+			const afterResults = await db.books.query({
+				where: { author: { $search: "herbert" } },
+			}).runPromise
+			expect(afterResults.length).toBe(0)
+		})
+
+		it("should update description field and find by new description", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Update description
+			await db.books.update("1", {
+				description: "The spice must flow on Arrakis",
+			}).runPromise
+
+			// Search for new description content should find it
+			const results = await db.books.query({
+				where: { description: { $search: "arrakis" } },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].id).toBe("1")
+		})
+
+		it("should no longer find entity by old description content after update", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// First verify original description is searchable
+			const beforeResults = await db.books.query({
+				where: { description: { $search: "sandworms" } },
+			}).runPromise
+			expect(beforeResults.length).toBe(1)
+
+			// Update the description
+			await db.books.update("1", {
+				description: "The spice must flow",
+			}).runPromise
+
+			// Old description content should no longer match
+			const afterResults = await db.books.query({
+				where: { description: { $search: "sandworms" } },
+			}).runPromise
+			expect(afterResults.length).toBe(0)
+		})
+
+		it("should handle update of multiple indexed fields at once", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Update both title and author
+			await db.books.update("1", {
+				title: "Arrakis Chronicles",
+				author: "F. Herbert",
+			}).runPromise
+
+			// New title should be searchable
+			const titleResults = await db.books.query({
+				where: { title: { $search: "arrakis" } },
+			}).runPromise
+			expect(titleResults.length).toBe(1)
+			expect(titleResults[0].id).toBe("1")
+
+			// New author should be searchable
+			const authorResults = await db.books.query({
+				where: { author: { $search: "herbert" } },
+			}).runPromise
+			expect(authorResults.length).toBe(1)
+			expect(authorResults[0].id).toBe("1")
+
+			// Old title should not match
+			const oldTitleResults = await db.books.query({
+				where: { title: { $search: "dune" } },
+			}).runPromise
+			expect(oldTitleResults.length).toBe(0)
+		})
+
+		it("should still find other entities after updating one", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Update Dune's title
+			await db.books.update("1", { title: "Arrakis Chronicles" }).runPromise
+
+			// Other books should still be searchable
+			const neuroResults = await db.books.query({
+				where: { title: { $search: "neuromancer" } },
+			}).runPromise
+			expect(neuroResults.length).toBe(1)
+			expect(neuroResults[0].title).toBe("Neuromancer")
+
+			const gibsonResults = await db.books.query({
+				where: { author: { $search: "gibson" } },
+			}).runPromise
+			expect(gibsonResults.length).toBe(1)
+			expect(gibsonResults[0].author).toBe("William Gibson")
+		})
+
+		it("should work with top-level $search after update", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Update title and description
+			await db.books.update("1", {
+				title: "Chronicles of Arrakis",
+				description: "A tale of spice and power",
+			}).runPromise
+
+			// Top-level search spanning multiple fields should work
+			const results = await db.books.query({
+				where: {
+					$search: { query: "chronicles spice", fields: ["title", "description"] },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].id).toBe("1")
+		})
+
+		it("should update index correctly when only partial field content changes", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Update title from "Dune" to "Dune Messiah" - "dune" should still match
+			await db.books.update("1", { title: "Dune Messiah" }).runPromise
+
+			// "dune" should still match (partial content preserved)
+			const duneResults = await db.books.query({
+				where: { title: { $search: "dune" } },
+			}).runPromise
+			expect(duneResults.length).toBe(1)
+			expect(duneResults[0].id).toBe("1")
+
+			// "messiah" should now also match (new content added)
+			const messiahResults = await db.books.query({
+				where: { title: { $search: "messiah" } },
+			}).runPromise
+			expect(messiahResults.length).toBe(1)
+			expect(messiahResults[0].id).toBe("1")
+		})
+
+		it("should handle update of non-indexed field without affecting search", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Update year (non-indexed field)
+			await db.books.update("1", { year: 2000 }).runPromise
+
+			// Title should still be searchable
+			const results = await db.books.query({
+				where: { title: { $search: "dune" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].id).toBe("1")
+			expect(results[0].year).toBe(2000)
+		})
+
+		it("should find entity by prefix after update", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Update title
+			await db.books.update("1", { title: "Hyperspace Journey" }).runPromise
+
+			// Prefix search should work
+			const results = await db.books.query({
+				where: { title: { $search: "hyper" } },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect(results[0].id).toBe("1")
+			expect(results[0].title).toBe("Hyperspace Journey")
+		})
+	})
 })
