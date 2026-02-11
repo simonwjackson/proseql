@@ -100,7 +100,7 @@ export const createTransaction = <DB extends Record<string, EffectCollection<Has
 		// Mutation tracking set (will be fully implemented in task 2.7)
 		const mutatedCollections = new Set<string>()
 
-		// isActive flag (will be fully implemented in task 2.6)
+		// isActive flag - guards all transaction operations
 		let isActive = true
 
 		// Build the addMutation callback
@@ -108,10 +108,54 @@ export const createTransaction = <DB extends Record<string, EffectCollection<Has
 			mutatedCollections.add(collectionName)
 		}
 
-		// Build collection accessors
+		// Helper to check if transaction is still active before any operation
+		const checkActive = (): Effect.Effect<void, TransactionError> =>
+			Effect.suspend(() =>
+				isActive
+					? Effect.void
+					: new TransactionError({
+							operation: "begin",
+							reason: "transaction is no longer active",
+							message: "Cannot perform operation: transaction is no longer active",
+						}),
+			)
+
+		// Helper to wrap an effect-returning method with isActive check
+		const wrapWithActiveCheck = <A, E>(
+			effect: Effect.Effect<A, E>,
+		): Effect.Effect<A, E | TransactionError> =>
+			Effect.flatMap(checkActive(), () => effect)
+
+		// Build collection accessors with isActive guards
 		const collections: Record<string, EffectCollection<HasId>> = {}
 		for (const collectionName of Object.keys(stateRefs)) {
-			collections[collectionName] = buildCollectionForTx(collectionName, addMutation)
+			const baseCollection = buildCollectionForTx(collectionName, addMutation)
+
+			// Wrap each method to check isActive before proceeding
+			// Note: query returns Stream/CursorPage which need different handling
+			collections[collectionName] = {
+				...baseCollection,
+				create: (...args) => wrapWithActiveCheck(baseCollection.create(...args)),
+				createMany: (...args) => wrapWithActiveCheck(baseCollection.createMany(...args)),
+				update: (...args) => wrapWithActiveCheck(baseCollection.update(...args)),
+				updateMany: (...args) => wrapWithActiveCheck(baseCollection.updateMany(...args)),
+				delete: (...args) => wrapWithActiveCheck(baseCollection.delete(...args)),
+				deleteMany: (...args) => wrapWithActiveCheck(baseCollection.deleteMany(...args)),
+				upsert: (...args) => wrapWithActiveCheck(baseCollection.upsert(...args)),
+				upsertMany: (...args) => wrapWithActiveCheck(baseCollection.upsertMany(...args)),
+				findById: (...args) => wrapWithActiveCheck(baseCollection.findById(...args)),
+				createWithRelationships: (...args) =>
+					wrapWithActiveCheck(baseCollection.createWithRelationships(...args)),
+				updateWithRelationships: (...args) =>
+					wrapWithActiveCheck(baseCollection.updateWithRelationships(...args)),
+				deleteWithRelationships: (...args) =>
+					wrapWithActiveCheck(baseCollection.deleteWithRelationships(...args)),
+				deleteManyWithRelationships: (...args) =>
+					wrapWithActiveCheck(baseCollection.deleteManyWithRelationships(...args)),
+				// aggregate uses the base implementation since reads don't modify state
+				// and its conditional return type is incompatible with wrapWithActiveCheck
+				aggregate: baseCollection.aggregate,
+			} as EffectCollection<HasId>
 		}
 
 		const commit = (): Effect.Effect<void, TransactionError> =>

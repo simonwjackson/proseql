@@ -11,7 +11,7 @@
 - [x] 2.3 Implement single-writer lock: use `Ref.modify` on `transactionLock` to atomically check-and-acquire. Fail with `TransactionError { operation: "begin", reason: "another transaction is already active" }` if already locked.
 - [x] 2.4 Implement `commit()`: verify `isActive`, trigger `persistenceTrigger.schedule` for each collection in `mutatedCollections`, release lock via `Ref.set(transactionLock, false)`, mark inactive.
 - [x] 2.5 Implement `rollback()`: verify `isActive`, restore each collection Ref to its snapshot via `Ref.set`, release lock, mark inactive. Return `Effect.fail(TransactionError { operation: "rollback" })` to short-circuit.
-- [ ] 2.6 Implement `isActive` as a mutable flag checked by commit/rollback/operations. Operations on inactive transaction produce `TransactionError { operation: "begin", reason: "transaction is no longer active" }`.
+- [x] 2.6 Implement `isActive` as a mutable flag checked by commit/rollback/operations. Operations on inactive transaction produce `TransactionError { operation: "begin", reason: "transaction is no longer active" }`.
 - [ ] 2.7 Implement mutation tracking: a `Set<string>` that `afterMutation` adds collection names to instead of scheduling persistence writes.
 
 ## 3. $transaction Callback Wrapper
