@@ -871,6 +871,153 @@ describe("schema-migrations: migration registry validation", () => {
 })
 
 // ============================================================================
+// Tests: Auto-Migrate on Load (Tasks 11.1-11.6)
+// ============================================================================
+
+describe("schema-migrations: auto-migrate on load", () => {
+	describe("file at version 0, config at version 3 → all migrations run, data correct (task 11.1)", () => {
+		it("loadData runs all three migrations (0→1→2→3) and produces correct V3 data", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File at version 0 (no _version field) with V0 data (id, name only)
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					u1: { id: "u1", name: "Alice Smith" },
+					u2: { id: "u2", name: "Bob Jones" },
+				}),
+			)
+
+			// Load with version 3 config and full migration chain
+			const result = await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV3, {
+						version: 3,
+						collectionName: "users",
+						migrations: allMigrations,
+					}),
+					layer,
+				),
+			)
+
+			// Verify all entities were migrated correctly
+			expect(result.size).toBe(2)
+
+			const alice = result.get("u1")!
+			expect(alice.firstName).toBe("Alice")
+			expect(alice.lastName).toBe("Smith")
+			expect(alice.email).toBe("alice.smith@example.com")
+			expect(alice.age).toBe(0)
+
+			const bob = result.get("u2")!
+			expect(bob.firstName).toBe("Bob")
+			expect(bob.lastName).toBe("Jones")
+			expect(bob.email).toBe("bob.jones@example.com")
+			expect(bob.age).toBe(0)
+		})
+
+		it("loadCollectionsFromFile runs all three migrations and produces correct V3 data", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File with version 0 (no _version) in users collection
+			store.set(
+				"/data/db.json",
+				JSON.stringify({
+					users: {
+						u1: { id: "u1", name: "Charlie Brown" },
+					},
+				}),
+			)
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					loadCollectionsFromFile("/data/db.json", [
+						{
+							name: "users",
+							schema: UserSchemaV3,
+							version: 3,
+							migrations: allMigrations,
+						},
+					]),
+					layer,
+				),
+			)
+
+			const charlie = result.users.get("u1") as UserV3
+			expect(charlie.firstName).toBe("Charlie")
+			expect(charlie.lastName).toBe("Brown")
+			expect(charlie.email).toBe("charlie.brown@example.com")
+			expect(charlie.age).toBe(0)
+		})
+
+		it("handles explicit _version: 0 in file same as missing _version", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File with explicit _version: 0
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					_version: 0,
+					u1: { id: "u1", name: "David Lee" },
+				}),
+			)
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV3, {
+						version: 3,
+						collectionName: "users",
+						migrations: allMigrations,
+					}),
+					layer,
+				),
+			)
+
+			const david = result.get("u1")!
+			expect(david.firstName).toBe("David")
+			expect(david.lastName).toBe("Lee")
+			expect(david.email).toBe("david.lee@example.com")
+			expect(david.age).toBe(0)
+		})
+
+		it("transforms are applied in correct order (0→1 then 1→2 then 2→3)", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// Use a name that would expose ordering issues
+			// If 1→2 ran before 0→1, it would fail because 'name' field wouldn't exist
+			// If 2→3 ran before 1→2, firstName/lastName wouldn't exist
+			store.set(
+				"/data/users.json",
+				JSON.stringify({
+					u1: { id: "u1", name: "Test User" },
+				}),
+			)
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV3, {
+						version: 3,
+						collectionName: "users",
+						migrations: allMigrations,
+					}),
+					layer,
+				),
+			)
+
+			// This would only work if all migrations ran in correct order:
+			// 0→1: adds email based on name
+			// 1→2: splits name into firstName/lastName
+			// 2→3: adds age
+			const user = result.get("u1")!
+			expect(user.email).toBe("test.user@example.com") // From 0→1 (based on original name)
+			expect(user.firstName).toBe("Test") // From 1→2
+			expect(user.lastName).toBe("User") // From 1→2
+			expect(user.age).toBe(0) // From 2→3
+		})
+	})
+})
+
+// ============================================================================
 // Exported test helpers and schemas for use in other test files
 // ============================================================================
 
