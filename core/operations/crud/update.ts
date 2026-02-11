@@ -23,6 +23,8 @@ import { validateEntity } from "../../validators/schema-validator.js"
 import {
 	validateForeignKeysEffect,
 } from "../../validators/foreign-key.js"
+import type { CollectionIndexes } from "../../types/index-types.js"
+import { updateInIndex } from "../../indexes/index-manager.js"
 
 // ============================================================================
 // Types
@@ -212,6 +214,7 @@ export const update = <T extends HasId, I = T>(
 	relationships: Record<string, RelationshipConfig>,
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+	indexes?: CollectionIndexes,
 ) =>
 (id: string, updates: UpdateWithOperators<T & MinimalEntity>): Effect.Effect<T, ValidationError | NotFoundError | ForeignKeyError> =>
 	Effect.gen(function* () {
@@ -272,6 +275,11 @@ export const update = <T extends HasId, I = T>(
 			return next
 		})
 
+		// Update indexes if provided
+		if (indexes && indexes.size > 0) {
+			yield* updateInIndex(indexes, entity, validated)
+		}
+
 		return validated
 	})
 
@@ -294,6 +302,7 @@ export const updateMany = <T extends HasId, I = T>(
 	relationships: Record<string, RelationshipConfig>,
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
+	indexes?: CollectionIndexes,
 ) =>
 (
 	predicate: (entity: T) => boolean,
@@ -363,6 +372,13 @@ export const updateMany = <T extends HasId, I = T>(
 			}
 			return next
 		})
+
+		// Update indexes if provided
+		if (indexes && indexes.size > 0) {
+			for (let i = 0; i < matchingEntities.length; i++) {
+				yield* updateInIndex(indexes, matchingEntities[i]!, validatedEntities[i]!)
+			}
+		}
 
 		return {
 			count: validatedEntities.length,
