@@ -7,14 +7,21 @@ import {
 	InMemoryStorageLayer,
 } from "../core/storage/in-memory-adapter-layer.js"
 import { makeNodeStorageLayer } from "../core/storage/node-adapter-layer.js"
-import { JsonSerializerLayer } from "../core/serializers/json.js"
-import { YamlSerializerLayer } from "../core/serializers/yaml.js"
-import { MessagePackSerializerLayer } from "../core/serializers/messagepack.js"
+import { makeSerializerLayer } from "../core/serializers/format-codec.js"
+import { jsonCodec } from "../core/serializers/codecs/json.js"
+import { yamlCodec } from "../core/serializers/codecs/yaml.js"
 import { StorageError, SerializationError, UnsupportedFormatError } from "../core/errors/storage-errors.js"
 import { promises as fs } from "fs"
 import { join } from "path"
 import { tmpdir } from "os"
 import { randomBytes } from "crypto"
+
+// ============================================================================
+// Codec-based serializer layers
+// ============================================================================
+
+const JsonSerializerLayer = makeSerializerLayer([jsonCodec()])
+const YamlSerializerLayer = makeSerializerLayer([yamlCodec()])
 
 // ============================================================================
 // Helpers
@@ -96,16 +103,6 @@ describe("Storage + Serializer integration", () => {
 		})
 	})
 
-	describe("in-memory storage with MessagePack serializer", () => {
-		const TestLayer = Layer.merge(InMemoryStorageLayer, MessagePackSerializerLayer)
-
-		it("write serialized data, read back, and deserialize round-trips", async () => {
-			const result = await Effect.runPromise(
-				Effect.provide(writeAndReadBack("/data/users.msgpack", "msgpack"), TestLayer),
-			)
-			expect(result).toEqual(sampleData)
-		})
-	})
 })
 
 // ============================================================================
@@ -234,10 +231,6 @@ describe("Cross-format serialization round-trips", () => {
 
 	it("YAML preserves complex data", async () => {
 		expect(await roundTrip("yaml", YamlSerializerLayer)).toEqual(complexData)
-	})
-
-	it("MessagePack preserves complex data", async () => {
-		expect(await roundTrip("msgpack", MessagePackSerializerLayer)).toEqual(complexData)
 	})
 })
 
