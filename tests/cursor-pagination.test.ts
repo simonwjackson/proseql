@@ -660,4 +660,128 @@ describe("Cursor Pagination", () => {
 			}
 		})
 	})
+
+	describe("combined with where", () => {
+		it("cursor applies after filtering, correct subset paginated", async () => {
+			// Generate 15 items with categories:
+			// clothing: 1, 5, 7, 11, 13 (odd items not divisible by 3)
+			// books: 2, 4, 8, 10, 14 (even items not divisible by 3)
+			// electronics: 3, 6, 9, 12, 15 (items divisible by 3)
+			const items = generateItems(15)
+
+			// Verify our category distribution is correct
+			const electronics = items.filter((i) => i.category === "electronics")
+			expect(electronics.map((i) => i.id)).toEqual([
+				"item-003",
+				"item-006",
+				"item-009",
+				"item-012",
+				"item-015",
+			])
+
+			// First page of electronics items (limit 2)
+			const firstPage = await runCursorQuery(items, {
+				where: { category: "electronics" },
+				cursor: { key: "id", limit: 2 },
+			})
+
+			// Should return first 2 electronics items
+			expect(firstPage.items).toHaveLength(2)
+			expect(firstPage.items.map((i) => i.id)).toEqual([
+				"item-003",
+				"item-006",
+			])
+			expect(firstPage.items.every((i) => i.category === "electronics")).toBe(true)
+
+			// Should have next page (3 more electronics items)
+			expect(firstPage.pageInfo.hasNextPage).toBe(true)
+			expect(firstPage.pageInfo.hasPreviousPage).toBe(false)
+			expect(firstPage.pageInfo.startCursor).toBe("item-003")
+			expect(firstPage.pageInfo.endCursor).toBe("item-006")
+
+			// Second page of electronics items
+			const secondPage = await runCursorQuery(items, {
+				where: { category: "electronics" },
+				cursor: {
+					key: "id",
+					limit: 2,
+					after: firstPage.pageInfo.endCursor!,
+				},
+			})
+
+			// Should return next 2 electronics items
+			expect(secondPage.items).toHaveLength(2)
+			expect(secondPage.items.map((i) => i.id)).toEqual([
+				"item-009",
+				"item-012",
+			])
+			expect(secondPage.items.every((i) => i.category === "electronics")).toBe(true)
+
+			// Should have both next and previous pages
+			expect(secondPage.pageInfo.hasNextPage).toBe(true)
+			expect(secondPage.pageInfo.hasPreviousPage).toBe(true)
+
+			// Third (final) page of electronics items
+			const thirdPage = await runCursorQuery(items, {
+				where: { category: "electronics" },
+				cursor: {
+					key: "id",
+					limit: 2,
+					after: secondPage.pageInfo.endCursor!,
+				},
+			})
+
+			// Should return only the last electronics item
+			expect(thirdPage.items).toHaveLength(1)
+			expect(thirdPage.items.map((i) => i.id)).toEqual(["item-015"])
+			expect(thirdPage.items[0].category).toBe("electronics")
+
+			// Should not have next page
+			expect(thirdPage.pageInfo.hasNextPage).toBe(false)
+			expect(thirdPage.pageInfo.hasPreviousPage).toBe(true)
+		})
+
+		it("cursor backward pagination works with where filter", async () => {
+			const items = generateItems(15)
+
+			// Get the last 2 electronics items before item-015
+			const page = await runCursorQuery(items, {
+				where: { category: "electronics" },
+				cursor: {
+					key: "id",
+					limit: 2,
+					before: "item-015",
+				},
+			})
+
+			// Should return items 9 and 12 (the 2 electronics items before 15)
+			expect(page.items).toHaveLength(2)
+			expect(page.items.map((i) => i.id)).toEqual([
+				"item-009",
+				"item-012",
+			])
+			expect(page.items.every((i) => i.category === "electronics")).toBe(true)
+
+			// Should have both previous and next pages
+			expect(page.pageInfo.hasPreviousPage).toBe(true) // items 3 and 6
+			expect(page.pageInfo.hasNextPage).toBe(true) // item 15
+		})
+
+		it("where filter that matches no items returns empty cursor result", async () => {
+			const items = generateItems(10)
+
+			// Query for a category that doesn't exist
+			const result = await runCursorQuery(items, {
+				where: { category: "nonexistent" },
+				cursor: { key: "id", limit: 5 },
+			})
+
+			// Should return empty items
+			expect(result.items).toHaveLength(0)
+			expect(result.pageInfo.startCursor).toBeNull()
+			expect(result.pageInfo.endCursor).toBeNull()
+			expect(result.pageInfo.hasNextPage).toBe(false)
+			expect(result.pageInfo.hasPreviousPage).toBe(false)
+		})
+	})
 })
