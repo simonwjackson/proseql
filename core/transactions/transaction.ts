@@ -114,7 +114,6 @@ export const createTransaction = <DB extends Record<string, EffectCollection<Has
 			collections[collectionName] = buildCollectionForTx(collectionName, addMutation)
 		}
 
-		// TODO 2.4: Implement commit
 		const commit = (): Effect.Effect<void, TransactionError> =>
 			Effect.gen(function* () {
 				if (!isActive) {
