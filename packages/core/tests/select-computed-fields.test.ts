@@ -119,6 +119,24 @@ describe("selectFields with computed fields", () => {
 			expect(result).not.toHaveProperty("yearsSincePublication");
 		});
 
+		it("should select only computed fields, excluding stored fields", () => {
+			const result = applyObjectSelection(
+				booksWithComputed[0] as Record<string, unknown>,
+				{ displayName: true, isClassic: true, yearsSincePublication: true },
+			);
+
+			expect(result).toEqual({
+				displayName: "Dune (1965)",
+				isClassic: true,
+				yearsSincePublication: 59,
+			});
+			// Stored fields should not be present
+			expect(result).not.toHaveProperty("id");
+			expect(result).not.toHaveProperty("title");
+			expect(result).not.toHaveProperty("year");
+			expect(result).not.toHaveProperty("genre");
+		});
+
 		it("should handle selecting non-existent fields gracefully", () => {
 			const result = applyObjectSelection(
 				booksWithComputed[0] as Record<string, unknown>,
@@ -167,6 +185,36 @@ describe("selectFields with computed fields", () => {
 			expect(result).toHaveLength(5);
 			expect(result[0]).toEqual({ id: "1", title: "Dune" });
 			// Note: array-based select converts to object-based internally
+		});
+
+		it("should select only computed fields via stream, excluding stored fields", async () => {
+			const result = await collectSelected(booksWithComputed, {
+				displayName: true,
+				isClassic: true,
+				yearsSincePublication: true,
+			});
+
+			expect(result).toHaveLength(5);
+			// First book: Dune (1965)
+			expect(result[0]).toEqual({
+				displayName: "Dune (1965)",
+				isClassic: true,
+				yearsSincePublication: 59,
+			});
+			// Stored fields should not be present
+			expect(result[0]).not.toHaveProperty("id");
+			expect(result[0]).not.toHaveProperty("title");
+			expect(result[0]).not.toHaveProperty("year");
+			expect(result[0]).not.toHaveProperty("genre");
+
+			// Fourth book: Project Hail Mary (2021)
+			expect(result[3]).toEqual({
+				displayName: "Project Hail Mary (2021)",
+				isClassic: false,
+				yearsSincePublication: 3,
+			});
+			expect(result[3]).not.toHaveProperty("id");
+			expect(result[3]).not.toHaveProperty("title");
 		});
 	});
 
