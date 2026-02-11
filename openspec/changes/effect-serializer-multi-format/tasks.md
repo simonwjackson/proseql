@@ -36,31 +36,31 @@
 
 - [x] 6.1 Remove `PersistenceOptions` and `DatabaseOptions` types from `core/types/database-config-types.ts`. Remove the import of legacy `SerializerRegistry` and `StorageAdapter` from types.ts. Keep all other types.
 
-## 7. Delete Legacy Files
+## 7. Update Existing Tests
 
-- [ ] 7.1 Delete `core/serializers/types.ts`
-- [ ] 7.2 Delete `core/serializers/json.ts`
-- [ ] 7.3 Delete `core/serializers/yaml.ts`
-- [ ] 7.4 Delete `core/serializers/messagepack.ts`
-- [ ] 7.5 Delete `core/storage/persistence.ts`
-- [ ] 7.6 Delete `core/storage/types.ts`
-- [ ] 7.7 Delete `core/utils/file-extensions.ts`
-- [ ] 7.8 Delete `core/storage/node-adapter.ts` (legacy adapter; Effect version in `node-adapter-layer.ts`)
-- [ ] 7.9 Remove `msgpackr` dependency: `bun remove msgpackr`
+- [x] 7.1 Update `tests/json-serializer.test.ts`: replace `JsonSerializerLayer`/`makeJsonSerializerLayer` imports with `makeSerializerLayer([jsonCodec()])`. Adapt tests for new API.
+- [ ] 7.2 Update `tests/yaml-serializer.test.ts`: replace `YamlSerializerLayer`/`makeYamlSerializerLayer` imports with `makeSerializerLayer([yamlCodec()])`. Adapt tests.
+- [ ] 7.3 Update `tests/messagepack-serializer.test.ts`: delete file (MessagePack removed).
+- [ ] 7.4 Update `tests/serializer-service.test.ts`: replace test registry with `makeSerializerLayer`. Verify multi-format dispatch.
+- [ ] 7.5 Update `tests/storage-services.test.ts`: replace all `JsonSerializerLayer`/`YamlSerializerLayer`/`MessagePackSerializerLayer` with codec-based layers. Remove MessagePack tests.
+- [ ] 7.6 Update `tests/persistence-effect.test.ts`: replace serializer layer imports.
+- [ ] 7.7 Update `tests/persistence.test.ts`: replace serializer layer imports. Remove MessagePack test helpers.
+- [ ] 7.8 Update `tests/file-watcher.test.ts`: replace serializer layer imports.
+- [ ] 7.9 Update `tests/debounced-writer.test.ts`: replace serializer layer imports.
+- [ ] 7.10 Update `tests/database-effect.test.ts`: replace serializer layer imports.
+- [ ] 7.11 Update `tests/schema-migrations.test.ts`: replace serializer layer imports.
 
-## 8. Update Existing Tests
+## 8. Delete Legacy Files
 
-- [ ] 8.1 Update `tests/json-serializer.test.ts`: replace `JsonSerializerLayer`/`makeJsonSerializerLayer` imports with `makeSerializerLayer([jsonCodec()])`. Adapt tests for new API.
-- [ ] 8.2 Update `tests/yaml-serializer.test.ts`: replace `YamlSerializerLayer`/`makeYamlSerializerLayer` imports with `makeSerializerLayer([yamlCodec()])`. Adapt tests.
-- [ ] 8.3 Update `tests/messagepack-serializer.test.ts`: delete file (MessagePack removed).
-- [ ] 8.4 Update `tests/serializer-service.test.ts`: replace test registry with `makeSerializerLayer`. Verify multi-format dispatch.
-- [ ] 8.5 Update `tests/storage-services.test.ts`: replace all `JsonSerializerLayer`/`YamlSerializerLayer`/`MessagePackSerializerLayer` with codec-based layers. Remove MessagePack tests.
-- [ ] 8.6 Update `tests/persistence-effect.test.ts`: replace serializer layer imports.
-- [ ] 8.7 Update `tests/persistence.test.ts`: replace serializer layer imports. Remove MessagePack test helpers.
-- [ ] 8.8 Update `tests/file-watcher.test.ts`: replace serializer layer imports.
-- [ ] 8.9 Update `tests/debounced-writer.test.ts`: replace serializer layer imports.
-- [ ] 8.10 Update `tests/database-effect.test.ts`: replace serializer layer imports.
-- [ ] 8.11 Update `tests/schema-migrations.test.ts`: replace serializer layer imports.
+- [ ] 8.1 Delete `core/serializers/types.ts`
+- [ ] 8.2 Delete `core/serializers/json.ts`
+- [ ] 8.3 Delete `core/serializers/yaml.ts`
+- [ ] 8.4 Delete `core/serializers/messagepack.ts`
+- [ ] 8.5 Delete `core/storage/persistence.ts`
+- [ ] 8.6 Delete `core/storage/types.ts`
+- [ ] 8.7 Delete `core/utils/file-extensions.ts`
+- [ ] 8.8 Delete `core/storage/node-adapter.ts` (legacy adapter; Effect version in `node-adapter-layer.ts`)
+- [ ] 8.9 Remove `msgpackr` dependency: `bun remove msgpackr`
 
 ## 9. New Tests
 
