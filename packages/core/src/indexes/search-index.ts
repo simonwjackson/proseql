@@ -59,6 +59,94 @@ export const buildSearchIndex = <T extends HasId>(
 	});
 
 /**
+ * Lookup candidate entity IDs from the search index for a given query.
+ *
+ * For each query token:
+ * - Finds exact matches in the index
+ * - Finds prefix matches (index tokens that start with the query token)
+ *
+ * Returns the intersection of ID sets across all query tokens (AND semantics).
+ * If a query token has no matches, returns an empty set.
+ * If queryTokens is empty, returns an empty set.
+ *
+ * @param indexRef - Ref containing the SearchIndexMap
+ * @param queryTokens - Tokenized query terms to search for
+ * @returns Effect producing a Set of candidate entity IDs
+ *
+ * @example
+ * ```ts
+ * // Index: "dune" -> Set(["1"]), "frank" -> Set(["1"]), "neuromancer" -> Set(["2"])
+ *
+ * // Exact match
+ * const ids = yield* lookupSearchIndex(indexRef, ["dune"])
+ * // → Set(["1"])
+ *
+ * // Prefix match
+ * const ids = yield* lookupSearchIndex(indexRef, ["neuro"])
+ * // → Set(["2"]) (matches "neuromancer")
+ *
+ * // Multi-token (AND semantics)
+ * const ids = yield* lookupSearchIndex(indexRef, ["dune", "frank"])
+ * // → Set(["1"]) (intersection)
+ *
+ * // No match
+ * const ids = yield* lookupSearchIndex(indexRef, ["xyz"])
+ * // → Set([])
+ * ```
+ */
+export const lookupSearchIndex = (
+	indexRef: Ref.Ref<SearchIndexMap>,
+	queryTokens: ReadonlyArray<string>,
+): Effect.Effect<Set<string>> =>
+	Effect.gen(function* () {
+		// Empty query returns empty set
+		if (queryTokens.length === 0) {
+			return new Set<string>();
+		}
+
+		const index = yield* Ref.get(indexRef);
+
+		// For each query token, find all matching IDs (exact + prefix)
+		const tokenMatchSets: Array<Set<string>> = [];
+
+		for (const queryToken of queryTokens) {
+			const matchingIds = new Set<string>();
+
+			// Check each token in the index for exact or prefix match
+			for (const [indexToken, entityIds] of index) {
+				if (indexToken === queryToken || indexToken.startsWith(queryToken)) {
+					// Union all matching entity IDs for this query token
+					for (const id of entityIds) {
+						matchingIds.add(id);
+					}
+				}
+			}
+
+			tokenMatchSets.push(matchingIds);
+		}
+
+		// Intersect all token match sets (AND semantics)
+		// If any token has no matches, the result is empty
+		if (tokenMatchSets.length === 0) {
+			return new Set<string>();
+		}
+
+		// Start with the first set and intersect with the rest
+		const result = new Set<string>(tokenMatchSets[0]);
+
+		for (let i = 1; i < tokenMatchSets.length; i++) {
+			const currentSet = tokenMatchSets[i];
+			for (const id of result) {
+				if (!currentSet.has(id)) {
+					result.delete(id);
+				}
+			}
+		}
+
+		return result;
+	});
+
+/**
  * Helper function to add a single entity to a search index map.
  *
  * Tokenizes the values of the specified fields and adds the entity's ID
