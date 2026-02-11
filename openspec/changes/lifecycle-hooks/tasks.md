@@ -10,7 +10,7 @@
 ## 2. Hook Runner
 
 - [x] 2.1 Create `core/hooks/hook-runner.ts` with `runBeforeHooks(hooks, initialCtx)`: chain hooks in order, pipe each hook's output to the next. Return the final transformed data. If any hook fails with `HookError`, short-circuit and propagate.
-- [ ] 2.2 Implement `runAfterHooks(hooks, ctx)`: run all hooks in order, swallow errors (catch all and discard). Each hook receives the same context.
+- [x] 2.2 Implement `runAfterHooks(hooks, ctx)`: run all hooks in order, swallow errors (catch all and discard). Each hook receives the same context.
 - [ ] 2.3 Implement `runOnChangeHooks(hooks, ctx)`: same as `runAfterHooks` but with `OnChangeContext`.
 - [ ] 2.4 Handle empty/undefined hook arrays: return data unchanged (before) or no-op (after/onChange).
 

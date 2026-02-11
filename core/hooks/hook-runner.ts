@@ -14,6 +14,12 @@ import type {
 	BeforeCreateContext,
 	BeforeUpdateContext,
 	BeforeDeleteContext,
+	AfterCreateHook,
+	AfterUpdateHook,
+	AfterDeleteHook,
+	AfterCreateContext,
+	AfterUpdateContext,
+	AfterDeleteContext,
 } from "../types/hook-types.js"
 import type { UpdateWithOperators } from "../types/crud-types.js"
 
@@ -80,4 +86,71 @@ export const runBeforeDeleteHooks = <T>(
 	}
 
 	return Effect.forEach(hooks, (hook) => hook(ctx), { discard: true })
+}
+
+// ============================================================================
+// After Hooks - Run In Order, Swallow Errors
+// ============================================================================
+
+/**
+ * Run afterCreate hooks in order. Each hook receives the same context.
+ * Errors are swallowed (fire-and-forget).
+ *
+ * If hooks array is empty or undefined, no-op.
+ */
+export const runAfterCreateHooks = <T>(
+	hooks: ReadonlyArray<AfterCreateHook<T>> | undefined,
+	ctx: AfterCreateContext<T>,
+): Effect.Effect<void, never> => {
+	if (!hooks || hooks.length === 0) {
+		return Effect.void
+	}
+
+	return Effect.forEach(
+		hooks,
+		(hook) => Effect.catchAll(hook(ctx), () => Effect.void),
+		{ discard: true },
+	)
+}
+
+/**
+ * Run afterUpdate hooks in order. Each hook receives the same context.
+ * Errors are swallowed (fire-and-forget).
+ *
+ * If hooks array is empty or undefined, no-op.
+ */
+export const runAfterUpdateHooks = <T>(
+	hooks: ReadonlyArray<AfterUpdateHook<T>> | undefined,
+	ctx: AfterUpdateContext<T>,
+): Effect.Effect<void, never> => {
+	if (!hooks || hooks.length === 0) {
+		return Effect.void
+	}
+
+	return Effect.forEach(
+		hooks,
+		(hook) => Effect.catchAll(hook(ctx), () => Effect.void),
+		{ discard: true },
+	)
+}
+
+/**
+ * Run afterDelete hooks in order. Each hook receives the same context.
+ * Errors are swallowed (fire-and-forget).
+ *
+ * If hooks array is empty or undefined, no-op.
+ */
+export const runAfterDeleteHooks = <T>(
+	hooks: ReadonlyArray<AfterDeleteHook<T>> | undefined,
+	ctx: AfterDeleteContext<T>,
+): Effect.Effect<void, never> => {
+	if (!hooks || hooks.length === 0) {
+		return Effect.void
+	}
+
+	return Effect.forEach(
+		hooks,
+		(hook) => Effect.catchAll(hook(ctx), () => Effect.void),
+		{ discard: true },
+	)
 }
