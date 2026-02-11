@@ -220,7 +220,7 @@ export interface EffectCollection<T extends HasId> {
 		options?: { readonly soft?: boolean; readonly limit?: number },
 	) => RunnableEffect<
 		DeleteManyResult<T>,
-		OperationError | ForeignKeyError
+		OperationError | ForeignKeyError | HookError
 	>
 
 	readonly upsert: (

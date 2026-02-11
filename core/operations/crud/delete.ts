@@ -191,6 +191,9 @@ export const del = <T extends HasId>(
  * The caller (database factory) can use the Stream-based filter pipeline
  * to build the predicate from a WhereClause.
  *
+ * Runs hooks per entity: beforeDelete can reject deletion,
+ * afterDelete and onChange run after state mutation.
+ *
  * All matching entities are deleted atomically in a single Ref.update call.
  */
 export const deleteMany = <T extends HasId>(
@@ -200,11 +203,12 @@ export const deleteMany = <T extends HasId>(
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	supportsSoftDelete: boolean = false,
 	indexes?: CollectionIndexes,
+	hooks?: HooksConfig<T>,
 ) =>
 (
 	predicate: (entity: T) => boolean,
 	options?: DeleteManyOptions,
-): Effect.Effect<DeleteManyResult<T>, OperationError | ForeignKeyError> =>
+): Effect.Effect<DeleteManyResult<T>, OperationError | ForeignKeyError | HookError> =>
 	Effect.gen(function* () {
 		// Get current state and find matching entities
 		const currentMap = yield* Ref.get(ref)
@@ -235,6 +239,16 @@ export const deleteMany = <T extends HasId>(
 					message: "Entities do not have a deletedAt field",
 				}),
 			)
+		}
+
+		// Run beforeDelete hooks for each entity (can reject deletion)
+		for (const entity of matchingEntities) {
+			yield* runBeforeDeleteHooks(hooks?.beforeDelete, {
+				operation: "delete",
+				collection: collectionName,
+				id: entity.id,
+				entity,
+			})
 		}
 
 		// Check foreign key constraints for all entities (only for hard delete)
@@ -289,6 +303,25 @@ export const deleteMany = <T extends HasId>(
 					next.delete(id)
 				}
 				return next
+			})
+		}
+
+		// Run afterDelete and onChange hooks for each deleted entity
+		for (const entity of deleted) {
+			// Run afterDelete hooks (fire-and-forget, errors swallowed)
+			yield* runAfterDeleteHooks(hooks?.afterDelete, {
+				operation: "delete",
+				collection: collectionName,
+				id: entity.id,
+				entity,
+			})
+
+			// Run onChange hooks with type: "delete" (fire-and-forget, errors swallowed)
+			yield* runOnChangeHooks(hooks?.onChange, {
+				type: "delete",
+				collection: collectionName,
+				id: entity.id,
+				entity,
 			})
 		}
 
