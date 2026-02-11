@@ -48,12 +48,12 @@
 
 ## 9. Tests — Schema Versioning
 
-- [ ] 9.1 Create `tests/schema-migrations.test.ts` with test helpers: in-memory storage adapter, sample schemas at multiple versions
-- [ ] 9.2 Test save versioned collection → file contains `_version`
-- [ ] 9.3 Test load file at current version → entities loaded, `_version` stripped
-- [ ] 9.4 Test load file without `_version` → treated as version 0
-- [ ] 9.5 Test load file with version ahead → `MigrationError`
-- [ ] 9.6 Test unversioned collection → `_version` not written or checked
+- [x] 9.1 Create `tests/schema-migrations.test.ts` with test helpers: in-memory storage adapter, sample schemas at multiple versions
+- [x] 9.2 Test save versioned collection → file contains `_version`
+- [x] 9.3 Test load file at current version → entities loaded, `_version` stripped
+- [x] 9.4 Test load file without `_version` → treated as version 0
+- [x] 9.5 Test load file with version ahead → `MigrationError`
+- [x] 9.6 Test unversioned collection → `_version` not written or checked
 
 ## 10. Tests — Migration Registry Validation
 
