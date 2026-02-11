@@ -1589,6 +1589,260 @@ describe("schema-migrations: auto-migrate on load", () => {
 			expect(grace.email).toBe("grace@example.com")
 		})
 	})
+
+	describe("failed transform → original file untouched, MigrationError (task 11.5)", () => {
+		it("loadData fails with MigrationError when transform throws", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// Original file content at version 0
+			const originalContent = JSON.stringify({
+				u1: { id: "u1", name: "Alice Smith" },
+			})
+			store.set("/data/users.json", originalContent)
+
+			// Migration that throws an error during transform
+			const failingMigration: Migration = {
+				from: 0,
+				to: 1,
+				description: "Failing migration",
+				transform: () => {
+					throw new Error("Simulated transform failure")
+				},
+			}
+
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV1, {
+						version: 1,
+						collectionName: "users",
+						migrations: [failingMigration],
+					}).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			// Verify MigrationError is returned
+			expect(error._tag).toBe("MigrationError")
+			const migrationError = error as MigrationError
+			expect(migrationError.reason).toBe("transform-failed")
+			expect(migrationError.collection).toBe("users")
+			expect(migrationError.fromVersion).toBe(0)
+			expect(migrationError.toVersion).toBe(1)
+			expect(migrationError.step).toBe(0) // First (and only) migration step
+			expect(migrationError.message).toContain("Simulated transform failure")
+
+			// Verify original file is untouched
+			const storedContent = store.get("/data/users.json")
+			expect(storedContent).toBe(originalContent)
+		})
+
+		it("loadData fails when transform throws non-Error object", async () => {
+			const { store, layer } = makeTestEnv()
+
+			const originalContent = JSON.stringify({
+				u1: { id: "u1", name: "Bob Jones" },
+			})
+			store.set("/data/users.json", originalContent)
+
+			// Migration that throws a string (not an Error object)
+			const failingMigration: Migration = {
+				from: 0,
+				to: 1,
+				description: "Throws string",
+				transform: () => {
+					throw "string error message"
+				},
+			}
+
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV1, {
+						version: 1,
+						collectionName: "users",
+						migrations: [failingMigration],
+					}).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			const migrationError = error as MigrationError
+			expect(migrationError.reason).toBe("transform-failed")
+			expect(migrationError.message).toContain("string error message")
+
+			// Original file untouched
+			expect(store.get("/data/users.json")).toBe(originalContent)
+		})
+
+		it("original file untouched when second migration in chain fails", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File at version 0
+			const originalContent = JSON.stringify({
+				u1: { id: "u1", name: "Charlie Brown" },
+			})
+			store.set("/data/users.json", originalContent)
+
+			// First migration succeeds, second fails
+			const successMigration: Migration = {
+				from: 0,
+				to: 1,
+				transform: (data) => {
+					const result: Record<string, unknown> = {}
+					for (const [id, entity] of Object.entries(data)) {
+						result[id] = { ...(entity as object), email: "added@example.com" }
+					}
+					return result
+				},
+			}
+
+			const failingMigration: Migration = {
+				from: 1,
+				to: 2,
+				description: "Second migration fails",
+				transform: () => {
+					throw new Error("Second step failure")
+				},
+			}
+
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV2, {
+						version: 2,
+						collectionName: "users",
+						migrations: [successMigration, failingMigration],
+					}).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			const migrationError = error as MigrationError
+			expect(migrationError.reason).toBe("transform-failed")
+			expect(migrationError.fromVersion).toBe(1)
+			expect(migrationError.toVersion).toBe(2)
+			expect(migrationError.step).toBe(1) // Second migration (index 1)
+			expect(migrationError.message).toContain("Second step failure")
+
+			// Original file untouched - no partial migration written
+			expect(store.get("/data/users.json")).toBe(originalContent)
+		})
+
+		it("loadCollectionsFromFile fails with MigrationError when transform throws", async () => {
+			const { store, layer } = makeTestEnv()
+
+			const originalContent = JSON.stringify({
+				users: {
+					u1: { id: "u1", name: "David Lee" },
+				},
+			})
+			store.set("/data/db.json", originalContent)
+
+			const failingMigration: Migration = {
+				from: 0,
+				to: 1,
+				transform: () => {
+					throw new Error("Collection migration failed")
+				},
+			}
+
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadCollectionsFromFile("/data/db.json", [
+						{
+							name: "users",
+							schema: UserSchemaV1,
+							version: 1,
+							migrations: [failingMigration],
+						},
+					]).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			const migrationError = error as MigrationError
+			expect(migrationError.reason).toBe("transform-failed")
+			expect(migrationError.collection).toBe("users")
+			expect(migrationError.message).toContain("Collection migration failed")
+
+			// Original file untouched
+			expect(store.get("/data/db.json")).toBe(originalContent)
+		})
+
+		it("file unchanged when migration fails partway through multi-collection file", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// Two collections in file, second one's migration fails
+			const originalContent = JSON.stringify({
+				users: {
+					u1: { id: "u1", name: "Eve" },
+				},
+				products: {
+					p1: { id: "p1", title: "Widget" },
+				},
+			})
+			store.set("/data/db.json", originalContent)
+
+			// Product schema for v1 (adds price field)
+			const ProductSchemaV1 = Schema.Struct({
+				id: Schema.String,
+				title: Schema.String,
+				price: Schema.Number,
+			})
+
+			// Users migration succeeds
+			const userMigration: Migration = {
+				from: 0,
+				to: 1,
+				transform: (data) => {
+					const result: Record<string, unknown> = {}
+					for (const [id, entity] of Object.entries(data)) {
+						result[id] = { ...(entity as object), email: "user@example.com" }
+					}
+					return result
+				},
+			}
+
+			// Products migration fails
+			const productMigration: Migration = {
+				from: 0,
+				to: 1,
+				transform: () => {
+					throw new Error("Product migration exploded")
+				},
+			}
+
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadCollectionsFromFile("/data/db.json", [
+						{
+							name: "users",
+							schema: UserSchemaV1,
+							version: 1,
+							migrations: [userMigration],
+						},
+						{
+							name: "products",
+							schema: ProductSchemaV1,
+							version: 1,
+							migrations: [productMigration],
+						},
+					]).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			const migrationError = error as MigrationError
+			expect(migrationError.collection).toBe("products")
+			expect(migrationError.message).toContain("Product migration exploded")
+
+			// Original file untouched - even though users migration succeeded,
+			// we fail atomically and don't write back partial results
+			expect(store.get("/data/db.json")).toBe(originalContent)
+		})
+	})
 })
 
 // ============================================================================
