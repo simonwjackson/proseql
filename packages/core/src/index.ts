@@ -387,7 +387,7 @@ export type {
 	SearchIndexMap,
 } from "./types/search-types.js";
 
-export { STOP_WORDS } from "./types/search-types.js";
+export { STOP_WORDS, SEARCH_SCORE_KEY } from "./types/search-types.js";
 
 // ============================================================================
 // ID Generation Utilities

@@ -1,5 +1,5 @@
 import { Chunk, Effect, Stream } from "effect";
-import type { SearchConfig } from "../../types/search-types.js";
+import { type SearchConfig, SEARCH_SCORE_KEY } from "../../types/search-types.js";
 import { tokenize, computeSearchScore } from "./search.js";
 
 /**
@@ -22,6 +22,42 @@ export function extractSearchConfig(
   if (typeof config.query !== "string") return undefined;
   return config;
 }
+
+/**
+ * Compute and attach search relevance scores as metadata to each item in the stream.
+ * This is called after filtering to pre-compute scores for the sort stage.
+ *
+ * Attaches the score as `_searchScore` on each item. Items that don't match
+ * the search (already filtered out) won't be processed.
+ *
+ * @param searchConfig - The search configuration containing query and optional fields
+ * @returns A stream combinator that attaches _searchScore metadata to each item
+ */
+export const attachSearchScores = <T extends Record<string, unknown>>(
+  searchConfig: SearchConfig | undefined,
+) =>
+  <E, R>(stream: Stream.Stream<T, E, R>): Stream.Stream<T & { readonly [SEARCH_SCORE_KEY]?: number }, E, R> => {
+    // No search config: pass through unchanged (no scores to attach)
+    if (!searchConfig) return stream as Stream.Stream<T & { readonly [SEARCH_SCORE_KEY]?: number }, E, R>;
+
+    const queryTokens = tokenize(searchConfig.query);
+    // Empty query: no scoring needed
+    if (queryTokens.length === 0) return stream as Stream.Stream<T & { readonly [SEARCH_SCORE_KEY]?: number }, E, R>;
+
+    return Stream.map(stream, (item: T) => {
+      // Determine target fields: explicit or all string fields
+      let targetFields: ReadonlyArray<string>;
+      if (searchConfig.fields && searchConfig.fields.length > 0) {
+        targetFields = searchConfig.fields;
+      } else {
+        targetFields = Object.keys(item).filter(
+          (k) => typeof item[k] === "string",
+        );
+      }
+      const score = computeSearchScore(item, queryTokens, targetFields);
+      return { ...item, [SEARCH_SCORE_KEY]: score } as T & { readonly [SEARCH_SCORE_KEY]?: number };
+    });
+  };
 
 /**
  * Get a nested value from an object using dot notation.
@@ -82,6 +118,10 @@ function compareValues(aValue: unknown, bValue: unknown): number {
  * Apply relevance-based sorting for search results.
  * Sorts items by their search relevance score in descending order.
  *
+ * This function expects items to have a pre-computed `_searchScore` attached
+ * by `attachSearchScores`. If the score is not present, it falls back to
+ * computing the score on-the-fly.
+ *
  * @param searchConfig - The search configuration containing query and optional fields
  * @returns A stream combinator that sorts by relevance score
  */
@@ -97,9 +137,15 @@ export const applyRelevanceSort = <T extends Record<string, unknown>>(
       Effect.map(Stream.runCollect(stream), (chunk: Chunk.Chunk<T>) => {
         const arr = Chunk.toArray(chunk) as Array<T>;
 
-        // Compute scores for all items
+        // Sort by pre-computed score, or compute on-the-fly if not present
         const scored = arr.map((item) => {
-          // Determine target fields: explicit or all string fields
+          // Use pre-computed score if available
+          const preComputedScore = item[SEARCH_SCORE_KEY];
+          if (typeof preComputedScore === "number") {
+            return { item, score: preComputedScore };
+          }
+
+          // Fallback: compute score on-the-fly (for backward compatibility)
           let targetFields: ReadonlyArray<string>;
           if (searchConfig.fields && searchConfig.fields.length > 0) {
             targetFields = searchConfig.fields;

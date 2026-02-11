@@ -87,6 +87,18 @@ export type SearchIndexMap = Map<string, Set<string>>;
 // Stop Words
 // ============================================================================
 
+// ============================================================================
+// Metadata Keys
+// ============================================================================
+
+/**
+ * Key used to store computed search relevance scores on entities.
+ * This metadata is attached after filtering and consumed by the sort stage.
+ *
+ * @internal
+ */
+export const SEARCH_SCORE_KEY = "_searchScore" as const;
+
 /**
  * Common English stop words that can optionally be filtered from search queries.
  * These words are typically too common to be useful for search relevance.

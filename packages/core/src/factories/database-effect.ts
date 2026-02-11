@@ -49,7 +49,7 @@ import {
 	deleteManyWithRelationships,
 } from "../operations/crud/delete-with-relationships.js"
 import { applyFilter } from "../operations/query/filter-stream.js"
-import { applySort, applyRelevanceSort, extractSearchConfig } from "../operations/query/sort-stream.js"
+import { applySort, applyRelevanceSort, extractSearchConfig, attachSearchScores } from "../operations/query/sort-stream.js"
 import { applySelect, applySelectToArray } from "../operations/query/select-stream.js"
 import { applyPagination } from "../operations/query/paginate-stream.js"
 import { applyPopulate } from "../operations/relationships/populate-stream.js"
@@ -573,6 +573,12 @@ const buildCollection = <T extends HasId>(
 					normalizeSelectForLazySkip(options?.select),
 				)(s)
 				s = applyFilter(options?.where)(s)
+				// When $search is active, compute and attach relevance scores after filtering
+				// (even though cursor pagination uses explicit sort, scores are still computed)
+				const cursorSearchConfig = extractSearchConfig(options?.where)
+				if (cursorSearchConfig) {
+					s = attachSearchScores(cursorSearchConfig)(s)
+				}
 				s = applySort(effectiveSort)(s)
 
 				// Collect via applyCursor (extracts cursor values from pre-select items)
@@ -618,8 +624,12 @@ const buildCollection = <T extends HasId>(
 					normalizeSelectForLazySkip(options?.select),
 				)(s)
 				s = applyFilter(options?.where)(s)
-				// When $search is active and no explicit sort provided, use relevance sort
+				// When $search is active, compute and attach relevance scores after filtering
 				const searchConfig = extractSearchConfig(options?.where)
+				if (searchConfig) {
+					s = attachSearchScores(searchConfig)(s)
+				}
+				// When $search is active and no explicit sort provided, use relevance sort
 				if (searchConfig && !options?.sort) {
 					s = applyRelevanceSort(searchConfig)(s)
 				} else {
