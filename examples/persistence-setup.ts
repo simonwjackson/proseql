@@ -14,12 +14,12 @@ import { Effect, Layer, Schema, Scope } from "effect"
 import {
 	createPersistentEffectDatabase,
 	type EffectDatabaseWithPersistence,
-} from "../core/factories/database-effect"
-import { NodeStorageLayer } from "../core/storage/node-adapter-layer"
-import { makeSerializerLayer } from "../core/serializers/format-codec"
-import { jsonCodec } from "../core/serializers/codecs/json"
-import { StorageAdapter } from "../core/storage/storage-service"
-import { SerializerRegistry } from "../core/serializers/serializer-service"
+	NodeStorageLayer,
+	makeSerializerLayer,
+	jsonCodec,
+	StorageAdapterService as StorageAdapter,
+	SerializerRegistryService as SerializerRegistry,
+} from "@proseql/node"
 
 // ============================================================================
 // 1. Schemas

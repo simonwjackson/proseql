@@ -7,7 +7,7 @@
  */
 
 import { Effect, Schema, Stream, Chunk } from "effect"
-import { createEffectDatabase } from "../core/factories/database-effect"
+import { createEffectDatabase } from "@proseql/core"
 
 // ============================================================================
 // 1. Schemas

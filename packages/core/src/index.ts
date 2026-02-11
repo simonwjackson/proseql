@@ -246,6 +246,18 @@ export { applySelect } from "./operations/query/select-stream.js";
 export { applyPagination } from "./operations/query/paginate-stream.js";
 export { applyPopulate } from "./operations/relationships/populate-stream.js";
 
+// Non-stream filter utility (for direct array filtering)
+export { filterData } from "./operations/query/filter.js";
+
+// Object-based field selection utilities
+export {
+	applyObjectSelection,
+	applySelectionToArray,
+	applySelectionSafe,
+	createFieldSelector,
+	mergeObjectFieldSelections,
+} from "./operations/query/select.js";
+
 // ============================================================================
 // Storage Services (Effect Layer)
 // ============================================================================

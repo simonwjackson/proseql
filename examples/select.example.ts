@@ -11,7 +11,7 @@ import {
 	applySelectionSafe,
 	createFieldSelector,
 	mergeObjectFieldSelections,
-} from "../core/operations/query/select";
+} from "@proseql/core";
 
 // Example 1: Basic field selection
 function basicSelectionExample() {

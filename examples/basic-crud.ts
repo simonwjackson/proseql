@@ -7,8 +7,7 @@
  */
 
 import { Effect, Schema } from "effect"
-import { createEffectDatabase } from "../core/factories/database-effect"
-import { NotFoundError } from "../core/errors/crud-errors"
+import { createEffectDatabase, NotFoundError } from "@proseql/core"
 
 // ============================================================================
 // 1. Define Schemas using Effect Schema

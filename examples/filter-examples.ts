@@ -2,7 +2,7 @@
  * Examples of using conditional logic operators in the database v2 filter system
  */
 
-import { filterData } from "../core/operations/query/filter";
+import { filterData } from "@proseql/core";
 
 // Example data
 const users = [
