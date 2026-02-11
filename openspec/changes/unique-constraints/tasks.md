@@ -9,7 +9,7 @@
 - [x] 2.2 Implement `checkUniqueConstraints(entity, existingMap, constraints, collectionName)` returning `Effect<void, UniqueConstraintError>`. For each normalized constraint, check if all fields match any existing entity (excluding same ID). Skip null/undefined values. Fail-fast on first violation.
 - [x] 2.3 Implement `checkBatchUniqueConstraints(entities, existingMap, constraints, collectionName)` — same as above but also checks entities within the batch against each other
 - [x] 2.4 Implement `validateUpsertWhere(where, constraints, collectionName)` returning `Effect<void, ValidationError>`. Verify the where clause keys fully cover at least one declared constraint or `id`. Produce a `ValidationError` listing valid unique fields on failure.
-- [ ] 2.5 Delete the old `checkUniqueConstraints` helper from `core/operations/crud/create.ts` (lines 259-279)
+- [x] 2.5 Delete the old `checkUniqueConstraints` helper from `core/operations/crud/create.ts` (lines 259-279)
 
 ## 3. Wire Into CRUD Operations
 

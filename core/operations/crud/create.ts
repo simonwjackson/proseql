@@ -329,32 +329,3 @@ export const createMany = <T extends HasId, I = T>(
 		} as CreateManyResult<T>
 	})
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-
-/**
- * Check for unique constraint violations against existing data in a Ref.
- */
-export const checkUniqueConstraints = <T extends HasId>(
-	entity: T,
-	existingMap: ReadonlyMap<string, T>,
-	uniqueFields: ReadonlyArray<string>,
-): { readonly valid: boolean; readonly field?: string; readonly value?: unknown; readonly existingId?: string } => {
-	for (const field of uniqueFields) {
-		const value = (entity as Record<string, unknown>)[field]
-		if (value === undefined || value === null) continue
-
-		for (const [existingId, existing] of existingMap) {
-			if (
-				(existing as Record<string, unknown>)[field] === value &&
-				existingId !== entity.id
-			) {
-				return { valid: false, field, value, existingId }
-			}
-		}
-	}
-
-	return { valid: true }
-}
