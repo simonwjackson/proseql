@@ -1,7 +1,8 @@
-import type { Schema, Stream } from "effect";
+import type { Effect, Schema, Stream } from "effect";
 import type { EffectCollection, RunnableEffect, RunnableStream } from "../factories/database-effect.js";
-import type { MinimalEntity } from "./crud-types.js";
+import type { MinimalEntity, TransactionContext } from "./crud-types.js";
 import type { DanglingReferenceError } from "../errors/query-errors.js";
+import type { TransactionError } from "../errors/crud-errors.js";
 import type {
 	AggregateConfig,
 	AggregateResult,
@@ -838,6 +839,15 @@ export type GenerateDatabase<Config> = {
 				GenerateDatabase<Config>
 			>
 		: never;
+} & {
+	/**
+	 * Execute multiple operations atomically within a transaction.
+	 * On success, all changes are committed and persistence is triggered.
+	 * On failure, all changes are rolled back and the original error is re-raised.
+	 */
+	$transaction<A, E>(
+		fn: (ctx: TransactionContext<GenerateDatabase<Config>>) => Effect.Effect<A, E>,
+	): Effect.Effect<A, E | TransactionError>;
 };
 
 // Type-safe populate helper for better IntelliSense

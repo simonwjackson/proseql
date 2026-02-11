@@ -1,7 +1,7 @@
 ## 1. Types
 
 - [x] 1.1 Update `TransactionContext` in `core/types/crud-types.ts`: change `rollback` to `() => Effect<never, TransactionError>`, `commit` to `() => Effect<void, TransactionError>`, add `readonly mutatedCollections: ReadonlySet<string>`, add collection accessor index signature
-- [ ] 1.2 Add `$transaction` method signature to the database type in `core/types/types.ts`: `$transaction<A, E>(fn: (ctx: TransactionContext) => Effect<A, E>): Effect<A, E | TransactionError>`
+- [x] 1.2 Add `$transaction` method signature to the database type in `core/types/types.ts`: `$transaction<A, E>(fn: (ctx: TransactionContext) => Effect<A, E>): Effect<A, E | TransactionError>`
 - [ ] 1.3 Export updated types from `core/types/index.ts`
 
 ## 2. Transaction Core
