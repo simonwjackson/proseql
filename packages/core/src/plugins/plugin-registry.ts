@@ -23,6 +23,16 @@ import type { PluginError } from "../errors/plugin-errors.js";
 // ============================================================================
 
 /**
+ * Creates an empty PluginRegistry with no contributions.
+ */
+const createEmptyRegistry = (): PluginRegistry => ({
+	codecs: [],
+	operators: new Map<string, CustomOperator>(),
+	idGenerators: new Map<string, CustomIdGenerator>(),
+	globalHooks: {},
+});
+
+/**
  * Builds a PluginRegistry from an array of plugins.
  *
  * This function:
@@ -34,12 +44,19 @@ import type { PluginError } from "../errors/plugin-errors.js";
  * 6. Merges ID generators into a Map (O(1) lookup)
  * 7. Merges global hooks (concatenate arrays in registration order)
  *
- * @param plugins - Array of plugins to validate and merge
+ * If plugins is undefined or empty, returns an empty registry.
+ *
+ * @param plugins - Array of plugins to validate and merge (optional)
  * @returns Effect<PluginRegistry, PluginError> - The merged registry or validation error
  */
 export const buildPluginRegistry = (
-	plugins: ReadonlyArray<ProseQLPlugin>,
+	plugins?: ReadonlyArray<ProseQLPlugin>,
 ): Effect.Effect<PluginRegistry, PluginError> => {
+	// Handle empty or undefined plugin arrays
+	if (plugins === undefined || plugins.length === 0) {
+		return Effect.succeed(createEmptyRegistry());
+	}
+
 	return Effect.gen(function* () {
 		// Validate each plugin individually
 		for (const plugin of plugins) {

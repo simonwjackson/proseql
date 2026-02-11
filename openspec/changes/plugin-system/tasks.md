@@ -18,7 +18,7 @@
 ## 3. Plugin Registry
 
 - [x] 3.1 Create `core/plugins/plugin-registry.ts` with `buildPluginRegistry(plugins)`: validate all plugins (2.1-2.3), merge codecs (append in registration order), merge operators into a `Map`, merge ID generators into a `Map`, merge global hooks (concatenate arrays in registration order). Return `Effect<PluginRegistry, PluginError>`.
-- [ ] 3.2 Handle empty/undefined plugin arrays: return an empty `PluginRegistry` (no codecs, no operators, no generators, empty hooks).
+- [x] 3.2 Handle empty/undefined plugin arrays: return an empty `PluginRegistry` (no codecs, no operators, no generators, empty hooks).
 
 ## 4. Codec Plugin Integration
 
