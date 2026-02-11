@@ -30,6 +30,7 @@ import { updateInIndex } from "../../indexes/index-manager.js"
 import type { HooksConfig } from "../../types/hook-types.js"
 import { runBeforeUpdateHooks, runAfterUpdateHooks, runOnChangeHooks } from "../../hooks/hook-runner.js"
 import { checkUniqueConstraints, type NormalizedConstraints } from "./unique-check.js"
+import type { ComputedFieldsConfig } from "../../types/computed-types.js"
 
 // ============================================================================
 // Types
@@ -199,6 +200,38 @@ export function validateImmutableFields<T extends MinimalEntity>(
 }
 
 // ============================================================================
+// Computed Field Stripping
+// ============================================================================
+
+/**
+ * Strip computed field keys from an update input object.
+ * Used to remove computed field names from update input before schema validation.
+ *
+ * @param updates - The update payload (possibly with computed field keys)
+ * @param computed - The computed fields configuration that defines which keys to strip
+ * @returns A new object with computed field keys removed
+ */
+const stripComputedFromUpdates = <T>(
+	updates: UpdateWithOperators<T & MinimalEntity>,
+	computed: ComputedFieldsConfig<unknown> | undefined,
+): UpdateWithOperators<T & MinimalEntity> => {
+	if (computed === undefined || Object.keys(computed).length === 0) {
+		return updates
+	}
+
+	const computedKeys = new Set(Object.keys(computed))
+	const result: Record<string, unknown> = {}
+
+	for (const key of Object.keys(updates as Record<string, unknown>)) {
+		if (!computedKeys.has(key)) {
+			result[key] = (updates as Record<string, unknown>)[key]
+		}
+	}
+
+	return result as UpdateWithOperators<T & MinimalEntity>
+}
+
+// ============================================================================
 // Unique Constraint Helpers
 // ============================================================================
 
@@ -275,11 +308,15 @@ export const update = <T extends HasId, I = T>(
 	indexes?: CollectionIndexes,
 	hooks?: HooksConfig<T>,
 	uniqueFields: NormalizedConstraints = [],
+	computed?: ComputedFieldsConfig<unknown>,
 ) =>
 (id: string, updates: UpdateWithOperators<T & MinimalEntity>): Effect.Effect<T, ValidationError | NotFoundError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
+		// Strip computed field keys from updates (they are derived, not stored)
+		const sanitizedUpdates = stripComputedFromUpdates(updates, computed)
+
 		// Validate immutable fields
-		const immutableCheck = validateImmutableFields(updates)
+		const immutableCheck = validateImmutableFields(sanitizedUpdates)
 		if (!immutableCheck.valid) {
 			return yield* Effect.fail(
 				new ValidationError({
@@ -311,7 +348,7 @@ export const update = <T extends HasId, I = T>(
 			collection: collectionName,
 			id,
 			existing: previous,
-			update: updates,
+			update: sanitizedUpdates,
 		})
 
 		// Apply update operators with (possibly transformed) updates
@@ -401,14 +438,18 @@ export const updateMany = <T extends HasId, I = T>(
 	indexes?: CollectionIndexes,
 	hooks?: HooksConfig<T>,
 	uniqueFields: NormalizedConstraints = [],
+	computed?: ComputedFieldsConfig<unknown>,
 ) =>
 (
 	predicate: (entity: T) => boolean,
 	updates: UpdateWithOperators<T & MinimalEntity>,
 ): Effect.Effect<UpdateManyResult<T>, ValidationError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
+		// Strip computed field keys from updates (they are derived, not stored)
+		const sanitizedUpdates = stripComputedFromUpdates(updates, computed)
+
 		// Validate immutable fields
-		const immutableCheck = validateImmutableFields(updates)
+		const immutableCheck = validateImmutableFields(sanitizedUpdates)
 		if (!immutableCheck.valid) {
 			return yield* Effect.fail(
 				new ValidationError({
@@ -445,7 +486,7 @@ export const updateMany = <T extends HasId, I = T>(
 				collection: collectionName,
 				id: (entity as HasId).id,
 				existing: entity,
-				update: updates,
+				update: sanitizedUpdates,
 			})
 
 			const updated = applyUpdates(entity as T & MinimalEntity, transformedUpdates as UpdateWithOperators<T & MinimalEntity>)
@@ -457,7 +498,7 @@ export const updateMany = <T extends HasId, I = T>(
 		const relationshipFields = Object.keys(relationships).map(
 			(field) => relationships[field].foreignKey || `${field}Id`,
 		)
-		const hasRelationshipUpdate = Object.keys(updates).some((key) =>
+		const hasRelationshipUpdate = Object.keys(sanitizedUpdates).some((key) =>
 			relationshipFields.includes(key),
 		)
 
@@ -473,7 +514,7 @@ export const updateMany = <T extends HasId, I = T>(
 		}
 
 		// Check unique constraints if the update touches any unique fields
-		if (updateTouchesUniqueFields(updates, uniqueFields)) {
+		if (updateTouchesUniqueFields(sanitizedUpdates, uniqueFields)) {
 			// For updateMany, we need to check each entity against:
 			// 1. Existing entities (excluding entities being updated)
 			// 2. Other entities in the batch (they might conflict with each other)

@@ -617,8 +617,8 @@ const buildCollection = <T extends HasId>(
 	// Wire CRUD operations with runPromise convenience
 	const createFn = wrapEffect(create(collectionName, schema, relationships, ref, stateRefs, indexes, hooks, uniqueFields, computed))
 	const createManyFn = wrapEffect(createMany(collectionName, schema, relationships, ref, stateRefs, indexes, hooks, uniqueFields, computed))
-	const updateFn = wrapEffect(update(collectionName, schema, relationships, ref, stateRefs, indexes, hooks, uniqueFields))
-	const updateManyFn = wrapEffect(updateMany(collectionName, schema, relationships, ref, stateRefs, indexes, hooks, uniqueFields))
+	const updateFn = wrapEffect(update(collectionName, schema, relationships, ref, stateRefs, indexes, hooks, uniqueFields, computed))
+	const updateManyFn = wrapEffect(updateMany(collectionName, schema, relationships, ref, stateRefs, indexes, hooks, uniqueFields, computed))
 	// Check if schema defines a deletedAt field for soft delete support
 	const supportsSoftDelete = "fields" in schema && "deletedAt" in (schema as Record<string, unknown> & { fields: Record<string, unknown> }).fields
 	const deleteFn = wrapEffect(del(collectionName, allRelationships, ref, stateRefs, supportsSoftDelete, indexes, hooks))
