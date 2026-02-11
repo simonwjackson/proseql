@@ -943,6 +943,205 @@ describe("Indexing - Index Maintenance", () => {
 		})
 	})
 
+	describe("Task 7.4: delete → index entries removed, empty Sets cleaned up", () => {
+		it("should remove entity from index when deleted", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Verify initial index state
+			const aliceInitial = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceInitial.length).toBe(1)
+			expect((aliceInitial[0] as { id: string }).id).toBe("u1")
+
+			// Delete Alice
+			const deleted = await db.users.delete("u1").runPromise
+			expect((deleted as { id: string }).id).toBe("u1")
+
+			// Query by deleted email - should not find Alice anymore
+			const aliceAfter = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceAfter.length).toBe(0)
+
+			// Bob should still be queryable
+			const bobResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(bobResults.length).toBe(1)
+			expect((bobResults[0] as { id: string }).id).toBe("u2")
+		})
+
+		it("should remove entity from shared index Set, leaving other entities", async () => {
+			// Two users share the same email
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "shared@example.com", name: "User One", age: 30 },
+				{ id: "u2", email: "shared@example.com", name: "User Two", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Verify both are queryable initially
+			const sharedInitial = await db.users.query({ where: { email: "shared@example.com" } }).runPromise
+			expect(sharedInitial.length).toBe(2)
+
+			// Delete u1
+			await db.users.delete("u1").runPromise
+
+			// Query shared email - should now only have u2
+			const sharedAfter = await db.users.query({ where: { email: "shared@example.com" } }).runPromise
+			expect(sharedAfter.length).toBe(1)
+			expect((sharedAfter[0] as { id: string }).id).toBe("u2")
+		})
+
+		it("should clean up empty index Set when last entity with that value is deleted", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Delete Alice - should clean up the "alice@example.com" index entry
+			await db.users.delete("u1").runPromise
+
+			// Query by deleted email - should return empty (not error)
+			const aliceAfter = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceAfter.length).toBe(0)
+
+			// Verify by checking we can query the remaining user
+			const allUsers = await db.users.query().runPromise
+			expect(allUsers.length).toBe(1)
+			expect((allUsers[0] as { id: string }).id).toBe("u2")
+		})
+
+		it("should remove entity from compound index when deleted", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Desktop", category: "electronics", subcategory: "computers", price: 1299 },
+				{ id: "p3", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Verify initial compound index state
+			const computersInitial = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(computersInitial.length).toBe(2)
+
+			// Delete the Laptop
+			await db.products.delete("p1").runPromise
+
+			// Query compound index - should only have Desktop now
+			const computersAfter = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(computersAfter.length).toBe(1)
+			expect((computersAfter[0] as { id: string }).id).toBe("p2")
+
+			// Phone should still be queryable
+			const phonesResults = await db.products.query({
+				where: { category: "electronics", subcategory: "phones" },
+			}).runPromise
+			expect(phonesResults.length).toBe(1)
+			expect((phonesResults[0] as { id: string }).id).toBe("p3")
+		})
+
+		it("should clean up empty compound index Set when last entity is deleted", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p2", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Delete the only electronics/phones product
+			await db.products.delete("p1").runPromise
+
+			// Query by deleted compound key - should return empty
+			const phonesAfter = await db.products.query({
+				where: { category: "electronics", subcategory: "phones" },
+			}).runPromise
+			expect(phonesAfter.length).toBe(0)
+
+			// Other compound index entry should be unaffected
+			const officeResults = await db.products.query({
+				where: { category: "furniture", subcategory: "office" },
+			}).runPromise
+			expect(officeResults.length).toBe(1)
+			expect((officeResults[0] as { id: string }).id).toBe("p2")
+		})
+
+		it("should handle deleting all entities and leaving indexes empty", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Delete all users
+			await db.users.delete("u1").runPromise
+			await db.users.delete("u2").runPromise
+
+			// All queries should return empty
+			const aliceResults = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceResults.length).toBe(0)
+
+			const bobResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(bobResults.length).toBe(0)
+
+			const allUsers = await db.users.query().runPromise
+			expect(allUsers.length).toBe(0)
+		})
+
+		it("should maintain multiple single-field indexes when deleting", async () => {
+			// createMultiIndexConfig has users with indexes on both "email" and "role"
+			const config = createMultiIndexConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30, role: "admin" },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25, role: "user" },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35, role: "admin" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Verify both indexes work initially
+			const adminsBefore = await db.users.query({ where: { role: "admin" } }).runPromise
+			expect(adminsBefore.length).toBe(2)
+
+			// Delete Alice (admin)
+			await db.users.delete("u1").runPromise
+
+			// Email index should no longer have Alice
+			const aliceByEmail = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceByEmail.length).toBe(0)
+
+			// Role index should only have Charlie as admin now
+			const adminsAfter = await db.users.query({ where: { role: "admin" } }).runPromise
+			expect(adminsAfter.length).toBe(1)
+			expect((adminsAfter[0] as { id: string }).id).toBe("u3")
+
+			// User role should be unaffected
+			const usersRole = await db.users.query({ where: { role: "user" } }).runPromise
+			expect(usersRole.length).toBe(1)
+			expect((usersRole[0] as { id: string }).id).toBe("u2")
+		})
+	})
+
 	describe("Task 7.1: create → index entry added", () => {
 		it("should add new entity to index when created", async () => {
 			// Start with an empty indexed database
