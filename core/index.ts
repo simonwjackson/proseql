@@ -44,6 +44,7 @@ export {
 	ConcurrencyError,
 	OperationError,
 	TransactionError,
+	HookError,
 } from "./errors/crud-errors.js";
 
 export type { CrudError } from "./errors/crud-errors.js";
@@ -140,6 +141,36 @@ export type {
 	CollectionIndexes,
 	NormalizedIndex,
 } from "./types/index-types.js";
+
+// ============================================================================
+// Lifecycle Hook Types
+// ============================================================================
+
+export type {
+	// Before hook contexts
+	BeforeCreateContext,
+	BeforeUpdateContext,
+	BeforeDeleteContext,
+	// After hook contexts
+	AfterCreateContext,
+	AfterUpdateContext,
+	AfterDeleteContext,
+	// onChange contexts (discriminated union)
+	OnChangeContext,
+	OnChangeCreateContext,
+	OnChangeUpdateContext,
+	OnChangeDeleteContext,
+	// Hook function signatures
+	BeforeCreateHook,
+	BeforeUpdateHook,
+	BeforeDeleteHook,
+	AfterCreateHook,
+	AfterUpdateHook,
+	AfterDeleteHook,
+	OnChangeHook,
+	// Hooks configuration
+	HooksConfig,
+} from "./types/hook-types.js";
 
 // ============================================================================
 // Index Functions
