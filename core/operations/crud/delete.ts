@@ -22,7 +22,7 @@ import { checkDeleteConstraintsEffect } from "../../validators/foreign-key.js"
 import type { CollectionIndexes } from "../../types/index-types.js"
 import { removeFromIndex, removeManyFromIndex } from "../../indexes/index-manager.js"
 import type { HooksConfig } from "../../types/hook-types.js"
-import { runBeforeDeleteHooks } from "../../hooks/hook-runner.js"
+import { runBeforeDeleteHooks, runAfterDeleteHooks, runOnChangeHooks } from "../../hooks/hook-runner.js"
 
 // ============================================================================
 // Types
@@ -130,6 +130,22 @@ export const del = <T extends HasId>(
 				return next
 			})
 
+			// Run afterDelete hooks (fire-and-forget, errors swallowed)
+			yield* runAfterDeleteHooks(hooks?.afterDelete, {
+				operation: "delete",
+				collection: collectionName,
+				id,
+				entity: softDeleted,
+			})
+
+			// Run onChange hooks with type: "delete" (fire-and-forget, errors swallowed)
+			yield* runOnChangeHooks(hooks?.onChange, {
+				type: "delete",
+				collection: collectionName,
+				id,
+				entity: softDeleted,
+			})
+
 			return softDeleted
 		}
 
@@ -143,6 +159,22 @@ export const del = <T extends HasId>(
 			const next = new Map(map)
 			next.delete(id)
 			return next
+		})
+
+		// Run afterDelete hooks (fire-and-forget, errors swallowed)
+		yield* runAfterDeleteHooks(hooks?.afterDelete, {
+			operation: "delete",
+			collection: collectionName,
+			id,
+			entity,
+		})
+
+		// Run onChange hooks with type: "delete" (fire-and-forget, errors swallowed)
+		yield* runOnChangeHooks(hooks?.onChange, {
+			type: "delete",
+			collection: collectionName,
+			id,
+			entity,
 		})
 
 		return entity
