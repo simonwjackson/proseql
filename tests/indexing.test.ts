@@ -3854,6 +3854,118 @@ describe("Indexing - Query Acceleration", () => {
 			expect(indexedIds).toEqual(["p1", "p4"])
 		})
 	})
+
+	// ============================================================================
+	// Tests - Compound Indexes (Tasks 9.1-9.6)
+	// ============================================================================
+
+	describe("Task 9.1: compound index equality query on all fields → index lookup", () => {
+		it("should use compound index for equality query on both fields", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+				{ id: "p4", name: "Monitor", category: "electronics", subcategory: "computers", price: 399 },
+				{ id: "p5", name: "Chair", category: "furniture", subcategory: "office", price: 199 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Query using both fields in compound index ["category", "subcategory"]
+			const results = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+
+			// Should return entities matching both fields
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p4"])
+		})
+
+		it("should return correct results with compound index using $eq on all fields", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Query using $eq on both compound index fields
+			const results = await db.products.query({
+				where: { category: { $eq: "furniture" }, subcategory: { $eq: "office" } },
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("p3")
+		})
+
+		it("should return empty array when compound index lookup finds no matches", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Query with compound key that doesn't exist
+			const results = await db.products.query({
+				where: { category: "electronics", subcategory: "tablets" },
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should prefer compound index over single-field index when both match", async () => {
+			// createMultiIndexConfig has both "category" single-field and ["category", "subcategory"] compound
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Monitor", category: "electronics", subcategory: "computers", price: 399 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Query on both fields - should use compound index for more specific results
+			const results = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+
+			// Should return only the computers (2 items), not all electronics (3 items)
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p3"])
+		})
+
+		it("should handle compound index with mixed direct and $eq conditions", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+				{ id: "p3", name: "Chair", category: "furniture", subcategory: "office", price: 199 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Mix of direct value and $eq
+			const results = await db.products.query({
+				where: { category: "furniture", subcategory: { $eq: "office" } },
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p2", "p3"])
+		})
+	})
 })
 
 // Export helpers for use in other test files
