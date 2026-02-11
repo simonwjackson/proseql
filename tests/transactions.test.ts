@@ -395,4 +395,105 @@ describe("$transaction", () => {
 			expect(users.find((u) => u.id === "u3")).toBeUndefined()
 		})
 	})
+
+	describe("nested transactions", () => {
+		it("should reject nested $transaction with TransactionError", async () => {
+			const db = await Effect.runPromise(createTestDb())
+
+			// Attempt to nest a $transaction inside another $transaction
+			const result = await db
+				.$transaction((ctx) =>
+					Effect.gen(function* () {
+						// Create a user in the outer transaction
+						yield* ctx.users.create({
+							id: "u3",
+							name: "Charlie",
+							email: "charlie@test.com",
+							age: 35,
+						})
+
+						// Attempt to start a nested transaction - this should fail
+						const nestedResult = yield* db.$transaction((innerCtx) =>
+							Effect.gen(function* () {
+								yield* innerCtx.users.create({
+									id: "u4",
+									name: "Diana",
+									email: "diana@test.com",
+									age: 28,
+								})
+								return "nested completed"
+							}),
+						)
+
+						return nestedResult
+					}),
+				)
+				.pipe(Effect.either, Effect.runPromise)
+
+			// Verify the transaction failed with TransactionError
+			expect(result._tag).toBe("Left")
+			if (result._tag === "Left") {
+				const error = result.left as {
+					readonly _tag?: string
+					readonly operation?: string
+					readonly reason?: string
+				}
+				expect(error._tag).toBe("TransactionError")
+				expect(error.operation).toBe("begin")
+				expect(error.reason).toBe("nested transactions not supported")
+			}
+
+			// Verify both user creations were rolled back (the outer transaction's user too)
+			const users = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(users).toHaveLength(2)
+			expect(users.find((u) => u.id === "u3")).toBeUndefined()
+			expect(users.find((u) => u.id === "u4")).toBeUndefined()
+		})
+
+		it("should allow new transaction after previous completes", async () => {
+			const db = await Effect.runPromise(createTestDb())
+
+			// First transaction - creates a user
+			await db
+				.$transaction((ctx) =>
+					Effect.gen(function* () {
+						yield* ctx.users.create({
+							id: "u3",
+							name: "Charlie",
+							email: "charlie@test.com",
+							age: 35,
+						})
+						return "first completed"
+					}),
+				)
+				.pipe(Effect.runPromise)
+
+			// Second transaction - should work since first one completed
+			await db
+				.$transaction((ctx) =>
+					Effect.gen(function* () {
+						yield* ctx.users.create({
+							id: "u4",
+							name: "Diana",
+							email: "diana@test.com",
+							age: 28,
+						})
+						return "second completed"
+					}),
+				)
+				.pipe(Effect.runPromise)
+
+			// Verify both users were created
+			const users = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(users).toHaveLength(4)
+			expect(users.find((u) => u.id === "u3")?.name).toBe("Charlie")
+			expect(users.find((u) => u.id === "u4")?.name).toBe("Diana")
+		})
+	})
 })

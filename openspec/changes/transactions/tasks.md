@@ -33,7 +33,7 @@
 - [x] 5.3 Test failed transaction: create user, then fail (Effect.fail), user creation reverted
 - [x] 5.4 Test explicit rollback: call `ctx.rollback()` mid-transaction, all changes reverted
 - [x] 5.5 Test error preservation: original CRUD error type accessible after rollback via `catchTag`
-- [ ] 5.6 Test nested transaction rejection: `$transaction` inside `$transaction` → `TransactionError`
+- [x] 5.6 Test nested transaction rejection: `$transaction` inside `$transaction` → `TransactionError`
 
 ## 6. Tests — createTransaction (Manual)
 
