@@ -661,6 +661,224 @@ describe("Cursor Pagination", () => {
 		})
 	})
 
+	describe("combined with populate", () => {
+		// Define schemas and config for populate tests
+		const CategorySchema = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+		})
+
+		const ProductSchema = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+			price: Schema.Number,
+			categoryId: Schema.String,
+			createdAt: Schema.optional(Schema.String),
+			updatedAt: Schema.optional(Schema.String),
+		})
+
+		const populateConfig = {
+			categories: {
+				schema: CategorySchema,
+				relationships: {
+					products: { type: "inverse" as const, target: "products" },
+				},
+			},
+			products: {
+				schema: ProductSchema,
+				relationships: {
+					category: { type: "ref" as const, target: "categories" },
+				},
+			},
+		} as const
+
+		const categoriesData = [
+			{ id: "cat-1", name: "Electronics" },
+			{ id: "cat-2", name: "Books" },
+		]
+
+		/**
+		 * Generate products with categories.
+		 * Products are divided between categories to test population.
+		 */
+		const generateProductsWithCategory = (count: number) => {
+			const products = []
+			for (let i = 1; i <= count; i++) {
+				const paddedId = String(i).padStart(3, "0")
+				products.push({
+					id: `prod-${paddedId}`,
+					name: `Product ${i}`,
+					price: i * 10,
+					categoryId: i % 2 === 0 ? "cat-2" : "cat-1", // alternate between categories
+				})
+			}
+			return products
+		}
+
+		it("populated fields present in cursor page items via ref relationship", async () => {
+			const products = generateProductsWithCategory(10)
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateConfig, {
+					categories: categoriesData,
+					products: products as ReadonlyArray<Record<string, unknown>>,
+				}),
+			)
+
+			// Query products with populated category
+			const result = await (db.products.query({
+				populate: { category: true },
+				cursor: { key: "id", limit: 3 },
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }).runPromise
+
+			// Should have 3 items
+			expect(result.items).toHaveLength(3)
+
+			// Each item should have the category populated
+			for (const item of result.items) {
+				expect(item.category).toBeDefined()
+				const category = item.category as Record<string, unknown>
+				expect(category.id).toBeDefined()
+				expect(category.name).toBeDefined()
+				// Verify it's the correct category based on categoryId
+				if (item.categoryId === "cat-1") {
+					expect(category.name).toBe("Electronics")
+				} else {
+					expect(category.name).toBe("Books")
+				}
+			}
+
+			// Cursor metadata should still be correct
+			expect(result.pageInfo.startCursor).toBe("prod-001")
+			expect(result.pageInfo.endCursor).toBe("prod-003")
+			expect(result.pageInfo.hasNextPage).toBe(true)
+			expect(result.pageInfo.hasPreviousPage).toBe(false)
+		})
+
+		it("populated fields present in cursor page items via inverse relationship", async () => {
+			const products = generateProductsWithCategory(6)
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateConfig, {
+					categories: categoriesData,
+					products: products as ReadonlyArray<Record<string, unknown>>,
+				}),
+			)
+
+			// Query categories with populated products
+			const result = await (db.categories.query({
+				populate: { products: true },
+				cursor: { key: "id", limit: 2 },
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }).runPromise
+
+			// Should have 2 categories
+			expect(result.items).toHaveLength(2)
+
+			// Each category should have products populated
+			for (const item of result.items) {
+				expect(item.products).toBeDefined()
+				const products = item.products as ReadonlyArray<Record<string, unknown>>
+				expect(Array.isArray(products)).toBe(true)
+				expect(products.length).toBeGreaterThan(0)
+				// Verify each product has expected fields
+				for (const product of products) {
+					expect(product.id).toBeDefined()
+					expect(product.name).toBeDefined()
+					expect(product.price).toBeDefined()
+				}
+			}
+
+			// Cursor metadata should still be correct
+			expect(result.pageInfo.startCursor).toBe("cat-1")
+			expect(result.pageInfo.endCursor).toBe("cat-2")
+			expect(result.pageInfo.hasNextPage).toBe(false)
+			expect(result.pageInfo.hasPreviousPage).toBe(false)
+		})
+
+		it("cursor pagination works with forward navigation on populated items", async () => {
+			const products = generateProductsWithCategory(10)
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateConfig, {
+					categories: categoriesData,
+					products: products as ReadonlyArray<Record<string, unknown>>,
+				}),
+			)
+
+			// First page with populate
+			const firstPage = await (db.products.query({
+				populate: { category: true },
+				cursor: { key: "id", limit: 3 },
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }).runPromise
+
+			expect(firstPage.items).toHaveLength(3)
+			expect(firstPage.items.map((i) => i.id)).toEqual([
+				"prod-001",
+				"prod-002",
+				"prod-003",
+			])
+
+			// Second page with populate
+			const secondPage = await (db.products.query({
+				populate: { category: true },
+				cursor: {
+					key: "id",
+					limit: 3,
+					after: firstPage.pageInfo.endCursor!,
+				},
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }).runPromise
+
+			expect(secondPage.items).toHaveLength(3)
+			expect(secondPage.items.map((i) => i.id)).toEqual([
+				"prod-004",
+				"prod-005",
+				"prod-006",
+			])
+
+			// Verify populated fields on second page
+			for (const item of secondPage.items) {
+				expect(item.category).toBeDefined()
+				const category = item.category as Record<string, unknown>
+				expect(category.name).toBeDefined()
+			}
+
+			expect(secondPage.pageInfo.hasPreviousPage).toBe(true)
+			expect(secondPage.pageInfo.hasNextPage).toBe(true)
+		})
+
+		it("cursor pagination works with backward navigation on populated items", async () => {
+			const products = generateProductsWithCategory(10)
+			const db = await Effect.runPromise(
+				createEffectDatabase(populateConfig, {
+					categories: categoriesData,
+					products: products as ReadonlyArray<Record<string, unknown>>,
+				}),
+			)
+
+			// Get items before prod-007 with populate
+			const page = await (db.products.query({
+				populate: { category: true },
+				cursor: {
+					key: "id",
+					limit: 3,
+					before: "prod-007",
+				},
+			}) as { runPromise: Promise<CursorPageResult<Record<string, unknown>>> }).runPromise
+
+			expect(page.items).toHaveLength(3)
+			expect(page.items.map((i) => i.id)).toEqual([
+				"prod-004",
+				"prod-005",
+				"prod-006",
+			])
+
+			// Verify populated fields
+			for (const item of page.items) {
+				expect(item.category).toBeDefined()
+			}
+
+			expect(page.pageInfo.hasPreviousPage).toBe(true)
+			expect(page.pageInfo.hasNextPage).toBe(true)
+		})
+	})
+
 	describe("combined with where", () => {
 		it("cursor applies after filtering, correct subset paginated", async () => {
 			// Generate 15 items with categories:
