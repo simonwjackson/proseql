@@ -1480,4 +1480,74 @@ describe("Snapshot Isolation", () => {
 			expect(postRestored?.content).toBe("First post")
 		})
 	})
+
+	describe("lock release on commit", () => {
+		it("should allow new transaction to begin after previous commits", async () => {
+			const setup = await Effect.runPromise(createManualTransactionTestSetup())
+
+			// Create first transaction
+			const ctx1 = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined,
+				),
+			)
+
+			// Verify first transaction is active
+			expect(ctx1.isActive).toBe(true)
+
+			// Perform an operation in first transaction
+			await Effect.runPromise(
+				ctx1.users.create({
+					id: "u3",
+					name: "Charlie",
+					email: "charlie@test.com",
+					age: 35,
+				}),
+			)
+
+			// Commit first transaction
+			await Effect.runPromise(ctx1.commit())
+
+			// Verify first transaction is no longer active
+			expect(ctx1.isActive).toBe(false)
+
+			// Now try to create a second transaction - should succeed since lock was released
+			const ctx2 = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined,
+				),
+			)
+
+			// Verify second transaction is active
+			expect(ctx2.isActive).toBe(true)
+
+			// Verify second transaction can perform operations
+			await Effect.runPromise(
+				ctx2.users.create({
+					id: "u4",
+					name: "Diana",
+					email: "diana@test.com",
+					age: 28,
+				}),
+			)
+
+			// Commit second transaction
+			await Effect.runPromise(ctx2.commit())
+			expect(ctx2.isActive).toBe(false)
+
+			// Verify both users were created
+			const finalUsers = await Effect.runPromise(Ref.get(setup.usersRef))
+			expect(finalUsers.size).toBe(4) // u1, u2 (initial) + u3, u4 (created)
+			expect(finalUsers.get("u3")).toBeDefined()
+			expect((finalUsers.get("u3") as { name: string }).name).toBe("Charlie")
+			expect(finalUsers.get("u4")).toBeDefined()
+			expect((finalUsers.get("u4") as { name: string }).name).toBe("Diana")
+		})
+	})
 })
