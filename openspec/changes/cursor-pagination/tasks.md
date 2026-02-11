@@ -1,6 +1,6 @@
 ## 1. Types
 
-- [ ] 1.1 Create `core/types/cursor-types.ts` with `CursorConfig` interface (`key: string`, `after?: string`, `before?: string`, `limit: number`), `CursorPageResult<T>` interface (`items: ReadonlyArray<T>`, `pageInfo: { startCursor, endCursor, hasNextPage, hasPreviousPage }`), and `RunnableCursorPage<T, E>` type (Effect with `.runPromise` returning `Promise<CursorPageResult<T>>`)
+- [x] 1.1 Create `core/types/cursor-types.ts` with `CursorConfig` interface (`key: string`, `after?: string`, `before?: string`, `limit: number`), `CursorPageResult<T>` interface (`items: ReadonlyArray<T>`, `pageInfo: { startCursor, endCursor, hasNextPage, hasPreviousPage }`), and `RunnableCursorPage<T, E>` type (Effect with `.runPromise` returning `Promise<CursorPageResult<T>>`)
 - [ ] 1.2 Update `core/types/types.ts`: extend `QueryConfig` union with two cursor variants (with/without populate) that include `cursor: CursorConfig` and exclude top-level `limit`/`offset`
 - [ ] 1.3 Update `core/types/types.ts`: extend `QueryReturnType` to branch on `Config extends { cursor: CursorConfig }`, returning `RunnableCursorPage` (with correct item type from populate/select logic) instead of `RunnableStream`
 - [ ] 1.4 Export new cursor types from `core/index.ts`
