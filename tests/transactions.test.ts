@@ -1046,6 +1046,129 @@ describe("createTransaction (Manual)", () => {
 		})
 	})
 
+	describe("isActive state", () => {
+		it("should be true immediately after createTransaction returns", async () => {
+			const setup = await Effect.runPromise(createManualTransactionTestSetup())
+
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined,
+				),
+			)
+
+			// isActive should be true right after transaction creation
+			expect(ctx.isActive).toBe(true)
+		})
+
+		it("should become false after commit()", async () => {
+			const setup = await Effect.runPromise(createManualTransactionTestSetup())
+
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined,
+				),
+			)
+
+			// Verify starts as true
+			expect(ctx.isActive).toBe(true)
+
+			// Perform an operation
+			await Effect.runPromise(
+				ctx.users.create({
+					id: "u3",
+					name: "Charlie",
+					email: "charlie@test.com",
+					age: 35,
+				}),
+			)
+
+			// Still active after operation
+			expect(ctx.isActive).toBe(true)
+
+			// Commit the transaction
+			await Effect.runPromise(ctx.commit())
+
+			// Now should be false
+			expect(ctx.isActive).toBe(false)
+		})
+
+		it("should become false after rollback()", async () => {
+			const setup = await Effect.runPromise(createManualTransactionTestSetup())
+
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined,
+				),
+			)
+
+			// Verify starts as true
+			expect(ctx.isActive).toBe(true)
+
+			// Perform an operation
+			await Effect.runPromise(
+				ctx.users.create({
+					id: "u3",
+					name: "Charlie",
+					email: "charlie@test.com",
+					age: 35,
+				}),
+			)
+
+			// Still active after operation
+			expect(ctx.isActive).toBe(true)
+
+			// Rollback the transaction (this fails with TransactionError, which is expected)
+			await Effect.runPromise(ctx.rollback().pipe(Effect.either))
+
+			// Now should be false
+			expect(ctx.isActive).toBe(false)
+		})
+
+		it("should reflect correct state through full lifecycle", async () => {
+			const setup = await Effect.runPromise(createManualTransactionTestSetup())
+
+			// Transaction 1: commit lifecycle
+			const ctx1 = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined,
+				),
+			)
+
+			expect(ctx1.isActive).toBe(true)
+			await Effect.runPromise(ctx1.commit())
+			expect(ctx1.isActive).toBe(false)
+
+			// Transaction 2: rollback lifecycle (after previous completed)
+			const ctx2 = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined,
+				),
+			)
+
+			expect(ctx2.isActive).toBe(true)
+			await Effect.runPromise(ctx2.rollback().pipe(Effect.either))
+			expect(ctx2.isActive).toBe(false)
+
+			// Verify first transaction's isActive is still false (state is captured per-context)
+			expect(ctx1.isActive).toBe(false)
+		})
+	})
+
 	describe("double rollback", () => {
 		it("should fail with TransactionError when rollback() is called twice", async () => {
 			const setup = await Effect.runPromise(createManualTransactionTestSetup())
