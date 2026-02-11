@@ -552,4 +552,101 @@ describe("Full-text search: Multi-Field Search (task 10)", () => {
 			expect(results[0].title).toBe("Snow Crash")
 		})
 	})
+
+	describe("10.3: Single-field explicit search", () => {
+		it("should only search the specified field - title match", async () => {
+			const db = await createTestDatabase()
+			// "dune" is in title field, should match when fields: ["title"]
+			const results = await db.books.query({
+				where: { $search: { query: "dune", fields: ["title"] } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should not match when term is in a non-specified field", async () => {
+			const db = await createTestDatabase()
+			// "herbert" is in author field, but we only search title
+			const results = await db.books.query({
+				where: { $search: { query: "herbert", fields: ["title"] } },
+			}).runPromise
+			expect(results.length).toBe(0)
+		})
+
+		it("should not match when term is in description but only title is specified", async () => {
+			const db = await createTestDatabase()
+			// "sandworms" is in description field, but we only search title
+			const results = await db.books.query({
+				where: { $search: { query: "sandworms", fields: ["title"] } },
+			}).runPromise
+			expect(results.length).toBe(0)
+		})
+
+		it("should only search author field when specified", async () => {
+			const db = await createTestDatabase()
+			// "gibson" is in author field "William Gibson"
+			const results = await db.books.query({
+				where: { $search: { query: "gibson", fields: ["author"] } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Neuromancer")
+		})
+
+		it("should not match title terms when only author is specified", async () => {
+			const db = await createTestDatabase()
+			// "neuromancer" is in title field, but we only search author
+			const results = await db.books.query({
+				where: { $search: { query: "neuromancer", fields: ["author"] } },
+			}).runPromise
+			expect(results.length).toBe(0)
+		})
+
+		it("should only search description field when specified", async () => {
+			const db = await createTestDatabase()
+			// "cyberpunk" is in description field
+			const results = await db.books.query({
+				where: { $search: { query: "cyberpunk", fields: ["description"] } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Snow Crash")
+		})
+
+		it("should support prefix matching in single specified field", async () => {
+			const db = await createTestDatabase()
+			// "du" is a prefix for "Dune" in title
+			const results = await db.books.query({
+				where: { $search: { query: "du", fields: ["title"] } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should support multi-term search in single specified field", async () => {
+			const db = await createTestDatabase()
+			// "left hand darkness" all in title field
+			const results = await db.books.query({
+				where: { $search: { query: "left hand darkness", fields: ["title"] } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("The Left Hand of Darkness")
+		})
+
+		it("should fail multi-term search when terms span excluded fields", async () => {
+			const db = await createTestDatabase()
+			// "herbert" is in author, "dune" is in title -- but only title is searched
+			const results = await db.books.query({
+				where: { $search: { query: "herbert dune", fields: ["title"] } },
+			}).runPromise
+			expect(results.length).toBe(0)
+		})
+
+		it("should be case-insensitive in single-field search", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { $search: { query: "DUNE", fields: ["title"] } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+	})
 })
