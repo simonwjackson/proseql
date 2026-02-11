@@ -93,6 +93,21 @@ export type CollectionConfig = {
 	 * ```
 	 */
 	readonly computed?: ComputedFieldsConfig<unknown>;
+
+	/**
+	 * Fields to include in the full-text search index for this collection.
+	 * When specified, an inverted index is built and maintained for fast text search.
+	 * Each entry should be the name of a string-typed field on the entity.
+	 *
+	 * Queries using `$search` will leverage this index when available for the queried fields.
+	 * If not specified, `$search` queries will scan all entities (slower but still functional).
+	 *
+	 * @example
+	 * ```ts
+	 * searchIndex: ["title", "author", "description"]
+	 * ```
+	 */
+	readonly searchIndex?: ReadonlyArray<string>;
 };
 
 /**
