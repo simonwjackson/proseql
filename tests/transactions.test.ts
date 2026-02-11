@@ -1550,4 +1550,95 @@ describe("Snapshot Isolation", () => {
 			expect((finalUsers.get("u4") as { name: string }).name).toBe("Diana")
 		})
 	})
+
+	describe("lock release on rollback", () => {
+		it("should allow new transaction to begin after previous rolls back", async () => {
+			const setup = await Effect.runPromise(createManualTransactionTestSetup())
+
+			// Create first transaction
+			const ctx1 = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined,
+				),
+			)
+
+			// Verify first transaction is active
+			expect(ctx1.isActive).toBe(true)
+
+			// Perform an operation in first transaction
+			await Effect.runPromise(
+				ctx1.users.create({
+					id: "u3",
+					name: "Charlie",
+					email: "charlie@test.com",
+					age: 35,
+				}),
+			)
+
+			// Verify the user exists during the transaction (read-own-writes)
+			const userInTx = await Effect.runPromise(ctx1.users.findById("u3"))
+			expect(userInTx.name).toBe("Charlie")
+
+			// Rollback first transaction (this returns a TransactionError, which is expected)
+			const rollbackResult = await Effect.runPromise(
+				ctx1.rollback().pipe(Effect.either),
+			)
+
+			// Verify rollback returned the expected TransactionError
+			expect(rollbackResult._tag).toBe("Left")
+			if (rollbackResult._tag === "Left") {
+				const error = rollbackResult.left as {
+					readonly _tag?: string
+					readonly operation?: string
+				}
+				expect(error._tag).toBe("TransactionError")
+				expect(error.operation).toBe("rollback")
+			}
+
+			// Verify first transaction is no longer active
+			expect(ctx1.isActive).toBe(false)
+
+			// Verify the user was reverted (not in the state)
+			const usersAfterRollback = await Effect.runPromise(Ref.get(setup.usersRef))
+			expect(usersAfterRollback.size).toBe(2)
+			expect(usersAfterRollback.get("u3")).toBeUndefined()
+
+			// Now try to create a second transaction - should succeed since lock was released on rollback
+			const ctx2 = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined,
+				),
+			)
+
+			// Verify second transaction is active
+			expect(ctx2.isActive).toBe(true)
+
+			// Verify second transaction can perform operations
+			await Effect.runPromise(
+				ctx2.users.create({
+					id: "u4",
+					name: "Diana",
+					email: "diana@test.com",
+					age: 28,
+				}),
+			)
+
+			// Commit second transaction
+			await Effect.runPromise(ctx2.commit())
+			expect(ctx2.isActive).toBe(false)
+
+			// Verify only the second user was created (first was rolled back)
+			const finalUsers = await Effect.runPromise(Ref.get(setup.usersRef))
+			expect(finalUsers.size).toBe(3) // u1, u2 (initial) + u4 (created after rollback)
+			expect(finalUsers.get("u3")).toBeUndefined() // u3 was rolled back
+			expect(finalUsers.get("u4")).toBeDefined()
+			expect((finalUsers.get("u4") as { name: string }).name).toBe("Diana")
+		})
+	})
 })
