@@ -171,3 +171,50 @@ export const addToIndex = <T extends HasId>(
 			});
 		}
 	});
+
+/**
+ * Remove an entity from all applicable indexes.
+ *
+ * For each index in the collection, computes the index key from the entity's
+ * field values and removes the entity's ID from the corresponding Set.
+ * Empty Sets are cleaned up (deleted from the index).
+ *
+ * Entities with null/undefined values in indexed fields are skipped for that index
+ * (they wouldn't have been indexed in the first place).
+ *
+ * @param indexes - The collection's indexes
+ * @param entity - The entity to remove
+ * @returns Effect that updates all index Refs
+ */
+export const removeFromIndex = <T extends HasId>(
+	indexes: CollectionIndexes,
+	entity: T,
+): Effect.Effect<void> =>
+	Effect.gen(function* () {
+		for (const [indexKey, indexRef] of indexes) {
+			const fields: NormalizedIndex = JSON.parse(indexKey);
+			const key = computeIndexKey(entity, fields);
+
+			if (key === undefined) {
+				continue;
+			}
+
+			yield* Ref.update(indexRef, (indexMap) => {
+				const existing = indexMap.get(key);
+				if (!existing) {
+					return indexMap;
+				}
+
+				const newMap = new Map(indexMap);
+				const newSet = new Set(existing);
+				newSet.delete(entity.id);
+
+				if (newSet.size === 0) {
+					newMap.delete(key);
+				} else {
+					newMap.set(key, newSet);
+				}
+				return newMap;
+			});
+		}
+	});
