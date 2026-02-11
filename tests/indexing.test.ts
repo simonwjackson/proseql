@@ -328,6 +328,115 @@ describe("Indexing - Index Built from Initial Data", () => {
 			expect(userIds?.has("u3")).toBe(true)
 		})
 	})
+
+	describe("Task 6.3: multiple entities with same field value", () => {
+		it("should include all IDs in the Set when multiple entities share a field value", async () => {
+			// createSampleUsers() includes u1 and u4 with the same email "alice@example.com"
+			const normalized = normalizeIndexes(["email"])
+			const users = createSampleUsers() // All 4 users, including duplicate email
+			const indexes = await inspectIndexState(normalized, users)
+			const indexMap = await getIndexMap(indexes, ["email"])
+
+			// alice@example.com should have both u1 and u4
+			const aliceIds = indexMap.get("alice@example.com")
+			expect(aliceIds).toBeDefined()
+			expect(aliceIds?.size).toBe(2)
+			expect(aliceIds?.has("u1")).toBe(true)
+			expect(aliceIds?.has("u4")).toBe(true)
+
+			// Other emails should still have single entries
+			expect(indexMap.get("bob@example.com")?.size).toBe(1)
+			expect(indexMap.get("charlie@example.com")?.size).toBe(1)
+		})
+
+		it("should handle many entities sharing the same field value", async () => {
+			// Create users with many duplicate role values
+			const usersWithSameRole: ReadonlyArray<User> = [
+				{ id: "u1", email: "a@test.com", name: "A", age: 20, role: "member" },
+				{ id: "u2", email: "b@test.com", name: "B", age: 21, role: "member" },
+				{ id: "u3", email: "c@test.com", name: "C", age: 22, role: "member" },
+				{ id: "u4", email: "d@test.com", name: "D", age: 23, role: "member" },
+				{ id: "u5", email: "e@test.com", name: "E", age: 24, role: "member" },
+				{ id: "u6", email: "f@test.com", name: "F", age: 25, role: "admin" },
+			]
+
+			const normalized = normalizeIndexes(["role"])
+			const indexes = await inspectIndexState(normalized, usersWithSameRole)
+			const indexMap = await getIndexMap(indexes, ["role"])
+
+			// "member" should have 5 IDs
+			const memberIds = indexMap.get("member")
+			expect(memberIds).toBeDefined()
+			expect(memberIds?.size).toBe(5)
+			expect(memberIds?.has("u1")).toBe(true)
+			expect(memberIds?.has("u2")).toBe(true)
+			expect(memberIds?.has("u3")).toBe(true)
+			expect(memberIds?.has("u4")).toBe(true)
+			expect(memberIds?.has("u5")).toBe(true)
+
+			// "admin" should have 1 ID
+			const adminIds = indexMap.get("admin")
+			expect(adminIds).toBeDefined()
+			expect(adminIds?.size).toBe(1)
+			expect(adminIds?.has("u6")).toBe(true)
+		})
+
+		it("should collect all IDs for compound indexes with duplicate key combinations", async () => {
+			// p1 (Laptop) and p5 (Monitor) both have ["electronics", "computers"]
+			// p3 (Desk) and p4 (Chair) both have ["furniture", "office"]
+			const normalized = normalizeIndexes([["category", "subcategory"]])
+			const products = createSampleProducts()
+			const indexes = await inspectIndexState(normalized, products)
+			const indexMap = await getIndexMap(indexes, ["category", "subcategory"])
+
+			// Check electronics/computers has both p1 and p5
+			const electronicsComputersKey = JSON.stringify(["electronics", "computers"])
+			const electronicsComputers = indexMap.get(electronicsComputersKey)
+			expect(electronicsComputers).toBeDefined()
+			expect(electronicsComputers?.size).toBe(2)
+			expect(electronicsComputers?.has("p1")).toBe(true)
+			expect(electronicsComputers?.has("p5")).toBe(true)
+
+			// Check furniture/office has both p3 and p4
+			const furnitureOfficeKey = JSON.stringify(["furniture", "office"])
+			const furnitureOffice = indexMap.get(furnitureOfficeKey)
+			expect(furnitureOffice).toBeDefined()
+			expect(furnitureOffice?.size).toBe(2)
+			expect(furnitureOffice?.has("p3")).toBe(true)
+			expect(furnitureOffice?.has("p4")).toBe(true)
+
+			// electronics/phones should have only p2
+			const electronicsPhonesKey = JSON.stringify(["electronics", "phones"])
+			const electronicsPhones = indexMap.get(electronicsPhonesKey)
+			expect(electronicsPhones).toBeDefined()
+			expect(electronicsPhones?.size).toBe(1)
+			expect(electronicsPhones?.has("p2")).toBe(true)
+		})
+
+		it("should correctly index when all entities have the same field value", async () => {
+			// All users have the same role
+			const usersAllSameRole: ReadonlyArray<User> = [
+				{ id: "u1", email: "a@test.com", name: "A", age: 20, role: "guest" },
+				{ id: "u2", email: "b@test.com", name: "B", age: 21, role: "guest" },
+				{ id: "u3", email: "c@test.com", name: "C", age: 22, role: "guest" },
+			]
+
+			const normalized = normalizeIndexes(["role"])
+			const indexes = await inspectIndexState(normalized, usersAllSameRole)
+			const indexMap = await getIndexMap(indexes, ["role"])
+
+			// Only one entry in the index map
+			expect(indexMap.size).toBe(1)
+
+			// "guest" should have all 3 IDs
+			const guestIds = indexMap.get("guest")
+			expect(guestIds).toBeDefined()
+			expect(guestIds?.size).toBe(3)
+			expect(guestIds?.has("u1")).toBe(true)
+			expect(guestIds?.has("u2")).toBe(true)
+			expect(guestIds?.has("u3")).toBe(true)
+		})
+	})
 })
 
 // Export helpers for use in other test files
