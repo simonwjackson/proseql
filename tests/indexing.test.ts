@@ -437,6 +437,125 @@ describe("Indexing - Index Built from Initial Data", () => {
 			expect(guestIds?.has("u3")).toBe(true)
 		})
 	})
+
+	describe("Task 6.4: null/undefined values not indexed", () => {
+		it("should not index entities with null values in indexed field", async () => {
+			const usersWithNull = createUsersWithNullValues()
+			const normalized = normalizeIndexes(["email"])
+			const indexes = await inspectIndexState(normalized, usersWithNull as ReadonlyArray<{ readonly id: string }>)
+			const indexMap = await getIndexMap(indexes, ["email"])
+
+			// Only u1 (alice@example.com) and u4 (dave@example.com) have valid emails
+			// u2 has null email, u3 has undefined/missing email
+			expect(indexMap.size).toBe(2)
+			expect(indexMap.has("alice@example.com")).toBe(true)
+			expect(indexMap.has("dave@example.com")).toBe(true)
+
+			// Verify the IDs are correct
+			expect(indexMap.get("alice@example.com")?.has("u1")).toBe(true)
+			expect(indexMap.get("dave@example.com")?.has("u4")).toBe(true)
+
+			// null should not be a key in the index
+			expect(indexMap.has(null)).toBe(false)
+		})
+
+		it("should not index entities with undefined values in indexed field", async () => {
+			const usersWithNull = createUsersWithNullValues()
+			const normalized = normalizeIndexes(["role"])
+			const indexes = await inspectIndexState(normalized, usersWithNull as ReadonlyArray<{ readonly id: string }>)
+			const indexMap = await getIndexMap(indexes, ["role"])
+
+			// u1 has role: "admin", u2 has role: "user"
+			// u3 has role: "user", u4 has no role (undefined)
+			expect(indexMap.size).toBe(2)
+			expect(indexMap.has("admin")).toBe(true)
+			expect(indexMap.has("user")).toBe(true)
+
+			// Verify correct IDs
+			const adminIds = indexMap.get("admin")
+			expect(adminIds?.size).toBe(1)
+			expect(adminIds?.has("u1")).toBe(true)
+
+			const userIds = indexMap.get("user")
+			expect(userIds?.size).toBe(2)
+			expect(userIds?.has("u2")).toBe(true)
+			expect(userIds?.has("u3")).toBe(true)
+
+			// undefined should not be a key in the index
+			expect(indexMap.has(undefined)).toBe(false)
+		})
+
+		it("should not index compound keys when any field is null/undefined", async () => {
+			const productsWithMissing: ReadonlyArray<Record<string, unknown>> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: null, price: 699 }, // null subcategory
+				{ id: "p3", name: "Desk", category: "furniture", price: 299 }, // undefined subcategory
+				{ id: "p4", name: "Chair", category: null, subcategory: "office", price: 199 }, // null category
+			]
+
+			const normalized = normalizeIndexes([["category", "subcategory"]])
+			const indexes = await inspectIndexState(normalized, productsWithMissing as ReadonlyArray<{ readonly id: string }>)
+			const indexMap = await getIndexMap(indexes, ["category", "subcategory"])
+
+			// Only p1 has both fields defined
+			expect(indexMap.size).toBe(1)
+
+			const key = JSON.stringify(["electronics", "computers"])
+			expect(indexMap.has(key)).toBe(true)
+			expect(indexMap.get(key)?.size).toBe(1)
+			expect(indexMap.get(key)?.has("p1")).toBe(true)
+		})
+
+		it("should handle mix of valid and null/undefined across multiple entities", async () => {
+			const mixedUsers: ReadonlyArray<Record<string, unknown>> = [
+				{ id: "u1", email: "a@test.com", name: "A", age: 20, role: "admin" },
+				{ id: "u2", email: null, name: "B", age: 21, role: "user" },
+				{ id: "u3", email: "c@test.com", name: "C", age: 22 }, // undefined role
+				{ id: "u4", name: "D", age: 23, role: "user" }, // undefined email
+				{ id: "u5", email: "e@test.com", name: "E", age: 24, role: "admin" },
+			]
+
+			// Test email index
+			const emailNormalized = normalizeIndexes(["email"])
+			const emailIndexes = await inspectIndexState(emailNormalized, mixedUsers as ReadonlyArray<{ readonly id: string }>)
+			const emailMap = await getIndexMap(emailIndexes, ["email"])
+
+			// u1, u3, u5 have valid emails
+			expect(emailMap.size).toBe(3)
+			expect(emailMap.get("a@test.com")?.has("u1")).toBe(true)
+			expect(emailMap.get("c@test.com")?.has("u3")).toBe(true)
+			expect(emailMap.get("e@test.com")?.has("u5")).toBe(true)
+
+			// Test role index
+			const roleNormalized = normalizeIndexes(["role"])
+			const roleIndexes = await inspectIndexState(roleNormalized, mixedUsers as ReadonlyArray<{ readonly id: string }>)
+			const roleMap = await getIndexMap(roleIndexes, ["role"])
+
+			// u1, u2, u4, u5 have valid roles
+			expect(roleMap.size).toBe(2) // "admin" and "user"
+			expect(roleMap.get("admin")?.size).toBe(2) // u1, u5
+			expect(roleMap.get("admin")?.has("u1")).toBe(true)
+			expect(roleMap.get("admin")?.has("u5")).toBe(true)
+			expect(roleMap.get("user")?.size).toBe(2) // u2, u4
+			expect(roleMap.get("user")?.has("u2")).toBe(true)
+			expect(roleMap.get("user")?.has("u4")).toBe(true)
+		})
+
+		it("should not index when all entities have null/undefined in indexed field", async () => {
+			const usersAllNull: ReadonlyArray<Record<string, unknown>> = [
+				{ id: "u1", email: null, name: "A", age: 20 },
+				{ id: "u2", name: "B", age: 21 }, // undefined email
+				{ id: "u3", email: null, name: "C", age: 22 },
+			]
+
+			const normalized = normalizeIndexes(["email"])
+			const indexes = await inspectIndexState(normalized, usersAllNull as ReadonlyArray<{ readonly id: string }>)
+			const indexMap = await getIndexMap(indexes, ["email"])
+
+			// Index should be empty since all emails are null/undefined
+			expect(indexMap.size).toBe(0)
+		})
+	})
 })
 
 // Export helpers for use in other test files
