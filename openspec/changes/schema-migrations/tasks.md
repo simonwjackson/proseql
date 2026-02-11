@@ -28,7 +28,7 @@
 - [x] 5.2 If file version < config version and migrations are provided: run `runMigrations`, then decode the migrated data through schema, then write back to disk via `saveData` with new version. Return the decoded data.
 - [x] 5.3 If file version > config version: fail with `MigrationError` (data from future version).
 - [x] 5.4 If file version === config version: proceed normally (no migration needed).
-- [ ] 5.5 Modify `loadCollectionsFromFile`: apply per-collection migration independently.
+- [x] 5.5 Modify `loadCollectionsFromFile`: apply per-collection migration independently.
 
 ## 6. Post-Migration Validation
 

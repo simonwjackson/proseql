@@ -291,23 +291,45 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 // ============================================================================
 
 /**
+ * Configuration for loading a single collection from a multi-collection file.
+ */
+export interface LoadCollectionConfig {
+	readonly name: string
+	readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>
+	/**
+	 * Optional schema version from collection config.
+	 * When provided, enables version checking and migration support.
+	 */
+	readonly version?: number
+	/**
+	 * Optional migrations array for automatic data migration.
+	 * Only used when version is also provided.
+	 */
+	readonly migrations?: ReadonlyArray<Migration>
+}
+
+/**
  * Load multiple collections from a single file.
  *
  * The file is expected to contain a top-level object where keys are collection names
  * and values are objects keyed by entity ID. Each collection is decoded independently
  * using its own schema.
  *
+ * When collections have `version` and `migrations` specified, per-collection migration
+ * is applied:
+ * - Each collection's `_version` is extracted from its section (default 0 if absent)
+ * - If file version < config version: migrations run for that collection
+ * - If file version > config version: fails with MigrationError
+ * - After any migrations, the entire file is rewritten with all collections at their current versions
+ *
  * Returns a Record mapping collection name to ReadonlyMap<string, unknown>.
  */
 export const loadCollectionsFromFile = (
 	filePath: string,
-	collections: ReadonlyArray<{
-		readonly name: string
-		readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>
-	}>,
+	collections: ReadonlyArray<LoadCollectionConfig>,
 ): Effect.Effect<
 	Record<string, ReadonlyMap<string, { readonly id: string }>>,
-	StorageError | SerializationError | UnsupportedFormatError | ValidationError,
+	StorageError | SerializationError | UnsupportedFormatError | ValidationError | MigrationError,
 	StorageAdapter | SerializerRegistry
 > =>
 	Effect.gen(function* () {
@@ -337,18 +359,91 @@ export const loadCollectionsFromFile = (
 		}
 
 		const result: Record<string, ReadonlyMap<string, { readonly id: string }>> = {}
+		// Track which collections need write-back after migration
+		let needsWriteBack = false
+		// Store migrated data for write-back (maps collection name to encoded entities + version)
+		const writeBackData: Array<{
+			readonly name: string
+			readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>
+			readonly data: ReadonlyMap<string, { readonly id: string }>
+			readonly version?: number
+		}> = []
 
 		for (const col of collections) {
 			const collectionData = parsed[col.name]
 			if (collectionData === undefined || !isRecord(collectionData)) {
 				result[col.name] = new Map()
+				// Build write-back entry, only adding version if defined
+				const emptyEntry: {
+					readonly name: string
+					readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>
+					readonly data: ReadonlyMap<string, { readonly id: string }>
+					readonly version?: number
+				} = {
+					name: col.name,
+					schema: col.schema,
+					data: new Map(),
+				}
+				if (col.version !== undefined) {
+					writeBackData.push({ ...emptyEntry, version: col.version })
+				} else {
+					writeBackData.push(emptyEntry)
+				}
 				continue
 			}
 
+			// Extract _version from collection data (default 0 if absent)
+			const fileVersion = typeof collectionData._version === "number" ? collectionData._version : 0
+
+			// Create entity map without _version
+			const entityMap: Record<string, unknown> = {}
+			for (const [key, value] of Object.entries(collectionData)) {
+				if (key !== "_version") {
+					entityMap[key] = value
+				}
+			}
+
+			// Determine the data to decode (may be migrated)
+			let dataToLoad: Record<string, unknown> = entityMap
+			let collectionNeedsMigration = false
+
+			// If version checking is enabled, validate version compatibility
+			if (col.version !== undefined) {
+				const configVersion = col.version
+
+				// File version ahead of config version is an error
+				if (fileVersion > configVersion) {
+					return yield* Effect.fail(
+						new MigrationError({
+							collection: col.name,
+							fromVersion: configVersion,
+							toVersion: fileVersion,
+							step: -1,
+							reason: "version-ahead",
+							message: `File version ${fileVersion} for collection "${col.name}" is ahead of config version ${configVersion}. Cannot load data from a future version.`,
+						}),
+					)
+				}
+
+				// If file version < config version and migrations are provided, run migrations
+				if (fileVersion < configVersion && col.migrations && col.migrations.length > 0) {
+					dataToLoad = yield* runMigrations(
+						entityMap,
+						fileVersion,
+						configVersion,
+						col.migrations,
+						col.name,
+					)
+					collectionNeedsMigration = true
+					needsWriteBack = true
+				}
+			}
+
+			// Decode each entity through the schema
 			const decode = Schema.decodeUnknown(col.schema)
 			const entries: Array<[string, { readonly id: string }]> = []
 
-			for (const [id, value] of Object.entries(collectionData)) {
+			for (const [id, value] of Object.entries(dataToLoad)) {
 				const decoded = yield* decode(value).pipe(
 					Effect.mapError(
 						(parseError) =>
@@ -366,7 +461,31 @@ export const loadCollectionsFromFile = (
 				entries.push([id, decoded])
 			}
 
-			result[col.name] = new Map(entries)
+			const collectionMap = new Map(entries) as ReadonlyMap<string, { readonly id: string }>
+			result[col.name] = collectionMap
+
+			// Track for write-back, only adding version if defined
+			const entry: {
+				readonly name: string
+				readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>
+				readonly data: ReadonlyMap<string, { readonly id: string }>
+				readonly version?: number
+			} = {
+				name: col.name,
+				schema: col.schema,
+				data: collectionMap,
+			}
+			// Use the target version if versioned collection (whether migrated or not)
+			if (col.version !== undefined) {
+				writeBackData.push({ ...entry, version: col.version })
+			} else {
+				writeBackData.push(entry)
+			}
+		}
+
+		// If any collection was migrated, write back the entire file
+		if (needsWriteBack) {
+			yield* saveCollectionsToFile(filePath, writeBackData)
 		}
 
 		return result
