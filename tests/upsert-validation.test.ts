@@ -405,7 +405,50 @@ describe("Upsert Where-Clause Validation", () => {
 		})
 
 		it("should reject partial compound where (missing one field)", async () => {
-			// TODO: Task 7.6
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<Setting>([existingSetting])
+				const stateRefs = yield* makeStateRefs({ settings: [existingSetting] })
+
+				// Upsert using only { userId } — invalid because compound constraint requires BOTH userId AND settingKey
+				const result = yield* upsert(
+					"settings",
+					SettingSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					settingUniqueFields, // [["userId", "settingKey"]] configured
+				)({
+					where: { userId: "user1" }, // Only one of the compound fields — should fail
+					create: {
+						userId: "user1",
+						settingKey: "theme",
+						value: "dark",
+					},
+					update: { value: "updated-value" },
+				})
+
+				return result
+			})
+
+			const error = await Effect.runPromise(
+				program.pipe(
+					Effect.flip, // Convert failure to success for assertion
+				),
+			)
+
+			// Should fail with ValidationError because partial compound where doesn't match any constraint
+			expect(error).toBeInstanceOf(ValidationError)
+			expect(error._tag).toBe("ValidationError")
+			expect(error.message).toContain("unique")
+			expect(error.issues).toHaveLength(1)
+			expect(error.issues[0].field).toBe("where")
+			// Should mention the invalid field(s) and collection
+			expect(error.issues[0].message).toContain("userId")
+			expect(error.issues[0].message).toContain("settings")
+			// Should mention valid unique fields (the compound constraint)
+			expect(error.issues[0].message).toContain("userId, settingKey")
 		})
 	})
 
