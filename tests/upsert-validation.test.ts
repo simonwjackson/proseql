@@ -332,7 +332,76 @@ describe("Upsert Where-Clause Validation", () => {
 
 	describe("upsert with compound unique constraint", () => {
 		it("should accept where clause matching compound constraint", async () => {
-			// TODO: Task 7.5
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<Setting>([existingSetting])
+				const stateRefs = yield* makeStateRefs({ settings: [existingSetting] })
+
+				// Upsert using { userId, settingKey } — valid because [userId, settingKey] is a compound constraint
+				const result = yield* upsert(
+					"settings",
+					SettingSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					settingUniqueFields, // [["userId", "settingKey"]] configured
+				)({
+					where: { userId: "user1", settingKey: "theme" }, // Using compound constraint fields
+					create: {
+						userId: "user1",
+						settingKey: "theme",
+						value: "new-value",
+					},
+					update: { value: "updated-value" },
+				})
+
+				// Should update existing setting (matched by compound key)
+				expect(result.__action).toBe("updated")
+				expect(result.id).toBe("setting1")
+				expect(result.value).toBe("updated-value")
+
+				return result
+			})
+
+			await Effect.runPromise(program)
+		})
+
+		it("should create when compound where clause does not match existing", async () => {
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<Setting>([existingSetting])
+				const stateRefs = yield* makeStateRefs({ settings: [existingSetting] })
+
+				// Upsert with compound where that doesn't match — should create
+				const result = yield* upsert(
+					"settings",
+					SettingSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					settingUniqueFields,
+				)({
+					where: { userId: "user1", settingKey: "language" }, // Different settingKey
+					create: {
+						userId: "user1",
+						settingKey: "language",
+						value: "en",
+					},
+					update: { value: "fr" },
+				})
+
+				// Should create new setting (no match for compound key)
+				expect(result.__action).toBe("created")
+				expect(result.userId).toBe("user1")
+				expect(result.settingKey).toBe("language")
+				expect(result.value).toBe("en")
+
+				return result
+			})
+
+			await Effect.runPromise(program)
 		})
 
 		it("should reject partial compound where (missing one field)", async () => {

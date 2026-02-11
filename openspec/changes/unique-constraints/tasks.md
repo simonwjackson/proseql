@@ -51,7 +51,7 @@
 - [x] 7.2 Test upsert `where: { id }` → always valid
 - [x] 7.3 Test upsert `where: { email }` when email is unique → valid
 - [x] 7.4 Test upsert `where: { name }` when name is NOT unique → `ValidationError`
-- [ ] 7.5 Test upsert with compound where matching compound constraint → valid
+- [x] 7.5 Test upsert with compound where matching compound constraint → valid
 - [ ] 7.6 Test upsert with partial compound where → `ValidationError`
 - [ ] 7.7 Test collection without uniqueFields → only `{ id }` accepted
 - [ ] 7.8 Test upsert where with extra fields beyond constraint → valid
