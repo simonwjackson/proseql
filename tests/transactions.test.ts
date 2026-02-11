@@ -76,6 +76,18 @@ const createTestDb = () => createEffectDatabase(config, initialData)
 // Transaction Callback Tests
 // ============================================================================
 
+// ============================================================================
+// Custom Test Errors
+// ============================================================================
+
+class TestBusinessError extends Error {
+	readonly _tag = "TestBusinessError"
+	constructor(message: string) {
+		super(message)
+		this.name = "TestBusinessError"
+	}
+}
+
 describe("$transaction", () => {
 	describe("successful transactions", () => {
 		it("should have $transaction method on the database", async () => {
@@ -148,6 +160,68 @@ describe("$transaction", () => {
 			expect(charliePost).toBeDefined()
 			expect(charliePost?.title).toBe("Charlie's First Post")
 			expect(charliePost?.authorId).toBe("u3")
+		})
+	})
+
+	describe("failed transactions", () => {
+		it("should revert user creation when transaction fails with Effect.fail", async () => {
+			const db = await Effect.runPromise(createTestDb())
+
+			// Verify initial state
+			const initialUsers = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(initialUsers).toHaveLength(2)
+			expect(initialUsers.find((u) => u.id === "u3")).toBeUndefined()
+
+			// Execute transaction that creates a user then fails
+			const result = await db
+				.$transaction((ctx) =>
+					Effect.gen(function* () {
+						// Create user - this should be reverted on rollback
+						yield* ctx.users.create({
+							id: "u3",
+							name: "Charlie",
+							email: "charlie@test.com",
+							age: 35,
+						})
+
+						// Verify the user exists within the transaction (read-own-writes)
+						const userInTx = yield* ctx.users.findById("u3")
+						expect(userInTx.name).toBe("Charlie")
+
+						// Now fail the transaction with a business error
+						return yield* Effect.fail(
+							new TestBusinessError("Simulated failure after user creation"),
+						)
+					}),
+				)
+				.pipe(
+					Effect.either,
+					Effect.runPromise,
+				)
+
+			// Verify the transaction failed with our error
+			expect(result._tag).toBe("Left")
+			if (result._tag === "Left") {
+				expect(result.left).toBeInstanceOf(TestBusinessError)
+				expect((result.left as TestBusinessError).message).toBe(
+					"Simulated failure after user creation",
+				)
+			}
+
+			// Verify the user creation was reverted
+			const finalUsers = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(finalUsers).toHaveLength(2)
+			expect(finalUsers.find((u) => u.id === "u3")).toBeUndefined()
+
+			// Verify original users are still intact
+			expect(finalUsers.find((u) => u.id === "u1")?.name).toBe("Alice")
+			expect(finalUsers.find((u) => u.id === "u2")?.name).toBe("Bob")
 		})
 	})
 })
