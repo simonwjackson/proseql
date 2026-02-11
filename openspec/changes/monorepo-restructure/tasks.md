@@ -29,7 +29,7 @@
 ## 4. Package: @proseql/rest
 
 - [x] 4.1 Create `packages/rest/` directory structure: `src/`, `tests/`
-- [ ] 4.2 Copy `../proseql-rest/src/index.ts` to `packages/rest/src/index.ts`
+- [x] 4.2 Copy `../proseql-rest/src/index.ts` to `packages/rest/src/index.ts`
 - [ ] 4.3 Create `packages/rest/package.json`: name `@proseql/rest`, version `0.0.0`, type `module`, main `src/index.ts`, dependencies: `{ "@proseql/core": "workspace:*" }`, peerDependencies: `{ "effect": "^3.15.0" }`
 - [ ] 4.4 Create `packages/rest/tsconfig.json`: extends `../../tsconfig.base.json`, rootDir `src`, outDir `dist`, references `[{ "path": "../core" }]`
 
