@@ -163,6 +163,85 @@ describe("$transaction", () => {
 		})
 	})
 
+	describe("explicit rollback", () => {
+		it("should revert all changes when ctx.rollback() is called mid-transaction", async () => {
+			const db = await Effect.runPromise(createTestDb())
+
+			// Verify initial state
+			const initialUsers = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			const initialPosts = await Stream.runCollect(db.posts.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(initialUsers).toHaveLength(2)
+			expect(initialPosts).toHaveLength(2)
+
+			// Execute transaction that creates entities then explicitly rolls back
+			const result = await db
+				.$transaction((ctx) =>
+					Effect.gen(function* () {
+						// Create user and post - should be reverted on rollback
+						const newUser = yield* ctx.users.create({
+							id: "u3",
+							name: "Charlie",
+							email: "charlie@test.com",
+							age: 35,
+						})
+						yield* ctx.posts.create({
+							id: "p3",
+							title: "Charlie's Post",
+							content: "This will be rolled back",
+							authorId: newUser.id,
+						})
+
+						// Verify entities exist within the transaction (read-own-writes)
+						const userInTx = yield* ctx.users.findById("u3")
+						expect(userInTx.name).toBe("Charlie")
+
+						const postInTx = yield* ctx.posts.findById("p3")
+						expect(postInTx.title).toBe("Charlie's Post")
+
+						// Explicitly rollback mid-transaction
+						return yield* ctx.rollback()
+					}),
+				)
+				.pipe(Effect.either, Effect.runPromise)
+
+			// Verify the transaction resulted in a TransactionError from rollback
+			expect(result._tag).toBe("Left")
+			if (result._tag === "Left") {
+				// The error should be a TransactionError with operation "rollback"
+				const error = result.left as { readonly _tag?: string; readonly operation?: string }
+				expect(error._tag).toBe("TransactionError")
+				expect(error.operation).toBe("rollback")
+			}
+
+			// Verify all changes were reverted
+			const finalUsers = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			const finalPosts = await Stream.runCollect(db.posts.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+
+			expect(finalUsers).toHaveLength(2)
+			expect(finalPosts).toHaveLength(2)
+			expect(finalUsers.find((u) => u.id === "u3")).toBeUndefined()
+			expect(finalPosts.find((p) => p.id === "p3")).toBeUndefined()
+
+			// Verify original data is still intact
+			expect(finalUsers.find((u) => u.id === "u1")?.name).toBe("Alice")
+			expect(finalUsers.find((u) => u.id === "u2")?.name).toBe("Bob")
+			expect(finalPosts.find((p) => p.id === "p1")?.title).toBe("Hello World")
+			expect(finalPosts.find((p) => p.id === "p2")?.title).toBe("TypeScript Tips")
+		})
+	})
+
 	describe("failed transactions", () => {
 		it("should revert user creation when transaction fails with Effect.fail", async () => {
 			const db = await Effect.runPromise(createTestDb())
