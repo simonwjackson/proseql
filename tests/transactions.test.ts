@@ -1551,6 +1551,71 @@ describe("Snapshot Isolation", () => {
 		})
 	})
 
+	describe("lock release on error", () => {
+		it("should allow new transaction to begin after $transaction fails with error", async () => {
+			const db = await Effect.runPromise(createTestDb())
+
+			// First transaction fails with an error - automatic rollback should release lock
+			const result = await db
+				.$transaction((ctx) =>
+					Effect.gen(function* () {
+						// Create a user (will be rolled back)
+						yield* ctx.users.create({
+							id: "u3",
+							name: "Charlie",
+							email: "charlie@test.com",
+							age: 35,
+						})
+
+						// Fail the transaction
+						return yield* Effect.fail(new TestBusinessError("Intentional failure"))
+					}),
+				)
+				.pipe(Effect.either, Effect.runPromise)
+
+			// Verify first transaction failed
+			expect(result._tag).toBe("Left")
+			if (result._tag === "Left") {
+				expect(result.left).toBeInstanceOf(TestBusinessError)
+			}
+
+			// Verify the user was rolled back
+			const usersAfterFailure = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(usersAfterFailure).toHaveLength(2)
+			expect(usersAfterFailure.find((u) => u.id === "u3")).toBeUndefined()
+
+			// Now start a new transaction - should succeed since lock was released on error
+			const secondResult = await db
+				.$transaction((ctx) =>
+					Effect.gen(function* () {
+						yield* ctx.users.create({
+							id: "u4",
+							name: "Diana",
+							email: "diana@test.com",
+							age: 28,
+						})
+						return "second transaction succeeded"
+					}),
+				)
+				.pipe(Effect.runPromise)
+
+			// Verify second transaction succeeded
+			expect(secondResult).toBe("second transaction succeeded")
+
+			// Verify the new user exists
+			const finalUsers = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(finalUsers).toHaveLength(3)
+			expect(finalUsers.find((u) => u.id === "u3")).toBeUndefined() // From failed tx
+			expect(finalUsers.find((u) => u.id === "u4")?.name).toBe("Diana")
+		})
+	})
+
 	describe("lock release on rollback", () => {
 		it("should allow new transaction to begin after previous rolls back", async () => {
 			const setup = await Effect.runPromise(createManualTransactionTestSetup())

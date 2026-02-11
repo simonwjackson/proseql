@@ -51,7 +51,7 @@
 - [x] 7.2 Test snapshot immutability: rollback restores exact pre-transaction state including entities that were deleted during transaction
 - [x] 7.3 Test lock release on commit: new transaction can begin after previous commits
 - [x] 7.4 Test lock release on rollback: new transaction can begin after previous rolls back
-- [ ] 7.5 Test lock release on error: automatic rollback in `$transaction` releases lock
+- [x] 7.5 Test lock release on error: automatic rollback in `$transaction` releases lock
 - [ ] 7.6 Test concurrent transaction rejection: second `createTransaction` while first is active → `TransactionError`
 
 ## 8. Tests — Persistence Integration
