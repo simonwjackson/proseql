@@ -773,6 +773,176 @@ describe("Indexing - Index Maintenance", () => {
 		})
 	})
 
+	describe("Task 7.3: update not changing indexed field → index unchanged", () => {
+		it("should keep entity in same index entry when only non-indexed fields change", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Verify initial query works
+			const aliceInitial = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceInitial.length).toBe(1)
+			expect((aliceInitial[0] as { id: string }).id).toBe("u1")
+
+			// Update non-indexed field (name, age)
+			await db.users.update("u1", { name: "Alice Updated", age: 31 }).runPromise
+
+			// Query by indexed field (email) - should still find Alice
+			const aliceAfter = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceAfter.length).toBe(1)
+			expect((aliceAfter[0] as { id: string }).id).toBe("u1")
+			expect((aliceAfter[0] as { name: string }).name).toBe("Alice Updated")
+			expect((aliceAfter[0] as { age: number }).age).toBe(31)
+
+			// Bob should be unaffected
+			const bobResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(bobResults.length).toBe(1)
+			expect((bobResults[0] as { id: string }).id).toBe("u2")
+		})
+
+		it("should preserve shared index entry when updating non-indexed fields", async () => {
+			// Two users share the same email
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "shared@example.com", name: "User One", age: 30 },
+				{ id: "u2", email: "shared@example.com", name: "User Two", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Verify both are queryable via shared email initially
+			const sharedInitial = await db.users.query({ where: { email: "shared@example.com" } }).runPromise
+			expect(sharedInitial.length).toBe(2)
+
+			// Update u1's name (non-indexed field)
+			await db.users.update("u1", { name: "Updated User One" }).runPromise
+
+			// Query shared email - should still return both users
+			const sharedAfter = await db.users.query({ where: { email: "shared@example.com" } }).runPromise
+			expect(sharedAfter.length).toBe(2)
+
+			const ids = sharedAfter.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u2"])
+
+			// Verify the update was applied
+			const u1 = sharedAfter.find((r) => (r as { id: string }).id === "u1")
+			expect((u1 as { name: string }).name).toBe("Updated User One")
+		})
+
+		it("should keep compound index entry unchanged when updating non-indexed fields", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { products: initialProducts }),
+			)
+
+			// Verify compound index query works initially
+			const computersInitial = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(computersInitial.length).toBe(1)
+			expect((computersInitial[0] as { id: string }).id).toBe("p1")
+
+			// Update non-indexed fields (name, price)
+			await db.products.update("p1", { name: "Gaming Laptop", price: 1499 }).runPromise
+
+			// Query by compound index - should still find the product
+			const computersAfter = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(computersAfter.length).toBe(1)
+			expect((computersAfter[0] as { id: string }).id).toBe("p1")
+			expect((computersAfter[0] as { name: string }).name).toBe("Gaming Laptop")
+			expect((computersAfter[0] as { price: number }).price).toBe(1499)
+
+			// Other compound index entry should be unaffected
+			const phonesResults = await db.products.query({
+				where: { category: "electronics", subcategory: "phones" },
+			}).runPromise
+			expect(phonesResults.length).toBe(1)
+			expect((phonesResults[0] as { id: string }).id).toBe("p2")
+		})
+
+		it("should handle updating email to same value (no actual change)", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Update email to the exact same value
+			await db.users.update("u1", { email: "alice@example.com" }).runPromise
+
+			// Should still be queryable
+			const results = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("u1")
+		})
+
+		it("should maintain multiple single-field indexes when updating non-indexed field", async () => {
+			// createMultiIndexConfig has users with indexes on both "email" and "role"
+			const config = createMultiIndexConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30, role: "admin" },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25, role: "user" },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Verify both indexes work initially
+			const aliceByEmail = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceByEmail.length).toBe(1)
+			const aliceByRole = await db.users.query({ where: { role: "admin" } }).runPromise
+			expect(aliceByRole.length).toBe(1)
+
+			// Update non-indexed field (name)
+			await db.users.update("u1", { name: "Alice Smith" }).runPromise
+
+			// Both indexes should still work
+			const aliceByEmailAfter = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceByEmailAfter.length).toBe(1)
+			expect((aliceByEmailAfter[0] as { name: string }).name).toBe("Alice Smith")
+
+			const aliceByRoleAfter = await db.users.query({ where: { role: "admin" } }).runPromise
+			expect(aliceByRoleAfter.length).toBe(1)
+			expect((aliceByRoleAfter[0] as { name: string }).name).toBe("Alice Smith")
+		})
+
+		it("should handle multiple consecutive updates to non-indexed fields", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Perform multiple updates to non-indexed fields
+			await db.users.update("u1", { name: "Alice 1" }).runPromise
+			await db.users.update("u1", { age: 31 }).runPromise
+			await db.users.update("u1", { name: "Alice 2", age: 32 }).runPromise
+
+			// Should still be queryable by indexed field
+			const results = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("u1")
+			expect((results[0] as { name: string }).name).toBe("Alice 2")
+			expect((results[0] as { age: number }).age).toBe(32)
+		})
+	})
+
 	describe("Task 7.1: create → index entry added", () => {
 		it("should add new entity to index when created", async () => {
 			// Start with an empty indexed database
