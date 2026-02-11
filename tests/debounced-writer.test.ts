@@ -3,14 +3,15 @@ import { Effect, Layer, Schema } from "effect"
 import { createDebouncedWriter, saveData } from "../core/storage/persistence-effect.js"
 import { StorageAdapter } from "../core/storage/storage-service.js"
 import { makeInMemoryStorageLayer } from "../core/storage/in-memory-adapter-layer.js"
-import { JsonSerializerLayer } from "../core/serializers/json.js"
+import { makeSerializerLayer } from "../core/serializers/format-codec.js"
+import { jsonCodec } from "../core/serializers/codecs/json.js"
 import { StorageError } from "../core/errors/storage-errors.js"
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-const TestLayer = Layer.merge(makeInMemoryStorageLayer(), JsonSerializerLayer)
+const TestLayer = Layer.merge(makeInMemoryStorageLayer(), makeSerializerLayer([jsonCodec()]))
 
 const UserSchema = Schema.Struct({
 	id: Schema.String,
@@ -93,7 +94,7 @@ describe("DebouncedWriter", () => {
 	describe("triggerSave", () => {
 		it("schedules a pending write", async () => {
 			const { layer, getWriteCount } = makeCountingStorageLayer()
-			const TestEnv = Layer.merge(layer, JsonSerializerLayer)
+			const TestEnv = Layer.merge(layer, makeSerializerLayer([jsonCodec()]))
 
 			await Effect.runPromise(
 				Effect.provide(
@@ -122,7 +123,7 @@ describe("DebouncedWriter", () => {
 
 		it("executes write after delay", async () => {
 			const { layer, store, getWriteCount } = makeCountingStorageLayer()
-			const TestEnv = Layer.merge(layer, JsonSerializerLayer)
+			const TestEnv = Layer.merge(layer, makeSerializerLayer([jsonCodec()]))
 
 			await Effect.runPromise(
 				Effect.provide(
@@ -156,7 +157,7 @@ describe("DebouncedWriter", () => {
 	describe("coalescing", () => {
 		it("multiple rapid saves to the same key coalesce into one write", async () => {
 			const { layer, store, getWriteCount } = makeCountingStorageLayer()
-			const TestEnv = Layer.merge(layer, JsonSerializerLayer)
+			const TestEnv = Layer.merge(layer, makeSerializerLayer([jsonCodec()]))
 
 			await Effect.runPromise(
 				Effect.provide(
@@ -197,7 +198,7 @@ describe("DebouncedWriter", () => {
 
 		it("saves to different keys are independent", async () => {
 			const { layer, store, getWriteCount } = makeCountingStorageLayer()
-			const TestEnv = Layer.merge(layer, JsonSerializerLayer)
+			const TestEnv = Layer.merge(layer, makeSerializerLayer([jsonCodec()]))
 
 			await Effect.runPromise(
 				Effect.provide(
@@ -241,7 +242,7 @@ describe("DebouncedWriter", () => {
 	describe("custom debounce delay", () => {
 		it("respects custom delay of 200ms", async () => {
 			const { layer, getWriteCount } = makeCountingStorageLayer()
-			const TestEnv = Layer.merge(layer, JsonSerializerLayer)
+			const TestEnv = Layer.merge(layer, makeSerializerLayer([jsonCodec()]))
 
 			await Effect.runPromise(
 				Effect.provide(
@@ -277,7 +278,7 @@ describe("DebouncedWriter", () => {
 	describe("flush", () => {
 		it("immediately executes all pending writes", async () => {
 			const { layer, store, getWriteCount } = makeCountingStorageLayer()
-			const TestEnv = Layer.merge(layer, JsonSerializerLayer)
+			const TestEnv = Layer.merge(layer, makeSerializerLayer([jsonCodec()]))
 
 			await Effect.runPromise(
 				Effect.provide(
@@ -332,7 +333,7 @@ describe("DebouncedWriter", () => {
 
 		it("flush uses the latest data for each key", async () => {
 			const { layer, store, getWriteCount } = makeCountingStorageLayer()
-			const TestEnv = Layer.merge(layer, JsonSerializerLayer)
+			const TestEnv = Layer.merge(layer, makeSerializerLayer([jsonCodec()]))
 
 			await Effect.runPromise(
 				Effect.provide(
@@ -367,7 +368,7 @@ describe("DebouncedWriter", () => {
 	describe("pendingCount", () => {
 		it("tracks pending writes accurately", async () => {
 			const { layer } = makeCountingStorageLayer()
-			const TestEnv = Layer.merge(layer, JsonSerializerLayer)
+			const TestEnv = Layer.merge(layer, makeSerializerLayer([jsonCodec()]))
 
 			await Effect.runPromise(
 				Effect.provide(
