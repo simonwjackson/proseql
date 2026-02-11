@@ -293,6 +293,29 @@ export {
 
 export type { SerializerRegistryShape } from "./serializers/serializer-service.js";
 
+// FormatCodec compositor and types
+export { makeSerializerLayer } from "./serializers/format-codec.js";
+
+export type {
+	FormatCodec,
+	FormatOptions,
+} from "./serializers/format-codec.js";
+
+// Individual codec factories
+export { jsonCodec } from "./serializers/codecs/json.js";
+export { yamlCodec } from "./serializers/codecs/yaml.js";
+export { json5Codec } from "./serializers/codecs/json5.js";
+export { jsoncCodec } from "./serializers/codecs/jsonc.js";
+export { tomlCodec } from "./serializers/codecs/toml.js";
+export { toonCodec } from "./serializers/codecs/toon.js";
+export { hjsonCodec } from "./serializers/codecs/hjson.js";
+
+// Preset Layers
+export {
+	AllTextFormatsLayer,
+	DefaultSerializerLayer,
+} from "./serializers/presets.js";
+
 // JSON serializer
 export {
 	JsonSerializerLayer,
