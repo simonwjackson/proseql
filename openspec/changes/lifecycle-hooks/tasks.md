@@ -62,7 +62,7 @@
 - [x] 9.2 Test afterUpdate receives previous and current state
 - [x] 9.3 Test afterDelete receives deleted entity
 - [x] 9.4 Test after-hook error does not fail the CRUD operation
-- [ ] 9.5 Test multiple after-hooks run in order
+- [x] 9.5 Test multiple after-hooks run in order
 - [ ] 9.6 Test after-hooks run after state mutation is complete
 
 ## 10. Tests — onChange

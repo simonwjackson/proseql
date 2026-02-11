@@ -867,5 +867,79 @@ describe("lifecycle-hooks", () => {
 			// Verify all hooks were actually called (even though they failed)
 			expect(hookCallOrder).toEqual(["afterCreate", "afterUpdate", "afterDelete"])
 		})
+
+		it("multiple after-hooks run in order", async () => {
+			// Track the order in which hooks are called for each operation type
+			const createHookOrder: Array<number> = []
+			const updateHookOrder: Array<number> = []
+			const deleteHookOrder: Array<number> = []
+
+			// Create numbered after-hooks that record their position
+			const makeOrderedAfterCreateHook = (index: number): AfterCreateHook<User> =>
+				() => {
+					createHookOrder.push(index)
+					return Effect.void
+				}
+
+			const makeOrderedAfterUpdateHook = (index: number): AfterUpdateHook<User> =>
+				() => {
+					updateHookOrder.push(index)
+					return Effect.void
+				}
+
+			const makeOrderedAfterDeleteHook = (index: number): AfterDeleteHook<User> =>
+				() => {
+					deleteHookOrder.push(index)
+					return Effect.void
+				}
+
+			const hooks: HooksConfig<User> = {
+				afterCreate: [
+					makeOrderedAfterCreateHook(1),
+					makeOrderedAfterCreateHook(2),
+					makeOrderedAfterCreateHook(3),
+				],
+				afterUpdate: [
+					makeOrderedAfterUpdateHook(1),
+					makeOrderedAfterUpdateHook(2),
+					makeOrderedAfterUpdateHook(3),
+				],
+				afterDelete: [
+					makeOrderedAfterDeleteHook(1),
+					makeOrderedAfterDeleteHook(2),
+					makeOrderedAfterDeleteHook(3),
+				],
+			}
+
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, { users: [] })
+
+					// Create a user - all 3 afterCreate hooks should run in order
+					const created = yield* db.users.create({
+						name: "Order Test User",
+						email: "order@test.com",
+						age: 30,
+					})
+
+					// Update the user - all 3 afterUpdate hooks should run in order
+					yield* db.users.update(created.id, {
+						name: "Updated Order Test User",
+					})
+
+					// Delete the user - all 3 afterDelete hooks should run in order
+					yield* db.users.delete(created.id)
+				}),
+			)
+
+			// Verify afterCreate hooks ran in registration order
+			expect(createHookOrder).toEqual([1, 2, 3])
+
+			// Verify afterUpdate hooks ran in registration order
+			expect(updateHookOrder).toEqual([1, 2, 3])
+
+			// Verify afterDelete hooks ran in registration order
+			expect(deleteHookOrder).toEqual([1, 2, 3])
+		})
 	})
 })
