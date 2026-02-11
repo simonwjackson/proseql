@@ -378,6 +378,18 @@ export {
 } from "./operations/query/resolve-computed.js";
 
 // ============================================================================
+// Search Types
+// ============================================================================
+
+export type {
+	SearchConfig,
+	SearchScore,
+	SearchIndexMap,
+} from "./types/search-types.js";
+
+export { STOP_WORDS } from "./types/search-types.js";
+
+// ============================================================================
 // ID Generation Utilities
 // ============================================================================
 

@@ -4,7 +4,7 @@
 - [x] 1.2 Add `$search: string` to `FilterOperators<string>` in `core/types/types.ts` (field-level search operator for string fields only)
 - [x] 1.3 Add top-level `$search: SearchConfig` to the `WhereClause` type in `core/types/types.ts` alongside `$and`, `$or`, `$not`
 - [x] 1.4 Add optional `searchIndex: ReadonlyArray<string>` to collection config types in `core/types/database-config-types.ts` (fields to build the inverted index on)
-- [ ] 1.5 Export search types from `core/index.ts`
+- [x] 1.5 Export search types from `core/index.ts`
 
 ## 2. Tokenizer
 
