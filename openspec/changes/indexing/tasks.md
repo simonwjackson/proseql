@@ -51,7 +51,7 @@
 - [x] 7.3 Test update not changing indexed field → index unchanged
 - [x] 7.4 Test delete → index entries removed, empty Sets cleaned up
 - [x] 7.5 Test createMany → batch index update
-- [ ] 7.6 Test upsert (create path) → index added
+- [x] 7.6 Test upsert (create path) → index added
 - [ ] 7.7 Test upsert (update path) → index updated
 - [ ] 7.8 Test index consistency after mixed CRUD sequence
 

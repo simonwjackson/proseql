@@ -1344,6 +1344,160 @@ describe("Indexing - Index Maintenance", () => {
 		})
 	})
 
+	describe("Task 7.6: upsert (create path) → index added", () => {
+		it("should add new entity to index when upsert creates", async () => {
+			// Start with an empty indexed database
+			const config = createIndexedUsersConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Upsert with no existing match → should create
+			const result = await db.users.upsert({
+				where: { email: "newuser@example.com" },
+				update: { name: "Updated Name" },
+				create: { name: "New User", age: 25 },
+			}).runPromise
+
+			expect(result.__action).toBe("created")
+			expect(result.email).toBe("newuser@example.com")
+			expect(result.name).toBe("New User")
+
+			// Query using the indexed field - should find the new user
+			const results = await db.users.query({ where: { email: "newuser@example.com" } }).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { name: string }).name).toBe("New User")
+		})
+
+		it("should add entity to index alongside existing entries via upsert create path", async () => {
+			// Start with some initial data
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Verify initial data is queryable
+			const aliceResults = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceResults.length).toBe(1)
+
+			// Upsert a new user (no match for bob@example.com)
+			const result = await db.users.upsert({
+				where: { email: "bob@example.com" },
+				update: { name: "Should Not Apply" },
+				create: { name: "Bob", age: 25 },
+			}).runPromise
+
+			expect(result.__action).toBe("created")
+			expect(result.name).toBe("Bob")
+
+			// Query for the new user via indexed field
+			const bobResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(bobResults.length).toBe(1)
+			expect((bobResults[0] as { name: string }).name).toBe("Bob")
+
+			// Original user should still be queryable
+			const aliceStillThere = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceStillThere.length).toBe(1)
+		})
+
+		it("should add entity to existing index Set when upsert creates with same field value", async () => {
+			// Start with a user having shared@example.com
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "shared@example.com", name: "User One", age: 30 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Upsert another user with a different where clause that results in same email
+			// Note: we use id in where to force a no-match
+			const result = await db.users.upsert({
+				where: { id: "u2" },
+				update: { name: "Should Not Apply" },
+				create: { email: "shared@example.com", name: "User Two", age: 25 },
+			}).runPromise
+
+			expect(result.__action).toBe("created")
+
+			// Query should return both users with this email
+			const results = await db.users.query({ where: { email: "shared@example.com" } }).runPromise
+			expect(results.length).toBe(2)
+
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u2"])
+		})
+
+		it("should add entity to compound index when upsert creates", async () => {
+			const config = createMultiIndexConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Upsert a product (no existing match) → should create
+			const result = await db.products.upsert({
+				where: { id: "p1" },
+				update: { name: "Should Not Apply" },
+				create: { name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+			}).runPromise
+
+			expect(result.__action).toBe("created")
+			expect(result.name).toBe("Laptop")
+
+			// Query using compound index fields
+			const results = await db.products.query({
+				where: { category: "electronics", subcategory: "computers" },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("p1")
+		})
+
+		it("should add multiple entities to index via upsertMany create path", async () => {
+			const config = createIndexedUsersConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Upsert multiple users that don't exist
+			const result = await db.users.upsertMany([
+				{ where: { email: "alice@example.com" }, update: {}, create: { name: "Alice", age: 30 } },
+				{ where: { email: "bob@example.com" }, update: {}, create: { name: "Bob", age: 25 } },
+				{ where: { email: "charlie@example.com" }, update: {}, create: { name: "Charlie", age: 35 } },
+			]).runPromise
+
+			expect(result.created.length).toBe(3)
+			expect(result.updated.length).toBe(0)
+
+			// All should be queryable via index
+			const aliceResults = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(aliceResults.length).toBe(1)
+
+			const bobResults = await db.users.query({ where: { email: "bob@example.com" } }).runPromise
+			expect(bobResults.length).toBe(1)
+
+			const charlieResults = await db.users.query({ where: { email: "charlie@example.com" } }).runPromise
+			expect(charlieResults.length).toBe(1)
+		})
+
+		it("should add entities to shared index Set via upsertMany create path", async () => {
+			const config = createIndexedUsersConfig()
+			const db = await Effect.runPromise(createIndexedDatabase(config))
+
+			// Upsert multiple users with the same email
+			const result = await db.users.upsertMany([
+				{ where: { id: "u1" }, update: {}, create: { email: "shared@example.com", name: "User One", age: 30 } },
+				{ where: { id: "u2" }, update: {}, create: { email: "shared@example.com", name: "User Two", age: 25 } },
+				{ where: { id: "u3" }, update: {}, create: { email: "shared@example.com", name: "User Three", age: 35 } },
+			]).runPromise
+
+			expect(result.created.length).toBe(3)
+
+			// Query by shared email - should return all 3 users
+			const results = await db.users.query({ where: { email: "shared@example.com" } }).runPromise
+			expect(results.length).toBe(3)
+
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u2", "u3"])
+		})
+	})
+
 	describe("Task 7.1: create → index entry added", () => {
 		it("should add new entity to index when created", async () => {
 			// Start with an empty indexed database
