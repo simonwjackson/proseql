@@ -281,7 +281,52 @@ describe("Upsert Where-Clause Validation", () => {
 		})
 
 		it("should reject where clause targeting a non-unique field", async () => {
-			// TODO: Task 7.4
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<User>([existingUser])
+				const stateRefs = yield* makeStateRefs({ users: [existingUser] })
+
+				// Upsert using { name } — invalid because name is NOT in uniqueFields
+				// uniqueFields is ["email", "username"], so "name" should fail
+				const result = yield* upsert(
+					"users",
+					UserSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					userUniqueFields, // ["email", "username"] configured
+				)({
+					where: { name: "Alice" }, // Using non-unique field
+					create: {
+						name: "Alice",
+						email: "alice-new@example.com",
+						username: "alice-new",
+						age: 25,
+					},
+					update: { age: 32 },
+				})
+
+				return result
+			})
+
+			const error = await Effect.runPromise(
+				program.pipe(
+					Effect.flip, // Convert failure to success for assertion
+				),
+			)
+
+			// Should fail with ValidationError
+			expect(error).toBeInstanceOf(ValidationError)
+			expect(error._tag).toBe("ValidationError")
+			expect(error.message).toContain("unique")
+			expect(error.issues).toHaveLength(1)
+			expect(error.issues[0].field).toBe("where")
+			expect(error.issues[0].message).toContain("name")
+			expect(error.issues[0].message).toContain("users")
+			// Should mention valid unique fields
+			expect(error.issues[0].message).toContain("email")
+			expect(error.issues[0].message).toContain("username")
 		})
 	})
 
