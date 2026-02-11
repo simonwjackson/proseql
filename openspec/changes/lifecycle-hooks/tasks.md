@@ -68,7 +68,7 @@
 ## 10. Tests — onChange
 
 - [x] 10.1 Test onChange fires on create with `type: "create"`
-- [ ] 10.2 Test onChange fires on update with `type: "update"`, previous/current
+- [x] 10.2 Test onChange fires on update with `type: "update"`, previous/current
 - [ ] 10.3 Test onChange fires on delete with `type: "delete"`
 - [ ] 10.4 Test onChange fires after specific after-hooks
 - [ ] 10.5 Test onChange works alongside specific hooks

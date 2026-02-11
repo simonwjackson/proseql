@@ -1093,5 +1093,56 @@ describe("lifecycle-hooks", () => {
 				expect.fail("Expected onChange context type to be 'create'")
 			}
 		})
+
+		it("onChange fires on update with type: 'update', previous/current", async () => {
+			const onChangeCalls: Array<OnChangeContext<User>> = []
+			const hooks: HooksConfig<User> = {
+				onChange: [makeTrackingOnChangeHook(onChangeCalls)],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks)
+					// u1 starts as: { id: "u1", name: "Alice", email: "alice@test.com", age: 30 }
+					const updated = yield* db.users.update("u1", {
+						name: "Alice Updated",
+						age: 31,
+					})
+					return updated
+				}),
+			)
+
+			// Verify onChange was called exactly once
+			expect(onChangeCalls).toHaveLength(1)
+			const ctx = onChangeCalls[0]
+
+			// Verify the context has the correct discriminated union type
+			expect(ctx.type).toBe("update")
+			expect(ctx.collection).toBe("users")
+
+			// Type narrowing based on discriminant
+			if (ctx.type === "update") {
+				// Verify the id
+				expect(ctx.id).toBe("u1")
+
+				// Verify previous state (before update)
+				expect(ctx.previous.id).toBe("u1")
+				expect(ctx.previous.name).toBe("Alice")
+				expect(ctx.previous.email).toBe("alice@test.com")
+				expect(ctx.previous.age).toBe(30)
+
+				// Verify current state (after update)
+				expect(ctx.current.id).toBe("u1")
+				expect(ctx.current.name).toBe("Alice Updated")
+				expect(ctx.current.email).toBe("alice@test.com") // unchanged
+				expect(ctx.current.age).toBe(31)
+
+				// The current should match what was returned from update
+				expect(ctx.current).toEqual(result)
+			} else {
+				// Fail if wrong type
+				expect.fail("Expected onChange context type to be 'update'")
+			}
+		})
 	})
 })
