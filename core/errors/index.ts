@@ -40,14 +40,24 @@ export {
 export type { PersistenceError } from "./storage-errors.js"
 
 // ============================================================================
+// Migration Errors (re-exported from migration-errors.ts)
+// ============================================================================
+
+export { MigrationError } from "./migration-errors.js"
+
+export type { MigrationErrors } from "./migration-errors.js"
+
+// ============================================================================
 // Union Types
 // ============================================================================
 
 import type { CrudError } from "./crud-errors.js"
 import type { QueryError } from "./query-errors.js"
 import type { PersistenceError } from "./storage-errors.js"
+import type { MigrationErrors } from "./migration-errors.js"
 
 export type DatabaseError =
 	| CrudError
 	| QueryError
 	| PersistenceError
+	| MigrationErrors

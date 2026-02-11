@@ -1,7 +1,7 @@
 ## 1. Types and Configuration
 
 - [x] 1.1 Create `core/migrations/migration-types.ts` with `Migration` interface (`from`, `to`, `transform`, `description?`) and `DryRunResult` type
-- [ ] 1.2 Create `core/errors/migration-errors.ts` with `MigrationError` tagged error (`collection`, `fromVersion`, `toVersion`, `step`, `reason`, `message`)
+- [x] 1.2 Create `core/errors/migration-errors.ts` with `MigrationError` tagged error (`collection`, `fromVersion`, `toVersion`, `step`, `reason`, `message`)
 - [ ] 1.3 Add `readonly version?: number` and `readonly migrations?: ReadonlyArray<Migration>` to `CollectionConfig` in `core/types/database-config-types.ts`
 - [ ] 1.4 Export new types from `core/index.ts`
 
