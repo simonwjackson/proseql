@@ -3,3 +3,7 @@
 #   bun test packages/core/tests/
 #   bun test packages/node/tests/
 #   bun test (all packages)
+
+[test]
+# Limit test discovery to packages/ to exclude the effect/ reference codebase
+root = "packages"

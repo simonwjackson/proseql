@@ -71,7 +71,7 @@
 - [x] 9.1 Run `bun install` at workspace root — verify all packages link correctly, `node_modules/@proseql/core` etc. resolve
 - [x] 9.2 Run `bun test packages/core/tests/` — verify all core tests pass (should be ~1590 tests)
 - [x] 9.3 Run `bun test packages/node/tests/` — verify node adapter tests pass
-- [ ] 9.4 Run `bun test` (all packages) — verify total test count matches 1591
+- [x] 9.4 Run `bun test` (all packages) — verify total test count matches 1591
 - [ ] 9.5 Run `bunx tsc --build` — verify all packages typecheck cleanly
 - [ ] 9.6 Run `nix develop` — verify dev shell has bun, biome, just, bun2nix
 - [ ] 9.7 Run `nix build .#core` — verify hermetic build succeeds
