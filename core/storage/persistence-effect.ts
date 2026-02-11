@@ -17,6 +17,7 @@ import {
 import { ValidationError } from "../errors/crud-errors.js"
 import { MigrationError } from "../errors/migration-errors.js"
 import type { Migration } from "../migrations/migration-types.js"
+import { runMigrations } from "../migrations/migration-runner.js"
 import { getFileExtension } from "../utils/file-extensions.js"
 
 // ============================================================================
@@ -140,6 +141,11 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 			}
 		}
 
+		// Determine the data to decode (may be migrated)
+		let dataToLoad: Record<string, unknown> = entityMap
+		let needsWriteBack = false
+		let targetVersion: number | undefined
+
 		// If version checking is enabled, validate version compatibility
 		if (options?.version !== undefined) {
 			const configVersion = options.version
@@ -159,15 +165,25 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 				)
 			}
 
-			// TODO (task 5.2): If file version < config version and migrations are provided,
-			// run migrations and write back to disk
+			// If file version < config version and migrations are provided, run migrations
+			if (fileVersion < configVersion && options.migrations && options.migrations.length > 0) {
+				dataToLoad = yield* runMigrations(
+					entityMap,
+					fileVersion,
+					configVersion,
+					options.migrations,
+					collectionName,
+				)
+				needsWriteBack = true
+				targetVersion = configVersion
+			}
 		}
 
 		// Decode each entity through the schema
 		const decode = Schema.decodeUnknown(schema)
 		const entries: Array<[string, A]> = []
 
-		for (const [id, value] of Object.entries(entityMap)) {
+		for (const [id, value] of Object.entries(dataToLoad)) {
 			const decoded = yield* decode(value).pipe(
 				Effect.mapError(
 					(parseError) =>
@@ -185,7 +201,14 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 			entries.push([id, decoded])
 		}
 
-		return new Map(entries) as ReadonlyMap<string, A>
+		const result = new Map(entries) as ReadonlyMap<string, A>
+
+		// If migrations were run, write the migrated data back to disk with new version
+		if (needsWriteBack && targetVersion !== undefined) {
+			yield* saveData(filePath, schema, result, { version: targetVersion })
+		}
+
+		return result
 	})
 
 // ============================================================================
