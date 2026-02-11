@@ -5,7 +5,15 @@
 **Measured coverage (Bun reports Functions and Lines only):**
 - All files: 82.68% Functions, 85.44% Lines
 - Note: Bun's V8 coverage does not report branch or statement coverage separately
-- [ ] 1.2 Identify any files or directories that Bun includes by default but should be excluded (test files, vendored code, barrel files, type declarations)
+- [x] 1.2 Identify any files or directories that Bun includes by default but should be excluded (test files, vendored code, barrel files, type declarations)
+
+**Exclusion analysis:**
+- Test files (`packages/*/tests/`): Not in coverage - tests run but their source isn't measured
+- Vendored code (`effect/`): Not in coverage - correctly excluded
+- Examples (`examples/`): Not in coverage - correctly excluded
+- Type declarations (`*.d.ts`): Not in coverage - correctly excluded
+- Index files: Two `index.ts` files appear (core/src/index.ts and core/src/errors/index.ts), both contain substantive re-exports and type definitions, so they should remain included
+- **Conclusion:** No additional exclusions needed - Bun's default behavior is already correct for this project
 
 ## 2. Configuration
 
