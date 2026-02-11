@@ -438,6 +438,41 @@ describe("Indexing - Index Built from Initial Data", () => {
 		})
 	})
 
+	describe("Task 6.5: collection without indexes: empty CollectionIndexes", () => {
+		it("should return empty CollectionIndexes when no indexes configured", async () => {
+			// normalizeIndexes(undefined) returns [], buildIndexes([]) returns empty Map
+			const normalized = normalizeIndexes(undefined)
+			expect(normalized).toEqual([])
+
+			const indexes = await inspectIndexState(normalized, createSampleUsers())
+			expect(indexes.size).toBe(0)
+		})
+
+		it("should return empty CollectionIndexes when indexes is empty array", async () => {
+			const normalized = normalizeIndexes([])
+			expect(normalized).toEqual([])
+
+			const indexes = await inspectIndexState(normalized, createSampleUsers())
+			expect(indexes.size).toBe(0)
+		})
+
+		it("should work with database factory when no indexes configured", async () => {
+			// createUnindexedConfig has no indexes property
+			const config = createUnindexedConfig()
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: createSampleUsers().slice(0, 3) }),
+			)
+
+			// Database should still work - CRUD operations function without indexes
+			expect(db.users).toBeDefined()
+
+			// Query should work (full scan path)
+			const results = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("u1")
+		})
+	})
+
 	describe("Task 6.4: null/undefined values not indexed", () => {
 		it("should not index entities with null values in indexed field", async () => {
 			const usersWithNull = createUsersWithNullValues()
