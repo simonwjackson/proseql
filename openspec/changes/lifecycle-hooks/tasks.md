@@ -25,7 +25,7 @@
 
 - [x] 4.1 Add `hooks` parameter to `update` in `core/operations/crud/update.ts`. Before applying updates, capture the existing entity as `previous`. Run `beforeUpdate` hooks with the update payload. Use the returned (possibly transformed) payload.
 - [x] 4.2 After state mutation, run `afterUpdate` hooks with `previous` and `current`. Then run `onChange` hooks with `type: "update"`.
-- [ ] 4.3 Add `HookError` to `update`'s error channel.
+- [x] 4.3 Add `HookError` to `update`'s error channel.
 - [ ] 4.4 In `updateMany`, run hooks per entity.
 
 ## 5. CRUD Integration — Delete
