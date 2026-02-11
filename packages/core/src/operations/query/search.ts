@@ -165,3 +165,54 @@ export function computeFieldScore(
 
 	return coverage * tfBoost * lengthNorm;
 }
+
+/**
+ * Compute the total relevance score for an entity across multiple fields.
+ *
+ * Sums the field scores for all specified fields. Fields that are not
+ * present on the entity or are not strings are skipped (score 0).
+ *
+ * @param entity - The entity to score
+ * @param queryTokens - The tokenized search query
+ * @param fields - The fields to search across
+ * @returns Total relevance score (0 if no fields match)
+ *
+ * @example
+ * ```ts
+ * const book = { title: "Dune", author: "Frank Herbert", year: 1965 }
+ *
+ * computeSearchScore(book, ["dune"], ["title", "author"])
+ * // => ~1.44 (matches in title only)
+ *
+ * computeSearchScore(book, ["herbert", "dune"], ["title", "author"])
+ * // => ~2.88 (matches in both fields)
+ *
+ * computeSearchScore(book, ["xyz"], ["title", "author"])
+ * // => 0 (no matches)
+ * ```
+ */
+export function computeSearchScore(
+	entity: Record<string, unknown>,
+	queryTokens: ReadonlyArray<string>,
+	fields: ReadonlyArray<string>,
+): number {
+	// Handle edge cases
+	if (queryTokens.length === 0 || fields.length === 0) {
+		return 0;
+	}
+
+	let totalScore = 0;
+
+	for (const field of fields) {
+		const fieldValue = entity[field];
+
+		// Skip non-string fields
+		if (typeof fieldValue !== "string") {
+			continue;
+		}
+
+		totalScore += computeFieldScore(fieldValue, queryTokens);
+	}
+
+	return totalScore;
+}
