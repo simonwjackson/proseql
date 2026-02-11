@@ -25,7 +25,7 @@ import {
 import type { CollectionIndexes } from "../../types/index-types.js"
 import { addToIndex, addManyToIndex } from "../../indexes/index-manager.js"
 import type { HooksConfig } from "../../types/hook-types.js"
-import { runBeforeCreateHooks } from "../../hooks/hook-runner.js"
+import { runBeforeCreateHooks, runAfterCreateHooks, runOnChangeHooks } from "../../hooks/hook-runner.js"
 
 // ============================================================================
 // Types
@@ -120,6 +120,20 @@ export const create = <T extends HasId, I = T>(
 		if (indexes && indexes.size > 0) {
 			yield* addToIndex(indexes, entity)
 		}
+
+		// Run afterCreate hooks (fire-and-forget, errors swallowed)
+		yield* runAfterCreateHooks(hooks?.afterCreate, {
+			operation: "create",
+			collection: collectionName,
+			entity,
+		})
+
+		// Run onChange hooks with type: "create" (fire-and-forget, errors swallowed)
+		yield* runOnChangeHooks(hooks?.onChange, {
+			type: "create",
+			collection: collectionName,
+			entity,
+		})
 
 		return entity
 	})
