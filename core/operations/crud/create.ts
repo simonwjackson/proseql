@@ -27,7 +27,7 @@ import type { CollectionIndexes } from "../../types/index-types.js"
 import { addToIndex, addManyToIndex } from "../../indexes/index-manager.js"
 import type { HooksConfig } from "../../types/hook-types.js"
 import { runBeforeCreateHooks, runAfterCreateHooks, runOnChangeHooks } from "../../hooks/hook-runner.js"
-import { checkUniqueConstraints, checkBatchUniqueConstraints, type NormalizedConstraints } from "./unique-check.js"
+import { checkUniqueConstraints, checkEntityUniqueConstraints, addEntityToBatchIndex, type NormalizedConstraints } from "./unique-check.js"
 
 // ============================================================================
 // Types
@@ -255,15 +255,52 @@ export const createMany = <T extends HasId, I = T>(
 			validEntities.push(hookResult.entity)
 		}
 
-		// Check unique constraints on all valid entities (including inter-batch conflicts)
-		yield* checkBatchUniqueConstraints(validEntities, currentMap, uniqueFields, collectionName)
+		// Phase 2: Check unique constraints (with per-entity skipDuplicates handling)
+		// We check incrementally to support skipDuplicates for unique violations
+		const uniquePassedEntities: T[] = []
+		// Track constraint values we've seen in this batch for inter-batch conflict detection
+		// Key: constraintName + ":" + serialized values, Value: entity id
+		const batchConstraintIndex = new Map<string, string>()
 
-		// Phase 2: Validate foreign keys if requested
+		for (const entity of validEntities) {
+			const entityRecord = entity as Record<string, unknown>
+
+			// Check this entity against existing map and batch index
+			const uniqueResult = yield* checkEntityUniqueConstraints(
+				entity,
+				entityRecord,
+				currentMap,
+				uniqueFields,
+				collectionName,
+				batchConstraintIndex,
+			).pipe(
+				Effect.map(() => ({ _tag: "ok" as const })),
+				Effect.catchTag("UniqueConstraintError", (err) =>
+					skipOnError
+						? Effect.succeed({ _tag: "skipped" as const, error: err })
+						: Effect.fail(err),
+				),
+			)
+
+			if (uniqueResult._tag === "skipped") {
+				skipped.push({
+					data: entity as Partial<T>,
+					reason: `Unique constraint violation: ${uniqueResult.error.message}`,
+				})
+				continue
+			}
+
+			// Add this entity to the batch constraint index for subsequent checks
+			addEntityToBatchIndex(entity, entityRecord, uniqueFields, batchConstraintIndex)
+			uniquePassedEntities.push(entity)
+		}
+
+		// Phase 3: Validate foreign keys if requested
 		if (options?.validateRelationships !== false) {
 			const finalEntities: T[] = []
 
-			for (let i = 0; i < validEntities.length; i++) {
-				const entity = validEntities[i]!
+			for (let i = 0; i < uniquePassedEntities.length; i++) {
+				const entity = uniquePassedEntities[i]!
 				const fkResult = yield* validateForeignKeysEffect(
 					entity,
 					collectionName,
@@ -300,12 +337,12 @@ export const createMany = <T extends HasId, I = T>(
 				})
 			}
 		} else {
-			// No FK validation, add all validated entities
-			created.push(...validEntities)
-			if (validEntities.length > 0) {
+			// No FK validation, add all unique-passed entities
+			created.push(...uniquePassedEntities)
+			if (uniquePassedEntities.length > 0) {
 				yield* Ref.update(ref, (map) => {
 					const next = new Map(map)
-					for (const entity of validEntities) {
+					for (const entity of uniquePassedEntities) {
 						next.set(entity.id, entity)
 					}
 					return next

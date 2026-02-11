@@ -268,6 +268,154 @@ export const checkBatchUniqueConstraints = <T extends HasId>(
 }
 
 // ============================================================================
+// Per-Entity Unique Constraint Checking (for skipDuplicates support)
+// ============================================================================
+
+/**
+ * Check a single entity against unique constraints, including a batch index of
+ * previously-checked entities. Used by createMany with skipDuplicates.
+ *
+ * @param entity - The entity being checked
+ * @param entityRecord - The entity as a record for field access
+ * @param existingMap - Current state of the collection
+ * @param constraints - Normalized constraints
+ * @param collectionName - Name of the collection for error messages
+ * @param batchIndex - Map of constraint keys to entity IDs from prior entities in the batch
+ * @returns Effect that succeeds with void or fails with UniqueConstraintError
+ */
+export const checkEntityUniqueConstraints = <T extends HasId>(
+	entity: T,
+	entityRecord: Record<string, unknown>,
+	existingMap: ReadonlyMap<string, T>,
+	constraints: NormalizedConstraints,
+	collectionName: string,
+	batchIndex: Map<string, string>,
+): Effect.Effect<void, UniqueConstraintError> => {
+	// No constraints configured — nothing to check
+	if (constraints.length === 0) {
+		return Effect.void
+	}
+
+	for (const constraintFields of constraints) {
+		// Extract values for this constraint
+		const constraintValues: Record<string, unknown> = {}
+		let hasNullOrUndefined = false
+
+		for (const field of constraintFields) {
+			const value = entityRecord[field]
+			if (value === null || value === undefined) {
+				hasNullOrUndefined = true
+				break
+			}
+			constraintValues[field] = value
+		}
+
+		// Skip constraint if any field is null/undefined
+		if (hasNullOrUndefined) {
+			continue
+		}
+
+		const constraintName = `unique_${constraintFields.join("_")}`
+
+		// Create a stable key for this constraint+values combination
+		const valuesKey = constraintFields.map((f) => constraintValues[f]).join("\0")
+		const indexKey = `${constraintName}:${valuesKey}`
+
+		// Check against existing entities in the collection
+		for (const [existingId, existing] of existingMap) {
+			// Exclude the entity itself (for updates)
+			if (existingId === entity.id) {
+				continue
+			}
+
+			const existingRecord = existing as Record<string, unknown>
+
+			// Check if ALL fields in the constraint match
+			let allFieldsMatch = true
+			for (const field of constraintFields) {
+				if (existingRecord[field] !== constraintValues[field]) {
+					allFieldsMatch = false
+					break
+				}
+			}
+
+			if (allFieldsMatch) {
+				return Effect.fail(
+					new UniqueConstraintError({
+						collection: collectionName,
+						constraint: constraintName,
+						fields: constraintFields,
+						values: constraintValues,
+						existingId,
+						message: `Unique constraint violation on ${collectionName}: ${constraintName} (${constraintFields.join(", ")}) = ${JSON.stringify(constraintValues)} already exists (id: ${existingId})`,
+					}),
+				)
+			}
+		}
+
+		// Check against entities already processed in this batch
+		const conflictingId = batchIndex.get(indexKey)
+		if (conflictingId !== undefined && conflictingId !== entity.id) {
+			return Effect.fail(
+				new UniqueConstraintError({
+					collection: collectionName,
+					constraint: constraintName,
+					fields: constraintFields,
+					values: constraintValues,
+					existingId: conflictingId,
+					message: `Unique constraint violation on ${collectionName}: ${constraintName} (${constraintFields.join(", ")}) = ${JSON.stringify(constraintValues)} already exists in batch (id: ${conflictingId})`,
+				}),
+			)
+		}
+	}
+
+	return Effect.void
+}
+
+/**
+ * Add an entity's unique constraint values to the batch index.
+ * Called after an entity passes unique constraint checks.
+ *
+ * @param entity - The entity to add
+ * @param entityRecord - The entity as a record for field access
+ * @param constraints - Normalized constraints
+ * @param batchIndex - Map to populate with constraint keys -> entity IDs
+ */
+export const addEntityToBatchIndex = <T extends HasId>(
+	entity: T,
+	entityRecord: Record<string, unknown>,
+	constraints: NormalizedConstraints,
+	batchIndex: Map<string, string>,
+): void => {
+	for (const constraintFields of constraints) {
+		// Extract values for this constraint
+		const constraintValues: Record<string, unknown> = {}
+		let hasNullOrUndefined = false
+
+		for (const field of constraintFields) {
+			const value = entityRecord[field]
+			if (value === null || value === undefined) {
+				hasNullOrUndefined = true
+				break
+			}
+			constraintValues[field] = value
+		}
+
+		// Skip constraint if any field is null/undefined
+		if (hasNullOrUndefined) {
+			continue
+		}
+
+		const constraintName = `unique_${constraintFields.join("_")}`
+		const valuesKey = constraintFields.map((f) => constraintValues[f]).join("\0")
+		const indexKey = `${constraintName}:${valuesKey}`
+
+		// Add this entity to the batch index
+		batchIndex.set(indexKey, entity.id)
+	}
+}
+
+// ============================================================================
 // Upsert Where Clause Validation
 // ============================================================================
 
