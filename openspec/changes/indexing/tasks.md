@@ -57,7 +57,7 @@
 
 ## 8. Tests — Query Acceleration
 
-- [ ] 8.1 Test equality query on indexed field returns correct results
+- [x] 8.1 Test equality query on indexed field returns correct results
 - [ ] 8.2 Test `$eq` on indexed field returns correct results
 - [ ] 8.3 Test `$in` on indexed field returns correct results (union)
 - [ ] 8.4 Test query on non-indexed field returns correct results (full scan)
