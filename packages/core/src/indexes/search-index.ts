@@ -52,7 +52,7 @@ export const buildSearchIndex = <T extends HasId>(
 		const searchIndex: SearchIndexMap = new Map();
 
 		for (const entity of entities) {
-			addEntityToIndex(searchIndex, entity, fields);
+			addEntityToIndexMut(searchIndex, entity, fields);
 		}
 
 		return yield* Ref.make(searchIndex);
@@ -276,7 +276,7 @@ const extractSearchFromWhere = (
  * @param entity - The entity to add
  * @param fields - The fields to index
  */
-const addEntityToIndex = <T extends HasId>(
+const addEntityToIndexMut = <T extends HasId>(
 	index: SearchIndexMap,
 	entity: T,
 	fields: ReadonlyArray<string>,
@@ -304,3 +304,38 @@ const addEntityToIndex = <T extends HasId>(
 		}
 	}
 };
+
+/**
+ * Add an entity to the search index.
+ *
+ * Tokenizes the entity's indexed fields and adds the entity ID to each
+ * token's set in the inverted index. This should be called after creating
+ * a new entity to keep the search index up to date.
+ *
+ * @param indexRef - Ref containing the SearchIndexMap
+ * @param entity - The entity to add to the index
+ * @param fields - The fields to index for full-text search
+ * @returns Effect that completes when the entity is added
+ *
+ * @example
+ * ```ts
+ * const newBook = { id: "5", title: "Snow Crash", author: "Neal Stephenson" }
+ * yield* addToSearchIndex(indexRef, newBook, ["title", "author"])
+ * // Index now contains:
+ * // "snow" -> Set([..., "5"])
+ * // "crash" -> Set([..., "5"])
+ * // "neal" -> Set([..., "5"])
+ * // "stephenson" -> Set([..., "5"])
+ * ```
+ */
+export const addToSearchIndex = <T extends HasId>(
+	indexRef: Ref.Ref<SearchIndexMap>,
+	entity: T,
+	fields: ReadonlyArray<string>,
+): Effect.Effect<void> =>
+	Ref.update(indexRef, (index) => {
+		// Clone the index to avoid mutating the original
+		const newIndex: SearchIndexMap = new Map(index);
+		addEntityToIndexMut(newIndex, entity, fields);
+		return newIndex;
+	});

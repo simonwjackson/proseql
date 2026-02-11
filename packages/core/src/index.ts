@@ -391,6 +391,7 @@ export { STOP_WORDS, SEARCH_SCORE_KEY } from "./types/search-types.js";
 
 // Search index functions
 export {
+	addToSearchIndex,
 	buildSearchIndex,
 	lookupSearchIndex,
 	resolveWithSearchIndex,

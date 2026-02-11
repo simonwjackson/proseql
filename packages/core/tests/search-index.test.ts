@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Ref, Schema, Stream, Chunk } from "effect"
-import { buildSearchIndex, lookupSearchIndex, resolveWithSearchIndex } from "../src/indexes/search-index.js"
+import { addToSearchIndex, buildSearchIndex, lookupSearchIndex, resolveWithSearchIndex } from "../src/indexes/search-index.js"
 import type { SearchIndexMap } from "../src/types/search-types.js"
 import { createEffectDatabase } from "../src/factories/database-effect.js"
 
@@ -52,6 +52,101 @@ describe("buildSearchIndex", () => {
 		const index = await Effect.runPromise(Ref.get(indexRef))
 
 		expect(index.size).toBe(0)
+	})
+})
+
+// ============================================================================
+// addToSearchIndex Tests
+// ============================================================================
+
+describe("addToSearchIndex", () => {
+	it("8.1: adds a new entity to the search index", async () => {
+		// Start with existing books in the index
+		const indexRef = await Effect.runPromise(buildSearchIndex(["title", "author"], sampleBooks))
+
+		// Add a new book
+		const newBook = { id: "5", title: "Snow Crash", author: "Neal Stephenson" }
+		await Effect.runPromise(addToSearchIndex(indexRef, newBook, ["title", "author"]))
+
+		const index = await Effect.runPromise(Ref.get(indexRef))
+
+		// New tokens should be in the index
+		expect(index.get("snow")?.has("5")).toBe(true)
+		expect(index.get("crash")?.has("5")).toBe(true)
+		expect(index.get("neal")?.has("5")).toBe(true)
+		expect(index.get("stephenson")?.has("5")).toBe(true)
+	})
+
+	it("8.1: can find newly added entity via lookup", async () => {
+		const indexRef = await Effect.runPromise(buildSearchIndex(["title", "author"], sampleBooks))
+
+		// Add a new book
+		const newBook = { id: "5", title: "Snow Crash", author: "Neal Stephenson" }
+		await Effect.runPromise(addToSearchIndex(indexRef, newBook, ["title", "author"]))
+
+		// Should be able to find the new book via search
+		const ids = await Effect.runPromise(lookupSearchIndex(indexRef, ["snow"]))
+		expect(ids.has("5")).toBe(true)
+	})
+
+	it("8.1: does not affect existing entries", async () => {
+		const indexRef = await Effect.runPromise(buildSearchIndex(["title", "author"], sampleBooks))
+
+		// Verify initial state
+		const idsBefore = await Effect.runPromise(lookupSearchIndex(indexRef, ["dune"]))
+		expect(idsBefore.has("1")).toBe(true)
+		expect(idsBefore.has("4")).toBe(true)
+
+		// Add a new book
+		const newBook = { id: "5", title: "Snow Crash", author: "Neal Stephenson" }
+		await Effect.runPromise(addToSearchIndex(indexRef, newBook, ["title", "author"]))
+
+		// Existing entries should still be searchable
+		const idsAfter = await Effect.runPromise(lookupSearchIndex(indexRef, ["dune"]))
+		expect(idsAfter.has("1")).toBe(true)
+		expect(idsAfter.has("4")).toBe(true)
+	})
+
+	it("8.1: adds to existing token sets when token already exists", async () => {
+		// Create index with book containing "frank"
+		const indexRef = await Effect.runPromise(buildSearchIndex(["title", "author"], sampleBooks))
+
+		// Add another book with "Frank" in the title
+		const newBook = { id: "5", title: "Frank's Adventure", author: "Someone" }
+		await Effect.runPromise(addToSearchIndex(indexRef, newBook, ["title", "author"]))
+
+		// Both books should be in the "frank" token set
+		const ids = await Effect.runPromise(lookupSearchIndex(indexRef, ["frank"]))
+		expect(ids.has("1")).toBe(true) // Original "Frank Herbert"
+		expect(ids.has("5")).toBe(true) // New "Frank's Adventure"
+	})
+
+	it("8.1: handles empty fields array", async () => {
+		const indexRef = await Effect.runPromise(buildSearchIndex(["title", "author"], sampleBooks))
+		const indexBefore = await Effect.runPromise(Ref.get(indexRef))
+		const sizeBefore = indexBefore.size
+
+		// Add entity with no fields to index
+		const newBook = { id: "5", title: "Snow Crash", author: "Neal Stephenson" }
+		await Effect.runPromise(addToSearchIndex(indexRef, newBook, []))
+
+		const indexAfter = await Effect.runPromise(Ref.get(indexRef))
+		// Size should be unchanged
+		expect(indexAfter.size).toBe(sizeBefore)
+	})
+
+	it("8.1: skips non-string fields", async () => {
+		const indexRef = await Effect.runPromise(buildSearchIndex<Book>(["title", "author"], []))
+
+		// Add an entity with a non-existent field (simulating non-string)
+		const entity = { id: "1", title: "Test", author: "Author", year: 1999 } as unknown as Book
+		await Effect.runPromise(addToSearchIndex(indexRef, entity, ["title", "year"]))
+
+		const index = await Effect.runPromise(Ref.get(indexRef))
+		// Should have "test" from title, but nothing from year (number)
+		expect(index.get("test")?.has("1")).toBe(true)
+		// Should not have "1999" since year is a number
+		expect(index.has("1999")).toBe(false)
 	})
 })
 
