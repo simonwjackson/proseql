@@ -2695,6 +2695,228 @@ describe("schema-migrations: dry run", () => {
 			expect(usersResult.migrationsToApply).toHaveLength(0)
 		})
 	})
+
+	describe("no files modified after dry run (task 12.4)", () => {
+		it("dryRunMigrations does not modify files when collections need migration", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File at version 0 (no _version) with V0 data - needs migration to version 3
+			const originalContent = JSON.stringify({
+				u1: { id: "u1", name: "Alice Smith" },
+			})
+			store.set("/data/users.json", originalContent)
+
+			// Capture all file contents before dry run
+			const filesBefore = new Map<string, string>()
+			for (const [path, content] of store.entries()) {
+				filesBefore.set(path, content)
+			}
+
+			const config = {
+				users: {
+					schema: UserSchemaV3,
+					file: "/data/users.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			// Run dry run
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			// Verify dry run reported the collection needs migration
+			expect(result.collections[0].status).toBe("needs-migration")
+			expect(result.collections[0].migrationsToApply).toHaveLength(3)
+
+			// Verify NO files were modified
+			expect(store.size).toBe(filesBefore.size)
+			for (const [path, contentBefore] of filesBefore.entries()) {
+				const contentAfter = store.get(path)
+				expect(contentAfter).toBe(contentBefore)
+			}
+
+			// Specifically verify the users file is untouched
+			expect(store.get("/data/users.json")).toBe(originalContent)
+		})
+
+		it("dryRunMigrations does not create new files", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// No files in the store initially
+			expect(store.size).toBe(0)
+
+			const config = {
+				users: {
+					schema: UserSchemaV3,
+					file: "/data/users.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			// Run dry run
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			// Verify dry run reported no-file status
+			expect(result.collections[0].status).toBe("no-file")
+
+			// Verify no files were created
+			expect(store.size).toBe(0)
+		})
+
+		it("dryRunMigrations does not modify files even when multiple collections need migration", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// Users at version 0 needs full migration chain (0→1→2→3)
+			const usersContent = JSON.stringify({
+				u1: { id: "u1", name: "Alice Smith" },
+			})
+			store.set("/data/users.json", usersContent)
+
+			// Products at version 1 needs partial migration (1→2→3)
+			const productsContent = JSON.stringify({
+				_version: 1,
+				p1: { id: "p1", name: "Widget", email: "widget@example.com" },
+			})
+			store.set("/data/products.json", productsContent)
+
+			// Profiles at version 3 (up-to-date)
+			const profilesContent = JSON.stringify({
+				_version: 3,
+				pr1: {
+					id: "pr1",
+					firstName: "Alice",
+					lastName: "Smith",
+					email: "alice@example.com",
+					age: 25,
+				},
+			})
+			store.set("/data/profiles.json", profilesContent)
+
+			// Capture all file contents before dry run
+			const filesBefore = new Map<string, string>()
+			for (const [path, content] of store.entries()) {
+				filesBefore.set(path, content)
+			}
+
+			const config = {
+				users: {
+					schema: UserSchemaV3,
+					file: "/data/users.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+				products: {
+					schema: UserSchemaV3,
+					file: "/data/products.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+				profiles: {
+					schema: UserSchemaV3,
+					file: "/data/profiles.json",
+					version: 3,
+					migrations: allMigrations,
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			// Run dry run
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			// Verify dry run reported correct statuses
+			const usersResult = result.collections.find((c) => c.name === "users")!
+			const productsResult = result.collections.find((c) => c.name === "products")!
+			const profilesResult = result.collections.find((c) => c.name === "profiles")!
+
+			expect(usersResult.status).toBe("needs-migration")
+			expect(usersResult.migrationsToApply).toHaveLength(3)
+
+			expect(productsResult.status).toBe("needs-migration")
+			expect(productsResult.migrationsToApply).toHaveLength(2)
+
+			expect(profilesResult.status).toBe("up-to-date")
+			expect(profilesResult.migrationsToApply).toHaveLength(0)
+
+			// Verify NO files were modified - all content should be exactly the same
+			expect(store.size).toBe(filesBefore.size)
+			for (const [path, contentBefore] of filesBefore.entries()) {
+				const contentAfter = store.get(path)
+				expect(contentAfter).toBe(contentBefore)
+			}
+
+			// Explicitly verify each file
+			expect(store.get("/data/users.json")).toBe(usersContent)
+			expect(store.get("/data/products.json")).toBe(productsContent)
+			expect(store.get("/data/profiles.json")).toBe(profilesContent)
+		})
+
+		it("dryRunMigrations does not execute transform functions", async () => {
+			const { store, layer } = makeTestEnv()
+
+			let transformCalled = false
+
+			// File at version 0 needing migration
+			const originalContent = JSON.stringify({
+				u1: { id: "u1", name: "Alice Smith" },
+			})
+			store.set("/data/users.json", originalContent)
+
+			// Migration with a transform that tracks if it's called
+			const trackingMigration: Migration = {
+				from: 0,
+				to: 1,
+				description: "Tracking migration",
+				transform: (data) => {
+					transformCalled = true
+					return data
+				},
+			}
+
+			const config = {
+				users: {
+					schema: UserSchemaV1,
+					file: "/data/users.json",
+					version: 1,
+					migrations: [trackingMigration],
+					relationships: {},
+				},
+			}
+
+			const stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, { readonly id: string }>>> = {}
+
+			// Run dry run
+			const result = await Effect.runPromise(
+				Effect.provide(dryRunMigrations(config, stateRefs), layer),
+			)
+
+			// Verify dry run reported the collection needs migration
+			expect(result.collections[0].status).toBe("needs-migration")
+			expect(result.collections[0].migrationsToApply).toHaveLength(1)
+
+			// Verify transform was NOT called
+			expect(transformCalled).toBe(false)
+
+			// Verify file is unchanged
+			expect(store.get("/data/users.json")).toBe(originalContent)
+		})
+	})
 })
 
 // ============================================================================
