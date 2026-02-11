@@ -7,7 +7,8 @@ import type {
 	AggregateResult,
 	GroupedAggregateResult,
 } from "./aggregate-types.js";
-import type { CursorConfig } from "./cursor-types.js";
+import type { CursorConfig, RunnableCursorPage } from "./cursor-types.js";
+import type { ValidationError } from "../errors/crud-errors.js";
 
 // ============================================================================
 // Core Types
@@ -724,26 +725,52 @@ export type QueryConfig<T, Relations, DB> =
 			select?: SelectConfig<T, Relations, DB>;
 	  };
 
-// Enhanced query return type that supports both object and array-based selection
-// Uses RunnableStream (Stream.Stream + .runPromise) for composable query pipelines with typed errors
-export type QueryReturnType<T, Relations, Config, DB> = Config extends {
+// Helper type to compute the item type based on populate/select config
+type QueryItemType<T, Relations, Config, DB> = Config extends {
 	populate: infer P;
 	select: infer S;
 }
 	? P extends PopulateConfig<Relations, DB>
 		? S extends SelectConfig<T, Relations, DB>
-			? RunnableStream<ApplySelectAndPopulate<T, Relations, S, P, DB>, DanglingReferenceError>
-			: RunnableStream<ApplyPopulateObject<T, Relations, P, DB>, DanglingReferenceError>
-		: RunnableStream<T, DanglingReferenceError>
+			? ApplySelectAndPopulate<T, Relations, S, P, DB>
+			: ApplyPopulateObject<T, Relations, P, DB>
+		: T
 	: Config extends { populate: infer P }
 		? P extends PopulateConfig<Relations, DB>
-			? RunnableStream<ApplyPopulateObject<T, Relations, P, DB>, DanglingReferenceError>
-			: RunnableStream<T, DanglingReferenceError>
+			? ApplyPopulateObject<T, Relations, P, DB>
+			: T
 		: Config extends { select: infer S }
 			? S extends SelectConfig<T, Relations, DB>
-				? RunnableStream<ApplySelectConfig<T, S, Relations, DB>, DanglingReferenceError>
+				? ApplySelectConfig<T, S, Relations, DB>
+				: T
+			: T;
+
+// Enhanced query return type that supports both object and array-based selection
+// Uses RunnableStream (Stream.Stream + .runPromise) for composable query pipelines with typed errors
+// Cursor pagination returns RunnableCursorPage instead of RunnableStream
+export type QueryReturnType<T, Relations, Config, DB> = Config extends { cursor: CursorConfig }
+	? RunnableCursorPage<
+			QueryItemType<T, Relations, Config, DB>,
+			DanglingReferenceError | ValidationError
+		>
+	: Config extends {
+			populate: infer P;
+			select: infer S;
+		}
+		? P extends PopulateConfig<Relations, DB>
+			? S extends SelectConfig<T, Relations, DB>
+				? RunnableStream<ApplySelectAndPopulate<T, Relations, S, P, DB>, DanglingReferenceError>
+				: RunnableStream<ApplyPopulateObject<T, Relations, P, DB>, DanglingReferenceError>
+			: RunnableStream<T, DanglingReferenceError>
+		: Config extends { populate: infer P }
+			? P extends PopulateConfig<Relations, DB>
+				? RunnableStream<ApplyPopulateObject<T, Relations, P, DB>, DanglingReferenceError>
 				: RunnableStream<T, DanglingReferenceError>
-			: RunnableStream<T, DanglingReferenceError>;
+			: Config extends { select: infer S }
+				? S extends SelectConfig<T, Relations, DB>
+					? RunnableStream<ApplySelectConfig<T, S, Relations, DB>, DanglingReferenceError>
+					: RunnableStream<T, DanglingReferenceError>
+				: RunnableStream<T, DanglingReferenceError>;
 
 export type SmartCollection<
 	T,
