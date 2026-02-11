@@ -19,6 +19,7 @@ import type {
 import {
 	ForeignKeyError,
 	HookError,
+	UniqueConstraintError,
 	ValidationError,
 } from "../../errors/crud-errors.js"
 import { validateEntity } from "../../validators/schema-validator.js"
@@ -37,6 +38,12 @@ import {
 	runAfterUpdateHooks,
 	runOnChangeHooks,
 } from "../../hooks/hook-runner.js"
+import {
+	checkBatchUniqueConstraints,
+	checkUniqueConstraints,
+	validateUpsertWhere,
+	type NormalizedConstraints,
+} from "./unique-check.js"
 
 // ============================================================================
 // Types
@@ -112,11 +119,16 @@ export const upsert = <T extends HasId, I = T>(
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	indexes?: CollectionIndexes,
 	hooks?: HooksConfig<T>,
+	uniqueFields: NormalizedConstraints = [],
 ) =>
-(input: UpsertInput<T>): Effect.Effect<UpsertResult<T>, ValidationError | ForeignKeyError | HookError> =>
+(input: UpsertInput<T>): Effect.Effect<UpsertResult<T>, ValidationError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
-		const currentMap = yield* Ref.get(ref)
 		const where = input.where as Record<string, unknown>
+
+		// Validate that the where clause targets a unique field or id
+		yield* validateUpsertWhere(where, uniqueFields, collectionName)
+
+		const currentMap = yield* Ref.get(ref)
 		const existing = findByWhere(currentMap, where)
 
 		if (existing !== undefined) {
@@ -211,6 +223,9 @@ export const upsert = <T extends HasId, I = T>(
 			data: validated,
 		})
 
+		// Check unique constraints
+		yield* checkUniqueConstraints(entity, currentMap, uniqueFields, collectionName)
+
 		// Validate foreign keys
 		yield* validateForeignKeysEffect(
 			entity,
@@ -274,9 +289,16 @@ export const upsertMany = <T extends HasId, I = T>(
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	indexes?: CollectionIndexes,
 	hooks?: HooksConfig<T>,
+	uniqueFields: NormalizedConstraints = [],
 ) =>
-(inputs: ReadonlyArray<UpsertInput<T>>): Effect.Effect<UpsertManyResult<T>, ValidationError | ForeignKeyError | HookError> =>
+(inputs: ReadonlyArray<UpsertInput<T>>): Effect.Effect<UpsertManyResult<T>, ValidationError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
+		// Validate all where clauses target unique fields or id
+		for (const input of inputs) {
+			const where = input.where as Record<string, unknown>
+			yield* validateUpsertWhere(where, uniqueFields, collectionName)
+		}
+
 		const currentMap = yield* Ref.get(ref)
 		const created: T[] = []
 		const updated: T[] = []
@@ -360,7 +382,13 @@ export const upsertMany = <T extends HasId, I = T>(
 			}
 		}
 
-		// Phase 2: Validate foreign keys for all entities being created or updated
+		// Phase 2: Check unique constraints for entities being created
+		// This checks against existing data and also inter-batch conflicts
+		if (toCreate.length > 0) {
+			yield* checkBatchUniqueConstraints(toCreate, currentMap, uniqueFields, collectionName)
+		}
+
+		// Phase 3: Validate foreign keys for all entities being created or updated
 		for (const entity of toCreate) {
 			yield* validateForeignKeysEffect(
 				entity,
@@ -378,7 +406,7 @@ export const upsertMany = <T extends HasId, I = T>(
 			)
 		}
 
-		// Phase 3: Atomically apply all changes to state
+		// Phase 4: Atomically apply all changes to state
 		if (toCreate.length > 0 || toUpdate.length > 0) {
 			yield* Ref.update(ref, (map) => {
 				const next = new Map(map)
@@ -392,7 +420,7 @@ export const upsertMany = <T extends HasId, I = T>(
 			})
 		}
 
-		// Phase 4: Update indexes if provided
+		// Phase 5: Update indexes if provided
 		if (indexes && indexes.size > 0) {
 			// Use batch operation for created entities
 			if (toCreate.length > 0) {
@@ -404,7 +432,7 @@ export const upsertMany = <T extends HasId, I = T>(
 			}
 		}
 
-		// Phase 5: Run after-hooks and onChange hooks for created entities
+		// Phase 6: Run after-hooks and onChange hooks for created entities
 		for (const entity of toCreate) {
 			// Run afterCreate hooks (fire-and-forget, errors swallowed)
 			yield* runAfterCreateHooks(hooks?.afterCreate, {
@@ -421,7 +449,7 @@ export const upsertMany = <T extends HasId, I = T>(
 			})
 		}
 
-		// Phase 6: Run after-hooks and onChange hooks for updated entities
+		// Phase 7: Run after-hooks and onChange hooks for updated entities
 		for (const { oldEntity, newEntity, transformedUpdates } of toUpdate) {
 			// Run afterUpdate hooks (fire-and-forget, errors swallowed)
 			yield* runAfterUpdateHooks(hooks?.afterUpdate, {

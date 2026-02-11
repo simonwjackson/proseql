@@ -1352,9 +1352,9 @@ describe("Indexing - Index Maintenance", () => {
 
 			// Upsert with no existing match → should create
 			const result = await db.users.upsert({
-				where: { email: "newuser@example.com" },
+				where: { id: "newuser" },
 				update: { name: "Updated Name" },
-				create: { name: "New User", age: 25 },
+				create: { email: "newuser@example.com", name: "New User", age: 25 },
 			}).runPromise
 
 			expect(result.__action).toBe("created")
@@ -1381,11 +1381,11 @@ describe("Indexing - Index Maintenance", () => {
 			const aliceResults = await db.users.query({ where: { email: "alice@example.com" } }).runPromise
 			expect(aliceResults.length).toBe(1)
 
-			// Upsert a new user (no match for bob@example.com)
+			// Upsert a new user (no match for id u2)
 			const result = await db.users.upsert({
-				where: { email: "bob@example.com" },
+				where: { id: "u2" },
 				update: { name: "Should Not Apply" },
-				create: { name: "Bob", age: 25 },
+				create: { email: "bob@example.com", name: "Bob", age: 25 },
 			}).runPromise
 
 			expect(result.__action).toBe("created")
@@ -1455,11 +1455,11 @@ describe("Indexing - Index Maintenance", () => {
 			const config = createIndexedUsersConfig()
 			const db = await Effect.runPromise(createIndexedDatabase(config))
 
-			// Upsert multiple users that don't exist
+			// Upsert multiple users that don't exist (using id in where clause)
 			const result = await db.users.upsertMany([
-				{ where: { email: "alice@example.com" }, update: {}, create: { name: "Alice", age: 30 } },
-				{ where: { email: "bob@example.com" }, update: {}, create: { name: "Bob", age: 25 } },
-				{ where: { email: "charlie@example.com" }, update: {}, create: { name: "Charlie", age: 35 } },
+				{ where: { id: "u1" }, update: {}, create: { email: "alice@example.com", name: "Alice", age: 30 } },
+				{ where: { id: "u2" }, update: {}, create: { email: "bob@example.com", name: "Bob", age: 25 } },
+				{ where: { id: "u3" }, update: {}, create: { email: "charlie@example.com", name: "Charlie", age: 35 } },
 			]).runPromise
 
 			expect(result.created.length).toBe(3)
@@ -1848,9 +1848,9 @@ describe("Indexing - Index Maintenance", () => {
 
 			// Phase 5: Upsert (create path) - new user
 			await db.users.upsert({
-				where: { email: "dave@example.com" },
+				where: { id: "dave" },
 				update: { name: "Updated Dave" },
-				create: { name: "Dave", age: 40 },
+				create: { email: "dave@example.com", name: "Dave", age: 40 },
 			}).runPromise
 
 			// Verify phase 5 state

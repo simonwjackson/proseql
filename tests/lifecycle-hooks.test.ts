@@ -48,6 +48,7 @@ const createHookedConfig = (hooks: HooksConfig<User>) =>
 		users: {
 			schema: UserSchema,
 			hooks,
+			uniqueFields: ["email"] as const,
 			relationships: {},
 		},
 	}) as const

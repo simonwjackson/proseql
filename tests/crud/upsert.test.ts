@@ -62,6 +62,7 @@ const CategorySchema = Schema.Struct({
 const config = {
 	users: {
 		schema: UserSchema,
+		uniqueFields: ["email", "username"] as const,
 		relationships: {
 			company: { type: "ref" as const, target: "companies" as const },
 			settings: { type: "inverse" as const, target: "settings" as const, foreignKey: "userId" },
@@ -69,24 +70,28 @@ const config = {
 	},
 	products: {
 		schema: ProductSchema,
+		uniqueFields: ["sku"] as const,
 		relationships: {
 			category: { type: "ref" as const, target: "categories" as const },
 		},
 	},
 	settings: {
 		schema: SettingSchema,
+		uniqueFields: [["userId", "settingKey"]] as const,
 		relationships: {
 			user: { type: "ref" as const, target: "users" as const },
 		},
 	},
 	companies: {
 		schema: CompanySchema,
+		uniqueFields: ["domain"] as const,
 		relationships: {
 			users: { type: "inverse" as const, target: "users" as const, foreignKey: "companyId" },
 		},
 	},
 	categories: {
 		schema: CategorySchema,
+		uniqueFields: ["slug"] as const,
 		relationships: {
 			products: { type: "inverse" as const, target: "products" as const, foreignKey: "categoryId" },
 		},
