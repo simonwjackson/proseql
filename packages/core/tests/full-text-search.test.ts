@@ -1589,4 +1589,269 @@ describe("Full-text search: Search Index (task 12)", () => {
 			expect(results[0].title).toBe("Hyperspace Journey")
 		})
 	})
+
+	describe("12.4: Index maintenance on delete", () => {
+		it("should no longer find entity by title after delete", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// First verify the entity is searchable
+			const beforeResults = await db.books.query({
+				where: { title: { $search: "dune" } },
+			}).runPromise
+			expect(beforeResults.length).toBe(1)
+			expect(beforeResults[0].id).toBe("1")
+
+			// Delete the entity
+			await db.books.delete("1").runPromise
+
+			// Search should no longer find it
+			const afterResults = await db.books.query({
+				where: { title: { $search: "dune" } },
+			}).runPromise
+			expect(afterResults.length).toBe(0)
+		})
+
+		it("should no longer find entity by author after delete", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// First verify the entity is searchable by author
+			const beforeResults = await db.books.query({
+				where: { author: { $search: "herbert" } },
+			}).runPromise
+			expect(beforeResults.length).toBe(1)
+			expect(beforeResults[0].id).toBe("1")
+
+			// Delete the entity
+			await db.books.delete("1").runPromise
+
+			// Search by author should no longer find it
+			const afterResults = await db.books.query({
+				where: { author: { $search: "herbert" } },
+			}).runPromise
+			expect(afterResults.length).toBe(0)
+		})
+
+		it("should no longer find entity by description after delete", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// First verify the entity is searchable by description
+			const beforeResults = await db.books.query({
+				where: { description: { $search: "sandworms" } },
+			}).runPromise
+			expect(beforeResults.length).toBe(1)
+			expect(beforeResults[0].id).toBe("1")
+
+			// Delete the entity
+			await db.books.delete("1").runPromise
+
+			// Search by description should no longer find it
+			const afterResults = await db.books.query({
+				where: { description: { $search: "sandworms" } },
+			}).runPromise
+			expect(afterResults.length).toBe(0)
+		})
+
+		it("should no longer find entity via top-level $search after delete", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// First verify the entity is searchable via top-level search
+			const beforeResults = await db.books.query({
+				where: { $search: { query: "herbert dune", fields: ["title", "author"] } },
+			}).runPromise
+			expect(beforeResults.length).toBe(1)
+			expect(beforeResults[0].id).toBe("1")
+
+			// Delete the entity
+			await db.books.delete("1").runPromise
+
+			// Top-level search should no longer find it
+			const afterResults = await db.books.query({
+				where: { $search: { query: "herbert dune", fields: ["title", "author"] } },
+			}).runPromise
+			expect(afterResults.length).toBe(0)
+		})
+
+		it("should no longer find entity via prefix search after delete", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// First verify the entity is findable via prefix search
+			const beforeResults = await db.books.query({
+				where: { title: { $search: "du" } },
+			}).runPromise
+			expect(beforeResults.length).toBe(1)
+			expect(beforeResults[0].id).toBe("1")
+
+			// Delete the entity
+			await db.books.delete("1").runPromise
+
+			// Prefix search should no longer find it
+			const afterResults = await db.books.query({
+				where: { title: { $search: "du" } },
+			}).runPromise
+			expect(afterResults.length).toBe(0)
+		})
+
+		it("should still find other entities after deleting one", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Delete Dune (id: "1")
+			await db.books.delete("1").runPromise
+
+			// Other books should still be searchable
+			const neuroResults = await db.books.query({
+				where: { title: { $search: "neuromancer" } },
+			}).runPromise
+			expect(neuroResults.length).toBe(1)
+			expect(neuroResults[0].id).toBe("2")
+			expect(neuroResults[0].title).toBe("Neuromancer")
+
+			const gibsonResults = await db.books.query({
+				where: { author: { $search: "gibson" } },
+			}).runPromise
+			expect(gibsonResults.length).toBe(1)
+			expect(gibsonResults[0].author).toBe("William Gibson")
+
+			const leGuinResults = await db.books.query({
+				where: { author: { $search: "guin" } },
+			}).runPromise
+			expect(leGuinResults.length).toBe(1)
+			expect(leGuinResults[0].title).toBe("The Left Hand of Darkness")
+		})
+
+		it("should handle deleteMany and remove all deleted entities from search", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// First verify both entities are searchable
+			const beforeResults = await db.books.query({
+				where: { $search: { query: "planet" } },
+			}).runPromise
+			// "planet" appears in Dune ("desert planet") and The Left Hand of Darkness ("winter planet")
+			expect(beforeResults.length).toBe(2)
+
+			// Delete both books using a predicate that matches ids "1" and "3"
+			await db.books.deleteMany((entity) => entity.id === "1" || entity.id === "3").runPromise
+
+			// Search should no longer find either
+			const afterResults = await db.books.query({
+				where: { $search: { query: "planet" } },
+			}).runPromise
+			expect(afterResults.length).toBe(0)
+		})
+
+		it("should handle delete of entity that was just created", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Create a new entity
+			await db.books.create({
+				id: "new-book",
+				title: "Hyperion",
+				author: "Dan Simmons",
+				year: 1989,
+				description: "A pilgrimage to the Time Tombs",
+			}).runPromise
+
+			// Verify it's searchable
+			const beforeResults = await db.books.query({
+				where: { title: { $search: "hyperion" } },
+			}).runPromise
+			expect(beforeResults.length).toBe(1)
+
+			// Delete it
+			await db.books.delete("new-book").runPromise
+
+			// Should no longer be searchable
+			const afterResults = await db.books.query({
+				where: { title: { $search: "hyperion" } },
+			}).runPromise
+			expect(afterResults.length).toBe(0)
+		})
+
+		it("should handle delete of entity that was just updated", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// Update the entity first
+			await db.books.update("1", { title: "Arrakis Chronicles" }).runPromise
+
+			// Verify it's searchable by new title
+			const beforeResults = await db.books.query({
+				where: { title: { $search: "arrakis" } },
+			}).runPromise
+			expect(beforeResults.length).toBe(1)
+
+			// Delete it
+			await db.books.delete("1").runPromise
+
+			// Should no longer be searchable by new or old title
+			const afterNewTitle = await db.books.query({
+				where: { title: { $search: "arrakis" } },
+			}).runPromise
+			expect(afterNewTitle.length).toBe(0)
+
+			const afterOldTitle = await db.books.query({
+				where: { title: { $search: "dune" } },
+			}).runPromise
+			expect(afterOldTitle.length).toBe(0)
+		})
+
+		it("should clean up all tokens associated with deleted entity", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// This tests that the index properly removes all token -> entity mappings
+			// Dune has multiple tokens: "dune", "frank", "herbert", "desert", "planet", "spice", "sandworms"
+
+			// Delete Dune
+			await db.books.delete("1").runPromise
+
+			// None of the unique tokens from Dune's indexed fields should find it
+			// (but some tokens like "planet" appear in other books)
+
+			// "dune" is unique to Dune (title)
+			const duneResults = await db.books.query({
+				where: { $search: { query: "dune" } },
+			}).runPromise
+			expect(duneResults.length).toBe(0)
+
+			// "herbert" is unique to Dune (author: Frank Herbert)
+			const herbertResults = await db.books.query({
+				where: { $search: { query: "herbert" } },
+			}).runPromise
+			expect(herbertResults.length).toBe(0)
+
+			// "sandworms" is unique to Dune (description)
+			const sandwormsResults = await db.books.query({
+				where: { $search: { query: "sandworms" } },
+			}).runPromise
+			expect(sandwormsResults.length).toBe(0)
+
+			// "spice" is unique to Dune (description)
+			const spiceResults = await db.books.query({
+				where: { $search: { query: "spice" } },
+			}).runPromise
+			expect(spiceResults.length).toBe(0)
+
+			// "frank" is unique to Dune (author: Frank Herbert)
+			const frankResults = await db.books.query({
+				where: { $search: { query: "frank" } },
+			}).runPromise
+			expect(frankResults.length).toBe(0)
+		})
+
+		it("should not affect tokens shared with other entities", async () => {
+			const db = await createTestDatabaseWithSearchIndex()
+
+			// "planet" appears in both Dune ("desert planet") and The Left Hand of Darkness ("winter planet")
+			// Deleting Dune should not affect finding "The Left Hand of Darkness" via "planet"
+
+			// Delete Dune
+			await db.books.delete("1").runPromise
+
+			// "planet" search should still find The Left Hand of Darkness
+			const planetResults = await db.books.query({
+				where: { $search: { query: "planet" } },
+			}).runPromise
+			expect(planetResults.length).toBe(1)
+			expect(planetResults[0].id).toBe("3")
+			expect(planetResults[0].title).toBe("The Left Hand of Darkness")
+		})
+	})
 })

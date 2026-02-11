@@ -76,7 +76,7 @@
 - [x] 12.1 Test indexed search returns same results as unindexed search (correctness)
 - [x] 12.2 Test index maintenance on create: add a new entity, search finds it
 - [x] 12.3 Test index maintenance on update: update an entity's indexed field, search reflects the change
-- [ ] 12.4 Test index maintenance on delete: delete an entity, search no longer finds it
+- [x] 12.4 Test index maintenance on delete: delete an entity, search no longer finds it
 
 ## 13. Tests -- Combined Filters
 
