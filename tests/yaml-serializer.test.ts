@@ -1,29 +1,39 @@
 import { describe, it, expect } from "vitest"
 import { Effect } from "effect"
-import {
-	serializeYaml,
-	deserializeYaml,
-	YamlSerializerLayer,
-	makeYamlSerializerLayer,
-} from "../core/serializers/yaml.js"
+import { makeSerializerLayer } from "../core/serializers/format-codec.js"
+import { yamlCodec } from "../core/serializers/codecs/yaml.js"
 import { SerializerRegistry } from "../core/serializers/serializer-service.js"
 
 // ============================================================================
-// Direct Effect-based serialize/deserialize
+// YAML serialization via SerializerRegistry
 // ============================================================================
 
-describe("serializeYaml", () => {
+describe("YAML serialization via registry", () => {
+	const YamlLayer = makeSerializerLayer([yamlCodec()])
+
+	const run = <A>(effect: Effect.Effect<A, unknown, SerializerRegistry>) =>
+		Effect.runPromise(Effect.provide(effect, YamlLayer))
+
 	it("serializes an object to YAML", async () => {
-		const result = await Effect.runPromise(
-			serializeYaml({ id: "1", name: "Alice" }),
+		const result = await run(
+			Effect.gen(function* () {
+				const registry = yield* SerializerRegistry
+				return yield* registry.serialize({ id: "1", name: "Alice" }, "yaml")
+			}),
 		)
 		expect(result).toContain("id: \"1\"")
 		expect(result).toContain("name: Alice")
 	})
 
 	it("serializes nested objects", async () => {
-		const result = await Effect.runPromise(
-			serializeYaml({ user: { name: "Bob", age: 30 } }),
+		const result = await run(
+			Effect.gen(function* () {
+				const registry = yield* SerializerRegistry
+				return yield* registry.serialize(
+					{ user: { name: "Bob", age: 30 } },
+					"yaml",
+				)
+			}),
 		)
 		expect(result).toContain("user:")
 		expect(result).toContain("name: Bob")
@@ -31,8 +41,11 @@ describe("serializeYaml", () => {
 	})
 
 	it("serializes arrays", async () => {
-		const result = await Effect.runPromise(
-			serializeYaml({ tags: ["a", "b", "c"] }),
+		const result = await run(
+			Effect.gen(function* () {
+				const registry = yield* SerializerRegistry
+				return yield* registry.serialize({ tags: ["a", "b", "c"] }, "yaml")
+			}),
 		)
 		expect(result).toContain("tags:")
 		expect(result).toContain("- a")
@@ -40,32 +53,59 @@ describe("serializeYaml", () => {
 		expect(result).toContain("- c")
 	})
 
-	it("respects custom indent option", async () => {
+	it("respects custom indent option via codec configuration", async () => {
+		const customLayer = makeSerializerLayer([yamlCodec({ indent: 4 })])
 		const result = await Effect.runPromise(
-			serializeYaml({ nested: { key: "value" } }, { indent: 4 }),
+			Effect.provide(
+				Effect.gen(function* () {
+					const registry = yield* SerializerRegistry
+					return yield* registry.serialize(
+						{ nested: { key: "value" } },
+						"yaml",
+					)
+				}),
+				customLayer,
+			),
 		)
 		expect(result).toContain("    key: value")
 	})
 })
 
-describe("deserializeYaml", () => {
+describe("YAML deserialization via registry", () => {
+	const YamlLayer = makeSerializerLayer([yamlCodec()])
+
+	const run = <A>(effect: Effect.Effect<A, unknown, SerializerRegistry>) =>
+		Effect.runPromise(Effect.provide(effect, YamlLayer))
+
 	it("deserializes valid YAML string", async () => {
-		const result = await Effect.runPromise(
-			deserializeYaml("id: \"1\"\nname: Bob\n"),
+		const result = await run(
+			Effect.gen(function* () {
+				const registry = yield* SerializerRegistry
+				return yield* registry.deserialize("id: \"1\"\nname: Bob\n", "yaml")
+			}),
 		)
 		expect(result).toEqual({ id: "1", name: "Bob" })
 	})
 
 	it("deserializes YAML arrays", async () => {
-		const result = await Effect.runPromise(
-			deserializeYaml("- a\n- b\n- c\n"),
+		const result = await run(
+			Effect.gen(function* () {
+				const registry = yield* SerializerRegistry
+				return yield* registry.deserialize("- a\n- b\n- c\n", "yaml")
+			}),
 		)
 		expect(result).toEqual(["a", "b", "c"])
 	})
 
 	it("deserializes nested YAML", async () => {
-		const result = await Effect.runPromise(
-			deserializeYaml("user:\n  name: Alice\n  age: 25\n"),
+		const result = await run(
+			Effect.gen(function* () {
+				const registry = yield* SerializerRegistry
+				return yield* registry.deserialize(
+					"user:\n  name: Alice\n  age: 25\n",
+					"yaml",
+				)
+			}),
 		)
 		expect(result).toEqual({ user: { name: "Alice", age: 25 } })
 	})
@@ -73,17 +113,20 @@ describe("deserializeYaml", () => {
 	it("fails with SerializationError for invalid YAML", async () => {
 		// Use content that the yaml parser will reject
 		const invalidYaml = ":\n  - :\n    :\n  bad: [unterminated"
-		const result = await Effect.runPromise(
-			deserializeYaml(invalidYaml).pipe(
-				Effect.matchEffect({
-					onFailure: (e) => Effect.succeed(e),
-					onSuccess: () => Effect.fail("should not succeed" as const),
-				}),
-			),
+		const result = await run(
+			Effect.gen(function* () {
+				const registry = yield* SerializerRegistry
+				return yield* registry.deserialize(invalidYaml, "yaml").pipe(
+					Effect.matchEffect({
+						onFailure: (e) => Effect.succeed(e),
+						onSuccess: () => Effect.fail("should not succeed" as const),
+					}),
+				)
+			}),
 		)
-		expect(result._tag).toBe("SerializationError")
-		if (result._tag === "SerializationError") {
-			expect(result.format).toBe("yaml")
+		expect((result as { _tag: string })._tag).toBe("SerializationError")
+		if ((result as { _tag: string })._tag === "SerializationError") {
+			expect((result as { format: string }).format).toBe("yaml")
 		}
 	})
 })
@@ -93,13 +136,19 @@ describe("deserializeYaml", () => {
 // ============================================================================
 
 describe("YAML round-trip", () => {
+	const YamlLayer = makeSerializerLayer([yamlCodec()])
+
 	it("serialize then deserialize preserves data", async () => {
 		const data = { id: "42", tags: ["a", "b"], nested: { x: 1 } }
 		const result = await Effect.runPromise(
-			Effect.gen(function* () {
-				const yaml = yield* serializeYaml(data)
-				return yield* deserializeYaml(yaml)
-			}),
+			Effect.provide(
+				Effect.gen(function* () {
+					const registry = yield* SerializerRegistry
+					const yaml = yield* registry.serialize(data, "yaml")
+					return yield* registry.deserialize(yaml, "yaml")
+				}),
+				YamlLayer,
+			),
 		)
 		expect(result).toEqual(data)
 	})
@@ -114,23 +163,28 @@ describe("YAML round-trip", () => {
 			arr: [1, 2, 3],
 		}
 		const result = await Effect.runPromise(
-			Effect.gen(function* () {
-				const yaml = yield* serializeYaml(data)
-				return yield* deserializeYaml(yaml)
-			}),
+			Effect.provide(
+				Effect.gen(function* () {
+					const registry = yield* SerializerRegistry
+					const yaml = yield* registry.serialize(data, "yaml")
+					return yield* registry.deserialize(yaml, "yaml")
+				}),
+				YamlLayer,
+			),
 		)
 		expect(result).toEqual(data)
 	})
 })
 
 // ============================================================================
-// YamlSerializerLayer (as SerializerRegistry)
+// makeSerializerLayer with yamlCodec (as SerializerRegistry)
 // ============================================================================
 
-describe("YamlSerializerLayer", () => {
-	const run = <A>(
-		effect: Effect.Effect<A, unknown, SerializerRegistry>,
-	) => Effect.runPromise(Effect.provide(effect, YamlSerializerLayer))
+describe("makeSerializerLayer with yamlCodec", () => {
+	const YamlLayer = makeSerializerLayer([yamlCodec()])
+
+	const run = <A>(effect: Effect.Effect<A, unknown, SerializerRegistry>) =>
+		Effect.runPromise(Effect.provide(effect, YamlLayer))
 
 	it("serialize and deserialize round-trip via the service with 'yaml' extension", async () => {
 		const data = { id: "1", name: "Alice" }
@@ -186,8 +240,8 @@ describe("YamlSerializerLayer", () => {
 		expect((result as { _tag: string })._tag).toBe("SerializationError")
 	})
 
-	it("supports custom options via makeYamlSerializerLayer", async () => {
-		const customLayer = makeYamlSerializerLayer({ indent: 4 })
+	it("supports custom options via yamlCodec configuration", async () => {
+		const customLayer = makeSerializerLayer([yamlCodec({ indent: 4 })])
 		const result = await Effect.runPromise(
 			Effect.provide(
 				Effect.gen(function* () {
