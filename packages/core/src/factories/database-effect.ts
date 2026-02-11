@@ -76,6 +76,10 @@ import {
 	extractSearchConfig,
 } from "../operations/query/sort-stream.js";
 import { applyPopulate } from "../operations/relationships/populate-stream.js";
+import {
+	type FormatCodec,
+	mergeSerializerWithPluginCodecs,
+} from "../serializers/format-codec.js";
 import { SerializerRegistry } from "../serializers/serializer-service.js";
 import { loadData, saveData } from "../storage/persistence-effect.js";
 import { StorageAdapter } from "../storage/storage-service.js";
@@ -378,6 +382,13 @@ export type EffectDatabase<Config extends DatabaseConfig> = {
 export interface EffectDatabasePersistenceConfig {
 	/** Debounce delay in milliseconds (default 100) */
 	readonly writeDebounce?: number;
+	/**
+	 * Plugin codecs to merge with the serializer registry.
+	 * When provided, these codecs are layered on top of the user-provided
+	 * SerializerRegistry service, with plugin codecs taking precedence.
+	 * @internal Used by plugin system integration
+	 */
+	readonly _pluginCodecs?: ReadonlyArray<FormatCodec>;
 }
 
 /**
@@ -1391,7 +1402,19 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		// 1. Resolve services from the environment and capture as a Layer
 		// so save effects can be executed outside the creation runtime.
 		const storageAdapter = yield* StorageAdapter;
-		const serializerRegistry = yield* SerializerRegistry;
+		const baseSerializerRegistry = yield* SerializerRegistry;
+
+		// 1a. Merge plugin codecs with the base serializer registry if provided
+		// Plugin codecs take precedence over base registry codecs
+		const serializerRegistry =
+			persistenceConfig?._pluginCodecs !== undefined &&
+			persistenceConfig._pluginCodecs.length > 0
+				? mergeSerializerWithPluginCodecs(
+						baseSerializerRegistry,
+						persistenceConfig._pluginCodecs,
+					)
+				: baseSerializerRegistry;
+
 		const serviceLayer = Layer.merge(
 			Layer.succeed(StorageAdapter, storageAdapter),
 			Layer.succeed(SerializerRegistry, serializerRegistry),

@@ -296,7 +296,10 @@ export type {
 	FormatOptions,
 } from "./serializers/format-codec.js";
 // FormatCodec compositor and types
-export { makeSerializerLayer } from "./serializers/format-codec.js";
+export {
+	makeSerializerLayer,
+	mergeSerializerWithPluginCodecs,
+} from "./serializers/format-codec.js";
 // Preset Layers
 export {
 	AllTextFormatsLayer,
