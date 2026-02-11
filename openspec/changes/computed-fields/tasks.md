@@ -36,7 +36,7 @@
 
 ## 6. Persistence Exclusion
 
-- [ ] 6.1 Verify that computed fields are never written into the `Ref`. The Ref stores only schema-validated entities; computed fields are resolved downstream.
+- [x] 6.1 Verify that computed fields are never written into the `Ref`. The Ref stores only schema-validated entities; computed fields are resolved downstream.
 - [ ] 6.2 Test that saving a collection to disk produces a file with only stored fields (no computed field keys in serialized output).
 - [ ] 6.3 Test round-trip: save to disk, reload from disk, query with computed fields — computed values re-derived correctly from stored data.
 
