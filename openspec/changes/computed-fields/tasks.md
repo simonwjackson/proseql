@@ -63,7 +63,7 @@
 - [x] 9.5 Test computed field with select including computed — only selected fields present.
 - [x] 9.6 Test computed field with select excluding computed — computed fields absent, not evaluated.
 - [x] 9.7 Test filter by computed boolean field.
-- [ ] 9.8 Test filter by computed string field with operator.
+- [x] 9.8 Test filter by computed string field with operator.
 - [ ] 9.9 Test sort by computed field ascending.
 - [ ] 9.10 Test sort by computed field descending.
 - [ ] 9.11 Test combined: filter by computed + sort by computed + select computed.
