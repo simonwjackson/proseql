@@ -659,4 +659,42 @@ describe("lifecycle-hooks", () => {
 			expect(deleteCtx.entity.name).toBe("Updated Name") // Reflects the update
 		})
 	})
+
+	describe("after hooks", () => {
+		it("afterCreate receives created entity", async () => {
+			const afterCreateCalls: Array<AfterCreateContext<User>> = []
+			const hooks: HooksConfig<User> = {
+				afterCreate: [makeTrackingAfterCreateHook(afterCreateCalls)],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, { users: [] })
+					const created = yield* db.users.create({
+						name: "New User",
+						email: "newuser@test.com",
+						age: 28,
+					})
+					return created
+				}),
+			)
+
+			// Verify afterCreate was called
+			expect(afterCreateCalls).toHaveLength(1)
+			const ctx = afterCreateCalls[0]
+
+			// Verify context structure
+			expect(ctx.operation).toBe("create")
+			expect(ctx.collection).toBe("users")
+
+			// Verify the entity in the context matches the created entity
+			expect(ctx.entity.id).toBe(result.id)
+			expect(ctx.entity.name).toBe("New User")
+			expect(ctx.entity.email).toBe("newuser@test.com")
+			expect(ctx.entity.age).toBe(28)
+
+			// The entity should be the same as what was returned from create
+			expect(ctx.entity).toEqual(result)
+		})
+	})
 })
