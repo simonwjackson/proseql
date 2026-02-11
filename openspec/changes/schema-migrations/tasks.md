@@ -44,7 +44,7 @@
 ## 8. Dry-Run Migrations
 
 - [x] 8.1 Implement `dryRunMigrations(config, stateRefs)` in `core/migrations/migration-runner.ts`: for each versioned collection with a file, read the file, extract `_version`, determine which migrations would apply, report status. No transforms executed, no files written.
-- [ ] 8.2 Return `DryRunResult` with per-collection status: "up-to-date", "needs-migration", "ahead", or "no-file".
+- [x] 8.2 Return `DryRunResult` with per-collection status: "up-to-date", "needs-migration", "ahead", or "no-file".
 
 ## 9. Tests — Schema Versioning
 
