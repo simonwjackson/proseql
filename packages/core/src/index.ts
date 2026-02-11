@@ -394,3 +394,18 @@ export {
 	isValidId,
 	isValidIdFormat,
 } from "./utils/id-generator.js";
+
+// ============================================================================
+// Plugin System Types
+// ============================================================================
+
+export type {
+	CustomIdGenerator,
+	CustomOperator,
+	GlobalHooksConfig,
+	PluginRegistry,
+	ProseQLPlugin,
+} from "./plugins/plugin-types.js";
+
+// Plugin errors
+export { PluginError } from "./errors/plugin-errors.js";

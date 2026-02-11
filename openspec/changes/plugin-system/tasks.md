@@ -7,7 +7,7 @@
 - [x] 1.5 Define `PluginRegistry` interface: resolved internal state holding `codecs: ReadonlyArray<FormatCodec>`, `operators: Map<string, CustomOperator>`, `idGenerators: Map<string, CustomIdGenerator>`, `globalHooks: GlobalHooksConfig`
 - [x] 1.6 Create `core/errors/plugin-errors.ts` with `PluginError`: `Data.TaggedError("PluginError")<{ plugin: string, reason: string, message: string }>`
 - [x] 1.7 Add `readonly idGenerator?: string` to `CollectionConfig` in `core/types/database-config-types.ts`
-- [ ] 1.8 Export new types and `PluginError` from `core/index.ts`
+- [x] 1.8 Export new types and `PluginError` from `core/index.ts`
 
 ## 2. Plugin Validation
 
