@@ -1304,4 +1304,180 @@ describe("Snapshot Isolation", () => {
 			expect(finalUsers).toHaveLength(3)
 		})
 	})
+
+	describe("snapshot immutability", () => {
+		it("should restore exact pre-transaction state including entities deleted during transaction on rollback", async () => {
+			const db = await Effect.runPromise(createTestDb())
+
+			// Verify initial state - should have 2 users and 2 posts
+			const initialUsers = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			const initialPosts = await Stream.runCollect(db.posts.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(initialUsers).toHaveLength(2)
+			expect(initialPosts).toHaveLength(2)
+
+			// Verify Alice and her post exist
+			const aliceBefore = initialUsers.find((u) => u.id === "u1")
+			expect(aliceBefore).toBeDefined()
+			expect(aliceBefore?.name).toBe("Alice")
+
+			const alicePostBefore = initialPosts.find((p) => p.id === "p1")
+			expect(alicePostBefore).toBeDefined()
+			expect(alicePostBefore?.title).toBe("Hello World")
+
+			// Execute transaction that deletes entities and then rolls back
+			const result = await db
+				.$transaction((ctx) =>
+					Effect.gen(function* () {
+						// Delete Alice's post
+						yield* ctx.posts.delete("p1")
+
+						// Verify the post is deleted within the transaction
+						const postsAfterDelete = yield* Stream.runCollect(
+							ctx.posts.query({}),
+						).pipe(Effect.map(Chunk.toArray))
+						expect(postsAfterDelete).toHaveLength(1)
+						expect(postsAfterDelete.find((p) => p.id === "p1")).toBeUndefined()
+
+						// Delete Alice
+						yield* ctx.users.delete("u1")
+
+						// Verify the user is deleted within the transaction
+						const usersAfterDelete = yield* Stream.runCollect(
+							ctx.users.query({}),
+						).pipe(Effect.map(Chunk.toArray))
+						expect(usersAfterDelete).toHaveLength(1)
+						expect(usersAfterDelete.find((u) => u.id === "u1")).toBeUndefined()
+
+						// Also create a new entity (to verify it gets reverted too)
+						yield* ctx.users.create({
+							id: "u3",
+							name: "Charlie",
+							email: "charlie@test.com",
+							age: 35,
+						})
+
+						// Update an existing entity
+						yield* ctx.users.update("u2", { name: "Bob Updated" })
+
+						// Verify all changes are visible within transaction
+						const finalInTx = yield* Stream.runCollect(
+							ctx.users.query({}),
+						).pipe(Effect.map(Chunk.toArray))
+						expect(finalInTx).toHaveLength(2) // u2 and u3 (u1 deleted)
+						expect(finalInTx.find((u) => u.id === "u1")).toBeUndefined()
+						expect(finalInTx.find((u) => u.id === "u2")?.name).toBe("Bob Updated")
+						expect(finalInTx.find((u) => u.id === "u3")?.name).toBe("Charlie")
+
+						// Explicitly rollback
+						return yield* ctx.rollback()
+					}),
+				)
+				.pipe(Effect.either, Effect.runPromise)
+
+			// Verify the transaction was rolled back (returns TransactionError)
+			expect(result._tag).toBe("Left")
+			if (result._tag === "Left") {
+				const error = result.left as { readonly _tag?: string; readonly operation?: string }
+				expect(error._tag).toBe("TransactionError")
+				expect(error.operation).toBe("rollback")
+			}
+
+			// Verify snapshot was restored exactly - deleted entities are back
+			const finalUsers = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			const finalPosts = await Stream.runCollect(db.posts.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+
+			// Should have original 2 users and 2 posts
+			expect(finalUsers).toHaveLength(2)
+			expect(finalPosts).toHaveLength(2)
+
+			// Alice should be restored with original data
+			const aliceAfter = finalUsers.find((u) => u.id === "u1")
+			expect(aliceAfter).toBeDefined()
+			expect(aliceAfter?.name).toBe("Alice")
+			expect(aliceAfter?.email).toBe("alice@test.com")
+			expect(aliceAfter?.age).toBe(30)
+
+			// Bob should have original name (update reverted)
+			const bobAfter = finalUsers.find((u) => u.id === "u2")
+			expect(bobAfter).toBeDefined()
+			expect(bobAfter?.name).toBe("Bob")
+
+			// Alice's post should be restored
+			const alicePostAfter = finalPosts.find((p) => p.id === "p1")
+			expect(alicePostAfter).toBeDefined()
+			expect(alicePostAfter?.title).toBe("Hello World")
+			expect(alicePostAfter?.content).toBe("First post")
+			expect(alicePostAfter?.authorId).toBe("u1")
+
+			// Bob's post should still exist unchanged
+			const bobPostAfter = finalPosts.find((p) => p.id === "p2")
+			expect(bobPostAfter).toBeDefined()
+			expect(bobPostAfter?.title).toBe("TypeScript Tips")
+
+			// Created entity should NOT exist (creation reverted)
+			expect(finalUsers.find((u) => u.id === "u3")).toBeUndefined()
+		})
+
+		it("should restore deleted entities when transaction fails with error", async () => {
+			const db = await Effect.runPromise(createTestDb())
+
+			// Verify initial state
+			const initialPosts = await Stream.runCollect(db.posts.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(initialPosts).toHaveLength(2)
+			expect(initialPosts.find((p) => p.id === "p1")?.title).toBe("Hello World")
+
+			// Execute transaction that deletes an entity then fails
+			const result = await db
+				.$transaction((ctx) =>
+					Effect.gen(function* () {
+						// Delete a post (no foreign key constraints on posts)
+						yield* ctx.posts.delete("p1")
+
+						// Verify deletion within transaction
+						const postsAfterDelete = yield* Stream.runCollect(
+							ctx.posts.query({}),
+						).pipe(Effect.map(Chunk.toArray))
+						expect(postsAfterDelete).toHaveLength(1)
+						expect(postsAfterDelete.find((p) => p.id === "p1")).toBeUndefined()
+
+						// Fail the transaction
+						return yield* Effect.fail(new TestBusinessError("Intentional failure after delete"))
+					}),
+				)
+				.pipe(Effect.either, Effect.runPromise)
+
+			// Verify the transaction failed with our error
+			expect(result._tag).toBe("Left")
+			if (result._tag === "Left") {
+				expect(result.left).toBeInstanceOf(TestBusinessError)
+			}
+
+			// Verify the post was restored
+			const finalPosts = await Stream.runCollect(db.posts.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(finalPosts).toHaveLength(2)
+
+			const postRestored = finalPosts.find((p) => p.id === "p1")
+			expect(postRestored).toBeDefined()
+			expect(postRestored?.title).toBe("Hello World")
+			expect(postRestored?.content).toBe("First post")
+		})
+	})
 })
