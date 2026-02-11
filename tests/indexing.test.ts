@@ -3439,6 +3439,142 @@ describe("Indexing - Query Acceleration", () => {
 			expect(ids).toEqual(["u1", "u3"])
 		})
 	})
+
+	describe("Task 8.7: empty index entry (no matches) returns empty result", () => {
+		it("should return empty array when equality query matches no entities", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query for email that doesn't exist - index lookup should return empty
+			const results = await db.users.query({
+				where: { email: "nonexistent@example.com" },
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should return empty array when $eq query matches no entities", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $eq for non-existent value
+			const results = await db.users.query({
+				where: { email: { $eq: "nobody@example.com" } },
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should return empty array when $in contains only non-existent values", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $in containing only non-existent values
+			const results = await db.users.query({
+				where: { email: { $in: ["x@example.com", "y@example.com", "z@example.com"] } },
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should return partial results when $in contains mix of existing and non-existing values", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+				{ id: "u3", email: "charlie@example.com", name: "Charlie", age: 35 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Query with $in containing mix of existing and non-existing values
+			const results = await db.users.query({
+				where: { email: { $in: ["alice@example.com", "nonexistent@example.com", "charlie@example.com"] } },
+			}).runPromise
+
+			// Should only return the existing matches
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["u1", "u3"])
+		})
+
+		it("should return empty array when compound index query matches no entities", async () => {
+			const config = createMultiIndexConfig()
+			const initialProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, {
+					users: [],
+					products: initialProducts,
+				}),
+			)
+
+			// Query for compound key that doesn't exist
+			const results = await db.products.query({
+				where: { category: "electronics", subcategory: "tablets" },
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should return empty array after all matching entities are deleted", async () => {
+			const config = createIndexedUsersConfig()
+			const initialUsers: ReadonlyArray<User> = [
+				{ id: "u1", email: "alice@example.com", name: "Alice", age: 30 },
+				{ id: "u2", email: "bob@example.com", name: "Bob", age: 25 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: initialUsers }),
+			)
+
+			// Delete the only user with this email
+			await db.users.delete("u1").runPromise
+
+			// Query for the deleted user's email
+			const results = await db.users.query({
+				where: { email: "alice@example.com" },
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should return empty array when querying empty collection with index", async () => {
+			const config = createIndexedUsersConfig()
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [] }),
+			)
+
+			// Query on empty collection
+			const results = await db.users.query({
+				where: { email: "anyone@example.com" },
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+	})
 })
 
 // Export helpers for use in other test files
