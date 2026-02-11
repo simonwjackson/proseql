@@ -6,7 +6,7 @@
 
 ## 2. Scalar Aggregation
 
-- [ ] 2.1 Create `core/operations/query/aggregate.ts` with `computeAggregates(entities, config)` returning `AggregateResult`. Single-pass reduction over the entity array.
+- [x] 2.1 Create `core/operations/query/aggregate.ts` with `computeAggregates(entities, config)` returning `AggregateResult`. Single-pass reduction over the entity array.
 - [ ] 2.2 Implement `count`: return `entities.length` (simple, no field needed)
 - [ ] 2.3 Implement `sum`: for each requested field, accumulate numeric values. Non-numeric values (null, undefined, strings) are skipped (treated as 0). Empty result set → 0.
 - [ ] 2.4 Implement `avg`: for each requested field, track sum and count of numeric values. Compute mean after pass. If no numeric values → null.
