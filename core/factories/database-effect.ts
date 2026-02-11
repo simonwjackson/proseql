@@ -428,6 +428,7 @@ const buildCollection = <T extends HasId>(
 		string,
 		{ readonly type: "ref" | "inverse"; readonly target: string; readonly foreignKey?: string }
 	>
+	const hooks = collectionConfig.hooks as import("../types/hook-types.js").HooksConfig<T> | undefined
 
 	// Build allRelationships map for delete (needs all collections' relationships)
 	const allRelationships: Record<
@@ -586,16 +587,16 @@ const buildCollection = <T extends HasId>(
 		}
 
 	// Wire CRUD operations with runPromise convenience
-	const createFn = wrapEffect(create(collectionName, schema, relationships, ref, stateRefs, indexes))
-	const createManyFn = wrapEffect(createMany(collectionName, schema, relationships, ref, stateRefs, indexes))
-	const updateFn = wrapEffect(update(collectionName, schema, relationships, ref, stateRefs, indexes))
-	const updateManyFn = wrapEffect(updateMany(collectionName, schema, relationships, ref, stateRefs, indexes))
+	const createFn = wrapEffect(create(collectionName, schema, relationships, ref, stateRefs, indexes, hooks))
+	const createManyFn = wrapEffect(createMany(collectionName, schema, relationships, ref, stateRefs, indexes, hooks))
+	const updateFn = wrapEffect(update(collectionName, schema, relationships, ref, stateRefs, indexes, hooks))
+	const updateManyFn = wrapEffect(updateMany(collectionName, schema, relationships, ref, stateRefs, indexes, hooks))
 	// Check if schema defines a deletedAt field for soft delete support
 	const supportsSoftDelete = "fields" in schema && "deletedAt" in (schema as Record<string, unknown> & { fields: Record<string, unknown> }).fields
-	const deleteFn = wrapEffect(del(collectionName, allRelationships, ref, stateRefs, supportsSoftDelete, indexes))
-	const deleteManyFn = wrapEffect(deleteMany(collectionName, allRelationships, ref, stateRefs, supportsSoftDelete, indexes))
-	const upsertFn = wrapEffect(upsert(collectionName, schema, relationships, ref, stateRefs, indexes))
-	const upsertManyFn = wrapEffect(upsertMany(collectionName, schema, relationships, ref, stateRefs, indexes))
+	const deleteFn = wrapEffect(del(collectionName, allRelationships, ref, stateRefs, supportsSoftDelete, indexes, hooks))
+	const deleteManyFn = wrapEffect(deleteMany(collectionName, allRelationships, ref, stateRefs, supportsSoftDelete, indexes, hooks))
+	const upsertFn = wrapEffect(upsert(collectionName, schema, relationships, ref, stateRefs, indexes, hooks))
+	const upsertManyFn = wrapEffect(upsertMany(collectionName, schema, relationships, ref, stateRefs, indexes, hooks))
 	const createWithRelsFn = wrapEffect(createWithRelationships(
 		collectionName, schema, relationships, ref, stateRefs, dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target?: string; readonly __targetCollection?: string; readonly foreignKey?: string }> }>,
 	))
