@@ -43,7 +43,7 @@
 ## 7. Factory Integration
 
 - [x] 7.1 In `core/factories/database-effect.ts` `buildCollection`: read `hooks` from collection config, pass to all CRUD factory function calls.
-- [ ] 7.2 Default to empty hooks (no-op) when not configured.
+- [x] 7.2 Default to empty hooks (no-op) when not configured.
 
 ## 8. Tests — Before Hooks
 

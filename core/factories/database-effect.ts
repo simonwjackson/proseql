@@ -428,7 +428,8 @@ const buildCollection = <T extends HasId>(
 		string,
 		{ readonly type: "ref" | "inverse"; readonly target: string; readonly foreignKey?: string }
 	>
-	const hooks = collectionConfig.hooks as import("../types/hook-types.js").HooksConfig<T> | undefined
+	// Default to empty hooks (no-op) when not configured
+	const hooks = (collectionConfig.hooks ?? {}) as import("../types/hook-types.js").HooksConfig<T>
 
 	// Build allRelationships map for delete (needs all collections' relationships)
 	const allRelationships: Record<
