@@ -1446,4 +1446,220 @@ describe("Cursor Pagination", () => {
 			])
 		})
 	})
+
+	describe("implicit sort", () => {
+		it("omitting sort with cursor key uses ascending order on cursor key", async () => {
+			const items = generateItems(10)
+
+			// NO explicit sort provided - should default to ascending on cursor key
+			const result = await runCursorQuery(items, {
+				cursor: { key: "id", limit: 3 },
+			})
+
+			// Should return first 3 items in ascending order by id
+			expect(result.items).toHaveLength(3)
+			expect(result.items.map((i) => i.id)).toEqual([
+				"item-001",
+				"item-002",
+				"item-003",
+			])
+
+			// Verify order is ascending (each id should be greater than previous)
+			for (let i = 1; i < result.items.length; i++) {
+				const prev = result.items[i - 1].id as string
+				const curr = result.items[i].id as string
+				expect(curr > prev).toBe(true)
+			}
+
+			expect(result.pageInfo.hasNextPage).toBe(true)
+			expect(result.pageInfo.hasPreviousPage).toBe(false)
+		})
+
+		it("implicit sort produces same results as explicit ascending sort", async () => {
+			const items = generateItems(10)
+
+			// Query with implicit sort (no sort option)
+			const implicitResult = await runCursorQuery(items, {
+				cursor: { key: "id", limit: 5 },
+			})
+
+			// Query with explicit ascending sort
+			const explicitResult = await runCursorQuery(items, {
+				sort: { id: "asc" },
+				cursor: { key: "id", limit: 5 },
+			})
+
+			// Results should be identical
+			expect(implicitResult.items).toEqual(explicitResult.items)
+			expect(implicitResult.pageInfo).toEqual(explicitResult.pageInfo)
+		})
+
+		it("implicit sort on non-id field uses ascending order", async () => {
+			const items = generateItems(10)
+
+			// No sort, but cursor on price field
+			const result = await runCursorQuery(items, {
+				cursor: { key: "price", limit: 3 },
+			})
+
+			// Prices should be in ascending order: 10, 20, 30, ...
+			expect(result.items).toHaveLength(3)
+			expect(result.items.map((i) => i.price)).toEqual([10, 20, 30])
+
+			// Verify ascending order
+			for (let i = 1; i < result.items.length; i++) {
+				const prev = result.items[i - 1].price as number
+				const curr = result.items[i].price as number
+				expect(curr > prev).toBe(true)
+			}
+
+			expect(result.pageInfo.startCursor).toBe("10")
+			expect(result.pageInfo.endCursor).toBe("30")
+			expect(result.pageInfo.hasNextPage).toBe(true)
+		})
+
+		it("forward pagination works with implicit sort", async () => {
+			const items = generateItems(10)
+
+			// First page - no explicit sort
+			const firstPage = await runCursorQuery(items, {
+				cursor: { key: "id", limit: 3 },
+			})
+
+			expect(firstPage.items.map((i) => i.id)).toEqual([
+				"item-001",
+				"item-002",
+				"item-003",
+			])
+
+			// Second page - no explicit sort
+			const secondPage = await runCursorQuery(items, {
+				cursor: {
+					key: "id",
+					limit: 3,
+					after: firstPage.pageInfo.endCursor!,
+				},
+			})
+
+			expect(secondPage.items).toHaveLength(3)
+			expect(secondPage.items.map((i) => i.id)).toEqual([
+				"item-004",
+				"item-005",
+				"item-006",
+			])
+
+			// Items should continue in ascending order
+			expect((secondPage.items[0].id as string) > (firstPage.items[2].id as string)).toBe(true)
+		})
+
+		it("backward pagination works with implicit sort", async () => {
+			const items = generateItems(10)
+
+			// Get items before item-007 - no explicit sort
+			const page = await runCursorQuery(items, {
+				cursor: {
+					key: "id",
+					limit: 3,
+					before: "item-007",
+				},
+			})
+
+			// Should return items 4-6 in ascending order
+			expect(page.items).toHaveLength(3)
+			expect(page.items.map((i) => i.id)).toEqual([
+				"item-004",
+				"item-005",
+				"item-006",
+			])
+
+			expect(page.pageInfo.hasPreviousPage).toBe(true)
+			expect(page.pageInfo.hasNextPage).toBe(true)
+		})
+
+		it("can paginate through all items with implicit sort", async () => {
+			const items = generateItems(7)
+			const collectedItems: Array<Record<string, unknown>> = []
+			let cursor: string | undefined
+
+			// Paginate forward without explicit sort
+			while (true) {
+				const page = await runCursorQuery(items, {
+					cursor: { key: "id", limit: 2, after: cursor },
+				})
+
+				collectedItems.push(...page.items)
+
+				if (!page.pageInfo.hasNextPage) {
+					break
+				}
+				cursor = page.pageInfo.endCursor!
+			}
+
+			// Should have collected all 7 items in ascending order
+			expect(collectedItems).toHaveLength(7)
+			expect(collectedItems.map((i) => i.id)).toEqual([
+				"item-001",
+				"item-002",
+				"item-003",
+				"item-004",
+				"item-005",
+				"item-006",
+				"item-007",
+			])
+
+			// Verify order is strictly ascending
+			for (let i = 1; i < collectedItems.length; i++) {
+				const prev = collectedItems[i - 1].id as string
+				const curr = collectedItems[i].id as string
+				expect(curr > prev).toBe(true)
+			}
+		})
+
+		it("implicit sort combined with where filter", async () => {
+			const items = generateItems(15)
+
+			// Filter electronics, no explicit sort
+			const result = await runCursorQuery(items, {
+				where: { category: "electronics" },
+				cursor: { key: "id", limit: 2 },
+			})
+
+			// Electronics: items 3, 6, 9, 12, 15
+			// Should be in ascending order by id
+			expect(result.items).toHaveLength(2)
+			expect(result.items.map((i) => i.id)).toEqual([
+				"item-003",
+				"item-006",
+			])
+			expect(result.items.every((i) => i.category === "electronics")).toBe(true)
+
+			expect(result.pageInfo.hasNextPage).toBe(true)
+		})
+
+		it("implicit sort combined with select", async () => {
+			const items = generateItems(10)
+
+			// Select specific fields, no explicit sort
+			const result = await runCursorQuery(items, {
+				select: { id: true, name: true },
+				cursor: { key: "id", limit: 3 },
+			})
+
+			// Should return first 3 items in ascending order
+			expect(result.items).toHaveLength(3)
+			expect(result.items.map((i) => i.id)).toEqual([
+				"item-001",
+				"item-002",
+				"item-003",
+			])
+
+			// Verify only selected fields present
+			for (const item of result.items) {
+				expect(item.id).toBeDefined()
+				expect(item.name).toBeDefined()
+				expect(item.price).toBeUndefined()
+				expect(item.category).toBeUndefined()
+			}
+		})
+	})
 })
