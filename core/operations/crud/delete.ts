@@ -16,10 +16,13 @@ import {
 	NotFoundError,
 	ForeignKeyError,
 	OperationError,
+	HookError,
 } from "../../errors/crud-errors.js"
 import { checkDeleteConstraintsEffect } from "../../validators/foreign-key.js"
 import type { CollectionIndexes } from "../../types/index-types.js"
 import { removeFromIndex, removeManyFromIndex } from "../../indexes/index-manager.js"
+import type { HooksConfig } from "../../types/hook-types.js"
+import { runBeforeDeleteHooks } from "../../hooks/hook-runner.js"
 
 // ============================================================================
 // Types
@@ -51,9 +54,10 @@ type DeleteManyOptions = {
  *
  * Steps:
  * 1. Look up entity by ID in Ref state (O(1))
- * 2. If soft delete requested, verify entity has deletedAt field
- * 3. Check foreign key constraints across all collections
- * 4. Soft delete: update entity with deletedAt timestamp
+ * 2. Run beforeDelete hooks (can reject)
+ * 3. If soft delete requested, verify entity has deletedAt field
+ * 4. Check foreign key constraints across all collections
+ * 5. Soft delete: update entity with deletedAt timestamp
  *    Hard delete: remove entity from Ref state
  */
 export const del = <T extends HasId>(
@@ -63,8 +67,9 @@ export const del = <T extends HasId>(
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	supportsSoftDelete: boolean = false,
 	indexes?: CollectionIndexes,
+	hooks?: HooksConfig<T>,
 ) =>
-(id: string, options?: DeleteOptions): Effect.Effect<T, NotFoundError | OperationError | ForeignKeyError> =>
+(id: string, options?: DeleteOptions): Effect.Effect<T, NotFoundError | OperationError | ForeignKeyError | HookError> =>
 	Effect.gen(function* () {
 		// Look up entity by ID (O(1))
 		const currentMap = yield* Ref.get(ref)
@@ -78,6 +83,14 @@ export const del = <T extends HasId>(
 				}),
 			)
 		}
+
+		// Run beforeDelete hooks (can reject the delete)
+		yield* runBeforeDeleteHooks(hooks?.beforeDelete, {
+			operation: "delete",
+			collection: collectionName,
+			id,
+			entity,
+		})
 
 		const isSoft = options?.soft === true
 
