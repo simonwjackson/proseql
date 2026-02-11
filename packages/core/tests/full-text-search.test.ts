@@ -116,4 +116,29 @@ describe("Full-text search: Basic Search (task 9)", () => {
 			})
 		})
 	})
+
+	describe("9.2: Field-level $search basic match", () => {
+		it("should match 'Dune' when searching for 'dune'", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "dune" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0].title).toBe("Dune")
+		})
+
+		it("should return the full book object when matched", async () => {
+			const db = await createTestDatabase()
+			const results = await db.books.query({
+				where: { title: { $search: "dune" } },
+			}).runPromise
+			expect(results.length).toBe(1)
+			expect(results[0]).toMatchObject({
+				id: "1",
+				title: "Dune",
+				author: "Frank Herbert",
+				year: 1965,
+			})
+		})
+	})
 })
