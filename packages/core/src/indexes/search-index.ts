@@ -147,6 +147,126 @@ export const lookupSearchIndex = (
 	});
 
 /**
+ * Resolve candidate entities using the search index when a search query is present.
+ *
+ * Checks if the where clause contains a $search operator (field-level or top-level).
+ * If found and the search index covers the queried fields, uses the index to
+ * narrow the candidate set before full filtering.
+ *
+ * Returns undefined if:
+ * - No $search operator is present
+ * - The search index doesn't cover the queried fields
+ * - The search index is empty
+ *
+ * @param where - The where clause from the query
+ * @param searchIndexRef - The search index Ref (or undefined if not configured)
+ * @param searchIndexFields - The fields covered by the search index (or undefined)
+ * @param map - The entity data map (id -> entity)
+ * @returns Effect producing Array<T> if index was used, undefined if no usable index
+ */
+export const resolveWithSearchIndex = <T extends HasId>(
+	where: Record<string, unknown> | undefined,
+	searchIndexRef: Ref.Ref<SearchIndexMap> | undefined,
+	searchIndexFields: ReadonlyArray<string> | undefined,
+	map: ReadonlyMap<string, T>,
+): Effect.Effect<ReadonlyArray<T> | undefined> =>
+	Effect.gen(function* () {
+		// No where clause or no search index configured
+		if (!where || !searchIndexRef || !searchIndexFields || searchIndexFields.length === 0) {
+			return undefined;
+		}
+
+		// Extract search query from where clause
+		const searchInfo = extractSearchFromWhere(where, searchIndexFields);
+		if (!searchInfo) {
+			return undefined;
+		}
+
+		const { queryTokens, queriedFields } = searchInfo;
+
+		// Check if the search index covers all queried fields
+		const indexCovered = queriedFields.every((field) =>
+			searchIndexFields.includes(field),
+		);
+		if (!indexCovered) {
+			return undefined;
+		}
+
+		// Use the search index to get candidate entity IDs
+		const candidateIds = yield* lookupSearchIndex(searchIndexRef, queryTokens);
+
+		// Empty result set means no candidates
+		if (candidateIds.size === 0) {
+			return [];
+		}
+
+		// Load candidate entities from the map
+		const entities: Array<T> = [];
+		for (const id of candidateIds) {
+			const entity = map.get(id);
+			if (entity !== undefined) {
+				entities.push(entity);
+			}
+		}
+
+		return entities;
+	});
+
+/**
+ * Extract search query info from a where clause.
+ *
+ * Looks for:
+ * 1. Top-level $search: { query: "...", fields?: [...] }
+ * 2. Field-level $search: { fieldName: { $search: "..." } }
+ *
+ * Returns the tokenized query and the fields being searched, or undefined if no search.
+ */
+const extractSearchFromWhere = (
+	where: Record<string, unknown>,
+	defaultFields: ReadonlyArray<string>,
+): { queryTokens: ReadonlyArray<string>; queriedFields: ReadonlyArray<string> } | undefined => {
+	// Check for top-level $search
+	if ("$search" in where) {
+		const searchValue = where.$search;
+		if (searchValue !== null && typeof searchValue === "object") {
+			const config = searchValue as { query?: string; fields?: ReadonlyArray<string> };
+			if (typeof config.query === "string") {
+				const queryTokens = tokenize(config.query);
+				if (queryTokens.length === 0) {
+					return undefined; // Empty query matches everything, no index help
+				}
+				const queriedFields = config.fields && config.fields.length > 0
+					? config.fields
+					: defaultFields;
+				return { queryTokens, queriedFields };
+			}
+		}
+	}
+
+	// Check for field-level $search on any field
+	for (const [field, value] of Object.entries(where)) {
+		// Skip logical operators
+		if (field === "$or" || field === "$and" || field === "$not" || field === "$search") {
+			continue;
+		}
+
+		if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+			const obj = value as Record<string, unknown>;
+			if ("$search" in obj && typeof obj.$search === "string") {
+				const queryTokens = tokenize(obj.$search);
+				if (queryTokens.length === 0) {
+					continue; // Empty query, skip
+				}
+				// Field-level search applies to just this field
+				return { queryTokens, queriedFields: [field] };
+			}
+		}
+	}
+
+	return undefined;
+};
+
+/**
  * Helper function to add a single entity to a search index map.
  *
  * Tokenizes the values of the specified fields and adds the entity's ID

@@ -15,6 +15,8 @@ import type { CollectionConfig } from "../types/database-config-types.js"
 import type { CollectionIndexes } from "../types/index-types.js"
 import { normalizeIndexes, buildIndexes } from "../indexes/index-manager.js"
 import { resolveWithIndex } from "../indexes/index-lookup.js"
+import { buildSearchIndex, resolveWithSearchIndex } from "../indexes/search-index.js"
+import type { SearchIndexMap } from "../types/search-types.js"
 import { validateMigrationRegistry, dryRunMigrations } from "../migrations/migration-runner.js"
 import type { MigrationError } from "../errors/migration-errors.js"
 import type { DryRunResult } from "../migrations/migration-types.js"
@@ -457,6 +459,9 @@ function extractPopulateFromSelect(
  *
  * When `indexes` is provided, CRUD operations will maintain the indexes and
  * query operations will use indexes for accelerated lookups.
+ *
+ * When `searchIndexRef` is provided along with `searchIndexFields`, the query
+ * pipeline will use the search index to narrow candidates for $search queries.
  */
 const buildCollection = <T extends HasId>(
 	collectionName: string,
@@ -466,6 +471,8 @@ const buildCollection = <T extends HasId>(
 	dbConfig: DatabaseConfig,
 	afterMutation?: () => Effect.Effect<void>,
 	indexes?: CollectionIndexes,
+	searchIndexRef?: Ref.Ref<SearchIndexMap>,
+	searchIndexFields?: ReadonlyArray<string>,
 ): EffectCollection<T> => {
 	const schema = collectionConfig.schema as Schema.Schema<T, unknown>
 	const relationships = collectionConfig.relationships as Record<
@@ -553,10 +560,14 @@ const buildCollection = <T extends HasId>(
 			// Cursor pagination branch: populate → resolve computed → filter → sort → applyCursor → select
 			const cursorEffect = Effect.gen(function* () {
 				const map = yield* Ref.get(ref)
-				// Try index-accelerated lookup first
-				const narrowed = indexes
+				// Try index-accelerated lookup first (equality index, then search index)
+				let narrowed = indexes
 					? yield* resolveWithIndex(options?.where, indexes, map)
 					: undefined
+				// If equality index didn't help, try search index
+				if (narrowed === undefined && searchIndexRef) {
+					narrowed = yield* resolveWithSearchIndex(options?.where, searchIndexRef, searchIndexFields, map)
+				}
 				const items = (narrowed ?? Array.from(map.values())) as Array<Record<string, unknown>>
 				let s: Stream.Stream<Record<string, unknown>, DanglingReferenceError> =
 					Stream.fromIterable(items)
@@ -604,10 +615,14 @@ const buildCollection = <T extends HasId>(
 		const stream = Stream.unwrap(
 			Effect.gen(function* () {
 				const map = yield* Ref.get(ref)
-				// Try index-accelerated lookup first
-				const narrowed = indexes
+				// Try index-accelerated lookup first (equality index, then search index)
+				let narrowed = indexes
 					? yield* resolveWithIndex(options?.where, indexes, map)
 					: undefined
+				// If equality index didn't help, try search index
+				if (narrowed === undefined && searchIndexRef) {
+					narrowed = yield* resolveWithSearchIndex(options?.where, searchIndexRef, searchIndexFields, map)
+				}
 				const items = (narrowed ?? Array.from(map.values())) as Array<Record<string, unknown>>
 				let s: Stream.Stream<Record<string, unknown>, DanglingReferenceError> =
 					Stream.fromIterable(items)
@@ -778,6 +793,8 @@ type BuildCollectionForTx = (
  * @param stateRefs - Shared state refs for cross-collection access
  * @param typedRefs - Typed refs for each collection
  * @param collectionIndexes - Pre-built indexes for each collection
+ * @param searchIndexRefs - Pre-built search indexes for each collection (optional)
+ * @param searchIndexFields - Fields covered by search index for each collection (optional)
  * @returns A callback matching the BuildCollectionForTx type
  */
 const makeBuildCollectionForTx = (
@@ -785,6 +802,8 @@ const makeBuildCollectionForTx = (
 	stateRefs: StateRefs,
 	typedRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	collectionIndexes: Record<string, CollectionIndexes>,
+	searchIndexRefs?: Record<string, Ref.Ref<SearchIndexMap>>,
+	searchIndexFields?: Record<string, ReadonlyArray<string>>,
 ): BuildCollectionForTx => {
 	return (collectionName: string, addMutation: (name: string) => void) => {
 		// Transaction-aware afterMutation: records mutation instead of scheduling persistence
@@ -798,6 +817,8 @@ const makeBuildCollectionForTx = (
 			config,
 			afterMutation,
 			collectionIndexes[collectionName],
+			searchIndexRefs?.[collectionName],
+			searchIndexFields?.[collectionName],
 		)
 	}
 }
@@ -872,6 +893,20 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 			collectionIndexes[collectionName] = indexes
 		}
 
+		// 3b. Build search indexes for collections that have searchIndex configured
+		const searchIndexRefs: Record<string, Ref.Ref<SearchIndexMap>> = {}
+		const searchIndexFields: Record<string, ReadonlyArray<string>> = {}
+
+		for (const collectionName of Object.keys(config)) {
+			const collectionConfig = config[collectionName]
+			if (collectionConfig.searchIndex && collectionConfig.searchIndex.length > 0) {
+				const items = (initialData?.[collectionName] ?? []) as ReadonlyArray<HasId>
+				const searchIdx = yield* buildSearchIndex(collectionConfig.searchIndex, items)
+				searchIndexRefs[collectionName] = searchIdx
+				searchIndexFields[collectionName] = collectionConfig.searchIndex
+			}
+		}
+
 		// 4. Build each collection with its Ref, indexes, and shared state refs
 		const collections: Record<string, EffectCollection<HasId>> = {}
 
@@ -884,6 +919,8 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 				config,
 				undefined, // afterMutation
 				collectionIndexes[collectionName],
+				searchIndexRefs[collectionName],
+				searchIndexFields[collectionName],
 			)
 		}
 
@@ -893,6 +930,8 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 			stateRefs,
 			typedRefs,
 			collectionIndexes,
+			searchIndexRefs,
+			searchIndexFields,
 		)
 
 		// Create the $transaction method
@@ -1027,6 +1066,22 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			collectionIndexes[collectionName] = indexes
 		}
 
+		// 4b. Build search indexes for collections that have searchIndex configured
+		const searchIndexRefs: Record<string, Ref.Ref<SearchIndexMap>> = {}
+		const searchIndexFields: Record<string, ReadonlyArray<string>> = {}
+
+		for (const collectionName of Object.keys(config)) {
+			const collectionConfig = config[collectionName]
+			if (collectionConfig.searchIndex && collectionConfig.searchIndex.length > 0) {
+				// Use actual data from the Ref (loaded from file + initialData)
+				const dataMap = yield* Ref.get(typedRefs[collectionName])
+				const items = Array.from(dataMap.values()) as ReadonlyArray<HasId>
+				const searchIdx = yield* buildSearchIndex(collectionConfig.searchIndex, items)
+				searchIndexRefs[collectionName] = searchIdx
+				searchIndexFields[collectionName] = collectionConfig.searchIndex
+			}
+		}
+
 		// 5. Build the save effect factory. Each save reads the Ref at execution
 		// time (capturing latest state) and writes through saveData with services.
 		const collectionFilePaths: Record<string, string> = {}
@@ -1102,6 +1157,8 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				config,
 				afterMutation,
 				collectionIndexes[collectionName],
+				searchIndexRefs[collectionName],
+				searchIndexFields[collectionName],
 			)
 		}
 
@@ -1125,6 +1182,8 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			stateRefs,
 			typedRefs,
 			collectionIndexes,
+			searchIndexRefs,
+			searchIndexFields,
 		)
 
 		// Create the $transaction method with persistence trigger

@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest"
-import { Effect, Ref } from "effect"
-import { buildSearchIndex, lookupSearchIndex } from "../src/indexes/search-index.js"
+import { Effect, Ref, Schema, Stream, Chunk } from "effect"
+import { buildSearchIndex, lookupSearchIndex, resolveWithSearchIndex } from "../src/indexes/search-index.js"
 import type { SearchIndexMap } from "../src/types/search-types.js"
+import { createEffectDatabase } from "../src/factories/database-effect.js"
 
 // ============================================================================
 // Test Data
@@ -125,5 +126,222 @@ describe("lookupSearchIndex", () => {
 
 		// Book 3 has both "left" and "le" in its indexed fields
 		expect(ids.has("3")).toBe(true)
+	})
+})
+
+// ============================================================================
+// resolveWithSearchIndex Tests
+// ============================================================================
+
+describe("resolveWithSearchIndex", () => {
+	it("7.3: returns undefined when no search index is configured", async () => {
+		const map = new Map(sampleBooks.map((b) => [b.id, b]))
+		const result = await Effect.runPromise(
+			resolveWithSearchIndex({ title: { $search: "dune" } }, undefined, undefined, map),
+		)
+		expect(result).toBeUndefined()
+	})
+
+	it("7.3: returns undefined when where clause has no $search", async () => {
+		const indexRef = await Effect.runPromise(buildSearchIndex(["title", "author"], sampleBooks))
+		const map = new Map(sampleBooks.map((b) => [b.id, b]))
+		const result = await Effect.runPromise(
+			resolveWithSearchIndex({ title: "Dune" }, indexRef, ["title", "author"], map),
+		)
+		expect(result).toBeUndefined()
+	})
+
+	it("7.3: returns candidates for top-level $search when fields match index", async () => {
+		const indexRef = await Effect.runPromise(buildSearchIndex(["title", "author"], sampleBooks))
+		const map = new Map(sampleBooks.map((b) => [b.id, b]))
+		const result = await Effect.runPromise(
+			resolveWithSearchIndex(
+				{ $search: { query: "dune", fields: ["title"] } },
+				indexRef,
+				["title", "author"],
+				map,
+			),
+		)
+		expect(result).not.toBeUndefined()
+		// Should return books that contain "dune" token
+		expect(result!.some((b) => b.id === "1")).toBe(true) // "Dune"
+		expect(result!.some((b) => b.id === "4")).toBe(true) // "Duneland Adventures"
+	})
+
+	it("7.3: returns candidates for field-level $search when field is in index", async () => {
+		const indexRef = await Effect.runPromise(buildSearchIndex(["title", "author"], sampleBooks))
+		const map = new Map(sampleBooks.map((b) => [b.id, b]))
+		const result = await Effect.runPromise(
+			resolveWithSearchIndex(
+				{ title: { $search: "neuromancer" } },
+				indexRef,
+				["title", "author"],
+				map,
+			),
+		)
+		expect(result).not.toBeUndefined()
+		expect(result!.length).toBe(1)
+		expect(result![0].id).toBe("2")
+	})
+
+	it("7.3: returns undefined when queried fields are not covered by index", async () => {
+		const indexRef = await Effect.runPromise(buildSearchIndex(["title"], sampleBooks)) // Only title indexed
+		const map = new Map(sampleBooks.map((b) => [b.id, b]))
+		const result = await Effect.runPromise(
+			resolveWithSearchIndex(
+				{ $search: { query: "dune", fields: ["author"] } }, // Searching author which is not indexed
+				indexRef,
+				["title"], // Only title is indexed
+				map,
+			),
+		)
+		expect(result).toBeUndefined()
+	})
+
+	it("7.3: returns empty array when no matches found", async () => {
+		const indexRef = await Effect.runPromise(buildSearchIndex(["title", "author"], sampleBooks))
+		const map = new Map(sampleBooks.map((b) => [b.id, b]))
+		const result = await Effect.runPromise(
+			resolveWithSearchIndex(
+				{ $search: { query: "xyz123nonexistent", fields: ["title"] } },
+				indexRef,
+				["title", "author"],
+				map,
+			),
+		)
+		expect(result).not.toBeUndefined()
+		expect(result!.length).toBe(0)
+	})
+})
+
+// ============================================================================
+// Search Index Integration in Query Pipeline Tests
+// ============================================================================
+
+describe("Search Index in Query Pipeline (task 7.3)", () => {
+	const BookSchema = Schema.Struct({
+		id: Schema.String,
+		title: Schema.String,
+		author: Schema.String,
+		year: Schema.Number,
+	})
+
+	const testBooks = [
+		{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+		{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
+		{ id: "3", title: "The Left Hand of Darkness", author: "Ursula K. Le Guin", year: 1969 },
+		{ id: "4", title: "Duneland Adventures", author: "Some Author", year: 2020 },
+	]
+
+	it("7.3: uses search index to narrow candidates for $search queries", async () => {
+		// Create database with searchIndex configured
+		const config = {
+			books: {
+				schema: BookSchema,
+				relationships: {},
+				searchIndex: ["title", "author"] as const,
+			},
+		} as const
+
+		const db = await Effect.runPromise(
+			createEffectDatabase(config, {
+				books: testBooks,
+			}),
+		)
+
+		// Query with $search - should use the search index
+		const results = await db.books
+			.query({
+				where: { $search: { query: "dune" } },
+			})
+			.runPromise
+
+		// Should find books with "dune" in title (Dune and Duneland Adventures)
+		expect(results.length).toBe(2)
+		expect(results.some((r) => r.id === "1")).toBe(true)
+		expect(results.some((r) => r.id === "4")).toBe(true)
+	})
+
+	it("7.3: uses search index for field-level $search", async () => {
+		const config = {
+			books: {
+				schema: BookSchema,
+				relationships: {},
+				searchIndex: ["title", "author"] as const,
+			},
+		} as const
+
+		const db = await Effect.runPromise(
+			createEffectDatabase(config, {
+				books: testBooks,
+			}),
+		)
+
+		// Query with field-level $search
+		const results = await db.books
+			.query({
+				where: { title: { $search: "neuromancer" } },
+			})
+			.runPromise
+
+		expect(results.length).toBe(1)
+		expect(results[0].id).toBe("2")
+	})
+
+	it("7.3: search index works with other filters", async () => {
+		const config = {
+			books: {
+				schema: BookSchema,
+				relationships: {},
+				searchIndex: ["title", "author"] as const,
+			},
+		} as const
+
+		const db = await Effect.runPromise(
+			createEffectDatabase(config, {
+				books: testBooks,
+			}),
+		)
+
+		// Query with $search and additional filter
+		const results = await db.books
+			.query({
+				where: {
+					$search: { query: "dune" },
+					year: { $lt: 2000 },
+				},
+			})
+			.runPromise
+
+		// Should only find Dune (1965), not Duneland Adventures (2020)
+		expect(results.length).toBe(1)
+		expect(results[0].id).toBe("1")
+	})
+
+	it("7.3: search without searchIndex config still works (full scan)", async () => {
+		// Create database WITHOUT searchIndex configured
+		const config = {
+			books: {
+				schema: BookSchema,
+				relationships: {},
+				// No searchIndex configured
+			},
+		} as const
+
+		const db = await Effect.runPromise(
+			createEffectDatabase(config, {
+				books: testBooks,
+			}),
+		)
+
+		// Query with $search should still work via full scan
+		const results = await db.books
+			.query({
+				where: { $search: { query: "dune" } },
+			})
+			.runPromise
+
+		// Should still find books with "dune"
+		expect(results.length).toBe(2)
 	})
 })

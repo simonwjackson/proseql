@@ -389,6 +389,13 @@ export type {
 
 export { STOP_WORDS, SEARCH_SCORE_KEY } from "./types/search-types.js";
 
+// Search index functions
+export {
+	buildSearchIndex,
+	lookupSearchIndex,
+	resolveWithSearchIndex,
+} from "./indexes/search-index.js";
+
 // ============================================================================
 // ID Generation Utilities
 // ============================================================================
