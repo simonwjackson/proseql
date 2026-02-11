@@ -82,5 +82,72 @@ describe("$transaction", () => {
 			const db = await Effect.runPromise(createTestDb())
 			expect(typeof db.$transaction).toBe("function")
 		})
+
+		it("should create user and post in transaction, both visible after commit", async () => {
+			const db = await Effect.runPromise(createTestDb())
+
+			// Verify initial state
+			const initialUsers = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			const initialPosts = await Stream.runCollect(db.posts.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			expect(initialUsers).toHaveLength(2)
+			expect(initialPosts).toHaveLength(2)
+
+			// Execute transaction that creates a new user and a post referencing them
+			const result = await db
+				.$transaction((ctx) =>
+					Effect.gen(function* () {
+						const newUser = yield* ctx.users.create({
+							id: "u3",
+							name: "Charlie",
+							email: "charlie@test.com",
+							age: 35,
+						})
+						const newPost = yield* ctx.posts.create({
+							id: "p3",
+							title: "Charlie's First Post",
+							content: "Hello from Charlie",
+							authorId: newUser.id,
+						})
+						return { user: newUser, post: newPost }
+					}),
+				)
+				.pipe(Effect.runPromise)
+
+			// Verify return value from transaction
+			expect(result.user.id).toBe("u3")
+			expect(result.user.name).toBe("Charlie")
+			expect(result.post.id).toBe("p3")
+			expect(result.post.authorId).toBe("u3")
+
+			// Verify both entities are visible in the database after commit
+			const finalUsers = await Stream.runCollect(db.users.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+			const finalPosts = await Stream.runCollect(db.posts.query({})).pipe(
+				Effect.map(Chunk.toArray),
+				Effect.runPromise,
+			)
+
+			expect(finalUsers).toHaveLength(3)
+			expect(finalPosts).toHaveLength(3)
+
+			// Verify the new entities exist with correct data
+			const charlie = finalUsers.find((u) => u.id === "u3")
+			expect(charlie).toBeDefined()
+			expect(charlie?.name).toBe("Charlie")
+			expect(charlie?.email).toBe("charlie@test.com")
+
+			const charliePost = finalPosts.find((p) => p.id === "p3")
+			expect(charliePost).toBeDefined()
+			expect(charliePost?.title).toBe("Charlie's First Post")
+			expect(charliePost?.authorId).toBe("u3")
+		})
 	})
 })
