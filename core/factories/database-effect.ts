@@ -1017,9 +1017,20 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		for (const collectionName of Object.keys(config)) {
 			const filePath = config[collectionName].file
 
-			// afterMutation: synchronously schedule a debounced save (fire-and-forget)
+			// afterMutation: schedule a debounced save (fire-and-forget), but only if
+			// no transaction is active. When a transaction is active, the transaction's
+			// own afterMutation handles mutation tracking and persistence is deferred
+			// until commit. This handles the edge case where non-tx CRUD methods are
+			// called during a transaction.
 			const afterMutation = filePath
-				? () => Effect.sync(() => trigger.schedule(collectionName))
+				? () =>
+						Ref.get(transactionLock).pipe(
+							Effect.flatMap((isLocked) =>
+								isLocked
+									? Effect.void // Skip persistence during transactions
+									: Effect.sync(() => trigger.schedule(collectionName)),
+							),
+						)
 				: undefined
 
 			collections[collectionName] = buildCollection(
