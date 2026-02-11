@@ -1050,4 +1050,48 @@ describe("lifecycle-hooks", () => {
 			expect(afterDeleteFindings[0].found).toBe(false)
 		})
 	})
+
+	describe("onChange hooks", () => {
+		it("onChange fires on create with type: 'create'", async () => {
+			const onChangeCalls: Array<OnChangeContext<User>> = []
+			const hooks: HooksConfig<User> = {
+				onChange: [makeTrackingOnChangeHook(onChangeCalls)],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks, { users: [] })
+					const created = yield* db.users.create({
+						name: "OnChange Test User",
+						email: "onchange@test.com",
+						age: 32,
+					})
+					return created
+				}),
+			)
+
+			// Verify onChange was called exactly once
+			expect(onChangeCalls).toHaveLength(1)
+			const ctx = onChangeCalls[0]
+
+			// Verify the context has the correct discriminated union type
+			expect(ctx.type).toBe("create")
+			expect(ctx.collection).toBe("users")
+
+			// Type narrowing based on discriminant
+			if (ctx.type === "create") {
+				// Verify the entity matches what was created
+				expect(ctx.entity.id).toBe(result.id)
+				expect(ctx.entity.name).toBe("OnChange Test User")
+				expect(ctx.entity.email).toBe("onchange@test.com")
+				expect(ctx.entity.age).toBe(32)
+
+				// The entity should be the same as what was returned from create
+				expect(ctx.entity).toEqual(result)
+			} else {
+				// Fail if wrong type
+				expect.fail("Expected onChange context type to be 'create'")
+			}
+		})
+	})
 })
