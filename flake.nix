@@ -49,7 +49,7 @@
       );
 
       devShells = forAllSystems (
-        { pkgs, bun2nixPkgs }:
+        { pkgs, bun2nixPkgs, ... }:
         {
           default = pkgs.mkShell {
             packages = [
@@ -70,24 +70,32 @@
       );
 
       checks = forAllSystems (
-        { pkgs, ... }:
+        { pkgs, system, ... }:
+        let
+          mkBunDerivation = bun2nix.lib.${system}.mkBunDerivation;
+        in
         {
-          default = pkgs.stdenvNoCC.mkDerivation {
-            name = "proseql-checks";
+          default = mkBunDerivation {
+            pname = "proseql-checks";
+            version = "0.1.0";
             src = ./.;
+            bunNix = ./bun.nix;
 
-            nativeBuildInputs = [ pkgs.bun ];
+            nativeBuildInputs = [ pkgs.typescript ];
 
             buildPhase = ''
+              runHook preBuild
               export HOME=$(mktemp -d)
-              bun install --frozen-lockfile
               bun test packages/*/tests/
               bunx tsc --build
+              runHook postBuild
             '';
 
             installPhase = ''
+              runHook preInstall
               mkdir -p $out
               echo "All checks passed" > $out/result
+              runHook postInstall
             '';
           };
         }
