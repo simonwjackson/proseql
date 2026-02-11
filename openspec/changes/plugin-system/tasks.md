@@ -1,11 +1,11 @@
 ## 1. Types
 
 - [x] 1.1 Create `core/plugins/plugin-types.ts` with `ProseQLPlugin` interface: `name: string`, `version?: string`, optional `codecs: ReadonlyArray<FormatCodec>`, `operators: ReadonlyArray<CustomOperator>`, `idGenerators: ReadonlyArray<CustomIdGenerator>`, `hooks: GlobalHooksConfig`, `dependencies?: ReadonlyArray<string>`, `initialize?: () => Effect.Effect<void>`, `shutdown?: () => Effect.Effect<void>`
-- [ ] 1.2 Define `CustomOperator` interface: `name: string` (must start with `$`), `types: ReadonlyArray<"string" | "number" | "boolean" | "array">`, `evaluate: (fieldValue: unknown, operand: unknown) => boolean`
-- [ ] 1.3 Define `CustomIdGenerator` interface: `name: string`, `generate: () => string`
-- [ ] 1.4 Define `GlobalHooksConfig` type: same shape as `HooksConfig<Record<string, unknown>>` (untyped, since global hooks span all collections)
-- [ ] 1.5 Define `PluginRegistry` interface: resolved internal state holding `codecs: ReadonlyArray<FormatCodec>`, `operators: Map<string, CustomOperator>`, `idGenerators: Map<string, CustomIdGenerator>`, `globalHooks: GlobalHooksConfig`
-- [ ] 1.6 Create `core/errors/plugin-errors.ts` with `PluginError`: `Data.TaggedError("PluginError")<{ plugin: string, reason: string, message: string }>`
+- [x] 1.2 Define `CustomOperator` interface: `name: string` (must start with `$`), `types: ReadonlyArray<"string" | "number" | "boolean" | "array">`, `evaluate: (fieldValue: unknown, operand: unknown) => boolean`
+- [x] 1.3 Define `CustomIdGenerator` interface: `name: string`, `generate: () => string`
+- [x] 1.4 Define `GlobalHooksConfig` type: same shape as `HooksConfig<Record<string, unknown>>` (untyped, since global hooks span all collections)
+- [x] 1.5 Define `PluginRegistry` interface: resolved internal state holding `codecs: ReadonlyArray<FormatCodec>`, `operators: Map<string, CustomOperator>`, `idGenerators: Map<string, CustomIdGenerator>`, `globalHooks: GlobalHooksConfig`
+- [x] 1.6 Create `core/errors/plugin-errors.ts` with `PluginError`: `Data.TaggedError("PluginError")<{ plugin: string, reason: string, message: string }>`
 - [ ] 1.7 Add `readonly idGenerator?: string` to `CollectionConfig` in `core/types/database-config-types.ts`
 - [ ] 1.8 Export new types and `PluginError` from `core/index.ts`
 

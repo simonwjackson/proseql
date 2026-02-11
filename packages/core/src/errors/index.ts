@@ -44,11 +44,18 @@ export type { MigrationErrors } from "./migration-errors.js";
 export { MigrationError } from "./migration-errors.js";
 
 // ============================================================================
+// Plugin Errors (re-exported from plugin-errors.ts)
+// ============================================================================
+
+export { PluginError } from "./plugin-errors.js";
+
+// ============================================================================
 // Union Types
 // ============================================================================
 
 import type { CrudError } from "./crud-errors.js";
 import type { MigrationErrors } from "./migration-errors.js";
+import type { PluginError } from "./plugin-errors.js";
 import type { QueryError } from "./query-errors.js";
 import type { PersistenceError } from "./storage-errors.js";
 
@@ -56,4 +63,5 @@ export type DatabaseError =
 	| CrudError
 	| QueryError
 	| PersistenceError
-	| MigrationErrors;
+	| MigrationErrors
+	| PluginError;
