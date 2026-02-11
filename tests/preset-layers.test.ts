@@ -139,16 +139,21 @@ describe("AllTextFormatsLayer", () => {
 	})
 
 	it("fails with UnsupportedFormatError for unknown extension", async () => {
-		const result = await runWithAllFormats(
-			Effect.gen(function* () {
-				const registry = yield* SerializerRegistry
-				return yield* registry.serialize(testData, "xml").pipe(
-					Effect.matchEffect({
-						onFailure: (e) => Effect.succeed(e),
-						onSuccess: () => Effect.fail("should not succeed" as const),
-					}),
-				)
-			}),
+		const result = await Effect.runPromise(
+			Effect.provide(
+				Effect.gen(function* () {
+					const registry = yield* SerializerRegistry
+					return yield* registry.serialize(testData, "xml").pipe(
+						Effect.match({
+							onFailure: (e) => e,
+							onSuccess: () => {
+								throw new Error("should not succeed")
+							},
+						}),
+					)
+				}),
+				AllTextFormatsLayer,
+			),
 		)
 
 		expect(result._tag).toBe("UnsupportedFormatError")
@@ -197,16 +202,21 @@ describe("DefaultSerializerLayer", () => {
 
 		for (const ext of unsupportedExtensions) {
 			it(`fails with UnsupportedFormatError for .${ext}`, async () => {
-				const result = await runWithDefault(
-					Effect.gen(function* () {
-						const registry = yield* SerializerRegistry
-						return yield* registry.serialize(testData, ext).pipe(
-							Effect.matchEffect({
-								onFailure: (e) => Effect.succeed(e),
-								onSuccess: () => Effect.fail("should not succeed" as const),
-							}),
-						)
-					}),
+				const result = await Effect.runPromise(
+					Effect.provide(
+						Effect.gen(function* () {
+							const registry = yield* SerializerRegistry
+							return yield* registry.serialize(testData, ext).pipe(
+								Effect.match({
+									onFailure: (e) => e,
+									onSuccess: () => {
+										throw new Error("should not succeed")
+									},
+								}),
+							)
+						}),
+						DefaultSerializerLayer,
+					),
 				)
 
 				expect(result._tag).toBe("UnsupportedFormatError")
@@ -222,16 +232,21 @@ describe("DefaultSerializerLayer", () => {
 		}
 
 		it("error message only lists json and yaml as available formats", async () => {
-			const result = await runWithDefault(
-				Effect.gen(function* () {
-					const registry = yield* SerializerRegistry
-					return yield* registry.serialize(testData, "xml").pipe(
-						Effect.matchEffect({
-							onFailure: (e) => Effect.succeed(e),
-							onSuccess: () => Effect.fail("should not succeed" as const),
-						}),
-					)
-				}),
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const registry = yield* SerializerRegistry
+						return yield* registry.serialize(testData, "xml").pipe(
+							Effect.match({
+								onFailure: (e) => e,
+								onSuccess: () => {
+									throw new Error("should not succeed")
+								},
+							}),
+						)
+					}),
+					DefaultSerializerLayer,
+				),
 			)
 
 			expect(result._tag).toBe("UnsupportedFormatError")

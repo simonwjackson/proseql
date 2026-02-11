@@ -1,4 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import {
+	describe,
+	it,
+	expect,
+	vi,
+	beforeEach,
+	afterEach,
+	type MockInstance,
+} from "vitest"
 import { Effect } from "effect"
 import { SerializerRegistry } from "../core/serializers/serializer-service.js"
 import {
@@ -143,7 +151,7 @@ describe("makeSerializerLayer", () => {
 	})
 
 	describe("duplicate extension warning", () => {
-		let warnSpy: ReturnType<typeof vi.spyOn>
+		let warnSpy: MockInstance
 
 		beforeEach(() => {
 			warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})

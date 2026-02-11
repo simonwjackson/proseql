@@ -72,6 +72,6 @@
 
 ## 10. Verification
 
-- [ ] 10.1 Run `bunx tsc --noEmit` — verify no type errors
+- [x] 10.1 Run `bunx tsc --noEmit` — verify no type errors
 - [ ] 10.2 Run `bun test` — verify all tests pass
 - [ ] 10.3 Verify no remaining imports of deleted files across the codebase
