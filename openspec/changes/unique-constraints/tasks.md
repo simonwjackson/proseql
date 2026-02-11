@@ -13,7 +13,7 @@
 
 ## 3. Wire Into CRUD Operations
 
-- [ ] 3.1 Add `uniqueFields: ReadonlyArray<ReadonlyArray<string>>` parameter to `create` and `createMany` in `core/operations/crud/create.ts`. Call `checkUniqueConstraints` after schema validation, before Ref.update. Add `UniqueConstraintError` to the error channel.
+- [x] 3.1 Add `uniqueFields: ReadonlyArray<ReadonlyArray<string>>` parameter to `create` and `createMany` in `core/operations/crud/create.ts`. Call `checkUniqueConstraints` after schema validation, before Ref.update. Add `UniqueConstraintError` to the error channel.
 - [ ] 3.2 In `createMany`, respect `skipDuplicates` for unique violations: catch `UniqueConstraintError`, add to skipped list, continue with remaining entities
 - [ ] 3.3 Add `uniqueFields` parameter to `update` and `updateMany` in `core/operations/crud/update.ts`. Before checking, determine if the update touches any unique field (intersect update keys with constraint fields). If so, call `checkUniqueConstraints` on the post-update entity. Add `UniqueConstraintError` to the error channel.
 - [ ] 3.4 Add `uniqueFields` parameter to `upsert` and `upsertMany` in `core/operations/crud/upsert.ts`. At the top of each function, call `validateUpsertWhere`. On the create path, call `checkUniqueConstraints`. Add `UniqueConstraintError` to the error channel.

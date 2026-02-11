@@ -15,6 +15,7 @@ import {
 	DuplicateKeyError,
 	ForeignKeyError,
 	HookError,
+	UniqueConstraintError,
 	ValidationError,
 } from "../../errors/crud-errors.js"
 import { validateEntity } from "../../validators/schema-validator.js"
@@ -26,6 +27,7 @@ import type { CollectionIndexes } from "../../types/index-types.js"
 import { addToIndex, addManyToIndex } from "../../indexes/index-manager.js"
 import type { HooksConfig } from "../../types/hook-types.js"
 import { runBeforeCreateHooks, runAfterCreateHooks, runOnChangeHooks } from "../../hooks/hook-runner.js"
+import { checkUniqueConstraints, checkBatchUniqueConstraints, type NormalizedConstraints } from "./unique-check.js"
 
 // ============================================================================
 // Types
@@ -63,8 +65,9 @@ export const create = <T extends HasId, I = T>(
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	indexes?: CollectionIndexes,
 	hooks?: HooksConfig<T>,
+	uniqueFields: NormalizedConstraints = [],
 ) =>
-(input: CreateInput<T>): Effect.Effect<T, ValidationError | DuplicateKeyError | ForeignKeyError | HookError> =>
+(input: CreateInput<T>): Effect.Effect<T, ValidationError | DuplicateKeyError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
 		const id = (input as Record<string, unknown>).id as string | undefined || generateId()
 		const now = new Date().toISOString()
@@ -100,6 +103,9 @@ export const create = <T extends HasId, I = T>(
 				}),
 			)
 		}
+
+		// Check unique constraints
+		yield* checkUniqueConstraints(entity, currentMap, uniqueFields, collectionName)
 
 		// Validate foreign keys
 		yield* validateForeignKeysEffect(
@@ -157,11 +163,12 @@ export const createMany = <T extends HasId, I = T>(
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	indexes?: CollectionIndexes,
 	hooks?: HooksConfig<T>,
+	uniqueFields: NormalizedConstraints = [],
 ) =>
 (
 	inputs: ReadonlyArray<CreateInput<T>>,
 	options?: CreateManyOptions,
-): Effect.Effect<CreateManyResult<T>, ValidationError | DuplicateKeyError | ForeignKeyError | HookError> =>
+): Effect.Effect<CreateManyResult<T>, ValidationError | DuplicateKeyError | ForeignKeyError | HookError | UniqueConstraintError> =>
 	Effect.gen(function* () {
 		const created: T[] = []
 		const skipped: Array<{ data: Partial<T>; reason: string }> = []
@@ -247,6 +254,9 @@ export const createMany = <T extends HasId, I = T>(
 			batchIds.add(id)
 			validEntities.push(hookResult.entity)
 		}
+
+		// Check unique constraints on all valid entities (including inter-batch conflicts)
+		yield* checkBatchUniqueConstraints(validEntities, currentMap, uniqueFields, collectionName)
 
 		// Phase 2: Validate foreign keys if requested
 		if (options?.validateRelationships !== false) {

@@ -72,6 +72,7 @@ import {
 	type ForeignKeyError,
 	type HookError,
 	type OperationError,
+	type UniqueConstraintError,
 } from "../errors/crud-errors.js"
 import type {
 	StorageError,
@@ -199,13 +200,13 @@ export interface EffectCollection<T extends HasId> {
 
 	readonly create: (
 		input: CreateInput<T>,
-	) => RunnableEffect<T, ValidationError | DuplicateKeyError | ForeignKeyError | HookError>
+	) => RunnableEffect<T, ValidationError | DuplicateKeyError | ForeignKeyError | HookError | UniqueConstraintError>
 	readonly createMany: (
 		inputs: ReadonlyArray<CreateInput<T>>,
 		options?: CreateManyOptions,
 	) => RunnableEffect<
 		CreateManyResult<T>,
-		ValidationError | DuplicateKeyError | ForeignKeyError | HookError
+		ValidationError | DuplicateKeyError | ForeignKeyError | HookError | UniqueConstraintError
 	>
 
 	readonly update: (
