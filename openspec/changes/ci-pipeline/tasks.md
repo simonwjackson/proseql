@@ -14,7 +14,7 @@
 
 ## 3. Caching
 
-- [ ] 3.1 Verify `setup-bun` cache option is configured in all jobs, using `bun.lock` as cache key
+- [x] 3.1 Verify `setup-bun` cache option is configured in all jobs, using `bun.lock` as cache key
 - [ ] 3.2 Test that a second workflow run (same lockfile) hits the cache and skips full install
 
 ## 4. Verification
