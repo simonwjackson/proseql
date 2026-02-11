@@ -1,6 +1,6 @@
 ## 1. Workspace Root Setup
 
-- [ ] 1.1 Replace root `package.json` with workspace root: `"private": true`, `"workspaces": ["packages/*"]`, move `devDependencies` (`@types/bun`, `vitest`) to root, add `"scripts": { "postinstall": "bun2nix -o bun.nix" }`
+- [x] 1.1 Replace root `package.json` with workspace root: `"private": true`, `"workspaces": ["packages/*"]`, move `devDependencies` (`@types/bun`, `vitest`) to root, add `"scripts": { "postinstall": "bun2nix -o bun.nix" }`
 - [ ] 1.2 Create `tsconfig.base.json` at root with shared compiler options: `target: "ES2022"`, `module: "esnext"`, `moduleResolution: "bundler"`, `strict: true`, `declaration: true`, `declarationMap: true`, `composite: true`, `skipLibCheck: true`. Add `paths` mapping `@proseql/core` → `./packages/core/src/index.ts`
 - [ ] 1.3 Delete old `tsconfig.json` and `tsconfig.test.json` (replaced by base + per-package configs)
 
