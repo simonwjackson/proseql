@@ -418,3 +418,70 @@ export const removeFromSearchIndex = <T extends HasId>(
 		removeEntityFromIndexMut(newIndex, entity, fields);
 		return newIndex;
 	});
+
+/**
+ * Update an entity in the search index.
+ *
+ * Efficiently handles updates by only reindexing fields that have changed.
+ * For changed fields, removes old tokens and adds new tokens. This should
+ * be called after updating an entity to keep the search index up to date.
+ *
+ * Optimization: If a field's value hasn't changed, no index operations are
+ * performed for that field. This is more efficient than a full remove+add
+ * when only some indexed fields are modified.
+ *
+ * @param indexRef - Ref containing the SearchIndexMap
+ * @param oldEntity - The entity before the update
+ * @param newEntity - The entity after the update
+ * @param fields - The fields that are indexed for full-text search
+ * @returns Effect that completes when the index is updated
+ *
+ * @example
+ * ```ts
+ * const oldBook = { id: "5", title: "Snow Crash", author: "Neal Stephenson" }
+ * const newBook = { id: "5", title: "Snow Crash (Revised)", author: "Neal Stephenson" }
+ * yield* updateInSearchIndex(indexRef, oldBook, newBook, ["title", "author"])
+ * // Only "title" changed, so:
+ * // - Removes "5" from "snow", "crash"
+ * // - Adds "5" to "snow", "crash", "revised"
+ * // - "author" field is unchanged, no operations needed
+ * ```
+ */
+export const updateInSearchIndex = <T extends HasId>(
+	indexRef: Ref.Ref<SearchIndexMap>,
+	oldEntity: T,
+	newEntity: T,
+	fields: ReadonlyArray<string>,
+): Effect.Effect<void> =>
+	Ref.update(indexRef, (index) => {
+		const oldRecord = oldEntity as Record<string, unknown>;
+		const newRecord = newEntity as Record<string, unknown>;
+
+		// Find which fields have actually changed
+		const changedFields: Array<string> = [];
+		for (const field of fields) {
+			const oldValue = oldRecord[field];
+			const newValue = newRecord[field];
+			if (oldValue !== newValue) {
+				changedFields.push(field);
+			}
+		}
+
+		// If no indexed fields changed, return the original index unchanged
+		if (changedFields.length === 0) {
+			return index;
+		}
+
+		// Clone the index to avoid mutating the original
+		const newIndex: SearchIndexMap = new Map(index);
+		// Also clone the sets that we'll modify to maintain immutability
+		for (const [token, idSet] of index) {
+			newIndex.set(token, new Set(idSet));
+		}
+
+		// Remove old tokens and add new tokens for changed fields only
+		removeEntityFromIndexMut(newIndex, oldEntity, changedFields);
+		addEntityToIndexMut(newIndex, newEntity, changedFields);
+
+		return newIndex;
+	});

@@ -396,6 +396,7 @@ export {
 	lookupSearchIndex,
 	removeFromSearchIndex,
 	resolveWithSearchIndex,
+	updateInSearchIndex,
 } from "./indexes/search-index.js";
 
 // ============================================================================
