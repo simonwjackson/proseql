@@ -38,7 +38,7 @@
 
 ## 6. Tests — Compound Constraints
 
-- [ ] 6.1 Create test database with `uniqueFields: [["userId", "settingKey"]]`
+- [x] 6.1 Create test database with `uniqueFields: [["userId", "settingKey"]]`
 - [ ] 6.2 Test create: duplicate compound tuple → `UniqueConstraintError`
 - [ ] 6.3 Test create: partial overlap (one field matches, other differs) → succeeds
 - [ ] 6.4 Test create: null in one compound field → skipped, succeeds

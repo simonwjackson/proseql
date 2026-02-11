@@ -91,6 +91,52 @@ const anotherUser: User = {
 // Tests
 // ============================================================================
 
+// ============================================================================
+// Compound Constraint Test Schema
+// ============================================================================
+
+/**
+ * Settings schema with compound unique constraint on [userId, settingKey].
+ * This tests uniqueness across multiple fields where the combination must be unique.
+ */
+const SettingSchema = Schema.Struct({
+	id: Schema.String,
+	userId: Schema.String,
+	settingKey: Schema.String,
+	value: Schema.String,
+	createdAt: Schema.optional(Schema.String),
+	updatedAt: Schema.optional(Schema.String),
+})
+
+type Setting = typeof SettingSchema.Type
+
+/**
+ * Normalized unique constraints for compound [userId, settingKey].
+ */
+const settingUniqueFields = normalizeConstraints([["userId", "settingKey"]])
+
+// ============================================================================
+// Compound Constraint Test Data
+// ============================================================================
+
+const existingSetting: Setting = {
+	id: "setting1",
+	userId: "user1",
+	settingKey: "theme",
+	value: "dark",
+}
+
+const anotherSetting: Setting = {
+	id: "setting2",
+	userId: "user1",
+	settingKey: "language",
+	value: "en",
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
 describe("Unique Constraints - Single Field", () => {
 	describe("create", () => {
 		it("should fail with UniqueConstraintError when email already exists", async () => {
@@ -425,6 +471,129 @@ describe("Unique Constraints - Single Field", () => {
 
 			expect(result.name).toBe("Duplicate Email")
 			expect(result.email).toBe("alice@example.com")
+		})
+	})
+})
+
+// ============================================================================
+// Compound Unique Constraints Tests
+// ============================================================================
+
+describe("Unique Constraints - Compound Fields", () => {
+	describe("create", () => {
+		it("should fail with UniqueConstraintError when compound tuple already exists", async () => {
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const settingsRef = yield* makeRef<Setting>([existingSetting])
+					const stateRefs = yield* makeStateRefs({ settings: [existingSetting] })
+
+					const doCreate = create(
+						"settings",
+						SettingSchema,
+						noRelationships,
+						settingsRef,
+						stateRefs,
+						undefined,
+						undefined,
+						settingUniqueFields,
+					)
+
+					// Try to create with same userId + settingKey combo
+					return yield* doCreate({
+						userId: "user1",
+						settingKey: "theme", // same as existingSetting
+						value: "light",
+					}).pipe(Effect.flip)
+				}),
+			)
+
+			expect(result._tag).toBe("UniqueConstraintError")
+			if (result._tag === "UniqueConstraintError") {
+				expect(result.collection).toBe("settings")
+				expect(result.constraint).toBe("unique_userId_settingKey")
+				expect(result.fields).toEqual(["userId", "settingKey"])
+				expect(result.values).toEqual({ userId: "user1", settingKey: "theme" })
+				expect(result.existingId).toBe("setting1")
+			}
+		})
+
+		it("should succeed when one field of compound differs (partial overlap)", async () => {
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const settingsRef = yield* makeRef<Setting>([existingSetting])
+					const stateRefs = yield* makeStateRefs({ settings: [existingSetting] })
+
+					const doCreate = create(
+						"settings",
+						SettingSchema,
+						noRelationships,
+						settingsRef,
+						stateRefs,
+						undefined,
+						undefined,
+						settingUniqueFields,
+					)
+
+					// Same userId, different settingKey → should succeed
+					return yield* doCreate({
+						userId: "user1",
+						settingKey: "notifications", // different from existingSetting
+						value: "enabled",
+					})
+				}),
+			)
+
+			expect(result.userId).toBe("user1")
+			expect(result.settingKey).toBe("notifications")
+		})
+
+		it("should succeed when compound field has null (nulls not checked)", async () => {
+			// Schema with optional userId to allow null
+			const SettingWithOptionalUser = Schema.Struct({
+				id: Schema.String,
+				userId: Schema.NullOr(Schema.String),
+				settingKey: Schema.String,
+				value: Schema.String,
+				createdAt: Schema.optional(Schema.String),
+				updatedAt: Schema.optional(Schema.String),
+			})
+
+			type SettingOptUser = typeof SettingWithOptionalUser.Type
+
+			const existingWithNullUser: SettingOptUser = {
+				id: "setting1",
+				userId: null,
+				settingKey: "theme",
+				value: "dark",
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const settingsRef = yield* makeRef<SettingOptUser>([existingWithNullUser])
+					const stateRefs = yield* makeStateRefs({ settings: [existingWithNullUser] })
+
+					const doCreate = create(
+						"settings",
+						SettingWithOptionalUser,
+						noRelationships,
+						settingsRef,
+						stateRefs,
+						undefined,
+						undefined,
+						normalizeConstraints([["userId", "settingKey"]]),
+					)
+
+					// Another setting with null userId + same settingKey → should succeed (nulls not checked)
+					return yield* doCreate({
+						userId: null,
+						settingKey: "theme",
+						value: "light",
+					})
+				}),
+			)
+
+			expect(result.userId).toBe(null)
+			expect(result.settingKey).toBe("theme")
 		})
 	})
 })
