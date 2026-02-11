@@ -10,6 +10,7 @@ import type {
 } from "./aggregate-types.js";
 import type { CursorConfig, RunnableCursorPage } from "./cursor-types.js";
 import type { ValidationError } from "../errors/crud-errors.js";
+import type { ComputedFieldsConfig, InferComputedFields } from "./computed-types.js";
 
 // ============================================================================
 // Core Types
@@ -827,14 +828,20 @@ export type ResolveRelationships<Relations, AllEntities> = {
 		: never;
 };
 
+// Helper type to merge entity with computed fields when computed config is present
+type EntityWithComputed<Entity, Computed> = Computed extends ComputedFieldsConfig<Entity>
+	? Entity & InferComputedFields<Computed>
+	: Entity;
+
 // Generate the full database type automatically
 export type GenerateDatabase<Config> = {
 	[K in keyof Config]: Config[K] extends {
 		schema: Schema.Schema<infer Entity, infer _E, infer _R>;
 		relationships: infer Relations;
+		computed?: infer Computed;
 	}
 		? SmartCollection<
-				Entity,
+				EntityWithComputed<Entity, Computed>,
 				ResolveRelationships<Relations, ExtractEntityTypes<Config>>,
 				GenerateDatabase<Config>
 			>
