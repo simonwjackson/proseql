@@ -1,9 +1,24 @@
 {
+	"$schema": "https://biomejs.dev/schemas/2.3.8/schema.json",
+	"files": {
+		"includes": [
+			"packages/*/src/**/*.ts",
+			"packages/*/tests/**/*.ts",
+			"!**/dist",
+			"!!node_modules"
+		]
+	},
 	"linter": {
+		"enabled": true,
 		"rules": {
 			"suspicious": {
 				"noExplicitAny": "error"
 			}
 		}
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab",
+		"indentWidth": 2
 	}
 }
