@@ -17,7 +17,7 @@
 ## 3. $transaction Callback Wrapper
 
 - [x] 3.1 Implement `$transaction(fn)` in `core/transactions/transaction.ts`: create transaction → run `fn(ctx)` → on success call `ctx.commit()` → on failure call `ctx.rollback()` then re-raise the original error.
-- [ ] 3.2 Handle nested transaction detection: if `transactionLock` is already held, fail with `TransactionError { operation: "begin", reason: "nested transactions not supported" }`.
+- [x] 3.2 Handle nested transaction detection: if `transactionLock` is already held, fail with `TransactionError { operation: "begin", reason: "nested transactions not supported" }`.
 
 ## 4. Factory Integration
 

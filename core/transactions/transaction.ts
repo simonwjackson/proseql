@@ -266,6 +266,18 @@ export const $transaction = <DB extends Record<string, EffectCollection<HasId>>,
 	fn: (ctx: TransactionContext<DB>) => Effect.Effect<A, E>,
 ): Effect.Effect<A, E | TransactionError> =>
 	Effect.gen(function* () {
+		// Task 3.2: Check for nested transactions before attempting to acquire lock
+		// $transaction is the user-facing callback API, so if the lock is already held
+		// when $transaction is called, it's a nested transaction attempt.
+		const isLocked = yield* Ref.get(transactionLock)
+		if (isLocked) {
+			return yield* new TransactionError({
+				operation: "begin",
+				reason: "nested transactions not supported",
+				message: "Cannot begin transaction: nested transactions not supported",
+			})
+		}
+
 		// Create the transaction context
 		const ctx = yield* createTransaction<DB>(
 			stateRefs,
