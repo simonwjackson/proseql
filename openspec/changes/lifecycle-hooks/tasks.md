@@ -18,7 +18,7 @@
 
 - [x] 3.1 Add `hooks?: HooksConfig<T>` parameter to `create` in `core/operations/crud/create.ts`. After schema validation, run `beforeCreate` hooks with the validated entity. Use the returned (possibly transformed) entity for the insert.
 - [x] 3.2 After state mutation in `create`, run `afterCreate` hooks with the created entity. Then run `onChange` hooks with `type: "create"`.
-- [ ] 3.3 Add `HookError` to `create`'s error channel.
+- [x] 3.3 Add `HookError` to `create`'s error channel.
 - [ ] 3.4 In `createMany`, run before/after/onChange hooks per entity. Respect `skipDuplicates` for `HookError` (skip the entity).
 
 ## 4. CRUD Integration — Update

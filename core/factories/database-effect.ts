@@ -67,6 +67,7 @@ import {
 	ValidationError,
 	type DuplicateKeyError,
 	type ForeignKeyError,
+	type HookError,
 	type OperationError,
 } from "../errors/crud-errors.js"
 import type {
@@ -192,7 +193,7 @@ export interface EffectCollection<T extends HasId> {
 
 	readonly create: (
 		input: CreateInput<T>,
-	) => RunnableEffect<T, ValidationError | DuplicateKeyError | ForeignKeyError>
+	) => RunnableEffect<T, ValidationError | DuplicateKeyError | ForeignKeyError | HookError>
 	readonly createMany: (
 		inputs: ReadonlyArray<CreateInput<T>>,
 		options?: CreateManyOptions,
