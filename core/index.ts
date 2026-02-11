@@ -142,6 +142,22 @@ export type {
 } from "./types/index-types.js";
 
 // ============================================================================
+// Index Functions
+// ============================================================================
+
+export {
+	normalizeIndexes,
+	buildIndexes,
+	addToIndex,
+	removeFromIndex,
+	updateInIndex,
+	addManyToIndex,
+	removeManyFromIndex,
+} from "./indexes/index-manager.js";
+
+export { resolveWithIndex } from "./indexes/index-lookup.js";
+
+// ============================================================================
 // Schema Validation
 // ============================================================================
 

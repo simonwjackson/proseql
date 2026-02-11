@@ -15,12 +15,12 @@
 
 ## 3. Index Lookup
 
-- [ ] 3.1 Create `core/indexes/index-lookup.ts` with `resolveWithIndex(where, indexes, map)`. Returns `Array<T> | undefined` — entity array if index was used, `undefined` if no usable index.
-- [ ] 3.2 Implement index eligibility check: for each normalized index, check if all key fields have equality conditions (direct value, `$eq`, or `$in`) in the where clause. Skip `$or`/`$and`/`$not` at the top level.
-- [ ] 3.3 Implement single-value lookup: equality/$eq → `index.get(value)` → resolve IDs to entities from the map.
-- [ ] 3.4 Implement multi-value lookup: `$in` → union of `index.get(v)` for each value in the array.
-- [ ] 3.5 Implement compound index lookup: compute compound key(s) from where values, handle `$in` Cartesian product for compound indexes.
-- [ ] 3.6 Implement index selection: when multiple indexes match, prefer the one covering more fields (compound over single).
+- [x] 3.1 Create `core/indexes/index-lookup.ts` with `resolveWithIndex(where, indexes, map)`. Returns `Array<T> | undefined` — entity array if index was used, `undefined` if no usable index.
+- [x] 3.2 Implement index eligibility check: for each normalized index, check if all key fields have equality conditions (direct value, `$eq`, or `$in`) in the where clause. Skip `$or`/`$and`/`$not` at the top level.
+- [x] 3.3 Implement single-value lookup: equality/$eq → `index.get(value)` → resolve IDs to entities from the map.
+- [x] 3.4 Implement multi-value lookup: `$in` → union of `index.get(v)` for each value in the array.
+- [x] 3.5 Implement compound index lookup: compute compound key(s) from where values, handle `$in` Cartesian product for compound indexes.
+- [x] 3.6 Implement index selection: when multiple indexes match, prefer the one covering more fields (compound over single).
 
 ## 4. CRUD Integration
 
