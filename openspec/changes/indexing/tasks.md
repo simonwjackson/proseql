@@ -71,7 +71,7 @@
 - [x] 9.1 Test compound index equality query on all fields → index lookup
 - [x] 9.2 Test partial compound query → falls back to full scan
 - [x] 9.3 Test compound query with extra non-indexed fields → index used, extras post-filtered
-- [ ] 9.4 Test `$in` on one compound field → Cartesian product lookup
+- [x] 9.4 Test `$in` on one compound field → Cartesian product lookup
 - [ ] 9.5 Test compound index maintenance (create/update/delete)
 - [ ] 9.6 Test compound key handles mixed types (string + number)
 

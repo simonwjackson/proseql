@@ -4353,6 +4353,192 @@ describe("Indexing - Query Acceleration", () => {
 			expect(results.length).toBe(0)
 		})
 	})
+
+	describe("Task 9.4: $in on one compound field → Cartesian product lookup", () => {
+		it("should use Cartesian product when $in is used on one field of compound index", async () => {
+			const config = createMultiIndexConfig()
+			// Compound index: ["category", "subcategory"]
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+				{ id: "p4", name: "Chair", category: "furniture", subcategory: "office", price: 199 },
+				{ id: "p5", name: "Tablet", category: "electronics", subcategory: "tablets", price: 499 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Query with $in on category (first field) and direct value on subcategory (second field)
+			// Should lookup: ["electronics","office"] and ["furniture","office"]
+			// Only ["furniture","office"] has matches (p3, p4)
+			const results = await db.products.query({
+				where: {
+					category: { $in: ["electronics", "furniture"] },
+					subcategory: "office",
+				},
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p3", "p4"])
+		})
+
+		it("should use Cartesian product when $in is used on second field of compound index", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Tablet", category: "electronics", subcategory: "tablets", price: 499 },
+				{ id: "p4", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Query with direct value on category and $in on subcategory
+			// Should lookup: ["electronics","computers"] and ["electronics","phones"]
+			const results = await db.products.query({
+				where: {
+					category: "electronics",
+					subcategory: { $in: ["computers", "phones"] },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p2"])
+		})
+
+		it("should use Cartesian product when $in is used on both fields of compound index", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+				{ id: "p4", name: "Chair", category: "furniture", subcategory: "seating", price: 199 },
+				{ id: "p5", name: "Table", category: "furniture", subcategory: "office", price: 399 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Query with $in on both fields
+			// Cartesian product: ["electronics","computers"], ["electronics","phones"],
+			//                    ["furniture","computers"], ["furniture","phones"]
+			// Only ["electronics","computers"] and ["electronics","phones"] have matches
+			const results = await db.products.query({
+				where: {
+					category: { $in: ["electronics", "furniture"] },
+					subcategory: { $in: ["computers", "phones"] },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p2"])
+		})
+
+		it("should return empty when $in Cartesian product finds no matches", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Query with $in values that don't match any entries
+			// Cartesian product: ["furniture","office"], ["furniture","seating"]
+			// None exist in data
+			const results = await db.products.query({
+				where: {
+					category: { $in: ["furniture"] },
+					subcategory: { $in: ["office", "seating"] },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+
+		it("should produce same results as non-indexed query with $in on compound field", async () => {
+			// Config with compound index
+			const indexedConfig = {
+				products: {
+					schema: ProductSchema,
+					indexes: [["category", "subcategory"]] as ReadonlyArray<ReadonlyArray<string>>,
+					relationships: {} as const,
+				},
+			} as const
+
+			// Config without any indexes
+			const unindexedConfig = {
+				products: {
+					schema: ProductSchema,
+					relationships: {} as const,
+				},
+			} as const
+
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+				{ id: "p4", name: "Chair", category: "furniture", subcategory: "seating", price: 199 },
+			]
+
+			const indexedDb = await Effect.runPromise(
+				createIndexedDatabase(indexedConfig, { products: testProducts }),
+			)
+			const unindexedDb = await Effect.runPromise(
+				createIndexedDatabase(unindexedConfig, { products: testProducts }),
+			)
+
+			// Query with $in on one compound field
+			const whereClause = {
+				category: { $in: ["electronics", "furniture"] },
+				subcategory: "computers",
+			}
+
+			const indexedResults = await indexedDb.products.query({ where: whereClause }).runPromise
+			const unindexedResults = await unindexedDb.products.query({ where: whereClause }).runPromise
+
+			const indexedIds = indexedResults.map((r) => (r as { id: string }).id).sort()
+			const unindexedIds = unindexedResults.map((r) => (r as { id: string }).id).sort()
+
+			expect(indexedIds).toEqual(unindexedIds)
+			expect(indexedIds).toEqual(["p1"])
+		})
+
+		it("should combine $in Cartesian lookup with post-filtering on non-indexed field", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Desktop", category: "electronics", subcategory: "computers", price: 599 },
+				{ id: "p3", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p4", name: "Tablet", category: "electronics", subcategory: "tablets", price: 399 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Compound index with $in + extra non-indexed condition
+			// Cartesian: ["electronics","computers"], ["electronics","phones"]
+			// Matches: p1, p2, p3
+			// Post-filter price > 600: p1, p3
+			const results = await db.products.query({
+				where: {
+					category: "electronics",
+					subcategory: { $in: ["computers", "phones"] },
+					price: { $gt: 600 },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p3"])
+		})
+	})
 })
 
 // Export helpers for use in other test files
