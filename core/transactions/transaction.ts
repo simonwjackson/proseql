@@ -97,7 +97,10 @@ export const createTransaction = <DB extends Record<string, EffectCollection<Has
 			snapshots.set(name, snapshot)
 		}
 
-		// Mutation tracking set (will be fully implemented in task 2.7)
+		// Task 2.7: Mutation tracking set
+		// CRUD operations call addMutation(collectionName) instead of scheduling persistence writes.
+		// On commit, persistenceTrigger.schedule is called for each collection in this set.
+		// On rollback, this set is simply discarded (no persistence writes).
 		const mutatedCollections = new Set<string>()
 
 		// isActive flag - guards all transaction operations
