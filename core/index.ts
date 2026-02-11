@@ -191,10 +191,7 @@ export type {
 // Transaction Types
 // ============================================================================
 
-export type {
-	TransactionContext,
-	TransactionalOptions,
-} from "./types/crud-types.js";
+export type { TransactionContext } from "./types/crud-types.js";
 
 // ============================================================================
 // Transaction Functions

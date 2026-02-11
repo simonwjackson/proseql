@@ -270,13 +270,6 @@ export type TransactionContext<DB = Record<string, SmartCollection<unknown>>> = 
 	readonly [K in keyof DB]: DB[K];
 };
 
-/**
- * Options that support transactions
- */
-export type TransactionalOptions = {
-	transaction?: TransactionContext;
-};
-
 // ============================================================================
 // Type Helpers
 // ============================================================================
