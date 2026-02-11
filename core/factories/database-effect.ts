@@ -46,6 +46,7 @@ import { applySort } from "../operations/query/sort-stream.js"
 import { applySelect } from "../operations/query/select-stream.js"
 import { applyPagination } from "../operations/query/paginate-stream.js"
 import { applyPopulate } from "../operations/relationships/populate-stream.js"
+import type { CursorConfig } from "../types/cursor-types.js"
 import {
 	computeAggregates,
 	computeGroupedAggregates,
@@ -59,9 +60,9 @@ import {
 import type { DanglingReferenceError } from "../errors/query-errors.js"
 import {
 	NotFoundError,
+	ValidationError,
 	type DuplicateKeyError,
 	type ForeignKeyError,
-	type ValidationError,
 	type OperationError,
 } from "../errors/crud-errors.js"
 import type {
@@ -156,7 +157,8 @@ export interface EffectCollection<T extends HasId> {
 		readonly select?: Record<string, unknown> | ReadonlyArray<string>
 		readonly limit?: number
 		readonly offset?: number
-	}) => RunnableStream<Record<string, unknown>, DanglingReferenceError>
+		readonly cursor?: CursorConfig
+	}) => RunnableStream<Record<string, unknown>, DanglingReferenceError | ValidationError>
 
 	readonly findById: (
 		id: string,
@@ -414,8 +416,9 @@ const buildCollection = <T extends HasId>(
 			readonly select?: Record<string, unknown> | ReadonlyArray<string>
 			readonly limit?: number
 			readonly offset?: number
+			readonly cursor?: CursorConfig
 		},
-	): RunnableStream<Record<string, unknown>, DanglingReferenceError> => {
+	): RunnableStream<Record<string, unknown>, DanglingReferenceError | ValidationError> => {
 		// Determine populate config: explicit populate or extract from object-based select
 		let populateConfig = options?.populate
 		if (
@@ -427,6 +430,43 @@ const buildCollection = <T extends HasId>(
 				options.select as Record<string, unknown>,
 				relationships,
 			)
+		}
+
+		// Handle cursor pagination: validate and inject implicit sort if needed
+		const cursorConfig = options?.cursor
+		let effectiveSort = options?.sort
+
+		if (cursorConfig) {
+			const cursorKey = cursorConfig.key
+
+			if (options?.sort) {
+				// Explicit sort provided: validate cursor key matches primary sort field
+				const sortKeys = Object.keys(options.sort)
+				if (sortKeys.length === 0) {
+					// Empty sort object: inject implicit ascending sort on cursor key
+					effectiveSort = { [cursorKey]: "asc" as const }
+				} else {
+					const primarySortKey = sortKeys[0]
+					if (primarySortKey !== cursorKey) {
+						// Sort mismatch: return stream that immediately fails
+						const errorStream = Stream.fail(
+							new ValidationError({
+								message: "Invalid cursor configuration",
+								issues: [
+									{
+										field: "cursor.key",
+										message: `cursor key '${cursorKey}' must match primary sort field '${primarySortKey}'`,
+									},
+								],
+							}),
+						)
+						return withStreamRunPromise(errorStream)
+					}
+				}
+			} else {
+				// No explicit sort: inject implicit ascending sort on cursor key
+				effectiveSort = { [cursorKey]: "asc" as const }
+			}
 		}
 
 		const stream = Stream.unwrap(
@@ -444,7 +484,7 @@ const buildCollection = <T extends HasId>(
 					dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target: string; readonly foreignKey?: string }> }>,
 					collectionName,
 				)(s)
-				s = applySort(options?.sort)(s)
+				s = applySort(effectiveSort)(s)
 				s = applyPagination(options?.offset, options?.limit)(s)
 				s = applySelect(options?.select as Record<string, unknown> | ReadonlyArray<string> | undefined)(s)
 

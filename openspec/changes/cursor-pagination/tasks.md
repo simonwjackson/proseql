@@ -16,7 +16,7 @@
 
 ## 3. Factory Integration
 
-- [ ] 3.1 Update `queryFn` in `core/factories/database-effect.ts`: detect `options.cursor`, branch pipeline. When cursor present: inject implicit ascending sort on cursor key if no explicit sort, validate cursor key matches primary sort field if sort is explicit
+- [x] 3.1 Update `queryFn` in `core/factories/database-effect.ts`: detect `options.cursor`, branch pipeline. When cursor present: inject implicit ascending sort on cursor key if no explicit sort, validate cursor key matches primary sort field if sort is explicit
 - [ ] 3.2 Implement cursor pipeline branch: filter → populate → sort → collect via `applyCursor` → apply select to collected items → package as `CursorPageResult` → wrap with `RunnableCursorPage` (`.runPromise`)
 - [ ] 3.3 Ensure select is applied after cursor value extraction so projected items don't lose cursor key data
 - [ ] 3.4 Update `queryFn` options type to accept `cursor?: CursorConfig` (runtime), relying on `QueryConfig` type union for compile-time mutual exclusivity with `limit`/`offset`
