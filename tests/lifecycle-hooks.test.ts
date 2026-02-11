@@ -1144,5 +1144,47 @@ describe("lifecycle-hooks", () => {
 				expect.fail("Expected onChange context type to be 'update'")
 			}
 		})
+
+		it("onChange fires on delete with type: 'delete'", async () => {
+			const onChangeCalls: Array<OnChangeContext<User>> = []
+			const hooks: HooksConfig<User> = {
+				onChange: [makeTrackingOnChangeHook(onChangeCalls)],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks)
+					// u1 starts as: { id: "u1", name: "Alice", email: "alice@test.com", age: 30 }
+					const deleted = yield* db.users.delete("u1")
+					return deleted
+				}),
+			)
+
+			// Verify onChange was called exactly once
+			expect(onChangeCalls).toHaveLength(1)
+			const ctx = onChangeCalls[0]
+
+			// Verify the context has the correct discriminated union type
+			expect(ctx.type).toBe("delete")
+			expect(ctx.collection).toBe("users")
+
+			// Type narrowing based on discriminant
+			if (ctx.type === "delete") {
+				// Verify the id
+				expect(ctx.id).toBe("u1")
+
+				// Verify the entity matches what was deleted
+				expect(ctx.entity.id).toBe("u1")
+				expect(ctx.entity.name).toBe("Alice")
+				expect(ctx.entity.email).toBe("alice@test.com")
+				expect(ctx.entity.age).toBe(30)
+
+				// The entity should be the same as what was returned from delete
+				expect(ctx.entity).toEqual(result)
+			} else {
+				// Fail if wrong type
+				expect.fail("Expected onChange context type to be 'delete'")
+			}
+		})
 	})
 })
