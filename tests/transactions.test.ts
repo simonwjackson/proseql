@@ -850,6 +850,78 @@ describe("createTransaction (Manual)", () => {
 		})
 	})
 
+	describe("commit after rollback", () => {
+		it("should fail with TransactionError when commit() is called after rollback()", async () => {
+			const setup = await Effect.runPromise(createManualTransactionTestSetup())
+
+			// Create transaction context manually
+			const ctx = await Effect.runPromise(
+				createTransaction(
+					setup.stateRefs,
+					setup.transactionLock,
+					setup.buildCollectionForTx,
+					undefined, // no persistence trigger
+				),
+			)
+
+			// Verify transaction is active
+			expect(ctx.isActive).toBe(true)
+
+			// Perform operations within transaction
+			await Effect.runPromise(
+				ctx.users.create({
+					id: "u3",
+					name: "Charlie",
+					email: "charlie@test.com",
+					age: 35,
+				}),
+			)
+
+			// Rollback the transaction first
+			const rollbackResult = await Effect.runPromise(
+				ctx.rollback().pipe(Effect.either),
+			)
+
+			// Verify rollback returns TransactionError with operation "rollback"
+			expect(rollbackResult._tag).toBe("Left")
+			if (rollbackResult._tag === "Left") {
+				const error = rollbackResult.left as {
+					readonly _tag?: string
+					readonly operation?: string
+					readonly reason?: string
+				}
+				expect(error._tag).toBe("TransactionError")
+				expect(error.operation).toBe("rollback")
+				expect(error.reason).toBe("transaction rolled back")
+			}
+
+			// Verify transaction is no longer active
+			expect(ctx.isActive).toBe(false)
+
+			// Now try to commit - should fail with TransactionError
+			const commitResult = await Effect.runPromise(
+				ctx.commit().pipe(Effect.either),
+			)
+
+			expect(commitResult._tag).toBe("Left")
+			if (commitResult._tag === "Left") {
+				const error = commitResult.left as {
+					readonly _tag?: string
+					readonly operation?: string
+					readonly reason?: string
+				}
+				expect(error._tag).toBe("TransactionError")
+				expect(error.operation).toBe("commit")
+				expect(error.reason).toBe("transaction is no longer active")
+			}
+
+			// Verify the data was reverted by the rollback (not committed)
+			const finalUsers = await Effect.runPromise(Ref.get(setup.usersRef))
+			expect(finalUsers.size).toBe(2)
+			expect(finalUsers.get("u3")).toBeUndefined()
+		})
+	})
+
 	describe("double rollback", () => {
 		it("should fail with TransactionError when rollback() is called twice", async () => {
 			const setup = await Effect.runPromise(createManualTransactionTestSetup())
