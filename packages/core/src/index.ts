@@ -357,6 +357,18 @@ export {
 export { getFileExtension } from "./utils/path.js";
 
 // ============================================================================
+// Computed Field Types
+// ============================================================================
+
+export type {
+	ComputedFieldDefinition,
+	ComputedFieldsConfig,
+	InferComputedFields,
+	WithComputed,
+	ComputedFieldKeys,
+} from "./types/computed-types.js";
+
+// ============================================================================
 // ID Generation Utilities
 // ============================================================================
 
