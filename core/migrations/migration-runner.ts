@@ -11,7 +11,7 @@ import type { SerializationError, StorageError, UnsupportedFormatError } from ".
 import { StorageAdapter } from "../storage/storage-service.js"
 import { SerializerRegistry } from "../serializers/serializer-service.js"
 import type { DatabaseConfig } from "../types/database-config-types.js"
-import type { Migration, DryRunResult } from "./migration-types.js"
+import type { Migration, DryRunResult, DryRunCollectionResult, DryRunStatus, DryRunMigration } from "./migration-types.js"
 
 // ============================================================================
 // Migration Execution
@@ -244,5 +244,113 @@ export const dryRunMigrations = (
 	MigrationError | StorageError | SerializationError | UnsupportedFormatError,
 	StorageAdapter | SerializerRegistry
 > =>
-	// Stub implementation: task 8.1 will implement the actual logic
-	Effect.succeed({ collections: [] })
+	Effect.gen(function* () {
+		const storage = yield* StorageAdapter
+		const serializer = yield* SerializerRegistry
+
+		const collectionResults: Array<DryRunCollectionResult> = []
+
+		for (const collectionName of Object.keys(config)) {
+			const collectionConfig = config[collectionName]
+
+			// Skip unversioned collections
+			if (collectionConfig.version === undefined) {
+				continue
+			}
+
+			const targetVersion = collectionConfig.version
+			const filePath = collectionConfig.file
+
+			// Skip collections without a file path
+			if (!filePath) {
+				continue
+			}
+
+			// Check if file exists
+			const fileExists = yield* storage.exists(filePath)
+
+			if (!fileExists) {
+				// File doesn't exist - report as no-file
+				collectionResults.push({
+					name: collectionName,
+					filePath,
+					currentVersion: 0,
+					targetVersion,
+					migrationsToApply: [],
+					status: "no-file",
+				})
+				continue
+			}
+
+			// Read and deserialize the file to extract _version
+			const raw = yield* storage.read(filePath)
+
+			// Extract file extension for deserializer
+			const extMatch = filePath.match(/\.([^.]+)$/)
+			const ext = extMatch ? extMatch[1] : "json"
+
+			const parsed = yield* serializer.deserialize(raw, ext)
+
+			// Check if parsed is an object
+			if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+				return yield* Effect.fail(
+					new MigrationError({
+						collection: collectionName,
+						fromVersion: 0,
+						toVersion: targetVersion,
+						step: -1,
+						reason: "invalid-file-format",
+						message: `File '${filePath}' does not contain a valid object`,
+					}),
+				)
+			}
+
+			// Extract _version from file (default 0 if absent)
+			const fileVersion =
+				typeof (parsed as Record<string, unknown>)._version === "number"
+					? ((parsed as Record<string, unknown>)._version as number)
+					: 0
+
+			// Determine status and migrations to apply
+			let status: DryRunStatus
+			let migrationsToApply: ReadonlyArray<DryRunMigration> = []
+
+			if (fileVersion > targetVersion) {
+				// File version ahead of config - cannot migrate
+				status = "ahead"
+			} else if (fileVersion === targetVersion) {
+				// Already at target version
+				status = "up-to-date"
+			} else {
+				// File version < target version - needs migration
+				status = "needs-migration"
+
+				// Filter applicable migrations
+				const migrations = collectionConfig.migrations ?? []
+				migrationsToApply = migrations
+					.filter((m) => m.from >= fileVersion && m.to <= targetVersion)
+					.sort((a, b) => a.from - b.from)
+					.map((m): DryRunMigration => {
+						const result: DryRunMigration = {
+							from: m.from,
+							to: m.to,
+						}
+						if (m.description !== undefined) {
+							return { ...result, description: m.description }
+						}
+						return result
+					})
+			}
+
+			collectionResults.push({
+				name: collectionName,
+				filePath,
+				currentVersion: fileVersion,
+				targetVersion,
+				migrationsToApply,
+				status,
+			})
+		}
+
+		return { collections: collectionResults }
+	})
