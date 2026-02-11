@@ -30,7 +30,7 @@
 - [x] 4.5 Test stability: insert a record between page fetches, verify next page starts at correct cursor position without duplicates or skips
 - [x] 4.6 Test combined with `where`: cursor applies after filtering, correct subset paginated
 - [x] 4.7 Test combined with `populate`: populated fields present in cursor page items
-- [ ] 4.8 Test combined with `select`: selected fields applied to page items, cursor metadata still correct
+- [x] 4.8 Test combined with `select`: selected fields applied to page items, cursor metadata still correct
 - [ ] 4.9 Test combined with explicit `sort`: cursor key must match primary sort field, results in correct order
 - [ ] 4.10 Test implicit sort: omitting sort with cursor key uses ascending order
 - [ ] 4.11 Test validation errors: both `after` + `before` → `ValidationError`, invalid key → `ValidationError`, `limit <= 0` → `ValidationError`, sort mismatch → `ValidationError`

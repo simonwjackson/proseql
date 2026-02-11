@@ -1002,4 +1002,220 @@ describe("Cursor Pagination", () => {
 			expect(result.pageInfo.hasPreviousPage).toBe(false)
 		})
 	})
+
+	describe("combined with select", () => {
+		it("selected fields applied to page items with cursor metadata correct", async () => {
+			const items = generateItems(10)
+
+			// Select only id and name, omitting price and category
+			const result = await runCursorQuery(items, {
+				select: { id: true, name: true },
+				cursor: { key: "id", limit: 3 },
+			})
+
+			// Should have 3 items
+			expect(result.items).toHaveLength(3)
+
+			// Each item should only have selected fields
+			for (const item of result.items) {
+				expect(item.id).toBeDefined()
+				expect(item.name).toBeDefined()
+				// These fields should NOT be present
+				expect(item.price).toBeUndefined()
+				expect(item.category).toBeUndefined()
+			}
+
+			// Verify the specific items
+			expect(result.items.map((i) => i.id)).toEqual([
+				"item-001",
+				"item-002",
+				"item-003",
+			])
+			expect(result.items.map((i) => i.name)).toEqual([
+				"Item 1",
+				"Item 2",
+				"Item 3",
+			])
+
+			// Cursor metadata should still be correct
+			expect(result.pageInfo.startCursor).toBe("item-001")
+			expect(result.pageInfo.endCursor).toBe("item-003")
+			expect(result.pageInfo.hasNextPage).toBe(true)
+			expect(result.pageInfo.hasPreviousPage).toBe(false)
+		})
+
+		it("select with cursor key excluded still works for cursor extraction", async () => {
+			const items = generateItems(10)
+
+			// Select only name and price, explicitly excluding id (the cursor key)
+			// The cursor extraction should still work before select is applied
+			const result = await runCursorQuery(items, {
+				select: { name: true, price: true },
+				cursor: { key: "id", limit: 3 },
+			})
+
+			// Should have 3 items
+			expect(result.items).toHaveLength(3)
+
+			// Items should have selected fields only
+			for (const item of result.items) {
+				expect(item.name).toBeDefined()
+				expect(item.price).toBeDefined()
+				// id should NOT be present in the final items
+				expect(item.id).toBeUndefined()
+			}
+
+			// Despite id being excluded from select, cursor metadata should still be correct
+			// because cursor extraction happens BEFORE select is applied
+			expect(result.pageInfo.startCursor).toBe("item-001")
+			expect(result.pageInfo.endCursor).toBe("item-003")
+			expect(result.pageInfo.hasNextPage).toBe(true)
+			expect(result.pageInfo.hasPreviousPage).toBe(false)
+		})
+
+		it("forward pagination with select works across multiple pages", async () => {
+			const items = generateItems(10)
+
+			// First page with select
+			const firstPage = await runCursorQuery(items, {
+				select: { id: true, category: true },
+				cursor: { key: "id", limit: 3 },
+			})
+
+			expect(firstPage.items).toHaveLength(3)
+			expect(firstPage.items.map((i) => i.id)).toEqual([
+				"item-001",
+				"item-002",
+				"item-003",
+			])
+
+			// All items should only have selected fields
+			for (const item of firstPage.items) {
+				expect(item.id).toBeDefined()
+				expect(item.category).toBeDefined()
+				expect(item.name).toBeUndefined()
+				expect(item.price).toBeUndefined()
+			}
+
+			// Second page using endCursor from first page
+			const secondPage = await runCursorQuery(items, {
+				select: { id: true, category: true },
+				cursor: {
+					key: "id",
+					limit: 3,
+					after: firstPage.pageInfo.endCursor!,
+				},
+			})
+
+			expect(secondPage.items).toHaveLength(3)
+			expect(secondPage.items.map((i) => i.id)).toEqual([
+				"item-004",
+				"item-005",
+				"item-006",
+			])
+
+			// Second page items should also only have selected fields
+			for (const item of secondPage.items) {
+				expect(item.id).toBeDefined()
+				expect(item.category).toBeDefined()
+				expect(item.name).toBeUndefined()
+				expect(item.price).toBeUndefined()
+			}
+
+			expect(secondPage.pageInfo.hasPreviousPage).toBe(true)
+			expect(secondPage.pageInfo.hasNextPage).toBe(true)
+		})
+
+		it("backward pagination with select works correctly", async () => {
+			const items = generateItems(10)
+
+			// Get items before item-007 with select
+			const page = await runCursorQuery(items, {
+				select: { id: true, price: true },
+				cursor: {
+					key: "id",
+					limit: 3,
+					before: "item-007",
+				},
+			})
+
+			// Should return items 4-6
+			expect(page.items).toHaveLength(3)
+			expect(page.items.map((i) => i.id)).toEqual([
+				"item-004",
+				"item-005",
+				"item-006",
+			])
+
+			// Items should only have selected fields
+			for (const item of page.items) {
+				expect(item.id).toBeDefined()
+				expect(item.price).toBeDefined()
+				expect(item.name).toBeUndefined()
+				expect(item.category).toBeUndefined()
+			}
+
+			// Verify price values are correct
+			expect(page.items.map((i) => i.price)).toEqual([40, 50, 60])
+
+			expect(page.pageInfo.hasPreviousPage).toBe(true)
+			expect(page.pageInfo.hasNextPage).toBe(true)
+		})
+
+		it("select with array notation works with cursor pagination", async () => {
+			const items = generateItems(10)
+
+			// Use array notation for select
+			const result = await runCursorQuery(items, {
+				select: ["id", "name"],
+				cursor: { key: "id", limit: 3 },
+			})
+
+			// Should have 3 items
+			expect(result.items).toHaveLength(3)
+
+			// Each item should only have selected fields
+			for (const item of result.items) {
+				expect(item.id).toBeDefined()
+				expect(item.name).toBeDefined()
+				expect(item.price).toBeUndefined()
+				expect(item.category).toBeUndefined()
+			}
+
+			// Cursor metadata should be correct
+			expect(result.pageInfo.startCursor).toBe("item-001")
+			expect(result.pageInfo.endCursor).toBe("item-003")
+			expect(result.pageInfo.hasNextPage).toBe(true)
+		})
+
+		it("select combined with where and cursor works correctly", async () => {
+			const items = generateItems(15)
+
+			// Query electronics category with select
+			const result = await runCursorQuery(items, {
+				where: { category: "electronics" },
+				select: { id: true, name: true },
+				cursor: { key: "id", limit: 2 },
+			})
+
+			// Should have 2 items (electronics: 3, 6, 9, 12, 15)
+			expect(result.items).toHaveLength(2)
+			expect(result.items.map((i) => i.id)).toEqual([
+				"item-003",
+				"item-006",
+			])
+
+			// Items should only have selected fields
+			for (const item of result.items) {
+				expect(item.id).toBeDefined()
+				expect(item.name).toBeDefined()
+				expect(item.price).toBeUndefined()
+				// category should not be in output even though we filtered by it
+				expect(item.category).toBeUndefined()
+			}
+
+			expect(result.pageInfo.hasNextPage).toBe(true)
+			expect(result.pageInfo.hasPreviousPage).toBe(false)
+		})
+	})
 })
