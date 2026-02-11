@@ -7,6 +7,9 @@
 
 import type {
 	AggregateResult,
+	GroupedAggregateConfig,
+	GroupedAggregateResult,
+	GroupResult,
 	ScalarAggregateConfig,
 } from "../../types/aggregate-types.js"
 
@@ -216,4 +219,63 @@ export const computeAggregates = (
 	)
 
 	return accumulatorsToResult(finalAcc, config)
+}
+
+/**
+ * Compute grouped aggregates over an array of entities.
+ *
+ * Partitions entities into groups based on groupBy fields, then applies
+ * computeAggregates within each group. Groups are ordered by first encounter.
+ *
+ * @param entities - Array of entities to aggregate
+ * @param config - Grouped aggregate configuration specifying groupBy and operations
+ * @returns GroupedAggregateResult array with group objects
+ */
+export const computeGroupedAggregates = (
+	entities: ReadonlyArray<Record<string, unknown>>,
+	config: GroupedAggregateConfig,
+): GroupedAggregateResult => {
+	// Normalize groupBy to array
+	const groupByFields = normalizeFields(config.groupBy)
+
+	// Partition entities into groups using Map for first-encounter ordering
+	const groups = new Map<string, Array<Record<string, unknown>>>()
+
+	for (const entity of entities) {
+		// Build group key from grouping field values
+		const groupKey = JSON.stringify(groupByFields.map((f) => entity[f]))
+
+		const existing = groups.get(groupKey)
+		if (existing !== undefined) {
+			existing.push(entity)
+		} else {
+			groups.set(groupKey, [entity])
+		}
+	}
+
+	// Build result for each group
+	const result: Array<GroupResult> = []
+
+	for (const [groupKey, groupEntities] of groups) {
+		// Parse back the group values
+		const groupValues = JSON.parse(groupKey) as Array<unknown>
+
+		// Build the group field object
+		const group: Record<string, unknown> = {}
+		for (let i = 0; i < groupByFields.length; i++) {
+			group[groupByFields[i]] = groupValues[i]
+		}
+
+		// Compute aggregates for this group (exclude groupBy from config passed to computeAggregates)
+		const { groupBy: _, ...scalarConfig } = config
+		const aggregates = computeAggregates(groupEntities, scalarConfig)
+
+		// Combine group info with aggregates
+		result.push({
+			group,
+			...aggregates,
+		})
+	}
+
+	return result
 }
