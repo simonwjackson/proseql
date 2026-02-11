@@ -240,5 +240,27 @@ describe("Aggregation", () => {
 			expect(gadgets?.count).toBe(2)
 			expect(tools?.count).toBe(1)
 		})
+
+		it("6.2 single-field groupBy with sum → correct group sums", async () => {
+			const db = await createTestDb()
+			const result = await db.products.aggregate({
+				groupBy: "category",
+				sum: "price",
+			}).runPromise
+
+			// Test data:
+			// electronics: p1 (10.00) + p2 (25.50) = 35.50
+			// gadgets: p3 (15.75) + p4 (35.00) = 50.75
+			// tools: p5 (5.25) = 5.25
+			expect(result).toHaveLength(3)
+
+			const electronics = result.find(g => g.group.category === "electronics")
+			const gadgets = result.find(g => g.group.category === "gadgets")
+			const tools = result.find(g => g.group.category === "tools")
+
+			expect(electronics?.sum?.price).toBeCloseTo(35.50)
+			expect(gadgets?.sum?.price).toBeCloseTo(50.75)
+			expect(tools?.sum?.price).toBeCloseTo(5.25)
+		})
 	})
 })

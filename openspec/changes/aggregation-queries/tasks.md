@@ -48,7 +48,7 @@
 ## 6. Tests — Group By
 
 - [x] 6.1 Test single-field groupBy with count → correct group counts
-- [ ] 6.2 Test single-field groupBy with sum → correct group sums
+- [x] 6.2 Test single-field groupBy with sum → correct group sums
 - [ ] 6.3 Test multi-field groupBy → correct group partitioning
 - [ ] 6.4 Test groupBy with where → groups from filtered subset only
 - [ ] 6.5 Test null grouping field value → forms own group
