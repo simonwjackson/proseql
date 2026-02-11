@@ -1,0 +1,15 @@
+{
+  "name": "@proseql/core",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "effect": "^3.15.2",
+    "yaml": "^2.3.4",
+    "json5": "^2.2.3",
+    "jsonc-parser": "^3.3.1",
+    "smol-toml": "^1.6.0",
+    "@toon-format/toon": "^2.1.0",
+    "hjson": "^3.2.2"
+  }
+}
