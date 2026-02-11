@@ -539,7 +539,84 @@ describe("Upsert Where-Clause Validation", () => {
 
 	describe("upsert where with extra fields", () => {
 		it("should accept where clause with extra fields beyond constraint", async () => {
-			// TODO: Task 7.8
+			// Test that where clause can include additional fields beyond the constraint.
+			// If uniqueFields is ["email"], then where: { email: "...", age: 30 } is valid
+			// because it fully covers the "email" constraint (the extra "age" field is allowed).
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<User>([existingUser])
+				const stateRefs = yield* makeStateRefs({ users: [existingUser] })
+
+				// Upsert using { email, age } — valid because email is a unique field
+				// and age is just extra filtering criteria
+				const result = yield* upsert(
+					"users",
+					UserSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					userUniqueFields, // ["email", "username"] configured
+				)({
+					where: { email: "alice@example.com", age: 30 }, // email covers constraint, age is extra
+					create: {
+						name: "Alice New",
+						email: "alice@example.com",
+						username: "alice-new",
+						age: 30,
+					},
+					update: { age: 31 },
+				})
+
+				// Should update existing user (matched by email, age is extra filter)
+				expect(result.__action).toBe("updated")
+				expect(result.id).toBe("user1")
+				expect(result.age).toBe(31)
+
+				return result
+			})
+
+			await Effect.runPromise(program)
+		})
+
+		it("should accept compound where clause with extra fields", async () => {
+			// Test that where clause can include additional fields beyond a compound constraint.
+			// If uniqueFields is [["userId", "settingKey"]], then where: { userId, settingKey, value }
+			// is valid because it fully covers the compound constraint (value is extra).
+			const program = Effect.gen(function* () {
+				const ref = yield* makeRef<Setting>([existingSetting])
+				const stateRefs = yield* makeStateRefs({ settings: [existingSetting] })
+
+				// Upsert using { userId, settingKey, value } — valid because [userId, settingKey]
+				// is a compound constraint, and value is just extra filtering criteria
+				const result = yield* upsert(
+					"settings",
+					SettingSchema,
+					noRelationships,
+					ref,
+					stateRefs,
+					undefined,
+					undefined,
+					settingUniqueFields, // [["userId", "settingKey"]] configured
+				)({
+					where: { userId: "user1", settingKey: "theme", value: "dark" }, // compound constraint covered, value is extra
+					create: {
+						userId: "user1",
+						settingKey: "theme",
+						value: "dark",
+					},
+					update: { value: "light" },
+				})
+
+				// Should update existing setting (matched by compound key, value is extra filter)
+				expect(result.__action).toBe("updated")
+				expect(result.id).toBe("setting1")
+				expect(result.value).toBe("light")
+
+				return result
+			})
+
+			await Effect.runPromise(program)
 		})
 	})
 
