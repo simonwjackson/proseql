@@ -742,5 +742,39 @@ describe("lifecycle-hooks", () => {
 			// Verify the update payload is present
 			expect(ctx.update).toEqual({ name: "Alice Updated", age: 31 })
 		})
+
+		it("afterDelete receives deleted entity", async () => {
+			const afterDeleteCalls: Array<AfterDeleteContext<User>> = []
+			const hooks: HooksConfig<User> = {
+				afterDelete: [makeTrackingAfterDeleteHook(afterDeleteCalls)],
+			}
+
+			const result = await Effect.runPromise(
+				Effect.gen(function* () {
+					const db = yield* createHookedDatabase(hooks)
+					// u1 starts as: { id: "u1", name: "Alice", email: "alice@test.com", age: 30 }
+					const deleted = yield* db.users.delete("u1")
+					return deleted
+				}),
+			)
+
+			// Verify afterDelete was called
+			expect(afterDeleteCalls).toHaveLength(1)
+			const ctx = afterDeleteCalls[0]
+
+			// Verify context structure
+			expect(ctx.operation).toBe("delete")
+			expect(ctx.collection).toBe("users")
+			expect(ctx.id).toBe("u1")
+
+			// Verify the entity in the context matches the deleted entity
+			expect(ctx.entity.id).toBe("u1")
+			expect(ctx.entity.name).toBe("Alice")
+			expect(ctx.entity.email).toBe("alice@test.com")
+			expect(ctx.entity.age).toBe(30)
+
+			// The entity should be the same as what was returned from delete
+			expect(ctx.entity).toEqual(result)
+		})
 	})
 })
