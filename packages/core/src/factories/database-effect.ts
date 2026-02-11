@@ -626,10 +626,10 @@ const buildCollection = <T extends HasId>(
 	const upsertFn = wrapEffect(upsert(collectionName, schema, relationships, ref, stateRefs, indexes, hooks, uniqueFields))
 	const upsertManyFn = wrapEffect(upsertMany(collectionName, schema, relationships, ref, stateRefs, indexes, hooks, uniqueFields))
 	const createWithRelsFn = wrapEffect(createWithRelationships(
-		collectionName, schema, relationships, ref, stateRefs, dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target?: string; readonly __targetCollection?: string; readonly foreignKey?: string }> }>,
+		collectionName, schema, relationships, ref, stateRefs, dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target?: string; readonly __targetCollection?: string; readonly foreignKey?: string }> }>, computed,
 	))
 	const updateWithRelsFn = wrapEffect(updateWithRelationships(
-		collectionName, schema, relationships, ref, stateRefs, dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target?: string; readonly __targetCollection?: string; readonly foreignKey?: string }> }>,
+		collectionName, schema, relationships, ref, stateRefs, dbConfig as Record<string, { readonly schema: Schema.Schema<HasId, unknown>; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target?: string; readonly __targetCollection?: string; readonly foreignKey?: string }> }>, computed,
 	))
 	const deleteWithRelsFn = wrapEffect(deleteWithRelationships(
 		collectionName, relationships, ref, stateRefs, dbConfig as Record<string, { readonly schema: unknown; readonly relationships: Record<string, { readonly type: "ref" | "inverse"; readonly target?: string; readonly __targetCollection?: string; readonly foreignKey?: string }> }>,

@@ -24,6 +24,7 @@ import {
 } from "../../errors/crud-errors.js"
 import { validateEntity } from "../../validators/schema-validator.js"
 import { validateForeignKeysEffect } from "../../validators/foreign-key.js"
+import type { ComputedFieldsConfig } from "../../types/computed-types.js"
 
 // ============================================================================
 // Types
@@ -348,6 +349,38 @@ const processRelationshipOperations = (
 	})
 
 // ============================================================================
+// Computed Field Stripping
+// ============================================================================
+
+/**
+ * Strip computed field keys from an input object.
+ * Used to remove computed field names from update input before schema validation.
+ *
+ * @param input - The input object (possibly with computed field keys)
+ * @param computed - The computed fields configuration that defines which keys to strip
+ * @returns A new object with computed field keys removed
+ */
+const stripComputedFromInput = <T>(
+	input: T,
+	computed: ComputedFieldsConfig<unknown> | undefined,
+): T => {
+	if (computed === undefined || Object.keys(computed).length === 0) {
+		return input
+	}
+
+	const computedKeys = new Set(Object.keys(computed))
+	const result: Record<string, unknown> = {}
+
+	for (const key of Object.keys(input as Record<string, unknown>)) {
+		if (!computedKeys.has(key)) {
+			result[key] = (input as Record<string, unknown>)[key]
+		}
+	}
+
+	return result as T
+}
+
+// ============================================================================
 // Update with Relationships
 // ============================================================================
 
@@ -355,15 +388,16 @@ const processRelationshipOperations = (
  * Update a single entity with relationship support.
  *
  * Steps:
- * 1. Look up existing entity by ID
- * 2. Parse relationship operations from input
- * 3. Extract base entity updates (non-relationship fields)
- * 4. Process $disconnect: set FK to null (ref) or update inverse entities
- * 5. Process $connect: set FK (ref) or update inverse entity FKs
- * 6. Process $update: update related entities in target collections
- * 7. Process $delete: disconnect specific inverse entities
- * 8. Process $set: replace all inverse relationships
- * 9. Merge base updates, validate, and update the entity
+ * 1. Strip computed field keys from input (they are derived, not stored)
+ * 2. Look up existing entity by ID
+ * 3. Parse relationship operations from input
+ * 4. Extract base entity updates (non-relationship fields)
+ * 5. Process $disconnect: set FK to null (ref) or update inverse entities
+ * 6. Process $connect: set FK (ref) or update inverse entity FKs
+ * 7. Process $update: update related entities in target collections
+ * 8. Process $delete: disconnect specific inverse entities
+ * 9. Process $set: replace all inverse relationships
+ * 10. Merge base updates, validate, and update the entity
  */
 export const updateWithRelationships = <T extends HasId, I = T>(
 	collectionName: string,
@@ -372,13 +406,17 @@ export const updateWithRelationships = <T extends HasId, I = T>(
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	dbConfig: DatabaseConfig,
+	computed?: ComputedFieldsConfig<unknown>,
 ) =>
 (
 	id: string,
 	input: UpdateWithRelationshipsInput<T, Record<string, RelationshipDef>>,
 ): Effect.Effect<T, ValidationError | NotFoundError | ForeignKeyError | OperationError> =>
 	Effect.gen(function* () {
-		// 1. Look up existing entity
+		// 1. Strip computed field keys from input (they are derived, not stored)
+		const sanitizedInput = stripComputedFromInput(input, computed)
+
+		// 2. Look up existing entity
 		const currentMap = yield* Ref.get(ref)
 		const existing = currentMap.get(id)
 		if (existing === undefined) {
@@ -393,16 +431,16 @@ export const updateWithRelationships = <T extends HasId, I = T>(
 
 		const now = new Date().toISOString()
 
-		// 2. Process relationship operations
+		// 3. Process relationship operations
 		const relationshipOps = yield* processRelationshipOperations(
-			input as Record<string, unknown>,
+			sanitizedInput as Record<string, unknown>,
 			relationships,
 			stateRefs,
 		)
 
-		// 3. Extract base entity updates (non-relationship fields)
+		// 4. Extract base entity updates (non-relationship fields)
 		const baseUpdate: Record<string, unknown> = {}
-		for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+		for (const [key, value] of Object.entries(sanitizedInput as Record<string, unknown>)) {
 			if (!(key in relationships)) {
 				baseUpdate[key] = value
 			}
@@ -411,7 +449,7 @@ export const updateWithRelationships = <T extends HasId, I = T>(
 		// Start with a copy of existing entity
 		const updatedEntity: Record<string, unknown> = { ...existing as Record<string, unknown> }
 
-		// 4. Process disconnects
+		// 5. Process disconnects
 		for (const op of relationshipOps.disconnect) {
 			const relationship = relationships[op.field]
 			if (!relationship) continue
@@ -454,7 +492,7 @@ export const updateWithRelationships = <T extends HasId, I = T>(
 			}
 		}
 
-		// 5. Process connects
+		// 6. Process connects
 		for (const op of relationshipOps.connect) {
 			const relationship = relationships[op.field]
 			if (!relationship) continue
@@ -496,7 +534,7 @@ export const updateWithRelationships = <T extends HasId, I = T>(
 			}
 		}
 
-		// 6. Process nested updates on related entities
+		// 7. Process nested updates on related entities
 		for (const op of relationshipOps.update) {
 			const targetRef = stateRefs[op.targetCollection]
 			if (!targetRef) continue
@@ -546,7 +584,7 @@ export const updateWithRelationships = <T extends HasId, I = T>(
 			})
 		}
 
-		// 7. Process delete operations (disconnect specific inverse entities)
+		// 8. Process delete operations (disconnect specific inverse entities)
 		for (const op of relationshipOps.delete) {
 			const relationship = relationships[op.field]
 			if (!relationship || relationship.type !== "inverse") continue
@@ -584,7 +622,7 @@ export const updateWithRelationships = <T extends HasId, I = T>(
 			})
 		}
 
-		// 8. Process set operations (replace all inverse relationships)
+		// 9. Process set operations (replace all inverse relationships)
 		for (const op of relationshipOps.set) {
 			const relationship = relationships[op.field]
 			if (!relationship || relationship.type !== "inverse") continue
@@ -631,7 +669,7 @@ export const updateWithRelationships = <T extends HasId, I = T>(
 			})
 		}
 
-		// 9. Merge base updates, validate, and update
+		// 10. Merge base updates, validate, and update
 		Object.assign(updatedEntity, baseUpdate)
 		updatedEntity.updatedAt = now
 

@@ -24,6 +24,7 @@ import {
 import { validateEntity } from "../../validators/schema-validator.js"
 import { generateId } from "../../utils/id-generator.js"
 import { validateForeignKeysEffect } from "../../validators/foreign-key.js"
+import type { ComputedFieldsConfig } from "../../types/computed-types.js"
 
 // ============================================================================
 // Types
@@ -327,6 +328,38 @@ const processRelationshipOperations = (
 }
 
 // ============================================================================
+// Computed Field Stripping
+// ============================================================================
+
+/**
+ * Strip computed field keys from an input object.
+ * Used to remove computed field names from create input before schema validation.
+ *
+ * @param input - The input object (possibly with computed field keys)
+ * @param computed - The computed fields configuration that defines which keys to strip
+ * @returns A new object with computed field keys removed
+ */
+const stripComputedFromInput = <T>(
+	input: T,
+	computed: ComputedFieldsConfig<unknown> | undefined,
+): T => {
+	if (computed === undefined || Object.keys(computed).length === 0) {
+		return input
+	}
+
+	const computedKeys = new Set(Object.keys(computed))
+	const result: Record<string, unknown> = {}
+
+	for (const key of Object.keys(input as Record<string, unknown>)) {
+		if (!computedKeys.has(key)) {
+			result[key] = (input as Record<string, unknown>)[key]
+		}
+	}
+
+	return result as T
+}
+
+// ============================================================================
 // Create with Relationships
 // ============================================================================
 
@@ -334,14 +367,15 @@ const processRelationshipOperations = (
  * Create a single entity with relationship support.
  *
  * Steps:
- * 1. Parse relationship operations from input
- * 2. Generate parent ID early for use in inverse relationships
- * 3. Process $create: create nested entities in target collections
- * 4. Process $connectOrCreate: find or create target entities
- * 5. Process $connect: resolve target entity IDs
- * 6. Set foreign keys from resolved relationships
- * 7. Validate and create the parent entity
- * 8. Update inverse relationship foreign keys on connected entities
+ * 1. Strip computed field keys from input (they are derived, not stored)
+ * 2. Parse relationship operations from input
+ * 3. Generate parent ID early for use in inverse relationships
+ * 4. Process $create: create nested entities in target collections
+ * 5. Process $connectOrCreate: find or create target entities
+ * 6. Process $connect: resolve target entity IDs
+ * 7. Set foreign keys from resolved relationships
+ * 8. Validate and create the parent entity
+ * 9. Update inverse relationship foreign keys on connected entities
  */
 export const createWithRelationships = <T extends HasId, I = T>(
 	collectionName: string,
@@ -350,20 +384,24 @@ export const createWithRelationships = <T extends HasId, I = T>(
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 	dbConfig: DatabaseConfig,
+	computed?: ComputedFieldsConfig<unknown>,
 ) =>
 (
 	input: CreateWithRelationshipsInput<T, Record<string, RelationshipDef>>,
 ): Effect.Effect<T, ValidationError | ForeignKeyError | OperationError> =>
 	Effect.gen(function* () {
-		// 1. Process relationship operations
+		// 1. Strip computed field keys from input (they are derived, not stored)
+		const sanitizedInput = stripComputedFromInput(input, computed)
+
+		// 2. Process relationship operations
 		const relationshipOps = processRelationshipOperations(
-			input as Record<string, unknown>,
+			sanitizedInput as Record<string, unknown>,
 			relationships,
 		)
 
 		// Extract connect inputs for later resolution
 		const connectInputMap = extractConnectInputs(
-			input as Record<string, unknown>,
+			sanitizedInput as Record<string, unknown>,
 			relationships,
 		)
 		// Make a mutable copy for tracking which have been consumed
@@ -372,9 +410,9 @@ export const createWithRelationships = <T extends HasId, I = T>(
 			pendingConnects[k] = [...v]
 		}
 
-		// 2. Extract base entity data (non-relationship fields)
+		// 3. Extract base entity data (non-relationship fields)
 		const baseInput: Record<string, unknown> = {}
-		for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+		for (const [key, value] of Object.entries(sanitizedInput as Record<string, unknown>)) {
 			if (!(key in relationships)) {
 				baseInput[key] = value
 			}
@@ -384,7 +422,7 @@ export const createWithRelationships = <T extends HasId, I = T>(
 		const parentId = (baseInput.id as string | undefined) || generateId()
 		const now = new Date().toISOString()
 
-		// 3. Process $create: create nested entities
+		// 4. Process $create: create nested entities
 		for (const nestedCreate of relationshipOps.create) {
 			const targetConfig = dbConfig[nestedCreate.targetCollection]
 			if (!targetConfig) continue
@@ -443,7 +481,7 @@ export const createWithRelationships = <T extends HasId, I = T>(
 			}
 		}
 
-		// 4. Process $connectOrCreate operations
+		// 5. Process $connectOrCreate operations
 		for (const op of relationshipOps.connectOrCreate) {
 			const targetRef = stateRefs[op.targetCollection]
 			if (!targetRef) continue
@@ -518,7 +556,7 @@ export const createWithRelationships = <T extends HasId, I = T>(
 			}
 		}
 
-		// 5. Process $connect operations — resolve target IDs
+		// 6. Process $connect operations — resolve target IDs
 		const resolvedConnects: Array<{ field: string; targetId: string; targetCollection: string }> = []
 
 		// Deduplicate connect ops by field — each field's pending inputs are consumed once
@@ -540,7 +578,7 @@ export const createWithRelationships = <T extends HasId, I = T>(
 			}
 		}
 
-		// 6. Set foreign keys from connect operations (ref relationships)
+		// 7. Set foreign keys from connect operations (ref relationships)
 		for (const connect of resolvedConnects) {
 			const relationship = relationships[connect.field]
 			if (relationship && relationship.type === "ref") {
@@ -549,7 +587,7 @@ export const createWithRelationships = <T extends HasId, I = T>(
 			}
 		}
 
-		// 7. Construct, validate, and create the parent entity
+		// 8. Construct, validate, and create the parent entity
 		const rawEntity = {
 			...baseInput,
 			id: parentId,
@@ -585,7 +623,7 @@ export const createWithRelationships = <T extends HasId, I = T>(
 			return next
 		})
 
-		// 8. Update inverse relationship foreign keys on connected entities
+		// 9. Update inverse relationship foreign keys on connected entities
 		for (const connect of resolvedConnects) {
 			const relationship = relationships[connect.field]
 			if (relationship && relationship.type === "inverse") {
