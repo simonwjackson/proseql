@@ -4,8 +4,6 @@
  */
 
 import type { Schema } from "effect";
-import type { StorageAdapter } from "../storage/types.js";
-import type { SerializerRegistry } from "../serializers/types.js";
 import type { HooksConfig } from "./hook-types.js";
 import type { Migration } from "../migrations/migration-types.js";
 
@@ -72,56 +70,6 @@ export type CollectionConfig = {
  * Complete database configuration type that preserves literal types
  */
 export type DatabaseConfig = Record<string, CollectionConfig>;
-
-/**
- * Options for database persistence functionality
- */
-export type PersistenceOptions = {
-	/**
-	 * Storage adapter for file operations
-	 */
-	readonly adapter: StorageAdapter;
-
-	/**
-	 * Registry of serializers for different file formats
-	 */
-	readonly serializerRegistry: SerializerRegistry;
-
-	/**
-	 * Debounce delay for write operations in milliseconds (default: 100)
-	 */
-	readonly writeDebounce?: number;
-
-	/**
-	 * Whether to watch files for external changes and reload data
-	 */
-	readonly watchFiles?: boolean;
-
-	/**
-	 * Callback for handling file change events
-	 */
-	readonly onFileChange?: (filePath: string) => void;
-};
-
-/**
- * Complete options for creating a database with optional persistence
- */
-export type DatabaseOptions = {
-	/**
-	 * Persistence configuration. If not provided, database will be in-memory only.
-	 */
-	readonly persistence?: PersistenceOptions;
-
-	/**
-	 * Whether to validate all data against schemas on startup (default: false)
-	 */
-	readonly validateOnStartup?: boolean;
-
-	/**
-	 * Custom ID generator function (default: uses built-in generator)
-	 */
-	readonly generateId?: () => string;
-};
 
 /**
  * Type guard to check if a collection configuration includes persistence

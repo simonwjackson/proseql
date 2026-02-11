@@ -116,8 +116,6 @@ export type {
 
 export type {
 	DatabaseConfig,
-	DatabaseOptions,
-	PersistenceOptions,
 	CollectionConfig,
 } from "./types/database-config-types.js";
 

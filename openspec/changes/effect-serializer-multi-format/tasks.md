@@ -34,7 +34,7 @@
 
 ## 6. Remove PersistenceOptions/DatabaseOptions
 
-- [ ] 6.1 Remove `PersistenceOptions` and `DatabaseOptions` types from `core/types/database-config-types.ts`. Remove the import of legacy `SerializerRegistry` and `StorageAdapter` from types.ts. Keep all other types.
+- [x] 6.1 Remove `PersistenceOptions` and `DatabaseOptions` types from `core/types/database-config-types.ts`. Remove the import of legacy `SerializerRegistry` and `StorageAdapter` from types.ts. Keep all other types.
 
 ## 7. Delete Legacy Files
 
