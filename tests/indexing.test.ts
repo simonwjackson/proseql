@@ -4150,6 +4150,209 @@ describe("Indexing - Query Acceleration", () => {
 			expect(ids).toEqual(["p1", "p2", "p4"])
 		})
 	})
+
+	describe("Task 9.3: compound query with extra non-indexed fields → index used, extras post-filtered", () => {
+		it("should use compound index and post-filter extra non-indexed conditions", async () => {
+			const config = createMultiIndexConfig()
+			// products has compound index ["category", "subcategory"]
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Desktop", category: "electronics", subcategory: "computers", price: 799 },
+				{ id: "p3", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p4", name: "Monitor", category: "electronics", subcategory: "computers", price: 399 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Query with indexed fields + extra non-indexed field (price)
+			// Index should narrow to computers (p1, p2, p4), then price > 500 filters to (p1, p2)
+			const results = await db.products.query({
+				where: {
+					category: "electronics",
+					subcategory: "computers",
+					price: { $gt: 500 },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p2"])
+		})
+
+		it("should post-filter multiple extra non-indexed conditions", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop Pro", category: "electronics", subcategory: "computers", price: 1299 },
+				{ id: "p2", name: "Laptop Basic", category: "electronics", subcategory: "computers", price: 599 },
+				{ id: "p3", name: "Desktop Gaming", category: "electronics", subcategory: "computers", price: 1999 },
+				{ id: "p4", name: "Desktop Basic", category: "electronics", subcategory: "computers", price: 499 },
+				{ id: "p5", name: "Phone", category: "electronics", subcategory: "phones", price: 999 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Compound index narrows to computers (p1-p4), then filter by price and name pattern
+			const results = await db.products.query({
+				where: {
+					category: "electronics",
+					subcategory: "computers",
+					price: { $gte: 1000 },
+					name: { $contains: "Laptop" },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("p1")
+		})
+
+		it("should produce same results as unindexed query with extra conditions", async () => {
+			// Config with compound index
+			const indexedConfig = {
+				products: {
+					schema: ProductSchema,
+					indexes: [["category", "subcategory"]] as ReadonlyArray<ReadonlyArray<string>>,
+					relationships: {} as const,
+				},
+			} as const
+
+			// Config without any indexes
+			const unindexedConfig = {
+				products: {
+					schema: ProductSchema,
+					relationships: {} as const,
+				},
+			} as const
+
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Phone", category: "electronics", subcategory: "phones", price: 699 },
+				{ id: "p3", name: "Desk", category: "furniture", subcategory: "office", price: 299 },
+				{ id: "p4", name: "Monitor", category: "electronics", subcategory: "computers", price: 399 },
+			]
+
+			const indexedDb = await Effect.runPromise(
+				createIndexedDatabase(indexedConfig, { products: testProducts }),
+			)
+			const unindexedDb = await Effect.runPromise(
+				createIndexedDatabase(unindexedConfig, { products: testProducts }),
+			)
+
+			// Query with compound index fields + extra condition
+			const whereClause = {
+				category: "electronics",
+				subcategory: "computers",
+				price: { $lt: 500 },
+			}
+
+			const indexedResults = await indexedDb.products.query({ where: whereClause }).runPromise
+			const unindexedResults = await unindexedDb.products.query({ where: whereClause }).runPromise
+
+			const indexedIds = indexedResults.map((r) => (r as { id: string }).id).sort()
+			const unindexedIds = unindexedResults.map((r) => (r as { id: string }).id).sort()
+
+			expect(indexedIds).toEqual(unindexedIds)
+			expect(indexedIds).toEqual(["p4"])
+		})
+
+		it("should handle extra field with $eq operator", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Desktop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p3", name: "Monitor", category: "electronics", subcategory: "computers", price: 399 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Compound index for category/subcategory, extra $eq condition on name
+			const results = await db.products.query({
+				where: {
+					category: "electronics",
+					subcategory: "computers",
+					name: { $eq: "Laptop" },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(1)
+			expect((results[0] as { id: string }).id).toBe("p1")
+		})
+
+		it("should handle extra field with $in operator", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Desktop", category: "electronics", subcategory: "computers", price: 899 },
+				{ id: "p3", name: "Server", category: "electronics", subcategory: "computers", price: 2999 },
+				{ id: "p4", name: "Monitor", category: "electronics", subcategory: "computers", price: 399 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Compound index for category/subcategory, extra $in condition on name
+			const results = await db.products.query({
+				where: {
+					category: "electronics",
+					subcategory: "computers",
+					name: { $in: ["Laptop", "Server"] },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p1", "p3"])
+		})
+
+		it("should handle extra field with $ne operator (no index on that field)", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Desktop", category: "electronics", subcategory: "computers", price: 899 },
+				{ id: "p3", name: "Monitor", category: "electronics", subcategory: "computers", price: 399 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Compound index for category/subcategory, extra $ne condition on name
+			const results = await db.products.query({
+				where: {
+					category: "electronics",
+					subcategory: "computers",
+					name: { $ne: "Laptop" },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(2)
+			const ids = results.map((r) => (r as { id: string }).id).sort()
+			expect(ids).toEqual(["p2", "p3"])
+		})
+
+		it("should handle extra condition that filters all index results to empty", async () => {
+			const config = createMultiIndexConfig()
+			const testProducts: ReadonlyArray<Product> = [
+				{ id: "p1", name: "Laptop", category: "electronics", subcategory: "computers", price: 999 },
+				{ id: "p2", name: "Desktop", category: "electronics", subcategory: "computers", price: 899 },
+			]
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { users: [], products: testProducts }),
+			)
+
+			// Compound index narrows to p1, p2 but price > 10000 filters to none
+			const results = await db.products.query({
+				where: {
+					category: "electronics",
+					subcategory: "computers",
+					price: { $gt: 10000 },
+				},
+			}).runPromise
+
+			expect(results.length).toBe(0)
+		})
+	})
 })
 
 // Export helpers for use in other test files
