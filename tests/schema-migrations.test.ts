@@ -1843,6 +1843,275 @@ describe("schema-migrations: auto-migrate on load", () => {
 			expect(store.get("/data/db.json")).toBe(originalContent)
 		})
 	})
+
+	describe("post-migration validation failure → original file untouched, MigrationError with step: -1 (task 11.6)", () => {
+		it("loadData fails with MigrationError (step: -1) when migrated data fails schema validation", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// Original file content at version 0
+			const originalContent = JSON.stringify({
+				u1: { id: "u1", name: "Alice Smith" },
+			})
+			store.set("/data/users.json", originalContent)
+
+			// Migration that runs successfully but produces data that doesn't match V3 schema.
+			// It adds email but NOT firstName, lastName, or age - which V3 requires.
+			const brokenMigration: Migration = {
+				from: 0,
+				to: 1,
+				description: "Migration produces invalid V1 data (missing email)",
+				transform: (data) => {
+					// Intentionally produce data that doesn't match UserSchemaV1
+					// UserSchemaV1 requires email, but we don't add it
+					const result: Record<string, unknown> = {}
+					for (const [id, entity] of Object.entries(data)) {
+						// Just copy data without adding required 'email' field
+						result[id] = { ...(entity as object) }
+					}
+					return result
+				},
+			}
+
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV1, {
+						version: 1,
+						collectionName: "users",
+						migrations: [brokenMigration],
+					}).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			// Verify MigrationError is returned with step: -1 (post-migration validation)
+			expect(error._tag).toBe("MigrationError")
+			const migrationError = error as MigrationError
+			expect(migrationError.step).toBe(-1)
+			expect(migrationError.reason).toBe("post-migration-validation-failed")
+			expect(migrationError.collection).toBe("users")
+			expect(migrationError.fromVersion).toBe(0)
+			expect(migrationError.toVersion).toBe(1)
+			expect(migrationError.message).toContain("Post-migration validation failed")
+			expect(migrationError.message).toContain("u1") // Entity ID in error
+
+			// Verify original file is untouched
+			const storedContent = store.get("/data/users.json")
+			expect(storedContent).toBe(originalContent)
+		})
+
+		it("loadData fails when migration produces wrong type for required field", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// Original file at version 0
+			const originalContent = JSON.stringify({
+				u1: { id: "u1", name: "Bob Jones" },
+			})
+			store.set("/data/users.json", originalContent)
+
+			// Migration that produces data with wrong type for email (number instead of string)
+			const wrongTypeMigration: Migration = {
+				from: 0,
+				to: 1,
+				description: "Migration produces wrong type for email",
+				transform: (data) => {
+					const result: Record<string, unknown> = {}
+					for (const [id, entity] of Object.entries(data)) {
+						result[id] = {
+							...(entity as object),
+							email: 12345, // Wrong type: number instead of string
+						}
+					}
+					return result
+				},
+			}
+
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV1, {
+						version: 1,
+						collectionName: "users",
+						migrations: [wrongTypeMigration],
+					}).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			const migrationError = error as MigrationError
+			expect(migrationError.step).toBe(-1)
+			expect(migrationError.reason).toBe("post-migration-validation-failed")
+			expect(migrationError.message).toContain("Post-migration validation failed")
+
+			// Original file untouched
+			expect(store.get("/data/users.json")).toBe(originalContent)
+		})
+
+		it("loadData fails when last migration in chain produces invalid data", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// Original file at version 1 (needs 1→2 and 2→3 migrations)
+			const originalContent = JSON.stringify({
+				_version: 1,
+				u1: { id: "u1", name: "Charlie Brown", email: "charlie@example.com" },
+			})
+			store.set("/data/users.json", originalContent)
+
+			// Migration 1→2: splits name correctly
+			const migration1to2Valid: Migration = {
+				from: 1,
+				to: 2,
+				transform: (data) => {
+					const result: Record<string, unknown> = {}
+					for (const [id, entity] of Object.entries(data)) {
+						const e = entity as { id: string; name: string; email: string }
+						const parts = e.name.split(" ")
+						result[id] = {
+							id: e.id,
+							firstName: parts[0] || "",
+							lastName: parts.slice(1).join(" ") || "",
+							email: e.email,
+						}
+					}
+					return result
+				},
+			}
+
+			// Migration 2→3: intentionally produces invalid data (age as string instead of number)
+			const migration2to3Invalid: Migration = {
+				from: 2,
+				to: 3,
+				description: "Produces invalid age type",
+				transform: (data) => {
+					const result: Record<string, unknown> = {}
+					for (const [id, entity] of Object.entries(data)) {
+						result[id] = {
+							...(entity as object),
+							age: "not a number", // Wrong type - should be number
+						}
+					}
+					return result
+				},
+			}
+
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV3, {
+						version: 3,
+						collectionName: "users",
+						migrations: [migration1to2Valid, migration2to3Invalid],
+					}).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			const migrationError = error as MigrationError
+			expect(migrationError.step).toBe(-1)
+			expect(migrationError.reason).toBe("post-migration-validation-failed")
+			expect(migrationError.fromVersion).toBe(1) // Started from version 1
+			expect(migrationError.toVersion).toBe(3) // Target version
+
+			// Original file untouched - even though 1→2 ran successfully
+			expect(store.get("/data/users.json")).toBe(originalContent)
+		})
+
+		it("loadCollectionsFromFile fails with MigrationError (step: -1) when migrated data fails validation", async () => {
+			const { store, layer } = makeTestEnv()
+
+			const originalContent = JSON.stringify({
+				users: {
+					u1: { id: "u1", name: "David Lee" },
+				},
+			})
+			store.set("/data/db.json", originalContent)
+
+			// Migration that produces invalid data (missing required email field)
+			const brokenMigration: Migration = {
+				from: 0,
+				to: 1,
+				transform: (data) => {
+					// Just pass through without adding email
+					return data
+				},
+			}
+
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadCollectionsFromFile("/data/db.json", [
+						{
+							name: "users",
+							schema: UserSchemaV1,
+							version: 1,
+							migrations: [brokenMigration],
+						},
+					]).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			const migrationError = error as MigrationError
+			expect(migrationError.step).toBe(-1)
+			expect(migrationError.reason).toBe("post-migration-validation-failed")
+			expect(migrationError.collection).toBe("users")
+			expect(migrationError.message).toContain("Post-migration validation failed")
+
+			// Original file untouched
+			expect(store.get("/data/db.json")).toBe(originalContent)
+		})
+
+		it("all transforms succeed but one entity fails validation → original file untouched", async () => {
+			const { store, layer } = makeTestEnv()
+
+			// File with multiple entities, one will fail validation
+			const originalContent = JSON.stringify({
+				u1: { id: "u1", name: "Eve Wilson" },
+				u2: { id: "u2", name: "Frank Miller" },
+				u3: { id: "u3", name: "Grace Lee" },
+			})
+			store.set("/data/users.json", originalContent)
+
+			// Migration that produces valid data for some entities but invalid for one
+			const partiallyBrokenMigration: Migration = {
+				from: 0,
+				to: 1,
+				transform: (data) => {
+					const result: Record<string, unknown> = {}
+					for (const [id, entity] of Object.entries(data)) {
+						if (id === "u2") {
+							// u2 gets invalid email (number instead of string)
+							result[id] = { ...(entity as object), email: 999 }
+						} else {
+							// Other entities get valid email
+							result[id] = { ...(entity as object), email: "valid@example.com" }
+						}
+					}
+					return result
+				},
+			}
+
+			const error = await Effect.runPromise(
+				Effect.provide(
+					loadData("/data/users.json", UserSchemaV1, {
+						version: 1,
+						collectionName: "users",
+						migrations: [partiallyBrokenMigration],
+					}).pipe(Effect.flip),
+					layer,
+				),
+			)
+
+			expect(error._tag).toBe("MigrationError")
+			const migrationError = error as MigrationError
+			expect(migrationError.step).toBe(-1)
+			expect(migrationError.reason).toBe("post-migration-validation-failed")
+			// The error message should reference the failing entity
+			expect(migrationError.message).toContain("u2")
+
+			// Original file untouched - none of the entities should be written
+			expect(store.get("/data/users.json")).toBe(originalContent)
+		})
+	})
 })
 
 // ============================================================================

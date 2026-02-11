@@ -71,7 +71,7 @@
 - [x] 11.3 Test migrated data written back to file with new `_version`
 - [x] 11.4 Test file at current version → no migrations, normal load
 - [x] 11.5 Test failed transform → original file untouched, `MigrationError`
-- [ ] 11.6 Test post-migration validation failure → original file untouched, `MigrationError` with `step: -1`
+- [x] 11.6 Test post-migration validation failure → original file untouched, `MigrationError` with `step: -1`
 
 ## 12. Tests — Dry Run
 
