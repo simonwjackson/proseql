@@ -1,8 +1,45 @@
 {
   "name": "@proseql/rpc",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "Effect RPC integration for ProseQL type-safe in-memory database",
   "type": "module",
-  "main": "src/index.ts",
+  "scripts": {
+    "build": "bunx tsc --build",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "bun run build && bun test"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simonwjackson/proseql.git",
+    "directory": "packages/rpc"
+  },
+  "keywords": [
+    "database",
+    "typescript",
+    "effect",
+    "rpc",
+    "effect-rpc",
+    "type-safe",
+    "in-memory"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
   "dependencies": {
     "@proseql/core": "workspace:*",
     "@effect/rpc": "^0.51.0"
