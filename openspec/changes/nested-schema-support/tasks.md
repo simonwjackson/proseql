@@ -11,7 +11,7 @@
 - [x] 2.1 Replace local `getNestedValue` in `core/operations/query/sort.ts` with import from `core/utils/nested-path.ts`. Remove the local function.
 - [x] 2.2 Replace local `getNestedValue` in `core/operations/query/sort-stream.ts` with import from `core/utils/nested-path.ts`. Remove the local function.
 - [x] 2.3 Replace local `getNestedValue` in `core/operations/query/cursor-stream.ts` with import from `core/utils/nested-path.ts`. Remove the local function.
-- [ ] 2.4 Run existing tests (`just test-core`) to confirm no regressions from the import change.
+- [x] 2.4 Run existing tests (`just test-core`) to confirm no regressions from the import change.
 
 ## 3. Nested Filtering
 
