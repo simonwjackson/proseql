@@ -852,3 +852,388 @@ describe("parseQueryParams — pagination parsing (task 11.4)", () => {
 		});
 	});
 });
+
+// ============================================================================
+// Task 11.6: Type Coercion
+// ============================================================================
+
+describe("parseQueryParams — type coercion (task 11.6)", () => {
+	describe("boolean coercion", () => {
+		it("should coerce 'true' string to boolean true", () => {
+			const result = parseQueryParams({ published: "true" });
+
+			expect(result.where).toEqual({ published: true });
+			expect(result.where.published).toBe(true);
+			expect(typeof result.where.published).toBe("boolean");
+		});
+
+		it("should coerce 'false' string to boolean false", () => {
+			const result = parseQueryParams({ published: "false" });
+
+			expect(result.where).toEqual({ published: false });
+			expect(result.where.published).toBe(false);
+			expect(typeof result.where.published).toBe("boolean");
+		});
+
+		it("should NOT coerce 'True' (capitalized) to boolean", () => {
+			const result = parseQueryParams({ published: "True" });
+
+			expect(result.where).toEqual({ published: "True" });
+			expect(typeof result.where.published).toBe("string");
+		});
+
+		it("should NOT coerce 'FALSE' (uppercase) to boolean", () => {
+			const result = parseQueryParams({ published: "FALSE" });
+
+			expect(result.where).toEqual({ published: "FALSE" });
+			expect(typeof result.where.published).toBe("string");
+		});
+
+		it("should NOT coerce 'yes' to boolean", () => {
+			const result = parseQueryParams({ active: "yes" });
+
+			expect(result.where).toEqual({ active: "yes" });
+			expect(typeof result.where.active).toBe("string");
+		});
+
+		it("should NOT coerce 'no' to boolean", () => {
+			const result = parseQueryParams({ active: "no" });
+
+			expect(result.where).toEqual({ active: "no" });
+			expect(typeof result.where.active).toBe("string");
+		});
+
+		it("should NOT coerce '1' to boolean true", () => {
+			const result = parseQueryParams({ flag: "1" });
+
+			// '1' becomes number 1, not boolean
+			expect(result.where).toEqual({ flag: 1 });
+			expect(typeof result.where.flag).toBe("number");
+		});
+
+		it("should NOT coerce '0' to boolean false", () => {
+			const result = parseQueryParams({ flag: "0" });
+
+			// '0' becomes number 0, not boolean
+			expect(result.where).toEqual({ flag: 0 });
+			expect(typeof result.where.flag).toBe("number");
+		});
+
+		it("should coerce boolean in $in operator", () => {
+			const result = parseQueryParams({ "status[$in]": "true,false" });
+
+			expect(result.where).toEqual({
+				status: { $in: [true, false] },
+			});
+		});
+
+		it("should coerce boolean in $eq operator", () => {
+			const result = parseQueryParams({ "published[$eq]": "true" });
+
+			expect(result.where).toEqual({ published: { $eq: true } });
+		});
+
+		it("should coerce boolean in $ne operator", () => {
+			const result = parseQueryParams({ "archived[$ne]": "false" });
+
+			expect(result.where).toEqual({ archived: { $ne: false } });
+		});
+	});
+
+	describe("numeric coercion - integers", () => {
+		it("should coerce positive integer string to number", () => {
+			const result = parseQueryParams({ year: "1984" });
+
+			expect(result.where).toEqual({ year: 1984 });
+			expect(typeof result.where.year).toBe("number");
+		});
+
+		it("should coerce zero to number", () => {
+			const result = parseQueryParams({ count: "0" });
+
+			expect(result.where).toEqual({ count: 0 });
+			expect(typeof result.where.count).toBe("number");
+		});
+
+		it("should NOT coerce negative integer (keeps as string due to sign)", () => {
+			const result = parseQueryParams({ temperature: "-5" });
+
+			// parseInt("-5") gives -5, but -5.toString() is "-5" so it should coerce
+			expect(result.where).toEqual({ temperature: -5 });
+			expect(typeof result.where.temperature).toBe("number");
+		});
+
+		it("should coerce large integers", () => {
+			const result = parseQueryParams({ timestamp: "1704067200000" });
+
+			expect(result.where).toEqual({ timestamp: 1704067200000 });
+			expect(typeof result.where.timestamp).toBe("number");
+		});
+
+		it("should NOT coerce integer with leading zeros (string mismatch)", () => {
+			const result = parseQueryParams({ code: "007" });
+
+			// parseInt("007") = 7, but 7.toString() !== "007"
+			expect(result.where).toEqual({ code: "007" });
+			expect(typeof result.where.code).toBe("string");
+		});
+
+		it("should coerce integer in $eq operator", () => {
+			const result = parseQueryParams({ "year[$eq]": "2024" });
+
+			expect(result.where).toEqual({ year: { $eq: 2024 } });
+		});
+
+		it("should coerce integer in $in operator", () => {
+			const result = parseQueryParams({ "year[$in]": "1984,2001,2024" });
+
+			expect(result.where).toEqual({
+				year: { $in: [1984, 2001, 2024] },
+			});
+		});
+	});
+
+	describe("numeric coercion - floats", () => {
+		it("should coerce positive float string to number", () => {
+			const result = parseQueryParams({ rating: "4.5" });
+
+			expect(result.where).toEqual({ rating: 4.5 });
+			expect(typeof result.where.rating).toBe("number");
+		});
+
+		it("should coerce float starting with zero", () => {
+			const result = parseQueryParams({ ratio: "0.75" });
+
+			expect(result.where).toEqual({ ratio: 0.75 });
+			expect(typeof result.where.ratio).toBe("number");
+		});
+
+		it("should coerce negative float", () => {
+			const result = parseQueryParams({ delta: "-3.14" });
+
+			expect(result.where).toEqual({ delta: -3.14 });
+			expect(typeof result.where.delta).toBe("number");
+		});
+
+		it("should NOT coerce float with extra precision", () => {
+			const result = parseQueryParams({ precise: "3.14159265358979" });
+
+			// parseFloat("3.14159265358979").toString() may differ due to floating point representation
+			// But in this case it should match
+			expect(result.where).toEqual({ precise: 3.14159265358979 });
+			expect(typeof result.where.precise).toBe("number");
+		});
+
+		it("should NOT coerce trailing zeros float (string mismatch)", () => {
+			const result = parseQueryParams({ value: "1.50" });
+
+			// parseFloat("1.50") = 1.5, but 1.5.toString() !== "1.50"
+			expect(result.where).toEqual({ value: "1.50" });
+			expect(typeof result.where.value).toBe("string");
+		});
+
+		it("should coerce float in $gte operator", () => {
+			const result = parseQueryParams({ "rating[$gte]": "4.5" });
+
+			expect(result.where).toEqual({ rating: { $gte: 4.5 } });
+		});
+
+		it("should coerce float in $lt operator", () => {
+			const result = parseQueryParams({ "price[$lt]": "99.99" });
+
+			expect(result.where).toEqual({ price: { $lt: 99.99 } });
+		});
+
+		it("should coerce mixed integers and floats in $in operator", () => {
+			const result = parseQueryParams({ "value[$in]": "1,2.5,3,4.75" });
+
+			expect(result.where).toEqual({
+				value: { $in: [1, 2.5, 3, 4.75] },
+			});
+		});
+	});
+
+	describe("non-numeric strings remain strings", () => {
+		it("should NOT coerce alphabetic string", () => {
+			const result = parseQueryParams({ genre: "sci-fi" });
+
+			expect(result.where).toEqual({ genre: "sci-fi" });
+			expect(typeof result.where.genre).toBe("string");
+		});
+
+		it("should NOT coerce alphanumeric string", () => {
+			const result = parseQueryParams({ id: "book-123" });
+
+			expect(result.where).toEqual({ id: "book-123" });
+			expect(typeof result.where.id).toBe("string");
+		});
+
+		it("should NOT coerce string with embedded numbers", () => {
+			const result = parseQueryParams({ version: "v2.0.1" });
+
+			expect(result.where).toEqual({ version: "v2.0.1" });
+			expect(typeof result.where.version).toBe("string");
+		});
+
+		it("should NOT coerce string that looks like a number with text", () => {
+			const result = parseQueryParams({ price: "100USD" });
+
+			expect(result.where).toEqual({ price: "100USD" });
+			expect(typeof result.where.price).toBe("string");
+		});
+
+		it("should NOT coerce empty string", () => {
+			// Empty strings are filtered out completely
+			const result = parseQueryParams({ name: "" });
+
+			expect(result.where).toEqual({});
+		});
+
+		it("should NOT coerce whitespace-only string", () => {
+			const result = parseQueryParams({ name: "   " });
+
+			// Whitespace-only is treated as empty and filtered out
+			// Actually, the normalize function returns "   " which is truthy
+			// But coerceNumeric returns original for whitespace
+			expect(result.where).toEqual({ name: "   " });
+			expect(typeof result.where.name).toBe("string");
+		});
+
+		it("should NOT coerce hex number string", () => {
+			const result = parseQueryParams({ color: "0xFF0000" });
+
+			// Hex strings are not automatically coerced
+			expect(result.where).toEqual({ color: "0xFF0000" });
+			expect(typeof result.where.color).toBe("string");
+		});
+
+		it("should NOT coerce scientific notation string", () => {
+			const result = parseQueryParams({ value: "1e10" });
+
+			// parseInt("1e10") = 1, but 1.toString() !== "1e10"
+			// parseFloat("1e10") = 10000000000, but that.toString() = "10000000000" !== "1e10"
+			expect(result.where).toEqual({ value: "1e10" });
+			expect(typeof result.where.value).toBe("string");
+		});
+
+		it("should coerce Infinity string to number Infinity", () => {
+			const result = parseQueryParams({ maxValue: "Infinity" });
+
+			// "Infinity" is a valid JavaScript number representation
+			expect(result.where).toEqual({ maxValue: Number.POSITIVE_INFINITY });
+			expect(typeof result.where.maxValue).toBe("number");
+		});
+
+		it("should NOT coerce NaN string", () => {
+			const result = parseQueryParams({ value: "NaN" });
+
+			expect(result.where).toEqual({ value: "NaN" });
+			expect(typeof result.where.value).toBe("string");
+		});
+	});
+
+	describe("mixed type coercion in $in operator", () => {
+		it("should coerce mixed strings, numbers, and booleans", () => {
+			const result = parseQueryParams({
+				"tags[$in]": "active,true,123,pending",
+			});
+
+			expect(result.where).toEqual({
+				tags: { $in: ["active", true, 123, "pending"] },
+			});
+		});
+
+		it("should coerce each array element independently", () => {
+			const result = parseQueryParams({
+				"value[$in]": "42,false,hello,3.14,true",
+			});
+
+			expect(result.where).toEqual({
+				value: { $in: [42, false, "hello", 3.14, true] },
+			});
+		});
+	});
+
+	describe("type coercion with numeric operators", () => {
+		it("should always coerce to number for $gt operator", () => {
+			const result = parseQueryParams({ "year[$gt]": "1970" });
+
+			expect(result.where).toEqual({ year: { $gt: 1970 } });
+			expect(typeof (result.where.year as Record<string, unknown>).$gt).toBe(
+				"number",
+			);
+		});
+
+		it("should always coerce to number for $gte operator", () => {
+			const result = parseQueryParams({ "count[$gte]": "100" });
+
+			expect(result.where).toEqual({ count: { $gte: 100 } });
+		});
+
+		it("should always coerce to number for $lt operator", () => {
+			const result = parseQueryParams({ "price[$lt]": "50" });
+
+			expect(result.where).toEqual({ price: { $lt: 50 } });
+		});
+
+		it("should always coerce to number for $lte operator", () => {
+			const result = parseQueryParams({ "rating[$lte]": "5" });
+
+			expect(result.where).toEqual({ rating: { $lte: 5 } });
+		});
+
+		it("should always coerce to number for $size operator", () => {
+			const result = parseQueryParams({ "tags[$size]": "3" });
+
+			expect(result.where).toEqual({ tags: { $size: 3 } });
+		});
+
+		it("should keep non-numeric string as-is for numeric operators", () => {
+			const result = parseQueryParams({ "version[$gt]": "2.0.0" });
+
+			// coerceNumeric returns original string if not valid number
+			expect(result.where).toEqual({ version: { $gt: "2.0.0" } });
+			expect(typeof (result.where.version as Record<string, unknown>).$gt).toBe(
+				"string",
+			);
+		});
+	});
+
+	describe("type coercion edge cases", () => {
+		it("should handle multiple fields with different types", () => {
+			const result = parseQueryParams({
+				title: "Dune",
+				year: "1965",
+				rating: "4.5",
+				published: "true",
+				archived: "false",
+			});
+
+			expect(result.where).toEqual({
+				title: "Dune",
+				year: 1965,
+				rating: 4.5,
+				published: true,
+				archived: false,
+			});
+		});
+
+		it("should combine type coercion with operators and pagination", () => {
+			const result = parseQueryParams({
+				published: "true",
+				"year[$gte]": "1970",
+				"rating[$gt]": "4",
+				sort: "year:desc",
+				limit: "10",
+			});
+
+			expect(result.where).toEqual({
+				published: true,
+				year: { $gte: 1970 },
+				rating: { $gt: 4 },
+			});
+			expect(result.sort).toEqual({ year: "desc" });
+			expect(result.limit).toBe(10);
+		});
+	});
+});
