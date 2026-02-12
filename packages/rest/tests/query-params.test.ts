@@ -1021,12 +1021,12 @@ describe("parseQueryParams — type coercion (task 11.6)", () => {
 			expect(typeof result.where.delta).toBe("number");
 		});
 
-		it("should NOT coerce float with extra precision", () => {
+		it("should coerce float with extra precision", () => {
 			const result = parseQueryParams({ precise: "3.14159265358979" });
 
-			// parseFloat("3.14159265358979").toString() may differ due to floating point representation
-			// But in this case it should match
-			expect(result.where).toEqual({ precise: Math.PI });
+			// parseFloat("3.14159265358979") correctly parses to this value
+			// and parseFloat("3.14159265358979").toString() === "3.14159265358979"
+			expect(result.where).toEqual({ precise: 3.14159265358979 });
 			expect(typeof result.where.precise).toBe("number");
 		});
 
