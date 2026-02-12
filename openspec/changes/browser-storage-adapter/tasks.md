@@ -57,9 +57,9 @@
 
 ## 8. Quota Error Handling
 
-- [ ] 8.1 Detect `QuotaExceededError` by checking `DOMException.name === "QuotaExceededError"` in the `write` catch block
-- [ ] 8.2 Wrap as `StorageError` with `operation: "write"` and a message including the key name and a note about the storage quota being exceeded
-- [ ] 8.3 Verify IndexedDB write failures (e.g., `ConstraintError`, `QuotaExceededError`) are also surfaced as `StorageError`
+- [x] 8.1 Detect `QuotaExceededError` by checking `DOMException.name === "QuotaExceededError"` in the `write` catch block
+- [x] 8.2 Wrap as `StorageError` with `operation: "write"` and a message including the key name and a note about the storage quota being exceeded
+- [x] 8.3 Verify IndexedDB write failures (e.g., `ConstraintError`, `QuotaExceededError`) are also surfaced as `StorageError`
 
 ## 9. Format Restriction Validation
 
