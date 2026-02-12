@@ -22,7 +22,7 @@
 
 ## 4. CRUD Benchmarks
 
-- [ ] 4.1 Create `bench/crud.bench.ts` with a tinybench suite on a 10K-entity baseline collection
+- [x] 4.1 Create `bench/crud.bench.ts` with a tinybench suite on a 10K-entity baseline collection
 - [ ] 4.2 Implement `create` single-entity benchmark: measure ops/sec for inserting one entity
 - [ ] 4.3 Implement `createMany` batch benchmark: measure ops/sec for inserting batches of 100 entities, verify better amortized throughput than single create
 - [ ] 4.4 Implement `update` and `updateMany` benchmarks: measure ops/sec for single and batch updates
