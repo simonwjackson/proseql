@@ -31,10 +31,10 @@
 
 ## 5. SessionStorage Adapter
 
-- [ ] 5.1 Create `packages/browser/src/adapters/session-storage-adapter.ts` that calls `makeWebStorageAdapter` with `window.sessionStorage`
-- [ ] 5.2 Implement `watch` as a no-op: return `Effect.succeed(() => {})` (sessionStorage has no cross-tab events)
-- [ ] 5.3 Create `makeSessionStorageLayer(config?)` factory returning `Layer.Layer<StorageAdapter>`
-- [ ] 5.4 Export `SessionStorageLayer` as the default-config convenience alias
+- [x] 5.1 Create `packages/browser/src/adapters/session-storage-adapter.ts` that calls `makeWebStorageAdapter` with `window.sessionStorage`
+- [x] 5.2 Implement `watch` as a no-op: return `Effect.succeed(() => {})` (sessionStorage has no cross-tab events)
+- [x] 5.3 Create `makeSessionStorageLayer(config?)` factory returning `Layer.Layer<StorageAdapter>`
+- [x] 5.4 Export `SessionStorageLayer` as the default-config convenience alias
 
 ## 6. IndexedDB Adapter
 
