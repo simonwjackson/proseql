@@ -25,9 +25,9 @@
 ## 4. LocalStorage Adapter
 
 - [x] 4.1 Create `packages/browser/src/adapters/local-storage-adapter.ts` that calls `makeWebStorageAdapter` with `window.localStorage`
-- [ ] 4.2 Implement `watch` for localStorage: register a `storage` event listener on `window`, filter events by the target key, call `onChange` on match, return unsubscribe function that removes the listener
-- [ ] 4.3 Create `makeLocalStorageLayer(config?)` factory returning `Layer.Layer<StorageAdapter>`
-- [ ] 4.4 Export `LocalStorageLayer` as the default-config convenience alias
+- [x] 4.2 Implement `watch` for localStorage: register a `storage` event listener on `window`, filter events by the target key, call `onChange` on match, return unsubscribe function that removes the listener
+- [x] 4.3 Create `makeLocalStorageLayer(config?)` factory returning `Layer.Layer<StorageAdapter>`
+- [x] 4.4 Export `LocalStorageLayer` as the default-config convenience alias
 
 ## 5. SessionStorage Adapter
 
