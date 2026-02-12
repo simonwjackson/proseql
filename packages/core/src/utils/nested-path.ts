@@ -55,6 +55,38 @@ export function getNestedValue(
 }
 
 /**
+ * Recursively collect all paths in an object that have string values.
+ * Used for auto-discovering searchable fields when no explicit fields are specified.
+ *
+ * @param obj - The object to traverse
+ * @param prefix - The current path prefix (used during recursion)
+ * @returns An array of dot-notation paths pointing to string values
+ *
+ * @example
+ * collectStringPaths({ name: "foo", metadata: { description: "bar", count: 5 } })
+ * // returns ["name", "metadata.description"]
+ */
+export function collectStringPaths(
+	obj: Record<string, unknown>,
+	prefix = "",
+): ReadonlyArray<string> {
+	const paths: string[] = [];
+
+	for (const [key, value] of Object.entries(obj)) {
+		const path = prefix ? `${prefix}.${key}` : key;
+
+		if (typeof value === "string") {
+			paths.push(path);
+		} else if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+			// Recurse into nested objects (but not arrays)
+			paths.push(...collectStringPaths(value as Record<string, unknown>, path));
+		}
+	}
+
+	return paths;
+}
+
+/**
  * Set a nested value on an object using dot notation, returning a new object (immutable).
  * Creates intermediate objects along the path if they don't exist.
  * Handles single-segment paths (no ".") as direct property set with no overhead.

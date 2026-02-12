@@ -17,7 +17,7 @@
 
 - [x] 3.1 In `core/operations/query/filter-stream.ts` `matchesWhere`: add shape-mirroring branch. When `key in item` and value is a plain object with no `$`-prefixed keys and `item[key]` is also a plain object, recurse: `matchesWhere(item[key], value, customOperators)`.
 - [x] 3.2 In `matchesWhere`: add dot-notation fallback. When key is not in item and `isDotPath(key)`, resolve via `getNestedValue(item, key)` and run `matchesFilter(resolvedValue, value, customOperators)`.
-- [ ] 3.3 In the top-level `$search` handler: replace `item[field]` with `getNestedValue(item, field)` when resolving field values for tokenization. Replace the "all string fields" discovery with a recursive object walker that collects all string-valued paths.
+- [x] 3.3 In the top-level `$search` handler: replace `item[field]` with `getNestedValue(item, field)` when resolving field values for tokenization. Replace the "all string fields" discovery with a recursive object walker that collects all string-valued paths.
 - [ ] 3.4 Test shape-mirroring: `where: { metadata: { views: { $gt: 100 } } }` matches entities with `metadata.views > 100`.
 - [ ] 3.5 Test dot-notation: `where: { "metadata.views": { $gt: 100 } }` produces same results as shape-mirroring.
 - [ ] 3.6 Test nested exact match: `where: { metadata: { rating: 5 } }` matches entities with `metadata.rating === 5`.

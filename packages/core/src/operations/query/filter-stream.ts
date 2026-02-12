@@ -2,7 +2,7 @@ import { Stream } from "effect";
 import type { CustomOperator } from "../../plugins/plugin-types.js";
 import { isFilterOperatorObject, matchesFilter } from "../../types/operators.js";
 import type { SearchConfig } from "../../types/search-types.js";
-import { getNestedValue, isDotPath } from "../../utils/nested-path.js";
+import { collectStringPaths, getNestedValue, isDotPath } from "../../utils/nested-path.js";
 import { tokenize } from "./search.js";
 
 /**
@@ -66,10 +66,8 @@ function matchesWhere<T extends Record<string, unknown>>(
 			if (searchConfig.fields && searchConfig.fields.length > 0) {
 				targetFields = searchConfig.fields;
 			} else {
-				// Find all string fields on the entity
-				targetFields = Object.keys(item).filter(
-					(k) => typeof item[k] === "string",
-				);
+				// Find all string fields on the entity (recursively, including nested paths)
+				targetFields = collectStringPaths(item);
 			}
 
 			// Check if all query tokens are found across the target fields
@@ -77,7 +75,8 @@ function matchesWhere<T extends Record<string, unknown>>(
 			const allTokensMatch = queryTokens.every((qt) => {
 				// Check if this query token matches in any of the target fields
 				return targetFields.some((field) => {
-					const fieldValue = item[field];
+					// Use getNestedValue to resolve dot-notation paths (e.g., "metadata.description")
+					const fieldValue = getNestedValue(item, field);
 					if (typeof fieldValue !== "string") {
 						return false;
 					}

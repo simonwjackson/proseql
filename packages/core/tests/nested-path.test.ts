@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	collectStringPaths,
 	getNestedValue,
 	setNestedValue,
 	isDotPath,
@@ -172,6 +173,84 @@ describe("nested-path utilities", () => {
 				const obj = {};
 				expect(getNestedValue(obj, "any.path")).toBeUndefined();
 			});
+		});
+	});
+
+	describe("collectStringPaths", () => {
+		it("should return empty array for empty object", () => {
+			expect(collectStringPaths({})).toEqual([]);
+		});
+
+		it("should collect top-level string fields", () => {
+			const obj = { name: "John", age: 30 };
+			const paths = collectStringPaths(obj);
+			expect(paths).toContain("name");
+			expect(paths).not.toContain("age");
+		});
+
+		it("should collect nested string fields", () => {
+			const obj = { metadata: { description: "test", count: 5 } };
+			const paths = collectStringPaths(obj);
+			expect(paths).toContain("metadata.description");
+			expect(paths).not.toContain("metadata.count");
+		});
+
+		it("should collect both top-level and nested string fields", () => {
+			const obj = { name: "foo", metadata: { description: "bar", count: 5 } };
+			const paths = collectStringPaths(obj);
+			expect(paths).toEqual(["name", "metadata.description"]);
+		});
+
+		it("should handle deeply nested string fields", () => {
+			const obj = { a: { b: { c: { d: "deep" } } } };
+			const paths = collectStringPaths(obj);
+			expect(paths).toEqual(["a.b.c.d"]);
+		});
+
+		it("should skip arrays (not recurse into them)", () => {
+			const obj = { items: ["a", "b", "c"], name: "test" };
+			const paths = collectStringPaths(obj);
+			expect(paths).toEqual(["name"]);
+			expect(paths).not.toContain("items.0");
+		});
+
+		it("should skip null values", () => {
+			const obj = { name: "test", metadata: null };
+			const paths = collectStringPaths(obj);
+			expect(paths).toEqual(["name"]);
+		});
+
+		it("should handle mixed nested structure", () => {
+			const obj = {
+				title: "Book",
+				metadata: {
+					description: "A description",
+					views: 100,
+					tags: ["a", "b"],
+				},
+				author: {
+					name: "Frank Herbert",
+					country: "USA",
+				},
+			};
+			const paths = collectStringPaths(obj);
+			expect(paths).toContain("title");
+			expect(paths).toContain("metadata.description");
+			expect(paths).toContain("author.name");
+			expect(paths).toContain("author.country");
+			expect(paths).not.toContain("metadata.views");
+			expect(paths).not.toContain("metadata.tags");
+		});
+
+		it("should return empty array when no strings exist", () => {
+			const obj = { count: 1, active: true, items: [1, 2, 3] };
+			expect(collectStringPaths(obj)).toEqual([]);
+		});
+
+		it("should handle object with only nested strings", () => {
+			const obj = { data: { info: { label: "test" } } };
+			const paths = collectStringPaths(obj);
+			expect(paths).toEqual(["data.info.label"]);
 		});
 	});
 
