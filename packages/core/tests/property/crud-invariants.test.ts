@@ -359,7 +359,256 @@ describe("CRUD invariant properties", () => {
 	});
 
 	describe("Task 7.3: Delete then findById fails with NotFoundError", () => {
-		// Property tests will be added in task 7.3
+		it("should fail with NotFoundError when finding a deleted entity by ID", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					entityArbitrary(BookSchema),
+					async (entityWithId) => {
+						const { id: _unusedId, ...entityData } = entityWithId;
+
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(basicConfig, {
+								books: [],
+							});
+
+							// Create the entity
+							const created = yield* db.books.create(entityData);
+							expect(typeof created.id).toBe("string");
+
+							// Verify entity exists
+							const found = yield* db.books.findById(created.id);
+							expect(found.id).toBe(created.id);
+
+							// Delete the entity
+							const deleted = yield* db.books.delete(created.id);
+							expect(deleted.id).toBe(created.id);
+
+							// findById should fail with NotFoundError
+							const notFoundResult = yield* db.books.findById(created.id).pipe(
+								Effect.flip,
+							);
+							expect(notFoundResult._tag).toBe("NotFoundError");
+							expect(notFoundResult).toBeInstanceOf(NotFoundError);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should not include deleted entity in query results", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					entityArbitrary(BookSchema),
+					async (entityWithId) => {
+						const { id: _unusedId, ...entityData } = entityWithId;
+
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(basicConfig, {
+								books: [],
+							});
+
+							// Create the entity
+							const created = yield* db.books.create(entityData);
+
+							// Verify entity appears in query results before delete
+							const beforeDeleteChunk = yield* Stream.runCollect(
+								db.books.query({}),
+							);
+							const beforeDelete = Chunk.toReadonlyArray(beforeDeleteChunk);
+							const existsBefore = beforeDelete.some(
+								(book) => book.id === created.id,
+							);
+							expect(existsBefore).toBe(true);
+
+							// Delete the entity
+							yield* db.books.delete(created.id);
+
+							// Verify entity does NOT appear in query results after delete
+							const afterDeleteChunk = yield* Stream.runCollect(
+								db.books.query({}),
+							);
+							const afterDelete = Chunk.toReadonlyArray(afterDeleteChunk);
+							const existsAfter = afterDelete.some(
+								(book) => book.id === created.id,
+							);
+							expect(existsAfter).toBe(false);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should maintain other entities when deleting one entity from a collection", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate 2-10 unique entities
+					fc.array(entityArbitrary(BookSchema), { minLength: 2, maxLength: 10 }),
+					// Pick which entity to delete (by index)
+					fc.nat(),
+					async (entitiesWithIds, deleteIndexSeed) => {
+						const entitiesData = entitiesWithIds.map(({ id: _unusedId, ...data }) => data);
+
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(basicConfig, {
+								books: [],
+							});
+
+							// Create all entities
+							const createdEntities: Book[] = [];
+							for (const entityData of entitiesData) {
+								const created = yield* db.books.create(entityData);
+								createdEntities.push(created);
+							}
+
+							// Pick one entity to delete
+							const deleteIndex = deleteIndexSeed % createdEntities.length;
+							const entityToDelete = createdEntities[deleteIndex];
+
+							// Delete that entity
+							yield* db.books.delete(entityToDelete.id);
+
+							// Verify the deleted entity is not findable
+							const deletedFindResult = yield* db.books.findById(entityToDelete.id).pipe(
+								Effect.flip,
+							);
+							expect(deletedFindResult._tag).toBe("NotFoundError");
+
+							// Verify all OTHER entities are still findable
+							for (let i = 0; i < createdEntities.length; i++) {
+								if (i === deleteIndex) continue;
+
+								const entity = createdEntities[i];
+								const found = yield* db.books.findById(entity.id);
+								expect(found).toEqual(entity);
+							}
+
+							// Verify query returns exactly the remaining entities
+							const queryChunk = yield* Stream.runCollect(db.books.query({}));
+							const queryResult = Chunk.toReadonlyArray(queryChunk);
+							expect(queryResult.length).toBe(createdEntities.length - 1);
+
+							// Verify deleted entity is not in query results
+							const deletedInQuery = queryResult.some(
+								(book) => book.id === entityToDelete.id,
+							);
+							expect(deletedInQuery).toBe(false);
+
+							// Verify all remaining entities are in query results
+							for (let i = 0; i < createdEntities.length; i++) {
+								if (i === deleteIndex) continue;
+
+								const entity = createdEntities[i];
+								const inQuery = queryResult.some(
+									(book) => book.id === entity.id,
+								);
+								expect(inQuery).toBe(true);
+							}
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() / 2 }, // Fewer runs since we create multiple entities per run
+			);
+		});
+
+		it("should fail with NotFoundError when deleting the same entity twice", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					entityArbitrary(BookSchema),
+					async (entityWithId) => {
+						const { id: _unusedId, ...entityData } = entityWithId;
+
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(basicConfig, {
+								books: [],
+							});
+
+							// Create the entity
+							const created = yield* db.books.create(entityData);
+
+							// First delete should succeed
+							const firstDelete = yield* db.books.delete(created.id);
+							expect(firstDelete.id).toBe(created.id);
+
+							// Second delete should fail with NotFoundError
+							const secondDeleteResult = yield* db.books.delete(created.id).pipe(
+								Effect.flip,
+							);
+							expect(secondDeleteResult._tag).toBe("NotFoundError");
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should not include deleted entities in filtered queries", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate entities with a specific known genre for filtering
+					fc.array(
+						fc.record({
+							title: fc.string({ minLength: 1, maxLength: 20 }),
+							author: fc.string({ minLength: 1, maxLength: 20 }),
+							year: fc.integer({ min: 1900, max: 2100 }),
+							rating: fc.float({ min: 0, max: 5, noNaN: true }),
+							isPublished: fc.boolean(),
+							tags: fc.array(fc.string({ minLength: 1, maxLength: 10 }), { minLength: 0, maxLength: 5 }),
+						}),
+						{ minLength: 2, maxLength: 5 },
+					),
+					fc.nat(),
+					async (entitiesData, deleteIndexSeed) => {
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(basicConfig, {
+								books: [],
+							});
+
+							// Create all entities
+							const createdEntities: Book[] = [];
+							for (const entityData of entitiesData) {
+								const created = yield* db.books.create(entityData);
+								createdEntities.push(created);
+							}
+
+							// Pick one entity to delete
+							const deleteIndex = deleteIndexSeed % createdEntities.length;
+							const entityToDelete = createdEntities[deleteIndex];
+
+							// Query with a filter that would include the entity before deletion
+							const beforeDeleteChunk = yield* Stream.runCollect(
+								db.books.query({ where: { id: entityToDelete.id } }),
+							);
+							const beforeDelete = Chunk.toReadonlyArray(beforeDeleteChunk);
+							expect(beforeDelete.length).toBe(1);
+							expect(beforeDelete[0].id).toBe(entityToDelete.id);
+
+							// Delete the entity
+							yield* db.books.delete(entityToDelete.id);
+
+							// Query with same filter should now return empty
+							const afterDeleteChunk = yield* Stream.runCollect(
+								db.books.query({ where: { id: entityToDelete.id } }),
+							);
+							const afterDelete = Chunk.toReadonlyArray(afterDeleteChunk);
+							expect(afterDelete.length).toBe(0);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() / 2 },
+			);
+		});
 	});
 
 	describe("Task 7.4: Unique constraint enforcement", () => {
