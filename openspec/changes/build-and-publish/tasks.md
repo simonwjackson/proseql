@@ -53,7 +53,7 @@
 
 ## 8. Build Script Verification
 
-- [ ] 8.1 Run `bun run clean` and verify all `dist/` directories are removed.
+- [x] 8.1 Run `bun run clean` and verify all `dist/` directories are removed.
 - [ ] 8.2 Run `bun run build` and verify `dist/` is created in each package.
 - [ ] 8.3 Verify `packages/core/dist/index.js` exists and is valid ESM (has `export` statements, no `require`).
 - [ ] 8.4 Verify `packages/core/dist/index.d.ts` exists and exports the public API types.
