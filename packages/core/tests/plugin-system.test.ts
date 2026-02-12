@@ -1442,5 +1442,215 @@ describe("Plugin System", () => {
 			expect(threeOperatorQuery[0].title).toBe("1984");
 			expect(threeOperatorQuery[0].year).toBe(1949);
 		});
+
+		it("should work with custom operator combined with built-in operators in same where clause", async () => {
+			// Task 12.4: Test custom operator combined with built-in operators in same where clause
+			//
+			// We use the $regex custom operator alongside various built-in operators
+			// to verify they all work together correctly with AND logic.
+
+			const regexPlugin = createOperatorPlugin("regex-plugin", regexOperator);
+			const db = await createDatabaseWithPlugins([regexPlugin]);
+
+			// Test data:
+			// - "The Great Gatsby", 1925, fiction
+			// - "1984", 1949, dystopian
+			// - "Dune", 1965, sci-fi
+
+			// Test 1: Custom $regex + built-in $gt on different fields
+			// Query: title matches regex ".*e.*" AND year > 1940
+			// "The Great Gatsby" has 'e' and year 1925 (fails year > 1940)
+			// "1984" has no 'e' (fails regex)
+			// "Dune" has 'e' and year 1965 (passes both)
+			const regexAndGt = await db.books
+				.query({
+					where: {
+						title: { $regex: ".*e.*" },
+						year: { $gt: 1940 },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(regexAndGt.length).toBe(1);
+			expect(regexAndGt[0].title).toBe("Dune");
+
+			// Test 2: Custom $regex + built-in $eq on different fields
+			// Query: title matches regex "^D" AND genre equals "sci-fi"
+			// Only "Dune" starts with "D" and has genre "sci-fi"
+			const regexAndEq = await db.books
+				.query({
+					where: {
+						title: { $regex: "^D" },
+						genre: { $eq: "sci-fi" },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(regexAndEq.length).toBe(1);
+			expect(regexAndEq[0].title).toBe("Dune");
+
+			// Test 3: Custom $regex + built-in $in
+			// Query: title matches regex ".*" (all) AND genre in ["fiction", "dystopian"]
+			// "The Great Gatsby" - genre "fiction" (matches)
+			// "1984" - genre "dystopian" (matches)
+			// "Dune" - genre "sci-fi" (doesn't match $in)
+			const regexAndIn = await db.books
+				.query({
+					where: {
+						title: { $regex: ".*" },
+						genre: { $in: ["fiction", "dystopian"] },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(regexAndIn.length).toBe(2);
+			const genresMatched = regexAndIn.map((b) => b.genre).sort();
+			expect(genresMatched).toEqual(["dystopian", "fiction"]);
+
+			// Test 4: Custom $regex + built-in $gte and $lte (range query)
+			// Query: title matches "^The" AND year between 1920 and 1930
+			// Only "The Great Gatsby" matches both conditions
+			const regexAndRange = await db.books
+				.query({
+					where: {
+						title: { $regex: "^The" },
+						year: { $gte: 1920, $lte: 1930 },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(regexAndRange.length).toBe(1);
+			expect(regexAndRange[0].title).toBe("The Great Gatsby");
+			expect(regexAndRange[0].year).toBe(1925);
+
+			// Test 5: Custom $regex + built-in $ne
+			// Query: title matches "e" AND genre is NOT "fiction"
+			// "The Great Gatsby" has 'e' but genre is "fiction" (fails $ne)
+			// "Dune" has 'e' and genre is "sci-fi" (passes both)
+			const regexAndNe = await db.books
+				.query({
+					where: {
+						title: { $regex: "e" },
+						genre: { $ne: "fiction" },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(regexAndNe.length).toBe(1);
+			expect(regexAndNe[0].title).toBe("Dune");
+
+			// Test 6: Custom $regex + built-in $nin
+			// Query: title matches ".*" (all) AND genre NOT in ["sci-fi", "dystopian"]
+			// Only "The Great Gatsby" with genre "fiction" should match
+			const regexAndNin = await db.books
+				.query({
+					where: {
+						title: { $regex: ".*" },
+						genre: { $nin: ["sci-fi", "dystopian"] },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(regexAndNin.length).toBe(1);
+			expect(regexAndNin[0].title).toBe("The Great Gatsby");
+
+			// Test 7: Custom $regex + built-in $contains (string contains)
+			// Query: title matches regex "\\d" (has digit) AND author contains "George"
+			// Only "1984" has digits in title and author "George Orwell" contains "George"
+			const regexAndContains = await db.books
+				.query({
+					where: {
+						title: { $regex: "\\d" },
+						author: { $contains: "George" },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(regexAndContains.length).toBe(1);
+			expect(regexAndContains[0].title).toBe("1984");
+			expect(regexAndContains[0].author).toBe("George Orwell");
+
+			// Test 8: Custom $regex + built-in $startsWith
+			// Query: title matches regex ".*a.*" AND author starts with "F"
+			// "The Great Gatsby" has 'a' and author "F. Scott Fitzgerald" starts with 'F'
+			// "1984" has no 'a' in title
+			// "Dune" has no 'a' in title
+			const regexAndStartsWith = await db.books
+				.query({
+					where: {
+						title: { $regex: ".*a.*" },
+						author: { $startsWith: "F" },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(regexAndStartsWith.length).toBe(1);
+			expect(regexAndStartsWith[0].title).toBe("The Great Gatsby");
+
+			// Test 9: Multiple built-in operators + custom operator on same field
+			// Query: year > 1940, year < 1970, AND title matches "^D"
+			// This tests operators on same field (year) combined with custom operator on another
+			// "Dune" has year 1965 (between 1940 and 1970) and title starts with "D"
+			const multiBuiltInAndCustom = await db.books
+				.query({
+					where: {
+						year: { $gt: 1940, $lt: 1970 },
+						title: { $regex: "^D" },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(multiBuiltInAndCustom.length).toBe(1);
+			expect(multiBuiltInAndCustom[0].title).toBe("Dune");
+
+			// Test 10: Custom $regex + built-in $endsWith on different fields
+			// Query: genre ends with "fi" AND title matches regex ".*u.*"
+			// "sci-fi" ends with "fi", "Dune" contains 'u'
+			const regexAndEndsWith = await db.books
+				.query({
+					where: {
+						genre: { $endsWith: "fi" },
+						title: { $regex: ".*u.*" },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(regexAndEndsWith.length).toBe(1);
+			expect(regexAndEndsWith[0].title).toBe("Dune");
+			expect(regexAndEndsWith[0].genre).toBe("sci-fi");
+
+			// Test 11: No results when custom and built-in operators both filter out everything
+			// Query: title matches "^Z" (nothing) AND year > 0 (everything)
+			const noResults = await db.books
+				.query({
+					where: {
+						title: { $regex: "^Z" },
+						year: { $gt: 0 },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(noResults.length).toBe(0);
+
+			// Test 12: Custom operator with multiple built-in operators across many fields
+			// Query: title matches regex ".*", genre equals "dystopian", year > 1945, author contains "Orwell"
+			// Only "1984" by George Orwell (1949, dystopian) matches all conditions
+			const complexQuery = await db.books
+				.query({
+					where: {
+						title: { $regex: ".*" },
+						genre: { $eq: "dystopian" },
+						year: { $gt: 1945 },
+						author: { $contains: "Orwell" },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(complexQuery.length).toBe(1);
+			expect(complexQuery[0].title).toBe("1984");
+			expect(complexQuery[0].author).toBe("George Orwell");
+			expect(complexQuery[0].year).toBe(1949);
+			expect(complexQuery[0].genre).toBe("dystopian");
+		});
 	});
 });
