@@ -1039,6 +1039,259 @@ describe("reactive queries - mutation triggers", () => {
 // ============================================================================
 
 describe("reactive queries - irrelevant mutations", () => {
+	describe("deduplication of unchanged result sets (14.2)", () => {
+		it("creating a non-matching entity does not produce a new emission", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books only
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Track all emissions received
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork collection with a timeout - we expect only initial emission
+					const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "100 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission to be processed
+					yield* Effect.sleep("30 millis");
+
+					// Create a fantasy book - does NOT match the sci-fi filter
+					// This triggers a change event, but the result set is unchanged
+					yield* db.books.create({
+						title: "The Name of the Wind",
+						author: "Patrick Rothfuss",
+						year: 2007,
+						genre: "fantasy",
+					});
+
+					// Wait to allow any potential (erroneous) emission
+					yield* Effect.sleep("50 millis");
+
+					// Interrupt the fiber
+					yield* Fiber.interrupt(collectedFiber);
+
+					// Should only have the initial emission - no second emission
+					// because the result set is unchanged (deduplication)
+					expect(emissions).toHaveLength(1);
+					expect(emissions[0]).toHaveLength(2); // 2 sci-fi books
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+					]);
+				}),
+			);
+		});
+
+		it("createMany of all non-matching entities does not produce a new emission", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books only
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Track all emissions received
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork collection with a timeout
+					const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "100 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+
+					// Create multiple fantasy books - none match the sci-fi filter
+					yield* db.books.createMany([
+						{
+							title: "The Name of the Wind",
+							author: "Patrick Rothfuss",
+							year: 2007,
+							genre: "fantasy",
+						},
+						{
+							title: "A Game of Thrones",
+							author: "George R.R. Martin",
+							year: 1996,
+							genre: "fantasy",
+						},
+						{
+							title: "The Way of Kings",
+							author: "Brandon Sanderson",
+							year: 2010,
+							genre: "fantasy",
+						},
+					]);
+
+					// Wait for any potential emissions
+					yield* Effect.sleep("50 millis");
+
+					// Interrupt the fiber
+					yield* Fiber.interrupt(collectedFiber);
+
+					// Should only have the initial emission
+					expect(emissions).toHaveLength(1);
+					expect(emissions[0]).toHaveLength(2); // 2 sci-fi books unchanged
+				}),
+			);
+		});
+
+		it("updating a non-matching entity (that stays non-matching) does not produce a new emission", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books only
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Track all emissions received
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork collection with a timeout
+					const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "100 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+
+					// Update The Hobbit (id: "3", genre: "fantasy") year
+					// It doesn't match the sci-fi filter, and the update doesn't make it match
+					yield* db.books.update("3", { year: 2000 });
+
+					// Wait for any potential emissions
+					yield* Effect.sleep("50 millis");
+
+					// Interrupt the fiber
+					yield* Fiber.interrupt(collectedFiber);
+
+					// Should only have the initial emission
+					expect(emissions).toHaveLength(1);
+					expect(emissions[0]).toHaveLength(2); // 2 sci-fi books unchanged
+				}),
+			);
+		});
+
+		it("deleting a non-matching entity does not produce a new emission", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books only
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Track all emissions received
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork collection with a timeout
+					const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "100 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+
+					// Delete The Hobbit (id: "3", genre: "fantasy")
+					// It doesn't match the sci-fi filter, so result set is unchanged
+					yield* db.books.delete("3");
+
+					// Wait for any potential emissions
+					yield* Effect.sleep("50 millis");
+
+					// Interrupt the fiber
+					yield* Fiber.interrupt(collectedFiber);
+
+					// Should only have the initial emission
+					expect(emissions).toHaveLength(1);
+					expect(emissions[0]).toHaveLength(2); // 2 sci-fi books unchanged
+				}),
+			);
+		});
+
+		it("update that changes fields not in where clause produces emission only if result changes", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch books sorted by year
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Fork collection to get 2 emissions: initial + after meaningful update
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+
+					// First, update Dune's author (result changes because we're watching all fields)
+					yield* db.books.update("1", { author: "F. Herbert" });
+
+					// Collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					// Should have 2 emissions because the result set content changed
+					expect(emissions).toHaveLength(2);
+					expect(emissions[0].find((b) => b.id === "1")?.author).toBe(
+						"Frank Herbert",
+					);
+					expect(emissions[1].find((b) => b.id === "1")?.author).toBe(
+						"F. Herbert",
+					);
+				}),
+			);
+		});
+	});
+
 	describe("mutation to different collection (14.1)", () => {
 		it("mutation to a different collection does not trigger re-evaluation", async () => {
 			await runWithDb((db) =>
