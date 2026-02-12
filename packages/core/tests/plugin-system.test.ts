@@ -589,4 +589,192 @@ describe("Plugin System", () => {
 			}
 		});
 	});
+
+	// ============================================================================
+	// Tests — Custom Codecs (Task 11.1-11.3)
+	// ============================================================================
+
+	describe("custom codecs", () => {
+		it("should register plugin codec for new extension and serialize/deserialize correctly", async () => {
+			// Task 11.1: Test plugin codec registers for new extension,
+			// collection with that extension serializes/deserializes correctly
+			//
+			// We create a simple CSV-like codec that stores data as "id,title,author,year,genre"
+			// one line per entry. This is a new extension not built into proseql.
+
+			const csvCodec: FormatCodec = {
+				name: "csv",
+				extensions: ["csv"],
+				encode: (data: unknown): string => {
+					// Data is { [id]: entity } object format
+					const obj = data as Record<string, Record<string, unknown>>;
+					const lines: string[] = [];
+					// Header
+					lines.push("id,title,author,year,genre");
+					// Data rows
+					for (const [id, entity] of Object.entries(obj)) {
+						const title = String(entity.title ?? "");
+						const author = String(entity.author ?? "");
+						const year = String(entity.year ?? "");
+						const genre = String(entity.genre ?? "");
+						lines.push(`${id},${title},${author},${year},${genre}`);
+					}
+					return lines.join("\n");
+				},
+				decode: (raw: string): unknown => {
+					const lines = raw.trim().split("\n");
+					if (lines.length === 0) return {};
+					// Skip header
+					const dataLines = lines.slice(1);
+					const result: Record<string, Record<string, unknown>> = {};
+					for (const line of dataLines) {
+						if (!line.trim()) continue;
+						const [id, title, author, yearStr, genre] = line.split(",");
+						result[id] = {
+							id,
+							title,
+							author,
+							year: Number.parseInt(yearStr, 10),
+							genre,
+						};
+					}
+					return result;
+				},
+			};
+
+			const csvPlugin = createCodecPlugin("csv-plugin", [csvCodec]);
+
+			// Use in-memory storage and create a persistent database with CSV file
+			const store = new Map<string, string>();
+			const { makeInMemoryStorageLayer } = await import(
+				"../src/storage/in-memory-adapter-layer.js"
+			);
+			const { makeSerializerLayer } = await import(
+				"../src/serializers/format-codec.js"
+			);
+			const { createPersistentEffectDatabase } = await import(
+				"../src/factories/database-effect.js"
+			);
+			const { Layer } = await import("effect");
+
+			// Create layer with NO base codecs - only the plugin codec will be available
+			const baseLayer = Layer.merge(
+				makeInMemoryStorageLayer(store),
+				makeSerializerLayer([], [csvCodec]), // Empty base codecs, plugin codec provided
+			);
+
+			const persistentConfig = {
+				books: {
+					schema: BookSchema,
+					file: "/data/books.csv",
+					relationships: {},
+				},
+			} as const;
+
+			const persistentInitialData = {
+				books: [
+					{
+						id: "b1",
+						title: "Dune",
+						author: "Frank Herbert",
+						year: 1965,
+						genre: "sci-fi",
+					},
+					{
+						id: "b2",
+						title: "1984",
+						author: "George Orwell",
+						year: 1949,
+						genre: "dystopian",
+					},
+				],
+			};
+
+			// Create the database with plugin
+			const db = await Effect.runPromise(
+				Effect.provide(
+					Effect.scoped(
+						Effect.gen(function* () {
+							const database = yield* createPersistentEffectDatabase(
+								persistentConfig,
+								persistentInitialData,
+								{ writeDebounce: 10 },
+								{ plugins: [csvPlugin] },
+							);
+							return database;
+						}),
+					),
+					baseLayer,
+				),
+			);
+
+			// Verify database was created and we can query books
+			expect(db).toBeDefined();
+			expect(db.books).toBeDefined();
+
+			// Query existing books
+			const allBooks = await db.books.query().runPromise;
+			expect(allBooks.length).toBe(2);
+
+			// Create a new book
+			const newBook = await db.books
+				.create({
+					id: "b3",
+					title: "Neuromancer",
+					author: "William Gibson",
+					year: 1984,
+					genre: "cyberpunk",
+				})
+				.runPromise;
+
+			expect(newBook.id).toBe("b3");
+			expect(newBook.title).toBe("Neuromancer");
+
+			// Flush to trigger persistence
+			await db.flush();
+
+			// Verify the CSV file was written correctly
+			const csvContent = store.get("/data/books.csv");
+			expect(csvContent).toBeDefined();
+			expect(csvContent).toContain("id,title,author,year,genre");
+			expect(csvContent).toContain("b1,Dune,Frank Herbert,1965,sci-fi");
+			expect(csvContent).toContain("b2,1984,George Orwell,1949,dystopian");
+			expect(csvContent).toContain("b3,Neuromancer,William Gibson,1984,cyberpunk");
+
+			// Now test deserialization by creating a new database from the same store
+			// This verifies the codec can load the data it wrote
+			const db2 = await Effect.runPromise(
+				Effect.provide(
+					Effect.scoped(
+						Effect.gen(function* () {
+							// Don't provide initial data - load from file
+							const database = yield* createPersistentEffectDatabase(
+								persistentConfig,
+								{}, // No initial data - load from CSV file
+								{ writeDebounce: 10 },
+								{ plugins: [csvPlugin] },
+							);
+							return database;
+						}),
+					),
+					baseLayer,
+				),
+			);
+
+			// Verify all 3 books were loaded from the CSV file
+			const loadedBooks = await db2.books.query().runPromise;
+			expect(loadedBooks.length).toBe(3);
+
+			// Find the specific books to verify data integrity
+			const dune = await db2.books.findById("b1").runPromise;
+			expect(dune.title).toBe("Dune");
+			expect(dune.author).toBe("Frank Herbert");
+			expect(dune.year).toBe(1965);
+
+			const neuromancer = await db2.books.findById("b3").runPromise;
+			expect(neuromancer.title).toBe("Neuromancer");
+			expect(neuromancer.author).toBe("William Gibson");
+			expect(neuromancer.year).toBe(1984);
+		});
+	});
 });
