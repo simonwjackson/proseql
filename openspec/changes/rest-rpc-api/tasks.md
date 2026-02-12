@@ -1,7 +1,7 @@
 ## 1. RPC — Error and Payload Schemas
 
 - [x] 1.1 Create `rpc/src/rpc-errors.ts`: define Effect Schemas for each proseql tagged error (`NotFoundError`, `ValidationError`, `DuplicateKeyError`, `UniqueConstraintError`, `ForeignKeyError`, `HookError`, `TransactionError`, `DanglingReferenceError`) so they can be serialized/deserialized across RPC transport
-- [ ] 1.2 Create `rpc/src/rpc-schemas.ts`: define payload schemas for RPC procedures — `FindByIdPayload`, `QueryPayload` (wrapping QueryConfig), `CreatePayload`, `UpdatePayload`, `DeletePayload`, `AggregatePayload`, and batch variants (`CreateManyPayload`, `UpdateManyPayload`, `DeleteManyPayload`, `UpsertPayload`, `UpsertManyPayload`)
+- [x] 1.2 Create `rpc/src/rpc-schemas.ts`: define payload schemas for RPC procedures — `FindByIdPayload`, `QueryPayload` (wrapping QueryConfig), `CreatePayload`, `UpdatePayload`, `DeletePayload`, `AggregatePayload`, and batch variants (`CreateManyPayload`, `UpdateManyPayload`, `DeleteManyPayload`, `UpsertPayload`, `UpsertManyPayload`)
 - [ ] 1.3 Export all schemas from `rpc/src/index.ts`
 
 ## 2. RPC — Group Derivation
