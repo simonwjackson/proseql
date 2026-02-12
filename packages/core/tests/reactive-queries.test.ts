@@ -1033,3 +1033,184 @@ describe("reactive queries - mutation triggers", () => {
 		});
 	});
 });
+
+// ============================================================================
+// Tests - Irrelevant Mutations (14.1 - 14.2)
+// ============================================================================
+
+describe("reactive queries - irrelevant mutations", () => {
+	describe("mutation to different collection (14.1)", () => {
+		it("mutation to a different collection does not trigger re-evaluation", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch books collection
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Track all emissions received
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork collection with a timeout - we expect only initial emission
+					const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "100 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchTag("NoSuchElementException", () => Effect.void),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission to be processed
+					yield* Effect.sleep("30 millis");
+
+					// Perform mutations on the AUTHORS collection (not books)
+					yield* db.authors.create({
+						name: "Ursula K. Le Guin",
+						country: "USA",
+					});
+					yield* db.authors.update("a1", { country: "United States" });
+					yield* db.authors.delete("a2");
+
+					// Wait a bit more to allow any potential (erroneous) emissions
+					yield* Effect.sleep("50 millis");
+
+					// Interrupt the fiber
+					yield* Fiber.interrupt(collectedFiber);
+
+					// Should only have the initial emission - no re-evaluation from authors mutations
+					expect(emissions).toHaveLength(1);
+					expect(emissions[0]).toHaveLength(2); // 2 sci-fi books
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+					]);
+				}),
+			);
+		});
+
+		it("createMany on different collection does not trigger re-evaluation", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch books collection
+					const stream = yield* db.books.watch({
+						sort: { title: "asc" },
+					});
+
+					// Track all emissions received
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork collection with a timeout
+					const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "100 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+
+					// Create multiple authors - should not trigger books watch
+					yield* db.authors.createMany([
+						{ name: "Isaac Asimov", country: "USA" },
+						{ name: "Arthur C. Clarke", country: "UK" },
+						{ name: "Ray Bradbury", country: "USA" },
+					]);
+
+					// Wait for any potential emissions
+					yield* Effect.sleep("50 millis");
+
+					// Interrupt the fiber
+					yield* Fiber.interrupt(collectedFiber);
+
+					// Should only have the initial emission
+					expect(emissions).toHaveLength(1);
+					expect(emissions[0]).toHaveLength(3); // All 3 books
+				}),
+			);
+		});
+
+		it("simultaneous watches on different collections receive only relevant mutations", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch both collections simultaneously
+					const booksStream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+					});
+					const authorsStream = yield* db.authors.watch();
+
+					// Track emissions for both
+					const bookEmissions: Array<ReadonlyArray<Book>> = [];
+					const authorEmissions: Array<ReadonlyArray<Author>> = [];
+
+					// Fork both watchers
+					const booksFiber = yield* Stream.runForEach(booksStream, (emission) =>
+						Effect.sync(() => {
+							bookEmissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "150 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					const authorsFiber = yield* Stream.runForEach(
+						authorsStream,
+						(emission) =>
+							Effect.sync(() => {
+								authorEmissions.push(emission);
+							}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "150 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emissions
+					yield* Effect.sleep("30 millis");
+
+					// Mutate only authors
+					yield* db.authors.create({
+						name: "Ursula K. Le Guin",
+						country: "USA",
+					});
+
+					// Wait for emissions to settle
+					yield* Effect.sleep("50 millis");
+
+					// Interrupt both fibers
+					yield* Fiber.interrupt(booksFiber);
+					yield* Fiber.interrupt(authorsFiber);
+
+					// Books should only have initial emission (authors mutation irrelevant)
+					expect(bookEmissions).toHaveLength(1);
+					expect(bookEmissions[0]).toHaveLength(2); // 2 sci-fi books
+
+					// Authors should have 2 emissions: initial + after create
+					expect(authorEmissions).toHaveLength(2);
+					expect(authorEmissions[0]).toHaveLength(2); // Initial 2 authors
+					expect(authorEmissions[1]).toHaveLength(3); // After creating new author
+				}),
+			);
+		});
+	});
+});

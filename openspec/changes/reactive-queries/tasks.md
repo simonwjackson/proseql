@@ -86,7 +86,7 @@
 
 ## 14. Tests — Irrelevant Mutations
 
-- [ ] 14.1 Test mutation to a different collection does not trigger re-evaluation
+- [x] 14.1 Test mutation to a different collection does not trigger re-evaluation
 - [ ] 14.2 Test mutation that does not change the result set (e.g., creating a non-matching entity) does not produce a new emission (deduplication)
 
 ## 15. Tests — Transactions
