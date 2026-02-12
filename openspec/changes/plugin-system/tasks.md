@@ -47,7 +47,7 @@
 ## 8. Factory Integration
 
 - [x] 8.1 Add optional `options?: { plugins?: ReadonlyArray<ProseQLPlugin> }` parameter to `createEffectDatabase`.
-- [ ] 8.2 Add optional `options?: { plugins?: ReadonlyArray<ProseQLPlugin> }` parameter to `createPersistentEffectDatabase` (extend existing `persistenceConfig` or add alongside).
+- [x] 8.2 Add optional `options?: { plugins?: ReadonlyArray<ProseQLPlugin> }` parameter to `createPersistentEffectDatabase` (extend existing `persistenceConfig` or add alongside).
 - [ ] 8.3 At init time (before building collections): call `buildPluginRegistry(plugins)`, run each plugin's `initialize()` Effect, merge plugin codecs into serializer construction, store resolved operator and ID generator maps for collection building.
 - [ ] 8.4 Register plugin `shutdown()` Effects as scope finalizers (run during database teardown, after flush).
 - [ ] 8.5 Add `PluginError` to the error channel of `createEffectDatabase` and `createPersistentEffectDatabase`.

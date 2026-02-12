@@ -1425,6 +1425,9 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
  *
  * Requires `StorageAdapter` and `SerializerRegistry` services in the environment.
  *
+ * Optionally accepts plugins that provide custom codecs, operators, ID generators,
+ * and global lifecycle hooks.
+ *
  * Usage:
  * ```ts
  * const db = yield* createPersistentEffectDatabase(config, initialData, { writeDebounce: 200 })
@@ -1433,6 +1436,13 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
  * // Flush all pending writes before shutdown
  * yield* db.flush()
  * ```
+ *
+ * With plugins:
+ * ```ts
+ * const db = yield* createPersistentEffectDatabase(config, initialData, persistenceConfig, {
+ *   plugins: [regexPlugin, snowflakeIdPlugin]
+ * })
+ * ```
  */
 export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 	config: Config,
@@ -1440,6 +1450,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		readonly [K in keyof Config]?: ReadonlyArray<Record<string, unknown>>;
 	},
 	persistenceConfig?: EffectDatabasePersistenceConfig,
+	options?: EffectDatabaseOptions,
 ): Effect.Effect<
 	EffectDatabaseWithPersistence<Config>,
 	| MigrationError
