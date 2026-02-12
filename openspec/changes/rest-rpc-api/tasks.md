@@ -52,7 +52,7 @@
 
 ## 7. REST — CRUD Handlers
 
-- [ ] 7.1 Implement `GET /:collection` handler: parse query params, delegate to `db[collection].query(config)`, collect results, return `{ status: 200, body: results }`
+- [x] 7.1 Implement `GET /:collection` handler: parse query params, delegate to `db[collection].query(config)`, collect results, return `{ status: 200, body: results }`
 - [ ] 7.2 Implement `GET /:collection/:id` handler: delegate to `db[collection].findById(id)`, return 200 or mapped error
 - [ ] 7.3 Implement `POST /:collection` handler: delegate to `db[collection].create(body)`, return `{ status: 201, body: entity }`
 - [ ] 7.4 Implement `PUT /:collection/:id` handler: delegate to `db[collection].update(id, body)`, return 200 or mapped error

@@ -13,6 +13,7 @@ import type {
 	EffectDatabase,
 	EffectDatabaseWithPersistence,
 } from "@proseql/core";
+import { parseQueryParams } from "./query-params.js";
 
 // ============================================================================
 // Types
@@ -211,10 +212,10 @@ const createQueryHandler = (
 	// biome-ignore lint/suspicious/noExplicitAny: Collection type is dynamic
 	collection: Record<string, (...args: ReadonlyArray<any>) => any>,
 ): RestHandler => {
-	return async (_req: RestRequest): Promise<RestResponse> => {
-		// TODO: Parse query params via parseQueryParams (task 6.1)
-		// For now, return all results
-		const stream = collection.query({});
+	return async (req: RestRequest): Promise<RestResponse> => {
+		// Parse query params into proseql-compatible query config
+		const queryConfig = parseQueryParams(req.query);
+		const stream = collection.query(queryConfig);
 		const result = await Effect.runPromise(
 			Stream.runCollect(stream as Stream.Stream<Record<string, unknown>>).pipe(
 				Effect.map(Chunk.toReadonlyArray),
