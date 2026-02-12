@@ -3182,5 +3182,440 @@ describe("Plugin System", () => {
 			const allAuthors = await db.authors.query().runPromise;
 			expect(allAuthors.length).toBe(1);
 		});
+
+		it("should support plugin with persistent database (createPersistentEffectDatabase)", async () => {
+			// Task 15.2: Test plugin with persistent database (createPersistentEffectDatabase)
+			//
+			// This test creates a comprehensive plugin that provides:
+			// 1. A custom codec (.plg extension - pipe-line-graph format)
+			// 2. A custom operator ($prefix - prefix match)
+			// 3. A custom ID generator (seq-<timestamp>-<counter>)
+			// 4. Global hooks (beforeCreate adds metadata, onChange tracks operations)
+			//
+			// We verify all features work with createPersistentEffectDatabase, including:
+			// - Data is persisted to files using custom codec
+			// - Data can be reloaded from files
+			// - Custom operators work in queries after reload
+			// - ID generator produces IDs for new entities
+			// - Hooks fire correctly
+
+			// Track lifecycle hook invocations
+			const hookInvocations: Array<{
+				hook: string;
+				collection: string;
+				operation?: string;
+			}> = [];
+
+			// Track ID generation
+			let idCounter = 0;
+			const generatedIds: string[] = [];
+
+			// Custom codec: pipe-line-graph format (key=value pairs separated by |)
+			const plgCodec: FormatCodec = {
+				name: "plg-format",
+				extensions: ["plg"],
+				encode: (data: unknown): string => {
+					// Data comes as Record<string, entity> from persistence layer
+					const obj = data as Record<string, Record<string, unknown>>;
+					const lines: string[] = [];
+					for (const [id, entity] of Object.entries(obj)) {
+						const pairs = Object.entries(entity)
+							.map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+							.join("|");
+						lines.push(pairs);
+					}
+					return lines.join("\n");
+				},
+				decode: (raw: string): unknown => {
+					if (!raw.trim()) return {};
+					const lines = raw.trim().split("\n");
+					const result: Record<string, Record<string, unknown>> = {};
+					for (const line of lines) {
+						if (!line.trim()) continue;
+						const obj: Record<string, unknown> = {};
+						const pairs = line.split("|");
+						for (const pair of pairs) {
+							const eqIndex = pair.indexOf("=");
+							if (eqIndex > 0) {
+								const key = pair.slice(0, eqIndex);
+								const value = pair.slice(eqIndex + 1);
+								try {
+									obj[key] = JSON.parse(value);
+								} catch {
+									obj[key] = value;
+								}
+							}
+						}
+						if (obj.id) {
+							result[obj.id as string] = obj;
+						}
+					}
+					return result;
+				},
+			};
+
+			// Custom operator: $prefix - matches if field starts with operand
+			const prefixOperator: CustomOperator = {
+				name: "$prefix",
+				types: ["string"],
+				evaluate: (fieldValue, operand) => {
+					if (typeof fieldValue !== "string" || typeof operand !== "string") {
+						return false;
+					}
+					return fieldValue.startsWith(operand);
+				},
+			};
+
+			// Custom ID generator: sequential with timestamp
+			const seqGenerator: CustomIdGenerator = {
+				name: "seq-generator",
+				generate: () => {
+					idCounter += 1;
+					const id = `seq-${Date.now()}-${idCounter}`;
+					generatedIds.push(id);
+					return id;
+				},
+			};
+
+			// Global hooks configuration
+			const persistentGlobalHooks: GlobalHooksConfig = {
+				beforeCreate: [
+					(ctx) => {
+						hookInvocations.push({
+							hook: "beforeCreate",
+							collection: ctx.collection,
+						});
+						// Add metadata field
+						return Effect.succeed({
+							...(ctx.data as Record<string, unknown>),
+							createdAt: "2024-persistent-test",
+						});
+					},
+				],
+				afterCreate: [
+					(ctx) => {
+						hookInvocations.push({
+							hook: "afterCreate",
+							collection: ctx.collection,
+						});
+						return Effect.void;
+					},
+				],
+				onChange: [
+					(ctx) => {
+						hookInvocations.push({
+							hook: "onChange",
+							collection: ctx.collection,
+							operation: ctx.type,
+						});
+						return Effect.void;
+					},
+				],
+			};
+
+			// Create the full-featured plugin
+			const persistentPlugin = createFullPlugin("persistent-integration-plugin", {
+				version: "2.0.0",
+				codecs: [plgCodec],
+				operators: [prefixOperator],
+				idGenerators: [seqGenerator],
+				hooks: persistentGlobalHooks,
+			});
+
+			// Use in-memory storage to simulate file system
+			const store = new Map<string, string>();
+			const { makeInMemoryStorageLayer } = await import(
+				"../src/storage/in-memory-adapter-layer.js"
+			);
+			const { makeSerializerLayer } = await import(
+				"../src/serializers/format-codec.js"
+			);
+			const { createPersistentEffectDatabase } = await import(
+				"../src/factories/database-effect.js"
+			);
+			const { Layer } = await import("effect");
+
+			// Create layer with plugin codec
+			const baseLayer = Layer.merge(
+				makeInMemoryStorageLayer(store),
+				makeSerializerLayer([], [plgCodec]),
+			);
+
+			// Config that uses file persistence and custom ID generator
+			const persistentConfig = {
+				books: {
+					schema: BookSchema,
+					file: "/data/books.plg",
+					relationships: {},
+					idGenerator: "seq-generator", // Use custom generator
+				},
+				authors: {
+					schema: AuthorSchema,
+					file: "/data/authors.plg",
+					relationships: {},
+				},
+			} as const;
+
+			// Initial data to seed the database
+			const persistentInitialData = {
+				books: [
+					{
+						id: "seed-1",
+						title: "Persistent Book One",
+						author: "Author A",
+						year: 2020,
+						genre: "fiction",
+					},
+				],
+				authors: [{ id: "author-seed-1", name: "Author A" }],
+			};
+
+			// ========================================
+			// Phase 1: Create database, add data, persist
+			// ========================================
+
+			const db1 = await Effect.runPromise(
+				Effect.provide(
+					Effect.scoped(
+						Effect.gen(function* () {
+							const database = yield* createPersistentEffectDatabase(
+								persistentConfig,
+								persistentInitialData,
+								{ writeDebounce: 10 },
+								{ plugins: [persistentPlugin] },
+							);
+							return database;
+						}),
+					),
+					baseLayer,
+				),
+			);
+
+			// Verify initial data is loaded
+			const initialBooks = await db1.books.query().runPromise;
+			expect(initialBooks.length).toBe(1);
+			expect(initialBooks[0].id).toBe("seed-1");
+			expect(initialBooks[0].title).toBe("Persistent Book One");
+
+			// Create a new book WITHOUT providing ID - should use custom generator
+			const newBook = await db1.books
+				.create({
+					title: "The Prefix Test",
+					author: "Test Author",
+					year: 2024,
+					genre: "technical",
+				} as Omit<Book, "id"> & { id?: string })
+				.runPromise;
+
+			// Verify ID was generated by our custom generator
+			expect(newBook.id).toMatch(/^seq-\d+-\d+$/);
+			expect(generatedIds.length).toBe(1);
+			expect(generatedIds[0]).toBe(newBook.id);
+
+			// Verify beforeCreate hook added metadata
+			expect(newBook.createdAt).toBe("2024-persistent-test");
+
+			// Verify hooks were called
+			expect(hookInvocations.some((h) => h.hook === "beforeCreate" && h.collection === "books")).toBe(true);
+			expect(hookInvocations.some((h) => h.hook === "afterCreate" && h.collection === "books")).toBe(true);
+			expect(hookInvocations.some((h) => h.hook === "onChange" && h.collection === "books" && h.operation === "create")).toBe(true);
+
+			// Create another book with explicit ID
+			const explicitBook = await db1.books
+				.create({
+					id: "explicit-persistent-1",
+					title: "Prefix Example Book",
+					author: "Another Author",
+					year: 2023,
+					genre: "guide",
+				})
+				.runPromise;
+
+			expect(explicitBook.id).toBe("explicit-persistent-1");
+			// Generator should only have been called once (for newBook)
+			expect(generatedIds.length).toBe(1);
+
+			// Create an author
+			const newAuthor = await db1.authors
+				.create({
+					id: "author-new-1",
+					name: "Prefix Author Name",
+				})
+				.runPromise;
+
+			expect(newAuthor.name).toBe("Prefix Author Name");
+			// Verify hooks fired for authors collection
+			expect(hookInvocations.some((h) => h.hook === "beforeCreate" && h.collection === "authors")).toBe(true);
+
+			// ========================================
+			// Test custom operator with persistent database
+			// ========================================
+
+			// Use $prefix operator to find books where title starts with "Prefix"
+			const prefixResults = await db1.books
+				.query({
+					where: { title: { $prefix: "Prefix" } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			// "Prefix Example Book" should match
+			expect(prefixResults.length).toBe(1);
+			expect(prefixResults[0].title).toBe("Prefix Example Book");
+
+			// Use $prefix on author name
+			const prefixAuthorResults = await db1.authors
+				.query({
+					where: { name: { $prefix: "Prefix" } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(prefixAuthorResults.length).toBe(1);
+			expect(prefixAuthorResults[0].name).toBe("Prefix Author Name");
+
+			// ========================================
+			// Flush to persist data
+			// ========================================
+
+			await db1.flush();
+
+			// Verify data was written to store in PLG format
+			const booksContent = store.get("/data/books.plg");
+			expect(booksContent).toBeDefined();
+			expect(booksContent).toContain("Persistent Book One");
+			expect(booksContent).toContain("The Prefix Test");
+			expect(booksContent).toContain("Prefix Example Book");
+
+			const authorsContent = store.get("/data/authors.plg");
+			expect(authorsContent).toBeDefined();
+			expect(authorsContent).toContain("Author A");
+			expect(authorsContent).toContain("Prefix Author Name");
+
+			// ========================================
+			// Phase 2: Reload database from files
+			// ========================================
+
+			// Reset hook tracking for second database instance
+			hookInvocations.length = 0;
+
+			const db2 = await Effect.runPromise(
+				Effect.provide(
+					Effect.scoped(
+						Effect.gen(function* () {
+							const database = yield* createPersistentEffectDatabase(
+								persistentConfig,
+								{}, // No initial data - load from files
+								{ writeDebounce: 10 },
+								{ plugins: [persistentPlugin] },
+							);
+							return database;
+						}),
+					),
+					baseLayer,
+				),
+			);
+
+			// Verify all books were loaded from file
+			const reloadedBooks = await db2.books.query().runPromise;
+			expect(reloadedBooks.length).toBe(3);
+
+			// Verify specific data integrity
+			const seedBook = await db2.books.findById("seed-1").runPromise;
+			expect(seedBook.title).toBe("Persistent Book One");
+			expect(seedBook.year).toBe(2020);
+
+			const generatedIdBook = await db2.books.findById(newBook.id).runPromise;
+			expect(generatedIdBook.title).toBe("The Prefix Test");
+			expect(generatedIdBook.createdAt).toBe("2024-persistent-test");
+
+			const explicitIdBook = await db2.books.findById("explicit-persistent-1").runPromise;
+			expect(explicitIdBook.title).toBe("Prefix Example Book");
+
+			// Verify authors were loaded
+			const reloadedAuthors = await db2.authors.query().runPromise;
+			expect(reloadedAuthors.length).toBe(2);
+
+			// ========================================
+			// Verify custom operator still works after reload
+			// ========================================
+
+			const prefixAfterReload = await db2.books
+				.query({
+					where: { title: { $prefix: "The" } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			// "The Prefix Test" should match
+			expect(prefixAfterReload.length).toBe(1);
+			expect(prefixAfterReload[0].title).toBe("The Prefix Test");
+
+			// Combine custom and built-in operators after reload
+			const combinedAfterReload = await db2.books
+				.query({
+					where: {
+						title: { $prefix: "P" },
+						year: { $lte: 2023 },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			// "Persistent Book One" (2020) and "Prefix Example Book" (2023) start with P and year <= 2023
+			expect(combinedAfterReload.length).toBe(2);
+			const matchedTitles = combinedAfterReload.map((b) => b.title).sort();
+			expect(matchedTitles).toEqual(["Persistent Book One", "Prefix Example Book"]);
+
+			// ========================================
+			// Verify hooks still work after reload
+			// ========================================
+
+			// Create a new book in the reloaded database
+			const bookAfterReload = await db2.books
+				.create({
+					title: "Post Reload Book",
+					author: "Reload Author",
+					year: 2025,
+					genre: "test",
+				} as Omit<Book, "id"> & { id?: string })
+				.runPromise;
+
+			// ID generator should still work
+			expect(bookAfterReload.id).toMatch(/^seq-\d+-\d+$/);
+			expect(generatedIds.length).toBe(2); // Now 2 generated IDs
+
+			// Hooks should have fired
+			expect(hookInvocations.some((h) => h.hook === "beforeCreate" && h.collection === "books")).toBe(true);
+			expect(hookInvocations.some((h) => h.hook === "onChange" && h.operation === "create")).toBe(true);
+
+			// Metadata should be added
+			expect(bookAfterReload.createdAt).toBe("2024-persistent-test");
+
+			// ========================================
+			// Update and delete operations with hooks
+			// ========================================
+
+			const hookCountBeforeUpdate = hookInvocations.length;
+			await db2.books.update("seed-1", { genre: "updated-fiction" }).runPromise;
+
+			// onChange should have fired for update
+			expect(hookInvocations.slice(hookCountBeforeUpdate).some((h) => h.hook === "onChange" && h.operation === "update")).toBe(true);
+
+			const hookCountBeforeDelete = hookInvocations.length;
+			await db2.books.delete("explicit-persistent-1").runPromise;
+
+			// onChange should have fired for delete
+			expect(hookInvocations.slice(hookCountBeforeDelete).some((h) => h.hook === "onChange" && h.operation === "delete")).toBe(true);
+
+			// Verify final state
+			const finalBooks = await db2.books.query().runPromise;
+			expect(finalBooks.length).toBe(3); // seed-1, newBook.id, bookAfterReload.id (explicit-persistent-1 was deleted)
+
+			// Flush and verify persistence of changes
+			await db2.flush();
+
+			const finalBooksContent = store.get("/data/books.plg");
+			expect(finalBooksContent).toBeDefined();
+			expect(finalBooksContent).toContain("updated-fiction"); // Updated genre
+			expect(finalBooksContent).toContain("Post Reload Book"); // New book
+			expect(finalBooksContent).not.toContain("explicit-persistent-1"); // Deleted book
+		});
 	});
 });
