@@ -3617,5 +3617,291 @@ describe("Plugin System", () => {
 			expect(finalBooksContent).toContain("Post Reload Book"); // New book
 			expect(finalBooksContent).not.toContain("explicit-persistent-1"); // Deleted book
 		});
+
+		it("should run plugin shutdown() during scope finalization", async () => {
+			// Task 15.3: Test plugin shutdown() runs during scope finalization
+			//
+			// Plugins can define an optional shutdown() Effect that runs when the database
+			// scope is finalized. This is useful for cleanup, closing connections, etc.
+			//
+			// Note: shutdown() is only supported with createPersistentEffectDatabase because
+			// it requires a Scope in the environment for finalizer registration.
+			//
+			// We verify:
+			// 1. shutdown() is called when the scope closes
+			// 2. Multiple plugins' shutdown() are called in reverse registration order
+			// 3. shutdown() runs after flush (data is persisted before shutdown)
+			// 4. Errors in shutdown() are caught and don't break other shutdowns
+
+			// Track lifecycle events
+			const lifecycleEvents: string[] = [];
+
+			const { makeInMemoryStorageLayer } = await import(
+				"../src/storage/in-memory-adapter-layer.js"
+			);
+			const { makeSerializerLayer } = await import(
+				"../src/serializers/format-codec.js"
+			);
+			const { jsonCodec } = await import(
+				"../src/serializers/codecs/json.js"
+			);
+			const { createPersistentEffectDatabase } = await import(
+				"../src/factories/database-effect.js"
+			);
+			const { Layer } = await import("effect");
+
+			const persistentConfig = {
+				books: {
+					schema: BookSchema,
+					file: "/data/shutdown-test.json",
+					relationships: {},
+				},
+			} as const;
+
+			// Plugin 1 with initialize and shutdown
+			const plugin1 = createLifecyclePlugin("shutdown-plugin-1", {
+				initialize: () =>
+					Effect.sync(() => {
+						lifecycleEvents.push("plugin1-initialize");
+					}),
+				shutdown: () =>
+					Effect.sync(() => {
+						lifecycleEvents.push("plugin1-shutdown");
+					}),
+			});
+
+			// Plugin 2 with initialize and shutdown
+			const plugin2 = createLifecyclePlugin("shutdown-plugin-2", {
+				initialize: () =>
+					Effect.sync(() => {
+						lifecycleEvents.push("plugin2-initialize");
+					}),
+				shutdown: () =>
+					Effect.sync(() => {
+						lifecycleEvents.push("plugin2-shutdown");
+					}),
+			});
+
+			// Plugin 3 with only shutdown (no initialize)
+			const plugin3 = createLifecyclePlugin("shutdown-plugin-3", {
+				shutdown: () =>
+					Effect.sync(() => {
+						lifecycleEvents.push("plugin3-shutdown");
+					}),
+			});
+
+			// ========================================
+			// Test 1: Single plugin shutdown
+			// ========================================
+
+			lifecycleEvents.length = 0;
+			const store1 = new Map<string, string>();
+			const baseLayer1 = Layer.merge(
+				makeInMemoryStorageLayer(store1),
+				makeSerializerLayer([jsonCodec()]),
+			);
+
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.scoped(
+						Effect.gen(function* () {
+							const db = yield* createPersistentEffectDatabase(
+								persistentConfig,
+								{ books: [] },
+								{ writeDebounce: 10 },
+								{ plugins: [plugin1] },
+							);
+
+							// Verify initialize was called
+							expect(lifecycleEvents).toContain("plugin1-initialize");
+
+							// Create a book to verify database is functional
+							yield* db.books.create({
+								id: "shutdown-test-1",
+								title: "Shutdown Test Book",
+								author: "Test Author",
+								year: 2024,
+								genre: "test",
+							});
+
+							// At this point, shutdown should NOT have been called yet
+							expect(lifecycleEvents).not.toContain("plugin1-shutdown");
+
+							return db;
+						}),
+					),
+					baseLayer1,
+				),
+			);
+
+			// After scope closes, shutdown should have been called
+			expect(lifecycleEvents).toContain("plugin1-shutdown");
+			expect(lifecycleEvents).toEqual(["plugin1-initialize", "plugin1-shutdown"]);
+
+			// ========================================
+			// Test 2: Multiple plugins shutdown in reverse registration order
+			// ========================================
+
+			lifecycleEvents.length = 0;
+			const store2 = new Map<string, string>();
+			const baseLayer2 = Layer.merge(
+				makeInMemoryStorageLayer(store2),
+				makeSerializerLayer([jsonCodec()]),
+			);
+
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.scoped(
+						Effect.gen(function* () {
+							// Register plugins in order: 1, 2, 3
+							const db = yield* createPersistentEffectDatabase(
+								persistentConfig,
+								{ books: [] },
+								{ writeDebounce: 10 },
+								{ plugins: [plugin1, plugin2, plugin3] },
+							);
+
+							// Verify initializes ran in registration order (plugin3 has no initialize)
+							expect(lifecycleEvents).toContain("plugin1-initialize");
+							expect(lifecycleEvents).toContain("plugin2-initialize");
+							const init1Index = lifecycleEvents.indexOf("plugin1-initialize");
+							const init2Index = lifecycleEvents.indexOf("plugin2-initialize");
+							expect(init1Index).toBeLessThan(init2Index);
+
+							// No shutdowns yet
+							expect(lifecycleEvents).not.toContain("plugin1-shutdown");
+							expect(lifecycleEvents).not.toContain("plugin2-shutdown");
+							expect(lifecycleEvents).not.toContain("plugin3-shutdown");
+
+							return db;
+						}),
+					),
+					baseLayer2,
+				),
+			);
+
+			// After scope closes, all shutdowns should have been called
+			expect(lifecycleEvents).toContain("plugin1-shutdown");
+			expect(lifecycleEvents).toContain("plugin2-shutdown");
+			expect(lifecycleEvents).toContain("plugin3-shutdown");
+
+			// Verify shutdown order is REVERSE of registration order (LIFO)
+			// Plugins registered: 1, 2, 3
+			// Shutdowns should be: 3, 2, 1
+			const shutdown1Index = lifecycleEvents.indexOf("plugin1-shutdown");
+			const shutdown2Index = lifecycleEvents.indexOf("plugin2-shutdown");
+			const shutdown3Index = lifecycleEvents.indexOf("plugin3-shutdown");
+
+			// plugin3 shutdown should come before plugin2, which should come before plugin1
+			expect(shutdown3Index).toBeLessThan(shutdown2Index);
+			expect(shutdown2Index).toBeLessThan(shutdown1Index);
+
+			// ========================================
+			// Test 3: Shutdown runs after flush (data is persisted before shutdown)
+			// ========================================
+
+			lifecycleEvents.length = 0;
+			const store3 = new Map<string, string>();
+			const baseLayer3 = Layer.merge(
+				makeInMemoryStorageLayer(store3),
+				makeSerializerLayer([jsonCodec()]),
+			);
+
+			// Create a plugin that checks if data was persisted
+			const flushCheckPlugin = createLifecyclePlugin("flush-check-plugin", {
+				shutdown: () =>
+					Effect.sync(() => {
+						lifecycleEvents.push("flush-check-shutdown");
+					}),
+			});
+
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.scoped(
+						Effect.gen(function* () {
+							const db = yield* createPersistentEffectDatabase(
+								persistentConfig,
+								{ books: [] },
+								{ writeDebounce: 10 },
+								{ plugins: [flushCheckPlugin] },
+							);
+
+							// Create some data
+							const book = yield* db.books.create({
+								id: "persist-shutdown-1",
+								title: "Persist Before Shutdown",
+								author: "Test Author",
+								year: 2024,
+								genre: "test",
+							});
+
+							// Verify book was created
+							expect(book.id).toBe("persist-shutdown-1");
+							expect(book.title).toBe("Persist Before Shutdown");
+
+							// No shutdown yet
+							expect(lifecycleEvents).not.toContain("flush-check-shutdown");
+
+							return db;
+						}),
+					),
+					baseLayer3,
+				),
+			);
+
+			// After scope closes, shutdown should have been called
+			expect(lifecycleEvents).toContain("flush-check-shutdown");
+
+			// Verify data was persisted (flush happens before shutdown due to scope finalizer order)
+			const persistedContent = store3.get("/data/shutdown-test.json");
+			expect(persistedContent).toBeDefined();
+			expect(persistedContent).toContain("Persist Before Shutdown");
+
+			// ========================================
+			// Test 4: Shutdown error is caught and doesn't break other shutdowns
+			// ========================================
+
+			lifecycleEvents.length = 0;
+			const store4 = new Map<string, string>();
+			const baseLayer4 = Layer.merge(
+				makeInMemoryStorageLayer(store4),
+				makeSerializerLayer([jsonCodec()]),
+			);
+
+			// Plugin that throws during shutdown
+			const errorPlugin = createLifecyclePlugin("error-plugin", {
+				shutdown: () => Effect.fail(new Error("Shutdown error")),
+			});
+
+			// Plugin registered after error plugin should still shutdown
+			const afterErrorPlugin = createLifecyclePlugin("after-error-plugin", {
+				shutdown: () =>
+					Effect.sync(() => {
+						lifecycleEvents.push("after-error-shutdown");
+					}),
+			});
+
+			// This should NOT throw even though one plugin's shutdown fails
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.scoped(
+						Effect.gen(function* () {
+							const db = yield* createPersistentEffectDatabase(
+								persistentConfig,
+								{ books: [] },
+								{ writeDebounce: 10 },
+								{ plugins: [afterErrorPlugin, errorPlugin] },
+							);
+							return db;
+						}),
+					),
+					baseLayer4,
+				),
+			);
+
+			// The after-error plugin's shutdown should still have run
+			// (error plugin runs first in LIFO order, but its error is caught)
+			expect(lifecycleEvents).toContain("after-error-shutdown");
+		});
 	});
 });

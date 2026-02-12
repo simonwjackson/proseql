@@ -101,7 +101,7 @@
 
 - [x] 15.1 Test full plugin providing codecs + operators + hooks + ID generator together
 - [x] 15.2 Test plugin with persistent database (createPersistentEffectDatabase)
-- [ ] 15.3 Test plugin shutdown() runs during scope finalization
+- [x] 15.3 Test plugin shutdown() runs during scope finalization
 - [ ] 15.4 Test database with no plugins behaves identically to current behavior (regression)
 
 ## 16. Cleanup
