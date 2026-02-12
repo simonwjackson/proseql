@@ -57,11 +57,11 @@
 
 ## 9. Output Formatters
 
-- [ ] 9.1 Create `packages/cli/src/output/formatter.ts`: dispatcher that accepts format flag and record array, delegates to the appropriate formatter
-- [ ] 9.2 Create `packages/cli/src/output/table.ts`: calculate column widths from headers and data, print aligned columns. Truncate values exceeding terminal width.
-- [ ] 9.3 Create `packages/cli/src/output/json.ts`: `JSON.stringify` with 2-space indent
-- [ ] 9.4 Create `packages/cli/src/output/yaml.ts`: serialize using the YAML codec from `@proseql/core`
-- [ ] 9.5 Create `packages/cli/src/output/csv.ts`: write header row then data rows with proper quoting and comma escaping
+- [x] 9.1 Create `packages/cli/src/output/formatter.ts`: dispatcher that accepts format flag and record array, delegates to the appropriate formatter
+- [x] 9.2 Create `packages/cli/src/output/table.ts`: calculate column widths from headers and data, print aligned columns. Truncate values exceeding terminal width.
+- [x] 9.3 Create `packages/cli/src/output/json.ts`: `JSON.stringify` with 2-space indent
+- [x] 9.4 Create `packages/cli/src/output/yaml.ts`: serialize using the YAML codec from `@proseql/core`
+- [x] 9.5 Create `packages/cli/src/output/csv.ts`: write header row then data rows with proper quoting and comma escaping
 
 ## 10. Tests
 
