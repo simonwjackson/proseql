@@ -15,6 +15,7 @@ import {
 } from "./config/loader.js"
 import { handleInit as handleInitCommand } from "./commands/init.js"
 import { handleQuery as handleQueryCommand } from "./commands/query.js"
+import { format, type OutputFormat } from "./output/formatter.js"
 
 const VERSION = "0.1.0"
 
@@ -44,11 +45,6 @@ interface ParsedArgs {
     readonly dryRun: boolean
   }
 }
-
-/**
- * Output format type
- */
-type OutputFormat = "table" | "json" | "yaml" | "csv"
 
 /**
  * Determine output format from flags
@@ -331,8 +327,10 @@ async function handleQuery(
     exitWithError(result.message ?? "Query failed")
   }
 
-  // Output the results (for now, just JSON - formatting will be added in task 4.4)
-  console.log(JSON.stringify(result.data, null, 2))
+  // Output the results using the appropriate formatter
+  const outputFormat = getOutputFormat(args.flags)
+  const output = format(outputFormat, result.data ?? [])
+  console.log(output)
 }
 
 async function handleCollections(
@@ -486,7 +484,8 @@ async function main(): Promise<void> {
 
 // Export for testing
 export { parseArgs, getOutputFormat, printHelp, printVersion, resolveConfig }
-export type { ParsedArgs, OutputFormat }
+export type { ParsedArgs }
+export type { OutputFormat } from "./output/formatter.js"
 
 // Run main
 main().catch((error) => {
