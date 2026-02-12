@@ -1902,4 +1902,251 @@ describe("reactive queries - transactions", () => {
 			);
 		});
 	});
+
+	describe("transaction rollback no emissions (15.3)", () => {
+		it("transaction rollback produces no emissions (state unchanged)", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Track all emissions received
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork collection with a timeout
+					const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "200 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission to be processed
+					yield* Effect.sleep("30 millis");
+
+					// Start a transaction that will fail and be rolled back
+					yield* db
+						.$transaction((tx) =>
+							Effect.gen(function* () {
+								// Create a new book
+								yield* tx.books.create({
+									title: "Foundation",
+									author: "Isaac Asimov",
+									year: 1951,
+									genre: "sci-fi",
+								});
+
+								// Wait to see if any emission happens (it shouldn't)
+								yield* Effect.sleep("30 millis");
+
+								// Update an existing book
+								yield* tx.books.update("1", { year: 1966 });
+
+								// Wait again
+								yield* Effect.sleep("30 millis");
+
+								// Force the transaction to fail and rollback
+								return yield* Effect.fail(new Error("intentional failure"));
+							}),
+						)
+						.pipe(Effect.catchAll(() => Effect.void)); // Catch the intentional failure
+
+					// Wait for any potential emissions after rollback
+					yield* Effect.sleep("50 millis");
+
+					// Interrupt the fiber
+					yield* Fiber.interrupt(collectedFiber);
+
+					// Should have ONLY the initial emission - no emissions from rollback
+					// Rollback restores state and publishes nothing
+					expect(emissions).toHaveLength(1);
+
+					// Initial emission: 2 sci-fi books (Dune 1965, Neuromancer 1984)
+					expect(emissions[0]).toHaveLength(2);
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+					]);
+				}),
+			);
+		});
+
+		it("failed transaction with delete and create produces no emissions", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch all books
+					const stream = yield* db.books.watch({
+						sort: { title: "asc" },
+					});
+
+					// Track all emissions received
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork collection with a timeout
+					const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "200 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+
+					// Transaction that performs create and delete, then fails
+					yield* db
+						.$transaction((tx) =>
+							Effect.gen(function* () {
+								// Create a book
+								yield* tx.books.create({
+									title: "2001: A Space Odyssey",
+									author: "Arthur C. Clarke",
+									year: 1968,
+									genre: "sci-fi",
+								});
+
+								yield* Effect.sleep("30 millis");
+
+								// Delete The Hobbit
+								yield* tx.books.delete("3");
+
+								yield* Effect.sleep("30 millis");
+
+								// Fail to trigger rollback
+								return yield* Effect.fail(new Error("intentional failure"));
+							}),
+						)
+						.pipe(Effect.catchAll(() => Effect.void));
+
+					// Wait for any potential emissions after rollback
+					yield* Effect.sleep("50 millis");
+
+					// Interrupt the fiber
+					yield* Fiber.interrupt(collectedFiber);
+
+					// Should have ONLY the initial emission - no emissions from rollback
+					expect(emissions).toHaveLength(1);
+
+					// Initial emission: 3 books (unchanged from before rollback)
+					expect(emissions[0]).toHaveLength(3);
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+						"The Hobbit",
+					]);
+				}),
+			);
+		});
+
+		it("rollback after partial mutations on multiple collections produces no emissions", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch both collections
+					const booksStream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+					});
+					const authorsStream = yield* db.authors.watch();
+
+					// Track emissions for both
+					const bookEmissions: Array<ReadonlyArray<Book>> = [];
+					const authorEmissions: Array<ReadonlyArray<Author>> = [];
+
+					// Fork watchers for both collections
+					const booksFiber = yield* Stream.runForEach(
+						booksStream,
+						(emission) =>
+							Effect.sync(() => {
+								bookEmissions.push(emission);
+							}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "200 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					const authorsFiber = yield* Stream.runForEach(
+						authorsStream,
+						(emission) =>
+							Effect.sync(() => {
+								authorEmissions.push(emission);
+							}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "200 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emissions
+					yield* Effect.sleep("30 millis");
+
+					// Transaction that mutates both collections then fails
+					yield* db
+						.$transaction((tx) =>
+							Effect.gen(function* () {
+								// Mutate books
+								yield* tx.books.create({
+									title: "Foundation",
+									author: "Isaac Asimov",
+									year: 1951,
+									genre: "sci-fi",
+								});
+								yield* Effect.sleep("20 millis");
+
+								// Mutate authors
+								yield* tx.authors.create({
+									name: "Isaac Asimov",
+									country: "USA",
+								});
+								yield* Effect.sleep("20 millis");
+
+								// More mutations
+								yield* tx.books.update("1", { title: "Dune (Special Edition)" });
+								yield* tx.authors.delete("a1"); // Delete Frank Herbert
+
+								yield* Effect.sleep("20 millis");
+
+								// Force failure and rollback
+								return yield* Effect.fail(new Error("intentional failure"));
+							}),
+						)
+						.pipe(Effect.catchAll(() => Effect.void));
+
+					// Wait for any potential emissions after rollback
+					yield* Effect.sleep("50 millis");
+
+					// Interrupt both fibers
+					yield* Fiber.interrupt(booksFiber);
+					yield* Fiber.interrupt(authorsFiber);
+
+					// Both should have ONLY the initial emission - no emissions from rollback
+					expect(bookEmissions).toHaveLength(1);
+					expect(bookEmissions[0]).toHaveLength(2); // 2 sci-fi books
+
+					expect(authorEmissions).toHaveLength(1);
+					expect(authorEmissions[0]).toHaveLength(2); // 2 authors
+				}),
+			);
+		});
+	});
 });
