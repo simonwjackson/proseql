@@ -7,7 +7,16 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { Chunk, Effect, Fiber, Schema, Stream } from "effect";
+import {
+	Chunk,
+	Effect,
+	ExecutionStrategy,
+	Exit,
+	Fiber,
+	Schema,
+	Scope,
+	Stream,
+} from "effect";
 import { createEffectDatabase } from "../src/factories/database-effect.js";
 
 // ============================================================================
@@ -3734,6 +3743,265 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 					// even after streams end - this verifies cleanup was successful)
 					yield* Effect.sleep("50 millis");
 				}),
+			);
+		});
+	});
+
+	describe("Scope closure cleans up all active subscriptions (18.2)", () => {
+		it("closing a Scope cleans up all watch subscriptions within it", async () => {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					// Create database in outer scope (stays alive for the whole test)
+					const db = yield* createEffectDatabase(config, initialData);
+
+					// Track emissions from subscriptions started within an inner scope
+					const emissions1: Array<ReadonlyArray<Book>> = [];
+					const emissions2: Array<ReadonlyArray<Book>> = [];
+
+					// Create an inner scope that we will manually close
+					const innerScope = yield* Scope.make();
+
+					// Create watch subscriptions within the inner scope
+					const stream1 = yield* db.books
+						.watch({ where: { genre: "sci-fi" } })
+						.pipe(Effect.provideService(Scope.Scope, innerScope));
+
+					const stream2 = yield* db.books
+						.watch({ where: { genre: "fantasy" } })
+						.pipe(Effect.provideService(Scope.Scope, innerScope));
+
+					// Fork stream consumers
+					const fiber1 = yield* Stream.runForEach(stream1, (emission) =>
+						Effect.sync(() => {
+							emissions1.push(emission);
+						}),
+					).pipe(Effect.fork);
+
+					const fiber2 = yield* Stream.runForEach(stream2, (emission) =>
+						Effect.sync(() => {
+							emissions2.push(emission);
+						}),
+					).pipe(Effect.fork);
+
+					// Wait for initial emissions
+					yield* Effect.sleep("30 millis");
+					expect(emissions1).toHaveLength(1); // Initial sci-fi (2 books)
+					expect(emissions2).toHaveLength(1); // Initial fantasy (1 book)
+
+					// Trigger some mutations to verify subscriptions are active
+					yield* db.books.create({
+						title: "New Sci-Fi",
+						author: "Test",
+						year: 2000,
+						genre: "sci-fi",
+					});
+
+					yield* Effect.sleep("50 millis");
+					expect(emissions1).toHaveLength(2); // sci-fi subscription got update
+
+					yield* db.books.create({
+						title: "New Fantasy",
+						author: "Test",
+						year: 2001,
+						genre: "fantasy",
+					});
+
+					yield* Effect.sleep("50 millis");
+					expect(emissions2).toHaveLength(2); // fantasy subscription got update
+
+					// Now close the inner scope - this should clean up BOTH subscriptions
+					yield* Scope.close(innerScope, Exit.void);
+
+					// Wait for cleanup to process
+					yield* Effect.sleep("50 millis");
+
+					// Create more books - no emissions should be received since
+					// all subscriptions in the inner scope were cleaned up
+					const emissionsBeforeMutation1 = emissions1.length;
+					const emissionsBeforeMutation2 = emissions2.length;
+
+					yield* db.books.create({
+						title: "Post-Scope-Close Sci-Fi",
+						author: "Test",
+						year: 2002,
+						genre: "sci-fi",
+					});
+
+					yield* db.books.create({
+						title: "Post-Scope-Close Fantasy",
+						author: "Test",
+						year: 2003,
+						genre: "fantasy",
+					});
+
+					// Wait for any potential emissions
+					yield* Effect.sleep("100 millis");
+
+					// No new emissions should have been received after scope closure
+					expect(emissions1).toHaveLength(emissionsBeforeMutation1);
+					expect(emissions2).toHaveLength(emissionsBeforeMutation2);
+
+					// The fibers should have been interrupted when scope closed
+					// Await them to ensure they completed (either interrupted or finished)
+					yield* Fiber.await(fiber1);
+					yield* Fiber.await(fiber2);
+				}).pipe(Effect.scoped),
+			);
+		});
+
+		it("multiple scopes can independently manage their subscriptions", async () => {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					// Create database in outer scope
+					const db = yield* createEffectDatabase(config, initialData);
+
+					// Track emissions from two separate scopes
+					const scopeAEmissions: Array<ReadonlyArray<Book>> = [];
+					const scopeBEmissions: Array<ReadonlyArray<Book>> = [];
+
+					// Create two independent scopes
+					const scopeA = yield* Scope.make();
+					const scopeB = yield* Scope.make();
+
+					// Create subscriptions in scope A
+					const streamA = yield* db.books
+						.watch({ where: { genre: "sci-fi" } })
+						.pipe(Effect.provideService(Scope.Scope, scopeA));
+
+					// Create subscriptions in scope B
+					const streamB = yield* db.books
+						.watch({ where: { genre: "fantasy" } })
+						.pipe(Effect.provideService(Scope.Scope, scopeB));
+
+					// Fork consumers
+					const fiberA = yield* Stream.runForEach(streamA, (emission) =>
+						Effect.sync(() => {
+							scopeAEmissions.push(emission);
+						}),
+					).pipe(Effect.fork);
+
+					const fiberB = yield* Stream.runForEach(streamB, (emission) =>
+						Effect.sync(() => {
+							scopeBEmissions.push(emission);
+						}),
+					).pipe(Effect.fork);
+
+					// Wait for initial emissions
+					yield* Effect.sleep("30 millis");
+					expect(scopeAEmissions).toHaveLength(1);
+					expect(scopeBEmissions).toHaveLength(1);
+
+					// Close only scope A - scope B should still work
+					yield* Scope.close(scopeA, Exit.void);
+					yield* Effect.sleep("30 millis");
+
+					// Create books to test scope B is still active
+					yield* db.books.create({
+						title: "After Scope A Close",
+						author: "Test",
+						year: 2000,
+						genre: "fantasy",
+					});
+
+					yield* Effect.sleep("50 millis");
+
+					// Scope A subscription should not have received more emissions
+					expect(scopeAEmissions).toHaveLength(1);
+
+					// Scope B subscription should still be active and received the update
+					expect(scopeBEmissions).toHaveLength(2);
+
+					// Cleanup scope B
+					yield* Scope.close(scopeB, Exit.void);
+					yield* Fiber.await(fiberA);
+					yield* Fiber.await(fiberB);
+				}).pipe(Effect.scoped),
+			);
+		});
+
+		it("nested scopes respect scope hierarchy for subscription cleanup", async () => {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					// Create database
+					const db = yield* createEffectDatabase(config, initialData);
+
+					// Track emissions
+					const outerScopeEmissions: Array<ReadonlyArray<Book>> = [];
+					const innerScopeEmissions: Array<ReadonlyArray<Book>> = [];
+
+					// Create outer scope
+					const outerScope = yield* Scope.make();
+
+					// Create subscription in outer scope
+					const outerStream = yield* db.books
+						.watch({ sort: { year: "asc" } })
+						.pipe(Effect.provideService(Scope.Scope, outerScope));
+
+					const outerFiber = yield* Stream.runForEach(outerStream, (emission) =>
+						Effect.sync(() => {
+							outerScopeEmissions.push(emission);
+						}),
+					).pipe(Effect.fork);
+
+					// Create inner scope forked from outer scope
+					const innerScope = yield* outerScope.fork(
+						ExecutionStrategy.sequential,
+					);
+
+					// Create subscription in inner scope
+					const innerStream = yield* db.books
+						.watch({ where: { genre: "sci-fi" } })
+						.pipe(Effect.provideService(Scope.Scope, innerScope));
+
+					const innerFiber = yield* Stream.runForEach(innerStream, (emission) =>
+						Effect.sync(() => {
+							innerScopeEmissions.push(emission);
+						}),
+					).pipe(Effect.fork);
+
+					// Wait for initial emissions
+					yield* Effect.sleep("30 millis");
+					expect(outerScopeEmissions).toHaveLength(1);
+					expect(innerScopeEmissions).toHaveLength(1);
+
+					// Verify both subscriptions are working
+					yield* db.books.create({
+						title: "New Sci-Fi",
+						author: "Test",
+						year: 2000,
+						genre: "sci-fi",
+					});
+
+					yield* Effect.sleep("50 millis");
+					expect(outerScopeEmissions).toHaveLength(2);
+					expect(innerScopeEmissions).toHaveLength(2);
+
+					// Close inner scope - inner subscription should stop, outer should continue
+					yield* Scope.close(innerScope, Exit.void);
+					yield* Effect.sleep("30 millis");
+
+					const innerEmissionsBeforeMutation = innerScopeEmissions.length;
+
+					yield* db.books.create({
+						title: "After Inner Scope Close",
+						author: "Test",
+						year: 2001,
+						genre: "sci-fi",
+					});
+
+					yield* Effect.sleep("50 millis");
+
+					// Outer scope subscription should still be active
+					expect(outerScopeEmissions).toHaveLength(3);
+
+					// Inner scope subscription should be cleaned up (no new emissions)
+					expect(innerScopeEmissions).toHaveLength(innerEmissionsBeforeMutation);
+
+					// Cleanup
+					yield* Scope.close(outerScope, Exit.void);
+					yield* Fiber.await(outerFiber);
+					yield* Fiber.await(innerFiber);
+				}).pipe(Effect.scoped),
 			);
 		});
 	});
