@@ -1747,5 +1747,100 @@ describe("Plugin System", () => {
 			const foundBook2 = await db.books.findById("custom-id-2").runPromise;
 			expect(foundBook2.title).toBe("Book Two");
 		});
+
+		it("should use provided id when explicit, even with idGenerator configured", async () => {
+			// Task 13.2: Test collection with `idGenerator: "custom"` still uses provided id when explicit
+			//
+			// When a collection has an idGenerator configured, but the user provides an explicit ID
+			// when creating an entity, the explicit ID should be used instead of the generator.
+
+			// Create a counter-based ID generator
+			let counter = 0;
+			const customGenerator: CustomIdGenerator = {
+				name: "test-counter-explicit",
+				generate: () => {
+					counter += 1;
+					return `generated-id-${counter}`;
+				},
+			};
+
+			const generatorPlugin = createIdGeneratorPlugin("id-gen-explicit-plugin", customGenerator);
+
+			// Create config that references the custom ID generator
+			const configWithIdGenerator = {
+				books: {
+					schema: BookSchema,
+					relationships: {},
+					idGenerator: "test-counter-explicit", // Reference the plugin's generator
+				},
+			} as const;
+
+			// Create database with the plugin
+			const db = await Effect.runPromise(
+				createEffectDatabase(configWithIdGenerator, { books: [] }, { plugins: [generatorPlugin] }),
+			);
+
+			// Reset counter
+			counter = 0;
+
+			// Create a book WITH an explicit id - should use the provided id, not the generator
+			const book1 = await db.books
+				.create({
+					id: "my-explicit-id-1",
+					title: "Book With Explicit ID",
+					author: "Test Author",
+					year: 2024,
+					genre: "test",
+				})
+				.runPromise;
+
+			// The explicit ID should be used, not the generator
+			expect(book1.id).toBe("my-explicit-id-1");
+			// Counter should still be 0 because generator was not called
+			expect(counter).toBe(0);
+
+			// Create another book WITHOUT an id - should use the generator
+			const book2 = await db.books
+				.create({
+					title: "Book Without ID",
+					author: "Test Author",
+					year: 2024,
+					genre: "test",
+				} as Parameters<typeof db.books.create>[0])
+				.runPromise;
+
+			// This one should use the generator
+			expect(book2.id).toBe("generated-id-1");
+			expect(counter).toBe(1);
+
+			// Create another book WITH an explicit id - should use provided id
+			const book3 = await db.books
+				.create({
+					id: "my-explicit-id-2",
+					title: "Another Explicit ID Book",
+					author: "Test Author",
+					year: 2024,
+					genre: "test",
+				})
+				.runPromise;
+
+			expect(book3.id).toBe("my-explicit-id-2");
+			// Counter should still be 1 because generator was not called again
+			expect(counter).toBe(1);
+
+			// Verify all books are in the database with correct IDs
+			const allBooks = await db.books.query().runPromise;
+			expect(allBooks.length).toBe(3);
+
+			const ids = allBooks.map((b) => b.id).sort();
+			expect(ids).toEqual(["generated-id-1", "my-explicit-id-1", "my-explicit-id-2"]);
+
+			// Verify we can find books by their IDs
+			const foundExplicit = await db.books.findById("my-explicit-id-1").runPromise;
+			expect(foundExplicit.title).toBe("Book With Explicit ID");
+
+			const foundGenerated = await db.books.findById("generated-id-1").runPromise;
+			expect(foundGenerated.title).toBe("Book Without ID");
+		});
 	});
 });
