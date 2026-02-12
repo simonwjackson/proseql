@@ -212,6 +212,18 @@ export type {
 export type { TransactionContext } from "./types/crud-types.js";
 
 // ============================================================================
+// CRUD Result Types
+// ============================================================================
+
+export type {
+	CreateManyResult,
+	DeleteManyResult,
+	UpdateManyResult,
+	UpsertManyResult,
+	UpsertResult,
+} from "./types/crud-types.js";
+
+// ============================================================================
 // Transaction Functions
 // ============================================================================
 

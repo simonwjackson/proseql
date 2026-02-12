@@ -58,7 +58,7 @@
 - [x] 8.3 Verify `packages/core/dist/index.js` exists and is valid ESM (has `export` statements, no `require`).
 - [x] 8.4 Verify `packages/core/dist/index.d.ts` exists and exports the public API types.
 - [x] 8.5 Verify `.js.map` and `.d.ts.map` files are present alongside their source files.
-- [ ] 8.6 Verify cross-package references resolve (e.g., `@proseql/node` dist references `@proseql/core` types correctly).
+- [x] 8.6 Verify cross-package references resolve (e.g., `@proseql/node` dist references `@proseql/core` types correctly).
 
 ## 9. Publish Dry Run
 
