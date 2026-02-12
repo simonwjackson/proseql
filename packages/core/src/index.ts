@@ -151,6 +151,7 @@ export { evaluateQuery } from "./reactive/evaluate-query.js";
 export type { EvaluateQueryConfig } from "./reactive/evaluate-query.js";
 export { watch } from "./reactive/watch.js";
 export type { WatchQueryConfig } from "./reactive/watch.js";
+export { watchById } from "./reactive/watch-by-id.js";
 
 // ============================================================================
 // Cursor Pagination Types
