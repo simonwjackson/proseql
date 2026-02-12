@@ -425,5 +425,395 @@ describe("Transaction atomicity properties", () => {
 		});
 	});
 
-	// Task 8.3 will be implemented in subsequent tasks
+	describe("Task 8.3: Successful transaction commit applies all mutations", () => {
+		/**
+		 * Apply an operation to an in-memory model of the collection state.
+		 * This serves as a test oracle to compute the expected state after operations.
+		 *
+		 * @param state - Current state as a Map keyed by entity ID
+		 * @param op - The operation to apply
+		 * @returns Updated state
+		 */
+		const applyOperationToModel = (
+			state: Map<string, Book>,
+			op: CrudOperation<Book>,
+		): Map<string, Book> => {
+			const newState = new Map(state);
+
+			if (op.op === "create") {
+				newState.set(op.payload.id, op.payload);
+			} else if (op.op === "update") {
+				const existing = newState.get(op.id);
+				if (existing) {
+					newState.set(op.id, { ...existing, ...op.payload });
+				}
+			} else if (op.op === "delete") {
+				newState.delete(op.id);
+			}
+
+			return newState;
+		};
+
+		/**
+		 * Compute the expected final state by applying all operations sequentially.
+		 */
+		const computeExpectedState = (
+			initialBooks: readonly Book[],
+			operations: readonly CrudOperation<Book>[],
+		): readonly Book[] => {
+			let state = new Map<string, Book>();
+
+			// Add initial books
+			for (const book of initialBooks) {
+				state.set(book.id, book);
+			}
+
+			// Apply each operation
+			for (const op of operations) {
+				state = applyOperationToModel(state, op);
+			}
+
+			// Return sorted array for consistent comparison
+			return [...state.values()].sort((a, b) => a.id.localeCompare(b.id));
+		};
+
+		it("should apply all mutations when transaction commits successfully", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate initial data (0-5 books to allow starting from empty)
+					fc.array(entityArbitrary(BookSchema), { minLength: 0, maxLength: 5 }),
+					// Generate operation sequence (1-8 operations)
+					operationSequenceArbitrary(BookSchema, {
+						minLength: 1,
+						maxLength: 8,
+					}),
+					async (initialBooks, operationSequence) => {
+						// Create database with initial data
+						const db = await Effect.runPromise(
+							createEffectDatabase(config, { books: initialBooks }),
+						);
+
+						// Compute expected final state using our test oracle
+						const expectedFinalState = computeExpectedState(
+							initialBooks,
+							operationSequence,
+						);
+
+						// Execute transaction that performs all operations and commits
+						const txResult = await Effect.runPromise(
+							db
+								.$transaction((ctx) =>
+									Effect.gen(function* () {
+										// Execute all operations
+										for (const op of operationSequence) {
+											if (op.op === "create") {
+												yield* ctx.books
+													.create(op.payload)
+													.pipe(Effect.catchAll(() => Effect.void));
+											} else if (op.op === "update") {
+												yield* ctx.books
+													.update(op.id, op.payload)
+													.pipe(Effect.catchAll(() => Effect.void));
+											} else if (op.op === "delete") {
+												yield* ctx.books
+													.delete(op.id)
+													.pipe(Effect.catchAll(() => Effect.void));
+											}
+										}
+
+										// Return success - transaction should commit
+										return "committed" as const;
+									}),
+								)
+								.pipe(Effect.either),
+						);
+
+						// Verify the transaction succeeded
+						expect(txResult._tag).toBe("Right");
+						if (txResult._tag === "Right") {
+							expect(txResult.right).toBe("committed");
+						}
+
+						// Get actual final state
+						const actualFinalChunk = await Effect.runPromise(
+							Stream.runCollect(db.books.query({})),
+						);
+						const actualFinalState = snapshotCollection(
+							Chunk.toReadonlyArray(actualFinalChunk),
+						);
+
+						// CRITICAL PROPERTY: Final state must match expected state
+						expect(snapshotsEqual(expectedFinalState, actualFinalState)).toBe(
+							true,
+						);
+
+						// Additional verification: exact entity count match
+						expect(actualFinalState.length).toBe(expectedFinalState.length);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should apply create operations correctly in successful transaction", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate 1-5 books to create
+					fc.array(entityArbitrary(BookSchema), { minLength: 1, maxLength: 5 }),
+					async (booksToCreate) => {
+						// Start with empty collection
+						const db = await Effect.runPromise(
+							createEffectDatabase(config, { books: [] }),
+						);
+
+						// Execute transaction that creates all books
+						const txResult = await Effect.runPromise(
+							db
+								.$transaction((ctx) =>
+									Effect.gen(function* () {
+										for (const book of booksToCreate) {
+											yield* ctx.books.create(book);
+										}
+										return "committed" as const;
+									}),
+								)
+								.pipe(Effect.either),
+						);
+
+						// Verify success
+						expect(txResult._tag).toBe("Right");
+
+						// Verify all books were created
+						const allBooksChunk = await Effect.runPromise(
+							Stream.runCollect(db.books.query({})),
+						);
+						const allBooks = Chunk.toReadonlyArray(allBooksChunk);
+
+						expect(allBooks.length).toBe(booksToCreate.length);
+
+						// Verify each book exists with correct data
+						for (const createdBook of booksToCreate) {
+							const found = allBooks.find((b) => b.id === createdBook.id);
+							expect(found).toBeDefined();
+							if (found) {
+								expect(JSON.stringify(found)).toBe(JSON.stringify(createdBook));
+							}
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should apply update operations correctly in successful transaction", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate 2-5 initial books
+					fc.array(entityArbitrary(BookSchema), { minLength: 2, maxLength: 5 }),
+					// Generate update payloads
+					fc.array(
+						fc.record({
+							title: fc.string({ minLength: 1, maxLength: 50 }),
+							rating: fc.float({ min: 0, max: 5, noNaN: true }),
+						}),
+						{ minLength: 2, maxLength: 5 },
+					),
+					async (initialBooks, updatePayloads) => {
+						// Create database with initial books
+						const db = await Effect.runPromise(
+							createEffectDatabase(config, { books: initialBooks }),
+						);
+
+						// Select random books to update (ensure we don't update more than we have)
+						const booksToUpdate = initialBooks.slice(
+							0,
+							Math.min(updatePayloads.length, initialBooks.length),
+						);
+						const updates = booksToUpdate.map((book, i) => ({
+							id: book.id,
+							payload: updatePayloads[i],
+						}));
+
+						// Execute transaction that updates books
+						const txResult = await Effect.runPromise(
+							db
+								.$transaction((ctx) =>
+									Effect.gen(function* () {
+										for (const update of updates) {
+											yield* ctx.books.update(update.id, update.payload);
+										}
+										return "committed" as const;
+									}),
+								)
+								.pipe(Effect.either),
+						);
+
+						// Verify success
+						expect(txResult._tag).toBe("Right");
+
+						// Verify each update was applied
+						for (const update of updates) {
+							const found = await Effect.runPromise(
+								db.books.findById(update.id),
+							);
+							expect(found.title).toBe(update.payload.title);
+							expect(found.rating).toBe(update.payload.rating);
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should apply delete operations correctly in successful transaction", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate 3-6 initial books
+					fc.array(entityArbitrary(BookSchema), { minLength: 3, maxLength: 6 }),
+					// Generate how many to delete (1 to half of the books)
+					fc.nat({ max: 100 }),
+					async (initialBooks, deleteCountRaw) => {
+						// Ensure we delete at least 1 but not all books
+						const maxDelete = Math.max(1, Math.floor(initialBooks.length / 2));
+						const deleteCount = (deleteCountRaw % maxDelete) + 1;
+
+						// Create database with initial books
+						const db = await Effect.runPromise(
+							createEffectDatabase(config, { books: initialBooks }),
+						);
+
+						// Select books to delete
+						const idsToDelete = initialBooks
+							.slice(0, deleteCount)
+							.map((b) => b.id);
+						const idsToKeep = new Set(
+							initialBooks.slice(deleteCount).map((b) => b.id),
+						);
+
+						// Execute transaction that deletes books
+						const txResult = await Effect.runPromise(
+							db
+								.$transaction((ctx) =>
+									Effect.gen(function* () {
+										for (const id of idsToDelete) {
+											yield* ctx.books.delete(id);
+										}
+										return "committed" as const;
+									}),
+								)
+								.pipe(Effect.either),
+						);
+
+						// Verify success
+						expect(txResult._tag).toBe("Right");
+
+						// Verify deleted books no longer exist
+						for (const deletedId of idsToDelete) {
+							const result = await Effect.runPromise(
+								db.books.findById(deletedId).pipe(Effect.either),
+							);
+							expect(result._tag).toBe("Left");
+						}
+
+						// Verify remaining books still exist
+						const allBooksChunk = await Effect.runPromise(
+							Stream.runCollect(db.books.query({})),
+						);
+						const allBooks = Chunk.toReadonlyArray(allBooksChunk);
+
+						expect(allBooks.length).toBe(initialBooks.length - deleteCount);
+
+						for (const book of allBooks) {
+							expect(idsToKeep.has(book.id)).toBe(true);
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should apply mixed operations correctly in successful transaction", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate 2-4 initial books
+					fc.array(entityArbitrary(BookSchema), { minLength: 2, maxLength: 4 }),
+					// Generate a book to create
+					entityArbitrary(BookSchema),
+					// Generate update data
+					fc.record({
+						title: fc.string({ minLength: 1, maxLength: 50 }),
+					}),
+					async (initialBooks, newBook, updatePayload) => {
+						// Create database with initial books
+						const db = await Effect.runPromise(
+							createEffectDatabase(config, { books: initialBooks }),
+						);
+
+						const bookToUpdate = initialBooks[0];
+						const bookToDelete = initialBooks[initialBooks.length - 1];
+						const remainingBooks = initialBooks.slice(1, -1);
+
+						// Execute transaction with create, update, and delete
+						const txResult = await Effect.runPromise(
+							db
+								.$transaction((ctx) =>
+									Effect.gen(function* () {
+										// Create new book
+										yield* ctx.books.create(newBook);
+
+										// Update first book
+										yield* ctx.books.update(bookToUpdate.id, updatePayload);
+
+										// Delete last book
+										yield* ctx.books.delete(bookToDelete.id);
+
+										return "committed" as const;
+									}),
+								)
+								.pipe(Effect.either),
+						);
+
+						// Verify success
+						expect(txResult._tag).toBe("Right");
+
+						// Verify new book was created
+						const createdResult = await Effect.runPromise(
+							db.books.findById(newBook.id).pipe(Effect.either),
+						);
+						expect(createdResult._tag).toBe("Right");
+
+						// Verify update was applied
+						const updatedBook = await Effect.runPromise(
+							db.books.findById(bookToUpdate.id),
+						);
+						expect(updatedBook.title).toBe(updatePayload.title);
+
+						// Verify delete was applied
+						const deletedResult = await Effect.runPromise(
+							db.books.findById(bookToDelete.id).pipe(Effect.either),
+						);
+						expect(deletedResult._tag).toBe("Left");
+
+						// Verify final count
+						const allBooksChunk = await Effect.runPromise(
+							Stream.runCollect(db.books.query({})),
+						);
+						const allBooks = Chunk.toReadonlyArray(allBooksChunk);
+
+						// Original count - 1 deleted + 1 created = original count
+						expect(allBooks.length).toBe(initialBooks.length);
+
+						// Verify remaining original books are intact
+						for (const book of remainingBooks) {
+							const found = await Effect.runPromise(
+								db.books.findById(book.id).pipe(Effect.either),
+							);
+							expect(found._tag).toBe("Right");
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+	});
 });
