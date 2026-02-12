@@ -19,7 +19,7 @@
 - [x] 3.3 Add `"exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } }`.
 - [x] 3.4 Add `"files": ["dist", "LICENSE", "README.md"]`.
 - [x] 3.5 Add `"license": "MIT"`.
-- [ ] 3.6 Add `"description"` with a concise package description.
+- [x] 3.6 Add `"description"` with a concise package description.
 - [ ] 3.7 Add `"repository": { "type": "git", "url": "..." , "directory": "packages/core" }`.
 - [ ] 3.8 Add `"keywords": ["database", "typescript", "effect", "yaml", "json", "plain-text", "type-safe", "in-memory"]`.
 - [ ] 3.9 Add `"engines": { "node": ">=18" }`.
