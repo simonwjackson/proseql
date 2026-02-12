@@ -21,7 +21,7 @@
 ## 4. Query Re-evaluation Pipeline
 
 - [x] 4.1 Extract a reusable `evaluateQuery(ref, config)` function that reads the current Ref state and runs the query pipeline (filter, sort, select, limit/offset)
-- [ ] 4.2 Ensure `evaluateQuery` returns `ReadonlyArray<T>` (not a Stream or cursor — watch delivers complete result snapshots)
+- [x] 4.2 Ensure `evaluateQuery` returns `ReadonlyArray<T>` (not a Stream or cursor — watch delivers complete result snapshots)
 
 ## 5. Mutation Integration (CRUD publishes events)
 
