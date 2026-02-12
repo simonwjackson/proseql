@@ -150,8 +150,51 @@ export async function createSuite(): Promise<Bench> {
 		await createManyDb.users.createMany(batch).runPromise;
 	});
 
-	// Benchmarks will be added in tasks 4.4-4.6:
-	// - 4.4: update and updateMany benchmarks
+	// -------------------------------------------------------------------------
+	// 4.4: update and updateMany benchmarks
+	// -------------------------------------------------------------------------
+
+	// For update benchmark, we use the baseline collection.
+	// Each iteration updates a randomly selected entity by ID.
+	// This measures single-entity update throughput.
+	const updateDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	let updateCounter = 0;
+
+	bench.add("update (single)", async () => {
+		// Cycle through existing entity IDs to ensure updates target real entities
+		// This simulates realistic update patterns where entities already exist
+		const targetIndex = updateCounter % BASELINE_SIZE;
+		const targetId = usersArray[targetIndex].id;
+		updateCounter++;
+
+		await updateDb.users.update(targetId, {
+			name: `Updated User ${updateCounter}`,
+			age: 25 + (updateCounter % 50),
+		}).runPromise;
+	});
+
+	// For updateMany benchmark, we use a fresh copy of the baseline collection.
+	// Each iteration updates a batch of ~100 entities matching a predicate.
+	// This tests amortized batch update throughput vs single updates.
+	const updateManyDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	let updateManyCounter = 0;
+
+	bench.add("updateMany (batch ~100)", async () => {
+		// Target a different age range each iteration to update ~100 entities
+		// With ages 18-87 across 10K users, each age value has ~140 users on average
+		// We cycle through age ranges to hit different entities each time
+		const targetAge = 18 + (updateManyCounter % 70);
+		updateManyCounter++;
+
+		await updateManyDb.users.updateMany(
+			(user) => user.age === targetAge,
+			{
+				name: `Batch Updated User ${updateManyCounter}`,
+			},
+		).runPromise;
+	});
+
+	// Benchmarks will be added in tasks 4.5-4.6:
 	// - 4.5: delete and deleteMany benchmarks
 	// - 4.6: upsert benchmarks (create and update paths)
 
