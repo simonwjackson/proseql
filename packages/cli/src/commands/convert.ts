@@ -8,6 +8,7 @@
 
 import { Effect, Layer } from "effect"
 import * as path from "node:path"
+import * as fs from "node:fs"
 import {
 	NodeStorageLayer,
 	makeSerializerLayer,
@@ -74,6 +75,7 @@ export interface ConvertResult {
 		readonly oldFormat: string
 		readonly newFile: string
 		readonly newFormat: string
+		readonly configUpdated: boolean
 	}
 }
 
@@ -137,6 +139,124 @@ function computeNewFilePath(oldPath: string, newFormat: TargetFormat): string {
  */
 export function isValidFormat(format: string): format is TargetFormat {
 	return VALID_FORMATS.includes(format as TargetFormat)
+}
+
+/**
+ * Update the config file to reference the new file path.
+ *
+ * For JSON config files, we parse and rewrite the entire file.
+ * For TypeScript/JavaScript config files, we use text replacement
+ * to preserve formatting, imports, and other code.
+ *
+ * @param configPath - Path to the config file
+ * @param collectionName - Name of the collection to update
+ * @param oldFilePath - The old file path (relative or absolute)
+ * @param newFilePath - The new file path (relative)
+ * @returns true if the config was updated successfully
+ */
+function updateConfigFile(
+	configPath: string,
+	collectionName: string,
+	oldFilePath: string,
+	newFilePath: string,
+): boolean {
+	try {
+		const configContent = fs.readFileSync(configPath, "utf-8")
+		const ext = path.extname(configPath).toLowerCase()
+
+		if (ext === ".json") {
+			// For JSON configs, parse and modify
+			const config = JSON.parse(configContent) as Record<string, Record<string, unknown>>
+			if (config[collectionName] && typeof config[collectionName].file === "string") {
+				config[collectionName].file = newFilePath
+				fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8")
+				return true
+			}
+			return false
+		}
+
+		// For TypeScript/JavaScript configs, use text replacement
+		// We need to find the file property for the specific collection and update it
+
+		// Normalize paths for comparison - handle both relative paths starting with "./"
+		const normalizedOldPath = oldFilePath.startsWith("./") ? oldFilePath : `./${oldFilePath}`
+		const normalizedNewPath = newFilePath.startsWith("./") ? newFilePath : `./${newFilePath}`
+
+		// Also prepare versions without "./" prefix
+		const oldPathNoPrefix = oldFilePath.replace(/^\.\//, "")
+		const newPathNoPrefix = newFilePath.replace(/^\.\//, "")
+
+		// Strategy: Replace the old file path with the new one
+		// We look for patterns like:
+		//   file: "./data/collection.json"
+		//   file: './data/collection.json'
+		//   file: "./data/collection.json",
+		//   file: './data/collection.json',
+
+		let updatedContent = configContent
+		let replaced = false
+
+		// Try multiple patterns for different quote styles and path formats
+		const patterns = [
+			// Double quotes with ./
+			{ search: `file: "${normalizedOldPath}"`, replace: `file: "${normalizedNewPath}"` },
+			// Single quotes with ./
+			{ search: `file: '${normalizedOldPath}'`, replace: `file: '${normalizedNewPath}'` },
+			// Double quotes without ./
+			{ search: `file: "${oldPathNoPrefix}"`, replace: `file: "${newPathNoPrefix}"` },
+			// Single quotes without ./
+			{ search: `file: '${oldPathNoPrefix}'`, replace: `file: '${newPathNoPrefix}'` },
+			// With trailing comma - double quotes with ./
+			{ search: `file: "${normalizedOldPath}",`, replace: `file: "${normalizedNewPath}",` },
+			// With trailing comma - single quotes with ./
+			{ search: `file: '${normalizedOldPath}',`, replace: `file: '${normalizedNewPath}',` },
+			// With trailing comma - double quotes without ./
+			{ search: `file: "${oldPathNoPrefix}",`, replace: `file: "${newPathNoPrefix}",` },
+			// With trailing comma - single quotes without ./
+			{ search: `file: '${oldPathNoPrefix}',`, replace: `file: '${newPathNoPrefix}',` },
+		]
+
+		for (const { search, replace } of patterns) {
+			if (updatedContent.includes(search)) {
+				updatedContent = updatedContent.replace(search, replace)
+				replaced = true
+				break
+			}
+		}
+
+		if (replaced) {
+			fs.writeFileSync(configPath, updatedContent, "utf-8")
+			return true
+		}
+
+		// If simple replacement didn't work, try regex for more flexible matching
+		// Pattern matches: file: "path" or file: 'path' with optional whitespace
+		const regexPatterns = [
+			// Match with ./ prefix
+			new RegExp(`(file:\\s*["'])${escapeRegex(normalizedOldPath)}(["'])`, "g"),
+			// Match without ./ prefix
+			new RegExp(`(file:\\s*["'])${escapeRegex(oldPathNoPrefix)}(["'])`, "g"),
+		]
+
+		for (const regex of regexPatterns) {
+			if (regex.test(configContent)) {
+				updatedContent = configContent.replace(regex, `$1${normalizedNewPath}$2`)
+				fs.writeFileSync(configPath, updatedContent, "utf-8")
+				return true
+			}
+		}
+
+		return false
+	} catch {
+		return false
+	}
+}
+
+/**
+ * Escape special regex characters in a string.
+ */
+function escapeRegex(str: string): string {
+	return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
 /**
@@ -246,10 +366,20 @@ export function runConvert(
 			)
 		}
 
-		// Compute relative paths for display
+		// Compute relative paths for display and config update
 		const configDir = path.dirname(configPath)
 		const relativeOldPath = path.relative(configDir, absoluteFilePath) || absoluteFilePath
 		const relativeNewPath = path.relative(configDir, newFilePath) || newFilePath
+
+		// Update the config file to reference the new file path
+		// We use the relative path with "./" prefix to match the typical config file style
+		const configRelativeNewPath = relativeNewPath.startsWith("./") ? relativeNewPath : `./${relativeNewPath}`
+		const configUpdated = updateConfigFile(
+			configPath,
+			collection,
+			originalFilePath,
+			configRelativeNewPath,
+		)
 
 		return {
 			success: true,
@@ -259,6 +389,7 @@ export function runConvert(
 				oldFormat: currentExt,
 				newFile: relativeNewPath,
 				newFormat: targetFormat,
+				configUpdated,
 			},
 		}
 	})

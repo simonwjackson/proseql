@@ -630,11 +630,15 @@ async function handleConvert(
 
   if (result.data) {
     if (outputFormat === "table") {
-      console.log(`\nConversion prepared:`)
+      console.log(`\nConversion complete:`)
       console.log(`  Collection: ${result.data.collection}`)
       console.log(`  Old file:   ${result.data.oldFile} (${result.data.oldFormat})`)
       console.log(`  New file:   ${result.data.newFile} (${result.data.newFormat})`)
-      console.log(`\nNote: File writing will be implemented in a future update.`)
+      if (result.data.configUpdated) {
+        console.log(`  Config:     updated`)
+      } else {
+        console.log(`  Config:     not updated (manual update may be required)`)
+      }
     } else {
       const output = format(outputFormat, [result.data as Record<string, unknown>])
       console.log(output)
