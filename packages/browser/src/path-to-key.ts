@@ -14,12 +14,20 @@ export const DEFAULT_STORAGE_KEY_PREFIX = "proseql:";
 /**
  * Convert a file path to a flat browser storage key.
  *
- * - Strips leading `./` or `.\\`
- * - Normalizes backslashes to forward slashes
- * - Removes multiple leading `./` patterns
- * - Strips leading `/` for absolute paths
- * - Removes trailing slashes
- * - Prepends the configurable prefix (default `proseql:`)
+ * Normalizations applied:
+ * - Backslashes converted to forward slashes
+ * - Multiple consecutive slashes collapsed to single slash
+ * - Leading `./` patterns stripped (including multiple: `./././`)
+ * - Leading `/` stripped for absolute paths (including multiple: `///`)
+ * - Trailing slashes removed
+ * - Standalone `.` (current directory) becomes empty string
+ * - Prefix prepended (default `proseql:`)
+ *
+ * Edge cases:
+ * - Empty string `""` → `proseql:`
+ * - Single dot `.` → `proseql:`
+ * - Only slashes `///` → `proseql:`
+ * - Parent refs preserved: `../data` → `proseql:../data`
  *
  * @param path - The file path to convert (e.g., `./data/books.yaml`)
  * @param prefix - Optional prefix to prepend (default `proseql:`)
@@ -38,8 +46,8 @@ export const DEFAULT_STORAGE_KEY_PREFIX = "proseql:";
  * // => 'proseql:data/books.yaml'
  *
  * @example
- * pathToKey('data/books.yaml')
- * // => 'proseql:data/books.yaml'
+ * pathToKey('/absolute/path.yaml')
+ * // => 'proseql:absolute/path.yaml'
  */
 export function pathToKey(
 	path: string,
@@ -48,19 +56,39 @@ export function pathToKey(
 	// Normalize backslashes to forward slashes
 	let normalized = path.replace(/\\/g, "/");
 
-	// Remove multiple leading './' patterns (e.g., './././data' -> 'data')
+	// Collapse multiple consecutive slashes to single slash (e.g., 'a//b' -> 'a/b')
+	normalized = normalized.replace(/\/+/g, "/");
+
+	// Remove leading './' patterns repeatedly (handles './././data' -> 'data')
+	// Also need to remove after leading slash normalization since we might have
+	// patterns like './/./data' that become '././data' after slash collapse
 	while (normalized.startsWith("./")) {
 		normalized = normalized.slice(2);
 	}
 
-	// Strip leading '/' for absolute paths
-	while (normalized.startsWith("/")) {
+	// Strip leading '/' for absolute paths (handles '/', '/data', etc.)
+	if (normalized.startsWith("/")) {
 		normalized = normalized.slice(1);
 	}
 
-	// Remove trailing slashes
-	while (normalized.endsWith("/") && normalized.length > 0) {
+	// Handle case where we stripped './' and now have more './' (e.g., input was './/./data')
+	while (normalized.startsWith("./")) {
+		normalized = normalized.slice(2);
+	}
+
+	// Strip leading '/' again in case we had '././/data' -> '/data' after './' removal
+	if (normalized.startsWith("/")) {
+		normalized = normalized.slice(1);
+	}
+
+	// Remove trailing slashes (after collapse, at most one trailing slash remains)
+	if (normalized.endsWith("/")) {
 		normalized = normalized.slice(0, -1);
+	}
+
+	// Handle standalone dot (current directory reference) -> empty string
+	if (normalized === ".") {
+		normalized = "";
 	}
 
 	return prefix + normalized;

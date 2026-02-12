@@ -10,7 +10,7 @@
 
 - [x] 2.1 Create `packages/browser/src/path-to-key.ts` with `pathToKey(path: string, prefix?: string): string`. Default prefix `proseql:`. Strip leading `./`, normalize backslashes to forward slashes.
 - [x] 2.2 Export `pathToKey` from `packages/browser/src/index.ts`
-- [ ] 2.3 Handle edge cases: empty string, absolute paths, paths with multiple leading `./`, trailing slashes
+- [x] 2.3 Handle edge cases: empty string, absolute paths, paths with multiple leading `./`, trailing slashes
 
 ## 3. Shared Web Storage Adapter
 
