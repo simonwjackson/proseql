@@ -2852,4 +2852,335 @@ describe("Plugin System", () => {
 			expect(allBooks.length).toBe(9); // 3 + 4 + 2
 		});
 	});
+
+	// ============================================================================
+	// Tests — Integration (Task 15.1-15.4)
+	// ============================================================================
+
+	describe("integration", () => {
+		it("should support full plugin providing codecs + operators + hooks + ID generator together", async () => {
+			// Task 15.1: Test full plugin providing codecs + operators + hooks + ID generator together
+			//
+			// This test creates a comprehensive plugin that provides:
+			// 1. A custom codec (.custom extension)
+			// 2. A custom operator ($fuzzy - case-insensitive contains)
+			// 3. A custom ID generator (uuid-like)
+			// 4. Global hooks (beforeCreate, afterCreate, onChange)
+			//
+			// We then verify all features work together in a single database.
+
+			// Track lifecycle hook invocations
+			const hookInvocations: Array<{
+				hook: string;
+				collection: string;
+				data: Record<string, unknown>;
+			}> = [];
+
+			// Track ID generation
+			let idCounter = 0;
+			const generatedIds: string[] = [];
+
+			// Custom codec: simple pipe-separated format
+			const customCodec: FormatCodec = {
+				name: "custom-pipe-format",
+				extensions: ["custom"],
+				encode: (data: unknown): string => {
+					// For arrays, encode each item on a line with pipe-separated fields
+					if (Array.isArray(data)) {
+						const lines = data.map((item) => {
+							const obj = item as Record<string, unknown>;
+							return Object.entries(obj)
+								.map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+								.join("|");
+						});
+						return lines.join("\n");
+					}
+					return "";
+				},
+				decode: (raw: string): unknown => {
+					if (!raw.trim()) return [];
+					const lines = raw.trim().split("\n");
+					return lines.map((line) => {
+						const obj: Record<string, unknown> = {};
+						const pairs = line.split("|");
+						for (const pair of pairs) {
+							const [key, value] = pair.split("=");
+							if (key && value) {
+								try {
+									obj[key] = JSON.parse(value);
+								} catch {
+									obj[key] = value;
+								}
+							}
+						}
+						return obj;
+					});
+				},
+			};
+
+			// Custom operator: $fuzzy - case-insensitive contains
+			const fuzzyOperator: CustomOperator = {
+				name: "$fuzzy",
+				types: ["string"],
+				evaluate: (fieldValue, operand) => {
+					if (typeof fieldValue !== "string" || typeof operand !== "string") {
+						return false;
+					}
+					return fieldValue.toLowerCase().includes(operand.toLowerCase());
+				},
+			};
+
+			// Custom ID generator: prefixed counter
+			const uuidLikeGenerator: CustomIdGenerator = {
+				name: "integration-uuid",
+				generate: () => {
+					idCounter += 1;
+					const id = `intg-${Date.now()}-${idCounter}`;
+					generatedIds.push(id);
+					return id;
+				},
+			};
+
+			// Global hooks configuration
+			const globalHooks: GlobalHooksConfig = {
+				beforeCreate: [
+					(ctx) => {
+						hookInvocations.push({
+							hook: "beforeCreate",
+							collection: ctx.collection,
+							data: { ...(ctx.data as Record<string, unknown>) },
+						});
+						// Add a metadata field
+						return Effect.succeed({
+							...(ctx.data as Record<string, unknown>),
+							createdAt: "2024-01-01T00:00:00Z",
+						});
+					},
+				],
+				afterCreate: [
+					(ctx) => {
+						hookInvocations.push({
+							hook: "afterCreate",
+							collection: ctx.collection,
+							data: { id: (ctx.entity as { id: string }).id },
+						});
+						return Effect.void;
+					},
+				],
+				onChange: [
+					(ctx) => {
+						if (ctx.type === "create") {
+							hookInvocations.push({
+								hook: "onChange",
+								collection: ctx.collection,
+								data: {
+									type: ctx.type,
+									id: (ctx.entity as { id: string }).id,
+								},
+							});
+						} else if (ctx.type === "update") {
+							hookInvocations.push({
+								hook: "onChange",
+								collection: ctx.collection,
+								data: { type: ctx.type, id: ctx.id },
+							});
+						} else {
+							hookInvocations.push({
+								hook: "onChange",
+								collection: ctx.collection,
+								data: { type: ctx.type, id: ctx.id },
+							});
+						}
+						return Effect.void;
+					},
+				],
+			};
+
+			// Create the full-featured plugin
+			const fullPlugin = createFullPlugin("integration-full-plugin", {
+				version: "1.0.0",
+				codecs: [customCodec],
+				operators: [fuzzyOperator],
+				idGenerators: [uuidLikeGenerator],
+				hooks: globalHooks,
+			});
+
+			// Create config that uses the ID generator
+			const integrationConfig = {
+				books: {
+					schema: BookSchema,
+					relationships: {},
+					idGenerator: "integration-uuid", // Use our custom generator
+				},
+				authors: {
+					schema: AuthorSchema,
+					relationships: {},
+				},
+			} as const;
+
+			// Create database with the full plugin
+			const db = await Effect.runPromise(
+				createEffectDatabase(integrationConfig, { books: [], authors: [] }, { plugins: [fullPlugin] }),
+			);
+
+			// ========================================
+			// Test 1: ID Generator + Hooks working together
+			// ========================================
+
+			// Create a book without providing an ID - should use generator
+			const book1 = await db.books
+				.create({
+					title: "The Integration Guide",
+					author: "Test Author",
+					year: 2024,
+					genre: "technical",
+				} as Omit<Book, "id"> & { id?: string })
+				.runPromise;
+
+			// Verify ID was generated
+			expect(book1.id).toMatch(/^intg-\d+-\d+$/);
+			expect(generatedIds.length).toBe(1);
+			expect(generatedIds[0]).toBe(book1.id);
+
+			// Verify beforeCreate hook added createdAt
+			expect(book1.createdAt).toBe("2024-01-01T00:00:00Z");
+
+			// Verify hooks were invoked in correct order
+			expect(hookInvocations.length).toBe(3);
+			expect(hookInvocations[0].hook).toBe("beforeCreate");
+			expect(hookInvocations[0].collection).toBe("books");
+			expect(hookInvocations[1].hook).toBe("afterCreate");
+			expect(hookInvocations[1].collection).toBe("books");
+			expect(hookInvocations[2].hook).toBe("onChange");
+			expect(hookInvocations[2].collection).toBe("books");
+			expect((hookInvocations[2].data as { type: string }).type).toBe("create");
+
+			// ========================================
+			// Test 2: Create more books for querying
+			// ========================================
+
+			const book2 = await db.books
+				.create({
+					title: "Advanced Integration Testing",
+					author: "Another Author",
+					year: 2023,
+					genre: "technical",
+				} as Omit<Book, "id"> & { id?: string })
+				.runPromise;
+
+			const book3 = await db.books
+				.create({
+					id: "explicit-book-3", // Explicit ID should override generator
+					title: "Simple Integration",
+					author: "Simple Author",
+					year: 2022,
+					genre: "guide",
+				})
+				.runPromise;
+
+			// Verify explicit ID was used
+			expect(book3.id).toBe("explicit-book-3");
+			// Generator should have been called only twice (for book1 and book2)
+			expect(generatedIds.length).toBe(2);
+
+			// ========================================
+			// Test 3: Custom operator working
+			// ========================================
+
+			// Use $fuzzy operator - case-insensitive contains
+			const fuzzyResults = await db.books
+				.query({
+					where: { title: { $fuzzy: "integration" } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			// All 3 books have "Integration" in title (case-insensitive)
+			expect(fuzzyResults.length).toBe(3);
+
+			// Fuzzy search for "GUIDE" (should match "The Integration Guide" and "Simple Integration" if we had "guide" in title)
+			// Actually "The Integration Guide" has "Guide" in title
+			const fuzzyGuide = await db.books
+				.query({
+					where: { title: { $fuzzy: "GUIDE" } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(fuzzyGuide.length).toBe(1);
+			expect(fuzzyGuide[0].title).toBe("The Integration Guide");
+
+			// ========================================
+			// Test 4: Combine custom operator with built-in operators
+			// ========================================
+
+			const combinedQuery = await db.books
+				.query({
+					where: {
+						title: { $fuzzy: "integration" },
+						year: { $gte: 2023 },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			// Should match book1 (2024) and book2 (2023), but not book3 (2022)
+			expect(combinedQuery.length).toBe(2);
+			const years = combinedQuery.map((b) => b.year).sort();
+			expect(years).toEqual([2023, 2024]);
+
+			// ========================================
+			// Test 5: Update triggers onChange hook
+			// ========================================
+
+			const hookCountBeforeUpdate = hookInvocations.length;
+			await db.books.update(book1.id, { genre: "reference" }).runPromise;
+
+			// Should have one more onChange invocation
+			const updateHook = hookInvocations[hookCountBeforeUpdate];
+			expect(updateHook.hook).toBe("onChange");
+			expect(updateHook.collection).toBe("books");
+			expect((updateHook.data as { type: string }).type).toBe("update");
+
+			// ========================================
+			// Test 6: Delete triggers onChange hook
+			// ========================================
+
+			const hookCountBeforeDelete = hookInvocations.length;
+			await db.books.delete(book3.id).runPromise;
+
+			const deleteHook = hookInvocations[hookCountBeforeDelete];
+			expect(deleteHook.hook).toBe("onChange");
+			expect(deleteHook.collection).toBe("books");
+			expect((deleteHook.data as { type: string }).type).toBe("delete");
+
+			// ========================================
+			// Test 7: Authors collection also gets hooks
+			// ========================================
+
+			const hookCountBeforeAuthor = hookInvocations.length;
+			const author1 = await db.authors
+				.create({
+					id: "author-1",
+					name: "Integration Author",
+				})
+				.runPromise;
+
+			// Verify hooks fired for authors collection too
+			expect(hookInvocations.length).toBe(hookCountBeforeAuthor + 3); // beforeCreate, afterCreate, onChange
+			expect(hookInvocations[hookCountBeforeAuthor].hook).toBe("beforeCreate");
+			expect(hookInvocations[hookCountBeforeAuthor].collection).toBe("authors");
+			expect(hookInvocations[hookCountBeforeAuthor + 1].hook).toBe("afterCreate");
+			expect(hookInvocations[hookCountBeforeAuthor + 1].collection).toBe("authors");
+			expect(hookInvocations[hookCountBeforeAuthor + 2].hook).toBe("onChange");
+			expect(hookInvocations[hookCountBeforeAuthor + 2].collection).toBe("authors");
+
+			// ========================================
+			// Final verification: total state is correct
+			// ========================================
+
+			const allBooks = await db.books.query().runPromise;
+			expect(allBooks.length).toBe(2); // book1 and book2 (book3 was deleted)
+
+			const allAuthors = await db.authors.query().runPromise;
+			expect(allAuthors.length).toBe(1);
+		});
+	});
 });
