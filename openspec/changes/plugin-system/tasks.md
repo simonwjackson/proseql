@@ -91,7 +91,7 @@
 
 ## 14. Tests — Global Hooks
 
-- [ ] 14.1 Test global beforeCreate hook fires for all collections
+- [x] 14.1 Test global beforeCreate hook fires for all collections
 - [ ] 14.2 Test global afterCreate hook fires for all collections
 - [ ] 14.3 Test global hooks run before collection-specific hooks (ordering)
 - [ ] 14.4 Test multiple plugins' global hooks run in plugin registration order

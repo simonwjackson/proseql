@@ -1655,6 +1655,95 @@ describe("Plugin System", () => {
 	});
 
 	// ============================================================================
+	// Tests — Global Hooks (Task 14.1-14.5)
+	// ============================================================================
+
+	describe("global hooks", () => {
+		it("should fire global beforeCreate hook for all collections", async () => {
+			// Task 14.1: Test global beforeCreate hook fires for all collections
+			//
+			// We create a plugin with a global beforeCreate hook that tracks
+			// which collections it was called for. Then we create entities in
+			// multiple collections (books and authors) and verify the hook
+			// was called for BOTH collections.
+
+			// Track hook invocations
+			const hookCalls: Array<{ collection: string; data: Record<string, unknown> }> = [];
+
+			const globalHooksPlugin = createHooksPlugin("global-hooks-plugin", {
+				beforeCreate: [
+					(ctx) => {
+						hookCalls.push({
+							collection: ctx.collection,
+							data: ctx.data as Record<string, unknown>,
+						});
+						return Effect.succeed(ctx.data);
+					},
+				],
+			});
+
+			const db = await createDatabaseWithPlugins([globalHooksPlugin]);
+
+			// Verify hook hasn't been called yet
+			expect(hookCalls.length).toBe(0);
+
+			// Create a book - should trigger global hook for books collection
+			const book = await db.books
+				.create({
+					id: "b-test-1",
+					title: "Test Book",
+					author: "Test Author",
+					year: 2024,
+					genre: "test",
+				})
+				.runPromise;
+
+			// Verify hook was called for books collection
+			expect(hookCalls.length).toBe(1);
+			expect(hookCalls[0].collection).toBe("books");
+			expect(hookCalls[0].data.title).toBe("Test Book");
+			expect(book.title).toBe("Test Book");
+
+			// Create an author - should trigger global hook for authors collection
+			const author = await db.authors
+				.create({
+					id: "a-test-1",
+					name: "New Author",
+				})
+				.runPromise;
+
+			// Verify hook was called for authors collection
+			expect(hookCalls.length).toBe(2);
+			expect(hookCalls[1].collection).toBe("authors");
+			expect(hookCalls[1].data.name).toBe("New Author");
+			expect(author.name).toBe("New Author");
+
+			// Create another book - should trigger again for books
+			await db.books
+				.create({
+					id: "b-test-2",
+					title: "Another Book",
+					author: "Another Author",
+					year: 2025,
+					genre: "fiction",
+				})
+				.runPromise;
+
+			// Verify hook was called a third time for books
+			expect(hookCalls.length).toBe(3);
+			expect(hookCalls[2].collection).toBe("books");
+			expect(hookCalls[2].data.title).toBe("Another Book");
+
+			// Verify all collections triggered the hook
+			const collections = hookCalls.map((c) => c.collection);
+			expect(collections).toContain("books");
+			expect(collections).toContain("authors");
+			expect(collections.filter((c) => c === "books").length).toBe(2);
+			expect(collections.filter((c) => c === "authors").length).toBe(1);
+		});
+	});
+
+	// ============================================================================
 	// Tests — Custom ID Generators (Task 13.1-13.4)
 	// ============================================================================
 
