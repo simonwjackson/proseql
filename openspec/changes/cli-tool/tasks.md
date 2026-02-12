@@ -69,7 +69,7 @@
 - [x] 10.2 Create `packages/cli/tests/filter-parser.test.ts`: test all operators, type coercion (numbers, booleans, strings), malformed input errors
 - [x] 10.3 Create `packages/cli/tests/set-parser.test.ts`: test key=value parsing, multiple assignments, type coercion, edge cases (values containing `=`)
 - [x] 10.4 Create `packages/cli/tests/output-formatters.test.ts`: test table alignment, JSON validity, YAML validity, CSV quoting/escaping
-- [ ] 10.5 Create `packages/cli/tests/commands/init.test.ts`: test scaffolding creates expected files, test `--format` flag, test abort on existing config
+- [x] 10.5 Create `packages/cli/tests/commands/init.test.ts`: test scaffolding creates expected files, test `--format` flag, test abort on existing config
 - [ ] 10.6 Create `packages/cli/tests/commands/query.test.ts`: test basic query, filtered query, select/sort/limit, output format flags
 - [ ] 10.7 Create `packages/cli/tests/commands/crud.test.ts`: test create with `--data`, update with `--set`, delete with `--force`, delete confirmation prompt
 - [ ] 10.8 Create `packages/cli/tests/commands/migrate.test.ts`: test status display, dry-run output, migration execution
