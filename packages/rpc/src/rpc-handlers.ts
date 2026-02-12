@@ -73,6 +73,19 @@ const createCollectionHandlers = <Config extends DatabaseConfig>(
 			);
 		},
 
+		queryStream: (config: {
+			readonly where?: Record<string, unknown>;
+			readonly populate?: Record<string, unknown>;
+			readonly sort?: Record<string, "asc" | "desc">;
+			readonly select?: Record<string, unknown> | ReadonlyArray<string>;
+			readonly limit?: number;
+			readonly offset?: number;
+		}) => {
+			// Return the stream directly for incremental delivery over RPC transport
+			// The RPC layer will serialize stream items as they are emitted
+			return collection.query(config) as Stream.Stream<Record<string, unknown>, unknown>;
+		},
+
 		create: ({ data }: { readonly data: Record<string, unknown> }) =>
 			// biome-ignore lint/suspicious/noExplicitAny: Data type is dynamic based on schema
 			collection.create(data as any),

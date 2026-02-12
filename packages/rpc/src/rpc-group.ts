@@ -304,6 +304,146 @@ export type QueryRequestClass<
 	};
 };
 
+// ============================================================================
+// Streaming Query Request Factory
+// ============================================================================
+
+/**
+ * Creates a streaming Query TaggedRequest class for a collection.
+ *
+ * Unlike makeQueryRequest which returns an array-collecting RPC,
+ * this creates an RPC that streams results incrementally, allowing
+ * large result sets to flow through the transport without buffering.
+ *
+ * Uses `Rpc.StreamRequest` which marks the request for streaming handling.
+ * Handlers must return a `Stream<Entity, Error>` instead of `Effect<Array<Entity>, Error>`.
+ *
+ * @param collectionName - The name of the collection (used as the request _tag prefix)
+ * @param entitySchema - The Effect Schema for the collection's entities
+ * @returns A StreamRequest class for streaming query operations
+ *
+ * @example
+ * ```ts
+ * const BookSchema = Schema.Struct({
+ *   id: Schema.String,
+ *   title: Schema.String,
+ * })
+ *
+ * const QueryStreamRequest = makeQueryStreamRequest("books", BookSchema)
+ * // _tag: "books.queryStream"
+ * // payload: QueryPayload
+ * // success: Stream<Book, DanglingReferenceError | ValidationError>
+ *
+ * // Use with Rpc.stream to create a handler
+ * const handler = Rpc.stream(QueryStreamRequest, (req) =>
+ *   db.books.query({ where: req.where, sort: req.sort })
+ * )
+ * ```
+ */
+export function makeQueryStreamRequest<
+	CollectionName extends string,
+	EntitySchema extends Schema.Schema.Any,
+>(
+	collectionName: CollectionName,
+	entitySchema: EntitySchema,
+): QueryStreamRequestClass<CollectionName, EntitySchema> {
+	// Use Rpc.StreamRequest to create a streaming RPC schema
+	// The handler for this request must return a Stream, not an Effect
+	const RequestClass = Rpc.StreamRequest<QueryStreamRequestInstance<CollectionName, EntitySchema>>()(
+		`${collectionName}.queryStream` as `${CollectionName}.queryStream`,
+		{
+			failure: QueryErrorUnionSchema,
+			success: entitySchema,
+			payload: {
+				where: QueryPayloadSchema.fields.where,
+				sort: QueryPayloadSchema.fields.sort,
+				select: QueryPayloadSchema.fields.select,
+				populate: QueryPayloadSchema.fields.populate,
+				limit: QueryPayloadSchema.fields.limit,
+				offset: QueryPayloadSchema.fields.offset,
+				cursor: QueryPayloadSchema.fields.cursor,
+			},
+		},
+	);
+
+	return RequestClass as unknown as QueryStreamRequestClass<
+		CollectionName,
+		EntitySchema
+	>;
+}
+
+/**
+ * Instance type for a QueryStream request.
+ */
+interface QueryStreamRequestInstance<
+	CollectionName extends string,
+	EntitySchema extends Schema.Schema.Any,
+> extends Rpc.StreamRequest<
+		`${CollectionName}.queryStream`,
+		never,
+		{
+			readonly _tag: `${CollectionName}.queryStream`;
+			readonly where?: typeof QueryPayloadSchema.Type.where;
+			readonly sort?: typeof QueryPayloadSchema.Type.sort;
+			readonly select?: typeof QueryPayloadSchema.Type.select;
+			readonly populate?: typeof QueryPayloadSchema.Type.populate;
+			readonly limit?: typeof QueryPayloadSchema.Type.limit;
+			readonly offset?: typeof QueryPayloadSchema.Type.offset;
+			readonly cursor?: typeof QueryPayloadSchema.Type.cursor;
+		},
+		QueryStreamRequestInstance<CollectionName, EntitySchema>,
+		never,
+		Schema.Schema.Encoded<typeof QueryErrorUnionSchema>,
+		Schema.Schema.Type<typeof QueryErrorUnionSchema>,
+		Schema.Schema.Encoded<EntitySchema>,
+		Schema.Schema.Type<EntitySchema>
+	> {
+	readonly _tag: `${CollectionName}.queryStream`;
+	readonly where?: typeof QueryPayloadSchema.Type.where;
+	readonly sort?: typeof QueryPayloadSchema.Type.sort;
+	readonly select?: typeof QueryPayloadSchema.Type.select;
+	readonly populate?: typeof QueryPayloadSchema.Type.populate;
+	readonly limit?: typeof QueryPayloadSchema.Type.limit;
+	readonly offset?: typeof QueryPayloadSchema.Type.offset;
+	readonly cursor?: typeof QueryPayloadSchema.Type.cursor;
+}
+
+/**
+ * Type for a streaming Query TaggedRequest class.
+ * This is the class type returned by makeQueryStreamRequest.
+ */
+export type QueryStreamRequestClass<
+	CollectionName extends string,
+	EntitySchema extends Schema.Schema.Any,
+> = Rpc.StreamRequestConstructor<
+	`${CollectionName}.queryStream`,
+	QueryStreamRequestInstance<CollectionName, EntitySchema>,
+	never,
+	{
+		readonly where?: typeof QueryPayloadSchema.Encoded.where;
+		readonly sort?: typeof QueryPayloadSchema.Encoded.sort;
+		readonly select?: typeof QueryPayloadSchema.Encoded.select;
+		readonly populate?: typeof QueryPayloadSchema.Encoded.populate;
+		readonly limit?: typeof QueryPayloadSchema.Encoded.limit;
+		readonly offset?: typeof QueryPayloadSchema.Encoded.offset;
+		readonly cursor?: typeof QueryPayloadSchema.Encoded.cursor;
+	},
+	{
+		readonly where?: typeof QueryPayloadSchema.Type.where;
+		readonly sort?: typeof QueryPayloadSchema.Type.sort;
+		readonly select?: typeof QueryPayloadSchema.Type.select;
+		readonly populate?: typeof QueryPayloadSchema.Type.populate;
+		readonly limit?: typeof QueryPayloadSchema.Type.limit;
+		readonly offset?: typeof QueryPayloadSchema.Type.offset;
+		readonly cursor?: typeof QueryPayloadSchema.Type.cursor;
+	},
+	never,
+	Schema.Schema.Encoded<typeof QueryErrorUnionSchema>,
+	Schema.Schema.Type<typeof QueryErrorUnionSchema>,
+	Schema.Schema.Encoded<EntitySchema>,
+	Schema.Schema.Type<EntitySchema>
+>;
+
 /**
  * Creates a Create TaggedRequest class for a collection.
  *
@@ -927,6 +1067,12 @@ export interface CollectionRpcDefinitions<
 	 */
 	readonly QueryRequest: QueryRequestClass<CollectionName, EntitySchema>;
 	/**
+	 * StreamRequest class for streaming query operations.
+	 * Unlike QueryRequest which collects all results, this streams results incrementally.
+	 * Use with Rpc.stream() to create a handler that returns a Stream.
+	 */
+	readonly QueryStreamRequest: QueryStreamRequestClass<CollectionName, EntitySchema>;
+	/**
 	 * TaggedRequest class for create operations.
 	 * Use with Rpc.effect() to create an RPC handler.
 	 */
@@ -996,6 +1142,7 @@ export function makeCollectionRpcs<
 ): CollectionRpcDefinitions<CollectionName, EntitySchema> {
 	const FindByIdRequest = makeFindByIdRequest(collectionName, entitySchema);
 	const QueryRequest = makeQueryRequest(collectionName, entitySchema);
+	const QueryStreamRequest = makeQueryStreamRequest(collectionName, entitySchema);
 	const CreateRequest = makeCreateRequest(collectionName, entitySchema);
 	const UpdateRequest = makeUpdateRequest(collectionName, entitySchema);
 	const DeleteRequest = makeDeleteRequest(collectionName, entitySchema);
@@ -1009,6 +1156,7 @@ export function makeCollectionRpcs<
 	return {
 		FindByIdRequest,
 		QueryRequest,
+		QueryStreamRequest,
 		CreateRequest,
 		UpdateRequest,
 		DeleteRequest,
@@ -1033,7 +1181,8 @@ export function makeCollectionRpcs<
  * This is the primary entry point for deriving RPC schemas from a database config.
  * Each collection gets typed request schemas for:
  * - findById: Find entity by ID
- * - query: Query entities with filtering, sorting, pagination
+ * - query: Query entities with filtering, sorting, pagination (collected array result)
+ * - queryStream: Query entities with streaming results (incremental delivery)
  * - create: Create a new entity
  * - update: Update an existing entity by ID
  * - delete: Delete an entity by ID

@@ -137,12 +137,14 @@ export {
 	makeRpcGroup,
 	makeFindByIdRequest,
 	makeQueryRequest,
+	makeQueryStreamRequest,
 	makeCollectionRpcs,
 	RpcRouter,
 	type RpcGroupFromConfig,
 	type CollectionRpcDefinitions,
 	type FindByIdRequestClass,
 	type QueryRequestClass,
+	type QueryStreamRequestClass,
 } from "./rpc-group.js";
 
 // ============================================================================
