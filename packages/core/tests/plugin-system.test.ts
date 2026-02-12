@@ -491,5 +491,26 @@ describe("Plugin System", () => {
 				expect(result.message).toContain("non-existent-plugin");
 			}
 		});
+
+		it("should pass validation when plugin dependencies are satisfied", async () => {
+			// Task 10.4: Test satisfied dependency passes validation
+			const basePlugin = createMinimalPlugin("base-plugin");
+			const dependentPlugin = createDependentPlugin("dependent-plugin", [
+				"base-plugin",
+			]);
+
+			// Order matters: dependent plugin depends on base plugin
+			// Both orderings should work since we validate against the full set
+			const db = await createDatabaseWithPlugins([basePlugin, dependentPlugin]);
+
+			expect(db).toBeDefined();
+			expect(db.books).toBeDefined();
+
+			// Also verify reverse order works (dependency resolution is not order-dependent)
+			const db2 = await createDatabaseWithPlugins([dependentPlugin, basePlugin]);
+
+			expect(db2).toBeDefined();
+			expect(db2.books).toBeDefined();
+		});
 	});
 });
