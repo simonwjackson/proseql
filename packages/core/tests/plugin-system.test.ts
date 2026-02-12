@@ -917,5 +917,229 @@ describe("Plugin System", () => {
 				console.warn = originalWarn;
 			}
 		});
+
+		it("should make all extensions available when multiple plugins provide codecs", async () => {
+			// Task 11.3: Test multiple plugins providing codecs, all extensions are available
+			//
+			// We create two plugins, each providing a different codec for a different extension.
+			// Then we create a database with two collections, each using a different extension.
+			// Both should work correctly.
+
+			// Plugin 1: Provides a custom CSV-like codec for .csv extension
+			const csvCodec: FormatCodec = {
+				name: "csv-codec",
+				extensions: ["csv"],
+				encode: (data: unknown): string => {
+					const obj = data as Record<string, Record<string, unknown>>;
+					const lines: string[] = [];
+					lines.push("id,title,author,year,genre");
+					for (const [id, entity] of Object.entries(obj)) {
+						const title = String(entity.title ?? "");
+						const author = String(entity.author ?? "");
+						const year = String(entity.year ?? "");
+						const genre = String(entity.genre ?? "");
+						lines.push(`${id},${title},${author},${year},${genre}`);
+					}
+					return lines.join("\n");
+				},
+				decode: (raw: string): unknown => {
+					const lines = raw.trim().split("\n");
+					if (lines.length === 0) return {};
+					const dataLines = lines.slice(1);
+					const result: Record<string, Record<string, unknown>> = {};
+					for (const line of dataLines) {
+						if (!line.trim()) continue;
+						const [id, title, author, yearStr, genre] = line.split(",");
+						result[id] = {
+							id,
+							title,
+							author,
+							year: Number.parseInt(yearStr, 10),
+							genre,
+						};
+					}
+					return result;
+				},
+			};
+
+			// Plugin 2: Provides a custom TSV (tab-separated) codec for .tsv extension
+			const tsvCodec: FormatCodec = {
+				name: "tsv-codec",
+				extensions: ["tsv"],
+				encode: (data: unknown): string => {
+					const obj = data as Record<string, Record<string, unknown>>;
+					const lines: string[] = [];
+					lines.push("id\tname");
+					for (const [id, entity] of Object.entries(obj)) {
+						const name = String(entity.name ?? "");
+						lines.push(`${id}\t${name}`);
+					}
+					return lines.join("\n");
+				},
+				decode: (raw: string): unknown => {
+					const lines = raw.trim().split("\n");
+					if (lines.length === 0) return {};
+					const dataLines = lines.slice(1);
+					const result: Record<string, Record<string, unknown>> = {};
+					for (const line of dataLines) {
+						if (!line.trim()) continue;
+						const [id, name] = line.split("\t");
+						result[id] = { id, name };
+					}
+					return result;
+				},
+			};
+
+			const csvPlugin = createCodecPlugin("csv-plugin", [csvCodec]);
+			const tsvPlugin = createCodecPlugin("tsv-plugin", [tsvCodec]);
+
+			// Use in-memory storage
+			const store = new Map<string, string>();
+			const { makeInMemoryStorageLayer } = await import(
+				"../src/storage/in-memory-adapter-layer.js"
+			);
+			const { makeSerializerLayer } = await import(
+				"../src/serializers/format-codec.js"
+			);
+			const { createPersistentEffectDatabase } = await import(
+				"../src/factories/database-effect.js"
+			);
+			const { Layer } = await import("effect");
+
+			// Create layer with BOTH plugin codecs (no base codecs needed)
+			const baseLayer = Layer.merge(
+				makeInMemoryStorageLayer(store),
+				makeSerializerLayer([], [csvCodec, tsvCodec]),
+			);
+
+			// Use both extensions in different collections
+			const persistentConfig = {
+				books: {
+					schema: BookSchema,
+					file: "/data/books.csv", // Uses CSV codec from first plugin
+					relationships: {},
+				},
+				authors: {
+					schema: AuthorSchema,
+					file: "/data/authors.tsv", // Uses TSV codec from second plugin
+					relationships: {},
+				},
+			} as const;
+
+			const persistentInitialData = {
+				books: [
+					{
+						id: "b1",
+						title: "Dune",
+						author: "Frank Herbert",
+						year: 1965,
+						genre: "sci-fi",
+					},
+				],
+				authors: [{ id: "a1", name: "Frank Herbert" }],
+			};
+
+			// Create the database with BOTH plugins
+			const db = await Effect.runPromise(
+				Effect.provide(
+					Effect.scoped(
+						Effect.gen(function* () {
+							const database = yield* createPersistentEffectDatabase(
+								persistentConfig,
+								persistentInitialData,
+								{ writeDebounce: 10 },
+								{ plugins: [csvPlugin, tsvPlugin] },
+							);
+							return database;
+						}),
+					),
+					baseLayer,
+				),
+			);
+
+			// Verify database was created with both collections
+			expect(db).toBeDefined();
+			expect(db.books).toBeDefined();
+			expect(db.authors).toBeDefined();
+
+			// Verify we can query both collections
+			const books = await db.books.query().runPromise;
+			expect(books.length).toBe(1);
+			expect(books[0].title).toBe("Dune");
+
+			const authors = await db.authors.query().runPromise;
+			expect(authors.length).toBe(1);
+			expect(authors[0].name).toBe("Frank Herbert");
+
+			// Create records in both collections
+			const newBook = await db.books
+				.create({
+					id: "b2",
+					title: "Neuromancer",
+					author: "William Gibson",
+					year: 1984,
+					genre: "cyberpunk",
+				})
+				.runPromise;
+			expect(newBook.id).toBe("b2");
+
+			const newAuthor = await db.authors
+				.create({
+					id: "a2",
+					name: "William Gibson",
+				})
+				.runPromise;
+			expect(newAuthor.id).toBe("a2");
+
+			// Flush to trigger persistence
+			await db.flush();
+
+			// Verify the CSV file was written with correct format
+			const csvContent = store.get("/data/books.csv");
+			expect(csvContent).toBeDefined();
+			expect(csvContent).toContain("id,title,author,year,genre");
+			expect(csvContent).toContain("b1,Dune,Frank Herbert,1965,sci-fi");
+			expect(csvContent).toContain("b2,Neuromancer,William Gibson,1984,cyberpunk");
+
+			// Verify the TSV file was written with correct format
+			const tsvContent = store.get("/data/authors.tsv");
+			expect(tsvContent).toBeDefined();
+			expect(tsvContent).toContain("id\tname");
+			expect(tsvContent).toContain("a1\tFrank Herbert");
+			expect(tsvContent).toContain("a2\tWilliam Gibson");
+
+			// Verify we can load the data back (test deserialization)
+			const db2 = await Effect.runPromise(
+				Effect.provide(
+					Effect.scoped(
+						Effect.gen(function* () {
+							const database = yield* createPersistentEffectDatabase(
+								persistentConfig,
+								{}, // No initial data - load from files
+								{ writeDebounce: 10 },
+								{ plugins: [csvPlugin, tsvPlugin] },
+							);
+							return database;
+						}),
+					),
+					baseLayer,
+				),
+			);
+
+			// Verify both collections loaded correctly from their respective formats
+			const loadedBooks = await db2.books.query().runPromise;
+			expect(loadedBooks.length).toBe(2);
+
+			const loadedAuthors = await db2.authors.query().runPromise;
+			expect(loadedAuthors.length).toBe(2);
+
+			// Verify specific data integrity across both formats
+			const dune = await db2.books.findById("b1").runPromise;
+			expect(dune.title).toBe("Dune");
+			expect(dune.year).toBe(1965);
+
+			const herbert = await db2.authors.findById("a1").runPromise;
+			expect(herbert.name).toBe("Frank Herbert");
+		});
 	});
 });
