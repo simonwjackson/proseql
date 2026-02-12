@@ -1093,6 +1093,7 @@ const buildCollection = <T extends HasId>(
 				}
 			>,
 			computed,
+			changePubSub,
 		),
 	);
 	const updateWithRelsFn = wrapEffect(
@@ -1118,6 +1119,7 @@ const buildCollection = <T extends HasId>(
 				}
 			>,
 			computed,
+			changePubSub,
 		),
 	);
 	const deleteWithRelsFn = wrapEffect(
@@ -1141,6 +1143,7 @@ const buildCollection = <T extends HasId>(
 					>;
 				}
 			>,
+			changePubSub,
 		),
 	);
 	const deleteManyWithRelsFn = wrapEffect(
@@ -1164,6 +1167,7 @@ const buildCollection = <T extends HasId>(
 					>;
 				}
 			>,
+			changePubSub,
 		),
 	);
 

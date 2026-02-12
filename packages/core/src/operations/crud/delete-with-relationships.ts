@@ -6,7 +6,7 @@
  * cascade options for relationship handling during deletion.
  */
 
-import { Effect, Ref } from "effect";
+import { Effect, PubSub, Ref } from "effect";
 import {
 	NotFoundError,
 	type OperationError,
@@ -18,6 +18,7 @@ import type {
 	DeleteWithRelationshipsResult,
 	RestrictViolation,
 } from "../../types/crud-relationship-types.js";
+import type { ChangeEvent } from "../../types/reactive-types.js";
 import type { RelationshipDef } from "../../types/types.js";
 
 // ============================================================================
@@ -311,6 +312,7 @@ export const deleteWithRelationships =
 		ref: Ref.Ref<ReadonlyMap<string, T>>,
 		stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 		dbConfig: DatabaseConfig,
+		changePubSub?: PubSub.PubSub<ChangeEvent>,
 	) =>
 	(
 		id: string,
@@ -386,7 +388,15 @@ export const deleteWithRelationships =
 				deletedEntity = entity;
 			}
 
-			// 5. Return result
+			// 5. Publish change event for reactive query subscribers
+			if (changePubSub) {
+				yield* PubSub.publish(changePubSub, {
+					collection: collectionName,
+					operation: "delete" as const,
+				});
+			}
+
+			// 6. Return result
 			const result: DeleteWithRelationshipsResult<T> = {
 				deleted: deletedEntity,
 				...(Object.keys(cascadeResults).length > 0
@@ -419,6 +429,7 @@ export const deleteManyWithRelationships =
 		ref: Ref.Ref<ReadonlyMap<string, T>>,
 		stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 		dbConfig: DatabaseConfig,
+		changePubSub?: PubSub.PubSub<ChangeEvent>,
 	) =>
 	(
 		predicate: (entity: T) => boolean,
@@ -608,7 +619,15 @@ export const deleteManyWithRelationships =
 				});
 			}
 
-			// 6. Return result
+			// 6. Publish change event for reactive query subscribers
+			if (changePubSub && deletedEntities.length > 0) {
+				yield* PubSub.publish(changePubSub, {
+					collection: collectionName,
+					operation: "delete" as const,
+				});
+			}
+
+			// 7. Return result
 			return {
 				count: deletedEntities.length,
 				deleted: deletedEntities,

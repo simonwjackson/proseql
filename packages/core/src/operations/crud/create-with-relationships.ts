@@ -6,7 +6,7 @@
  * for both ref (single) and inverse (many) relationship types.
  */
 
-import { Effect, Ref, type Schema } from "effect";
+import { Effect, PubSub, Ref, type Schema } from "effect";
 import {
 	ForeignKeyError,
 	type OperationError,
@@ -21,6 +21,7 @@ import type {
 } from "../../types/crud-relationship-types.js";
 import { isRelationshipOperation } from "../../types/crud-relationship-types.js";
 import type { CreateInput } from "../../types/crud-types.js";
+import type { ChangeEvent } from "../../types/reactive-types.js";
 import type { RelationshipDef } from "../../types/types.js";
 import { generateId } from "../../utils/id-generator.js";
 import { validateForeignKeysEffect } from "../../validators/foreign-key.js";
@@ -431,6 +432,7 @@ export const createWithRelationships =
 		stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
 		dbConfig: DatabaseConfig,
 		computed?: ComputedFieldsConfig<unknown>,
+		changePubSub?: PubSub.PubSub<ChangeEvent>,
 	) =>
 	(
 		input: CreateWithRelationshipsInput<T, Record<string, RelationshipDef>>,
@@ -739,6 +741,14 @@ export const createWithRelationships =
 						});
 					}
 				}
+			}
+
+			// Publish change event for reactive query subscribers
+			if (changePubSub) {
+				yield* PubSub.publish(changePubSub, {
+					collection: collectionName,
+					operation: "create" as const,
+				});
 			}
 
 			return validated;
