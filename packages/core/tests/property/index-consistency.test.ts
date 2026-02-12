@@ -626,10 +626,377 @@ describe("Index consistency properties", () => {
 		});
 	});
 
-	describe("Task 6.3: Index bucket integrity after operations (placeholder)", () => {
-		// This will be implemented in task 6.3
-		it.skip("should maintain correct index bucket entries", async () => {
-			// Placeholder for task 6.3
+	describe("Task 6.3: Index bucket integrity after operations", () => {
+		/**
+		 * Helper to compute the expected index state from a collection of entities.
+		 * This is the "oracle" - what the index SHOULD look like given the entities.
+		 *
+		 * @param entities - All entities in the collection
+		 * @param indexFields - The fields that make up the index (e.g., ["genre"] or ["genre", "year"])
+		 * @returns A Map from index key values to Sets of entity IDs
+		 */
+		const computeExpectedIndex = <T extends { id: string }>(
+			entities: readonly T[],
+			indexFields: readonly string[],
+		): Map<unknown, Set<string>> => {
+			const expectedIndex = new Map<unknown, Set<string>>();
+
+			for (const entity of entities) {
+				// Compute the index key for this entity
+				const values = indexFields.map(
+					(field) => (entity as Record<string, unknown>)[field],
+				);
+
+				// Skip if any indexed field is null or undefined
+				if (values.some((v) => v === null || v === undefined)) {
+					continue;
+				}
+
+				// Single-field: use raw value; compound: use JSON.stringify'd array
+				const key = indexFields.length === 1 ? values[0] : JSON.stringify(values);
+
+				// Add entity ID to the index bucket
+				const existing = expectedIndex.get(key);
+				if (existing) {
+					existing.add(entity.id);
+				} else {
+					expectedIndex.set(key, new Set([entity.id]));
+				}
+			}
+
+			return expectedIndex;
+		};
+
+		/**
+		 * Helper to compare two index maps for equality.
+		 * @returns null if equal, or an error message describing the difference
+		 */
+		const compareIndexMaps = (
+			actual: Map<unknown, Set<string>>,
+			expected: Map<unknown, Set<string>>,
+		): string | null => {
+			// Check that all expected keys exist in actual with correct IDs
+			for (const [key, expectedIds] of expected) {
+				const actualIds = actual.get(key);
+				if (!actualIds) {
+					return `Missing index bucket for key ${JSON.stringify(key)}. Expected IDs: ${[...expectedIds].join(", ")}`;
+				}
+				// Check that all expected IDs are present
+				for (const id of expectedIds) {
+					if (!actualIds.has(id)) {
+						return `Index bucket for key ${JSON.stringify(key)} is missing ID "${id}"`;
+					}
+				}
+				// Check that no extra IDs are present
+				for (const id of actualIds) {
+					if (!expectedIds.has(id)) {
+						return `Index bucket for key ${JSON.stringify(key)} contains unexpected ID "${id}"`;
+					}
+				}
+			}
+
+			// Check that actual doesn't have extra keys
+			for (const [key, actualIds] of actual) {
+				if (!expected.has(key)) {
+					return `Unexpected index bucket for key ${JSON.stringify(key)} with IDs: ${[...actualIds].join(", ")}`;
+				}
+			}
+
+			return null; // Equal
+		};
+
+		/**
+		 * Helper to apply a sequence of CRUD operations and track the final entity state.
+		 * Returns the final array of entities after all operations.
+		 */
+		const applyOperationsToEntities = <T extends { id: string }>(
+			operations: readonly CrudOperation<T>[],
+		): T[] => {
+			const entities = new Map<string, T>();
+
+			for (const operation of operations) {
+				if (operation.op === "create") {
+					entities.set(operation.payload.id, operation.payload);
+				} else if (operation.op === "update") {
+					const existing = entities.get(operation.id);
+					if (existing) {
+						entities.set(operation.id, { ...existing, ...operation.payload });
+					}
+				} else if (operation.op === "delete") {
+					entities.delete(operation.id);
+				}
+			}
+
+			return Array.from(entities.values());
+		};
+
+		it("should have every entity in exactly the correct index buckets (single-field index)", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					operationSequenceArbitrary(BookSchema, { minLength: 1, maxLength: 20 }),
+					async (operations) => {
+						// 1. Create database with single-field index
+						const db = await Effect.runPromise(
+							createEffectDatabase(configWithSingleIndex, { books: [] }),
+						);
+
+						// 2. Apply operations to the database (ignoring errors from updates/deletes of non-existent entities)
+						for (const operation of operations) {
+							try {
+								if (operation.op === "create") {
+									await db.books.create(operation.payload).runPromise;
+								} else if (operation.op === "update") {
+									await db.books.update(operation.id, operation.payload).runPromise;
+								} else if (operation.op === "delete") {
+									await db.books.delete(operation.id).runPromise;
+								}
+							} catch {
+								// Ignore NotFoundError for updates/deletes
+							}
+						}
+
+						// 3. Get all entities from the database
+						const actualEntities = await db.books.query({ sort: { id: "asc" } }).runPromise;
+
+						// 4. Compute expected index state from actual entities
+						const expectedIndex = computeExpectedIndex(actualEntities, ["genre"]);
+
+						// 5. Build a fresh index from the current entities using the index manager
+						const normalized = normalizeIndexes(["genre"]);
+						const freshIndexes = await Effect.runPromise(buildIndexes(normalized, actualEntities));
+						const actualIndex = await getIndexMap(freshIndexes, ["genre"]);
+
+						// 6. Compare: the fresh index should match the expected index
+						const difference = compareIndexMaps(actualIndex, expectedIndex);
+						expect(difference).toBeNull();
+
+						// 7. Additional check: verify no index bucket contains IDs of non-existent entities
+						const entityIds = new Set(actualEntities.map((e) => e.id));
+						for (const [key, ids] of actualIndex) {
+							for (const id of ids) {
+								if (!entityIds.has(id)) {
+									throw new Error(
+										`Index bucket for key ${JSON.stringify(key)} contains non-existent entity ID "${id}"`,
+									);
+								}
+							}
+						}
+
+						// 8. Verify every entity appears in its correct bucket
+						for (const entity of actualEntities) {
+							const key = entity.genre;
+							const bucket = actualIndex.get(key);
+							if (!bucket || !bucket.has(entity.id)) {
+								throw new Error(
+									`Entity "${entity.id}" with genre "${key}" not found in its index bucket`,
+								);
+							}
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should have every entity in exactly the correct index buckets (compound index)", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					operationSequenceArbitrary(BookSchema, { minLength: 1, maxLength: 20 }),
+					async (operations) => {
+						// 1. Create database with compound index
+						const db = await Effect.runPromise(
+							createEffectDatabase(configWithCompoundIndex, { books: [] }),
+						);
+
+						// 2. Apply operations to the database
+						for (const operation of operations) {
+							try {
+								if (operation.op === "create") {
+									await db.books.create(operation.payload).runPromise;
+								} else if (operation.op === "update") {
+									await db.books.update(operation.id, operation.payload).runPromise;
+								} else if (operation.op === "delete") {
+									await db.books.delete(operation.id).runPromise;
+								}
+							} catch {
+								// Ignore NotFoundError for updates/deletes
+							}
+						}
+
+						// 3. Get all entities from the database
+						const actualEntities = await db.books.query({ sort: { id: "asc" } }).runPromise;
+
+						// 4. Compute expected index state from actual entities
+						const expectedIndex = computeExpectedIndex(actualEntities, ["genre", "year"]);
+
+						// 5. Build a fresh index from the current entities
+						const normalized = normalizeIndexes([["genre", "year"]]);
+						const freshIndexes = await Effect.runPromise(buildIndexes(normalized, actualEntities));
+						const actualIndex = await getIndexMap(freshIndexes, ["genre", "year"]);
+
+						// 6. Compare: the fresh index should match the expected index
+						const difference = compareIndexMaps(actualIndex, expectedIndex);
+						expect(difference).toBeNull();
+
+						// 7. Additional check: verify no index bucket contains IDs of non-existent entities
+						const entityIds = new Set(actualEntities.map((e) => e.id));
+						for (const [key, ids] of actualIndex) {
+							for (const id of ids) {
+								if (!entityIds.has(id)) {
+									throw new Error(
+										`Index bucket for key ${JSON.stringify(key)} contains non-existent entity ID "${id}"`,
+									);
+								}
+							}
+						}
+
+						// 8. Verify every entity appears in its correct bucket
+						for (const entity of actualEntities) {
+							const key = JSON.stringify([entity.genre, entity.year]);
+							const bucket = actualIndex.get(key);
+							if (!bucket || !bucket.has(entity.id)) {
+								throw new Error(
+									`Entity "${entity.id}" with [genre="${entity.genre}", year=${entity.year}] not found in its index bucket`,
+								);
+							}
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should have every entity in exactly the correct index buckets (multiple indexes)", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					operationSequenceArbitrary(BookSchema, { minLength: 1, maxLength: 20 }),
+					async (operations) => {
+						// 1. Create database with multiple indexes
+						const db = await Effect.runPromise(
+							createEffectDatabase(configWithMultipleIndexes, { books: [] }),
+						);
+
+						// 2. Apply operations to the database
+						for (const operation of operations) {
+							try {
+								if (operation.op === "create") {
+									await db.books.create(operation.payload).runPromise;
+								} else if (operation.op === "update") {
+									await db.books.update(operation.id, operation.payload).runPromise;
+								} else if (operation.op === "delete") {
+									await db.books.delete(operation.id).runPromise;
+								}
+							} catch {
+								// Ignore NotFoundError for updates/deletes
+							}
+						}
+
+						// 3. Get all entities from the database
+						const actualEntities = await db.books.query({ sort: { id: "asc" } }).runPromise;
+
+						// 4. Test each index separately
+						const indexConfigs: Array<{ fields: readonly string[]; normalized: ReadonlyArray<ReadonlyArray<string>> }> = [
+							{ fields: ["genre"], normalized: normalizeIndexes(["genre"]) },
+							{ fields: ["author"], normalized: normalizeIndexes(["author"]) },
+							{ fields: ["genre", "year"], normalized: normalizeIndexes([["genre", "year"]]) },
+						];
+
+						const entityIds = new Set(actualEntities.map((e) => e.id));
+
+						for (const { fields, normalized } of indexConfigs) {
+							// Compute expected index
+							const expectedIndex = computeExpectedIndex(actualEntities, fields);
+
+							// Build fresh index
+							const freshIndexes = await Effect.runPromise(buildIndexes(normalized, actualEntities));
+							const actualIndex = await getIndexMap(freshIndexes, fields);
+
+							// Compare
+							const difference = compareIndexMaps(actualIndex, expectedIndex);
+							if (difference) {
+								throw new Error(`Index [${fields.join(", ")}]: ${difference}`);
+							}
+
+							// Verify no non-existent entities
+							for (const [key, ids] of actualIndex) {
+								for (const id of ids) {
+									if (!entityIds.has(id)) {
+										throw new Error(
+											`Index [${fields.join(", ")}] bucket for key ${JSON.stringify(key)} contains non-existent entity ID "${id}"`,
+										);
+									}
+								}
+							}
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should not have index buckets for deleted entities", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate a sequence that creates some entities and then deletes some
+					fc.array(entityArbitrary(BookSchema), { minLength: 3, maxLength: 10 }),
+					fc.integer({ min: 1, max: 5 }),
+					async (entities, deleteCount) => {
+						// Ensure unique IDs
+						const uniqueEntities = ensureUniqueIds(entities);
+						if (uniqueEntities.length < 2) return; // Need at least 2 entities
+
+						// 1. Create database with initial entities
+						const db = await Effect.runPromise(
+							createEffectDatabase(configWithSingleIndex, { books: [] }),
+						);
+
+						// 2. Create all entities
+						for (const entity of uniqueEntities) {
+							await db.books.create(entity).runPromise;
+						}
+
+						// 3. Delete some entities (up to deleteCount or half of entities)
+						const actualDeleteCount = Math.min(deleteCount, Math.floor(uniqueEntities.length / 2));
+						const deletedIds = new Set<string>();
+						for (let i = 0; i < actualDeleteCount; i++) {
+							const id = uniqueEntities[i].id;
+							await db.books.delete(id).runPromise;
+							deletedIds.add(id);
+						}
+
+						// 4. Get remaining entities
+						const remainingEntities = await db.books.query({}).runPromise;
+
+						// 5. Build fresh index from remaining entities
+						const normalized = normalizeIndexes(["genre"]);
+						const freshIndexes = await Effect.runPromise(buildIndexes(normalized, remainingEntities));
+						const actualIndex = await getIndexMap(freshIndexes, ["genre"]);
+
+						// 6. Verify deleted IDs don't appear in any bucket
+						for (const [key, ids] of actualIndex) {
+							for (const id of ids) {
+								if (deletedIds.has(id)) {
+									throw new Error(
+										`Deleted entity ID "${id}" still appears in index bucket for key ${JSON.stringify(key)}`,
+									);
+								}
+							}
+						}
+
+						// 7. Verify all remaining entities are in correct buckets
+						for (const entity of remainingEntities) {
+							const key = entity.genre;
+							const bucket = actualIndex.get(key);
+							if (!bucket || !bucket.has(entity.id)) {
+								throw new Error(
+									`Remaining entity "${entity.id}" with genre "${key}" not found in its index bucket`,
+								);
+							}
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
 		});
 	});
 });

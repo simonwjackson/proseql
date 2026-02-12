@@ -35,7 +35,7 @@
 
 - [x] 6.1 Create `packages/core/tests/property/index-consistency.test.ts`
 - [x] 6.2 Property: create a collection with indexes, apply an arbitrary operation sequence, then run a query on the indexed field — the index-accelerated result is identical to a full-scan result (same entities, same order)
-- [ ] 6.3 Property: after an arbitrary operation sequence, every entity in the collection appears in exactly the correct index buckets, and no index bucket contains IDs of non-existent entities
+- [x] 6.3 Property: after an arbitrary operation sequence, every entity in the collection appears in exactly the correct index buckets, and no index bucket contains IDs of non-existent entities
 
 ## 7. CRUD Invariant Properties
 
