@@ -168,6 +168,18 @@ export interface User {
 	readonly createdAt: string;
 }
 
+/**
+ * Product entity type for benchmarks.
+ */
+export interface Product {
+	readonly id: string;
+	readonly name: string;
+	readonly price: number;
+	readonly category: "electronics" | "clothing" | "books" | "home" | "sports" | "toys";
+	readonly stock: number;
+	readonly supplierId: string;
+}
+
 // ============================================================================
 // Data Pools for Realistic Generation
 // ============================================================================
@@ -252,6 +264,45 @@ const EMAIL_DOMAINS = [
  */
 const ROLES = ["admin", "moderator", "user"] as const;
 
+/**
+ * Pool of product categories for product generation.
+ */
+const CATEGORIES = ["electronics", "clothing", "books", "home", "sports", "toys"] as const;
+
+/**
+ * Pool of adjectives for product name generation.
+ */
+const PRODUCT_ADJECTIVES = [
+	"Premium",
+	"Deluxe",
+	"Essential",
+	"Professional",
+	"Classic",
+	"Modern",
+	"Vintage",
+	"Ultra",
+	"Compact",
+	"Portable",
+	"Wireless",
+	"Smart",
+	"Eco",
+	"Organic",
+	"Handcrafted",
+	"Limited",
+] as const;
+
+/**
+ * Pool of product nouns by category for realistic product names.
+ */
+const PRODUCT_NOUNS: Record<(typeof CATEGORIES)[number], ReadonlyArray<string>> = {
+	electronics: ["Headphones", "Speaker", "Keyboard", "Mouse", "Monitor", "Charger", "Cable", "Webcam"],
+	clothing: ["T-Shirt", "Jacket", "Jeans", "Sweater", "Sneakers", "Hat", "Scarf", "Gloves"],
+	books: ["Novel", "Textbook", "Cookbook", "Biography", "Guide", "Manual", "Journal", "Atlas"],
+	home: ["Lamp", "Pillow", "Blanket", "Vase", "Clock", "Mirror", "Rug", "Candle"],
+	sports: ["Ball", "Racket", "Weights", "Mat", "Helmet", "Gloves", "Shoes", "Bag"],
+	toys: ["Puzzle", "Board Game", "Action Figure", "Doll", "Building Set", "Plush Toy", "Car", "Robot"],
+} as const;
+
 // ============================================================================
 // Entity Generators
 // ============================================================================
@@ -296,4 +347,59 @@ export function generateUsers(count: number, seed: number = DEFAULT_SEED): Reado
 	}
 
 	return users;
+}
+
+/**
+ * Generate an array of Product entities with deterministic, reproducible data.
+ *
+ * Products have realistic-looking names, prices, categories, stock levels, and
+ * supplier references. The same seed will always produce the same sequence of
+ * products.
+ *
+ * @param count - Number of products to generate
+ * @param seed - Optional seed for the RNG (default: DEFAULT_SEED)
+ * @returns Array of Product entities
+ *
+ * @example
+ * ```ts
+ * const products = generateProducts(1000);
+ * // Always produces the same 1000 products
+ *
+ * const customProducts = generateProducts(100, 12345);
+ * // Uses custom seed for different but still reproducible data
+ * ```
+ */
+export function generateProducts(count: number, seed: number = DEFAULT_SEED): ReadonlyArray<Product> {
+	const rng = createSeededRng(seed);
+	const products: Product[] = [];
+
+	for (let i = 0; i < count; i++) {
+		const category = pickRandom(rng, CATEGORIES);
+		const adjective = pickRandom(rng, PRODUCT_ADJECTIVES);
+		const noun = pickRandom(rng, PRODUCT_NOUNS[category]);
+
+		// Price ranges vary by category for realism
+		const priceRanges: Record<(typeof CATEGORIES)[number], [number, number]> = {
+			electronics: [19.99, 999.99],
+			clothing: [9.99, 199.99],
+			books: [4.99, 49.99],
+			home: [14.99, 299.99],
+			sports: [9.99, 399.99],
+			toys: [4.99, 99.99],
+		};
+		const [minPrice, maxPrice] = priceRanges[category];
+		// Round to 2 decimal places for realistic pricing
+		const price = Math.round(randomFloat(rng, minPrice, maxPrice) * 100) / 100;
+
+		products.push({
+			id: `product_${String(i + 1).padStart(6, "0")}`,
+			name: `${adjective} ${noun}`,
+			price,
+			category,
+			stock: randomInt(rng, 0, 500),
+			supplierId: `supplier_${String(randomInt(rng, 1, 50)).padStart(4, "0")}`,
+		});
+	}
+
+	return products;
 }
