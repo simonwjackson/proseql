@@ -2,7 +2,7 @@
 
 - [x] 1.1 Verify `tsconfig.base.json` has `sourceMap: true`; add it if missing. Confirm `declaration`, `declarationMap`, and `composite` are already set.
 - [x] 1.2 Verify each package (`core`, `node`, `rest`, `rpc`) has a `tsconfig.json` that extends `tsconfig.base.json` with `rootDir: "src"` and `outDir: "dist"`. Create missing ones for `rest` and `rpc`.
-- [ ] 1.3 Verify root `tsconfig.json` has project references for all four packages.
+- [x] 1.3 Verify root `tsconfig.json` has project references for all four packages.
 - [ ] 1.4 Add `dist/` to `.gitignore`.
 
 ## 2. Root Build Scripts
