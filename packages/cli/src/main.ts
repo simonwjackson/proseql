@@ -18,6 +18,7 @@ import { handleQuery as handleQueryCommand } from "./commands/query.js"
 import { handleCollections as handleCollectionsCommand } from "./commands/collections.js"
 import { handleDescribe as handleDescribeCommand } from "./commands/describe.js"
 import { handleStats as handleStatsCommand } from "./commands/stats.js"
+import { handleCreate as handleCreateCommand } from "./commands/create.js"
 import { format, type OutputFormat } from "./output/formatter.js"
 
 const VERSION = "0.1.0"
@@ -464,10 +465,31 @@ async function handleStats(
 }
 
 async function handleCreate(
-  _args: ParsedArgs,
-  _resolvedConfig: ResolvedConfig,
+  args: ParsedArgs,
+  resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  console.log("create command - not yet implemented")
+  const collectionName = args.positionalArgs[0]
+  const dataArg = args.flags.data
+
+  if (!dataArg) {
+    exitWithError("create command requires --data flag with JSON data")
+  }
+
+  const result = await handleCreateCommand({
+    collection: collectionName,
+    config: resolvedConfig.config,
+    configPath: resolvedConfig.configPath,
+    data: dataArg,
+  })
+
+  if (!result.success) {
+    exitWithError(result.message ?? "Create failed")
+  }
+
+  // Output the created entity using the appropriate formatter
+  const outputFormat = getOutputFormat(args.flags)
+  const output = format(outputFormat, [result.data as Record<string, unknown>])
+  console.log(output)
 }
 
 async function handleUpdate(
