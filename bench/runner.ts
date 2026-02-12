@@ -151,7 +151,94 @@ export function filterBenchmarks(
 // Suite Execution (Task 8.2)
 // ============================================================================
 
-// Placeholder for task 8.2: Sequential suite execution with warm-up
+/**
+ * Result of executing a benchmark suite.
+ */
+interface SuiteExecutionResult {
+	readonly suiteName: string;
+	readonly bench: Bench;
+	readonly durationMs: number;
+}
+
+/**
+ * Execute a single benchmark suite.
+ *
+ * Creates the suite via its module's createSuite() function and runs it.
+ * tinybench handles warm-up internally via the warmupIterations and warmupTime
+ * options set in defaultBenchOptions.
+ *
+ * @param benchmark - The discovered benchmark to execute
+ * @returns The execution result including the bench instance and timing
+ */
+async function executeSuite(
+	benchmark: DiscoveredBenchmark,
+): Promise<SuiteExecutionResult> {
+	const startTime = performance.now();
+
+	// Create the suite (this may involve setup like database creation)
+	const bench = await benchmark.module.createSuite();
+
+	// Run all benchmarks in the suite
+	// tinybench handles warm-up internally based on the Bench options
+	await bench.run();
+
+	const endTime = performance.now();
+
+	return {
+		suiteName: benchmark.module.suiteName,
+		bench,
+		durationMs: endTime - startTime,
+	};
+}
+
+/**
+ * Execute all benchmark suites sequentially.
+ *
+ * Suites are executed one at a time to avoid resource contention and ensure
+ * consistent measurements. Each suite's warm-up runs before its measurements
+ * are collected.
+ *
+ * @param benchmarks - Array of discovered benchmarks to execute
+ * @param options - Execution options
+ * @returns Array of execution results for all suites
+ */
+export async function executeAllSuites(
+	benchmarks: ReadonlyArray<DiscoveredBenchmark>,
+	options: {
+		readonly verbose?: boolean;
+	} = {},
+): Promise<ReadonlyArray<SuiteExecutionResult>> {
+	const results: SuiteExecutionResult[] = [];
+	const { verbose = true } = options;
+
+	for (let i = 0; i < benchmarks.length; i++) {
+		const benchmark = benchmarks[i];
+
+		if (verbose) {
+			console.log(
+				`\n[${i + 1}/${benchmarks.length}] Running suite: ${benchmark.module.suiteName}`,
+			);
+		}
+
+		try {
+			const result = await executeSuite(benchmark);
+			results.push(result);
+
+			if (verbose) {
+				const seconds = (result.durationMs / 1000).toFixed(2);
+				console.log(
+					`  ✓ Completed in ${seconds}s (${result.bench.tasks.length} benchmarks)`,
+				);
+			}
+		} catch (error) {
+			if (verbose) {
+				console.error(`  ✗ Failed: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+	}
+
+	return results;
+}
 
 // ============================================================================
 // Table Output (Task 8.3)
@@ -222,23 +309,44 @@ async function main(): Promise<void> {
 		}
 	}
 
-	// For now, just list discovered benchmarks
-	// Full execution will be implemented in task 8.2
+	// Display header (table mode only)
 	if (!json) {
-		console.log(`Discovered ${benchmarks.length} benchmark suite(s):\n`);
-		for (const b of benchmarks) {
-			console.log(`  - ${b.module.suiteName}`);
+		console.log(`ProseQL Benchmark Runner`);
+		console.log(`========================`);
+		console.log(`Discovered ${benchmarks.length} benchmark suite(s)`);
+	}
+
+	// Execute all benchmark suites sequentially
+	// Each suite handles its own warm-up via tinybench's warmupIterations option
+	const results = await executeAllSuites(benchmarks, { verbose: !json });
+
+	// Output results
+	if (!json) {
+		// Table output - show results for each suite
+		console.log("\n" + "=".repeat(60));
+		console.log("BENCHMARK RESULTS");
+		console.log("=".repeat(60));
+
+		for (const result of results) {
+			console.log(`\n## ${result.suiteName}`);
+			console.log("-".repeat(40));
+			console.log(formatResultsTable(result.bench.tasks));
 		}
-		console.log("\nNote: Full execution will be implemented in task 8.2");
+
+		// Summary
+		console.log("\n" + "=".repeat(60));
+		console.log("SUMMARY");
+		console.log("=".repeat(60));
+		const totalDuration = results.reduce((sum, r) => sum + r.durationMs, 0);
+		const totalBenchmarks = results.reduce((sum, r) => sum + r.bench.tasks.length, 0);
+		console.log(`Total suites: ${results.length}`);
+		console.log(`Total benchmarks: ${totalBenchmarks}`);
+		console.log(`Total time: ${(totalDuration / 1000).toFixed(2)}s`);
 	} else {
-		// Placeholder JSON output
+		// JSON output - full structured results
 		const output: BenchmarkJsonOutput = {
 			timestamp: new Date().toISOString(),
-			suites: benchmarks.map((b) => ({
-				suite: b.module.suiteName,
-				results: [],
-				timestamp: new Date().toISOString(),
-			})),
+			suites: results.map((r) => formatResultsJson(r.suiteName, r.bench.tasks)),
 		};
 		console.log(JSON.stringify(output, null, 2));
 	}
