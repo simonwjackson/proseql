@@ -29,6 +29,7 @@ import {
 	ValidationError,
 } from "../errors/crud-errors.js";
 import type { MigrationError } from "../errors/migration-errors.js";
+import type { PluginError } from "../errors/plugin-errors.js";
 import type { DanglingReferenceError } from "../errors/query-errors.js";
 import type {
 	SerializationError,
@@ -77,11 +78,15 @@ import {
 } from "../operations/query/sort-stream.js";
 import { applyPopulate } from "../operations/relationships/populate-stream.js";
 import { mergeGlobalHooks } from "../plugins/plugin-hooks.js";
+import { buildPluginRegistry } from "../plugins/plugin-registry.js";
 import type {
+	CustomIdGenerator,
 	CustomOperator,
 	GlobalHooksConfig,
+	PluginRegistry,
 	ProseQLPlugin,
 } from "../plugins/plugin-types.js";
+import { validateIdGeneratorReferences } from "../plugins/plugin-validation.js";
 import {
 	type FormatCodec,
 	mergeSerializerWithPluginCodecs,
@@ -1290,7 +1295,7 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 		readonly [K in keyof Config]?: ReadonlyArray<Record<string, unknown>>;
 	},
 	options?: EffectDatabaseOptions,
-): Effect.Effect<EffectDatabase<Config>, MigrationError> =>
+): Effect.Effect<EffectDatabase<Config>, MigrationError | PluginError> =>
 	Effect.gen(function* () {
 		// 0. Validate migration registries for all versioned collections at startup
 		for (const collectionName of Object.keys(config)) {
@@ -1301,6 +1306,19 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 					collectionConfig.version,
 					collectionConfig.migrations ?? [],
 				);
+			}
+		}
+
+		// 0b. Build plugin registry (validates plugins, merges contributions)
+		const pluginRegistry = yield* buildPluginRegistry(options?.plugins);
+
+		// 0c. Validate that all idGenerator references in collection configs exist
+		yield* validateIdGeneratorReferences(config, pluginRegistry.idGenerators);
+
+		// 0d. Run plugin initialize effects
+		for (const plugin of options?.plugins ?? []) {
+			if (plugin.initialize !== undefined) {
+				yield* plugin.initialize();
 			}
 		}
 
@@ -1356,6 +1374,7 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 		}
 
 		// 4. Build each collection with its Ref, indexes, and shared state refs
+		// Pass plugin registry data: custom operators, ID generators, and global hooks
 		const collections: Record<string, EffectCollection<HasId>> = {};
 
 		for (const collectionName of Object.keys(config)) {
@@ -1369,8 +1388,9 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 				collectionIndexes[collectionName],
 				searchIndexRefs[collectionName],
 				searchIndexFields[collectionName],
-				undefined, // customOperators - will be provided by plugin system (task 8)
-				undefined, // idGeneratorMap - will be provided by plugin system (task 8)
+				pluginRegistry.operators,
+				pluginRegistry.idGenerators,
+				pluginRegistry.globalHooks,
 			);
 		}
 
@@ -1382,8 +1402,9 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 			collectionIndexes,
 			searchIndexRefs,
 			searchIndexFields,
-			undefined, // customOperators - will be provided by plugin system (task 8)
-			undefined, // idGeneratorMap - will be provided by plugin system (task 8)
+			pluginRegistry.operators,
+			pluginRegistry.idGenerators,
+			pluginRegistry.globalHooks,
 		);
 
 		// Create the $transaction method
@@ -1457,7 +1478,8 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 	| StorageError
 	| SerializationError
 	| UnsupportedFormatError
-	| ValidationError,
+	| ValidationError
+	| PluginError,
 	StorageAdapter | SerializerRegistry | Scope.Scope
 > =>
 	Effect.gen(function* () {
@@ -1473,19 +1495,36 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			}
 		}
 
+		// 0b. Build plugin registry (validates plugins, merges contributions)
+		const pluginRegistry = yield* buildPluginRegistry(options?.plugins);
+
+		// 0c. Validate that all idGenerator references in collection configs exist
+		yield* validateIdGeneratorReferences(config, pluginRegistry.idGenerators);
+
+		// 0d. Run plugin initialize effects
+		for (const plugin of options?.plugins ?? []) {
+			if (plugin.initialize !== undefined) {
+				yield* plugin.initialize();
+			}
+		}
+
 		// 1. Resolve services from the environment and capture as a Layer
 		// so save effects can be executed outside the creation runtime.
 		const storageAdapter = yield* StorageAdapter;
 		const baseSerializerRegistry = yield* SerializerRegistry;
 
-		// 1a. Merge plugin codecs with the base serializer registry if provided
-		// Plugin codecs take precedence over base registry codecs
+		// 1a. Merge plugin codecs with the base serializer registry
+		// Plugin codecs from the registry take precedence, followed by any codecs
+		// passed via _pluginCodecs (for backwards compatibility)
+		const allPluginCodecs = [
+			...pluginRegistry.codecs,
+			...(persistenceConfig?._pluginCodecs ?? []),
+		];
 		const serializerRegistry =
-			persistenceConfig?._pluginCodecs !== undefined &&
-			persistenceConfig._pluginCodecs.length > 0
+			allPluginCodecs.length > 0
 				? mergeSerializerWithPluginCodecs(
 						baseSerializerRegistry,
-						persistenceConfig._pluginCodecs,
+						allPluginCodecs,
 					)
 				: baseSerializerRegistry;
 
@@ -1655,8 +1694,9 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				collectionIndexes[collectionName],
 				searchIndexRefs[collectionName],
 				searchIndexFields[collectionName],
-				undefined, // customOperators - will be provided by plugin system (task 8)
-				undefined, // idGeneratorMap - will be provided by plugin system (task 8)
+				pluginRegistry.operators,
+				pluginRegistry.idGenerators,
+				pluginRegistry.globalHooks,
 			);
 		}
 
@@ -1685,8 +1725,9 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			collectionIndexes,
 			searchIndexRefs,
 			searchIndexFields,
-			undefined, // customOperators - will be provided by plugin system (task 8)
-			undefined, // idGeneratorMap - will be provided by plugin system (task 8)
+			pluginRegistry.operators,
+			pluginRegistry.idGenerators,
+			pluginRegistry.globalHooks,
 		);
 
 		// Create the $transaction method with persistence trigger
