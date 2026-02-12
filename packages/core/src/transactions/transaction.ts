@@ -198,6 +198,17 @@ export const createTransaction = <
 					}
 				}
 
+				// Publish change events for each mutated collection (one event per collection)
+				// This notifies reactive subscribers about the committed changes
+				if (changePubSub) {
+					for (const collectionName of mutatedCollections) {
+						yield* PubSub.publish(changePubSub, {
+							collection: collectionName,
+							operation: "update",
+						});
+					}
+				}
+
 				// Release lock
 				yield* Ref.set(transactionLock, false);
 				isActive = false;
