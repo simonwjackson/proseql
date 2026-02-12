@@ -117,8 +117,40 @@ export async function createSuite(): Promise<Bench> {
 		}).runPromise;
 	});
 
-	// Benchmarks will be added in tasks 4.3-4.6:
-	// - 4.3: createMany batch benchmark
+	// -------------------------------------------------------------------------
+	// 4.3: createMany batch benchmark
+	// -------------------------------------------------------------------------
+
+	// For createMany benchmark, we start with the baseline collection.
+	// Each iteration creates a batch of 100 entities with unique IDs.
+	// This tests amortized batch insertion throughput vs single creates.
+	const createManyDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	let createManyCounter = 0;
+	const BATCH_SIZE = 100;
+
+	bench.add("createMany (batch of 100)", async () => {
+		// Generate a batch of entities with unique IDs
+		const batchStartIndex = createManyCounter;
+		createManyCounter += BATCH_SIZE;
+		const timestamp = Date.now();
+
+		const batch: Array<User> = [];
+		for (let i = 0; i < BATCH_SIZE; i++) {
+			const idx = batchStartIndex + i;
+			batch.push({
+				id: `batch_user_${timestamp}_${idx}`,
+				name: `Batch User ${idx}`,
+				email: `batch${idx}@test.com`,
+				age: 25 + (idx % 50),
+				role: "user" as const,
+				createdAt: new Date().toISOString(),
+			});
+		}
+
+		await createManyDb.users.createMany(batch).runPromise;
+	});
+
+	// Benchmarks will be added in tasks 4.4-4.6:
 	// - 4.4: update and updateMany benchmarks
 	// - 4.5: delete and deleteMany benchmarks
 	// - 4.6: upsert benchmarks (create and update paths)
