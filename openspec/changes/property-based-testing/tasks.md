@@ -23,7 +23,7 @@
 - [x] 4.1 Create `packages/core/tests/property/filter-consistency.test.ts`
 - [x] 4.2 Property: seed a collection with arbitrary entities, query with an arbitrary where clause, then manually evaluate the where clause against every entity — the query result is the exact matching subset (no false inclusions, no false exclusions)
 - [x] 4.3 Property: query with an empty where clause returns all entities in the collection
-- [ ] 4.4 Implement a reference `matchesWhere(entity, whereClause)` function that evaluates where clauses in plain JS for use as the test oracle
+- [x] 4.4 Implement a reference `matchesWhere(entity, whereClause)` function that evaluates where clauses in plain JS for use as the test oracle
 
 ## 5. Sort Ordering Properties
 
