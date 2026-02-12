@@ -1220,5 +1220,116 @@ describe("Plugin System", () => {
 			// The $regex operator passes the pattern directly to new RegExp()
 			expect(caseInsensitiveWithFlag.length).toBe(0);
 		});
+
+		it("should apply type-constrained operator only to matching field types", async () => {
+			// Task 12.2: Test custom operator with type constraint: operator declared for
+			// "string" only, applied to string field works, applied to number field is ignored
+			//
+			// The $regex operator is declared with types: ["string"]
+			// When applied to a string field (title), it should work
+			// When applied to a number field (year), it should be ignored (match everything)
+
+			const regexPlugin = createOperatorPlugin("regex-plugin", regexOperator);
+			const db = await createDatabaseWithPlugins([regexPlugin]);
+
+			// Test 1: $regex on string field (title) - should work normally
+			const stringFieldMatch = await db.books
+				.query({
+					where: { title: { $regex: "^The.*" } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(stringFieldMatch.length).toBe(1);
+			expect(stringFieldMatch[0].title).toBe("The Great Gatsby");
+
+			// Test 2: $regex on number field (year) - should be ignored
+			// Since the operator is ignored for number fields, all records match
+			const numberFieldMatch = await db.books
+				.query({
+					where: { year: { $regex: "^19.*" } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			// Since $regex is declared for "string" only, it's silently ignored for number fields
+			// This means no filter is applied and all 3 books are returned
+			expect(numberFieldMatch.length).toBe(3);
+
+			// Test 3: Combine with a built-in operator to verify the type-constraint behavior
+			// $regex on number should be ignored, $gte on number should work
+			const combinedQuery = await db.books
+				.query({
+					where: {
+						year: {
+							$regex: "^19.*", // This is ignored for number fields
+							$gte: 1960, // This should work (only Dune with year 1965 matches)
+						},
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			// Only Dune (1965) should match the $gte: 1960 filter
+			// The $regex is ignored because year is a number, not a string
+			expect(combinedQuery.length).toBe(1);
+			expect(combinedQuery[0].title).toBe("Dune");
+			expect(combinedQuery[0].year).toBe(1965);
+
+			// Test 4: Create a custom operator that supports numbers only
+			const numericOnlyOperator: CustomOperator = {
+				name: "$isEven",
+				types: ["number"], // Only works on numbers
+				evaluate: (fieldValue, _operand) => {
+					if (typeof fieldValue !== "number") return false;
+					return fieldValue % 2 === 0;
+				},
+			};
+
+			const numericPlugin = createOperatorPlugin("numeric-plugin", numericOnlyOperator);
+			const db2 = await createDatabaseWithPlugins([numericPlugin]);
+
+			// Test $isEven on number field (year) - should work
+			const evenYears = await db2.books
+				.query({
+					where: { year: { $isEven: true } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			// 1925 is odd, 1949 is odd, 1965 is odd - none are even
+			expect(evenYears.length).toBe(0);
+
+			// Test $isEven on string field (genre) - should be ignored
+			const evenOnString = await db2.books
+				.query({
+					where: { genre: { $isEven: true } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			// Since $isEven only supports "number", it's ignored for string fields
+			// All 3 books are returned
+			expect(evenOnString.length).toBe(3);
+
+			// Test 5: Verify boolean fields are handled correctly
+			// Create a custom operator that supports booleans
+			const boolOnlyOperator: CustomOperator = {
+				name: "$isTrue",
+				types: ["boolean"],
+				evaluate: (fieldValue, _operand) => {
+					return fieldValue === true;
+				},
+			};
+
+			const boolPlugin = createOperatorPlugin("bool-plugin", boolOnlyOperator);
+			const db3 = await createDatabaseWithPlugins([boolPlugin]);
+
+			// Apply $isTrue to string field - should be ignored
+			const boolOnString = await db3.books
+				.query({
+					where: { title: { $isTrue: true } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			// Since $isTrue only supports "boolean", it's ignored for string fields
+			// All 3 books are returned
+			expect(boolOnString.length).toBe(3);
+		});
 	});
 });
