@@ -147,6 +147,8 @@ export type {
 
 export { createChangePubSub } from "./reactive/change-pubsub.js";
 export { createChangeEvent, reloadEvent } from "./reactive/change-event.js";
+export { watch } from "./reactive/watch.js";
+export type { WatchQueryConfig } from "./reactive/watch.js";
 
 // ============================================================================
 // Cursor Pagination Types
