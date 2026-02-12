@@ -13,7 +13,12 @@
 import { Rpc, RpcRouter } from "@effect/rpc";
 import { Schema } from "effect";
 import type { DatabaseConfig, CollectionConfig } from "@proseql/core";
-import { NotFoundErrorSchema } from "./rpc-errors.js";
+import {
+	NotFoundErrorSchema,
+	DanglingReferenceErrorSchema,
+	ValidationErrorSchema,
+} from "./rpc-errors.js";
+import { QueryPayloadSchema } from "./rpc-schemas.js";
 
 // ============================================================================
 // TaggedRequest Schema Factories
@@ -100,6 +105,115 @@ export type FindByIdRequestClass<
 	};
 };
 
+/**
+ * Union schema for query errors (DanglingReferenceError | ValidationError).
+ */
+const QueryErrorUnionSchema = Schema.Union(
+	DanglingReferenceErrorSchema,
+	ValidationErrorSchema,
+);
+
+/**
+ * Creates a Query TaggedRequest class for a collection.
+ *
+ * The returned class extends Schema.TaggedRequest and can be used to:
+ * 1. Create request instances: new QueryRequest({ where: { ... } })
+ * 2. Define RPC handlers: Rpc.effect(QueryRequest, (req) => ...)
+ * 3. Build RPC routers: RpcRouter.make(queryRpc, ...)
+ *
+ * @param collectionName - The name of the collection (used as the request _tag prefix)
+ * @param entitySchema - The Effect Schema for the collection's entities
+ * @returns A TaggedRequest class for query operations
+ *
+ * @example
+ * ```ts
+ * const BookSchema = Schema.Struct({
+ *   id: Schema.String,
+ *   title: Schema.String,
+ * })
+ *
+ * const QueryRequest = makeQueryRequest("books", BookSchema)
+ * // _tag: "books.query"
+ * // payload: QueryPayload
+ * // success: ReadonlyArray<Book>
+ * // failure: DanglingReferenceError | ValidationError
+ * ```
+ */
+export function makeQueryRequest<
+	CollectionName extends string,
+	EntitySchema extends Schema.Schema.Any,
+>(
+	collectionName: CollectionName,
+	entitySchema: EntitySchema,
+): QueryRequestClass<CollectionName, EntitySchema> {
+	// Create a TaggedRequest class dynamically
+	// The class extends Schema.TaggedRequest with the collection-specific tag
+	const RequestClass = class QueryRequest extends Schema.TaggedRequest<QueryRequest>()(
+		`${collectionName}.query` as `${CollectionName}.query`,
+		{
+			failure: QueryErrorUnionSchema,
+			success: Schema.Array(entitySchema),
+			payload: {
+				where: QueryPayloadSchema.fields.where,
+				sort: QueryPayloadSchema.fields.sort,
+				select: QueryPayloadSchema.fields.select,
+				populate: QueryPayloadSchema.fields.populate,
+				limit: QueryPayloadSchema.fields.limit,
+				offset: QueryPayloadSchema.fields.offset,
+				cursor: QueryPayloadSchema.fields.cursor,
+			},
+		},
+	) {};
+
+	return RequestClass as unknown as QueryRequestClass<
+		CollectionName,
+		EntitySchema
+	>;
+}
+
+/**
+ * Type for a Query TaggedRequest class.
+ * This is the class type returned by makeQueryRequest.
+ */
+export type QueryRequestClass<
+	CollectionName extends string,
+	EntitySchema extends Schema.Schema.Any,
+> = {
+	/**
+	 * The request _tag (e.g., "books.query")
+	 */
+	readonly _tag: `${CollectionName}.query`;
+	/**
+	 * The success schema (array of entity type)
+	 */
+	readonly success: Schema.Array$<EntitySchema>;
+	/**
+	 * The failure schema (DanglingReferenceError | ValidationError)
+	 */
+	readonly failure: typeof QueryErrorUnionSchema;
+	/**
+	 * Create a new request instance
+	 */
+	new (props: {
+		readonly where?: typeof QueryPayloadSchema.Type.where;
+		readonly sort?: typeof QueryPayloadSchema.Type.sort;
+		readonly select?: typeof QueryPayloadSchema.Type.select;
+		readonly populate?: typeof QueryPayloadSchema.Type.populate;
+		readonly limit?: typeof QueryPayloadSchema.Type.limit;
+		readonly offset?: typeof QueryPayloadSchema.Type.offset;
+		readonly cursor?: typeof QueryPayloadSchema.Type.cursor;
+	}): Schema.TaggedRequest.Any & {
+		readonly _tag: `${CollectionName}.query`;
+		readonly where?: typeof QueryPayloadSchema.Type.where;
+		readonly sort?: typeof QueryPayloadSchema.Type.sort;
+		readonly select?: typeof QueryPayloadSchema.Type.select;
+		readonly populate?: typeof QueryPayloadSchema.Type.populate;
+		readonly limit?: typeof QueryPayloadSchema.Type.limit;
+		readonly offset?: typeof QueryPayloadSchema.Type.offset;
+		readonly cursor?: typeof QueryPayloadSchema.Type.cursor;
+	};
+};
+
 // ============================================================================
 // Collection RPC Definitions
 // ============================================================================
@@ -117,6 +231,11 @@ export interface CollectionRpcDefinitions<
 	 * Use with Rpc.effect() to create an RPC handler.
 	 */
 	readonly FindByIdRequest: FindByIdRequestClass<CollectionName, EntitySchema>;
+	/**
+	 * TaggedRequest class for query operations.
+	 * Use with Rpc.effect() to create an RPC handler.
+	 */
+	readonly QueryRequest: QueryRequestClass<CollectionName, EntitySchema>;
 	/** The collection name */
 	readonly collectionName: CollectionName;
 	/** The entity schema for this collection */
@@ -141,9 +260,11 @@ export function makeCollectionRpcs<
 	entitySchema: EntitySchema,
 ): CollectionRpcDefinitions<CollectionName, EntitySchema> {
 	const FindByIdRequest = makeFindByIdRequest(collectionName, entitySchema);
+	const QueryRequest = makeQueryRequest(collectionName, entitySchema);
 
 	return {
 		FindByIdRequest,
+		QueryRequest,
 		collectionName,
 		entitySchema,
 	};
@@ -159,8 +280,9 @@ export function makeCollectionRpcs<
  * This is the primary entry point for deriving RPC schemas from a database config.
  * Each collection gets typed request schemas for:
  * - findById: Find entity by ID
+ * - query: Query entities with filtering, sorting, pagination
  *
- * Additional procedures (query, create, update, delete, aggregate, batch ops)
+ * Additional procedures (create, update, delete, aggregate, batch ops)
  * will be added in subsequent tasks.
  *
  * @param config - The database configuration
@@ -183,8 +305,12 @@ export function makeCollectionRpcs<
  *   db.books.findById(req.id)
  * )
  *
+ * const queryBooks = Rpc.effect(rpcs.books.QueryRequest, (req) =>
+ *   db.books.query({ where: req.where, sort: req.sort }).runPromise
+ * )
+ *
  * // Build a router
- * const router = RpcRouter.make(findBookById)
+ * const router = RpcRouter.make(findBookById, queryBooks)
  * ```
  */
 export function makeRpcGroup<Config extends DatabaseConfig>(

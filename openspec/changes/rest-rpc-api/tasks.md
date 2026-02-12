@@ -8,7 +8,7 @@
 
 - [x] 2.1 Create `rpc/src/rpc-group.ts` with `makeRpcGroup(config)` that iterates DatabaseConfig collection names and builds an RpcGroup
 - [x] 2.2 For each collection, generate `findById` procedure: payload `{ id: string }`, success is collection entity type, error includes `NotFoundError`
-- [ ] 2.3 Generate `query` procedure: payload is `QueryConfig`, success is `ReadonlyArray<Entity>`, error includes `DanglingReferenceError | ValidationError`
+- [x] 2.3 Generate `query` procedure: payload is `QueryConfig`, success is `ReadonlyArray<Entity>`, error includes `DanglingReferenceError | ValidationError`
 - [ ] 2.4 Generate `create` procedure: payload is create input, success is entity, error includes `ValidationError | DuplicateKeyError | UniqueConstraintError | ForeignKeyError | HookError`
 - [ ] 2.5 Generate `update` procedure: payload is `{ id: string, updates: Partial<Entity> }`, success is entity, error includes `ValidationError | NotFoundError | UniqueConstraintError | HookError`
 - [ ] 2.6 Generate `delete` procedure: payload is `{ id: string }`, success is entity, error includes `NotFoundError | HookError`

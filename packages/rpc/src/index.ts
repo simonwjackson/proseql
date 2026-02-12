@@ -136,9 +136,11 @@ export {
 export {
 	makeRpcGroup,
 	makeFindByIdRequest,
+	makeQueryRequest,
 	makeCollectionRpcs,
 	RpcRouter,
 	type RpcGroupFromConfig,
 	type CollectionRpcDefinitions,
 	type FindByIdRequestClass,
+	type QueryRequestClass,
 } from "./rpc-group.js";
