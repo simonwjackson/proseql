@@ -1554,3 +1554,269 @@ describe("REST handlers — POST batch creates multiple entities (task 11.15)", 
 		expect(result.created[0].title).toBe("Single Book");
 	});
 });
+
+// ============================================================================
+// Task 11.16: Test GET aggregate returns correct result
+// ============================================================================
+
+describe("REST handlers — GET aggregate returns correct result (task 11.16)", () => {
+	it("should return count of all entities", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getAggregate = findRoute(routes, "GET", "/books/aggregate");
+		expect(getAggregate).toBeDefined();
+
+		const request = createRequest({ query: { count: "true" } });
+		const response = await getAggregate!.handler(request);
+
+		expect(response.status).toBe(200);
+		const result = response.body as { count: number };
+		expect(result.count).toBe(3);
+	});
+
+	it("should default to count when no aggregation is specified", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getAggregate = findRoute(routes, "GET", "/books/aggregate");
+
+		// No aggregation params - should default to count
+		const request = createRequest({ query: {} });
+		const response = await getAggregate!.handler(request);
+
+		expect(response.status).toBe(200);
+		const result = response.body as { count: number };
+		expect(result.count).toBe(3);
+	});
+
+	it("should return count with filter applied", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getAggregate = findRoute(routes, "GET", "/books/aggregate");
+
+		// Filter for books before 1970
+		const request = createRequest({
+			query: { count: "true", "year[$lt]": "1970" },
+		});
+		const response = await getAggregate!.handler(request);
+
+		expect(response.status).toBe(200);
+		const result = response.body as { count: number };
+		// Dune (1965) and Left Hand (1969) are < 1970
+		expect(result.count).toBe(2);
+	});
+
+	it("should return min and max values for a field", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getAggregate = findRoute(routes, "GET", "/books/aggregate");
+
+		const request = createRequest({
+			query: { min: "year", max: "year" },
+		});
+		const response = await getAggregate!.handler(request);
+
+		expect(response.status).toBe(200);
+		const result = response.body as { min: { year: number }; max: { year: number } };
+		expect(result.min.year).toBe(1965); // Dune
+		expect(result.max.year).toBe(1984); // Neuromancer
+	});
+
+	it("should return sum of a numeric field", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getAggregate = findRoute(routes, "GET", "/books/aggregate");
+
+		const request = createRequest({
+			query: { sum: "year" },
+		});
+		const response = await getAggregate!.handler(request);
+
+		expect(response.status).toBe(200);
+		const result = response.body as { sum: { year: number } };
+		// Sum of years: 1965 + 1984 + 1969 = 5918
+		expect(result.sum.year).toBe(5918);
+	});
+
+	it("should return average of a numeric field", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getAggregate = findRoute(routes, "GET", "/books/aggregate");
+
+		const request = createRequest({
+			query: { avg: "year" },
+		});
+		const response = await getAggregate!.handler(request);
+
+		expect(response.status).toBe(200);
+		const result = response.body as { avg: { year: number } };
+		// Average of years: (1965 + 1984 + 1969) / 3 ≈ 1972.67
+		expect(result.avg.year).toBeCloseTo(1972.67, 1);
+	});
+
+	it("should return grouped aggregate results", async () => {
+		// Create books with different genres for groupBy testing
+		const mixedBooks = [
+			{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965, genre: "sci-fi" },
+			{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984, genre: "sci-fi" },
+			{ id: "3", title: "The Hobbit", author: "J.R.R. Tolkien", year: 1937, genre: "fantasy" },
+		];
+
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: mixedBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getAggregate = findRoute(routes, "GET", "/books/aggregate");
+
+		const request = createRequest({
+			query: { count: "true", groupBy: "genre" },
+		});
+		const response = await getAggregate!.handler(request);
+
+		expect(response.status).toBe(200);
+		const result = response.body as ReadonlyArray<{
+			group: { genre: string };
+			count: number;
+		}>;
+
+		expect(Array.isArray(result)).toBe(true);
+		expect(result.length).toBe(2);
+
+		const scifiGroup = result.find((g) => g.group.genre === "sci-fi");
+		const fantasyGroup = result.find((g) => g.group.genre === "fantasy");
+
+		expect(scifiGroup).toBeDefined();
+		expect(scifiGroup!.count).toBe(2);
+
+		expect(fantasyGroup).toBeDefined();
+		expect(fantasyGroup!.count).toBe(1);
+	});
+
+	it("should return multiple aggregations in one request", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getAggregate = findRoute(routes, "GET", "/books/aggregate");
+
+		const request = createRequest({
+			query: { count: "true", min: "year", max: "year" },
+		});
+		const response = await getAggregate!.handler(request);
+
+		expect(response.status).toBe(200);
+		const result = response.body as {
+			count: number;
+			min: { year: number };
+			max: { year: number };
+		};
+		expect(result.count).toBe(3);
+		expect(result.min.year).toBe(1965);
+		expect(result.max.year).toBe(1984);
+	});
+
+	it("should return correct result for empty collection", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const getAggregate = findRoute(routes, "GET", "/books/aggregate");
+
+		const request = createRequest({ query: { count: "true" } });
+		const response = await getAggregate!.handler(request);
+
+		expect(response.status).toBe(200);
+		const result = response.body as { count: number };
+		expect(result.count).toBe(0);
+	});
+
+	it("should work with different collections", async () => {
+		const multiConfig = {
+			books: { schema: BookSchema, relationships: {} },
+			authors: {
+				schema: Schema.Struct({ id: Schema.String, name: Schema.String }),
+				relationships: {},
+			},
+		} as const;
+
+		const db = await Effect.runPromise(
+			createEffectDatabase(multiConfig, {
+				books: initialBooks,
+				authors: [
+					{ id: "a1", name: "Frank Herbert" },
+					{ id: "a2", name: "William Gibson" },
+				],
+			}),
+		);
+		const routes = createRestHandlers(multiConfig, db);
+
+		// Test books aggregate
+		const getBooksAggregate = findRoute(routes, "GET", "/books/aggregate");
+		const booksRequest = createRequest({ query: { count: "true" } });
+		const booksResponse = await getBooksAggregate!.handler(booksRequest);
+		expect(booksResponse.status).toBe(200);
+		expect((booksResponse.body as { count: number }).count).toBe(3);
+
+		// Test authors aggregate
+		const getAuthorsAggregate = findRoute(routes, "GET", "/authors/aggregate");
+		const authorsRequest = createRequest({ query: { count: "true" } });
+		const authorsResponse = await getAuthorsAggregate!.handler(authorsRequest);
+		expect(authorsResponse.status).toBe(200);
+		expect((authorsResponse.body as { count: number }).count).toBe(2);
+	});
+
+	it("should filter count by simple equality", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getAggregate = findRoute(routes, "GET", "/books/aggregate");
+
+		// Filter by author
+		const request = createRequest({
+			query: { count: "true", author: "Frank Herbert" },
+		});
+		const response = await getAggregate!.handler(request);
+
+		expect(response.status).toBe(200);
+		const result = response.body as { count: number };
+		expect(result.count).toBe(1);
+	});
+
+	it("should return 200 with grouped average", async () => {
+		// Create books with different genres for groupBy testing
+		const mixedBooks = [
+			{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965, genre: "sci-fi" },
+			{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984, genre: "sci-fi" },
+			{ id: "3", title: "The Hobbit", author: "J.R.R. Tolkien", year: 1937, genre: "fantasy" },
+		];
+
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: mixedBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getAggregate = findRoute(routes, "GET", "/books/aggregate");
+
+		const request = createRequest({
+			query: { avg: "year", groupBy: "genre" },
+		});
+		const response = await getAggregate!.handler(request);
+
+		expect(response.status).toBe(200);
+		const result = response.body as ReadonlyArray<{
+			group: { genre: string };
+			avg: { year: number };
+		}>;
+
+		expect(Array.isArray(result)).toBe(true);
+
+		const scifiGroup = result.find((g) => g.group.genre === "sci-fi");
+		expect(scifiGroup).toBeDefined();
+		// Average of sci-fi years: (1965 + 1984) / 2 = 1974.5
+		expect(scifiGroup!.avg.year).toBeCloseTo(1974.5, 1);
+
+		const fantasyGroup = result.find((g) => g.group.genre === "fantasy");
+		expect(fantasyGroup).toBeDefined();
+		expect(fantasyGroup!.avg.year).toBe(1937);
+	});
+});

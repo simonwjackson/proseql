@@ -107,7 +107,7 @@
 - [x] 11.13 Test PUT updates entity and returns 200
 - [x] 11.14 Test DELETE removes entity and returns 200
 - [x] 11.15 Test POST batch creates multiple entities
-- [ ] 11.16 Test GET aggregate returns correct result
+- [x] 11.16 Test GET aggregate returns correct result
 - [ ] 11.17 Create `rest/tests/error-mapping.test.ts`: test each tagged error maps to correct HTTP status
 - [ ] 11.18 Test unknown error maps to 500
 - [ ] 11.19 Create `rest/tests/relationship.test.ts`: test ref relationship route returns related entity
