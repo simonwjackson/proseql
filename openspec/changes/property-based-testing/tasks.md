@@ -14,7 +14,7 @@
 
 ## 3. Schema Round-Trip Properties
 
-- [ ] 3.1 Create `packages/core/tests/property/schema-roundtrip.test.ts`
+- [x] 3.1 Create `packages/core/tests/property/schema-roundtrip.test.ts`
 - [ ] 3.2 Property: any value produced by `entityArbitrary` survives `Schema.encode` then `Schema.decode` and is deeply equal to the original
 - [ ] 3.3 Property: a randomly mutated entity (wrong field types, missing required fields) is rejected by `Schema.decode` with a validation error, never silently accepted
 
