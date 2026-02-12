@@ -4,7 +4,7 @@
 - [x] 1.2 Create `packages/cli/tsconfig.json` extending root tsconfig
 - [x] 1.3 Add `packages/cli` to the root workspace configuration
 - [x] 1.4 Create `packages/cli/src/main.ts` entry point: parse top-level flags (`--config`, `--help`, `--version`, `--json`, `--yaml`, `--csv`), dispatch to command handlers based on first positional argument
-- [ ] 1.5 Verify `bun run packages/cli/src/main.ts --help` executes without error
+- [x] 1.5 Verify `bun run packages/cli/src/main.ts --help` executes without error
 
 ## 2. Config Discovery
 
