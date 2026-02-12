@@ -17,6 +17,7 @@ import { handleInit as handleInitCommand } from "./commands/init.js"
 import { handleQuery as handleQueryCommand } from "./commands/query.js"
 import { handleCollections as handleCollectionsCommand } from "./commands/collections.js"
 import { handleDescribe as handleDescribeCommand } from "./commands/describe.js"
+import { handleStats as handleStatsCommand } from "./commands/stats.js"
 import { format, type OutputFormat } from "./output/formatter.js"
 
 const VERSION = "0.1.0"
@@ -444,10 +445,22 @@ async function handleDescribe(
 }
 
 async function handleStats(
-  _args: ParsedArgs,
-  _resolvedConfig: ResolvedConfig,
+  args: ParsedArgs,
+  resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  console.log("stats command - not yet implemented")
+  const result = await handleStatsCommand({
+    config: resolvedConfig.config,
+    configPath: resolvedConfig.configPath,
+  })
+
+  if (!result.success) {
+    exitWithError(result.message ?? "Failed to get collection stats")
+  }
+
+  // Output the results using the appropriate formatter
+  const outputFormat = getOutputFormat(args.flags)
+  const output = format(outputFormat, result.data ?? [])
+  console.log(output)
 }
 
 async function handleCreate(
