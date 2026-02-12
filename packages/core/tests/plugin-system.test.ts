@@ -296,15 +296,26 @@ describe("Plugin System", () => {
 
 		it("should register multiple plugins and merge all contributions", async () => {
 			// Task 9.3: Test registering multiple plugins succeeds, all contributions are merged
+			// We need to verify that each plugin's contributions are actually usable
+
+			// Track hook execution
+			let hookCalled = false;
+
 			const operatorPlugin = createOperatorPlugin("regex-plugin", regexOperator);
 			const generatorPlugin = createIdGeneratorPlugin(
 				"counter-plugin",
 				createCounterGenerator("test"),
 			);
 			const hooksPlugin = createHooksPlugin("hooks-plugin", {
-				beforeCreate: [(ctx) => Effect.succeed(ctx.data)],
+				beforeCreate: [
+					(ctx) => {
+						hookCalled = true;
+						return Effect.succeed(ctx.data);
+					},
+				],
 			});
 
+			// Create database with all three plugins
 			const db = await createDatabaseWithPlugins([
 				operatorPlugin,
 				generatorPlugin,
@@ -313,6 +324,33 @@ describe("Plugin System", () => {
 
 			expect(db).toBeDefined();
 			expect(db.books).toBeDefined();
+
+			// Verify custom operator is merged and functional
+			// The $regex operator should be able to query books
+			const regexResults = await db.books
+				.query({
+					where: { title: { $regex: "^The.*" } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			// Should match "The Great Gatsby" but not "1984" or "Dune"
+			expect(regexResults.length).toBe(1);
+			expect(regexResults[0].title).toBe("The Great Gatsby");
+
+			// Verify global hooks are merged and functional
+			// Create a new book to trigger beforeCreate hook
+			hookCalled = false;
+			await db.books
+				.create({
+					id: "b4",
+					title: "New Book",
+					author: "Test Author",
+					year: 2024,
+					genre: "test",
+				})
+				.runPromise;
+
+			expect(hookCalled).toBe(true);
 		});
 
 		it("should run plugin initialize() during database creation", async () => {
