@@ -36,8 +36,6 @@ const BookSchema = Schema.Struct({
 	scores: Schema.Array(Schema.Number),
 });
 
-type Book = Schema.Schema.Type<typeof BookSchema>;
-
 /**
  * Database config for the Book collection.
  */
@@ -111,7 +109,10 @@ describe("Filter consistency properties", () => {
 			await fc.assert(
 				fc.asyncProperty(
 					// Generate 1-20 entities for the collection
-					fc.array(entityArbitrary(BookSchema), { minLength: 1, maxLength: 20 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 1,
+						maxLength: 20,
+					}),
 					// Generate an arbitrary where clause
 					whereClauseArbitrary(BookSchema),
 					async (entities, where) => {
@@ -122,9 +123,7 @@ describe("Filter consistency properties", () => {
 							});
 
 							// Query with the generated where clause
-							const chunk = yield* Stream.runCollect(
-								db.books.query({ where }),
-							);
+							const chunk = yield* Stream.runCollect(db.books.query({ where }));
 							const queryResults = Chunk.toReadonlyArray(chunk);
 
 							// Calculate expected results using the reference implementation
@@ -171,9 +170,7 @@ describe("Filter consistency properties", () => {
 								books: [entity],
 							});
 
-							const chunk = yield* Stream.runCollect(
-								db.books.query({ where }),
-							);
+							const chunk = yield* Stream.runCollect(db.books.query({ where }));
 							const queryResults = Chunk.toReadonlyArray(chunk);
 
 							const shouldMatch = matchesWhere(entity, where);
@@ -196,7 +193,10 @@ describe("Filter consistency properties", () => {
 		it("should be consistent across multiple queries with the same where clause", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					fc.array(entityArbitrary(BookSchema), { minLength: 5, maxLength: 15 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 5,
+						maxLength: 15,
+					}),
 					whereClauseArbitrary(BookSchema),
 					async (entities, where) => {
 						const program = Effect.gen(function* () {
@@ -242,7 +242,10 @@ describe("Filter consistency properties", () => {
 			await fc.assert(
 				fc.asyncProperty(
 					// Generate 0-25 entities for the collection
-					fc.array(entityArbitrary(BookSchema), { minLength: 0, maxLength: 25 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 0,
+						maxLength: 25,
+					}),
 					async (entities) => {
 						const program = Effect.gen(function* () {
 							const db = yield* createEffectDatabase(config, {
@@ -274,7 +277,10 @@ describe("Filter consistency properties", () => {
 		it("should return all entities when where clause is undefined", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					fc.array(entityArbitrary(BookSchema), { minLength: 0, maxLength: 25 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 0,
+						maxLength: 25,
+					}),
 					async (entities) => {
 						const program = Effect.gen(function* () {
 							const db = yield* createEffectDatabase(config, {
@@ -326,7 +332,10 @@ describe("Filter consistency properties", () => {
 		it("should return all entities consistently across multiple calls", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					fc.array(entityArbitrary(BookSchema), { minLength: 1, maxLength: 15 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 1,
+						maxLength: 15,
+					}),
 					async (entities) => {
 						const program = Effect.gen(function* () {
 							const db = yield* createEffectDatabase(config, {
@@ -460,14 +469,22 @@ describe("Filter consistency properties", () => {
 
 		it("should handle $in operator", () => {
 			const entity = { id: "1", title: "Dune", genre: "sci-fi" };
-			expect(matchesWhere(entity, { genre: { $in: ["sci-fi", "fantasy"] } })).toBe(true);
-			expect(matchesWhere(entity, { genre: { $in: ["romance", "mystery"] } })).toBe(false);
+			expect(
+				matchesWhere(entity, { genre: { $in: ["sci-fi", "fantasy"] } }),
+			).toBe(true);
+			expect(
+				matchesWhere(entity, { genre: { $in: ["romance", "mystery"] } }),
+			).toBe(false);
 		});
 
 		it("should handle $nin operator", () => {
 			const entity = { id: "1", title: "Dune", genre: "sci-fi" };
-			expect(matchesWhere(entity, { genre: { $nin: ["romance", "mystery"] } })).toBe(true);
-			expect(matchesWhere(entity, { genre: { $nin: ["sci-fi", "fantasy"] } })).toBe(false);
+			expect(
+				matchesWhere(entity, { genre: { $nin: ["romance", "mystery"] } }),
+			).toBe(true);
+			expect(
+				matchesWhere(entity, { genre: { $nin: ["sci-fi", "fantasy"] } }),
+			).toBe(false);
 		});
 
 		it("should handle comparison operators ($gt, $gte, $lt, $lte)", () => {
@@ -491,24 +508,42 @@ describe("Filter consistency properties", () => {
 
 		it("should handle string operators ($startsWith, $endsWith, $contains)", () => {
 			const entity = { id: "1", title: "The Left Hand of Darkness" };
-			expect(matchesWhere(entity, { title: { $startsWith: "The" } })).toBe(true);
-			expect(matchesWhere(entity, { title: { $startsWith: "Left" } })).toBe(false);
-			expect(matchesWhere(entity, { title: { $endsWith: "Darkness" } })).toBe(true);
-			expect(matchesWhere(entity, { title: { $endsWith: "Hand" } })).toBe(false);
+			expect(matchesWhere(entity, { title: { $startsWith: "The" } })).toBe(
+				true,
+			);
+			expect(matchesWhere(entity, { title: { $startsWith: "Left" } })).toBe(
+				false,
+			);
+			expect(matchesWhere(entity, { title: { $endsWith: "Darkness" } })).toBe(
+				true,
+			);
+			expect(matchesWhere(entity, { title: { $endsWith: "Hand" } })).toBe(
+				false,
+			);
 			expect(matchesWhere(entity, { title: { $contains: "Hand" } })).toBe(true);
-			expect(matchesWhere(entity, { title: { $contains: "Foot" } })).toBe(false);
+			expect(matchesWhere(entity, { title: { $contains: "Foot" } })).toBe(
+				false,
+			);
 		});
 
 		it("should handle array $contains operator", () => {
 			const entity = { id: "1", tags: ["sci-fi", "classic", "space"] };
-			expect(matchesWhere(entity, { tags: { $contains: "sci-fi" } })).toBe(true);
-			expect(matchesWhere(entity, { tags: { $contains: "romance" } })).toBe(false);
+			expect(matchesWhere(entity, { tags: { $contains: "sci-fi" } })).toBe(
+				true,
+			);
+			expect(matchesWhere(entity, { tags: { $contains: "romance" } })).toBe(
+				false,
+			);
 		});
 
 		it("should handle $all operator", () => {
 			const entity = { id: "1", tags: ["sci-fi", "classic", "space"] };
-			expect(matchesWhere(entity, { tags: { $all: ["sci-fi", "classic"] } })).toBe(true);
-			expect(matchesWhere(entity, { tags: { $all: ["sci-fi", "romance"] } })).toBe(false);
+			expect(
+				matchesWhere(entity, { tags: { $all: ["sci-fi", "classic"] } }),
+			).toBe(true);
+			expect(
+				matchesWhere(entity, { tags: { $all: ["sci-fi", "romance"] } }),
+			).toBe(false);
 		});
 
 		it("should handle $size operator", () => {
@@ -519,9 +554,15 @@ describe("Filter consistency properties", () => {
 
 		it("should handle combined operators (range queries)", () => {
 			const entity = { id: "1", year: 1965 };
-			expect(matchesWhere(entity, { year: { $gte: 1960, $lte: 1970 } })).toBe(true);
-			expect(matchesWhere(entity, { year: { $gte: 1970, $lte: 1980 } })).toBe(false);
-			expect(matchesWhere(entity, { year: { $gt: 1960, $lt: 1970 } })).toBe(true);
+			expect(matchesWhere(entity, { year: { $gte: 1960, $lte: 1970 } })).toBe(
+				true,
+			);
+			expect(matchesWhere(entity, { year: { $gte: 1970, $lte: 1980 } })).toBe(
+				false,
+			);
+			expect(matchesWhere(entity, { year: { $gt: 1960, $lt: 1970 } })).toBe(
+				true,
+			);
 		});
 
 		it("should handle multiple field conditions (AND logic)", () => {
@@ -531,16 +572,26 @@ describe("Filter consistency properties", () => {
 				author: "Frank Herbert",
 				year: 1965,
 			};
-			expect(matchesWhere(entity, { title: "Dune", author: "Frank Herbert" })).toBe(true);
-			expect(matchesWhere(entity, { title: "Dune", author: "Other Author" })).toBe(false);
-			expect(matchesWhere(entity, { title: "Dune", year: { $gt: 1960 } })).toBe(true);
-			expect(matchesWhere(entity, { title: "Other", year: { $gt: 1960 } })).toBe(false);
+			expect(
+				matchesWhere(entity, { title: "Dune", author: "Frank Herbert" }),
+			).toBe(true);
+			expect(
+				matchesWhere(entity, { title: "Dune", author: "Other Author" }),
+			).toBe(false);
+			expect(matchesWhere(entity, { title: "Dune", year: { $gt: 1960 } })).toBe(
+				true,
+			);
+			expect(
+				matchesWhere(entity, { title: "Other", year: { $gt: 1960 } }),
+			).toBe(false);
 		});
 
 		it("should handle unknown operators by returning false", () => {
 			const entity = { id: "1", title: "Dune" };
 			// Unknown operators should cause no match
-			expect(matchesWhere(entity, { title: { $unknownOp: "value" } })).toBe(false);
+			expect(matchesWhere(entity, { title: { $unknownOp: "value" } })).toBe(
+				false,
+			);
 		});
 
 		it("should be consistent with property test assertions", async () => {
@@ -548,7 +599,10 @@ describe("Filter consistency properties", () => {
 			// across random inputs
 			await fc.assert(
 				fc.asyncProperty(
-					fc.array(entityArbitrary(BookSchema), { minLength: 1, maxLength: 10 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 1,
+						maxLength: 10,
+					}),
 					whereClauseArbitrary(BookSchema),
 					async (entities, where) => {
 						// For each entity, matchesWhere should give a deterministic result

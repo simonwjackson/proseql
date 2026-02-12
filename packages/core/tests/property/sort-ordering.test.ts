@@ -18,9 +18,9 @@ import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../../src/factories/database-effect";
 import {
 	entityArbitrary,
+	type GeneratedSortConfig,
 	getNumRuns,
 	sortConfigArbitrary,
-	type GeneratedSortConfig,
 } from "./generators";
 
 /**
@@ -267,7 +267,10 @@ describe("Sort ordering properties", () => {
 			await fc.assert(
 				fc.asyncProperty(
 					// Generate 2-30 entities for the collection
-					fc.array(entityArbitrary(BookSchema), { minLength: 2, maxLength: 30 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 2,
+						maxLength: 30,
+					}),
 					// Generate a sort config that has at least one field
 					sortConfigArbitrary(BookSchema).filter(
 						(sort) => Object.keys(sort).length > 0,
@@ -283,9 +286,7 @@ describe("Sort ordering properties", () => {
 							});
 
 							// Query with the generated sort configuration
-							const chunk = yield* Stream.runCollect(
-								db.books.query({ sort }),
-							);
+							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
 							const sortedResults = Chunk.toReadonlyArray(chunk);
 
 							// Verify: all unique entities are returned
@@ -331,7 +332,10 @@ describe("Sort ordering properties", () => {
 			await fc.assert(
 				fc.asyncProperty(
 					// Generate 5-20 entities for the collection
-					fc.array(entityArbitrary(BookSchema), { minLength: 5, maxLength: 20 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 5,
+						maxLength: 20,
+					}),
 					// Generate a multi-field sort config
 					sortConfigArbitrary(BookSchema).filter(
 						(sort) => Object.keys(sort).length >= 2,
@@ -346,9 +350,7 @@ describe("Sort ordering properties", () => {
 								books: uniqueEntities,
 							});
 
-							const chunk = yield* Stream.runCollect(
-								db.books.query({ sort }),
-							);
+							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
 							const sortedResults = Chunk.toReadonlyArray(chunk);
 
 							expect(sortedResults.length).toBe(uniqueEntities.length);
@@ -368,11 +370,14 @@ describe("Sort ordering properties", () => {
 		it("should handle ascending sort correctly", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					fc.array(entityArbitrary(BookSchema), { minLength: 2, maxLength: 20 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 2,
+						maxLength: 20,
+					}),
 					// Generate specifically ascending sort on sortable fields
-					fc.constantFrom("title", "author", "year", "rating").map(
-						(field) => ({ [field]: "asc" as const }),
-					),
+					fc
+						.constantFrom("title", "author", "year", "rating")
+						.map((field) => ({ [field]: "asc" as const })),
 					async (entities, sort) => {
 						// Ensure unique IDs (duplicates collapse in database)
 						const uniqueEntities = ensureUniqueIds(entities);
@@ -383,9 +388,7 @@ describe("Sort ordering properties", () => {
 								books: uniqueEntities,
 							});
 
-							const chunk = yield* Stream.runCollect(
-								db.books.query({ sort }),
-							);
+							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
 							const sortedResults = Chunk.toReadonlyArray(chunk);
 
 							const field = Object.keys(sort)[0];
@@ -411,11 +414,14 @@ describe("Sort ordering properties", () => {
 		it("should handle descending sort correctly", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					fc.array(entityArbitrary(BookSchema), { minLength: 2, maxLength: 20 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 2,
+						maxLength: 20,
+					}),
 					// Generate specifically descending sort on sortable fields
-					fc.constantFrom("title", "author", "year", "rating").map(
-						(field) => ({ [field]: "desc" as const }),
-					),
+					fc
+						.constantFrom("title", "author", "year", "rating")
+						.map((field) => ({ [field]: "desc" as const })),
 					async (entities, sort) => {
 						// Ensure unique IDs (duplicates collapse in database)
 						const uniqueEntities = ensureUniqueIds(entities);
@@ -426,9 +432,7 @@ describe("Sort ordering properties", () => {
 								books: uniqueEntities,
 							});
 
-							const chunk = yield* Stream.runCollect(
-								db.books.query({ sort }),
-							);
+							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
 							const sortedResults = Chunk.toReadonlyArray(chunk);
 
 							const field = Object.keys(sort)[0];
@@ -454,7 +458,10 @@ describe("Sort ordering properties", () => {
 		it("should handle edge cases: empty sort config returns all entities", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					fc.array(entityArbitrary(BookSchema), { minLength: 0, maxLength: 20 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 0,
+						maxLength: 20,
+					}),
 					async (entities) => {
 						const program = Effect.gen(function* () {
 							const db = yield* createEffectDatabase(config, {
@@ -494,9 +501,7 @@ describe("Sort ordering properties", () => {
 								books: [entity],
 							});
 
-							const chunk = yield* Stream.runCollect(
-								db.books.query({ sort }),
-							);
+							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
 							const results = Chunk.toReadonlyArray(chunk);
 
 							// Single entity is always "sorted"
@@ -515,9 +520,9 @@ describe("Sort ordering properties", () => {
 			await fc.assert(
 				fc.asyncProperty(
 					// Generate two entities with the same year value
-					fc.tuple(entityArbitrary(BookSchema), entityArbitrary(BookSchema)).map(
-						([e1, e2]) => [e1, { ...e2, year: e1.year }] as [Book, Book],
-					),
+					fc
+						.tuple(entityArbitrary(BookSchema), entityArbitrary(BookSchema))
+						.map(([e1, e2]) => [e1, { ...e2, year: e1.year }] as [Book, Book]),
 					async ([entity1, entity2]) => {
 						const program = Effect.gen(function* () {
 							const db = yield* createEffectDatabase(config, {
@@ -551,7 +556,10 @@ describe("Sort ordering properties", () => {
 		it("should maintain sort order combined with filter", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					fc.array(entityArbitrary(BookSchema), { minLength: 5, maxLength: 25 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 5,
+						maxLength: 25,
+					}),
 					sortConfigArbitrary(BookSchema).filter(
 						(sort) => Object.keys(sort).length > 0,
 					),
@@ -625,11 +633,14 @@ describe("Sort ordering properties", () => {
 			await fc.assert(
 				fc.asyncProperty(
 					// Generate 5-20 entities with potential duplicates in sort field
-					fc.array(entityArbitrary(BookSchema), { minLength: 5, maxLength: 20 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 5,
+						maxLength: 20,
+					}),
 					// Generate a single-field sort config
-					fc.constantFrom("year", "rating", "title", "author").map(
-						(field) => ({ [field]: "asc" as const }),
-					),
+					fc
+						.constantFrom("year", "rating", "title", "author")
+						.map((field) => ({ [field]: "asc" as const })),
 					async (entities, sort) => {
 						// Ensure unique IDs (duplicates collapse in database)
 						const uniqueEntities = ensureUniqueIds(entities);
@@ -698,10 +709,13 @@ describe("Sort ordering properties", () => {
 		it("should maintain consistent ordering for duplicate values in descending sort", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					fc.array(entityArbitrary(BookSchema), { minLength: 5, maxLength: 15 }),
-					fc.constantFrom("year", "rating").map(
-						(field) => ({ [field]: "desc" as const }),
-					),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 5,
+						maxLength: 15,
+					}),
+					fc
+						.constantFrom("year", "rating")
+						.map((field) => ({ [field]: "desc" as const })),
 					async (entities, sort) => {
 						const uniqueEntities = ensureUniqueIds(entities);
 						if (uniqueEntities.length < 3) return;
@@ -714,9 +728,18 @@ describe("Sort ordering properties", () => {
 							const val = modifiedEntities[0][
 								sortField as keyof Book
 							] as unknown;
-							modifiedEntities[1] = { ...modifiedEntities[1], [sortField]: val };
-							modifiedEntities[2] = { ...modifiedEntities[2], [sortField]: val };
-							modifiedEntities[3] = { ...modifiedEntities[3], [sortField]: val };
+							modifiedEntities[1] = {
+								...modifiedEntities[1],
+								[sortField]: val,
+							};
+							modifiedEntities[2] = {
+								...modifiedEntities[2],
+								[sortField]: val,
+							};
+							modifiedEntities[3] = {
+								...modifiedEntities[3],
+								[sortField]: val,
+							};
 						}
 
 						const NUM_RUNS = 5;
@@ -756,7 +779,10 @@ describe("Sort ordering properties", () => {
 		it("should maintain stability with multi-field sort and duplicate primary keys", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					fc.array(entityArbitrary(BookSchema), { minLength: 6, maxLength: 15 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 6,
+						maxLength: 15,
+					}),
 					async (entities) => {
 						const uniqueEntities = ensureUniqueIds(entities);
 						if (uniqueEntities.length < 6) return;
@@ -801,9 +827,7 @@ describe("Sort ordering properties", () => {
 								books: modifiedEntities,
 							});
 
-							const chunk = yield* Stream.runCollect(
-								db.books.query({ sort }),
-							);
+							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
 							return Chunk.toReadonlyArray(chunk);
 						});
 
@@ -817,7 +841,9 @@ describe("Sort ordering properties", () => {
 						const firstYear2010Idx = results.findIndex((b) => b.year === 2010);
 						if (firstYear2010Idx !== -1) {
 							// All 2000 items should be before this index
-							expect(year2000Items.length).toBeLessThanOrEqual(firstYear2010Idx);
+							expect(year2000Items.length).toBeLessThanOrEqual(
+								firstYear2010Idx,
+							);
 						}
 
 						// Within each group, ratings should be ascending
@@ -844,7 +870,10 @@ describe("Sort ordering properties", () => {
 		it("should produce deterministic results for identical database setups", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					fc.array(entityArbitrary(BookSchema), { minLength: 3, maxLength: 20 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 3,
+						maxLength: 20,
+					}),
 					sortConfigArbitrary(BookSchema).filter(
 						(sort) => Object.keys(sort).length > 0,
 					),
@@ -890,7 +919,10 @@ describe("Sort ordering properties", () => {
 		it("should maintain consistent ordering when all entities have identical sort key values", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					fc.array(entityArbitrary(BookSchema), { minLength: 3, maxLength: 15 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 3,
+						maxLength: 15,
+					}),
 					fc.integer({ min: 1900, max: 2100 }), // shared year value
 					async (entities, sharedYear) => {
 						const uniqueEntities = ensureUniqueIds(entities);

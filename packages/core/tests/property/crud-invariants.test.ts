@@ -115,9 +115,9 @@ describe("CRUD invariant properties", () => {
 				expect(deleted.id).toBe(book.id);
 
 				// FindById should fail after delete
-				const notFoundResult = yield* db.books.findById(book.id).pipe(
-					Effect.flip,
-				);
+				const notFoundResult = yield* db.books
+					.findById(book.id)
+					.pipe(Effect.flip);
 				expect(notFoundResult._tag).toBe("NotFoundError");
 			});
 
@@ -138,12 +138,14 @@ describe("CRUD invariant properties", () => {
 				expect(book1.isbn).toBe("978-0441172719");
 
 				// Attempt to create with same ISBN should fail
-				const error = yield* db.books.create({
-					title: "Different Book",
-					author: "Other Author",
-					isbn: "978-0441172719", // same ISBN
-					year: 2000,
-				}).pipe(Effect.flip);
+				const error = yield* db.books
+					.create({
+						title: "Different Book",
+						author: "Other Author",
+						isbn: "978-0441172719", // same ISBN
+						year: 2000,
+					})
+					.pipe(Effect.flip);
 
 				expect(error._tag).toBe("UniqueConstraintError");
 			});
@@ -209,10 +211,15 @@ describe("CRUD invariant properties", () => {
 			await fc.assert(
 				fc.asyncProperty(
 					// Generate multiple entities
-					fc.array(entityArbitrary(BookSchema), { minLength: 1, maxLength: 10 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 1,
+						maxLength: 10,
+					}),
 					async (entitiesWithIds) => {
 						// Remove generated ids
-						const entitiesData = entitiesWithIds.map(({ id: _unusedId, ...data }) => data);
+						const entitiesData = entitiesWithIds.map(
+							({ id: _unusedId, ...data }) => data,
+						);
 
 						const program = Effect.gen(function* () {
 							const db = yield* createEffectDatabase(basicConfig, {
@@ -243,45 +250,42 @@ describe("CRUD invariant properties", () => {
 
 		it("should preserve all field types correctly (strings, numbers, booleans, arrays)", async () => {
 			await fc.assert(
-				fc.asyncProperty(
-					entityArbitrary(BookSchema),
-					async (entityWithId) => {
-						const { id: _unusedId, ...entityData } = entityWithId;
+				fc.asyncProperty(entityArbitrary(BookSchema), async (entityWithId) => {
+					const { id: _unusedId, ...entityData } = entityWithId;
 
-						const program = Effect.gen(function* () {
-							const db = yield* createEffectDatabase(basicConfig, {
-								books: [],
-							});
-
-							const created = yield* db.books.create(entityData);
-							const found = yield* db.books.findById(created.id);
-
-							// Verify type preservation
-							expect(typeof found.id).toBe("string");
-							expect(typeof found.title).toBe("string");
-							expect(typeof found.author).toBe("string");
-							expect(typeof found.year).toBe("number");
-							expect(typeof found.rating).toBe("number");
-							expect(typeof found.isPublished).toBe("boolean");
-							expect(Array.isArray(found.tags)).toBe(true);
-
-							// Verify array element types
-							for (const tag of found.tags) {
-								expect(typeof tag).toBe("string");
-							}
-
-							// Verify exact values match
-							expect(found.title).toBe(created.title);
-							expect(found.author).toBe(created.author);
-							expect(found.year).toBe(created.year);
-							expect(found.rating).toBe(created.rating);
-							expect(found.isPublished).toBe(created.isPublished);
-							expect(found.tags).toEqual(created.tags);
+					const program = Effect.gen(function* () {
+						const db = yield* createEffectDatabase(basicConfig, {
+							books: [],
 						});
 
-						await Effect.runPromise(program);
-					},
-				),
+						const created = yield* db.books.create(entityData);
+						const found = yield* db.books.findById(created.id);
+
+						// Verify type preservation
+						expect(typeof found.id).toBe("string");
+						expect(typeof found.title).toBe("string");
+						expect(typeof found.author).toBe("string");
+						expect(typeof found.year).toBe("number");
+						expect(typeof found.rating).toBe("number");
+						expect(typeof found.isPublished).toBe("boolean");
+						expect(Array.isArray(found.tags)).toBe(true);
+
+						// Verify array element types
+						for (const tag of found.tags) {
+							expect(typeof tag).toBe("string");
+						}
+
+						// Verify exact values match
+						expect(found.title).toBe(created.title);
+						expect(found.author).toBe(created.author);
+						expect(found.year).toBe(created.year);
+						expect(found.rating).toBe(created.rating);
+						expect(found.isPublished).toBe(created.isPublished);
+						expect(found.tags).toEqual(created.tags);
+					});
+
+					await Effect.runPromise(program);
+				}),
 				{ numRuns: getNumRuns() },
 			);
 		});
@@ -291,12 +295,27 @@ describe("CRUD invariant properties", () => {
 			await fc.assert(
 				fc.asyncProperty(
 					fc.record({
-						title: fc.oneof(fc.constant(""), fc.string({ minLength: 1, maxLength: 10 })),
-						author: fc.oneof(fc.constant(""), fc.string({ minLength: 1, maxLength: 10 })),
-						year: fc.oneof(fc.constant(0), fc.integer({ min: -1000, max: 3000 })),
-						rating: fc.oneof(fc.constant(0), fc.float({ min: 0, max: 5, noNaN: true })),
+						title: fc.oneof(
+							fc.constant(""),
+							fc.string({ minLength: 1, maxLength: 10 }),
+						),
+						author: fc.oneof(
+							fc.constant(""),
+							fc.string({ minLength: 1, maxLength: 10 }),
+						),
+						year: fc.oneof(
+							fc.constant(0),
+							fc.integer({ min: -1000, max: 3000 }),
+						),
+						rating: fc.oneof(
+							fc.constant(0),
+							fc.float({ min: 0, max: 5, noNaN: true }),
+						),
 						isPublished: fc.boolean(),
-						tags: fc.oneof(fc.constant([]), fc.array(fc.string(), { minLength: 1, maxLength: 5 })),
+						tags: fc.oneof(
+							fc.constant([]),
+							fc.array(fc.string(), { minLength: 1, maxLength: 5 }),
+						),
 					}),
 					async (entityData) => {
 						const program = Effect.gen(function* () {
@@ -326,9 +345,14 @@ describe("CRUD invariant properties", () => {
 		it("should generate unique IDs for each created entity", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					fc.array(entityArbitrary(BookSchema), { minLength: 2, maxLength: 20 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 2,
+						maxLength: 20,
+					}),
 					async (entitiesWithIds) => {
-						const entitiesData = entitiesWithIds.map(({ id: _unusedId, ...data }) => data);
+						const entitiesData = entitiesWithIds.map(
+							({ id: _unusedId, ...data }) => data,
+						);
 
 						const program = Effect.gen(function* () {
 							const db = yield* createEffectDatabase(basicConfig, {
@@ -364,85 +388,79 @@ describe("CRUD invariant properties", () => {
 	describe("Task 7.3: Delete then findById fails with NotFoundError", () => {
 		it("should fail with NotFoundError when finding a deleted entity by ID", async () => {
 			await fc.assert(
-				fc.asyncProperty(
-					entityArbitrary(BookSchema),
-					async (entityWithId) => {
-						const { id: _unusedId, ...entityData } = entityWithId;
+				fc.asyncProperty(entityArbitrary(BookSchema), async (entityWithId) => {
+					const { id: _unusedId, ...entityData } = entityWithId;
 
-						const program = Effect.gen(function* () {
-							const db = yield* createEffectDatabase(basicConfig, {
-								books: [],
-							});
-
-							// Create the entity
-							const created = yield* db.books.create(entityData);
-							expect(typeof created.id).toBe("string");
-
-							// Verify entity exists
-							const found = yield* db.books.findById(created.id);
-							expect(found.id).toBe(created.id);
-
-							// Delete the entity
-							const deleted = yield* db.books.delete(created.id);
-							expect(deleted.id).toBe(created.id);
-
-							// findById should fail with NotFoundError
-							const notFoundResult = yield* db.books.findById(created.id).pipe(
-								Effect.flip,
-							);
-							expect(notFoundResult._tag).toBe("NotFoundError");
-							expect(notFoundResult).toBeInstanceOf(NotFoundError);
+					const program = Effect.gen(function* () {
+						const db = yield* createEffectDatabase(basicConfig, {
+							books: [],
 						});
 
-						await Effect.runPromise(program);
-					},
-				),
+						// Create the entity
+						const created = yield* db.books.create(entityData);
+						expect(typeof created.id).toBe("string");
+
+						// Verify entity exists
+						const found = yield* db.books.findById(created.id);
+						expect(found.id).toBe(created.id);
+
+						// Delete the entity
+						const deleted = yield* db.books.delete(created.id);
+						expect(deleted.id).toBe(created.id);
+
+						// findById should fail with NotFoundError
+						const notFoundResult = yield* db.books
+							.findById(created.id)
+							.pipe(Effect.flip);
+						expect(notFoundResult._tag).toBe("NotFoundError");
+						expect(notFoundResult).toBeInstanceOf(NotFoundError);
+					});
+
+					await Effect.runPromise(program);
+				}),
 				{ numRuns: getNumRuns() },
 			);
 		});
 
 		it("should not include deleted entity in query results", async () => {
 			await fc.assert(
-				fc.asyncProperty(
-					entityArbitrary(BookSchema),
-					async (entityWithId) => {
-						const { id: _unusedId, ...entityData } = entityWithId;
+				fc.asyncProperty(entityArbitrary(BookSchema), async (entityWithId) => {
+					const { id: _unusedId, ...entityData } = entityWithId;
 
-						const program = Effect.gen(function* () {
-							const db = yield* createEffectDatabase(basicConfig, {
-								books: [],
-							});
-
-							// Create the entity
-							const created = yield* db.books.create(entityData);
-
-							// Verify entity appears in query results before delete
-							const beforeDeleteChunk = yield* Stream.runCollect(
-								db.books.query({}),
-							);
-							const beforeDelete = Chunk.toReadonlyArray(beforeDeleteChunk);
-							const existsBefore = beforeDelete.some(
-								(book) => book.id === created.id,
-							);
-							expect(existsBefore).toBe(true);
-
-							// Delete the entity
-							yield* db.books.delete(created.id);
-
-							// Verify entity does NOT appear in query results after delete
-							const afterDeleteChunk = yield* Stream.runCollect(
-								db.books.query({}),
-							);
-							const afterDelete = Chunk.toReadonlyArray(afterDeleteChunk);
-							const existsAfter = afterDelete.some(
-								(book) => book.id === created.id,
-							);
-							expect(existsAfter).toBe(false);
+					const program = Effect.gen(function* () {
+						const db = yield* createEffectDatabase(basicConfig, {
+							books: [],
 						});
 
-						await Effect.runPromise(program);
-					},
-				),
+						// Create the entity
+						const created = yield* db.books.create(entityData);
+
+						// Verify entity appears in query results before delete
+						const beforeDeleteChunk = yield* Stream.runCollect(
+							db.books.query({}),
+						);
+						const beforeDelete = Chunk.toReadonlyArray(beforeDeleteChunk);
+						const existsBefore = beforeDelete.some(
+							(book) => book.id === created.id,
+						);
+						expect(existsBefore).toBe(true);
+
+						// Delete the entity
+						yield* db.books.delete(created.id);
+
+						// Verify entity does NOT appear in query results after delete
+						const afterDeleteChunk = yield* Stream.runCollect(
+							db.books.query({}),
+						);
+						const afterDelete = Chunk.toReadonlyArray(afterDeleteChunk);
+						const existsAfter = afterDelete.some(
+							(book) => book.id === created.id,
+						);
+						expect(existsAfter).toBe(false);
+					});
+
+					await Effect.runPromise(program);
+				}),
 				{ numRuns: getNumRuns() },
 			);
 		});
@@ -451,11 +469,16 @@ describe("CRUD invariant properties", () => {
 			await fc.assert(
 				fc.asyncProperty(
 					// Generate 2-10 unique entities
-					fc.array(entityArbitrary(BookSchema), { minLength: 2, maxLength: 10 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 2,
+						maxLength: 10,
+					}),
 					// Pick which entity to delete (by index)
 					fc.nat(),
 					async (entitiesWithIds, deleteIndexSeed) => {
-						const entitiesData = entitiesWithIds.map(({ id: _unusedId, ...data }) => data);
+						const entitiesData = entitiesWithIds.map(
+							({ id: _unusedId, ...data }) => data,
+						);
 
 						const program = Effect.gen(function* () {
 							const db = yield* createEffectDatabase(basicConfig, {
@@ -477,9 +500,9 @@ describe("CRUD invariant properties", () => {
 							yield* db.books.delete(entityToDelete.id);
 
 							// Verify the deleted entity is not findable
-							const deletedFindResult = yield* db.books.findById(entityToDelete.id).pipe(
-								Effect.flip,
-							);
+							const deletedFindResult = yield* db.books
+								.findById(entityToDelete.id)
+								.pipe(Effect.flip);
 							expect(deletedFindResult._tag).toBe("NotFoundError");
 
 							// Verify all OTHER entities are still findable
@@ -523,33 +546,30 @@ describe("CRUD invariant properties", () => {
 
 		it("should fail with NotFoundError when deleting the same entity twice", async () => {
 			await fc.assert(
-				fc.asyncProperty(
-					entityArbitrary(BookSchema),
-					async (entityWithId) => {
-						const { id: _unusedId, ...entityData } = entityWithId;
+				fc.asyncProperty(entityArbitrary(BookSchema), async (entityWithId) => {
+					const { id: _unusedId, ...entityData } = entityWithId;
 
-						const program = Effect.gen(function* () {
-							const db = yield* createEffectDatabase(basicConfig, {
-								books: [],
-							});
-
-							// Create the entity
-							const created = yield* db.books.create(entityData);
-
-							// First delete should succeed
-							const firstDelete = yield* db.books.delete(created.id);
-							expect(firstDelete.id).toBe(created.id);
-
-							// Second delete should fail with NotFoundError
-							const secondDeleteResult = yield* db.books.delete(created.id).pipe(
-								Effect.flip,
-							);
-							expect(secondDeleteResult._tag).toBe("NotFoundError");
+					const program = Effect.gen(function* () {
+						const db = yield* createEffectDatabase(basicConfig, {
+							books: [],
 						});
 
-						await Effect.runPromise(program);
-					},
-				),
+						// Create the entity
+						const created = yield* db.books.create(entityData);
+
+						// First delete should succeed
+						const firstDelete = yield* db.books.delete(created.id);
+						expect(firstDelete.id).toBe(created.id);
+
+						// Second delete should fail with NotFoundError
+						const secondDeleteResult = yield* db.books
+							.delete(created.id)
+							.pipe(Effect.flip);
+						expect(secondDeleteResult._tag).toBe("NotFoundError");
+					});
+
+					await Effect.runPromise(program);
+				}),
 				{ numRuns: getNumRuns() },
 			);
 		});
@@ -565,7 +585,10 @@ describe("CRUD invariant properties", () => {
 							year: fc.integer({ min: 1900, max: 2100 }),
 							rating: fc.float({ min: 0, max: 5, noNaN: true }),
 							isPublished: fc.boolean(),
-							tags: fc.array(fc.string({ minLength: 1, maxLength: 10 }), { minLength: 0, maxLength: 5 }),
+							tags: fc.array(fc.string({ minLength: 1, maxLength: 10 }), {
+								minLength: 0,
+								maxLength: 5,
+							}),
 						}),
 						{ minLength: 2, maxLength: 5 },
 					),
@@ -658,7 +681,10 @@ describe("CRUD invariant properties", () => {
 										year: years[i],
 									})
 									.pipe(
-										Effect.map((entity) => ({ success: true as const, entity })),
+										Effect.map((entity) => ({
+											success: true as const,
+											entity,
+										})),
 										Effect.catchTag("UniqueConstraintError", (err) =>
 											Effect.succeed({
 												success: false as const,
@@ -867,7 +893,10 @@ describe("CRUD invariant properties", () => {
 										isbn, // Same ISBN for all
 									})
 									.pipe(
-										Effect.map((entity) => ({ success: true as const, entity })),
+										Effect.map((entity) => ({
+											success: true as const,
+											entity,
+										})),
 										Effect.catchTag("UniqueConstraintError", (err) =>
 											Effect.succeed({
 												success: false as const,

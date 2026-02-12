@@ -10,15 +10,12 @@ import {
 	ARRAY_OPERATORS,
 	BOOLEAN_OPERATORS,
 	DEFAULT_NUM_RUNS,
-	type FieldInfo,
-	type GeneratedSortConfig,
-	type GeneratedWhereClause,
-	NUMBER_OPERATORS,
-	STRING_OPERATORS,
 	entityArbitrary,
 	extractFieldsFromSchema,
 	getNumRuns,
+	NUMBER_OPERATORS,
 	operationSequenceArbitrary,
+	STRING_OPERATORS,
 	sortConfigArbitrary,
 	whereClauseArbitrary,
 } from "./generators";
@@ -693,7 +690,10 @@ describe("generators module", () => {
 			// Use more runs to ensure we see all operation types
 			fc.assert(
 				fc.property(
-					operationSequenceArbitrary(TestSchema, { minLength: 5, maxLength: 15 }),
+					operationSequenceArbitrary(TestSchema, {
+						minLength: 5,
+						maxLength: 15,
+					}),
 					(ops) => {
 						for (const operation of ops) {
 							if (operation.op === "create") foundCreate = true;
@@ -714,7 +714,10 @@ describe("generators module", () => {
 		it("should respect minLength and maxLength options", () => {
 			fc.assert(
 				fc.property(
-					operationSequenceArbitrary(TestSchema, { minLength: 3, maxLength: 7 }),
+					operationSequenceArbitrary(TestSchema, {
+						minLength: 3,
+						maxLength: 7,
+					}),
 					(ops) => {
 						expect(ops.length).toBeGreaterThanOrEqual(3);
 						expect(ops.length).toBeLessThanOrEqual(7);

@@ -38,46 +38,106 @@ interface FieldMutation {
  * Generate an arbitrary that produces invalid entity mutations for SimpleSchema.
  * The mutations include wrong types for fields and missing required fields.
  */
-const simpleSchemaInvalidArbitrary = (): fc.Arbitrary<Record<string, unknown>> => {
+const simpleSchemaInvalidArbitrary = (): fc.Arbitrary<
+	Record<string, unknown>
+> => {
 	// Generate a base valid-ish structure, then mutate one field to be invalid
 	const mutations: FieldMutation[] = [
 		// Wrong type mutations
 		{ fieldName: "id", mutationType: "wrongTypeString", invalidValue: 12345 },
 		{ fieldName: "id", mutationType: "wrongTypeString", invalidValue: true },
 		{ fieldName: "id", mutationType: "wrongTypeString", invalidValue: null },
-		{ fieldName: "id", mutationType: "wrongTypeString", invalidValue: { nested: "object" } },
+		{
+			fieldName: "id",
+			mutationType: "wrongTypeString",
+			invalidValue: { nested: "object" },
+		},
 		{ fieldName: "name", mutationType: "wrongTypeString", invalidValue: 42 },
 		{ fieldName: "name", mutationType: "wrongTypeString", invalidValue: false },
-		{ fieldName: "name", mutationType: "wrongTypeString", invalidValue: ["array"] },
-		{ fieldName: "age", mutationType: "wrongTypeNumber", invalidValue: "not a number" },
+		{
+			fieldName: "name",
+			mutationType: "wrongTypeString",
+			invalidValue: ["array"],
+		},
+		{
+			fieldName: "age",
+			mutationType: "wrongTypeNumber",
+			invalidValue: "not a number",
+		},
 		{ fieldName: "age", mutationType: "wrongTypeNumber", invalidValue: true },
-		{ fieldName: "age", mutationType: "wrongTypeNumber", invalidValue: { obj: 1 } },
-		{ fieldName: "isActive", mutationType: "wrongTypeBoolean", invalidValue: "true" },
-		{ fieldName: "isActive", mutationType: "wrongTypeBoolean", invalidValue: 1 },
-		{ fieldName: "isActive", mutationType: "wrongTypeBoolean", invalidValue: null },
+		{
+			fieldName: "age",
+			mutationType: "wrongTypeNumber",
+			invalidValue: { obj: 1 },
+		},
+		{
+			fieldName: "isActive",
+			mutationType: "wrongTypeBoolean",
+			invalidValue: "true",
+		},
+		{
+			fieldName: "isActive",
+			mutationType: "wrongTypeBoolean",
+			invalidValue: 1,
+		},
+		{
+			fieldName: "isActive",
+			mutationType: "wrongTypeBoolean",
+			invalidValue: null,
+		},
 		// Missing required field mutations (represented by undefined)
-		{ fieldName: "id", mutationType: "missingRequired", invalidValue: undefined },
-		{ fieldName: "name", mutationType: "missingRequired", invalidValue: undefined },
-		{ fieldName: "age", mutationType: "missingRequired", invalidValue: undefined },
-		{ fieldName: "isActive", mutationType: "missingRequired", invalidValue: undefined },
+		{
+			fieldName: "id",
+			mutationType: "missingRequired",
+			invalidValue: undefined,
+		},
+		{
+			fieldName: "name",
+			mutationType: "missingRequired",
+			invalidValue: undefined,
+		},
+		{
+			fieldName: "age",
+			mutationType: "missingRequired",
+			invalidValue: undefined,
+		},
+		{
+			fieldName: "isActive",
+			mutationType: "missingRequired",
+			invalidValue: undefined,
+		},
 	];
 
 	return fc.constantFrom(...mutations).chain((mutation) => {
 		// Build a base valid object, then apply the mutation
-		return fc.record({
-			id: mutation.fieldName === "id" ? fc.constant(mutation.invalidValue) : fc.uuid(),
-			name: mutation.fieldName === "name" ? fc.constant(mutation.invalidValue) : fc.string(),
-			age: mutation.fieldName === "age" ? fc.constant(mutation.invalidValue) : fc.integer(),
-			isActive: mutation.fieldName === "isActive" ? fc.constant(mutation.invalidValue) : fc.boolean(),
-		}).map((obj) => {
-			// For "missingRequired" mutations, actually delete the field
-			if (mutation.mutationType === "missingRequired") {
-				const result = { ...obj };
-				delete (result as Record<string, unknown>)[mutation.fieldName];
-				return result;
-			}
-			return obj;
-		});
+		return fc
+			.record({
+				id:
+					mutation.fieldName === "id"
+						? fc.constant(mutation.invalidValue)
+						: fc.uuid(),
+				name:
+					mutation.fieldName === "name"
+						? fc.constant(mutation.invalidValue)
+						: fc.string(),
+				age:
+					mutation.fieldName === "age"
+						? fc.constant(mutation.invalidValue)
+						: fc.integer(),
+				isActive:
+					mutation.fieldName === "isActive"
+						? fc.constant(mutation.invalidValue)
+						: fc.boolean(),
+			})
+			.map((obj) => {
+				// For "missingRequired" mutations, actually delete the field
+				if (mutation.mutationType === "missingRequired") {
+					const result = { ...obj };
+					delete (result as Record<string, unknown>)[mutation.fieldName];
+					return result;
+				}
+				return obj;
+			});
 	});
 };
 
@@ -85,44 +145,106 @@ const simpleSchemaInvalidArbitrary = (): fc.Arbitrary<Record<string, unknown>> =
  * Generate an arbitrary that produces invalid entity mutations for ComplexSchema.
  * Includes wrong types, missing fields, and invalid array contents.
  */
-const complexSchemaInvalidArbitrary = (): fc.Arbitrary<Record<string, unknown>> => {
+const complexSchemaInvalidArbitrary = (): fc.Arbitrary<
+	Record<string, unknown>
+> => {
 	const mutations: FieldMutation[] = [
 		// Wrong type mutations for required fields
 		{ fieldName: "id", mutationType: "wrongTypeString", invalidValue: 999 },
 		{ fieldName: "title", mutationType: "wrongTypeString", invalidValue: 123 },
-		{ fieldName: "rating", mutationType: "wrongTypeNumber", invalidValue: "five stars" },
-		{ fieldName: "isPublished", mutationType: "wrongTypeBoolean", invalidValue: "yes" },
+		{
+			fieldName: "rating",
+			mutationType: "wrongTypeNumber",
+			invalidValue: "five stars",
+		},
+		{
+			fieldName: "isPublished",
+			mutationType: "wrongTypeBoolean",
+			invalidValue: "yes",
+		},
 		// Wrong type mutations for arrays
-		{ fieldName: "tags", mutationType: "wrongTypeArray", invalidValue: "not an array" },
+		{
+			fieldName: "tags",
+			mutationType: "wrongTypeArray",
+			invalidValue: "not an array",
+		},
 		{ fieldName: "tags", mutationType: "wrongTypeArray", invalidValue: 123 },
-		{ fieldName: "scores", mutationType: "wrongTypeArray", invalidValue: { scores: [1, 2] } },
+		{
+			fieldName: "scores",
+			mutationType: "wrongTypeArray",
+			invalidValue: { scores: [1, 2] },
+		},
 		// Missing required field mutations
-		{ fieldName: "id", mutationType: "missingRequired", invalidValue: undefined },
-		{ fieldName: "title", mutationType: "missingRequired", invalidValue: undefined },
-		{ fieldName: "rating", mutationType: "missingRequired", invalidValue: undefined },
-		{ fieldName: "isPublished", mutationType: "missingRequired", invalidValue: undefined },
-		{ fieldName: "tags", mutationType: "missingRequired", invalidValue: undefined },
-		{ fieldName: "scores", mutationType: "missingRequired", invalidValue: undefined },
+		{
+			fieldName: "id",
+			mutationType: "missingRequired",
+			invalidValue: undefined,
+		},
+		{
+			fieldName: "title",
+			mutationType: "missingRequired",
+			invalidValue: undefined,
+		},
+		{
+			fieldName: "rating",
+			mutationType: "missingRequired",
+			invalidValue: undefined,
+		},
+		{
+			fieldName: "isPublished",
+			mutationType: "missingRequired",
+			invalidValue: undefined,
+		},
+		{
+			fieldName: "tags",
+			mutationType: "missingRequired",
+			invalidValue: undefined,
+		},
+		{
+			fieldName: "scores",
+			mutationType: "missingRequired",
+			invalidValue: undefined,
+		},
 	];
 
 	return fc.constantFrom(...mutations).chain((mutation) => {
-		return fc.record({
-			id: mutation.fieldName === "id" ? fc.constant(mutation.invalidValue) : fc.uuid(),
-			title: mutation.fieldName === "title" ? fc.constant(mutation.invalidValue) : fc.string(),
-			rating: mutation.fieldName === "rating" ? fc.constant(mutation.invalidValue) : fc.float({ noNaN: true }),
-			isPublished: mutation.fieldName === "isPublished" ? fc.constant(mutation.invalidValue) : fc.boolean(),
-			tags: mutation.fieldName === "tags" ? fc.constant(mutation.invalidValue) : fc.array(fc.string()),
-			scores: mutation.fieldName === "scores" ? fc.constant(mutation.invalidValue) : fc.array(fc.float({ noNaN: true })),
-			views: fc.option(fc.float({ noNaN: true }), { nil: undefined }),
-			description: fc.option(fc.string(), { nil: undefined }),
-		}).map((obj) => {
-			if (mutation.mutationType === "missingRequired") {
-				const result = { ...obj };
-				delete (result as Record<string, unknown>)[mutation.fieldName];
-				return result;
-			}
-			return obj;
-		});
+		return fc
+			.record({
+				id:
+					mutation.fieldName === "id"
+						? fc.constant(mutation.invalidValue)
+						: fc.uuid(),
+				title:
+					mutation.fieldName === "title"
+						? fc.constant(mutation.invalidValue)
+						: fc.string(),
+				rating:
+					mutation.fieldName === "rating"
+						? fc.constant(mutation.invalidValue)
+						: fc.float({ noNaN: true }),
+				isPublished:
+					mutation.fieldName === "isPublished"
+						? fc.constant(mutation.invalidValue)
+						: fc.boolean(),
+				tags:
+					mutation.fieldName === "tags"
+						? fc.constant(mutation.invalidValue)
+						: fc.array(fc.string()),
+				scores:
+					mutation.fieldName === "scores"
+						? fc.constant(mutation.invalidValue)
+						: fc.array(fc.float({ noNaN: true })),
+				views: fc.option(fc.float({ noNaN: true }), { nil: undefined }),
+				description: fc.option(fc.string(), { nil: undefined }),
+			})
+			.map((obj) => {
+				if (mutation.mutationType === "missingRequired") {
+					const result = { ...obj };
+					delete (result as Record<string, unknown>)[mutation.fieldName];
+					return result;
+				}
+				return obj;
+			});
 	});
 };
 
@@ -130,40 +252,108 @@ const complexSchemaInvalidArbitrary = (): fc.Arbitrary<Record<string, unknown>> 
  * Generate an arbitrary that produces arrays with wrong element types.
  * For ArrayHeavySchema, this generates arrays where elements have wrong types.
  */
-const arraySchemaInvalidArbitrary = (): fc.Arbitrary<Record<string, unknown>> => {
+const arraySchemaInvalidArbitrary = (): fc.Arbitrary<
+	Record<string, unknown>
+> => {
 	const mutations: FieldMutation[] = [
 		// Array with wrong element types
-		{ fieldName: "stringTags", mutationType: "wrongTypeArray", invalidValue: [1, 2, 3] }, // numbers instead of strings
-		{ fieldName: "stringTags", mutationType: "wrongTypeArray", invalidValue: [true, false] }, // booleans instead of strings
-		{ fieldName: "numericScores", mutationType: "wrongTypeArray", invalidValue: ["a", "b", "c"] }, // strings instead of numbers
-		{ fieldName: "numericScores", mutationType: "wrongTypeArray", invalidValue: [true, false] }, // booleans instead of numbers
-		{ fieldName: "boolFlags", mutationType: "wrongTypeArray", invalidValue: [1, 0, 1] }, // numbers instead of booleans
-		{ fieldName: "boolFlags", mutationType: "wrongTypeArray", invalidValue: ["true", "false"] }, // strings instead of booleans
+		{
+			fieldName: "stringTags",
+			mutationType: "wrongTypeArray",
+			invalidValue: [1, 2, 3],
+		}, // numbers instead of strings
+		{
+			fieldName: "stringTags",
+			mutationType: "wrongTypeArray",
+			invalidValue: [true, false],
+		}, // booleans instead of strings
+		{
+			fieldName: "numericScores",
+			mutationType: "wrongTypeArray",
+			invalidValue: ["a", "b", "c"],
+		}, // strings instead of numbers
+		{
+			fieldName: "numericScores",
+			mutationType: "wrongTypeArray",
+			invalidValue: [true, false],
+		}, // booleans instead of numbers
+		{
+			fieldName: "boolFlags",
+			mutationType: "wrongTypeArray",
+			invalidValue: [1, 0, 1],
+		}, // numbers instead of booleans
+		{
+			fieldName: "boolFlags",
+			mutationType: "wrongTypeArray",
+			invalidValue: ["true", "false"],
+		}, // strings instead of booleans
 		// Not arrays at all
-		{ fieldName: "stringTags", mutationType: "wrongTypeArray", invalidValue: "not an array" },
-		{ fieldName: "numericScores", mutationType: "wrongTypeArray", invalidValue: 42 },
-		{ fieldName: "boolFlags", mutationType: "wrongTypeArray", invalidValue: { flag: true } },
+		{
+			fieldName: "stringTags",
+			mutationType: "wrongTypeArray",
+			invalidValue: "not an array",
+		},
+		{
+			fieldName: "numericScores",
+			mutationType: "wrongTypeArray",
+			invalidValue: 42,
+		},
+		{
+			fieldName: "boolFlags",
+			mutationType: "wrongTypeArray",
+			invalidValue: { flag: true },
+		},
 		// Missing required arrays
-		{ fieldName: "id", mutationType: "missingRequired", invalidValue: undefined },
-		{ fieldName: "stringTags", mutationType: "missingRequired", invalidValue: undefined },
-		{ fieldName: "numericScores", mutationType: "missingRequired", invalidValue: undefined },
-		{ fieldName: "boolFlags", mutationType: "missingRequired", invalidValue: undefined },
+		{
+			fieldName: "id",
+			mutationType: "missingRequired",
+			invalidValue: undefined,
+		},
+		{
+			fieldName: "stringTags",
+			mutationType: "missingRequired",
+			invalidValue: undefined,
+		},
+		{
+			fieldName: "numericScores",
+			mutationType: "missingRequired",
+			invalidValue: undefined,
+		},
+		{
+			fieldName: "boolFlags",
+			mutationType: "missingRequired",
+			invalidValue: undefined,
+		},
 	];
 
 	return fc.constantFrom(...mutations).chain((mutation) => {
-		return fc.record({
-			id: mutation.fieldName === "id" ? fc.constant(mutation.invalidValue) : fc.uuid(),
-			stringTags: mutation.fieldName === "stringTags" ? fc.constant(mutation.invalidValue) : fc.array(fc.string()),
-			numericScores: mutation.fieldName === "numericScores" ? fc.constant(mutation.invalidValue) : fc.array(fc.float({ noNaN: true })),
-			boolFlags: mutation.fieldName === "boolFlags" ? fc.constant(mutation.invalidValue) : fc.array(fc.boolean()),
-		}).map((obj) => {
-			if (mutation.mutationType === "missingRequired") {
-				const result = { ...obj };
-				delete (result as Record<string, unknown>)[mutation.fieldName];
-				return result;
-			}
-			return obj;
-		});
+		return fc
+			.record({
+				id:
+					mutation.fieldName === "id"
+						? fc.constant(mutation.invalidValue)
+						: fc.uuid(),
+				stringTags:
+					mutation.fieldName === "stringTags"
+						? fc.constant(mutation.invalidValue)
+						: fc.array(fc.string()),
+				numericScores:
+					mutation.fieldName === "numericScores"
+						? fc.constant(mutation.invalidValue)
+						: fc.array(fc.float({ noNaN: true })),
+				boolFlags:
+					mutation.fieldName === "boolFlags"
+						? fc.constant(mutation.invalidValue)
+						: fc.array(fc.boolean()),
+			})
+			.map((obj) => {
+				if (mutation.mutationType === "missingRequired") {
+					const result = { ...obj };
+					delete (result as Record<string, unknown>)[mutation.fieldName];
+					return result;
+				}
+				return obj;
+			});
 	});
 };
 
@@ -489,7 +679,10 @@ describe("Schema round-trip properties", () => {
 					),
 					(validEntity, fieldToMutate, invalidValue) => {
 						// Create a copy with one field mutated to an invalid value
-						const mutatedEntity = { ...validEntity, [fieldToMutate]: invalidValue };
+						const mutatedEntity = {
+							...validEntity,
+							[fieldToMutate]: invalidValue,
+						};
 						const result = decode(mutatedEntity);
 
 						// The mutated entity should be rejected

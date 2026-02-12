@@ -20,10 +20,10 @@ import {
 } from "../../src/indexes/index-manager";
 import type { CollectionIndexes } from "../../src/types/index-types";
 import {
+	type CrudOperation,
 	entityArbitrary,
 	getNumRuns,
 	operationSequenceArbitrary,
-	type CrudOperation,
 } from "./generators";
 
 /**
@@ -143,7 +143,10 @@ describe("Index consistency properties", () => {
 			// Verify operationSequenceArbitrary generates valid operations
 			fc.assert(
 				fc.property(
-					operationSequenceArbitrary(BookSchema, { minLength: 1, maxLength: 5 }),
+					operationSequenceArbitrary(BookSchema, {
+						minLength: 1,
+						maxLength: 5,
+					}),
 					(ops) => {
 						expect(Array.isArray(ops)).toBe(true);
 						expect(ops.length).toBeGreaterThanOrEqual(1);
@@ -279,7 +282,9 @@ describe("Index consistency properties", () => {
 			];
 
 			const normalized = normalizeIndexes(["genre"]);
-			const indexes = await Effect.runPromise(buildIndexes(normalized, entities));
+			const indexes = await Effect.runPromise(
+				buildIndexes(normalized, entities),
+			);
 
 			// Check index structure
 			expect(indexes.size).toBe(1);
@@ -362,19 +367,29 @@ describe("Index consistency properties", () => {
 		 * Returns an Effect that applies all operations in order.
 		 */
 		const applyOperations = <T extends { id: string }>(
-			db: { books: { create: (p: T) => { runPromise: Promise<T> }; update: (id: string, p: Partial<T>) => { runPromise: Promise<T> }; delete: (id: string) => { runPromise: Promise<T> } } },
+			db: {
+				books: {
+					create: (p: T) => { runPromise: Promise<T> };
+					update: (id: string, p: Partial<T>) => { runPromise: Promise<T> };
+					delete: (id: string) => { runPromise: Promise<T> };
+				};
+			},
 			operations: readonly CrudOperation<T>[],
 		): Effect.Effect<void> =>
 			Effect.gen(function* () {
 				for (const operation of operations) {
 					if (operation.op === "create") {
-						yield* Effect.promise(() => db.books.create(operation.payload).runPromise);
+						yield* Effect.promise(
+							() => db.books.create(operation.payload).runPromise,
+						);
 					} else if (operation.op === "update") {
-						yield* Effect.promise(() =>
-							db.books.update(operation.id, operation.payload).runPromise,
+						yield* Effect.promise(
+							() => db.books.update(operation.id, operation.payload).runPromise,
 						).pipe(Effect.catchAll(() => Effect.void)); // Ignore NotFoundError for updates
 					} else if (operation.op === "delete") {
-						yield* Effect.promise(() => db.books.delete(operation.id).runPromise).pipe(
+						yield* Effect.promise(
+							() => db.books.delete(operation.id).runPromise,
+						).pipe(
 							Effect.catchAll(() => Effect.void), // Ignore NotFoundError for deletes
 						);
 					}
@@ -386,13 +401,16 @@ describe("Index consistency properties", () => {
 		 * Since the query engine may return results in different orders depending on
 		 * whether indexes are used, we sort by ID for comparison purposes.
 		 */
-		const sortById = <T extends { id: string }>(entities: readonly T[]): T[] =>
+		const _sortById = <T extends { id: string }>(entities: readonly T[]): T[] =>
 			[...entities].sort((a, b) => a.id.localeCompare(b.id));
 
 		it("should return identical results with and without index acceleration (single-field index)", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					operationSequenceArbitrary(BookSchema, { minLength: 1, maxLength: 15 }),
+					operationSequenceArbitrary(BookSchema, {
+						minLength: 1,
+						maxLength: 15,
+					}),
 					async (operations) => {
 						// Create two databases: one with index, one without
 						const [dbWithIndex, dbWithoutIndex] = await Effect.runPromise(
@@ -425,8 +443,14 @@ describe("Index consistency properties", () => {
 							const whereClause = { genre };
 
 							const [indexedResult, fullScanResult] = await Promise.all([
-								dbWithIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
-								dbWithoutIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
+								dbWithIndex.books.query({
+									where: whereClause,
+									sort: { id: "asc" },
+								}).runPromise,
+								dbWithoutIndex.books.query({
+									where: whereClause,
+									sort: { id: "asc" },
+								}).runPromise,
 							]);
 
 							// Results should have the same length
@@ -460,7 +484,10 @@ describe("Index consistency properties", () => {
 		it("should return identical results with and without index acceleration (compound index)", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					operationSequenceArbitrary(BookSchema, { minLength: 1, maxLength: 15 }),
+					operationSequenceArbitrary(BookSchema, {
+						minLength: 1,
+						maxLength: 15,
+					}),
 					async (operations) => {
 						// Create two databases: one with compound index, one without
 						const [dbWithIndex, dbWithoutIndex] = await Effect.runPromise(
@@ -482,18 +509,32 @@ describe("Index consistency properties", () => {
 						const combinations = new Set<string>();
 						for (const op of operations) {
 							if (op.op === "create") {
-								combinations.add(JSON.stringify({ genre: op.payload.genre, year: op.payload.year }));
+								combinations.add(
+									JSON.stringify({
+										genre: op.payload.genre,
+										year: op.payload.year,
+									}),
+								);
 							}
 						}
 
 						// Test queries for each (genre, year) combination (these should use the compound index)
 						for (const comboStr of combinations) {
-							const combo = JSON.parse(comboStr) as { genre: string; year: number };
+							const combo = JSON.parse(comboStr) as {
+								genre: string;
+								year: number;
+							};
 							const whereClause = { genre: combo.genre, year: combo.year };
 
 							const [indexedResult, fullScanResult] = await Promise.all([
-								dbWithIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
-								dbWithoutIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
+								dbWithIndex.books.query({
+									where: whereClause,
+									sort: { id: "asc" },
+								}).runPromise,
+								dbWithoutIndex.books.query({
+									where: whereClause,
+									sort: { id: "asc" },
+								}).runPromise,
 							]);
 
 							// Results should have the same length
@@ -515,7 +556,10 @@ describe("Index consistency properties", () => {
 		it("should return identical results with $in operator queries", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					operationSequenceArbitrary(BookSchema, { minLength: 3, maxLength: 15 }),
+					operationSequenceArbitrary(BookSchema, {
+						minLength: 3,
+						maxLength: 15,
+					}),
 					async (operations) => {
 						// Create two databases: one with index, one without
 						const [dbWithIndex, dbWithoutIndex] = await Effect.runPromise(
@@ -536,7 +580,10 @@ describe("Index consistency properties", () => {
 						// Collect unique genre values from the operations
 						const genreValues: string[] = [];
 						for (const op of operations) {
-							if (op.op === "create" && !genreValues.includes(op.payload.genre)) {
+							if (
+								op.op === "create" &&
+								!genreValues.includes(op.payload.genre)
+							) {
 								genreValues.push(op.payload.genre);
 							}
 						}
@@ -545,12 +592,21 @@ describe("Index consistency properties", () => {
 						if (genreValues.length < 2) return;
 
 						// Test $in query with multiple genre values (should use index)
-						const targetGenres = genreValues.slice(0, Math.min(3, genreValues.length));
+						const targetGenres = genreValues.slice(
+							0,
+							Math.min(3, genreValues.length),
+						);
 						const whereClause = { genre: { $in: targetGenres } };
 
 						const [indexedResult, fullScanResult] = await Promise.all([
-							dbWithIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
-							dbWithoutIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
+							dbWithIndex.books.query({
+								where: whereClause,
+								sort: { id: "asc" },
+							}).runPromise,
+							dbWithoutIndex.books.query({
+								where: whereClause,
+								sort: { id: "asc" },
+							}).runPromise,
 						]);
 
 						// Results should have the same length
@@ -570,7 +626,10 @@ describe("Index consistency properties", () => {
 		it("should return identical results when query includes additional non-indexed conditions", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					operationSequenceArbitrary(BookSchema, { minLength: 3, maxLength: 15 }),
+					operationSequenceArbitrary(BookSchema, {
+						minLength: 3,
+						maxLength: 15,
+					}),
 					async (operations) => {
 						// Create two databases: one with index, one without
 						const [dbWithIndex, dbWithoutIndex] = await Effect.runPromise(
@@ -603,11 +662,20 @@ describe("Index consistency properties", () => {
 
 						// Query with both indexed field (genre) and non-indexed condition (year)
 						// The index narrows candidates, then the filter applies the year condition
-						const whereClause = { genre: targetGenre, year: { $gte: targetYear } };
+						const whereClause = {
+							genre: targetGenre,
+							year: { $gte: targetYear },
+						};
 
 						const [indexedResult, fullScanResult] = await Promise.all([
-							dbWithIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
-							dbWithoutIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
+							dbWithIndex.books.query({
+								where: whereClause,
+								sort: { id: "asc" },
+							}).runPromise,
+							dbWithoutIndex.books.query({
+								where: whereClause,
+								sort: { id: "asc" },
+							}).runPromise,
 						]);
 
 						// Results should have the same length
@@ -653,7 +721,8 @@ describe("Index consistency properties", () => {
 				}
 
 				// Single-field: use raw value; compound: use JSON.stringify'd array
-				const key = indexFields.length === 1 ? values[0] : JSON.stringify(values);
+				const key =
+					indexFields.length === 1 ? values[0] : JSON.stringify(values);
 
 				// Add entity ID to the index bucket
 				const existing = expectedIndex.get(key);
@@ -709,7 +778,7 @@ describe("Index consistency properties", () => {
 		 * Helper to apply a sequence of CRUD operations and track the final entity state.
 		 * Returns the final array of entities after all operations.
 		 */
-		const applyOperationsToEntities = <T extends { id: string }>(
+		const _applyOperationsToEntities = <T extends { id: string }>(
 			operations: readonly CrudOperation<T>[],
 		): T[] => {
 			const entities = new Map<string, T>();
@@ -733,7 +802,10 @@ describe("Index consistency properties", () => {
 		it("should have every entity in exactly the correct index buckets (single-field index)", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					operationSequenceArbitrary(BookSchema, { minLength: 1, maxLength: 20 }),
+					operationSequenceArbitrary(BookSchema, {
+						minLength: 1,
+						maxLength: 20,
+					}),
 					async (operations) => {
 						// 1. Create database with single-field index
 						const db = await Effect.runPromise(
@@ -746,7 +818,8 @@ describe("Index consistency properties", () => {
 								if (operation.op === "create") {
 									await db.books.create(operation.payload).runPromise;
 								} else if (operation.op === "update") {
-									await db.books.update(operation.id, operation.payload).runPromise;
+									await db.books.update(operation.id, operation.payload)
+										.runPromise;
 								} else if (operation.op === "delete") {
 									await db.books.delete(operation.id).runPromise;
 								}
@@ -756,14 +829,19 @@ describe("Index consistency properties", () => {
 						}
 
 						// 3. Get all entities from the database
-						const actualEntities = await db.books.query({ sort: { id: "asc" } }).runPromise;
+						const actualEntities = await db.books.query({ sort: { id: "asc" } })
+							.runPromise;
 
 						// 4. Compute expected index state from actual entities
-						const expectedIndex = computeExpectedIndex(actualEntities, ["genre"]);
+						const expectedIndex = computeExpectedIndex(actualEntities, [
+							"genre",
+						]);
 
 						// 5. Build a fresh index from the current entities using the index manager
 						const normalized = normalizeIndexes(["genre"]);
-						const freshIndexes = await Effect.runPromise(buildIndexes(normalized, actualEntities));
+						const freshIndexes = await Effect.runPromise(
+							buildIndexes(normalized, actualEntities),
+						);
 						const actualIndex = await getIndexMap(freshIndexes, ["genre"]);
 
 						// 6. Compare: the fresh index should match the expected index
@@ -801,7 +879,10 @@ describe("Index consistency properties", () => {
 		it("should have every entity in exactly the correct index buckets (compound index)", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					operationSequenceArbitrary(BookSchema, { minLength: 1, maxLength: 20 }),
+					operationSequenceArbitrary(BookSchema, {
+						minLength: 1,
+						maxLength: 20,
+					}),
 					async (operations) => {
 						// 1. Create database with compound index
 						const db = await Effect.runPromise(
@@ -814,7 +895,8 @@ describe("Index consistency properties", () => {
 								if (operation.op === "create") {
 									await db.books.create(operation.payload).runPromise;
 								} else if (operation.op === "update") {
-									await db.books.update(operation.id, operation.payload).runPromise;
+									await db.books.update(operation.id, operation.payload)
+										.runPromise;
 								} else if (operation.op === "delete") {
 									await db.books.delete(operation.id).runPromise;
 								}
@@ -824,15 +906,24 @@ describe("Index consistency properties", () => {
 						}
 
 						// 3. Get all entities from the database
-						const actualEntities = await db.books.query({ sort: { id: "asc" } }).runPromise;
+						const actualEntities = await db.books.query({ sort: { id: "asc" } })
+							.runPromise;
 
 						// 4. Compute expected index state from actual entities
-						const expectedIndex = computeExpectedIndex(actualEntities, ["genre", "year"]);
+						const expectedIndex = computeExpectedIndex(actualEntities, [
+							"genre",
+							"year",
+						]);
 
 						// 5. Build a fresh index from the current entities
 						const normalized = normalizeIndexes([["genre", "year"]]);
-						const freshIndexes = await Effect.runPromise(buildIndexes(normalized, actualEntities));
-						const actualIndex = await getIndexMap(freshIndexes, ["genre", "year"]);
+						const freshIndexes = await Effect.runPromise(
+							buildIndexes(normalized, actualEntities),
+						);
+						const actualIndex = await getIndexMap(freshIndexes, [
+							"genre",
+							"year",
+						]);
 
 						// 6. Compare: the fresh index should match the expected index
 						const difference = compareIndexMaps(actualIndex, expectedIndex);
@@ -869,7 +960,10 @@ describe("Index consistency properties", () => {
 		it("should have every entity in exactly the correct index buckets (multiple indexes)", async () => {
 			await fc.assert(
 				fc.asyncProperty(
-					operationSequenceArbitrary(BookSchema, { minLength: 1, maxLength: 20 }),
+					operationSequenceArbitrary(BookSchema, {
+						minLength: 1,
+						maxLength: 20,
+					}),
 					async (operations) => {
 						// 1. Create database with multiple indexes
 						const db = await Effect.runPromise(
@@ -882,7 +976,8 @@ describe("Index consistency properties", () => {
 								if (operation.op === "create") {
 									await db.books.create(operation.payload).runPromise;
 								} else if (operation.op === "update") {
-									await db.books.update(operation.id, operation.payload).runPromise;
+									await db.books.update(operation.id, operation.payload)
+										.runPromise;
 								} else if (operation.op === "delete") {
 									await db.books.delete(operation.id).runPromise;
 								}
@@ -892,23 +987,35 @@ describe("Index consistency properties", () => {
 						}
 
 						// 3. Get all entities from the database
-						const actualEntities = await db.books.query({ sort: { id: "asc" } }).runPromise;
+						const actualEntities = await db.books.query({ sort: { id: "asc" } })
+							.runPromise;
 
 						// 4. Test each index separately
-						const indexConfigs: Array<{ fields: readonly string[]; normalized: ReadonlyArray<ReadonlyArray<string>> }> = [
+						const indexConfigs: Array<{
+							fields: readonly string[];
+							normalized: ReadonlyArray<ReadonlyArray<string>>;
+						}> = [
 							{ fields: ["genre"], normalized: normalizeIndexes(["genre"]) },
 							{ fields: ["author"], normalized: normalizeIndexes(["author"]) },
-							{ fields: ["genre", "year"], normalized: normalizeIndexes([["genre", "year"]]) },
+							{
+								fields: ["genre", "year"],
+								normalized: normalizeIndexes([["genre", "year"]]),
+							},
 						];
 
 						const entityIds = new Set(actualEntities.map((e) => e.id));
 
 						for (const { fields, normalized } of indexConfigs) {
 							// Compute expected index
-							const expectedIndex = computeExpectedIndex(actualEntities, fields);
+							const expectedIndex = computeExpectedIndex(
+								actualEntities,
+								fields,
+							);
 
 							// Build fresh index
-							const freshIndexes = await Effect.runPromise(buildIndexes(normalized, actualEntities));
+							const freshIndexes = await Effect.runPromise(
+								buildIndexes(normalized, actualEntities),
+							);
 							const actualIndex = await getIndexMap(freshIndexes, fields);
 
 							// Compare
@@ -938,7 +1045,10 @@ describe("Index consistency properties", () => {
 			await fc.assert(
 				fc.asyncProperty(
 					// Generate a sequence that creates some entities and then deletes some
-					fc.array(entityArbitrary(BookSchema), { minLength: 3, maxLength: 10 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 3,
+						maxLength: 10,
+					}),
 					fc.integer({ min: 1, max: 5 }),
 					async (entities, deleteCount) => {
 						// Ensure unique IDs
@@ -956,7 +1066,10 @@ describe("Index consistency properties", () => {
 						}
 
 						// 3. Delete some entities (up to deleteCount or half of entities)
-						const actualDeleteCount = Math.min(deleteCount, Math.floor(uniqueEntities.length / 2));
+						const actualDeleteCount = Math.min(
+							deleteCount,
+							Math.floor(uniqueEntities.length / 2),
+						);
 						const deletedIds = new Set<string>();
 						for (let i = 0; i < actualDeleteCount; i++) {
 							const id = uniqueEntities[i].id;
@@ -969,7 +1082,9 @@ describe("Index consistency properties", () => {
 
 						// 5. Build fresh index from remaining entities
 						const normalized = normalizeIndexes(["genre"]);
-						const freshIndexes = await Effect.runPromise(buildIndexes(normalized, remainingEntities));
+						const freshIndexes = await Effect.runPromise(
+							buildIndexes(normalized, remainingEntities),
+						);
 						const actualIndex = await getIndexMap(freshIndexes, ["genre"]);
 
 						// 6. Verify deleted IDs don't appear in any bucket

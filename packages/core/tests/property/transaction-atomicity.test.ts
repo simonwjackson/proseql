@@ -14,10 +14,10 @@ import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../../src/factories/database-effect";
 import {
+	type CrudOperation,
 	entityArbitrary,
 	getNumRuns,
 	operationSequenceArbitrary,
-	type CrudOperation,
 } from "./generators";
 
 /**
@@ -68,10 +68,7 @@ const snapshotCollection = (entities: readonly Book[]): readonly Book[] => {
 /**
  * Deep equal comparison for two snapshots.
  */
-const snapshotsEqual = (
-	a: readonly Book[],
-	b: readonly Book[],
-): boolean => {
+const snapshotsEqual = (a: readonly Book[], b: readonly Book[]): boolean => {
 	if (a.length !== b.length) return false;
 	for (let i = 0; i < a.length; i++) {
 		if (JSON.stringify(a[i]) !== JSON.stringify(b[i])) {
@@ -205,7 +202,10 @@ describe("Transaction atomicity properties", () => {
 			await fc.assert(
 				fc.asyncProperty(
 					// Generate initial data (1-10 books)
-					fc.array(entityArbitrary(BookSchema), { minLength: 1, maxLength: 10 }),
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 1,
+						maxLength: 10,
+					}),
 					// Generate operation sequence (1-8 operations)
 					operationSequenceArbitrary(BookSchema, {
 						minLength: 1,
@@ -239,7 +239,11 @@ describe("Transaction atomicity properties", () => {
 								.$transaction((ctx) =>
 									Effect.gen(function* () {
 										// Execute operations up to the failure point
-										for (let i = 0; i < failurePoint && i < operationSequence.length; i++) {
+										for (
+											let i = 0;
+											i < failurePoint && i < operationSequence.length;
+											i++
+										) {
 											const op = operationSequence[i];
 											if (op.op === "create") {
 												yield* ctx.books
@@ -282,9 +286,9 @@ describe("Transaction atomicity properties", () => {
 						);
 
 						// CRITICAL PROPERTY: Post-transaction state must be identical to pre-transaction state
-						expect(snapshotsEqual(preTransactionSnapshot, postTransactionSnapshot)).toBe(
-							true,
-						);
+						expect(
+							snapshotsEqual(preTransactionSnapshot, postTransactionSnapshot),
+						).toBe(true);
 
 						// Additional verification: exact length match
 						expect(postTransactionSnapshot.length).toBe(
@@ -341,9 +345,9 @@ describe("Transaction atomicity properties", () => {
 						);
 
 						// State should be unchanged
-						expect(snapshotsEqual(preTransactionSnapshot, postTransactionSnapshot)).toBe(
-							true,
-						);
+						expect(
+							snapshotsEqual(preTransactionSnapshot, postTransactionSnapshot),
+						).toBe(true);
 					},
 				),
 				{ numRuns: getNumRuns() },
@@ -415,9 +419,9 @@ describe("Transaction atomicity properties", () => {
 						);
 
 						// State should be restored to pre-transaction
-						expect(snapshotsEqual(preTransactionSnapshot, postTransactionSnapshot)).toBe(
-							true,
-						);
+						expect(
+							snapshotsEqual(preTransactionSnapshot, postTransactionSnapshot),
+						).toBe(true);
 					},
 				),
 				{ numRuns: getNumRuns() },
