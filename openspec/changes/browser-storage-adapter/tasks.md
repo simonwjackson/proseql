@@ -114,10 +114,10 @@
 
 ## 15. Tests — Integration
 
-- [ ] 15.1 Create `packages/browser/tests/integration.test.ts`
-- [ ] 15.2 Test full database lifecycle with `LocalStorageLayer`: create persistent database, insert records, reload from storage, verify data
-- [ ] 15.3 Test full database lifecycle with `IndexedDBStorageLayer`: same flow with larger dataset
-- [ ] 15.4 Test switching between localStorage and IndexedDB layers with the same database config
+- [x] 15.1 Create `packages/browser/tests/integration.test.ts`
+- [x] 15.2 Test full database lifecycle with `LocalStorageLayer`: create persistent database, insert records, reload from storage, verify data
+- [x] 15.3 Test full database lifecycle with `IndexedDBStorageLayer`: same flow with larger dataset
+- [x] 15.4 Test switching between localStorage and IndexedDB layers with the same database config
 
 ## 16. Cleanup
 
