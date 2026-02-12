@@ -76,6 +76,7 @@ import {
 	extractSearchConfig,
 } from "../operations/query/sort-stream.js";
 import { applyPopulate } from "../operations/relationships/populate-stream.js";
+import type { CustomOperator } from "../plugins/plugin-types.js";
 import {
 	type FormatCodec,
 	mergeSerializerWithPluginCodecs,
@@ -560,6 +561,10 @@ function extractPopulateFromSelect(
  *
  * When `searchIndexRef` is provided along with `searchIndexFields`, the query
  * pipeline will use the search index to narrow candidates for $search queries.
+ *
+ * When `customOperators` is provided, the query pipeline will recognize and
+ * evaluate custom filter operators (e.g., `$regex`, `$fuzzy`) in addition to
+ * built-in operators.
  */
 const buildCollection = <T extends HasId>(
 	collectionName: string,
@@ -571,6 +576,7 @@ const buildCollection = <T extends HasId>(
 	indexes?: CollectionIndexes,
 	searchIndexRef?: Ref.Ref<SearchIndexMap>,
 	searchIndexFields?: ReadonlyArray<string>,
+	customOperators?: Map<string, CustomOperator>,
 ): EffectCollection<T> => {
 	const schema = collectionConfig.schema as Schema.Schema<T, unknown>;
 	const relationships = collectionConfig.relationships as Record<
@@ -726,7 +732,7 @@ const buildCollection = <T extends HasId>(
 					computed,
 					normalizeSelectForLazySkip(options?.select),
 				)(s);
-				s = applyFilter(options?.where)(s);
+				s = applyFilter(options?.where, customOperators)(s);
 				// When $search is active, compute and attach relevance scores after filtering
 				// (even though cursor pagination uses explicit sort, scores are still computed)
 				const cursorSearchConfig = extractSearchConfig(options?.where);
@@ -811,7 +817,7 @@ const buildCollection = <T extends HasId>(
 					computed,
 					normalizeSelectForLazySkip(options?.select),
 				)(s);
-				s = applyFilter(options?.where)(s);
+				s = applyFilter(options?.where, customOperators)(s);
 				// When $search is active, compute and attach relevance scores after filtering
 				const searchConfig = extractSearchConfig(options?.where);
 				if (searchConfig) {
@@ -1104,7 +1110,7 @@ const buildCollection = <T extends HasId>(
 				Record<string, unknown>,
 				never
 			> = Stream.fromIterable(items);
-			s = applyFilter(config.where as Record<string, unknown> | undefined)(s);
+			s = applyFilter(config.where as Record<string, unknown> | undefined, customOperators)(s);
 
 			// 3. Collect filtered entities
 			const chunk = yield* Stream.runCollect(s);
@@ -1173,6 +1179,7 @@ type BuildCollectionForTx = (
  * @param collectionIndexes - Pre-built indexes for each collection
  * @param searchIndexRefs - Pre-built search indexes for each collection (optional)
  * @param searchIndexFields - Fields covered by search index for each collection (optional)
+ * @param customOperators - Custom operators from plugins for query filtering (optional)
  * @returns A callback matching the BuildCollectionForTx type
  */
 const makeBuildCollectionForTx = (
@@ -1182,6 +1189,7 @@ const makeBuildCollectionForTx = (
 	collectionIndexes: Record<string, CollectionIndexes>,
 	searchIndexRefs?: Record<string, Ref.Ref<SearchIndexMap>>,
 	searchIndexFields?: Record<string, ReadonlyArray<string>>,
+	customOperators?: Map<string, CustomOperator>,
 ): BuildCollectionForTx => {
 	return (collectionName: string, addMutation: (name: string) => void) => {
 		// Transaction-aware afterMutation: records mutation instead of scheduling persistence
@@ -1197,6 +1205,7 @@ const makeBuildCollectionForTx = (
 			collectionIndexes[collectionName],
 			searchIndexRefs?.[collectionName],
 			searchIndexFields?.[collectionName],
+			customOperators,
 		);
 	};
 };
