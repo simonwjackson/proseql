@@ -144,3 +144,15 @@ export {
 	type FindByIdRequestClass,
 	type QueryRequestClass,
 } from "./rpc-group.js";
+
+// ============================================================================
+// RPC Handler Layer
+// ============================================================================
+
+export {
+	makeRpcHandlers,
+	makeRpcHandlersLayer,
+	makeDatabaseContextTag,
+	type RpcHandlers,
+	type DatabaseContext,
+} from "./rpc-handlers.js";
