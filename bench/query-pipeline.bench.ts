@@ -367,8 +367,58 @@ export async function createSuite(): Promise<Bench> {
 	});
 
 	// -------------------------------------------------------------------------
-	// Task 5.3: Sort benchmarks will be added here
+	// Task 5.3: Sort benchmarks
 	// -------------------------------------------------------------------------
+
+	// Sort benchmark: Single-field sort
+	// Tests sorting on a single field in ascending order.
+	// This exercises the sort stage of the query pipeline.
+	const sortSingleDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("sort: single-field (age asc)", async () => {
+		await sortSingleDb.users.query({
+			sort: { age: "asc" },
+		}).runPromise;
+	});
+
+	// Sort benchmark: Single-field sort descending
+	// Tests sorting on a single field in descending order.
+	const sortSingleDescDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("sort: single-field (age desc)", async () => {
+		await sortSingleDescDb.users.query({
+			sort: { age: "desc" },
+		}).runPromise;
+	});
+
+	// Sort benchmark: Multi-field sort
+	// Tests sorting on multiple fields (primary and secondary sort keys).
+	// This exercises more complex comparison logic in the sort stage.
+	const sortMultiDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("sort: multi-field (role asc, age desc)", async () => {
+		await sortMultiDb.users.query({
+			sort: { role: "asc", age: "desc" },
+		}).runPromise;
+	});
+
+	// Sort benchmark: Multi-field sort with 3 keys
+	// Tests sorting with three sort keys to measure cost of additional sort dimensions.
+	const sortTripleDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("sort: multi-field (role asc, age desc, name asc)", async () => {
+		await sortTripleDb.users.query({
+			sort: { role: "asc", age: "desc", name: "asc" },
+		}).runPromise;
+	})
 
 	// -------------------------------------------------------------------------
 	// Task 5.4: Population benchmarks will be added here
