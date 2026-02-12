@@ -257,8 +257,9 @@ export type GeneratedWhereClause = Record<
 
 /**
  * String operators that can be used in where clauses for string fields.
+ * (Exported for documentation; actual generation uses inline oneof)
  */
-const STRING_OPERATORS = [
+export const STRING_OPERATORS = [
 	"$eq",
 	"$ne",
 	"$in",
@@ -274,8 +275,9 @@ const STRING_OPERATORS = [
 
 /**
  * Number operators that can be used in where clauses for numeric fields.
+ * (Exported for documentation; actual generation uses inline oneof)
  */
-const NUMBER_OPERATORS = [
+export const NUMBER_OPERATORS = [
 	"$eq",
 	"$ne",
 	"$in",
@@ -288,13 +290,15 @@ const NUMBER_OPERATORS = [
 
 /**
  * Boolean operators that can be used in where clauses for boolean fields.
+ * (Exported for documentation; actual generation uses inline oneof)
  */
-const BOOLEAN_OPERATORS = ["$eq", "$ne"] as const;
+export const BOOLEAN_OPERATORS = ["$eq", "$ne"] as const;
 
 /**
  * Array operators that can be used in where clauses for array fields.
+ * (Exported for documentation; actual generation uses inline oneof)
  */
-const ARRAY_OPERATORS = [
+export const ARRAY_OPERATORS = [
 	"$eq",
 	"$ne",
 	"$in",
@@ -506,12 +510,10 @@ export const whereClauseArbitrary = <A, I, R>(
 		// Single field where clause (40% weight)
 		{
 			weight: 4,
-			arbitrary: fc
-				.nat({ max: fieldArbitraries.length - 1 })
-				.chain((index) => {
-					const { name, arb } = fieldArbitraries[index];
-					return arb.map((value) => ({ [name]: value }));
-				}),
+			arbitrary: fc.nat({ max: fieldArbitraries.length - 1 }).chain((index) => {
+				const { name, arb } = fieldArbitraries[index];
+				return arb.map((value) => ({ [name]: value }));
+			}),
 		},
 		// Multi-field where clause (50% weight)
 		{
@@ -639,4 +641,205 @@ export const sortConfigArbitrary = <A, I, R>(
 				}),
 		},
 	);
+};
+
+// ============================================================================
+// Operation Sequence Generator
+// ============================================================================
+
+/**
+ * Type representing a CRUD operation in an operation sequence.
+ */
+export type CrudOperation<A extends { id: string }> =
+	| { readonly op: "create"; readonly payload: A }
+	| { readonly op: "update"; readonly id: string; readonly payload: Partial<A> }
+	| { readonly op: "delete"; readonly id: string };
+
+/**
+ * Type representing a generated sequence of CRUD operations.
+ */
+export type GeneratedOperationSequence<A extends { id: string }> =
+	readonly CrudOperation<A>[];
+
+/**
+ * Generate an arbitrary for partial update payload based on field information.
+ * Only includes non-id fields and makes them all optional.
+ */
+const updatePayloadArbitrary = (
+	fields: readonly FieldInfo[],
+): fc.Arbitrary<Record<string, unknown>> => {
+	// Filter out id field - we don't want to update the id
+	const updateableFields = fields.filter((f) => f.name !== "id");
+
+	if (updateableFields.length === 0) {
+		return fc.constant({});
+	}
+
+	// Generate a subset of fields to update (at least 1)
+	return fc
+		.subarray(updateableFields, {
+			minLength: 1,
+			maxLength: updateableFields.length,
+		})
+		.chain((selectedFields) => {
+			const arbitraries: Record<string, fc.Arbitrary<unknown>> = {};
+			for (const field of selectedFields) {
+				arbitraries[field.name] = fieldArbitrary(field);
+			}
+			return fc.record(arbitraries);
+		});
+};
+
+/**
+ * Generate an arbitrary that produces sequences of CRUD operations (create, update, delete).
+ *
+ * The generator ensures referential integrity:
+ * - `create` operations produce new entities with unique IDs
+ * - `update` operations reference IDs from previously created (and not deleted) entities
+ * - `delete` operations reference IDs from previously created (and not deleted) entities
+ *
+ * This is achieved by generating sequences where operations can only reference
+ * entities that would exist at that point in the sequence.
+ *
+ * @param schema - The Effect Schema defining the entity structure
+ * @param options - Optional configuration
+ * @param options.minLength - Minimum sequence length (default: 1)
+ * @param options.maxLength - Maximum sequence length (default: 10)
+ * @returns A fast-check Arbitrary that generates valid operation sequences
+ *
+ * @example
+ * ```ts
+ * const BookSchema = Schema.Struct({
+ *   id: Schema.String,
+ *   title: Schema.String,
+ *   year: Schema.Number,
+ * });
+ *
+ * const opsArb = operationSequenceArbitrary(BookSchema);
+ * fc.assert(fc.property(opsArb, (ops) => {
+ *   // ops is a valid sequence where update/delete reference existing IDs
+ *   // e.g., [
+ *   //   { op: "create", payload: { id: "abc", title: "Dune", year: 1965 } },
+ *   //   { op: "update", id: "abc", payload: { year: 1966 } },
+ *   //   { op: "delete", id: "abc" },
+ *   // ]
+ *   return Array.isArray(ops);
+ * }));
+ * ```
+ */
+export const operationSequenceArbitrary = <A extends { id: string }, I, R>(
+	schema: Schema.Schema<A, I, R>,
+	options?: { readonly minLength?: number; readonly maxLength?: number },
+): fc.Arbitrary<GeneratedOperationSequence<A>> => {
+	const minLength = options?.minLength ?? 1;
+	const maxLength = options?.maxLength ?? 10;
+	const fields = extractFieldsFromSchema(schema);
+
+	// We use a stateful generator that tracks which IDs are "alive" at each step
+	// This ensures update/delete operations only reference valid IDs
+	return fc
+		.integer({ min: minLength, max: maxLength })
+		.chain((sequenceLength) => {
+			// Generate enough entities for potential creates
+			const entityArb = entityArbitrary(schema);
+
+			// Generate the full sequence with a model that tracks alive IDs
+			return generateSequenceWithModel<A>(
+				sequenceLength,
+				entityArb,
+				updatePayloadArbitrary(fields),
+			);
+		});
+};
+
+/**
+ * Generate an operation sequence by maintaining a model of alive IDs.
+ * This ensures referential integrity is maintained throughout the sequence.
+ */
+const generateSequenceWithModel = <A extends { id: string }>(
+	length: number,
+	entityArb: fc.Arbitrary<A>,
+	updatePayloadArb: fc.Arbitrary<Record<string, unknown>>,
+): fc.Arbitrary<GeneratedOperationSequence<A>> => {
+	if (length === 0) {
+		return fc.constant([]);
+	}
+
+	// Generate all potential entities upfront
+	return fc
+		.array(entityArb, { minLength: length, maxLength: length })
+		.chain((entities) => {
+			// Generate operation types with weights:
+			// - First op must be create (to have IDs to work with)
+			// - Subsequent ops: 50% create, 30% update, 20% delete
+			return fc
+				.array(
+					fc.oneof(
+						{ weight: 5, arbitrary: fc.constant("create" as const) },
+						{ weight: 3, arbitrary: fc.constant("update" as const) },
+						{ weight: 2, arbitrary: fc.constant("delete" as const) },
+					),
+					{ minLength: length, maxLength: length },
+				)
+				.chain((opTypes) => {
+					// Generate update payloads for each potential update
+					return fc
+						.array(updatePayloadArb, { minLength: length, maxLength: length })
+						.chain((updatePayloads) => {
+							// Generate random indices for targeting existing entities
+							return fc
+								.array(fc.nat({ max: 1000 }), {
+									minLength: length,
+									maxLength: length,
+								})
+								.map((targetIndices) => {
+									// Build the sequence maintaining alive IDs state
+									const operations: CrudOperation<A>[] = [];
+									const aliveIds: string[] = [];
+									let entityIndex = 0;
+
+									for (let i = 0; i < length; i++) {
+										let opType = opTypes[i];
+
+										// First operation must be create, or if no alive IDs exist
+										if (aliveIds.length === 0) {
+											opType = "create";
+										}
+
+										if (opType === "create") {
+											const entity = entities[entityIndex];
+											entityIndex = (entityIndex + 1) % entities.length;
+											operations.push({
+												op: "create",
+												payload: entity,
+											});
+											aliveIds.push(entity.id);
+										} else if (opType === "update") {
+											// Pick a random alive ID
+											const targetIdx = targetIndices[i] % aliveIds.length;
+											const targetId = aliveIds[targetIdx];
+											operations.push({
+												op: "update",
+												id: targetId,
+												payload: updatePayloads[i] as Partial<A>,
+											});
+										} else {
+											// delete
+											// Pick a random alive ID and remove it
+											const targetIdx = targetIndices[i] % aliveIds.length;
+											const targetId = aliveIds[targetIdx];
+											operations.push({
+												op: "delete",
+												id: targetId,
+											});
+											// Remove from alive IDs
+											aliveIds.splice(targetIdx, 1);
+										}
+									}
+
+									return operations;
+								});
+						});
+				});
+		});
 };
