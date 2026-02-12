@@ -408,4 +408,41 @@ describe("Plugin System", () => {
 			}
 		});
 	});
+
+	// ============================================================================
+	// Tests — Plugin Validation (Task 10.1-10.5)
+	// ============================================================================
+
+	describe("plugin validation", () => {
+		it("should fail with PluginError when two plugins register operators with the same name", async () => {
+			// Task 10.1: Test operator name conflict between two plugins fails with PluginError
+			const duplicateOperator1: CustomOperator = {
+				name: "$duplicate",
+				types: ["string"],
+				evaluate: (fieldValue, operand) => fieldValue === operand,
+			};
+
+			const duplicateOperator2: CustomOperator = {
+				name: "$duplicate",
+				types: ["number"],
+				evaluate: (fieldValue, operand) => fieldValue === operand,
+			};
+
+			const plugin1 = createOperatorPlugin("plugin-one", duplicateOperator1);
+			const plugin2 = createOperatorPlugin("plugin-two", duplicateOperator2);
+
+			const result = await Effect.runPromise(
+				createEffectDatabase(baseConfig, initialData, {
+					plugins: [plugin1, plugin2],
+				}).pipe(Effect.flip),
+			);
+
+			expect(result._tag).toBe("PluginError");
+			if (result._tag === "PluginError") {
+				expect(result.reason).toBe("operator_conflict");
+				expect(result.message).toContain("$duplicate");
+				expect(result.message).toContain("plugin-one");
+			}
+		});
+	});
 });
