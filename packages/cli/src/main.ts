@@ -14,6 +14,7 @@ import {
 	ConfigValidationError,
 } from "./config/loader.js"
 import { handleInit as handleInitCommand } from "./commands/init.js"
+import { handleQuery as handleQueryCommand } from "./commands/query.js"
 
 const VERSION = "0.1.0"
 
@@ -263,16 +264,25 @@ function exitWithError(message: string): never {
 }
 
 /**
+ * Resolved config result including both the config and its path.
+ */
+interface ResolvedConfig {
+  readonly config: DatabaseConfig
+  readonly configPath: string
+}
+
+/**
  * Resolve and load the database config.
  * Uses the --config flag if provided, otherwise discovers the config file.
+ * Returns both the config and its path (needed for resolving relative file paths).
  */
 async function resolveConfig(
   configOverride: string | undefined,
-): Promise<DatabaseConfig> {
+): Promise<ResolvedConfig> {
   const program = Effect.gen(function* () {
     const configPath = yield* discoverConfig(process.cwd(), configOverride)
     const config = yield* loadConfig(configPath)
-    return config
+    return { config, configPath }
   })
 
   const result = await Effect.runPromise(
@@ -303,64 +313,80 @@ async function handleInit(args: ParsedArgs): Promise<void> {
 }
 
 async function handleQuery(
-  _args: ParsedArgs,
-  _config: DatabaseConfig,
+  args: ParsedArgs,
+  resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  console.log("query command - not yet implemented")
+  const collectionName = args.positionalArgs[0]
+  const result = await handleQueryCommand({
+    collection: collectionName,
+    config: resolvedConfig.config,
+    configPath: resolvedConfig.configPath,
+    where: args.flags.where,
+    select: args.flags.select,
+    sort: args.flags.sort,
+    limit: args.flags.limit,
+  })
+
+  if (!result.success) {
+    exitWithError(result.message ?? "Query failed")
+  }
+
+  // Output the results (for now, just JSON - formatting will be added in task 4.4)
+  console.log(JSON.stringify(result.data, null, 2))
 }
 
 async function handleCollections(
   _args: ParsedArgs,
-  _config: DatabaseConfig,
+  _resolvedConfig: ResolvedConfig,
 ): Promise<void> {
   console.log("collections command - not yet implemented")
 }
 
 async function handleDescribe(
   _args: ParsedArgs,
-  _config: DatabaseConfig,
+  _resolvedConfig: ResolvedConfig,
 ): Promise<void> {
   console.log("describe command - not yet implemented")
 }
 
 async function handleStats(
   _args: ParsedArgs,
-  _config: DatabaseConfig,
+  _resolvedConfig: ResolvedConfig,
 ): Promise<void> {
   console.log("stats command - not yet implemented")
 }
 
 async function handleCreate(
   _args: ParsedArgs,
-  _config: DatabaseConfig,
+  _resolvedConfig: ResolvedConfig,
 ): Promise<void> {
   console.log("create command - not yet implemented")
 }
 
 async function handleUpdate(
   _args: ParsedArgs,
-  _config: DatabaseConfig,
+  _resolvedConfig: ResolvedConfig,
 ): Promise<void> {
   console.log("update command - not yet implemented")
 }
 
 async function handleDelete(
   _args: ParsedArgs,
-  _config: DatabaseConfig,
+  _resolvedConfig: ResolvedConfig,
 ): Promise<void> {
   console.log("delete command - not yet implemented")
 }
 
 async function handleMigrate(
   _args: ParsedArgs,
-  _config: DatabaseConfig,
+  _resolvedConfig: ResolvedConfig,
 ): Promise<void> {
   console.log("migrate command - not yet implemented")
 }
 
 async function handleConvert(
   _args: ParsedArgs,
-  _config: DatabaseConfig,
+  _resolvedConfig: ResolvedConfig,
 ): Promise<void> {
   console.log("convert command - not yet implemented")
 }
@@ -389,7 +415,7 @@ async function main(): Promise<void> {
 
   // Resolve config for commands that need it
   const needsConfig = !COMMANDS_WITHOUT_CONFIG.has(args.command)
-  const config = needsConfig
+  const resolvedConfig = needsConfig
     ? await resolveConfig(args.flags.config)
     : undefined
 
@@ -403,54 +429,54 @@ async function main(): Promise<void> {
       if (args.positionalArgs.length < 1) {
         exitWithError("query command requires a collection name")
       }
-      await handleQuery(args, config!)
+      await handleQuery(args, resolvedConfig!)
       break
 
     case "collections":
-      await handleCollections(args, config!)
+      await handleCollections(args, resolvedConfig!)
       break
 
     case "describe":
       if (args.positionalArgs.length < 1) {
         exitWithError("describe command requires a collection name")
       }
-      await handleDescribe(args, config!)
+      await handleDescribe(args, resolvedConfig!)
       break
 
     case "stats":
-      await handleStats(args, config!)
+      await handleStats(args, resolvedConfig!)
       break
 
     case "create":
       if (args.positionalArgs.length < 1) {
         exitWithError("create command requires a collection name")
       }
-      await handleCreate(args, config!)
+      await handleCreate(args, resolvedConfig!)
       break
 
     case "update":
       if (args.positionalArgs.length < 2) {
         exitWithError("update command requires a collection name and entity ID")
       }
-      await handleUpdate(args, config!)
+      await handleUpdate(args, resolvedConfig!)
       break
 
     case "delete":
       if (args.positionalArgs.length < 2) {
         exitWithError("delete command requires a collection name and entity ID")
       }
-      await handleDelete(args, config!)
+      await handleDelete(args, resolvedConfig!)
       break
 
     case "migrate":
-      await handleMigrate(args, config!)
+      await handleMigrate(args, resolvedConfig!)
       break
 
     case "convert":
       if (args.positionalArgs.length < 1) {
         exitWithError("convert command requires a collection name")
       }
-      await handleConvert(args, config!)
+      await handleConvert(args, resolvedConfig!)
       break
 
     default:
