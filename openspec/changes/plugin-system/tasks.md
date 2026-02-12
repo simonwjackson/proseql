@@ -107,5 +107,5 @@
 ## 16. Cleanup
 
 - [x] 16.1 Run full test suite (`bun test`) to verify no regressions
-- [ ] 16.2 Run type check (`bunx tsc --noEmit`) to verify no type errors
+- [x] 16.2 Run type check (`bunx tsc --noEmit`) to verify no type errors
 - [ ] 16.3 Run lint (`biome check .`) to verify no lint errors
