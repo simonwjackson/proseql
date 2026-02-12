@@ -47,7 +47,7 @@
 
 ## 8. Debouncing
 
-- [ ] 8.1 In `watch()`, apply debouncing to the change event stream before re-evaluation. Use configurable interval from database reactive config (default 10ms).
+- [x] 8.1 In `watch()`, apply debouncing to the change event stream before re-evaluation. Use configurable interval from database reactive config (default 10ms).
 - [ ] 8.2 Ensure debounce coalesces multiple events for the same collection into a single re-evaluation
 
 ## 9. watchById

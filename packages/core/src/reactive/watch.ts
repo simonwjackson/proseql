@@ -7,7 +7,7 @@
  * and emits the new result set.
  */
 
-import { Effect, PubSub, Ref, Stream } from "effect";
+import { Duration, Effect, PubSub, Ref, Stream } from "effect";
 import type { ChangeEvent } from "../types/reactive-types.js";
 import {
 	evaluateQuery,
@@ -16,9 +16,17 @@ import {
 
 /**
  * Configuration for the watch query.
- * Re-exports EvaluateQueryConfig for backward compatibility.
+ * Extends EvaluateQueryConfig with debounce options.
  */
-export type WatchQueryConfig = EvaluateQueryConfig;
+export interface WatchQueryConfig extends EvaluateQueryConfig {
+	/**
+	 * Debounce interval in milliseconds for change event processing.
+	 * When multiple mutations occur in rapid succession, they are coalesced
+	 * into a single re-evaluation after the debounce interval settles.
+	 * Default: 10ms (fast enough for interactive use, long enough to batch bursts).
+	 */
+	readonly debounceMs?: number;
+}
 
 /**
  * Entity constraint: must have a readonly string `id` field.
@@ -50,22 +58,27 @@ const resultsAreEqual = <T>(
 };
 
 /**
+ * Default debounce interval in milliseconds.
+ * Fast enough for interactive use, long enough to batch typical burst patterns.
+ */
+const DEFAULT_DEBOUNCE_MS = 10;
+
+/**
  * Creates a reactive watch stream that emits query results whenever the collection changes.
  *
  * The stream:
  * 1. Emits the current result set immediately upon subscription
  * 2. Subscribes to the PubSub for change notifications (scoped - auto-cleanup)
  * 3. Filters events to only those matching the specified collection
- * 4. Re-evaluates the query pipeline on each relevant change
- * 5. Deduplicates consecutive identical result sets to avoid spurious emissions
- * 6. Emits the new result set as a ReadonlyArray
- *
- * Note: Debouncing is handled by a separate task (8.1).
+ * 4. Debounces change events to coalesce rapid mutations into single re-evaluations
+ * 5. Re-evaluates the query pipeline on each relevant change
+ * 6. Deduplicates consecutive identical result sets to avoid spurious emissions
+ * 7. Emits the new result set as a ReadonlyArray
  *
  * @param pubsub - The PubSub broadcasting ChangeEvents from mutations
  * @param ref - The collection Ref containing entities keyed by ID
  * @param collectionName - Name of the collection to watch (for filtering events)
- * @param config - Optional query configuration (where, sort, select, limit, offset)
+ * @param config - Optional query configuration (where, sort, select, limit, offset, debounceMs)
  * @returns Scoped Effect producing a Stream of result arrays
  *
  * @example
@@ -78,6 +91,7 @@ const resultsAreEqual = <T>(
  *     where: { genre: "sci-fi" },
  *     sort: { year: "desc" },
  *     limit: 10,
+ *     debounceMs: 50, // custom debounce interval
  *   })
  *
  *   // Consume the stream
@@ -106,9 +120,18 @@ export const watch = <T extends HasId>(
 			(event) => event.collection === collectionName,
 		);
 
-		// Map each change event to a re-evaluation of the query
+		// Apply debouncing to coalesce rapid mutations into a single re-evaluation.
+		// This prevents re-evaluating the query on every single mutation when they
+		// arrive in bursts (e.g., createMany inserting 100 entities).
+		const debounceMs = config.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+		const debouncedStream = Stream.debounce(
+			filteredStream,
+			Duration.millis(debounceMs),
+		);
+
+		// Map each (debounced) change event to a re-evaluation of the query.
 		// This transforms Stream<ChangeEvent> into Stream<ReadonlyArray<T>>
-		const changeResultStream = Stream.mapEffect(filteredStream, () =>
+		const changeResultStream = Stream.mapEffect(debouncedStream, () =>
 			evaluateQuery(ref, config),
 		);
 
