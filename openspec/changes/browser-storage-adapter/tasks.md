@@ -74,8 +74,8 @@
 - [x] 10.3 Test custom prefix: `./data/books.yaml` with prefix `myapp:` maps to `myapp:data/books.yaml`
 - [x] 10.4 Test backslash normalization: `.\data\books.yaml` maps to `proseql:data/books.yaml`
 - [x] 10.5 Test no leading `./`: `data/books.yaml` maps to `proseql:data/books.yaml`
-- [ ] 10.6 Test empty string: maps to `proseql:`
-- [ ] 10.7 Test nested paths: `./a/b/c/d.json` maps to `proseql:a/b/c/d.json`
+- [x] 10.6 Test empty string: maps to `proseql:`
+- [x] 10.7 Test nested paths: `./a/b/c/d.json` maps to `proseql:a/b/c/d.json`
 
 ## 11. Tests — LocalStorage Adapter
 
