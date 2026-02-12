@@ -5,12 +5,9 @@
  * or cursor), providing a point-in-time snapshot of query results.
  */
 
-import { describe, expect, it } from "vitest";
 import { Effect, Ref } from "effect";
-import {
-	evaluateQuery,
-	type EvaluateQueryConfig,
-} from "../src/reactive/evaluate-query.js";
+import { describe, expect, it } from "vitest";
+import { evaluateQuery } from "../src/reactive/evaluate-query.js";
 
 interface Book {
 	readonly id: string;
@@ -90,7 +87,9 @@ describe("evaluateQuery", () => {
 		it("returns a complete snapshot, not a lazy iterator", async () => {
 			const program = Effect.gen(function* () {
 				const ref = yield* createRef(testBooks);
-				const results = yield* evaluateQuery(ref, { where: { genre: "sci-fi" } });
+				const results = yield* evaluateQuery(ref, {
+					where: { genre: "sci-fi" },
+				});
 
 				// We can iterate multiple times (not consumed on first iteration)
 				const firstPass = results.map((b) => b.id);
@@ -316,7 +315,9 @@ describe("evaluateQuery", () => {
 				const ref = yield* createRef(testBooks);
 
 				// Evaluate query
-				const results = yield* evaluateQuery(ref, { where: { genre: "sci-fi" } });
+				const results = yield* evaluateQuery(ref, {
+					where: { genre: "sci-fi" },
+				});
 				const originalLength = results.length;
 
 				// Modify the Ref after evaluation
@@ -344,7 +345,9 @@ describe("evaluateQuery", () => {
 			const program = Effect.gen(function* () {
 				const ref = yield* createRef(testBooks);
 
-				const results1 = yield* evaluateQuery(ref, { where: { genre: "sci-fi" } });
+				const results1 = yield* evaluateQuery(ref, {
+					where: { genre: "sci-fi" },
+				});
 				expect(results1).toHaveLength(3);
 
 				// Modify Ref
@@ -361,7 +364,9 @@ describe("evaluateQuery", () => {
 				});
 
 				// New evaluation should include the new entity
-				const results2 = yield* evaluateQuery(ref, { where: { genre: "sci-fi" } });
+				const results2 = yield* evaluateQuery(ref, {
+					where: { genre: "sci-fi" },
+				});
 				expect(results2).toHaveLength(4);
 			});
 

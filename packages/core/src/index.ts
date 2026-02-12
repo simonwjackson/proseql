@@ -145,12 +145,12 @@ export type {
 // Reactive Query Functions
 // ============================================================================
 
-export { createChangePubSub } from "./reactive/change-pubsub.js";
 export { createChangeEvent, reloadEvent } from "./reactive/change-event.js";
-export { evaluateQuery } from "./reactive/evaluate-query.js";
+export { createChangePubSub } from "./reactive/change-pubsub.js";
 export type { EvaluateQueryConfig } from "./reactive/evaluate-query.js";
-export { watch } from "./reactive/watch.js";
+export { evaluateQuery } from "./reactive/evaluate-query.js";
 export type { WatchQueryConfig } from "./reactive/watch.js";
+export { watch } from "./reactive/watch.js";
 export { watchById } from "./reactive/watch-by-id.js";
 
 // ============================================================================

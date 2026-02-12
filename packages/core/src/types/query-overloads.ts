@@ -14,7 +14,7 @@ import type {
 // Define separate interfaces for each query variant
 export interface QueryWithoutPopulate<T, Relations, DB> {
 	where?: WhereClause<T, Relations, DB>;
-	sort?: SortConfig<T, Relations, {}, DB>;
+	sort?: SortConfig<T, Relations, Record<string, never>, DB>;
 	select?: SelectConfig<T, Relations, DB>;
 	limit?: number;
 	offset?: number;
@@ -69,7 +69,7 @@ export interface SmartCollectionWithOverloads<
 	query<S extends SelectConfig<T, Relations, DB>>(config: {
 		select: S;
 		where?: WhereClause<T, Relations, DB>;
-		sort?: SortConfig<T, Relations, {}, DB>;
+		sort?: SortConfig<T, Relations, Record<string, never>, DB>;
 		limit?: number;
 		offset?: number;
 	}): AsyncIterable<ApplySelectConfig<T, S, Relations, DB>>;
@@ -77,7 +77,7 @@ export interface SmartCollectionWithOverloads<
 	// Overload 4: Query without populate or select
 	query(config?: {
 		where?: WhereClause<T, Relations, DB>;
-		sort?: SortConfig<T, Relations, {}, DB>;
+		sort?: SortConfig<T, Relations, Record<string, never>, DB>;
 		limit?: number;
 		offset?: number;
 	}): AsyncIterable<T>;

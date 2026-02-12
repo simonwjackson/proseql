@@ -7,12 +7,18 @@
  * and emits the new result set.
  */
 
-import { Duration, Effect, ExecutionStrategy, Exit, PubSub, Ref, Scope, Stream } from "effect";
-import type { ChangeEvent } from "../types/reactive-types.js";
 import {
-	evaluateQuery,
-	type EvaluateQueryConfig,
-} from "./evaluate-query.js";
+	Duration,
+	Effect,
+	ExecutionStrategy,
+	Exit,
+	PubSub,
+	type Ref,
+	Scope,
+	Stream,
+} from "effect";
+import type { ChangeEvent } from "../types/reactive-types.js";
+import { type EvaluateQueryConfig, evaluateQuery } from "./evaluate-query.js";
 
 /**
  * Configuration for the watch query.
@@ -122,7 +128,9 @@ export const watch = <T extends HasId>(
 
 		// Fork a child scope that will manage the subscription lifetime.
 		// When this child scope closes, the subscription will be cleaned up.
-		const subscriptionScope = yield* parentScope.fork(ExecutionStrategy.sequential);
+		const subscriptionScope = yield* parentScope.fork(
+			ExecutionStrategy.sequential,
+		);
 
 		// Use Effect.acquireRelease to manage the subscription:
 		// - Acquire: Subscribe to the PubSub (returns a Dequeue of ChangeEvents)
@@ -135,11 +143,11 @@ export const watch = <T extends HasId>(
 			// PubSub.subscribe returns Effect<Dequeue, never, Scope.Scope>
 			// We provide the subscription scope so cleanup is tied to it
 			PubSub.subscribe(pubsub).pipe(
-				Effect.provideService(Scope.Scope, subscriptionScope)
+				Effect.provideService(Scope.Scope, subscriptionScope),
 			),
 			// Release: Close the child scope to trigger subscription cleanup
 			// This runs when the enclosing scope closes
-			() => subscriptionScope.close(Exit.void)
+			() => subscriptionScope.close(Exit.void),
 		);
 
 		// Create a stream from the subscription queue
@@ -178,7 +186,10 @@ export const watch = <T extends HasId>(
 		// This prevents re-emitting the same result set when a change event occurs
 		// but doesn't actually affect the query results (e.g., inserting an entity
 		// that doesn't match the where clause).
-		const deduplicatedStream = Stream.changesWith(combinedStream, resultsAreEqual);
+		const deduplicatedStream = Stream.changesWith(
+			combinedStream,
+			resultsAreEqual,
+		);
 
 		// Ensure the subscription is cleaned up when the stream ends.
 		// This handles the case where the stream is interrupted or completed
@@ -186,7 +197,7 @@ export const watch = <T extends HasId>(
 		// Closing the subscription scope triggers the acquireRelease cleanup.
 		const resultStream = Stream.ensuring(
 			deduplicatedStream,
-			subscriptionScope.close(Exit.void)
+			subscriptionScope.close(Exit.void),
 		);
 
 		return resultStream;

@@ -8,10 +8,10 @@
  * - Emits null when the entity is deleted (task 9.2)
  */
 
-import { describe, expect, it } from "vitest";
 import { Effect, Fiber, PubSub, Ref, Stream } from "effect";
-import { watchById } from "../src/reactive/watch-by-id.js";
+import { describe, expect, it } from "vitest";
 import { createChangePubSub } from "../src/reactive/change-pubsub.js";
+import { watchById } from "../src/reactive/watch-by-id.js";
 import type { ChangeEvent } from "../src/types/reactive-types.js";
 
 interface Book {

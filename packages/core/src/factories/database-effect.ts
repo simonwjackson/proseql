@@ -16,10 +16,9 @@ import {
 	PubSub,
 	Ref,
 	type Schema,
-	Scope,
+	type Scope,
 	Stream,
 } from "effect";
-import type { ChangeEvent } from "../types/reactive-types.js";
 import {
 	type DuplicateKeyError,
 	type ForeignKeyError,
@@ -87,6 +86,8 @@ import type {
 	ProseQLPlugin,
 } from "../plugins/plugin-types.js";
 import { validateIdGeneratorReferences } from "../plugins/plugin-validation.js";
+import { watch } from "../reactive/watch.js";
+import { watchById } from "../reactive/watch-by-id.js";
 import {
 	type FormatCodec,
 	mergeSerializerWithPluginCodecs,
@@ -99,8 +100,6 @@ import {
 } from "../storage/persistence-effect.js";
 import { StorageAdapter } from "../storage/storage-service.js";
 import { $transaction as $transactionImpl } from "../transactions/transaction.js";
-import { watch } from "../reactive/watch.js";
-import { watchById } from "../reactive/watch-by-id.js";
 import {
 	type AggregateConfig,
 	type AggregateResult,
@@ -136,6 +135,7 @@ import type {
 	DatabaseConfig,
 } from "../types/database-config-types.js";
 import type { CollectionIndexes } from "../types/index-types.js";
+import type { ChangeEvent } from "../types/reactive-types.js";
 import type { SearchIndexMap } from "../types/search-types.js";
 import type { RelationshipDef } from "../types/types.js";
 

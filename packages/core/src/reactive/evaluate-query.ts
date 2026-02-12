@@ -9,9 +9,9 @@
 
 import { Effect, Ref, Stream } from "effect";
 import { applyFilter } from "../operations/query/filter-stream.js";
-import { applySort } from "../operations/query/sort-stream.js";
-import { applySelect } from "../operations/query/select-stream.js";
 import { applyPagination } from "../operations/query/paginate-stream.js";
+import { applySelect } from "../operations/query/select-stream.js";
+import { applySort } from "../operations/query/sort-stream.js";
 
 /**
  * Configuration for query evaluation.

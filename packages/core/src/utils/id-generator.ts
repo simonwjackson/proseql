@@ -189,16 +189,20 @@ export function createIdGenerator(
 			return generateUUID;
 		case "ulid":
 			return generateULID;
-		case "prefixed":
+		case "prefixed": {
 			if (!config.prefix) {
 				throw new Error("Prefix required for prefixed ID strategy");
 			}
-			return () => generatePrefixedId(config.prefix!);
-		case "typed":
+			const prefix = config.prefix;
+			return () => generatePrefixedId(prefix);
+		}
+		case "typed": {
 			if (!config.type) {
 				throw new Error("Type required for typed ID strategy");
 			}
-			return () => generateTypedId(config.type!);
+			const type = config.type;
+			return () => generateTypedId(type);
+		}
 		default:
 			throw new Error(
 				`Unknown ID strategy: ${(config as IdGeneratorConfig).strategy}`,

@@ -340,13 +340,14 @@ export const update =
 			// Validate immutable fields
 			const immutableCheck = validateImmutableFields(sanitizedUpdates);
 			if (!immutableCheck.valid) {
+				const fieldName = immutableCheck.field ?? "unknown";
 				return yield* Effect.fail(
 					new ValidationError({
-						message: `Cannot update immutable field: ${immutableCheck.field}`,
+						message: `Cannot update immutable field: ${fieldName}`,
 						issues: [
 							{
-								field: immutableCheck.field!,
-								message: `Cannot update immutable field: ${immutableCheck.field}`,
+								field: fieldName,
+								message: `Cannot update immutable field: ${fieldName}`,
 							},
 						],
 					}),
@@ -516,13 +517,14 @@ export const updateMany =
 			// Validate immutable fields
 			const immutableCheck = validateImmutableFields(sanitizedUpdates);
 			if (!immutableCheck.valid) {
+				const fieldName = immutableCheck.field ?? "unknown";
 				return yield* Effect.fail(
 					new ValidationError({
-						message: `Cannot update immutable field: ${immutableCheck.field}`,
+						message: `Cannot update immutable field: ${fieldName}`,
 						issues: [
 							{
-								field: immutableCheck.field!,
-								message: `Cannot update immutable field: ${immutableCheck.field}`,
+								field: fieldName,
+								message: `Cannot update immutable field: ${fieldName}`,
 							},
 						],
 					}),

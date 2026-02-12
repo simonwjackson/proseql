@@ -107,7 +107,7 @@ export type FindRelationsByCollection<
 	DB,
 	CollectionName extends keyof DB,
 > = DB[CollectionName] extends SmartCollection<
-	infer Entity,
+	infer _Entity,
 	infer Relations,
 	DB
 >
@@ -118,8 +118,10 @@ export type FindRelationsByCollection<
 export type FindRelationsForEntity<_DB, _T> = Record<string, never>; // Simplified for now
 
 // Helper type to extract the target collection from a relationship
-type GetRelationshipTargetCollection<R> =
-	R extends RelationshipDef<infer _, infer __, infer Target> ? Target : never;
+type _GetRelationshipTargetCollection<R> =
+	R extends RelationshipDef<infer _Entity, infer _Type, infer Target>
+		? Target
+		: never;
 
 // Helper to extract nested object field paths (for dot notation) - limited to 2 levels deep to avoid infinite recursion
 type ExtractNestedPaths<T> = {
@@ -188,7 +190,7 @@ export type WhereClause<T, Relations, DB> = {
 
 // Helper type for nested object selection - allows selection on nested object properties
 // Simplified version to avoid infinite recursion
-type NestedObjectSelectConfig<T> = {
+type _NestedObjectSelectConfig<T> = {
 	[K in keyof T]?: true;
 };
 
@@ -308,8 +310,8 @@ export type ApplyObjectSelectWithPopulation<T, Config, Relations, DB> =
 export type ApplySelectConfig<
 	T,
 	Config,
-	Relations = {},
-	DB = {},
+	Relations = Record<string, never>,
+	DB = Record<string, never>,
 > = Config extends ReadonlyArray<keyof T>
 	? ApplyArraySelectConfig<T, Config>
 	: Config extends Record<string, unknown>
@@ -588,7 +590,7 @@ export type GetEntityFromCollection<
 	CollectionName extends keyof DB,
 > = DB[CollectionName] extends SmartCollection<
 	infer Entity,
-	infer Relations,
+	infer _Relations,
 	DB
 >
 	? Entity
@@ -694,7 +696,7 @@ export type QueryConfig<T, Relations, DB> =
 	// Offset pagination without populate
 	| {
 			where?: WhereClause<T, Relations, DB>;
-			sort?: SortConfig<T, Relations, {}, DB>;
+			sort?: SortConfig<T, Relations, Record<string, never>, DB>;
 			select?: SelectConfig<T, Relations, DB>;
 			limit?: number;
 			offset?: number;
@@ -717,7 +719,7 @@ export type QueryConfig<T, Relations, DB> =
 	| {
 			cursor: CursorConfig;
 			where?: WhereClause<T, Relations, DB>;
-			sort?: SortConfig<T, Relations, {}, DB>;
+			sort?: SortConfig<T, Relations, Record<string, never>, DB>;
 			select?: SelectConfig<T, Relations, DB>;
 	  }
 	// Cursor pagination with populate
@@ -888,7 +890,7 @@ export type TypedPopulate<
 	DB,
 	Collection extends keyof DB,
 > = DB[Collection] extends SmartCollection<
-	infer T,
+	infer _T,
 	infer Relations,
 	infer DBType
 >

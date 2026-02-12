@@ -5,9 +5,9 @@
  * Emits the entity when it exists, or null when it's deleted or doesn't exist.
  */
 
-import { Effect, PubSub, Ref, Stream } from "effect";
+import { Effect, type PubSub, type Ref, Stream } from "effect";
 import type { ChangeEvent } from "../types/reactive-types.js";
-import { watch, type WatchQueryConfig } from "./watch.js";
+import { type WatchQueryConfig, watch } from "./watch.js";
 
 /**
  * Entity constraint: must have a readonly string `id` field.
@@ -55,7 +55,11 @@ export const watchById = <T extends HasId>(
 	collectionName: string,
 	id: string,
 	config: Pick<WatchQueryConfig, "debounceMs"> = {},
-): Effect.Effect<Stream.Stream<T | null>, never, import("effect").Scope.Scope> =>
+): Effect.Effect<
+	Stream.Stream<T | null>,
+	never,
+	import("effect").Scope.Scope
+> =>
 	Effect.gen(function* () {
 		// Use watch() with a where clause filtering by ID
 		const watchStream = yield* watch(pubsub, ref, collectionName, {

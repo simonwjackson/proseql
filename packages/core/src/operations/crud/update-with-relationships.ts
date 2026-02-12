@@ -654,8 +654,11 @@ export const updateWithRelationships =
 
 				if (!targetId) continue;
 
+				// Capture targetId for closure (TypeScript narrowing)
+				const validTargetId = targetId;
+
 				const targetMap = yield* Ref.get(targetRef);
-				const targetEntity = targetMap.get(targetId);
+				const targetEntity = targetMap.get(validTargetId);
 				if (!targetEntity) continue;
 
 				const updateData = op.data as Record<string, unknown>;
@@ -681,7 +684,7 @@ export const updateWithRelationships =
 
 				yield* Ref.update(targetRef, (map) => {
 					const next = new Map(map);
-					next.set(targetId!, validated);
+					next.set(validTargetId, validated);
 					return next;
 				});
 			}
@@ -706,17 +709,20 @@ export const updateWithRelationships =
 
 				if (!op.targetId) continue;
 
+				// Capture targetId for closure (TypeScript narrowing)
+				const deleteTargetId = op.targetId;
+
 				const targetRef = stateRefs[op.targetCollection];
 				if (!targetRef) continue;
 
 				yield* Ref.update(targetRef, (map) => {
-					const target = map.get(op.targetId!);
+					const target = map.get(deleteTargetId);
 					if (!target) return map;
 					if ((target as Record<string, unknown>)[foreignKey] !== id)
 						return map;
 
 					const next = new Map(map);
-					next.set(op.targetId!, {
+					next.set(deleteTargetId, {
 						...target,
 						[foreignKey]: null,
 						updatedAt: now,

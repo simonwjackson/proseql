@@ -6,7 +6,6 @@
  * proper integration with CRUD operations that trigger change events.
  */
 
-import { describe, expect, it } from "vitest";
 import {
 	Chunk,
 	Effect,
@@ -17,6 +16,7 @@ import {
 	Scope,
 	Stream,
 } from "effect";
+import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../src/factories/database-effect.js";
 
 // ============================================================================
@@ -125,7 +125,7 @@ describe("reactive queries - basic watch", () => {
 	describe("test helpers setup (12.1)", () => {
 		it("creates a database with watch methods on collections", async () => {
 			await runWithDb((db) =>
-				Effect.gen(function* () {
+				Effect.sync(() => {
 					// Verify watch methods exist
 					expect(typeof db.books.watch).toBe("function");
 					expect(typeof db.books.watchById).toBe("function");
@@ -160,7 +160,9 @@ describe("reactive queries - basic watch", () => {
 
 					// Take just the initial emission
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(results)[0] as ReadonlyArray<Book>;
+					const emission = Chunk.toReadonlyArray(
+						results,
+					)[0] as ReadonlyArray<Book>;
 
 					// Should emit all books immediately
 					expect(emission).toHaveLength(3);
@@ -179,7 +181,9 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(results)[0] as ReadonlyArray<Book>;
+					const emission = Chunk.toReadonlyArray(
+						results,
+					)[0] as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(0);
 				}),
@@ -196,7 +200,9 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(results)[0] as ReadonlyArray<Book>;
+					const emission = Chunk.toReadonlyArray(
+						results,
+					)[0] as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(2);
 					expect(emission.every((b) => b.genre === "sci-fi")).toBe(true);
@@ -212,7 +218,9 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(results)[0] as ReadonlyArray<Book>;
+					const emission = Chunk.toReadonlyArray(
+						results,
+					)[0] as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(3);
 					expect(emission[0].year).toBe(1937);
@@ -251,7 +259,9 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(results)[0] as ReadonlyArray<Book>;
+					const emission = Chunk.toReadonlyArray(
+						results,
+					)[0] as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(2);
 					expect(emission[0].title).toBe("The Hobbit");
@@ -270,7 +280,9 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(results)[0] as ReadonlyArray<Book>;
+					const emission = Chunk.toReadonlyArray(
+						results,
+					)[0] as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(2);
 					expect(emission[0].title).toBe("Dune");
@@ -382,7 +394,9 @@ describe("reactive queries - basic watch", () => {
 				Effect.gen(function* () {
 					// Create two independent watch subscriptions
 					const stream1 = yield* db.books.watch({ where: { genre: "sci-fi" } });
-					const stream2 = yield* db.books.watch({ where: { genre: "fantasy" } });
+					const stream2 = yield* db.books.watch({
+						where: { genre: "fantasy" },
+					});
 
 					// Take initial emissions from both
 					const fiber1 = yield* Stream.take(stream1, 1).pipe(
@@ -397,8 +411,12 @@ describe("reactive queries - basic watch", () => {
 					const results1 = yield* Fiber.join(fiber1);
 					const results2 = yield* Fiber.join(fiber2);
 
-					const emission1 = Chunk.toReadonlyArray(results1)[0] as ReadonlyArray<Book>;
-					const emission2 = Chunk.toReadonlyArray(results2)[0] as ReadonlyArray<Book>;
+					const emission1 = Chunk.toReadonlyArray(
+						results1,
+					)[0] as ReadonlyArray<Book>;
+					const emission2 = Chunk.toReadonlyArray(
+						results2,
+					)[0] as ReadonlyArray<Book>;
 
 					// Each subscription should have its own filtered results
 					expect(emission1).toHaveLength(2);
@@ -467,7 +485,9 @@ describe("reactive queries - mutation triggers", () => {
 						"Dune",
 						"Neuromancer",
 					]);
-					expect(emissions[1].find((b) => b.title === "Foundation")).toBeDefined();
+					expect(
+						emissions[1].find((b) => b.title === "Foundation"),
+					).toBeDefined();
 				}),
 			);
 		});
@@ -636,10 +656,9 @@ describe("reactive queries - mutation triggers", () => {
 					yield* Effect.sleep("20 millis");
 
 					// Update all sci-fi books' years using predicate and single update
-					yield* db.books.updateMany(
-						(book: Book) => book.genre === "sci-fi",
-						{ year: 2000 },
-					);
+					yield* db.books.updateMany((book: Book) => book.genre === "sci-fi", {
+						year: 2000,
+					});
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
@@ -871,10 +890,9 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Change all books from 1970 or later to horror genre
 					// This should remove Neuromancer (1984) from the sci-fi results
-					yield* db.books.updateMany(
-						(book: Book) => book.year >= 1970,
-						{ genre: "horror" },
-					);
+					yield* db.books.updateMany((book: Book) => book.year >= 1970, {
+						genre: "horror",
+					});
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
@@ -1593,12 +1611,10 @@ describe("reactive queries - transactions", () => {
 					const authorEmissions: Array<ReadonlyArray<Author>> = [];
 
 					// Fork watchers for both collections
-					const booksFiber = yield* Stream.runForEach(
-						booksStream,
-						(emission) =>
-							Effect.sync(() => {
-								bookEmissions.push(emission);
-							}),
+					const booksFiber = yield* Stream.runForEach(booksStream, (emission) =>
+						Effect.sync(() => {
+							bookEmissions.push(emission);
+						}),
 					).pipe(
 						Effect.timeoutFail({
 							duration: "200 millis",
@@ -2076,12 +2092,10 @@ describe("reactive queries - transactions", () => {
 					const authorEmissions: Array<ReadonlyArray<Author>> = [];
 
 					// Fork watchers for both collections
-					const booksFiber = yield* Stream.runForEach(
-						booksStream,
-						(emission) =>
-							Effect.sync(() => {
-								bookEmissions.push(emission);
-							}),
+					const booksFiber = yield* Stream.runForEach(booksStream, (emission) =>
+						Effect.sync(() => {
+							bookEmissions.push(emission);
+						}),
 					).pipe(
 						Effect.timeoutFail({
 							duration: "200 millis",
@@ -2130,7 +2144,9 @@ describe("reactive queries - transactions", () => {
 								yield* Effect.sleep("20 millis");
 
 								// More mutations
-								yield* tx.books.update("1", { title: "Dune (Special Edition)" });
+								yield* tx.books.update("1", {
+									title: "Dune (Special Edition)",
+								});
 								yield* tx.authors.delete("a1"); // Delete Frank Herbert
 
 								yield* Effect.sleep("20 millis");
@@ -2165,14 +2181,14 @@ describe("reactive queries - transactions", () => {
 // ============================================================================
 
 import { Layer } from "effect";
+import { StorageError } from "../src/errors/storage-errors.js";
+import { createPersistentEffectDatabase } from "../src/factories/database-effect.js";
 import { jsonCodec } from "../src/serializers/codecs/json.js";
 import { makeSerializerLayer } from "../src/serializers/format-codec.js";
 import {
 	StorageAdapter,
 	type StorageAdapterShape,
 } from "../src/storage/storage-service.js";
-import { StorageError } from "../src/errors/storage-errors.js";
-import { createPersistentEffectDatabase } from "../src/factories/database-effect.js";
 
 /**
  * Create a test storage layer with controllable file watchers.
@@ -2360,7 +2376,9 @@ describe("reactive queries - file changes", () => {
 				]);
 			});
 
-			await Effect.runPromise(program.pipe(Effect.provide(layer), Effect.scoped));
+			await Effect.runPromise(
+				program.pipe(Effect.provide(layer), Effect.scoped),
+			);
 		});
 
 		it("file reload with modified entity triggers watch emission", async () => {
@@ -2455,7 +2473,9 @@ describe("reactive queries - file changes", () => {
 				expect(emissions[1][0].year).toBe(1969);
 			});
 
-			await Effect.runPromise(program.pipe(Effect.provide(layer), Effect.scoped));
+			await Effect.runPromise(
+				program.pipe(Effect.provide(layer), Effect.scoped),
+			);
 		});
 
 		it("file reload with entity deletion triggers watch emission", async () => {
@@ -2558,7 +2578,9 @@ describe("reactive queries - file changes", () => {
 				expect(emissions[1][0].title).toBe("Neuromancer");
 			});
 
-			await Effect.runPromise(program.pipe(Effect.provide(layer), Effect.scoped));
+			await Effect.runPromise(
+				program.pipe(Effect.provide(layer), Effect.scoped),
+			);
 		});
 	});
 
@@ -2657,7 +2679,9 @@ describe("reactive queries - file changes", () => {
 				]);
 			});
 
-			await Effect.runPromise(program.pipe(Effect.provide(layer), Effect.scoped));
+			await Effect.runPromise(
+				program.pipe(Effect.provide(layer), Effect.scoped),
+			);
 		});
 
 		it("file reload with reordered but equivalent content does not emit", async () => {
@@ -2766,7 +2790,9 @@ describe("reactive queries - file changes", () => {
 				]);
 			});
 
-			await Effect.runPromise(program.pipe(Effect.provide(layer), Effect.scoped));
+			await Effect.runPromise(
+				program.pipe(Effect.provide(layer), Effect.scoped),
+			);
 		});
 
 		it("file reload with non-matching change does not emit for filtered watch", async () => {
@@ -2873,7 +2899,9 @@ describe("reactive queries - file changes", () => {
 				expect(emissions[0][0].title).toBe("Dune");
 			});
 
-			await Effect.runPromise(program.pipe(Effect.provide(layer), Effect.scoped));
+			await Effect.runPromise(
+				program.pipe(Effect.provide(layer), Effect.scoped),
+			);
 		});
 
 		it("multiple file reloads with unchanged content emit only once", async () => {
@@ -2954,7 +2982,9 @@ describe("reactive queries - file changes", () => {
 				expect(emissions[0][0].title).toBe("Dune");
 			});
 
-			await Effect.runPromise(program.pipe(Effect.provide(layer), Effect.scoped));
+			await Effect.runPromise(
+				program.pipe(Effect.provide(layer), Effect.scoped),
+			);
 		});
 	});
 });
@@ -3160,9 +3190,7 @@ describe("reactive queries - debounce", () => {
 					expect(emissions[1]).toHaveLength(21);
 
 					// Verify Neuromancer is gone
-					expect(
-						emissions[1].find((b) => b.id === "2"),
-					).toBeUndefined();
+					expect(emissions[1].find((b) => b.id === "2")).toBeUndefined();
 
 					// Verify Dune has the final year
 					const dune = emissions[1].find((b) => b.id === "1");
@@ -3170,7 +3198,9 @@ describe("reactive queries - debounce", () => {
 
 					// Verify new books are present
 					expect(emissions[1].some((b) => b.title === "New Book 0")).toBe(true);
-					expect(emissions[1].some((b) => b.title === "New Book 19")).toBe(true);
+					expect(emissions[1].some((b) => b.title === "New Book 19")).toBe(
+						true,
+					);
 				}),
 			);
 		});
@@ -3995,7 +4025,9 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 					expect(outerScopeEmissions).toHaveLength(3);
 
 					// Inner scope subscription should be cleaned up (no new emissions)
-					expect(innerScopeEmissions).toHaveLength(innerEmissionsBeforeMutation);
+					expect(innerScopeEmissions).toHaveLength(
+						innerEmissionsBeforeMutation,
+					);
 
 					// Cleanup
 					yield* Scope.close(outerScope, Exit.void);
@@ -4072,7 +4104,10 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 					expect(emissions[0]?.year).toBe(1965);
 
 					// Update the watched entity
-					yield* db.books.update("1", { year: 1966, title: "Dune (Special Edition)" });
+					yield* db.books.update("1", {
+						year: 1966,
+						title: "Dune (Special Edition)",
+					});
 
 					// Wait for re-emission
 					yield* Effect.sleep("50 millis");

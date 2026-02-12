@@ -140,8 +140,8 @@ export const create =
 			if (inputId) {
 				id = inputId;
 			} else if (idGeneratorName && idGeneratorMap?.has(idGeneratorName)) {
-				const generator = idGeneratorMap.get(idGeneratorName)!;
-				id = generator.generate();
+				const generator = idGeneratorMap.get(idGeneratorName);
+				id = generator ? generator.generate() : generateId();
 			} else {
 				id = generateId();
 			}
@@ -306,8 +306,8 @@ export const createMany =
 				if (inputId) {
 					id = inputId;
 				} else if (idGeneratorName && idGeneratorMap?.has(idGeneratorName)) {
-					const generator = idGeneratorMap.get(idGeneratorName)!;
-					id = generator.generate();
+					const generator = idGeneratorMap.get(idGeneratorName);
+					id = generator ? generator.generate() : generateId();
 				} else {
 					id = generateId();
 				}
@@ -430,7 +430,8 @@ export const createMany =
 				const finalEntities: T[] = [];
 
 				for (let i = 0; i < uniquePassedEntities.length; i++) {
-					const entity = uniquePassedEntities[i]!;
+					const entity = uniquePassedEntities[i];
+					if (!entity) continue;
 					const fkResult = yield* validateForeignKeysEffect(
 						entity,
 						collectionName,

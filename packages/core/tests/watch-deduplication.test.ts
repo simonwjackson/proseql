@@ -5,10 +5,10 @@
  * spurious emissions when a change event occurs but doesn't affect the query results.
  */
 
-import { describe, expect, it } from "vitest";
 import { Effect, Fiber, PubSub, Ref, Stream } from "effect";
-import { watch } from "../src/reactive/watch.js";
+import { describe, expect, it } from "vitest";
 import { createChangePubSub } from "../src/reactive/change-pubsub.js";
+import { watch } from "../src/reactive/watch.js";
 import type { ChangeEvent } from "../src/types/reactive-types.js";
 
 interface Book {
@@ -80,7 +80,8 @@ describe("watch() deduplication", () => {
 				Stream.runCollect,
 				Effect.timeoutFail({
 					duration: "200 millis",
-					onTimeout: () => new Error("timeout - only got 1 emission as expected"),
+					onTimeout: () =>
+						new Error("timeout - only got 1 emission as expected"),
 				}),
 				Effect.either,
 				Effect.fork,
@@ -155,7 +156,9 @@ describe("watch() deduplication", () => {
 			yield* publishEvent(pubsub, "books", "create");
 
 			const results = yield* Fiber.join(collectedFiber);
-			const emissions = Array.from(results) as ReadonlyArray<ReadonlyArray<Book>>;
+			const emissions = Array.from(results) as ReadonlyArray<
+				ReadonlyArray<Book>
+			>;
 
 			// First emission: 2 sci-fi books
 			expect(emissions[0]).toHaveLength(2);
@@ -302,7 +305,9 @@ describe("watch() deduplication", () => {
 			yield* publishEvent(pubsub, "books", "update");
 
 			const results = yield* Fiber.join(collectedFiber);
-			const emissions = Array.from(results) as ReadonlyArray<ReadonlyArray<Book>>;
+			const emissions = Array.from(results) as ReadonlyArray<
+				ReadonlyArray<Book>
+			>;
 
 			// Both emissions have 2 books but content differs
 			expect(emissions[0]).toHaveLength(2);

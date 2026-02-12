@@ -23,7 +23,7 @@ const CompanySchema = Schema.Struct({
 });
 
 type User = typeof UserSchema.Type;
-type Company = typeof CompanySchema.Type;
+type _Company = typeof CompanySchema.Type;
 
 const config = {
 	users: {

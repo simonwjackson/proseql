@@ -190,7 +190,7 @@ describe("Persistence System (Effect-based)", () => {
 		});
 
 		it("should persist and reload data correctly (round-trip)", async () => {
-			const { layer } = makeTestEnv();
+			const { store, layer } = makeTestEnv();
 
 			const result = await Effect.runPromise(
 				Effect.provide(
@@ -373,7 +373,7 @@ describe("Persistence System (Effect-based)", () => {
 		});
 
 		it("should load multiple collections from shared file", async () => {
-			const { layer } = makeTestEnv();
+			const { store, layer } = makeTestEnv();
 
 			const result = await Effect.runPromise(
 				Effect.provide(
@@ -604,7 +604,7 @@ describe("Persistence System (Effect-based)", () => {
 		});
 
 		it("should report pending count correctly", async () => {
-			const { layer } = makeTestEnv();
+			const { store, layer } = makeTestEnv();
 
 			await Effect.runPromise(
 				Effect.provide(
@@ -797,7 +797,7 @@ describe("Persistence System (Effect-based)", () => {
 		});
 
 		it("should return empty map when file does not exist", async () => {
-			const { layer } = makeTestEnv();
+			const { store, layer } = makeTestEnv();
 
 			const result = await Effect.runPromise(
 				Effect.provide(

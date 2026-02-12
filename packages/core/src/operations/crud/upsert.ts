@@ -383,7 +383,8 @@ export const upsertMany =
 			}> = [];
 
 			for (let i = 0; i < inputs.length; i++) {
-				const input = inputs[i]!;
+				const input = inputs[i];
+				if (!input) continue;
 				const where = input.where as Record<string, unknown>;
 				const existing = findByWhere(currentMap, where);
 

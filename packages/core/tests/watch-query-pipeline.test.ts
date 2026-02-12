@@ -5,10 +5,10 @@
  * applied correctly on both initial emission and re-evaluation after changes.
  */
 
-import { describe, expect, it } from "vitest";
 import { Effect, Fiber, PubSub, Ref, Stream } from "effect";
-import { watch, type WatchQueryConfig } from "../src/reactive/watch.js";
+import { describe, expect, it } from "vitest";
 import { createChangePubSub } from "../src/reactive/change-pubsub.js";
+import { watch } from "../src/reactive/watch.js";
 import type { ChangeEvent } from "../src/types/reactive-types.js";
 
 interface Book {
@@ -168,7 +168,10 @@ describe("watch() query pipeline on re-evaluation", () => {
 
 			// Should only have title and author fields
 			expect(firstEmission).toHaveLength(1);
-			expect(firstEmission[0]).toEqual({ title: "Dune", author: "Frank Herbert" });
+			expect(firstEmission[0]).toEqual({
+				title: "Dune",
+				author: "Frank Herbert",
+			});
 			expect(firstEmission[0]).not.toHaveProperty("year");
 			expect(firstEmission[0]).not.toHaveProperty("genre");
 		});
@@ -238,7 +241,9 @@ describe("watch() query pipeline on re-evaluation", () => {
 			yield* publishEvent(pubsub, "books", "create");
 
 			const results = yield* Fiber.join(collectedFiber);
-			const emissions = Array.from(results) as ReadonlyArray<ReadonlyArray<Book>>;
+			const emissions = Array.from(results) as ReadonlyArray<
+				ReadonlyArray<Book>
+			>;
 
 			// First emission: 3 sci-fi books
 			expect(emissions[0]).toHaveLength(3);
@@ -284,7 +289,9 @@ describe("watch() query pipeline on re-evaluation", () => {
 			yield* publishEvent(pubsub, "books", "create");
 
 			const results = yield* Fiber.join(collectedFiber);
-			const emissions = Array.from(results) as ReadonlyArray<ReadonlyArray<Book>>;
+			const emissions = Array.from(results) as ReadonlyArray<
+				ReadonlyArray<Book>
+			>;
 
 			// Second emission should have the new book sorted correctly
 			const secondEmission = emissions[1];
@@ -331,7 +338,9 @@ describe("watch() query pipeline on re-evaluation", () => {
 			yield* publishEvent(pubsub, "books", "create");
 
 			const results = yield* Fiber.join(collectedFiber);
-			const emissions = Array.from(results) as ReadonlyArray<ReadonlyArray<Book>>;
+			const emissions = Array.from(results) as ReadonlyArray<
+				ReadonlyArray<Book>
+			>;
 
 			// First emission: 1937, 1949
 			expect(emissions[0]).toHaveLength(2);
@@ -541,7 +550,9 @@ describe("watch() query pipeline on re-evaluation", () => {
 			yield* Effect.sleep("100 millis");
 
 			const results = yield* Fiber.join(collectedFiber);
-			const emissions = Array.from(results) as ReadonlyArray<ReadonlyArray<Book>>;
+			const emissions = Array.from(results) as ReadonlyArray<
+				ReadonlyArray<Book>
+			>;
 
 			// Should have exactly 2 emissions: initial + one coalesced re-evaluation
 			expect(emissions).toHaveLength(2);

@@ -5,7 +5,7 @@
  * to subscribers - dropping events would break subscription correctness.
  */
 
-import { Effect, PubSub } from "effect";
+import { type Effect, PubSub } from "effect";
 import type { ChangeEvent } from "../types/reactive-types.js";
 
 /**

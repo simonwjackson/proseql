@@ -209,7 +209,7 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 						? new MigrationError({
 								collection: collectionNameForError,
 								fromVersion: fromVersionForError,
-								toVersion: targetVersion!,
+								toVersion: targetVersion ?? 0,
 								step: -1,
 								reason: "post-migration-validation-failed",
 								message: `Post-migration validation failed for entity '${id}': ${parseError.message}`,
@@ -500,7 +500,7 @@ export const loadCollectionsFromFile = (
 							? new MigrationError({
 									collection: col.name,
 									fromVersion: fileVersion,
-									toVersion: col.version!,
+									toVersion: col.version ?? 0,
 									step: -1,
 									reason: "post-migration-validation-failed",
 									message: `Post-migration validation failed for entity '${id}': ${parseError.message}`,
