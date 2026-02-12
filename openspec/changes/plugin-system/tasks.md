@@ -79,7 +79,7 @@
 
 - [x] 12.1 Test custom `$regex` operator: `where: { title: { $regex: "^The.*" } }` matches correctly
 - [x] 12.2 Test custom operator with type constraint: operator declared for `"string"` only, applied to string field works, applied to number field is ignored
-- [ ] 12.3 Test multiple custom operators from different plugins work in same query
+- [x] 12.3 Test multiple custom operators from different plugins work in same query
 - [ ] 12.4 Test custom operator combined with built-in operators in same where clause
 
 ## 13. Tests — Custom ID Generators

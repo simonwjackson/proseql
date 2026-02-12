@@ -1331,5 +1331,116 @@ describe("Plugin System", () => {
 			// All 3 books are returned
 			expect(boolOnString.length).toBe(3);
 		});
+
+		it("should support multiple custom operators from different plugins in same query", async () => {
+			// Task 12.3: Test multiple custom operators from different plugins work in same query
+			//
+			// We register two plugins, each providing a different custom operator:
+			// - Plugin 1: $regex operator (string matching)
+			// - Plugin 2: $between operator (numeric range)
+			//
+			// Then we use both operators in the same query to verify they work together.
+
+			const regexPlugin = createOperatorPlugin("regex-plugin", regexOperator);
+			const betweenPlugin = createOperatorPlugin("between-plugin", betweenOperator);
+
+			const db = await createDatabaseWithPlugins([regexPlugin, betweenPlugin]);
+
+			// Test 1: Use both custom operators in the same where clause
+			// $regex on title (string field) AND $between on year (number field)
+			// Our test data:
+			// - "The Great Gatsby", 1925, fiction
+			// - "1984", 1949, dystopian
+			// - "Dune", 1965, sci-fi
+			//
+			// Query: title contains "e" AND year between 1940 and 1970
+			// Expected: "1984" (year 1949, has 'e' in... wait no, 1984 doesn't have 'e')
+			// Let's re-check: "The Great Gatsby" has 'e', "Dune" has 'e', "1984" has no 'e'
+			// So: title contains 'e' matches Gatsby and Dune
+			// year between 1940-1970 matches 1984 (1949) and Dune (1965)
+			// Intersection: Dune (1965, contains 'e')
+
+			const combinedQuery = await db.books
+				.query({
+					where: {
+						title: { $regex: "e" },
+						year: { $between: [1940, 1970] },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(combinedQuery.length).toBe(1);
+			expect(combinedQuery[0].title).toBe("Dune");
+			expect(combinedQuery[0].year).toBe(1965);
+
+			// Test 2: Use both operators but with no results matching both
+			// $regex for titles starting with "The" AND year between 1960-1980
+			// "The Great Gatsby" has year 1925 (outside range)
+			// No books match both conditions
+
+			const noMatchQuery = await db.books
+				.query({
+					where: {
+						title: { $regex: "^The" },
+						year: { $between: [1960, 1980] },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(noMatchQuery.length).toBe(0);
+
+			// Test 3: Each operator alone returns multiple results, combined returns subset
+			// $regex for any title (matches all) AND $between for all years (matches all)
+			// Should return all books
+
+			const allMatchQuery = await db.books
+				.query({
+					where: {
+						title: { $regex: ".*" },
+						year: { $between: [1900, 2000] },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(allMatchQuery.length).toBe(3);
+
+			// Test 4: Register a third operator and use all three in one query
+			const containsDigitOperator: CustomOperator = {
+				name: "$hasDigit",
+				types: ["string"],
+				evaluate: (fieldValue, _operand) => {
+					if (typeof fieldValue !== "string") return false;
+					return /\d/.test(fieldValue);
+				},
+			};
+
+			const digitPlugin = createOperatorPlugin("digit-plugin", containsDigitOperator);
+
+			const db2 = await createDatabaseWithPlugins([
+				regexPlugin,
+				betweenPlugin,
+				digitPlugin,
+			]);
+
+			// Query using all three custom operators:
+			// $regex on genre, $between on year, $hasDigit on title
+			// Only "1984" has digits in the title
+			// Filter: genre matches ".*", year between 1940-1970, title has digit
+			// Expected: "1984" (year 1949, title has digit "1984", genre "dystopian")
+
+			const threeOperatorQuery = await db2.books
+				.query({
+					where: {
+						genre: { $regex: ".*" }, // matches all
+						year: { $between: [1940, 1970] }, // matches 1984 (1949) and Dune (1965)
+						title: { $hasDigit: true }, // matches only "1984"
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(threeOperatorQuery.length).toBe(1);
+			expect(threeOperatorQuery[0].title).toBe("1984");
+			expect(threeOperatorQuery[0].year).toBe(1949);
+		});
 	});
 });
