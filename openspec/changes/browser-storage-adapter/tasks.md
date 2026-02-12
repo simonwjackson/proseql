@@ -16,11 +16,11 @@
 
 - [x] 3.1 Create `packages/browser/src/adapters/web-storage-adapter.ts` with `makeWebStorageAdapter(storage: Storage, config: WebStorageConfig): StorageAdapterShape`
 - [x] 3.2 Implement `read`: call `storage.getItem(pathToKey(path))`, fail with `StorageError` if `null`
-- [ ] 3.3 Implement `write`: call `storage.setItem(pathToKey(path), data)` in a try/catch that detects `QuotaExceededError`
-- [ ] 3.4 Implement `exists`: return `storage.getItem(pathToKey(path)) !== null`
-- [ ] 3.5 Implement `remove`: call `storage.removeItem(pathToKey(path))`
-- [ ] 3.6 Implement `ensureDir`: return `Effect.void` (no-op, browser storage is flat)
-- [ ] 3.7 Accept a `watch` function parameter so localStorage and sessionStorage can provide different implementations
+- [x] 3.3 Implement `write`: call `storage.setItem(pathToKey(path), data)` in a try/catch that detects `QuotaExceededError`
+- [x] 3.4 Implement `exists`: return `storage.getItem(pathToKey(path)) !== null`
+- [x] 3.5 Implement `remove`: call `storage.removeItem(pathToKey(path))`
+- [x] 3.6 Implement `ensureDir`: return `Effect.void` (no-op, browser storage is flat)
+- [x] 3.7 Accept a `watch` function parameter so localStorage and sessionStorage can provide different implementations
 
 ## 4. LocalStorage Adapter
 
