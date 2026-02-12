@@ -98,7 +98,7 @@
 ## 16. Tests — File Changes
 
 - [x] 16.1 Test file watcher reload triggers watch emission when result set changes
-- [ ] 16.2 Test file watcher reload does not emit when result set is unchanged (deduplication)
+- [x] 16.2 Test file watcher reload does not emit when result set is unchanged (deduplication)
 
 ## 17. Tests — Debounce
 
