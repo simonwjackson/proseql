@@ -15,7 +15,7 @@
 ## 3. Per-Package package.json -- @proseql/core
 
 - [x] 3.1 Change `"main"` from `"src/index.ts"` to `"dist/index.js"`.
-- [ ] 3.2 Add `"types": "dist/index.d.ts"`.
+- [x] 3.2 Add `"types": "dist/index.d.ts"`.
 - [ ] 3.3 Add `"exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } }`.
 - [ ] 3.4 Add `"files": ["dist", "LICENSE", "README.md"]`.
 - [ ] 3.5 Add `"license": "MIT"`.
