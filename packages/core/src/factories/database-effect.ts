@@ -598,6 +598,9 @@ const buildCollection = <T extends HasId>(
 		import("../plugins/plugin-types.js").CustomIdGenerator
 	>,
 	globalHooks?: GlobalHooksConfig,
+	changePubSub?: import("effect").PubSub.PubSub<
+		import("../types/reactive-types.js").ChangeEvent
+	>,
 ): EffectCollection<T> => {
 	const schema = collectionConfig.schema as Schema.Schema<T, unknown>;
 	const relationships = collectionConfig.relationships as Record<
@@ -903,6 +906,7 @@ const buildCollection = <T extends HasId>(
 			searchIndexFields,
 			idGeneratorName,
 			idGeneratorMap,
+			changePubSub,
 		),
 	);
 	const createManyFn = wrapEffect(
@@ -920,6 +924,7 @@ const buildCollection = <T extends HasId>(
 			searchIndexFields,
 			idGeneratorName,
 			idGeneratorMap,
+			changePubSub,
 		),
 	);
 	const updateFn = wrapEffect(
@@ -935,6 +940,7 @@ const buildCollection = <T extends HasId>(
 			computed,
 			searchIndexRef,
 			searchIndexFields,
+			changePubSub,
 		),
 	);
 	const updateManyFn = wrapEffect(
@@ -950,6 +956,7 @@ const buildCollection = <T extends HasId>(
 			computed,
 			searchIndexRef,
 			searchIndexFields,
+			changePubSub,
 		),
 	);
 	// Check if schema defines a deletedAt field for soft delete support
@@ -969,6 +976,7 @@ const buildCollection = <T extends HasId>(
 			hooks,
 			searchIndexRef,
 			searchIndexFields,
+			changePubSub,
 		),
 	);
 	const deleteManyFn = wrapEffect(
@@ -982,6 +990,7 @@ const buildCollection = <T extends HasId>(
 			hooks,
 			searchIndexRef,
 			searchIndexFields,
+			changePubSub,
 		),
 	);
 	const upsertFn = wrapEffect(
@@ -996,6 +1005,7 @@ const buildCollection = <T extends HasId>(
 			uniqueFields,
 			searchIndexRef,
 			searchIndexFields,
+			changePubSub,
 		),
 	);
 	const upsertManyFn = wrapEffect(
@@ -1010,6 +1020,7 @@ const buildCollection = <T extends HasId>(
 			uniqueFields,
 			searchIndexRef,
 			searchIndexFields,
+			changePubSub,
 		),
 	);
 	const createWithRelsFn = wrapEffect(
@@ -1236,6 +1247,9 @@ const makeBuildCollectionForTx = (
 		// Transaction-aware afterMutation: records mutation instead of scheduling persistence
 		const afterMutation = () => Effect.sync(() => addMutation(collectionName));
 
+		// Explicitly pass undefined for changePubSub to suppress reactive events during transactions.
+		// Individual mutations within a transaction should not publish change events;
+		// events are only published after commit (see task 7.3).
 		return buildCollection(
 			collectionName,
 			config[collectionName],
@@ -1249,6 +1263,7 @@ const makeBuildCollectionForTx = (
 			customOperators,
 			idGeneratorMap,
 			globalHooks,
+			undefined, // changePubSub: suppressed during transactions
 		);
 	};
 };
