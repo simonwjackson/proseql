@@ -110,7 +110,7 @@
 - [x] 14.2 Test `watch` registers a `storage` event listener and calls `onChange` when the watched key is modified
 - [x] 14.3 Test `watch` ignores `storage` events for unrelated keys
 - [x] 14.4 Test unsubscribe function removes the event listener
-- [ ] 14.5 Test multiple watchers on different keys coexist independently
+- [x] 14.5 Test multiple watchers on different keys coexist independently
 
 ## 15. Tests — Integration
 
