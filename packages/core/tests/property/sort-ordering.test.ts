@@ -160,5 +160,439 @@ describe("Sort ordering properties", () => {
 		});
 	});
 
-	// Task 5.2 and 5.3 tests will be added in subsequent tasks
+	describe("Task 5.2: Adjacent pair ordering property", () => {
+		/**
+		 * Helper function to compare two values for ordering.
+		 * This mirrors the comparison logic in sort-stream.ts to ensure
+		 * test assertions match actual database behavior.
+		 *
+		 * Returns:
+		 *   negative if a < b
+		 *   0 if a === b
+		 *   positive if a > b
+		 */
+		const compareValues = (aValue: unknown, bValue: unknown): number => {
+			// Handle undefined/null values - they always sort to the end
+			if (aValue === undefined || aValue === null) {
+				if (bValue === undefined || bValue === null) {
+					return 0;
+				}
+				return 1;
+			}
+			if (bValue === undefined || bValue === null) {
+				return -1;
+			}
+
+			// String comparison using localeCompare (matches database)
+			if (typeof aValue === "string" && typeof bValue === "string") {
+				return aValue.localeCompare(bValue);
+			}
+
+			// Number comparison
+			if (typeof aValue === "number" && typeof bValue === "number") {
+				return aValue - bValue;
+			}
+
+			// Boolean comparison (false=0, true=1)
+			if (typeof aValue === "boolean" && typeof bValue === "boolean") {
+				return (aValue ? 1 : 0) - (bValue ? 1 : 0);
+			}
+
+			// Fallback: convert to string and use localeCompare (matches database)
+			return String(aValue).localeCompare(String(bValue));
+		};
+
+		/**
+		 * Helper to ensure entities have unique IDs.
+		 * The database stores entities by ID, so duplicates collapse into one.
+		 */
+		const ensureUniqueIds = <T extends { id: string }>(
+			entities: readonly T[],
+		): readonly T[] => {
+			const seen = new Set<string>();
+			const result: T[] = [];
+			for (const entity of entities) {
+				if (!seen.has(entity.id)) {
+					seen.add(entity.id);
+					result.push(entity);
+				}
+			}
+			return result;
+		};
+
+		/**
+		 * Verify that an array is sorted according to the given sort configuration.
+		 * Returns true if all adjacent pairs satisfy the ordering constraint.
+		 */
+		const verifySortOrder = <T extends Record<string, unknown>>(
+			items: readonly T[],
+			sortConfig: GeneratedSortConfig,
+		): boolean => {
+			if (items.length <= 1) return true;
+
+			const sortFields = Object.entries(sortConfig);
+			if (sortFields.length === 0) return true; // No sort = any order is valid
+
+			for (let i = 0; i < items.length - 1; i++) {
+				const a = items[i];
+				const b = items[i + 1];
+
+				// Compare using sort fields in order (primary, secondary, etc.)
+				for (const [field, direction] of sortFields) {
+					const aValue = a[field];
+					const bValue = b[field];
+					const cmp = compareValues(aValue, bValue);
+
+					if (cmp !== 0) {
+						// Values differ - check if order is correct for this direction
+						if (direction === "asc" && cmp > 0) {
+							// a > b but should be a <= b for ascending
+							return false;
+						}
+						if (direction === "desc" && cmp < 0) {
+							// a < b but should be a >= b for descending
+							return false;
+						}
+						// Order is correct, move to next pair
+						break;
+					}
+					// Values are equal, continue to next sort field
+				}
+			}
+
+			return true;
+		};
+
+		it("should maintain ordering invariant for adjacent pairs with single-field sort", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate 2-30 entities for the collection
+					fc.array(entityArbitrary(BookSchema), { minLength: 2, maxLength: 30 }),
+					// Generate a sort config that has at least one field
+					sortConfigArbitrary(BookSchema).filter(
+						(sort) => Object.keys(sort).length > 0,
+					),
+					async (entities, sort) => {
+						// Ensure unique IDs (duplicates collapse in database)
+						const uniqueEntities = ensureUniqueIds(entities);
+						if (uniqueEntities.length < 2) return; // Need at least 2 for ordering test
+
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: uniqueEntities,
+							});
+
+							// Query with the generated sort configuration
+							const chunk = yield* Stream.runCollect(
+								db.books.query({ sort }),
+							);
+							const sortedResults = Chunk.toReadonlyArray(chunk);
+
+							// Verify: all unique entities are returned
+							expect(sortedResults.length).toBe(uniqueEntities.length);
+
+							// Verify: ordering invariant holds for adjacent pairs
+							const isOrdered = verifySortOrder(sortedResults, sort);
+							expect(isOrdered).toBe(true);
+
+							// Additional verification: check each adjacent pair explicitly
+							const sortFields = Object.entries(sort);
+							for (let i = 0; i < sortedResults.length - 1; i++) {
+								const a = sortedResults[i];
+								const b = sortedResults[i + 1];
+
+								// For the primary sort field, verify the ordering
+								for (const [field, direction] of sortFields) {
+									const aValue = a[field as keyof Book];
+									const bValue = b[field as keyof Book];
+									const cmp = compareValues(aValue, bValue);
+
+									if (cmp !== 0) {
+										// Values differ - verify order
+										if (direction === "asc") {
+											expect(cmp).toBeLessThanOrEqual(0);
+										} else {
+											expect(cmp).toBeGreaterThanOrEqual(0);
+										}
+										break;
+									}
+								}
+							}
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should maintain ordering for multi-field sort configurations", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate 5-20 entities for the collection
+					fc.array(entityArbitrary(BookSchema), { minLength: 5, maxLength: 20 }),
+					// Generate a multi-field sort config
+					sortConfigArbitrary(BookSchema).filter(
+						(sort) => Object.keys(sort).length >= 2,
+					),
+					async (entities, sort) => {
+						// Ensure unique IDs (duplicates collapse in database)
+						const uniqueEntities = ensureUniqueIds(entities);
+						if (uniqueEntities.length < 2) return; // Need at least 2 for ordering test
+
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: uniqueEntities,
+							});
+
+							const chunk = yield* Stream.runCollect(
+								db.books.query({ sort }),
+							);
+							const sortedResults = Chunk.toReadonlyArray(chunk);
+
+							expect(sortedResults.length).toBe(uniqueEntities.length);
+
+							// Verify ordering invariant with multi-field comparison
+							const isOrdered = verifySortOrder(sortedResults, sort);
+							expect(isOrdered).toBe(true);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should handle ascending sort correctly", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					fc.array(entityArbitrary(BookSchema), { minLength: 2, maxLength: 20 }),
+					// Generate specifically ascending sort on sortable fields
+					fc.constantFrom("title", "author", "year", "rating").map(
+						(field) => ({ [field]: "asc" as const }),
+					),
+					async (entities, sort) => {
+						// Ensure unique IDs (duplicates collapse in database)
+						const uniqueEntities = ensureUniqueIds(entities);
+						if (uniqueEntities.length < 2) return; // Need at least 2 for ordering test
+
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: uniqueEntities,
+							});
+
+							const chunk = yield* Stream.runCollect(
+								db.books.query({ sort }),
+							);
+							const sortedResults = Chunk.toReadonlyArray(chunk);
+
+							const field = Object.keys(sort)[0];
+
+							// Every adjacent pair should have a[field] <= b[field]
+							for (let i = 0; i < sortedResults.length - 1; i++) {
+								const a = sortedResults[i];
+								const b = sortedResults[i + 1];
+								const aVal = a[field as keyof Book];
+								const bVal = b[field as keyof Book];
+								const cmp = compareValues(aVal, bVal);
+								expect(cmp).toBeLessThanOrEqual(0);
+							}
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should handle descending sort correctly", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					fc.array(entityArbitrary(BookSchema), { minLength: 2, maxLength: 20 }),
+					// Generate specifically descending sort on sortable fields
+					fc.constantFrom("title", "author", "year", "rating").map(
+						(field) => ({ [field]: "desc" as const }),
+					),
+					async (entities, sort) => {
+						// Ensure unique IDs (duplicates collapse in database)
+						const uniqueEntities = ensureUniqueIds(entities);
+						if (uniqueEntities.length < 2) return; // Need at least 2 for ordering test
+
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: uniqueEntities,
+							});
+
+							const chunk = yield* Stream.runCollect(
+								db.books.query({ sort }),
+							);
+							const sortedResults = Chunk.toReadonlyArray(chunk);
+
+							const field = Object.keys(sort)[0];
+
+							// Every adjacent pair should have a[field] >= b[field]
+							for (let i = 0; i < sortedResults.length - 1; i++) {
+								const a = sortedResults[i];
+								const b = sortedResults[i + 1];
+								const aVal = a[field as keyof Book];
+								const bVal = b[field as keyof Book];
+								const cmp = compareValues(aVal, bVal);
+								expect(cmp).toBeGreaterThanOrEqual(0);
+							}
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should handle edge cases: empty sort config returns all entities", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					fc.array(entityArbitrary(BookSchema), { minLength: 0, maxLength: 20 }),
+					async (entities) => {
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: entities,
+							});
+
+							// Query with empty sort config
+							const chunk = yield* Stream.runCollect(
+								db.books.query({ sort: {} }),
+							);
+							const results = Chunk.toReadonlyArray(chunk);
+
+							// All entities should be returned (order undefined)
+							expect(results.length).toBe(entities.length);
+
+							// Same set of IDs
+							const resultIds = new Set(results.map((e) => e.id));
+							const entityIds = new Set(entities.map((e) => e.id));
+							expect(resultIds).toEqual(entityIds);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should handle edge cases: single entity collection", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					entityArbitrary(BookSchema),
+					sortConfigArbitrary(BookSchema),
+					async (entity, sort) => {
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: [entity],
+							});
+
+							const chunk = yield* Stream.runCollect(
+								db.books.query({ sort }),
+							);
+							const results = Chunk.toReadonlyArray(chunk);
+
+							// Single entity is always "sorted"
+							expect(results.length).toBe(1);
+							expect(results[0].id).toBe(entity.id);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should handle edge cases: two entities with same sort key value", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate two entities with the same year value
+					fc.tuple(entityArbitrary(BookSchema), entityArbitrary(BookSchema)).map(
+						([e1, e2]) => [e1, { ...e2, year: e1.year }] as [Book, Book],
+					),
+					async ([entity1, entity2]) => {
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: [entity1, entity2],
+							});
+
+							// Sort by year (both have same year)
+							const chunk = yield* Stream.runCollect(
+								db.books.query({ sort: { year: "asc" } }),
+							);
+							const results = Chunk.toReadonlyArray(chunk);
+
+							expect(results.length).toBe(2);
+
+							// Both should be present
+							const ids = new Set(results.map((e) => e.id));
+							expect(ids.has(entity1.id)).toBe(true);
+							expect(ids.has(entity2.id)).toBe(true);
+
+							// Order is valid (equal values can be in any order)
+							expect(results[0].year).toBe(results[1].year);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should maintain sort order combined with filter", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					fc.array(entityArbitrary(BookSchema), { minLength: 5, maxLength: 25 }),
+					sortConfigArbitrary(BookSchema).filter(
+						(sort) => Object.keys(sort).length > 0,
+					),
+					async (entities, sort) => {
+						// Ensure unique IDs (duplicates collapse in database)
+						const uniqueEntities = ensureUniqueIds(entities);
+
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: uniqueEntities,
+							});
+
+							// Query with both filter and sort
+							// Use a simple filter that should match some entities
+							const chunk = yield* Stream.runCollect(
+								db.books.query({
+									where: { isPublished: true },
+									sort,
+								}),
+							);
+							const sortedResults = Chunk.toReadonlyArray(chunk);
+
+							// Verify: only published books are returned
+							for (const result of sortedResults) {
+								expect(result.isPublished).toBe(true);
+							}
+
+							// Verify: ordering invariant holds
+							if (sortedResults.length > 1) {
+								const isOrdered = verifySortOrder(sortedResults, sort);
+								expect(isOrdered).toBe(true);
+							}
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+	});
+
+	// Task 5.3 tests will be added in subsequent task
 });
