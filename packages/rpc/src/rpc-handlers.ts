@@ -6,7 +6,7 @@
  * and wires each handler to the appropriate collection method.
  */
 
-import { Context, Effect, Layer } from "effect";
+import { Chunk, Context, Effect, Layer, Stream } from "effect";
 import {
 	createEffectDatabase,
 	type DatabaseConfig,
@@ -63,7 +63,14 @@ const createCollectionHandlers = <Config extends DatabaseConfig>(
 			readonly select?: Record<string, unknown> | ReadonlyArray<string>;
 			readonly limit?: number;
 			readonly offset?: number;
-		}) => collection.query(config),
+		}) => {
+			// Query returns a RunnableStream; collect it to an array for RPC response
+			const stream = collection.query(config);
+			// The stream is a Stream.Stream at runtime (RunnableStream wrapper)
+			return Stream.runCollect(stream as Stream.Stream<Record<string, unknown>, unknown>).pipe(
+				Effect.map(Chunk.toReadonlyArray),
+			);
+		},
 
 		create: ({ data }: { readonly data: Record<string, unknown> }) =>
 			// biome-ignore lint/suspicious/noExplicitAny: Data type is dynamic based on schema

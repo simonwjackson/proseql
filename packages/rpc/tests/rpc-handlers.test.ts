@@ -188,6 +188,69 @@ describe("makeRpcHandlers", () => {
 			expect(result.avg).toBeDefined();
 			expect(result.avg?.year).toBe((1965 + 1984) / 2);
 		});
+
+		it("query should return all entities when no filter is provided", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			const results = await Effect.runPromise(handlers.books.query({}));
+			expect(results).toHaveLength(2);
+			expect(results[0].title).toBe("Dune");
+			expect(results[1].title).toBe("Neuromancer");
+		});
+
+		it("query should return filtered results", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			const results = await Effect.runPromise(
+				handlers.books.query({
+					where: { year: { $gte: 1980 } },
+				}),
+			);
+			expect(results).toHaveLength(1);
+			expect(results[0].title).toBe("Neuromancer");
+		});
+
+		it("query should support sorting", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			const results = await Effect.runPromise(
+				handlers.books.query({
+					sort: { year: "desc" },
+				}),
+			);
+			expect(results).toHaveLength(2);
+			expect(results[0].title).toBe("Neuromancer"); // 1984
+			expect(results[1].title).toBe("Dune"); // 1965
+		});
+
+		it("query should support pagination", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			const results = await Effect.runPromise(
+				handlers.books.query({
+					limit: 1,
+					offset: 1,
+				}),
+			);
+			expect(results).toHaveLength(1);
+			expect(results[0].title).toBe("Neuromancer");
+		});
 	});
 });
 

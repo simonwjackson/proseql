@@ -20,7 +20,7 @@
 
 - [x] 3.1 Create `rpc/src/rpc-handlers.ts` with `makeRpcHandlers(config, initialData?)` returning an Effect Layer
 - [x] 3.2 Wire `findById` handler: delegate to `db[collection].findById(id)`, propagate typed error
-- [ ] 3.3 Wire `query` handler: delegate to `db[collection].query(config)`, collect stream to array
+- [x] 3.3 Wire `query` handler: delegate to `db[collection].query(config)`, collect stream to array
 - [ ] 3.4 Wire `create` handler: delegate to `db[collection].create(data)`, propagate typed errors
 - [ ] 3.5 Wire `update` handler: delegate to `db[collection].update(id, updates)`, propagate typed errors
 - [ ] 3.6 Wire `delete` handler: delegate to `db[collection].delete(id)`, propagate typed errors
