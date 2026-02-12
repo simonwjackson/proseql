@@ -23,7 +23,7 @@
 - [x] 3.7 Add `"repository": { "type": "git", "url": "..." , "directory": "packages/core" }`.
 - [x] 3.8 Add `"keywords": ["database", "typescript", "effect", "yaml", "json", "plain-text", "type-safe", "in-memory"]`.
 - [x] 3.9 Add `"engines": { "node": ">=18" }`.
-- [ ] 3.10 Add `"sideEffects": false`.
+- [x] 3.10 Add `"sideEffects": false`.
 - [ ] 3.11 Add `"build"` and `"clean"` scripts.
 - [ ] 3.12 Add `"prepublishOnly": "bun run build && bun test"`.
 
