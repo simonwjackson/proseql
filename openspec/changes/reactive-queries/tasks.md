@@ -57,8 +57,8 @@
 
 ## 10. Scope Cleanup
 
-- [ ] 10.1 In `watch()`, use `Effect.acquireRelease` to subscribe to the PubSub on acquire and unsubscribe on release, tying the subscription lifetime to the enclosing Scope
-- [ ] 10.2 Ensure stream interruption triggers cleanup (unsubscribe from PubSub)
+- [x] 10.1 In `watch()`, use `Effect.acquireRelease` to subscribe to the PubSub on acquire and unsubscribe on release, tying the subscription lifetime to the enclosing Scope
+- [x] 10.2 Ensure stream interruption triggers cleanup (unsubscribe from PubSub)
 
 ## 11. Factory Integration
 

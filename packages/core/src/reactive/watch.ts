@@ -7,7 +7,7 @@
  * and emits the new result set.
  */
 
-import { Duration, Effect, PubSub, Ref, Stream } from "effect";
+import { Duration, Effect, ExecutionStrategy, Exit, PubSub, Ref, Scope, Stream } from "effect";
 import type { ChangeEvent } from "../types/reactive-types.js";
 import {
 	evaluateQuery,
@@ -75,6 +75,13 @@ const DEFAULT_DEBOUNCE_MS = 10;
  * 6. Deduplicates consecutive identical result sets to avoid spurious emissions
  * 7. Emits the new result set as a ReadonlyArray
  *
+ * Resource management:
+ * - Uses Effect.acquireRelease to manage the PubSub subscription lifecycle
+ * - Subscription is acquired when the watch Effect runs and released when:
+ *   - The enclosing Scope closes, OR
+ *   - The stream is interrupted/completes (via Stream.ensuring)
+ * - This ensures no memory leaks from lingering subscriptions
+ *
  * @param pubsub - The PubSub broadcasting ChangeEvents from mutations
  * @param ref - The collection Ref containing entities keyed by ID
  * @param collectionName - Name of the collection to watch (for filtering events)
@@ -106,10 +113,34 @@ export const watch = <T extends HasId>(
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	collectionName: string,
 	config: WatchQueryConfig = {},
-): Effect.Effect<Stream.Stream<ReadonlyArray<T>>, never, import("effect").Scope.Scope> =>
+): Effect.Effect<Stream.Stream<ReadonlyArray<T>>, never, Scope.Scope> =>
 	Effect.gen(function* () {
-		// Subscribe to the PubSub - this is automatically cleaned up when scope closes
-		const subscription = yield* PubSub.subscribe(pubsub);
+		// Get the current scope so we can fork a child scope for this subscription.
+		// The child scope allows us to clean up the subscription independently of
+		// the parent scope - either when the stream ends OR when the parent closes.
+		const parentScope = yield* Scope.Scope;
+
+		// Fork a child scope that will manage the subscription lifetime.
+		// When this child scope closes, the subscription will be cleaned up.
+		const subscriptionScope = yield* parentScope.fork(ExecutionStrategy.sequential);
+
+		// Use Effect.acquireRelease to manage the subscription:
+		// - Acquire: Subscribe to the PubSub (returns a Dequeue of ChangeEvents)
+		// - Release: Close the subscription scope (which triggers subscription cleanup)
+		//
+		// This explicit acquireRelease pattern makes the resource management visible
+		// and ensures proper cleanup when the stream is interrupted or completes.
+		const subscription = yield* Effect.acquireRelease(
+			// Acquire: Subscribe to the PubSub within the child scope
+			// PubSub.subscribe returns Effect<Dequeue, never, Scope.Scope>
+			// We provide the subscription scope so cleanup is tied to it
+			PubSub.subscribe(pubsub).pipe(
+				Effect.provideService(Scope.Scope, subscriptionScope)
+			),
+			// Release: Close the child scope to trigger subscription cleanup
+			// This runs when the enclosing scope closes
+			() => subscriptionScope.close(Exit.void)
+		);
 
 		// Create a stream from the subscription queue
 		const changeStream = Stream.fromQueue(subscription);
@@ -147,7 +178,16 @@ export const watch = <T extends HasId>(
 		// This prevents re-emitting the same result set when a change event occurs
 		// but doesn't actually affect the query results (e.g., inserting an entity
 		// that doesn't match the where clause).
-		const resultStream = Stream.changesWith(combinedStream, resultsAreEqual);
+		const deduplicatedStream = Stream.changesWith(combinedStream, resultsAreEqual);
+
+		// Ensure the subscription is cleaned up when the stream ends.
+		// This handles the case where the stream is interrupted or completed
+		// before the parent scope closes (e.g., Stream.take(n) stopping early).
+		// Closing the subscription scope triggers the acquireRelease cleanup.
+		const resultStream = Stream.ensuring(
+			deduplicatedStream,
+			subscriptionScope.close(Exit.void)
+		);
 
 		return resultStream;
 	});
