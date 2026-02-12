@@ -181,6 +181,62 @@ describe("makeRpcHandlers", () => {
 			expect(found.title).toBe("Snow Crash");
 		});
 
+		it("create should return typed ValidationError for invalid data", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			// Attempt to create with invalid data (missing required field 'author', wrong type for 'year')
+			const result = await Effect.runPromise(
+				Effect.either(
+					handlers.books.create({
+						data: { id: "bad", title: "Bad Book", year: "not-a-number" } as unknown as Record<string, unknown>,
+					}),
+				),
+			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left._tag).toBe("ValidationError");
+			}
+		});
+
+		it("create should return typed ValidationError that can be caught with Effect.catchTag", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			// Use Effect.catchTag to verify the error is properly typed
+			const result = await Effect.runPromise(
+				handlers.books
+					.create({
+						data: { id: "bad", title: "Bad Book" } as unknown as Record<string, unknown>,
+					})
+					.pipe(
+						Effect.catchTag("ValidationError", (error) =>
+							// The error is typed - we can access its fields
+							Effect.succeed({
+								caught: true,
+								errorTag: error._tag,
+								hasIssues: error.issues.length > 0,
+								hasMessage: error.message.length > 0,
+							}),
+						),
+					),
+			);
+
+			expect(result).toEqual({
+				caught: true,
+				errorTag: "ValidationError",
+				hasIssues: true,
+				hasMessage: true,
+			});
+		});
+
 		it("update should modify an existing entity", async () => {
 			const handlers = await Effect.runPromise(
 				makeRpcHandlers(singleCollectionConfig, {

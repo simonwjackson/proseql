@@ -82,7 +82,7 @@
 - [x] 10.4 Test findById handler returns typed NotFoundError for missing id
 - [x] 10.5 Test query handler returns filtered results
 - [x] 10.6 Test create handler returns created entity
-- [ ] 10.7 Test create handler returns typed ValidationError for invalid data
+- [x] 10.7 Test create handler returns typed ValidationError for invalid data
 - [ ] 10.8 Test update handler returns updated entity
 - [ ] 10.9 Test delete handler returns deleted entity
 - [ ] 10.10 Test aggregate handler returns correct scalar result
