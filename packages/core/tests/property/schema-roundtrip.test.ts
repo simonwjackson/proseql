@@ -43,9 +43,128 @@ const ArrayHeavySchema = Schema.Struct({
 
 describe("Schema round-trip properties", () => {
 	describe("Task 3.2: encode-decode round-trip invariant", () => {
-		// TODO: Implement in task 3.2
-		it.skip("placeholder for round-trip property tests", () => {
-			// Will be implemented in task 3.2
+		it("should survive encode→decode round-trip for SimpleSchema", () => {
+			const encode = Schema.encodeSync(SimpleSchema);
+			const decode = Schema.decodeSync(SimpleSchema);
+
+			fc.assert(
+				fc.property(entityArbitrary(SimpleSchema), (entity) => {
+					// Encode the entity, then decode it back
+					const encoded = encode(entity);
+					const decoded = decode(encoded);
+
+					// The decoded value should be deeply equal to the original
+					expect(decoded).toEqual(entity);
+				}),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should survive encode→decode round-trip for ComplexSchema with optional fields", () => {
+			const encode = Schema.encodeSync(ComplexSchema);
+			const decode = Schema.decodeSync(ComplexSchema);
+
+			fc.assert(
+				fc.property(entityArbitrary(ComplexSchema), (entity) => {
+					const encoded = encode(entity);
+					const decoded = decode(encoded);
+
+					// Required fields must match exactly
+					expect(decoded.id).toBe(entity.id);
+					expect(decoded.title).toBe(entity.title);
+					expect(decoded.rating).toBe(entity.rating);
+					expect(decoded.isPublished).toBe(entity.isPublished);
+					expect(decoded.tags).toEqual(entity.tags);
+					expect(decoded.scores).toEqual(entity.scores);
+
+					// Optional fields: compare presence and value
+					expect(decoded.views).toBe(entity.views);
+					expect(decoded.description).toBe(entity.description);
+				}),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should survive encode→decode round-trip for ArrayHeavySchema", () => {
+			const encode = Schema.encodeSync(ArrayHeavySchema);
+			const decode = Schema.decodeSync(ArrayHeavySchema);
+
+			fc.assert(
+				fc.property(entityArbitrary(ArrayHeavySchema), (entity) => {
+					const encoded = encode(entity);
+					const decoded = decode(encoded);
+
+					expect(decoded).toEqual(entity);
+				}),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should maintain value identity through encode→decode (reference equality not required)", () => {
+			const encode = Schema.encodeSync(SimpleSchema);
+			const decode = Schema.decodeSync(SimpleSchema);
+
+			fc.assert(
+				fc.property(entityArbitrary(SimpleSchema), (entity) => {
+					const encoded = encode(entity);
+					const decoded = decode(encoded);
+
+					// Values should be equal but may not be the same reference
+					expect(decoded.id).toBe(entity.id);
+					expect(decoded.name).toBe(entity.name);
+					expect(decoded.age).toBe(entity.age);
+					expect(decoded.isActive).toBe(entity.isActive);
+				}),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should preserve array order through encode→decode", () => {
+			const encode = Schema.encodeSync(ComplexSchema);
+			const decode = Schema.decodeSync(ComplexSchema);
+
+			fc.assert(
+				fc.property(entityArbitrary(ComplexSchema), (entity) => {
+					const encoded = encode(entity);
+					const decoded = decode(encoded);
+
+					// Arrays should preserve order
+					expect(decoded.tags).toEqual(entity.tags);
+					expect(decoded.scores).toEqual(entity.scores);
+
+					// Verify element-by-element
+					for (let i = 0; i < entity.tags.length; i++) {
+						expect(decoded.tags[i]).toBe(entity.tags[i]);
+					}
+					for (let i = 0; i < entity.scores.length; i++) {
+						expect(decoded.scores[i]).toBe(entity.scores[i]);
+					}
+				}),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should handle empty arrays through encode→decode", () => {
+			// Create a schema that will produce entities with potentially empty arrays
+			const encode = Schema.encodeSync(ArrayHeavySchema);
+			const decode = Schema.decodeSync(ArrayHeavySchema);
+
+			fc.assert(
+				fc.property(entityArbitrary(ArrayHeavySchema), (entity) => {
+					const encoded = encode(entity);
+					const decoded = decode(encoded);
+
+					// Even empty arrays should survive round-trip
+					expect(Array.isArray(decoded.stringTags)).toBe(true);
+					expect(Array.isArray(decoded.numericScores)).toBe(true);
+					expect(Array.isArray(decoded.boolFlags)).toBe(true);
+
+					expect(decoded.stringTags).toEqual(entity.stringTags);
+					expect(decoded.numericScores).toEqual(entity.numericScores);
+					expect(decoded.boolFlags).toEqual(entity.boolFlags);
+				}),
+				{ numRuns: getNumRuns() },
+			);
 		});
 	});
 
