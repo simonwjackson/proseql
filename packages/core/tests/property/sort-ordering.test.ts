@@ -594,5 +594,343 @@ describe("Sort ordering properties", () => {
 		});
 	});
 
-	// Task 5.3 tests will be added in subsequent task
+	describe("Task 5.3: Sort stability property", () => {
+		/**
+		 * Helper to ensure entities have unique IDs.
+		 * The database stores entities by ID, so duplicates collapse into one.
+		 */
+		const ensureUniqueIds = <T extends { id: string }>(
+			entities: readonly T[],
+		): readonly T[] => {
+			const seen = new Set<string>();
+			const result: T[] = [];
+			for (const entity of entities) {
+				if (!seen.has(entity.id)) {
+					seen.add(entity.id);
+					result.push(entity);
+				}
+			}
+			return result;
+		};
+
+		/**
+		 * Property: entities with duplicate sort key values maintain consistent
+		 * relative ordering across repeated runs with the same seed.
+		 *
+		 * This verifies sort stability: if we run the same query multiple times
+		 * with the same data, entities with equal sort keys should always appear
+		 * in the same relative order.
+		 */
+		it("should maintain consistent ordering for entities with duplicate sort key values", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate 5-20 entities with potential duplicates in sort field
+					fc.array(entityArbitrary(BookSchema), { minLength: 5, maxLength: 20 }),
+					// Generate a single-field sort config
+					fc.constantFrom("year", "rating", "title", "author").map(
+						(field) => ({ [field]: "asc" as const }),
+					),
+					async (entities, sort) => {
+						// Ensure unique IDs (duplicates collapse in database)
+						const uniqueEntities = ensureUniqueIds(entities);
+						if (uniqueEntities.length < 3) return; // Need at least 3 for meaningful stability test
+
+						// Force some duplicate sort key values by copying values between entities
+						const sortField = Object.keys(sort)[0];
+						const modifiedEntities = [...uniqueEntities];
+
+						// Make some entities share the same sort key value
+						if (modifiedEntities.length >= 3) {
+							const firstValue = modifiedEntities[0][
+								sortField as keyof Book
+							] as unknown;
+							// Set indices 1 and 2 to have the same value as index 0
+							modifiedEntities[1] = {
+								...modifiedEntities[1],
+								[sortField]: firstValue,
+							};
+							modifiedEntities[2] = {
+								...modifiedEntities[2],
+								[sortField]: firstValue,
+							};
+						}
+
+						// Run the query multiple times and verify consistent ordering
+						const NUM_RUNS = 5;
+						const resultsPerRun: string[][] = [];
+
+						for (let run = 0; run < NUM_RUNS; run++) {
+							const program = Effect.gen(function* () {
+								const db = yield* createEffectDatabase(config, {
+									books: modifiedEntities,
+								});
+
+								const chunk = yield* Stream.runCollect(
+									db.books.query({ sort }),
+								);
+								return Chunk.toReadonlyArray(chunk).map((b) => b.id);
+							});
+
+							const ids = await Effect.runPromise(program);
+							resultsPerRun.push([...ids]);
+						}
+
+						// All runs should produce identical ordering
+						const firstRunIds = resultsPerRun[0];
+						for (let run = 1; run < NUM_RUNS; run++) {
+							const currentRunIds = resultsPerRun[run];
+
+							// Same length
+							expect(currentRunIds.length).toBe(firstRunIds.length);
+
+							// Same order (including entities with duplicate sort keys)
+							expect(currentRunIds).toEqual(firstRunIds);
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		/**
+		 * Property: sort stability holds for descending order as well.
+		 */
+		it("should maintain consistent ordering for duplicate values in descending sort", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					fc.array(entityArbitrary(BookSchema), { minLength: 5, maxLength: 15 }),
+					fc.constantFrom("year", "rating").map(
+						(field) => ({ [field]: "desc" as const }),
+					),
+					async (entities, sort) => {
+						const uniqueEntities = ensureUniqueIds(entities);
+						if (uniqueEntities.length < 3) return;
+
+						const sortField = Object.keys(sort)[0];
+						const modifiedEntities = [...uniqueEntities];
+
+						// Create duplicates in sort key
+						if (modifiedEntities.length >= 4) {
+							const val = modifiedEntities[0][
+								sortField as keyof Book
+							] as unknown;
+							modifiedEntities[1] = { ...modifiedEntities[1], [sortField]: val };
+							modifiedEntities[2] = { ...modifiedEntities[2], [sortField]: val };
+							modifiedEntities[3] = { ...modifiedEntities[3], [sortField]: val };
+						}
+
+						const NUM_RUNS = 5;
+						const resultsPerRun: string[][] = [];
+
+						for (let run = 0; run < NUM_RUNS; run++) {
+							const program = Effect.gen(function* () {
+								const db = yield* createEffectDatabase(config, {
+									books: modifiedEntities,
+								});
+
+								const chunk = yield* Stream.runCollect(
+									db.books.query({ sort }),
+								);
+								return Chunk.toReadonlyArray(chunk).map((b) => b.id);
+							});
+
+							const ids = await Effect.runPromise(program);
+							resultsPerRun.push([...ids]);
+						}
+
+						// Verify all runs are identical
+						for (let run = 1; run < NUM_RUNS; run++) {
+							expect(resultsPerRun[run]).toEqual(resultsPerRun[0]);
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		/**
+		 * Property: with multi-field sort, when the primary key has duplicates,
+		 * the secondary key should determine the order, and ties in secondary
+		 * should be stable.
+		 */
+		it("should maintain stability with multi-field sort and duplicate primary keys", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					fc.array(entityArbitrary(BookSchema), { minLength: 6, maxLength: 15 }),
+					async (entities) => {
+						const uniqueEntities = ensureUniqueIds(entities);
+						if (uniqueEntities.length < 6) return;
+
+						// Create entities with duplicate primary sort key (year)
+						// but varying secondary sort key (rating)
+						const modifiedEntities = uniqueEntities.map((e, i) => ({
+							...e,
+							// First 3 entities have year=2000, next 3 have year=2010
+							year: i < 3 ? 2000 : 2010,
+						}));
+
+						const sort = { year: "asc" as const, rating: "asc" as const };
+
+						const NUM_RUNS = 5;
+						const resultsPerRun: string[][] = [];
+
+						for (let run = 0; run < NUM_RUNS; run++) {
+							const program = Effect.gen(function* () {
+								const db = yield* createEffectDatabase(config, {
+									books: modifiedEntities,
+								});
+
+								const chunk = yield* Stream.runCollect(
+									db.books.query({ sort }),
+								);
+								return Chunk.toReadonlyArray(chunk).map((b) => b.id);
+							});
+
+							const ids = await Effect.runPromise(program);
+							resultsPerRun.push([...ids]);
+						}
+
+						// All runs should be identical
+						for (let run = 1; run < NUM_RUNS; run++) {
+							expect(resultsPerRun[run]).toEqual(resultsPerRun[0]);
+						}
+
+						// Verify that within each year group, items are sorted by rating
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: modifiedEntities,
+							});
+
+							const chunk = yield* Stream.runCollect(
+								db.books.query({ sort }),
+							);
+							return Chunk.toReadonlyArray(chunk);
+						});
+
+						const results = await Effect.runPromise(program);
+
+						// All year=2000 items should come before year=2010 items
+						const year2000Items = results.filter((b) => b.year === 2000);
+						const year2010Items = results.filter((b) => b.year === 2010);
+
+						// Find where 2010 items start
+						const firstYear2010Idx = results.findIndex((b) => b.year === 2010);
+						if (firstYear2010Idx !== -1) {
+							// All 2000 items should be before this index
+							expect(year2000Items.length).toBeLessThanOrEqual(firstYear2010Idx);
+						}
+
+						// Within each group, ratings should be ascending
+						for (let i = 1; i < year2000Items.length; i++) {
+							expect(year2000Items[i].rating).toBeGreaterThanOrEqual(
+								year2000Items[i - 1].rating,
+							);
+						}
+						for (let i = 1; i < year2010Items.length; i++) {
+							expect(year2010Items[i].rating).toBeGreaterThanOrEqual(
+								year2010Items[i - 1].rating,
+							);
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		/**
+		 * Property: sort is deterministic - creating the same database twice
+		 * with the same data should produce identical query results.
+		 */
+		it("should produce deterministic results for identical database setups", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					fc.array(entityArbitrary(BookSchema), { minLength: 3, maxLength: 20 }),
+					sortConfigArbitrary(BookSchema).filter(
+						(sort) => Object.keys(sort).length > 0,
+					),
+					async (entities, sort) => {
+						const uniqueEntities = ensureUniqueIds(entities);
+						if (uniqueEntities.length < 2) return;
+
+						// Create two separate databases with the same data
+						const program1 = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: uniqueEntities,
+							});
+							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
+							return Chunk.toReadonlyArray(chunk).map((b) => b.id);
+						});
+
+						const program2 = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: uniqueEntities,
+							});
+							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
+							return Chunk.toReadonlyArray(chunk).map((b) => b.id);
+						});
+
+						const [ids1, ids2] = await Promise.all([
+							Effect.runPromise(program1),
+							Effect.runPromise(program2),
+						]);
+
+						// Both should have the same result
+						expect(ids1).toEqual(ids2);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		/**
+		 * Property: sort stability with all identical sort key values.
+		 * When ALL entities have the same sort key value, the relative order
+		 * should be consistent across runs.
+		 */
+		it("should maintain consistent ordering when all entities have identical sort key values", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					fc.array(entityArbitrary(BookSchema), { minLength: 3, maxLength: 15 }),
+					fc.integer({ min: 1900, max: 2100 }), // shared year value
+					async (entities, sharedYear) => {
+						const uniqueEntities = ensureUniqueIds(entities);
+						if (uniqueEntities.length < 3) return;
+
+						// All entities have the same year
+						const modifiedEntities = uniqueEntities.map((e) => ({
+							...e,
+							year: sharedYear,
+						}));
+
+						const sort = { year: "asc" as const };
+
+						const NUM_RUNS = 5;
+						const resultsPerRun: string[][] = [];
+
+						for (let run = 0; run < NUM_RUNS; run++) {
+							const program = Effect.gen(function* () {
+								const db = yield* createEffectDatabase(config, {
+									books: modifiedEntities,
+								});
+
+								const chunk = yield* Stream.runCollect(
+									db.books.query({ sort }),
+								);
+								return Chunk.toReadonlyArray(chunk).map((b) => b.id);
+							});
+
+							const ids = await Effect.runPromise(program);
+							resultsPerRun.push([...ids]);
+						}
+
+						// All runs should produce the same ordering
+						for (let run = 1; run < NUM_RUNS; run++) {
+							expect(resultsPerRun[run]).toEqual(resultsPerRun[0]);
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+	});
 });

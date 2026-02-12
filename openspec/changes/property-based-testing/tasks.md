@@ -29,7 +29,7 @@
 
 - [x] 5.1 Create `packages/core/tests/property/sort-ordering.test.ts`
 - [x] 5.2 Property: for any collection and sort configuration, every adjacent pair `(a, b)` in the sorted result satisfies `a[field] <= b[field]` (asc) or `a[field] >= b[field]` (desc)
-- [ ] 5.3 Property: entities with duplicate sort key values maintain consistent relative ordering across repeated runs with the same seed (sort stability)
+- [x] 5.3 Property: entities with duplicate sort key values maintain consistent relative ordering across repeated runs with the same seed (sort stability)
 
 ## 6. Index Consistency Properties
 
