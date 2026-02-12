@@ -57,7 +57,7 @@
 
 - [x] 8.1 Create `bench/runner.ts` that discovers and imports all `.bench.ts` files in the `bench/` directory
 - [x] 8.2 Implement sequential suite execution with warm-up iterations before measurement
-- [ ] 8.3 Implement table output: format results as an aligned table with columns for benchmark name, ops/sec, mean, p50, p95, p99
+- [x] 8.3 Implement table output: format results as an aligned table with columns for benchmark name, ops/sec, mean, p50, p95, p99
 - [ ] 8.4 Implement `--json` flag: output all results as a structured JSON object keyed by suite and benchmark name
 - [ ] 8.5 Implement suite filtering: allow running a single benchmark file via argument (e.g., `bun run bench scaling`)
 
