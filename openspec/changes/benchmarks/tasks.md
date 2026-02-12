@@ -1,7 +1,7 @@
 ## 1. Dependencies and Setup
 
 - [x] 1.1 Add `tinybench` as a dev dependency in the root `package.json`
-- [ ] 1.2 Add `"bench": "bun run bench/runner.ts"` script to root `package.json`
+- [x] 1.2 Add `"bench": "bun run bench/runner.ts"` script to root `package.json`
 - [ ] 1.3 Create `bench/` directory at the repository root
 - [ ] 1.4 Create `bench/utils.ts` with shared helpers: database factory wrapper (creates an in-memory proseql database with a given schema and dataset), percentile extraction from tinybench results, table formatting for terminal output
 

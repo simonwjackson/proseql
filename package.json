@@ -2,7 +2,8 @@
   "private": true,
   "workspaces": ["packages/*"],
   "scripts": {
-    "postinstall": "bun2nix -o bun.nix"
+    "postinstall": "bun2nix -o bun.nix",
+    "bench": "bun run bench/runner.ts"
   },
   "dependencies": {
     "effect": "^3.15.2",
