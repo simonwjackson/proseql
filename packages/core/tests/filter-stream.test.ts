@@ -322,4 +322,135 @@ describe("applyFilter Stream combinator", () => {
 			expect(result[0].id).toBe("3");
 		});
 	});
+
+	describe("nested filtering (shape-mirroring)", () => {
+		const nestedData = [
+			{
+				id: "1",
+				title: "Dune",
+				genre: "sci-fi",
+				metadata: { views: 150, rating: 5, tags: ["classic"] },
+				author: { name: "Frank Herbert", country: "USA" },
+			},
+			{
+				id: "2",
+				title: "Neuromancer",
+				genre: "sci-fi",
+				metadata: { views: 80, rating: 4, tags: ["cyberpunk"] },
+				author: { name: "William Gibson", country: "USA" },
+			},
+			{
+				id: "3",
+				title: "Foundation",
+				genre: "sci-fi",
+				metadata: { views: 200, rating: 5, tags: ["epic", "classic"] },
+				author: { name: "Isaac Asimov", country: "Russia" },
+			},
+			{
+				id: "4",
+				title: "1984",
+				genre: "dystopian",
+				metadata: { views: 50, rating: 3, tags: ["political"] },
+				author: { name: "George Orwell", country: "UK" },
+			},
+		];
+
+		it("should filter by nested field with $gt operator (shape-mirroring)", async () => {
+			const result = await collectFiltered(nestedData, {
+				metadata: { views: { $gt: 100 } },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
+
+		it("should filter by nested field with $gte operator", async () => {
+			const result = await collectFiltered(nestedData, {
+				metadata: { views: { $gte: 150 } },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
+
+		it("should filter by nested field with $lt operator", async () => {
+			const result = await collectFiltered(nestedData, {
+				metadata: { views: { $lt: 100 } },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["2", "4"]);
+		});
+
+		it("should filter by nested field with $lte operator", async () => {
+			const result = await collectFiltered(nestedData, {
+				metadata: { views: { $lte: 80 } },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["2", "4"]);
+		});
+
+		it("should filter by nested field with $eq operator", async () => {
+			const result = await collectFiltered(nestedData, {
+				metadata: { rating: { $eq: 5 } },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
+
+		it("should filter by nested field with $ne operator", async () => {
+			const result = await collectFiltered(nestedData, {
+				metadata: { rating: { $ne: 5 } },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["2", "4"]);
+		});
+
+		it("should filter by nested field with $in operator", async () => {
+			const result = await collectFiltered(nestedData, {
+				metadata: { rating: { $in: [4, 5] } },
+			});
+			expect(result).toHaveLength(3);
+			expect(result.map((r) => r.id)).toEqual(["1", "2", "3"]);
+		});
+
+		it("should filter by multiple nested fields", async () => {
+			const result = await collectFiltered(nestedData, {
+				metadata: { views: { $gt: 100 }, rating: 5 },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
+
+		it("should filter by different nested objects", async () => {
+			const result = await collectFiltered(nestedData, {
+				metadata: { rating: 5 },
+				author: { country: "USA" },
+			});
+			expect(result).toHaveLength(1);
+			expect(result[0].id).toBe("1");
+		});
+
+		it("should combine nested and flat filters", async () => {
+			const result = await collectFiltered(nestedData, {
+				genre: "sci-fi",
+				metadata: { views: { $gt: 100 } },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
+
+		it("should handle nested array operators ($contains)", async () => {
+			const result = await collectFiltered(nestedData, {
+				metadata: { tags: { $contains: "classic" } },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
+
+		it("should handle nested array operators ($all)", async () => {
+			const result = await collectFiltered(nestedData, {
+				metadata: { tags: { $all: ["epic", "classic"] } },
+			});
+			expect(result).toHaveLength(1);
+			expect(result[0].id).toBe("3");
+		});
+	});
 });
