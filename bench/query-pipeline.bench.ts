@@ -691,8 +691,102 @@ export async function createSuite(): Promise<Bench> {
 	});
 
 	// -------------------------------------------------------------------------
-	// Task 5.7: Combined pipeline benchmark will be added here
+	// Task 5.7: Combined pipeline benchmarks
 	// -------------------------------------------------------------------------
+
+	// Combined pipeline benchmark: filter + sort + select + paginate
+	// Tests the full query pipeline without population on a single collection.
+	// This measures the combined overhead of all non-relationship pipeline stages.
+	const combinedBasicDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("combined: filter + sort + select + paginate (no populate)", async () => {
+		await combinedBasicDb.users.query({
+			where: { role: { $in: ["admin", "moderator"] }, age: { $gte: 25, $lte: 55 } },
+			sort: { age: "desc", name: "asc" },
+			select: ["id", "name", "email", "role"],
+			offset: 100,
+			limit: 20,
+		}).runPromise;
+	});
+
+	// Combined pipeline benchmark: filter + sort + populate + select + paginate
+	// Tests the complete query pipeline with all stages including population.
+	// This is the most realistic benchmark for complex queries.
+	const combinedFullDb = await createBenchDatabase(relationshipDbConfig, {
+		users: [...relationshipUsers],
+		products: [...relationshipProducts],
+		suppliers: [...suppliers],
+		orders: [...orders],
+	});
+
+	bench.add("combined: filter + sort + populate + select + paginate", async () => {
+		await combinedFullDb.orders.query({
+			where: { status: { $in: ["completed", "pending"] }, quantity: { $gte: 2 } },
+			sort: { total: "desc", createdAt: "asc" },
+			populate: { user: true, product: true },
+			select: ["id", "quantity", "total", "status"],
+			offset: 50,
+			limit: 25,
+		}).runPromise;
+	});
+
+	// Combined pipeline benchmark: filter + populate with nested + sort + paginate
+	// Tests deep relationship population within a complex query.
+	// Exercises the population stage with multi-level traversal.
+	const combinedNestedDb = await createBenchDatabase(relationshipDbConfig, {
+		users: [...relationshipUsers],
+		products: [...relationshipProducts],
+		suppliers: [...suppliers],
+		orders: [...orders],
+	});
+
+	bench.add("combined: filter + nested populate + sort + paginate", async () => {
+		await combinedNestedDb.orders.query({
+			where: { status: "completed" },
+			sort: { total: "desc" },
+			populate: {
+				product: {
+					supplier: true,
+				},
+			},
+			offset: 20,
+			limit: 15,
+		}).runPromise;
+	});
+
+	// Combined pipeline benchmark: complex filter + multiple populates + sort + select + paginate
+	// Tests the maximum complexity pipeline with compound filters, multiple relationships, and all stages.
+	// This represents the upper bound of query complexity.
+	const combinedComplexDb = await createBenchDatabase(relationshipDbConfig, {
+		users: [...relationshipUsers],
+		products: [...relationshipProducts],
+		suppliers: [...suppliers],
+		orders: [...orders],
+	});
+
+	bench.add("combined: complex filter + multi-populate + sort + select + paginate", async () => {
+		await combinedComplexDb.orders.query({
+			where: {
+				$and: [
+					{ status: { $in: ["completed", "pending"] } },
+					{ quantity: { $gte: 1, $lte: 4 } },
+					{ total: { $gt: 50 } },
+				],
+			},
+			sort: { total: "desc", createdAt: "desc" },
+			populate: {
+				user: true,
+				product: {
+					supplier: true,
+				},
+			},
+			select: ["id", "quantity", "total", "status", "createdAt"],
+			offset: 10,
+			limit: 20,
+		}).runPromise;
+	});
 
 	return bench;
 }

@@ -37,7 +37,7 @@
 - [x] 5.4 Implement population benchmarks: single ref population, inverse population, nested population (requires a multi-collection setup with relationships)
 - [x] 5.5 Implement select benchmark: field projection with a subset of fields
 - [x] 5.6 Implement paginate benchmark: skip/take on a large result set
-- [ ] 5.7 Implement combined pipeline benchmark: filter + sort + populate + select + paginate in a single query
+- [x] 5.7 Implement combined pipeline benchmark: filter + sort + populate + select + paginate in a single query
 
 ## 6. Persistence and Serialization Benchmarks
 
