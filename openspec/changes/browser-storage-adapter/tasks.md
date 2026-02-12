@@ -65,7 +65,7 @@
 
 - [x] 9.1 Document which codecs are browser-safe in the package README or JSDoc: JSON, JSON5, JSONC, Hjson, YAML are safe; TOML and TOON require verification
 - [x] 9.2 If TOML/TOON codecs depend on Node-only modules, add a runtime check that raises `UnsupportedFormatError` when they are used with a browser adapter
-- [ ] 9.3 Optionally accept an `allowedFormats` list in the adapter config to restrict codecs at construction time
+- [x] 9.3 Optionally accept an `allowedFormats` list in the adapter config to restrict codecs at construction time
 
 ## 10. Tests — Path-to-Key
 

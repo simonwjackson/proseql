@@ -11,6 +11,12 @@ export * from "@proseql/core";
 // Browser-specific exports
 export { pathToKey, DEFAULT_STORAGE_KEY_PREFIX } from "./path-to-key.js";
 
+// Format validation utilities
+export {
+	getFileExtension,
+	validateAllowedFormat,
+} from "./format-validation.js";
+
 // Browser storage adapter layers, factories, and config types
 export {
 	// LocalStorage

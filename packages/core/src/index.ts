@@ -276,7 +276,10 @@ export {
 	saveCollectionsToFile,
 	saveData,
 } from "./storage/persistence-effect.js";
-export type { StorageAdapterShape } from "./storage/storage-service.js";
+export type {
+	StorageAdapterShape,
+	StorageReadWriteError,
+} from "./storage/storage-service.js";
 // Storage adapter service
 export { StorageAdapter as StorageAdapterService } from "./storage/storage-service.js";
 

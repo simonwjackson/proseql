@@ -11,10 +11,12 @@
 import {
 	StorageAdapterService as StorageAdapter,
 	StorageError,
+	UnsupportedFormatError,
 	type StorageAdapterShape,
 } from "@proseql/core";
 import { Effect, Layer } from "effect";
 import { pathToKey, DEFAULT_STORAGE_KEY_PREFIX } from "../path-to-key.js";
+import { validateAllowedFormat } from "../format-validation.js";
 
 // ============================================================================
 // Configuration
@@ -43,9 +45,36 @@ export interface IndexedDBConfig {
 	 * IndexedDB database version. Default: 1
 	 */
 	readonly version?: number;
+
+	/**
+	 * Optional list of allowed file extensions (without dots).
+	 * When provided, read/write operations will fail with UnsupportedFormatError
+	 * if the path has an extension not in this list.
+	 *
+	 * @example
+	 * ```ts
+	 * // Only allow JSON and YAML files
+	 * const layer = makeIndexedDBStorageLayer({
+	 *   allowedFormats: ["json", "yaml", "yml"]
+	 * });
+	 * ```
+	 */
+	readonly allowedFormats?: ReadonlyArray<string>;
 }
 
-const defaultConfig: Required<IndexedDBConfig> = {
+/**
+ * Resolved configuration with all required fields filled in.
+ * Note: allowedFormats remains optional (undefined means all formats allowed).
+ */
+interface ResolvedIndexedDBConfig {
+	readonly keyPrefix: string;
+	readonly databaseName: string;
+	readonly storeName: string;
+	readonly version: number;
+	readonly allowedFormats?: ReadonlyArray<string>;
+}
+
+const defaultConfig: ResolvedIndexedDBConfig = {
 	keyPrefix: DEFAULT_STORAGE_KEY_PREFIX,
 	databaseName: "proseql",
 	storeName: "collections",
@@ -80,7 +109,7 @@ const toStorageError = (
  * Caches the IDBDatabase handle for subsequent operations.
  */
 const openDatabase = (
-	config: Required<IndexedDBConfig>,
+	config: ResolvedIndexedDBConfig,
 ): Effect.Effect<IDBDatabase, StorageError> =>
 	Effect.async<IDBDatabase, StorageError>((resume) => {
 		const request = indexedDB.open(config.databaseName, config.version);
@@ -127,11 +156,11 @@ const openDatabase = (
 // Cached database connection per config
 const databaseCache = new Map<string, IDBDatabase>();
 
-const getCacheKey = (config: Required<IndexedDBConfig>): string =>
+const getCacheKey = (config: ResolvedIndexedDBConfig): string =>
 	`${config.databaseName}:${config.version}`;
 
 const getDatabase = (
-	config: Required<IndexedDBConfig>,
+	config: ResolvedIndexedDBConfig,
 ): Effect.Effect<IDBDatabase, StorageError> => {
 	const cacheKey = getCacheKey(config);
 	const cached = databaseCache.get(cacheKey);
@@ -154,11 +183,14 @@ const getDatabase = (
 // ============================================================================
 
 const makeRead =
-	(config: Required<IndexedDBConfig>) =>
-	(path: string): Effect.Effect<string, StorageError> => {
+	(config: ResolvedIndexedDBConfig) =>
+	(path: string): Effect.Effect<string, StorageError | UnsupportedFormatError> => {
 		const key = pathToKey(path, config.keyPrefix);
 
 		return Effect.gen(function* () {
+			// Validate format if restrictions are configured
+			yield* validateAllowedFormat(path, config.allowedFormats);
+
 			const db = yield* getDatabase(config);
 
 			return yield* Effect.async<string, StorageError>((resume) => {
@@ -194,11 +226,14 @@ const makeRead =
 	};
 
 const makeWrite =
-	(config: Required<IndexedDBConfig>) =>
-	(path: string, data: string): Effect.Effect<void, StorageError> => {
+	(config: ResolvedIndexedDBConfig) =>
+	(path: string, data: string): Effect.Effect<void, StorageError | UnsupportedFormatError> => {
 		const key = pathToKey(path, config.keyPrefix);
 
 		return Effect.gen(function* () {
+			// Validate format if restrictions are configured
+			yield* validateAllowedFormat(path, config.allowedFormats);
+
 			const db = yield* getDatabase(config);
 
 			return yield* Effect.async<void, StorageError>((resume) => {
@@ -237,7 +272,7 @@ const makeWrite =
 	};
 
 const makeExists =
-	(config: Required<IndexedDBConfig>) =>
+	(config: ResolvedIndexedDBConfig) =>
 	(path: string): Effect.Effect<boolean, StorageError> => {
 		const key = pathToKey(path, config.keyPrefix);
 
@@ -265,7 +300,7 @@ const makeExists =
 	};
 
 const makeRemove =
-	(config: Required<IndexedDBConfig>) =>
+	(config: ResolvedIndexedDBConfig) =>
 	(path: string): Effect.Effect<void, StorageError> => {
 		const key = pathToKey(path, config.keyPrefix);
 
@@ -293,7 +328,7 @@ const makeRemove =
 	};
 
 const makeEnsureDir =
-	(_config: Required<IndexedDBConfig>) =>
+	(_config: ResolvedIndexedDBConfig) =>
 	(_path: string): Effect.Effect<void, StorageError> => {
 		// IndexedDB is flat (no directories), so this is a no-op
 		return Effect.void;
@@ -308,7 +343,7 @@ const makeEnsureDir =
  * Returns an empty unsubscribe function.
  */
 const makeWatch =
-	(_config: Required<IndexedDBConfig>) =>
+	(_config: ResolvedIndexedDBConfig) =>
 	(
 		_path: string,
 		_onChange: () => void,

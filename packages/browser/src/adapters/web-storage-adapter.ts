@@ -8,10 +8,12 @@
 
 import {
 	StorageError,
+	UnsupportedFormatError,
 	type StorageAdapterShape,
 } from "@proseql/core";
 import { Effect } from "effect";
 import { pathToKey, DEFAULT_STORAGE_KEY_PREFIX } from "../path-to-key.js";
+import { getFileExtension, validateAllowedFormat } from "../format-validation.js";
 
 // ============================================================================
 // Configuration
@@ -25,9 +27,33 @@ export interface WebStorageConfig {
 	 * Prefix for storage keys. Default: "proseql:"
 	 */
 	readonly keyPrefix?: string;
+
+	/**
+	 * Optional list of allowed file extensions (without dots).
+	 * When provided, read/write operations will fail with UnsupportedFormatError
+	 * if the path has an extension not in this list.
+	 *
+	 * @example
+	 * ```ts
+	 * // Only allow JSON and YAML files
+	 * const layer = makeLocalStorageLayer({
+	 *   allowedFormats: ["json", "yaml", "yml"]
+	 * });
+	 * ```
+	 */
+	readonly allowedFormats?: ReadonlyArray<string>;
 }
 
-const defaultConfig: Required<WebStorageConfig> = {
+/**
+ * Resolved configuration with all required fields filled in.
+ * Note: allowedFormats remains optional (undefined means all formats allowed).
+ */
+interface ResolvedWebStorageConfig {
+	readonly keyPrefix: string;
+	readonly allowedFormats?: ReadonlyArray<string>;
+}
+
+const defaultConfig: ResolvedWebStorageConfig = {
 	keyPrefix: DEFAULT_STORAGE_KEY_PREFIX,
 };
 
@@ -68,64 +94,72 @@ const toStorageError = (
 // ============================================================================
 
 const makeRead =
-	(storage: Storage, config: Required<WebStorageConfig>) =>
-	(path: string): Effect.Effect<string, StorageError> => {
+	(storage: Storage, config: ResolvedWebStorageConfig) =>
+	(path: string): Effect.Effect<string, StorageError | UnsupportedFormatError> => {
 		const key = pathToKey(path, config.keyPrefix);
-		return Effect.sync(() => storage.getItem(key)).pipe(
-			Effect.flatMap((value) =>
-				value === null
-					? Effect.fail(
-							new StorageError({
-								path,
-								operation: "read",
-								message: `Key not found: ${key}`,
-							}),
-						)
-					: Effect.succeed(value),
-			),
-		);
+		return Effect.gen(function* () {
+			// Validate format if restrictions are configured
+			yield* validateAllowedFormat(path, config.allowedFormats);
+
+			const value = storage.getItem(key);
+			if (value === null) {
+				return yield* Effect.fail(
+					new StorageError({
+						path,
+						operation: "read",
+						message: `Key not found: ${key}`,
+					}),
+				);
+			}
+			return value;
+		});
 	};
 
 const makeWrite =
-	(storage: Storage, config: Required<WebStorageConfig>) =>
-	(path: string, data: string): Effect.Effect<void, StorageError> => {
+	(storage: Storage, config: ResolvedWebStorageConfig) =>
+	(path: string, data: string): Effect.Effect<void, StorageError | UnsupportedFormatError> => {
 		const key = pathToKey(path, config.keyPrefix);
-		return Effect.try({
-			try: () => storage.setItem(key, data),
-			catch: (error) => {
-				// Check for QuotaExceededError
-				if (
-					error instanceof DOMException &&
-					error.name === "QuotaExceededError"
-				) {
-					return new StorageError({
-						path,
-						operation: "write",
-						message: `Storage quota exceeded while writing key: ${key}. Consider clearing old data or using IndexedDB for larger datasets.`,
-						cause: error,
-					});
-				}
-				return toStorageError(path, "write", error);
-			},
+		return Effect.gen(function* () {
+			// Validate format if restrictions are configured
+			yield* validateAllowedFormat(path, config.allowedFormats);
+
+			yield* Effect.try({
+				try: () => storage.setItem(key, data),
+				catch: (error) => {
+					// Check for QuotaExceededError
+					if (
+						error instanceof DOMException &&
+						error.name === "QuotaExceededError"
+					) {
+						return new StorageError({
+							path,
+							operation: "write",
+							message: `Storage quota exceeded while writing key: ${key}. Consider clearing old data or using IndexedDB for larger datasets.`,
+							cause: error,
+						});
+					}
+					return toStorageError(path, "write", error);
+				},
+			});
 		});
 	};
 
 const makeExists =
-	(storage: Storage, config: Required<WebStorageConfig>) =>
+	(storage: Storage, config: ResolvedWebStorageConfig) =>
 	(path: string): Effect.Effect<boolean, StorageError> => {
 		const key = pathToKey(path, config.keyPrefix);
 		return Effect.sync(() => storage.getItem(key) !== null);
 	};
 
 const makeRemove =
-	(storage: Storage, config: Required<WebStorageConfig>) =>
+	(storage: Storage, config: ResolvedWebStorageConfig) =>
 	(path: string): Effect.Effect<void, StorageError> => {
 		const key = pathToKey(path, config.keyPrefix);
 		return Effect.sync(() => storage.removeItem(key));
 	};
 
 const makeEnsureDir =
-	(_storage: Storage, _config: Required<WebStorageConfig>) =>
+	(_storage: Storage, _config: ResolvedWebStorageConfig) =>
 	(_path: string): Effect.Effect<void, StorageError> => {
 		// Browser storage is flat (no directories), so this is a no-op
 		return Effect.void;
