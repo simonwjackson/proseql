@@ -2011,6 +2011,262 @@ describe("Plugin System", () => {
 			expect(executionOrder).toContain("global-afterDelete");
 			expect(executionOrder).toContain("collection-afterDelete");
 		});
+
+		it("should run multiple plugins' global hooks in plugin registration order", async () => {
+			// Task 14.4: Test multiple plugins' global hooks run in plugin registration order
+			//
+			// We create THREE plugins, each with global hooks that track their execution order.
+			// The hooks from plugin1 should run first, then plugin2, then plugin3.
+			// This verifies that global hooks from multiple plugins are merged and executed
+			// in the order the plugins were registered.
+
+			// Track hook execution order
+			const executionOrder: string[] = [];
+
+			// Plugin 1: First registered - should run its hooks first
+			const plugin1 = createHooksPlugin("plugin-order-1", {
+				beforeCreate: [
+					(ctx) => {
+						executionOrder.push("plugin1-beforeCreate");
+						return Effect.succeed(ctx.data);
+					},
+				],
+				afterCreate: [
+					() => {
+						executionOrder.push("plugin1-afterCreate");
+						return Effect.void;
+					},
+				],
+				beforeUpdate: [
+					(ctx) => {
+						executionOrder.push("plugin1-beforeUpdate");
+						return Effect.succeed(ctx.update);
+					},
+				],
+				afterUpdate: [
+					() => {
+						executionOrder.push("plugin1-afterUpdate");
+						return Effect.void;
+					},
+				],
+				beforeDelete: [
+					() => {
+						executionOrder.push("plugin1-beforeDelete");
+						return Effect.void;
+					},
+				],
+				afterDelete: [
+					() => {
+						executionOrder.push("plugin1-afterDelete");
+						return Effect.void;
+					},
+				],
+			});
+
+			// Plugin 2: Second registered - should run its hooks after plugin1
+			const plugin2 = createHooksPlugin("plugin-order-2", {
+				beforeCreate: [
+					(ctx) => {
+						executionOrder.push("plugin2-beforeCreate");
+						return Effect.succeed(ctx.data);
+					},
+				],
+				afterCreate: [
+					() => {
+						executionOrder.push("plugin2-afterCreate");
+						return Effect.void;
+					},
+				],
+				beforeUpdate: [
+					(ctx) => {
+						executionOrder.push("plugin2-beforeUpdate");
+						return Effect.succeed(ctx.update);
+					},
+				],
+				afterUpdate: [
+					() => {
+						executionOrder.push("plugin2-afterUpdate");
+						return Effect.void;
+					},
+				],
+				beforeDelete: [
+					() => {
+						executionOrder.push("plugin2-beforeDelete");
+						return Effect.void;
+					},
+				],
+				afterDelete: [
+					() => {
+						executionOrder.push("plugin2-afterDelete");
+						return Effect.void;
+					},
+				],
+			});
+
+			// Plugin 3: Third registered - should run its hooks after plugin1 and plugin2
+			const plugin3 = createHooksPlugin("plugin-order-3", {
+				beforeCreate: [
+					(ctx) => {
+						executionOrder.push("plugin3-beforeCreate");
+						return Effect.succeed(ctx.data);
+					},
+				],
+				afterCreate: [
+					() => {
+						executionOrder.push("plugin3-afterCreate");
+						return Effect.void;
+					},
+				],
+				beforeUpdate: [
+					(ctx) => {
+						executionOrder.push("plugin3-beforeUpdate");
+						return Effect.succeed(ctx.update);
+					},
+				],
+				afterUpdate: [
+					() => {
+						executionOrder.push("plugin3-afterUpdate");
+						return Effect.void;
+					},
+				],
+				beforeDelete: [
+					() => {
+						executionOrder.push("plugin3-beforeDelete");
+						return Effect.void;
+					},
+				],
+				afterDelete: [
+					() => {
+						executionOrder.push("plugin3-afterDelete");
+						return Effect.void;
+					},
+				],
+			});
+
+			// Create database with plugins in specific order: plugin1, plugin2, plugin3
+			const db = await createDatabaseWithPlugins([plugin1, plugin2, plugin3]);
+
+			// Test 1: CREATE - verify beforeCreate and afterCreate hook ordering
+			executionOrder.length = 0; // Reset
+
+			await db.books
+				.create({
+					id: "order-test-1",
+					title: "Order Test Book",
+					author: "Test Author",
+					year: 2024,
+					genre: "test",
+				})
+				.runPromise;
+
+			// Verify beforeCreate hooks ran in plugin registration order: 1, 2, 3
+			const beforeCreate1 = executionOrder.indexOf("plugin1-beforeCreate");
+			const beforeCreate2 = executionOrder.indexOf("plugin2-beforeCreate");
+			const beforeCreate3 = executionOrder.indexOf("plugin3-beforeCreate");
+			expect(beforeCreate1).toBeLessThan(beforeCreate2);
+			expect(beforeCreate2).toBeLessThan(beforeCreate3);
+
+			// Verify afterCreate hooks ran in plugin registration order: 1, 2, 3
+			const afterCreate1 = executionOrder.indexOf("plugin1-afterCreate");
+			const afterCreate2 = executionOrder.indexOf("plugin2-afterCreate");
+			const afterCreate3 = executionOrder.indexOf("plugin3-afterCreate");
+			expect(afterCreate1).toBeLessThan(afterCreate2);
+			expect(afterCreate2).toBeLessThan(afterCreate3);
+
+			// Verify all hooks were called
+			expect(executionOrder).toContain("plugin1-beforeCreate");
+			expect(executionOrder).toContain("plugin2-beforeCreate");
+			expect(executionOrder).toContain("plugin3-beforeCreate");
+			expect(executionOrder).toContain("plugin1-afterCreate");
+			expect(executionOrder).toContain("plugin2-afterCreate");
+			expect(executionOrder).toContain("plugin3-afterCreate");
+
+			// Test 2: UPDATE - verify beforeUpdate and afterUpdate hook ordering
+			executionOrder.length = 0; // Reset
+
+			await db.books
+				.update("order-test-1", { genre: "updated" })
+				.runPromise;
+
+			// Verify beforeUpdate hooks ran in plugin registration order: 1, 2, 3
+			const beforeUpdate1 = executionOrder.indexOf("plugin1-beforeUpdate");
+			const beforeUpdate2 = executionOrder.indexOf("plugin2-beforeUpdate");
+			const beforeUpdate3 = executionOrder.indexOf("plugin3-beforeUpdate");
+			expect(beforeUpdate1).toBeLessThan(beforeUpdate2);
+			expect(beforeUpdate2).toBeLessThan(beforeUpdate3);
+
+			// Verify afterUpdate hooks ran in plugin registration order: 1, 2, 3
+			const afterUpdate1 = executionOrder.indexOf("plugin1-afterUpdate");
+			const afterUpdate2 = executionOrder.indexOf("plugin2-afterUpdate");
+			const afterUpdate3 = executionOrder.indexOf("plugin3-afterUpdate");
+			expect(afterUpdate1).toBeLessThan(afterUpdate2);
+			expect(afterUpdate2).toBeLessThan(afterUpdate3);
+
+			// Verify all hooks were called
+			expect(executionOrder).toContain("plugin1-beforeUpdate");
+			expect(executionOrder).toContain("plugin2-beforeUpdate");
+			expect(executionOrder).toContain("plugin3-beforeUpdate");
+			expect(executionOrder).toContain("plugin1-afterUpdate");
+			expect(executionOrder).toContain("plugin2-afterUpdate");
+			expect(executionOrder).toContain("plugin3-afterUpdate");
+
+			// Test 3: DELETE - verify beforeDelete and afterDelete hook ordering
+			executionOrder.length = 0; // Reset
+
+			await db.books.delete("order-test-1").runPromise;
+
+			// Verify beforeDelete hooks ran in plugin registration order: 1, 2, 3
+			const beforeDelete1 = executionOrder.indexOf("plugin1-beforeDelete");
+			const beforeDelete2 = executionOrder.indexOf("plugin2-beforeDelete");
+			const beforeDelete3 = executionOrder.indexOf("plugin3-beforeDelete");
+			expect(beforeDelete1).toBeLessThan(beforeDelete2);
+			expect(beforeDelete2).toBeLessThan(beforeDelete3);
+
+			// Verify afterDelete hooks ran in plugin registration order: 1, 2, 3
+			const afterDelete1 = executionOrder.indexOf("plugin1-afterDelete");
+			const afterDelete2 = executionOrder.indexOf("plugin2-afterDelete");
+			const afterDelete3 = executionOrder.indexOf("plugin3-afterDelete");
+			expect(afterDelete1).toBeLessThan(afterDelete2);
+			expect(afterDelete2).toBeLessThan(afterDelete3);
+
+			// Verify all hooks were called
+			expect(executionOrder).toContain("plugin1-beforeDelete");
+			expect(executionOrder).toContain("plugin2-beforeDelete");
+			expect(executionOrder).toContain("plugin3-beforeDelete");
+			expect(executionOrder).toContain("plugin1-afterDelete");
+			expect(executionOrder).toContain("plugin2-afterDelete");
+			expect(executionOrder).toContain("plugin3-afterDelete");
+
+			// Test 4: Verify the reverse order also works correctly
+			// Register plugins in reverse order and verify hooks run in that order
+			const reverseDb = await createDatabaseWithPlugins([plugin3, plugin2, plugin1]);
+
+			executionOrder.length = 0; // Reset
+
+			await reverseDb.books
+				.create({
+					id: "reverse-test-1",
+					title: "Reverse Order Test",
+					author: "Test Author",
+					year: 2024,
+					genre: "test",
+				})
+				.runPromise;
+
+			// Now plugin3's hooks should run first, then plugin2, then plugin1
+			const reverseBeforeCreate3 = executionOrder.indexOf("plugin3-beforeCreate");
+			const reverseBeforeCreate2 = executionOrder.indexOf("plugin2-beforeCreate");
+			const reverseBeforeCreate1 = executionOrder.indexOf("plugin1-beforeCreate");
+			expect(reverseBeforeCreate3).toBeLessThan(reverseBeforeCreate2);
+			expect(reverseBeforeCreate2).toBeLessThan(reverseBeforeCreate1);
+
+			// Verify afterCreate also follows reverse registration order
+			const reverseAfterCreate3 = executionOrder.indexOf("plugin3-afterCreate");
+			const reverseAfterCreate2 = executionOrder.indexOf("plugin2-afterCreate");
+			const reverseAfterCreate1 = executionOrder.indexOf("plugin1-afterCreate");
+			expect(reverseAfterCreate3).toBeLessThan(reverseAfterCreate2);
+			expect(reverseAfterCreate2).toBeLessThan(reverseAfterCreate1);
+		});
 	});
 
 	// ============================================================================
