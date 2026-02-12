@@ -174,4 +174,183 @@ describe("nested-path utilities", () => {
 			});
 		});
 	});
+
+	describe("setNestedValue", () => {
+		describe("set leaf on existing object", () => {
+			it("should set a leaf value on an existing nested object", () => {
+				const obj = { metadata: { views: 100, rating: 5 } };
+				const result = setNestedValue(obj, "metadata.views", 200);
+				expect(result).toEqual({ metadata: { views: 200, rating: 5 } });
+			});
+
+			it("should set a new leaf value on existing nested object", () => {
+				const obj = { metadata: { views: 100 } };
+				const result = setNestedValue(obj, "metadata.rating", 5);
+				expect(result).toEqual({ metadata: { views: 100, rating: 5 } });
+			});
+
+			it("should set a deeply nested leaf value", () => {
+				const obj = { a: { b: { c: 1 } } };
+				const result = setNestedValue(obj, "a.b.c", 42);
+				expect(result).toEqual({ a: { b: { c: 42 } } });
+			});
+
+			it("should set a new leaf on existing deep path", () => {
+				const obj = { a: { b: { c: 1 } } };
+				const result = setNestedValue(obj, "a.b.d", 2);
+				expect(result).toEqual({ a: { b: { c: 1, d: 2 } } });
+			});
+
+			it("should preserve sibling properties at all levels", () => {
+				const obj = { a: { b: 1, c: 2 }, d: 3 };
+				const result = setNestedValue(obj, "a.b", 10);
+				expect(result).toEqual({ a: { b: 10, c: 2 }, d: 3 });
+			});
+		});
+
+		describe("create intermediate objects", () => {
+			it("should create intermediate objects for new path", () => {
+				const obj = {};
+				const result = setNestedValue(obj, "a.b.c", 1);
+				expect(result).toEqual({ a: { b: { c: 1 } } });
+			});
+
+			it("should create missing intermediate object", () => {
+				const obj = { a: 1 };
+				const result = setNestedValue(obj, "b.c", 2);
+				expect(result).toEqual({ a: 1, b: { c: 2 } });
+			});
+
+			it("should create multiple levels of intermediates", () => {
+				const obj = { existing: "value" };
+				const result = setNestedValue(obj, "a.b.c.d.e", "deep");
+				expect(result).toEqual({
+					existing: "value",
+					a: { b: { c: { d: { e: "deep" } } } },
+				});
+			});
+
+			it("should replace non-object intermediate with new object", () => {
+				const obj = { a: "string" };
+				const result = setNestedValue(obj, "a.b.c", 1);
+				expect(result).toEqual({ a: { b: { c: 1 } } });
+			});
+
+			it("should replace null intermediate with new object", () => {
+				const obj = { a: null };
+				const result = setNestedValue(obj, "a.b", 1);
+				expect(result).toEqual({ a: { b: 1 } });
+			});
+		});
+
+		describe("single-segment path", () => {
+			it("should set a direct property value", () => {
+				const obj = { name: "old", age: 30 };
+				const result = setNestedValue(obj, "name", "new");
+				expect(result).toEqual({ name: "new", age: 30 });
+			});
+
+			it("should add a new direct property", () => {
+				const obj = { name: "John" };
+				const result = setNestedValue(obj, "age", 25);
+				expect(result).toEqual({ name: "John", age: 25 });
+			});
+
+			it("should set a direct property to an object", () => {
+				const obj = { name: "John" };
+				const result = setNestedValue(obj, "metadata", { views: 100 });
+				expect(result).toEqual({ name: "John", metadata: { views: 100 } });
+			});
+
+			it("should set a direct property to null", () => {
+				const obj = { value: 1 };
+				const result = setNestedValue(obj, "value", null);
+				expect(result).toEqual({ value: null });
+			});
+
+			it("should set a direct property to undefined", () => {
+				const obj = { value: 1 };
+				const result = setNestedValue(obj, "value", undefined);
+				expect(result).toEqual({ value: undefined });
+			});
+		});
+
+		describe("verify immutability (original unchanged)", () => {
+			it("should not modify the original object for nested path", () => {
+				const original = { metadata: { views: 100, rating: 5 } };
+				const originalCopy = JSON.parse(JSON.stringify(original));
+
+				setNestedValue(original, "metadata.views", 200);
+
+				expect(original).toEqual(originalCopy);
+			});
+
+			it("should not modify the original object for single-segment path", () => {
+				const original = { name: "old", age: 30 };
+				const originalCopy = JSON.parse(JSON.stringify(original));
+
+				setNestedValue(original, "name", "new");
+
+				expect(original).toEqual(originalCopy);
+			});
+
+			it("should not modify nested objects in original", () => {
+				const original = { a: { b: { c: 1 } } };
+				const originalA = original.a;
+				const originalB = original.a.b;
+
+				setNestedValue(original, "a.b.c", 42);
+
+				// Original nested objects should be unchanged
+				expect(original.a).toBe(originalA);
+				expect(original.a.b).toBe(originalB);
+				expect(original.a.b.c).toBe(1);
+			});
+
+			it("should create new object references along the path", () => {
+				const original = { a: { b: { c: 1 } } };
+				const result = setNestedValue(original, "a.b.c", 42);
+
+				// Result should have new references along the path
+				expect(result).not.toBe(original);
+				expect(result.a).not.toBe(original.a);
+				expect((result.a as Record<string, unknown>).b).not.toBe(original.a.b);
+			});
+
+			it("should preserve unchanged branches", () => {
+				const sibling = { x: 1 };
+				const original = { a: { b: 1 }, c: sibling };
+				const result = setNestedValue(original, "a.b", 2);
+
+				// The unchanged sibling branch should be the same reference
+				expect(result.c).toBe(sibling);
+			});
+		});
+
+		describe("edge cases", () => {
+			it("should handle setting array values", () => {
+				const obj = { data: {} };
+				const result = setNestedValue(obj, "data.items", [1, 2, 3]);
+				expect(result).toEqual({ data: { items: [1, 2, 3] } });
+			});
+
+			it("should handle setting boolean values", () => {
+				const obj = { settings: {} };
+				const result = setNestedValue(obj, "settings.enabled", true);
+				expect(result).toEqual({ settings: { enabled: true } });
+			});
+
+			it("should handle empty string as value", () => {
+				const obj = { data: { name: "test" } };
+				const result = setNestedValue(obj, "data.name", "");
+				expect(result).toEqual({ data: { name: "" } });
+			});
+
+			it("should handle numeric values", () => {
+				const obj = {};
+				const result = setNestedValue(obj, "stats.count", 0);
+				expect(result).toEqual({ stats: { count: 0 } });
+			});
+		});
+	});
 });

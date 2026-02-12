@@ -4,7 +4,7 @@
 - [x] 1.2 Add `setNestedValue(obj, path, value)`: returns a new object with the value set at the dot-path. Immutable — copies intermediate objects along the path.
 - [x] 1.3 Add `isDotPath(key)`: returns `key.includes(".")` (already implemented in nested-path.ts).
 - [x] 1.4 Write unit tests for `getNestedValue`: flat path, 2-level path, 3-level path, missing intermediate, null intermediate, empty string path, single-segment path.
-- [ ] 1.5 Write unit tests for `setNestedValue`: set leaf on existing object, create intermediate objects, single-segment path, verify immutability (original unchanged).
+- [x] 1.5 Write unit tests for `setNestedValue`: set leaf on existing object, create intermediate objects, single-segment path, verify immutability (original unchanged).
 
 ## 2. Deduplicate Existing getNestedValue
 
