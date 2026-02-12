@@ -47,7 +47,7 @@
 ## 8. Transaction Atomicity Properties
 
 - [x] 8.1 Create `packages/core/tests/property/transaction-atomicity.test.ts`
-- [ ] 8.2 Property: snapshot collection state before a transaction, execute an arbitrary operation sequence inside the transaction, force failure at a random point, verify all collection states are identical to the pre-transaction snapshot
+- [x] 8.2 Property: snapshot collection state before a transaction, execute an arbitrary operation sequence inside the transaction, force failure at a random point, verify all collection states are identical to the pre-transaction snapshot
 - [ ] 8.3 Property: a transaction that completes without failure applies all mutations (post-transaction state reflects every operation in the sequence)
 
 ## 9. Cleanup

@@ -200,5 +200,230 @@ describe("Transaction atomicity properties", () => {
 		});
 	});
 
-	// Tasks 8.2 and 8.3 will be implemented in subsequent tasks
+	describe("Task 8.2: Transaction rollback restores pre-transaction state", () => {
+		it("should restore pre-transaction state after failure at arbitrary point in operation sequence", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate initial data (1-10 books)
+					fc.array(entityArbitrary(BookSchema), { minLength: 1, maxLength: 10 }),
+					// Generate operation sequence (1-8 operations)
+					operationSequenceArbitrary(BookSchema, {
+						minLength: 1,
+						maxLength: 8,
+					}),
+					// Generate failure point (0 to length-1, where to fail after executing that many ops)
+					fc.nat({ max: 100 }), // Will be modulo'd by sequence length
+					async (initialBooks, operationSequence, failurePointRaw) => {
+						// Fail after executing this many operations (0 = fail before any, length = fail after all)
+						const failurePoint =
+							operationSequence.length === 0
+								? 0
+								: failurePointRaw % (operationSequence.length + 1);
+
+						// Create database with initial data
+						const db = await Effect.runPromise(
+							createEffectDatabase(config, { books: initialBooks }),
+						);
+
+						// Snapshot collection state BEFORE the transaction
+						const preTransactionChunk = await Effect.runPromise(
+							Stream.runCollect(db.books.query({})),
+						);
+						const preTransactionSnapshot = snapshotCollection(
+							Chunk.toReadonlyArray(preTransactionChunk),
+						);
+
+						// Execute transaction that performs operations then fails at the specified point
+						const txResult = await Effect.runPromise(
+							db
+								.$transaction((ctx) =>
+									Effect.gen(function* () {
+										// Execute operations up to the failure point
+										for (let i = 0; i < failurePoint && i < operationSequence.length; i++) {
+											const op = operationSequence[i];
+											if (op.op === "create") {
+												yield* ctx.books
+													.create(op.payload)
+													.pipe(Effect.catchAll(() => Effect.void));
+											} else if (op.op === "update") {
+												yield* ctx.books
+													.update(op.id, op.payload)
+													.pipe(Effect.catchAll(() => Effect.void));
+											} else if (op.op === "delete") {
+												yield* ctx.books
+													.delete(op.id)
+													.pipe(Effect.catchAll(() => Effect.void));
+											}
+										}
+
+										// Force failure
+										return yield* Effect.fail(
+											new SimulatedFailureError(
+												`Simulated failure at point ${failurePoint}`,
+											),
+										);
+									}),
+								)
+								.pipe(Effect.either),
+						);
+
+						// Verify the transaction failed as expected
+						expect(txResult._tag).toBe("Left");
+						if (txResult._tag === "Left") {
+							expect(txResult.left).toBeInstanceOf(SimulatedFailureError);
+						}
+
+						// Snapshot collection state AFTER the failed transaction
+						const postTransactionChunk = await Effect.runPromise(
+							Stream.runCollect(db.books.query({})),
+						);
+						const postTransactionSnapshot = snapshotCollection(
+							Chunk.toReadonlyArray(postTransactionChunk),
+						);
+
+						// CRITICAL PROPERTY: Post-transaction state must be identical to pre-transaction state
+						expect(snapshotsEqual(preTransactionSnapshot, postTransactionSnapshot)).toBe(
+							true,
+						);
+
+						// Additional verification: exact length match
+						expect(postTransactionSnapshot.length).toBe(
+							preTransactionSnapshot.length,
+						);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should restore state for transaction that fails immediately (before any operations)", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate initial data (1-5 books)
+					fc.array(entityArbitrary(BookSchema), { minLength: 1, maxLength: 5 }),
+					async (initialBooks) => {
+						// Create database with initial data
+						const db = await Effect.runPromise(
+							createEffectDatabase(config, { books: initialBooks }),
+						);
+
+						// Snapshot state before transaction
+						const preTransactionChunk = await Effect.runPromise(
+							Stream.runCollect(db.books.query({})),
+						);
+						const preTransactionSnapshot = snapshotCollection(
+							Chunk.toReadonlyArray(preTransactionChunk),
+						);
+
+						// Execute transaction that fails immediately
+						const txResult = await Effect.runPromise(
+							db
+								.$transaction((_ctx) =>
+									Effect.gen(function* () {
+										// Fail immediately without doing anything
+										return yield* Effect.fail(
+											new SimulatedFailureError("Immediate failure"),
+										);
+									}),
+								)
+								.pipe(Effect.either),
+						);
+
+						// Verify failure
+						expect(txResult._tag).toBe("Left");
+
+						// Snapshot state after transaction
+						const postTransactionChunk = await Effect.runPromise(
+							Stream.runCollect(db.books.query({})),
+						);
+						const postTransactionSnapshot = snapshotCollection(
+							Chunk.toReadonlyArray(postTransactionChunk),
+						);
+
+						// State should be unchanged
+						expect(snapshotsEqual(preTransactionSnapshot, postTransactionSnapshot)).toBe(
+							true,
+						);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should restore state for transaction that explicitly rolls back after operations", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate initial data (1-5 books)
+					fc.array(entityArbitrary(BookSchema), { minLength: 1, maxLength: 5 }),
+					// Generate operation sequence (1-5 operations)
+					operationSequenceArbitrary(BookSchema, {
+						minLength: 1,
+						maxLength: 5,
+					}),
+					async (initialBooks, operationSequence) => {
+						// Create database with initial data
+						const db = await Effect.runPromise(
+							createEffectDatabase(config, { books: initialBooks }),
+						);
+
+						// Snapshot state before transaction
+						const preTransactionChunk = await Effect.runPromise(
+							Stream.runCollect(db.books.query({})),
+						);
+						const preTransactionSnapshot = snapshotCollection(
+							Chunk.toReadonlyArray(preTransactionChunk),
+						);
+
+						// Execute transaction that performs all operations then explicitly rolls back
+						const txResult = await Effect.runPromise(
+							db
+								.$transaction((ctx) =>
+									Effect.gen(function* () {
+										// Execute all operations
+										for (const op of operationSequence) {
+											if (op.op === "create") {
+												yield* ctx.books
+													.create(op.payload)
+													.pipe(Effect.catchAll(() => Effect.void));
+											} else if (op.op === "update") {
+												yield* ctx.books
+													.update(op.id, op.payload)
+													.pipe(Effect.catchAll(() => Effect.void));
+											} else if (op.op === "delete") {
+												yield* ctx.books
+													.delete(op.id)
+													.pipe(Effect.catchAll(() => Effect.void));
+											}
+										}
+
+										// Explicitly rollback
+										return yield* ctx.rollback();
+									}),
+								)
+								.pipe(Effect.either),
+						);
+
+						// Verify the transaction rolled back
+						expect(txResult._tag).toBe("Left");
+
+						// Snapshot state after transaction
+						const postTransactionChunk = await Effect.runPromise(
+							Stream.runCollect(db.books.query({})),
+						);
+						const postTransactionSnapshot = snapshotCollection(
+							Chunk.toReadonlyArray(postTransactionChunk),
+						);
+
+						// State should be restored to pre-transaction
+						expect(snapshotsEqual(preTransactionSnapshot, postTransactionSnapshot)).toBe(
+							true,
+						);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+	});
+
+	// Task 8.3 will be implemented in subsequent tasks
 });
