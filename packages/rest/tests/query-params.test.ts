@@ -323,3 +323,138 @@ describe("parseQueryParams — operator syntax (task 11.2)", () => {
 		});
 	});
 });
+
+// ============================================================================
+// Task 11.3: Sort Parsing
+// ============================================================================
+
+describe("parseQueryParams — sort parsing (task 11.3)", () => {
+	describe("single field sorting", () => {
+		it("should parse single field with ascending direction", () => {
+			const result = parseQueryParams({ sort: "year:asc" });
+
+			expect(result.sort).toEqual({ year: "asc" });
+		});
+
+		it("should parse single field with descending direction", () => {
+			const result = parseQueryParams({ sort: "year:desc" });
+
+			expect(result.sort).toEqual({ year: "desc" });
+		});
+
+		it("should default to ascending when no direction specified", () => {
+			const result = parseQueryParams({ sort: "title" });
+
+			expect(result.sort).toEqual({ title: "asc" });
+		});
+
+		it("should be case-insensitive for direction", () => {
+			const result = parseQueryParams({ sort: "year:DESC" });
+
+			expect(result.sort).toEqual({ year: "desc" });
+		});
+
+		it("should handle field name with dots (nested-looking path)", () => {
+			const result = parseQueryParams({ sort: "meta.createdAt:desc" });
+
+			expect(result.sort).toEqual({ "meta.createdAt": "desc" });
+		});
+	});
+
+	describe("multiple field sorting", () => {
+		it("should parse multiple fields with directions", () => {
+			const result = parseQueryParams({ sort: "year:desc,title:asc" });
+
+			expect(result.sort).toEqual({ year: "desc", title: "asc" });
+		});
+
+		it("should preserve order for multiple fields", () => {
+			const result = parseQueryParams({ sort: "genre:asc,year:desc,title:asc" });
+
+			// Note: Object key order is preserved in modern JS
+			const sortKeys = Object.keys(result.sort!);
+			expect(sortKeys).toEqual(["genre", "year", "title"]);
+			expect(result.sort).toEqual({
+				genre: "asc",
+				year: "desc",
+				title: "asc",
+			});
+		});
+
+		it("should handle mixed directions", () => {
+			const result = parseQueryParams({ sort: "author:asc,year:desc" });
+
+			expect(result.sort).toEqual({
+				author: "asc",
+				year: "desc",
+			});
+		});
+
+		it("should default to asc for fields without direction in multi-field sort", () => {
+			const result = parseQueryParams({ sort: "genre,year:desc,title" });
+
+			expect(result.sort).toEqual({
+				genre: "asc",
+				year: "desc",
+				title: "asc",
+			});
+		});
+	});
+
+	describe("edge cases", () => {
+		it("should handle whitespace around sort values", () => {
+			const result = parseQueryParams({ sort: " year:desc , title:asc " });
+
+			expect(result.sort).toEqual({ year: "desc", title: "asc" });
+		});
+
+		it("should skip empty segments", () => {
+			const result = parseQueryParams({ sort: "year:desc,,title:asc" });
+
+			expect(result.sort).toEqual({ year: "desc", title: "asc" });
+		});
+
+		it("should handle empty sort value", () => {
+			const result = parseQueryParams({ sort: "" });
+
+			expect(result.sort).toBeUndefined();
+		});
+
+		it("should default to asc for invalid direction", () => {
+			const result = parseQueryParams({ sort: "year:invalid" });
+
+			expect(result.sort).toEqual({ year: "asc" });
+		});
+
+		it("should handle field names that contain colons (use last colon)", () => {
+			// While unusual, field names could technically contain colons
+			const result = parseQueryParams({ sort: "time:stamp:desc" });
+
+			expect(result.sort).toEqual({ "time:stamp": "desc" });
+		});
+
+		it("should combine sort with where clause", () => {
+			const result = parseQueryParams({
+				genre: "sci-fi",
+				sort: "year:desc",
+			});
+
+			expect(result.where).toEqual({ genre: "sci-fi" });
+			expect(result.sort).toEqual({ year: "desc" });
+		});
+
+		it("should combine sort with operators and pagination", () => {
+			const result = parseQueryParams({
+				"year[$gte]": "1970",
+				sort: "year:desc,title:asc",
+				limit: "10",
+				offset: "0",
+			});
+
+			expect(result.where).toEqual({ year: { $gte: 1970 } });
+			expect(result.sort).toEqual({ year: "desc", title: "asc" });
+			expect(result.limit).toBe(10);
+			expect(result.offset).toBe(0);
+		});
+	});
+});
