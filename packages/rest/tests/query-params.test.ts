@@ -458,3 +458,232 @@ describe("parseQueryParams — sort parsing (task 11.3)", () => {
 		});
 	});
 });
+
+// ============================================================================
+// Task 11.4: Pagination Parsing
+// ============================================================================
+
+describe("parseQueryParams — pagination parsing (task 11.4)", () => {
+	describe("limit parsing", () => {
+		it("should parse limit as a number", () => {
+			const result = parseQueryParams({ limit: "10" });
+
+			expect(result.limit).toBe(10);
+		});
+
+		it("should parse limit of zero", () => {
+			const result = parseQueryParams({ limit: "0" });
+
+			expect(result.limit).toBe(0);
+		});
+
+		it("should parse large limit values", () => {
+			const result = parseQueryParams({ limit: "1000000" });
+
+			expect(result.limit).toBe(1000000);
+		});
+
+		it("should ignore invalid limit (non-numeric)", () => {
+			const result = parseQueryParams({ limit: "abc" });
+
+			expect(result.limit).toBeUndefined();
+		});
+
+		it("should ignore negative limit", () => {
+			const result = parseQueryParams({ limit: "-5" });
+
+			expect(result.limit).toBeUndefined();
+		});
+
+		it("should ignore floating point limit (use integer part)", () => {
+			const result = parseQueryParams({ limit: "10.5" });
+
+			// parseInt parses "10.5" as 10
+			expect(result.limit).toBe(10);
+		});
+
+		it("should ignore empty limit value", () => {
+			const result = parseQueryParams({ limit: "" });
+
+			expect(result.limit).toBeUndefined();
+		});
+	});
+
+	describe("offset parsing", () => {
+		it("should parse offset as a number", () => {
+			const result = parseQueryParams({ offset: "20" });
+
+			expect(result.offset).toBe(20);
+		});
+
+		it("should parse offset of zero", () => {
+			const result = parseQueryParams({ offset: "0" });
+
+			expect(result.offset).toBe(0);
+		});
+
+		it("should parse large offset values", () => {
+			const result = parseQueryParams({ offset: "500000" });
+
+			expect(result.offset).toBe(500000);
+		});
+
+		it("should ignore invalid offset (non-numeric)", () => {
+			const result = parseQueryParams({ offset: "xyz" });
+
+			expect(result.offset).toBeUndefined();
+		});
+
+		it("should ignore negative offset", () => {
+			const result = parseQueryParams({ offset: "-10" });
+
+			expect(result.offset).toBeUndefined();
+		});
+
+		it("should ignore floating point offset (use integer part)", () => {
+			const result = parseQueryParams({ offset: "25.7" });
+
+			// parseInt parses "25.7" as 25
+			expect(result.offset).toBe(25);
+		});
+
+		it("should ignore empty offset value", () => {
+			const result = parseQueryParams({ offset: "" });
+
+			expect(result.offset).toBeUndefined();
+		});
+	});
+
+	describe("limit and offset combined", () => {
+		it("should parse both limit and offset together", () => {
+			const result = parseQueryParams({ limit: "10", offset: "20" });
+
+			expect(result.limit).toBe(10);
+			expect(result.offset).toBe(20);
+		});
+
+		it("should parse limit and offset with zero values", () => {
+			const result = parseQueryParams({ limit: "50", offset: "0" });
+
+			expect(result.limit).toBe(50);
+			expect(result.offset).toBe(0);
+		});
+
+		it("should handle valid limit with invalid offset", () => {
+			const result = parseQueryParams({ limit: "10", offset: "invalid" });
+
+			expect(result.limit).toBe(10);
+			expect(result.offset).toBeUndefined();
+		});
+
+		it("should handle invalid limit with valid offset", () => {
+			const result = parseQueryParams({ limit: "invalid", offset: "20" });
+
+			expect(result.limit).toBeUndefined();
+			expect(result.offset).toBe(20);
+		});
+	});
+
+	describe("pagination with other query params", () => {
+		it("should combine pagination with where clause", () => {
+			const result = parseQueryParams({
+				genre: "sci-fi",
+				limit: "10",
+				offset: "0",
+			});
+
+			expect(result.where).toEqual({ genre: "sci-fi" });
+			expect(result.limit).toBe(10);
+			expect(result.offset).toBe(0);
+		});
+
+		it("should combine pagination with operators", () => {
+			const result = parseQueryParams({
+				"year[$gte]": "1970",
+				"year[$lt]": "2000",
+				limit: "25",
+				offset: "50",
+			});
+
+			expect(result.where).toEqual({ year: { $gte: 1970, $lt: 2000 } });
+			expect(result.limit).toBe(25);
+			expect(result.offset).toBe(50);
+		});
+
+		it("should combine pagination with sort", () => {
+			const result = parseQueryParams({
+				sort: "year:desc",
+				limit: "10",
+				offset: "20",
+			});
+
+			expect(result.sort).toEqual({ year: "desc" });
+			expect(result.limit).toBe(10);
+			expect(result.offset).toBe(20);
+		});
+
+		it("should combine pagination with select", () => {
+			const result = parseQueryParams({
+				select: "title,author",
+				limit: "5",
+				offset: "10",
+			});
+
+			expect(result.select).toEqual(["title", "author"]);
+			expect(result.limit).toBe(5);
+			expect(result.offset).toBe(10);
+		});
+
+		it("should combine all query params together", () => {
+			const result = parseQueryParams({
+				genre: "sci-fi",
+				"year[$gte]": "1970",
+				sort: "year:desc,title:asc",
+				select: "title,author,year",
+				limit: "10",
+				offset: "30",
+			});
+
+			expect(result.where).toEqual({
+				genre: "sci-fi",
+				year: { $gte: 1970 },
+			});
+			expect(result.sort).toEqual({ year: "desc", title: "asc" });
+			expect(result.select).toEqual(["title", "author", "year"]);
+			expect(result.limit).toBe(10);
+			expect(result.offset).toBe(30);
+		});
+	});
+
+	describe("pagination edge cases", () => {
+		it("should not include limit in where clause", () => {
+			const result = parseQueryParams({ limit: "10" });
+
+			expect(result.where).toEqual({});
+			expect(result.limit).toBe(10);
+		});
+
+		it("should not include offset in where clause", () => {
+			const result = parseQueryParams({ offset: "20" });
+
+			expect(result.where).toEqual({});
+			expect(result.offset).toBe(20);
+		});
+
+		it("should handle whitespace in pagination values", () => {
+			const result = parseQueryParams({ limit: " 10 ", offset: " 20 " });
+
+			// parseInt handles leading/trailing whitespace
+			expect(result.limit).toBe(10);
+			expect(result.offset).toBe(20);
+		});
+
+		it("should handle numeric strings with leading zeros", () => {
+			const result = parseQueryParams({ limit: "010", offset: "020" });
+
+			// parseInt with base 10 handles leading zeros correctly
+			expect(result.limit).toBe(10);
+			expect(result.offset).toBe(20);
+		});
+	});
+});

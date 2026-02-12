@@ -95,7 +95,7 @@
 - [x] 11.1 Create `rest/tests/query-params.test.ts`: test simple equality parsing
 - [x] 11.2 Test operator syntax parsing ($gte, $lt, $in, etc.)
 - [x] 11.3 Test sort parsing (single field, multiple fields)
-- [ ] 11.4 Test pagination parsing (limit, offset)
+- [x] 11.4 Test pagination parsing (limit, offset)
 - [ ] 11.5 Test field selection parsing
 - [ ] 11.6 Test type coercion (numbers, booleans)
 - [ ] 11.7 Create `rest/tests/handlers.test.ts`: test GET collection returns all entities
