@@ -16,6 +16,7 @@ import {
 } from "../errors/storage-errors.js";
 import { runMigrations } from "../migrations/migration-runner.js";
 import type { Migration } from "../migrations/migration-types.js";
+import { reloadEvent } from "../reactive/change-event.js";
 import { SerializerRegistry } from "../serializers/serializer-service.js";
 import type { ChangeEvent } from "../types/reactive-types.js";
 import { getFileExtension } from "../utils/path.js";
@@ -866,6 +867,16 @@ export const createFileWatcher = <A extends { readonly id: string }, I, R>(
 							yield* Effect.sleep(debounceMs);
 							const newData = yield* loadData(config.filePath, config.schema);
 							yield* Ref.set(config.ref, newData);
+							// Publish reload event if PubSub is provided
+							if (
+								config.changePubSub !== undefined &&
+								config.collectionName !== undefined
+							) {
+								yield* PubSub.publish(
+									config.changePubSub,
+									reloadEvent(config.collectionName),
+								);
+							}
 						}),
 					);
 

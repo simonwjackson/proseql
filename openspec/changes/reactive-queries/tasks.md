@@ -36,7 +36,7 @@
 ## 6. File Watcher Integration
 
 - [x] 6.1 Modify `createFileWatcher` in `core/storage/persistence-effect.ts` to accept optional `changePubSub` parameter
-- [ ] 6.2 After reloading data from disk into the Ref, publish `ChangeEvent` with `operation: "reload"` to the PubSub
+- [x] 6.2 After reloading data from disk into the Ref, publish `ChangeEvent` with `operation: "reload"` to the PubSub
 
 ## 7. Transaction Batching
 
