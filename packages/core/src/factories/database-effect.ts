@@ -92,7 +92,11 @@ import {
 	mergeSerializerWithPluginCodecs,
 } from "../serializers/format-codec.js";
 import { SerializerRegistry } from "../serializers/serializer-service.js";
-import { loadData, saveData } from "../storage/persistence-effect.js";
+import {
+	createFileWatcher,
+	loadData,
+	saveData,
+} from "../storage/persistence-effect.js";
 import { StorageAdapter } from "../storage/storage-service.js";
 import { $transaction as $transactionImpl } from "../transactions/transaction.js";
 import {
@@ -1758,6 +1762,26 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		}
 
 		const db = collections as unknown as EffectDatabase<Config>;
+
+		// 10. Create file watchers for persistent collections to detect external file changes
+		// Each watcher monitors its file and reloads data into the Ref on changes,
+		// publishing a reload event to the changePubSub for reactive query subscribers.
+		// File watching is best-effort: if the storage adapter doesn't support watching
+		// (e.g., browser adapters in test environments), the database still functions
+		// without reactive file change detection.
+		for (const collectionName of Object.keys(config)) {
+			const collectionConfig = config[collectionName];
+			const filePath = collectionConfig.file;
+			if (filePath) {
+				yield* createFileWatcher({
+					filePath,
+					schema: collectionConfig.schema as Schema.Schema<HasId, unknown>,
+					ref: typedRefs[collectionName],
+					changePubSub,
+					collectionName,
+				}).pipe(Effect.catchAll(() => Effect.void));
+			}
+		}
 
 		// Build the $dryRunMigrations method
 		const dryRunMigrationsFn = (): RunnableEffect<
