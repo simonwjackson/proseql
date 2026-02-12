@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { discoverBenchmarks, filterBenchmarks, executeAllSuites } from "./runner.js";
+import { formatResultsJson } from "./utils.js";
 
 /**
  * Tests for the benchmark runner.
@@ -149,6 +150,91 @@ describe("Benchmark Execution", () => {
 			expect(result.durationMs).toBeGreaterThan(0);
 		}
 	}, 120_000); // Long timeout for running all benchmarks
+
+	it("produces valid JSON output with expected structure", async () => {
+		const benchmarks = await discoverBenchmarks();
+		const filtered = filterBenchmarks(benchmarks, "transactions");
+
+		expect(filtered.length).toBe(1);
+
+		const results = await executeAllSuites(filtered, { verbose: false });
+
+		// Build JSON output structure matching what runner.ts produces
+		const output = {
+			timestamp: new Date().toISOString(),
+			suites: results.map((r) => formatResultsJson(r.suiteName, r.bench.tasks)),
+		};
+
+		// Verify it's valid JSON (can be serialized and parsed)
+		const jsonString = JSON.stringify(output);
+		expect(() => JSON.parse(jsonString)).not.toThrow();
+
+		// Verify parsed output has expected top-level keys
+		const parsed = JSON.parse(jsonString) as Record<string, unknown>;
+		expect(parsed).toHaveProperty("timestamp");
+		expect(parsed).toHaveProperty("suites");
+		expect(typeof parsed.timestamp).toBe("string");
+		expect(Array.isArray(parsed.suites)).toBe(true);
+
+		// Verify timestamp is a valid ISO date string
+		expect(new Date(parsed.timestamp as string).toISOString()).toBe(parsed.timestamp);
+
+		// Verify suites array has expected structure
+		const suites = parsed.suites as Array<Record<string, unknown>>;
+		expect(suites.length).toBeGreaterThan(0);
+
+		for (const suite of suites) {
+			// Each suite should have required keys
+			expect(suite).toHaveProperty("suite");
+			expect(suite).toHaveProperty("results");
+			expect(suite).toHaveProperty("timestamp");
+
+			expect(typeof suite.suite).toBe("string");
+			expect(Array.isArray(suite.results)).toBe(true);
+			expect(typeof suite.timestamp).toBe("string");
+
+			// Verify results array has expected benchmark result structure
+			const suiteResults = suite.results as Array<Record<string, unknown>>;
+			expect(suiteResults.length).toBeGreaterThan(0);
+
+			for (const benchResult of suiteResults) {
+				// Each benchmark result should have required keys
+				expect(benchResult).toHaveProperty("name");
+				expect(benchResult).toHaveProperty("opsPerSec");
+				expect(benchResult).toHaveProperty("meanMs");
+				expect(benchResult).toHaveProperty("samples");
+				expect(benchResult).toHaveProperty("minMs");
+				expect(benchResult).toHaveProperty("maxMs");
+
+				// Verify types
+				expect(typeof benchResult.name).toBe("string");
+				expect(typeof benchResult.opsPerSec).toBe("number");
+				expect(typeof benchResult.meanMs).toBe("number");
+				expect(typeof benchResult.samples).toBe("number");
+				expect(typeof benchResult.minMs).toBe("number");
+				expect(typeof benchResult.maxMs).toBe("number");
+
+				// Verify numeric values are positive
+				expect(benchResult.opsPerSec).toBeGreaterThan(0);
+				expect(benchResult.meanMs).toBeGreaterThan(0);
+				expect(benchResult.samples).toBeGreaterThan(0);
+
+				// Optional percentile fields can be number or undefined
+				if (benchResult.p50Ms !== undefined) {
+					expect(typeof benchResult.p50Ms).toBe("number");
+				}
+				if (benchResult.p75Ms !== undefined) {
+					expect(typeof benchResult.p75Ms).toBe("number");
+				}
+				if (benchResult.p95Ms !== undefined) {
+					expect(typeof benchResult.p95Ms).toBe("number");
+				}
+				if (benchResult.p99Ms !== undefined) {
+					expect(typeof benchResult.p99Ms).toBe("number");
+				}
+			}
+		}
+	}, 60_000);
 
 	it("executes a single filtered suite", async () => {
 		const benchmarks = await discoverBenchmarks();
