@@ -66,12 +66,13 @@ const evaluateQuery = <T extends HasId>(
  * Creates a reactive watch stream that emits query results whenever the collection changes.
  *
  * The stream:
- * 1. Subscribes to the PubSub for change notifications (scoped - auto-cleanup)
- * 2. Filters events to only those matching the specified collection
- * 3. Re-evaluates the query pipeline on each relevant change
- * 4. Emits the new result set as a ReadonlyArray
+ * 1. Emits the current result set immediately upon subscription
+ * 2. Subscribes to the PubSub for change notifications (scoped - auto-cleanup)
+ * 3. Filters events to only those matching the specified collection
+ * 4. Re-evaluates the query pipeline on each relevant change
+ * 5. Emits the new result set as a ReadonlyArray
  *
- * Note: Initial emission and deduplication are handled by separate tasks (3.2, 3.4).
+ * Note: Deduplication is handled by a separate task (3.4).
  * Note: Debouncing is handled by a separate task (8.1).
  *
  * @param pubsub - The PubSub broadcasting ChangeEvents from mutations
@@ -120,9 +121,17 @@ export const watch = <T extends HasId>(
 
 		// Map each change event to a re-evaluation of the query
 		// This transforms Stream<ChangeEvent> into Stream<ReadonlyArray<T>>
-		const resultStream = Stream.mapEffect(filteredStream, () =>
+		const changeResultStream = Stream.mapEffect(filteredStream, () =>
 			evaluateQuery(ref, config),
 		);
+
+		// Create the initial emission stream: emit current result set immediately
+		const initialStream = Stream.fromEffect(evaluateQuery(ref, config));
+
+		// Concatenate initial emission with the change-driven stream
+		// This ensures subscribers receive the current state immediately,
+		// then receive updates as changes occur
+		const resultStream = Stream.concat(initialStream, changeResultStream);
 
 		return resultStream;
 	});
