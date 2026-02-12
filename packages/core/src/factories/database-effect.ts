@@ -76,7 +76,11 @@ import {
 	extractSearchConfig,
 } from "../operations/query/sort-stream.js";
 import { applyPopulate } from "../operations/relationships/populate-stream.js";
-import type { CustomOperator } from "../plugins/plugin-types.js";
+import { mergeGlobalHooks } from "../plugins/plugin-hooks.js";
+import type {
+	CustomOperator,
+	GlobalHooksConfig,
+} from "../plugins/plugin-types.js";
 import {
 	type FormatCodec,
 	mergeSerializerWithPluginCodecs,
@@ -582,6 +586,7 @@ const buildCollection = <T extends HasId>(
 	searchIndexFields?: ReadonlyArray<string>,
 	customOperators?: Map<string, CustomOperator>,
 	idGeneratorMap?: Map<string, import("../plugins/plugin-types.js").CustomIdGenerator>,
+	globalHooks?: GlobalHooksConfig,
 ): EffectCollection<T> => {
 	const schema = collectionConfig.schema as Schema.Schema<T, unknown>;
 	const relationships = collectionConfig.relationships as Record<
@@ -592,9 +597,14 @@ const buildCollection = <T extends HasId>(
 			readonly foreignKey?: string;
 		}
 	>;
-	// Default to empty hooks (no-op) when not configured
-	const hooks = (collectionConfig.hooks ??
-		{}) as import("../types/hook-types.js").HooksConfig<T>;
+	// Merge global plugin hooks with collection-specific hooks.
+	// Global hooks run first (cross-cutting concerns), then collection hooks.
+	// Type narrowing: globalHooks is HooksConfig<Record<string, unknown>>,
+	// collectionHooks is HooksConfig<T>. mergeGlobalHooks returns HooksConfig<T>.
+	const collectionHooks = collectionConfig.hooks as
+		| import("../types/hook-types.js").HooksConfig<T>
+		| undefined;
+	const hooks = mergeGlobalHooks<T>(globalHooks, collectionHooks);
 	// Normalize unique fields constraints (default to empty array if not configured)
 	const uniqueFields = normalizeConstraints(collectionConfig.uniqueFields);
 	// Get computed fields config (undefined means no computed fields)
@@ -1203,6 +1213,7 @@ const makeBuildCollectionForTx = (
 	searchIndexFields?: Record<string, ReadonlyArray<string>>,
 	customOperators?: Map<string, CustomOperator>,
 	idGeneratorMap?: Map<string, import("../plugins/plugin-types.js").CustomIdGenerator>,
+	globalHooks?: GlobalHooksConfig,
 ): BuildCollectionForTx => {
 	return (collectionName: string, addMutation: (name: string) => void) => {
 		// Transaction-aware afterMutation: records mutation instead of scheduling persistence
@@ -1220,6 +1231,7 @@ const makeBuildCollectionForTx = (
 			searchIndexFields?.[collectionName],
 			customOperators,
 			idGeneratorMap,
+			globalHooks,
 		);
 	};
 };
