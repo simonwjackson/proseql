@@ -489,4 +489,68 @@ describe("watch() query pipeline on re-evaluation", () => {
 
 		await Effect.runPromise(Effect.scoped(program));
 	});
+
+	it("coalesces multiple rapid events for the same collection into a single re-evaluation", async () => {
+		const program = Effect.gen(function* () {
+			const pubsub = yield* createChangePubSub();
+			const ref = yield* createRef(testBooks);
+
+			// Track how many times the query is re-evaluated
+			let evaluationCount = 0;
+
+			const stream = yield* watch(pubsub, ref, "books", {
+				// Use a short debounce for test speed
+				debounceMs: 30,
+			});
+
+			// Wrap the stream to count re-evaluations after initial emission
+			const countingStream = Stream.tap(stream, () =>
+				Effect.sync(() => {
+					evaluationCount++;
+				}),
+			);
+
+			// Collect emissions with a timeout
+			const collectedFiber = yield* Stream.take(countingStream, 2).pipe(
+				Stream.runCollect,
+				Effect.fork,
+			);
+
+			// Wait for initial emission
+			yield* Effect.sleep("10 millis");
+
+			// Publish 10 rapid change events for the same collection
+			for (let i = 0; i < 10; i++) {
+				yield* publishEvent(pubsub, "books", "update");
+			}
+
+			// Modify the ref so the second emission has different content
+			yield* Ref.update(ref, (map) => {
+				const newMap = new Map(map);
+				newMap.set("6", {
+					id: "6",
+					title: "Rapid Addition",
+					author: "Test Author",
+					year: 2024,
+					genre: "test",
+				});
+				return newMap;
+			});
+
+			// Wait for debounce to settle and second emission to occur
+			yield* Effect.sleep("100 millis");
+
+			const results = yield* Fiber.join(collectedFiber);
+			const emissions = Array.from(results) as ReadonlyArray<ReadonlyArray<Book>>;
+
+			// Should have exactly 2 emissions: initial + one coalesced re-evaluation
+			expect(emissions).toHaveLength(2);
+
+			// The 10 rapid events should have been coalesced into a single re-evaluation
+			// So evaluationCount should be 2 (initial + 1 coalesced), not 11 (initial + 10)
+			expect(evaluationCount).toBe(2);
+		});
+
+		await Effect.runPromise(Effect.scoped(program));
+	});
 });
