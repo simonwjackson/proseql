@@ -80,5 +80,5 @@
 ## 12. Cleanup
 
 - [x] 12.1 Run full test suite (`bun test`) to verify no regressions from package.json changes.
-- [ ] 12.2 Run type check (`bunx tsc --build`) to verify all packages compile cleanly.
+- [x] 12.2 Run type check (`bunx tsc --build`) to verify all packages compile cleanly.
 - [ ] 12.3 Run `biome check .` to verify no lint issues in modified files.
