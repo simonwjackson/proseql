@@ -194,8 +194,57 @@ export async function createSuite(): Promise<Bench> {
 		).runPromise;
 	});
 
-	// Benchmarks will be added in tasks 4.5-4.6:
-	// - 4.5: delete and deleteMany benchmarks
+	// -------------------------------------------------------------------------
+	// 4.5: delete and deleteMany benchmarks
+	// -------------------------------------------------------------------------
+
+	// For delete benchmark, we use a separate database instance.
+	// Each iteration deletes an entity then recreates it to maintain collection size.
+	// This measures the delete operation throughput while keeping the benchmark sustainable.
+	const deleteDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	let deleteCounter = 0;
+
+	bench.add("delete (single)", async () => {
+		// Cycle through existing entity IDs
+		const targetIndex = deleteCounter % BASELINE_SIZE;
+		const targetUser = usersArray[targetIndex];
+		deleteCounter++;
+
+		// Delete the entity
+		await deleteDb.users.delete(targetUser.id).runPromise;
+
+		// Recreate the entity to maintain collection size for subsequent iterations
+		// This ensures we're always deleting a real entity
+		await deleteDb.users.create(targetUser).runPromise;
+	});
+
+	// For deleteMany benchmark, we use a fresh database instance.
+	// Each iteration deletes entities matching a predicate then recreates them.
+	// This measures batch delete throughput with ~100 entities per batch.
+	const deleteManyDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	let deleteManyCounter = 0;
+
+	bench.add("deleteMany (batch ~100)", async () => {
+		// Target a different age value each iteration to delete ~140 users on average
+		// With ages 18-87 across 10K users, each age value has ~140 users
+		const targetAge = 18 + (deleteManyCounter % 70);
+		deleteManyCounter++;
+
+		// Find entities that will be deleted (for recreation)
+		const toDelete = usersArray.filter((user) => user.age === targetAge);
+
+		// Delete matching entities
+		await deleteManyDb.users.deleteMany(
+			(user) => user.age === targetAge,
+		).runPromise;
+
+		// Recreate deleted entities to maintain collection size
+		if (toDelete.length > 0) {
+			await deleteManyDb.users.createMany(toDelete).runPromise;
+		}
+	});
+
+	// Benchmarks will be added in task 4.6:
 	// - 4.6: upsert benchmarks (create and update paths)
 
 	return bench;
