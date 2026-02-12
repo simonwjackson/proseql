@@ -55,7 +55,7 @@
 ## 9. Tests — Plugin Registration
 
 - [x] 9.1 Create `tests/plugin-system.test.ts` with test helpers: minimal plugin factory, database with plugins
-- [ ] 9.2 Test registering a plugin with no contributions (name only) succeeds
+- [x] 9.2 Test registering a plugin with no contributions (name only) succeeds
 - [ ] 9.3 Test registering multiple plugins succeeds, all contributions are merged
 - [ ] 9.4 Test plugin initialize() runs during database creation
 - [ ] 9.5 Test plugin with missing name fails with PluginError
