@@ -62,7 +62,7 @@
 
 ## 8. REST — Error Mapping
 
-- [ ] 8.1 Create `rest/src/error-mapping.ts` with `mapErrorToResponse(error)` that matches on `_tag` and returns `{ status, body }`
+- [x] 8.1 Create `rest/src/error-mapping.ts` with `mapErrorToResponse(error)` that matches on `_tag` and returns `{ status, body }`
 - [ ] 8.2 Map `NotFoundError` to 404, `ValidationError` to 400, `DuplicateKeyError` to 409, `UniqueConstraintError` to 409, `ForeignKeyError` to 422, `HookError` to 422, `TransactionError` to 500
 - [ ] 8.3 Default unknown errors to 500 with a generic message
 - [ ] 8.4 Include error `_tag` and fields in response body for debugging
