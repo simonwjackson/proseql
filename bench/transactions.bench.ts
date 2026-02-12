@@ -11,10 +11,7 @@
 
 import { Effect, Schema } from "effect";
 import { Bench } from "tinybench";
-import {
-	generateUsers,
-	type User,
-} from "./generators.js";
+import { generateUsers } from "./generators.js";
 import {
 	createBenchDatabase,
 	defaultBenchOptions,
@@ -206,7 +203,8 @@ export function calculateOverheadDelta(
 ): TransactionOverheadDelta {
 	// Throughput overhead: how much slower is transactional?
 	// (direct - tx) / direct * 100 = percentage decrease
-	const throughputOverhead = ((directOpsPerSec - txOpsPerSec) / directOpsPerSec) * 100;
+	const throughputOverhead =
+		((directOpsPerSec - txOpsPerSec) / directOpsPerSec) * 100;
 
 	// Latency overhead: how much longer does transactional take?
 	// (tx - direct) / direct * 100 = percentage increase
@@ -233,7 +231,9 @@ export function calculateOverheadDelta(
  * @param bench - The completed benchmark suite
  * @returns Overhead delta data or null if not available
  */
-export function getOverheadDelta(bench: Bench): TransactionOverheadDelta | null {
+export function getOverheadDelta(
+	bench: Bench,
+): TransactionOverheadDelta | null {
 	const directTask = bench.tasks.find((t) => t.name.startsWith("direct"));
 	const txTask = bench.tasks.find((t) => t.name.startsWith("transactional"));
 
@@ -266,7 +266,12 @@ function formatOverheadReport(
 	txOpsPerSec: number,
 	txMeanMs: number,
 ): string {
-	const delta = calculateOverheadDelta(directOpsPerSec, directMeanMs, txOpsPerSec, txMeanMs);
+	const delta = calculateOverheadDelta(
+		directOpsPerSec,
+		directMeanMs,
+		txOpsPerSec,
+		txMeanMs,
+	);
 
 	const lines: string[] = [
 		"Transaction Overhead Analysis",
@@ -307,7 +312,9 @@ export async function run(): Promise<void> {
 	const bench = await createSuite();
 
 	if (bench.tasks.length === 0) {
-		console.log("No benchmarks configured yet. Benchmarks will be added in tasks 7.2-7.4.");
+		console.log(
+			"No benchmarks configured yet. Benchmarks will be added in tasks 7.2-7.4.",
+		);
 		return;
 	}
 

@@ -261,7 +261,14 @@ describe("generateProducts Determinism", () => {
 			expect(typeof product.id).toBe("string");
 			expect(typeof product.name).toBe("string");
 			expect(typeof product.price).toBe("number");
-			expect(["electronics", "clothing", "books", "home", "sports", "toys"]).toContain(product.category);
+			expect([
+				"electronics",
+				"clothing",
+				"books",
+				"home",
+				"sports",
+				"toys",
+			]).toContain(product.category);
 			expect(typeof product.stock).toBe("number");
 			expect(typeof product.supplierId).toBe("string");
 		}

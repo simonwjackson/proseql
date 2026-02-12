@@ -12,10 +12,9 @@
 import { Schema } from "effect";
 import { Bench } from "tinybench";
 import {
-	STANDARD_SIZES,
-	generateUsers,
 	generateAtScale,
-	type User,
+	generateUsers,
+	STANDARD_SIZES,
 } from "./generators.js";
 import {
 	createBenchDatabase,
@@ -123,18 +122,16 @@ export async function createSuite(): Promise<Bench> {
 		};
 
 		// Format size for display: 100 → "100", 1000 → "1K", etc.
-		const sizeLabel =
-			size >= 1000 ? `${size / 1000}K` : String(size);
+		const sizeLabel = size >= 1000 ? `${size / 1000}K` : String(size);
 
 		// ---------------------------------------------------------------------
 		// findById Benchmark
 		// ---------------------------------------------------------------------
 
 		// Create database for findById (no indexes needed - it uses ID map)
-		const findByIdDb = await createBenchDatabase(
-			unindexedConfig,
-			{ users: usersArray },
-		);
+		const findByIdDb = await createBenchDatabase(unindexedConfig, {
+			users: usersArray,
+		});
 
 		bench.add(`findById @ ${sizeLabel}`, async () => {
 			await findByIdDb.users.findById(getNextId()).runPromise;
@@ -144,10 +141,9 @@ export async function createSuite(): Promise<Bench> {
 		// Unindexed Filter Benchmark (filter on 'age' - not indexed)
 		// ---------------------------------------------------------------------
 
-		const unindexedDb = await createBenchDatabase(
-			unindexedConfig,
-			{ users: usersArray },
-		);
+		const unindexedDb = await createBenchDatabase(unindexedConfig, {
+			users: usersArray,
+		});
 
 		// Filter for users in a specific age range
 		// Using a range query ensures we scan the full collection
@@ -161,10 +157,9 @@ export async function createSuite(): Promise<Bench> {
 		// Indexed Filter Benchmark (filter on 'role' - indexed)
 		// ---------------------------------------------------------------------
 
-		const indexedDb = await createBenchDatabase(
-			indexedConfig,
-			{ users: usersArray },
-		);
+		const indexedDb = await createBenchDatabase(indexedConfig, {
+			users: usersArray,
+		});
 
 		// Filter for users with a specific role
 		// With index, this should be sub-linear (O(matches) + O(1) lookup)

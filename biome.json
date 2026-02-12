@@ -4,6 +4,7 @@
 		"includes": [
 			"packages/*/src/**/*.ts",
 			"packages/*/tests/**/*.ts",
+			"bench/**/*.ts",
 			"!**/dist",
 			"!!node_modules"
 		]

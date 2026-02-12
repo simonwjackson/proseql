@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
-import { discoverBenchmarks, filterBenchmarks, executeAllSuites } from "./runner.js";
+import { describe, expect, it } from "vitest";
+import {
+	discoverBenchmarks,
+	executeAllSuites,
+	filterBenchmarks,
+} from "./runner.js";
 import { formatResultsJson, formatResultsTable } from "./utils.js";
 
 /**
@@ -177,7 +181,9 @@ describe("Benchmark Execution", () => {
 		expect(Array.isArray(parsed.suites)).toBe(true);
 
 		// Verify timestamp is a valid ISO date string
-		expect(new Date(parsed.timestamp as string).toISOString()).toBe(parsed.timestamp);
+		expect(new Date(parsed.timestamp as string).toISOString()).toBe(
+			parsed.timestamp,
+		);
 
 		// Verify suites array has expected structure
 		const suites = parsed.suites as Array<Record<string, unknown>>;

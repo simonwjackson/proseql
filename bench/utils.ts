@@ -4,14 +4,13 @@
  * Provides database factory wrapper, result formatting, and percentile extraction.
  */
 
-import { Effect, Schema } from "effect";
-import type { Task, TaskResult } from "tinybench";
 import {
 	type CollectionConfig,
-	type DatabaseConfig,
-	type EffectDatabase,
 	createEffectDatabase,
+	type EffectDatabase,
 } from "@proseql/core";
+import { Effect, type Schema } from "effect";
+import type { Task, TaskResult } from "tinybench";
 
 // ============================================================================
 // Types
@@ -25,9 +24,7 @@ export type BenchSchemaConfig = Record<
 	string,
 	{
 		readonly schema: Schema.Schema<{ readonly id: string }, unknown>;
-		readonly indexes?: ReadonlyArray<
-			string | ReadonlyArray<string>
-		>;
+		readonly indexes?: ReadonlyArray<string | ReadonlyArray<string>>;
 		readonly relationships?: Record<
 			string,
 			{
@@ -97,9 +94,7 @@ export interface FormattedBenchmarkResult {
  * );
  * ```
  */
-export async function createBenchDatabase<
-	T extends BenchSchemaConfig,
->(
+export async function createBenchDatabase<T extends BenchSchemaConfig>(
 	schemaConfig: T,
 	initialData?: {
 		readonly [K in keyof T]?: ReadonlyArray<Record<string, unknown>>;
@@ -192,9 +187,7 @@ function estimateP95(
  * @param task - The tinybench Task object
  * @returns Formatted benchmark result or null if no result available
  */
-export function formatTaskResult(
-	task: Task,
-): FormattedBenchmarkResult | null {
+export function formatTaskResult(task: Task): FormattedBenchmarkResult | null {
 	const result = task.result;
 	if (!result) {
 		return null;
@@ -276,7 +269,9 @@ export function formatResultsTable(tasks: ReadonlyArray<Task>): string {
 
 	// Header
 	const headerLine = headers
-		.map((h, i) => (i === 0 ? h.padEnd(colWidths[i]) : h.padStart(colWidths[i])))
+		.map((h, i) =>
+			i === 0 ? h.padEnd(colWidths[i]) : h.padStart(colWidths[i]),
+		)
 		.join("  ");
 	lines.push(headerLine);
 

@@ -12,7 +12,11 @@
 
 import { Glob } from "bun";
 import type { Bench } from "tinybench";
-import { formatResultsTable, formatResultsJson, type FormattedBenchmarkResult } from "./utils.js";
+import {
+	type FormattedBenchmarkResult,
+	formatResultsJson,
+	formatResultsTable,
+} from "./utils.js";
 
 // ============================================================================
 // Types
@@ -89,20 +93,27 @@ async function discoverBenchFiles(): Promise<ReadonlyArray<string>> {
  * @throws Error if the module doesn't have required exports
  */
 async function importBenchModule(filePath: string): Promise<BenchmarkModule> {
-	const module = await import(filePath) as Record<string, unknown>;
+	const module = (await import(filePath)) as Record<string, unknown>;
 
 	if (typeof module.suiteName !== "string") {
-		throw new Error(`Benchmark module ${filePath} must export 'suiteName: string'`);
+		throw new Error(
+			`Benchmark module ${filePath} must export 'suiteName: string'`,
+		);
 	}
 
 	if (typeof module.createSuite !== "function") {
-		throw new Error(`Benchmark module ${filePath} must export 'createSuite: () => Promise<Bench>'`);
+		throw new Error(
+			`Benchmark module ${filePath} must export 'createSuite: () => Promise<Bench>'`,
+		);
 	}
 
 	return {
 		suiteName: module.suiteName,
 		createSuite: module.createSuite as () => Promise<Bench>,
-		run: typeof module.run === "function" ? module.run as () => Promise<void> : undefined,
+		run:
+			typeof module.run === "function"
+				? (module.run as () => Promise<void>)
+				: undefined,
 	};
 }
 
@@ -111,7 +122,9 @@ async function importBenchModule(filePath: string): Promise<BenchmarkModule> {
  *
  * @returns Array of discovered benchmarks with their modules
  */
-export async function discoverBenchmarks(): Promise<ReadonlyArray<DiscoveredBenchmark>> {
+export async function discoverBenchmarks(): Promise<
+	ReadonlyArray<DiscoveredBenchmark>
+> {
 	const files = await discoverBenchFiles();
 	const benchmarks: DiscoveredBenchmark[] = [];
 
@@ -232,7 +245,9 @@ export async function executeAllSuites(
 			}
 		} catch (error) {
 			if (verbose) {
-				console.error(`  ✗ Failed: ${error instanceof Error ? error.message : String(error)}`);
+				console.error(
+					`  ✗ Failed: ${error instanceof Error ? error.message : String(error)}`,
+				);
 			}
 		}
 	}
@@ -323,7 +338,7 @@ async function main(): Promise<void> {
 	// Output results
 	if (!json) {
 		// Table output - show results for each suite
-		console.log("\n" + "=".repeat(60));
+		console.log(`\n${"=".repeat(60)}`);
 		console.log("BENCHMARK RESULTS");
 		console.log("=".repeat(60));
 
@@ -334,11 +349,14 @@ async function main(): Promise<void> {
 		}
 
 		// Summary
-		console.log("\n" + "=".repeat(60));
+		console.log(`\n${"=".repeat(60)}`);
 		console.log("SUMMARY");
 		console.log("=".repeat(60));
 		const totalDuration = results.reduce((sum, r) => sum + r.durationMs, 0);
-		const totalBenchmarks = results.reduce((sum, r) => sum + r.bench.tasks.length, 0);
+		const totalBenchmarks = results.reduce(
+			(sum, r) => sum + r.bench.tasks.length,
+			0,
+		);
 		console.log(`Total suites: ${results.length}`);
 		console.log(`Total benchmarks: ${totalBenchmarks}`);
 		console.log(`Total time: ${(totalDuration / 1000).toFixed(2)}s`);

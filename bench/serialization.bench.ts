@@ -14,22 +14,22 @@
  * Uses a 1K-entity dataset for consistent measurements.
  */
 
+import {
+	createPersistentEffectDatabase,
+	hjsonCodec,
+	json5Codec,
+	jsonCodec,
+	jsoncCodec,
+	makeSerializerLayer,
+	StorageAdapterService,
+	type StorageAdapterShape,
+	tomlCodec,
+	toonCodec,
+	yamlCodec,
+} from "@proseql/core";
 import { Effect, Layer, Schema } from "effect";
 import { Bench } from "tinybench";
-import {
-	jsonCodec,
-	yamlCodec,
-	tomlCodec,
-	json5Codec,
-	jsoncCodec,
-	toonCodec,
-	hjsonCodec,
-	createPersistentEffectDatabase,
-	StorageAdapterService,
-	makeSerializerLayer,
-	type StorageAdapterShape,
-} from "@proseql/core";
-import { generateUsers, type User } from "./generators.js";
+import { generateUsers } from "./generators.js";
 import { defaultBenchOptions, formatResultsTable } from "./utils.js";
 
 // ============================================================================
@@ -123,7 +123,10 @@ export async function createSuite(): Promise<Bench> {
 
 	// Add deserialization benchmarks for each codec
 	for (const { name, codec } of CODECS) {
-		const encoded = serializedData.get(name)!;
+		const encoded = serializedData.get(name);
+		if (encoded === undefined) {
+			throw new Error(`Missing serialized data for codec: ${name}`);
+		}
 
 		bench.add(`deserialize ${name}`, () => {
 			codec.decode(encoded);
@@ -174,8 +177,7 @@ export async function createSuite(): Promise<Bench> {
 			exists: (path: string) => Effect.sync(() => store.has(path)),
 			remove: (_path: string) => Effect.void,
 			ensureDir: (_path: string) => Effect.void,
-			watch: (_path: string, _onChange: () => void) =>
-				Effect.succeed(() => {}),
+			watch: (_path: string, _onChange: () => void) => Effect.succeed(() => {}),
 		};
 
 		const CountingStorageLayer = Layer.succeed(
@@ -253,8 +255,9 @@ export async function createSuite(): Promise<Bench> {
 	});
 
 	// Store the stats reference on the bench object for later retrieval
-	(bench as unknown as { coalescingStats: typeof coalescingStats }).coalescingStats =
-		coalescingStats;
+	(
+		bench as unknown as { coalescingStats: typeof coalescingStats }
+	).coalescingStats = coalescingStats;
 
 	return bench;
 }

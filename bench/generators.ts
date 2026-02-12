@@ -175,7 +175,13 @@ export interface Product {
 	readonly id: string;
 	readonly name: string;
 	readonly price: number;
-	readonly category: "electronics" | "clothing" | "books" | "home" | "sports" | "toys";
+	readonly category:
+		| "electronics"
+		| "clothing"
+		| "books"
+		| "home"
+		| "sports"
+		| "toys";
 	readonly stock: number;
 	readonly supplierId: string;
 }
@@ -267,7 +273,14 @@ const ROLES = ["admin", "moderator", "user"] as const;
 /**
  * Pool of product categories for product generation.
  */
-const CATEGORIES = ["electronics", "clothing", "books", "home", "sports", "toys"] as const;
+const CATEGORIES = [
+	"electronics",
+	"clothing",
+	"books",
+	"home",
+	"sports",
+	"toys",
+] as const;
 
 /**
  * Pool of adjectives for product name generation.
@@ -294,13 +307,70 @@ const PRODUCT_ADJECTIVES = [
 /**
  * Pool of product nouns by category for realistic product names.
  */
-const PRODUCT_NOUNS: Record<(typeof CATEGORIES)[number], ReadonlyArray<string>> = {
-	electronics: ["Headphones", "Speaker", "Keyboard", "Mouse", "Monitor", "Charger", "Cable", "Webcam"],
-	clothing: ["T-Shirt", "Jacket", "Jeans", "Sweater", "Sneakers", "Hat", "Scarf", "Gloves"],
-	books: ["Novel", "Textbook", "Cookbook", "Biography", "Guide", "Manual", "Journal", "Atlas"],
-	home: ["Lamp", "Pillow", "Blanket", "Vase", "Clock", "Mirror", "Rug", "Candle"],
-	sports: ["Ball", "Racket", "Weights", "Mat", "Helmet", "Gloves", "Shoes", "Bag"],
-	toys: ["Puzzle", "Board Game", "Action Figure", "Doll", "Building Set", "Plush Toy", "Car", "Robot"],
+const PRODUCT_NOUNS: Record<
+	(typeof CATEGORIES)[number],
+	ReadonlyArray<string>
+> = {
+	electronics: [
+		"Headphones",
+		"Speaker",
+		"Keyboard",
+		"Mouse",
+		"Monitor",
+		"Charger",
+		"Cable",
+		"Webcam",
+	],
+	clothing: [
+		"T-Shirt",
+		"Jacket",
+		"Jeans",
+		"Sweater",
+		"Sneakers",
+		"Hat",
+		"Scarf",
+		"Gloves",
+	],
+	books: [
+		"Novel",
+		"Textbook",
+		"Cookbook",
+		"Biography",
+		"Guide",
+		"Manual",
+		"Journal",
+		"Atlas",
+	],
+	home: [
+		"Lamp",
+		"Pillow",
+		"Blanket",
+		"Vase",
+		"Clock",
+		"Mirror",
+		"Rug",
+		"Candle",
+	],
+	sports: [
+		"Ball",
+		"Racket",
+		"Weights",
+		"Mat",
+		"Helmet",
+		"Gloves",
+		"Shoes",
+		"Bag",
+	],
+	toys: [
+		"Puzzle",
+		"Board Game",
+		"Action Figure",
+		"Doll",
+		"Building Set",
+		"Plush Toy",
+		"Car",
+		"Robot",
+	],
 } as const;
 
 // ============================================================================
@@ -326,7 +396,10 @@ const PRODUCT_NOUNS: Record<(typeof CATEGORIES)[number], ReadonlyArray<string>> 
  * // Uses custom seed for different but still reproducible data
  * ```
  */
-export function generateUsers(count: number, seed: number = DEFAULT_SEED): ReadonlyArray<User> {
+export function generateUsers(
+	count: number,
+	seed: number = DEFAULT_SEED,
+): ReadonlyArray<User> {
 	const rng = createSeededRng(seed);
 	const users: User[] = [];
 
@@ -369,7 +442,10 @@ export function generateUsers(count: number, seed: number = DEFAULT_SEED): Reado
  * // Uses custom seed for different but still reproducible data
  * ```
  */
-export function generateProducts(count: number, seed: number = DEFAULT_SEED): ReadonlyArray<Product> {
+export function generateProducts(
+	count: number,
+	seed: number = DEFAULT_SEED,
+): ReadonlyArray<Product> {
 	const rng = createSeededRng(seed);
 	const products: Product[] = [];
 
@@ -412,7 +488,10 @@ export function generateProducts(count: number, seed: number = DEFAULT_SEED): Re
  * Generator function signature for use with generateAtScale.
  * Takes a count and optional seed, returns an array of entities.
  */
-export type EntityGenerator<T> = (count: number, seed?: number) => ReadonlyArray<T>;
+export type EntityGenerator<T> = (
+	count: number,
+	seed?: number,
+) => ReadonlyArray<T>;
 
 /**
  * Generate datasets at multiple sizes using a given generator function.

@@ -15,10 +15,7 @@
 
 import { Schema } from "effect";
 import { Bench } from "tinybench";
-import {
-	generateUsers,
-	type User,
-} from "./generators.js";
+import { generateUsers, type User } from "./generators.js";
 import {
 	createBenchDatabase,
 	defaultBenchOptions,
@@ -124,7 +121,9 @@ export async function createSuite(): Promise<Bench> {
 	// For createMany benchmark, we start with the baseline collection.
 	// Each iteration creates a batch of 100 entities with unique IDs.
 	// This tests amortized batch insertion throughput vs single creates.
-	const createManyDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	const createManyDb = await createBenchDatabase(dbConfig, {
+		users: usersArray,
+	});
 	let createManyCounter = 0;
 	const BATCH_SIZE = 100;
 
@@ -176,7 +175,9 @@ export async function createSuite(): Promise<Bench> {
 	// For updateMany benchmark, we use a fresh copy of the baseline collection.
 	// Each iteration updates a batch of ~100 entities matching a predicate.
 	// This tests amortized batch update throughput vs single updates.
-	const updateManyDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	const updateManyDb = await createBenchDatabase(dbConfig, {
+		users: usersArray,
+	});
 	let updateManyCounter = 0;
 
 	bench.add("updateMany (batch ~100)", async () => {
@@ -186,12 +187,9 @@ export async function createSuite(): Promise<Bench> {
 		const targetAge = 18 + (updateManyCounter % 70);
 		updateManyCounter++;
 
-		await updateManyDb.users.updateMany(
-			(user) => user.age === targetAge,
-			{
-				name: `Batch Updated User ${updateManyCounter}`,
-			},
-		).runPromise;
+		await updateManyDb.users.updateMany((user) => user.age === targetAge, {
+			name: `Batch Updated User ${updateManyCounter}`,
+		}).runPromise;
 	});
 
 	// -------------------------------------------------------------------------
@@ -221,7 +219,9 @@ export async function createSuite(): Promise<Bench> {
 	// For deleteMany benchmark, we use a fresh database instance.
 	// Each iteration deletes entities matching a predicate then recreates them.
 	// This measures batch delete throughput with ~100 entities per batch.
-	const deleteManyDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	const deleteManyDb = await createBenchDatabase(dbConfig, {
+		users: usersArray,
+	});
 	let deleteManyCounter = 0;
 
 	bench.add("deleteMany (batch ~100)", async () => {
@@ -234,9 +234,8 @@ export async function createSuite(): Promise<Bench> {
 		const toDelete = usersArray.filter((user) => user.age === targetAge);
 
 		// Delete matching entities
-		await deleteManyDb.users.deleteMany(
-			(user) => user.age === targetAge,
-		).runPromise;
+		await deleteManyDb.users.deleteMany((user) => user.age === targetAge)
+			.runPromise;
 
 		// Recreate deleted entities to maintain collection size
 		if (toDelete.length > 0) {
@@ -251,7 +250,9 @@ export async function createSuite(): Promise<Bench> {
 	// Upsert benchmark (create path): upsert entities that don't exist.
 	// Each iteration upserts a new entity that doesn't exist in the collection.
 	// This measures the "create" path of upsert (when the entity is not found).
-	const upsertCreateDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	const upsertCreateDb = await createBenchDatabase(dbConfig, {
+		users: usersArray,
+	});
 	let upsertCreateCounter = 0;
 
 	bench.add("upsert (create path)", async () => {
@@ -278,7 +279,9 @@ export async function createSuite(): Promise<Bench> {
 	// Upsert benchmark (update path): upsert entities that already exist.
 	// Each iteration upserts an existing entity from the baseline collection.
 	// This measures the "update" path of upsert (when the entity is found).
-	const upsertUpdateDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	const upsertUpdateDb = await createBenchDatabase(dbConfig, {
+		users: usersArray,
+	});
 	let upsertUpdateCounter = 0;
 
 	bench.add("upsert (update path)", async () => {
@@ -317,7 +320,9 @@ export async function run(): Promise<void> {
 	const bench = await createSuite();
 
 	if (bench.tasks.length === 0) {
-		console.log("No benchmarks configured yet. Benchmarks will be added in tasks 4.2-4.6.");
+		console.log(
+			"No benchmarks configured yet. Benchmarks will be added in tasks 4.2-4.6.",
+		);
 		return;
 	}
 

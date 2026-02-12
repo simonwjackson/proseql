@@ -16,10 +16,10 @@
 import { Schema } from "effect";
 import { Bench } from "tinybench";
 import {
-	generateUsers,
 	generateProducts,
-	type User,
+	generateUsers,
 	type Product,
+	type User,
 } from "./generators.js";
 import {
 	createBenchDatabase,
@@ -418,7 +418,7 @@ export async function createSuite(): Promise<Bench> {
 		await sortTripleDb.users.query({
 			sort: { role: "asc", age: "desc", name: "asc" },
 		}).runPromise;
-	})
+	});
 
 	// -------------------------------------------------------------------------
 	// Task 5.4: Population benchmarks
@@ -509,16 +509,19 @@ export async function createSuite(): Promise<Bench> {
 		orders: [...orders],
 	});
 
-	bench.add("populate: nested 3-level (order → product → supplier)", async () => {
-		await populateDeepRefDb.orders.query({
-			where: { status: "pending" },
-			populate: {
-				product: {
-					supplier: true,
+	bench.add(
+		"populate: nested 3-level (order → product → supplier)",
+		async () => {
+			await populateDeepRefDb.orders.query({
+				where: { status: "pending" },
+				populate: {
+					product: {
+						supplier: true,
+					},
 				},
-			},
-		}).runPromise;
-	});
+			}).runPromise;
+		},
+	);
 
 	// -------------------------------------------------------------------------
 	// Task 5.5: Select benchmarks
@@ -594,12 +597,15 @@ export async function createSuite(): Promise<Bench> {
 		users: usersArray,
 	});
 
-	bench.add("select: with filter (name, email WHERE role='admin')", async () => {
-		await selectWithFilterDb.users.query({
-			where: { role: "admin" },
-			select: ["name", "email"],
-		}).runPromise;
-	});
+	bench.add(
+		"select: with filter (name, email WHERE role='admin')",
+		async () => {
+			await selectWithFilterDb.users.query({
+				where: { role: "admin" },
+				select: ["name", "email"],
+			}).runPromise;
+		},
+	);
 
 	// -------------------------------------------------------------------------
 	// Task 5.6: Paginate benchmarks
@@ -701,15 +707,21 @@ export async function createSuite(): Promise<Bench> {
 		users: usersArray,
 	});
 
-	bench.add("combined: filter + sort + select + paginate (no populate)", async () => {
-		await combinedBasicDb.users.query({
-			where: { role: { $in: ["admin", "moderator"] }, age: { $gte: 25, $lte: 55 } },
-			sort: { age: "desc", name: "asc" },
-			select: ["id", "name", "email", "role"],
-			offset: 100,
-			limit: 20,
-		}).runPromise;
-	});
+	bench.add(
+		"combined: filter + sort + select + paginate (no populate)",
+		async () => {
+			await combinedBasicDb.users.query({
+				where: {
+					role: { $in: ["admin", "moderator"] },
+					age: { $gte: 25, $lte: 55 },
+				},
+				sort: { age: "desc", name: "asc" },
+				select: ["id", "name", "email", "role"],
+				offset: 100,
+				limit: 20,
+			}).runPromise;
+		},
+	);
 
 	// Combined pipeline benchmark: filter + sort + populate + select + paginate
 	// Tests the complete query pipeline with all stages including population.
@@ -721,16 +733,22 @@ export async function createSuite(): Promise<Bench> {
 		orders: [...orders],
 	});
 
-	bench.add("combined: filter + sort + populate + select + paginate", async () => {
-		await combinedFullDb.orders.query({
-			where: { status: { $in: ["completed", "pending"] }, quantity: { $gte: 2 } },
-			sort: { total: "desc", createdAt: "asc" },
-			populate: { user: true, product: true },
-			select: ["id", "quantity", "total", "status"],
-			offset: 50,
-			limit: 25,
-		}).runPromise;
-	});
+	bench.add(
+		"combined: filter + sort + populate + select + paginate",
+		async () => {
+			await combinedFullDb.orders.query({
+				where: {
+					status: { $in: ["completed", "pending"] },
+					quantity: { $gte: 2 },
+				},
+				sort: { total: "desc", createdAt: "asc" },
+				populate: { user: true, product: true },
+				select: ["id", "quantity", "total", "status"],
+				offset: 50,
+				limit: 25,
+			}).runPromise;
+		},
+	);
 
 	// Combined pipeline benchmark: filter + populate with nested + sort + paginate
 	// Tests deep relationship population within a complex query.
@@ -742,19 +760,22 @@ export async function createSuite(): Promise<Bench> {
 		orders: [...orders],
 	});
 
-	bench.add("combined: filter + nested populate + sort + paginate", async () => {
-		await combinedNestedDb.orders.query({
-			where: { status: "completed" },
-			sort: { total: "desc" },
-			populate: {
-				product: {
-					supplier: true,
+	bench.add(
+		"combined: filter + nested populate + sort + paginate",
+		async () => {
+			await combinedNestedDb.orders.query({
+				where: { status: "completed" },
+				sort: { total: "desc" },
+				populate: {
+					product: {
+						supplier: true,
+					},
 				},
-			},
-			offset: 20,
-			limit: 15,
-		}).runPromise;
-	});
+				offset: 20,
+				limit: 15,
+			}).runPromise;
+		},
+	);
 
 	// Combined pipeline benchmark: complex filter + multiple populates + sort + select + paginate
 	// Tests the maximum complexity pipeline with compound filters, multiple relationships, and all stages.
@@ -766,27 +787,30 @@ export async function createSuite(): Promise<Bench> {
 		orders: [...orders],
 	});
 
-	bench.add("combined: complex filter + multi-populate + sort + select + paginate", async () => {
-		await combinedComplexDb.orders.query({
-			where: {
-				$and: [
-					{ status: { $in: ["completed", "pending"] } },
-					{ quantity: { $gte: 1, $lte: 4 } },
-					{ total: { $gt: 50 } },
-				],
-			},
-			sort: { total: "desc", createdAt: "desc" },
-			populate: {
-				user: true,
-				product: {
-					supplier: true,
+	bench.add(
+		"combined: complex filter + multi-populate + sort + select + paginate",
+		async () => {
+			await combinedComplexDb.orders.query({
+				where: {
+					$and: [
+						{ status: { $in: ["completed", "pending"] } },
+						{ quantity: { $gte: 1, $lte: 4 } },
+						{ total: { $gt: 50 } },
+					],
 				},
-			},
-			select: ["id", "quantity", "total", "status", "createdAt"],
-			offset: 10,
-			limit: 20,
-		}).runPromise;
-	});
+				sort: { total: "desc", createdAt: "desc" },
+				populate: {
+					user: true,
+					product: {
+						supplier: true,
+					},
+				},
+				select: ["id", "quantity", "total", "status", "createdAt"],
+				offset: 10,
+				limit: 20,
+			}).runPromise;
+		},
+	);
 
 	return bench;
 }
