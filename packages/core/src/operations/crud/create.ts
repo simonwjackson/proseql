@@ -20,6 +20,7 @@ import {
 } from "../../hooks/hook-runner.js";
 import { addManyToIndex, addToIndex } from "../../indexes/index-manager.js";
 import { addToSearchIndex } from "../../indexes/search-index.js";
+import type { CustomIdGenerator } from "../../plugins/plugin-types.js";
 import type { ComputedFieldsConfig } from "../../types/computed-types.js";
 import type {
 	CreateInput,
@@ -109,6 +110,8 @@ export const create =
 		computed?: ComputedFieldsConfig<unknown>,
 		searchIndexRef?: Ref.Ref<SearchIndexMap>,
 		searchIndexFields?: ReadonlyArray<string>,
+		idGeneratorName?: string,
+		idGeneratorMap?: Map<string, CustomIdGenerator>,
 	) =>
 	(
 		input: CreateInput<T>,
@@ -124,10 +127,22 @@ export const create =
 			// Strip computed field keys from input (they are derived, not stored)
 			const sanitizedInput = stripComputedFromInput(input, computed);
 
-			const id =
-				((sanitizedInput as Record<string, unknown>).id as
-					| string
-					| undefined) || generateId();
+			// Determine which ID generator to use:
+			// 1. If input has an id, use it
+			// 2. If collection specifies idGenerator and it exists in the map, use the plugin generator
+			// 3. Otherwise, use the default generateId
+			const inputId = (sanitizedInput as Record<string, unknown>).id as
+				| string
+				| undefined;
+			let id: string;
+			if (inputId) {
+				id = inputId;
+			} else if (idGeneratorName && idGeneratorMap?.has(idGeneratorName)) {
+				const generator = idGeneratorMap.get(idGeneratorName)!;
+				id = generator.generate();
+			} else {
+				id = generateId();
+			}
 			const now = new Date().toISOString();
 
 			// Build raw entity object for schema validation
@@ -236,6 +251,8 @@ export const createMany =
 		computed?: ComputedFieldsConfig<unknown>,
 		searchIndexRef?: Ref.Ref<SearchIndexMap>,
 		searchIndexFields?: ReadonlyArray<string>,
+		idGeneratorName?: string,
+		idGeneratorMap?: Map<string, CustomIdGenerator>,
 	) =>
 	(
 		inputs: ReadonlyArray<CreateInput<T>>,
@@ -266,10 +283,23 @@ export const createMany =
 			for (const input of inputs) {
 				// Strip computed field keys from input (they are derived, not stored)
 				const sanitizedInput = stripComputedFromInput(input, computed);
-				const id =
-					((sanitizedInput as Record<string, unknown>).id as
-						| string
-						| undefined) || generateId();
+
+				// Determine which ID generator to use for this entity:
+				// 1. If input has an id, use it
+				// 2. If collection specifies idGenerator and it exists in the map, use the plugin generator
+				// 3. Otherwise, use the default generateId
+				const inputId = (sanitizedInput as Record<string, unknown>).id as
+					| string
+					| undefined;
+				let id: string;
+				if (inputId) {
+					id = inputId;
+				} else if (idGeneratorName && idGeneratorMap?.has(idGeneratorName)) {
+					const generator = idGeneratorMap.get(idGeneratorName)!;
+					id = generator.generate();
+				} else {
+					id = generateId();
+				}
 
 				// Check for duplicate ID
 				if (existingIds.has(id) || batchIds.has(id)) {
