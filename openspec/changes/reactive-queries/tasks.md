@@ -15,7 +15,7 @@
 
 - [x] 3.1 Create `core/reactive/watch.ts` with `watch(pubsub, ref, collectionName, config)`: subscribe to PubSub, filter by collection, debounce, re-evaluate query, deduplicate, emit as Stream
 - [x] 3.2 Initial emission: the stream emits the current result set immediately upon subscription (before waiting for any change events)
-- [ ] 3.3 Apply the full query pipeline on each re-evaluation: filter, sort, select, paginate (reuse existing query functions)
+- [x] 3.3 Apply the full query pipeline on each re-evaluation: filter, sort, select, paginate (reuse existing query functions)
 - [ ] 3.4 Deduplicate consecutive identical result sets to avoid spurious emissions (compare serialized results or use structural equality)
 
 ## 4. Query Re-evaluation Pipeline
