@@ -5,6 +5,15 @@
  * Entry point: parses top-level flags and dispatches to command handlers.
  */
 
+import { Effect } from "effect"
+import type { DatabaseConfig } from "@proseql/core"
+import { discoverConfig, ConfigNotFoundError } from "./config/discovery.js"
+import {
+	loadConfig,
+	ConfigLoadError,
+	ConfigValidationError,
+} from "./config/loader.js"
+
 const VERSION = "0.1.0"
 
 /**
@@ -253,67 +262,110 @@ function exitWithError(message: string): never {
 }
 
 /**
+ * Resolve and load the database config.
+ * Uses the --config flag if provided, otherwise discovers the config file.
+ */
+async function resolveConfig(
+  configOverride: string | undefined,
+): Promise<DatabaseConfig> {
+  const program = Effect.gen(function* () {
+    const configPath = yield* discoverConfig(process.cwd(), configOverride)
+    const config = yield* loadConfig(configPath)
+    return config
+  })
+
+  const result = await Effect.runPromise(
+    program.pipe(
+      Effect.catchTag("ConfigNotFoundError", (error) => {
+        exitWithError(error.message)
+      }),
+      Effect.catchTag("ConfigLoadError", (error) => {
+        exitWithError(error.message)
+      }),
+      Effect.catchTag("ConfigValidationError", (error) => {
+        exitWithError(error.message)
+      }),
+    ),
+  )
+
+  return result
+}
+
+/**
  * Placeholder for command handlers (to be implemented in separate files)
  */
-async function handleInit(
-  _args: ParsedArgs,
-): Promise<void> {
+async function handleInit(_args: ParsedArgs): Promise<void> {
+  // init does not need config - it creates one
   console.log("init command - not yet implemented")
 }
 
 async function handleQuery(
   _args: ParsedArgs,
+  _config: DatabaseConfig,
 ): Promise<void> {
   console.log("query command - not yet implemented")
 }
 
 async function handleCollections(
   _args: ParsedArgs,
+  _config: DatabaseConfig,
 ): Promise<void> {
   console.log("collections command - not yet implemented")
 }
 
 async function handleDescribe(
   _args: ParsedArgs,
+  _config: DatabaseConfig,
 ): Promise<void> {
   console.log("describe command - not yet implemented")
 }
 
 async function handleStats(
   _args: ParsedArgs,
+  _config: DatabaseConfig,
 ): Promise<void> {
   console.log("stats command - not yet implemented")
 }
 
 async function handleCreate(
   _args: ParsedArgs,
+  _config: DatabaseConfig,
 ): Promise<void> {
   console.log("create command - not yet implemented")
 }
 
 async function handleUpdate(
   _args: ParsedArgs,
+  _config: DatabaseConfig,
 ): Promise<void> {
   console.log("update command - not yet implemented")
 }
 
 async function handleDelete(
   _args: ParsedArgs,
+  _config: DatabaseConfig,
 ): Promise<void> {
   console.log("delete command - not yet implemented")
 }
 
 async function handleMigrate(
   _args: ParsedArgs,
+  _config: DatabaseConfig,
 ): Promise<void> {
   console.log("migrate command - not yet implemented")
 }
 
 async function handleConvert(
   _args: ParsedArgs,
+  _config: DatabaseConfig,
 ): Promise<void> {
   console.log("convert command - not yet implemented")
 }
+
+/**
+ * Commands that do NOT require a loaded config.
+ */
+const COMMANDS_WITHOUT_CONFIG = new Set(["init"])
 
 /**
  * Main entry point
@@ -332,6 +384,12 @@ async function main(): Promise<void> {
     return
   }
 
+  // Resolve config for commands that need it
+  const needsConfig = !COMMANDS_WITHOUT_CONFIG.has(args.command)
+  const config = needsConfig
+    ? await resolveConfig(args.flags.config)
+    : undefined
+
   // Dispatch to command handlers
   switch (args.command) {
     case "init":
@@ -342,54 +400,54 @@ async function main(): Promise<void> {
       if (args.positionalArgs.length < 1) {
         exitWithError("query command requires a collection name")
       }
-      await handleQuery(args)
+      await handleQuery(args, config!)
       break
 
     case "collections":
-      await handleCollections(args)
+      await handleCollections(args, config!)
       break
 
     case "describe":
       if (args.positionalArgs.length < 1) {
         exitWithError("describe command requires a collection name")
       }
-      await handleDescribe(args)
+      await handleDescribe(args, config!)
       break
 
     case "stats":
-      await handleStats(args)
+      await handleStats(args, config!)
       break
 
     case "create":
       if (args.positionalArgs.length < 1) {
         exitWithError("create command requires a collection name")
       }
-      await handleCreate(args)
+      await handleCreate(args, config!)
       break
 
     case "update":
       if (args.positionalArgs.length < 2) {
         exitWithError("update command requires a collection name and entity ID")
       }
-      await handleUpdate(args)
+      await handleUpdate(args, config!)
       break
 
     case "delete":
       if (args.positionalArgs.length < 2) {
         exitWithError("delete command requires a collection name and entity ID")
       }
-      await handleDelete(args)
+      await handleDelete(args, config!)
       break
 
     case "migrate":
-      await handleMigrate(args)
+      await handleMigrate(args, config!)
       break
 
     case "convert":
       if (args.positionalArgs.length < 1) {
         exitWithError("convert command requires a collection name")
       }
-      await handleConvert(args)
+      await handleConvert(args, config!)
       break
 
     default:
@@ -398,7 +456,7 @@ async function main(): Promise<void> {
 }
 
 // Export for testing
-export { parseArgs, getOutputFormat, printHelp, printVersion }
+export { parseArgs, getOutputFormat, printHelp, printVersion, resolveConfig }
 export type { ParsedArgs, OutputFormat }
 
 // Run main
