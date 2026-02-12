@@ -4005,4 +4005,353 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 			);
 		});
 	});
+
+	describe("watchById emits entity state, re-emits on update, emits null on deletion (18.3)", () => {
+		it("watchById emits the entity state immediately on subscription", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch a specific book by ID (Dune)
+					const stream = yield* db.books.watchById("1");
+
+					// Take just the initial emission
+					const results = yield* Stream.runCollect(Stream.take(stream, 1));
+					const emission = Chunk.toReadonlyArray(results)[0] as Book | null;
+
+					// Should emit the entity immediately
+					expect(emission).not.toBeNull();
+					expect(emission?.id).toBe("1");
+					expect(emission?.title).toBe("Dune");
+					expect(emission?.author).toBe("Frank Herbert");
+				}),
+			);
+		});
+
+		it("watchById emits null for non-existent entity", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch a non-existent book
+					const stream = yield* db.books.watchById("non-existent-id");
+
+					// Take the initial emission
+					const results = yield* Stream.runCollect(Stream.take(stream, 1));
+					const emission = Chunk.toReadonlyArray(results)[0];
+
+					// Should emit null for non-existent entity
+					expect(emission).toBeNull();
+				}),
+			);
+		});
+
+		it("watchById re-emits the entity on update", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch Dune (id: "1")
+					const stream = yield* db.books.watchById("1");
+
+					// Track emissions
+					const emissions: Array<Book | null> = [];
+
+					// Fork stream consumer
+					const consumerFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "200 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+					expect(emissions).toHaveLength(1);
+					expect(emissions[0]?.title).toBe("Dune");
+					expect(emissions[0]?.year).toBe(1965);
+
+					// Update the watched entity
+					yield* db.books.update("1", { year: 1966, title: "Dune (Special Edition)" });
+
+					// Wait for re-emission
+					yield* Effect.sleep("50 millis");
+
+					// Should have a second emission with the updated entity
+					expect(emissions).toHaveLength(2);
+					expect(emissions[1]?.title).toBe("Dune (Special Edition)");
+					expect(emissions[1]?.year).toBe(1966);
+					expect(emissions[1]?.id).toBe("1");
+
+					yield* Fiber.interrupt(consumerFiber);
+				}),
+			);
+		});
+
+		it("watchById emits null when the entity is deleted", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch Dune (id: "1")
+					const stream = yield* db.books.watchById("1");
+
+					// Track emissions
+					const emissions: Array<Book | null> = [];
+
+					// Fork stream consumer
+					const consumerFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "200 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+					expect(emissions).toHaveLength(1);
+					expect(emissions[0]).not.toBeNull();
+					expect(emissions[0]?.id).toBe("1");
+					expect(emissions[0]?.title).toBe("Dune");
+
+					// Delete the watched entity
+					yield* db.books.delete("1");
+
+					// Wait for emission
+					yield* Effect.sleep("50 millis");
+
+					// Should have a second emission with null (entity deleted)
+					expect(emissions).toHaveLength(2);
+					expect(emissions[1]).toBeNull();
+
+					yield* Fiber.interrupt(consumerFiber);
+				}),
+			);
+		});
+
+		it("watchById tracks entity through multiple updates and deletion", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch Neuromancer (id: "2")
+					const stream = yield* db.books.watchById("2");
+
+					// Track emissions
+					const emissions: Array<Book | null> = [];
+
+					// Fork stream consumer
+					const consumerFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "400 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+					expect(emissions).toHaveLength(1);
+					expect(emissions[0]?.title).toBe("Neuromancer");
+					expect(emissions[0]?.genre).toBe("sci-fi");
+
+					// First update
+					yield* db.books.update("2", { genre: "cyberpunk" });
+					yield* Effect.sleep("50 millis");
+
+					expect(emissions).toHaveLength(2);
+					expect(emissions[1]?.genre).toBe("cyberpunk");
+
+					// Second update
+					yield* db.books.update("2", { year: 1985 });
+					yield* Effect.sleep("50 millis");
+
+					expect(emissions).toHaveLength(3);
+					expect(emissions[2]?.year).toBe(1985);
+					expect(emissions[2]?.genre).toBe("cyberpunk");
+
+					// Delete
+					yield* db.books.delete("2");
+					yield* Effect.sleep("50 millis");
+
+					// Final emission should be null
+					expect(emissions).toHaveLength(4);
+					expect(emissions[3]).toBeNull();
+
+					yield* Fiber.interrupt(consumerFiber);
+				}),
+			);
+		});
+
+		it("watchById does not emit when a different entity is updated", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch Dune (id: "1")
+					const stream = yield* db.books.watchById("1");
+
+					// Track emissions
+					const emissions: Array<Book | null> = [];
+
+					// Fork stream consumer
+					const consumerFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "200 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+					expect(emissions).toHaveLength(1);
+					expect(emissions[0]?.title).toBe("Dune");
+
+					// Update a DIFFERENT entity (Neuromancer, id: "2")
+					yield* db.books.update("2", { title: "Neuromancer (Revised)" });
+
+					// Wait for any potential emission
+					yield* Effect.sleep("100 millis");
+
+					// Should still only have the initial emission
+					// (deduplication: result set is unchanged for watchById("1"))
+					expect(emissions).toHaveLength(1);
+
+					yield* Fiber.interrupt(consumerFiber);
+				}),
+			);
+		});
+
+		it("watchById emits entity when it is created after subscription started", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch a book ID that doesn't exist yet
+					const stream = yield* db.books.watchById("new-book-id");
+
+					// Track emissions
+					const emissions: Array<Book | null> = [];
+
+					// Fork stream consumer
+					const consumerFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "200 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+					expect(emissions).toHaveLength(1);
+					expect(emissions[0]).toBeNull(); // Entity doesn't exist yet
+
+					// Create the entity with the watched ID
+					yield* db.books.create({
+						id: "new-book-id",
+						title: "Brand New Book",
+						author: "New Author",
+						year: 2024,
+						genre: "sci-fi",
+					});
+
+					// Wait for emission
+					yield* Effect.sleep("50 millis");
+
+					// Should have a second emission with the newly created entity
+					expect(emissions).toHaveLength(2);
+					expect(emissions[1]).not.toBeNull();
+					expect(emissions[1]?.id).toBe("new-book-id");
+					expect(emissions[1]?.title).toBe("Brand New Book");
+
+					yield* Fiber.interrupt(consumerFiber);
+				}),
+			);
+		});
+
+		it("watchById handles create, update, and delete sequence", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch a book ID that doesn't exist yet
+					const stream = yield* db.books.watchById("lifecycle-book");
+
+					// Track emissions
+					const emissions: Array<Book | null> = [];
+
+					// Fork stream consumer
+					const consumerFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "500 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission (null - doesn't exist)
+					yield* Effect.sleep("30 millis");
+					expect(emissions).toHaveLength(1);
+					expect(emissions[0]).toBeNull();
+
+					// Create
+					yield* db.books.create({
+						id: "lifecycle-book",
+						title: "Lifecycle Book",
+						author: "Lifecycle Author",
+						year: 2020,
+						genre: "test",
+					});
+					yield* Effect.sleep("50 millis");
+					expect(emissions).toHaveLength(2);
+					expect(emissions[1]?.title).toBe("Lifecycle Book");
+
+					// Update
+					yield* db.books.update("lifecycle-book", { year: 2021 });
+					yield* Effect.sleep("50 millis");
+					expect(emissions).toHaveLength(3);
+					expect(emissions[2]?.year).toBe(2021);
+
+					// Delete
+					yield* db.books.delete("lifecycle-book");
+					yield* Effect.sleep("50 millis");
+					expect(emissions).toHaveLength(4);
+					expect(emissions[3]).toBeNull();
+
+					// Re-create with same ID
+					yield* db.books.create({
+						id: "lifecycle-book",
+						title: "Lifecycle Book Reborn",
+						author: "Lifecycle Author",
+						year: 2025,
+						genre: "test",
+					});
+					yield* Effect.sleep("50 millis");
+					expect(emissions).toHaveLength(5);
+					expect(emissions[4]?.title).toBe("Lifecycle Book Reborn");
+					expect(emissions[4]?.year).toBe(2025);
+
+					yield* Fiber.interrupt(consumerFiber);
+				}),
+			);
+		});
+	});
 });
