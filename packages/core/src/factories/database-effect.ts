@@ -1508,6 +1508,20 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			}
 		}
 
+		// 0e. Register plugin shutdown effects as scope finalizers.
+		// Register BEFORE the flush finalizer so they run AFTER flush (LIFO order).
+		// Iterate in registration order so that when finalizers run in LIFO order,
+		// plugins shut down in reverse registration order (last registered = first to shut down).
+		// This matches typical dependency patterns: if plugin A depends on plugin B,
+		// B is registered first, so A (registered later) shuts down first.
+		for (const plugin of options?.plugins ?? []) {
+			if (plugin.shutdown !== undefined) {
+				yield* Effect.addFinalizer(() =>
+					plugin.shutdown!().pipe(Effect.catchAll(() => Effect.void)),
+				);
+			}
+		}
+
 		// 1. Resolve services from the environment and capture as a Layer
 		// so save effects can be executed outside the creation runtime.
 		const storageAdapter = yield* StorageAdapter;
