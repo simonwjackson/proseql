@@ -421,8 +421,104 @@ export async function createSuite(): Promise<Bench> {
 	})
 
 	// -------------------------------------------------------------------------
-	// Task 5.4: Population benchmarks will be added here
+	// Task 5.4: Population benchmarks
 	// -------------------------------------------------------------------------
+
+	// Population benchmark: Single ref population
+	// Tests populating a single ref relationship (order → user).
+	// This measures the overhead of joining entities via foreign key lookup.
+	const populateSingleRefDb = await createBenchDatabase(relationshipDbConfig, {
+		users: [...relationshipUsers],
+		products: [...relationshipProducts],
+		suppliers: [...suppliers],
+		orders: [...orders],
+	});
+
+	bench.add("populate: single ref (order → user)", async () => {
+		await populateSingleRefDb.orders.query({
+			where: { status: "completed" },
+			populate: { user: true },
+		}).runPromise;
+	});
+
+	// Population benchmark: Inverse population
+	// Tests populating an inverse relationship (user → orders).
+	// Inverse relationships require scanning the related collection for matching foreign keys.
+	const populateInverseDb = await createBenchDatabase(relationshipDbConfig, {
+		users: [...relationshipUsers],
+		products: [...relationshipProducts],
+		suppliers: [...suppliers],
+		orders: [...orders],
+	});
+
+	bench.add("populate: inverse (user → orders)", async () => {
+		await populateInverseDb.users.query({
+			where: { role: "admin" },
+			populate: { orders: true },
+		}).runPromise;
+	});
+
+	// Population benchmark: Nested population (2 levels)
+	// Tests populating nested relationships (order → user → orders).
+	// This measures the cost of recursive population through multiple relationship hops.
+	const populateNestedDb = await createBenchDatabase(relationshipDbConfig, {
+		users: [...relationshipUsers],
+		products: [...relationshipProducts],
+		suppliers: [...suppliers],
+		orders: [...orders],
+	});
+
+	bench.add("populate: nested 2-level (order → user → orders)", async () => {
+		await populateNestedDb.orders.query({
+			where: { status: "completed" },
+			populate: {
+				user: {
+					orders: true,
+				},
+			},
+		}).runPromise;
+	});
+
+	// Population benchmark: Multiple relationships
+	// Tests populating multiple relationships in a single query (order → user + order → product).
+	// This measures the overhead of parallel relationship resolution.
+	const populateMultipleDb = await createBenchDatabase(relationshipDbConfig, {
+		users: [...relationshipUsers],
+		products: [...relationshipProducts],
+		suppliers: [...suppliers],
+		orders: [...orders],
+	});
+
+	bench.add("populate: multiple refs (order → user, product)", async () => {
+		await populateMultipleDb.orders.query({
+			where: { status: "completed" },
+			populate: {
+				user: true,
+				product: true,
+			},
+		}).runPromise;
+	});
+
+	// Population benchmark: Nested with ref chain (3 levels)
+	// Tests populating through a chain of ref relationships (order → product → supplier).
+	// This exercises deep nested population through refs.
+	const populateDeepRefDb = await createBenchDatabase(relationshipDbConfig, {
+		users: [...relationshipUsers],
+		products: [...relationshipProducts],
+		suppliers: [...suppliers],
+		orders: [...orders],
+	});
+
+	bench.add("populate: nested 3-level (order → product → supplier)", async () => {
+		await populateDeepRefDb.orders.query({
+			where: { status: "pending" },
+			populate: {
+				product: {
+					supplier: true,
+				},
+			},
+		}).runPromise;
+	});
 
 	// -------------------------------------------------------------------------
 	// Task 5.5: Select benchmark will be added here
