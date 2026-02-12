@@ -31,7 +31,7 @@
 
 ## 5. Query Pipeline Benchmarks
 
-- [ ] 5.1 Create `bench/query-pipeline.bench.ts` with a tinybench suite on a 10K-entity collection
+- [x] 5.1 Create `bench/query-pipeline.bench.ts` with a tinybench suite on a 10K-entity collection
 - [ ] 5.2 Implement filter benchmarks: simple equality filter, range filter ($gt, $lt), compound filter (multiple conditions combined)
 - [ ] 5.3 Implement sort benchmarks: single-field sort, multi-field sort
 - [ ] 5.4 Implement population benchmarks: single ref population, inverse population, nested population (requires a multi-collection setup with relationships)
