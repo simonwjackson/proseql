@@ -1,6 +1,6 @@
 ## 1. Package Scaffolding
 
-- [ ] 1.1 Create `packages/browser/` directory with `package.json` (`@proseql/browser`, workspace dependency on `@proseql/core`, `"type": "module"`)
+- [x] 1.1 Create `packages/browser/` directory with `package.json` (`@proseql/browser`, workspace dependency on `@proseql/core`, `"type": "module"`)
 - [ ] 1.2 Create `packages/browser/tsconfig.json` extending the root tsconfig, with appropriate `paths` and `references`
 - [ ] 1.3 Create `packages/browser/src/index.ts` that re-exports everything from `@proseql/core`
 - [ ] 1.4 Add `packages/browser` to the workspace root `package.json` workspaces array

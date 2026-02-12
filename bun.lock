@@ -21,6 +21,13 @@
         "vitest": "^1.1.1",
       },
     },
+    "packages/browser": {
+      "name": "@proseql/browser",
+      "version": "0.1.0",
+      "dependencies": {
+        "@proseql/core": "workspace:*",
+      },
+    },
     "packages/core": {
       "name": "@proseql/core",
       "version": "0.1.0",
@@ -117,6 +124,8 @@
     "@jest/schemas": ["@jest/schemas@29.6.3", "", { "dependencies": { "@sinclair/typebox": "^0.27.8" } }, "sha512-mo5j5X+jIZmJQveBKeS/clAueipV7KgiX1vMgCxam1RNYiqE1w62n0/tJJnHtjW8ZHcQco5gY85jA3mi0L+nSA=="],
 
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.5.5", "", {}, "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og=="],
+
+    "@proseql/browser": ["@proseql/browser@workspace:packages/browser"],
 
     "@proseql/core": ["@proseql/core@workspace:packages/core"],
 
