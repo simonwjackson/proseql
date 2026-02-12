@@ -89,10 +89,10 @@
 
 ## 12. Tests — SessionStorage Adapter
 
-- [ ] 12.1 Create `packages/browser/tests/session-storage-adapter.test.ts` using a mock `Storage` implementation
-- [ ] 12.2 Test `write`/`read` round-trip
-- [ ] 12.3 Test `watch` returns a no-op unsubscribe function
-- [ ] 12.4 Test `exists`, `remove`, `ensureDir` behave identically to localStorage adapter
+- [x] 12.1 Create `packages/browser/tests/session-storage-adapter.test.ts` using a mock `Storage` implementation
+- [x] 12.2 Test `write`/`read` round-trip
+- [x] 12.3 Test `watch` returns a no-op unsubscribe function
+- [x] 12.4 Test `exists`, `remove`, `ensureDir` behave identically to localStorage adapter
 
 ## 13. Tests — IndexedDB Adapter
 
