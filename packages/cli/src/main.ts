@@ -19,6 +19,7 @@ import { handleCollections as handleCollectionsCommand } from "./commands/collec
 import { handleDescribe as handleDescribeCommand } from "./commands/describe.js"
 import { handleStats as handleStatsCommand } from "./commands/stats.js"
 import { handleCreate as handleCreateCommand } from "./commands/create.js"
+import { handleUpdate as handleUpdateCommand } from "./commands/update.js"
 import { format, type OutputFormat } from "./output/formatter.js"
 
 const VERSION = "0.1.0"
@@ -493,10 +494,33 @@ async function handleCreate(
 }
 
 async function handleUpdate(
-  _args: ParsedArgs,
-  _resolvedConfig: ResolvedConfig,
+  args: ParsedArgs,
+  resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  console.log("update command - not yet implemented")
+  const collectionName = args.positionalArgs[0]
+  const entityId = args.positionalArgs[1]
+  const setArg = args.flags.set
+
+  if (!setArg) {
+    exitWithError("update command requires --set flag with assignments (e.g., --set 'year=2025,title=New')")
+  }
+
+  const result = await handleUpdateCommand({
+    collection: collectionName,
+    id: entityId,
+    config: resolvedConfig.config,
+    configPath: resolvedConfig.configPath,
+    set: setArg,
+  })
+
+  if (!result.success) {
+    exitWithError(result.message ?? "Update failed")
+  }
+
+  // Output the updated entity using the appropriate formatter
+  const outputFormat = getOutputFormat(args.flags)
+  const output = format(outputFormat, [result.data as Record<string, unknown>])
+  console.log(output)
 }
 
 async function handleDelete(
