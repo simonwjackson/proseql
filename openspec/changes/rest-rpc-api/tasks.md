@@ -106,7 +106,7 @@
 - [x] 11.12 Test POST with invalid data returns 400
 - [x] 11.13 Test PUT updates entity and returns 200
 - [x] 11.14 Test DELETE removes entity and returns 200
-- [ ] 11.15 Test POST batch creates multiple entities
+- [x] 11.15 Test POST batch creates multiple entities
 - [ ] 11.16 Test GET aggregate returns correct result
 - [ ] 11.17 Create `rest/tests/error-mapping.test.ts`: test each tagged error maps to correct HTTP status
 - [ ] 11.18 Test unknown error maps to 500

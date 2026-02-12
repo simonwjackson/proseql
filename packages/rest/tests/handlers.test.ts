@@ -1301,3 +1301,256 @@ describe("REST handlers — DELETE removes entity (task 11.14)", () => {
 		expect(finalResponse.body).toEqual([]);
 	});
 });
+
+// ============================================================================
+// Task 11.15: Test POST batch creates multiple entities
+// ============================================================================
+
+describe("REST handlers — POST batch creates multiple entities (task 11.15)", () => {
+	it("should create multiple entities and return 201 with created entities", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBatch = findRoute(routes, "POST", "/books/batch");
+		expect(postBatch).toBeDefined();
+
+		const newBooks = [
+			{ id: "batch-1", title: "Snow Crash", author: "Neal Stephenson", year: 1992, genre: "sci-fi" },
+			{ id: "batch-2", title: "Hyperion", author: "Dan Simmons", year: 1989, genre: "sci-fi" },
+			{ id: "batch-3", title: "Foundation", author: "Isaac Asimov", year: 1951, genre: "sci-fi" },
+		];
+
+		const request = createRequest({ body: newBooks });
+		const response = await postBatch!.handler(request);
+
+		expect(response.status).toBe(201);
+
+		// createMany returns { created: [...], skipped?: [...] }
+		const result = response.body as { created: ReadonlyArray<{
+			id: string;
+			title: string;
+			author: string;
+			year: number;
+			genre: string;
+		}> };
+		expect(result.created).toBeDefined();
+		expect(Array.isArray(result.created)).toBe(true);
+		expect(result.created.length).toBe(3);
+
+		// Verify each book was created with correct data
+		const book1 = result.created.find((b) => b.id === "batch-1");
+		expect(book1).toBeDefined();
+		expect(book1!.title).toBe("Snow Crash");
+		expect(book1!.author).toBe("Neal Stephenson");
+		expect(book1!.year).toBe(1992);
+
+		const book2 = result.created.find((b) => b.id === "batch-2");
+		expect(book2).toBeDefined();
+		expect(book2!.title).toBe("Hyperion");
+
+		const book3 = result.created.find((b) => b.id === "batch-3");
+		expect(book3).toBeDefined();
+		expect(book3!.title).toBe("Foundation");
+	});
+
+	it("should persist all created entities to the database", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBatch = findRoute(routes, "POST", "/books/batch");
+		const getBooks = findRoute(routes, "GET", "/books");
+		const getBookById = findRoute(routes, "GET", "/books/:id");
+
+		const newBooks = [
+			{ id: "persist-1", title: "Anathem", author: "Neal Stephenson", year: 2008, genre: "sci-fi" },
+			{ id: "persist-2", title: "Seveneves", author: "Neal Stephenson", year: 2015, genre: "sci-fi" },
+		];
+
+		// Create the entities in batch
+		const batchRequest = createRequest({ body: newBooks });
+		const batchResponse = await postBatch!.handler(batchRequest);
+		expect(batchResponse.status).toBe(201);
+
+		// Verify collection now has 2 entities
+		const getAllResponse = await getBooks!.handler(createRequest());
+		expect(getAllResponse.status).toBe(200);
+		expect((getAllResponse.body as ReadonlyArray<unknown>).length).toBe(2);
+
+		// Verify each entity can be retrieved by ID
+		const get1Response = await getBookById!.handler(createRequest({ params: { id: "persist-1" } }));
+		expect(get1Response.status).toBe(200);
+		expect((get1Response.body as { title: string }).title).toBe("Anathem");
+
+		const get2Response = await getBookById!.handler(createRequest({ params: { id: "persist-2" } }));
+		expect(get2Response.status).toBe(200);
+		expect((get2Response.body as { title: string }).title).toBe("Seveneves");
+	});
+
+	it("should add to existing collection data", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const postBatch = findRoute(routes, "POST", "/books/batch");
+		const getBooks = findRoute(routes, "GET", "/books");
+
+		// Start with 3 existing books
+		const initialResponse = await getBooks!.handler(createRequest());
+		expect((initialResponse.body as ReadonlyArray<unknown>).length).toBe(3);
+
+		// Add 2 more books in batch
+		const newBooks = [
+			{ id: "new-1", title: "Ringworld", author: "Larry Niven", year: 1970, genre: "sci-fi" },
+			{ id: "new-2", title: "The Forever War", author: "Joe Haldeman", year: 1974, genre: "sci-fi" },
+		];
+
+		const batchResponse = await postBatch!.handler(createRequest({ body: newBooks }));
+		expect(batchResponse.status).toBe(201);
+
+		// Should now have 5 books total
+		const finalResponse = await getBooks!.handler(createRequest());
+		expect((finalResponse.body as ReadonlyArray<unknown>).length).toBe(5);
+	});
+
+	it("should work with different collections", async () => {
+		const multiConfig = {
+			books: { schema: BookSchema, relationships: {} },
+			authors: {
+				schema: Schema.Struct({ id: Schema.String, name: Schema.String }),
+				relationships: {},
+			},
+		} as const;
+
+		const db = await Effect.runPromise(
+			createEffectDatabase(multiConfig, { books: [], authors: [] }),
+		);
+		const routes = createRestHandlers(multiConfig, db);
+
+		// Batch create books
+		const postBooksBatch = findRoute(routes, "POST", "/books/batch");
+		const booksRequest = createRequest({
+			body: [
+				{ id: "b1", title: "Dune", author: "Frank Herbert", year: 1965, genre: "sci-fi" },
+				{ id: "b2", title: "Neuromancer", author: "William Gibson", year: 1984, genre: "sci-fi" },
+			],
+		});
+		const booksResponse = await postBooksBatch!.handler(booksRequest);
+		expect(booksResponse.status).toBe(201);
+		expect((booksResponse.body as { created: ReadonlyArray<unknown> }).created.length).toBe(2);
+
+		// Batch create authors
+		const postAuthorsBatch = findRoute(routes, "POST", "/authors/batch");
+		const authorsRequest = createRequest({
+			body: [
+				{ id: "a1", name: "Frank Herbert" },
+				{ id: "a2", name: "William Gibson" },
+				{ id: "a3", name: "Ursula K. Le Guin" },
+			],
+		});
+		const authorsResponse = await postAuthorsBatch!.handler(authorsRequest);
+		expect(authorsResponse.status).toBe(201);
+		expect((authorsResponse.body as { created: ReadonlyArray<unknown> }).created.length).toBe(3);
+	});
+
+	it("should return 400 when batch contains invalid data", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBatch = findRoute(routes, "POST", "/books/batch");
+
+		// Second book is missing required fields
+		const invalidBooks = [
+			{ id: "valid-1", title: "Valid Book", author: "Author", year: 2020, genre: "sci-fi" },
+			{ id: "invalid-1", title: "Invalid Book" }, // missing author, year, genre
+		];
+
+		const request = createRequest({ body: invalidBooks });
+		const response = await postBatch!.handler(request);
+
+		expect(response.status).toBe(400);
+		const body = response.body as { _tag: string };
+		expect(body._tag).toBe("ValidationError");
+	});
+
+	it("should return 409 when batch contains duplicate IDs", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const postBatch = findRoute(routes, "POST", "/books/batch");
+
+		// Try to create a book with an ID that already exists
+		const duplicateBooks = [
+			{ id: "1", title: "Duplicate Book", author: "Author", year: 2020, genre: "sci-fi" },
+		];
+
+		const request = createRequest({ body: duplicateBooks });
+		const response = await postBatch!.handler(request);
+
+		expect(response.status).toBe(409);
+		const body = response.body as { _tag: string };
+		expect(body._tag).toBe("DuplicateKeyError");
+	});
+
+	it("should handle empty array gracefully", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBatch = findRoute(routes, "POST", "/books/batch");
+		const getBooks = findRoute(routes, "GET", "/books");
+
+		const request = createRequest({ body: [] });
+		const response = await postBatch!.handler(request);
+
+		expect(response.status).toBe(201);
+		// createMany returns { created: [] } for empty input
+		expect((response.body as { created: ReadonlyArray<unknown> }).created).toEqual([]);
+
+		// Collection should still be empty
+		const getAllResponse = await getBooks!.handler(createRequest());
+		expect((getAllResponse.body as ReadonlyArray<unknown>).length).toBe(0);
+	});
+
+	it("should return all entity fields in the response", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBatch = findRoute(routes, "POST", "/books/batch");
+
+		const newBooks = [
+			{ id: "fields-1", title: "Book 1", author: "Author 1", year: 2020, genre: "sci-fi" },
+		];
+
+		const request = createRequest({ body: newBooks });
+		const response = await postBatch!.handler(request);
+
+		expect(response.status).toBe(201);
+		const result = response.body as { created: ReadonlyArray<Record<string, unknown>> };
+		expect(result.created.length).toBe(1);
+
+		const book = result.created[0];
+		expect(book).toHaveProperty("id");
+		expect(book).toHaveProperty("title");
+		expect(book).toHaveProperty("author");
+		expect(book).toHaveProperty("year");
+		expect(book).toHaveProperty("genre");
+	});
+
+	it("should create single entity in batch", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBatch = findRoute(routes, "POST", "/books/batch");
+
+		const singleBook = [
+			{ id: "single-1", title: "Single Book", author: "Single Author", year: 2021, genre: "fiction" },
+		];
+
+		const request = createRequest({ body: singleBook });
+		const response = await postBatch!.handler(request);
+
+		expect(response.status).toBe(201);
+		const result = response.body as { created: ReadonlyArray<{ id: string; title: string }> };
+		expect(result.created.length).toBe(1);
+		expect(result.created[0].id).toBe("single-1");
+		expect(result.created[0].title).toBe("Single Book");
+	});
+});
