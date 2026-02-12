@@ -106,7 +106,7 @@
 
 ## 14. Tests — Cross-Tab Sync
 
-- [ ] 14.1 Create `packages/browser/tests/cross-tab-sync.test.ts`
+- [x] 14.1 Create `packages/browser/tests/cross-tab-sync.test.ts`
 - [ ] 14.2 Test `watch` registers a `storage` event listener and calls `onChange` when the watched key is modified
 - [ ] 14.3 Test `watch` ignores `storage` events for unrelated keys
 - [ ] 14.4 Test unsubscribe function removes the event listener
