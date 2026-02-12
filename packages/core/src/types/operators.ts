@@ -95,35 +95,49 @@ function checkArrayOperator<T>(
 	}
 }
 
+// Built-in operator keys (shared between isFilterOperatorObject and matchesFilter)
+const BUILT_IN_OPERATORS = new Set([
+	"$eq",
+	"$ne",
+	"$in",
+	"$nin",
+	"$gt",
+	"$gte",
+	"$lt",
+	"$lte",
+	"$startsWith",
+	"$endsWith",
+	"$contains",
+	"$all",
+	"$size",
+	"$search",
+]);
+
 // Type guard to check if a value is a filter operator object
 export function isFilterOperatorObject<T>(
 	filter: T | FilterOperators<T>,
+	customOperators?: Map<string, CustomOperator>,
 ): filter is FilterOperators<T> {
 	if (typeof filter !== "object" || filter === null || Array.isArray(filter)) {
 		return false;
 	}
 
-	const operatorKeys = [
-		"$eq",
-		"$ne",
-		"$in",
-		"$nin",
-		"$gt",
-		"$gte",
-		"$lt",
-		"$lte",
-		"$startsWith",
-		"$endsWith",
-		"$contains",
-		"$all",
-		"$size",
-		"$search",
-	];
 	const filterKeys = Object.keys(filter);
-	return (
-		filterKeys.length > 0 &&
-		filterKeys.some((key) => operatorKeys.includes(key))
-	);
+	if (filterKeys.length === 0) {
+		return false;
+	}
+
+	return filterKeys.some((key) => {
+		// Check built-in operators
+		if (BUILT_IN_OPERATORS.has(key)) {
+			return true;
+		}
+		// Check custom operators (any $-prefixed key present in the custom operators map)
+		if (customOperators && key.startsWith("$") && customOperators.has(key)) {
+			return true;
+		}
+		return false;
+	});
 }
 
 // Helper function to check if a value matches a filter operator
@@ -133,7 +147,7 @@ export function matchesFilter<T>(
 	customOperators?: Map<string, CustomOperator>,
 ): boolean {
 	// Check if filter is an object with operators
-	if (isFilterOperatorObject(filter)) {
+	if (isFilterOperatorObject(filter, customOperators)) {
 		// Type-safe operator access using type guards and explicit property checks
 		const ops = filter as Record<string, unknown>;
 		const results: boolean[] = [];
@@ -357,26 +371,9 @@ export function matchesFilter<T>(
 
 		// Check custom operators for any unrecognized $-prefixed keys
 		if (customOperators && customOperators.size > 0) {
-			const builtInOperators = new Set([
-				"$eq",
-				"$ne",
-				"$in",
-				"$nin",
-				"$gt",
-				"$gte",
-				"$lt",
-				"$lte",
-				"$startsWith",
-				"$endsWith",
-				"$contains",
-				"$all",
-				"$size",
-				"$search",
-			]);
-
 			for (const key of Object.keys(ops)) {
 				// Skip non-operator keys and built-in operators
-				if (!key.startsWith("$") || builtInOperators.has(key)) {
+				if (!key.startsWith("$") || BUILT_IN_OPERATORS.has(key)) {
 					continue;
 				}
 
