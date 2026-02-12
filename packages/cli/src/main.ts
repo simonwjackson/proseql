@@ -16,6 +16,7 @@ import {
 import { handleInit as handleInitCommand } from "./commands/init.js"
 import { handleQuery as handleQueryCommand } from "./commands/query.js"
 import { handleCollections as handleCollectionsCommand } from "./commands/collections.js"
+import { handleDescribe as handleDescribeCommand } from "./commands/describe.js"
 import { format, type OutputFormat } from "./output/formatter.js"
 
 const VERSION = "0.1.0"
@@ -354,10 +355,92 @@ async function handleCollections(
 }
 
 async function handleDescribe(
-  _args: ParsedArgs,
-  _resolvedConfig: ResolvedConfig,
+  args: ParsedArgs,
+  resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  console.log("describe command - not yet implemented")
+  const collectionName = args.positionalArgs[0]
+  const result = await handleDescribeCommand({
+    collection: collectionName,
+    config: resolvedConfig.config,
+  })
+
+  if (!result.success) {
+    exitWithError(result.message ?? "Failed to describe collection")
+  }
+
+  // Format output based on format flag
+  const outputFormat = getOutputFormat(args.flags)
+
+  if (outputFormat === "json" || outputFormat === "yaml") {
+    // For structured formats, output the full data object
+    const output = format(outputFormat, [result.data as Record<string, unknown>])
+    console.log(output)
+  } else {
+    // For table/csv, format a human-readable summary
+    const data = result.data!
+
+    // Print collection header
+    console.log(`\nCollection: ${data.collection}`)
+    if (data.version !== undefined) {
+      console.log(`Version: ${data.version}`)
+    }
+    if (data.appendOnly) {
+      console.log(`Mode: append-only`)
+    }
+    console.log("")
+
+    // Print fields as a table
+    console.log("Fields:")
+    const fieldRecords = data.fields.map((f) => ({
+      name: f.name,
+      type: f.type,
+      required: f.required ? "yes" : "no",
+      indexed: f.indexed ? "yes" : "",
+      unique: f.unique ? "yes" : "",
+    }))
+    console.log(format("table", fieldRecords))
+
+    // Print relationships if any
+    if (data.relationships.length > 0) {
+      console.log("\nRelationships:")
+      const relRecords = data.relationships.map((r) => ({
+        name: r.name,
+        type: r.type,
+        target: r.target,
+        foreignKey: r.foreignKey ?? "",
+      }))
+      console.log(format("table", relRecords))
+    }
+
+    // Print indexes if any
+    if (data.indexes.length > 0) {
+      console.log("\nIndexes:")
+      for (const index of data.indexes) {
+        if (typeof index === "string") {
+          console.log(`  - ${index}`)
+        } else {
+          console.log(`  - [${index.join(", ")}]`)
+        }
+      }
+    }
+
+    // Print unique constraints if any
+    if (data.uniqueConstraints.length > 0) {
+      console.log("\nUnique Constraints:")
+      for (const constraint of data.uniqueConstraints) {
+        if (typeof constraint === "string") {
+          console.log(`  - ${constraint}`)
+        } else {
+          console.log(`  - [${constraint.join(", ")}]`)
+        }
+      }
+    }
+
+    // Print search index if configured
+    if (data.hasSearchIndex) {
+      console.log(`\nSearch Index: [${data.searchIndexFields.join(", ")}]`)
+    }
+  }
 }
 
 async function handleStats(
