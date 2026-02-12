@@ -21,6 +21,7 @@ import { handleStats as handleStatsCommand } from "./commands/stats.js"
 import { handleCreate as handleCreateCommand } from "./commands/create.js"
 import { handleUpdate as handleUpdateCommand } from "./commands/update.js"
 import { handleDelete as handleDeleteCommand } from "./commands/delete.js"
+import { handleMigrate as handleMigrateCommand, detectSubcommand } from "./commands/migrate.js"
 import { format, type OutputFormat } from "./output/formatter.js"
 
 const VERSION = "0.1.0"
@@ -553,10 +554,48 @@ async function handleDelete(
 }
 
 async function handleMigrate(
-  _args: ParsedArgs,
-  _resolvedConfig: ResolvedConfig,
+  args: ParsedArgs,
+  resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  console.log("migrate command - not yet implemented")
+  // Detect subcommand from positional args and flags
+  const subcommand = detectSubcommand(args.positionalArgs, args.flags.dryRun)
+
+  const result = await handleMigrateCommand({
+    config: resolvedConfig.config,
+    configPath: resolvedConfig.configPath,
+    subcommand,
+    force: args.flags.force,
+  })
+
+  if (!result.success) {
+    if (result.aborted) {
+      // User cancelled - just print the message, don't exit with error
+      console.log(result.message ?? "Operation cancelled.")
+      return
+    }
+    exitWithError(result.message ?? "Migration failed")
+  }
+
+  // Output the results
+  if (result.data) {
+    // For status and dry-run, format the collection results
+    const outputFormat = getOutputFormat(args.flags)
+
+    // Transform collection data for output
+    const records = result.data.collections.map((c) => ({
+      collection: c.name,
+      file: c.filePath,
+      currentVersion: c.currentVersion,
+      targetVersion: c.targetVersion,
+      status: c.status,
+      migrations: c.migrationsToApply.length,
+    }))
+
+    const output = format(outputFormat, records)
+    console.log(output)
+  } else if (result.message) {
+    console.log(result.message)
+  }
 }
 
 async function handleConvert(
