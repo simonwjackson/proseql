@@ -91,7 +91,7 @@
 
 ## 15. Tests — Transactions
 
-- [ ] 15.1 Test transaction: no emissions during transaction (intermediate states suppressed)
+- [x] 15.1 Test transaction: no emissions during transaction (intermediate states suppressed)
 - [ ] 15.2 Test transaction commit: exactly one emission with the final state after commit
 - [ ] 15.3 Test transaction rollback: no emissions (state unchanged)
 

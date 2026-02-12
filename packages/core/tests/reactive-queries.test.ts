@@ -1467,3 +1467,201 @@ describe("reactive queries - irrelevant mutations", () => {
 		});
 	});
 });
+
+// ============================================================================
+// Tests - Transactions (15.1 - 15.3)
+// ============================================================================
+
+describe("reactive queries - transactions", () => {
+	describe("no emissions during transaction (15.1)", () => {
+		it("transaction: no emissions during transaction (intermediate states suppressed)", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Track all emissions received
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork collection with a timeout
+					const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "200 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission to be processed
+					yield* Effect.sleep("30 millis");
+
+					// Start a transaction and perform multiple mutations
+					// These should NOT trigger emissions during the transaction
+					yield* db.$transaction((tx) =>
+						Effect.gen(function* () {
+							// Create a new book
+							yield* tx.books.create({
+								title: "Foundation",
+								author: "Isaac Asimov",
+								year: 1951,
+								genre: "sci-fi",
+							});
+
+							// Wait to see if any emission happens (it shouldn't)
+							yield* Effect.sleep("30 millis");
+
+							// Update an existing book
+							yield* tx.books.update("1", { year: 1966 });
+
+							// Wait again
+							yield* Effect.sleep("30 millis");
+
+							// Create another book
+							yield* tx.books.create({
+								title: "Snow Crash",
+								author: "Neal Stephenson",
+								year: 1992,
+								genre: "sci-fi",
+							});
+
+							// Wait one more time inside the transaction
+							yield* Effect.sleep("30 millis");
+						}),
+					);
+
+					// Wait for any emissions after commit
+					yield* Effect.sleep("50 millis");
+
+					// Interrupt the fiber
+					yield* Fiber.interrupt(collectedFiber);
+
+					// Should have exactly 2 emissions:
+					// 1. Initial emission (2 sci-fi books: Dune 1965, Neuromancer 1984)
+					// 2. Post-commit emission (4 sci-fi books: Foundation 1951, Dune 1966, Neuromancer 1984, Snow Crash 1992)
+					// NO intermediate emissions during the transaction
+					expect(emissions).toHaveLength(2);
+
+					// Initial emission: 2 sci-fi books
+					expect(emissions[0]).toHaveLength(2);
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+					]);
+
+					// After commit: 4 sci-fi books, sorted by year
+					expect(emissions[1]).toHaveLength(4);
+					expect(emissions[1].map((b) => b.title)).toEqual([
+						"Foundation",
+						"Dune",
+						"Neuromancer",
+						"Snow Crash",
+					]);
+					// Verify Dune's year was updated
+					expect(emissions[1].find((b) => b.id === "1")?.year).toBe(1966);
+				}),
+			);
+		});
+
+		it("transaction mutations on different collections don't emit during transaction", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch both books and authors
+					const booksStream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+					});
+					const authorsStream = yield* db.authors.watch();
+
+					// Track emissions for both
+					const bookEmissions: Array<ReadonlyArray<Book>> = [];
+					const authorEmissions: Array<ReadonlyArray<Author>> = [];
+
+					// Fork watchers for both collections
+					const booksFiber = yield* Stream.runForEach(
+						booksStream,
+						(emission) =>
+							Effect.sync(() => {
+								bookEmissions.push(emission);
+							}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "200 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					const authorsFiber = yield* Stream.runForEach(
+						authorsStream,
+						(emission) =>
+							Effect.sync(() => {
+								authorEmissions.push(emission);
+							}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "200 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emissions
+					yield* Effect.sleep("30 millis");
+
+					// Transaction that mutates both collections
+					yield* db.$transaction((tx) =>
+						Effect.gen(function* () {
+							yield* tx.books.create({
+								title: "Foundation",
+								author: "Isaac Asimov",
+								year: 1951,
+								genre: "sci-fi",
+							});
+							yield* Effect.sleep("20 millis");
+
+							yield* tx.authors.create({
+								name: "Isaac Asimov",
+								country: "USA",
+							});
+							yield* Effect.sleep("20 millis");
+
+							yield* tx.books.create({
+								title: "Snow Crash",
+								author: "Neal Stephenson",
+								year: 1992,
+								genre: "sci-fi",
+							});
+							yield* Effect.sleep("20 millis");
+						}),
+					);
+
+					// Wait for emissions after commit
+					yield* Effect.sleep("50 millis");
+
+					// Interrupt both fibers
+					yield* Fiber.interrupt(booksFiber);
+					yield* Fiber.interrupt(authorsFiber);
+
+					// Books: initial + 1 post-commit emission (no intermediate)
+					expect(bookEmissions).toHaveLength(2);
+					expect(bookEmissions[0]).toHaveLength(2); // Initial: 2 sci-fi books
+					expect(bookEmissions[1]).toHaveLength(4); // After commit: 4 sci-fi books
+
+					// Authors: initial + 1 post-commit emission (no intermediate)
+					expect(authorEmissions).toHaveLength(2);
+					expect(authorEmissions[0]).toHaveLength(2); // Initial: 2 authors
+					expect(authorEmissions[1]).toHaveLength(3); // After commit: 3 authors
+				}),
+			);
+		});
+	});
+});
