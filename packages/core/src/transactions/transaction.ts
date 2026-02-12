@@ -236,6 +236,10 @@ export const createTransaction = <
 				yield* Ref.set(transactionLock, false);
 				isActive = false;
 
+				// NOTE: We deliberately do NOT publish any ChangeEvents on rollback.
+				// Reactive subscribers should never see tentative transaction state.
+				// Only committed changes trigger notifications (see commit()).
+
 				// Rollback always fails to short-circuit
 				return yield* new TransactionError({
 					operation: "rollback",

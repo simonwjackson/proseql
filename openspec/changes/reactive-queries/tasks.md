@@ -43,7 +43,7 @@
 - [x] 7.1 Modify `createTransaction` in `core/transactions/transaction.ts` to accept `changePubSub` parameter
 - [x] 7.2 During transaction: pass a no-op PubSub (or suppression flag) to CRUD operations created via `buildCollectionForTx` so individual mutations do not publish events
 - [x] 7.3 On commit: iterate `mutatedCollections` and publish one `ChangeEvent` per collection to the real PubSub
-- [ ] 7.4 On rollback: publish nothing (subscribers never see tentative state)
+- [x] 7.4 On rollback: publish nothing (subscribers never see tentative state)
 
 ## 8. Debouncing
 
