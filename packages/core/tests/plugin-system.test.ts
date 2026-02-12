@@ -1142,4 +1142,83 @@ describe("Plugin System", () => {
 			expect(herbert.name).toBe("Frank Herbert");
 		});
 	});
+
+	// ============================================================================
+	// Tests — Custom Operators (Task 12.1-12.4)
+	// ============================================================================
+
+	describe("custom operators", () => {
+		it("should match correctly with custom $regex operator", async () => {
+			// Task 12.1: Test custom `$regex` operator: `where: { title: { $regex: "^The.*" } }` matches correctly
+			const regexPlugin = createOperatorPlugin("regex-plugin", regexOperator);
+
+			const db = await createDatabaseWithPlugins([regexPlugin]);
+
+			// Query using the custom $regex operator
+			// Our test data has: "The Great Gatsby", "1984", "Dune"
+			// Only "The Great Gatsby" starts with "The"
+			const startsWithThe = await db.books
+				.query({
+					where: { title: { $regex: "^The.*" } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(startsWithThe.length).toBe(1);
+			expect(startsWithThe[0].title).toBe("The Great Gatsby");
+
+			// Test another regex pattern: contains numbers
+			const containsNumbers = await db.books
+				.query({
+					where: { title: { $regex: "\\d+" } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(containsNumbers.length).toBe(1);
+			expect(containsNumbers[0].title).toBe("1984");
+
+			// Test pattern that matches multiple books
+			const containsE = await db.books
+				.query({
+					where: { title: { $regex: "e" } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			// "The Great Gatsby" contains 'e', "Dune" contains 'e'
+			expect(containsE.length).toBe(2);
+			const titles = containsE.map((b) => b.title).sort();
+			expect(titles).toEqual(["Dune", "The Great Gatsby"]);
+
+			// Test pattern that matches nothing
+			const noMatch = await db.books
+				.query({
+					where: { title: { $regex: "^ZZZZZ" } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			expect(noMatch.length).toBe(0);
+
+			// Test case-insensitive pattern using regex flags
+			const caseInsensitive = await db.books
+				.query({
+					where: { title: { $regex: "^the" } } as Record<string, unknown>,
+				})
+				.runPromise;
+
+			// Should NOT match because regex is case-sensitive by default
+			expect(caseInsensitive.length).toBe(0);
+
+			// Test with explicit case-insensitive flag in the pattern
+			const caseInsensitiveWithFlag = await db.books
+				.query({
+					where: {
+						title: { $regex: "(?i)^the" },
+					} as Record<string, unknown>,
+				})
+				.runPromise;
+
+			// JavaScript regex doesn't support inline flags like (?i), so this won't match
+			// The $regex operator passes the pattern directly to new RegExp()
+			expect(caseInsensitiveWithFlag.length).toBe(0);
+		});
+	});
 });
