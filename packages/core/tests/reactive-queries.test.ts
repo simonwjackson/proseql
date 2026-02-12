@@ -749,6 +749,148 @@ describe("reactive queries - mutation triggers", () => {
 		});
 	});
 
+	describe("entity leaving result set (13.5)", () => {
+		it("updating a matching entity to no longer match triggers emission without the entity", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books only
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Fork collection to get 2 emissions: initial + after update
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission to be processed
+					yield* Effect.sleep("20 millis");
+
+					// Update Dune (id: "1", genre: "sci-fi") to be fantasy
+					// This makes it no longer match the watch filter
+					yield* db.books.update("1", { genre: "fantasy" });
+
+					// Wait for the stream to emit and collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					// Should have 2 emissions
+					expect(emissions).toHaveLength(2);
+
+					// Initial emission: 2 sci-fi books (Dune 1965, Neuromancer 1984)
+					expect(emissions[0]).toHaveLength(2);
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+					]);
+
+					// After update: 1 sci-fi book (Neuromancer 1984)
+					// Dune left the result set because it's now fantasy
+					expect(emissions[1]).toHaveLength(1);
+					expect(emissions[1].map((b) => b.title)).toEqual(["Neuromancer"]);
+					// Verify Dune is no longer in the result set
+					expect(emissions[1].find((b) => b.id === "1")).toBeUndefined();
+				}),
+			);
+		});
+
+		it("updating entity to leave one watch and enter another", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books (initially Dune and Neuromancer)
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { title: "asc" },
+					});
+
+					// Fork collection to get 2 emissions
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("20 millis");
+
+					// Update Neuromancer (id: "2", genre: "sci-fi") to be fantasy
+					// This removes it from the sci-fi watch
+					yield* db.books.update("2", { genre: "fantasy" });
+
+					// Collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					expect(emissions).toHaveLength(2);
+
+					// Initial: 2 sci-fi books (Dune, Neuromancer)
+					expect(emissions[0]).toHaveLength(2);
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+					]);
+
+					// After update: 1 sci-fi book (Dune only)
+					expect(emissions[1]).toHaveLength(1);
+					expect(emissions[1][0].title).toBe("Dune");
+				}),
+			);
+		});
+
+		it("updating multiple entities via updateMany causes some to leave result set", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Fork collection to get 2 emissions
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("20 millis");
+
+					// Change all books from 1970 or later to horror genre
+					// This should remove Neuromancer (1984) from the sci-fi results
+					yield* db.books.updateMany(
+						(book: Book) => book.year >= 1970,
+						{ genre: "horror" },
+					);
+
+					// Collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					expect(emissions).toHaveLength(2);
+
+					// Initial: 2 sci-fi books (Dune 1965, Neuromancer 1984)
+					expect(emissions[0]).toHaveLength(2);
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+					]);
+
+					// After updateMany: Only Dune remains (1965 < 1970, so not updated)
+					expect(emissions[1]).toHaveLength(1);
+					expect(emissions[1][0].title).toBe("Dune");
+					expect(emissions[1][0].genre).toBe("sci-fi");
+				}),
+			);
+		});
+	});
+
 	describe("delete triggers watch (13.3)", () => {
 		it("deleting a matched entity causes a new emission without the entity", async () => {
 			await runWithDb((db) =>

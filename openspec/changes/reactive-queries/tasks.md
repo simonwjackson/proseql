@@ -82,7 +82,7 @@
 - [x] 13.2 Test update triggers watch: updating a matched entity causes a new emission with the updated entity
 - [x] 13.3 Test delete triggers watch: deleting a matched entity causes a new emission without the entity
 - [x] 13.4 Test entity entering result set: updating a non-matching entity to match the where clause triggers emission
-- [ ] 13.5 Test entity leaving result set: updating a matching entity to no longer match triggers emission
+- [x] 13.5 Test entity leaving result set: updating a matching entity to no longer match triggers emission
 
 ## 14. Tests — Irrelevant Mutations
 
