@@ -41,13 +41,13 @@
 - [x] 6.1 Create `packages/browser/src/adapters/indexeddb-adapter.ts` implementing `StorageAdapterShape`
 - [x] 6.2 Implement `openDatabase`: wrap `indexedDB.open` in `Effect.async`, create object store on `onupgradeneeded`, cache `IDBDatabase` handle. Config: database name (default `proseql`), store name (default `collections`), version.
 - [x] 6.3 Implement `read`: open a `readonly` transaction, call `store.get(pathToKey(path))`, wrap in `Effect.async`, fail with `StorageError` if result is `undefined`
-- [ ] 6.4 Implement `write`: open a `readwrite` transaction, call `store.put(data, pathToKey(path))`, wrap in `Effect.async`
-- [ ] 6.5 Implement `exists`: open a `readonly` transaction, call `store.count(pathToKey(path))`, return `count > 0`
-- [ ] 6.6 Implement `remove`: open a `readwrite` transaction, call `store.delete(pathToKey(path))`, wrap in `Effect.async`
-- [ ] 6.7 Implement `ensureDir`: return `Effect.void` (no-op)
-- [ ] 6.8 Implement `watch`: return no-op unsubscribe (IndexedDB has no native change notification; BroadcastChannel-based sync is out of scope)
-- [ ] 6.9 Create `makeIndexedDBStorageLayer(config?)` factory returning `Layer.Layer<StorageAdapter>`
-- [ ] 6.10 Export `IndexedDBStorageLayer` as the default-config convenience alias
+- [x] 6.4 Implement `write`: open a `readwrite` transaction, call `store.put(data, pathToKey(path))`, wrap in `Effect.async`
+- [x] 6.5 Implement `exists`: open a `readonly` transaction, call `store.count(pathToKey(path))`, return `count > 0`
+- [x] 6.6 Implement `remove`: open a `readwrite` transaction, call `store.delete(pathToKey(path))`, wrap in `Effect.async`
+- [x] 6.7 Implement `ensureDir`: return `Effect.void` (no-op)
+- [x] 6.8 Implement `watch`: return no-op unsubscribe (IndexedDB has no native change notification; BroadcastChannel-based sync is out of scope)
+- [x] 6.9 Create `makeIndexedDBStorageLayer(config?)` factory returning `Layer.Layer<StorageAdapter>`
+- [x] 6.10 Export `IndexedDBStorageLayer` as the default-config convenience alias
 
 ## 7. Browser Adapter Layer Exports
 
