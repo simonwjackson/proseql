@@ -92,16 +92,36 @@ export async function createSuite(): Promise<Bench> {
 	const baselineUsers = generateUsers(BASELINE_SIZE);
 	const usersArray = [...baselineUsers];
 
-	// Benchmarks will be added in tasks 4.2-4.6:
-	// - 4.2: create single-entity benchmark
+	// -------------------------------------------------------------------------
+	// 4.2: create single-entity benchmark
+	// -------------------------------------------------------------------------
+
+	// For create benchmark, we start with the baseline collection.
+	// Each iteration creates one new entity with a unique ID.
+	// After benchmark completes, the collection will have grown.
+	const createDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	let createCounter = 0;
+
+	bench.add("create (single)", async () => {
+		// Generate a unique ID for each created entity
+		// Using a counter ensures no collisions during the benchmark
+		const uniqueId = `bench_user_${Date.now()}_${createCounter++}`;
+
+		await createDb.users.create({
+			id: uniqueId,
+			name: "Benchmark User",
+			email: `benchmark${createCounter}@test.com`,
+			age: 30,
+			role: "user" as const,
+			createdAt: new Date().toISOString(),
+		}).runPromise;
+	});
+
+	// Benchmarks will be added in tasks 4.3-4.6:
 	// - 4.3: createMany batch benchmark
 	// - 4.4: update and updateMany benchmarks
 	// - 4.5: delete and deleteMany benchmarks
 	// - 4.6: upsert benchmarks (create and update paths)
-
-	// Placeholder: verify suite can be created with baseline data
-	// This ensures the infrastructure works before adding actual benchmarks
-	const _db = await createBenchDatabase(dbConfig, { users: usersArray });
 
 	return bench;
 }
