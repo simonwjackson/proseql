@@ -193,6 +193,23 @@ describe("makeRpcHandlers", () => {
 			expect(result._tag).toBe("Left");
 		});
 
+		it("delete should fail for non-existent entity with NotFoundError", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			const result = await Effect.runPromise(
+				Effect.either(handlers.books.delete({ id: "nonexistent" })),
+			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left._tag).toBe("NotFoundError");
+			}
+		});
+
 		it("aggregate should compute aggregates", async () => {
 			const handlers = await Effect.runPromise(
 				makeRpcHandlers(singleCollectionConfig, {
