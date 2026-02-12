@@ -75,9 +75,36 @@ export async function createSuite(): Promise<Bench> {
 	const bench = new Bench(defaultBenchOptions);
 
 	// Pre-generate dataset for serialization benchmarks
-	const _dataset = generateUsers(DATASET_SIZE);
+	const dataset = generateUsers(DATASET_SIZE);
 
-	// TODO (task 6.2): Add serialization benchmarks for each format
+	// -------------------------------------------------------------------------
+	// 6.2: Serialization benchmarks for each format
+	// -------------------------------------------------------------------------
+
+	// For JSON-compatible formats (JSON, YAML, JSON5, JSONC, TOON, Hjson),
+	// we serialize the array directly as most formats support top-level arrays.
+	// For TOML, we wrap in an object since TOML requires a table at the top level.
+
+	// Helper to get the data in the appropriate shape for each format
+	const getDataForCodec = (codecName: string): unknown => {
+		// TOML requires top-level to be a table (object), not an array
+		// Use { users: [...] } wrapper for TOML
+		if (codecName === "TOML") {
+			return { users: dataset };
+		}
+		// All other formats can handle top-level arrays directly
+		return dataset;
+	};
+
+	// Add serialization benchmarks for each codec
+	for (const { name, codec } of CODECS) {
+		const data = getDataForCodec(name);
+
+		bench.add(`serialize ${name}`, () => {
+			codec.encode(data);
+		});
+	}
+
 	// TODO (task 6.3): Add deserialization benchmarks for each format
 	// TODO (task 6.4): Add debounced write coalescing benchmark
 
