@@ -13,11 +13,13 @@ import {
 	Chunk,
 	Effect,
 	Layer,
+	PubSub,
 	Ref,
 	type Schema,
 	type Scope,
 	Stream,
 } from "effect";
+import type { ChangeEvent } from "../types/reactive-types.js";
 import {
 	type DuplicateKeyError,
 	type ForeignKeyError,
@@ -1399,8 +1401,13 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 			}
 		}
 
-		// 4. Build each collection with its Ref, indexes, and shared state refs
+		// 4. Create shared PubSub for reactive change notifications (one per database)
+		// This PubSub is shared by all collections and broadcasts ChangeEvents to reactive subscribers
+		const changePubSub = yield* PubSub.unbounded<ChangeEvent>();
+
+		// 5. Build each collection with its Ref, indexes, and shared state refs
 		// Pass plugin registry data: custom operators, ID generators, and global hooks
+		// Pass the shared changePubSub so CRUD operations publish ChangeEvents
 		const collections: Record<string, EffectCollection<HasId>> = {};
 
 		for (const collectionName of Object.keys(config)) {
@@ -1417,6 +1424,7 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 				pluginRegistry.operators,
 				pluginRegistry.idGenerators,
 				pluginRegistry.globalHooks,
+				changePubSub,
 			);
 		}
 
@@ -1705,7 +1713,12 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			),
 		);
 
-		// 8. Build each collection with its Ref, indexes, state refs, and persistence hooks
+		// 8. Create shared PubSub for reactive change notifications (one per database)
+		// This PubSub is shared by all collections and broadcasts ChangeEvents to reactive subscribers
+		const changePubSub = yield* PubSub.unbounded<ChangeEvent>();
+
+		// 9. Build each collection with its Ref, indexes, state refs, and persistence hooks
+		// Pass the shared changePubSub so CRUD operations publish ChangeEvents
 		const collections: Record<string, EffectCollection<HasId>> = {};
 
 		for (const collectionName of Object.keys(config)) {
@@ -1740,6 +1753,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				pluginRegistry.operators,
 				pluginRegistry.idGenerators,
 				pluginRegistry.globalHooks,
+				changePubSub,
 			);
 		}
 
