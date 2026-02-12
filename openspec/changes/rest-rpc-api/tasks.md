@@ -32,7 +32,7 @@
 
 - [x] 4.1 Add stream variant for `query` procedure using `Rpc.stream` so results can flow incrementally
 - [x] 4.2 Support configurable behavior: stream results incrementally or collect-then-return based on caller preference
-- [ ] 4.3 Verify streaming works over in-process transport (`RpcServer.makeNoSerialization`)
+- [x] 4.3 Verify streaming works over in-process transport (`RpcServer.makeNoSerialization`)
 
 ## 5. REST — Route Generation
 
