@@ -5,7 +5,8 @@
     "postinstall": "bun2nix -o bun.nix",
     "bench": "bun run bench/runner.ts",
     "build": "bunx tsc --build",
-    "clean": "rm -rf packages/*/dist"
+    "build:clean": "bun run clean && bun run build",
+    "clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo"
   },
   "dependencies": {
     "effect": "^3.15.2",

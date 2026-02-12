@@ -9,7 +9,7 @@
 
 - [x] 2.1 Add `"build": "tsc --build"` script to root `package.json`.
 - [x] 2.2 Add `"clean": "rm -rf packages/*/dist"` script to root `package.json`.
-- [ ] 2.3 Add `"build:clean": "bun run clean && bun run build"` script to root `package.json`.
+- [x] 2.3 Add `"build:clean": "bun run clean && bun run build"` script to root `package.json`.
 - [ ] 2.4 Run `bun run build` and verify it produces `dist/` in all four packages with `.js`, `.d.ts`, `.d.ts.map`, and `.js.map` files.
 
 ## 3. Per-Package package.json -- @proseql/core
