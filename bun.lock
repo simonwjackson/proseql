@@ -5,6 +5,7 @@
     "": {
       "name": "plan-text-db",
       "dependencies": {
+        "@proseql/browser": "workspace:*",
         "@proseql/core": "workspace:*",
         "@proseql/node": "workspace:*",
         "@toon-format/toon": "^2.1.0",

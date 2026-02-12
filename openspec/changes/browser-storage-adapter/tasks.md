@@ -4,7 +4,7 @@
 - [x] 1.2 Create `packages/browser/tsconfig.json` extending the root tsconfig, with appropriate `paths` and `references`
 - [x] 1.3 Create `packages/browser/src/index.ts` that re-exports everything from `@proseql/core`
 - [x] 1.4 Add `packages/browser` to the workspace root `package.json` workspaces array
-- [ ] 1.5 Verify `bun install` resolves the new workspace package and `bunx tsc --build` compiles it
+- [x] 1.5 Verify `bun install` resolves the new workspace package and `bunx tsc --build` compiles it
 
 ## 2. Path-to-Key Mapping
 
