@@ -171,6 +171,70 @@ function findExistingConfig(cwd: string): string | null {
 }
 
 /**
+ * Check if the current directory is inside a git repository.
+ * Returns true if a .git directory exists.
+ */
+function isGitRepository(cwd: string): boolean {
+	const gitPath = path.join(cwd, ".git")
+	return fs.existsSync(gitPath)
+}
+
+/**
+ * Check if a pattern is already in .gitignore.
+ * Handles various formats: exact match, with leading slash, with trailing slash.
+ */
+function isPatternInGitignore(gitignoreContent: string, pattern: string): boolean {
+	const lines = gitignoreContent.split("\n").map((line) => line.trim())
+	const normalizedPattern = pattern.replace(/^\//, "").replace(/\/$/, "")
+
+	for (const line of lines) {
+		// Skip comments and empty lines
+		if (line.startsWith("#") || line === "") {
+			continue
+		}
+		const normalizedLine = line.replace(/^\//, "").replace(/\/$/, "")
+		if (normalizedLine === normalizedPattern) {
+			return true
+		}
+	}
+	return false
+}
+
+/**
+ * Update .gitignore to include the data directory.
+ * Creates .gitignore if it doesn't exist.
+ * Returns true if the file was modified, false if pattern was already present.
+ */
+function updateGitignore(cwd: string, dataDir: string): { updated: boolean; created: boolean } {
+	const gitignorePath = path.join(cwd, ".gitignore")
+	const pattern = `${dataDir}/`
+
+	let gitignoreContent = ""
+	let fileExists = false
+
+	if (fs.existsSync(gitignorePath)) {
+		fileExists = true
+		gitignoreContent = fs.readFileSync(gitignorePath, "utf-8")
+
+		// Check if pattern is already present
+		if (isPatternInGitignore(gitignoreContent, dataDir)) {
+			return { updated: false, created: false }
+		}
+	}
+
+	// Append the pattern to .gitignore
+	const newContent = fileExists
+		? gitignoreContent.endsWith("\n")
+			? `${gitignoreContent}# ProseQL data directory\n${pattern}\n`
+			: `${gitignoreContent}\n\n# ProseQL data directory\n${pattern}\n`
+		: `# ProseQL data directory\n${pattern}\n`
+
+	fs.writeFileSync(gitignorePath, newContent, "utf-8")
+
+	return { updated: true, created: !fileExists }
+}
+
+/**
  * Options for the init command.
  */
 export interface InitOptions {
@@ -261,9 +325,24 @@ export function runInit(options: InitOptions = {}): InitResult {
 		}
 	}
 
-	// TODO: Subsequent tasks will implement:
-	// - 3.4: Detect .git and update .gitignore
-	// - 3.5: Print summary of created files
+	// Task 3.4: Detect .git directory and update .gitignore
+	if (isGitRepository(cwd)) {
+		try {
+			const gitignoreResult = updateGitignore(cwd, "data")
+			if (gitignoreResult.created) {
+				createdFiles.push(".gitignore")
+			} else if (gitignoreResult.updated) {
+				createdFiles.push(".gitignore (updated)")
+			}
+			// If neither created nor updated, the pattern was already present - nothing to report
+		} catch (error) {
+			// Non-fatal: warn but don't fail the init
+			const message = error instanceof Error ? error.message : String(error)
+			console.warn(`Warning: Could not update .gitignore: ${message}`)
+		}
+	}
+
+	// TODO: Task 3.5 will implement: Print summary of created files
 
 	return {
 		success: true,
