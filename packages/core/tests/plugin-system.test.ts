@@ -2267,6 +2267,184 @@ describe("Plugin System", () => {
 			expect(reverseAfterCreate3).toBeLessThan(reverseAfterCreate2);
 			expect(reverseAfterCreate2).toBeLessThan(reverseAfterCreate1);
 		});
+
+		it("should fire global onChange hook for create/update/delete across collections", async () => {
+			// Task 14.5: Test global onChange hook fires for create/update/delete across collections
+			//
+			// We create a plugin with a global onChange hook that tracks all mutations
+			// across both books and authors collections. The onChange hook receives a
+			// discriminated union context with type "create", "update", or "delete".
+			// We verify:
+			// 1. onChange fires on create for both collections
+			// 2. onChange fires on update for both collections
+			// 3. onChange fires on delete for both collections
+			// 4. The context contains correct type and data for each operation
+
+			// Track all onChange invocations
+			const onChangeCalls: Array<{
+				type: string;
+				collection: string;
+				data: Record<string, unknown>;
+			}> = [];
+
+			const globalOnChangePlugin = createHooksPlugin("global-onchange-plugin", {
+				onChange: [
+					(ctx) => {
+						// Build a record of relevant data based on the change type
+						let data: Record<string, unknown>;
+						if (ctx.type === "create") {
+							data = ctx.entity as Record<string, unknown>;
+						} else if (ctx.type === "update") {
+							data = {
+								id: ctx.id,
+								previous: ctx.previous,
+								current: ctx.current,
+							};
+						} else {
+							// delete
+							data = {
+								id: ctx.id,
+								entity: ctx.entity,
+							};
+						}
+
+						onChangeCalls.push({
+							type: ctx.type,
+							collection: ctx.collection,
+							data,
+						});
+						return Effect.void;
+					},
+				],
+			});
+
+			const db = await createDatabaseWithPlugins([globalOnChangePlugin]);
+
+			// Verify no onChange calls yet
+			expect(onChangeCalls.length).toBe(0);
+
+			// ========================================
+			// Test CREATE on both collections
+			// ========================================
+
+			// Create a book - should trigger onChange with type "create" for books collection
+			const book = await db.books
+				.create({
+					id: "onchange-book-1",
+					title: "OnChange Test Book",
+					author: "Test Author",
+					year: 2024,
+					genre: "test",
+				})
+				.runPromise;
+
+			expect(onChangeCalls.length).toBe(1);
+			expect(onChangeCalls[0].type).toBe("create");
+			expect(onChangeCalls[0].collection).toBe("books");
+			expect((onChangeCalls[0].data as { id: string }).id).toBe("onchange-book-1");
+			expect((onChangeCalls[0].data as { title: string }).title).toBe("OnChange Test Book");
+
+			// Create an author - should trigger onChange with type "create" for authors collection
+			const author = await db.authors
+				.create({
+					id: "onchange-author-1",
+					name: "OnChange Test Author",
+				})
+				.runPromise;
+
+			expect(onChangeCalls.length).toBe(2);
+			expect(onChangeCalls[1].type).toBe("create");
+			expect(onChangeCalls[1].collection).toBe("authors");
+			expect((onChangeCalls[1].data as { id: string }).id).toBe("onchange-author-1");
+			expect((onChangeCalls[1].data as { name: string }).name).toBe("OnChange Test Author");
+
+			// ========================================
+			// Test UPDATE on both collections
+			// ========================================
+
+			// Update the book - should trigger onChange with type "update" for books collection
+			await db.books
+				.update("onchange-book-1", { genre: "updated-genre" })
+				.runPromise;
+
+			expect(onChangeCalls.length).toBe(3);
+			expect(onChangeCalls[2].type).toBe("update");
+			expect(onChangeCalls[2].collection).toBe("books");
+			const updateBookData = onChangeCalls[2].data as {
+				id: string;
+				previous: { genre: string };
+				current: { genre: string };
+			};
+			expect(updateBookData.id).toBe("onchange-book-1");
+			expect(updateBookData.previous.genre).toBe("test");
+			expect(updateBookData.current.genre).toBe("updated-genre");
+
+			// Update the author - should trigger onChange with type "update" for authors collection
+			await db.authors
+				.update("onchange-author-1", { name: "Updated Author Name" })
+				.runPromise;
+
+			expect(onChangeCalls.length).toBe(4);
+			expect(onChangeCalls[3].type).toBe("update");
+			expect(onChangeCalls[3].collection).toBe("authors");
+			const updateAuthorData = onChangeCalls[3].data as {
+				id: string;
+				previous: { name: string };
+				current: { name: string };
+			};
+			expect(updateAuthorData.id).toBe("onchange-author-1");
+			expect(updateAuthorData.previous.name).toBe("OnChange Test Author");
+			expect(updateAuthorData.current.name).toBe("Updated Author Name");
+
+			// ========================================
+			// Test DELETE on both collections
+			// ========================================
+
+			// Delete the book - should trigger onChange with type "delete" for books collection
+			await db.books.delete("onchange-book-1").runPromise;
+
+			expect(onChangeCalls.length).toBe(5);
+			expect(onChangeCalls[4].type).toBe("delete");
+			expect(onChangeCalls[4].collection).toBe("books");
+			const deleteBookData = onChangeCalls[4].data as {
+				id: string;
+				entity: { id: string; title: string };
+			};
+			expect(deleteBookData.id).toBe("onchange-book-1");
+			expect(deleteBookData.entity.id).toBe("onchange-book-1");
+			expect(deleteBookData.entity.title).toBe("OnChange Test Book");
+
+			// Delete the author - should trigger onChange with type "delete" for authors collection
+			await db.authors.delete("onchange-author-1").runPromise;
+
+			expect(onChangeCalls.length).toBe(6);
+			expect(onChangeCalls[5].type).toBe("delete");
+			expect(onChangeCalls[5].collection).toBe("authors");
+			const deleteAuthorData = onChangeCalls[5].data as {
+				id: string;
+				entity: { id: string; name: string };
+			};
+			expect(deleteAuthorData.id).toBe("onchange-author-1");
+			expect(deleteAuthorData.entity.id).toBe("onchange-author-1");
+			expect(deleteAuthorData.entity.name).toBe("Updated Author Name");
+
+			// ========================================
+			// Verify all operations on all collections triggered onChange
+			// ========================================
+
+			// Verify we have onChange calls for both collections
+			const bookCalls = onChangeCalls.filter((c) => c.collection === "books");
+			const authorCalls = onChangeCalls.filter((c) => c.collection === "authors");
+
+			expect(bookCalls.length).toBe(3); // create, update, delete
+			expect(authorCalls.length).toBe(3); // create, update, delete
+
+			// Verify all operation types were captured for books
+			expect(bookCalls.map((c) => c.type)).toEqual(["create", "update", "delete"]);
+
+			// Verify all operation types were captured for authors
+			expect(authorCalls.map((c) => c.type)).toEqual(["create", "update", "delete"]);
+		});
 	});
 
 	// ============================================================================

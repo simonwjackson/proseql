@@ -95,7 +95,7 @@
 - [x] 14.2 Test global afterCreate hook fires for all collections
 - [x] 14.3 Test global hooks run before collection-specific hooks (ordering)
 - [x] 14.4 Test multiple plugins' global hooks run in plugin registration order
-- [ ] 14.5 Test global onChange hook fires for create/update/delete across collections
+- [x] 14.5 Test global onChange hook fires for create/update/delete across collections
 
 ## 15. Tests — Integration
 
