@@ -565,6 +565,10 @@ function extractPopulateFromSelect(
  * When `customOperators` is provided, the query pipeline will recognize and
  * evaluate custom filter operators (e.g., `$regex`, `$fuzzy`) in addition to
  * built-in operators.
+ *
+ * When `idGeneratorMap` is provided and the collection config specifies an
+ * `idGenerator` name, the create/createMany operations will use the plugin's
+ * generator to produce IDs when not explicitly provided.
  */
 const buildCollection = <T extends HasId>(
 	collectionName: string,
@@ -577,6 +581,7 @@ const buildCollection = <T extends HasId>(
 	searchIndexRef?: Ref.Ref<SearchIndexMap>,
 	searchIndexFields?: ReadonlyArray<string>,
 	customOperators?: Map<string, CustomOperator>,
+	idGeneratorMap?: Map<string, import("../plugins/plugin-types.js").CustomIdGenerator>,
 ): EffectCollection<T> => {
 	const schema = collectionConfig.schema as Schema.Schema<T, unknown>;
 	const relationships = collectionConfig.relationships as Record<
@@ -594,6 +599,8 @@ const buildCollection = <T extends HasId>(
 	const uniqueFields = normalizeConstraints(collectionConfig.uniqueFields);
 	// Get computed fields config (undefined means no computed fields)
 	const computed = collectionConfig.computed;
+	// Get ID generator name from collection config (used with idGeneratorMap)
+	const idGeneratorName = collectionConfig.idGenerator;
 
 	// Build allRelationships map for delete (needs all collections' relationships)
 	const allRelationships: Record<
@@ -873,6 +880,8 @@ const buildCollection = <T extends HasId>(
 			computed,
 			searchIndexRef,
 			searchIndexFields,
+			idGeneratorName,
+			idGeneratorMap,
 		),
 	);
 	const createManyFn = wrapEffect(
@@ -888,6 +897,8 @@ const buildCollection = <T extends HasId>(
 			computed,
 			searchIndexRef,
 			searchIndexFields,
+			idGeneratorName,
+			idGeneratorMap,
 		),
 	);
 	const updateFn = wrapEffect(
@@ -1180,6 +1191,7 @@ type BuildCollectionForTx = (
  * @param searchIndexRefs - Pre-built search indexes for each collection (optional)
  * @param searchIndexFields - Fields covered by search index for each collection (optional)
  * @param customOperators - Custom operators from plugins for query filtering (optional)
+ * @param idGeneratorMap - ID generators from plugins for custom ID generation (optional)
  * @returns A callback matching the BuildCollectionForTx type
  */
 const makeBuildCollectionForTx = (
@@ -1190,6 +1202,7 @@ const makeBuildCollectionForTx = (
 	searchIndexRefs?: Record<string, Ref.Ref<SearchIndexMap>>,
 	searchIndexFields?: Record<string, ReadonlyArray<string>>,
 	customOperators?: Map<string, CustomOperator>,
+	idGeneratorMap?: Map<string, import("../plugins/plugin-types.js").CustomIdGenerator>,
 ): BuildCollectionForTx => {
 	return (collectionName: string, addMutation: (name: string) => void) => {
 		// Transaction-aware afterMutation: records mutation instead of scheduling persistence
@@ -1206,6 +1219,7 @@ const makeBuildCollectionForTx = (
 			searchIndexRefs?.[collectionName],
 			searchIndexFields?.[collectionName],
 			customOperators,
+			idGeneratorMap,
 		);
 	};
 };
@@ -1319,6 +1333,8 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 				collectionIndexes[collectionName],
 				searchIndexRefs[collectionName],
 				searchIndexFields[collectionName],
+				undefined, // customOperators - will be provided by plugin system (task 8)
+				undefined, // idGeneratorMap - will be provided by plugin system (task 8)
 			);
 		}
 
@@ -1330,6 +1346,8 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 			collectionIndexes,
 			searchIndexRefs,
 			searchIndexFields,
+			undefined, // customOperators - will be provided by plugin system (task 8)
+			undefined, // idGeneratorMap - will be provided by plugin system (task 8)
 		);
 
 		// Create the $transaction method
@@ -1590,6 +1608,8 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				collectionIndexes[collectionName],
 				searchIndexRefs[collectionName],
 				searchIndexFields[collectionName],
+				undefined, // customOperators - will be provided by plugin system (task 8)
+				undefined, // idGeneratorMap - will be provided by plugin system (task 8)
 			);
 		}
 
@@ -1618,6 +1638,8 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			collectionIndexes,
 			searchIndexRefs,
 			searchIndexFields,
+			undefined, // customOperators - will be provided by plugin system (task 8)
+			undefined, // idGeneratorMap - will be provided by plugin system (task 8)
 		);
 
 		// Create the $transaction method with persistence trigger
