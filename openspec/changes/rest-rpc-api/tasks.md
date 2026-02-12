@@ -42,7 +42,7 @@
 
 ## 6. REST — Query Parameter Parsing
 
-- [ ] 6.1 Create `rest/src/query-params.ts` with `parseQueryParams(query)` returning a proseql-compatible query config
+- [x] 6.1 Create `rest/src/query-params.ts` with `parseQueryParams(query)` returning a proseql-compatible query config
 - [ ] 6.2 Parse simple equality: `?genre=sci-fi` becomes `where: { genre: "sci-fi" }`
 - [ ] 6.3 Parse operator syntax: `?year[$gte]=1970&year[$lt]=2000` becomes `where: { year: { $gte: 1970, $lt: 2000 } }`
 - [ ] 6.4 Parse sort: `?sort=year:desc` becomes `sort: { year: "desc" }`
