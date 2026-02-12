@@ -69,7 +69,7 @@
 
 ## 9. REST — Relationship Routes
 
-- [ ] 9.1 Create `rest/src/relationship-routes.ts` that inspects collection relationships in the config
+- [x] 9.1 Create `rest/src/relationship-routes.ts` that inspects collection relationships in the config
 - [ ] 9.2 For `ref` relationships (e.g., books.author), generate `GET /books/:id/author` that finds the book, follows the ref, returns the related entity
 - [ ] 9.3 For `inverse` relationships (e.g., authors.books), generate `GET /authors/:id/books` that queries the inverse collection filtered by foreign key
 - [ ] 9.4 Return 404 when the parent entity is not found, 200 with the related data on success
