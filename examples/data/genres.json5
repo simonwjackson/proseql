@@ -1,0 +1,12 @@
+{
+  'sci-fi': {
+    id: 'sci-fi',
+    name: 'Science Fiction',
+    description: 'Speculative worlds and futures',
+  },
+  cyberpunk: {
+    id: 'cyberpunk',
+    name: 'Cyberpunk',
+    description: 'High tech, low life',
+  },
+}

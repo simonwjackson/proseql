@@ -1,0 +1,9 @@
+[ace]
+id = "ace"
+name = "Ace Books"
+founded = 1952
+
+[harper]
+id = "harper"
+name = "Harper Voyager"
+founded = 1817

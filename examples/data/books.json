@@ -1,0 +1,30 @@
+{
+  "EEaL3Khy7EDwIfHl4xSgB": {
+    "id": "EEaL3Khy7EDwIfHl4xSgB",
+    "title": "Dune",
+    "authorId": "JkkyQ4uBZBbqxtMaP52Jz",
+    "year": 1965,
+    "genreId": "sci-fi"
+  },
+  "rpH1xT8ywaaF7W26o8qUq": {
+    "id": "rpH1xT8ywaaF7W26o8qUq",
+    "title": "The Left Hand of Darkness",
+    "authorId": "Z-wM4AJbTGztyuqOkh8Ge",
+    "year": 1969,
+    "genreId": "sci-fi"
+  },
+  "dxlnSABQrfNu52XUFuqOX": {
+    "id": "dxlnSABQrfNu52XUFuqOX",
+    "title": "Neuromancer",
+    "authorId": "O9iU5LZHxYJp-szFROGgm",
+    "year": 1984,
+    "genreId": "cyberpunk"
+  },
+  "Dr9-JJiufAn3ZH-CmmF_i": {
+    "id": "Dr9-JJiufAn3ZH-CmmF_i",
+    "title": "Count Zero",
+    "authorId": "O9iU5LZHxYJp-szFROGgm",
+    "year": 1986,
+    "genreId": "cyberpunk"
+  }
+}
