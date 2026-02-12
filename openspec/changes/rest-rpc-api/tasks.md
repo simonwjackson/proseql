@@ -43,12 +43,12 @@
 ## 6. REST — Query Parameter Parsing
 
 - [x] 6.1 Create `rest/src/query-params.ts` with `parseQueryParams(query)` returning a proseql-compatible query config
-- [ ] 6.2 Parse simple equality: `?genre=sci-fi` becomes `where: { genre: "sci-fi" }`
-- [ ] 6.3 Parse operator syntax: `?year[$gte]=1970&year[$lt]=2000` becomes `where: { year: { $gte: 1970, $lt: 2000 } }`
-- [ ] 6.4 Parse sort: `?sort=year:desc` becomes `sort: { year: "desc" }`
-- [ ] 6.5 Parse pagination: `?limit=10&offset=20` becomes `limit: 10, offset: 20`
-- [ ] 6.6 Parse field selection: `?select=title,year` becomes `select: ["title", "year"]`
-- [ ] 6.7 Handle type coercion: numeric strings to numbers, `"true"`/`"false"` to booleans where appropriate
+- [x] 6.2 Parse simple equality: `?genre=sci-fi` becomes `where: { genre: "sci-fi" }`
+- [x] 6.3 Parse operator syntax: `?year[$gte]=1970&year[$lt]=2000` becomes `where: { year: { $gte: 1970, $lt: 2000 } }`
+- [x] 6.4 Parse sort: `?sort=year:desc` becomes `sort: { year: "desc" }`
+- [x] 6.5 Parse pagination: `?limit=10&offset=20` becomes `limit: 10, offset: 20`
+- [x] 6.6 Parse field selection: `?select=title,year` becomes `select: ["title", "year"]`
+- [x] 6.7 Handle type coercion: numeric strings to numbers, `"true"`/`"false"` to booleans where appropriate
 
 ## 7. REST — CRUD Handlers
 
