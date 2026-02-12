@@ -131,6 +131,32 @@ export type CollectionConfig = {
 export type DatabaseConfig = Record<string, CollectionConfig>;
 
 /**
+ * Reactive query configuration options for the database.
+ * Controls behavior of watch() and watchById() subscriptions.
+ */
+export interface ReactiveConfig {
+	/**
+	 * Debounce interval in milliseconds for change event processing.
+	 * When multiple mutations occur in rapid succession, they are coalesced
+	 * into a single re-evaluation after the debounce interval settles.
+	 * Default: 10ms (fast enough for interactive use, long enough to batch bursts).
+	 */
+	readonly debounceMs?: number;
+}
+
+/**
+ * Database-level options that include reactive query configuration.
+ * Used by database factory functions to configure database-wide behavior.
+ */
+export interface DatabaseReactiveOptions {
+	/**
+	 * Reactive query configuration.
+	 * Controls debouncing and other behavior of watch() and watchById() methods.
+	 */
+	readonly reactive?: ReactiveConfig;
+}
+
+/**
  * Type guard to check if a collection configuration includes persistence
  */
 export function isCollectionPersistent(
