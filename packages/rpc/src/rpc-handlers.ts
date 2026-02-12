@@ -76,9 +76,18 @@ const createCollectionHandlers = <Config extends DatabaseConfig>(
 			// biome-ignore lint/suspicious/noExplicitAny: Data type is dynamic based on schema
 			collection.create(data as any),
 
-		createMany: ({ data }: { readonly data: ReadonlyArray<Record<string, unknown>> }) =>
+		createMany: ({
+			data,
+			options,
+		}: {
+			readonly data: ReadonlyArray<Record<string, unknown>>;
+			readonly options?: {
+				readonly skipDuplicates?: boolean;
+				readonly validateRelationships?: boolean;
+			};
+		}) =>
 			// biome-ignore lint/suspicious/noExplicitAny: Data type is dynamic based on schema
-			collection.createMany(data as any),
+			collection.createMany(data as any, options),
 
 		update: ({
 			id,
@@ -115,8 +124,12 @@ const createCollectionHandlers = <Config extends DatabaseConfig>(
 
 		deleteMany: ({
 			where,
+			options,
 		}: {
 			readonly where: Record<string, unknown>;
+			readonly options?: {
+				readonly limit?: number;
+			};
 		}) =>
 			// biome-ignore lint/suspicious/noExplicitAny: Predicate is dynamic
 			collection.deleteMany((entity: any) => {
@@ -124,7 +137,7 @@ const createCollectionHandlers = <Config extends DatabaseConfig>(
 					if (entity[key] !== value) return false;
 				}
 				return true;
-			}),
+			}, options),
 
 		aggregate: (config: {
 			readonly count?: boolean;

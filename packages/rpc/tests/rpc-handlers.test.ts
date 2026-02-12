@@ -289,6 +289,214 @@ describe("makeRpcHandlers", () => {
 			expect(results[0].title).toBe("Neuromancer");
 		});
 	});
+
+	describe("batch handler operations", () => {
+		it("createMany should create multiple entities", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: [],
+				}),
+			);
+
+			const result = await Effect.runPromise(
+				handlers.books.createMany({
+					data: [
+						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+						{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
+					],
+				}),
+			);
+
+			expect(result.created).toHaveLength(2);
+			expect(result.created[0].title).toBe("Dune");
+			expect(result.created[1].title).toBe("Neuromancer");
+
+			// Verify entities were added
+			const allBooks = await Effect.runPromise(handlers.books.query({}));
+			expect(allBooks).toHaveLength(2);
+		});
+
+		it("createMany should support skipDuplicates option", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: [{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 }],
+				}),
+			);
+
+			const result = await Effect.runPromise(
+				handlers.books.createMany({
+					data: [
+						{ id: "1", title: "Dune Again", author: "Frank Herbert", year: 1965 }, // Duplicate ID
+						{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
+					],
+					options: { skipDuplicates: true },
+				}),
+			);
+
+			expect(result.created).toHaveLength(1);
+			expect(result.created[0].title).toBe("Neuromancer");
+			expect(result.skipped).toHaveLength(1);
+			expect(result.skipped?.[0].reason).toContain("Duplicate");
+		});
+
+		it("updateMany should update matching entities", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: [
+						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+						{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
+						{ id: "3", title: "Foundation", author: "Isaac Asimov", year: 1951 },
+					],
+				}),
+			);
+
+			const result = await Effect.runPromise(
+				handlers.books.updateMany({
+					where: { author: "Frank Herbert" },
+					updates: { year: 2000 },
+				}),
+			);
+
+			expect(result.count).toBe(1);
+			expect(result.updated).toHaveLength(1);
+			expect(result.updated[0].year).toBe(2000);
+
+			// Verify the update persisted
+			const dune = await Effect.runPromise(handlers.books.findById({ id: "1" }));
+			expect(dune.year).toBe(2000);
+		});
+
+		it("deleteMany should delete matching entities", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: [
+						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+						{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
+						{ id: "3", title: "Foundation", author: "Isaac Asimov", year: 1951 },
+					],
+				}),
+			);
+
+			const result = await Effect.runPromise(
+				handlers.books.deleteMany({
+					where: { year: 1965 },
+				}),
+			);
+
+			expect(result.count).toBe(1);
+			expect(result.deleted).toHaveLength(1);
+			expect(result.deleted[0].title).toBe("Dune");
+
+			// Verify remaining books
+			const allBooks = await Effect.runPromise(handlers.books.query({}));
+			expect(allBooks).toHaveLength(2);
+		});
+
+		it("deleteMany should respect limit option", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: [
+						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+						{ id: "2", title: "Children of Dune", author: "Frank Herbert", year: 1976 },
+						{ id: "3", title: "Foundation", author: "Isaac Asimov", year: 1951 },
+					],
+				}),
+			);
+
+			const result = await Effect.runPromise(
+				handlers.books.deleteMany({
+					where: { author: "Frank Herbert" },
+					options: { limit: 1 },
+				}),
+			);
+
+			expect(result.count).toBe(1);
+			expect(result.deleted).toHaveLength(1);
+
+			// Verify one Frank Herbert book remains
+			const allBooks = await Effect.runPromise(handlers.books.query({}));
+			expect(allBooks).toHaveLength(2);
+			const herbertBooks = allBooks.filter(b => b.author === "Frank Herbert");
+			expect(herbertBooks).toHaveLength(1);
+		});
+
+		it("upsert should create when entity does not exist", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: [],
+				}),
+			);
+
+			const result = await Effect.runPromise(
+				handlers.books.upsert({
+					where: { id: "1" },
+					create: { id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+					update: { year: 2000 },
+				}),
+			);
+
+			// UpsertResult<T> is T & { __action }, so entity fields are at top level
+			expect(result.__action).toBe("created");
+			expect(result.title).toBe("Dune");
+			expect(result.year).toBe(1965);
+		});
+
+		it("upsert should update when entity exists", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: [{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 }],
+				}),
+			);
+
+			const result = await Effect.runPromise(
+				handlers.books.upsert({
+					where: { id: "1" },
+					create: { id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+					update: { year: 2000 },
+				}),
+			);
+
+			// UpsertResult<T> is T & { __action }, so entity fields are at top level
+			expect(result.__action).toBe("updated");
+			expect(result.year).toBe(2000);
+		});
+
+		it("upsertMany should create and update multiple entities", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: [{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 }],
+				}),
+			);
+
+			const result = await Effect.runPromise(
+				handlers.books.upsertMany({
+					data: [
+						{
+							where: { id: "1" },
+							create: { id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+							update: { year: 2000 },
+						},
+						{
+							where: { id: "2" },
+							create: { id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
+							update: { year: 2001 },
+						},
+					],
+				}),
+			);
+
+			expect(result.updated).toHaveLength(1);
+			expect(result.updated[0].id).toBe("1");
+			expect(result.updated[0].year).toBe(2000);
+			expect(result.created).toHaveLength(1);
+			expect(result.created[0].id).toBe("2");
+			expect(result.created[0].year).toBe(1984);
+
+			// Verify both entities exist
+			const allBooks = await Effect.runPromise(handlers.books.query({}));
+			expect(allBooks).toHaveLength(2);
+		});
+	});
 });
 
 describe("makeRpcHandlersLayer", () => {
