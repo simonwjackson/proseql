@@ -6,7 +6,7 @@
  * Includes DebouncedWriter for coalescing rapid mutations into single file writes.
  */
 
-import { Effect, Fiber, Queue, Ref, Schema, type Scope } from "effect";
+import { Effect, Fiber, PubSub, Queue, Ref, Schema, type Scope } from "effect";
 import { ValidationError } from "../errors/crud-errors.js";
 import { MigrationError } from "../errors/migration-errors.js";
 import {
@@ -17,6 +17,7 @@ import {
 import { runMigrations } from "../migrations/migration-runner.js";
 import type { Migration } from "../migrations/migration-types.js";
 import { SerializerRegistry } from "../serializers/serializer-service.js";
+import type { ChangeEvent } from "../types/reactive-types.js";
 import { getFileExtension } from "../utils/path.js";
 import { StorageAdapter } from "./storage-service.js";
 
@@ -793,6 +794,10 @@ export interface FileWatcherConfig<A extends { readonly id: string }, I, R> {
 	readonly ref: Ref.Ref<ReadonlyMap<string, A>>;
 	/** Optional debounce delay in ms for reload after change (default 50) */
 	readonly debounceMs?: number;
+	/** Optional PubSub to publish reload events to for reactive query subscriptions */
+	readonly changePubSub?: PubSub.PubSub<ChangeEvent>;
+	/** Collection name (required when changePubSub is provided) */
+	readonly collectionName?: string;
 }
 
 /**
