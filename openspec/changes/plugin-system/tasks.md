@@ -29,7 +29,7 @@
 
 - [x] 5.1 Add an optional `customOperators?: Map<string, CustomOperator>` parameter to `matchesFilter` in `core/types/operators.ts`. When a `$`-prefixed key is not recognized as a built-in operator, look it up in the custom operators map and call `evaluate(fieldValue, operand)`.
 - [x] 5.2 Extend `isFilterOperatorObject` to recognize custom operator keys (any `$`-prefixed key present in the custom operators map).
-- [ ] 5.3 Modify `applyFilter` in `core/operations/query/filter-stream.ts` to accept and pass through the custom operators map to `matchesFilter`.
+- [x] 5.3 Modify `applyFilter` in `core/operations/query/filter-stream.ts` to accept and pass through the custom operators map to `matchesFilter`.
 - [ ] 5.4 Thread the custom operators map from `buildCollection` through to query operations.
 
 ## 6. ID Generator Integration

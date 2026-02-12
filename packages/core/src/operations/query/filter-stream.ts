@@ -1,4 +1,5 @@
 import { Stream } from "effect";
+import type { CustomOperator } from "../../plugins/plugin-types.js";
 import { matchesFilter } from "../../types/operators.js";
 import type { SearchConfig } from "../../types/search-types.js";
 import { tokenize } from "./search.js";
@@ -18,6 +19,7 @@ function isValidWhereClause(where: unknown): where is Record<string, unknown> {
 function matchesWhere<T extends Record<string, unknown>>(
 	item: T,
 	where: Record<string, unknown>,
+	customOperators?: Map<string, CustomOperator>,
 ): boolean {
 	for (const [key, value] of Object.entries(where)) {
 		if (key === "$or") {
@@ -25,7 +27,7 @@ function matchesWhere<T extends Record<string, unknown>>(
 			if ((value as unknown[]).length === 0) return false;
 			const anyMatch = (value as unknown[]).some((condition) => {
 				if (!isValidWhereClause(condition)) return false;
-				return matchesWhere(item, condition);
+				return matchesWhere(item, condition, customOperators);
 			});
 			if (!anyMatch) return false;
 		} else if (key === "$and") {
@@ -33,12 +35,12 @@ function matchesWhere<T extends Record<string, unknown>>(
 			if ((value as unknown[]).length === 0) continue;
 			const allMatch = (value as unknown[]).every((condition) => {
 				if (!isValidWhereClause(condition)) return false;
-				return matchesWhere(item, condition);
+				return matchesWhere(item, condition, customOperators);
 			});
 			if (!allMatch) return false;
 		} else if (key === "$not") {
 			if (!isValidWhereClause(value)) return false;
-			if (matchesWhere(item, value)) return false;
+			if (matchesWhere(item, value, customOperators)) return false;
 		} else if (key === "$search") {
 			// Top-level multi-field search: check if entity matches across specified fields
 			if (value === null || typeof value !== "object") {
@@ -86,7 +88,7 @@ function matchesWhere<T extends Record<string, unknown>>(
 
 			if (!allTokensMatch) return false;
 		} else if (key in item) {
-			if (!matchesFilter(item[key], value)) return false;
+			if (!matchesFilter(item[key], value, customOperators)) return false;
 		} else {
 			// Field doesn't exist in item
 			if (isValidWhereClause(value)) {
@@ -132,13 +134,17 @@ function matchesWhere<T extends Record<string, unknown>>(
  * Returns a function that transforms Stream<T> → Stream<T>, keeping only items matching the where clause.
  *
  * Supports all field-level operators ($eq, $ne, $gt, $gte, $lt, $lte, $in, $nin,
- * $startsWith, $endsWith, $contains, $all, $size) and logical operators ($or, $and, $not).
+ * $startsWith, $endsWith, $contains, $all, $size), custom operators (via customOperators map),
+ * and logical operators ($or, $and, $not).
  */
 export const applyFilter =
 	<T extends Record<string, unknown>>(
 		where: Record<string, unknown> | undefined,
+		customOperators?: Map<string, CustomOperator>,
 	) =>
 	<E, R>(stream: Stream.Stream<T, E, R>): Stream.Stream<T, E, R> => {
 		if (!where || !isValidWhereClause(where)) return stream;
-		return Stream.filter(stream, (item: T) => matchesWhere(item, where));
+		return Stream.filter(stream, (item: T) =>
+			matchesWhere(item, where, customOperators),
+		);
 	};
