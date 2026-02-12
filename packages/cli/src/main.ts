@@ -15,6 +15,7 @@ import {
 } from "./config/loader.js"
 import { handleInit as handleInitCommand } from "./commands/init.js"
 import { handleQuery as handleQueryCommand } from "./commands/query.js"
+import { handleCollections as handleCollectionsCommand } from "./commands/collections.js"
 import { format, type OutputFormat } from "./output/formatter.js"
 
 const VERSION = "0.1.0"
@@ -334,10 +335,22 @@ async function handleQuery(
 }
 
 async function handleCollections(
-  _args: ParsedArgs,
-  _resolvedConfig: ResolvedConfig,
+  args: ParsedArgs,
+  resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  console.log("collections command - not yet implemented")
+  const result = await handleCollectionsCommand({
+    config: resolvedConfig.config,
+    configPath: resolvedConfig.configPath,
+  })
+
+  if (!result.success) {
+    exitWithError(result.message ?? "Failed to list collections")
+  }
+
+  // Output the results using the appropriate formatter
+  const outputFormat = getOutputFormat(args.flags)
+  const output = format(outputFormat, result.data ?? [])
+  console.log(output)
 }
 
 async function handleDescribe(

@@ -29,7 +29,7 @@
 
 ## 5. Inspect Commands
 
-- [ ] 5.1 Create `packages/cli/src/commands/collections.ts`: boot database, list all collection names with entity count, file path, and serialization format. Output as table (or chosen format).
+- [x] 5.1 Create `packages/cli/src/commands/collections.ts`: boot database, list all collection names with entity count, file path, and serialization format. Output as table (or chosen format).
 - [ ] 5.2 Create `packages/cli/src/commands/describe.ts`: boot database, read the schema for the named collection, display field names, types, optional/required, indexes, relationships, and constraints
 - [ ] 5.3 Create `packages/cli/src/commands/stats.ts`: boot database, report per-collection entity count, file size on disk, and serialization format
 
