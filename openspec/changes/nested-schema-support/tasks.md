@@ -1,6 +1,6 @@
 ## 1. Shared Path Utilities
 
-- [ ] 1.1 Create `core/utils/nested-path.ts` with `getNestedValue(obj, path)`: splits on `.`, traverses properties, returns `undefined` for missing paths. Handles single-segment paths (no `.`) as direct property access with no overhead.
+- [x] 1.1 Create `core/utils/nested-path.ts` with `getNestedValue(obj, path)`: splits on `.`, traverses properties, returns `undefined` for missing paths. Handles single-segment paths (no `.`) as direct property access with no overhead.
 - [ ] 1.2 Add `setNestedValue(obj, path, value)`: returns a new object with the value set at the dot-path. Immutable — copies intermediate objects along the path.
 - [ ] 1.3 Add `isDotPath(key)`: returns `key.includes(".")`.
 - [ ] 1.4 Write unit tests for `getNestedValue`: flat path, 2-level path, 3-level path, missing intermediate, null intermediate, empty string path, single-segment path.
