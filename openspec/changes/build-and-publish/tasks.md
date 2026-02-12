@@ -75,7 +75,7 @@
 ## 11. Prepublish Safety
 
 - [x] 11.1 Verify `prepublishOnly` runs build and test: delete `dist/`, run `npm publish --dry-run`, confirm it rebuilds and tests pass.
-- [ ] 11.2 Introduce a deliberate type error, run `npm publish --dry-run`, confirm it fails.
+- [x] 11.2 Introduce a deliberate type error, run `npm publish --dry-run`, confirm it fails.
 
 ## 12. Cleanup
 
