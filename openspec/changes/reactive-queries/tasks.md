@@ -2,7 +2,7 @@
 
 - [x] 1.1 Create `core/types/reactive-types.ts` with `ChangeEvent`: `{ readonly collection: string; readonly operation: "create" | "update" | "delete" | "reload" }`
 - [x] 1.2 Define `WatchConfig<T>` type mirroring the existing query config (where, sort, select, limit, offset)
-- [ ] 1.3 Add `watch` and `watchById` method signatures to the collection interface types
+- [x] 1.3 Add `watch` and `watchById` method signatures to the collection interface types
 - [ ] 1.4 Add optional `readonly reactive?: { readonly debounceMs?: number }` to database config in `core/types/database-config-types.ts`
 - [ ] 1.5 Export new types from `core/index.ts`
 
