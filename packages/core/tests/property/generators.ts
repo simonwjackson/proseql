@@ -241,3 +241,291 @@ export const entityArbitraryFromEffect = <A, I, R>(
 ): fc.Arbitrary<A> => {
 	return Arbitrary.make(schema);
 };
+
+// ============================================================================
+// Where Clause Generator
+// ============================================================================
+
+/**
+ * Type representing a generated where clause.
+ * This is a simplified representation that's valid for proseql queries.
+ */
+export type GeneratedWhereClause = Record<
+	string,
+	unknown | Record<string, unknown>
+>;
+
+/**
+ * String operators that can be used in where clauses for string fields.
+ */
+const STRING_OPERATORS = [
+	"$eq",
+	"$ne",
+	"$in",
+	"$nin",
+	"$contains",
+	"$startsWith",
+	"$endsWith",
+	"$gt",
+	"$gte",
+	"$lt",
+	"$lte",
+] as const;
+
+/**
+ * Number operators that can be used in where clauses for numeric fields.
+ */
+const NUMBER_OPERATORS = [
+	"$eq",
+	"$ne",
+	"$in",
+	"$nin",
+	"$gt",
+	"$gte",
+	"$lt",
+	"$lte",
+] as const;
+
+/**
+ * Boolean operators that can be used in where clauses for boolean fields.
+ */
+const BOOLEAN_OPERATORS = ["$eq", "$ne"] as const;
+
+/**
+ * Array operators that can be used in where clauses for array fields.
+ */
+const ARRAY_OPERATORS = [
+	"$eq",
+	"$ne",
+	"$in",
+	"$nin",
+	"$contains",
+	"$all",
+	"$size",
+] as const;
+
+/**
+ * Generate an arbitrary for a single filter condition on a string field.
+ */
+const stringFilterArbitrary = (): fc.Arbitrary<
+	string | Record<string, unknown>
+> => {
+	const stringValue = fc.string({ minLength: 0, maxLength: 20 });
+	const stringArray = fc.array(stringValue, { minLength: 1, maxLength: 5 });
+
+	return fc.oneof(
+		// Direct equality (no operator)
+		stringValue,
+		// $eq operator
+		fc.record({ $eq: stringValue }),
+		// $ne operator
+		fc.record({ $ne: stringValue }),
+		// $in operator
+		fc.record({ $in: stringArray }),
+		// $nin operator
+		fc.record({ $nin: stringArray }),
+		// $contains operator
+		fc.record({ $contains: stringValue }),
+		// $startsWith operator
+		fc.record({ $startsWith: stringValue }),
+		// $endsWith operator
+		fc.record({ $endsWith: stringValue }),
+		// $gt, $gte, $lt, $lte operators (for string comparison)
+		fc.record({ $gt: stringValue }),
+		fc.record({ $gte: stringValue }),
+		fc.record({ $lt: stringValue }),
+		fc.record({ $lte: stringValue }),
+		// Combined operators (e.g., range)
+		fc.record({ $gte: stringValue, $lte: stringValue }),
+	);
+};
+
+/**
+ * Generate an arbitrary for a single filter condition on a numeric field.
+ */
+const numberFilterArbitrary = (): fc.Arbitrary<
+	number | Record<string, unknown>
+> => {
+	const numberValue = fc.float({ min: -10000, max: 10000, noNaN: true });
+	const numberArray = fc.array(numberValue, { minLength: 1, maxLength: 5 });
+
+	return fc.oneof(
+		// Direct equality (no operator)
+		numberValue,
+		// $eq operator
+		fc.record({ $eq: numberValue }),
+		// $ne operator
+		fc.record({ $ne: numberValue }),
+		// $in operator
+		fc.record({ $in: numberArray }),
+		// $nin operator
+		fc.record({ $nin: numberArray }),
+		// $gt operator
+		fc.record({ $gt: numberValue }),
+		// $gte operator
+		fc.record({ $gte: numberValue }),
+		// $lt operator
+		fc.record({ $lt: numberValue }),
+		// $lte operator
+		fc.record({ $lte: numberValue }),
+		// Combined operators (e.g., range)
+		fc.record({ $gte: numberValue, $lte: numberValue }),
+		fc.record({ $gt: numberValue, $lt: numberValue }),
+	);
+};
+
+/**
+ * Generate an arbitrary for a single filter condition on a boolean field.
+ */
+const booleanFilterArbitrary = (): fc.Arbitrary<
+	boolean | Record<string, unknown>
+> => {
+	return fc.oneof(
+		// Direct equality (no operator)
+		fc.boolean(),
+		// $eq operator
+		fc.record({ $eq: fc.boolean() }),
+		// $ne operator
+		fc.record({ $ne: fc.boolean() }),
+	);
+};
+
+/**
+ * Generate an arbitrary for a single filter condition on an array field.
+ */
+const arrayFilterArbitrary = (
+	elementType: "string" | "number" | "boolean" | "unknown",
+): fc.Arbitrary<Record<string, unknown>> => {
+	const elementArb =
+		elementType === "string"
+			? fc.string({ minLength: 0, maxLength: 20 })
+			: elementType === "number"
+				? fc.float({ min: -10000, max: 10000, noNaN: true })
+				: elementType === "boolean"
+					? fc.boolean()
+					: fc.string();
+
+	const arrayArb = fc.array(elementArb, {
+		minLength: 0,
+		maxLength: 5,
+	}) as fc.Arbitrary<unknown[]>;
+
+	return fc.oneof(
+		// $contains operator (single element)
+		fc.record({ $contains: elementArb as fc.Arbitrary<unknown> }),
+		// $all operator (array of elements)
+		fc.record({ $all: arrayArb }),
+		// $size operator
+		fc.record({ $size: fc.integer({ min: 0, max: 10 }) }),
+	);
+};
+
+/**
+ * Generate an arbitrary for a filter condition based on field type.
+ */
+const filterArbitraryForField = (
+	field: FieldInfo,
+): fc.Arbitrary<unknown> | null => {
+	switch (field.type) {
+		case "string":
+			return stringFilterArbitrary();
+		case "number":
+			return numberFilterArbitrary();
+		case "boolean":
+			return booleanFilterArbitrary();
+		case "array":
+			return arrayFilterArbitrary(field.elementType ?? "unknown");
+		default:
+			// For unknown types, use string filter as fallback
+			return stringFilterArbitrary();
+	}
+};
+
+/**
+ * Generate an arbitrary that produces valid where clauses matching the given Effect Schema.
+ * Inspects the schema's field types and generates appropriate operators with matching value types.
+ *
+ * The generator produces:
+ * - Empty where clauses (to test "return all" path)
+ * - Single-field where clauses
+ * - Multi-field where clauses (AND logic)
+ *
+ * @param schema - The Effect Schema defining the entity structure
+ * @returns A fast-check Arbitrary that generates valid where clauses
+ *
+ * @example
+ * ```ts
+ * const UserSchema = Schema.Struct({
+ *   id: Schema.String,
+ *   name: Schema.String,
+ *   age: Schema.Number,
+ *   isActive: Schema.Boolean,
+ * });
+ *
+ * const whereArb = whereClauseArbitrary(UserSchema);
+ * fc.assert(fc.property(whereArb, (where) => {
+ *   // where is a valid where clause object
+ *   // e.g., {}, { name: "Alice" }, { age: { $gt: 18 } }, { name: "Bob", isActive: true }
+ *   return typeof where === 'object';
+ * }));
+ * ```
+ */
+export const whereClauseArbitrary = <A, I, R>(
+	schema: Schema.Schema<A, I, R>,
+): fc.Arbitrary<GeneratedWhereClause> => {
+	const fields = extractFieldsFromSchema(schema);
+
+	// Filter out the id field and fields with no valid filter arbitrary
+	const filterableFields = fields.filter(
+		(field) => field.name !== "id" && filterArbitraryForField(field) !== null,
+	);
+
+	// If no filterable fields, return empty object
+	if (filterableFields.length === 0) {
+		return fc.constant({});
+	}
+
+	// Build array of [fieldName, filterArbitrary] pairs
+	const fieldArbitraries: Array<{
+		name: string;
+		arb: fc.Arbitrary<unknown>;
+	}> = filterableFields
+		.map((field) => ({
+			name: field.name,
+			arb: filterArbitraryForField(field),
+		}))
+		.filter(
+			(f): f is { name: string; arb: fc.Arbitrary<unknown> } => f.arb !== null,
+		);
+
+	// Generate where clauses with 0 to N fields
+	// Weight empty clauses to appear ~10% of the time
+	return fc.oneof(
+		// Empty where clause (10% weight)
+		{ weight: 1, arbitrary: fc.constant({}) },
+		// Single field where clause (40% weight)
+		{
+			weight: 4,
+			arbitrary: fc
+				.nat({ max: fieldArbitraries.length - 1 })
+				.chain((index) => {
+					const { name, arb } = fieldArbitraries[index];
+					return arb.map((value) => ({ [name]: value }));
+				}),
+		},
+		// Multi-field where clause (50% weight)
+		{
+			weight: 5,
+			arbitrary: fc
+				.subarray(fieldArbitraries, { minLength: 1, maxLength: 3 })
+				.chain((selectedFields) => {
+					// Generate a value for each selected field
+					const recordArbitraries: Record<string, fc.Arbitrary<unknown>> = {};
+					for (const { name, arb } of selectedFields) {
+						recordArbitraries[name] = arb;
+					}
+					return fc.record(recordArbitraries);
+				}),
+		},
+	);
+};
