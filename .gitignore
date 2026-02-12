@@ -4,4 +4,5 @@ dist/
 packages/*/dist/
 bun.nix
 packages/*/*.tsbuildinfo
+packages/*/LICENSE
 coverage/
