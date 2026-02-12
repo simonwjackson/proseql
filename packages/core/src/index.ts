@@ -12,6 +12,7 @@
 export type {
 	EffectCollection,
 	EffectDatabase,
+	EffectDatabaseOptions,
 	EffectDatabasePersistenceConfig,
 	EffectDatabaseWithPersistence,
 	RunnableEffect,

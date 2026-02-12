@@ -457,7 +457,10 @@ describe("makeSerializerLayer", () => {
 				decode: (raw) => JSON.parse(raw.replace("CUSTOM:", "")),
 			};
 
-			const layer = makeSerializerLayer([jsonCodec(), yamlCodec()], [customCodec]);
+			const layer = makeSerializerLayer(
+				[jsonCodec(), yamlCodec()],
+				[customCodec],
+			);
 
 			await Effect.runPromise(
 				Effect.provide(

@@ -169,33 +169,39 @@ const mergeGlobalHooks = (
 	const finalResult: GlobalHooksConfig = {};
 
 	if (mutableResult.beforeCreate !== undefined) {
-		(finalResult as { beforeCreate: GlobalHooksConfig["beforeCreate"] }).beforeCreate =
-			mutableResult.beforeCreate.flat();
+		(
+			finalResult as { beforeCreate: GlobalHooksConfig["beforeCreate"] }
+		).beforeCreate = mutableResult.beforeCreate.flat();
 	}
 
 	if (mutableResult.afterCreate !== undefined) {
-		(finalResult as { afterCreate: GlobalHooksConfig["afterCreate"] }).afterCreate =
-			mutableResult.afterCreate.flat();
+		(
+			finalResult as { afterCreate: GlobalHooksConfig["afterCreate"] }
+		).afterCreate = mutableResult.afterCreate.flat();
 	}
 
 	if (mutableResult.beforeUpdate !== undefined) {
-		(finalResult as { beforeUpdate: GlobalHooksConfig["beforeUpdate"] }).beforeUpdate =
-			mutableResult.beforeUpdate.flat();
+		(
+			finalResult as { beforeUpdate: GlobalHooksConfig["beforeUpdate"] }
+		).beforeUpdate = mutableResult.beforeUpdate.flat();
 	}
 
 	if (mutableResult.afterUpdate !== undefined) {
-		(finalResult as { afterUpdate: GlobalHooksConfig["afterUpdate"] }).afterUpdate =
-			mutableResult.afterUpdate.flat();
+		(
+			finalResult as { afterUpdate: GlobalHooksConfig["afterUpdate"] }
+		).afterUpdate = mutableResult.afterUpdate.flat();
 	}
 
 	if (mutableResult.beforeDelete !== undefined) {
-		(finalResult as { beforeDelete: GlobalHooksConfig["beforeDelete"] }).beforeDelete =
-			mutableResult.beforeDelete.flat();
+		(
+			finalResult as { beforeDelete: GlobalHooksConfig["beforeDelete"] }
+		).beforeDelete = mutableResult.beforeDelete.flat();
 	}
 
 	if (mutableResult.afterDelete !== undefined) {
-		(finalResult as { afterDelete: GlobalHooksConfig["afterDelete"] }).afterDelete =
-			mutableResult.afterDelete.flat();
+		(
+			finalResult as { afterDelete: GlobalHooksConfig["afterDelete"] }
+		).afterDelete = mutableResult.afterDelete.flat();
 	}
 
 	if (mutableResult.onChange !== undefined) {

@@ -80,6 +80,7 @@ import { mergeGlobalHooks } from "../plugins/plugin-hooks.js";
 import type {
 	CustomOperator,
 	GlobalHooksConfig,
+	ProseQLPlugin,
 } from "../plugins/plugin-types.js";
 import {
 	type FormatCodec,
@@ -1237,6 +1238,18 @@ const makeBuildCollectionForTx = (
 };
 
 // ============================================================================
+// Database Factory Options
+// ============================================================================
+
+/**
+ * Options for creating an Effect-based database.
+ */
+export interface EffectDatabaseOptions {
+	/** Plugins to load, providing custom codecs, operators, ID generators, and global hooks */
+	readonly plugins?: ReadonlyArray<ProseQLPlugin>;
+}
+
+// ============================================================================
 // Database Factory
 // ============================================================================
 
@@ -1246,6 +1259,9 @@ const makeBuildCollectionForTx = (
  * Accepts a DatabaseConfig and optional initial data (arrays keyed by collection name).
  * Returns an Effect that initializes Ref state for each collection and wires up
  * the query pipeline and CRUD methods.
+ *
+ * Optionally accepts plugins that provide custom codecs, operators, ID generators,
+ * and global lifecycle hooks.
  *
  * Usage:
  * ```ts
@@ -1260,12 +1276,20 @@ const makeBuildCollectionForTx = (
  * // CRUD
  * const user = yield* db.users.create({ name: "Bob", age: 25 })
  * ```
+ *
+ * With plugins:
+ * ```ts
+ * const db = yield* createEffectDatabase(config, initialData, {
+ *   plugins: [regexPlugin, snowflakeIdPlugin]
+ * })
+ * ```
  */
 export const createEffectDatabase = <Config extends DatabaseConfig>(
 	config: Config,
 	initialData?: {
 		readonly [K in keyof Config]?: ReadonlyArray<Record<string, unknown>>;
 	},
+	options?: EffectDatabaseOptions,
 ): Effect.Effect<EffectDatabase<Config>, MigrationError> =>
 	Effect.gen(function* () {
 		// 0. Validate migration registries for all versioned collections at startup
