@@ -230,8 +230,23 @@ export function runConvert(
 		// Compute the new file path
 		const newFilePath = computeNewFilePath(absoluteFilePath, targetFormat)
 
-		// Store conversion details (actual file write will be done in task 8.2)
-		// For now, this task only does the read and serialization
+		// Write the new file
+		yield* storage.write(newFilePath, newContent).pipe(
+			Effect.catchAll((err) =>
+				Effect.fail(new Error(`Failed to write new file '${newFilePath}': ${err}`)),
+			),
+		)
+
+		// Remove the old file (only if different from new file path)
+		if (newFilePath !== absoluteFilePath) {
+			yield* storage.remove(absoluteFilePath).pipe(
+				Effect.catchAll((err) =>
+					Effect.fail(new Error(`Failed to remove old file '${absoluteFilePath}': ${err}`)),
+				),
+			)
+		}
+
+		// Compute relative paths for display
 		const configDir = path.dirname(configPath)
 		const relativeOldPath = path.relative(configDir, absoluteFilePath) || absoluteFilePath
 		const relativeNewPath = path.relative(configDir, newFilePath) || newFilePath
@@ -245,10 +260,6 @@ export function runConvert(
 				newFile: relativeNewPath,
 				newFormat: targetFormat,
 			},
-			// Store the serialized content internally for the next task
-			_serializedContent: newContent,
-			_absoluteNewPath: newFilePath,
-			_absoluteOldPath: absoluteFilePath,
 		}
 	})
 
@@ -261,14 +272,6 @@ export function runConvert(
 				success: false as const,
 				message: `Failed to convert: ${message}`,
 			})
-		}),
-		// Strip internal fields before returning
-		Effect.map((result) => {
-			if ("_serializedContent" in result) {
-				const { _serializedContent, _absoluteNewPath, _absoluteOldPath, ...publicResult } = result
-				return publicResult as ConvertResult
-			}
-			return result as ConvertResult
 		}),
 	)
 }
