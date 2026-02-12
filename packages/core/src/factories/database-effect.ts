@@ -1456,7 +1456,7 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 				transactionLock,
 				buildCollectionForTx,
 				undefined, // no persistence trigger for in-memory database
-				undefined, // no change PubSub for in-memory database (will be added in factory integration)
+				changePubSub, // shared PubSub for reactive change notifications
 				fn as unknown as (
 					ctx: TransactionContext<Record<string, EffectCollection<HasId>>>,
 				) => Effect.Effect<A, E>,
@@ -1822,7 +1822,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				transactionLock,
 				buildCollectionForTx,
 				trigger, // persistence trigger for debounced saves on commit
-				undefined, // no change PubSub for persistent database (will be added in factory integration)
+				changePubSub, // shared PubSub for reactive change notifications
 				fn as unknown as (
 					ctx: TransactionContext<Record<string, EffectCollection<HasId>>>,
 				) => Effect.Effect<A, E>,

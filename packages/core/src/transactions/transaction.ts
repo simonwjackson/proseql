@@ -10,7 +10,7 @@
  * auto-rolls back on failure.
  */
 
-import { Effect, type PubSub, Ref } from "effect";
+import { Effect, PubSub, Ref } from "effect";
 import { TransactionError } from "../errors/crud-errors.js";
 import type { EffectCollection } from "../factories/database-effect.js";
 import type { TransactionContext } from "../types/crud-types.js";
