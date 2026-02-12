@@ -65,7 +65,7 @@
 
 ## 10. Tests
 
-- [ ] 10.1 Create `packages/cli/tests/config-discovery.test.ts`: test upward search finds config, test override path, test missing config error
+- [x] 10.1 Create `packages/cli/tests/config-discovery.test.ts`: test upward search finds config, test override path, test missing config error
 - [ ] 10.2 Create `packages/cli/tests/filter-parser.test.ts`: test all operators, type coercion (numbers, booleans, strings), malformed input errors
 - [ ] 10.3 Create `packages/cli/tests/set-parser.test.ts`: test key=value parsing, multiple assignments, type coercion, edge cases (values containing `=`)
 - [ ] 10.4 Create `packages/cli/tests/output-formatters.test.ts`: test table alignment, JSON validity, YAML validity, CSV quoting/escaping
