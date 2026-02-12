@@ -96,7 +96,7 @@
 
 ## 13. Tests — IndexedDB Adapter
 
-- [ ] 13.1 Create `packages/browser/tests/indexeddb-adapter.test.ts` using `fake-indexeddb` or a similar mock
+- [x] 13.1 Create `packages/browser/tests/indexeddb-adapter.test.ts` using `fake-indexeddb` or a similar mock
 - [ ] 13.2 Test `write` then `read` round-trip
 - [ ] 13.3 Test `exists` returns `false` for missing key, `true` after write
 - [ ] 13.4 Test `remove` deletes the entry
