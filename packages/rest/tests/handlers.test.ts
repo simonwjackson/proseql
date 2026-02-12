@@ -595,3 +595,155 @@ describe("REST handlers — GET by id returns 404 for missing entity (task 11.10
 		expect((authorResponse.body as { _tag: string })._tag).toBe("NotFoundError");
 	});
 });
+
+// ============================================================================
+// Task 11.11: Test POST creates entity and returns 201
+// ============================================================================
+
+describe("REST handlers — POST creates entity (task 11.11)", () => {
+	it("should create entity and return 201 with created entity", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBooks = findRoute(routes, "POST", "/books");
+		expect(postBooks).toBeDefined();
+
+		const newBook = {
+			id: "new-1",
+			title: "Snow Crash",
+			author: "Neal Stephenson",
+			year: 1992,
+			genre: "sci-fi",
+		};
+
+		const request = createRequest({ body: newBook });
+		const response = await postBooks!.handler(request);
+
+		expect(response.status).toBe(201);
+		const createdBook = response.body as {
+			id: string;
+			title: string;
+			author: string;
+			year: number;
+			genre: string;
+		};
+		expect(createdBook.id).toBe("new-1");
+		expect(createdBook.title).toBe("Snow Crash");
+		expect(createdBook.author).toBe("Neal Stephenson");
+		expect(createdBook.year).toBe(1992);
+		expect(createdBook.genre).toBe("sci-fi");
+	});
+
+	it("should persist the created entity to the database", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBooks = findRoute(routes, "POST", "/books");
+		const getBookById = findRoute(routes, "GET", "/books/:id");
+
+		const newBook = {
+			id: "persist-test",
+			title: "Hyperion",
+			author: "Dan Simmons",
+			year: 1989,
+			genre: "sci-fi",
+		};
+
+		// Create the entity
+		const createRequest = { params: {}, query: {}, body: newBook };
+		const createResponse = await postBooks!.handler(createRequest);
+		expect(createResponse.status).toBe(201);
+
+		// Verify it can be retrieved
+		const getRequest = { params: { id: "persist-test" }, query: {}, body: undefined };
+		const getResponse = await getBookById!.handler(getRequest);
+		expect(getResponse.status).toBe(200);
+		expect((getResponse.body as { title: string }).title).toBe("Hyperion");
+	});
+
+	it("should return all entity fields in the response", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBooks = findRoute(routes, "POST", "/books");
+
+		const newBook = {
+			id: "fields-test",
+			title: "Foundation",
+			author: "Isaac Asimov",
+			year: 1951,
+			genre: "sci-fi",
+		};
+
+		const request = createRequest({ body: newBook });
+		const response = await postBooks!.handler(request);
+
+		expect(response.status).toBe(201);
+		const body = response.body as Record<string, unknown>;
+		expect(body).toHaveProperty("id");
+		expect(body).toHaveProperty("title");
+		expect(body).toHaveProperty("author");
+		expect(body).toHaveProperty("year");
+		expect(body).toHaveProperty("genre");
+	});
+
+	it("should work with different collections", async () => {
+		const multiConfig = {
+			books: { schema: BookSchema, relationships: {} },
+			authors: {
+				schema: Schema.Struct({ id: Schema.String, name: Schema.String }),
+				relationships: {},
+			},
+		} as const;
+
+		const db = await Effect.runPromise(
+			createEffectDatabase(multiConfig, { books: [], authors: [] }),
+		);
+		const routes = createRestHandlers(multiConfig, db);
+
+		// Create a book
+		const postBooks = findRoute(routes, "POST", "/books");
+		const bookRequest = createRequest({
+			body: { id: "b1", title: "Dune", author: "Frank Herbert", year: 1965, genre: "sci-fi" },
+		});
+		const bookResponse = await postBooks!.handler(bookRequest);
+		expect(bookResponse.status).toBe(201);
+		expect((bookResponse.body as { title: string }).title).toBe("Dune");
+
+		// Create an author
+		const postAuthors = findRoute(routes, "POST", "/authors");
+		const authorRequest = createRequest({
+			body: { id: "a1", name: "Frank Herbert" },
+		});
+		const authorResponse = await postAuthors!.handler(authorRequest);
+		expect(authorResponse.status).toBe(201);
+		expect((authorResponse.body as { name: string }).name).toBe("Frank Herbert");
+	});
+
+	it("should add entity to collection with existing data", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const postBooks = findRoute(routes, "POST", "/books");
+		const getBooks = findRoute(routes, "GET", "/books");
+
+		// Start with 3 books
+		const initialResponse = await getBooks!.handler(createRequest());
+		expect((initialResponse.body as ReadonlyArray<unknown>).length).toBe(3);
+
+		// Add a new book
+		const newBook = {
+			id: "new-book",
+			title: "Ancillary Justice",
+			author: "Ann Leckie",
+			year: 2013,
+			genre: "sci-fi",
+		};
+		const createResponse = await postBooks!.handler(createRequest({ body: newBook }));
+		expect(createResponse.status).toBe(201);
+
+		// Now should have 4 books
+		const finalResponse = await getBooks!.handler(createRequest());
+		expect((finalResponse.body as ReadonlyArray<unknown>).length).toBe(4);
+	});
+});
