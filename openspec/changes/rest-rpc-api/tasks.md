@@ -38,7 +38,7 @@
 
 - [x] 5.1 Create `rest/src/handlers.ts` with `createRestHandlers(config, db)` returning an array of `{ method, path, handler }` route descriptors
 - [x] 5.2 Define the framework-agnostic handler type: `(req: { params: Record<string, string>, query: Record<string, string | string[]>, body: unknown }) => Promise<{ status: number, body: unknown, headers?: Record<string, string> }>`
-- [ ] 5.3 Generate per-collection routes: `GET /:collection`, `GET /:collection/:id`, `POST /:collection`, `PUT /:collection/:id`, `DELETE /:collection/:id`, `POST /:collection/batch`, `GET /:collection/aggregate`
+- [x] 5.3 Generate per-collection routes: `GET /:collection`, `GET /:collection/:id`, `POST /:collection`, `PUT /:collection/:id`, `DELETE /:collection/:id`, `POST /:collection/batch`, `GET /:collection/aggregate`
 
 ## 6. REST — Query Parameter Parsing
 
