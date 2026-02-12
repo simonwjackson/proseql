@@ -21,7 +21,7 @@
 - [x] 3.5 Add `"license": "MIT"`.
 - [x] 3.6 Add `"description"` with a concise package description.
 - [x] 3.7 Add `"repository": { "type": "git", "url": "..." , "directory": "packages/core" }`.
-- [ ] 3.8 Add `"keywords": ["database", "typescript", "effect", "yaml", "json", "plain-text", "type-safe", "in-memory"]`.
+- [x] 3.8 Add `"keywords": ["database", "typescript", "effect", "yaml", "json", "plain-text", "type-safe", "in-memory"]`.
 - [ ] 3.9 Add `"engines": { "node": ">=18" }`.
 - [ ] 3.10 Add `"sideEffects": false`.
 - [ ] 3.11 Add `"build"` and `"clean"` scripts.
