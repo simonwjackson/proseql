@@ -109,7 +109,7 @@
 - [x] 11.15 Test POST batch creates multiple entities
 - [x] 11.16 Test GET aggregate returns correct result
 - [x] 11.17 Create `rest/tests/error-mapping.test.ts`: test each tagged error maps to correct HTTP status
-- [ ] 11.18 Test unknown error maps to 500
+- [x] 11.18 Test unknown error maps to 500
 - [ ] 11.19 Create `rest/tests/relationship.test.ts`: test ref relationship route returns related entity
 - [ ] 11.20 Test inverse relationship route returns related entities
 - [ ] 11.21 Test relationship route returns 404 for missing parent

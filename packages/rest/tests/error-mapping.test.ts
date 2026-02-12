@@ -413,3 +413,151 @@ describe("Error mapping — response body structure (task 11.17)", () => {
 		expect(response.body.details).toBeUndefined();
 	});
 });
+
+// ============================================================================
+// Task 11.18: Test unknown error maps to 500
+// ============================================================================
+
+describe("Error mapping — Unknown errors (task 11.18)", () => {
+	it("should map standard Error to 500", () => {
+		const error = new Error("Something went wrong");
+
+		const response = mapErrorToResponse(error);
+
+		expect(response.status).toBe(500);
+		expect(response.body._tag).toBe("UnknownError");
+		expect(response.body.error).toBe("Internal server error");
+		expect(response.body.details).toBeDefined();
+		const details = response.body.details as Record<string, unknown>;
+		expect(details.message).toBe("Something went wrong");
+		expect(details.name).toBe("Error");
+	});
+
+	it("should map TypeError to 500 with correct name", () => {
+		const error = new TypeError("Cannot read property 'foo' of undefined");
+
+		const response = mapErrorToResponse(error);
+
+		expect(response.status).toBe(500);
+		expect(response.body._tag).toBe("UnknownError");
+		expect(response.body.error).toBe("Internal server error");
+		expect(response.body.details).toBeDefined();
+		const details = response.body.details as Record<string, unknown>;
+		expect(details.message).toBe("Cannot read property 'foo' of undefined");
+		expect(details.name).toBe("TypeError");
+	});
+
+	it("should map RangeError to 500 with correct name", () => {
+		const error = new RangeError("Maximum call stack size exceeded");
+
+		const response = mapErrorToResponse(error);
+
+		expect(response.status).toBe(500);
+		expect(response.body._tag).toBe("UnknownError");
+		expect(response.body.error).toBe("Internal server error");
+		expect(response.body.details).toBeDefined();
+		const details = response.body.details as Record<string, unknown>;
+		expect(details.message).toBe("Maximum call stack size exceeded");
+		expect(details.name).toBe("RangeError");
+	});
+
+	it("should map plain string to 500 without details", () => {
+		const error = "A plain string error";
+
+		const response = mapErrorToResponse(error);
+
+		expect(response.status).toBe(500);
+		expect(response.body._tag).toBe("UnknownError");
+		expect(response.body.error).toBe("Internal server error");
+		expect(response.body.details).toBeUndefined();
+	});
+
+	it("should map number to 500 without details", () => {
+		const error = 42;
+
+		const response = mapErrorToResponse(error);
+
+		expect(response.status).toBe(500);
+		expect(response.body._tag).toBe("UnknownError");
+		expect(response.body.error).toBe("Internal server error");
+		expect(response.body.details).toBeUndefined();
+	});
+
+	it("should map null to 500 without details", () => {
+		const error = null;
+
+		const response = mapErrorToResponse(error);
+
+		expect(response.status).toBe(500);
+		expect(response.body._tag).toBe("UnknownError");
+		expect(response.body.error).toBe("Internal server error");
+		expect(response.body.details).toBeUndefined();
+	});
+
+	it("should map undefined to 500 without details", () => {
+		const error = undefined;
+
+		const response = mapErrorToResponse(error);
+
+		expect(response.status).toBe(500);
+		expect(response.body._tag).toBe("UnknownError");
+		expect(response.body.error).toBe("Internal server error");
+		expect(response.body.details).toBeUndefined();
+	});
+
+	it("should map plain object without _tag to 500 without details", () => {
+		const error = { message: "Some error", code: 123 };
+
+		const response = mapErrorToResponse(error);
+
+		expect(response.status).toBe(500);
+		expect(response.body._tag).toBe("UnknownError");
+		expect(response.body.error).toBe("Internal server error");
+		expect(response.body.details).toBeUndefined();
+	});
+
+	it("should map array to 500 without details", () => {
+		const error = ["error1", "error2"];
+
+		const response = mapErrorToResponse(error);
+
+		expect(response.status).toBe(500);
+		expect(response.body._tag).toBe("UnknownError");
+		expect(response.body.error).toBe("Internal server error");
+		expect(response.body.details).toBeUndefined();
+	});
+
+	it("should map custom Error subclass to 500 with correct name", () => {
+		class CustomError extends Error {
+			constructor(message: string) {
+				super(message);
+				this.name = "CustomError";
+			}
+		}
+		const error = new CustomError("Custom error occurred");
+
+		const response = mapErrorToResponse(error);
+
+		expect(response.status).toBe(500);
+		expect(response.body._tag).toBe("UnknownError");
+		expect(response.body.error).toBe("Internal server error");
+		expect(response.body.details).toBeDefined();
+		const details = response.body.details as Record<string, unknown>;
+		expect(details.message).toBe("Custom error occurred");
+		expect(details.name).toBe("CustomError");
+	});
+
+	it("should map unrecognized tagged error to 500", () => {
+		// A tagged error with a _tag that isn't in the ERROR_STATUS_MAP
+		const error = { _tag: "SomeUnknownTaggedError", foo: "bar" };
+
+		const response = mapErrorToResponse(error);
+
+		expect(response.status).toBe(500);
+		expect(response.body._tag).toBe("SomeUnknownTaggedError");
+		expect(response.body.error).toBe("Internal server error");
+		expect(response.body.details).toBeDefined();
+		const details = response.body.details as Record<string, unknown>;
+		expect(details.foo).toBe("bar");
+	});
+});
