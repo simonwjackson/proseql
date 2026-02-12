@@ -107,7 +107,7 @@
 
 ## 18. Tests — Unsubscribe and Cleanup
 
-- [ ] 18.1 Test stream interruption stops emissions and cleans up the PubSub subscription
+- [x] 18.1 Test stream interruption stops emissions and cleans up the PubSub subscription
 - [ ] 18.2 Test Scope closure cleans up all active subscriptions
 - [ ] 18.3 Test `watchById` emits entity state, re-emits on update, emits null on deletion
 

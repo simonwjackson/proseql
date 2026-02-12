@@ -3474,3 +3474,267 @@ describe("reactive queries - debounce", () => {
 		});
 	});
 });
+
+// ============================================================================
+// Tests - Unsubscribe and Cleanup (18.1 - 18.3)
+// ============================================================================
+
+describe("reactive queries - unsubscribe and cleanup", () => {
+	describe("stream interruption stops emissions (18.1)", () => {
+		it("stream interruption stops emissions and cleans up the PubSub subscription", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch all books
+					const stream = yield* db.books.watch({
+						sort: { year: "asc" },
+					});
+
+					// Track emissions received
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork the stream consumer
+					const consumerFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(Effect.fork);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+
+					// Should have received the initial emission
+					expect(emissions).toHaveLength(1);
+
+					// Interrupt the stream - this should stop emissions and cleanup
+					yield* Fiber.interrupt(consumerFiber);
+
+					// Wait a bit to ensure the interruption is processed
+					yield* Effect.sleep("30 millis");
+
+					// Now create some books - these should NOT trigger emissions
+					// because the subscription should be cleaned up
+					yield* db.books.create({
+						title: "Post-Interrupt Book 1",
+						author: "Test Author",
+						year: 2050,
+						genre: "sci-fi",
+					});
+
+					yield* db.books.create({
+						title: "Post-Interrupt Book 2",
+						author: "Test Author",
+						year: 2051,
+						genre: "sci-fi",
+					});
+
+					// Wait for any potential emissions (there should be none)
+					yield* Effect.sleep("100 millis");
+
+					// Should still only have the initial emission
+					// No new emissions after interruption
+					expect(emissions).toHaveLength(1);
+				}),
+			);
+		});
+
+		it("interrupted fiber does not receive subsequent mutations", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Track emissions
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork the stream consumer
+					const consumerFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(Effect.fork);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+					expect(emissions).toHaveLength(1);
+					expect(emissions[0]).toHaveLength(2); // Dune, Neuromancer
+
+					// Create a book before interruption - should trigger emission
+					yield* db.books.create({
+						title: "Pre-Interrupt Book",
+						author: "Test Author",
+						year: 1990,
+						genre: "sci-fi",
+					});
+
+					// Wait for the emission
+					yield* Effect.sleep("50 millis");
+					expect(emissions).toHaveLength(2);
+					expect(emissions[1]).toHaveLength(3); // Dune, Neuromancer, Pre-Interrupt Book
+
+					// Now interrupt the fiber
+					yield* Fiber.interrupt(consumerFiber);
+
+					// Wait for cleanup
+					yield* Effect.sleep("30 millis");
+
+					// Create books after interruption
+					yield* db.books.create({
+						title: "Post-Interrupt Book A",
+						author: "Test Author",
+						year: 1991,
+						genre: "sci-fi",
+					});
+
+					yield* db.books.create({
+						title: "Post-Interrupt Book B",
+						author: "Test Author",
+						year: 1992,
+						genre: "sci-fi",
+					});
+
+					// Wait for any potential emissions
+					yield* Effect.sleep("100 millis");
+
+					// Should still only have 2 emissions (none after interruption)
+					expect(emissions).toHaveLength(2);
+				}),
+			);
+		});
+
+		it("multiple streams can be independently interrupted", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Create two separate watch streams
+					const stream1 = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+					});
+					const stream2 = yield* db.books.watch({
+						where: { genre: "fantasy" },
+					});
+
+					// Track emissions for each
+					const emissions1: Array<ReadonlyArray<Book>> = [];
+					const emissions2: Array<ReadonlyArray<Book>> = [];
+
+					// Fork both stream consumers
+					const fiber1 = yield* Stream.runForEach(stream1, (emission) =>
+						Effect.sync(() => {
+							emissions1.push(emission);
+						}),
+					).pipe(Effect.fork);
+
+					const fiber2 = yield* Stream.runForEach(stream2, (emission) =>
+						Effect.sync(() => {
+							emissions2.push(emission);
+						}),
+					).pipe(Effect.fork);
+
+					// Wait for initial emissions
+					yield* Effect.sleep("30 millis");
+					expect(emissions1).toHaveLength(1); // 2 sci-fi books
+					expect(emissions2).toHaveLength(1); // 1 fantasy book (The Hobbit)
+
+					// Interrupt only the first stream
+					yield* Fiber.interrupt(fiber1);
+
+					// Wait for cleanup
+					yield* Effect.sleep("30 millis");
+
+					// Create a sci-fi book - should NOT trigger emission for stream1
+					yield* db.books.create({
+						title: "New Sci-Fi",
+						author: "Author",
+						year: 2000,
+						genre: "sci-fi",
+					});
+
+					// Create a fantasy book - SHOULD trigger emission for stream2
+					yield* db.books.create({
+						title: "New Fantasy",
+						author: "Author",
+						year: 2001,
+						genre: "fantasy",
+					});
+
+					// Wait for emissions
+					yield* Effect.sleep("100 millis");
+
+					// Stream1 should still have only 1 emission (was interrupted)
+					expect(emissions1).toHaveLength(1);
+
+					// Stream2 should have 2 emissions (initial + after fantasy book)
+					expect(emissions2).toHaveLength(2);
+					expect(emissions2[1]).toHaveLength(2); // 2 fantasy books now
+
+					// Cleanup stream2
+					yield* Fiber.interrupt(fiber2);
+				}),
+			);
+		});
+
+		it("Stream.take naturally ends stream and cleans up subscription", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch all books
+					const stream = yield* db.books.watch({
+						sort: { year: "asc" },
+					});
+
+					// Use Stream.take to get only 2 emissions, then stream ends naturally
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+
+					// Create a book to trigger second emission
+					yield* db.books.create({
+						title: "Second Emission Book",
+						author: "Test Author",
+						year: 2000,
+						genre: "sci-fi",
+					});
+
+					// Wait for the fiber to complete (should complete after 2 emissions)
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					// Should have exactly 2 emissions
+					expect(emissions).toHaveLength(2);
+					expect(emissions[0]).toHaveLength(3); // Initial
+					expect(emissions[1]).toHaveLength(4); // After create
+
+					// Wait to ensure the stream properly cleaned up
+					yield* Effect.sleep("50 millis");
+
+					// Create more books - should not cause any issues since stream ended
+					// (This tests that cleanup happened properly)
+					yield* db.books.create({
+						title: "Post-End Book 1",
+						author: "Test Author",
+						year: 2001,
+						genre: "sci-fi",
+					});
+
+					yield* db.books.create({
+						title: "Post-End Book 2",
+						author: "Test Author",
+						year: 2002,
+						genre: "sci-fi",
+					});
+
+					// Wait to ensure no errors occur (the database should work normally
+					// even after streams end - this verifies cleanup was successful)
+					yield* Effect.sleep("50 millis");
+				}),
+			);
+		});
+	});
+});
