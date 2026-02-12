@@ -101,11 +101,19 @@ describe("Computed Field Types Integration", () => {
 
 		it("should accept computed boolean field in where clause", () => {
 			// WhereClause should accept isClassic (computed boolean field)
-			const whereIsClassic: WhereClause<BookWithComputed, Record<string, never>, Record<string, never>> = {
+			const whereIsClassic: WhereClause<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				isClassic: true,
 			};
 
-			const whereIsClassicOp: WhereClause<BookWithComputed, Record<string, never>, Record<string, never>> = {
+			const whereIsClassicOp: WhereClause<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				isClassic: { $eq: true },
 			};
 
@@ -115,11 +123,19 @@ describe("Computed Field Types Integration", () => {
 
 		it("should accept computed numeric field in where clause", () => {
 			// WhereClause should accept decade (computed numeric field)
-			const whereDecade: WhereClause<BookWithComputed, Record<string, never>, Record<string, never>> = {
+			const whereDecade: WhereClause<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				decade: { $gte: 1960, $lt: 1990 },
 			};
 
-			const whereDecadeIn: WhereClause<BookWithComputed, Record<string, never>, Record<string, never>> = {
+			const whereDecadeIn: WhereClause<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				decade: { $in: [1960, 1970, 1980] },
 			};
 
@@ -128,7 +144,11 @@ describe("Computed Field Types Integration", () => {
 		});
 
 		it("should accept mixed stored and computed fields in where clause", () => {
-			const whereMixed: WhereClause<BookWithComputed, Record<string, never>, Record<string, never>> = {
+			const whereMixed: WhereClause<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				title: { $contains: "Dune" },
 				isClassic: true,
 				decade: { $gte: 1960 },
@@ -140,7 +160,12 @@ describe("Computed Field Types Integration", () => {
 
 	describe("SortConfig with computed fields", () => {
 		it("should accept computed string field in sort config", () => {
-			const sortByDisplayName: SortConfig<BookWithComputed, Record<string, never>, Record<string, never>, Record<string, never>> = {
+			const sortByDisplayName: SortConfig<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				displayName: "asc",
 			};
 
@@ -148,7 +173,12 @@ describe("Computed Field Types Integration", () => {
 		});
 
 		it("should accept computed boolean field in sort config", () => {
-			const sortByIsClassic: SortConfig<BookWithComputed, Record<string, never>, Record<string, never>, Record<string, never>> = {
+			const sortByIsClassic: SortConfig<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				isClassic: "desc",
 			};
 
@@ -156,7 +186,12 @@ describe("Computed Field Types Integration", () => {
 		});
 
 		it("should accept computed numeric field in sort config", () => {
-			const sortByDecade: SortConfig<BookWithComputed, Record<string, never>, Record<string, never>, Record<string, never>> = {
+			const sortByDecade: SortConfig<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				decade: "asc",
 			};
 
@@ -164,7 +199,12 @@ describe("Computed Field Types Integration", () => {
 		});
 
 		it("should accept mixed stored and computed fields in sort config", () => {
-			const sortMixed: SortConfig<BookWithComputed, Record<string, never>, Record<string, never>, Record<string, never>> = {
+			const sortMixed: SortConfig<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				isClassic: "desc",
 				year: "asc",
 			};
@@ -175,15 +215,27 @@ describe("Computed Field Types Integration", () => {
 
 	describe("ObjectSelectConfig with computed fields", () => {
 		it("should accept computed fields in object select config", () => {
-			const selectDisplayName: ObjectSelectConfig<BookWithComputed, Record<string, never>, Record<string, never>> = {
+			const selectDisplayName: ObjectSelectConfig<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				displayName: true,
 			};
 
-			const selectIsClassic: ObjectSelectConfig<BookWithComputed, Record<string, never>, Record<string, never>> = {
+			const selectIsClassic: ObjectSelectConfig<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				isClassic: true,
 			};
 
-			const selectDecade: ObjectSelectConfig<BookWithComputed, Record<string, never>, Record<string, never>> = {
+			const selectDecade: ObjectSelectConfig<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				decade: true,
 			};
 
@@ -193,7 +245,11 @@ describe("Computed Field Types Integration", () => {
 		});
 
 		it("should accept mixed stored and computed fields in select config", () => {
-			const selectMixed: ObjectSelectConfig<BookWithComputed, Record<string, never>, Record<string, never>> = {
+			const selectMixed: ObjectSelectConfig<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				title: true,
 				displayName: true,
 				isClassic: true,
@@ -203,7 +259,11 @@ describe("Computed Field Types Integration", () => {
 		});
 
 		it("should accept only stored fields in select config", () => {
-			const selectStoredOnly: ObjectSelectConfig<BookWithComputed, Record<string, never>, Record<string, never>> = {
+			const selectStoredOnly: ObjectSelectConfig<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				id: true,
 				title: true,
 				year: true,
@@ -213,7 +273,11 @@ describe("Computed Field Types Integration", () => {
 		});
 
 		it("should accept only computed fields in select config", () => {
-			const selectComputedOnly: ObjectSelectConfig<BookWithComputed, Record<string, never>, Record<string, never>> = {
+			const selectComputedOnly: ObjectSelectConfig<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>
+			> = {
 				displayName: true,
 				isClassic: true,
 				decade: true,
@@ -226,20 +290,21 @@ describe("Computed Field Types Integration", () => {
 	describe("SelectConfig union type with computed fields", () => {
 		it("should accept array-based selection with computed fields", () => {
 			// Array-based select with computed fields
-			const arraySelect: SelectConfig<BookWithComputed, Record<string, never>, Record<string, never>> = [
-				"displayName",
-				"isClassic",
-			] as const;
+			const arraySelect: SelectConfig<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>
+			> = ["displayName", "isClassic"] as const;
 
 			expect(arraySelect).toBeDefined();
 		});
 
 		it("should accept mixed array-based selection", () => {
-			const arraySelectMixed: SelectConfig<BookWithComputed, Record<string, never>, Record<string, never>> = [
-				"title",
-				"displayName",
-				"isClassic",
-			] as const;
+			const arraySelectMixed: SelectConfig<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>
+			> = ["title", "displayName", "isClassic"] as const;
 
 			expect(arraySelectMixed).toBeDefined();
 		});
@@ -248,7 +313,12 @@ describe("Computed Field Types Integration", () => {
 	describe("QueryReturnType with computed fields", () => {
 		it("should include computed fields in result type by default", () => {
 			// Plain query without select should return entity with computed fields
-			type PlainResult = QueryReturnType<BookWithComputed, Record<string, never>, Record<string, never>, Record<string, never>>;
+			type PlainResult = QueryReturnType<
+				BookWithComputed,
+				Record<string, never>,
+				Record<string, never>,
+				Record<string, never>
+			>;
 
 			// Verify result includes computed fields
 			type _check1 = Assert<

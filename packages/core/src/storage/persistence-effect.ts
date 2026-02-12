@@ -125,27 +125,35 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 		const raw = yield* storage.read(filePath);
 		const parsed = yield* serializer.deserialize(raw, ext);
 
-		// The on-disk format is { collectionName: { id: entity, ... } } or { id: entity, ... }
-		// For a single collection load, we expect a Record<string, unknown> of entities keyed by ID
-		if (!isRecord(parsed)) {
+		// The on-disk format depends on the file extension:
+		// - JSONL/NDJSON: array of entity objects (one entity per line)
+		// - All other formats: Record<string, object> keyed by entity ID
+		const isJsonl = ext === "jsonl" || ext === "ndjson";
+		const entityMap: Record<string, unknown> = {};
+		let fileVersion = 0;
+
+		if (isJsonl && Array.isArray(parsed)) {
+			// JSONL format: array of entity objects → convert to Record keyed by id
+			for (const item of parsed) {
+				if (isRecord(item) && typeof item.id === "string") {
+					entityMap[item.id] = item;
+				}
+			}
+		} else if (isRecord(parsed)) {
+			// Standard format: Record keyed by entity ID
+			fileVersion = typeof parsed._version === "number" ? parsed._version : 0;
+			for (const [key, value] of Object.entries(parsed)) {
+				if (key !== "_version") {
+					entityMap[key] = value;
+				}
+			}
+		} else {
 			return yield* Effect.fail(
 				new SerializationError({
 					format: ext,
 					message: `Invalid data format in '${filePath}': expected object, got ${typeof parsed}`,
 				}),
 			);
-		}
-
-		// Extract _version from parsed data (default 0 if absent)
-		const fileVersion =
-			typeof parsed._version === "number" ? parsed._version : 0;
-
-		// Create entity map without _version
-		const entityMap: Record<string, unknown> = {};
-		for (const [key, value] of Object.entries(parsed)) {
-			if (key !== "_version") {
-				entityMap[key] = value;
-			}
 		}
 
 		// Determine the data to decode (may be migrated)
@@ -281,36 +289,63 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 
 		// Encode each entity through the schema
 		const encode = Schema.encode(schema);
-		const entityMap: Record<string, I> = {};
+		const isJsonl = ext === "jsonl" || ext === "ndjson";
 
-		for (const [id, entity] of data) {
-			const encoded = yield* encode(entity).pipe(
-				Effect.mapError(
-					(parseError) =>
-						new ValidationError({
-							message: `Failed to encode entity '${id}' for '${filePath}': ${parseError.message}`,
-							issues: [
-								{
-									field: id,
-									message: parseError.message,
-								},
-							],
-						}),
-				),
-			);
-			entityMap[id] = encoded;
+		if (isJsonl) {
+			// JSONL format: encode as array of entities (one JSON line per entity)
+			const entities: Array<I> = [];
+			for (const [id, entity] of data) {
+				const encoded = yield* encode(entity).pipe(
+					Effect.mapError(
+						(parseError) =>
+							new ValidationError({
+								message: `Failed to encode entity '${id}' for '${filePath}': ${parseError.message}`,
+								issues: [
+									{
+										field: id,
+										message: parseError.message,
+									},
+								],
+							}),
+					),
+				);
+				entities.push(encoded);
+			}
+			const content = yield* serializer.serialize(entities, ext);
+			yield* storage.ensureDir(filePath);
+			yield* storage.write(filePath, content);
+		} else {
+			// Standard format: encode as Record keyed by entity ID
+			const entityMap: Record<string, I> = {};
+			for (const [id, entity] of data) {
+				const encoded = yield* encode(entity).pipe(
+					Effect.mapError(
+						(parseError) =>
+							new ValidationError({
+								message: `Failed to encode entity '${id}' for '${filePath}': ${parseError.message}`,
+								issues: [
+									{
+										field: id,
+										message: parseError.message,
+									},
+								],
+							}),
+					),
+				);
+				entityMap[id] = encoded;
+			}
+
+			// Build output object, injecting _version first if provided for readability
+			const output: Record<string, unknown> =
+				options?.version !== undefined
+					? { _version: options.version, ...entityMap }
+					: entityMap;
+
+			// Serialize and write
+			const content = yield* serializer.serialize(output, ext);
+			yield* storage.ensureDir(filePath);
+			yield* storage.write(filePath, content);
 		}
-
-		// Build output object, injecting _version first if provided for readability
-		const output: Record<string, unknown> =
-			options?.version !== undefined
-				? { _version: options.version, ...entityMap }
-				: entityMap;
-
-		// Serialize and write
-		const content = yield* serializer.serialize(output, ext);
-		yield* storage.ensureDir(filePath);
-		yield* storage.write(filePath, content);
 	});
 
 // ============================================================================

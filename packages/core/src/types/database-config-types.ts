@@ -123,6 +123,29 @@ export type CollectionConfig = {
 	 * ```
 	 */
 	readonly idGenerator?: string;
+
+	/**
+	 * When true, the collection uses an append-only persistence strategy.
+	 * Each `create()` appends a single JSONL line to the file instead of rewriting it.
+	 *
+	 * Restrictions when append-only:
+	 * - `update()`, `updateMany()`, `delete()`, `deleteMany()` fail with OperationError
+	 * - The file should use a `.jsonl` extension
+	 * - `flush()` writes a clean canonical JSONL file
+	 *
+	 * Useful for event logs and audit trails where data is only ever inserted.
+	 *
+	 * @example
+	 * ```ts
+	 * events: {
+	 *   schema: EventSchema,
+	 *   file: "./data/events.jsonl",
+	 *   appendOnly: true,
+	 *   relationships: {},
+	 * }
+	 * ```
+	 */
+	readonly appendOnly?: boolean;
 };
 
 /**

@@ -132,6 +132,35 @@ makeSerializerLayer([jsonCodec(), yamlCodec(), tomlCodec()])
 import { AllTextFormatsLayer } from "proseql"
 ```
 
+### Append-Only Collections
+
+For event logs, audit trails, and other write-once data: set `appendOnly: true`. Each `create()` appends a single JSONL line instead of rewriting the file.
+
+```ts
+const config = {
+  events: {
+    schema: EventSchema,
+    file: "./data/events.jsonl",    // ← must be .jsonl
+    appendOnly: true,               // ← the magic flag
+    relationships: {},
+  },
+} as const
+```
+
+```ts
+// these work normally
+await db.events.create({ type: "click", target: "button-1" }).runPromise
+await db.events.query({ where: { type: "click" } }).runPromise
+await db.events.findById("evt_001").runPromise
+await db.events.aggregate({ count: true }).runPromise
+
+// these throw OperationError — append-only means append-only
+await db.events.update("evt_001", { type: "tap" }).runPromise  // OperationError
+await db.events.delete("evt_001").runPromise                    // OperationError
+```
+
+On disk, it's one JSON object per line. `flush()` rewrites the file cleanly.
+
 ## CRUD
 
 The usual suspects, but type-safe and with `.runPromise` to keep things simple.

@@ -163,6 +163,39 @@ const makeRemove =
 		return Effect.sync(() => storage.removeItem(key));
 	};
 
+const makeAppend =
+	(storage: Storage, config: ResolvedWebStorageConfig) =>
+	(
+		path: string,
+		data: string,
+	): Effect.Effect<void, StorageError | UnsupportedFormatError> => {
+		const key = pathToKey(path, config.keyPrefix);
+		return Effect.gen(function* () {
+			yield* validateAllowedFormat(path, config.allowedFormats);
+
+			yield* Effect.try({
+				try: () => {
+					const existing = storage.getItem(key) ?? "";
+					storage.setItem(key, existing + data);
+				},
+				catch: (error) => {
+					if (
+						error instanceof DOMException &&
+						error.name === "QuotaExceededError"
+					) {
+						return new StorageError({
+							path,
+							operation: "write",
+							message: `Storage quota exceeded while appending to key: ${key}. Consider clearing old data or using IndexedDB for larger datasets.`,
+							cause: error,
+						});
+					}
+					return toStorageError(path, "write", error);
+				},
+			});
+		});
+	};
+
 const makeEnsureDir =
 	(_storage: Storage, _config: ResolvedWebStorageConfig) =>
 	(_path: string): Effect.Effect<void, StorageError> => {
@@ -201,6 +234,7 @@ export function makeWebStorageAdapter(
 	return {
 		read: makeRead(storage, resolved),
 		write: makeWrite(storage, resolved),
+		append: makeAppend(storage, resolved),
 		exists: makeExists(storage, resolved),
 		remove: makeRemove(storage, resolved),
 		ensureDir: makeEnsureDir(storage, resolved),

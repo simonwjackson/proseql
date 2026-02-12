@@ -21,6 +21,10 @@ export interface StorageAdapterShape {
 		path: string,
 		data: string,
 	) => Effect.Effect<void, StorageReadWriteError>;
+	readonly append: (
+		path: string,
+		data: string,
+	) => Effect.Effect<void, StorageReadWriteError>;
 	readonly exists: (path: string) => Effect.Effect<boolean, StorageError>;
 	readonly remove: (path: string) => Effect.Effect<void, StorageError>;
 	readonly ensureDir: (path: string) => Effect.Effect<void, StorageError>;

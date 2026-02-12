@@ -332,6 +332,58 @@ const makeRemove =
 		});
 	};
 
+const makeAppend =
+	(config: ResolvedIndexedDBConfig) =>
+	(
+		path: string,
+		data: string,
+	): Effect.Effect<void, StorageError | UnsupportedFormatError> => {
+		const key = pathToKey(path, config.keyPrefix);
+
+		return Effect.gen(function* () {
+			yield* validateAllowedFormat(path, config.allowedFormats);
+
+			const db = yield* getDatabase(config);
+
+			// Read existing value, concatenate, then write back
+			const existing = yield* Effect.async<string, StorageError>((resume) => {
+				try {
+					const transaction = db.transaction(config.storeName, "readonly");
+					const store = transaction.objectStore(config.storeName);
+					const request = store.get(key);
+
+					request.onsuccess = () => {
+						resume(Effect.succeed((request.result as string) ?? ""));
+					};
+
+					request.onerror = () => {
+						resume(Effect.fail(toStorageError(path, "read", request.error)));
+					};
+				} catch (error) {
+					resume(Effect.fail(toStorageError(path, "read", error)));
+				}
+			});
+
+			yield* Effect.async<void, StorageError>((resume) => {
+				try {
+					const transaction = db.transaction(config.storeName, "readwrite");
+					const store = transaction.objectStore(config.storeName);
+					const request = store.put(existing + data, key);
+
+					request.onsuccess = () => {
+						resume(Effect.succeed(undefined));
+					};
+
+					request.onerror = () => {
+						resume(Effect.fail(toStorageError(path, "write", request.error)));
+					};
+				} catch (error) {
+					resume(Effect.fail(toStorageError(path, "write", error)));
+				}
+			});
+		});
+	};
+
 const makeEnsureDir =
 	(_config: ResolvedIndexedDBConfig) =>
 	(_path: string): Effect.Effect<void, StorageError> => {
@@ -374,6 +426,7 @@ export function makeIndexedDBAdapter(
 	return {
 		read: makeRead(resolved),
 		write: makeWrite(resolved),
+		append: makeAppend(resolved),
 		exists: makeExists(resolved),
 		remove: makeRemove(resolved),
 		ensureDir: makeEnsureDir(resolved),

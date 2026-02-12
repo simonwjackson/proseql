@@ -108,6 +108,31 @@ const makeWrite =
 		);
 	};
 
+const makeAppend =
+	(config: Required<NodeAdapterConfig>) =>
+	(path: string, data: string): Effect.Effect<void, StorageError> => {
+		const ensureParentDir = config.createMissingDirectories
+			? Effect.tryPromise({
+					try: () =>
+						fs.mkdir(dirname(path), {
+							recursive: true,
+							mode: config.dirMode,
+						}),
+					catch: (error) => toStorageError(dirname(path), "write", error),
+				}).pipe(Effect.asVoid)
+			: Effect.void;
+
+		return ensureParentDir.pipe(
+			Effect.andThen(
+				Effect.tryPromise({
+					try: () => fs.appendFile(path, data, { mode: config.fileMode }),
+					catch: (error) => toStorageError(path, "write", error),
+				}),
+			),
+			Effect.retry(retryPolicy(config)),
+		);
+	};
+
 const makeExists =
 	(_config: Required<NodeAdapterConfig>) =>
 	(path: string): Effect.Effect<boolean, StorageError> =>
@@ -162,6 +187,7 @@ const makeAdapter = (
 ): StorageAdapterShape => ({
 	read: makeRead(config),
 	write: makeWrite(config),
+	append: makeAppend(config),
 	exists: makeExists(config),
 	remove: makeRemove(config),
 	ensureDir: makeEnsureDir(config),

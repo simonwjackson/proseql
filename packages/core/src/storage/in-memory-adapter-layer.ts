@@ -42,6 +42,19 @@ const makeInMemoryAdapter = (
 			}
 		}),
 
+	append: (path: string, data: string) =>
+		Effect.sync(() => {
+			const existing = store.get(path) ?? "";
+			store.set(path, existing + data);
+			// Notify watchers for this path
+			const pathWatchers = watchers.get(path);
+			if (pathWatchers) {
+				for (const cb of pathWatchers) {
+					cb();
+				}
+			}
+		}),
+
 	exists: (path: string) => Effect.sync(() => store.has(path)),
 
 	remove: (path: string) =>

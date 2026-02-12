@@ -15,7 +15,7 @@ import {
 	Layer,
 	PubSub,
 	Ref,
-	type Schema,
+	Schema,
 	type Scope,
 	Stream,
 } from "effect";
@@ -24,7 +24,7 @@ import {
 	type ForeignKeyError,
 	type HookError,
 	NotFoundError,
-	type OperationError,
+	OperationError,
 	type TransactionError,
 	type UniqueConstraintError,
 	ValidationError,
@@ -629,6 +629,19 @@ function extractPopulateFromSelect(
  * `idGenerator` name, the create/createMany operations will use the plugin's
  * generator to produce IDs when not explicitly provided.
  */
+/**
+ * Configuration for append-only collections.
+ * When provided, creates are followed by an append to the file,
+ * and update/delete operations are forbidden.
+ */
+interface AppendOnlyConfig {
+	/**
+	 * Called after each entity is created to append it to the file.
+	 * The callback is responsible for encoding and writing to storage.
+	 */
+	readonly onEntityCreated: (entity: HasId) => Effect.Effect<void>;
+}
+
 const buildCollection = <T extends HasId>(
 	collectionName: string,
 	collectionConfig: CollectionConfig,
@@ -648,6 +661,7 @@ const buildCollection = <T extends HasId>(
 	changePubSub?: import("effect").PubSub.PubSub<
 		import("../types/reactive-types.js").ChangeEvent
 	>,
+	appendOnlyConfig?: AppendOnlyConfig,
 ): EffectCollection<T> => {
 	const schema = collectionConfig.schema as Schema.Schema<T, unknown>;
 	const relationships = collectionConfig.relationships as Record<
@@ -937,139 +951,193 @@ const buildCollection = <T extends HasId>(
 			return withRunPromise(effect);
 		};
 
+	// Helper to create a forbidden operation for append-only collections
+	const forbiddenOp =
+		(opName: string) =>
+		(..._args: ReadonlyArray<unknown>) =>
+			withRunPromise(
+				Effect.fail(
+					new OperationError({
+						operation: opName,
+						reason: "append-only",
+						message: `Operation '${opName}' is not allowed on append-only collection '${collectionName}'`,
+					}),
+				),
+			);
+
 	// Wire CRUD operations with runPromise convenience
-	const createFn = wrapEffect(
-		create(
-			collectionName,
-			schema,
-			relationships,
-			ref,
-			stateRefs,
-			indexes,
-			hooks,
-			uniqueFields,
-			computed,
-			searchIndexRef,
-			searchIndexFields,
-			idGeneratorName,
-			idGeneratorMap,
-			changePubSub,
-		),
+	const rawCreate = create(
+		collectionName,
+		schema,
+		relationships,
+		ref,
+		stateRefs,
+		indexes,
+		hooks,
+		uniqueFields,
+		computed,
+		searchIndexRef,
+		searchIndexFields,
+		idGeneratorName,
+		idGeneratorMap,
+		changePubSub,
 	);
-	const createManyFn = wrapEffect(
-		createMany(
-			collectionName,
-			schema,
-			relationships,
-			ref,
-			stateRefs,
-			indexes,
-			hooks,
-			uniqueFields,
-			computed,
-			searchIndexRef,
-			searchIndexFields,
-			idGeneratorName,
-			idGeneratorMap,
-			changePubSub,
-		),
+	const rawCreateMany = createMany(
+		collectionName,
+		schema,
+		relationships,
+		ref,
+		stateRefs,
+		indexes,
+		hooks,
+		uniqueFields,
+		computed,
+		searchIndexRef,
+		searchIndexFields,
+		idGeneratorName,
+		idGeneratorMap,
+		changePubSub,
 	);
-	const updateFn = wrapEffect(
-		update(
-			collectionName,
-			schema,
-			relationships,
-			ref,
-			stateRefs,
-			indexes,
-			hooks,
-			uniqueFields,
-			computed,
-			searchIndexRef,
-			searchIndexFields,
-			changePubSub,
-		),
-	);
-	const updateManyFn = wrapEffect(
-		updateMany(
-			collectionName,
-			schema,
-			relationships,
-			ref,
-			stateRefs,
-			indexes,
-			hooks,
-			uniqueFields,
-			computed,
-			searchIndexRef,
-			searchIndexFields,
-			changePubSub,
-		),
-	);
+
+	// For append-only: wrap create to also append each entity to the file
+	const createFn = appendOnlyConfig
+		? (...args: Parameters<typeof rawCreate>) => {
+				const effect = rawCreate(...args).pipe(
+					Effect.tap((entity) =>
+						appendOnlyConfig.onEntityCreated(entity as HasId),
+					),
+				);
+				return withRunPromise(effect);
+			}
+		: wrapEffect(rawCreate);
+	const createManyFn = appendOnlyConfig
+		? (...args: Parameters<typeof rawCreateMany>) => {
+				const effect = rawCreateMany(...args).pipe(
+					Effect.tap((result) =>
+						Effect.forEach(result.created as ReadonlyArray<HasId>, (entity) =>
+							appendOnlyConfig.onEntityCreated(entity),
+						),
+					),
+				);
+				return withRunPromise(effect);
+			}
+		: wrapEffect(rawCreateMany);
+
+	// For append-only: update/updateMany/delete/deleteMany/upsert/upsertMany are forbidden
+	const updateFn = appendOnlyConfig
+		? // biome-ignore lint/suspicious/noExplicitAny: forbidden ops return OperationError regardless of input type
+			(forbiddenOp("update") as any)
+		: wrapEffect(
+				update(
+					collectionName,
+					schema,
+					relationships,
+					ref,
+					stateRefs,
+					indexes,
+					hooks,
+					uniqueFields,
+					computed,
+					searchIndexRef,
+					searchIndexFields,
+					changePubSub,
+				),
+			);
+	const updateManyFn = appendOnlyConfig
+		? // biome-ignore lint/suspicious/noExplicitAny: forbidden ops return OperationError regardless of input type
+			(forbiddenOp("updateMany") as any)
+		: wrapEffect(
+				updateMany(
+					collectionName,
+					schema,
+					relationships,
+					ref,
+					stateRefs,
+					indexes,
+					hooks,
+					uniqueFields,
+					computed,
+					searchIndexRef,
+					searchIndexFields,
+					changePubSub,
+				),
+			);
 	// Check if schema defines a deletedAt field for soft delete support
 	const supportsSoftDelete =
 		"fields" in schema &&
 		"deletedAt" in
 			(schema as Record<string, unknown> & { fields: Record<string, unknown> })
 				.fields;
-	const deleteFn = wrapEffect(
-		del(
-			collectionName,
-			allRelationships,
-			ref,
-			stateRefs,
-			supportsSoftDelete,
-			indexes,
-			hooks,
-			searchIndexRef,
-			searchIndexFields,
-			changePubSub,
-		),
-	);
-	const deleteManyFn = wrapEffect(
-		deleteMany(
-			collectionName,
-			allRelationships,
-			ref,
-			stateRefs,
-			supportsSoftDelete,
-			indexes,
-			hooks,
-			searchIndexRef,
-			searchIndexFields,
-			changePubSub,
-		),
-	);
-	const upsertFn = wrapEffect(
-		upsert(
-			collectionName,
-			schema,
-			relationships,
-			ref,
-			stateRefs,
-			indexes,
-			hooks,
-			uniqueFields,
-			searchIndexRef,
-			searchIndexFields,
-			changePubSub,
-		),
-	);
-	const upsertManyFn = wrapEffect(
-		upsertMany(
-			collectionName,
-			schema,
-			relationships,
-			ref,
-			stateRefs,
-			indexes,
-			hooks,
-			uniqueFields,
-			searchIndexRef,
-			searchIndexFields,
-			changePubSub,
-		),
-	);
+	const deleteFn = appendOnlyConfig
+		? // biome-ignore lint/suspicious/noExplicitAny: forbidden ops return OperationError regardless of input type
+			(forbiddenOp("delete") as any)
+		: wrapEffect(
+				del(
+					collectionName,
+					allRelationships,
+					ref,
+					stateRefs,
+					supportsSoftDelete,
+					indexes,
+					hooks,
+					searchIndexRef,
+					searchIndexFields,
+					changePubSub,
+				),
+			);
+	const deleteManyFn = appendOnlyConfig
+		? // biome-ignore lint/suspicious/noExplicitAny: forbidden ops return OperationError regardless of input type
+			(forbiddenOp("deleteMany") as any)
+		: wrapEffect(
+				deleteMany(
+					collectionName,
+					allRelationships,
+					ref,
+					stateRefs,
+					supportsSoftDelete,
+					indexes,
+					hooks,
+					searchIndexRef,
+					searchIndexFields,
+					changePubSub,
+				),
+			);
+	const upsertFn = appendOnlyConfig
+		? // biome-ignore lint/suspicious/noExplicitAny: forbidden ops return OperationError regardless of input type
+			(forbiddenOp("upsert") as any)
+		: wrapEffect(
+				upsert(
+					collectionName,
+					schema,
+					relationships,
+					ref,
+					stateRefs,
+					indexes,
+					hooks,
+					uniqueFields,
+					searchIndexRef,
+					searchIndexFields,
+					changePubSub,
+				),
+			);
+	const upsertManyFn = appendOnlyConfig
+		? // biome-ignore lint/suspicious/noExplicitAny: forbidden ops return OperationError regardless of input type
+			(forbiddenOp("upsertMany") as any)
+		: wrapEffect(
+				upsertMany(
+					collectionName,
+					schema,
+					relationships,
+					ref,
+					stateRefs,
+					indexes,
+					hooks,
+					uniqueFields,
+					searchIndexRef,
+					searchIndexFields,
+					changePubSub,
+				),
+			);
 	const createWithRelsFn = wrapEffect(
 		createWithRelationships(
 			collectionName,
@@ -1096,80 +1164,89 @@ const buildCollection = <T extends HasId>(
 			changePubSub,
 		),
 	);
-	const updateWithRelsFn = wrapEffect(
-		updateWithRelationships(
-			collectionName,
-			schema,
-			relationships,
-			ref,
-			stateRefs,
-			dbConfig as Record<
-				string,
-				{
-					readonly schema: Schema.Schema<HasId, unknown>;
-					readonly relationships: Record<
+	const updateWithRelsFn = appendOnlyConfig
+		? // biome-ignore lint/suspicious/noExplicitAny: forbidden ops return OperationError regardless of input type
+			(forbiddenOp("updateWithRelationships") as any)
+		: wrapEffect(
+				updateWithRelationships(
+					collectionName,
+					schema,
+					relationships,
+					ref,
+					stateRefs,
+					dbConfig as Record<
 						string,
 						{
-							readonly type: "ref" | "inverse";
-							readonly target?: string;
-							readonly __targetCollection?: string;
-							readonly foreignKey?: string;
+							readonly schema: Schema.Schema<HasId, unknown>;
+							readonly relationships: Record<
+								string,
+								{
+									readonly type: "ref" | "inverse";
+									readonly target?: string;
+									readonly __targetCollection?: string;
+									readonly foreignKey?: string;
+								}
+							>;
 						}
-					>;
-				}
-			>,
-			computed,
-			changePubSub,
-		),
-	);
-	const deleteWithRelsFn = wrapEffect(
-		deleteWithRelationships(
-			collectionName,
-			relationships,
-			ref,
-			stateRefs,
-			dbConfig as Record<
-				string,
-				{
-					readonly schema: unknown;
-					readonly relationships: Record<
+					>,
+					computed,
+					changePubSub,
+				),
+			);
+	const deleteWithRelsFn = appendOnlyConfig
+		? // biome-ignore lint/suspicious/noExplicitAny: forbidden ops return OperationError regardless of input type
+			(forbiddenOp("deleteWithRelationships") as any)
+		: wrapEffect(
+				deleteWithRelationships(
+					collectionName,
+					relationships,
+					ref,
+					stateRefs,
+					dbConfig as Record<
 						string,
 						{
-							readonly type: "ref" | "inverse";
-							readonly target?: string;
-							readonly __targetCollection?: string;
-							readonly foreignKey?: string;
+							readonly schema: unknown;
+							readonly relationships: Record<
+								string,
+								{
+									readonly type: "ref" | "inverse";
+									readonly target?: string;
+									readonly __targetCollection?: string;
+									readonly foreignKey?: string;
+								}
+							>;
 						}
-					>;
-				}
-			>,
-			changePubSub,
-		),
-	);
-	const deleteManyWithRelsFn = wrapEffect(
-		deleteManyWithRelationships(
-			collectionName,
-			relationships,
-			ref,
-			stateRefs,
-			dbConfig as Record<
-				string,
-				{
-					readonly schema: unknown;
-					readonly relationships: Record<
+					>,
+					changePubSub,
+				),
+			);
+	const deleteManyWithRelsFn = appendOnlyConfig
+		? // biome-ignore lint/suspicious/noExplicitAny: forbidden ops return OperationError regardless of input type
+			(forbiddenOp("deleteManyWithRelationships") as any)
+		: wrapEffect(
+				deleteManyWithRelationships(
+					collectionName,
+					relationships,
+					ref,
+					stateRefs,
+					dbConfig as Record<
 						string,
 						{
-							readonly type: "ref" | "inverse";
-							readonly target?: string;
-							readonly __targetCollection?: string;
-							readonly foreignKey?: string;
+							readonly schema: unknown;
+							readonly relationships: Record<
+								string,
+								{
+									readonly type: "ref" | "inverse";
+									readonly target?: string;
+									readonly __targetCollection?: string;
+									readonly foreignKey?: string;
+								}
+							>;
 						}
-					>;
-				}
-			>,
-			changePubSub,
-		),
-	);
+					>,
+					changePubSub,
+				),
+			);
 
 	// findById: O(1) lookup directly from the ReadonlyMap
 	const findByIdFn = (id: string): RunnableEffect<T, NotFoundError> => {
@@ -1816,27 +1893,52 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		const collections: Record<string, EffectCollection<HasId>> = {};
 
 		for (const collectionName of Object.keys(config)) {
-			const filePath = config[collectionName].file;
+			const collectionConfig = config[collectionName];
+			const filePath = collectionConfig.file;
+			const isAppendOnly = collectionConfig.appendOnly === true;
 
-			// afterMutation: schedule a debounced save (fire-and-forget), but only if
-			// no transaction is active. When a transaction is active, the transaction's
-			// own afterMutation handles mutation tracking and persistence is deferred
-			// until commit. This handles the edge case where non-tx CRUD methods are
-			// called during a transaction.
-			const afterMutation = filePath
-				? () =>
-						Ref.get(transactionLock).pipe(
-							Effect.flatMap((isLocked) =>
-								isLocked
-									? Effect.void // Skip persistence during transactions
-									: Effect.sync(() => trigger.schedule(collectionName)),
-							),
-						)
-				: undefined;
+			// For append-only collections, afterMutation is undefined (no debounced full-file save).
+			// Instead, each create appends a single JSONL line via appendOnlyConfig.
+			const afterMutation =
+				filePath && !isAppendOnly
+					? () =>
+							Ref.get(transactionLock).pipe(
+								Effect.flatMap((isLocked) =>
+									isLocked
+										? Effect.void // Skip persistence during transactions
+										: Effect.sync(() => trigger.schedule(collectionName)),
+								),
+							)
+					: undefined;
+
+			// Build appendOnlyConfig for append-only persistent collections
+			let appendOnlyConfig: AppendOnlyConfig | undefined;
+			if (isAppendOnly && filePath) {
+				const appendSchema = collectionConfig.schema as Schema.Schema<
+					HasId,
+					unknown
+				>;
+				appendOnlyConfig = {
+					onEntityCreated: (entity: HasId) =>
+						Effect.provide(
+							Effect.gen(function* () {
+								const storage = yield* StorageAdapter;
+								const encode = Schema.encode(appendSchema);
+								const encoded = yield* encode(entity).pipe(
+									Effect.catchAll(() => Effect.succeed(entity)),
+								);
+								const line = `${JSON.stringify(encoded)}\n`;
+								yield* storage.ensureDir(filePath);
+								yield* storage.append(filePath, line);
+							}),
+							serviceLayer,
+						),
+				};
+			}
 
 			collections[collectionName] = buildCollection(
 				collectionName,
-				config[collectionName],
+				collectionConfig,
 				typedRefs[collectionName],
 				stateRefs,
 				config,
@@ -1848,6 +1950,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				pluginRegistry.idGenerators,
 				pluginRegistry.globalHooks,
 				changePubSub,
+				appendOnlyConfig,
 			);
 		}
 
@@ -1918,8 +2021,30 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				) => Effect.Effect<A, E>,
 			);
 
+		// Build the flush method: flushes debounced writes AND writes canonical files
+		// for append-only collections (which don't use the debounced trigger).
+		const flushAll = async (): Promise<void> => {
+			// Flush debounced writes for non-append-only collections
+			await trigger.flush();
+			// Write canonical JSONL files for append-only collections
+			const appendOnlyFlushes: Array<Promise<void>> = [];
+			for (const collectionName of Object.keys(config)) {
+				const cc = config[collectionName];
+				if (cc.appendOnly && cc.file) {
+					appendOnlyFlushes.push(
+						Effect.runPromise(
+							makeSaveEffect(collectionName).pipe(
+								Effect.catchAll(() => Effect.void),
+							),
+						),
+					);
+				}
+			}
+			await Promise.all(appendOnlyFlushes);
+		};
+
 		return Object.assign(db, {
-			flush: () => trigger.flush(),
+			flush: flushAll,
 			pendingCount: () => trigger.pendingCount(),
 			$dryRunMigrations: dryRunMigrationsFn,
 			$transaction: $transactionMethod,
