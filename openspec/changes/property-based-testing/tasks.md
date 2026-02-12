@@ -1,7 +1,7 @@
 ## 1. Dependencies
 
 - [x] 1.1 Add `fast-check` as a dev dependency in the root `package.json` and run `bun install`
-- [ ] 1.2 Verify `fast-check` imports resolve correctly in a trivial test file under `packages/core/tests/`
+- [x] 1.2 Verify `fast-check` imports resolve correctly in a trivial test file under `packages/core/tests/`
 
 ## 2. Generator Infrastructure
 
