@@ -10,10 +10,11 @@
  * auto-rolls back on failure.
  */
 
-import { Effect, Ref } from "effect";
+import { Effect, type PubSub, Ref } from "effect";
 import { TransactionError } from "../errors/crud-errors.js";
 import type { EffectCollection } from "../factories/database-effect.js";
 import type { TransactionContext } from "../types/crud-types.js";
+import type { ChangeEvent } from "../types/reactive-types.js";
 
 // ============================================================================
 // Types
@@ -56,6 +57,9 @@ type BuildCollectionForTx = (
  * - transactionLock: Single-writer lock Ref (prevents concurrent transactions)
  * - buildCollectionForTx: Callback to create collection accessors with transaction-aware mutations
  * - persistenceTrigger: Optional trigger for scheduling saves on commit
+ * - changePubSub: Optional PubSub for reactive change notifications. When provided,
+ *   individual mutation events are suppressed during the transaction and a single
+ *   batch event is published for each mutated collection on commit.
  *
  * Returns an Effect that yields a TransactionContext. The context provides:
  * - Collection accessors with the same interface as db.collectionName
@@ -73,6 +77,7 @@ export const createTransaction = <
 	transactionLock: Ref.Ref<boolean>,
 	buildCollectionForTx: BuildCollectionForTx,
 	persistenceTrigger?: PersistenceTrigger,
+	changePubSub?: PubSub.PubSub<ChangeEvent>,
 ): Effect.Effect<TransactionContext<DB>, TransactionError> =>
 	Effect.gen(function* () {
 		// Task 2.3: Single-writer lock - atomically check and acquire via Ref.modify
@@ -270,6 +275,7 @@ export const createTransaction = <
  * @param transactionLock - Single-writer lock Ref
  * @param buildCollectionForTx - Callback to create collection accessors
  * @param persistenceTrigger - Optional trigger for scheduling saves on commit
+ * @param changePubSub - Optional PubSub for reactive change notifications
  * @param fn - The callback to execute within the transaction
  * @returns Effect that yields the callback result, with TransactionError in error channel
  */
@@ -282,6 +288,7 @@ export const $transaction = <
 	transactionLock: Ref.Ref<boolean>,
 	buildCollectionForTx: BuildCollectionForTx,
 	persistenceTrigger: PersistenceTrigger | undefined,
+	changePubSub: PubSub.PubSub<ChangeEvent> | undefined,
 	fn: (ctx: TransactionContext<DB>) => Effect.Effect<A, E>,
 ): Effect.Effect<A, E | TransactionError> =>
 	Effect.gen(function* () {
@@ -303,6 +310,7 @@ export const $transaction = <
 			transactionLock,
 			buildCollectionForTx,
 			persistenceTrigger,
+			changePubSub,
 		);
 
 		// Run the callback and handle success/failure

@@ -2178,6 +2178,7 @@ describe("Persistence Integration", () => {
 					setup.transactionLock,
 					setup.buildCollectionForTx,
 					setup.persistenceTrigger,
+					undefined, // no change PubSub
 					(ctx) =>
 						Effect.gen(function* () {
 							// Create a user
@@ -2559,6 +2560,7 @@ describe("Persistence Integration", () => {
 					setup.transactionLock,
 					setup.buildCollectionForTx,
 					setup.persistenceTrigger,
+					undefined, // no change PubSub
 					(ctx) =>
 						Effect.gen(function* () {
 							// Create entities (will be rolled back)
@@ -2609,6 +2611,7 @@ describe("Persistence Integration", () => {
 					setup.transactionLock,
 					setup.buildCollectionForTx,
 					setup.persistenceTrigger,
+					undefined, // no change PubSub
 					(ctx) =>
 						Effect.gen(function* () {
 							// Create entities (will be rolled back)
