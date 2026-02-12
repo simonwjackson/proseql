@@ -78,7 +78,7 @@
 
 - [x] 10.1 Create `rpc/tests/rpc-group.test.ts`: verify makeRpcGroup produces correct procedures for a single-collection config
 - [x] 10.2 Test multi-collection config produces namespaced procedures for each collection
-- [ ] 10.3 Create `rpc/tests/rpc-handlers.test.ts`: test findById handler returns entity for valid id
+- [x] 10.3 Create `rpc/tests/rpc-handlers.test.ts`: test findById handler returns entity for valid id
 - [ ] 10.4 Test findById handler returns typed NotFoundError for missing id
 - [ ] 10.5 Test query handler returns filtered results
 - [ ] 10.6 Test create handler returns created entity
