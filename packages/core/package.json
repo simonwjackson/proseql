@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "bunx tsc --build",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "bun run build && bun test"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

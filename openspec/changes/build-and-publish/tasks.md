@@ -25,7 +25,7 @@
 - [x] 3.9 Add `"engines": { "node": ">=18" }`.
 - [x] 3.10 Add `"sideEffects": false`.
 - [x] 3.11 Add `"build"` and `"clean"` scripts.
-- [ ] 3.12 Add `"prepublishOnly": "bun run build && bun test"`.
+- [x] 3.12 Add `"prepublishOnly": "bun run build && bun test"`.
 
 ## 4. Per-Package package.json -- @proseql/node
 
