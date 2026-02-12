@@ -4,7 +4,7 @@
 - [x] 1.2 Define `WatchConfig<T>` type mirroring the existing query config (where, sort, select, limit, offset)
 - [x] 1.3 Add `watch` and `watchById` method signatures to the collection interface types
 - [x] 1.4 Add optional `readonly reactive?: { readonly debounceMs?: number }` to database config in `core/types/database-config-types.ts`
-- [ ] 1.5 Export new types from `core/index.ts`
+- [x] 1.5 Export new types from `core/index.ts`
 
 ## 2. Change Notification PubSub
 

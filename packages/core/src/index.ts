@@ -98,6 +98,8 @@ export type {
 export type {
 	CollectionConfig,
 	DatabaseConfig,
+	DatabaseReactiveOptions,
+	ReactiveConfig,
 } from "./types/database-config-types.js";
 export type {
 	DatasetFor,
@@ -127,6 +129,17 @@ export type {
 } from "./types/aggregate-types.js";
 
 export { isGroupedAggregateConfig } from "./types/aggregate-types.js";
+
+// ============================================================================
+// Reactive Query Types
+// ============================================================================
+
+export type {
+	ChangeEvent,
+	WatchByIdMethod,
+	WatchConfig,
+	WatchMethod,
+} from "./types/reactive-types.js";
 
 // ============================================================================
 // Cursor Pagination Types
