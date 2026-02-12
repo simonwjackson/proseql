@@ -27,4 +27,104 @@
  * @module
  */
 
-export {};
+// ============================================================================
+// Error Schemas
+// ============================================================================
+
+export {
+	// Individual error schemas
+	NotFoundErrorSchema,
+	DuplicateKeyErrorSchema,
+	ForeignKeyErrorSchema,
+	ValidationIssueSchema,
+	ValidationErrorSchema,
+	UniqueConstraintErrorSchema,
+	ConcurrencyErrorSchema,
+	OperationErrorSchema,
+	TransactionErrorSchema,
+	HookErrorSchema,
+	DanglingReferenceErrorSchema,
+	CollectionNotFoundErrorSchema,
+	PopulationErrorSchema,
+	// Union schemas
+	CrudErrorSchema,
+	QueryErrorSchema,
+	RpcErrorSchema,
+	// Type exports
+	type NotFoundError,
+	type DuplicateKeyError,
+	type ForeignKeyError,
+	type ValidationError,
+	type UniqueConstraintError,
+	type ConcurrencyError,
+	type OperationError,
+	type TransactionError,
+	type HookError,
+	type DanglingReferenceError,
+	type CollectionNotFoundError,
+	type PopulationError,
+	type CrudError,
+	type QueryError,
+	type RpcError,
+} from "./rpc-errors.js";
+
+// ============================================================================
+// Payload Schemas
+// ============================================================================
+
+export {
+	// Common schemas
+	SortOrderSchema,
+	SortConfigSchema,
+	CursorConfigSchema,
+	FilterOperatorsSchema,
+	WhereClauseSchema,
+	SearchConfigSchema,
+	PopulateConfigSchema,
+	SelectConfigSchema,
+	// Payload schemas
+	FindByIdPayloadSchema,
+	QueryPayloadSchema,
+	CreatePayloadSchema,
+	UpdatePayloadSchema,
+	DeletePayloadSchema,
+	AggregatePayloadSchema,
+	CreateManyPayloadSchema,
+	UpdateManyPayloadSchema,
+	DeleteManyPayloadSchema,
+	UpsertPayloadSchema,
+	UpsertManyPayloadSchema,
+	// Result schemas
+	AggregateResultSchema,
+	GroupResultSchema,
+	GroupedAggregateResultSchema,
+	CursorPageInfoSchema,
+	CursorPageResultSchema,
+	CreateManyResultSchema,
+	UpdateManyResultSchema,
+	DeleteManyResultSchema,
+	UpsertResultSchema,
+	UpsertManyResultSchema,
+	// Type exports
+	type FindByIdPayload,
+	type QueryPayload,
+	type CreatePayload,
+	type UpdatePayload,
+	type DeletePayload,
+	type AggregatePayload,
+	type CreateManyPayload,
+	type UpdateManyPayload,
+	type DeleteManyPayload,
+	type UpsertPayload,
+	type UpsertManyPayload,
+	type AggregateResultType,
+	type GroupResultType,
+	type GroupedAggregateResultType,
+	type CursorPageInfoType,
+	type CursorPageResultType,
+	type CreateManyResultType,
+	type UpdateManyResultType,
+	type DeleteManyResultType,
+	type UpsertResultType,
+	type UpsertManyResultType,
+} from "./rpc-schemas.js";
