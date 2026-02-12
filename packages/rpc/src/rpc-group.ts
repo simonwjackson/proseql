@@ -21,6 +21,7 @@ import {
 	UniqueConstraintErrorSchema,
 	ForeignKeyErrorSchema,
 	HookErrorSchema,
+	OperationErrorSchema,
 } from "./rpc-errors.js";
 import {
 	QueryPayloadSchema,
@@ -30,6 +31,16 @@ import {
 	AggregatePayloadSchema,
 	AggregateResultSchema,
 	GroupedAggregateResultSchema,
+	CreateManyPayloadSchema,
+	UpdateManyPayloadSchema,
+	DeleteManyPayloadSchema,
+	UpsertPayloadSchema,
+	UpsertManyPayloadSchema,
+	CreateManyResultSchema,
+	UpdateManyResultSchema,
+	DeleteManyResultSchema,
+	UpsertResultSchema,
+	UpsertManyResultSchema,
 } from "./rpc-schemas.js";
 
 // ============================================================================
@@ -150,6 +161,47 @@ const UpdateErrorUnionSchema = Schema.Union(
  * Union schema for delete errors (NotFoundError | HookError).
  */
 const DeleteErrorUnionSchema = Schema.Union(NotFoundErrorSchema, HookErrorSchema);
+
+/**
+ * Union schema for createMany errors (ValidationError | DuplicateKeyError | UniqueConstraintError | ForeignKeyError | HookError).
+ * Same as CreateErrorUnionSchema.
+ */
+const CreateManyErrorUnionSchema = CreateErrorUnionSchema;
+
+/**
+ * Union schema for updateMany errors (ValidationError | ForeignKeyError | HookError | UniqueConstraintError).
+ */
+const UpdateManyErrorUnionSchema = Schema.Union(
+	ValidationErrorSchema,
+	ForeignKeyErrorSchema,
+	HookErrorSchema,
+	UniqueConstraintErrorSchema,
+);
+
+/**
+ * Union schema for deleteMany errors (OperationError | ForeignKeyError | HookError).
+ */
+const DeleteManyErrorUnionSchema = Schema.Union(
+	OperationErrorSchema,
+	ForeignKeyErrorSchema,
+	HookErrorSchema,
+);
+
+/**
+ * Union schema for upsert errors (ValidationError | ForeignKeyError | HookError | UniqueConstraintError).
+ */
+const UpsertErrorUnionSchema = Schema.Union(
+	ValidationErrorSchema,
+	ForeignKeyErrorSchema,
+	HookErrorSchema,
+	UniqueConstraintErrorSchema,
+);
+
+/**
+ * Union schema for upsertMany errors (ValidationError | ForeignKeyError | HookError | UniqueConstraintError).
+ * Same as UpsertErrorUnionSchema.
+ */
+const UpsertManyErrorUnionSchema = UpsertErrorUnionSchema;
 
 /**
  * Creates a Query TaggedRequest class for a collection.
@@ -599,6 +651,260 @@ export type AggregateRequestClass<CollectionName extends string> = {
 };
 
 // ============================================================================
+// Batch Operation TaggedRequest Schema Factories
+// ============================================================================
+
+/**
+ * Creates a CreateMany TaggedRequest class for a collection.
+ *
+ * @param collectionName - The name of the collection (used as the request _tag prefix)
+ * @returns A TaggedRequest class for createMany operations
+ *
+ * @example
+ * ```ts
+ * const CreateManyRequest = makeCreateManyRequest("books")
+ * // _tag: "books.createMany"
+ * // payload: { data: Array<Record<string, unknown>>, options?: { skipDuplicates?: boolean } }
+ * // success: CreateManyResult
+ * // failure: ValidationError | DuplicateKeyError | UniqueConstraintError | ForeignKeyError | HookError
+ * ```
+ */
+export function makeCreateManyRequest<CollectionName extends string>(
+	collectionName: CollectionName,
+): CreateManyRequestClass<CollectionName> {
+	const RequestClass = class CreateManyRequest extends Schema.TaggedRequest<CreateManyRequest>()(
+		`${collectionName}.createMany` as `${CollectionName}.createMany`,
+		{
+			failure: CreateManyErrorUnionSchema,
+			success: CreateManyResultSchema,
+			payload: {
+				data: CreateManyPayloadSchema.fields.data,
+				options: CreateManyPayloadSchema.fields.options,
+			},
+		},
+	) {};
+
+	return RequestClass as unknown as CreateManyRequestClass<CollectionName>;
+}
+
+/**
+ * Type for a CreateMany TaggedRequest class.
+ */
+export type CreateManyRequestClass<CollectionName extends string> = {
+	readonly _tag: `${CollectionName}.createMany`;
+	readonly success: typeof CreateManyResultSchema;
+	readonly failure: typeof CreateManyErrorUnionSchema;
+	new (props: {
+		readonly data: typeof CreateManyPayloadSchema.Type.data;
+		readonly options?: typeof CreateManyPayloadSchema.Type.options;
+	}): Schema.TaggedRequest.Any & {
+		readonly _tag: `${CollectionName}.createMany`;
+		readonly data: typeof CreateManyPayloadSchema.Type.data;
+		readonly options?: typeof CreateManyPayloadSchema.Type.options;
+	};
+};
+
+/**
+ * Creates an UpdateMany TaggedRequest class for a collection.
+ *
+ * @param collectionName - The name of the collection (used as the request _tag prefix)
+ * @returns A TaggedRequest class for updateMany operations
+ *
+ * @example
+ * ```ts
+ * const UpdateManyRequest = makeUpdateManyRequest("books")
+ * // _tag: "books.updateMany"
+ * // payload: { where: Record<string, unknown>, updates: Record<string, unknown> }
+ * // success: UpdateManyResult
+ * // failure: ValidationError | ForeignKeyError | HookError | UniqueConstraintError
+ * ```
+ */
+export function makeUpdateManyRequest<CollectionName extends string>(
+	collectionName: CollectionName,
+): UpdateManyRequestClass<CollectionName> {
+	const RequestClass = class UpdateManyRequest extends Schema.TaggedRequest<UpdateManyRequest>()(
+		`${collectionName}.updateMany` as `${CollectionName}.updateMany`,
+		{
+			failure: UpdateManyErrorUnionSchema,
+			success: UpdateManyResultSchema,
+			payload: {
+				where: UpdateManyPayloadSchema.fields.where,
+				updates: UpdateManyPayloadSchema.fields.updates,
+			},
+		},
+	) {};
+
+	return RequestClass as unknown as UpdateManyRequestClass<CollectionName>;
+}
+
+/**
+ * Type for an UpdateMany TaggedRequest class.
+ */
+export type UpdateManyRequestClass<CollectionName extends string> = {
+	readonly _tag: `${CollectionName}.updateMany`;
+	readonly success: typeof UpdateManyResultSchema;
+	readonly failure: typeof UpdateManyErrorUnionSchema;
+	new (props: {
+		readonly where: typeof UpdateManyPayloadSchema.Type.where;
+		readonly updates: typeof UpdateManyPayloadSchema.Type.updates;
+	}): Schema.TaggedRequest.Any & {
+		readonly _tag: `${CollectionName}.updateMany`;
+		readonly where: typeof UpdateManyPayloadSchema.Type.where;
+		readonly updates: typeof UpdateManyPayloadSchema.Type.updates;
+	};
+};
+
+/**
+ * Creates a DeleteMany TaggedRequest class for a collection.
+ *
+ * @param collectionName - The name of the collection (used as the request _tag prefix)
+ * @returns A TaggedRequest class for deleteMany operations
+ *
+ * @example
+ * ```ts
+ * const DeleteManyRequest = makeDeleteManyRequest("books")
+ * // _tag: "books.deleteMany"
+ * // payload: { where: Record<string, unknown>, options?: { limit?: number } }
+ * // success: DeleteManyResult
+ * // failure: OperationError | ForeignKeyError | HookError
+ * ```
+ */
+export function makeDeleteManyRequest<CollectionName extends string>(
+	collectionName: CollectionName,
+): DeleteManyRequestClass<CollectionName> {
+	const RequestClass = class DeleteManyRequest extends Schema.TaggedRequest<DeleteManyRequest>()(
+		`${collectionName}.deleteMany` as `${CollectionName}.deleteMany`,
+		{
+			failure: DeleteManyErrorUnionSchema,
+			success: DeleteManyResultSchema,
+			payload: {
+				where: DeleteManyPayloadSchema.fields.where,
+				options: DeleteManyPayloadSchema.fields.options,
+			},
+		},
+	) {};
+
+	return RequestClass as unknown as DeleteManyRequestClass<CollectionName>;
+}
+
+/**
+ * Type for a DeleteMany TaggedRequest class.
+ */
+export type DeleteManyRequestClass<CollectionName extends string> = {
+	readonly _tag: `${CollectionName}.deleteMany`;
+	readonly success: typeof DeleteManyResultSchema;
+	readonly failure: typeof DeleteManyErrorUnionSchema;
+	new (props: {
+		readonly where: typeof DeleteManyPayloadSchema.Type.where;
+		readonly options?: typeof DeleteManyPayloadSchema.Type.options;
+	}): Schema.TaggedRequest.Any & {
+		readonly _tag: `${CollectionName}.deleteMany`;
+		readonly where: typeof DeleteManyPayloadSchema.Type.where;
+		readonly options?: typeof DeleteManyPayloadSchema.Type.options;
+	};
+};
+
+/**
+ * Creates an Upsert TaggedRequest class for a collection.
+ *
+ * @param collectionName - The name of the collection (used as the request _tag prefix)
+ * @returns A TaggedRequest class for upsert operations
+ *
+ * @example
+ * ```ts
+ * const UpsertRequest = makeUpsertRequest("books")
+ * // _tag: "books.upsert"
+ * // payload: { where: Record<string, unknown>, create: Record<string, unknown>, update: Record<string, unknown> }
+ * // success: UpsertResult
+ * // failure: ValidationError | ForeignKeyError | HookError | UniqueConstraintError
+ * ```
+ */
+export function makeUpsertRequest<CollectionName extends string>(
+	collectionName: CollectionName,
+): UpsertRequestClass<CollectionName> {
+	const RequestClass = class UpsertRequest extends Schema.TaggedRequest<UpsertRequest>()(
+		`${collectionName}.upsert` as `${CollectionName}.upsert`,
+		{
+			failure: UpsertErrorUnionSchema,
+			success: UpsertResultSchema,
+			payload: {
+				where: UpsertPayloadSchema.fields.where,
+				create: UpsertPayloadSchema.fields.create,
+				update: UpsertPayloadSchema.fields.update,
+			},
+		},
+	) {};
+
+	return RequestClass as unknown as UpsertRequestClass<CollectionName>;
+}
+
+/**
+ * Type for an Upsert TaggedRequest class.
+ */
+export type UpsertRequestClass<CollectionName extends string> = {
+	readonly _tag: `${CollectionName}.upsert`;
+	readonly success: typeof UpsertResultSchema;
+	readonly failure: typeof UpsertErrorUnionSchema;
+	new (props: {
+		readonly where: typeof UpsertPayloadSchema.Type.where;
+		readonly create: typeof UpsertPayloadSchema.Type.create;
+		readonly update: typeof UpsertPayloadSchema.Type.update;
+	}): Schema.TaggedRequest.Any & {
+		readonly _tag: `${CollectionName}.upsert`;
+		readonly where: typeof UpsertPayloadSchema.Type.where;
+		readonly create: typeof UpsertPayloadSchema.Type.create;
+		readonly update: typeof UpsertPayloadSchema.Type.update;
+	};
+};
+
+/**
+ * Creates an UpsertMany TaggedRequest class for a collection.
+ *
+ * @param collectionName - The name of the collection (used as the request _tag prefix)
+ * @returns A TaggedRequest class for upsertMany operations
+ *
+ * @example
+ * ```ts
+ * const UpsertManyRequest = makeUpsertManyRequest("books")
+ * // _tag: "books.upsertMany"
+ * // payload: { data: Array<{ where, create, update }> }
+ * // success: UpsertManyResult
+ * // failure: ValidationError | ForeignKeyError | HookError | UniqueConstraintError
+ * ```
+ */
+export function makeUpsertManyRequest<CollectionName extends string>(
+	collectionName: CollectionName,
+): UpsertManyRequestClass<CollectionName> {
+	const RequestClass = class UpsertManyRequest extends Schema.TaggedRequest<UpsertManyRequest>()(
+		`${collectionName}.upsertMany` as `${CollectionName}.upsertMany`,
+		{
+			failure: UpsertManyErrorUnionSchema,
+			success: UpsertManyResultSchema,
+			payload: {
+				data: UpsertManyPayloadSchema.fields.data,
+			},
+		},
+	) {};
+
+	return RequestClass as unknown as UpsertManyRequestClass<CollectionName>;
+}
+
+/**
+ * Type for an UpsertMany TaggedRequest class.
+ */
+export type UpsertManyRequestClass<CollectionName extends string> = {
+	readonly _tag: `${CollectionName}.upsertMany`;
+	readonly success: typeof UpsertManyResultSchema;
+	readonly failure: typeof UpsertManyErrorUnionSchema;
+	new (props: {
+		readonly data: typeof UpsertManyPayloadSchema.Type.data;
+	}): Schema.TaggedRequest.Any & {
+		readonly _tag: `${CollectionName}.upsertMany`;
+		readonly data: typeof UpsertManyPayloadSchema.Type.data;
+	};
+};
+
+// ============================================================================
 // Collection RPC Definitions
 // ============================================================================
 
@@ -640,6 +946,31 @@ export interface CollectionRpcDefinitions<
 	 * Use with Rpc.effect() to create an RPC handler.
 	 */
 	readonly AggregateRequest: AggregateRequestClass<CollectionName>;
+	/**
+	 * TaggedRequest class for createMany operations.
+	 * Use with Rpc.effect() to create an RPC handler.
+	 */
+	readonly CreateManyRequest: CreateManyRequestClass<CollectionName>;
+	/**
+	 * TaggedRequest class for updateMany operations.
+	 * Use with Rpc.effect() to create an RPC handler.
+	 */
+	readonly UpdateManyRequest: UpdateManyRequestClass<CollectionName>;
+	/**
+	 * TaggedRequest class for deleteMany operations.
+	 * Use with Rpc.effect() to create an RPC handler.
+	 */
+	readonly DeleteManyRequest: DeleteManyRequestClass<CollectionName>;
+	/**
+	 * TaggedRequest class for upsert operations.
+	 * Use with Rpc.effect() to create an RPC handler.
+	 */
+	readonly UpsertRequest: UpsertRequestClass<CollectionName>;
+	/**
+	 * TaggedRequest class for upsertMany operations.
+	 * Use with Rpc.effect() to create an RPC handler.
+	 */
+	readonly UpsertManyRequest: UpsertManyRequestClass<CollectionName>;
 	/** The collection name */
 	readonly collectionName: CollectionName;
 	/** The entity schema for this collection */
@@ -669,6 +1000,11 @@ export function makeCollectionRpcs<
 	const UpdateRequest = makeUpdateRequest(collectionName, entitySchema);
 	const DeleteRequest = makeDeleteRequest(collectionName, entitySchema);
 	const AggregateRequest = makeAggregateRequest(collectionName);
+	const CreateManyRequest = makeCreateManyRequest(collectionName);
+	const UpdateManyRequest = makeUpdateManyRequest(collectionName);
+	const DeleteManyRequest = makeDeleteManyRequest(collectionName);
+	const UpsertRequest = makeUpsertRequest(collectionName);
+	const UpsertManyRequest = makeUpsertManyRequest(collectionName);
 
 	return {
 		FindByIdRequest,
@@ -677,6 +1013,11 @@ export function makeCollectionRpcs<
 		UpdateRequest,
 		DeleteRequest,
 		AggregateRequest,
+		CreateManyRequest,
+		UpdateManyRequest,
+		DeleteManyRequest,
+		UpsertRequest,
+		UpsertManyRequest,
 		collectionName,
 		entitySchema,
 	};
@@ -696,8 +1037,12 @@ export function makeCollectionRpcs<
  * - create: Create a new entity
  * - update: Update an existing entity by ID
  * - delete: Delete an entity by ID
- *
- * Additional procedures (batch ops) will be added in subsequent tasks.
+ * - aggregate: Compute aggregates (count, sum, avg, min, max) with optional groupBy
+ * - createMany: Create multiple entities in batch
+ * - updateMany: Update multiple entities matching a predicate
+ * - deleteMany: Delete multiple entities matching a predicate
+ * - upsert: Create or update an entity based on a where clause
+ * - upsertMany: Create or update multiple entities in batch
  *
  * @param config - The database configuration
  * @returns A mapping of collection names to their RPC definitions
@@ -739,8 +1084,12 @@ export function makeCollectionRpcs<
  *   db.books.aggregate({ count: req.count, groupBy: req.groupBy, ...req })
  * )
  *
+ * const createManyBooks = Rpc.effect(rpcs.books.CreateManyRequest, (req) =>
+ *   db.books.createMany(req.data, req.options)
+ * )
+ *
  * // Build a router
- * const router = RpcRouter.make(findBookById, queryBooks, createBook, updateBook, deleteBook, aggregateBooks)
+ * const router = RpcRouter.make(findBookById, queryBooks, createBook, updateBook, deleteBook, aggregateBooks, createManyBooks)
  * ```
  */
 export function makeRpcGroup<Config extends DatabaseConfig>(
