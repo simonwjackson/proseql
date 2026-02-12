@@ -8,7 +8,6 @@
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../src/factories/database-effect.js";
-import { PluginError } from "../src/errors/plugin-errors.js";
 import type {
 	CustomIdGenerator,
 	CustomOperator,
@@ -253,7 +252,10 @@ const createCounterGenerator = (prefix: string): CustomIdGenerator => {
 /**
  * A static ID generator for predictable testing.
  */
-const createStaticGenerator = (name: string, id: string): CustomIdGenerator => ({
+const _createStaticGenerator = (
+	name: string,
+	id: string,
+): CustomIdGenerator => ({
 	name,
 	generate: () => id,
 });
@@ -301,7 +303,10 @@ describe("Plugin System", () => {
 			// Track hook execution
 			let hookCalled = false;
 
-			const operatorPlugin = createOperatorPlugin("regex-plugin", regexOperator);
+			const operatorPlugin = createOperatorPlugin(
+				"regex-plugin",
+				regexOperator,
+			);
 			const generatorPlugin = createIdGeneratorPlugin(
 				"counter-plugin",
 				createCounterGenerator("test"),
@@ -327,11 +332,9 @@ describe("Plugin System", () => {
 
 			// Verify custom operator is merged and functional
 			// The $regex operator should be able to query books
-			const regexResults = await db.books
-				.query({
-					where: { title: { $regex: "^The.*" } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const regexResults = await db.books.query({
+				where: { title: { $regex: "^The.*" } } as Record<string, unknown>,
+			}).runPromise;
 
 			// Should match "The Great Gatsby" but not "1984" or "Dune"
 			expect(regexResults.length).toBe(1);
@@ -340,15 +343,13 @@ describe("Plugin System", () => {
 			// Verify global hooks are merged and functional
 			// Create a new book to trigger beforeCreate hook
 			hookCalled = false;
-			await db.books
-				.create({
-					id: "b4",
-					title: "New Book",
-					author: "Test Author",
-					year: 2024,
-					genre: "test",
-				})
-				.runPromise;
+			await db.books.create({
+				id: "b4",
+				title: "New Book",
+				author: "Test Author",
+				year: 2024,
+				genre: "test",
+			}).runPromise;
 
 			expect(hookCalled).toBe(true);
 		});
@@ -393,7 +394,10 @@ describe("Plugin System", () => {
 				// missing evaluate function
 			} as unknown as CustomOperator;
 
-			const invalidPlugin = createOperatorPlugin("invalid-plugin", malformedOperator);
+			const invalidPlugin = createOperatorPlugin(
+				"invalid-plugin",
+				malformedOperator,
+			);
 
 			const result = await Effect.runPromise(
 				createEffectDatabase(baseConfig, initialData, {
@@ -507,7 +511,10 @@ describe("Plugin System", () => {
 			expect(db.books).toBeDefined();
 
 			// Also verify reverse order works (dependency resolution is not order-dependent)
-			const db2 = await createDatabaseWithPlugins([dependentPlugin, basePlugin]);
+			const db2 = await createDatabaseWithPlugins([
+				dependentPlugin,
+				basePlugin,
+			]);
 
 			expect(db2).toBeDefined();
 			expect(db2.books).toBeDefined();
@@ -717,15 +724,13 @@ describe("Plugin System", () => {
 			expect(allBooks.length).toBe(2);
 
 			// Create a new book
-			const newBook = await db.books
-				.create({
-					id: "b3",
-					title: "Neuromancer",
-					author: "William Gibson",
-					year: 1984,
-					genre: "cyberpunk",
-				})
-				.runPromise;
+			const newBook = await db.books.create({
+				id: "b3",
+				title: "Neuromancer",
+				author: "William Gibson",
+				year: 1984,
+				genre: "cyberpunk",
+			}).runPromise;
 
 			expect(newBook.id).toBe("b3");
 			expect(newBook.title).toBe("Neuromancer");
@@ -739,7 +744,9 @@ describe("Plugin System", () => {
 			expect(csvContent).toContain("id,title,author,year,genre");
 			expect(csvContent).toContain("b1,Dune,Frank Herbert,1965,sci-fi");
 			expect(csvContent).toContain("b2,1984,George Orwell,1949,dystopian");
-			expect(csvContent).toContain("b3,Neuromancer,William Gibson,1984,cyberpunk");
+			expect(csvContent).toContain(
+				"b3,Neuromancer,William Gibson,1984,cyberpunk",
+			);
 
 			// Now test deserialization by creating a new database from the same store
 			// This verifies the codec can load the data it wrote
@@ -831,9 +838,7 @@ describe("Plugin System", () => {
 				const { makeSerializerLayer } = await import(
 					"../src/serializers/format-codec.js"
 				);
-				const { jsonCodec } = await import(
-					"../src/serializers/codecs/json.js"
-				);
+				const { jsonCodec } = await import("../src/serializers/codecs/json.js");
 				const { createPersistentEffectDatabase } = await import(
 					"../src/factories/database-effect.js"
 				);
@@ -888,9 +893,7 @@ describe("Plugin System", () => {
 				expect(db.books).toBeDefined();
 
 				// Perform a CRUD operation to trigger persistence scheduling
-				await db.books
-					.update("b1", { genre: "science-fiction" })
-					.runPromise;
+				await db.books.update("b1", { genre: "science-fiction" }).runPromise;
 
 				// Flush to trigger persistence
 				await db.flush();
@@ -1072,23 +1075,19 @@ describe("Plugin System", () => {
 			expect(authors[0].name).toBe("Frank Herbert");
 
 			// Create records in both collections
-			const newBook = await db.books
-				.create({
-					id: "b2",
-					title: "Neuromancer",
-					author: "William Gibson",
-					year: 1984,
-					genre: "cyberpunk",
-				})
-				.runPromise;
+			const newBook = await db.books.create({
+				id: "b2",
+				title: "Neuromancer",
+				author: "William Gibson",
+				year: 1984,
+				genre: "cyberpunk",
+			}).runPromise;
 			expect(newBook.id).toBe("b2");
 
-			const newAuthor = await db.authors
-				.create({
-					id: "a2",
-					name: "William Gibson",
-				})
-				.runPromise;
+			const newAuthor = await db.authors.create({
+				id: "a2",
+				name: "William Gibson",
+			}).runPromise;
 			expect(newAuthor.id).toBe("a2");
 
 			// Flush to trigger persistence
@@ -1099,7 +1098,9 @@ describe("Plugin System", () => {
 			expect(csvContent).toBeDefined();
 			expect(csvContent).toContain("id,title,author,year,genre");
 			expect(csvContent).toContain("b1,Dune,Frank Herbert,1965,sci-fi");
-			expect(csvContent).toContain("b2,Neuromancer,William Gibson,1984,cyberpunk");
+			expect(csvContent).toContain(
+				"b2,Neuromancer,William Gibson,1984,cyberpunk",
+			);
 
 			// Verify the TSV file was written with correct format
 			const tsvContent = store.get("/data/authors.tsv");
@@ -1157,31 +1158,25 @@ describe("Plugin System", () => {
 			// Query using the custom $regex operator
 			// Our test data has: "The Great Gatsby", "1984", "Dune"
 			// Only "The Great Gatsby" starts with "The"
-			const startsWithThe = await db.books
-				.query({
-					where: { title: { $regex: "^The.*" } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const startsWithThe = await db.books.query({
+				where: { title: { $regex: "^The.*" } } as Record<string, unknown>,
+			}).runPromise;
 
 			expect(startsWithThe.length).toBe(1);
 			expect(startsWithThe[0].title).toBe("The Great Gatsby");
 
 			// Test another regex pattern: contains numbers
-			const containsNumbers = await db.books
-				.query({
-					where: { title: { $regex: "\\d+" } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const containsNumbers = await db.books.query({
+				where: { title: { $regex: "\\d+" } } as Record<string, unknown>,
+			}).runPromise;
 
 			expect(containsNumbers.length).toBe(1);
 			expect(containsNumbers[0].title).toBe("1984");
 
 			// Test pattern that matches multiple books
-			const containsE = await db.books
-				.query({
-					where: { title: { $regex: "e" } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const containsE = await db.books.query({
+				where: { title: { $regex: "e" } } as Record<string, unknown>,
+			}).runPromise;
 
 			// "The Great Gatsby" contains 'e', "Dune" contains 'e'
 			expect(containsE.length).toBe(2);
@@ -1189,32 +1184,26 @@ describe("Plugin System", () => {
 			expect(titles).toEqual(["Dune", "The Great Gatsby"]);
 
 			// Test pattern that matches nothing
-			const noMatch = await db.books
-				.query({
-					where: { title: { $regex: "^ZZZZZ" } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const noMatch = await db.books.query({
+				where: { title: { $regex: "^ZZZZZ" } } as Record<string, unknown>,
+			}).runPromise;
 
 			expect(noMatch.length).toBe(0);
 
 			// Test case-insensitive pattern using regex flags
-			const caseInsensitive = await db.books
-				.query({
-					where: { title: { $regex: "^the" } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const caseInsensitive = await db.books.query({
+				where: { title: { $regex: "^the" } } as Record<string, unknown>,
+			}).runPromise;
 
 			// Should NOT match because regex is case-sensitive by default
 			expect(caseInsensitive.length).toBe(0);
 
 			// Test with explicit case-insensitive flag in the pattern
-			const caseInsensitiveWithFlag = await db.books
-				.query({
-					where: {
-						title: { $regex: "(?i)^the" },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const caseInsensitiveWithFlag = await db.books.query({
+				where: {
+					title: { $regex: "(?i)^the" },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			// JavaScript regex doesn't support inline flags like (?i), so this won't match
 			// The $regex operator passes the pattern directly to new RegExp()
@@ -1233,22 +1222,18 @@ describe("Plugin System", () => {
 			const db = await createDatabaseWithPlugins([regexPlugin]);
 
 			// Test 1: $regex on string field (title) - should work normally
-			const stringFieldMatch = await db.books
-				.query({
-					where: { title: { $regex: "^The.*" } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const stringFieldMatch = await db.books.query({
+				where: { title: { $regex: "^The.*" } } as Record<string, unknown>,
+			}).runPromise;
 
 			expect(stringFieldMatch.length).toBe(1);
 			expect(stringFieldMatch[0].title).toBe("The Great Gatsby");
 
 			// Test 2: $regex on number field (year) - should be ignored
 			// Since the operator is ignored for number fields, all records match
-			const numberFieldMatch = await db.books
-				.query({
-					where: { year: { $regex: "^19.*" } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const numberFieldMatch = await db.books.query({
+				where: { year: { $regex: "^19.*" } } as Record<string, unknown>,
+			}).runPromise;
 
 			// Since $regex is declared for "string" only, it's silently ignored for number fields
 			// This means no filter is applied and all 3 books are returned
@@ -1256,16 +1241,14 @@ describe("Plugin System", () => {
 
 			// Test 3: Combine with a built-in operator to verify the type-constraint behavior
 			// $regex on number should be ignored, $gte on number should work
-			const combinedQuery = await db.books
-				.query({
-					where: {
-						year: {
-							$regex: "^19.*", // This is ignored for number fields
-							$gte: 1960, // This should work (only Dune with year 1965 matches)
-						},
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const combinedQuery = await db.books.query({
+				where: {
+					year: {
+						$regex: "^19.*", // This is ignored for number fields
+						$gte: 1960, // This should work (only Dune with year 1965 matches)
+					},
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			// Only Dune (1965) should match the $gte: 1960 filter
 			// The $regex is ignored because year is a number, not a string
@@ -1283,25 +1266,24 @@ describe("Plugin System", () => {
 				},
 			};
 
-			const numericPlugin = createOperatorPlugin("numeric-plugin", numericOnlyOperator);
+			const numericPlugin = createOperatorPlugin(
+				"numeric-plugin",
+				numericOnlyOperator,
+			);
 			const db2 = await createDatabaseWithPlugins([numericPlugin]);
 
 			// Test $isEven on number field (year) - should work
-			const evenYears = await db2.books
-				.query({
-					where: { year: { $isEven: true } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const evenYears = await db2.books.query({
+				where: { year: { $isEven: true } } as Record<string, unknown>,
+			}).runPromise;
 
 			// 1925 is odd, 1949 is odd, 1965 is odd - none are even
 			expect(evenYears.length).toBe(0);
 
 			// Test $isEven on string field (genre) - should be ignored
-			const evenOnString = await db2.books
-				.query({
-					where: { genre: { $isEven: true } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const evenOnString = await db2.books.query({
+				where: { genre: { $isEven: true } } as Record<string, unknown>,
+			}).runPromise;
 
 			// Since $isEven only supports "number", it's ignored for string fields
 			// All 3 books are returned
@@ -1321,11 +1303,9 @@ describe("Plugin System", () => {
 			const db3 = await createDatabaseWithPlugins([boolPlugin]);
 
 			// Apply $isTrue to string field - should be ignored
-			const boolOnString = await db3.books
-				.query({
-					where: { title: { $isTrue: true } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const boolOnString = await db3.books.query({
+				where: { title: { $isTrue: true } } as Record<string, unknown>,
+			}).runPromise;
 
 			// Since $isTrue only supports "boolean", it's ignored for string fields
 			// All 3 books are returned
@@ -1342,7 +1322,10 @@ describe("Plugin System", () => {
 			// Then we use both operators in the same query to verify they work together.
 
 			const regexPlugin = createOperatorPlugin("regex-plugin", regexOperator);
-			const betweenPlugin = createOperatorPlugin("between-plugin", betweenOperator);
+			const betweenPlugin = createOperatorPlugin(
+				"between-plugin",
+				betweenOperator,
+			);
 
 			const db = await createDatabaseWithPlugins([regexPlugin, betweenPlugin]);
 
@@ -1360,14 +1343,12 @@ describe("Plugin System", () => {
 			// year between 1940-1970 matches 1984 (1949) and Dune (1965)
 			// Intersection: Dune (1965, contains 'e')
 
-			const combinedQuery = await db.books
-				.query({
-					where: {
-						title: { $regex: "e" },
-						year: { $between: [1940, 1970] },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const combinedQuery = await db.books.query({
+				where: {
+					title: { $regex: "e" },
+					year: { $between: [1940, 1970] },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(combinedQuery.length).toBe(1);
 			expect(combinedQuery[0].title).toBe("Dune");
@@ -1378,14 +1359,12 @@ describe("Plugin System", () => {
 			// "The Great Gatsby" has year 1925 (outside range)
 			// No books match both conditions
 
-			const noMatchQuery = await db.books
-				.query({
-					where: {
-						title: { $regex: "^The" },
-						year: { $between: [1960, 1980] },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const noMatchQuery = await db.books.query({
+				where: {
+					title: { $regex: "^The" },
+					year: { $between: [1960, 1980] },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(noMatchQuery.length).toBe(0);
 
@@ -1393,14 +1372,12 @@ describe("Plugin System", () => {
 			// $regex for any title (matches all) AND $between for all years (matches all)
 			// Should return all books
 
-			const allMatchQuery = await db.books
-				.query({
-					where: {
-						title: { $regex: ".*" },
-						year: { $between: [1900, 2000] },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const allMatchQuery = await db.books.query({
+				where: {
+					title: { $regex: ".*" },
+					year: { $between: [1900, 2000] },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(allMatchQuery.length).toBe(3);
 
@@ -1414,7 +1391,10 @@ describe("Plugin System", () => {
 				},
 			};
 
-			const digitPlugin = createOperatorPlugin("digit-plugin", containsDigitOperator);
+			const digitPlugin = createOperatorPlugin(
+				"digit-plugin",
+				containsDigitOperator,
+			);
 
 			const db2 = await createDatabaseWithPlugins([
 				regexPlugin,
@@ -1428,15 +1408,13 @@ describe("Plugin System", () => {
 			// Filter: genre matches ".*", year between 1940-1970, title has digit
 			// Expected: "1984" (year 1949, title has digit "1984", genre "dystopian")
 
-			const threeOperatorQuery = await db2.books
-				.query({
-					where: {
-						genre: { $regex: ".*" }, // matches all
-						year: { $between: [1940, 1970] }, // matches 1984 (1949) and Dune (1965)
-						title: { $hasDigit: true }, // matches only "1984"
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const threeOperatorQuery = await db2.books.query({
+				where: {
+					genre: { $regex: ".*" }, // matches all
+					year: { $between: [1940, 1970] }, // matches 1984 (1949) and Dune (1965)
+					title: { $hasDigit: true }, // matches only "1984"
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(threeOperatorQuery.length).toBe(1);
 			expect(threeOperatorQuery[0].title).toBe("1984");
@@ -1462,14 +1440,12 @@ describe("Plugin System", () => {
 			// "The Great Gatsby" has 'e' and year 1925 (fails year > 1940)
 			// "1984" has no 'e' (fails regex)
 			// "Dune" has 'e' and year 1965 (passes both)
-			const regexAndGt = await db.books
-				.query({
-					where: {
-						title: { $regex: ".*e.*" },
-						year: { $gt: 1940 },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const regexAndGt = await db.books.query({
+				where: {
+					title: { $regex: ".*e.*" },
+					year: { $gt: 1940 },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(regexAndGt.length).toBe(1);
 			expect(regexAndGt[0].title).toBe("Dune");
@@ -1477,14 +1453,12 @@ describe("Plugin System", () => {
 			// Test 2: Custom $regex + built-in $eq on different fields
 			// Query: title matches regex "^D" AND genre equals "sci-fi"
 			// Only "Dune" starts with "D" and has genre "sci-fi"
-			const regexAndEq = await db.books
-				.query({
-					where: {
-						title: { $regex: "^D" },
-						genre: { $eq: "sci-fi" },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const regexAndEq = await db.books.query({
+				where: {
+					title: { $regex: "^D" },
+					genre: { $eq: "sci-fi" },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(regexAndEq.length).toBe(1);
 			expect(regexAndEq[0].title).toBe("Dune");
@@ -1494,14 +1468,12 @@ describe("Plugin System", () => {
 			// "The Great Gatsby" - genre "fiction" (matches)
 			// "1984" - genre "dystopian" (matches)
 			// "Dune" - genre "sci-fi" (doesn't match $in)
-			const regexAndIn = await db.books
-				.query({
-					where: {
-						title: { $regex: ".*" },
-						genre: { $in: ["fiction", "dystopian"] },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const regexAndIn = await db.books.query({
+				where: {
+					title: { $regex: ".*" },
+					genre: { $in: ["fiction", "dystopian"] },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(regexAndIn.length).toBe(2);
 			const genresMatched = regexAndIn.map((b) => b.genre).sort();
@@ -1510,14 +1482,12 @@ describe("Plugin System", () => {
 			// Test 4: Custom $regex + built-in $gte and $lte (range query)
 			// Query: title matches "^The" AND year between 1920 and 1930
 			// Only "The Great Gatsby" matches both conditions
-			const regexAndRange = await db.books
-				.query({
-					where: {
-						title: { $regex: "^The" },
-						year: { $gte: 1920, $lte: 1930 },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const regexAndRange = await db.books.query({
+				where: {
+					title: { $regex: "^The" },
+					year: { $gte: 1920, $lte: 1930 },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(regexAndRange.length).toBe(1);
 			expect(regexAndRange[0].title).toBe("The Great Gatsby");
@@ -1527,14 +1497,12 @@ describe("Plugin System", () => {
 			// Query: title matches "e" AND genre is NOT "fiction"
 			// "The Great Gatsby" has 'e' but genre is "fiction" (fails $ne)
 			// "Dune" has 'e' and genre is "sci-fi" (passes both)
-			const regexAndNe = await db.books
-				.query({
-					where: {
-						title: { $regex: "e" },
-						genre: { $ne: "fiction" },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const regexAndNe = await db.books.query({
+				where: {
+					title: { $regex: "e" },
+					genre: { $ne: "fiction" },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(regexAndNe.length).toBe(1);
 			expect(regexAndNe[0].title).toBe("Dune");
@@ -1542,14 +1510,12 @@ describe("Plugin System", () => {
 			// Test 6: Custom $regex + built-in $nin
 			// Query: title matches ".*" (all) AND genre NOT in ["sci-fi", "dystopian"]
 			// Only "The Great Gatsby" with genre "fiction" should match
-			const regexAndNin = await db.books
-				.query({
-					where: {
-						title: { $regex: ".*" },
-						genre: { $nin: ["sci-fi", "dystopian"] },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const regexAndNin = await db.books.query({
+				where: {
+					title: { $regex: ".*" },
+					genre: { $nin: ["sci-fi", "dystopian"] },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(regexAndNin.length).toBe(1);
 			expect(regexAndNin[0].title).toBe("The Great Gatsby");
@@ -1557,14 +1523,12 @@ describe("Plugin System", () => {
 			// Test 7: Custom $regex + built-in $contains (string contains)
 			// Query: title matches regex "\\d" (has digit) AND author contains "George"
 			// Only "1984" has digits in title and author "George Orwell" contains "George"
-			const regexAndContains = await db.books
-				.query({
-					where: {
-						title: { $regex: "\\d" },
-						author: { $contains: "George" },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const regexAndContains = await db.books.query({
+				where: {
+					title: { $regex: "\\d" },
+					author: { $contains: "George" },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(regexAndContains.length).toBe(1);
 			expect(regexAndContains[0].title).toBe("1984");
@@ -1575,14 +1539,12 @@ describe("Plugin System", () => {
 			// "The Great Gatsby" has 'a' and author "F. Scott Fitzgerald" starts with 'F'
 			// "1984" has no 'a' in title
 			// "Dune" has no 'a' in title
-			const regexAndStartsWith = await db.books
-				.query({
-					where: {
-						title: { $regex: ".*a.*" },
-						author: { $startsWith: "F" },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const regexAndStartsWith = await db.books.query({
+				where: {
+					title: { $regex: ".*a.*" },
+					author: { $startsWith: "F" },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(regexAndStartsWith.length).toBe(1);
 			expect(regexAndStartsWith[0].title).toBe("The Great Gatsby");
@@ -1591,14 +1553,12 @@ describe("Plugin System", () => {
 			// Query: year > 1940, year < 1970, AND title matches "^D"
 			// This tests operators on same field (year) combined with custom operator on another
 			// "Dune" has year 1965 (between 1940 and 1970) and title starts with "D"
-			const multiBuiltInAndCustom = await db.books
-				.query({
-					where: {
-						year: { $gt: 1940, $lt: 1970 },
-						title: { $regex: "^D" },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const multiBuiltInAndCustom = await db.books.query({
+				where: {
+					year: { $gt: 1940, $lt: 1970 },
+					title: { $regex: "^D" },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(multiBuiltInAndCustom.length).toBe(1);
 			expect(multiBuiltInAndCustom[0].title).toBe("Dune");
@@ -1606,14 +1566,12 @@ describe("Plugin System", () => {
 			// Test 10: Custom $regex + built-in $endsWith on different fields
 			// Query: genre ends with "fi" AND title matches regex ".*u.*"
 			// "sci-fi" ends with "fi", "Dune" contains 'u'
-			const regexAndEndsWith = await db.books
-				.query({
-					where: {
-						genre: { $endsWith: "fi" },
-						title: { $regex: ".*u.*" },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const regexAndEndsWith = await db.books.query({
+				where: {
+					genre: { $endsWith: "fi" },
+					title: { $regex: ".*u.*" },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(regexAndEndsWith.length).toBe(1);
 			expect(regexAndEndsWith[0].title).toBe("Dune");
@@ -1621,30 +1579,26 @@ describe("Plugin System", () => {
 
 			// Test 11: No results when custom and built-in operators both filter out everything
 			// Query: title matches "^Z" (nothing) AND year > 0 (everything)
-			const noResults = await db.books
-				.query({
-					where: {
-						title: { $regex: "^Z" },
-						year: { $gt: 0 },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const noResults = await db.books.query({
+				where: {
+					title: { $regex: "^Z" },
+					year: { $gt: 0 },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(noResults.length).toBe(0);
 
 			// Test 12: Custom operator with multiple built-in operators across many fields
 			// Query: title matches regex ".*", genre equals "dystopian", year > 1945, author contains "Orwell"
 			// Only "1984" by George Orwell (1949, dystopian) matches all conditions
-			const complexQuery = await db.books
-				.query({
-					where: {
-						title: { $regex: ".*" },
-						genre: { $eq: "dystopian" },
-						year: { $gt: 1945 },
-						author: { $contains: "Orwell" },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const complexQuery = await db.books.query({
+				where: {
+					title: { $regex: ".*" },
+					genre: { $eq: "dystopian" },
+					year: { $gt: 1945 },
+					author: { $contains: "Orwell" },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			expect(complexQuery.length).toBe(1);
 			expect(complexQuery[0].title).toBe("1984");
@@ -1668,7 +1622,10 @@ describe("Plugin System", () => {
 			// was called for BOTH collections.
 
 			// Track hook invocations
-			const hookCalls: Array<{ collection: string; data: Record<string, unknown> }> = [];
+			const hookCalls: Array<{
+				collection: string;
+				data: Record<string, unknown>;
+			}> = [];
 
 			const globalHooksPlugin = createHooksPlugin("global-hooks-plugin", {
 				beforeCreate: [
@@ -1688,15 +1645,13 @@ describe("Plugin System", () => {
 			expect(hookCalls.length).toBe(0);
 
 			// Create a book - should trigger global hook for books collection
-			const book = await db.books
-				.create({
-					id: "b-test-1",
-					title: "Test Book",
-					author: "Test Author",
-					year: 2024,
-					genre: "test",
-				})
-				.runPromise;
+			const book = await db.books.create({
+				id: "b-test-1",
+				title: "Test Book",
+				author: "Test Author",
+				year: 2024,
+				genre: "test",
+			}).runPromise;
 
 			// Verify hook was called for books collection
 			expect(hookCalls.length).toBe(1);
@@ -1705,12 +1660,10 @@ describe("Plugin System", () => {
 			expect(book.title).toBe("Test Book");
 
 			// Create an author - should trigger global hook for authors collection
-			const author = await db.authors
-				.create({
-					id: "a-test-1",
-					name: "New Author",
-				})
-				.runPromise;
+			const author = await db.authors.create({
+				id: "a-test-1",
+				name: "New Author",
+			}).runPromise;
 
 			// Verify hook was called for authors collection
 			expect(hookCalls.length).toBe(2);
@@ -1719,15 +1672,13 @@ describe("Plugin System", () => {
 			expect(author.name).toBe("New Author");
 
 			// Create another book - should trigger again for books
-			await db.books
-				.create({
-					id: "b-test-2",
-					title: "Another Book",
-					author: "Another Author",
-					year: 2025,
-					genre: "fiction",
-				})
-				.runPromise;
+			await db.books.create({
+				id: "b-test-2",
+				title: "Another Book",
+				author: "Another Author",
+				year: 2025,
+				genre: "fiction",
+			}).runPromise;
 
 			// Verify hook was called a third time for books
 			expect(hookCalls.length).toBe(3);
@@ -1775,15 +1726,13 @@ describe("Plugin System", () => {
 			expect(hookCalls.length).toBe(0);
 
 			// Create a book - should trigger global afterCreate hook for books collection
-			const book = await db.books
-				.create({
-					id: "b-after-1",
-					title: "Test Book After",
-					author: "Test Author",
-					year: 2024,
-					genre: "test",
-				})
-				.runPromise;
+			const book = await db.books.create({
+				id: "b-after-1",
+				title: "Test Book After",
+				author: "Test Author",
+				year: 2024,
+				genre: "test",
+			}).runPromise;
 
 			// Verify afterCreate hook was called for books collection
 			expect(hookCalls.length).toBe(1);
@@ -1793,12 +1742,10 @@ describe("Plugin System", () => {
 			expect(book.title).toBe("Test Book After");
 
 			// Create an author - should trigger global afterCreate hook for authors collection
-			const author = await db.authors
-				.create({
-					id: "a-after-1",
-					name: "New Author After",
-				})
-				.runPromise;
+			const author = await db.authors.create({
+				id: "a-after-1",
+				name: "New Author After",
+			}).runPromise;
 
 			// Verify afterCreate hook was called for authors collection
 			expect(hookCalls.length).toBe(2);
@@ -1808,15 +1755,13 @@ describe("Plugin System", () => {
 			expect(author.name).toBe("New Author After");
 
 			// Create another book - should trigger afterCreate again for books
-			await db.books
-				.create({
-					id: "b-after-2",
-					title: "Another Book After",
-					author: "Another Author",
-					year: 2025,
-					genre: "fiction",
-				})
-				.runPromise;
+			await db.books.create({
+				id: "b-after-2",
+				title: "Another Book After",
+				author: "Another Author",
+				year: 2025,
+				genre: "fiction",
+			}).runPromise;
 
 			// Verify afterCreate hook was called a third time for books
 			expect(hookCalls.length).toBe(3);
@@ -1838,7 +1783,9 @@ describe("Plugin System", () => {
 			expect(bookHookCalls[0].entity.title).toBe("Test Book After");
 			expect(bookHookCalls[0].entity.year).toBe(2024);
 
-			const authorHookCalls = hookCalls.filter((c) => c.collection === "authors");
+			const authorHookCalls = hookCalls.filter(
+				(c) => c.collection === "authors",
+			);
 			expect(authorHookCalls[0].entity.id).toBe("a-after-1");
 			expect(authorHookCalls[0].entity.name).toBe("New Author After");
 		});
@@ -1941,32 +1888,38 @@ describe("Plugin System", () => {
 
 			// Create database with plugin and collection hooks
 			const db = await Effect.runPromise(
-				createEffectDatabase(configWithHooks, { books: [] }, { plugins: [globalHooksPlugin] }),
+				createEffectDatabase(
+					configWithHooks,
+					{ books: [] },
+					{ plugins: [globalHooksPlugin] },
+				),
 			);
 
 			// Test 1: CREATE - global beforeCreate should run before collection beforeCreate
 			executionOrder.length = 0; // Reset
 
-			await db.books
-				.create({
-					id: "order-test-1",
-					title: "Order Test Book",
-					author: "Test Author",
-					year: 2024,
-					genre: "test",
-				})
-				.runPromise;
+			await db.books.create({
+				id: "order-test-1",
+				title: "Order Test Book",
+				author: "Test Author",
+				year: 2024,
+				genre: "test",
+			}).runPromise;
 
 			// Verify beforeCreate order: global first, then collection
 			const createBeforeIndex = executionOrder.indexOf("global-beforeCreate");
-			const collectionBeforeIndex = executionOrder.indexOf("collection-beforeCreate");
+			const collectionBeforeIndex = executionOrder.indexOf(
+				"collection-beforeCreate",
+			);
 			expect(createBeforeIndex).toBeLessThan(collectionBeforeIndex);
 			expect(executionOrder).toContain("global-beforeCreate");
 			expect(executionOrder).toContain("collection-beforeCreate");
 
 			// Verify afterCreate order: global first, then collection
 			const createAfterIndex = executionOrder.indexOf("global-afterCreate");
-			const collectionAfterIndex = executionOrder.indexOf("collection-afterCreate");
+			const collectionAfterIndex = executionOrder.indexOf(
+				"collection-afterCreate",
+			);
 			expect(createAfterIndex).toBeLessThan(collectionAfterIndex);
 			expect(executionOrder).toContain("global-afterCreate");
 			expect(executionOrder).toContain("collection-afterCreate");
@@ -1974,20 +1927,25 @@ describe("Plugin System", () => {
 			// Test 2: UPDATE - global beforeUpdate should run before collection beforeUpdate
 			executionOrder.length = 0; // Reset
 
-			await db.books
-				.update("order-test-1", { genre: "updated" })
-				.runPromise;
+			await db.books.update("order-test-1", { genre: "updated" }).runPromise;
 
 			// Verify beforeUpdate order: global first, then collection
-			const updateBeforeGlobalIndex = executionOrder.indexOf("global-beforeUpdate");
-			const updateBeforeCollectionIndex = executionOrder.indexOf("collection-beforeUpdate");
+			const updateBeforeGlobalIndex = executionOrder.indexOf(
+				"global-beforeUpdate",
+			);
+			const updateBeforeCollectionIndex = executionOrder.indexOf(
+				"collection-beforeUpdate",
+			);
 			expect(updateBeforeGlobalIndex).toBeLessThan(updateBeforeCollectionIndex);
 			expect(executionOrder).toContain("global-beforeUpdate");
 			expect(executionOrder).toContain("collection-beforeUpdate");
 
 			// Verify afterUpdate order: global first, then collection
-			const updateAfterGlobalIndex = executionOrder.indexOf("global-afterUpdate");
-			const updateAfterCollectionIndex = executionOrder.indexOf("collection-afterUpdate");
+			const updateAfterGlobalIndex =
+				executionOrder.indexOf("global-afterUpdate");
+			const updateAfterCollectionIndex = executionOrder.indexOf(
+				"collection-afterUpdate",
+			);
 			expect(updateAfterGlobalIndex).toBeLessThan(updateAfterCollectionIndex);
 			expect(executionOrder).toContain("global-afterUpdate");
 			expect(executionOrder).toContain("collection-afterUpdate");
@@ -1998,15 +1956,22 @@ describe("Plugin System", () => {
 			await db.books.delete("order-test-1").runPromise;
 
 			// Verify beforeDelete order: global first, then collection
-			const deleteBeforeGlobalIndex = executionOrder.indexOf("global-beforeDelete");
-			const deleteBeforeCollectionIndex = executionOrder.indexOf("collection-beforeDelete");
+			const deleteBeforeGlobalIndex = executionOrder.indexOf(
+				"global-beforeDelete",
+			);
+			const deleteBeforeCollectionIndex = executionOrder.indexOf(
+				"collection-beforeDelete",
+			);
 			expect(deleteBeforeGlobalIndex).toBeLessThan(deleteBeforeCollectionIndex);
 			expect(executionOrder).toContain("global-beforeDelete");
 			expect(executionOrder).toContain("collection-beforeDelete");
 
 			// Verify afterDelete order: global first, then collection
-			const deleteAfterGlobalIndex = executionOrder.indexOf("global-afterDelete");
-			const deleteAfterCollectionIndex = executionOrder.indexOf("collection-afterDelete");
+			const deleteAfterGlobalIndex =
+				executionOrder.indexOf("global-afterDelete");
+			const deleteAfterCollectionIndex = executionOrder.indexOf(
+				"collection-afterDelete",
+			);
 			expect(deleteAfterGlobalIndex).toBeLessThan(deleteAfterCollectionIndex);
 			expect(executionOrder).toContain("global-afterDelete");
 			expect(executionOrder).toContain("collection-afterDelete");
@@ -2149,15 +2114,13 @@ describe("Plugin System", () => {
 			// Test 1: CREATE - verify beforeCreate and afterCreate hook ordering
 			executionOrder.length = 0; // Reset
 
-			await db.books
-				.create({
-					id: "order-test-1",
-					title: "Order Test Book",
-					author: "Test Author",
-					year: 2024,
-					genre: "test",
-				})
-				.runPromise;
+			await db.books.create({
+				id: "order-test-1",
+				title: "Order Test Book",
+				author: "Test Author",
+				year: 2024,
+				genre: "test",
+			}).runPromise;
 
 			// Verify beforeCreate hooks ran in plugin registration order: 1, 2, 3
 			const beforeCreate1 = executionOrder.indexOf("plugin1-beforeCreate");
@@ -2184,9 +2147,7 @@ describe("Plugin System", () => {
 			// Test 2: UPDATE - verify beforeUpdate and afterUpdate hook ordering
 			executionOrder.length = 0; // Reset
 
-			await db.books
-				.update("order-test-1", { genre: "updated" })
-				.runPromise;
+			await db.books.update("order-test-1", { genre: "updated" }).runPromise;
 
 			// Verify beforeUpdate hooks ran in plugin registration order: 1, 2, 3
 			const beforeUpdate1 = executionOrder.indexOf("plugin1-beforeUpdate");
@@ -2239,24 +2200,32 @@ describe("Plugin System", () => {
 
 			// Test 4: Verify the reverse order also works correctly
 			// Register plugins in reverse order and verify hooks run in that order
-			const reverseDb = await createDatabaseWithPlugins([plugin3, plugin2, plugin1]);
+			const reverseDb = await createDatabaseWithPlugins([
+				plugin3,
+				plugin2,
+				plugin1,
+			]);
 
 			executionOrder.length = 0; // Reset
 
-			await reverseDb.books
-				.create({
-					id: "reverse-test-1",
-					title: "Reverse Order Test",
-					author: "Test Author",
-					year: 2024,
-					genre: "test",
-				})
-				.runPromise;
+			await reverseDb.books.create({
+				id: "reverse-test-1",
+				title: "Reverse Order Test",
+				author: "Test Author",
+				year: 2024,
+				genre: "test",
+			}).runPromise;
 
 			// Now plugin3's hooks should run first, then plugin2, then plugin1
-			const reverseBeforeCreate3 = executionOrder.indexOf("plugin3-beforeCreate");
-			const reverseBeforeCreate2 = executionOrder.indexOf("plugin2-beforeCreate");
-			const reverseBeforeCreate1 = executionOrder.indexOf("plugin1-beforeCreate");
+			const reverseBeforeCreate3 = executionOrder.indexOf(
+				"plugin3-beforeCreate",
+			);
+			const reverseBeforeCreate2 = executionOrder.indexOf(
+				"plugin2-beforeCreate",
+			);
+			const reverseBeforeCreate1 = executionOrder.indexOf(
+				"plugin1-beforeCreate",
+			);
 			expect(reverseBeforeCreate3).toBeLessThan(reverseBeforeCreate2);
 			expect(reverseBeforeCreate2).toBeLessThan(reverseBeforeCreate1);
 
@@ -2328,43 +2297,46 @@ describe("Plugin System", () => {
 			// ========================================
 
 			// Create a book - should trigger onChange with type "create" for books collection
-			const book = await db.books
-				.create({
-					id: "onchange-book-1",
-					title: "OnChange Test Book",
-					author: "Test Author",
-					year: 2024,
-					genre: "test",
-				})
-				.runPromise;
+			const _book = await db.books.create({
+				id: "onchange-book-1",
+				title: "OnChange Test Book",
+				author: "Test Author",
+				year: 2024,
+				genre: "test",
+			}).runPromise;
 
 			expect(onChangeCalls.length).toBe(1);
 			expect(onChangeCalls[0].type).toBe("create");
 			expect(onChangeCalls[0].collection).toBe("books");
-			expect((onChangeCalls[0].data as { id: string }).id).toBe("onchange-book-1");
-			expect((onChangeCalls[0].data as { title: string }).title).toBe("OnChange Test Book");
+			expect((onChangeCalls[0].data as { id: string }).id).toBe(
+				"onchange-book-1",
+			);
+			expect((onChangeCalls[0].data as { title: string }).title).toBe(
+				"OnChange Test Book",
+			);
 
 			// Create an author - should trigger onChange with type "create" for authors collection
-			const author = await db.authors
-				.create({
-					id: "onchange-author-1",
-					name: "OnChange Test Author",
-				})
-				.runPromise;
+			const _author = await db.authors.create({
+				id: "onchange-author-1",
+				name: "OnChange Test Author",
+			}).runPromise;
 
 			expect(onChangeCalls.length).toBe(2);
 			expect(onChangeCalls[1].type).toBe("create");
 			expect(onChangeCalls[1].collection).toBe("authors");
-			expect((onChangeCalls[1].data as { id: string }).id).toBe("onchange-author-1");
-			expect((onChangeCalls[1].data as { name: string }).name).toBe("OnChange Test Author");
+			expect((onChangeCalls[1].data as { id: string }).id).toBe(
+				"onchange-author-1",
+			);
+			expect((onChangeCalls[1].data as { name: string }).name).toBe(
+				"OnChange Test Author",
+			);
 
 			// ========================================
 			// Test UPDATE on both collections
 			// ========================================
 
 			// Update the book - should trigger onChange with type "update" for books collection
-			await db.books
-				.update("onchange-book-1", { genre: "updated-genre" })
+			await db.books.update("onchange-book-1", { genre: "updated-genre" })
 				.runPromise;
 
 			expect(onChangeCalls.length).toBe(3);
@@ -2380,9 +2352,9 @@ describe("Plugin System", () => {
 			expect(updateBookData.current.genre).toBe("updated-genre");
 
 			// Update the author - should trigger onChange with type "update" for authors collection
-			await db.authors
-				.update("onchange-author-1", { name: "Updated Author Name" })
-				.runPromise;
+			await db.authors.update("onchange-author-1", {
+				name: "Updated Author Name",
+			}).runPromise;
 
 			expect(onChangeCalls.length).toBe(4);
 			expect(onChangeCalls[3].type).toBe("update");
@@ -2434,16 +2406,26 @@ describe("Plugin System", () => {
 
 			// Verify we have onChange calls for both collections
 			const bookCalls = onChangeCalls.filter((c) => c.collection === "books");
-			const authorCalls = onChangeCalls.filter((c) => c.collection === "authors");
+			const authorCalls = onChangeCalls.filter(
+				(c) => c.collection === "authors",
+			);
 
 			expect(bookCalls.length).toBe(3); // create, update, delete
 			expect(authorCalls.length).toBe(3); // create, update, delete
 
 			// Verify all operation types were captured for books
-			expect(bookCalls.map((c) => c.type)).toEqual(["create", "update", "delete"]);
+			expect(bookCalls.map((c) => c.type)).toEqual([
+				"create",
+				"update",
+				"delete",
+			]);
 
 			// Verify all operation types were captured for authors
-			expect(authorCalls.map((c) => c.type)).toEqual(["create", "update", "delete"]);
+			expect(authorCalls.map((c) => c.type)).toEqual([
+				"create",
+				"update",
+				"delete",
+			]);
 		});
 	});
 
@@ -2469,7 +2451,10 @@ describe("Plugin System", () => {
 				},
 			};
 
-			const generatorPlugin = createIdGeneratorPlugin("id-gen-plugin", customGenerator);
+			const generatorPlugin = createIdGeneratorPlugin(
+				"id-gen-plugin",
+				customGenerator,
+			);
 
 			// Create config that references the custom ID generator
 			const configWithIdGenerator = {
@@ -2482,47 +2467,45 @@ describe("Plugin System", () => {
 
 			// Create database with the plugin and custom config
 			const db = await Effect.runPromise(
-				createEffectDatabase(configWithIdGenerator, { books: [] }, { plugins: [generatorPlugin] }),
+				createEffectDatabase(
+					configWithIdGenerator,
+					{ books: [] },
+					{ plugins: [generatorPlugin] },
+				),
 			);
 
 			// Reset counter for predictable test results
 			counter = 0;
 
 			// Create first book WITHOUT providing an id
-			const book1 = await db.books
-				.create({
-					title: "Book One",
-					author: "Author One",
-					year: 2024,
-					genre: "test",
-				} as Parameters<typeof db.books.create>[0])
-				.runPromise;
+			const book1 = await db.books.create({
+				title: "Book One",
+				author: "Author One",
+				year: 2024,
+				genre: "test",
+			} as Parameters<typeof db.books.create>[0]).runPromise;
 
 			// The ID should come from the custom generator
 			expect(book1.id).toBe("custom-id-1");
 
 			// Create second book WITHOUT providing an id
-			const book2 = await db.books
-				.create({
-					title: "Book Two",
-					author: "Author Two",
-					year: 2024,
-					genre: "test",
-				} as Parameters<typeof db.books.create>[0])
-				.runPromise;
+			const book2 = await db.books.create({
+				title: "Book Two",
+				author: "Author Two",
+				year: 2024,
+				genre: "test",
+			} as Parameters<typeof db.books.create>[0]).runPromise;
 
 			// The ID should be the next value from the generator
 			expect(book2.id).toBe("custom-id-2");
 
 			// Create third book WITHOUT providing an id
-			const book3 = await db.books
-				.create({
-					title: "Book Three",
-					author: "Author Three",
-					year: 2024,
-					genre: "test",
-				} as Parameters<typeof db.books.create>[0])
-				.runPromise;
+			const book3 = await db.books.create({
+				title: "Book Three",
+				author: "Author Three",
+				year: 2024,
+				genre: "test",
+			} as Parameters<typeof db.books.create>[0]).runPromise;
 
 			expect(book3.id).toBe("custom-id-3");
 
@@ -2557,7 +2540,10 @@ describe("Plugin System", () => {
 				},
 			};
 
-			const generatorPlugin = createIdGeneratorPlugin("id-gen-explicit-plugin", customGenerator);
+			const generatorPlugin = createIdGeneratorPlugin(
+				"id-gen-explicit-plugin",
+				customGenerator,
+			);
 
 			// Create config that references the custom ID generator
 			const configWithIdGenerator = {
@@ -2570,22 +2556,24 @@ describe("Plugin System", () => {
 
 			// Create database with the plugin
 			const db = await Effect.runPromise(
-				createEffectDatabase(configWithIdGenerator, { books: [] }, { plugins: [generatorPlugin] }),
+				createEffectDatabase(
+					configWithIdGenerator,
+					{ books: [] },
+					{ plugins: [generatorPlugin] },
+				),
 			);
 
 			// Reset counter
 			counter = 0;
 
 			// Create a book WITH an explicit id - should use the provided id, not the generator
-			const book1 = await db.books
-				.create({
-					id: "my-explicit-id-1",
-					title: "Book With Explicit ID",
-					author: "Test Author",
-					year: 2024,
-					genre: "test",
-				})
-				.runPromise;
+			const book1 = await db.books.create({
+				id: "my-explicit-id-1",
+				title: "Book With Explicit ID",
+				author: "Test Author",
+				year: 2024,
+				genre: "test",
+			}).runPromise;
 
 			// The explicit ID should be used, not the generator
 			expect(book1.id).toBe("my-explicit-id-1");
@@ -2593,29 +2581,25 @@ describe("Plugin System", () => {
 			expect(counter).toBe(0);
 
 			// Create another book WITHOUT an id - should use the generator
-			const book2 = await db.books
-				.create({
-					title: "Book Without ID",
-					author: "Test Author",
-					year: 2024,
-					genre: "test",
-				} as Parameters<typeof db.books.create>[0])
-				.runPromise;
+			const book2 = await db.books.create({
+				title: "Book Without ID",
+				author: "Test Author",
+				year: 2024,
+				genre: "test",
+			} as Parameters<typeof db.books.create>[0]).runPromise;
 
 			// This one should use the generator
 			expect(book2.id).toBe("generated-id-1");
 			expect(counter).toBe(1);
 
 			// Create another book WITH an explicit id - should use provided id
-			const book3 = await db.books
-				.create({
-					id: "my-explicit-id-2",
-					title: "Another Explicit ID Book",
-					author: "Test Author",
-					year: 2024,
-					genre: "test",
-				})
-				.runPromise;
+			const book3 = await db.books.create({
+				id: "my-explicit-id-2",
+				title: "Another Explicit ID Book",
+				author: "Test Author",
+				year: 2024,
+				genre: "test",
+			}).runPromise;
 
 			expect(book3.id).toBe("my-explicit-id-2");
 			// Counter should still be 1 because generator was not called again
@@ -2626,13 +2610,19 @@ describe("Plugin System", () => {
 			expect(allBooks.length).toBe(3);
 
 			const ids = allBooks.map((b) => b.id).sort();
-			expect(ids).toEqual(["generated-id-1", "my-explicit-id-1", "my-explicit-id-2"]);
+			expect(ids).toEqual([
+				"generated-id-1",
+				"my-explicit-id-1",
+				"my-explicit-id-2",
+			]);
 
 			// Verify we can find books by their IDs
-			const foundExplicit = await db.books.findById("my-explicit-id-1").runPromise;
+			const foundExplicit =
+				await db.books.findById("my-explicit-id-1").runPromise;
 			expect(foundExplicit.title).toBe("Book With Explicit ID");
 
-			const foundGenerated = await db.books.findById("generated-id-1").runPromise;
+			const foundGenerated =
+				await db.books.findById("generated-id-1").runPromise;
 			expect(foundGenerated.title).toBe("Book Without ID");
 		});
 
@@ -2654,9 +2644,11 @@ describe("Plugin System", () => {
 
 			// Try to create database WITHOUT registering a plugin that provides this generator
 			const result = await Effect.runPromise(
-				createEffectDatabase(configWithMissingGenerator, { books: [] }, { plugins: [] }).pipe(
-					Effect.flip,
-				),
+				createEffectDatabase(
+					configWithMissingGenerator,
+					{ books: [] },
+					{ plugins: [] },
+				).pipe(Effect.flip),
 			);
 
 			// Should fail with PluginError
@@ -2689,7 +2681,10 @@ describe("Plugin System", () => {
 				},
 			};
 
-			const generatorPlugin = createIdGeneratorPlugin("batch-gen-plugin", customGenerator);
+			const generatorPlugin = createIdGeneratorPlugin(
+				"batch-gen-plugin",
+				customGenerator,
+			);
 
 			// Create config that references the custom ID generator
 			const configWithIdGenerator = {
@@ -2702,7 +2697,11 @@ describe("Plugin System", () => {
 
 			// Create database with the plugin
 			const db = await Effect.runPromise(
-				createEffectDatabase(configWithIdGenerator, { books: [] }, { plugins: [generatorPlugin] }),
+				createEffectDatabase(
+					configWithIdGenerator,
+					{ books: [] },
+					{ plugins: [generatorPlugin] },
+				),
 			);
 
 			// Reset counter for predictable test results
@@ -2710,28 +2709,26 @@ describe("Plugin System", () => {
 
 			// Test 1: createMany with all entities missing IDs
 			// Generator should be called 3 times, once per entity
-			const result1 = await db.books
-				.createMany([
-					{
-						title: "Book One",
-						author: "Author One",
-						year: 2024,
-						genre: "test",
-					} as Parameters<typeof db.books.create>[0],
-					{
-						title: "Book Two",
-						author: "Author Two",
-						year: 2024,
-						genre: "test",
-					} as Parameters<typeof db.books.create>[0],
-					{
-						title: "Book Three",
-						author: "Author Three",
-						year: 2024,
-						genre: "test",
-					} as Parameters<typeof db.books.create>[0],
-				])
-				.runPromise;
+			const result1 = await db.books.createMany([
+				{
+					title: "Book One",
+					author: "Author One",
+					year: 2024,
+					genre: "test",
+				} as Parameters<typeof db.books.create>[0],
+				{
+					title: "Book Two",
+					author: "Author Two",
+					year: 2024,
+					genre: "test",
+				} as Parameters<typeof db.books.create>[0],
+				{
+					title: "Book Three",
+					author: "Author Three",
+					year: 2024,
+					genre: "test",
+				} as Parameters<typeof db.books.create>[0],
+			]).runPromise;
 
 			// Verify 3 books were created
 			expect(result1.created.length).toBe(3);
@@ -2755,36 +2752,34 @@ describe("Plugin System", () => {
 
 			// Test 2: createMany with a mix of explicit IDs and missing IDs
 			// Only entities without IDs should use the generator
-			const result2 = await db.books
-				.createMany([
-					{
-						id: "explicit-id-1", // Explicit ID - should use this
-						title: "Book Four",
-						author: "Author Four",
-						year: 2024,
-						genre: "test",
-					},
-					{
-						title: "Book Five", // No ID - should use generator
-						author: "Author Five",
-						year: 2024,
-						genre: "test",
-					} as Parameters<typeof db.books.create>[0],
-					{
-						id: "explicit-id-2", // Explicit ID - should use this
-						title: "Book Six",
-						author: "Author Six",
-						year: 2024,
-						genre: "test",
-					},
-					{
-						title: "Book Seven", // No ID - should use generator
-						author: "Author Seven",
-						year: 2024,
-						genre: "test",
-					} as Parameters<typeof db.books.create>[0],
-				])
-				.runPromise;
+			const result2 = await db.books.createMany([
+				{
+					id: "explicit-id-1", // Explicit ID - should use this
+					title: "Book Four",
+					author: "Author Four",
+					year: 2024,
+					genre: "test",
+				},
+				{
+					title: "Book Five", // No ID - should use generator
+					author: "Author Five",
+					year: 2024,
+					genre: "test",
+				} as Parameters<typeof db.books.create>[0],
+				{
+					id: "explicit-id-2", // Explicit ID - should use this
+					title: "Book Six",
+					author: "Author Six",
+					year: 2024,
+					genre: "test",
+				},
+				{
+					title: "Book Seven", // No ID - should use generator
+					author: "Author Seven",
+					year: 2024,
+					genre: "test",
+				} as Parameters<typeof db.books.create>[0],
+			]).runPromise;
 
 			// Verify 4 books were created
 			expect(result2.created.length).toBe(4);
@@ -2803,10 +2798,12 @@ describe("Plugin System", () => {
 			]);
 
 			// Verify books with explicit IDs have correct titles
-			const foundExplicit1 = await db.books.findById("explicit-id-1").runPromise;
+			const foundExplicit1 =
+				await db.books.findById("explicit-id-1").runPromise;
 			expect(foundExplicit1.title).toBe("Book Four");
 
-			const foundExplicit2 = await db.books.findById("explicit-id-2").runPromise;
+			const foundExplicit2 =
+				await db.books.findById("explicit-id-2").runPromise;
 			expect(foundExplicit2.title).toBe("Book Six");
 
 			// Verify books with generated IDs have correct titles
@@ -2818,24 +2815,22 @@ describe("Plugin System", () => {
 
 			// Test 3: createMany with all explicit IDs - generator should not be called
 			const counterBefore = counter;
-			const result3 = await db.books
-				.createMany([
-					{
-						id: "explicit-id-3",
-						title: "Book Eight",
-						author: "Author Eight",
-						year: 2024,
-						genre: "test",
-					},
-					{
-						id: "explicit-id-4",
-						title: "Book Nine",
-						author: "Author Nine",
-						year: 2024,
-						genre: "test",
-					},
-				])
-				.runPromise;
+			const result3 = await db.books.createMany([
+				{
+					id: "explicit-id-3",
+					title: "Book Eight",
+					author: "Author Eight",
+					year: 2024,
+					genre: "test",
+				},
+				{
+					id: "explicit-id-4",
+					title: "Book Nine",
+					author: "Author Nine",
+					year: 2024,
+					genre: "test",
+				},
+			]).runPromise;
 
 			// Verify 2 books were created
 			expect(result3.created.length).toBe(2);
@@ -3020,7 +3015,11 @@ describe("Plugin System", () => {
 
 			// Create database with the full plugin
 			const db = await Effect.runPromise(
-				createEffectDatabase(integrationConfig, { books: [], authors: [] }, { plugins: [fullPlugin] }),
+				createEffectDatabase(
+					integrationConfig,
+					{ books: [], authors: [] },
+					{ plugins: [fullPlugin] },
+				),
 			);
 
 			// ========================================
@@ -3028,14 +3027,12 @@ describe("Plugin System", () => {
 			// ========================================
 
 			// Create a book without providing an ID - should use generator
-			const book1 = await db.books
-				.create({
-					title: "The Integration Guide",
-					author: "Test Author",
-					year: 2024,
-					genre: "technical",
-				} as Omit<Book, "id"> & { id?: string })
-				.runPromise;
+			const book1 = await db.books.create({
+				title: "The Integration Guide",
+				author: "Test Author",
+				year: 2024,
+				genre: "technical",
+			} as Omit<Book, "id"> & { id?: string }).runPromise;
 
 			// Verify ID was generated
 			expect(book1.id).toMatch(/^intg-\d+-\d+$/);
@@ -3059,24 +3056,20 @@ describe("Plugin System", () => {
 			// Test 2: Create more books for querying
 			// ========================================
 
-			const book2 = await db.books
-				.create({
-					title: "Advanced Integration Testing",
-					author: "Another Author",
-					year: 2023,
-					genre: "technical",
-				} as Omit<Book, "id"> & { id?: string })
-				.runPromise;
+			const _book2 = await db.books.create({
+				title: "Advanced Integration Testing",
+				author: "Another Author",
+				year: 2023,
+				genre: "technical",
+			} as Omit<Book, "id"> & { id?: string }).runPromise;
 
-			const book3 = await db.books
-				.create({
-					id: "explicit-book-3", // Explicit ID should override generator
-					title: "Simple Integration",
-					author: "Simple Author",
-					year: 2022,
-					genre: "guide",
-				})
-				.runPromise;
+			const book3 = await db.books.create({
+				id: "explicit-book-3", // Explicit ID should override generator
+				title: "Simple Integration",
+				author: "Simple Author",
+				year: 2022,
+				genre: "guide",
+			}).runPromise;
 
 			// Verify explicit ID was used
 			expect(book3.id).toBe("explicit-book-3");
@@ -3088,22 +3081,18 @@ describe("Plugin System", () => {
 			// ========================================
 
 			// Use $fuzzy operator - case-insensitive contains
-			const fuzzyResults = await db.books
-				.query({
-					where: { title: { $fuzzy: "integration" } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const fuzzyResults = await db.books.query({
+				where: { title: { $fuzzy: "integration" } } as Record<string, unknown>,
+			}).runPromise;
 
 			// All 3 books have "Integration" in title (case-insensitive)
 			expect(fuzzyResults.length).toBe(3);
 
 			// Fuzzy search for "GUIDE" (should match "The Integration Guide" and "Simple Integration" if we had "guide" in title)
 			// Actually "The Integration Guide" has "Guide" in title
-			const fuzzyGuide = await db.books
-				.query({
-					where: { title: { $fuzzy: "GUIDE" } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const fuzzyGuide = await db.books.query({
+				where: { title: { $fuzzy: "GUIDE" } } as Record<string, unknown>,
+			}).runPromise;
 
 			expect(fuzzyGuide.length).toBe(1);
 			expect(fuzzyGuide[0].title).toBe("The Integration Guide");
@@ -3112,14 +3101,12 @@ describe("Plugin System", () => {
 			// Test 4: Combine custom operator with built-in operators
 			// ========================================
 
-			const combinedQuery = await db.books
-				.query({
-					where: {
-						title: { $fuzzy: "integration" },
-						year: { $gte: 2023 },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const combinedQuery = await db.books.query({
+				where: {
+					title: { $fuzzy: "integration" },
+					year: { $gte: 2023 },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			// Should match book1 (2024) and book2 (2023), but not book3 (2022)
 			expect(combinedQuery.length).toBe(2);
@@ -3156,21 +3143,25 @@ describe("Plugin System", () => {
 			// ========================================
 
 			const hookCountBeforeAuthor = hookInvocations.length;
-			const author1 = await db.authors
-				.create({
-					id: "author-1",
-					name: "Integration Author",
-				})
-				.runPromise;
+			const _author1 = await db.authors.create({
+				id: "author-1",
+				name: "Integration Author",
+			}).runPromise;
 
 			// Verify hooks fired for authors collection too
 			expect(hookInvocations.length).toBe(hookCountBeforeAuthor + 3); // beforeCreate, afterCreate, onChange
 			expect(hookInvocations[hookCountBeforeAuthor].hook).toBe("beforeCreate");
 			expect(hookInvocations[hookCountBeforeAuthor].collection).toBe("authors");
-			expect(hookInvocations[hookCountBeforeAuthor + 1].hook).toBe("afterCreate");
-			expect(hookInvocations[hookCountBeforeAuthor + 1].collection).toBe("authors");
+			expect(hookInvocations[hookCountBeforeAuthor + 1].hook).toBe(
+				"afterCreate",
+			);
+			expect(hookInvocations[hookCountBeforeAuthor + 1].collection).toBe(
+				"authors",
+			);
 			expect(hookInvocations[hookCountBeforeAuthor + 2].hook).toBe("onChange");
-			expect(hookInvocations[hookCountBeforeAuthor + 2].collection).toBe("authors");
+			expect(hookInvocations[hookCountBeforeAuthor + 2].collection).toBe(
+				"authors",
+			);
 
 			// ========================================
 			// Final verification: total state is correct
@@ -3218,7 +3209,7 @@ describe("Plugin System", () => {
 					// Data comes as Record<string, entity> from persistence layer
 					const obj = data as Record<string, Record<string, unknown>>;
 					const lines: string[] = [];
-					for (const [id, entity] of Object.entries(obj)) {
+					for (const [_id, entity] of Object.entries(obj)) {
 						const pairs = Object.entries(entity)
 							.map(([k, v]) => `${k}=${JSON.stringify(v)}`)
 							.join("|");
@@ -3314,13 +3305,16 @@ describe("Plugin System", () => {
 			};
 
 			// Create the full-featured plugin
-			const persistentPlugin = createFullPlugin("persistent-integration-plugin", {
-				version: "2.0.0",
-				codecs: [plgCodec],
-				operators: [prefixOperator],
-				idGenerators: [seqGenerator],
-				hooks: persistentGlobalHooks,
-			});
+			const persistentPlugin = createFullPlugin(
+				"persistent-integration-plugin",
+				{
+					version: "2.0.0",
+					codecs: [plgCodec],
+					operators: [prefixOperator],
+					idGenerators: [seqGenerator],
+					hooks: persistentGlobalHooks,
+				},
+			);
 
 			// Use in-memory storage to simulate file system
 			const store = new Map<string, string>();
@@ -3398,14 +3392,12 @@ describe("Plugin System", () => {
 			expect(initialBooks[0].title).toBe("Persistent Book One");
 
 			// Create a new book WITHOUT providing ID - should use custom generator
-			const newBook = await db1.books
-				.create({
-					title: "The Prefix Test",
-					author: "Test Author",
-					year: 2024,
-					genre: "technical",
-				} as Omit<Book, "id"> & { id?: string })
-				.runPromise;
+			const newBook = await db1.books.create({
+				title: "The Prefix Test",
+				author: "Test Author",
+				year: 2024,
+				genre: "technical",
+			} as Omit<Book, "id"> & { id?: string }).runPromise;
 
 			// Verify ID was generated by our custom generator
 			expect(newBook.id).toMatch(/^seq-\d+-\d+$/);
@@ -3416,58 +3408,69 @@ describe("Plugin System", () => {
 			expect(newBook.createdAt).toBe("2024-persistent-test");
 
 			// Verify hooks were called
-			expect(hookInvocations.some((h) => h.hook === "beforeCreate" && h.collection === "books")).toBe(true);
-			expect(hookInvocations.some((h) => h.hook === "afterCreate" && h.collection === "books")).toBe(true);
-			expect(hookInvocations.some((h) => h.hook === "onChange" && h.collection === "books" && h.operation === "create")).toBe(true);
+			expect(
+				hookInvocations.some(
+					(h) => h.hook === "beforeCreate" && h.collection === "books",
+				),
+			).toBe(true);
+			expect(
+				hookInvocations.some(
+					(h) => h.hook === "afterCreate" && h.collection === "books",
+				),
+			).toBe(true);
+			expect(
+				hookInvocations.some(
+					(h) =>
+						h.hook === "onChange" &&
+						h.collection === "books" &&
+						h.operation === "create",
+				),
+			).toBe(true);
 
 			// Create another book with explicit ID
-			const explicitBook = await db1.books
-				.create({
-					id: "explicit-persistent-1",
-					title: "Prefix Example Book",
-					author: "Another Author",
-					year: 2023,
-					genre: "guide",
-				})
-				.runPromise;
+			const explicitBook = await db1.books.create({
+				id: "explicit-persistent-1",
+				title: "Prefix Example Book",
+				author: "Another Author",
+				year: 2023,
+				genre: "guide",
+			}).runPromise;
 
 			expect(explicitBook.id).toBe("explicit-persistent-1");
 			// Generator should only have been called once (for newBook)
 			expect(generatedIds.length).toBe(1);
 
 			// Create an author
-			const newAuthor = await db1.authors
-				.create({
-					id: "author-new-1",
-					name: "Prefix Author Name",
-				})
-				.runPromise;
+			const newAuthor = await db1.authors.create({
+				id: "author-new-1",
+				name: "Prefix Author Name",
+			}).runPromise;
 
 			expect(newAuthor.name).toBe("Prefix Author Name");
 			// Verify hooks fired for authors collection
-			expect(hookInvocations.some((h) => h.hook === "beforeCreate" && h.collection === "authors")).toBe(true);
+			expect(
+				hookInvocations.some(
+					(h) => h.hook === "beforeCreate" && h.collection === "authors",
+				),
+			).toBe(true);
 
 			// ========================================
 			// Test custom operator with persistent database
 			// ========================================
 
 			// Use $prefix operator to find books where title starts with "Prefix"
-			const prefixResults = await db1.books
-				.query({
-					where: { title: { $prefix: "Prefix" } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const prefixResults = await db1.books.query({
+				where: { title: { $prefix: "Prefix" } } as Record<string, unknown>,
+			}).runPromise;
 
 			// "Prefix Example Book" should match
 			expect(prefixResults.length).toBe(1);
 			expect(prefixResults[0].title).toBe("Prefix Example Book");
 
 			// Use $prefix on author name
-			const prefixAuthorResults = await db1.authors
-				.query({
-					where: { name: { $prefix: "Prefix" } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const prefixAuthorResults = await db1.authors.query({
+				where: { name: { $prefix: "Prefix" } } as Record<string, unknown>,
+			}).runPromise;
 
 			expect(prefixAuthorResults.length).toBe(1);
 			expect(prefixAuthorResults[0].name).toBe("Prefix Author Name");
@@ -3527,7 +3530,8 @@ describe("Plugin System", () => {
 			expect(generatedIdBook.title).toBe("The Prefix Test");
 			expect(generatedIdBook.createdAt).toBe("2024-persistent-test");
 
-			const explicitIdBook = await db2.books.findById("explicit-persistent-1").runPromise;
+			const explicitIdBook = await db2.books.findById("explicit-persistent-1")
+				.runPromise;
 			expect(explicitIdBook.title).toBe("Prefix Example Book");
 
 			// Verify authors were loaded
@@ -3538,52 +3542,57 @@ describe("Plugin System", () => {
 			// Verify custom operator still works after reload
 			// ========================================
 
-			const prefixAfterReload = await db2.books
-				.query({
-					where: { title: { $prefix: "The" } } as Record<string, unknown>,
-				})
-				.runPromise;
+			const prefixAfterReload = await db2.books.query({
+				where: { title: { $prefix: "The" } } as Record<string, unknown>,
+			}).runPromise;
 
 			// "The Prefix Test" should match
 			expect(prefixAfterReload.length).toBe(1);
 			expect(prefixAfterReload[0].title).toBe("The Prefix Test");
 
 			// Combine custom and built-in operators after reload
-			const combinedAfterReload = await db2.books
-				.query({
-					where: {
-						title: { $prefix: "P" },
-						year: { $lte: 2023 },
-					} as Record<string, unknown>,
-				})
-				.runPromise;
+			const combinedAfterReload = await db2.books.query({
+				where: {
+					title: { $prefix: "P" },
+					year: { $lte: 2023 },
+				} as Record<string, unknown>,
+			}).runPromise;
 
 			// "Persistent Book One" (2020) and "Prefix Example Book" (2023) start with P and year <= 2023
 			expect(combinedAfterReload.length).toBe(2);
 			const matchedTitles = combinedAfterReload.map((b) => b.title).sort();
-			expect(matchedTitles).toEqual(["Persistent Book One", "Prefix Example Book"]);
+			expect(matchedTitles).toEqual([
+				"Persistent Book One",
+				"Prefix Example Book",
+			]);
 
 			// ========================================
 			// Verify hooks still work after reload
 			// ========================================
 
 			// Create a new book in the reloaded database
-			const bookAfterReload = await db2.books
-				.create({
-					title: "Post Reload Book",
-					author: "Reload Author",
-					year: 2025,
-					genre: "test",
-				} as Omit<Book, "id"> & { id?: string })
-				.runPromise;
+			const bookAfterReload = await db2.books.create({
+				title: "Post Reload Book",
+				author: "Reload Author",
+				year: 2025,
+				genre: "test",
+			} as Omit<Book, "id"> & { id?: string }).runPromise;
 
 			// ID generator should still work
 			expect(bookAfterReload.id).toMatch(/^seq-\d+-\d+$/);
 			expect(generatedIds.length).toBe(2); // Now 2 generated IDs
 
 			// Hooks should have fired
-			expect(hookInvocations.some((h) => h.hook === "beforeCreate" && h.collection === "books")).toBe(true);
-			expect(hookInvocations.some((h) => h.hook === "onChange" && h.operation === "create")).toBe(true);
+			expect(
+				hookInvocations.some(
+					(h) => h.hook === "beforeCreate" && h.collection === "books",
+				),
+			).toBe(true);
+			expect(
+				hookInvocations.some(
+					(h) => h.hook === "onChange" && h.operation === "create",
+				),
+			).toBe(true);
 
 			// Metadata should be added
 			expect(bookAfterReload.createdAt).toBe("2024-persistent-test");
@@ -3596,13 +3605,21 @@ describe("Plugin System", () => {
 			await db2.books.update("seed-1", { genre: "updated-fiction" }).runPromise;
 
 			// onChange should have fired for update
-			expect(hookInvocations.slice(hookCountBeforeUpdate).some((h) => h.hook === "onChange" && h.operation === "update")).toBe(true);
+			expect(
+				hookInvocations
+					.slice(hookCountBeforeUpdate)
+					.some((h) => h.hook === "onChange" && h.operation === "update"),
+			).toBe(true);
 
 			const hookCountBeforeDelete = hookInvocations.length;
 			await db2.books.delete("explicit-persistent-1").runPromise;
 
 			// onChange should have fired for delete
-			expect(hookInvocations.slice(hookCountBeforeDelete).some((h) => h.hook === "onChange" && h.operation === "delete")).toBe(true);
+			expect(
+				hookInvocations
+					.slice(hookCountBeforeDelete)
+					.some((h) => h.hook === "onChange" && h.operation === "delete"),
+			).toBe(true);
 
 			// Verify final state
 			const finalBooks = await db2.books.query().runPromise;
@@ -3642,9 +3659,7 @@ describe("Plugin System", () => {
 			const { makeSerializerLayer } = await import(
 				"../src/serializers/format-codec.js"
 			);
-			const { jsonCodec } = await import(
-				"../src/serializers/codecs/json.js"
-			);
+			const { jsonCodec } = await import("../src/serializers/codecs/json.js");
 			const { createPersistentEffectDatabase } = await import(
 				"../src/factories/database-effect.js"
 			);
@@ -3736,7 +3751,10 @@ describe("Plugin System", () => {
 
 			// After scope closes, shutdown should have been called
 			expect(lifecycleEvents).toContain("plugin1-shutdown");
-			expect(lifecycleEvents).toEqual(["plugin1-initialize", "plugin1-shutdown"]);
+			expect(lifecycleEvents).toEqual([
+				"plugin1-initialize",
+				"plugin1-shutdown",
+			]);
 
 			// ========================================
 			// Test 2: Multiple plugins shutdown in reverse registration order
@@ -3941,21 +3959,18 @@ describe("Plugin System", () => {
 			expect(book.title).toBe("The Great Gatsby");
 
 			// create
-			const newBook = await db.books
-				.create({
-					id: "b-new",
-					title: "New Book",
-					author: "New Author",
-					year: 2024,
-					genre: "test",
-				})
-				.runPromise;
+			const newBook = await db.books.create({
+				id: "b-new",
+				title: "New Book",
+				author: "New Author",
+				year: 2024,
+				genre: "test",
+			}).runPromise;
 			expect(newBook.id).toBe("b-new");
 			expect(newBook.title).toBe("New Book");
 
 			// update
-			const updated = await db.books
-				.update("b-new", { title: "Updated Title" })
+			const updated = await db.books.update("b-new", { title: "Updated Title" })
 				.runPromise;
 			expect(updated.title).toBe("Updated Title");
 
@@ -3964,29 +3979,26 @@ describe("Plugin System", () => {
 			expect(deleted.id).toBe("b-new");
 
 			// createMany
-			const batch = await db.books
-				.createMany([
-					{
-						id: "batch-1",
-						title: "Batch Book 1",
-						author: "Batch Author",
-						year: 2024,
-						genre: "batch",
-					},
-					{
-						id: "batch-2",
-						title: "Batch Book 2",
-						author: "Batch Author",
-						year: 2024,
-						genre: "batch",
-					},
-				])
-				.runPromise;
+			const batch = await db.books.createMany([
+				{
+					id: "batch-1",
+					title: "Batch Book 1",
+					author: "Batch Author",
+					year: 2024,
+					genre: "batch",
+				},
+				{
+					id: "batch-2",
+					title: "Batch Book 2",
+					author: "Batch Author",
+					year: 2024,
+					genre: "batch",
+				},
+			]).runPromise;
 			expect(batch.created).toHaveLength(2);
 
 			// deleteMany (uses predicate, not array of IDs)
-			const deletedBatch = await db.books
-				.deleteMany((b) => b.genre === "batch")
+			const deletedBatch = await db.books.deleteMany((b) => b.genre === "batch")
 				.runPromise;
 			expect(deletedBatch.count).toBe(2);
 			expect(deletedBatch.deleted).toHaveLength(2);
@@ -3996,55 +4008,50 @@ describe("Plugin System", () => {
 			// ========================================
 
 			// $eq (implicit)
-			const gatsby = await db.books
-				.query({ where: { title: "The Great Gatsby" } })
-				.runPromise;
+			const gatsby = await db.books.query({
+				where: { title: "The Great Gatsby" },
+			}).runPromise;
 			expect(gatsby).toHaveLength(1);
 
 			// $gt
-			const after1950 = await db.books
-				.query({ where: { year: { $gt: 1950 } } })
+			const after1950 = await db.books.query({ where: { year: { $gt: 1950 } } })
 				.runPromise;
 			expect(after1950).toHaveLength(1); // Only Dune (1965)
 			expect(after1950[0].title).toBe("Dune");
 
 			// $in
-			const scifiOrDystopian = await db.books
-				.query({ where: { genre: { $in: ["sci-fi", "dystopian"] } } })
-				.runPromise;
+			const scifiOrDystopian = await db.books.query({
+				where: { genre: { $in: ["sci-fi", "dystopian"] } },
+			}).runPromise;
 			expect(scifiOrDystopian).toHaveLength(2);
 
 			// $startsWith
-			const startsWithThe = await db.books
-				.query({ where: { title: { $startsWith: "The" } } })
-				.runPromise;
+			const startsWithThe = await db.books.query({
+				where: { title: { $startsWith: "The" } },
+			}).runPromise;
 			expect(startsWithThe).toHaveLength(1);
 			expect(startsWithThe[0].title).toBe("The Great Gatsby");
 
 			// Combined operators
-			const combined = await db.books
-				.query({
-					where: {
-						year: { $gte: 1940, $lte: 1970 },
-						genre: { $ne: "fiction" },
-					},
-				})
-				.runPromise;
+			const combined = await db.books.query({
+				where: {
+					year: { $gte: 1940, $lte: 1970 },
+					genre: { $ne: "fiction" },
+				},
+			}).runPromise;
 			expect(combined).toHaveLength(2); // 1984 and Dune
 
 			// ========================================
 			// Test 4: Sorting works
 			// ========================================
 
-			const sortedByYear = await db.books
-				.query({ sort: { year: "asc" } })
+			const sortedByYear = await db.books.query({ sort: { year: "asc" } })
 				.runPromise;
 			expect(sortedByYear[0].year).toBe(1925);
 			expect(sortedByYear[1].year).toBe(1949);
 			expect(sortedByYear[2].year).toBe(1965);
 
-			const sortedByYearDesc = await db.books
-				.query({ sort: { year: "desc" } })
+			const sortedByYearDesc = await db.books.query({ sort: { year: "desc" } })
 				.runPromise;
 			expect(sortedByYearDesc[0].year).toBe(1965);
 
@@ -4052,22 +4059,25 @@ describe("Plugin System", () => {
 			// Test 5: Pagination works
 			// ========================================
 
-			const page1 = await db.books
-				.query({ limit: 2, offset: 0, sort: { year: "asc" } })
-				.runPromise;
+			const page1 = await db.books.query({
+				limit: 2,
+				offset: 0,
+				sort: { year: "asc" },
+			}).runPromise;
 			expect(page1).toHaveLength(2);
 
-			const page2 = await db.books
-				.query({ limit: 2, offset: 2, sort: { year: "asc" } })
-				.runPromise;
+			const page2 = await db.books.query({
+				limit: 2,
+				offset: 2,
+				sort: { year: "asc" },
+			}).runPromise;
 			expect(page2).toHaveLength(1);
 
 			// ========================================
 			// Test 6: Field selection works
 			// ========================================
 
-			const selected = await db.books
-				.query({ select: ["title", "author"] })
+			const selected = await db.books.query({ select: ["title", "author"] })
 				.runPromise;
 			expect(selected[0]).toHaveProperty("title");
 			expect(selected[0]).toHaveProperty("author");
@@ -4083,15 +4093,14 @@ describe("Plugin System", () => {
 			);
 
 			expect(dbWithEmptyPlugins).toBeDefined();
-			const bookFromEmptyPlugins = await dbWithEmptyPlugins.books
-				.findById("b1")
-				.runPromise;
+			const bookFromEmptyPlugins =
+				await dbWithEmptyPlugins.books.findById("b1").runPromise;
 			expect(bookFromEmptyPlugins.title).toBe("The Great Gatsby");
 
 			// Query operations work identically
-			const queryResult = await dbWithEmptyPlugins.books
-				.query({ where: { year: { $gt: 1950 } } })
-				.runPromise;
+			const queryResult = await dbWithEmptyPlugins.books.query({
+				where: { year: { $gt: 1950 } },
+			}).runPromise;
 			expect(queryResult).toHaveLength(1);
 			expect(queryResult[0].title).toBe("Dune");
 
@@ -4127,15 +4136,13 @@ describe("Plugin System", () => {
 				createEffectDatabase(hookedConfig, { books: [] }),
 			);
 
-			const createdWithHook = await dbWithHooks.books
-				.create({
-					id: "hook-test",
-					title: "Hook Test",
-					author: "Test",
-					year: 2024,
-					genre: "test",
-				})
-				.runPromise;
+			const createdWithHook = await dbWithHooks.books.create({
+				id: "hook-test",
+				title: "Hook Test",
+				author: "Test",
+				year: 2024,
+				genre: "test",
+			}).runPromise;
 
 			// Verify beforeCreate hook transformed the data
 			expect(createdWithHook.createdAt).toBe("2024-01-01");
@@ -4146,13 +4153,11 @@ describe("Plugin System", () => {
 			// Test 9: Aggregation works without plugins
 			// ========================================
 
-			const stats = await db.books
-				.aggregate({
-					count: true,
-					min: "year",
-					max: "year",
-				})
-				.runPromise;
+			const stats = await db.books.aggregate({
+				count: true,
+				min: "year",
+				max: "year",
+			}).runPromise;
 
 			expect(stats.count).toBe(3);
 			expect(stats.min?.year).toBe(1925);
@@ -4162,37 +4167,33 @@ describe("Plugin System", () => {
 			// Test 10: Upsert works without plugins
 			// ========================================
 
-			const upsertResult = await db.books
-				.upsert({
-					where: { id: "upsert-test" },
-					create: {
-						id: "upsert-test",
-						title: "Upsert Created",
-						author: "Test",
-						year: 2024,
-						genre: "upsert",
-					},
-					update: { title: "Upsert Updated" },
-				})
-				.runPromise;
+			const upsertResult = await db.books.upsert({
+				where: { id: "upsert-test" },
+				create: {
+					id: "upsert-test",
+					title: "Upsert Created",
+					author: "Test",
+					year: 2024,
+					genre: "upsert",
+				},
+				update: { title: "Upsert Updated" },
+			}).runPromise;
 
 			expect(upsertResult.title).toBe("Upsert Created");
 			expect(upsertResult.__action).toBe("created");
 
 			// Upsert again to update
-			const upsertResult2 = await db.books
-				.upsert({
-					where: { id: "upsert-test" },
-					create: {
-						id: "upsert-test",
-						title: "Should Not Use This",
-						author: "Test",
-						year: 2024,
-						genre: "upsert",
-					},
-					update: { title: "Upsert Updated" },
-				})
-				.runPromise;
+			const upsertResult2 = await db.books.upsert({
+				where: { id: "upsert-test" },
+				create: {
+					id: "upsert-test",
+					title: "Should Not Use This",
+					author: "Test",
+					year: 2024,
+					genre: "upsert",
+				},
+				update: { title: "Upsert Updated" },
+			}).runPromise;
 
 			expect(upsertResult2.title).toBe("Upsert Updated");
 			expect(upsertResult2.__action).toBe("updated");

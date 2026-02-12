@@ -4,6 +4,7 @@
  */
 
 import { Effect } from "effect";
+import type { PluginError } from "../errors/plugin-errors.js";
 import type {
 	CustomIdGenerator,
 	CustomOperator,
@@ -12,11 +13,10 @@ import type {
 	ProseQLPlugin,
 } from "./plugin-types.js";
 import {
-	validatePlugin,
-	validateOperatorConflicts,
 	validateDependencies,
+	validateOperatorConflicts,
+	validatePlugin,
 } from "./plugin-validation.js";
-import type { PluginError } from "../errors/plugin-errors.js";
 
 // ============================================================================
 // Plugin Registry Builder
@@ -111,8 +111,6 @@ export const buildPluginRegistry = (
 const mergeGlobalHooks = (
 	plugins: ReadonlyArray<ProseQLPlugin>,
 ): GlobalHooksConfig => {
-	const result: GlobalHooksConfig = {};
-
 	// Use a mutable object for building
 	const mutableResult: {
 		beforeCreate?: Array<GlobalHooksConfig["beforeCreate"]>;

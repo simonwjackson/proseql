@@ -403,6 +403,8 @@ export {
 // Plugin System Types
 // ============================================================================
 
+// Plugin errors
+export { PluginError } from "./errors/plugin-errors.js";
 export type {
 	CustomIdGenerator,
 	CustomOperator,
@@ -410,9 +412,6 @@ export type {
 	PluginRegistry,
 	ProseQLPlugin,
 } from "./plugins/plugin-types.js";
-
-// Plugin errors
-export { PluginError } from "./errors/plugin-errors.js";
 
 // Plugin validation
 export {

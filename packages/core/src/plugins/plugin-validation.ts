@@ -6,13 +6,13 @@
 
 import { Effect } from "effect";
 import { PluginError } from "../errors/plugin-errors.js";
+import type { FormatCodec } from "../serializers/format-codec.js";
+import type { DatabaseConfig } from "../types/database-config-types.js";
 import type {
 	CustomIdGenerator,
 	CustomOperator,
 	ProseQLPlugin,
 } from "./plugin-types.js";
-import type { FormatCodec } from "../serializers/format-codec.js";
-import type { DatabaseConfig } from "../types/database-config-types.js";
 
 // ============================================================================
 // Plugin Validation

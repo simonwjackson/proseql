@@ -80,10 +80,8 @@ import { applyPopulate } from "../operations/relationships/populate-stream.js";
 import { mergeGlobalHooks } from "../plugins/plugin-hooks.js";
 import { buildPluginRegistry } from "../plugins/plugin-registry.js";
 import type {
-	CustomIdGenerator,
 	CustomOperator,
 	GlobalHooksConfig,
-	PluginRegistry,
 	ProseQLPlugin,
 } from "../plugins/plugin-types.js";
 import { validateIdGeneratorReferences } from "../plugins/plugin-validation.js";
@@ -591,7 +589,10 @@ const buildCollection = <T extends HasId>(
 	searchIndexRef?: Ref.Ref<SearchIndexMap>,
 	searchIndexFields?: ReadonlyArray<string>,
 	customOperators?: Map<string, CustomOperator>,
-	idGeneratorMap?: Map<string, import("../plugins/plugin-types.js").CustomIdGenerator>,
+	idGeneratorMap?: Map<
+		string,
+		import("../plugins/plugin-types.js").CustomIdGenerator
+	>,
 	globalHooks?: GlobalHooksConfig,
 ): EffectCollection<T> => {
 	const schema = collectionConfig.schema as Schema.Schema<T, unknown>;
@@ -1137,7 +1138,10 @@ const buildCollection = <T extends HasId>(
 				Record<string, unknown>,
 				never
 			> = Stream.fromIterable(items);
-			s = applyFilter(config.where as Record<string, unknown> | undefined, customOperators)(s);
+			s = applyFilter(
+				config.where as Record<string, unknown> | undefined,
+				customOperators,
+			)(s);
 
 			// 3. Collect filtered entities
 			const chunk = yield* Stream.runCollect(s);
@@ -1218,7 +1222,10 @@ const makeBuildCollectionForTx = (
 	searchIndexRefs?: Record<string, Ref.Ref<SearchIndexMap>>,
 	searchIndexFields?: Record<string, ReadonlyArray<string>>,
 	customOperators?: Map<string, CustomOperator>,
-	idGeneratorMap?: Map<string, import("../plugins/plugin-types.js").CustomIdGenerator>,
+	idGeneratorMap?: Map<
+		string,
+		import("../plugins/plugin-types.js").CustomIdGenerator
+	>,
 	globalHooks?: GlobalHooksConfig,
 ): BuildCollectionForTx => {
 	return (collectionName: string, addMutation: (name: string) => void) => {
@@ -1517,7 +1524,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		for (const plugin of options?.plugins ?? []) {
 			if (plugin.shutdown !== undefined) {
 				yield* Effect.addFinalizer(() =>
-					plugin.shutdown!().pipe(Effect.catchAll(() => Effect.void)),
+					plugin.shutdown?.().pipe(Effect.catchAll(() => Effect.void)),
 				);
 			}
 		}

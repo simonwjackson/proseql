@@ -281,7 +281,9 @@ describe("Database v2 - Pagination (Stream-based)", () => {
 			});
 
 			expect(filtered).toHaveLength(3);
-			filtered.forEach((p) => expect(p.category).toBe("electronics"));
+			for (const p of filtered) {
+				expect(p.category).toBe("electronics");
+			}
 		});
 
 		it("should handle pagination when filter reduces result set", async () => {
