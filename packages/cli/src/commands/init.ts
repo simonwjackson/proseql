@@ -342,13 +342,42 @@ export function runInit(options: InitOptions = {}): InitResult {
 		}
 	}
 
-	// TODO: Task 3.5 will implement: Print summary of created files
-
 	return {
 		success: true,
-		message: `Created ${createdFiles.join(", ")}`,
+		message: "ProseQL project initialized successfully!",
 		createdFiles,
 	}
+}
+
+/**
+ * Print a formatted summary of the init operation to stdout.
+ * Displays the created files in a clear, user-friendly format.
+ */
+function printInitSummary(result: InitResult): void {
+	console.log("")
+	console.log(result.message)
+	console.log("")
+
+	if (result.createdFiles && result.createdFiles.length > 0) {
+		console.log("Created files:")
+		for (const file of result.createdFiles) {
+			// Use different indicators for different file types
+			if (file.endsWith("/")) {
+				console.log(`  + ${file.slice(0, -1)}/ (directory)`)
+			} else if (file.includes("(updated)")) {
+				console.log(`  ~ ${file.replace(" (updated)", "")} (updated)`)
+			} else {
+				console.log(`  + ${file}`)
+			}
+		}
+		console.log("")
+	}
+
+	console.log("Next steps:")
+	console.log("  1. Edit proseql.config.ts to define your collections")
+	console.log("  2. Run 'proseql query notes' to see example data")
+	console.log("  3. Run 'proseql --help' for available commands")
+	console.log("")
 }
 
 /**
@@ -363,5 +392,5 @@ export async function handleInit(options: InitOptions = {}): Promise<void> {
 		process.exit(1)
 	}
 
-	console.log(result.message)
+	printInitSummary(result)
 }

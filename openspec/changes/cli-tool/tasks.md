@@ -18,7 +18,7 @@
 - [x] 3.2 Scaffold `proseql.config.ts` with an example collection definition
 - [x] 3.3 Create `data/` directory with an example data file in the chosen format (default JSON, override with `--format`)
 - [x] 3.4 Detect `.git` directory and append data directory to `.gitignore` if appropriate
-- [ ] 3.5 Print summary of created files to stdout
+- [x] 3.5 Print summary of created files to stdout
 
 ## 4. Query Command
 
