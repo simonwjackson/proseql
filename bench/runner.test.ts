@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { discoverBenchmarks, filterBenchmarks, executeAllSuites } from "./runner.js";
-import { formatResultsJson } from "./utils.js";
+import { formatResultsJson, formatResultsTable } from "./utils.js";
 
 /**
  * Tests for the benchmark runner.
@@ -258,4 +258,86 @@ describe("Benchmark Execution", () => {
 			expect(results[i].suiteName).toBe(benchmarks[i].module.suiteName);
 		}
 	}, 120_000);
+});
+
+describe("Table Output", () => {
+	it("renders table output without errors", async () => {
+		const benchmarks = await discoverBenchmarks();
+		// Use a small filtered suite for faster test execution
+		const filtered = filterBenchmarks(benchmarks, "transactions");
+
+		expect(filtered.length).toBe(1);
+
+		const results = await executeAllSuites(filtered, { verbose: false });
+
+		// Verify we have results to format
+		expect(results.length).toBe(1);
+		expect(results[0].bench.tasks.length).toBeGreaterThan(0);
+
+		// formatResultsTable should not throw
+		const tableOutput = formatResultsTable(results[0].bench.tasks);
+
+		// Verify it returns a non-empty string
+		expect(typeof tableOutput).toBe("string");
+		expect(tableOutput.length).toBeGreaterThan(0);
+
+		// Verify table has the expected structure (header line, separator, data rows)
+		const lines = tableOutput.split("\n");
+		expect(lines.length).toBeGreaterThanOrEqual(3); // header + separator + at least one data row
+
+		// Verify header contains expected column names
+		const headerLine = lines[0];
+		expect(headerLine).toContain("Name");
+		expect(headerLine).toContain("ops/sec");
+		expect(headerLine).toContain("mean");
+		expect(headerLine).toContain("p50");
+		expect(headerLine).toContain("p95");
+		expect(headerLine).toContain("p99");
+
+		// Verify separator line contains dashes
+		const separatorLine = lines[1];
+		expect(separatorLine).toMatch(/^[-\s]+$/);
+
+		// Verify data rows exist and contain benchmark names
+		const dataRows = lines.slice(2);
+		expect(dataRows.length).toBeGreaterThan(0);
+
+		// Each data row should have some content (not just whitespace)
+		for (const row of dataRows) {
+			expect(row.trim().length).toBeGreaterThan(0);
+		}
+	}, 60_000);
+
+	it("renders empty results message when no tasks available", () => {
+		// Test with empty task array
+		const tableOutput = formatResultsTable([]);
+
+		expect(typeof tableOutput).toBe("string");
+		expect(tableOutput).toBe("No benchmark results available.");
+	});
+
+	it("formats numbers correctly in table output", async () => {
+		const benchmarks = await discoverBenchmarks();
+		const filtered = filterBenchmarks(benchmarks, "transactions");
+
+		const results = await executeAllSuites(filtered, { verbose: false });
+		const tableOutput = formatResultsTable(results[0].bench.tasks);
+
+		// Table should contain formatted numbers (K/M suffixes or decimal values)
+		// The output should match patterns like "1.23K", "1.23M", "1.23ms", "0.123ms", "1.23s", or "-"
+		const lines = tableOutput.split("\n");
+		const dataRows = lines.slice(2);
+
+		for (const row of dataRows) {
+			// Split row into columns (they're separated by 2 spaces)
+			const columns = row.split(/\s{2,}/);
+
+			// Skip the name column (index 0), check numeric columns
+			for (let i = 1; i < columns.length; i++) {
+				const value = columns[i].trim();
+				// Should match: number with K/M suffix, ms/s suffix, or "-" for undefined
+				expect(value).toMatch(/^(\d+\.?\d*(K|M|ms|s)?|-)$/);
+			}
+		}
+	}, 60_000);
 });

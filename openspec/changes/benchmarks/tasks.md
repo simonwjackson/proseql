@@ -66,7 +66,7 @@
 - [x] 9.1 Verify data generators produce correct entity counts and field shapes
 - [x] 9.2 Verify the benchmark runner discovers and executes all bench files
 - [x] 9.3 Verify JSON output is valid and contains expected keys
-- [ ] 9.4 Verify table output renders without errors
+- [x] 9.4 Verify table output renders without errors
 - [ ] 9.5 Run the full benchmark suite end-to-end and confirm all suites complete without failures
 
 ## 10. Cleanup
