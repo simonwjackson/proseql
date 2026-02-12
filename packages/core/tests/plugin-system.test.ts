@@ -1875,5 +1875,188 @@ describe("Plugin System", () => {
 				expect(result.message).toContain("not registered");
 			}
 		});
+
+		it("should use generator per entity when createMany is called", async () => {
+			// Task 13.4: Test createMany uses generator per entity
+			//
+			// When using createMany with a custom ID generator, the generator should be
+			// called once for each entity that doesn't have an explicit ID. This test
+			// verifies that:
+			// 1. Each entity gets a unique ID from the generator
+			// 2. Entities with explicit IDs use those IDs instead
+			// 3. The generator is called the correct number of times
+
+			// Create a counter-based ID generator that produces predictable IDs
+			let counter = 0;
+			const customGenerator: CustomIdGenerator = {
+				name: "batch-counter",
+				generate: () => {
+					counter += 1;
+					return `batch-id-${counter}`;
+				},
+			};
+
+			const generatorPlugin = createIdGeneratorPlugin("batch-gen-plugin", customGenerator);
+
+			// Create config that references the custom ID generator
+			const configWithIdGenerator = {
+				books: {
+					schema: BookSchema,
+					relationships: {},
+					idGenerator: "batch-counter",
+				},
+			} as const;
+
+			// Create database with the plugin
+			const db = await Effect.runPromise(
+				createEffectDatabase(configWithIdGenerator, { books: [] }, { plugins: [generatorPlugin] }),
+			);
+
+			// Reset counter for predictable test results
+			counter = 0;
+
+			// Test 1: createMany with all entities missing IDs
+			// Generator should be called 3 times, once per entity
+			const result1 = await db.books
+				.createMany([
+					{
+						title: "Book One",
+						author: "Author One",
+						year: 2024,
+						genre: "test",
+					} as Parameters<typeof db.books.create>[0],
+					{
+						title: "Book Two",
+						author: "Author Two",
+						year: 2024,
+						genre: "test",
+					} as Parameters<typeof db.books.create>[0],
+					{
+						title: "Book Three",
+						author: "Author Three",
+						year: 2024,
+						genre: "test",
+					} as Parameters<typeof db.books.create>[0],
+				])
+				.runPromise;
+
+			// Verify 3 books were created
+			expect(result1.created.length).toBe(3);
+
+			// Verify each book got a unique ID from the generator
+			const ids1 = result1.created.map((b) => b.id).sort();
+			expect(ids1).toEqual(["batch-id-1", "batch-id-2", "batch-id-3"]);
+
+			// Verify the counter was incremented 3 times
+			expect(counter).toBe(3);
+
+			// Verify each book can be found by its ID
+			const foundBook1 = await db.books.findById("batch-id-1").runPromise;
+			expect(foundBook1.title).toBe("Book One");
+
+			const foundBook2 = await db.books.findById("batch-id-2").runPromise;
+			expect(foundBook2.title).toBe("Book Two");
+
+			const foundBook3 = await db.books.findById("batch-id-3").runPromise;
+			expect(foundBook3.title).toBe("Book Three");
+
+			// Test 2: createMany with a mix of explicit IDs and missing IDs
+			// Only entities without IDs should use the generator
+			const result2 = await db.books
+				.createMany([
+					{
+						id: "explicit-id-1", // Explicit ID - should use this
+						title: "Book Four",
+						author: "Author Four",
+						year: 2024,
+						genre: "test",
+					},
+					{
+						title: "Book Five", // No ID - should use generator
+						author: "Author Five",
+						year: 2024,
+						genre: "test",
+					} as Parameters<typeof db.books.create>[0],
+					{
+						id: "explicit-id-2", // Explicit ID - should use this
+						title: "Book Six",
+						author: "Author Six",
+						year: 2024,
+						genre: "test",
+					},
+					{
+						title: "Book Seven", // No ID - should use generator
+						author: "Author Seven",
+						year: 2024,
+						genre: "test",
+					} as Parameters<typeof db.books.create>[0],
+				])
+				.runPromise;
+
+			// Verify 4 books were created
+			expect(result2.created.length).toBe(4);
+
+			// Counter should have been incremented 2 more times (for books 5 and 7)
+			expect(counter).toBe(5);
+
+			// Verify the IDs are correct - explicit IDs used where provided,
+			// generator used where not provided
+			const ids2 = result2.created.map((b) => b.id).sort();
+			expect(ids2).toEqual([
+				"batch-id-4",
+				"batch-id-5",
+				"explicit-id-1",
+				"explicit-id-2",
+			]);
+
+			// Verify books with explicit IDs have correct titles
+			const foundExplicit1 = await db.books.findById("explicit-id-1").runPromise;
+			expect(foundExplicit1.title).toBe("Book Four");
+
+			const foundExplicit2 = await db.books.findById("explicit-id-2").runPromise;
+			expect(foundExplicit2.title).toBe("Book Six");
+
+			// Verify books with generated IDs have correct titles
+			const foundGenerated4 = await db.books.findById("batch-id-4").runPromise;
+			expect(foundGenerated4.title).toBe("Book Five");
+
+			const foundGenerated5 = await db.books.findById("batch-id-5").runPromise;
+			expect(foundGenerated5.title).toBe("Book Seven");
+
+			// Test 3: createMany with all explicit IDs - generator should not be called
+			const counterBefore = counter;
+			const result3 = await db.books
+				.createMany([
+					{
+						id: "explicit-id-3",
+						title: "Book Eight",
+						author: "Author Eight",
+						year: 2024,
+						genre: "test",
+					},
+					{
+						id: "explicit-id-4",
+						title: "Book Nine",
+						author: "Author Nine",
+						year: 2024,
+						genre: "test",
+					},
+				])
+				.runPromise;
+
+			// Verify 2 books were created
+			expect(result3.created.length).toBe(2);
+
+			// Counter should NOT have been incremented
+			expect(counter).toBe(counterBefore);
+
+			// Verify the explicit IDs were used
+			const ids3 = result3.created.map((b) => b.id).sort();
+			expect(ids3).toEqual(["explicit-id-3", "explicit-id-4"]);
+
+			// Final verification: query all books to ensure total count is correct
+			const allBooks = await db.books.query().runPromise;
+			expect(allBooks.length).toBe(9); // 3 + 4 + 2
+		});
 	});
 });
