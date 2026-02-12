@@ -51,7 +51,7 @@
 - [x] 7.1 Create `bench/transactions.bench.ts` with a tinybench suite
 - [x] 7.2 Implement direct multi-operation benchmark: run a sequence of create, update, delete operations without a transaction wrapper
 - [x] 7.3 Implement transactional multi-operation benchmark: run the same sequence inside a transaction
-- [ ] 7.4 Report the overhead delta between transactional and direct execution
+- [x] 7.4 Report the overhead delta between transactional and direct execution
 
 ## 8. Benchmark Runner and Reporting
 

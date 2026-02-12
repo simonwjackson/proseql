@@ -171,6 +171,132 @@ export async function createSuite(): Promise<Bench> {
 	return bench;
 }
 
+// ============================================================================
+// Overhead Delta Calculation (Task 7.4)
+// ============================================================================
+
+/**
+ * Overhead delta result structure for JSON output.
+ */
+export interface TransactionOverheadDelta {
+	readonly throughputOverhead: number; // Percentage decrease in ops/sec
+	readonly latencyOverhead: number; // Percentage increase in mean latency
+	readonly absoluteLatencyDelta: number; // Absolute difference in ms
+	readonly directOpsPerSec: number;
+	readonly directMeanMs: number;
+	readonly txOpsPerSec: number;
+	readonly txMeanMs: number;
+}
+
+/**
+ * Calculate and format the overhead delta between transactional and direct execution.
+ *
+ * This compares:
+ * - ops/sec: Higher is better (direct should be higher)
+ * - mean latency: Lower is better (direct should be lower)
+ *
+ * Reports the transaction overhead as a percentage increase in latency
+ * and percentage decrease in throughput.
+ */
+export function calculateOverheadDelta(
+	directOpsPerSec: number,
+	directMeanMs: number,
+	txOpsPerSec: number,
+	txMeanMs: number,
+): TransactionOverheadDelta {
+	// Throughput overhead: how much slower is transactional?
+	// (direct - tx) / direct * 100 = percentage decrease
+	const throughputOverhead = ((directOpsPerSec - txOpsPerSec) / directOpsPerSec) * 100;
+
+	// Latency overhead: how much longer does transactional take?
+	// (tx - direct) / direct * 100 = percentage increase
+	const latencyOverhead = ((txMeanMs - directMeanMs) / directMeanMs) * 100;
+
+	// Absolute latency delta
+	const absoluteLatencyDelta = txMeanMs - directMeanMs;
+
+	return {
+		throughputOverhead,
+		latencyOverhead,
+		absoluteLatencyDelta,
+		directOpsPerSec,
+		directMeanMs,
+		txOpsPerSec,
+		txMeanMs,
+	};
+}
+
+/**
+ * Extract overhead delta from benchmark results.
+ * Returns null if the required tasks are not found or haven't run.
+ *
+ * @param bench - The completed benchmark suite
+ * @returns Overhead delta data or null if not available
+ */
+export function getOverheadDelta(bench: Bench): TransactionOverheadDelta | null {
+	const directTask = bench.tasks.find((t) => t.name.startsWith("direct"));
+	const txTask = bench.tasks.find((t) => t.name.startsWith("transactional"));
+
+	if (!directTask?.result || !txTask?.result) {
+		return null;
+	}
+
+	return calculateOverheadDelta(
+		directTask.result.throughput.mean,
+		directTask.result.latency.mean,
+		txTask.result.throughput.mean,
+		txTask.result.latency.mean,
+	);
+}
+
+/**
+ * Format a number as a percentage with sign.
+ */
+function formatPercent(value: number): string {
+	const sign = value >= 0 ? "+" : "";
+	return `${sign}${value.toFixed(2)}%`;
+}
+
+/**
+ * Format the overhead delta report for terminal output.
+ */
+function formatOverheadReport(
+	directOpsPerSec: number,
+	directMeanMs: number,
+	txOpsPerSec: number,
+	txMeanMs: number,
+): string {
+	const delta = calculateOverheadDelta(directOpsPerSec, directMeanMs, txOpsPerSec, txMeanMs);
+
+	const lines: string[] = [
+		"Transaction Overhead Analysis",
+		"─".repeat(50),
+		"",
+		`Direct execution:       ${directOpsPerSec.toFixed(2)} ops/sec (${directMeanMs.toFixed(3)}ms mean)`,
+		`Transactional execution: ${txOpsPerSec.toFixed(2)} ops/sec (${txMeanMs.toFixed(3)}ms mean)`,
+		"",
+		"Overhead:",
+		`  Throughput:  ${formatPercent(-delta.throughputOverhead)} (${delta.throughputOverhead >= 0 ? "slower" : "faster"})`,
+		`  Latency:     ${formatPercent(delta.latencyOverhead)} (${delta.absoluteLatencyDelta >= 0 ? "+" : ""}${delta.absoluteLatencyDelta.toFixed(3)}ms)`,
+		"",
+	];
+
+	// Add interpretation
+	if (delta.latencyOverhead > 0) {
+		lines.push(
+			`Interpretation: Transactions add ~${delta.latencyOverhead.toFixed(1)}% overhead`,
+			"for snapshot creation and commit operations.",
+		);
+	} else {
+		lines.push(
+			"Interpretation: Transactional execution shows no overhead penalty.",
+			"This may indicate that snapshot and commit costs are negligible at this scale.",
+		);
+	}
+
+	return lines.join("\n");
+}
+
 /**
  * Run the benchmark suite and print results.
  * This is called when the file is executed directly.
@@ -189,6 +315,22 @@ export async function run(): Promise<void> {
 
 	console.log("\nResults:\n");
 	console.log(formatResultsTable(bench.tasks));
+
+	// Task 7.4: Report overhead delta between transactional and direct execution
+	const directTask = bench.tasks.find((t) => t.name.startsWith("direct"));
+	const txTask = bench.tasks.find((t) => t.name.startsWith("transactional"));
+
+	if (directTask?.result && txTask?.result) {
+		console.log("\n");
+		console.log(
+			formatOverheadReport(
+				directTask.result.throughput.mean,
+				directTask.result.latency.mean,
+				txTask.result.throughput.mean,
+				txTask.result.latency.mean,
+			),
+		);
+	}
 }
 
 // Run when executed directly
