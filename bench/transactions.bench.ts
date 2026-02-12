@@ -9,7 +9,7 @@
  * Uses a 10K-entity baseline collection for consistent measurements.
  */
 
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { Bench } from "tinybench";
 import {
 	generateUsers,
@@ -123,7 +123,49 @@ export async function createSuite(): Promise<Bench> {
 		await directDb.users.delete(created.id).runPromise;
 	});
 
-	// Task 7.3: Transactional multi-operation benchmark (with $transaction)
+	// -------------------------------------------------------------------------
+	// 7.3: Transactional multi-operation benchmark (with $transaction wrapper)
+	// -------------------------------------------------------------------------
+
+	// For transactional execution, we run the same sequence of create, update, delete
+	// operations inside a $transaction wrapper. This measures the overhead of
+	// transaction semantics: snapshot creation, mutation tracking, and commit.
+	const txDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	let txCounter = 0;
+
+	bench.add("transactional (create + update + delete)", async () => {
+		// Use a counter to generate unique IDs for each iteration
+		const uniqueId = `tx_bench_${Date.now()}_${txCounter++}`;
+
+		// Run the same operations inside a transaction
+		await Effect.runPromise(
+			txDb.$transaction((ctx) =>
+				Effect.gen(function* () {
+					// 1. Create a new user
+					const created = yield* ctx.users.create({
+						id: uniqueId,
+						name: `Tx User ${txCounter}`,
+						email: `tx${txCounter}@test.com`,
+						age: 25 + (txCounter % 50),
+						role: "user" as const,
+						createdAt: new Date().toISOString(),
+					});
+
+					// 2. Update the user we just created
+					yield* ctx.users.update(created.id, {
+						name: `Updated Tx User ${txCounter}`,
+						age: 30 + (txCounter % 40),
+					});
+
+					// 3. Delete the user to keep collection size stable
+					yield* ctx.users.delete(created.id);
+
+					return created;
+				}),
+			),
+		);
+	});
+
 	// Task 7.4: Overhead delta reporting
 
 	return bench;
