@@ -1,13 +1,16 @@
-import { Chunk, Effect, Layer, Schema, Stream } from "effect";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
 	createPersistentEffectDatabase,
-	makeSerializerLayer,
 	jsonCodec,
-	yamlCodec,
+	makeSerializerLayer,
 	StorageAdapterService as StorageAdapter,
+	yamlCodec,
 } from "@proseql/core";
-import { makeLocalStorageAdapter, makeIndexedDBAdapter } from "../src/browser-adapter-layer.js";
+import { Chunk, Effect, Layer, Schema, Stream } from "effect";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+	makeIndexedDBAdapter,
+	makeLocalStorageAdapter,
+} from "../src/browser-adapter-layer.js";
 
 // ============================================================================
 // Mock Storage Implementations
@@ -288,7 +291,7 @@ class MockIDBOpenDBRequest implements IDBOpenDBRequest {
 }
 
 class MockIDBFactory implements IDBFactory {
-	private databases: Map<string, MockIDBDatabase> = new Map();
+	private _databases: Map<string, MockIDBDatabase> = new Map();
 	private globalStore: Map<string, string>;
 
 	constructor(store: Map<string, string>) {
@@ -299,19 +302,22 @@ class MockIDBFactory implements IDBFactory {
 		const request = new MockIDBOpenDBRequest();
 
 		queueMicrotask(() => {
-			let db = this.databases.get(name);
+			let db = this._databases.get(name);
 			const isNew = !db;
 
 			if (!db) {
 				db = new MockIDBDatabase(name, this.globalStore);
-				this.databases.set(name, db);
+				this._databases.set(name, db);
 			}
 
 			request.result = db;
 			request.readyState = "done";
 
 			if (isNew && request.onupgradeneeded) {
-				request.onupgradeneeded.call(request, new Event("upgradeneeded") as IDBVersionChangeEvent);
+				request.onupgradeneeded.call(
+					request,
+					new Event("upgradeneeded") as IDBVersionChangeEvent,
+				);
 			}
 
 			if (request.onsuccess) {
@@ -325,7 +331,7 @@ class MockIDBFactory implements IDBFactory {
 	deleteDatabase(name: string): IDBOpenDBRequest {
 		const request = new MockIDBOpenDBRequest();
 		queueMicrotask(() => {
-			this.databases.delete(name);
+			this._databases.delete(name);
 			request.readyState = "done";
 			if (request.onsuccess) {
 				request.onsuccess.call(request, new Event("success"));
@@ -340,7 +346,7 @@ class MockIDBFactory implements IDBFactory {
 
 	databases(): Promise<IDBDatabaseInfo[]> {
 		return Promise.resolve(
-			Array.from(this.databases.keys()).map((name) => ({ name, version: 1 })),
+			Array.from(this._databases.keys()).map((name) => ({ name, version: 1 })),
 		);
 	}
 }
@@ -398,7 +404,13 @@ describe("Browser Storage Integration", () => {
 			} as const;
 
 			const initialBooks = [
-				{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965, genre: "sci-fi" },
+				{
+					id: "1",
+					title: "Dune",
+					author: "Frank Herbert",
+					year: 1965,
+					genre: "sci-fi",
+				},
 			];
 
 			// Phase 1: Create database and insert records
@@ -411,9 +423,13 @@ describe("Browser Storage Integration", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(config, { books: initialBooks }, {
-								writeDebounce: 10,
-							}),
+							createPersistentEffectDatabase(
+								config,
+								{ books: initialBooks },
+								{
+									writeDebounce: 10,
+								},
+							),
 							layer,
 						);
 
@@ -438,7 +454,7 @@ describe("Browser Storage Integration", () => {
 			// Verify data was persisted to storage
 			const storedData = mockStorage.getItem(`${keyPrefix}data/books.json`);
 			expect(storedData).toBeDefined();
-			const parsed = JSON.parse(storedData!);
+			const parsed = JSON.parse(storedData ?? "");
 			expect(Object.keys(parsed)).toHaveLength(2);
 
 			// Phase 2: Reload from storage with fresh database instance
@@ -446,9 +462,13 @@ describe("Browser Storage Integration", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(config, { books: [] }, {
-								writeDebounce: 10,
-							}),
+							createPersistentEffectDatabase(
+								config,
+								{ books: [] },
+								{
+									writeDebounce: 10,
+								},
+							),
 							layer,
 						);
 
@@ -458,8 +478,12 @@ describe("Browser Storage Integration", () => {
 						expect(books).toHaveLength(2);
 
 						// Verify specific records
-						const dune = books.find((b) => (b as Record<string, unknown>).title === "Dune");
-						const neuromancer = books.find((b) => (b as Record<string, unknown>).title === "Neuromancer");
+						const dune = books.find(
+							(b) => (b as Record<string, unknown>).title === "Dune",
+						);
+						const neuromancer = books.find(
+							(b) => (b as Record<string, unknown>).title === "Neuromancer",
+						);
 						expect(dune).toBeDefined();
 						expect(neuromancer).toBeDefined();
 					}),
@@ -492,10 +516,14 @@ describe("Browser Storage Integration", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(config, {
-								books: [],
-								authors: [],
-							}, { writeDebounce: 10 }),
+							createPersistentEffectDatabase(
+								config,
+								{
+									books: [],
+									authors: [],
+								},
+								{ writeDebounce: 10 },
+							),
 							layer,
 						);
 
@@ -519,11 +547,17 @@ describe("Browser Storage Integration", () => {
 
 			// Verify both files exist
 			expect(mockStorage.getItem(`${keyPrefix}data/books.json`)).toBeDefined();
-			expect(mockStorage.getItem(`${keyPrefix}data/authors.json`)).toBeDefined();
+			expect(
+				mockStorage.getItem(`${keyPrefix}data/authors.json`),
+			).toBeDefined();
 
 			// Verify each has one record
-			const booksData = JSON.parse(mockStorage.getItem(`${keyPrefix}data/books.json`)!);
-			const authorsData = JSON.parse(mockStorage.getItem(`${keyPrefix}data/authors.json`)!);
+			const booksData = JSON.parse(
+				mockStorage.getItem(`${keyPrefix}data/books.json`) ?? "",
+			);
+			const authorsData = JSON.parse(
+				mockStorage.getItem(`${keyPrefix}data/authors.json`) ?? "",
+			);
 			expect(Object.keys(booksData)).toHaveLength(1);
 			expect(Object.keys(authorsData)).toHaveLength(1);
 		});
@@ -548,9 +582,13 @@ describe("Browser Storage Integration", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(config, { books: [] }, {
-								writeDebounce: 10,
-							}),
+							createPersistentEffectDatabase(
+								config,
+								{ books: [] },
+								{
+									writeDebounce: 10,
+								},
+							),
 							layer,
 						);
 
@@ -570,9 +608,9 @@ describe("Browser Storage Integration", () => {
 			const storedData = mockStorage.getItem(`${keyPrefix}data/books.yaml`);
 			expect(storedData).toBeDefined();
 			// YAML doesn't start with { like JSON
-			expect(storedData!.startsWith("{")).toBe(false);
+			expect(storedData?.startsWith("{")).toBe(false);
 			// Should contain the book title
-			expect(storedData!).toContain("Dune");
+			expect(storedData ?? "").toContain("Dune");
 		});
 	});
 
@@ -636,9 +674,13 @@ describe("Browser Storage Integration", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(config, { books: initialBooks }, {
-								writeDebounce: 10,
-							}),
+							createPersistentEffectDatabase(
+								config,
+								{ books: initialBooks },
+								{
+									writeDebounce: 10,
+								},
+							),
 							layer,
 						);
 
@@ -671,9 +713,13 @@ describe("Browser Storage Integration", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(config, { books: [] }, {
-								writeDebounce: 10,
-							}),
+							createPersistentEffectDatabase(
+								config,
+								{ books: [] },
+								{
+									writeDebounce: 10,
+								},
+							),
 							layer,
 						);
 
@@ -701,7 +747,10 @@ describe("Browser Storage Integration", () => {
 				},
 			} as const;
 
-			const adapter = makeIndexedDBAdapter({ keyPrefix, databaseName: `testdb_${testCounter}` });
+			const adapter = makeIndexedDBAdapter({
+				keyPrefix,
+				databaseName: `testdb_${testCounter}`,
+			});
 			const storageLayer = Layer.succeed(StorageAdapter, adapter);
 			const serializerLayer = makeSerializerLayer([jsonCodec()]);
 			const layer = Layer.merge(storageLayer, serializerLayer);
@@ -710,9 +759,13 @@ describe("Browser Storage Integration", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(config, { books: [] }, {
-								writeDebounce: 10,
-							}),
+							createPersistentEffectDatabase(
+								config,
+								{ books: [] },
+								{
+									writeDebounce: 10,
+								},
+							),
 							layer,
 						);
 
@@ -730,7 +783,9 @@ describe("Browser Storage Integration", () => {
 						expect(found.title).toBe("Dune");
 
 						// Update
-						const updated = yield* db.books.update(dune.id, { genre: "classic" });
+						const updated = yield* db.books.update(dune.id, {
+							genre: "classic",
+						});
 						expect(updated.genre).toBe("classic");
 
 						// Delete
@@ -786,14 +841,22 @@ describe("Browser Storage Integration", () => {
 			} as const;
 
 			const initialBooks = [
-				{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965, genre: "sci-fi" },
+				{
+					id: "1",
+					title: "Dune",
+					author: "Frank Herbert",
+					year: 1965,
+					genre: "sci-fi",
+				},
 			];
 
 			const serializerLayer = makeSerializerLayer([jsonCodec()]);
 
 			// Test with localStorage - create database, add a record, flush, reload
 			const localStorageKeyPrefix = "localStorage:";
-			const localStorageAdapter = makeLocalStorageAdapter(mockLocalStorage, { keyPrefix: localStorageKeyPrefix });
+			const localStorageAdapter = makeLocalStorageAdapter(mockLocalStorage, {
+				keyPrefix: localStorageKeyPrefix,
+			});
 			const localStorageLayer = Layer.merge(
 				Layer.succeed(StorageAdapter, localStorageAdapter),
 				serializerLayer,
@@ -804,9 +867,13 @@ describe("Browser Storage Integration", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(config, { books: initialBooks }, {
-								writeDebounce: 10,
-							}),
+							createPersistentEffectDatabase(
+								config,
+								{ books: initialBooks },
+								{
+									writeDebounce: 10,
+								},
+							),
 							localStorageLayer,
 						);
 
@@ -826,8 +893,13 @@ describe("Browser Storage Integration", () => {
 			);
 
 			// Verify localStorage has the data
-			expect(mockLocalStorage.getItem(`${localStorageKeyPrefix}data/books.json`)).toBeDefined();
-			const localStorageData = JSON.parse(mockLocalStorage.getItem(`${localStorageKeyPrefix}data/books.json`)!);
+			expect(
+				mockLocalStorage.getItem(`${localStorageKeyPrefix}data/books.json`),
+			).toBeDefined();
+			const localStorageData = JSON.parse(
+				mockLocalStorage.getItem(`${localStorageKeyPrefix}data/books.json`) ??
+					"",
+			);
 			expect(Object.keys(localStorageData)).toHaveLength(2);
 
 			// Phase 2: Reload from localStorage to verify persistence
@@ -835,14 +907,20 @@ describe("Browser Storage Integration", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(config, { books: [] }, {
-								writeDebounce: 10,
-							}),
+							createPersistentEffectDatabase(
+								config,
+								{ books: [] },
+								{
+									writeDebounce: 10,
+								},
+							),
 							localStorageLayer,
 						);
 
 						const allBooks = yield* Stream.runCollect(db.books.query());
-						const books = Chunk.toArray(allBooks) as Array<Record<string, unknown>>;
+						const books = Chunk.toArray(allBooks) as Array<
+							Record<string, unknown>
+						>;
 						expect(books).toHaveLength(2);
 
 						// Should contain Dune (initial) and Neuromancer (created)
@@ -856,7 +934,10 @@ describe("Browser Storage Integration", () => {
 			// Test with IndexedDB - use unique database name to avoid cache conflicts
 			const indexedDBKeyPrefix = "indexedDB:";
 			const dbName = `testdb_switching_${testCounter}_${Date.now()}`;
-			const indexedDBAdapter = makeIndexedDBAdapter({ keyPrefix: indexedDBKeyPrefix, databaseName: dbName });
+			const indexedDBAdapter = makeIndexedDBAdapter({
+				keyPrefix: indexedDBKeyPrefix,
+				databaseName: dbName,
+			});
 			const indexedDBLayer = Layer.merge(
 				Layer.succeed(StorageAdapter, indexedDBAdapter),
 				serializerLayer,
@@ -867,9 +948,13 @@ describe("Browser Storage Integration", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(config, { books: initialBooks }, {
-								writeDebounce: 10,
-							}),
+							createPersistentEffectDatabase(
+								config,
+								{ books: initialBooks },
+								{
+									writeDebounce: 10,
+								},
+							),
 							indexedDBLayer,
 						);
 
@@ -883,7 +968,9 @@ describe("Browser Storage Integration", () => {
 						yield* Effect.promise(() => db.flush());
 
 						const allBooks = yield* Stream.runCollect(db.books.query());
-						const books = Chunk.toArray(allBooks) as Array<Record<string, unknown>>;
+						const books = Chunk.toArray(allBooks) as Array<
+							Record<string, unknown>
+						>;
 						expect(books).toHaveLength(2);
 
 						// Should contain Dune (initial) and Snow Crash (created)
@@ -901,14 +988,20 @@ describe("Browser Storage Integration", () => {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const db = yield* Effect.provide(
-							createPersistentEffectDatabase(config, { books: [] }, {
-								writeDebounce: 10,
-							}),
+							createPersistentEffectDatabase(
+								config,
+								{ books: [] },
+								{
+									writeDebounce: 10,
+								},
+							),
 							indexedDBLayer,
 						);
 
 						const allBooks = yield* Stream.runCollect(db.books.query());
-						const books = Chunk.toArray(allBooks) as Array<Record<string, unknown>>;
+						const books = Chunk.toArray(allBooks) as Array<
+							Record<string, unknown>
+						>;
 						expect(books).toHaveLength(2);
 
 						// Should still have Dune and Snow Crash (persisted)
@@ -920,8 +1013,13 @@ describe("Browser Storage Integration", () => {
 			);
 
 			// Verify localStorage still has its separate data (localStorage wasn't affected by IndexedDB operations)
-			const finalLocalStorageData = JSON.parse(mockLocalStorage.getItem(`${localStorageKeyPrefix}data/books.json`)!);
-			const localStorageTitles = Object.values(finalLocalStorageData).map((b) => (b as Record<string, unknown>).title);
+			const finalLocalStorageData = JSON.parse(
+				mockLocalStorage.getItem(`${localStorageKeyPrefix}data/books.json`) ??
+					"",
+			);
+			const localStorageTitles = Object.values(finalLocalStorageData).map(
+				(b) => (b as Record<string, unknown>).title,
+			);
 			expect(localStorageTitles).toContain("Neuromancer");
 			expect(localStorageTitles).not.toContain("Snow Crash");
 		});

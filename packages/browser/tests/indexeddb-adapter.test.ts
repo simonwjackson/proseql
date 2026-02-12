@@ -1,7 +1,10 @@
+import { StorageAdapterService as StorageAdapter } from "@proseql/core";
 import { Effect, Layer } from "effect";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { StorageAdapterService as StorageAdapter, StorageError } from "@proseql/core";
-import { makeIndexedDBAdapter, makeIndexedDBStorageLayer } from "../src/adapters/indexeddb-adapter.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+	makeIndexedDBAdapter,
+	makeIndexedDBStorageLayer,
+} from "../src/adapters/indexeddb-adapter.js";
 
 // ============================================================================
 // Mock IndexedDB Implementation
@@ -253,7 +256,7 @@ class MockIDBOpenDBRequest implements IDBOpenDBRequest {
 }
 
 class MockIDBFactory implements IDBFactory {
-	private databases: Map<string, MockIDBDatabase> = new Map();
+	private _databases: Map<string, MockIDBDatabase> = new Map();
 	private globalStore: Map<string, string>;
 
 	constructor(store: Map<string, string>) {
@@ -264,12 +267,12 @@ class MockIDBFactory implements IDBFactory {
 		const request = new MockIDBOpenDBRequest();
 
 		queueMicrotask(() => {
-			let db = this.databases.get(name);
+			let db = this._databases.get(name);
 			const isNew = !db;
 
 			if (!db) {
 				db = new MockIDBDatabase(name, this.globalStore);
-				this.databases.set(name, db);
+				this._databases.set(name, db);
 			}
 
 			request.result = db;
@@ -277,7 +280,10 @@ class MockIDBFactory implements IDBFactory {
 
 			// Fire onupgradeneeded for new databases
 			if (isNew && request.onupgradeneeded) {
-				request.onupgradeneeded.call(request, new Event("upgradeneeded") as IDBVersionChangeEvent);
+				request.onupgradeneeded.call(
+					request,
+					new Event("upgradeneeded") as IDBVersionChangeEvent,
+				);
 			}
 
 			if (request.onsuccess) {
@@ -291,7 +297,7 @@ class MockIDBFactory implements IDBFactory {
 	deleteDatabase(name: string): IDBOpenDBRequest {
 		const request = new MockIDBOpenDBRequest();
 		queueMicrotask(() => {
-			this.databases.delete(name);
+			this._databases.delete(name);
 			request.readyState = "done";
 			if (request.onsuccess) {
 				request.onsuccess.call(request, new Event("success"));
@@ -306,7 +312,7 @@ class MockIDBFactory implements IDBFactory {
 
 	databases(): Promise<IDBDatabaseInfo[]> {
 		return Promise.resolve(
-			Array.from(this.databases.keys()).map((name) => ({ name, version: 1 })),
+			Array.from(this._databases.keys()).map((name) => ({ name, version: 1 })),
 		);
 	}
 }

@@ -123,5 +123,5 @@
 
 - [x] 16.1 Run full test suite (`bun test`) to verify no regressions in existing packages
 - [x] 16.2 Run type check (`bunx tsc --build`) to verify no type errors
-- [ ] 16.3 Run linter (`biome check .`) and fix any issues
+- [x] 16.3 Run linter (`biome check .`) and fix any issues
 - [ ] 16.4 Verify `nix flake check` passes with the new package

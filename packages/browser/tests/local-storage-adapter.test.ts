@@ -1,7 +1,10 @@
+import { StorageAdapterService as StorageAdapter } from "@proseql/core";
 import { Effect, Layer } from "effect";
-import { describe, expect, it, beforeEach } from "vitest";
-import { StorageAdapterService as StorageAdapter, StorageError } from "@proseql/core";
-import { makeLocalStorageAdapter, makeLocalStorageLayer } from "../src/adapters/local-storage-adapter.js";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+	makeLocalStorageAdapter,
+	makeLocalStorageLayer,
+} from "../src/adapters/local-storage-adapter.js";
 
 // ============================================================================
 // Mock Storage Implementation
@@ -275,12 +278,14 @@ describe("LocalStorageAdapter", () => {
 				Effect.provide(
 					Effect.gen(function* () {
 						const adapter = yield* StorageAdapter;
-						return yield* adapter.write("./large-file.json", "lots of data").pipe(
-							Effect.matchEffect({
-								onFailure: (e) => Effect.succeed(e),
-								onSuccess: () => Effect.fail("should not succeed" as const),
-							}),
-						);
+						return yield* adapter
+							.write("./large-file.json", "lots of data")
+							.pipe(
+								Effect.matchEffect({
+									onFailure: (e) => Effect.succeed(e),
+									onSuccess: () => Effect.fail("should not succeed" as const),
+								}),
+							);
 					}),
 					layer,
 				),

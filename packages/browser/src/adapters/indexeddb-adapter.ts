@@ -10,13 +10,13 @@
 
 import {
 	StorageAdapterService as StorageAdapter,
-	StorageError,
-	UnsupportedFormatError,
 	type StorageAdapterShape,
+	StorageError,
+	type UnsupportedFormatError,
 } from "@proseql/core";
 import { Effect, Layer } from "effect";
-import { pathToKey, DEFAULT_STORAGE_KEY_PREFIX } from "../path-to-key.js";
 import { validateAllowedFormat } from "../format-validation.js";
+import { DEFAULT_STORAGE_KEY_PREFIX, pathToKey } from "../path-to-key.js";
 
 // ============================================================================
 // Configuration
@@ -184,7 +184,9 @@ const getDatabase = (
 
 const makeRead =
 	(config: ResolvedIndexedDBConfig) =>
-	(path: string): Effect.Effect<string, StorageError | UnsupportedFormatError> => {
+	(
+		path: string,
+	): Effect.Effect<string, StorageError | UnsupportedFormatError> => {
 		const key = pathToKey(path, config.keyPrefix);
 
 		return Effect.gen(function* () {
@@ -227,7 +229,10 @@ const makeRead =
 
 const makeWrite =
 	(config: ResolvedIndexedDBConfig) =>
-	(path: string, data: string): Effect.Effect<void, StorageError | UnsupportedFormatError> => {
+	(
+		path: string,
+		data: string,
+	): Effect.Effect<void, StorageError | UnsupportedFormatError> => {
 		const key = pathToKey(path, config.keyPrefix);
 
 		return Effect.gen(function* () {

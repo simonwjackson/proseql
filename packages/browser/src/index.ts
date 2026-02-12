@@ -7,35 +7,33 @@
 
 // Re-export everything from core
 export * from "@proseql/core";
-
-// Browser-specific exports
-export { pathToKey, DEFAULT_STORAGE_KEY_PREFIX } from "./path-to-key.js";
+// Browser storage adapter layers, factories, and config types
+export {
+	// Default browser layer alias
+	BrowserStorageLayer,
+	type IndexedDBConfig,
+	IndexedDBStorageLayer,
+	LocalStorageLayer,
+	// IndexedDB
+	makeIndexedDBAdapter,
+	makeIndexedDBStorageLayer,
+	// LocalStorage
+	makeLocalStorageAdapter,
+	makeLocalStorageLayer,
+	// SessionStorage
+	makeSessionStorageAdapter,
+	makeSessionStorageLayer,
+	// Shared web storage adapter
+	makeWebStorageAdapter,
+	SessionStorageLayer,
+	type WatchImplementation,
+	type WebStorageConfig,
+} from "./browser-adapter-layer.js";
 
 // Format validation utilities
 export {
 	getFileExtension,
 	validateAllowedFormat,
 } from "./format-validation.js";
-
-// Browser storage adapter layers, factories, and config types
-export {
-	// LocalStorage
-	makeLocalStorageAdapter,
-	makeLocalStorageLayer,
-	LocalStorageLayer,
-	type WebStorageConfig,
-	// SessionStorage
-	makeSessionStorageAdapter,
-	makeSessionStorageLayer,
-	SessionStorageLayer,
-	// IndexedDB
-	makeIndexedDBAdapter,
-	makeIndexedDBStorageLayer,
-	IndexedDBStorageLayer,
-	type IndexedDBConfig,
-	// Shared web storage adapter
-	makeWebStorageAdapter,
-	type WatchImplementation,
-	// Default browser layer alias
-	BrowserStorageLayer,
-} from "./browser-adapter-layer.js";
+// Browser-specific exports
+export { DEFAULT_STORAGE_KEY_PREFIX, pathToKey } from "./path-to-key.js";

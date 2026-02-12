@@ -15,8 +15,8 @@ import {
 import { Effect, Layer } from "effect";
 import {
 	makeWebStorageAdapter,
-	type WebStorageConfig,
 	type WatchImplementation,
+	type WebStorageConfig,
 } from "./web-storage-adapter.js";
 
 // ============================================================================

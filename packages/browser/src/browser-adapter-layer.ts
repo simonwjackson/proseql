@@ -10,9 +10,9 @@
 // ============================================================================
 
 export {
+	LocalStorageLayer,
 	makeLocalStorageAdapter,
 	makeLocalStorageLayer,
-	LocalStorageLayer,
 	type WebStorageConfig,
 } from "./adapters/local-storage-adapter.js";
 
@@ -31,10 +31,10 @@ export {
 // ============================================================================
 
 export {
+	type IndexedDBConfig,
+	IndexedDBStorageLayer,
 	makeIndexedDBAdapter,
 	makeIndexedDBStorageLayer,
-	IndexedDBStorageLayer,
-	type IndexedDBConfig,
 } from "./adapters/indexeddb-adapter.js";
 
 // ============================================================================

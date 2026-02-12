@@ -7,13 +7,13 @@
  */
 
 import {
-	StorageError,
-	UnsupportedFormatError,
 	type StorageAdapterShape,
+	StorageError,
+	type UnsupportedFormatError,
 } from "@proseql/core";
 import { Effect } from "effect";
-import { pathToKey, DEFAULT_STORAGE_KEY_PREFIX } from "../path-to-key.js";
-import { getFileExtension, validateAllowedFormat } from "../format-validation.js";
+import { validateAllowedFormat } from "../format-validation.js";
+import { DEFAULT_STORAGE_KEY_PREFIX, pathToKey } from "../path-to-key.js";
 
 // ============================================================================
 // Configuration
@@ -95,7 +95,9 @@ const toStorageError = (
 
 const makeRead =
 	(storage: Storage, config: ResolvedWebStorageConfig) =>
-	(path: string): Effect.Effect<string, StorageError | UnsupportedFormatError> => {
+	(
+		path: string,
+	): Effect.Effect<string, StorageError | UnsupportedFormatError> => {
 		const key = pathToKey(path, config.keyPrefix);
 		return Effect.gen(function* () {
 			// Validate format if restrictions are configured
@@ -117,7 +119,10 @@ const makeRead =
 
 const makeWrite =
 	(storage: Storage, config: ResolvedWebStorageConfig) =>
-	(path: string, data: string): Effect.Effect<void, StorageError | UnsupportedFormatError> => {
+	(
+		path: string,
+		data: string,
+	): Effect.Effect<void, StorageError | UnsupportedFormatError> => {
 		const key = pathToKey(path, config.keyPrefix);
 		return Effect.gen(function* () {
 			// Validate format if restrictions are configured

@@ -1,6 +1,6 @@
-import { Effect, Layer } from "effect";
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { StorageAdapterService as StorageAdapter } from "@proseql/core";
+import { Effect, Layer } from "effect";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeLocalStorageAdapter } from "../src/adapters/local-storage-adapter.js";
 
 // ============================================================================
@@ -56,9 +56,19 @@ interface StorageEventState {
 
 const createMockWindow = (): {
 	state: StorageEventState;
-	addEventListener: (type: string, listener: (event: StorageEvent) => void) => void;
-	removeEventListener: (type: string, listener: (event: StorageEvent) => void) => void;
-	dispatchStorageEvent: (key: string | null, oldValue: string | null, newValue: string | null) => void;
+	addEventListener: (
+		type: string,
+		listener: (event: StorageEvent) => void,
+	) => void;
+	removeEventListener: (
+		type: string,
+		listener: (event: StorageEvent) => void,
+	) => void;
+	dispatchStorageEvent: (
+		key: string | null,
+		oldValue: string | null,
+		newValue: string | null,
+	) => void;
 } => {
 	const state: StorageEventState = {
 		listeners: [],
@@ -66,12 +76,18 @@ const createMockWindow = (): {
 
 	return {
 		state,
-		addEventListener: (type: string, listener: (event: StorageEvent) => void) => {
+		addEventListener: (
+			type: string,
+			listener: (event: StorageEvent) => void,
+		) => {
 			if (type === "storage") {
 				state.listeners.push(listener);
 			}
 		},
-		removeEventListener: (type: string, listener: (event: StorageEvent) => void) => {
+		removeEventListener: (
+			type: string,
+			listener: (event: StorageEvent) => void,
+		) => {
 			if (type === "storage") {
 				const index = state.listeners.indexOf(listener);
 				if (index !== -1) {
@@ -79,7 +95,11 @@ const createMockWindow = (): {
 				}
 			}
 		},
-		dispatchStorageEvent: (key: string | null, oldValue: string | null, newValue: string | null) => {
+		dispatchStorageEvent: (
+			key: string | null,
+			oldValue: string | null,
+			newValue: string | null,
+		) => {
 			const event = {
 				key,
 				oldValue,
@@ -194,7 +214,11 @@ describe("Cross-Tab Sync", () => {
 			expect(onChange).toHaveBeenCalledTimes(1);
 
 			// Event with default prefix should NOT trigger onChange
-			mockWindow.dispatchStorageEvent("proseql:data/test.json", null, "other data");
+			mockWindow.dispatchStorageEvent(
+				"proseql:data/test.json",
+				null,
+				"other data",
+			);
 			expect(onChange).toHaveBeenCalledTimes(1); // Still 1, not 2
 
 			unsubscribe();
@@ -218,7 +242,11 @@ describe("Cross-Tab Sync", () => {
 
 			// Simulate storage events for OTHER keys
 			mockWindow.dispatchStorageEvent("proseql:data/authors.yaml", null, "new");
-			mockWindow.dispatchStorageEvent("proseql:data/publishers.json", null, "new");
+			mockWindow.dispatchStorageEvent(
+				"proseql:data/publishers.json",
+				null,
+				"new",
+			);
 			mockWindow.dispatchStorageEvent("other-app:data/books.yaml", null, "new");
 
 			// onChange should NOT have been called
@@ -315,9 +343,18 @@ describe("Cross-Tab Sync", () => {
 			const [unsubBooks, unsubAuthors, unsubPublishers] = await run(
 				Effect.gen(function* () {
 					const adapter = yield* StorageAdapter;
-					const unsub1 = yield* adapter.watch("./data/books.yaml", onChangeBooks);
-					const unsub2 = yield* adapter.watch("./data/authors.yaml", onChangeAuthors);
-					const unsub3 = yield* adapter.watch("./data/publishers.json", onChangePublishers);
+					const unsub1 = yield* adapter.watch(
+						"./data/books.yaml",
+						onChangeBooks,
+					);
+					const unsub2 = yield* adapter.watch(
+						"./data/authors.yaml",
+						onChangeAuthors,
+					);
+					const unsub3 = yield* adapter.watch(
+						"./data/publishers.json",
+						onChangePublishers,
+					);
 					return [unsub1, unsub2, unsub3] as const;
 				}),
 			);
@@ -338,7 +375,11 @@ describe("Cross-Tab Sync", () => {
 			expect(onChangePublishers).not.toHaveBeenCalled();
 
 			// Trigger event for publishers
-			mockWindow.dispatchStorageEvent("proseql:data/publishers.json", null, "new");
+			mockWindow.dispatchStorageEvent(
+				"proseql:data/publishers.json",
+				null,
+				"new",
+			);
 			expect(onChangeBooks).toHaveBeenCalledTimes(1);
 			expect(onChangeAuthors).toHaveBeenCalledTimes(1);
 			expect(onChangePublishers).toHaveBeenCalledTimes(1);
@@ -357,8 +398,14 @@ describe("Cross-Tab Sync", () => {
 			const [unsubBooks, unsubAuthors] = await run(
 				Effect.gen(function* () {
 					const adapter = yield* StorageAdapter;
-					const unsub1 = yield* adapter.watch("./data/books.yaml", onChangeBooks);
-					const unsub2 = yield* adapter.watch("./data/authors.yaml", onChangeAuthors);
+					const unsub1 = yield* adapter.watch(
+						"./data/books.yaml",
+						onChangeBooks,
+					);
+					const unsub2 = yield* adapter.watch(
+						"./data/authors.yaml",
+						onChangeAuthors,
+					);
 					return [unsub1, unsub2] as const;
 				}),
 			);

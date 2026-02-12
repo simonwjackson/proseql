@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pathToKey, DEFAULT_STORAGE_KEY_PREFIX } from "../src/path-to-key.js";
+import { DEFAULT_STORAGE_KEY_PREFIX, pathToKey } from "../src/path-to-key.js";
 
 // ============================================================================
 // pathToKey - Basic functionality
@@ -28,7 +28,9 @@ describe("pathToKey", () => {
 		});
 
 		it("supports prefix without colon", () => {
-			expect(pathToKey("./data/books.yaml", "app_")).toBe("app_data/books.yaml");
+			expect(pathToKey("./data/books.yaml", "app_")).toBe(
+				"app_data/books.yaml",
+			);
 		});
 	});
 
@@ -82,7 +84,9 @@ describe("pathToKey", () => {
 
 	describe("edge cases", () => {
 		it("handles multiple leading ./", () => {
-			expect(pathToKey("./././data/books.yaml")).toBe("proseql:data/books.yaml");
+			expect(pathToKey("./././data/books.yaml")).toBe(
+				"proseql:data/books.yaml",
+			);
 		});
 
 		it("handles standalone dot", () => {
@@ -90,7 +94,9 @@ describe("pathToKey", () => {
 		});
 
 		it("handles absolute paths by stripping leading /", () => {
-			expect(pathToKey("/absolute/path.yaml")).toBe("proseql:absolute/path.yaml");
+			expect(pathToKey("/absolute/path.yaml")).toBe(
+				"proseql:absolute/path.yaml",
+			);
 		});
 
 		it("handles trailing slashes", () => {
@@ -106,7 +112,9 @@ describe("pathToKey", () => {
 		});
 
 		it("preserves parent directory references", () => {
-			expect(pathToKey("../data/books.yaml")).toBe("proseql:../data/books.yaml");
+			expect(pathToKey("../data/books.yaml")).toBe(
+				"proseql:../data/books.yaml",
+			);
 		});
 
 		it("handles complex parent references", () => {
