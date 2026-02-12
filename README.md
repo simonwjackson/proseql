@@ -163,12 +163,63 @@ const result = await db.books.upsert({
   update: { genre: "documentary" },  // honestly more accurate
 }).runPromise
 
+// update many by predicate
+await db.books.updateMany(
+  (book) => book.genre === "sci-fi",
+  { genre: "speculative fiction" },
+).runPromise
+
+// upsert many
+await db.books.upsertMany([
+  { where: { id: "1" }, create: { title: "Dune", author: "Frank Herbert", year: 1965, genre: "sci-fi" }, update: { genre: "classic" } },
+  { where: { id: "99" }, create: { title: "New Book", author: "New Author", year: 2024, genre: "new" }, update: { genre: "updated" } },
+]).runPromise
+
 // delete
 await db.books.delete("1").runPromise
 
-// batch delete
-await db.books.deleteMany(["1", "2", "3"]).runPromise
+// delete by predicate
+await db.books.deleteMany(
+  (book) => book.year < 1970,
+).runPromise
 ```
+
+### Update Operators
+
+For when plain field replacement isn't enough. Operators give you atomic, type-safe mutations.
+
+```ts
+// increment/decrement numbers
+await db.books.update("1", { year: { $increment: 1 } }).runPromise
+await db.books.update("1", { year: { $decrement: 5 } }).runPromise
+await db.books.update("1", { year: { $multiply: 2 } }).runPromise
+
+// string append/prepend
+await db.books.update("1", { title: { $append: " (Revised)" } }).runPromise
+await db.books.update("1", { title: { $prepend: "The " } }).runPromise
+
+// array operations
+await db.books.update("1", { tags: { $append: "classic" } }).runPromise
+await db.books.update("1", { tags: { $prepend: "must-read" } }).runPromise
+await db.books.update("1", { tags: { $remove: "draft" } }).runPromise
+
+// toggle booleans
+await db.books.update("1", { inStock: { $toggle: true } }).runPromise
+
+// explicit set (same as plain value, but composable with other operators)
+await db.books.update("1", { genre: { $set: "masterpiece" } }).runPromise
+```
+
+| Operator | Works On | What It Does |
+|----------|----------|-------------|
+| `$set` | everything | Explicit set (equivalent to plain value) |
+| `$increment` | numbers | Add to current value |
+| `$decrement` | numbers | Subtract from current value |
+| `$multiply` | numbers | Multiply current value |
+| `$append` | strings, arrays | Append to end |
+| `$prepend` | strings, arrays | Prepend to beginning |
+| `$remove` | arrays | Remove matching element(s) |
+| `$toggle` | booleans | Flip the value |
 
 ## Querying
 
@@ -192,12 +243,49 @@ const results = await db.books.query({
 | `$nin` | everything | Not in list |
 | `$gt` `$gte` `$lt` `$lte` | numbers, strings | Comparisons |
 | `$startsWith` `$endsWith` `$contains` | strings | String matching |
+| `$search` | strings | Token-based text search (see [Full-Text Search](#full-text-search)) |
 | `$contains` `$all` `$size` | arrays | Array matching |
+| `$or` | clauses | Match **any** of the given conditions |
+| `$and` | clauses | Match **all** of the given conditions |
+| `$not` | clause | Negate a condition |
 
 Or just pass a value for exact match:
 
 ```ts
 const scifi = await db.books.query({ where: { genre: "sci-fi" } }).runPromise
+```
+
+#### Logical Operators
+
+Combine conditions with `$or`, `$and`, and `$not`:
+
+```ts
+// books that are either sci-fi OR published before 1970
+const results = await db.books.query({
+  where: {
+    $or: [
+      { genre: "sci-fi" },
+      { year: { $lt: 1970 } },
+    ],
+  },
+}).runPromise
+
+// NOT fantasy
+const notFantasy = await db.books.query({
+  where: {
+    $not: { genre: "fantasy" },
+  },
+}).runPromise
+
+// combine with field-level filters
+const complex = await db.books.query({
+  where: {
+    $and: [
+      { year: { $gte: 1960 } },
+      { $or: [{ genre: "sci-fi" }, { genre: "fantasy" }] },
+    ],
+  },
+}).runPromise
 ```
 
 ### Sorting
@@ -246,11 +334,12 @@ const page2 = await db.books.query({
 ```ts
 const stats = await db.books.aggregate({
   count: true,
+  sum: "pages",
   min: "year",
   max: "year",
   avg: "year",
 }).runPromise
-// → { count: 42, min: 1818, max: 2024, avg: 1973.5 }
+// → { count: 42, sum: { pages: 12840 }, min: { year: 1818 }, max: { year: 2024 }, avg: { year: 1973.5 } }
 
 // by genre
 const genres = await db.books.aggregate({
@@ -258,15 +347,142 @@ const genres = await db.books.aggregate({
   count: true,
 }).runPromise
 // → [
-//   { genre: "sci-fi", count: 23 },
-//   { genre: "fantasy", count: 12 },
-//   { genre: "literary horror", count: 7 },
+//   { group: { genre: "sci-fi" }, count: 23 },
+//   { group: { genre: "fantasy" }, count: 12 },
+//   { group: { genre: "literary horror" }, count: 7 },
 // ]
 
 // filtered
 const modern = await db.books.aggregate({
   where: { year: { $gte: 2000 } },
   count: true,
+}).runPromise
+```
+
+## Reactive Queries
+
+Subscribe to live query results. Mutations automatically push updates through the stream.
+
+```ts
+import { Effect, Stream, Scope } from "effect"
+
+// watch a filtered query — emits current results, then re-emits on every change
+const program = Effect.gen(function* () {
+  const db = yield* createEffectDatabase(config, initialData)
+
+  const stream = yield* db.books.watch({
+    where: { genre: "sci-fi" },
+    sort: { year: "desc" },
+  })
+
+  // process each emission
+  yield* Stream.runForEach(stream, (books) =>
+    Effect.sync(() => console.log("Current sci-fi:", books.length))
+  )
+})
+
+// run with a scope (stream cleans up automatically when scope closes)
+await Effect.runPromise(Effect.scoped(program))
+```
+
+Watch a single entity by ID:
+
+```ts
+const program = Effect.gen(function* () {
+  const db = yield* createEffectDatabase(config, initialData)
+
+  const stream = yield* db.books.watchById("1")
+
+  // emits the entity (or null if it doesn't exist)
+  // re-emits on update, emits null on deletion
+  yield* Stream.runForEach(stream, (book) =>
+    Effect.sync(() => {
+      if (book) console.log("Book updated:", book.title)
+      else console.log("Book was deleted")
+    })
+  )
+})
+```
+
+Streams are debounced and deduplicated automatically — rapid mutations produce at most one emission after the debounce interval settles.
+
+## Full-Text Search
+
+Search text fields with token-based matching. Results are ranked by relevance.
+
+```ts
+// field-level search
+const results = await db.books.query({
+  where: { title: { $search: "left hand" } },
+}).runPromise
+
+// multi-field search — terms can span across fields
+const results = await db.books.query({
+  where: {
+    $search: { query: "herbert dune", fields: ["title", "author"] },
+  },
+}).runPromise
+
+// search all string fields (omit fields)
+const results = await db.books.query({
+  where: {
+    $search: { query: "cyberpunk" },
+  },
+}).runPromise
+```
+
+Add a `searchIndex` for faster lookups on large collections:
+
+```ts
+const config = {
+  books: {
+    schema: BookSchema,
+    searchIndex: ["title", "author", "description"],
+    relationships: {},
+  },
+} as const
+```
+
+Without a search index, `$search` scans all entities (still works, just slower). With one, it hits the inverted index for O(tokens) candidate lookup.
+
+## Computed Fields
+
+Derived values that exist only at query time. Never persisted, zero overhead when not selected.
+
+```ts
+const config = {
+  books: {
+    schema: BookSchema,
+    computed: {
+      displayName: (book) => `${book.title} (${book.year})`,
+      isClassic: (book) => book.year < 1980,
+    },
+    relationships: {},
+  },
+} as const
+
+const db = await Effect.runPromise(
+  createEffectDatabase(config, { books: initialBooks }),
+)
+
+// computed fields appear in query results automatically
+const books = await db.books.query().runPromise
+// → [{ title: "Dune", year: 1965, displayName: "Dune (1965)", isClassic: true, ... }]
+
+// filter on computed fields
+const classics = await db.books.query({
+  where: { isClassic: true },
+}).runPromise
+
+// select specific fields (including computed)
+const labels = await db.books.query({
+  select: ["displayName"],
+}).runPromise
+// → [{ displayName: "Dune (1965)" }, ...]
+
+// sort by computed fields
+const sorted = await db.books.query({
+  sort: { displayName: "asc" },
 }).runPromise
 ```
 
@@ -476,6 +692,54 @@ await db.books.create({ title: "Dune (but again)", isbn: "978-0441172719", ... }
 // → UniqueConstraintError. There can be only one.
 ```
 
+## Plugin System
+
+Extend ProseQL with custom codecs, operators, ID generators, and global hooks.
+
+```ts
+import type { ProseQLPlugin } from "proseql"
+
+const regexPlugin: ProseQLPlugin = {
+  name: "regex-search",
+  operators: [{
+    name: "$regex",
+    types: ["string"],
+    evaluate: (value, pattern) =>
+      typeof value === "string" && new RegExp(pattern as string).test(value),
+  }],
+}
+
+const snowflakePlugin: ProseQLPlugin = {
+  name: "snowflake-ids",
+  idGenerators: [{
+    name: "snowflake",
+    generate: () => generateSnowflakeId(),
+  }],
+}
+
+const db = await Effect.runPromise(
+  createEffectDatabase(config, initialData, {
+    plugins: [regexPlugin, snowflakePlugin],
+  }),
+)
+
+// use the custom operator in queries
+const matches = await db.books.query({
+  where: { title: { $regex: "^The.*" } },
+}).runPromise
+
+// reference the custom ID generator in collection config
+const config = {
+  books: {
+    schema: BookSchema,
+    idGenerator: "snowflake",  // uses the plugin's generator
+    relationships: {},
+  },
+} as const
+```
+
+Plugins can also contribute format codecs and global lifecycle hooks that run across all collections.
+
 ## Error Handling
 
 Every error is tagged. Catch exactly what you want.
@@ -514,6 +778,7 @@ try {
 | `StorageError` | File system trouble |
 | `SerializationError` | Couldn't encode/decode |
 | `MigrationError` | Migration went sideways |
+| `PluginError` | Plugin validation or conflict |
 
 ## ID Generation
 
@@ -536,6 +801,29 @@ generateTimestampId()       // "1704067200000-a3f2-0001"
 generatePrefixedId("book")  // "book_1704067200000-a3f2-0001"
 generateTypedId("book")     // "book_V1StGXR8_Z5jdHi6B-myT"
 ```
+
+## Packages
+
+ProseQL is a monorepo. Pick the package that fits your runtime.
+
+| Package | What It Does |
+|---------|-------------|
+| `@proseql/core` | Runtime-agnostic database core. All the logic, no platform dependencies. |
+| `@proseql/node` | Re-exports core + `NodeStorageLayer` for file system persistence. |
+| `@proseql/browser` | Browser storage adapters: localStorage, sessionStorage, IndexedDB. |
+
+```ts
+// Node.js — file system persistence
+import { createPersistentEffectDatabase, NodeStorageLayer } from "@proseql/node"
+
+// Browser — localStorage with cross-tab sync
+import { createPersistentEffectDatabase, LocalStorageLayer } from "@proseql/browser"
+
+// In-memory only (works everywhere)
+import { createEffectDatabase } from "@proseql/core"
+```
+
+The browser package supports cross-tab synchronization via `storage` events (localStorage) and IndexedDB for datasets that exceed the ~5MB localStorage limit. See [packages/browser/README.md](packages/browser/README.md) for details.
 
 ## License
 
