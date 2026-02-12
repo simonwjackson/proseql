@@ -520,4 +520,133 @@ describe("reactive queries - mutation triggers", () => {
 			);
 		});
 	});
+
+	describe("update triggers watch (13.2)", () => {
+		it("updating a matched entity causes a new emission with the updated entity", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books sorted by year
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Fork collection to get 2 emissions: initial + after update
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission to be processed
+					yield* Effect.sleep("20 millis");
+
+					// Update Dune's year (id: "1", year: 1965 -> 1966)
+					yield* db.books.update("1", { year: 1966 });
+
+					// Wait for the stream to emit and collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					// Should have 2 emissions
+					expect(emissions).toHaveLength(2);
+
+					// Initial emission: Dune 1965, Neuromancer 1984
+					expect(emissions[0]).toHaveLength(2);
+					expect(emissions[0].find((b) => b.id === "1")?.year).toBe(1965);
+
+					// After update: Dune 1966, Neuromancer 1984
+					expect(emissions[1]).toHaveLength(2);
+					expect(emissions[1].find((b) => b.id === "1")?.year).toBe(1966);
+				}),
+			);
+		});
+
+		it("updating a matched entity's title causes emission with new title", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch all books
+					const stream = yield* db.books.watch({
+						sort: { title: "asc" },
+					});
+
+					// Fork collection to get 2 emissions
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("20 millis");
+
+					// Update Dune's title
+					yield* db.books.update("1", { title: "Dune Messiah" });
+
+					// Collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					expect(emissions).toHaveLength(2);
+
+					// Initial: Dune, Neuromancer, The Hobbit (sorted alphabetically)
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+						"The Hobbit",
+					]);
+
+					// After update: Dune Messiah, Neuromancer, The Hobbit
+					expect(emissions[1].map((b) => b.title)).toEqual([
+						"Dune Messiah",
+						"Neuromancer",
+						"The Hobbit",
+					]);
+				}),
+			);
+		});
+
+		it("updateMany triggers emission with all updated entities", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Fork collection to get 2 emissions
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("20 millis");
+
+					// Update all sci-fi books' years using predicate and single update
+					yield* db.books.updateMany(
+						(book: Book) => book.genre === "sci-fi",
+						{ year: 2000 },
+					);
+
+					// Collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					expect(emissions).toHaveLength(2);
+
+					// Initial: Dune 1965, Neuromancer 1984
+					expect(emissions[0].map((b) => b.year)).toEqual([1965, 1984]);
+
+					// After updateMany: Both books now have year 2000
+					expect(emissions[1].map((b) => b.year)).toEqual([2000, 2000]);
+				}),
+			);
+		});
+	});
 });
