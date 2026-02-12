@@ -142,6 +142,13 @@ export type {
 } from "./types/reactive-types.js";
 
 // ============================================================================
+// Reactive Query Functions
+// ============================================================================
+
+export { createChangePubSub } from "./reactive/change-pubsub.js";
+export { createChangeEvent, reloadEvent } from "./reactive/change-event.js";
+
+// ============================================================================
 // Cursor Pagination Types
 // ============================================================================
 
