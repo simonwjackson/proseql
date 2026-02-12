@@ -58,7 +58,7 @@
 - [x] 7.4 Implement `PUT /:collection/:id` handler: delegate to `db[collection].update(id, body)`, return 200 or mapped error
 - [x] 7.5 Implement `DELETE /:collection/:id` handler: delegate to `db[collection].delete(id)`, return 200 or mapped error
 - [x] 7.6 Implement `POST /:collection/batch` handler: delegate to `db[collection].createMany(body)`, return 201
-- [ ] 7.7 Implement `GET /:collection/aggregate` handler: parse aggregate query params, delegate to `db[collection].aggregate(config)`, return 200
+- [x] 7.7 Implement `GET /:collection/aggregate` handler: parse aggregate query params, delegate to `db[collection].aggregate(config)`, return 200
 
 ## 8. REST — Error Mapping
 

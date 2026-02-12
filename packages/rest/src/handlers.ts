@@ -13,7 +13,7 @@ import type {
 	EffectDatabase,
 	EffectDatabaseWithPersistence,
 } from "@proseql/core";
-import { parseQueryParams } from "./query-params.js";
+import { parseQueryParams, parseAggregateParams } from "./query-params.js";
 
 // ============================================================================
 // Types
@@ -376,16 +376,28 @@ const createBatchHandler = (
 
 /**
  * Create a GET handler for aggregation queries.
+ * Parses aggregate query parameters and delegates to the collection's aggregate method.
+ *
+ * Supported query parameters:
+ * - count=true: Count entities
+ * - sum=field or sum=field1,field2: Sum numeric fields
+ * - avg=field: Calculate average of numeric fields
+ * - min=field: Find minimum value
+ * - max=field: Find maximum value
+ * - groupBy=field or groupBy=field1,field2: Group results by field(s)
+ * - Filter params: Same as query endpoint (e.g., genre=sci-fi, year[$gte]=1970)
+ *
+ * If no aggregation is specified, defaults to count=true.
  */
 const createAggregateHandler = (
 	// biome-ignore lint/suspicious/noExplicitAny: Collection type is dynamic
 	collection: Record<string, (...args: ReadonlyArray<any>) => any>,
 ): RestHandler => {
-	return async (_req: RestRequest): Promise<RestResponse> => {
-		// TODO: Parse aggregate query params (task 7.7)
-		// For now, return a basic count
+	return async (req: RestRequest): Promise<RestResponse> => {
 		try {
-			const aggregateEffect = collection.aggregate({ count: true }) as Effect.Effect<Record<string, unknown>, unknown>;
+			// Parse aggregate query params
+			const aggregateConfig = parseAggregateParams(req.query);
+			const aggregateEffect = collection.aggregate(aggregateConfig) as Effect.Effect<Record<string, unknown>, unknown>;
 			const result = await Effect.runPromise(aggregateEffect);
 			return { status: 200, body: result };
 		} catch (error) {

@@ -7,6 +7,8 @@
  * @module
  */
 
+import type { AggregateConfig } from "@proseql/core";
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -348,4 +350,155 @@ const coerceNumeric = (value: string): number | string => {
 	}
 
 	return value;
+};
+
+// ============================================================================
+// Aggregate Parameter Parsing
+// ============================================================================
+
+/**
+ * Parsed aggregate configuration compatible with proseql's aggregate method.
+ * Contains aggregation options and optional where clause.
+ */
+export interface ParsedAggregateConfig {
+	/** Count entities */
+	readonly count?: true;
+
+	/** Field(s) to sum */
+	readonly sum?: string | ReadonlyArray<string>;
+
+	/** Field(s) to average */
+	readonly avg?: string | ReadonlyArray<string>;
+
+	/** Field(s) to find minimum */
+	readonly min?: string | ReadonlyArray<string>;
+
+	/** Field(s) to find maximum */
+	readonly max?: string | ReadonlyArray<string>;
+
+	/** Field(s) to group by */
+	readonly groupBy?: string | ReadonlyArray<string>;
+
+	/** Where clause with field filters */
+	readonly where?: Record<string, unknown>;
+}
+
+/**
+ * Reserved parameter names for aggregate queries.
+ */
+const AGGREGATE_PARAMS = new Set([
+	"count",
+	"sum",
+	"avg",
+	"min",
+	"max",
+	"groupBy",
+]);
+
+/**
+ * Parse URL query parameters into a proseql-compatible aggregate configuration.
+ *
+ * Supports the following syntax:
+ *
+ * - Count: `?count=true` becomes `{ count: true }`
+ * - Sum: `?sum=pages` or `?sum=pages,price` becomes `{ sum: "pages" }` or `{ sum: ["pages", "price"] }`
+ * - Avg: `?avg=rating` becomes `{ avg: "rating" }`
+ * - Min/Max: `?min=year&max=year` becomes `{ min: "year", max: "year" }`
+ * - GroupBy: `?groupBy=genre` or `?groupBy=genre,year` becomes `{ groupBy: "genre" }` or `{ groupBy: ["genre", "year"] }`
+ * - Filters: Same as query params - `?genre=sci-fi` or `?year[$gte]=1970`
+ *
+ * @param query - URL query parameters as key-value pairs
+ * @returns Parsed aggregate configuration for proseql's aggregate method
+ *
+ * @example
+ * ```typescript
+ * // Simple count
+ * parseAggregateParams({ count: "true" })
+ * // → { count: true }
+ *
+ * // Count with filter
+ * parseAggregateParams({ count: "true", genre: "sci-fi" })
+ * // → { count: true, where: { genre: "sci-fi" } }
+ *
+ * // Grouped aggregate
+ * parseAggregateParams({ count: "true", groupBy: "genre" })
+ * // → { count: true, groupBy: "genre" }
+ *
+ * // Multiple aggregations
+ * parseAggregateParams({ count: "true", sum: "pages", avg: "rating", groupBy: "genre" })
+ * // → { count: true, sum: "pages", avg: "rating", groupBy: "genre" }
+ * ```
+ */
+export const parseAggregateParams = (query: QueryParams): AggregateConfig => {
+	const result: Record<string, unknown> = {};
+	const where: Record<string, unknown> = {};
+
+	for (const [key, value] of Object.entries(query)) {
+		const strValue = normalizeValue(value);
+		if (strValue === undefined) continue;
+
+		// Handle aggregate-specific parameters
+		if (key === "count" && strValue.toLowerCase() === "true") {
+			result.count = true;
+			continue;
+		}
+
+		if (key === "sum" || key === "avg" || key === "min" || key === "max") {
+			const fields = parseFieldListParam(strValue);
+			result[key] = fields.length === 1 ? fields[0] : fields;
+			continue;
+		}
+
+		if (key === "groupBy") {
+			const fields = parseFieldListParam(strValue);
+			result.groupBy = fields.length === 1 ? fields[0] : fields;
+			continue;
+		}
+
+		// Skip aggregate params that were handled above
+		if (AGGREGATE_PARAMS.has(key)) {
+			continue;
+		}
+
+		// Check for operator syntax: field[$op]=value
+		const operatorMatch = key.match(/^(.+)\[(\$[a-zA-Z]+)\]$/);
+		if (operatorMatch) {
+			const [, field, operator] = operatorMatch;
+			if (field && operator && VALID_OPERATORS.has(operator)) {
+				parseOperatorFilter(where, field, operator, strValue);
+				continue;
+			}
+		}
+
+		// Simple equality filter
+		where[key] = coerceValue(strValue);
+	}
+
+	// Add where clause if any filters were specified
+	if (Object.keys(where).length > 0) {
+		result.where = where;
+	}
+
+	// If no aggregations were specified, default to count
+	if (
+		result.count === undefined &&
+		result.sum === undefined &&
+		result.avg === undefined &&
+		result.min === undefined &&
+		result.max === undefined
+	) {
+		result.count = true;
+	}
+
+	return result as AggregateConfig;
+};
+
+/**
+ * Parse a comma-separated field list parameter.
+ */
+const parseFieldListParam = (value: string): ReadonlyArray<string> => {
+	return value
+		.split(",")
+		.map((s) => s.trim())
+		.filter((s) => s.length > 0);
 };
