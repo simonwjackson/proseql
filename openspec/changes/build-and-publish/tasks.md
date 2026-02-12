@@ -62,7 +62,7 @@
 
 ## 9. Publish Dry Run
 
-- [ ] 9.1 Run `npm pack --dry-run` in each package directory and verify only `dist/`, `LICENSE`, and `README.md` are included.
+- [x] 9.1 Run `npm pack --dry-run` in each package directory and verify only `dist/`, `LICENSE`, and `README.md` are included.
 - [ ] 9.2 Verify `package.json` in the tarball has no `workspace:*` references (use `bun publish --dry-run` or `npm pack` + inspect).
 - [ ] 9.3 Verify tarball size is reasonable (no `src/`, `tests/`, `node_modules/`, or `.ts` source files).
 
