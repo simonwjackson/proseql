@@ -325,6 +325,43 @@ describe("makeRpcHandlers", () => {
 			expect(result.avg?.year).toBe((1965 + 1984) / 2);
 		});
 
+		it("aggregate should compute all scalar operations (sum, min, max)", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			const result = await Effect.runPromise(
+				handlers.books.aggregate({
+					count: true,
+					sum: "year",
+					min: "year",
+					max: "year",
+					avg: "year",
+				}),
+			);
+
+			// count: 2 books
+			expect(result.count).toBe(2);
+
+			// sum: 1965 + 1984 = 3949
+			expect(result.sum).toBeDefined();
+			expect(result.sum?.year).toBe(1965 + 1984);
+
+			// min: 1965 (Dune)
+			expect(result.min).toBeDefined();
+			expect(result.min?.year).toBe(1965);
+
+			// max: 1984 (Neuromancer)
+			expect(result.max).toBeDefined();
+			expect(result.max?.year).toBe(1984);
+
+			// avg: (1965 + 1984) / 2 = 1974.5
+			expect(result.avg).toBeDefined();
+			expect(result.avg?.year).toBe((1965 + 1984) / 2);
+		});
+
 		it("query should return all entities when no filter is provided", async () => {
 			const handlers = await Effect.runPromise(
 				makeRpcHandlers(singleCollectionConfig, {
