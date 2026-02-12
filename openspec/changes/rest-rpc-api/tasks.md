@@ -26,7 +26,7 @@
 - [x] 3.6 Wire `delete` handler: delegate to `db[collection].delete(id)`, propagate typed errors
 - [x] 3.7 Wire `aggregate` handler: delegate to `db[collection].aggregate(config)`
 - [x] 3.8 Wire batch handlers: `createMany`, `updateMany`, `deleteMany`, `upsert`, `upsertMany` delegating to corresponding SmartCollection methods
-- [ ] 3.9 Ensure mutations on persistent databases trigger persistence as normal
+- [x] 3.9 Ensure mutations on persistent databases trigger persistence as normal
 
 ## 4. RPC — Streaming
 

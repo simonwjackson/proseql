@@ -12,6 +12,7 @@ import {
 	type DatabaseConfig,
 	type DatasetFor,
 	type EffectDatabase,
+	type EffectDatabaseWithPersistence,
 	type MigrationError,
 	type PluginError,
 } from "@proseql/core";
@@ -284,4 +285,112 @@ export const makeRpcHandlersLayer = <Config extends DatabaseConfig>(
 			return { db };
 		}),
 	);
+};
+
+// ============================================================================
+// Database-First Handler Factory
+// ============================================================================
+
+/**
+ * Create RPC handlers from an existing database instance.
+ *
+ * This function accepts any EffectDatabase or EffectDatabaseWithPersistence
+ * and wires handlers to delegate to the collection methods. When the database
+ * is a persistent database (created via createPersistentEffectDatabase),
+ * mutations automatically trigger persistence as normal.
+ *
+ * This is the recommended approach for production use cases where you need:
+ * - File-based persistence with debounced writes
+ * - Control over the database lifecycle
+ * - Multiple transports (RPC, REST) sharing the same database instance
+ *
+ * @param config - The database configuration (used to enumerate collections)
+ * @param db - An existing EffectDatabase or EffectDatabaseWithPersistence instance
+ * @returns The RPC handler implementations
+ *
+ * @example
+ * ```typescript
+ * import { Effect, Layer } from "effect"
+ * import { createPersistentEffectDatabase, NodeStorageLayer, makeSerializerLayer, jsonCodec } from "@proseql/node"
+ * import { makeRpcHandlersFromDatabase } from "@proseql/rpc"
+ *
+ * const config = {
+ *   books: {
+ *     schema: BookSchema,
+ *     file: "./data/books.json", // persistence enabled
+ *     relationships: {},
+ *   },
+ * } as const
+ *
+ * const program = Effect.gen(function* () {
+ *   // Create persistent database
+ *   const db = yield* createPersistentEffectDatabase(config, { books: [] })
+ *
+ *   // Wire RPC handlers to the persistent database
+ *   const handlers = makeRpcHandlersFromDatabase(config, db)
+ *
+ *   // Mutations through RPC now trigger persistence automatically
+ *   yield* handlers.books.create({ data: { id: "1", title: "Dune" } })
+ *
+ *   // Flush to ensure data is written
+ *   await db.flush()
+ * })
+ *
+ * const PersistenceLayer = Layer.merge(
+ *   NodeStorageLayer,
+ *   makeSerializerLayer([jsonCodec()]),
+ * )
+ *
+ * await Effect.runPromise(
+ *   program.pipe(Effect.provide(PersistenceLayer), Effect.scoped),
+ * )
+ * ```
+ */
+export const makeRpcHandlersFromDatabase = <Config extends DatabaseConfig>(
+	config: Config,
+	db: EffectDatabase<Config> | EffectDatabaseWithPersistence<Config>,
+): RpcHandlers<Config> => {
+	// Build handlers for each collection, delegating to the provided database
+	const handlers = {} as Record<string, ReturnType<typeof createCollectionHandlers>>;
+	for (const collectionName of Object.keys(config)) {
+		handlers[collectionName] = createCollectionHandlers(
+			collectionName as keyof Config,
+			db,
+		);
+	}
+
+	return handlers as RpcHandlers<Config>;
+};
+
+/**
+ * Create an Effect Layer that provides RPC handlers from an existing database.
+ *
+ * Similar to makeRpcHandlersLayer, but accepts an existing database instance
+ * instead of creating one internally. This allows you to use a persistent
+ * database with the RPC layer.
+ *
+ * @param db - An existing EffectDatabase or EffectDatabaseWithPersistence instance
+ * @returns A Layer providing all RPC handlers via DatabaseContext
+ *
+ * @example
+ * ```typescript
+ * import { Effect, Layer } from "effect"
+ * import { createPersistentEffectDatabase } from "@proseql/node"
+ * import { makeRpcHandlersLayerFromDatabase, makeDatabaseContextTag } from "@proseql/rpc"
+ *
+ * const program = Effect.gen(function* () {
+ *   const db = yield* createPersistentEffectDatabase(config, initialData)
+ *   const handlerLayer = makeRpcHandlersLayerFromDatabase(db)
+ *
+ *   // Use the layer with your RPC server
+ *   // ...
+ * })
+ * ```
+ */
+export const makeRpcHandlersLayerFromDatabase = <Config extends DatabaseConfig>(
+	db: EffectDatabase<Config> | EffectDatabaseWithPersistence<Config>,
+): Layer.Layer<DatabaseContext<Config>> => {
+	const DatabaseContextTag = makeDatabaseContextTag<Config>();
+
+	return Layer.succeed(DatabaseContextTag, { db });
 };

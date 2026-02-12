@@ -2,9 +2,21 @@
  * Tests for the RPC handler layer implementation.
  */
 
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { makeRpcHandlers, makeRpcHandlersLayer, makeDatabaseContextTag } from "../src/rpc-handlers.js";
+import {
+	createPersistentEffectDatabase,
+	jsonCodec,
+	makeInMemoryStorageLayer,
+	makeSerializerLayer,
+} from "@proseql/core";
+import {
+	makeRpcHandlers,
+	makeRpcHandlersFromDatabase,
+	makeRpcHandlersLayer,
+	makeRpcHandlersLayerFromDatabase,
+	makeDatabaseContextTag,
+} from "../src/rpc-handlers.js";
 
 // Test schema
 const BookSchema = Schema.Struct({
@@ -516,5 +528,218 @@ describe("makeRpcHandlersLayer", () => {
 		);
 
 		expect(result.title).toBe("Dune");
+	});
+});
+
+describe("makeRpcHandlersFromDatabase", () => {
+	// Config with file persistence
+	const persistentConfig = {
+		books: {
+			schema: BookSchema,
+			file: "/data/books.json",
+			relationships: {},
+		},
+	} as const;
+
+	it("should create handlers from an existing database", async () => {
+		const handlers = await Effect.runPromise(
+			Effect.gen(function* () {
+				const db = yield* Effect.provide(
+					createPersistentEffectDatabase(persistentConfig, {
+						books: initialBooks,
+					}),
+					Layer.merge(
+						makeInMemoryStorageLayer(),
+						makeSerializerLayer([jsonCodec()]),
+					),
+				);
+				return makeRpcHandlersFromDatabase(persistentConfig, db);
+			}).pipe(Effect.scoped),
+		);
+
+		expect(handlers.books).toBeDefined();
+		expect(handlers.books.findById).toBeTypeOf("function");
+
+		// Verify handlers work
+		const book = await Effect.runPromise(handlers.books.findById({ id: "1" }));
+		expect(book.title).toBe("Dune");
+	});
+
+	it("should trigger persistence when mutations are performed through RPC handlers", async () => {
+		// Track what gets written to storage
+		const store = new Map<string, string>();
+		const customStorageLayer = makeInMemoryStorageLayer(store);
+		const serializerLayer = makeSerializerLayer([jsonCodec()]);
+		const layer = Layer.merge(customStorageLayer, serializerLayer);
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				// Create a persistent database
+				const db = yield* createPersistentEffectDatabase(persistentConfig, {
+					books: [],
+				});
+
+				// Wire RPC handlers to the persistent database
+				const handlers = makeRpcHandlersFromDatabase(persistentConfig, db);
+
+				// File should not exist yet
+				expect(store.has("/data/books.json")).toBe(false);
+
+				// Create a book via RPC handler
+				yield* handlers.books.create({
+					data: { id: "new-1", title: "Snow Crash", author: "Neal Stephenson", year: 1992 },
+				});
+
+				// Flush to ensure persistence
+				yield* Effect.promise(() => db.flush());
+
+				// Verify the file was written
+				expect(store.has("/data/books.json")).toBe(true);
+				const parsed = JSON.parse(store.get("/data/books.json")!);
+				expect(parsed["new-1"]).toBeDefined();
+				expect(parsed["new-1"].title).toBe("Snow Crash");
+			}).pipe(Effect.provide(layer), Effect.scoped),
+		);
+	});
+
+	it("should persist updates made through RPC handlers", async () => {
+		const store = new Map<string, string>();
+		const layer = Layer.merge(
+			makeInMemoryStorageLayer(store),
+			makeSerializerLayer([jsonCodec()]),
+		);
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const db = yield* createPersistentEffectDatabase(persistentConfig, {
+					books: [{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 }],
+				});
+
+				const handlers = makeRpcHandlersFromDatabase(persistentConfig, db);
+
+				// Update via RPC handler
+				yield* handlers.books.update({
+					id: "1",
+					updates: { title: "Dune (Revised Edition)" },
+				});
+
+				// Flush to ensure persistence
+				yield* Effect.promise(() => db.flush());
+
+				// Verify the update was persisted
+				expect(store.has("/data/books.json")).toBe(true);
+				const parsed = JSON.parse(store.get("/data/books.json")!);
+				expect(parsed["1"].title).toBe("Dune (Revised Edition)");
+			}).pipe(Effect.provide(layer), Effect.scoped),
+		);
+	});
+
+	it("should persist deletions made through RPC handlers", async () => {
+		const store = new Map<string, string>();
+		const layer = Layer.merge(
+			makeInMemoryStorageLayer(store),
+			makeSerializerLayer([jsonCodec()]),
+		);
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const db = yield* createPersistentEffectDatabase(persistentConfig, {
+					books: [
+						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+						{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
+					],
+				});
+
+				const handlers = makeRpcHandlersFromDatabase(persistentConfig, db);
+
+				// Delete via RPC handler
+				yield* handlers.books.delete({ id: "1" });
+
+				// Flush to ensure persistence
+				yield* Effect.promise(() => db.flush());
+
+				// Verify the deletion was persisted
+				expect(store.has("/data/books.json")).toBe(true);
+				const parsed = JSON.parse(store.get("/data/books.json")!);
+				expect(parsed["1"]).toBeUndefined();
+				expect(parsed["2"]).toBeDefined();
+			}).pipe(Effect.provide(layer), Effect.scoped),
+		);
+	});
+
+	it("should persist batch operations made through RPC handlers", async () => {
+		const store = new Map<string, string>();
+		const layer = Layer.merge(
+			makeInMemoryStorageLayer(store),
+			makeSerializerLayer([jsonCodec()]),
+		);
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const db = yield* createPersistentEffectDatabase(persistentConfig, {
+					books: [],
+				});
+
+				const handlers = makeRpcHandlersFromDatabase(persistentConfig, db);
+
+				// Create many via RPC handler
+				yield* handlers.books.createMany({
+					data: [
+						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+						{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
+						{ id: "3", title: "Snow Crash", author: "Neal Stephenson", year: 1992 },
+					],
+				});
+
+				// Flush to ensure persistence
+				yield* Effect.promise(() => db.flush());
+
+				// Verify all were persisted
+				expect(store.has("/data/books.json")).toBe(true);
+				const parsed = JSON.parse(store.get("/data/books.json")!);
+				expect(Object.keys(parsed)).toHaveLength(3);
+				expect(parsed["1"].title).toBe("Dune");
+				expect(parsed["2"].title).toBe("Neuromancer");
+				expect(parsed["3"].title).toBe("Snow Crash");
+			}).pipe(Effect.provide(layer), Effect.scoped),
+		);
+	});
+});
+
+describe("makeRpcHandlersLayerFromDatabase", () => {
+	const persistentConfig = {
+		books: {
+			schema: BookSchema,
+			file: "/data/books.json",
+			relationships: {},
+		},
+	} as const;
+
+	it("should create a layer from an existing database", async () => {
+		const store = new Map<string, string>();
+		const layer = Layer.merge(
+			makeInMemoryStorageLayer(store),
+			makeSerializerLayer([jsonCodec()]),
+		);
+
+		const DatabaseContextTag = makeDatabaseContextTag<typeof persistentConfig>();
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const db = yield* createPersistentEffectDatabase(persistentConfig, {
+					books: initialBooks,
+				});
+
+				const handlerLayer = makeRpcHandlersLayerFromDatabase(db);
+
+				// Use the layer to access the database
+				const result = yield* Effect.gen(function* () {
+					const ctx = yield* DatabaseContextTag;
+					return yield* ctx.db.books.findById("1");
+				}).pipe(Effect.provide(handlerLayer));
+
+				expect(result.title).toBe("Dune");
+			}).pipe(Effect.provide(layer), Effect.scoped),
+		);
 	});
 });

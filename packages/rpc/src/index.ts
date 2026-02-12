@@ -151,7 +151,9 @@ export {
 
 export {
 	makeRpcHandlers,
+	makeRpcHandlersFromDatabase,
 	makeRpcHandlersLayer,
+	makeRpcHandlersLayerFromDatabase,
 	makeDatabaseContextTag,
 	type RpcHandlers,
 	type DatabaseContext,
