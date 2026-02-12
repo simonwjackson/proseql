@@ -1842,6 +1842,175 @@ describe("Plugin System", () => {
 			expect(authorHookCalls[0].entity.id).toBe("a-after-1");
 			expect(authorHookCalls[0].entity.name).toBe("New Author After");
 		});
+
+		it("should run global hooks before collection-specific hooks (ordering)", async () => {
+			// Task 14.3: Test global hooks run before collection-specific hooks (ordering)
+			//
+			// We create a plugin with a global beforeCreate hook AND configure
+			// collection-specific beforeCreate hooks on the books collection.
+			// Both hooks append to a shared array to track execution order.
+			// The global hook should run FIRST, then the collection hook.
+
+			// Track hook execution order
+			const executionOrder: string[] = [];
+
+			const globalHooksPlugin = createHooksPlugin("global-order-plugin", {
+				beforeCreate: [
+					(ctx) => {
+						executionOrder.push("global-beforeCreate");
+						return Effect.succeed(ctx.data);
+					},
+				],
+				afterCreate: [
+					() => {
+						executionOrder.push("global-afterCreate");
+						return Effect.void;
+					},
+				],
+				beforeUpdate: [
+					(ctx) => {
+						executionOrder.push("global-beforeUpdate");
+						return Effect.succeed(ctx.update);
+					},
+				],
+				afterUpdate: [
+					() => {
+						executionOrder.push("global-afterUpdate");
+						return Effect.void;
+					},
+				],
+				beforeDelete: [
+					() => {
+						executionOrder.push("global-beforeDelete");
+						return Effect.void;
+					},
+				],
+				afterDelete: [
+					() => {
+						executionOrder.push("global-afterDelete");
+						return Effect.void;
+					},
+				],
+			});
+
+			// Create config with collection-specific hooks that also track execution
+			const configWithHooks = {
+				books: {
+					schema: BookSchema,
+					relationships: {},
+					hooks: {
+						beforeCreate: [
+							(ctx: { data: Book }) => {
+								executionOrder.push("collection-beforeCreate");
+								return Effect.succeed(ctx.data);
+							},
+						],
+						afterCreate: [
+							() => {
+								executionOrder.push("collection-afterCreate");
+								return Effect.void;
+							},
+						],
+						beforeUpdate: [
+							(ctx: { update: Partial<Book> }) => {
+								executionOrder.push("collection-beforeUpdate");
+								return Effect.succeed(ctx.update);
+							},
+						],
+						afterUpdate: [
+							() => {
+								executionOrder.push("collection-afterUpdate");
+								return Effect.void;
+							},
+						],
+						beforeDelete: [
+							() => {
+								executionOrder.push("collection-beforeDelete");
+								return Effect.void;
+							},
+						],
+						afterDelete: [
+							() => {
+								executionOrder.push("collection-afterDelete");
+								return Effect.void;
+							},
+						],
+					},
+				},
+			} as const;
+
+			// Create database with plugin and collection hooks
+			const db = await Effect.runPromise(
+				createEffectDatabase(configWithHooks, { books: [] }, { plugins: [globalHooksPlugin] }),
+			);
+
+			// Test 1: CREATE - global beforeCreate should run before collection beforeCreate
+			executionOrder.length = 0; // Reset
+
+			await db.books
+				.create({
+					id: "order-test-1",
+					title: "Order Test Book",
+					author: "Test Author",
+					year: 2024,
+					genre: "test",
+				})
+				.runPromise;
+
+			// Verify beforeCreate order: global first, then collection
+			const createBeforeIndex = executionOrder.indexOf("global-beforeCreate");
+			const collectionBeforeIndex = executionOrder.indexOf("collection-beforeCreate");
+			expect(createBeforeIndex).toBeLessThan(collectionBeforeIndex);
+			expect(executionOrder).toContain("global-beforeCreate");
+			expect(executionOrder).toContain("collection-beforeCreate");
+
+			// Verify afterCreate order: global first, then collection
+			const createAfterIndex = executionOrder.indexOf("global-afterCreate");
+			const collectionAfterIndex = executionOrder.indexOf("collection-afterCreate");
+			expect(createAfterIndex).toBeLessThan(collectionAfterIndex);
+			expect(executionOrder).toContain("global-afterCreate");
+			expect(executionOrder).toContain("collection-afterCreate");
+
+			// Test 2: UPDATE - global beforeUpdate should run before collection beforeUpdate
+			executionOrder.length = 0; // Reset
+
+			await db.books
+				.update("order-test-1", { genre: "updated" })
+				.runPromise;
+
+			// Verify beforeUpdate order: global first, then collection
+			const updateBeforeGlobalIndex = executionOrder.indexOf("global-beforeUpdate");
+			const updateBeforeCollectionIndex = executionOrder.indexOf("collection-beforeUpdate");
+			expect(updateBeforeGlobalIndex).toBeLessThan(updateBeforeCollectionIndex);
+			expect(executionOrder).toContain("global-beforeUpdate");
+			expect(executionOrder).toContain("collection-beforeUpdate");
+
+			// Verify afterUpdate order: global first, then collection
+			const updateAfterGlobalIndex = executionOrder.indexOf("global-afterUpdate");
+			const updateAfterCollectionIndex = executionOrder.indexOf("collection-afterUpdate");
+			expect(updateAfterGlobalIndex).toBeLessThan(updateAfterCollectionIndex);
+			expect(executionOrder).toContain("global-afterUpdate");
+			expect(executionOrder).toContain("collection-afterUpdate");
+
+			// Test 3: DELETE - global beforeDelete should run before collection beforeDelete
+			executionOrder.length = 0; // Reset
+
+			await db.books.delete("order-test-1").runPromise;
+
+			// Verify beforeDelete order: global first, then collection
+			const deleteBeforeGlobalIndex = executionOrder.indexOf("global-beforeDelete");
+			const deleteBeforeCollectionIndex = executionOrder.indexOf("collection-beforeDelete");
+			expect(deleteBeforeGlobalIndex).toBeLessThan(deleteBeforeCollectionIndex);
+			expect(executionOrder).toContain("global-beforeDelete");
+			expect(executionOrder).toContain("collection-beforeDelete");
+
+			// Verify afterDelete order: global first, then collection
+			const deleteAfterGlobalIndex = executionOrder.indexOf("global-afterDelete");
+			const deleteAfterCollectionIndex = executionOrder.indexOf("collection-afterDelete");
+			expect(deleteAfterGlobalIndex).toBeLessThan(deleteAfterCollectionIndex);
+			expect(executionOrder).toContain("global-afterDelete");
+			expect(executionOrder).toContain("collection-afterDelete");
+		});
 	});
 
 	// ============================================================================
