@@ -29,7 +29,7 @@
 - [x] 5.2 Same for `createMany`: publish a single event after all entities are inserted (not per entity)
 - [x] 5.3 Add `changePubSub` parameter to `update` in `core/operations/crud/update.ts`. Publish with `operation: "update"` after mutation.
 - [x] 5.4 Same for `updateMany`: publish a single event after all updates
-- [ ] 5.5 Add `changePubSub` parameter to `delete` in `core/operations/crud/delete.ts`. Publish with `operation: "delete"` after mutation.
+- [x] 5.5 Add `changePubSub` parameter to `delete` in `core/operations/crud/delete.ts`. Publish with `operation: "delete"` after mutation.
 - [ ] 5.6 Same for `deleteMany`: publish a single event after all deletes
 - [ ] 5.7 Add `changePubSub` parameter to `upsert` and `upsertMany` in `core/operations/crud/upsert.ts`. Publish appropriate event after mutation.
 
