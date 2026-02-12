@@ -1842,5 +1842,38 @@ describe("Plugin System", () => {
 			const foundGenerated = await db.books.findById("generated-id-1").runPromise;
 			expect(foundGenerated.title).toBe("Book Without ID");
 		});
+
+		it("should fail at init with PluginError when referencing non-existent idGenerator", async () => {
+			// Task 13.3: Test referencing non-existent idGenerator name fails at init with PluginError
+			//
+			// When a collection config references an idGenerator name that doesn't exist in
+			// any registered plugin, the database creation should fail with a PluginError
+			// at init time (before any collections are built).
+
+			// Create config that references an idGenerator that doesn't exist
+			const configWithMissingGenerator = {
+				books: {
+					schema: BookSchema,
+					relationships: {},
+					idGenerator: "non-existent-generator", // This generator is not registered
+				},
+			} as const;
+
+			// Try to create database WITHOUT registering a plugin that provides this generator
+			const result = await Effect.runPromise(
+				createEffectDatabase(configWithMissingGenerator, { books: [] }, { plugins: [] }).pipe(
+					Effect.flip,
+				),
+			);
+
+			// Should fail with PluginError
+			expect(result._tag).toBe("PluginError");
+			if (result._tag === "PluginError") {
+				expect(result.reason).toBe("missing_id_generator");
+				expect(result.message).toContain("non-existent-generator");
+				expect(result.message).toContain("books");
+				expect(result.message).toContain("not registered");
+			}
+		});
 	});
 });
