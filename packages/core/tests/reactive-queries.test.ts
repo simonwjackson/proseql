@@ -649,4 +649,146 @@ describe("reactive queries - mutation triggers", () => {
 			);
 		});
 	});
+
+	describe("delete triggers watch (13.3)", () => {
+		it("deleting a matched entity causes a new emission without the entity", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books sorted by year
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Fork collection to get 2 emissions: initial + after delete
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission to be processed
+					yield* Effect.sleep("20 millis");
+
+					// Delete Dune (id: "1", genre: "sci-fi")
+					yield* db.books.delete("1");
+
+					// Wait for the stream to emit and collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					// Should have 2 emissions
+					expect(emissions).toHaveLength(2);
+
+					// Initial emission: Dune 1965, Neuromancer 1984
+					expect(emissions[0]).toHaveLength(2);
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+					]);
+
+					// After delete: Only Neuromancer remains
+					expect(emissions[1]).toHaveLength(1);
+					expect(emissions[1].map((b) => b.title)).toEqual(["Neuromancer"]);
+					expect(emissions[1].find((b) => b.id === "1")).toBeUndefined();
+				}),
+			);
+		});
+
+		it("deleting multiple matched entities via deleteMany causes emission without those entities", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Fork collection to get 2 emissions
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("20 millis");
+
+					// Delete both sci-fi books using a predicate
+					yield* db.books.deleteMany((book: Book) => book.genre === "sci-fi");
+
+					// Collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					expect(emissions).toHaveLength(2);
+
+					// Initial: Dune 1965, Neuromancer 1984
+					expect(emissions[0]).toHaveLength(2);
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+					]);
+
+					// After deleteMany: No sci-fi books remain
+					expect(emissions[1]).toHaveLength(0);
+				}),
+			);
+		});
+
+		it("deleting a non-matching entity does not affect watch results", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Fork collection to get 2 emissions
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("20 millis");
+
+					// Delete The Hobbit (id: "3", genre: "fantasy") - not in sci-fi watch
+					yield* db.books.delete("3");
+
+					// Create a new sci-fi book to trigger a second emission
+					// (needed since deleting non-matching entity may be deduplicated)
+					yield* db.books.create({
+						title: "Foundation",
+						author: "Isaac Asimov",
+						year: 1951,
+						genre: "sci-fi",
+					});
+
+					// Collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					expect(emissions).toHaveLength(2);
+
+					// Initial: Dune 1965, Neuromancer 1984
+					expect(emissions[0]).toHaveLength(2);
+
+					// After delete of fantasy book + create of Foundation:
+					// 3 sci-fi books (Foundation was added)
+					expect(emissions[1]).toHaveLength(3);
+					expect(emissions[1].map((b) => b.title)).toEqual([
+						"Foundation",
+						"Dune",
+						"Neuromancer",
+					]);
+				}),
+			);
+		});
+	});
 });
