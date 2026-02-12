@@ -4,28 +4,7 @@ import type {
 	CursorConfig,
 	CursorPageResult,
 } from "../../types/cursor-types.js";
-
-/**
- * Get a nested value from a record using dot notation.
- */
-function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
-	const parts = path.split(".");
-	let current: unknown = obj;
-
-	for (const part of parts) {
-		if (current === null || current === undefined) {
-			return undefined;
-		}
-
-		if (typeof current === "object") {
-			current = (current as Record<string, unknown>)[part];
-		} else {
-			return undefined;
-		}
-	}
-
-	return current;
-}
+import { getNestedValue } from "../../utils/nested-path.js";
 
 /**
  * Check if a key exists on a record (returns undefined only if property doesn't exist).
