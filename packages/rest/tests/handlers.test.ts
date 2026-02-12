@@ -173,3 +173,234 @@ describe("REST handlers — GET collection (task 11.7)", () => {
 		expect(dune!.genre).toBe("sci-fi");
 	});
 });
+
+// ============================================================================
+// Task 11.8: Test GET collection with query params returns filtered results
+// ============================================================================
+
+describe("REST handlers — GET collection with query params (task 11.8)", () => {
+	it("should filter by simple equality (genre=sci-fi)", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBooks = findRoute(routes, "GET", "/books");
+		const request = createRequest({ query: { genre: "sci-fi" } });
+		const response = await getBooks!.handler(request);
+
+		expect(response.status).toBe(200);
+		const books = response.body as ReadonlyArray<{ id: string; genre: string }>;
+		expect(books.length).toBe(3); // All test books are sci-fi
+		for (const book of books) {
+			expect(book.genre).toBe("sci-fi");
+		}
+	});
+
+	it("should filter by numeric comparison (year[$gte]=1970)", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBooks = findRoute(routes, "GET", "/books");
+		const request = createRequest({ query: { "year[$gte]": "1970" } });
+		const response = await getBooks!.handler(request);
+
+		expect(response.status).toBe(200);
+		const books = response.body as ReadonlyArray<{ id: string; year: number; title: string }>;
+		// Only Neuromancer (1984) is >= 1970
+		expect(books.length).toBe(1);
+		expect(books[0].title).toBe("Neuromancer");
+		expect(books[0].year).toBe(1984);
+	});
+
+	it("should filter by multiple operators on same field (year[$gte]=1965&year[$lte]=1970)", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBooks = findRoute(routes, "GET", "/books");
+		const request = createRequest({
+			query: { "year[$gte]": "1965", "year[$lte]": "1970" },
+		});
+		const response = await getBooks!.handler(request);
+
+		expect(response.status).toBe(200);
+		const books = response.body as ReadonlyArray<{ id: string; year: number; title: string }>;
+		// Dune (1965) and Left Hand (1969) are in range
+		expect(books.length).toBe(2);
+		for (const book of books) {
+			expect(book.year).toBeGreaterThanOrEqual(1965);
+			expect(book.year).toBeLessThanOrEqual(1970);
+		}
+	});
+
+	it("should filter with $lt operator (year[$lt]=1970)", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBooks = findRoute(routes, "GET", "/books");
+		const request = createRequest({ query: { "year[$lt]": "1970" } });
+		const response = await getBooks!.handler(request);
+
+		expect(response.status).toBe(200);
+		const books = response.body as ReadonlyArray<{ id: string; year: number; title: string }>;
+		// Dune (1965) and Left Hand (1969) are < 1970
+		expect(books.length).toBe(2);
+		for (const book of books) {
+			expect(book.year).toBeLessThan(1970);
+		}
+	});
+
+	it("should apply sort parameter (sort=year:desc)", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBooks = findRoute(routes, "GET", "/books");
+		const request = createRequest({ query: { sort: "year:desc" } });
+		const response = await getBooks!.handler(request);
+
+		expect(response.status).toBe(200);
+		const books = response.body as ReadonlyArray<{ id: string; year: number; title: string }>;
+		expect(books.length).toBe(3);
+		// Should be sorted by year descending: Neuromancer (1984), Left Hand (1969), Dune (1965)
+		expect(books[0].title).toBe("Neuromancer");
+		expect(books[1].title).toBe("The Left Hand of Darkness");
+		expect(books[2].title).toBe("Dune");
+	});
+
+	it("should apply limit parameter (limit=2)", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBooks = findRoute(routes, "GET", "/books");
+		const request = createRequest({ query: { limit: "2" } });
+		const response = await getBooks!.handler(request);
+
+		expect(response.status).toBe(200);
+		const books = response.body as ReadonlyArray<{ id: string }>;
+		expect(books.length).toBe(2);
+	});
+
+	it("should apply offset parameter (offset=1)", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBooks = findRoute(routes, "GET", "/books");
+		const request = createRequest({ query: { offset: "1" } });
+		const response = await getBooks!.handler(request);
+
+		expect(response.status).toBe(200);
+		const books = response.body as ReadonlyArray<{ id: string; title: string }>;
+		// Skips first book (Dune)
+		expect(books.length).toBe(2);
+		expect(books[0].title).toBe("Neuromancer");
+		expect(books[1].title).toBe("The Left Hand of Darkness");
+	});
+
+	it("should apply limit and offset together (limit=1&offset=1)", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBooks = findRoute(routes, "GET", "/books");
+		const request = createRequest({ query: { limit: "1", offset: "1" } });
+		const response = await getBooks!.handler(request);
+
+		expect(response.status).toBe(200);
+		const books = response.body as ReadonlyArray<{ id: string; title: string }>;
+		// Skip 1, take 1 = second book only
+		expect(books.length).toBe(1);
+		expect(books[0].title).toBe("Neuromancer");
+	});
+
+	it("should apply select parameter (select=title,year)", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBooks = findRoute(routes, "GET", "/books");
+		const request = createRequest({ query: { select: "title,year" } });
+		const response = await getBooks!.handler(request);
+
+		expect(response.status).toBe(200);
+		const books = response.body as ReadonlyArray<Record<string, unknown>>;
+		expect(books.length).toBe(3);
+
+		// Should only have selected fields
+		for (const book of books) {
+			expect(book).toHaveProperty("title");
+			expect(book).toHaveProperty("year");
+			expect(book).not.toHaveProperty("author");
+			expect(book).not.toHaveProperty("genre");
+		}
+	});
+
+	it("should combine filter, sort, limit, offset, and select", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBooks = findRoute(routes, "GET", "/books");
+		const request = createRequest({
+			query: {
+				genre: "sci-fi",
+				sort: "year:desc",
+				limit: "2",
+				offset: "0",
+				select: "title,year",
+			},
+		});
+		const response = await getBooks!.handler(request);
+
+		expect(response.status).toBe(200);
+		const books = response.body as ReadonlyArray<Record<string, unknown>>;
+		expect(books.length).toBe(2);
+
+		// Sorted descending: first should be Neuromancer (1984)
+		expect(books[0].title).toBe("Neuromancer");
+		expect(books[0].year).toBe(1984);
+
+		// Second should be Left Hand (1969)
+		expect(books[1].title).toBe("The Left Hand of Darkness");
+		expect(books[1].year).toBe(1969);
+
+		// Only selected fields
+		expect(books[0]).not.toHaveProperty("author");
+		expect(books[0]).not.toHaveProperty("genre");
+	});
+
+	it("should return empty array when filter matches nothing", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBooks = findRoute(routes, "GET", "/books");
+		const request = createRequest({ query: { genre: "romance" } });
+		const response = await getBooks!.handler(request);
+
+		expect(response.status).toBe(200);
+		expect(response.body).toEqual([]);
+	});
+
+	it("should filter by string operator ($contains)", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBooks = findRoute(routes, "GET", "/books");
+		const request = createRequest({ query: { "title[$contains]": "Dark" } });
+		const response = await getBooks!.handler(request);
+
+		expect(response.status).toBe(200);
+		const books = response.body as ReadonlyArray<{ id: string; title: string }>;
+		expect(books.length).toBe(1);
+		expect(books[0].title).toBe("The Left Hand of Darkness");
+	});
+
+	it("should filter by author", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBooks = findRoute(routes, "GET", "/books");
+		const request = createRequest({ query: { author: "Frank Herbert" } });
+		const response = await getBooks!.handler(request);
+
+		expect(response.status).toBe(200);
+		const books = response.body as ReadonlyArray<{ id: string; title: string; author: string }>;
+		expect(books.length).toBe(1);
+		expect(books[0].title).toBe("Dune");
+		expect(books[0].author).toBe("Frank Herbert");
+	});
+});
