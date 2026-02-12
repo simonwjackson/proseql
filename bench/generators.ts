@@ -403,3 +403,56 @@ export function generateProducts(count: number, seed: number = DEFAULT_SEED): Re
 
 	return products;
 }
+
+// ============================================================================
+// Scale Generation
+// ============================================================================
+
+/**
+ * Generator function signature for use with generateAtScale.
+ * Takes a count and optional seed, returns an array of entities.
+ */
+export type EntityGenerator<T> = (count: number, seed?: number) => ReadonlyArray<T>;
+
+/**
+ * Generate datasets at multiple sizes using a given generator function.
+ *
+ * Returns a Map keyed by size, where each value is the generated entity array.
+ * Uses the same seed for all sizes to ensure consistency in the data
+ * characteristics (same distribution of names, values, etc.).
+ *
+ * @param generator - Entity generator function (e.g., generateUsers, generateProducts)
+ * @param sizes - Array of sizes to generate (default: STANDARD_SIZES)
+ * @param seed - Optional seed for the RNG (default: DEFAULT_SEED)
+ * @returns Map of size to entity array
+ *
+ * @example
+ * ```ts
+ * // Generate users at all standard sizes
+ * const usersBySize = generateAtScale(generateUsers);
+ * usersBySize.get(1000); // 1000 users
+ * usersBySize.get(10000); // 10000 users
+ *
+ * // Generate products at custom sizes
+ * const productsBySize = generateAtScale(generateProducts, [50, 500, 5000]);
+ *
+ * // Use with STANDARD_SIZES type for type safety
+ * for (const size of STANDARD_SIZES) {
+ *   const users = usersBySize.get(size);
+ *   console.log(`${size}: ${users?.length} users`);
+ * }
+ * ```
+ */
+export function generateAtScale<T>(
+	generator: EntityGenerator<T>,
+	sizes: ReadonlyArray<number> = STANDARD_SIZES,
+	seed: number = DEFAULT_SEED,
+): Map<number, ReadonlyArray<T>> {
+	const result = new Map<number, ReadonlyArray<T>>();
+
+	for (const size of sizes) {
+		result.set(size, generator(size, seed));
+	}
+
+	return result;
+}
