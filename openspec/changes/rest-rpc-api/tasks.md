@@ -98,7 +98,7 @@
 - [x] 11.4 Test pagination parsing (limit, offset)
 - [x] 11.5 Test field selection parsing
 - [x] 11.6 Test type coercion (numbers, booleans)
-- [ ] 11.7 Create `rest/tests/handlers.test.ts`: test GET collection returns all entities
+- [x] 11.7 Create `rest/tests/handlers.test.ts`: test GET collection returns all entities
 - [ ] 11.8 Test GET collection with query params returns filtered results
 - [ ] 11.9 Test GET by id returns correct entity
 - [ ] 11.10 Test GET by id for missing entity returns 404
