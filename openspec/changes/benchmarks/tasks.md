@@ -41,7 +41,7 @@
 
 ## 6. Persistence and Serialization Benchmarks
 
-- [ ] 6.1 Create `bench/serialization.bench.ts` with a tinybench suite
+- [x] 6.1 Create `bench/serialization.bench.ts` with a tinybench suite
 - [ ] 6.2 Implement serialization comparison: for each of the 7 formats (JSON, YAML, TOML, JSON5, JSONC, TOON, Hjson), measure serialize time on a 1K-entity dataset
 - [ ] 6.3 Implement deserialization comparison: for each of the 7 formats, measure deserialize time on the same dataset
 - [ ] 6.4 Implement debounced write coalescing benchmark: perform 100 rapid mutations with debounced persistence, count actual file writes, report coalescing ratio
