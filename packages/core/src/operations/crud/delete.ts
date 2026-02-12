@@ -248,6 +248,7 @@ export const deleteMany =
 		hooks?: HooksConfig<T>,
 		searchIndexRef?: Ref.Ref<SearchIndexMap>,
 		searchIndexFields?: ReadonlyArray<string>,
+		changePubSub?: PubSub.PubSub<ChangeEvent>,
 	) =>
 	(
 		predicate: (entity: T) => boolean,
@@ -387,6 +388,14 @@ export const deleteMany =
 					collection: collectionName,
 					id: entity.id,
 					entity,
+				});
+			}
+
+			// Publish a single change event after all deletes are complete
+			if (changePubSub && deleted.length > 0) {
+				yield* PubSub.publish(changePubSub, {
+					collection: collectionName,
+					operation: "delete",
 				});
 			}
 
