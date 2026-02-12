@@ -8,7 +8,7 @@
  * $append, $prepend, $remove, $toggle, $set.
  */
 
-import { Effect, Ref, type Schema } from "effect";
+import { Effect, PubSub, Ref, type Schema } from "effect";
 import {
 	type ForeignKeyError,
 	type HookError,
@@ -31,6 +31,7 @@ import type {
 } from "../../types/crud-types.js";
 import type { HooksConfig } from "../../types/hook-types.js";
 import type { CollectionIndexes } from "../../types/index-types.js";
+import type { ChangeEvent } from "../../types/reactive-types.js";
 import type { SearchIndexMap } from "../../types/search-types.js";
 import { validateForeignKeysEffect } from "../../validators/foreign-key.js";
 import { validateEntity } from "../../validators/schema-validator.js";
@@ -319,6 +320,7 @@ export const update =
 		computed?: ComputedFieldsConfig<unknown>,
 		searchIndexRef?: Ref.Ref<SearchIndexMap>,
 		searchIndexFields?: ReadonlyArray<string>,
+		changePubSub?: PubSub.PubSub<ChangeEvent>,
 	) =>
 	(
 		id: string,
@@ -457,6 +459,14 @@ export const update =
 				previous,
 				current: validated,
 			});
+
+			// Publish change event to reactive subscribers
+			if (changePubSub) {
+				yield* PubSub.publish(changePubSub, {
+					collection: collectionName,
+					operation: "update",
+				});
+			}
 
 			return validated;
 		});
