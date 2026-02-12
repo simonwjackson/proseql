@@ -45,5 +45,8 @@
   "sideEffects": false,
   "dependencies": {
     "@proseql/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "effect": "^3.15.2"
   }
 }
