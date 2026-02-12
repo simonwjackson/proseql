@@ -3,10 +3,11 @@
  *
  * Creates a Stream that emits result sets whenever the underlying collection data changes.
  * Subscribes to the PubSub for change notifications, filters events by collection name,
- * re-evaluates the query pipeline on each change, and emits the new result set.
+ * re-evaluates the query pipeline on each change, deduplicates identical consecutive results,
+ * and emits the new result set.
  */
 
-import { Effect, PubSub, Queue, Ref, Stream } from "effect";
+import { Effect, PubSub, Ref, Stream } from "effect";
 import type { ChangeEvent } from "../types/reactive-types.js";
 import { applyFilter } from "../operations/query/filter-stream.js";
 import { applySort } from "../operations/query/sort-stream.js";
@@ -29,6 +30,30 @@ export interface WatchQueryConfig {
  * Entity constraint: must have a readonly string `id` field.
  */
 type HasId = { readonly id: string };
+
+/**
+ * Compares two result arrays for structural equality.
+ *
+ * Uses JSON serialization for deep comparison. This is simple and correct for
+ * comparing arrays of plain objects (which is what query results are).
+ *
+ * @param a - First result array
+ * @param b - Second result array
+ * @returns true if the arrays are structurally equal
+ */
+const resultsAreEqual = <T>(
+	a: ReadonlyArray<T>,
+	b: ReadonlyArray<T>,
+): boolean => {
+	// Fast path: same reference
+	if (a === b) return true;
+
+	// Fast path: different lengths
+	if (a.length !== b.length) return false;
+
+	// Compare by serialization for deep structural equality
+	return JSON.stringify(a) === JSON.stringify(b);
+};
 
 /**
  * Evaluates a query against the current state in the Ref.
@@ -70,9 +95,9 @@ const evaluateQuery = <T extends HasId>(
  * 2. Subscribes to the PubSub for change notifications (scoped - auto-cleanup)
  * 3. Filters events to only those matching the specified collection
  * 4. Re-evaluates the query pipeline on each relevant change
- * 5. Emits the new result set as a ReadonlyArray
+ * 5. Deduplicates consecutive identical result sets to avoid spurious emissions
+ * 6. Emits the new result set as a ReadonlyArray
  *
- * Note: Deduplication is handled by a separate task (3.4).
  * Note: Debouncing is handled by a separate task (8.1).
  *
  * @param pubsub - The PubSub broadcasting ChangeEvents from mutations
@@ -131,7 +156,13 @@ export const watch = <T extends HasId>(
 		// Concatenate initial emission with the change-driven stream
 		// This ensures subscribers receive the current state immediately,
 		// then receive updates as changes occur
-		const resultStream = Stream.concat(initialStream, changeResultStream);
+		const combinedStream = Stream.concat(initialStream, changeResultStream);
+
+		// Deduplicate consecutive identical result sets to avoid spurious emissions.
+		// This prevents re-emitting the same result set when a change event occurs
+		// but doesn't actually affect the query results (e.g., inserting an entity
+		// that doesn't match the where clause).
+		const resultStream = Stream.changesWith(combinedStream, resultsAreEqual);
 
 		return resultStream;
 	});
