@@ -70,7 +70,7 @@
 ## 10. Tests — Path-to-Key
 
 - [x] 10.1 Create `packages/browser/tests/path-to-key.test.ts`
-- [ ] 10.2 Test default prefix: `./data/books.yaml` maps to `proseql:data/books.yaml`
+- [x] 10.2 Test default prefix: `./data/books.yaml` maps to `proseql:data/books.yaml`
 - [ ] 10.3 Test custom prefix: `./data/books.yaml` with prefix `myapp:` maps to `myapp:data/books.yaml`
 - [ ] 10.4 Test backslash normalization: `.\data\books.yaml` maps to `proseql:data/books.yaml`
 - [ ] 10.5 Test no leading `./`: `data/books.yaml` maps to `proseql:data/books.yaml`
