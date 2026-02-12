@@ -384,6 +384,153 @@ function runMigrateDryRun(
 }
 
 /**
+ * Result of a single collection migration.
+ */
+interface CollectionMigrationResult {
+	readonly name: string
+	readonly success: boolean
+	readonly fromVersion: number
+	readonly toVersion: number
+	readonly migrationsApplied: number
+	readonly error?: string
+}
+
+/**
+ * Result of the full migration run.
+ */
+interface MigrationRunResult {
+	readonly collectionsProcessed: number
+	readonly collectionsSucceeded: number
+	readonly collectionsFailed: number
+	readonly details: ReadonlyArray<CollectionMigrationResult>
+}
+
+/**
+ * Execute migrations for a single collection.
+ *
+ * - Reads the file
+ * - Parses it
+ * - Runs the migrations on each entity
+ * - Updates the `_version` field
+ * - Writes the file back
+ */
+function migrateCollection(
+	name: string,
+	collectionConfig: DatabaseConfig[string],
+	fileVersion: number,
+): Effect.Effect<
+	CollectionMigrationResult,
+	never,
+	typeof StorageAdapterService.Service | typeof SerializerRegistryService.Service
+> {
+	const targetVersion = collectionConfig.version ?? 0
+	const filePath = collectionConfig.file
+
+	// This should not happen as we filter before calling this
+	if (!filePath) {
+		return Effect.succeed({
+			name,
+			success: false,
+			fromVersion: fileVersion,
+			toVersion: targetVersion,
+			migrationsApplied: 0,
+			error: "No file path configured",
+		})
+	}
+
+	return Effect.gen(function* () {
+		const storage = yield* StorageAdapterService
+		const serializer = yield* SerializerRegistryService
+
+		const ext = getFileExtension(filePath) || "json"
+
+		// Read the file
+		const raw = yield* storage.read(filePath).pipe(
+			Effect.catchAll((err) =>
+				Effect.fail(new Error(`Failed to read file: ${err}`)),
+			),
+		)
+
+		// Parse the file
+		const parsed = yield* serializer.deserialize(raw, ext).pipe(
+			Effect.catchAll((err) =>
+				Effect.fail(new Error(`Failed to parse file: ${err}`)),
+			),
+		)
+
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+			return yield* Effect.fail(
+				new Error("File does not contain a valid object"),
+			)
+		}
+
+		const data = parsed as Record<string, unknown>
+
+		// Get the migrations to apply
+		const migrations = collectionConfig.migrations ?? []
+		const applicableMigrations = migrations
+			.filter((m) => m.from >= fileVersion && m.to <= targetVersion)
+			.sort((a, b) => a.from - b.from)
+
+		// Run the migrations by chaining transforms
+		let migratedData = data
+		for (const migration of applicableMigrations) {
+			try {
+				migratedData = migration.transform(migratedData)
+			} catch (err) {
+				return {
+					name,
+					success: false,
+					fromVersion: fileVersion,
+					toVersion: targetVersion,
+					migrationsApplied: applicableMigrations.indexOf(migration),
+					error: `Migration ${migration.from}→${migration.to} failed: ${err instanceof Error ? err.message : String(err)}`,
+				}
+			}
+		}
+
+		// Update the _version field
+		migratedData = {
+			...migratedData,
+			_version: targetVersion,
+		}
+
+		// Serialize the data
+		const serialized = yield* serializer.serialize(migratedData, ext).pipe(
+			Effect.catchAll((err) =>
+				Effect.fail(new Error(`Failed to serialize data: ${err}`)),
+			),
+		)
+
+		// Write the file
+		yield* storage.write(filePath, serialized).pipe(
+			Effect.catchAll((err) =>
+				Effect.fail(new Error(`Failed to write file: ${err}`)),
+			),
+		)
+
+		return {
+			name,
+			success: true,
+			fromVersion: fileVersion,
+			toVersion: targetVersion,
+			migrationsApplied: applicableMigrations.length,
+		}
+	}).pipe(
+		Effect.catchAll((err) =>
+			Effect.succeed({
+				name,
+				success: false,
+				fromVersion: fileVersion,
+				toVersion: targetVersion,
+				migrationsApplied: 0,
+				error: err instanceof Error ? err.message : String(err),
+			}),
+		),
+	)
+}
+
+/**
  * Execute migrations (the "run" subcommand).
  *
  * Prompts for confirmation (unless --force), executes all pending migrations,
@@ -394,27 +541,78 @@ function runMigrate(
 	configPath: string,
 	force: boolean,
 ): Effect.Effect<MigrateResult, never> {
-	return Effect.gen(function* () {
-		// For task 7.1, return placeholder result
-		// Full implementation in task 7.4
-		const resolvedConfig = resolveConfigPaths(config, configPath)
+	const resolvedConfig = resolveConfigPaths(config, configPath)
 
-		// Check if there are any versioned collections
-		const versionedCollections = Object.entries(resolvedConfig).filter(
-			([_, cfg]) => cfg.version !== undefined,
+	const program = Effect.gen(function* () {
+		// First, do a dry-run to determine which collections need migration
+		const dryRunCollections: DryRunCollectionResult[] = []
+
+		for (const [name, collectionConfig] of Object.entries(resolvedConfig)) {
+			// Only include versioned collections
+			if (collectionConfig.version === undefined) {
+				continue
+			}
+
+			const targetVersion = collectionConfig.version
+			const filePath = collectionConfig.file ?? "(in-memory)"
+
+			// Skip in-memory collections (no file to migrate)
+			if (!collectionConfig.file) {
+				continue
+			}
+
+			// Read the file version
+			const { version: fileVersion, exists: fileExists } =
+				yield* readFileVersion(collectionConfig.file)
+
+			// Determine the status
+			const status = determineStatus(fileVersion, targetVersion, fileExists)
+
+			// Get migrations to apply (only if needs migration)
+			const migrationsToApply =
+				status === "needs-migration"
+					? getMigrationsToApply(collectionConfig, fileVersion, targetVersion)
+					: []
+
+			dryRunCollections.push({
+				name,
+				filePath,
+				currentVersion: fileVersion,
+				targetVersion,
+				migrationsToApply,
+				status,
+			})
+		}
+
+		// Filter to collections that need migration
+		const collectionsToMigrate = dryRunCollections.filter(
+			(c) => c.status === "needs-migration",
 		)
 
-		if (versionedCollections.length === 0) {
+		if (collectionsToMigrate.length === 0) {
+			// Check if there are any versioned collections at all
+			const versionedCount = dryRunCollections.length
+			if (versionedCount === 0) {
+				return {
+					success: true,
+					message: "No versioned collections found. Nothing to migrate.",
+				}
+			}
 			return {
 				success: true,
-				message: "No versioned collections found. Nothing to migrate.",
+				message: "All collections are up-to-date. Nothing to migrate.",
+				data: { collections: dryRunCollections } as DryRunResult,
 			}
 		}
 
 		// Prompt for confirmation
+		const totalMigrations = collectionsToMigrate.reduce(
+			(sum, c) => sum + c.migrationsToApply.length,
+			0,
+		)
 		const confirmResult = yield* Effect.promise(() =>
 			confirm({
-				message: `Run migrations on ${versionedCollections.length} collection(s)?`,
+				message: `Run ${totalMigrations} migration(s) on ${collectionsToMigrate.length} collection(s)?`,
 				force,
 			}),
 		)
@@ -427,12 +625,76 @@ function runMigrate(
 			}
 		}
 
-		// Placeholder - actual migration will be implemented in task 7.4
+		// Execute migrations for each collection
+		const migrationResults: CollectionMigrationResult[] = []
+
+		for (const collectionDryRun of collectionsToMigrate) {
+			const collectionConfig = resolvedConfig[collectionDryRun.name]
+			const result = yield* migrateCollection(
+				collectionDryRun.name,
+				collectionConfig,
+				collectionDryRun.currentVersion,
+			)
+			migrationResults.push(result)
+		}
+
+		// Build the summary
+		const succeeded = migrationResults.filter((r) => r.success).length
+		const failed = migrationResults.filter((r) => !r.success).length
+		const totalApplied = migrationResults.reduce(
+			(sum, r) => sum + r.migrationsApplied,
+			0,
+		)
+
+		const runResult: MigrationRunResult = {
+			collectionsProcessed: migrationResults.length,
+			collectionsSucceeded: succeeded,
+			collectionsFailed: failed,
+			details: migrationResults,
+		}
+
+		// Build message
+		let message: string
+		if (failed === 0) {
+			message = `Migration complete. Applied ${totalApplied} migration(s) to ${succeeded} collection(s).`
+		} else {
+			message = `Migration completed with errors. ${succeeded}/${migrationResults.length} collection(s) succeeded.`
+		}
+
+		// Build updated dry-run result showing post-migration state
+		const updatedCollections: DryRunCollectionResult[] = dryRunCollections.map(
+			(c) => {
+				const migrationResult = migrationResults.find((r) => r.name === c.name)
+				if (migrationResult?.success) {
+					return {
+						...c,
+						currentVersion: migrationResult.toVersion,
+						migrationsToApply: [],
+						status: "up-to-date" as DryRunStatus,
+					}
+				}
+				return c
+			},
+		)
+
 		return {
-			success: true,
-			message: "Migration complete. (not yet implemented)",
+			success: failed === 0,
+			message,
+			data: { collections: updatedCollections } as DryRunResult,
 		}
 	})
+
+	// Run with the persistence layer
+	return program.pipe(
+		Effect.provide(buildPersistenceLayer()),
+		Effect.catchAll((error) => {
+			const message = error instanceof Error ? error.message : String(error)
+			return Effect.succeed({
+				success: false as const,
+				message: `Failed to run migrations: ${message}`,
+			})
+		}),
+	)
 }
 
 /**
