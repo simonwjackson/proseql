@@ -500,6 +500,7 @@ export const updateMany =
 		computed?: ComputedFieldsConfig<unknown>,
 		searchIndexRef?: Ref.Ref<SearchIndexMap>,
 		searchIndexFields?: ReadonlyArray<string>,
+		changePubSub?: PubSub.PubSub<ChangeEvent>,
 	) =>
 	(
 		predicate: (entity: T) => boolean,
@@ -665,6 +666,14 @@ export const updateMany =
 					id: (validated as HasId).id,
 					previous,
 					current: validated,
+				});
+			}
+
+			// Publish a single change event after all updates are complete
+			if (changePubSub && entityPairs.length > 0) {
+				yield* PubSub.publish(changePubSub, {
+					collection: collectionName,
+					operation: "update",
 				});
 			}
 
