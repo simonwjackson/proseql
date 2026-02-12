@@ -45,3 +45,21 @@ export {
 	makeWebStorageAdapter,
 	type WatchImplementation,
 } from "./adapters/web-storage-adapter.js";
+
+// ============================================================================
+// Default Browser Layer
+// ============================================================================
+
+/**
+ * Default browser storage layer alias.
+ *
+ * This is an alias for LocalStorageLayer, which is the sensible default for
+ * most browser applications. LocalStorage provides:
+ * - Persistence across browser restarts
+ * - Cross-tab synchronization via the "storage" event
+ * - Simple key-value API
+ *
+ * For applications requiring more storage capacity or non-blocking writes,
+ * consider using IndexedDBStorageLayer instead.
+ */
+export { LocalStorageLayer as BrowserStorageLayer } from "./adapters/local-storage-adapter.js";
