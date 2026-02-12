@@ -776,5 +776,146 @@ describe("Plugin System", () => {
 			expect(neuromancer.author).toBe("William Gibson");
 			expect(neuromancer.year).toBe(1984);
 		});
+
+		it("should allow plugin codec to override built-in extension (last wins) and log warning", async () => {
+			// Task 11.2: Test plugin codec overrides built-in extension (last wins), warning is logged
+			//
+			// We create a custom JSON codec that adds a special marker to the output.
+			// When we serialize data, the marker presence proves the plugin codec was used.
+
+			// Custom JSON codec that adds a marker to prove it was used
+			const customJsonCodec: FormatCodec = {
+				name: "custom-json",
+				extensions: ["json"], // Same as built-in JSON codec
+				encode: (data: unknown): string => {
+					// Wrap the data with a marker to prove this codec was used
+					const wrapper = {
+						__customCodec: true,
+						data,
+					};
+					return JSON.stringify(wrapper, null, 2);
+				},
+				decode: (raw: string): unknown => {
+					const parsed = JSON.parse(raw);
+					// If the wrapper exists, unwrap it
+					if (
+						parsed &&
+						typeof parsed === "object" &&
+						"__customCodec" in parsed &&
+						"data" in parsed
+					) {
+						return parsed.data;
+					}
+					// Otherwise, return as-is (for compatibility)
+					return parsed;
+				},
+			};
+
+			const customJsonPlugin = createCodecPlugin("custom-json-plugin", [
+				customJsonCodec,
+			]);
+
+			// Spy on console.warn to capture the warning
+			const warnings: string[] = [];
+			const originalWarn = console.warn;
+			console.warn = (...args: unknown[]) => {
+				warnings.push(args.map(String).join(" "));
+			};
+
+			try {
+				// Use in-memory storage
+				const store = new Map<string, string>();
+				const { makeInMemoryStorageLayer } = await import(
+					"../src/storage/in-memory-adapter-layer.js"
+				);
+				const { makeSerializerLayer } = await import(
+					"../src/serializers/format-codec.js"
+				);
+				const { jsonCodec } = await import(
+					"../src/serializers/codecs/json.js"
+				);
+				const { createPersistentEffectDatabase } = await import(
+					"../src/factories/database-effect.js"
+				);
+				const { Layer } = await import("effect");
+
+				// Create layer with base JSON codec AND plugin codec (plugin overrides)
+				const baseLayer = Layer.merge(
+					makeInMemoryStorageLayer(store),
+					makeSerializerLayer([jsonCodec()], [customJsonCodec]),
+				);
+
+				const persistentConfig = {
+					books: {
+						schema: BookSchema,
+						file: "/data/books.json", // Use .json extension that will be overridden
+						relationships: {},
+					},
+				} as const;
+
+				const persistentInitialData = {
+					books: [
+						{
+							id: "b1",
+							title: "Dune",
+							author: "Frank Herbert",
+							year: 1965,
+							genre: "sci-fi",
+						},
+					],
+				};
+
+				// Create the database with plugin
+				const db = await Effect.runPromise(
+					Effect.provide(
+						Effect.scoped(
+							Effect.gen(function* () {
+								const database = yield* createPersistentEffectDatabase(
+									persistentConfig,
+									persistentInitialData,
+									{ writeDebounce: 10 },
+									{ plugins: [customJsonPlugin] },
+								);
+								return database;
+							}),
+						),
+						baseLayer,
+					),
+				);
+
+				// Verify database was created
+				expect(db).toBeDefined();
+				expect(db.books).toBeDefined();
+
+				// Perform a CRUD operation to trigger persistence scheduling
+				await db.books
+					.update("b1", { genre: "science-fiction" })
+					.runPromise;
+
+				// Flush to trigger persistence
+				await db.flush();
+
+				// Verify the custom JSON codec was used (check for wrapper marker)
+				const jsonContent = store.get("/data/books.json");
+				expect(jsonContent).toBeDefined();
+
+				const parsed = JSON.parse(jsonContent!);
+				expect(parsed.__customCodec).toBe(true);
+				expect(parsed.data).toBeDefined();
+
+				// Verify the warning was logged about duplicate extension
+				expect(warnings.length).toBeGreaterThan(0);
+				const duplicateWarning = warnings.find(
+					(w) =>
+						w.includes("json") &&
+						w.includes("overwritten") &&
+						w.includes("custom-json"),
+				);
+				expect(duplicateWarning).toBeDefined();
+			} finally {
+				// Restore console.warn
+				console.warn = originalWarn;
+			}
+		});
 	});
 });

@@ -72,7 +72,7 @@
 ## 11. Tests — Custom Codecs
 
 - [x] 11.1 Test plugin codec registers for new extension, collection with that extension serializes/deserializes correctly
-- [ ] 11.2 Test plugin codec overrides built-in extension (last wins), warning is logged
+- [x] 11.2 Test plugin codec overrides built-in extension (last wins), warning is logged
 - [ ] 11.3 Test multiple plugins providing codecs, all extensions are available
 
 ## 12. Tests — Custom Operators
