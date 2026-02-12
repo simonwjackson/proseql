@@ -505,3 +505,93 @@ describe("REST handlers — GET by id (task 11.9)", () => {
 		expect((response3.body as { title: string }).title).toBe("The Left Hand of Darkness");
 	});
 });
+
+// ============================================================================
+// Task 11.10: Test GET by id for missing entity returns 404
+// ============================================================================
+
+describe("REST handlers — GET by id returns 404 for missing entity (task 11.10)", () => {
+	it("should return 404 when entity does not exist", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBookById = findRoute(routes, "GET", "/books/:id");
+		expect(getBookById).toBeDefined();
+
+		const request = createRequest({ params: { id: "nonexistent-id" } });
+		const response = await getBookById!.handler(request);
+
+		expect(response.status).toBe(404);
+	});
+
+	it("should include NotFoundError tag in response body", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBookById = findRoute(routes, "GET", "/books/:id");
+		const request = createRequest({ params: { id: "missing-id" } });
+		const response = await getBookById!.handler(request);
+
+		expect(response.status).toBe(404);
+		const body = response.body as { _tag: string; error: string };
+		expect(body._tag).toBe("NotFoundError");
+		expect(body.error).toBe("Not found");
+	});
+
+	it("should return 404 for empty collection", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const getBookById = findRoute(routes, "GET", "/books/:id");
+		const request = createRequest({ params: { id: "1" } });
+		const response = await getBookById!.handler(request);
+
+		expect(response.status).toBe(404);
+		const body = response.body as { _tag: string };
+		expect(body._tag).toBe("NotFoundError");
+	});
+
+	it("should return 404 for valid-looking id that does not exist", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBookById = findRoute(routes, "GET", "/books/:id");
+		// Test with an id that looks valid but doesn't exist
+		const request = createRequest({ params: { id: "100" } });
+		const response = await getBookById!.handler(request);
+
+		expect(response.status).toBe(404);
+	});
+
+	it("should return 404 for different collections independently", async () => {
+		const multiConfig = {
+			books: { schema: BookSchema, relationships: {} },
+			authors: {
+				schema: Schema.Struct({ id: Schema.String, name: Schema.String }),
+				relationships: {},
+			},
+		} as const;
+
+		const db = await Effect.runPromise(
+			createEffectDatabase(multiConfig, {
+				books: initialBooks,
+				authors: [{ id: "a1", name: "Frank Herbert" }],
+			}),
+		);
+		const routes = createRestHandlers(multiConfig, db);
+
+		// Test books 404
+		const getBooksById = findRoute(routes, "GET", "/books/:id");
+		const bookRequest = createRequest({ params: { id: "nonexistent" } });
+		const bookResponse = await getBooksById!.handler(bookRequest);
+		expect(bookResponse.status).toBe(404);
+		expect((bookResponse.body as { _tag: string })._tag).toBe("NotFoundError");
+
+		// Test authors 404
+		const getAuthorsById = findRoute(routes, "GET", "/authors/:id");
+		const authorRequest = createRequest({ params: { id: "nonexistent" } });
+		const authorResponse = await getAuthorsById!.handler(authorRequest);
+		expect(authorResponse.status).toBe(404);
+		expect((authorResponse.body as { _tag: string })._tag).toBe("NotFoundError");
+	});
+});
