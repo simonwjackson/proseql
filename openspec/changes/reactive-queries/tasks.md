@@ -66,7 +66,7 @@
 - [x] 11.2 Pass the PubSub to all CRUD factory function calls
 - [x] 11.3 Pass the PubSub to file watcher creation
 - [x] 11.4 Pass the PubSub to transaction factory
-- [ ] 11.5 Add `watch(config)` and `watchById(id)` methods to the `EffectCollection` interface and wire them to the implementations
+- [x] 11.5 Add `watch(config)` and `watchById(id)` methods to the `EffectCollection` interface and wire them to the implementations
 - [ ] 11.6 In `crud-factory.ts` and `crud-factory-with-relationships.ts`, thread the PubSub through to underlying CRUD calls
 
 ## 12. Tests — Basic Watch

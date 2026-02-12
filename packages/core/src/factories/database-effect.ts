@@ -16,7 +16,7 @@ import {
 	PubSub,
 	Ref,
 	type Schema,
-	type Scope,
+	Scope,
 	Stream,
 } from "effect";
 import type { ChangeEvent } from "../types/reactive-types.js";
@@ -99,6 +99,8 @@ import {
 } from "../storage/persistence-effect.js";
 import { StorageAdapter } from "../storage/storage-service.js";
 import { $transaction as $transactionImpl } from "../transactions/transaction.js";
+import { watch } from "../reactive/watch.js";
+import { watchById } from "../reactive/watch-by-id.js";
 import {
 	type AggregateConfig,
 	type AggregateResult,
@@ -369,6 +371,45 @@ export interface EffectCollection<T extends HasId> {
 	) => C extends { readonly groupBy: string | ReadonlyArray<string> }
 		? RunnableEffect<GroupedAggregateResult, never>
 		: RunnableEffect<AggregateResult, never>;
+
+	/**
+	 * Create a reactive subscription that emits query results whenever the collection changes.
+	 *
+	 * The stream:
+	 * 1. Emits the current result set immediately upon subscription
+	 * 2. Re-emits whenever the underlying data changes (create/update/delete/reload)
+	 * 3. Deduplicates consecutive identical result sets to avoid spurious emissions
+	 *
+	 * The stream is scoped: it subscribes to change notifications on creation and
+	 * automatically unsubscribes when the scope closes or the stream is interrupted.
+	 *
+	 * @param config - Optional query configuration (where, sort, select, limit, offset, debounceMs)
+	 * @returns A scoped Effect that produces a Stream of result arrays
+	 */
+	readonly watch: (config?: {
+		readonly where?: Record<string, unknown>;
+		readonly sort?: Record<string, "asc" | "desc">;
+		readonly select?: Record<string, unknown> | ReadonlyArray<string>;
+		readonly limit?: number;
+		readonly offset?: number;
+		readonly debounceMs?: number;
+	}) => Effect.Effect<Stream.Stream<ReadonlyArray<T>>, never, Scope.Scope>;
+
+	/**
+	 * Create a reactive subscription for a single entity by ID.
+	 *
+	 * Emits the entity immediately if it exists (or null if not), then re-emits
+	 * whenever the entity is created, updated, or deleted.
+	 *
+	 * The stream is scoped: it subscribes to change notifications on creation and
+	 * automatically unsubscribes when the scope closes or the stream is interrupted.
+	 *
+	 * @param id - The entity ID to watch
+	 * @returns A scoped Effect that produces a Stream of T | null
+	 */
+	readonly watchById: (
+		id: string,
+	) => Effect.Effect<Stream.Stream<T | null>, never, Scope.Scope>;
 }
 
 /**
@@ -1183,6 +1224,49 @@ const buildCollection = <T extends HasId>(
 			: RunnableEffect<AggregateResult, never>;
 	};
 
+	// watch: create reactive subscription to query results
+	// Requires changePubSub to be available; throws if called within a transaction
+	const watchFn = (config?: {
+		readonly where?: Record<string, unknown>;
+		readonly sort?: Record<string, "asc" | "desc">;
+		readonly select?: Record<string, unknown> | ReadonlyArray<string>;
+		readonly limit?: number;
+		readonly offset?: number;
+		readonly debounceMs?: number;
+	}): Effect.Effect<Stream.Stream<ReadonlyArray<T>>, never, Scope.Scope> => {
+		if (changePubSub === undefined) {
+			// This happens when called within a transaction context
+			// Reactive queries aren't supported within transactions since transaction
+			// data is isolated and temporary (rolled back or committed atomically)
+			return Effect.die(
+				new Error(
+					`watch() is not supported within transactions. ` +
+						`Reactive queries can only be used on the main database collections.`,
+				),
+			);
+		}
+		return watch(changePubSub, ref, collectionName, config);
+	};
+
+	// watchById: create reactive subscription for a single entity
+	// Requires changePubSub to be available; throws if called within a transaction
+	const watchByIdFn = (
+		id: string,
+	): Effect.Effect<Stream.Stream<T | null>, never, Scope.Scope> => {
+		if (changePubSub === undefined) {
+			// This happens when called within a transaction context
+			// Reactive queries aren't supported within transactions since transaction
+			// data is isolated and temporary (rolled back or committed atomically)
+			return Effect.die(
+				new Error(
+					`watchById() is not supported within transactions. ` +
+						`Reactive queries can only be used on the main database collections.`,
+				),
+			);
+		}
+		return watchById(changePubSub, ref, collectionName, id);
+	};
+
 	return {
 		query: queryFn,
 		findById: findByIdFn,
@@ -1199,6 +1283,8 @@ const buildCollection = <T extends HasId>(
 		deleteWithRelationships: deleteWithRelsFn,
 		deleteManyWithRelationships: deleteManyWithRelsFn,
 		aggregate: aggregateFn,
+		watch: watchFn,
+		watchById: watchByIdFn,
 	};
 };
 
