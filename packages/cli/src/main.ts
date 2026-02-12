@@ -20,6 +20,7 @@ import { handleDescribe as handleDescribeCommand } from "./commands/describe.js"
 import { handleStats as handleStatsCommand } from "./commands/stats.js"
 import { handleCreate as handleCreateCommand } from "./commands/create.js"
 import { handleUpdate as handleUpdateCommand } from "./commands/update.js"
+import { handleDelete as handleDeleteCommand } from "./commands/delete.js"
 import { format, type OutputFormat } from "./output/formatter.js"
 
 const VERSION = "0.1.0"
@@ -524,10 +525,31 @@ async function handleUpdate(
 }
 
 async function handleDelete(
-  _args: ParsedArgs,
-  _resolvedConfig: ResolvedConfig,
+  args: ParsedArgs,
+  resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  console.log("delete command - not yet implemented")
+  const collectionName = args.positionalArgs[0]
+  const entityId = args.positionalArgs[1]
+
+  const result = await handleDeleteCommand({
+    collection: collectionName,
+    id: entityId,
+    config: resolvedConfig.config,
+    configPath: resolvedConfig.configPath,
+    force: args.flags.force,
+  })
+
+  if (!result.success) {
+    if (result.aborted) {
+      // User cancelled - just print the message, don't exit with error
+      console.log(result.message ?? "Operation cancelled.")
+      return
+    }
+    exitWithError(result.message ?? "Delete failed")
+  }
+
+  // Print confirmation message
+  console.log(result.message)
 }
 
 async function handleMigrate(
