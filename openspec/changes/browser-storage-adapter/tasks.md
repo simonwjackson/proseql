@@ -14,7 +14,7 @@
 
 ## 3. Shared Web Storage Adapter
 
-- [ ] 3.1 Create `packages/browser/src/adapters/web-storage-adapter.ts` with `makeWebStorageAdapter(storage: Storage, config: WebStorageConfig): StorageAdapterShape`
+- [x] 3.1 Create `packages/browser/src/adapters/web-storage-adapter.ts` with `makeWebStorageAdapter(storage: Storage, config: WebStorageConfig): StorageAdapterShape`
 - [ ] 3.2 Implement `read`: call `storage.getItem(pathToKey(path))`, fail with `StorageError` if `null`
 - [ ] 3.3 Implement `write`: call `storage.setItem(pathToKey(path), data)` in a try/catch that detects `QuotaExceededError`
 - [ ] 3.4 Implement `exists`: return `storage.getItem(pathToKey(path)) !== null`
