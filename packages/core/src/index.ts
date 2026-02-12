@@ -317,6 +317,7 @@ export { hjsonCodec } from "./serializers/codecs/hjson.js";
 export { jsonCodec } from "./serializers/codecs/json.js";
 export { json5Codec } from "./serializers/codecs/json5.js";
 export { jsoncCodec } from "./serializers/codecs/jsonc.js";
+export { jsonlCodec } from "./serializers/codecs/jsonl.js";
 export { tomlCodec } from "./serializers/codecs/toml.js";
 export { toonCodec } from "./serializers/codecs/toon.js";
 export { yamlCodec } from "./serializers/codecs/yaml.js";

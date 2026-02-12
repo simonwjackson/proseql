@@ -2,6 +2,7 @@ import { hjsonCodec } from "./codecs/hjson.js";
 import { jsonCodec } from "./codecs/json.js";
 import { json5Codec } from "./codecs/json5.js";
 import { jsoncCodec } from "./codecs/jsonc.js";
+import { jsonlCodec } from "./codecs/jsonl.js";
 import { tomlCodec } from "./codecs/toml.js";
 import { toonCodec } from "./codecs/toon.js";
 import { yamlCodec } from "./codecs/yaml.js";
@@ -12,8 +13,9 @@ import { makeSerializerLayer } from "./format-codec.js";
 // ============================================================================
 
 /**
- * A SerializerRegistry Layer that supports all 7 text formats:
+ * A SerializerRegistry Layer that supports all 8 text formats:
  * - JSON (.json)
+ * - JSONL (.jsonl, .ndjson)
  * - YAML (.yaml, .yml)
  * - JSON5 (.json5)
  * - JSONC (.jsonc)
@@ -37,6 +39,7 @@ import { makeSerializerLayer } from "./format-codec.js";
  */
 export const AllTextFormatsLayer = makeSerializerLayer([
 	jsonCodec(),
+	jsonlCodec(),
 	yamlCodec(),
 	json5Codec(),
 	jsoncCodec(),

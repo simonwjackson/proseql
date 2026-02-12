@@ -116,6 +116,7 @@ Writes are debounced. Call `db.flush()` when you're impatient.
 | Format | Extension | Vibe |
 |--------|-----------|------|
 | JSON   | `.json`   | The classic |
+| JSONL  | `.jsonl`  | One object per line, streaming-friendly |
 | YAML   | `.yaml`   | For humans who hate braces |
 | JSON5  | `.json5`  | JSON, but chill (comments, trailing commas) |
 | JSONC  | `.jsonc`  | JSON with comments, because you deserve them |

@@ -3,6 +3,7 @@ import { hjsonCodec } from "../src/serializers/codecs/hjson.js";
 import { jsonCodec } from "../src/serializers/codecs/json.js";
 import { json5Codec } from "../src/serializers/codecs/json5.js";
 import { jsoncCodec } from "../src/serializers/codecs/jsonc.js";
+import { jsonlCodec } from "../src/serializers/codecs/jsonl.js";
 import { tomlCodec } from "../src/serializers/codecs/toml.js";
 import { toonCodec } from "../src/serializers/codecs/toon.js";
 import { yamlCodec } from "../src/serializers/codecs/yaml.js";
@@ -436,8 +437,82 @@ describe("hjsonCodec", () => {
 	});
 });
 
+describe("jsonlCodec", () => {
+	const codec = jsonlCodec();
+
+	it("has correct metadata", () => {
+		expect(codec.name).toBe("jsonl");
+		expect(codec.extensions).toEqual(["jsonl", "ndjson"]);
+	});
+
+	it("round-trips array of objects", () => {
+		const data = [
+			{ id: "1", name: "Alice" },
+			{ id: "2", name: "Bob" },
+		];
+		const encoded = codec.encode(data);
+		const decoded = codec.decode(encoded);
+		expect(decoded).toEqual(data);
+	});
+
+	it("encodes each element on its own line", () => {
+		const data = [{ a: 1 }, { b: 2 }, { c: 3 }];
+		const encoded = codec.encode(data);
+		const lines = encoded.split("\n");
+		expect(lines).toHaveLength(3);
+		expect(JSON.parse(lines[0])).toEqual({ a: 1 });
+		expect(JSON.parse(lines[1])).toEqual({ b: 2 });
+		expect(JSON.parse(lines[2])).toEqual({ c: 3 });
+	});
+
+	it("handles empty array", () => {
+		const encoded = codec.encode([]);
+		expect(codec.decode(encoded)).toEqual([]);
+	});
+
+	it("ignores blank lines on decode", () => {
+		const raw = '{"a":1}\n\n{"b":2}\n\n';
+		const decoded = codec.decode(raw);
+		expect(decoded).toEqual([{ a: 1 }, { b: 2 }]);
+	});
+
+	it("round-trips objects with special strings", () => {
+		const data = [
+			{ text: 'He said "hello"' },
+			{ text: "line1\nline2" },
+			{ text: "Hello \u4e16\u754c" },
+		];
+		const encoded = codec.encode(data);
+		const decoded = codec.decode(encoded);
+		expect(decoded).toEqual(data);
+	});
+
+	it("round-trips objects with null values", () => {
+		const data = [
+			{ id: "1", name: null },
+			{ id: "2", value: null },
+		];
+		const encoded = codec.encode(data);
+		const decoded = codec.decode(encoded);
+		expect(decoded).toEqual(data);
+	});
+
+	it("throws on invalid JSON lines", () => {
+		const raw = '{"a":1}\n{invalid json}';
+		expect(() => codec.decode(raw)).toThrow();
+	});
+
+	it("encodes non-array data as single JSON line", () => {
+		const data = { id: "1", name: "test" };
+		const encoded = codec.encode(data);
+		expect(encoded).toBe('{"id":"1","name":"test"}');
+		expect(JSON.parse(encoded)).toEqual(data);
+	});
+});
+
 describe("all codecs handle common edge cases", () => {
 	// Skip TOML for tests involving null since TOML strips nulls
+	// Skip JSONL since it encodes arrays (not objects) at the top level
 	const jsonCompatibleCodecs = [
 		{ name: "json", codec: jsonCodec() },
 		{ name: "yaml", codec: yamlCodec() },
