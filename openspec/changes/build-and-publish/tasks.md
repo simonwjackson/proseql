@@ -29,7 +29,7 @@
 
 ## 4. Per-Package package.json -- @proseql/node
 
-- [ ] 4.1 Apply the same field changes as core (main, types, exports, files, license, description, repository, keywords, engines, sideEffects, build, clean, prepublishOnly).
+- [x] 4.1 Apply the same field changes as core (main, types, exports, files, license, description, repository, keywords, engines, sideEffects, build, clean, prepublishOnly).
 - [ ] 4.2 Verify `@proseql/core` dependency uses `"workspace:*"` (already does).
 - [ ] 4.3 Add `effect` as a `peerDependency` if not already present (node re-exports core which depends on effect).
 
