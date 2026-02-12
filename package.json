@@ -14,7 +14,8 @@
     "hjson": "^3.2.2",
     "@proseql/core": "workspace:*",
     "@proseql/node": "workspace:*",
-    "@proseql/browser": "workspace:*"
+    "@proseql/browser": "workspace:*",
+    "@proseql/cli": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "^1.2.17",
