@@ -14,6 +14,7 @@
  * Uses a 1K-entity dataset for consistent measurements.
  */
 
+import { Effect, Layer, Schema } from "effect";
 import { Bench } from "tinybench";
 import {
 	jsonCodec,
@@ -23,8 +24,12 @@ import {
 	jsoncCodec,
 	toonCodec,
 	hjsonCodec,
+	createPersistentEffectDatabase,
+	StorageAdapterService,
+	makeSerializerLayer,
+	type StorageAdapterShape,
 } from "@proseql/core";
-import { generateUsers } from "./generators.js";
+import { generateUsers, type User } from "./generators.js";
 import { defaultBenchOptions, formatResultsTable } from "./utils.js";
 
 // ============================================================================
@@ -125,7 +130,131 @@ export async function createSuite(): Promise<Bench> {
 		});
 	}
 
-	// TODO (task 6.4): Add debounced write coalescing benchmark
+	// -------------------------------------------------------------------------
+	// 6.4: Debounced write coalescing benchmark
+	// -------------------------------------------------------------------------
+
+	// Note: This benchmark doesn't fit the typical ops/sec pattern.
+	// It measures coalescing behavior rather than throughput.
+	// We include it as a single-iteration "benchmark" that reports the ratio.
+
+	// Track coalescing statistics across iterations for reporting
+	const coalescingStats = {
+		totalMutations: 0,
+		totalWrites: 0,
+		iterations: 0,
+	};
+
+	bench.add("debounced write coalescing (100 mutations)", async () => {
+		// Create a counting storage adapter to track actual writes
+		let writeCount = 0;
+		const store = new Map<string, string>();
+
+		const countingAdapter: StorageAdapterShape = {
+			read: (path: string) =>
+				Effect.suspend(() => {
+					const content = store.get(path);
+					if (content === undefined) {
+						// Return empty collection format for new files
+						return Effect.succeed("{}");
+					}
+					return Effect.succeed(content);
+				}),
+			write: (path: string, data: string) =>
+				Effect.sync(() => {
+					store.set(path, data);
+					writeCount++;
+				}),
+			append: (path: string, data: string) =>
+				Effect.sync(() => {
+					const existing = store.get(path) ?? "";
+					store.set(path, existing + data);
+					writeCount++;
+				}),
+			exists: (path: string) => Effect.sync(() => store.has(path)),
+			remove: (_path: string) => Effect.void,
+			ensureDir: (_path: string) => Effect.void,
+			watch: (_path: string, _onChange: () => void) =>
+				Effect.succeed(() => {}),
+		};
+
+		const CountingStorageLayer = Layer.succeed(
+			StorageAdapterService,
+			countingAdapter,
+		);
+		const SerializerLayer = makeSerializerLayer([jsonCodec()]);
+		const PersistenceLayer = Layer.merge(CountingStorageLayer, SerializerLayer);
+
+		// Schema for benchmark users
+		const BenchUserSchema = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+			email: Schema.String,
+			age: Schema.Number,
+			role: Schema.Literal("admin", "moderator", "user"),
+			createdAt: Schema.String,
+		});
+
+		const config = {
+			users: {
+				schema: BenchUserSchema,
+				file: "./data/users.json",
+				relationships: {},
+			},
+		} as const;
+
+		// Create database with short debounce for testing
+		const program = Effect.gen(function* () {
+			const db = yield* createPersistentEffectDatabase(
+				config,
+				{ users: [] },
+				{ writeDebounce: 10 }, // Short debounce for testing
+			);
+
+			// Perform 100 rapid mutations
+			for (let i = 0; i < 100; i++) {
+				yield* db.users.create({
+					id: `bench_user_${i}`,
+					name: `User ${i}`,
+					email: `user${i}@example.com`,
+					age: 25 + (i % 50),
+					role: "user",
+					createdAt: new Date().toISOString(),
+				});
+			}
+
+			// Flush to ensure all writes complete
+			yield* Effect.promise(() => db.flush());
+
+			return writeCount;
+		});
+
+		// Run the program
+		const actualWrites = await Effect.runPromise(
+			program.pipe(Effect.provide(PersistenceLayer), Effect.scoped),
+		);
+
+		// Track statistics for reporting
+		coalescingStats.totalMutations += 100;
+		coalescingStats.totalWrites += actualWrites;
+		coalescingStats.iterations++;
+
+		// The coalescing ratio indicates how effective debouncing is
+		// 100 mutations should result in far fewer than 100 writes
+		// Ideal: 1-5 writes for 100 mutations
+		const coalescingRatio = 100 / actualWrites;
+
+		// If coalescing isn't working well, throw to make it visible
+		if (actualWrites > 0 && coalescingRatio < 2) {
+			throw new Error(
+				`Poor coalescing: ${actualWrites} writes for 100 mutations (ratio: ${coalescingRatio.toFixed(2)})`,
+			);
+		}
+	});
+
+	// Store the stats reference on the bench object for later retrieval
+	(bench as unknown as { coalescingStats: typeof coalescingStats }).coalescingStats =
+		coalescingStats;
 
 	return bench;
 }
@@ -150,6 +279,30 @@ export async function run(): Promise<void> {
 
 	console.log("\nResults:\n");
 	console.log(formatResultsTable(bench.tasks));
+
+	// Report coalescing statistics if available
+	const stats = (
+		bench as unknown as {
+			coalescingStats?: {
+				totalMutations: number;
+				totalWrites: number;
+				iterations: number;
+			};
+		}
+	).coalescingStats;
+
+	if (stats && stats.iterations > 0) {
+		const avgWrites = stats.totalWrites / stats.iterations;
+		const coalescingRatio = stats.totalMutations / stats.totalWrites;
+		console.log("\n--- Debounced Write Coalescing Report ---");
+		console.log(`Total iterations: ${stats.iterations}`);
+		console.log(`Mutations per iteration: 100`);
+		console.log(`Average writes per iteration: ${avgWrites.toFixed(2)}`);
+		console.log(`Coalescing ratio: ${coalescingRatio.toFixed(2)}x`);
+		console.log(
+			`(${stats.totalMutations} mutations coalesced into ${stats.totalWrites} writes)`,
+		);
+	}
 }
 
 // Run when executed directly
