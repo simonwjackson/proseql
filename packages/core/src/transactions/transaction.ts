@@ -204,7 +204,7 @@ export const createTransaction = <
 					for (const collectionName of mutatedCollections) {
 						yield* PubSub.publish(changePubSub, {
 							collection: collectionName,
-							operation: "update",
+							operation: "update" as const,
 						});
 					}
 				}

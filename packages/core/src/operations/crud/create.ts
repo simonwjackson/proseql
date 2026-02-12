@@ -230,7 +230,7 @@ export const create =
 			if (changePubSub) {
 				yield* PubSub.publish(changePubSub, {
 					collection: collectionName,
-					operation: "create",
+					operation: "create" as const,
 				});
 			}
 
@@ -517,7 +517,7 @@ export const createMany =
 			if (changePubSub && created.length > 0) {
 				yield* PubSub.publish(changePubSub, {
 					collection: collectionName,
-					operation: "create",
+					operation: "create" as const,
 				});
 			}
 

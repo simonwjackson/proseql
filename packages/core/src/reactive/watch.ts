@@ -128,7 +128,8 @@ export const watch = <T extends HasId>(
 
 		// Fork a child scope that will manage the subscription lifetime.
 		// When this child scope closes, the subscription will be cleaned up.
-		const subscriptionScope = yield* parentScope.fork(
+		const subscriptionScope = yield* Scope.fork(
+			parentScope,
 			ExecutionStrategy.sequential,
 		);
 
@@ -147,7 +148,7 @@ export const watch = <T extends HasId>(
 			),
 			// Release: Close the child scope to trigger subscription cleanup
 			// This runs when the enclosing scope closes
-			() => subscriptionScope.close(Exit.void),
+			() => Scope.close(subscriptionScope, Exit.void),
 		);
 
 		// Create a stream from the subscription queue
@@ -197,7 +198,7 @@ export const watch = <T extends HasId>(
 		// Closing the subscription scope triggers the acquireRelease cleanup.
 		const resultStream = Stream.ensuring(
 			deduplicatedStream,
-			subscriptionScope.close(Exit.void),
+			Scope.close(subscriptionScope, Exit.void),
 		);
 
 		return resultStream;

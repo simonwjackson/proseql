@@ -638,6 +638,7 @@ interface AppendOnlyConfig {
 	/**
 	 * Called after each entity is created to append it to the file.
 	 * The callback is responsible for encoding and writing to storage.
+	 * Storage errors are caught and logged rather than propagated.
 	 */
 	readonly onEntityCreated: (entity: HasId) => Effect.Effect<void>;
 }
@@ -1930,7 +1931,11 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 								const line = `${JSON.stringify(encoded)}\n`;
 								yield* storage.ensureDir(filePath);
 								yield* storage.append(filePath, line);
-							}),
+							}).pipe(
+								// Catch storage errors to avoid propagating them to the caller.
+								// The entity was already created in memory; storage failure is logged but not fatal.
+								Effect.catchAll(() => Effect.void),
+							),
 							serviceLayer,
 						),
 				};

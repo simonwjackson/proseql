@@ -176,25 +176,13 @@ export const parseQueryParams = (query: QueryParams): ParsedQueryConfig => {
 		}
 	}
 
-	const result: ParsedQueryConfig = { where };
-
-	if (sort !== undefined) {
-		result.sort = sort;
-	}
-
-	if (limit !== undefined) {
-		result.limit = limit;
-	}
-
-	if (offset !== undefined) {
-		result.offset = offset;
-	}
-
-	if (select !== undefined) {
-		result.select = select;
-	}
-
-	return result;
+	return {
+		where,
+		...(sort !== undefined && { sort }),
+		...(limit !== undefined && { limit }),
+		...(offset !== undefined && { offset }),
+		...(select !== undefined && { select }),
+	};
 };
 
 // ============================================================================
@@ -208,10 +196,11 @@ export const parseQueryParams = (query: QueryParams): ParsedQueryConfig => {
 const normalizeValue = (
 	value: string | ReadonlyArray<string>,
 ): string | undefined => {
-	if (Array.isArray(value)) {
-		return value.length > 0 ? value.join(",") : undefined;
+	if (typeof value === "string") {
+		return value || undefined;
 	}
-	return value || undefined;
+	// Value is ReadonlyArray<string>
+	return value.length > 0 ? value.join(",") : undefined;
 };
 
 /**

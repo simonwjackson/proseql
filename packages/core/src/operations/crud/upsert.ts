@@ -235,7 +235,7 @@ export const upsert =
 				if (changePubSub) {
 					yield* PubSub.publish(changePubSub, {
 						collection: collectionName,
-						operation: "update",
+						operation: "update" as const,
 					});
 				}
 
@@ -316,7 +316,7 @@ export const upsert =
 			if (changePubSub) {
 				yield* PubSub.publish(changePubSub, {
 					collection: collectionName,
-					operation: "create",
+					operation: "create" as const,
 				});
 			}
 
@@ -584,14 +584,14 @@ export const upsertMany =
 			if (changePubSub && toCreate.length > 0) {
 				yield* PubSub.publish(changePubSub, {
 					collection: collectionName,
-					operation: "create",
+					operation: "create" as const,
 				});
 			}
 			// Publish an "update" event if any entities were updated
 			if (changePubSub && toUpdate.length > 0) {
 				yield* PubSub.publish(changePubSub, {
 					collection: collectionName,
-					operation: "update",
+					operation: "update" as const,
 				});
 			}
 

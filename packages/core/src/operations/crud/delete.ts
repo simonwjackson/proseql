@@ -170,7 +170,7 @@ export const del =
 				if (changePubSub) {
 					yield* PubSub.publish(changePubSub, {
 						collection: collectionName,
-						operation: "delete",
+						operation: "delete" as const,
 					});
 				}
 
@@ -214,7 +214,7 @@ export const del =
 			if (changePubSub) {
 				yield* PubSub.publish(changePubSub, {
 					collection: collectionName,
-					operation: "delete",
+					operation: "delete" as const,
 				});
 			}
 
@@ -395,7 +395,7 @@ export const deleteMany =
 			if (changePubSub && deleted.length > 0) {
 				yield* PubSub.publish(changePubSub, {
 					collection: collectionName,
-					operation: "delete",
+					operation: "delete" as const,
 				});
 			}
 

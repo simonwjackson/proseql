@@ -465,7 +465,7 @@ export const update =
 			if (changePubSub) {
 				yield* PubSub.publish(changePubSub, {
 					collection: collectionName,
-					operation: "update",
+					operation: "update" as const,
 				});
 			}
 
@@ -675,7 +675,7 @@ export const updateMany =
 			if (changePubSub && entityPairs.length > 0) {
 				yield* PubSub.publish(changePubSub, {
 					collection: collectionName,
-					operation: "update",
+					operation: "update" as const,
 				});
 			}
 
