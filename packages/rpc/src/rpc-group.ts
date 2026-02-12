@@ -362,6 +362,7 @@ export function makeQueryStreamRequest<
 				limit: QueryPayloadSchema.fields.limit,
 				offset: QueryPayloadSchema.fields.offset,
 				cursor: QueryPayloadSchema.fields.cursor,
+				streamingOptions: QueryPayloadSchema.fields.streamingOptions,
 			},
 		},
 	);
@@ -390,6 +391,7 @@ interface QueryStreamRequestInstance<
 			readonly limit?: typeof QueryPayloadSchema.Type.limit;
 			readonly offset?: typeof QueryPayloadSchema.Type.offset;
 			readonly cursor?: typeof QueryPayloadSchema.Type.cursor;
+			readonly streamingOptions?: typeof QueryPayloadSchema.Type.streamingOptions;
 		},
 		QueryStreamRequestInstance<CollectionName, EntitySchema>,
 		never,
@@ -406,6 +408,7 @@ interface QueryStreamRequestInstance<
 	readonly limit?: typeof QueryPayloadSchema.Type.limit;
 	readonly offset?: typeof QueryPayloadSchema.Type.offset;
 	readonly cursor?: typeof QueryPayloadSchema.Type.cursor;
+	readonly streamingOptions?: typeof QueryPayloadSchema.Type.streamingOptions;
 }
 
 /**
@@ -427,6 +430,7 @@ export type QueryStreamRequestClass<
 		readonly limit?: typeof QueryPayloadSchema.Encoded.limit;
 		readonly offset?: typeof QueryPayloadSchema.Encoded.offset;
 		readonly cursor?: typeof QueryPayloadSchema.Encoded.cursor;
+		readonly streamingOptions?: typeof QueryPayloadSchema.Encoded.streamingOptions;
 	},
 	{
 		readonly where?: typeof QueryPayloadSchema.Type.where;
@@ -436,6 +440,7 @@ export type QueryStreamRequestClass<
 		readonly limit?: typeof QueryPayloadSchema.Type.limit;
 		readonly offset?: typeof QueryPayloadSchema.Type.offset;
 		readonly cursor?: typeof QueryPayloadSchema.Type.cursor;
+		readonly streamingOptions?: typeof QueryPayloadSchema.Type.streamingOptions;
 	},
 	never,
 	Schema.Schema.Encoded<typeof QueryErrorUnionSchema>,

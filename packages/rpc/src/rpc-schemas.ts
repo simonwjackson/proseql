@@ -98,6 +98,51 @@ export const SelectConfigSchema = Schema.Union(
 );
 
 // ============================================================================
+// Streaming Options Schema
+// ============================================================================
+
+/**
+ * Schema for streaming configuration options.
+ *
+ * These options allow callers to configure how streaming queries behave:
+ * - `chunkSize`: Number of items to batch together before sending (default: 1)
+ * - `bufferSize`: Client-side buffer size for backpressure handling (default: 16)
+ *
+ * When using the `query` endpoint (collect-then-return), these options are ignored.
+ * When using the `queryStream` endpoint, these options control streaming behavior.
+ *
+ * @example
+ * ```ts
+ * // Stream with larger chunks for better throughput
+ * const results = client.books.queryStream({
+ *   where: { genre: "sci-fi" },
+ *   streamingOptions: { chunkSize: 100 }
+ * })
+ *
+ * // Collect all results (streaming options ignored)
+ * const all = await client.books.query({
+ *   where: { genre: "sci-fi" }
+ * })
+ * ```
+ */
+export const StreamingOptionsSchema = Schema.Struct({
+	/**
+	 * Number of items to batch together before sending over the transport.
+	 * Higher values reduce RPC overhead but increase latency to first item.
+	 * Default: 1 (send items as they become available)
+	 */
+	chunkSize: Schema.optional(Schema.Number),
+	/**
+	 * Client-side buffer size for handling backpressure.
+	 * When the buffer fills, the stream will apply backpressure to the server.
+	 * Default: 16
+	 */
+	bufferSize: Schema.optional(Schema.Number),
+});
+
+export type StreamingOptions = typeof StreamingOptionsSchema.Type;
+
+// ============================================================================
 // Payload Schemas
 // ============================================================================
 
@@ -113,6 +158,10 @@ export type FindByIdPayload = typeof FindByIdPayloadSchema.Type;
 /**
  * Payload for query operations.
  * Wraps the full QueryConfig structure.
+ *
+ * For streaming queries (`queryStream`), use `streamingOptions` to configure
+ * streaming behavior. For collect-then-return queries (`query`), streaming
+ * options are ignored.
  */
 export const QueryPayloadSchema = Schema.Struct({
 	where: Schema.optional(
@@ -127,6 +176,27 @@ export const QueryPayloadSchema = Schema.Struct({
 	limit: Schema.optional(Schema.Number),
 	offset: Schema.optional(Schema.Number),
 	cursor: Schema.optional(CursorConfigSchema),
+	/**
+	 * Streaming configuration options.
+	 *
+	 * Only applies when using the `queryStream` endpoint.
+	 * Ignored when using the `query` endpoint (collect-then-return).
+	 *
+	 * @example
+	 * ```ts
+	 * // Use queryStream with custom chunk size
+	 * const stream = client.books.queryStream({
+	 *   where: { genre: "sci-fi" },
+	 *   streamingOptions: { chunkSize: 50 }
+	 * })
+	 *
+	 * // Use query for collect-then-return (streamingOptions ignored)
+	 * const all = await client.books.query({
+	 *   where: { genre: "sci-fi" }
+	 * })
+	 * ```
+	 */
+	streamingOptions: Schema.optional(StreamingOptionsSchema),
 });
 
 export type QueryPayload = typeof QueryPayloadSchema.Type;

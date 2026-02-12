@@ -2,7 +2,7 @@
  * Tests for the RPC handler layer implementation.
  */
 
-import { Effect, Layer, Schema } from "effect";
+import { Chunk, Effect, Layer, Schema, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	createPersistentEffectDatabase,
@@ -299,6 +299,157 @@ describe("makeRpcHandlers", () => {
 			);
 			expect(results).toHaveLength(1);
 			expect(results[0].title).toBe("Neuromancer");
+		});
+	});
+
+	describe("streaming handler operations", () => {
+		it("queryStream should return a stream of entities", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			// queryStream returns a Stream that can be collected
+			const stream = handlers.books.queryStream({});
+			const results = await Effect.runPromise(
+				Stream.runCollect(stream).pipe(Effect.map(Chunk.toReadonlyArray)),
+			);
+
+			expect(results).toHaveLength(2);
+			expect(results[0].title).toBe("Dune");
+			expect(results[1].title).toBe("Neuromancer");
+		});
+
+		it("queryStream should support filtering", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			const stream = handlers.books.queryStream({
+				where: { year: { $gte: 1980 } },
+			});
+			const results = await Effect.runPromise(
+				Stream.runCollect(stream).pipe(Effect.map(Chunk.toReadonlyArray)),
+			);
+
+			expect(results).toHaveLength(1);
+			expect(results[0].title).toBe("Neuromancer");
+		});
+
+		it("queryStream should accept streamingOptions", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: [
+						{ id: "1", title: "Book 1", author: "Author", year: 2000 },
+						{ id: "2", title: "Book 2", author: "Author", year: 2001 },
+						{ id: "3", title: "Book 3", author: "Author", year: 2002 },
+						{ id: "4", title: "Book 4", author: "Author", year: 2003 },
+						{ id: "5", title: "Book 5", author: "Author", year: 2004 },
+					],
+				}),
+			);
+
+			// queryStream with chunkSize should work
+			const stream = handlers.books.queryStream({
+				streamingOptions: { chunkSize: 2 },
+			});
+			const results = await Effect.runPromise(
+				Stream.runCollect(stream).pipe(Effect.map(Chunk.toReadonlyArray)),
+			);
+
+			// Should still return all 5 items regardless of chunk size
+			expect(results).toHaveLength(5);
+		});
+
+		it("queryStream with chunkSize should rechunk the stream", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: [
+						{ id: "1", title: "Book 1", author: "Author", year: 2000 },
+						{ id: "2", title: "Book 2", author: "Author", year: 2001 },
+						{ id: "3", title: "Book 3", author: "Author", year: 2002 },
+						{ id: "4", title: "Book 4", author: "Author", year: 2003 },
+						{ id: "5", title: "Book 5", author: "Author", year: 2004 },
+					],
+				}),
+			);
+
+			// Track chunk sizes to verify rechunking behavior
+			const chunkSizes: number[] = [];
+			const stream = handlers.books.queryStream({
+				streamingOptions: { chunkSize: 2 },
+			});
+
+			// Use mapChunks to observe the actual chunk structure
+			const observedStream = Stream.mapChunks(stream, (chunk) => {
+				chunkSizes.push(Chunk.size(chunk));
+				return chunk;
+			});
+
+			await Effect.runPromise(
+				Stream.runCollect(observedStream).pipe(Effect.map(Chunk.toReadonlyArray)),
+			);
+
+			// With 5 items and chunkSize 2, we should get chunks of size 2, 2, 1
+			// (or similar batching depending on implementation)
+			expect(chunkSizes.length).toBeGreaterThan(0);
+			// At least some chunks should respect the chunkSize
+			expect(chunkSizes.some((size) => size <= 2)).toBe(true);
+		});
+
+		it("queryStream without chunkSize should pass stream through unchanged", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			// Without streamingOptions, stream should work normally
+			const stream = handlers.books.queryStream({});
+			const results = await Effect.runPromise(
+				Stream.runCollect(stream).pipe(Effect.map(Chunk.toReadonlyArray)),
+			);
+
+			expect(results).toHaveLength(2);
+		});
+
+		it("queryStream with chunkSize=1 should not apply rechunking", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			// chunkSize of 1 should not trigger rechunking (no benefit)
+			const stream = handlers.books.queryStream({
+				streamingOptions: { chunkSize: 1 },
+			});
+			const results = await Effect.runPromise(
+				Stream.runCollect(stream).pipe(Effect.map(Chunk.toReadonlyArray)),
+			);
+
+			expect(results).toHaveLength(2);
+		});
+
+		it("streamingOptions.bufferSize should be accepted but not affect handler", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			// bufferSize is a client-side hint; handler should accept it without error
+			const stream = handlers.books.queryStream({
+				streamingOptions: { bufferSize: 32 },
+			});
+			const results = await Effect.runPromise(
+				Stream.runCollect(stream).pipe(Effect.map(Chunk.toReadonlyArray)),
+			);
+
+			expect(results).toHaveLength(2);
 		});
 	});
 

@@ -80,10 +80,29 @@ const createCollectionHandlers = <Config extends DatabaseConfig>(
 			readonly select?: Record<string, unknown> | ReadonlyArray<string>;
 			readonly limit?: number;
 			readonly offset?: number;
+			readonly streamingOptions?: {
+				readonly chunkSize?: number;
+				readonly bufferSize?: number;
+			};
 		}) => {
 			// Return the stream directly for incremental delivery over RPC transport
 			// The RPC layer will serialize stream items as they are emitted
-			return collection.query(config) as Stream.Stream<Record<string, unknown>, unknown>;
+			const baseStream = collection.query(config) as Stream.Stream<Record<string, unknown>, unknown>;
+
+			// Apply rechunking if streamingOptions.chunkSize is specified
+			// This batches items into chunks of the specified size before they are
+			// sent over the RPC transport, reducing overhead at the cost of increased
+			// latency to first item. The RPC layer transmits items in chunks, so this
+			// ensures each transmission contains up to `chunkSize` items.
+			//
+			// Note: bufferSize is a client-side hint that should be passed to the
+			// RPC client's streamBufferSize option when making the call.
+			const chunkSize = config.streamingOptions?.chunkSize;
+			if (chunkSize && chunkSize > 1) {
+				return Stream.rechunk(baseStream, chunkSize);
+			}
+
+			return baseStream;
 		},
 
 		create: ({ data }: { readonly data: Record<string, unknown> }) =>

@@ -82,6 +82,8 @@ export {
 	SearchConfigSchema,
 	PopulateConfigSchema,
 	SelectConfigSchema,
+	// Streaming options
+	StreamingOptionsSchema,
 	// Payload schemas
 	FindByIdPayloadSchema,
 	QueryPayloadSchema,
@@ -106,6 +108,7 @@ export {
 	UpsertResultSchema,
 	UpsertManyResultSchema,
 	// Type exports
+	type StreamingOptions,
 	type FindByIdPayload,
 	type QueryPayload,
 	type CreatePayload,
