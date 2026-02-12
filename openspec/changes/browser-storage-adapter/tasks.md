@@ -79,13 +79,13 @@
 
 ## 11. Tests — LocalStorage Adapter
 
-- [ ] 11.1 Create `packages/browser/tests/local-storage-adapter.test.ts` using a mock `Storage` implementation
-- [ ] 11.2 Test `write` then `read` round-trip: data is stored and retrieved correctly
-- [ ] 11.3 Test `exists` returns `false` for missing key, `true` after write
-- [ ] 11.4 Test `remove` deletes the key, subsequent `exists` returns `false`
-- [ ] 11.5 Test `read` on missing key fails with `StorageError`
-- [ ] 11.6 Test `ensureDir` is a no-op (succeeds without side effects)
-- [ ] 11.7 Test `write` with quota exceeded throws `StorageError` with appropriate message
+- [x] 11.1 Create `packages/browser/tests/local-storage-adapter.test.ts` using a mock `Storage` implementation
+- [x] 11.2 Test `write` then `read` round-trip: data is stored and retrieved correctly
+- [x] 11.3 Test `exists` returns `false` for missing key, `true` after write
+- [x] 11.4 Test `remove` deletes the key, subsequent `exists` returns `false`
+- [x] 11.5 Test `read` on missing key fails with `StorageError`
+- [x] 11.6 Test `ensureDir` is a no-op (succeeds without side effects)
+- [x] 11.7 Test `write` with quota exceeded throws `StorageError` with appropriate message
 
 ## 12. Tests — SessionStorage Adapter
 
