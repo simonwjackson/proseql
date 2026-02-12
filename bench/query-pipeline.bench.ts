@@ -602,8 +602,93 @@ export async function createSuite(): Promise<Bench> {
 	});
 
 	// -------------------------------------------------------------------------
-	// Task 5.6: Paginate benchmark will be added here
+	// Task 5.6: Paginate benchmarks
 	// -------------------------------------------------------------------------
+
+	// Paginate benchmark: Small limit from beginning
+	// Tests taking a small slice from the start of the result set.
+	// This is the common case for first-page retrieval.
+	const paginateSmallBeginDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("paginate: limit 10 from beginning", async () => {
+		await paginateSmallBeginDb.users.query({
+			limit: 10,
+		}).runPromise;
+	});
+
+	// Paginate benchmark: Small limit from middle
+	// Tests taking a small slice from the middle of a large result set.
+	// Common for paginating through results (e.g., page 500 of 1000).
+	const paginateSmallMiddleDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("paginate: limit 10, offset 5000 (middle)", async () => {
+		await paginateSmallMiddleDb.users.query({
+			offset: 5000,
+			limit: 10,
+		}).runPromise;
+	});
+
+	// Paginate benchmark: Small limit from end
+	// Tests taking a small slice from near the end of the result set.
+	// This exercises the worst-case offset scenario.
+	const paginateSmallEndDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("paginate: limit 10, offset 9990 (end)", async () => {
+		await paginateSmallEndDb.users.query({
+			offset: 9990,
+			limit: 10,
+		}).runPromise;
+	});
+
+	// Paginate benchmark: Larger page size
+	// Tests taking a larger slice (100 items).
+	// Measures the cost of extracting more items per page.
+	const paginateLargerPageDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("paginate: limit 100, offset 500", async () => {
+		await paginateLargerPageDb.users.query({
+			offset: 500,
+			limit: 100,
+		}).runPromise;
+	});
+
+	// Paginate benchmark: With sort (realistic scenario)
+	// Tests pagination combined with sorting.
+	// This is the typical pagination use case - sorted results with skip/take.
+	const paginateSortedDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("paginate: limit 10, offset 1000 with sort", async () => {
+		await paginateSortedDb.users.query({
+			sort: { age: "desc" },
+			offset: 1000,
+			limit: 10,
+		}).runPromise;
+	});
+
+	// Paginate benchmark: With filter (filtered pagination)
+	// Tests pagination on a filtered subset.
+	// Offset/limit apply after filtering, so this tests skipping over filtered results.
+	const paginateFilteredDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("paginate: limit 10, offset 500 with filter", async () => {
+		await paginateFilteredDb.users.query({
+			where: { role: "admin" },
+			offset: 500,
+			limit: 10,
+		}).runPromise;
+	});
 
 	// -------------------------------------------------------------------------
 	// Task 5.7: Combined pipeline benchmark will be added here
