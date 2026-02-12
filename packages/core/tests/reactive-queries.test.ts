@@ -1664,4 +1664,242 @@ describe("reactive queries - transactions", () => {
 			);
 		});
 	});
+
+	describe("transaction commit exactly one emission (15.2)", () => {
+		it("transaction commit produces exactly one emission with the final state", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch all books sorted by year
+					const stream = yield* db.books.watch({
+						sort: { year: "asc" },
+					});
+
+					// Fork to get exactly 2 emissions: initial + post-commit
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+
+					// Perform a transaction with multiple mutations
+					yield* db.$transaction((tx) =>
+						Effect.gen(function* () {
+							// Create two books
+							yield* tx.books.create({
+								title: "Foundation",
+								author: "Isaac Asimov",
+								year: 1951,
+								genre: "sci-fi",
+							});
+
+							yield* tx.books.create({
+								title: "I, Robot",
+								author: "Isaac Asimov",
+								year: 1950,
+								genre: "sci-fi",
+							});
+
+							// Delete one book
+							yield* tx.books.delete("3"); // The Hobbit
+
+							// Update one book
+							yield* tx.books.update("1", { title: "Dune (Revised)" });
+						}),
+					);
+
+					// Collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					// Should have exactly 2 emissions: initial + one post-commit
+					expect(emissions).toHaveLength(2);
+
+					// Initial emission: 3 books (The Hobbit, Dune, Neuromancer)
+					expect(emissions[0]).toHaveLength(3);
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"The Hobbit",
+						"Dune",
+						"Neuromancer",
+					]);
+
+					// Post-commit emission: 4 books, all changes applied
+					// I, Robot (1950), Foundation (1951), Dune (Revised) (1965), Neuromancer (1984)
+					// The Hobbit was deleted
+					expect(emissions[1]).toHaveLength(4);
+					expect(emissions[1].map((b) => b.title)).toEqual([
+						"I, Robot",
+						"Foundation",
+						"Dune (Revised)",
+						"Neuromancer",
+					]);
+					// Verify The Hobbit was deleted
+					expect(
+						emissions[1].find((b) => b.title === "The Hobbit"),
+					).toBeUndefined();
+					// Verify Dune was renamed
+					expect(
+						emissions[1].find((b) => b.title === "Dune (Revised)"),
+					).toBeDefined();
+				}),
+			);
+		});
+
+		it("multiple sequential transactions each produce exactly one emission", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Fork to get 3 emissions: initial + 2 post-commit
+					const collectedFiber = yield* Stream.take(stream, 3).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+
+					// First transaction: add one book
+					yield* db.$transaction((tx) =>
+						Effect.gen(function* () {
+							yield* tx.books.create({
+								title: "Foundation",
+								author: "Isaac Asimov",
+								year: 1951,
+								genre: "sci-fi",
+							});
+						}),
+					);
+
+					// Wait for first post-commit emission
+					yield* Effect.sleep("50 millis");
+
+					// Second transaction: add another book
+					yield* db.$transaction((tx) =>
+						Effect.gen(function* () {
+							yield* tx.books.create({
+								title: "Snow Crash",
+								author: "Neal Stephenson",
+								year: 1992,
+								genre: "sci-fi",
+							});
+						}),
+					);
+
+					// Collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					// Should have exactly 3 emissions: initial + one per transaction
+					expect(emissions).toHaveLength(3);
+
+					// Initial: 2 sci-fi books (Dune 1965, Neuromancer 1984)
+					expect(emissions[0]).toHaveLength(2);
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+					]);
+
+					// After first transaction: 3 sci-fi books (Foundation 1951, Dune 1965, Neuromancer 1984)
+					expect(emissions[1]).toHaveLength(3);
+					expect(emissions[1].map((b) => b.title)).toEqual([
+						"Foundation",
+						"Dune",
+						"Neuromancer",
+					]);
+
+					// After second transaction: 4 sci-fi books (Foundation 1951, Dune 1965, Neuromancer 1984, Snow Crash 1992)
+					expect(emissions[2]).toHaveLength(4);
+					expect(emissions[2].map((b) => b.title)).toEqual([
+						"Foundation",
+						"Dune",
+						"Neuromancer",
+						"Snow Crash",
+					]);
+				}),
+			);
+		});
+
+		it("transaction with mutations to multiple collections produces one emission per affected collection", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch both books and authors
+					const booksStream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { title: "asc" },
+					});
+					const authorsStream = yield* db.authors.watch({
+						sort: { name: "asc" },
+					});
+
+					// Fork both to get 2 emissions each: initial + post-commit
+					const booksFiber = yield* Stream.take(booksStream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+					const authorsFiber = yield* Stream.take(authorsStream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emissions
+					yield* Effect.sleep("30 millis");
+
+					// Transaction mutating both collections
+					yield* db.$transaction((tx) =>
+						Effect.gen(function* () {
+							yield* tx.books.create({
+								title: "2001: A Space Odyssey",
+								author: "Arthur C. Clarke",
+								year: 1968,
+								genre: "sci-fi",
+							});
+							yield* tx.authors.create({
+								name: "Arthur C. Clarke",
+								country: "UK",
+							});
+						}),
+					);
+
+					// Collect results from both
+					const booksResults = yield* Fiber.join(booksFiber);
+					const authorsResults = yield* Fiber.join(authorsFiber);
+
+					const bookEmissions = Chunk.toReadonlyArray(
+						booksResults,
+					) as ReadonlyArray<ReadonlyArray<Book>>;
+					const authorEmissions = Chunk.toReadonlyArray(
+						authorsResults,
+					) as ReadonlyArray<ReadonlyArray<Author>>;
+
+					// Books: exactly 2 emissions (initial + one post-commit)
+					expect(bookEmissions).toHaveLength(2);
+					expect(bookEmissions[0]).toHaveLength(2); // Initial: Dune, Neuromancer
+					expect(bookEmissions[1]).toHaveLength(3); // After: 2001, Dune, Neuromancer
+					expect(bookEmissions[1].map((b) => b.title)).toEqual([
+						"2001: A Space Odyssey",
+						"Dune",
+						"Neuromancer",
+					]);
+
+					// Authors: exactly 2 emissions (initial + one post-commit)
+					expect(authorEmissions).toHaveLength(2);
+					expect(authorEmissions[0]).toHaveLength(2); // Initial: Frank Herbert, William Gibson
+					expect(authorEmissions[1]).toHaveLength(3); // After: Arthur C. Clarke added
+					expect(authorEmissions[1].map((a) => a.name)).toContain(
+						"Arthur C. Clarke",
+					);
+				}),
+			);
+		});
+	});
 });
