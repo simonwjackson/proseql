@@ -53,7 +53,7 @@
 ## 9. watchById
 
 - [x] 9.1 Create `core/reactive/watch-by-id.ts` implementing `watchById(pubsub, ref, collectionName, id)` as a thin wrapper over `watch()` with `where: { id }`, mapping results to `T | null`
-- [ ] 9.2 Emit `null` when the entity is deleted (result array becomes empty)
+- [x] 9.2 Emit `null` when the entity is deleted (result array becomes empty)
 
 ## 10. Scope Cleanup
 
