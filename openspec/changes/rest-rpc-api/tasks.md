@@ -6,7 +6,7 @@
 
 ## 2. RPC — Group Derivation
 
-- [ ] 2.1 Create `rpc/src/rpc-group.ts` with `makeRpcGroup(config)` that iterates DatabaseConfig collection names and builds an RpcGroup
+- [x] 2.1 Create `rpc/src/rpc-group.ts` with `makeRpcGroup(config)` that iterates DatabaseConfig collection names and builds an RpcGroup
 - [ ] 2.2 For each collection, generate `findById` procedure: payload `{ id: string }`, success is collection entity type, error includes `NotFoundError`
 - [ ] 2.3 Generate `query` procedure: payload is `QueryConfig`, success is `ReadonlyArray<Entity>`, error includes `DanglingReferenceError | ValidationError`
 - [ ] 2.4 Generate `create` procedure: payload is create input, success is entity, error includes `ValidationError | DuplicateKeyError | UniqueConstraintError | ForeignKeyError | HookError`

@@ -128,3 +128,13 @@ export {
 	type UpsertResultType,
 	type UpsertManyResultType,
 } from "./rpc-schemas.js";
+
+// ============================================================================
+// RPC Group Derivation
+// ============================================================================
+
+export {
+	makeRpcGroup,
+	type CollectionRpcs,
+	type CollectionProcedures,
+} from "./rpc-group.js";
