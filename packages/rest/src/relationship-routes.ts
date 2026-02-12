@@ -13,7 +13,7 @@
  * @module
  */
 
-import { Chunk, Effect, Stream } from "effect";
+import { Cause, Chunk, Effect, Option, Runtime, Stream } from "effect";
 import type {
 	DatabaseConfig,
 	EffectDatabase,
@@ -309,13 +309,44 @@ const deriveForeignKey = (collectionName: string): string => {
 };
 
 /**
+ * Extract a tagged error from an unknown error value.
+ *
+ * Effect.runPromise throws a FiberFailure when the Effect fails.
+ * This function extracts the underlying tagged error from the FiberFailure
+ * or returns the error directly if it's already a tagged error.
+ */
+const extractTaggedError = (
+	error: unknown,
+): { readonly _tag: string; [key: string]: unknown } | null => {
+	// Check if it's a FiberFailure (from Effect.runPromise)
+	if (Runtime.isFiberFailure(error)) {
+		// Get the cause from the FiberFailure using the well-known symbol
+		const causeSymbol = Symbol.for("effect/Runtime/FiberFailure/Cause");
+		const cause = (error as unknown as Record<symbol, unknown>)[causeSymbol] as Cause.Cause<unknown>;
+
+		// Extract the failure from the cause
+		const failure = Cause.failureOption(cause);
+		if (Option.isSome(failure)) {
+			const value = failure.value;
+			if (value !== null && typeof value === "object" && "_tag" in value) {
+				return value as { readonly _tag: string; [key: string]: unknown };
+			}
+		}
+	}
+
+	// Check if it's already a tagged error
+	if (error !== null && typeof error === "object" && "_tag" in error) {
+		return error as { readonly _tag: string; [key: string]: unknown };
+	}
+
+	return null;
+};
+
+/**
  * Type guard to check if an error has a specific _tag.
+ * Handles both direct tagged errors and FiberFailure wrappers.
  */
 const isTaggedError = (error: unknown, tag: string): boolean => {
-	return (
-		typeof error === "object" &&
-		error !== null &&
-		"_tag" in error &&
-		(error as { _tag: unknown })._tag === tag
-	);
+	const taggedError = extractTaggedError(error);
+	return taggedError !== null && taggedError._tag === tag;
 };
