@@ -1,4 +1,5 @@
 import type { SortOrder } from "../../types/types";
+import { getNestedValue } from "../../utils/nested-path";
 
 /**
  * Sort an array of data based on sort configuration
@@ -63,29 +64,4 @@ export function sortData<T extends Record<string, unknown>>(
 	});
 
 	return sorted;
-}
-
-/**
- * Get a nested value from an object using dot notation
- * @param obj The object to get the value from
- * @param path The dot-separated path to the value
- * @returns The value at the path, or undefined if not found
- */
-function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
-	const parts = path.split(".");
-	let current: unknown = obj;
-
-	for (const part of parts) {
-		if (current === null || current === undefined) {
-			return undefined;
-		}
-
-		if (typeof current === "object") {
-			current = (current as Record<string, unknown>)[part];
-		} else {
-			return undefined;
-		}
-	}
-
-	return current;
 }
