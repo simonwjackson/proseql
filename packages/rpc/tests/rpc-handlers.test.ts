@@ -156,6 +156,26 @@ describe("makeRpcHandlers", () => {
 			expect(updated.title).toBe("Dune"); // Other fields unchanged
 		});
 
+		it("update should fail for non-existent entity with NotFoundError", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			const result = await Effect.runPromise(
+				Effect.either(handlers.books.update({
+					id: "nonexistent",
+					updates: { year: 2000 },
+				})),
+			);
+
+			expect(result._tag).toBe("Left");
+			if (result._tag === "Left") {
+				expect(result.left._tag).toBe("NotFoundError");
+			}
+		});
+
 		it("delete should remove an entity", async () => {
 			const handlers = await Effect.runPromise(
 				makeRpcHandlers(singleCollectionConfig, {
