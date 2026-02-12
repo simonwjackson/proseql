@@ -2150,3 +2150,406 @@ describe("reactive queries - transactions", () => {
 		});
 	});
 });
+
+// ============================================================================
+// Tests - File Changes (16.1 - 16.2)
+// ============================================================================
+
+import { Layer } from "effect";
+import { jsonCodec } from "../src/serializers/codecs/json.js";
+import { makeSerializerLayer } from "../src/serializers/format-codec.js";
+import {
+	StorageAdapter,
+	type StorageAdapterShape,
+} from "../src/storage/storage-service.js";
+import { StorageError } from "../src/errors/storage-errors.js";
+import { createPersistentEffectDatabase } from "../src/factories/database-effect.js";
+
+/**
+ * Create a test storage layer with controllable file watchers.
+ * Returns the store Map, watchers Map, and the Layer.
+ */
+const makeTestStorageWithWatchers = () => {
+	const store = new Map<string, string>();
+	const watchers = new Map<string, () => void>();
+
+	const adapter: StorageAdapterShape = {
+		read: (path: string) =>
+			Effect.suspend(() => {
+				const content = store.get(path);
+				if (content === undefined) {
+					return Effect.fail(
+						new StorageError({
+							path,
+							operation: "read",
+							message: `File not found: ${path}`,
+						}),
+					);
+				}
+				return Effect.succeed(content);
+			}),
+		write: (path: string, data: string) =>
+			Effect.sync(() => store.set(path, data)),
+		exists: (path: string) => Effect.sync(() => store.has(path)),
+		remove: (path: string) => Effect.sync(() => store.delete(path)),
+		ensureDir: () => Effect.void,
+		watch: (path: string, onChange: () => void) =>
+			Effect.sync(() => {
+				// Store the callback so we can trigger it manually
+				watchers.set(path, onChange);
+				return () => {
+					watchers.delete(path);
+				};
+			}),
+	};
+
+	const StorageLayer = Layer.succeed(StorageAdapter, adapter);
+	const SerializerLayer = makeSerializerLayer([jsonCodec()]);
+	const PersistenceLayer = Layer.merge(StorageLayer, SerializerLayer);
+
+	return { store, watchers, layer: PersistenceLayer };
+};
+
+describe("reactive queries - file changes", () => {
+	// File watcher tests require a persistent database with file storage.
+	// We use a custom storage adapter that simulates file changes by
+	// allowing us to manually trigger file watcher callbacks.
+
+	describe("file watcher reload triggers watch emission (16.1)", () => {
+		it("file reload triggers watch emission when result set changes", async () => {
+			// We need to test that external file changes trigger watch emissions.
+			// We set up a persistent database with a custom storage adapter that
+			// lets us simulate external file changes.
+
+			const { store, watchers, layer } = makeTestStorageWithWatchers();
+
+			// Seed initial data in the "file"
+			const initialFileContent = JSON.stringify({
+				"1": {
+					id: "1",
+					title: "Dune",
+					author: "Frank Herbert",
+					year: 1965,
+					genre: "sci-fi",
+				},
+				"2": {
+					id: "2",
+					title: "Neuromancer",
+					author: "William Gibson",
+					year: 1984,
+					genre: "sci-fi",
+				},
+			});
+			store.set("./data/books.json", initialFileContent);
+
+			const FileBookSchema = Schema.Struct({
+				id: Schema.String,
+				title: Schema.String,
+				author: Schema.String,
+				year: Schema.Number,
+				genre: Schema.String,
+			});
+
+			type FileBook = Schema.Schema.Type<typeof FileBookSchema>;
+
+			const fileConfig = {
+				books: {
+					schema: FileBookSchema,
+					file: "./data/books.json",
+					relationships: {},
+				},
+			} as const;
+
+			const program = Effect.gen(function* () {
+				// Create persistent database that loads from our store
+				const db = yield* createPersistentEffectDatabase(fileConfig, {});
+
+				// Watch sci-fi books sorted by year
+				const stream = yield* db.books.watch({
+					where: { genre: "sci-fi" },
+					sort: { year: "asc" },
+				});
+
+				// Track all emissions received
+				const emissions: Array<ReadonlyArray<FileBook>> = [];
+
+				// Fork collection with a timeout
+				const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+					Effect.sync(() => {
+						emissions.push(emission as ReadonlyArray<FileBook>);
+					}),
+				).pipe(
+					Effect.timeoutFail({
+						duration: "300 millis",
+						onTimeout: () => new Error("timeout"),
+					}),
+					Effect.catchAll(() => Effect.void),
+					Effect.fork,
+				);
+
+				// Wait for initial emission to be processed
+				yield* Effect.sleep("50 millis");
+
+				// Simulate an external file change by:
+				// 1. Writing new data to the store
+				// 2. Triggering the file watcher callback
+				const newFileContent = JSON.stringify({
+					"1": {
+						id: "1",
+						title: "Dune",
+						author: "Frank Herbert",
+						year: 1965,
+						genre: "sci-fi",
+					},
+					"2": {
+						id: "2",
+						title: "Neuromancer",
+						author: "William Gibson",
+						year: 1984,
+						genre: "sci-fi",
+					},
+					"3": {
+						id: "3",
+						title: "Foundation",
+						author: "Isaac Asimov",
+						year: 1951,
+						genre: "sci-fi",
+					},
+				});
+				store.set("./data/books.json", newFileContent);
+
+				// Trigger the file watcher callback to simulate file change detection
+				const watcherCallback = watchers.get("./data/books.json");
+				if (watcherCallback) {
+					watcherCallback();
+				}
+
+				// Wait for reload and emission
+				yield* Effect.sleep("150 millis");
+
+				// Interrupt the fiber
+				yield* Fiber.interrupt(collectedFiber);
+
+				// Should have 2 emissions:
+				// 1. Initial emission (2 sci-fi books: Dune 1965, Neuromancer 1984)
+				// 2. After file reload (3 sci-fi books: Foundation 1951, Dune 1965, Neuromancer 1984)
+				expect(emissions).toHaveLength(2);
+
+				// Initial emission: 2 sci-fi books
+				expect(emissions[0]).toHaveLength(2);
+				expect(emissions[0].map((b) => b.title)).toEqual([
+					"Dune",
+					"Neuromancer",
+				]);
+
+				// After file reload: 3 sci-fi books including Foundation
+				expect(emissions[1]).toHaveLength(3);
+				expect(emissions[1].map((b) => b.title)).toEqual([
+					"Foundation",
+					"Dune",
+					"Neuromancer",
+				]);
+			});
+
+			await Effect.runPromise(program.pipe(Effect.provide(layer), Effect.scoped));
+		});
+
+		it("file reload with modified entity triggers watch emission", async () => {
+			const { store, watchers, layer } = makeTestStorageWithWatchers();
+
+			const initialFileContent = JSON.stringify({
+				"1": {
+					id: "1",
+					title: "Dune",
+					author: "Frank Herbert",
+					year: 1965,
+					genre: "sci-fi",
+				},
+			});
+			store.set("./data/books.json", initialFileContent);
+
+			const FileBookSchema = Schema.Struct({
+				id: Schema.String,
+				title: Schema.String,
+				author: Schema.String,
+				year: Schema.Number,
+				genre: Schema.String,
+			});
+
+			type FileBook = Schema.Schema.Type<typeof FileBookSchema>;
+
+			const fileConfig = {
+				books: {
+					schema: FileBookSchema,
+					file: "./data/books.json",
+					relationships: {},
+				},
+			} as const;
+
+			const program = Effect.gen(function* () {
+				const db = yield* createPersistentEffectDatabase(fileConfig, {});
+
+				const stream = yield* db.books.watch({
+					sort: { title: "asc" },
+				});
+
+				const emissions: Array<ReadonlyArray<FileBook>> = [];
+
+				const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+					Effect.sync(() => {
+						emissions.push(emission as ReadonlyArray<FileBook>);
+					}),
+				).pipe(
+					Effect.timeoutFail({
+						duration: "300 millis",
+						onTimeout: () => new Error("timeout"),
+					}),
+					Effect.catchAll(() => Effect.void),
+					Effect.fork,
+				);
+
+				yield* Effect.sleep("50 millis");
+
+				// Simulate external modification: update the book's title
+				const modifiedFileContent = JSON.stringify({
+					"1": {
+						id: "1",
+						title: "Dune Messiah",
+						author: "Frank Herbert",
+						year: 1969,
+						genre: "sci-fi",
+					},
+				});
+				store.set("./data/books.json", modifiedFileContent);
+
+				// Trigger file watcher
+				const watcherCallback = watchers.get("./data/books.json");
+				if (watcherCallback) {
+					watcherCallback();
+				}
+
+				yield* Effect.sleep("150 millis");
+
+				yield* Fiber.interrupt(collectedFiber);
+
+				// Should have 2 emissions: initial + after file modification
+				expect(emissions).toHaveLength(2);
+
+				// Initial: Dune 1965
+				expect(emissions[0]).toHaveLength(1);
+				expect(emissions[0][0].title).toBe("Dune");
+				expect(emissions[0][0].year).toBe(1965);
+
+				// After modification: Dune Messiah 1969
+				expect(emissions[1]).toHaveLength(1);
+				expect(emissions[1][0].title).toBe("Dune Messiah");
+				expect(emissions[1][0].year).toBe(1969);
+			});
+
+			await Effect.runPromise(program.pipe(Effect.provide(layer), Effect.scoped));
+		});
+
+		it("file reload with entity deletion triggers watch emission", async () => {
+			const { store, watchers, layer } = makeTestStorageWithWatchers();
+
+			const initialFileContent = JSON.stringify({
+				"1": {
+					id: "1",
+					title: "Dune",
+					author: "Frank Herbert",
+					year: 1965,
+					genre: "sci-fi",
+				},
+				"2": {
+					id: "2",
+					title: "Neuromancer",
+					author: "William Gibson",
+					year: 1984,
+					genre: "sci-fi",
+				},
+			});
+			store.set("./data/books.json", initialFileContent);
+
+			const FileBookSchema = Schema.Struct({
+				id: Schema.String,
+				title: Schema.String,
+				author: Schema.String,
+				year: Schema.Number,
+				genre: Schema.String,
+			});
+
+			type FileBook = Schema.Schema.Type<typeof FileBookSchema>;
+
+			const fileConfig = {
+				books: {
+					schema: FileBookSchema,
+					file: "./data/books.json",
+					relationships: {},
+				},
+			} as const;
+
+			const program = Effect.gen(function* () {
+				const db = yield* createPersistentEffectDatabase(fileConfig, {});
+
+				const stream = yield* db.books.watch({
+					sort: { year: "asc" },
+				});
+
+				const emissions: Array<ReadonlyArray<FileBook>> = [];
+
+				const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+					Effect.sync(() => {
+						emissions.push(emission as ReadonlyArray<FileBook>);
+					}),
+				).pipe(
+					Effect.timeoutFail({
+						duration: "300 millis",
+						onTimeout: () => new Error("timeout"),
+					}),
+					Effect.catchAll(() => Effect.void),
+					Effect.fork,
+				);
+
+				yield* Effect.sleep("50 millis");
+
+				// Simulate external deletion: remove one book from the file
+				const modifiedFileContent = JSON.stringify({
+					"2": {
+						id: "2",
+						title: "Neuromancer",
+						author: "William Gibson",
+						year: 1984,
+						genre: "sci-fi",
+					},
+				});
+				store.set("./data/books.json", modifiedFileContent);
+
+				// Trigger file watcher
+				const watcherCallback = watchers.get("./data/books.json");
+				if (watcherCallback) {
+					watcherCallback();
+				}
+
+				yield* Effect.sleep("150 millis");
+
+				yield* Fiber.interrupt(collectedFiber);
+
+				// Should have 2 emissions: initial + after file deletion
+				expect(emissions).toHaveLength(2);
+
+				// Initial: 2 books (Dune 1965, Neuromancer 1984)
+				expect(emissions[0]).toHaveLength(2);
+				expect(emissions[0].map((b) => b.title)).toEqual([
+					"Dune",
+					"Neuromancer",
+				]);
+
+				// After deletion: 1 book (Neuromancer only)
+				expect(emissions[1]).toHaveLength(1);
+				expect(emissions[1][0].title).toBe("Neuromancer");
+			});
+
+			await Effect.runPromise(program.pipe(Effect.provide(layer), Effect.scoped));
+		});
+	});
+});
