@@ -402,3 +402,122 @@ describe("reactive queries - basic watch", () => {
 		});
 	});
 });
+
+// ============================================================================
+// Tests - Mutation Triggers (13.1 - 13.5)
+// ============================================================================
+
+describe("reactive queries - mutation triggers", () => {
+	describe("create triggers watch (13.1)", () => {
+		it("inserting a matching entity causes a new emission with the entity included", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Fork collection to get 2 emissions: initial + after create
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission to be processed
+					yield* Effect.sleep("20 millis");
+
+					// Create a new sci-fi book that matches the filter
+					yield* db.books.create({
+						title: "Foundation",
+						author: "Isaac Asimov",
+						year: 1951,
+						genre: "sci-fi",
+					});
+
+					// Wait for the stream to emit and collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					// Should have 2 emissions
+					expect(emissions).toHaveLength(2);
+
+					// Initial emission: 2 sci-fi books (Dune 1965, Neuromancer 1984)
+					expect(emissions[0]).toHaveLength(2);
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+					]);
+
+					// After create: 3 sci-fi books, sorted by year (Foundation 1951, Dune 1965, Neuromancer 1984)
+					expect(emissions[1]).toHaveLength(3);
+					expect(emissions[1].map((b) => b.title)).toEqual([
+						"Foundation",
+						"Dune",
+						"Neuromancer",
+					]);
+					expect(emissions[1].find((b) => b.title === "Foundation")).toBeDefined();
+				}),
+			);
+		});
+
+		it("inserting multiple matching entities via createMany causes emission with all new entities", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Fork collection to get 2 emissions
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("20 millis");
+
+					// Create multiple sci-fi books at once
+					yield* db.books.createMany([
+						{
+							title: "Foundation",
+							author: "Isaac Asimov",
+							year: 1951,
+							genre: "sci-fi",
+						},
+						{
+							title: "Snow Crash",
+							author: "Neal Stephenson",
+							year: 1992,
+							genre: "sci-fi",
+						},
+					]);
+
+					// Wait for emission and collect
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					expect(emissions).toHaveLength(2);
+
+					// Initial: 2 sci-fi books
+					expect(emissions[0]).toHaveLength(2);
+
+					// After createMany: 4 sci-fi books (Foundation 1951, Dune 1965, Neuromancer 1984, Snow Crash 1992)
+					expect(emissions[1]).toHaveLength(4);
+					expect(emissions[1].map((b) => b.title)).toEqual([
+						"Foundation",
+						"Dune",
+						"Neuromancer",
+						"Snow Crash",
+					]);
+				}),
+			);
+		});
+	});
+});

@@ -78,7 +78,7 @@
 
 ## 13. Tests — Mutation Triggers
 
-- [ ] 13.1 Test create triggers watch: inserting a matching entity causes a new emission with the entity included
+- [x] 13.1 Test create triggers watch: inserting a matching entity causes a new emission with the entity included
 - [ ] 13.2 Test update triggers watch: updating a matched entity causes a new emission with the updated entity
 - [ ] 13.3 Test delete triggers watch: deleting a matched entity causes a new emission without the entity
 - [ ] 13.4 Test entity entering result set: updating a non-matching entity to match the where clause triggers emission
