@@ -63,7 +63,7 @@
 ## 11. Factory Integration
 
 - [x] 11.1 In `core/factories/database-effect.ts` `buildCollection`: create a single shared `PubSub<ChangeEvent>` per database
-- [ ] 11.2 Pass the PubSub to all CRUD factory function calls
+- [x] 11.2 Pass the PubSub to all CRUD factory function calls
 - [ ] 11.3 Pass the PubSub to file watcher creation
 - [ ] 11.4 Pass the PubSub to transaction factory
 - [ ] 11.5 Add `watch(config)` and `watchById(id)` methods to the `EffectCollection` interface and wire them to the implementations
