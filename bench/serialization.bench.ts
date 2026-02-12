@@ -105,7 +105,26 @@ export async function createSuite(): Promise<Bench> {
 		});
 	}
 
-	// TODO (task 6.3): Add deserialization benchmarks for each format
+	// -------------------------------------------------------------------------
+	// 6.3: Deserialization benchmarks for each format
+	// -------------------------------------------------------------------------
+
+	// Pre-serialize data for each format to benchmark decoding
+	const serializedData = new Map<string, string>();
+	for (const { name, codec } of CODECS) {
+		const data = getDataForCodec(name);
+		serializedData.set(name, codec.encode(data));
+	}
+
+	// Add deserialization benchmarks for each codec
+	for (const { name, codec } of CODECS) {
+		const encoded = serializedData.get(name)!;
+
+		bench.add(`deserialize ${name}`, () => {
+			codec.decode(encoded);
+		});
+	}
+
 	// TODO (task 6.4): Add debounced write coalescing benchmark
 
 	return bench;
