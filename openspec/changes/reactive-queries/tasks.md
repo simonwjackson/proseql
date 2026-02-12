@@ -71,7 +71,7 @@
 
 ## 12. Tests — Basic Watch
 
-- [ ] 12.1 Create `tests/reactive-queries.test.ts` with test helpers: database with a hooked collection, PubSub, and Scope
+- [x] 12.1 Create `tests/reactive-queries.test.ts` with test helpers: database with a hooked collection, PubSub, and Scope
 - [ ] 12.2 Test `watch()` emits the current result set immediately on subscription
 - [ ] 12.3 Test `watch()` with full query config (where, sort, select, limit) applies the pipeline correctly on initial emission
 - [ ] 12.4 Test `watch()` stream can be consumed via `Stream.take` and `Stream.runCollect`
