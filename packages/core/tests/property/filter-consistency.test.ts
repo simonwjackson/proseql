@@ -381,6 +381,173 @@ describe("Filter consistency properties", () => {
 		});
 	});
 
-	// Task 4.3 will add: Property tests for empty where clause returning all
+	describe("Task 4.3: Query with empty where clause returns all entities", () => {
+		it("should return all entities when where clause is empty object", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate 0-25 entities for the collection
+					fc.array(entityArbitrary(BookSchema), { minLength: 0, maxLength: 25 }),
+					async (entities) => {
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: entities,
+							});
+
+							// Query with empty where clause
+							const chunk = yield* Stream.runCollect(
+								db.books.query({ where: {} }),
+							);
+							const queryResults = Chunk.toReadonlyArray(chunk);
+
+							// All entities should be returned
+							expect(queryResults.length).toBe(entities.length);
+
+							// Verify same set of IDs
+							const queryIds = new Set(queryResults.map((e) => e.id));
+							const entityIds = new Set(entities.map((e) => e.id));
+							expect(queryIds).toEqual(entityIds);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should return all entities when where clause is undefined", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					fc.array(entityArbitrary(BookSchema), { minLength: 0, maxLength: 25 }),
+					async (entities) => {
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: entities,
+							});
+
+							// Query with no where clause (undefined)
+							const chunk = yield* Stream.runCollect(db.books.query({}));
+							const queryResults = Chunk.toReadonlyArray(chunk);
+
+							// All entities should be returned
+							expect(queryResults.length).toBe(entities.length);
+
+							// Verify same set of IDs
+							const queryIds = new Set(queryResults.map((e) => e.id));
+							const entityIds = new Set(entities.map((e) => e.id));
+							expect(queryIds).toEqual(entityIds);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should return an empty array for empty collection with any where clause", async () => {
+			await fc.assert(
+				fc.asyncProperty(whereClauseArbitrary(BookSchema), async (where) => {
+					const program = Effect.gen(function* () {
+						const db = yield* createEffectDatabase(config, {
+							books: [], // Empty collection
+						});
+
+						// Query with arbitrary where clause
+						const chunk = yield* Stream.runCollect(db.books.query({ where }));
+						const queryResults = Chunk.toReadonlyArray(chunk);
+
+						// Empty collection always returns empty results
+						expect(queryResults.length).toBe(0);
+					});
+
+					await Effect.runPromise(program);
+				}),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should return all entities consistently across multiple calls", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					fc.array(entityArbitrary(BookSchema), { minLength: 1, maxLength: 15 }),
+					async (entities) => {
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: entities,
+							});
+
+							// Run empty query multiple times
+							const chunk1 = yield* Stream.runCollect(
+								db.books.query({ where: {} }),
+							);
+							const results1 = Chunk.toReadonlyArray(chunk1);
+
+							const chunk2 = yield* Stream.runCollect(db.books.query({}));
+							const results2 = Chunk.toReadonlyArray(chunk2);
+
+							const chunk3 = yield* Stream.runCollect(
+								db.books.query({ where: {} }),
+							);
+							const results3 = Chunk.toReadonlyArray(chunk3);
+
+							// All should return the same count
+							expect(results1.length).toBe(entities.length);
+							expect(results2.length).toBe(entities.length);
+							expect(results3.length).toBe(entities.length);
+
+							// All should return the same set of IDs
+							const ids1 = new Set(results1.map((e) => e.id));
+							const ids2 = new Set(results2.map((e) => e.id));
+							const ids3 = new Set(results3.map((e) => e.id));
+							expect(ids1).toEqual(ids2);
+							expect(ids2).toEqual(ids3);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() / 2 },
+			);
+		});
+
+		it("should handle large collections efficiently", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate a larger collection
+					fc.array(entityArbitrary(BookSchema), {
+						minLength: 50,
+						maxLength: 100,
+					}),
+					async (entities) => {
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(config, {
+								books: entities,
+							});
+
+							// Query with empty where clause
+							const chunk = yield* Stream.runCollect(
+								db.books.query({ where: {} }),
+							);
+							const queryResults = Chunk.toReadonlyArray(chunk);
+
+							// All entities should be returned
+							expect(queryResults.length).toBe(entities.length);
+
+							// Verify every original entity is present
+							const queryIds = new Set(queryResults.map((e) => e.id));
+							for (const entity of entities) {
+								expect(queryIds.has(entity.id)).toBe(true);
+							}
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: 20 }, // Fewer runs for large collections
+			);
+		});
+	});
+
 	// Task 4.4 will add: Reference matchesWhere implementation as test oracle
 });
