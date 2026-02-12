@@ -12,6 +12,7 @@ import type {
 	ProseQLPlugin,
 } from "./plugin-types.js";
 import type { FormatCodec } from "../serializers/format-codec.js";
+import type { DatabaseConfig } from "../types/database-config-types.js";
 
 // ============================================================================
 // Plugin Validation
@@ -223,7 +224,10 @@ export const validateDependencies = (
 
 		// Check each plugin's dependencies
 		for (const plugin of plugins) {
-			if (plugin.dependencies === undefined || plugin.dependencies.length === 0) {
+			if (
+				plugin.dependencies === undefined ||
+				plugin.dependencies.length === 0
+			) {
 				continue;
 			}
 
@@ -322,6 +326,46 @@ export const validateOperatorConflicts = (
 
 				// Register this operator
 				operatorRegistry.set(operatorName, plugin.name);
+			}
+		}
+	});
+};
+
+// ============================================================================
+// ID Generator Reference Validation
+// ============================================================================
+
+/**
+ * Validates that all collection-configured `idGenerator` names exist in the plugin registry.
+ * Called at init time to ensure fast failure with clear error messages.
+ *
+ * @param config - The database configuration with collection configs
+ * @param idGenerators - Map of ID generator names to generators from the plugin registry
+ * @returns Effect<void, PluginError> - Succeeds if all references are valid, fails with PluginError listing the missing generator
+ */
+export const validateIdGeneratorReferences = (
+	config: DatabaseConfig,
+	idGenerators: Map<string, CustomIdGenerator>,
+): Effect.Effect<void, PluginError> => {
+	return Effect.gen(function* () {
+		for (const collectionName of Object.keys(config)) {
+			const collectionConfig = config[collectionName];
+			const idGeneratorName = collectionConfig.idGenerator;
+
+			// Skip collections without idGenerator configured
+			if (idGeneratorName === undefined) {
+				continue;
+			}
+
+			// Check if the referenced generator exists in the registry
+			if (!idGenerators.has(idGeneratorName)) {
+				return yield* Effect.fail(
+					new PluginError({
+						plugin: "(collection config)",
+						reason: "missing_id_generator",
+						message: `Collection '${collectionName}' references idGenerator '${idGeneratorName}' which is not registered by any plugin`,
+					}),
+				);
 			}
 		}
 	});

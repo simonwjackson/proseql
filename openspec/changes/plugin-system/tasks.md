@@ -36,7 +36,7 @@
 
 - [x] 6.1 In `create` (`core/operations/crud/create.ts`), when the collection config specifies `idGenerator` and the input has no `id` field, look up the generator by name from the resolved ID generator map and call `generate()` to produce the ID.
 - [x] 6.2 Pass the ID generator map from `buildCollection` to `create` and `createMany`.
-- [ ] 6.3 Validate at init time that any `idGenerator` name referenced in a collection config exists in the plugin registry. Fail with `PluginError` if not found.
+- [x] 6.3 Validate at init time that any `idGenerator` name referenced in a collection config exists in the plugin registry. Fail with `PluginError` if not found.
 
 ## 7. Global Lifecycle Hooks
 
