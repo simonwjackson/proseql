@@ -307,36 +307,80 @@ function runMigrateStatus(
  * Execute the migrate dry-run subcommand.
  *
  * Shows what migrations would run without executing them.
+ * This reads the current file versions and determines which migrations
+ * would be applied, but does not actually execute any transforms or write files.
  */
 function runMigrateDryRun(
 	config: DatabaseConfig,
 	configPath: string,
 ): Effect.Effect<MigrateResult, never> {
-	return Effect.gen(function* () {
-		// For task 7.1, return placeholder result
-		// Full implementation in task 7.3
-		const resolvedConfig = resolveConfigPaths(config, configPath)
+	const resolvedConfig = resolveConfigPaths(config, configPath)
 
+	const program = Effect.gen(function* () {
 		const collections: DryRunCollectionResult[] = []
 
 		for (const [name, collectionConfig] of Object.entries(resolvedConfig)) {
-			if (collectionConfig.version !== undefined) {
+			// Only include versioned collections
+			if (collectionConfig.version === undefined) {
+				continue
+			}
+
+			const targetVersion = collectionConfig.version
+			const filePath = collectionConfig.file ?? "(in-memory)"
+
+			// Skip in-memory collections (no file to migrate)
+			if (!collectionConfig.file) {
 				collections.push({
 					name,
-					filePath: collectionConfig.file ?? "(in-memory)",
+					filePath: "(in-memory)",
 					currentVersion: 0,
-					targetVersion: collectionConfig.version,
+					targetVersion,
 					migrationsToApply: [],
-					status: "needs-migration",
+					status: "no-file",
 				})
+				continue
 			}
+
+			// Read the file version
+			const { version: fileVersion, exists: fileExists } =
+				yield* readFileVersion(collectionConfig.file)
+
+			// Determine the status
+			const status = determineStatus(fileVersion, targetVersion, fileExists)
+
+			// Get migrations to apply (only if needs migration)
+			const migrationsToApply =
+				status === "needs-migration"
+					? getMigrationsToApply(collectionConfig, fileVersion, targetVersion)
+					: []
+
+			collections.push({
+				name,
+				filePath,
+				currentVersion: fileVersion,
+				targetVersion,
+				migrationsToApply,
+				status,
+			})
 		}
 
 		return {
-			success: true,
-			data: { collections },
+			success: true as const,
+			data: { collections } as DryRunResult,
 		}
 	})
+
+	// Run with the persistence layer
+	return program.pipe(
+		Effect.provide(buildPersistenceLayer()),
+		Effect.catchAll((error) => {
+			const message = error instanceof Error ? error.message : String(error)
+			return Effect.succeed({
+				success: false as const,
+				message: `Failed to check dry-run status: ${message}`,
+			})
+		}),
+	)
 }
 
 /**
