@@ -3305,4 +3305,172 @@ describe("reactive queries - debounce", () => {
 			);
 		});
 	});
+
+	describe("configurable debounce interval (17.2)", () => {
+		it("respects custom debounceMs configuration", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Use a longer debounce interval (100ms instead of default 10ms)
+					const customDebounceMs = 100;
+
+					const stream = yield* db.books.watch({
+						sort: { year: "asc" },
+						debounceMs: customDebounceMs,
+					});
+
+					const emissions: ReadonlyArray<Book>[] = [];
+
+					// Start collecting emissions in a fiber
+					const collectedFiber = yield* Effect.fork(
+						Stream.runForEach(stream, (emission) =>
+							Effect.sync(() => {
+								emissions.push(emission);
+							}),
+						),
+					);
+
+					// Wait a bit for the initial emission to arrive
+					yield* Effect.sleep("30 millis");
+
+					// Initial emission should have happened
+					expect(emissions).toHaveLength(1);
+
+					// Create a new book to trigger a change event
+					yield* db.books.create({
+						id: "test-debounce",
+						title: "Test Book",
+						author: "Test Author",
+						year: 2000,
+						genre: "test",
+					});
+
+					// Wait 50ms - less than the custom debounce interval
+					yield* Effect.sleep("50 millis");
+
+					// Still should only have the initial emission (debounce hasn't settled)
+					expect(emissions).toHaveLength(1);
+
+					// Wait for the full debounce interval to pass (another 100ms to be safe)
+					yield* Effect.sleep("150 millis");
+
+					// Now the debounced emission should have arrived
+					expect(emissions).toHaveLength(2);
+					expect(emissions[1]).toHaveLength(4); // 3 original + 1 new
+
+					yield* Fiber.interrupt(collectedFiber);
+				}),
+			);
+		});
+
+		it("uses default debounce when not configured", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch without custom debounceMs - should use default 10ms
+					const stream = yield* db.books.watch({
+						sort: { year: "asc" },
+					});
+
+					const emissions: ReadonlyArray<Book>[] = [];
+
+					const collectedFiber = yield* Effect.fork(
+						Stream.runForEach(stream, (emission) =>
+							Effect.sync(() => {
+								emissions.push(emission);
+							}),
+						),
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+					expect(emissions).toHaveLength(1);
+
+					// Create a book
+					yield* db.books.create({
+						id: "test-default-debounce",
+						title: "Default Debounce Test",
+						author: "Test Author",
+						year: 2001,
+						genre: "test",
+					});
+
+					// Wait 50ms - which is plenty of time for the default 10ms debounce
+					yield* Effect.sleep("50 millis");
+
+					// Should have received the emission with default debounce
+					expect(emissions).toHaveLength(2);
+					expect(emissions[1]).toHaveLength(4);
+
+					yield* Fiber.interrupt(collectedFiber);
+				}),
+			);
+		});
+
+		it("different watches with different debounce intervals are respected independently", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Create two watchers with different debounce intervals
+					const fastStream = yield* db.books.watch({
+						sort: { year: "asc" },
+						debounceMs: 20, // Fast debounce
+					});
+
+					const slowStream = yield* db.books.watch({
+						sort: { year: "asc" },
+						debounceMs: 150, // Slow debounce
+					});
+
+					const fastEmissions: ReadonlyArray<Book>[] = [];
+					const slowEmissions: ReadonlyArray<Book>[] = [];
+
+					// Start collecting emissions in fibers
+					const fastFiber = yield* Effect.fork(
+						Stream.runForEach(fastStream, (emission) =>
+							Effect.sync(() => {
+								fastEmissions.push(emission);
+							}),
+						),
+					);
+
+					const slowFiber = yield* Effect.fork(
+						Stream.runForEach(slowStream, (emission) =>
+							Effect.sync(() => {
+								slowEmissions.push(emission);
+							}),
+						),
+					);
+
+					// Wait for initial emissions
+					yield* Effect.sleep("30 millis");
+					expect(fastEmissions).toHaveLength(1);
+					expect(slowEmissions).toHaveLength(1);
+
+					// Create a book
+					yield* db.books.create({
+						id: "test-independent-debounce",
+						title: "Independent Debounce Test",
+						author: "Test Author",
+						year: 2002,
+						genre: "test",
+					});
+
+					// Wait 80ms - fast watcher should have emitted, slow should not
+					yield* Effect.sleep("80 millis");
+
+					// Fast watcher should have its emission
+					expect(fastEmissions).toHaveLength(2);
+					// Slow watcher should still be waiting
+					expect(slowEmissions).toHaveLength(1);
+
+					// Wait for slow watcher's debounce to settle
+					yield* Effect.sleep("150 millis");
+
+					// Now slow watcher should also have emitted
+					expect(slowEmissions).toHaveLength(2);
+
+					yield* Fiber.interrupt(fastFiber);
+					yield* Fiber.interrupt(slowFiber);
+				}),
+			);
+		});
+	});
 });
