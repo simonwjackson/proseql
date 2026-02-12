@@ -8,15 +8,19 @@
 import { Effect, Layer } from "effect"
 import * as path from "node:path"
 import {
-	createPersistentEffectDatabase,
 	NodeStorageLayer,
 	makeSerializerLayer,
 	jsonCodec,
 	yamlCodec,
 	tomlCodec,
+	StorageAdapterService,
+	SerializerRegistryService,
+	getFileExtension,
 	type DatabaseConfig,
 	type DryRunResult,
 	type DryRunCollectionResult,
+	type DryRunStatus,
+	type DryRunMigration,
 } from "@proseql/node"
 import { confirm } from "../prompt.js"
 
@@ -105,6 +109,122 @@ function resolveConfigPaths(
 }
 
 /**
+ * Build the persistence layer for storage and serializer operations.
+ */
+function buildPersistenceLayer() {
+	return Layer.merge(
+		NodeStorageLayer,
+		makeSerializerLayer([jsonCodec(), yamlCodec(), tomlCodec()]),
+	)
+}
+
+/**
+ * Read the _version from a data file.
+ * Returns 0 if the file doesn't exist or has no _version field.
+ *
+ * @param filePath - Path to the data file
+ * @returns Effect yielding the file version and existence status
+ */
+function readFileVersion(
+	filePath: string,
+): Effect.Effect<
+	{ version: number; exists: boolean },
+	never,
+	typeof StorageAdapterService.Service | typeof SerializerRegistryService.Service
+> {
+	return Effect.gen(function* () {
+		const storage = yield* StorageAdapterService
+		const serializer = yield* SerializerRegistryService
+
+		// Check if file exists
+		const exists = yield* storage.exists(filePath)
+		if (!exists) {
+			return { version: 0, exists: false }
+		}
+
+		// Read and parse the file
+		const raw = yield* storage.read(filePath)
+		const ext = getFileExtension(filePath) || "json"
+
+		const parsed = yield* serializer.deserialize(raw, ext).pipe(
+			Effect.catchAll(() => Effect.succeed(null)),
+		)
+
+		// Extract _version from parsed data
+		if (
+			parsed !== null &&
+			typeof parsed === "object" &&
+			!Array.isArray(parsed)
+		) {
+			const maybeVersion = (parsed as Record<string, unknown>)._version
+			if (typeof maybeVersion === "number") {
+				return { version: maybeVersion, exists: true }
+			}
+		}
+
+		// Default to version 0 if no _version field
+		return { version: 0, exists: true }
+	}).pipe(
+		// Catch any storage/serialization errors and return version 0
+		Effect.catchAll(() => Effect.succeed({ version: 0, exists: true })),
+	)
+}
+
+/**
+ * Determine the migration status based on file and config versions.
+ *
+ * @param fileVersion - Current version from the file
+ * @param targetVersion - Target version from config
+ * @param fileExists - Whether the data file exists
+ * @returns The appropriate DryRunStatus
+ */
+function determineStatus(
+	fileVersion: number,
+	targetVersion: number,
+	fileExists: boolean,
+): DryRunStatus {
+	if (!fileExists) {
+		return "no-file"
+	}
+	if (fileVersion > targetVersion) {
+		return "ahead"
+	}
+	if (fileVersion === targetVersion) {
+		return "up-to-date"
+	}
+	return "needs-migration"
+}
+
+/**
+ * Get the list of migrations that would be applied for a collection.
+ *
+ * @param collectionConfig - The collection configuration
+ * @param fileVersion - Current version from the file
+ * @param targetVersion - Target version from config
+ * @returns Array of migrations to apply
+ */
+function getMigrationsToApply(
+	collectionConfig: DatabaseConfig[string],
+	fileVersion: number,
+	targetVersion: number,
+): ReadonlyArray<DryRunMigration> {
+	const migrations = collectionConfig.migrations ?? []
+	return migrations
+		.filter((m) => m.from >= fileVersion && m.to <= targetVersion)
+		.sort((a, b) => a.from - b.from)
+		.map((m): DryRunMigration => {
+			const result: DryRunMigration = {
+				from: m.from,
+				to: m.to,
+			}
+			if (m.description !== undefined) {
+				return { ...result, description: m.description }
+			}
+			return result
+		})
+}
+
+/**
  * Execute the migrate status subcommand.
  *
  * Displays each collection's current file version vs config version,
@@ -114,33 +234,73 @@ function runMigrateStatus(
 	config: DatabaseConfig,
 	configPath: string,
 ): Effect.Effect<MigrateResult, never> {
-	return Effect.gen(function* () {
-		const resolvedConfig = resolveConfigPaths(config, configPath)
+	const resolvedConfig = resolveConfigPaths(config, configPath)
 
-		// Build collection status from config
-		// For now, just extract version info from config
-		// The actual file version reading will be implemented in task 7.2
+	const program = Effect.gen(function* () {
 		const collections: DryRunCollectionResult[] = []
 
 		for (const [name, collectionConfig] of Object.entries(resolvedConfig)) {
 			// Only include versioned collections
-			if (collectionConfig.version !== undefined) {
+			if (collectionConfig.version === undefined) {
+				continue
+			}
+
+			const targetVersion = collectionConfig.version
+			const filePath = collectionConfig.file ?? "(in-memory)"
+
+			// Skip in-memory collections (no file to check)
+			if (!collectionConfig.file) {
 				collections.push({
 					name,
-					filePath: collectionConfig.file ?? "(in-memory)",
-					currentVersion: 0, // Placeholder - will read from file in task 7.2
-					targetVersion: collectionConfig.version,
+					filePath: "(in-memory)",
+					currentVersion: 0,
+					targetVersion,
 					migrationsToApply: [],
-					status: "needs-migration", // Placeholder - will determine in task 7.2
+					status: "no-file",
 				})
+				continue
 			}
+
+			// Read the file version
+			const { version: fileVersion, exists: fileExists } =
+				yield* readFileVersion(collectionConfig.file)
+
+			// Determine the status
+			const status = determineStatus(fileVersion, targetVersion, fileExists)
+
+			// Get migrations to apply (only if needs migration)
+			const migrationsToApply =
+				status === "needs-migration"
+					? getMigrationsToApply(collectionConfig, fileVersion, targetVersion)
+					: []
+
+			collections.push({
+				name,
+				filePath,
+				currentVersion: fileVersion,
+				targetVersion,
+				migrationsToApply,
+				status,
+			})
 		}
 
 		return {
-			success: true,
-			data: { collections },
+			success: true as const,
+			data: { collections } as DryRunResult,
 		}
 	})
+
+	// Run with the persistence layer
+	return program.pipe(
+		Effect.provide(buildPersistenceLayer()),
+		Effect.catchAll((error) => {
+			const message = error instanceof Error ? error.message : String(error)
+			return Effect.succeed({
+				success: false as const,
+				message: `Failed to check migration status: ${message}`,
+			})
+		}),
+	)
 }
 
 /**

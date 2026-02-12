@@ -44,7 +44,7 @@
 ## 7. Migration Commands
 
 - [x] 7.1 Create `packages/cli/src/commands/migrate.ts`: detect subcommand (`status`, or root `migrate`)
-- [ ] 7.2 Implement `migrate status`: boot database, display each collection's current file version vs config version, highlight collections needing migration
+- [x] 7.2 Implement `migrate status`: boot database, display each collection's current file version vs config version, highlight collections needing migration
 - [ ] 7.3 Implement `migrate --dry-run`: show what migrations would run without executing them
 - [ ] 7.4 Implement `migrate` (run): prompt for confirmation (unless `--force`), execute all pending migrations, report results
 
