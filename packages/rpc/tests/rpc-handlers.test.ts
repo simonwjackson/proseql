@@ -981,6 +981,155 @@ describe("makeRpcHandlersFromDatabase", () => {
 	});
 });
 
+describe("typed error flow through to client", () => {
+	/**
+	 * Task 10.12: Test that typed errors flow through to the client side.
+	 *
+	 * This test demonstrates the full pattern of typed error handling:
+	 * 1. Errors maintain their _tag through the RPC layer
+	 * 2. Effect.catchTag can discriminate between error types
+	 * 3. Multiple error types can be handled with different catch branches
+	 * 4. Uncaught errors propagate correctly
+	 */
+	it("should allow Effect.catchTag to discriminate between different error types", async () => {
+		const handlers = await Effect.runPromise(
+			makeRpcHandlers(singleCollectionConfig, {
+				books: initialBooks,
+			}),
+		);
+
+		// Test that NotFoundError can be caught specifically while letting other errors pass
+		const notFoundResult = await Effect.runPromise(
+			handlers.books.findById({ id: "nonexistent" }).pipe(
+				Effect.catchTag("NotFoundError", (error) =>
+					Effect.succeed({
+						handledBy: "NotFoundError" as const,
+						tag: error._tag,
+						id: error.id,
+					}),
+				),
+				Effect.catchTag("ValidationError", () =>
+					Effect.succeed({ handledBy: "ValidationError" as const }),
+				),
+			),
+		);
+
+		expect(notFoundResult.handledBy).toBe("NotFoundError");
+		expect(notFoundResult.tag).toBe("NotFoundError");
+		expect((notFoundResult as { id: string }).id).toBe("nonexistent");
+
+		// Test that ValidationError is caught by its specific handler, not NotFoundError handler
+		const validationResult = await Effect.runPromise(
+			handlers.books
+				.create({
+					data: { id: "invalid", title: 123 } as unknown as Record<string, unknown>,
+				})
+				.pipe(
+					Effect.catchTag("NotFoundError", () =>
+						Effect.succeed({ handledBy: "NotFoundError" as const }),
+					),
+					Effect.catchTag("ValidationError", (error) =>
+						Effect.succeed({
+							handledBy: "ValidationError" as const,
+							tag: error._tag,
+							hasIssues: error.issues.length > 0,
+						}),
+					),
+				),
+		);
+
+		expect(validationResult.handledBy).toBe("ValidationError");
+		expect(validationResult.tag).toBe("ValidationError");
+		expect((validationResult as { hasIssues: boolean }).hasIssues).toBe(true);
+	});
+
+	it("should preserve all error fields through the RPC layer", async () => {
+		const handlers = await Effect.runPromise(
+			makeRpcHandlers(singleCollectionConfig, {
+				books: initialBooks,
+			}),
+		);
+
+		// Verify NotFoundError fields are preserved
+		const notFoundError = await Effect.runPromise(
+			handlers.books.findById({ id: "missing-book-123" }).pipe(
+				Effect.flip, // Convert error to success to inspect it
+			),
+		);
+
+		expect(notFoundError._tag).toBe("NotFoundError");
+		expect(notFoundError.collection).toBe("books");
+		expect(notFoundError.id).toBe("missing-book-123");
+		expect(notFoundError.message).toContain("missing-book-123");
+	});
+
+	it("should allow chaining multiple catchTag handlers for different error scenarios", async () => {
+		const handlers = await Effect.runPromise(
+			makeRpcHandlers(singleCollectionConfig, {
+				books: initialBooks,
+			}),
+		);
+
+		// Define a generic error handler that uses multiple catchTag calls
+		const handleOperation = <T>(operation: Effect.Effect<T, { _tag: string }>) =>
+			operation.pipe(
+				Effect.catchTag("NotFoundError", (e) =>
+					Effect.succeed({ status: "not_found" as const, errorId: e.id }),
+				),
+				Effect.catchTag("ValidationError", (e) =>
+					Effect.succeed({ status: "validation_failed" as const, issues: e.issues.length }),
+				),
+				Effect.catchTag("DuplicateKeyError", (e) =>
+					Effect.succeed({ status: "duplicate" as const, field: e.field }),
+				),
+			);
+
+		// Test not found scenario
+		const findResult = await Effect.runPromise(
+			handleOperation(handlers.books.findById({ id: "ghost" })),
+		);
+		expect(findResult.status).toBe("not_found");
+
+		// Test validation scenario
+		const createResult = await Effect.runPromise(
+			handleOperation(
+				handlers.books.create({
+					data: { id: "bad" } as unknown as Record<string, unknown>,
+				}),
+			),
+		);
+		expect(createResult.status).toBe("validation_failed");
+
+		// Test success scenario (no error, returns the entity)
+		const successResult = await Effect.runPromise(
+			handleOperation(handlers.books.findById({ id: "1" })),
+		);
+		expect(successResult).toEqual({ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 });
+	});
+
+	it("should allow Effect.catchTags to handle multiple error types at once", async () => {
+		const handlers = await Effect.runPromise(
+			makeRpcHandlers(singleCollectionConfig, {
+				books: initialBooks,
+			}),
+		);
+
+		// Use Effect.catchTags to handle multiple error types in a single call
+		const result = await Effect.runPromise(
+			handlers.books.findById({ id: "nonexistent" }).pipe(
+				Effect.catchTags({
+					NotFoundError: (e) =>
+						Effect.succeed({ handled: "NotFoundError", collection: e.collection }),
+					ValidationError: (e) =>
+						Effect.succeed({ handled: "ValidationError", issues: e.issues }),
+				}),
+			),
+		);
+
+		expect(result).toEqual({ handled: "NotFoundError", collection: "books" });
+	});
+});
+
 describe("makeRpcHandlersLayerFromDatabase", () => {
 	const persistentConfig = {
 		books: {

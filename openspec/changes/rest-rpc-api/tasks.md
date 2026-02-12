@@ -87,7 +87,7 @@
 - [x] 10.9 Test delete handler returns deleted entity
 - [x] 10.10 Test aggregate handler returns correct scalar result
 - [x] 10.11 Test batch handlers (createMany, deleteMany) work correctly
-- [ ] 10.12 Test typed errors flow through to client: `Effect.catchTag("NotFoundError", ...)` works
+- [x] 10.12 Test typed errors flow through to client: `Effect.catchTag("NotFoundError", ...)` works
 - [ ] 10.13 Create `rpc/tests/rpc-streaming.test.ts`: test query streaming returns results incrementally via in-process transport
 
 ## 11. Tests — REST
