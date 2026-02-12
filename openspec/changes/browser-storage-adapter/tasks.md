@@ -53,7 +53,7 @@
 
 - [x] 7.1 Create `packages/browser/src/browser-adapter-layer.ts` that re-exports all layer factories and convenience aliases from the individual adapter files
 - [x] 7.2 Export `BrowserStorageLayer` as an alias for `LocalStorageLayer` (sensible default)
-- [ ] 7.3 Export all layers, factories, config types, and `pathToKey` from `packages/browser/src/index.ts`
+- [x] 7.3 Export all layers, factories, config types, and `pathToKey` from `packages/browser/src/index.ts`
 
 ## 8. Quota Error Handling
 
