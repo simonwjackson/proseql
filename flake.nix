@@ -40,6 +40,7 @@
           mkBunDerivation = bun2nix.lib.${system}.mkBunDerivation;
         in
         {
+          browser = pkgs.callPackage ./packages/browser/default.nix { inherit mkBunDerivation; };
           core = pkgs.callPackage ./packages/core/default.nix { inherit mkBunDerivation; };
           node = pkgs.callPackage ./packages/node/default.nix { inherit mkBunDerivation; };
           rest = pkgs.callPackage ./packages/rest/default.nix { inherit mkBunDerivation; };
