@@ -35,7 +35,7 @@
 - [x] 5.2 Implement filter benchmarks: simple equality filter, range filter ($gt, $lt), compound filter (multiple conditions combined)
 - [x] 5.3 Implement sort benchmarks: single-field sort, multi-field sort
 - [x] 5.4 Implement population benchmarks: single ref population, inverse population, nested population (requires a multi-collection setup with relationships)
-- [ ] 5.5 Implement select benchmark: field projection with a subset of fields
+- [x] 5.5 Implement select benchmark: field projection with a subset of fields
 - [ ] 5.6 Implement paginate benchmark: skip/take on a large result set
 - [ ] 5.7 Implement combined pipeline benchmark: filter + sort + populate + select + paginate in a single query
 

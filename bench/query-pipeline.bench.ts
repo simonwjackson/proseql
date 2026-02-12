@@ -521,8 +521,85 @@ export async function createSuite(): Promise<Bench> {
 	});
 
 	// -------------------------------------------------------------------------
-	// Task 5.5: Select benchmark will be added here
+	// Task 5.5: Select benchmarks
 	// -------------------------------------------------------------------------
+
+	// Select benchmark: Single field projection
+	// Tests selecting just one field from entities.
+	// Measures the overhead of field projection vs returning full entities.
+	const selectSingleDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("select: single field (name)", async () => {
+		await selectSingleDb.users.query({
+			select: ["name"],
+		}).runPromise;
+	});
+
+	// Select benchmark: Few fields projection
+	// Tests selecting a small subset of fields (2 fields).
+	// Typical use case for list views that only need display fields.
+	const selectFewDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("select: few fields (id, name)", async () => {
+		await selectFewDb.users.query({
+			select: ["id", "name"],
+		}).runPromise;
+	});
+
+	// Select benchmark: Multiple fields projection
+	// Tests selecting about half the available fields (3 of 6 fields).
+	// Common pattern for partial entity loading.
+	const selectMultipleDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("select: multiple fields (id, name, email)", async () => {
+		await selectMultipleDb.users.query({
+			select: ["id", "name", "email"],
+		}).runPromise;
+	});
+
+	// Select benchmark: Most fields projection
+	// Tests selecting most fields (5 of 6 fields).
+	// Measures when projection cost approaches full entity retrieval.
+	const selectMostDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("select: most fields (id, name, email, age, role)", async () => {
+		await selectMostDb.users.query({
+			select: ["id", "name", "email", "age", "role"],
+		}).runPromise;
+	});
+
+	// Select benchmark: No projection (baseline)
+	// Returns full entities without field projection.
+	// This is the baseline to compare projection overhead against.
+	const selectNoneDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("select: no projection (all fields)", async () => {
+		await selectNoneDb.users.query({}).runPromise;
+	});
+
+	// Select benchmark: With filter (combined operation)
+	// Tests field projection combined with filtering.
+	// Measures whether projection adds significant overhead to filtered queries.
+	const selectWithFilterDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("select: with filter (name, email WHERE role='admin')", async () => {
+		await selectWithFilterDb.users.query({
+			where: { role: "admin" },
+			select: ["name", "email"],
+		}).runPromise;
+	});
 
 	// -------------------------------------------------------------------------
 	// Task 5.6: Paginate benchmark will be added here
