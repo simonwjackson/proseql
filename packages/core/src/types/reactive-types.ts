@@ -4,6 +4,13 @@
  * whenever the underlying data changes.
  */
 
+import type {
+	PopulateConfig,
+	SelectConfig,
+	SortConfig,
+	WhereClause,
+} from "./types.js";
+
 // ============================================================================
 // Change Event Types
 // ============================================================================
@@ -21,3 +28,43 @@ export interface ChangeEvent {
 	readonly collection: string;
 	readonly operation: "create" | "update" | "delete" | "reload";
 }
+
+// ============================================================================
+// Watch Configuration Types
+// ============================================================================
+
+/**
+ * Configuration for reactive watch queries.
+ * Mirrors QueryConfig but excludes cursor pagination (watches are continuous streams).
+ *
+ * @template T - The entity type being watched
+ * @template Relations - Relationship definitions for the collection
+ * @template DB - The full database type (for cross-collection type resolution)
+ */
+export type WatchConfig<
+	T,
+	Relations extends Record<string, unknown> = Record<string, never>,
+	DB = unknown,
+> =
+	// Without populate
+	| {
+			readonly where?: WhereClause<T, Relations, DB>;
+			readonly sort?: SortConfig<T, Relations, Record<string, never>, DB>;
+			readonly select?: SelectConfig<T, Relations, DB>;
+			readonly limit?: number;
+			readonly offset?: number;
+	  }
+	// With populate
+	| {
+			readonly populate: PopulateConfig<Relations, DB>;
+			readonly where?: WhereClause<T, Relations, DB>;
+			readonly sort?: SortConfig<
+				T,
+				Relations,
+				{ populate: PopulateConfig<Relations, DB> },
+				DB
+			>;
+			readonly select?: SelectConfig<T, Relations, DB>;
+			readonly limit?: number;
+			readonly offset?: number;
+	  };
