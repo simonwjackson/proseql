@@ -22,7 +22,11 @@ import {
 	ForeignKeyErrorSchema,
 	HookErrorSchema,
 } from "./rpc-errors.js";
-import { QueryPayloadSchema, CreatePayloadSchema } from "./rpc-schemas.js";
+import {
+	QueryPayloadSchema,
+	CreatePayloadSchema,
+	UpdatePayloadSchema,
+} from "./rpc-schemas.js";
 
 // ============================================================================
 // TaggedRequest Schema Factories
@@ -125,6 +129,16 @@ const CreateErrorUnionSchema = Schema.Union(
 	DuplicateKeyErrorSchema,
 	UniqueConstraintErrorSchema,
 	ForeignKeyErrorSchema,
+	HookErrorSchema,
+);
+
+/**
+ * Union schema for update errors (ValidationError | NotFoundError | UniqueConstraintError | HookError).
+ */
+const UpdateErrorUnionSchema = Schema.Union(
+	ValidationErrorSchema,
+	NotFoundErrorSchema,
+	UniqueConstraintErrorSchema,
 	HookErrorSchema,
 );
 
@@ -312,6 +326,92 @@ export type CreateRequestClass<
 	};
 };
 
+/**
+ * Creates an Update TaggedRequest class for a collection.
+ *
+ * The returned class extends Schema.TaggedRequest and can be used to:
+ * 1. Create request instances: new UpdateRequest({ id: "123", updates: { ... } })
+ * 2. Define RPC handlers: Rpc.effect(UpdateRequest, (req) => ...)
+ * 3. Build RPC routers: RpcRouter.make(updateRpc, ...)
+ *
+ * @param collectionName - The name of the collection (used as the request _tag prefix)
+ * @param entitySchema - The Effect Schema for the collection's entities
+ * @returns A TaggedRequest class for update operations
+ *
+ * @example
+ * ```ts
+ * const BookSchema = Schema.Struct({
+ *   id: Schema.String,
+ *   title: Schema.String,
+ * })
+ *
+ * const UpdateRequest = makeUpdateRequest("books", BookSchema)
+ * // _tag: "books.update"
+ * // payload: { id: string, updates: Record<string, unknown> }
+ * // success: Book
+ * // failure: ValidationError | NotFoundError | UniqueConstraintError | HookError
+ * ```
+ */
+export function makeUpdateRequest<
+	CollectionName extends string,
+	EntitySchema extends Schema.Schema.Any,
+>(
+	collectionName: CollectionName,
+	entitySchema: EntitySchema,
+): UpdateRequestClass<CollectionName, EntitySchema> {
+	// Create a TaggedRequest class dynamically
+	// The class extends Schema.TaggedRequest with the collection-specific tag
+	const RequestClass = class UpdateRequest extends Schema.TaggedRequest<UpdateRequest>()(
+		`${collectionName}.update` as `${CollectionName}.update`,
+		{
+			failure: UpdateErrorUnionSchema,
+			success: entitySchema,
+			payload: {
+				id: UpdatePayloadSchema.fields.id,
+				updates: UpdatePayloadSchema.fields.updates,
+			},
+		},
+	) {};
+
+	return RequestClass as unknown as UpdateRequestClass<
+		CollectionName,
+		EntitySchema
+	>;
+}
+
+/**
+ * Type for an Update TaggedRequest class.
+ * This is the class type returned by makeUpdateRequest.
+ */
+export type UpdateRequestClass<
+	CollectionName extends string,
+	EntitySchema extends Schema.Schema.Any,
+> = {
+	/**
+	 * The request _tag (e.g., "books.update")
+	 */
+	readonly _tag: `${CollectionName}.update`;
+	/**
+	 * The success schema (entity type)
+	 */
+	readonly success: EntitySchema;
+	/**
+	 * The failure schema (ValidationError | NotFoundError | UniqueConstraintError | HookError)
+	 */
+	readonly failure: typeof UpdateErrorUnionSchema;
+	/**
+	 * Create a new request instance
+	 */
+	new (props: {
+		readonly id: typeof UpdatePayloadSchema.Type.id;
+		readonly updates: typeof UpdatePayloadSchema.Type.updates;
+	}): Schema.TaggedRequest.Any & {
+		readonly _tag: `${CollectionName}.update`;
+		readonly id: typeof UpdatePayloadSchema.Type.id;
+		readonly updates: typeof UpdatePayloadSchema.Type.updates;
+	};
+};
+
 // ============================================================================
 // Collection RPC Definitions
 // ============================================================================
@@ -339,6 +439,11 @@ export interface CollectionRpcDefinitions<
 	 * Use with Rpc.effect() to create an RPC handler.
 	 */
 	readonly CreateRequest: CreateRequestClass<CollectionName, EntitySchema>;
+	/**
+	 * TaggedRequest class for update operations.
+	 * Use with Rpc.effect() to create an RPC handler.
+	 */
+	readonly UpdateRequest: UpdateRequestClass<CollectionName, EntitySchema>;
 	/** The collection name */
 	readonly collectionName: CollectionName;
 	/** The entity schema for this collection */
@@ -365,11 +470,13 @@ export function makeCollectionRpcs<
 	const FindByIdRequest = makeFindByIdRequest(collectionName, entitySchema);
 	const QueryRequest = makeQueryRequest(collectionName, entitySchema);
 	const CreateRequest = makeCreateRequest(collectionName, entitySchema);
+	const UpdateRequest = makeUpdateRequest(collectionName, entitySchema);
 
 	return {
 		FindByIdRequest,
 		QueryRequest,
 		CreateRequest,
+		UpdateRequest,
 		collectionName,
 		entitySchema,
 	};
@@ -387,8 +494,9 @@ export function makeCollectionRpcs<
  * - findById: Find entity by ID
  * - query: Query entities with filtering, sorting, pagination
  * - create: Create a new entity
+ * - update: Update an existing entity by ID
  *
- * Additional procedures (update, delete, aggregate, batch ops)
+ * Additional procedures (delete, aggregate, batch ops)
  * will be added in subsequent tasks.
  *
  * @param config - The database configuration
@@ -419,8 +527,12 @@ export function makeCollectionRpcs<
  *   db.books.create(req.data)
  * )
  *
+ * const updateBook = Rpc.effect(rpcs.books.UpdateRequest, (req) =>
+ *   db.books.update(req.id, req.updates)
+ * )
+ *
  * // Build a router
- * const router = RpcRouter.make(findBookById, queryBooks, createBook)
+ * const router = RpcRouter.make(findBookById, queryBooks, createBook, updateBook)
  * ```
  */
 export function makeRpcGroup<Config extends DatabaseConfig>(
