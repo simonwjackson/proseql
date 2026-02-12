@@ -3,6 +3,7 @@ import {
 	SEARCH_SCORE_KEY,
 	type SearchConfig,
 } from "../../types/search-types.js";
+import { getNestedValue } from "../../utils/nested-path.js";
 import { computeSearchScore, tokenize } from "./search.js";
 
 /**
@@ -74,28 +75,6 @@ export const attachSearchScores =
 			};
 		});
 	};
-
-/**
- * Get a nested value from an object using dot notation.
- */
-function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
-	const parts = path.split(".");
-	let current: unknown = obj;
-
-	for (const part of parts) {
-		if (current === null || current === undefined) {
-			return undefined;
-		}
-
-		if (typeof current === "object") {
-			current = (current as Record<string, unknown>)[part];
-		} else {
-			return undefined;
-		}
-	}
-
-	return current;
-}
 
 /**
  * Compare two values for sorting, returning a negative, zero, or positive number.
