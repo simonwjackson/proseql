@@ -12,7 +12,7 @@
 - [x] 2.4 Generate `create` procedure: payload is create input, success is entity, error includes `ValidationError | DuplicateKeyError | UniqueConstraintError | ForeignKeyError | HookError`
 - [x] 2.5 Generate `update` procedure: payload is `{ id: string, updates: Partial<Entity> }`, success is entity, error includes `ValidationError | NotFoundError | UniqueConstraintError | HookError`
 - [x] 2.6 Generate `delete` procedure: payload is `{ id: string }`, success is entity, error includes `NotFoundError | HookError`
-- [ ] 2.7 Generate `aggregate` procedure: payload is `AggregateConfig`, success is `AggregateResult | GroupedAggregateResult`
+- [x] 2.7 Generate `aggregate` procedure: payload is `AggregateConfig`, success is `AggregateResult | GroupedAggregateResult`
 - [ ] 2.8 Generate batch procedures: `createMany`, `updateMany`, `deleteMany`, `upsert`, `upsertMany` with appropriate payload/success/error types
 - [ ] 2.9 Verify that multiple collections in a config each produce their own namespaced set of procedures
 

@@ -27,6 +27,9 @@ import {
 	CreatePayloadSchema,
 	UpdatePayloadSchema,
 	DeletePayloadSchema,
+	AggregatePayloadSchema,
+	AggregateResultSchema,
+	GroupedAggregateResultSchema,
 } from "./rpc-schemas.js";
 
 // ============================================================================
@@ -501,6 +504,100 @@ export type DeleteRequestClass<
 	};
 };
 
+/**
+ * Union schema for aggregate results (AggregateResult | GroupedAggregateResult).
+ * The aggregate operation never fails, so we use Schema.Never for failure.
+ */
+const AggregateResultUnionSchema = Schema.Union(
+	AggregateResultSchema,
+	GroupedAggregateResultSchema,
+);
+
+/**
+ * Creates an Aggregate TaggedRequest class for a collection.
+ *
+ * The returned class extends Schema.TaggedRequest and can be used to:
+ * 1. Create request instances: new AggregateRequest({ count: true })
+ * 2. Define RPC handlers: Rpc.effect(AggregateRequest, (req) => ...)
+ * 3. Build RPC routers: RpcRouter.make(aggregateRpc, ...)
+ *
+ * @param collectionName - The name of the collection (used as the request _tag prefix)
+ * @returns A TaggedRequest class for aggregate operations
+ *
+ * @example
+ * ```ts
+ * const AggregateRequest = makeAggregateRequest("books")
+ * // _tag: "books.aggregate"
+ * // payload: AggregateConfig
+ * // success: AggregateResult | GroupedAggregateResult
+ * // failure: never (aggregate operations cannot fail)
+ * ```
+ */
+export function makeAggregateRequest<CollectionName extends string>(
+	collectionName: CollectionName,
+): AggregateRequestClass<CollectionName> {
+	// Create a TaggedRequest class dynamically
+	// The class extends Schema.TaggedRequest with the collection-specific tag
+	const RequestClass = class AggregateRequest extends Schema.TaggedRequest<AggregateRequest>()(
+		`${collectionName}.aggregate` as `${CollectionName}.aggregate`,
+		{
+			failure: Schema.Never,
+			success: AggregateResultUnionSchema,
+			payload: {
+				where: AggregatePayloadSchema.fields.where,
+				groupBy: AggregatePayloadSchema.fields.groupBy,
+				count: AggregatePayloadSchema.fields.count,
+				sum: AggregatePayloadSchema.fields.sum,
+				avg: AggregatePayloadSchema.fields.avg,
+				min: AggregatePayloadSchema.fields.min,
+				max: AggregatePayloadSchema.fields.max,
+			},
+		},
+	) {};
+
+	return RequestClass as unknown as AggregateRequestClass<CollectionName>;
+}
+
+/**
+ * Type for an Aggregate TaggedRequest class.
+ * This is the class type returned by makeAggregateRequest.
+ */
+export type AggregateRequestClass<CollectionName extends string> = {
+	/**
+	 * The request _tag (e.g., "books.aggregate")
+	 */
+	readonly _tag: `${CollectionName}.aggregate`;
+	/**
+	 * The success schema (AggregateResult | GroupedAggregateResult)
+	 */
+	readonly success: typeof AggregateResultUnionSchema;
+	/**
+	 * The failure schema (never - aggregate operations cannot fail)
+	 */
+	readonly failure: typeof Schema.Never;
+	/**
+	 * Create a new request instance
+	 */
+	new (props: {
+		readonly where?: typeof AggregatePayloadSchema.Type.where;
+		readonly groupBy?: typeof AggregatePayloadSchema.Type.groupBy;
+		readonly count?: typeof AggregatePayloadSchema.Type.count;
+		readonly sum?: typeof AggregatePayloadSchema.Type.sum;
+		readonly avg?: typeof AggregatePayloadSchema.Type.avg;
+		readonly min?: typeof AggregatePayloadSchema.Type.min;
+		readonly max?: typeof AggregatePayloadSchema.Type.max;
+	}): Schema.TaggedRequest.Any & {
+		readonly _tag: `${CollectionName}.aggregate`;
+		readonly where?: typeof AggregatePayloadSchema.Type.where;
+		readonly groupBy?: typeof AggregatePayloadSchema.Type.groupBy;
+		readonly count?: typeof AggregatePayloadSchema.Type.count;
+		readonly sum?: typeof AggregatePayloadSchema.Type.sum;
+		readonly avg?: typeof AggregatePayloadSchema.Type.avg;
+		readonly min?: typeof AggregatePayloadSchema.Type.min;
+		readonly max?: typeof AggregatePayloadSchema.Type.max;
+	};
+};
+
 // ============================================================================
 // Collection RPC Definitions
 // ============================================================================
@@ -538,6 +635,11 @@ export interface CollectionRpcDefinitions<
 	 * Use with Rpc.effect() to create an RPC handler.
 	 */
 	readonly DeleteRequest: DeleteRequestClass<CollectionName, EntitySchema>;
+	/**
+	 * TaggedRequest class for aggregate operations.
+	 * Use with Rpc.effect() to create an RPC handler.
+	 */
+	readonly AggregateRequest: AggregateRequestClass<CollectionName>;
 	/** The collection name */
 	readonly collectionName: CollectionName;
 	/** The entity schema for this collection */
@@ -566,6 +668,7 @@ export function makeCollectionRpcs<
 	const CreateRequest = makeCreateRequest(collectionName, entitySchema);
 	const UpdateRequest = makeUpdateRequest(collectionName, entitySchema);
 	const DeleteRequest = makeDeleteRequest(collectionName, entitySchema);
+	const AggregateRequest = makeAggregateRequest(collectionName);
 
 	return {
 		FindByIdRequest,
@@ -573,6 +676,7 @@ export function makeCollectionRpcs<
 		CreateRequest,
 		UpdateRequest,
 		DeleteRequest,
+		AggregateRequest,
 		collectionName,
 		entitySchema,
 	};
@@ -593,7 +697,7 @@ export function makeCollectionRpcs<
  * - update: Update an existing entity by ID
  * - delete: Delete an entity by ID
  *
- * Additional procedures (aggregate, batch ops) will be added in subsequent tasks.
+ * Additional procedures (batch ops) will be added in subsequent tasks.
  *
  * @param config - The database configuration
  * @returns A mapping of collection names to their RPC definitions
@@ -631,8 +735,12 @@ export function makeCollectionRpcs<
  *   db.books.delete(req.id)
  * )
  *
+ * const aggregateBooks = Rpc.effect(rpcs.books.AggregateRequest, (req) =>
+ *   db.books.aggregate({ count: req.count, groupBy: req.groupBy, ...req })
+ * )
+ *
  * // Build a router
- * const router = RpcRouter.make(findBookById, queryBooks, createBook, updateBook, deleteBook)
+ * const router = RpcRouter.make(findBookById, queryBooks, createBook, updateBook, deleteBook, aggregateBooks)
  * ```
  */
 export function makeRpcGroup<Config extends DatabaseConfig>(
