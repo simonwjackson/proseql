@@ -1,0 +1,13 @@
+{
+  "name": "@proseql/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "proseql": "./src/main.ts"
+  },
+  "main": "src/index.ts",
+  "dependencies": {
+    "@proseql/core": "workspace:*",
+    "@proseql/node": "workspace:*"
+  }
+}

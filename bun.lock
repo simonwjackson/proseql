@@ -29,6 +29,17 @@
         "@proseql/core": "workspace:*",
       },
     },
+    "packages/cli": {
+      "name": "@proseql/cli",
+      "version": "0.1.0",
+      "bin": {
+        "proseql": "./src/main.ts",
+      },
+      "dependencies": {
+        "@proseql/core": "workspace:*",
+        "@proseql/node": "workspace:*",
+      },
+    },
     "packages/core": {
       "name": "@proseql/core",
       "version": "0.1.0",
@@ -127,6 +138,8 @@
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.5.5", "", {}, "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og=="],
 
     "@proseql/browser": ["@proseql/browser@workspace:packages/browser"],
+
+    "@proseql/cli": ["@proseql/cli@workspace:packages/cli"],
 
     "@proseql/core": ["@proseql/core@workspace:packages/core"],
 
