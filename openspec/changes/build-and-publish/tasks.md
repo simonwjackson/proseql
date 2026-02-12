@@ -48,7 +48,7 @@
 ## 7. LICENSE File
 
 - [x] 7.1 Create `LICENSE` at repository root with MIT license text.
-- [ ] 7.2 Add a build step or script to copy root `LICENSE` into each package directory before publish.
+- [x] 7.2 Add a build step or script to copy root `LICENSE` into each package directory before publish.
 - [ ] 7.3 Add `packages/*/LICENSE` to `.gitignore` so copied LICENSE files are not committed.
 
 ## 8. Build Script Verification
