@@ -918,3 +918,190 @@ describe("REST handlers — POST with invalid data returns 400 (task 11.12)", ()
 		expect((getResponse.body as ReadonlyArray<unknown>).length).toBe(0);
 	});
 });
+
+// ============================================================================
+// Task 11.13: Test PUT updates entity and returns 200
+// ============================================================================
+
+describe("REST handlers — PUT updates entity (task 11.13)", () => {
+	it("should update entity and return 200 with updated entity", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const putBook = findRoute(routes, "PUT", "/books/:id");
+		expect(putBook).toBeDefined();
+
+		const updates = { title: "Dune (Revised Edition)" };
+		const request = createRequest({ params: { id: "1" }, body: updates });
+		const response = await putBook!.handler(request);
+
+		expect(response.status).toBe(200);
+		const updatedBook = response.body as {
+			id: string;
+			title: string;
+			author: string;
+			year: number;
+			genre: string;
+		};
+		expect(updatedBook.id).toBe("1");
+		expect(updatedBook.title).toBe("Dune (Revised Edition)");
+		// Other fields should remain unchanged
+		expect(updatedBook.author).toBe("Frank Herbert");
+		expect(updatedBook.year).toBe(1965);
+		expect(updatedBook.genre).toBe("sci-fi");
+	});
+
+	it("should persist the update to the database", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const putBook = findRoute(routes, "PUT", "/books/:id");
+		const getBookById = findRoute(routes, "GET", "/books/:id");
+
+		// Update the entity
+		const updates = { genre: "masterpiece" };
+		const updateRequest = createRequest({ params: { id: "1" }, body: updates });
+		const updateResponse = await putBook!.handler(updateRequest);
+		expect(updateResponse.status).toBe(200);
+
+		// Verify update persisted
+		const getRequest = createRequest({ params: { id: "1" } });
+		const getResponse = await getBookById!.handler(getRequest);
+		expect(getResponse.status).toBe(200);
+		expect((getResponse.body as { genre: string }).genre).toBe("masterpiece");
+	});
+
+	it("should update multiple fields at once", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const putBook = findRoute(routes, "PUT", "/books/:id");
+
+		const updates = {
+			title: "Neuromancer (Anniversary Edition)",
+			year: 2024,
+			genre: "classic",
+		};
+		const request = createRequest({ params: { id: "2" }, body: updates });
+		const response = await putBook!.handler(request);
+
+		expect(response.status).toBe(200);
+		const updatedBook = response.body as {
+			id: string;
+			title: string;
+			author: string;
+			year: number;
+			genre: string;
+		};
+		expect(updatedBook.id).toBe("2");
+		expect(updatedBook.title).toBe("Neuromancer (Anniversary Edition)");
+		expect(updatedBook.year).toBe(2024);
+		expect(updatedBook.genre).toBe("classic");
+		// Author should remain unchanged
+		expect(updatedBook.author).toBe("William Gibson");
+	});
+
+	it("should return all entity fields in the response", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const putBook = findRoute(routes, "PUT", "/books/:id");
+
+		const updates = { title: "Updated Title" };
+		const request = createRequest({ params: { id: "3" }, body: updates });
+		const response = await putBook!.handler(request);
+
+		expect(response.status).toBe(200);
+		const body = response.body as Record<string, unknown>;
+		expect(body).toHaveProperty("id");
+		expect(body).toHaveProperty("title");
+		expect(body).toHaveProperty("author");
+		expect(body).toHaveProperty("year");
+		expect(body).toHaveProperty("genre");
+	});
+
+	it("should work with different collections", async () => {
+		const multiConfig = {
+			books: { schema: BookSchema, relationships: {} },
+			authors: {
+				schema: Schema.Struct({ id: Schema.String, name: Schema.String }),
+				relationships: {},
+			},
+		} as const;
+
+		const db = await Effect.runPromise(
+			createEffectDatabase(multiConfig, {
+				books: initialBooks,
+				authors: [{ id: "a1", name: "Frank Herbert" }],
+			}),
+		);
+		const routes = createRestHandlers(multiConfig, db);
+
+		// Update a book
+		const putBook = findRoute(routes, "PUT", "/books/:id");
+		const bookRequest = createRequest({ params: { id: "1" }, body: { title: "Updated Book" } });
+		const bookResponse = await putBook!.handler(bookRequest);
+		expect(bookResponse.status).toBe(200);
+		expect((bookResponse.body as { title: string }).title).toBe("Updated Book");
+
+		// Update an author
+		const putAuthor = findRoute(routes, "PUT", "/authors/:id");
+		const authorRequest = createRequest({ params: { id: "a1" }, body: { name: "F. Herbert" } });
+		const authorResponse = await putAuthor!.handler(authorRequest);
+		expect(authorResponse.status).toBe(200);
+		expect((authorResponse.body as { name: string }).name).toBe("F. Herbert");
+	});
+
+	it("should return 404 when updating non-existent entity", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const putBook = findRoute(routes, "PUT", "/books/:id");
+
+		const updates = { title: "Ghost Book" };
+		const request = createRequest({ params: { id: "nonexistent" }, body: updates });
+		const response = await putBook!.handler(request);
+
+		expect(response.status).toBe(404);
+		const body = response.body as { _tag: string };
+		expect(body._tag).toBe("NotFoundError");
+	});
+
+	it("should not modify other entities in the collection", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const putBook = findRoute(routes, "PUT", "/books/:id");
+		const getBookById = findRoute(routes, "GET", "/books/:id");
+
+		// Update book with id "1"
+		const updates = { title: "Modified Dune" };
+		const updateRequest = createRequest({ params: { id: "1" }, body: updates });
+		await putBook!.handler(updateRequest);
+
+		// Verify other books are unchanged
+		const book2Response = await getBookById!.handler(createRequest({ params: { id: "2" } }));
+		expect(book2Response.status).toBe(200);
+		expect((book2Response.body as { title: string }).title).toBe("Neuromancer");
+
+		const book3Response = await getBookById!.handler(createRequest({ params: { id: "3" } }));
+		expect(book3Response.status).toBe(200);
+		expect((book3Response.body as { title: string }).title).toBe("The Left Hand of Darkness");
+	});
+
+	it("should update with empty body (no changes)", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const putBook = findRoute(routes, "PUT", "/books/:id");
+
+		// Empty update should succeed and return the entity unchanged
+		const request = createRequest({ params: { id: "1" }, body: {} });
+		const response = await putBook!.handler(request);
+
+		expect(response.status).toBe(200);
+		const book = response.body as { id: string; title: string };
+		expect(book.id).toBe("1");
+		expect(book.title).toBe("Dune");
+	});
+});

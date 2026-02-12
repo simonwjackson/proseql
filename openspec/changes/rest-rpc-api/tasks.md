@@ -104,7 +104,7 @@
 - [x] 11.10 Test GET by id for missing entity returns 404
 - [x] 11.11 Test POST creates entity and returns 201
 - [x] 11.12 Test POST with invalid data returns 400
-- [ ] 11.13 Test PUT updates entity and returns 200
+- [x] 11.13 Test PUT updates entity and returns 200
 - [ ] 11.14 Test DELETE removes entity and returns 200
 - [ ] 11.15 Test POST batch creates multiple entities
 - [ ] 11.16 Test GET aggregate returns correct result
