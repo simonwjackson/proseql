@@ -151,3 +151,149 @@ export const STANDARD_SIZES = [100, 1_000, 10_000, 100_000] as const;
  * Type for standard collection sizes.
  */
 export type StandardSize = (typeof STANDARD_SIZES)[number];
+
+// ============================================================================
+// Entity Types
+// ============================================================================
+
+/**
+ * User entity type for benchmarks.
+ */
+export interface User {
+	readonly id: string;
+	readonly name: string;
+	readonly email: string;
+	readonly age: number;
+	readonly role: "admin" | "moderator" | "user";
+	readonly createdAt: string;
+}
+
+// ============================================================================
+// Data Pools for Realistic Generation
+// ============================================================================
+
+/**
+ * Pool of first names for user generation.
+ */
+const FIRST_NAMES = [
+	"Alice",
+	"Bob",
+	"Carol",
+	"David",
+	"Eve",
+	"Frank",
+	"Grace",
+	"Henry",
+	"Iris",
+	"Jack",
+	"Kate",
+	"Leo",
+	"Mia",
+	"Noah",
+	"Olivia",
+	"Paul",
+	"Quinn",
+	"Rose",
+	"Sam",
+	"Tara",
+	"Uma",
+	"Victor",
+	"Wendy",
+	"Xavier",
+	"Yara",
+	"Zach",
+] as const;
+
+/**
+ * Pool of last names for user generation.
+ */
+const LAST_NAMES = [
+	"Anderson",
+	"Brown",
+	"Chen",
+	"Davis",
+	"Edwards",
+	"Foster",
+	"Garcia",
+	"Harris",
+	"Ivanov",
+	"Johnson",
+	"Kim",
+	"Lee",
+	"Martinez",
+	"Nguyen",
+	"O'Brien",
+	"Patel",
+	"Quinn",
+	"Roberts",
+	"Smith",
+	"Taylor",
+	"Ueda",
+	"Vance",
+	"Williams",
+	"Xu",
+	"Young",
+	"Zhang",
+] as const;
+
+/**
+ * Pool of email domains for user generation.
+ */
+const EMAIL_DOMAINS = [
+	"example.com",
+	"test.org",
+	"mail.net",
+	"demo.io",
+	"sample.co",
+] as const;
+
+/**
+ * Pool of roles for user generation.
+ */
+const ROLES = ["admin", "moderator", "user"] as const;
+
+// ============================================================================
+// Entity Generators
+// ============================================================================
+
+/**
+ * Generate an array of User entities with deterministic, reproducible data.
+ *
+ * Users have realistic-looking names, emails, ages, and roles. The same
+ * seed will always produce the same sequence of users.
+ *
+ * @param count - Number of users to generate
+ * @param seed - Optional seed for the RNG (default: DEFAULT_SEED)
+ * @returns Array of User entities
+ *
+ * @example
+ * ```ts
+ * const users = generateUsers(1000);
+ * // Always produces the same 1000 users
+ *
+ * const customUsers = generateUsers(100, 12345);
+ * // Uses custom seed for different but still reproducible data
+ * ```
+ */
+export function generateUsers(count: number, seed: number = DEFAULT_SEED): ReadonlyArray<User> {
+	const rng = createSeededRng(seed);
+	const users: User[] = [];
+
+	for (let i = 0; i < count; i++) {
+		const firstName = pickRandom(rng, FIRST_NAMES);
+		const lastName = pickRandom(rng, LAST_NAMES);
+		const domain = pickRandom(rng, EMAIL_DOMAINS);
+		const emailSuffix = randomInt(rng, 1, 9999);
+
+		users.push({
+			id: `user_${String(i + 1).padStart(6, "0")}`,
+			name: `${firstName} ${lastName}`,
+			email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}${emailSuffix}@${domain}`,
+			age: randomInt(rng, 18, 80),
+			role: pickRandom(rng, ROLES),
+			createdAt: randomDate(rng, 2020, 2024),
+		});
+	}
+
+	return users;
+}

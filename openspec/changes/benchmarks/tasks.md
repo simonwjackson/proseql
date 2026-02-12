@@ -8,7 +8,7 @@
 ## 2. Data Generators
 
 - [x] 2.1 Create `bench/generators.ts` with a seeded pseudo-random number generator for deterministic output
-- [ ] 2.2 Implement `generateUsers(count)` producing entities with id, name, email, age, role, createdAt fields
+- [x] 2.2 Implement `generateUsers(count)` producing entities with id, name, email, age, role, createdAt fields
 - [ ] 2.3 Implement `generateProducts(count)` producing entities with id, name, price, category, stock, supplierId fields
 - [ ] 2.4 Implement `generateAtScale(generator, sizes)` that returns a Map of size to entity array for the standard sizes (100, 1K, 10K, 100K)
 - [ ] 2.5 Verify generators produce identical output across multiple invocations (determinism check)
