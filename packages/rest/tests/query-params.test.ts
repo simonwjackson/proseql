@@ -463,6 +463,171 @@ describe("parseQueryParams — sort parsing (task 11.3)", () => {
 // Task 11.4: Pagination Parsing
 // ============================================================================
 
+// ============================================================================
+// Task 11.5: Field Selection Parsing
+// ============================================================================
+
+describe("parseQueryParams — field selection parsing (task 11.5)", () => {
+	describe("single field selection", () => {
+		it("should parse single field selection", () => {
+			const result = parseQueryParams({ select: "title" });
+
+			expect(result.select).toEqual(["title"]);
+		});
+
+		it("should handle field name with dots (nested-looking path)", () => {
+			const result = parseQueryParams({ select: "meta.createdAt" });
+
+			expect(result.select).toEqual(["meta.createdAt"]);
+		});
+	});
+
+	describe("multiple field selection", () => {
+		it("should parse multiple fields separated by comma", () => {
+			const result = parseQueryParams({ select: "title,author" });
+
+			expect(result.select).toEqual(["title", "author"]);
+		});
+
+		it("should parse many fields", () => {
+			const result = parseQueryParams({
+				select: "id,title,author,year,genre,description",
+			});
+
+			expect(result.select).toEqual([
+				"id",
+				"title",
+				"author",
+				"year",
+				"genre",
+				"description",
+			]);
+		});
+
+		it("should preserve field order", () => {
+			const result = parseQueryParams({ select: "year,author,title" });
+
+			expect(result.select).toEqual(["year", "author", "title"]);
+		});
+	});
+
+	describe("whitespace handling", () => {
+		it("should trim whitespace around field names", () => {
+			const result = parseQueryParams({ select: " title , author , year " });
+
+			expect(result.select).toEqual(["title", "author", "year"]);
+		});
+
+		it("should handle tabs and multiple spaces", () => {
+			const result = parseQueryParams({ select: "  title  ,   author  " });
+
+			expect(result.select).toEqual(["title", "author"]);
+		});
+	});
+
+	describe("edge cases", () => {
+		it("should skip empty segments", () => {
+			const result = parseQueryParams({ select: "title,,author" });
+
+			expect(result.select).toEqual(["title", "author"]);
+		});
+
+		it("should handle empty select value", () => {
+			const result = parseQueryParams({ select: "" });
+
+			expect(result.select).toBeUndefined();
+		});
+
+		it("should handle only commas", () => {
+			const result = parseQueryParams({ select: ",,," });
+
+			// All segments are empty, so returns empty array
+			expect(result.select).toEqual([]);
+		});
+
+		it("should handle only whitespace", () => {
+			const result = parseQueryParams({ select: "   " });
+
+			// Whitespace-only becomes empty array after trim
+			expect(result.select).toEqual([]);
+		});
+
+		it("should not include select in where clause", () => {
+			const result = parseQueryParams({ select: "title,author" });
+
+			expect(result.where).toEqual({});
+		});
+	});
+
+	describe("combination with other params", () => {
+		it("should combine select with where clause", () => {
+			const result = parseQueryParams({
+				genre: "sci-fi",
+				select: "title,year",
+			});
+
+			expect(result.where).toEqual({ genre: "sci-fi" });
+			expect(result.select).toEqual(["title", "year"]);
+		});
+
+		it("should combine select with operators", () => {
+			const result = parseQueryParams({
+				"year[$gte]": "1970",
+				select: "title,author,year",
+			});
+
+			expect(result.where).toEqual({ year: { $gte: 1970 } });
+			expect(result.select).toEqual(["title", "author", "year"]);
+		});
+
+		it("should combine select with sort", () => {
+			const result = parseQueryParams({
+				sort: "year:desc",
+				select: "title,year",
+			});
+
+			expect(result.sort).toEqual({ year: "desc" });
+			expect(result.select).toEqual(["title", "year"]);
+		});
+
+		it("should combine select with pagination", () => {
+			const result = parseQueryParams({
+				limit: "10",
+				offset: "20",
+				select: "title",
+			});
+
+			expect(result.limit).toBe(10);
+			expect(result.offset).toBe(20);
+			expect(result.select).toEqual(["title"]);
+		});
+
+		it("should combine select with all other params", () => {
+			const result = parseQueryParams({
+				genre: "sci-fi",
+				"year[$gte]": "1970",
+				sort: "year:desc,title:asc",
+				limit: "10",
+				offset: "0",
+				select: "id,title,year",
+			});
+
+			expect(result.where).toEqual({
+				genre: "sci-fi",
+				year: { $gte: 1970 },
+			});
+			expect(result.sort).toEqual({ year: "desc", title: "asc" });
+			expect(result.limit).toBe(10);
+			expect(result.offset).toBe(0);
+			expect(result.select).toEqual(["id", "title", "year"]);
+		});
+	});
+});
+
+// ============================================================================
+// Task 11.4: Pagination Parsing
+// ============================================================================
+
 describe("parseQueryParams — pagination parsing (task 11.4)", () => {
 	describe("limit parsing", () => {
 		it("should parse limit as a number", () => {

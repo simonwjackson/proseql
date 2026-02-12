@@ -96,7 +96,7 @@
 - [x] 11.2 Test operator syntax parsing ($gte, $lt, $in, etc.)
 - [x] 11.3 Test sort parsing (single field, multiple fields)
 - [x] 11.4 Test pagination parsing (limit, offset)
-- [ ] 11.5 Test field selection parsing
+- [x] 11.5 Test field selection parsing
 - [ ] 11.6 Test type coercion (numbers, booleans)
 - [ ] 11.7 Create `rest/tests/handlers.test.ts`: test GET collection returns all entities
 - [ ] 11.8 Test GET collection with query params returns filtered results
