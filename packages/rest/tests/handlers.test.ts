@@ -747,3 +747,174 @@ describe("REST handlers — POST creates entity (task 11.11)", () => {
 		expect((finalResponse.body as ReadonlyArray<unknown>).length).toBe(4);
 	});
 });
+
+// ============================================================================
+// Task 11.12: Test POST with invalid data returns 400
+// ============================================================================
+
+describe("REST handlers — POST with invalid data returns 400 (task 11.12)", () => {
+	it("should return 400 when required field is missing", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBooks = findRoute(routes, "POST", "/books");
+		expect(postBooks).toBeDefined();
+
+		// Missing "year" field which is required by the schema
+		const invalidBook = {
+			id: "invalid-1",
+			title: "Incomplete Book",
+			author: "Unknown",
+			genre: "sci-fi",
+			// year is missing
+		};
+
+		const request = createRequest({ body: invalidBook });
+		const response = await postBooks!.handler(request);
+
+		expect(response.status).toBe(400);
+	});
+
+	it("should include ValidationError tag in response body", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBooks = findRoute(routes, "POST", "/books");
+
+		// Missing required field
+		const invalidBook = {
+			id: "invalid-2",
+			title: "Missing Fields",
+			// author, year, genre missing
+		};
+
+		const request = createRequest({ body: invalidBook });
+		const response = await postBooks!.handler(request);
+
+		expect(response.status).toBe(400);
+		const body = response.body as { _tag: string; error: string };
+		expect(body._tag).toBe("ValidationError");
+		expect(body.error).toBe("Validation error");
+	});
+
+	it("should return 400 when field has wrong type", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBooks = findRoute(routes, "POST", "/books");
+
+		// year should be a number, not a string
+		const invalidBook = {
+			id: "invalid-3",
+			title: "Wrong Type Book",
+			author: "Test Author",
+			year: "not-a-number", // should be number
+			genre: "sci-fi",
+		};
+
+		const request = createRequest({ body: invalidBook });
+		const response = await postBooks!.handler(request);
+
+		expect(response.status).toBe(400);
+		const body = response.body as { _tag: string };
+		expect(body._tag).toBe("ValidationError");
+	});
+
+	it("should return 500 when body is null (unrecoverable defect)", async () => {
+		// Note: Passing null to create causes a Die (crash) in the core library
+		// because it tries to access properties on null before validation.
+		// This is treated as a programmer error, not a validation error.
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBooks = findRoute(routes, "POST", "/books");
+
+		const request = createRequest({ body: null });
+		const response = await postBooks!.handler(request);
+
+		// Returns 500 because this is an unexpected defect, not a validation error
+		expect(response.status).toBe(500);
+	});
+
+	it("should return 400 when body is an empty object", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBooks = findRoute(routes, "POST", "/books");
+
+		const request = createRequest({ body: {} });
+		const response = await postBooks!.handler(request);
+
+		expect(response.status).toBe(400);
+		const body = response.body as { _tag: string };
+		expect(body._tag).toBe("ValidationError");
+	});
+
+	it("should return 400 when multiple required fields are missing", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBooks = findRoute(routes, "POST", "/books");
+
+		// Only id is provided
+		const invalidBook = {
+			id: "only-id",
+		};
+
+		const request = createRequest({ body: invalidBook });
+		const response = await postBooks!.handler(request);
+
+		expect(response.status).toBe(400);
+		const body = response.body as { _tag: string };
+		expect(body._tag).toBe("ValidationError");
+	});
+
+	it("should return 400 for different collections with invalid data", async () => {
+		const multiConfig = {
+			books: { schema: BookSchema, relationships: {} },
+			authors: {
+				schema: Schema.Struct({ id: Schema.String, name: Schema.String }),
+				relationships: {},
+			},
+		} as const;
+
+		const db = await Effect.runPromise(
+			createEffectDatabase(multiConfig, { books: [], authors: [] }),
+		);
+		const routes = createRestHandlers(multiConfig, db);
+
+		// Test invalid book
+		const postBooks = findRoute(routes, "POST", "/books");
+		const bookRequest = createRequest({ body: { id: "b1" } }); // missing fields
+		const bookResponse = await postBooks!.handler(bookRequest);
+		expect(bookResponse.status).toBe(400);
+		expect((bookResponse.body as { _tag: string })._tag).toBe("ValidationError");
+
+		// Test invalid author
+		const postAuthors = findRoute(routes, "POST", "/authors");
+		const authorRequest = createRequest({ body: { id: "a1" } }); // missing name
+		const authorResponse = await postAuthors!.handler(authorRequest);
+		expect(authorResponse.status).toBe(400);
+		expect((authorResponse.body as { _tag: string })._tag).toBe("ValidationError");
+	});
+
+	it("should not create entity when validation fails", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const postBooks = findRoute(routes, "POST", "/books");
+		const getBooks = findRoute(routes, "GET", "/books");
+
+		// Attempt to create invalid entity
+		const invalidBook = { id: "should-not-exist" };
+		const createRequest1 = { params: {}, query: {}, body: invalidBook };
+		const createResponse = await postBooks!.handler(createRequest1);
+		expect(createResponse.status).toBe(400);
+
+		// Verify entity was NOT created
+		const getRequest = { params: {}, query: {}, body: undefined };
+		const getResponse = await getBooks!.handler(getRequest);
+		expect(getResponse.status).toBe(200);
+		expect((getResponse.body as ReadonlyArray<unknown>).length).toBe(0);
+	});
+});
