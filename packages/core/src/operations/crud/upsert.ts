@@ -7,7 +7,7 @@
  * Upsert = find by `where` clause → update if exists, create if not.
  */
 
-import { Effect, Ref, type Schema } from "effect";
+import { Effect, PubSub, Ref, type Schema } from "effect";
 import type {
 	ForeignKeyError,
 	HookError,
@@ -39,6 +39,7 @@ import type {
 } from "../../types/crud-types.js";
 import type { HooksConfig } from "../../types/hook-types.js";
 import type { CollectionIndexes } from "../../types/index-types.js";
+import type { ChangeEvent } from "../../types/reactive-types.js";
 import type { SearchIndexMap } from "../../types/search-types.js";
 import { generateId } from "../../utils/id-generator.js";
 import { validateForeignKeysEffect } from "../../validators/foreign-key.js";
@@ -129,6 +130,7 @@ export const upsert =
 		uniqueFields: NormalizedConstraints = [],
 		searchIndexRef?: Ref.Ref<SearchIndexMap>,
 		searchIndexFields?: ReadonlyArray<string>,
+		changePubSub?: PubSub.PubSub<ChangeEvent>,
 	) =>
 	(
 		input: UpsertInternalInput<T>,
@@ -229,6 +231,14 @@ export const upsert =
 					current: validated,
 				});
 
+				// Publish change event to reactive subscribers
+				if (changePubSub) {
+					yield* PubSub.publish(changePubSub, {
+						collection: collectionName,
+						operation: "update",
+					});
+				}
+
 				return { ...validated, __action: "updated" as const };
 			}
 
@@ -302,6 +312,14 @@ export const upsert =
 				entity,
 			});
 
+			// Publish change event to reactive subscribers
+			if (changePubSub) {
+				yield* PubSub.publish(changePubSub, {
+					collection: collectionName,
+					operation: "create",
+				});
+			}
+
 			return { ...entity, __action: "created" as const };
 		});
 
@@ -335,6 +353,7 @@ export const upsertMany =
 		uniqueFields: NormalizedConstraints = [],
 		searchIndexRef?: Ref.Ref<SearchIndexMap>,
 		searchIndexFields?: ReadonlyArray<string>,
+		changePubSub?: PubSub.PubSub<ChangeEvent>,
 	) =>
 	(
 		inputs: ReadonlyArray<UpsertInternalInput<T>>,
@@ -558,6 +577,22 @@ export const upsertMany =
 
 			created.push(...toCreate);
 			updated.push(...toUpdate.map(({ newEntity }) => newEntity));
+
+			// Publish change events to reactive subscribers
+			// Publish a "create" event if any entities were created
+			if (changePubSub && toCreate.length > 0) {
+				yield* PubSub.publish(changePubSub, {
+					collection: collectionName,
+					operation: "create",
+				});
+			}
+			// Publish an "update" event if any entities were updated
+			if (changePubSub && toUpdate.length > 0) {
+				yield* PubSub.publish(changePubSub, {
+					collection: collectionName,
+					operation: "update",
+				});
+			}
 
 			return { created, updated, unchanged };
 		});

@@ -31,7 +31,7 @@
 - [x] 5.4 Same for `updateMany`: publish a single event after all updates
 - [x] 5.5 Add `changePubSub` parameter to `delete` in `core/operations/crud/delete.ts`. Publish with `operation: "delete"` after mutation.
 - [x] 5.6 Same for `deleteMany`: publish a single event after all deletes
-- [ ] 5.7 Add `changePubSub` parameter to `upsert` and `upsertMany` in `core/operations/crud/upsert.ts`. Publish appropriate event after mutation.
+- [x] 5.7 Add `changePubSub` parameter to `upsert` and `upsertMany` in `core/operations/crud/upsert.ts`. Publish appropriate event after mutation.
 
 ## 6. File Watcher Integration
 
