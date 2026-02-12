@@ -1653,4 +1653,99 @@ describe("Plugin System", () => {
 			expect(complexQuery[0].genre).toBe("dystopian");
 		});
 	});
+
+	// ============================================================================
+	// Tests — Custom ID Generators (Task 13.1-13.4)
+	// ============================================================================
+
+	describe("custom ID generators", () => {
+		it("should use plugin generator when collection has idGenerator and no id is provided", async () => {
+			// Task 13.1: Test collection with `idGenerator: "custom"` uses plugin generator when no id provided
+			//
+			// We create a plugin with a custom ID generator that produces predictable IDs.
+			// Then we configure a collection to use that generator.
+			// When we create entities without providing an ID, the generator should be used.
+
+			// Create a counter-based ID generator that produces predictable IDs
+			let counter = 0;
+			const customGenerator: CustomIdGenerator = {
+				name: "test-counter",
+				generate: () => {
+					counter += 1;
+					return `custom-id-${counter}`;
+				},
+			};
+
+			const generatorPlugin = createIdGeneratorPlugin("id-gen-plugin", customGenerator);
+
+			// Create config that references the custom ID generator
+			const configWithIdGenerator = {
+				books: {
+					schema: BookSchema,
+					relationships: {},
+					idGenerator: "test-counter", // Reference the plugin's generator
+				},
+			} as const;
+
+			// Create database with the plugin and custom config
+			const db = await Effect.runPromise(
+				createEffectDatabase(configWithIdGenerator, { books: [] }, { plugins: [generatorPlugin] }),
+			);
+
+			// Reset counter for predictable test results
+			counter = 0;
+
+			// Create first book WITHOUT providing an id
+			const book1 = await db.books
+				.create({
+					title: "Book One",
+					author: "Author One",
+					year: 2024,
+					genre: "test",
+				} as Parameters<typeof db.books.create>[0])
+				.runPromise;
+
+			// The ID should come from the custom generator
+			expect(book1.id).toBe("custom-id-1");
+
+			// Create second book WITHOUT providing an id
+			const book2 = await db.books
+				.create({
+					title: "Book Two",
+					author: "Author Two",
+					year: 2024,
+					genre: "test",
+				} as Parameters<typeof db.books.create>[0])
+				.runPromise;
+
+			// The ID should be the next value from the generator
+			expect(book2.id).toBe("custom-id-2");
+
+			// Create third book WITHOUT providing an id
+			const book3 = await db.books
+				.create({
+					title: "Book Three",
+					author: "Author Three",
+					year: 2024,
+					genre: "test",
+				} as Parameters<typeof db.books.create>[0])
+				.runPromise;
+
+			expect(book3.id).toBe("custom-id-3");
+
+			// Verify all books are in the database with their custom IDs
+			const allBooks = await db.books.query().runPromise;
+			expect(allBooks.length).toBe(3);
+
+			const ids = allBooks.map((b) => b.id).sort();
+			expect(ids).toEqual(["custom-id-1", "custom-id-2", "custom-id-3"]);
+
+			// Verify we can find books by their custom IDs
+			const foundBook1 = await db.books.findById("custom-id-1").runPromise;
+			expect(foundBook1.title).toBe("Book One");
+
+			const foundBook2 = await db.books.findById("custom-id-2").runPromise;
+			expect(foundBook2.title).toBe("Book Two");
+		});
+	});
 });

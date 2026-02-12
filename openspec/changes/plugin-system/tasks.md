@@ -84,7 +84,7 @@
 
 ## 13. Tests — Custom ID Generators
 
-- [ ] 13.1 Test collection with `idGenerator: "custom"` uses plugin generator when no id provided
+- [x] 13.1 Test collection with `idGenerator: "custom"` uses plugin generator when no id provided
 - [ ] 13.2 Test collection with `idGenerator: "custom"` still uses provided id when explicit
 - [ ] 13.3 Test referencing non-existent idGenerator name fails at init with PluginError
 - [ ] 13.4 Test createMany uses generator per entity
