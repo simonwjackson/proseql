@@ -356,10 +356,273 @@ describe("Index consistency properties", () => {
 		});
 	});
 
-	describe("Task 6.2: Index-accelerated query results identical to full-scan (placeholder)", () => {
-		// This will be implemented in task 6.2
-		it.skip("should return identical results with and without index acceleration", async () => {
-			// Placeholder for task 6.2
+	describe("Task 6.2: Index-accelerated query results identical to full-scan", () => {
+		/**
+		 * Helper to apply a sequence of CRUD operations to a database.
+		 * Returns an Effect that applies all operations in order.
+		 */
+		const applyOperations = <T extends { id: string }>(
+			db: { books: { create: (p: T) => { runPromise: Promise<T> }; update: (id: string, p: Partial<T>) => { runPromise: Promise<T> }; delete: (id: string) => { runPromise: Promise<T> } } },
+			operations: readonly CrudOperation<T>[],
+		): Effect.Effect<void> =>
+			Effect.gen(function* () {
+				for (const operation of operations) {
+					if (operation.op === "create") {
+						yield* Effect.promise(() => db.books.create(operation.payload).runPromise);
+					} else if (operation.op === "update") {
+						yield* Effect.promise(() =>
+							db.books.update(operation.id, operation.payload).runPromise,
+						).pipe(Effect.catchAll(() => Effect.void)); // Ignore NotFoundError for updates
+					} else if (operation.op === "delete") {
+						yield* Effect.promise(() => db.books.delete(operation.id).runPromise).pipe(
+							Effect.catchAll(() => Effect.void), // Ignore NotFoundError for deletes
+						);
+					}
+				}
+			});
+
+		/**
+		 * Helper to sort entities by ID for consistent comparison.
+		 * Since the query engine may return results in different orders depending on
+		 * whether indexes are used, we sort by ID for comparison purposes.
+		 */
+		const sortById = <T extends { id: string }>(entities: readonly T[]): T[] =>
+			[...entities].sort((a, b) => a.id.localeCompare(b.id));
+
+		it("should return identical results with and without index acceleration (single-field index)", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					operationSequenceArbitrary(BookSchema, { minLength: 1, maxLength: 15 }),
+					async (operations) => {
+						// Create two databases: one with index, one without
+						const [dbWithIndex, dbWithoutIndex] = await Effect.runPromise(
+							Effect.all([
+								createEffectDatabase(configWithSingleIndex, { books: [] }),
+								createEffectDatabase(configWithoutIndexes, { books: [] }),
+							]),
+						);
+
+						// Apply the same operations to both databases
+						await Effect.runPromise(
+							Effect.all([
+								applyOperations(dbWithIndex, operations),
+								applyOperations(dbWithoutIndex, operations),
+							]),
+						);
+
+						// Collect unique genre values from the operations
+						const genreValues = new Set<string>();
+						for (const op of operations) {
+							if (op.op === "create") {
+								genreValues.add(op.payload.genre);
+							} else if (op.op === "update" && "genre" in op.payload) {
+								genreValues.add(op.payload.genre as string);
+							}
+						}
+
+						// Test queries for each genre value (these should use the index)
+						for (const genre of genreValues) {
+							const whereClause = { genre };
+
+							const [indexedResult, fullScanResult] = await Promise.all([
+								dbWithIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
+								dbWithoutIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
+							]);
+
+							// Results should have the same length
+							expect(indexedResult.length).toBe(fullScanResult.length);
+
+							// Each entity should match (same ID, same data)
+							for (let i = 0; i < indexedResult.length; i++) {
+								expect(indexedResult[i].id).toBe(fullScanResult[i].id);
+								expect(indexedResult[i].genre).toBe(fullScanResult[i].genre);
+								expect(indexedResult[i].title).toBe(fullScanResult[i].title);
+								expect(indexedResult[i].year).toBe(fullScanResult[i].year);
+							}
+						}
+
+						// Also test a query that returns all entities (empty where clause)
+						const [allIndexed, allFullScan] = await Promise.all([
+							dbWithIndex.books.query({ sort: { id: "asc" } }).runPromise,
+							dbWithoutIndex.books.query({ sort: { id: "asc" } }).runPromise,
+						]);
+
+						expect(allIndexed.length).toBe(allFullScan.length);
+						for (let i = 0; i < allIndexed.length; i++) {
+							expect(allIndexed[i].id).toBe(allFullScan[i].id);
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should return identical results with and without index acceleration (compound index)", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					operationSequenceArbitrary(BookSchema, { minLength: 1, maxLength: 15 }),
+					async (operations) => {
+						// Create two databases: one with compound index, one without
+						const [dbWithIndex, dbWithoutIndex] = await Effect.runPromise(
+							Effect.all([
+								createEffectDatabase(configWithCompoundIndex, { books: [] }),
+								createEffectDatabase(configWithoutIndexes, { books: [] }),
+							]),
+						);
+
+						// Apply the same operations to both databases
+						await Effect.runPromise(
+							Effect.all([
+								applyOperations(dbWithIndex, operations),
+								applyOperations(dbWithoutIndex, operations),
+							]),
+						);
+
+						// Collect unique (genre, year) combinations from the operations
+						const combinations = new Set<string>();
+						for (const op of operations) {
+							if (op.op === "create") {
+								combinations.add(JSON.stringify({ genre: op.payload.genre, year: op.payload.year }));
+							}
+						}
+
+						// Test queries for each (genre, year) combination (these should use the compound index)
+						for (const comboStr of combinations) {
+							const combo = JSON.parse(comboStr) as { genre: string; year: number };
+							const whereClause = { genre: combo.genre, year: combo.year };
+
+							const [indexedResult, fullScanResult] = await Promise.all([
+								dbWithIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
+								dbWithoutIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
+							]);
+
+							// Results should have the same length
+							expect(indexedResult.length).toBe(fullScanResult.length);
+
+							// Each entity should match
+							for (let i = 0; i < indexedResult.length; i++) {
+								expect(indexedResult[i].id).toBe(fullScanResult[i].id);
+								expect(indexedResult[i].genre).toBe(fullScanResult[i].genre);
+								expect(indexedResult[i].year).toBe(fullScanResult[i].year);
+							}
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should return identical results with $in operator queries", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					operationSequenceArbitrary(BookSchema, { minLength: 3, maxLength: 15 }),
+					async (operations) => {
+						// Create two databases: one with index, one without
+						const [dbWithIndex, dbWithoutIndex] = await Effect.runPromise(
+							Effect.all([
+								createEffectDatabase(configWithSingleIndex, { books: [] }),
+								createEffectDatabase(configWithoutIndexes, { books: [] }),
+							]),
+						);
+
+						// Apply the same operations to both databases
+						await Effect.runPromise(
+							Effect.all([
+								applyOperations(dbWithIndex, operations),
+								applyOperations(dbWithoutIndex, operations),
+							]),
+						);
+
+						// Collect unique genre values from the operations
+						const genreValues: string[] = [];
+						for (const op of operations) {
+							if (op.op === "create" && !genreValues.includes(op.payload.genre)) {
+								genreValues.push(op.payload.genre);
+							}
+						}
+
+						// Skip if less than 2 unique genres
+						if (genreValues.length < 2) return;
+
+						// Test $in query with multiple genre values (should use index)
+						const targetGenres = genreValues.slice(0, Math.min(3, genreValues.length));
+						const whereClause = { genre: { $in: targetGenres } };
+
+						const [indexedResult, fullScanResult] = await Promise.all([
+							dbWithIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
+							dbWithoutIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
+						]);
+
+						// Results should have the same length
+						expect(indexedResult.length).toBe(fullScanResult.length);
+
+						// Each entity should match
+						for (let i = 0; i < indexedResult.length; i++) {
+							expect(indexedResult[i].id).toBe(fullScanResult[i].id);
+							expect(targetGenres).toContain(indexedResult[i].genre);
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should return identical results when query includes additional non-indexed conditions", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					operationSequenceArbitrary(BookSchema, { minLength: 3, maxLength: 15 }),
+					async (operations) => {
+						// Create two databases: one with index, one without
+						const [dbWithIndex, dbWithoutIndex] = await Effect.runPromise(
+							Effect.all([
+								createEffectDatabase(configWithSingleIndex, { books: [] }),
+								createEffectDatabase(configWithoutIndexes, { books: [] }),
+							]),
+						);
+
+						// Apply the same operations to both databases
+						await Effect.runPromise(
+							Effect.all([
+								applyOperations(dbWithIndex, operations),
+								applyOperations(dbWithoutIndex, operations),
+							]),
+						);
+
+						// Find a genre and a year value from the operations
+						let targetGenre: string | undefined;
+						let targetYear: number | undefined;
+						for (const op of operations) {
+							if (op.op === "create") {
+								targetGenre = op.payload.genre;
+								targetYear = op.payload.year;
+								break;
+							}
+						}
+
+						if (!targetGenre || targetYear === undefined) return;
+
+						// Query with both indexed field (genre) and non-indexed condition (year)
+						// The index narrows candidates, then the filter applies the year condition
+						const whereClause = { genre: targetGenre, year: { $gte: targetYear } };
+
+						const [indexedResult, fullScanResult] = await Promise.all([
+							dbWithIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
+							dbWithoutIndex.books.query({ where: whereClause, sort: { id: "asc" } }).runPromise,
+						]);
+
+						// Results should have the same length
+						expect(indexedResult.length).toBe(fullScanResult.length);
+
+						// Each entity should match and satisfy both conditions
+						for (let i = 0; i < indexedResult.length; i++) {
+							expect(indexedResult[i].id).toBe(fullScanResult[i].id);
+							expect(indexedResult[i].genre).toBe(targetGenre);
+							expect(indexedResult[i].year).toBeGreaterThanOrEqual(targetYear);
+						}
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
 		});
 	});
 
