@@ -1741,6 +1741,107 @@ describe("Plugin System", () => {
 			expect(collections.filter((c) => c === "books").length).toBe(2);
 			expect(collections.filter((c) => c === "authors").length).toBe(1);
 		});
+
+		it("should fire global afterCreate hook for all collections", async () => {
+			// Task 14.2: Test global afterCreate hook fires for all collections
+			//
+			// We create a plugin with a global afterCreate hook that tracks
+			// which collections it was called for and the created entities.
+			// Then we create entities in multiple collections (books and authors)
+			// and verify the hook was called for BOTH collections with the correct
+			// entity data (post-creation, including ID).
+
+			// Track hook invocations
+			const hookCalls: Array<{
+				collection: string;
+				entity: Record<string, unknown>;
+			}> = [];
+
+			const globalHooksPlugin = createHooksPlugin("global-after-hooks-plugin", {
+				afterCreate: [
+					(ctx) => {
+						hookCalls.push({
+							collection: ctx.collection,
+							entity: ctx.entity as Record<string, unknown>,
+						});
+						return Effect.void;
+					},
+				],
+			});
+
+			const db = await createDatabaseWithPlugins([globalHooksPlugin]);
+
+			// Verify hook hasn't been called yet
+			expect(hookCalls.length).toBe(0);
+
+			// Create a book - should trigger global afterCreate hook for books collection
+			const book = await db.books
+				.create({
+					id: "b-after-1",
+					title: "Test Book After",
+					author: "Test Author",
+					year: 2024,
+					genre: "test",
+				})
+				.runPromise;
+
+			// Verify afterCreate hook was called for books collection
+			expect(hookCalls.length).toBe(1);
+			expect(hookCalls[0].collection).toBe("books");
+			expect(hookCalls[0].entity.id).toBe("b-after-1");
+			expect(hookCalls[0].entity.title).toBe("Test Book After");
+			expect(book.title).toBe("Test Book After");
+
+			// Create an author - should trigger global afterCreate hook for authors collection
+			const author = await db.authors
+				.create({
+					id: "a-after-1",
+					name: "New Author After",
+				})
+				.runPromise;
+
+			// Verify afterCreate hook was called for authors collection
+			expect(hookCalls.length).toBe(2);
+			expect(hookCalls[1].collection).toBe("authors");
+			expect(hookCalls[1].entity.id).toBe("a-after-1");
+			expect(hookCalls[1].entity.name).toBe("New Author After");
+			expect(author.name).toBe("New Author After");
+
+			// Create another book - should trigger afterCreate again for books
+			await db.books
+				.create({
+					id: "b-after-2",
+					title: "Another Book After",
+					author: "Another Author",
+					year: 2025,
+					genre: "fiction",
+				})
+				.runPromise;
+
+			// Verify afterCreate hook was called a third time for books
+			expect(hookCalls.length).toBe(3);
+			expect(hookCalls[2].collection).toBe("books");
+			expect(hookCalls[2].entity.id).toBe("b-after-2");
+			expect(hookCalls[2].entity.title).toBe("Another Book After");
+
+			// Verify all collections triggered the afterCreate hook
+			const collections = hookCalls.map((c) => c.collection);
+			expect(collections).toContain("books");
+			expect(collections).toContain("authors");
+			expect(collections.filter((c) => c === "books").length).toBe(2);
+			expect(collections.filter((c) => c === "authors").length).toBe(1);
+
+			// Verify the hook received the complete entity (post-creation state)
+			// The entity should include the ID and all fields
+			const bookHookCalls = hookCalls.filter((c) => c.collection === "books");
+			expect(bookHookCalls[0].entity.id).toBe("b-after-1");
+			expect(bookHookCalls[0].entity.title).toBe("Test Book After");
+			expect(bookHookCalls[0].entity.year).toBe(2024);
+
+			const authorHookCalls = hookCalls.filter((c) => c.collection === "authors");
+			expect(authorHookCalls[0].entity.id).toBe("a-after-1");
+			expect(authorHookCalls[0].entity.name).toBe("New Author After");
+		});
 	});
 
 	// ============================================================================
