@@ -69,7 +69,7 @@
 ## 10. Consumer Verification
 
 - [x] 10.1 Create a temporary project, install from the packed tarball (`npm install ./proseql-core-0.1.0.tgz`), and verify `import { createEffectDatabase } from "@proseql/core"` resolves.
-- [ ] 10.2 Verify TypeScript resolves full type information from the import (run `tsc --noEmit` in the test project).
+- [x] 10.2 Verify TypeScript resolves full type information from the import (run `tsc --noEmit` in the test project).
 - [ ] 10.3 Verify deep imports are blocked (`import { ... } from "@proseql/core/operations/crud/create"` fails to resolve).
 
 ## 11. Prepublish Safety
