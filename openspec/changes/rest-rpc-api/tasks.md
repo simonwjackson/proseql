@@ -111,7 +111,7 @@
 - [x] 11.17 Create `rest/tests/error-mapping.test.ts`: test each tagged error maps to correct HTTP status
 - [x] 11.18 Test unknown error maps to 500
 - [x] 11.19 Create `rest/tests/relationship.test.ts`: test ref relationship route returns related entity
-- [ ] 11.20 Test inverse relationship route returns related entities
+- [x] 11.20 Test inverse relationship route returns related entities
 - [ ] 11.21 Test relationship route returns 404 for missing parent
 
 ## 12. Cleanup
