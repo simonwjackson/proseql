@@ -10,7 +10,7 @@
 - [x] 2.3 Implement `whereClauseArbitrary(schema)`: inspect schema fields and types, generate valid where clauses with type-appropriate operators (`$eq`, `$gt`, `$lt`, `$in`, `$contains`, `$startsWith`, etc.), including empty where clauses
 - [x] 2.4 Implement `sortConfigArbitrary(schema)`: generate valid sort configurations by picking a field name from the schema and a direction (`asc` or `desc`)
 - [x] 2.5 Implement `operationSequenceArbitrary(schema)`: generate arrays of `{ op: "create" | "update" | "delete", payload }` objects with valid entities and IDs for update/delete referencing previously created IDs
-- [ ] 2.6 Write unit tests for the generators themselves: verify generated entities pass Schema decode, verify generated where clauses have valid structure
+- [x] 2.6 Write unit tests for the generators themselves: verify generated entities pass Schema decode, verify generated where clauses have valid structure
 
 ## 3. Schema Round-Trip Properties
 
