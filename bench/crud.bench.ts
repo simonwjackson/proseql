@@ -244,8 +244,65 @@ export async function createSuite(): Promise<Bench> {
 		}
 	});
 
-	// Benchmarks will be added in task 4.6:
-	// - 4.6: upsert benchmarks (create and update paths)
+	// -------------------------------------------------------------------------
+	// 4.6: upsert benchmarks (create and update paths)
+	// -------------------------------------------------------------------------
+
+	// Upsert benchmark (create path): upsert entities that don't exist.
+	// Each iteration upserts a new entity that doesn't exist in the collection.
+	// This measures the "create" path of upsert (when the entity is not found).
+	const upsertCreateDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	let upsertCreateCounter = 0;
+
+	bench.add("upsert (create path)", async () => {
+		// Generate a unique ID that doesn't exist in the baseline collection
+		// This ensures upsert takes the "create" path every time
+		const uniqueId = `upsert_new_${Date.now()}_${upsertCreateCounter++}`;
+
+		await upsertCreateDb.users.upsert({
+			where: { id: uniqueId },
+			create: {
+				id: uniqueId,
+				name: `Upserted User ${upsertCreateCounter}`,
+				email: `upsert_create${upsertCreateCounter}@test.com`,
+				age: 30,
+				role: "user" as const,
+				createdAt: new Date().toISOString(),
+			},
+			update: {
+				name: `Should Not Be Used ${upsertCreateCounter}`,
+			},
+		}).runPromise;
+	});
+
+	// Upsert benchmark (update path): upsert entities that already exist.
+	// Each iteration upserts an existing entity from the baseline collection.
+	// This measures the "update" path of upsert (when the entity is found).
+	const upsertUpdateDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	let upsertUpdateCounter = 0;
+
+	bench.add("upsert (update path)", async () => {
+		// Cycle through existing entity IDs to ensure upsert takes the "update" path
+		const targetIndex = upsertUpdateCounter % BASELINE_SIZE;
+		const targetId = usersArray[targetIndex].id;
+		upsertUpdateCounter++;
+
+		await upsertUpdateDb.users.upsert({
+			where: { id: targetId },
+			create: {
+				id: targetId,
+				name: `Should Not Be Used ${upsertUpdateCounter}`,
+				email: `should_not_be_used${upsertUpdateCounter}@test.com`,
+				age: 25,
+				role: "user" as const,
+				createdAt: new Date().toISOString(),
+			},
+			update: {
+				name: `Upserted Update ${upsertUpdateCounter}`,
+				age: 25 + (upsertUpdateCounter % 50),
+			},
+		}).runPromise;
+	});
 
 	return bench;
 }
