@@ -529,3 +529,114 @@ export const whereClauseArbitrary = <A, I, R>(
 		},
 	);
 };
+
+// ============================================================================
+// Sort Config Generator
+// ============================================================================
+
+/**
+ * Type representing a generated sort configuration.
+ * This maps field names to sort directions ("asc" or "desc").
+ */
+export type GeneratedSortConfig = Record<string, "asc" | "desc">;
+
+/**
+ * Sort direction options.
+ */
+const SORT_DIRECTIONS = ["asc", "desc"] as const;
+
+/**
+ * Arbitrary that generates a sort direction ("asc" or "desc").
+ */
+const sortDirectionArbitrary = (): fc.Arbitrary<"asc" | "desc"> => {
+	return fc.constantFrom(...SORT_DIRECTIONS);
+};
+
+/**
+ * Generate an arbitrary that produces valid sort configurations matching the given Effect Schema.
+ * Picks field names from the schema and assigns them sort directions ("asc" or "desc").
+ *
+ * The generator produces:
+ * - Empty sort configurations (to test "no sorting" path)
+ * - Single-field sort configurations (most common use case)
+ * - Multi-field sort configurations (for secondary sort keys)
+ *
+ * @param schema - The Effect Schema defining the entity structure
+ * @returns A fast-check Arbitrary that generates valid sort configurations
+ *
+ * @example
+ * ```ts
+ * const UserSchema = Schema.Struct({
+ *   id: Schema.String,
+ *   name: Schema.String,
+ *   age: Schema.Number,
+ *   isActive: Schema.Boolean,
+ * });
+ *
+ * const sortArb = sortConfigArbitrary(UserSchema);
+ * fc.assert(fc.property(sortArb, (sort) => {
+ *   // sort is a valid sort config object
+ *   // e.g., {}, { name: "asc" }, { age: "desc", name: "asc" }
+ *   return typeof sort === 'object';
+ * }));
+ * ```
+ */
+export const sortConfigArbitrary = <A, I, R>(
+	schema: Schema.Schema<A, I, R>,
+): fc.Arbitrary<GeneratedSortConfig> => {
+	const fields = extractFieldsFromSchema(schema);
+
+	// Extract sortable field names (all fields are sortable)
+	// Include 'id' since it's commonly used for stable sorting
+	const sortableFieldNames = fields.map((field) => field.name);
+
+	// If no sortable fields, return empty object
+	if (sortableFieldNames.length === 0) {
+		return fc.constant({});
+	}
+
+	// Build array of field name arbitraries with their direction
+	const fieldWithDirectionArbitrary = fc
+		.constantFrom(...sortableFieldNames)
+		.chain((fieldName) =>
+			sortDirectionArbitrary().map(
+				(direction) => [fieldName, direction] as const,
+			),
+		);
+
+	// Generate sort configs with 0 to N fields
+	// Weight empty configs to appear ~10% of the time, single field ~50%, multi-field ~40%
+	return fc.oneof(
+		// Empty sort config (10% weight)
+		{ weight: 1, arbitrary: fc.constant({}) },
+		// Single field sort config (50% weight)
+		{
+			weight: 5,
+			arbitrary: fieldWithDirectionArbitrary.map(([fieldName, direction]) => ({
+				[fieldName]: direction,
+			})),
+		},
+		// Multi-field sort config (40% weight)
+		{
+			weight: 4,
+			arbitrary: fc
+				.uniqueArray(fc.constantFrom(...sortableFieldNames), {
+					minLength: 2,
+					maxLength: Math.min(3, sortableFieldNames.length),
+				})
+				.chain((selectedFields) => {
+					// Generate a direction for each selected field
+					const directionArbitraries = selectedFields.map((name) =>
+						sortDirectionArbitrary().map((dir) => [name, dir] as const),
+					);
+					return fc.tuple(...directionArbitraries).map((pairs) => {
+						const result: GeneratedSortConfig = {};
+						for (const [name, direction] of pairs) {
+							result[name] = direction;
+						}
+						return result;
+					});
+				}),
+		},
+	);
+};
