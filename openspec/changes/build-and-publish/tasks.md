@@ -41,7 +41,7 @@
 
 ## 6. Per-Package package.json -- @proseql/rpc
 
-- [ ] 6.1 Apply the same field changes as core.
+- [x] 6.1 Apply the same field changes as core.
 - [ ] 6.2 Bump version from `0.0.0` to `0.1.0`.
 - [ ] 6.3 Verify `peerDependencies` includes `effect` and `@effect/rpc`.
 
