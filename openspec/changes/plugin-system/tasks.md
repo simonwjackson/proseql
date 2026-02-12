@@ -40,7 +40,7 @@
 
 ## 7. Global Lifecycle Hooks
 
-- [ ] 7.1 Create `core/plugins/plugin-hooks.ts` with `mergeGlobalHooks(globalHooks, collectionHooks)`: for each hook type (`beforeCreate`, `afterCreate`, etc.), concatenate the global hooks array before the collection hooks array. Return the merged `HooksConfig<T>`.
+- [x] 7.1 Create `core/plugins/plugin-hooks.ts` with `mergeGlobalHooks(globalHooks, collectionHooks)`: for each hook type (`beforeCreate`, `afterCreate`, etc.), concatenate the global hooks array before the collection hooks array. Return the merged `HooksConfig<T>`.
 - [ ] 7.2 In `buildCollection`, call `mergeGlobalHooks` with the plugin registry's global hooks and the collection's own hooks. Pass the merged result to CRUD operations.
 - [ ] 7.3 Handle type narrowing: global hooks are `HooksConfig<Record<string, unknown>>`, collection hooks are `HooksConfig<T>`. The merged result must be `HooksConfig<T>` with global hooks cast appropriately.
 
