@@ -8,7 +8,7 @@
 
 ## 2. Change Notification PubSub
 
-- [ ] 2.1 Create `core/reactive/change-pubsub.ts` with `createChangePubSub()`: returns `Effect.Effect<PubSub.PubSub<ChangeEvent>>` using `PubSub.unbounded()`
+- [x] 2.1 Create `core/reactive/change-pubsub.ts` with `createChangePubSub()`: returns `Effect.Effect<PubSub.PubSub<ChangeEvent>>` using `PubSub.unbounded()`
 - [ ] 2.2 Create `core/reactive/change-event.ts` with factory functions: `createChangeEvent(collection, operation)`, `reloadEvent(collection)`
 
 ## 3. Watch Implementation
