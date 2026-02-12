@@ -9,22 +9,16 @@
 
 import { Effect, PubSub, Ref, Stream } from "effect";
 import type { ChangeEvent } from "../types/reactive-types.js";
-import { applyFilter } from "../operations/query/filter-stream.js";
-import { applySort } from "../operations/query/sort-stream.js";
-import { applySelect } from "../operations/query/select-stream.js";
-import { applyPagination } from "../operations/query/paginate-stream.js";
+import {
+	evaluateQuery,
+	type EvaluateQueryConfig,
+} from "./evaluate-query.js";
 
 /**
  * Configuration for the watch query.
- * Mirrors the subset of QueryConfig that applies to reactive queries.
+ * Re-exports EvaluateQueryConfig for backward compatibility.
  */
-export interface WatchQueryConfig {
-	readonly where?: Record<string, unknown>;
-	readonly sort?: Record<string, "asc" | "desc">;
-	readonly select?: Record<string, unknown> | ReadonlyArray<string>;
-	readonly limit?: number;
-	readonly offset?: number;
-}
+export type WatchQueryConfig = EvaluateQueryConfig;
 
 /**
  * Entity constraint: must have a readonly string `id` field.
@@ -54,38 +48,6 @@ const resultsAreEqual = <T>(
 	// Compare by serialization for deep structural equality
 	return JSON.stringify(a) === JSON.stringify(b);
 };
-
-/**
- * Evaluates a query against the current state in the Ref.
- *
- * Reads all entities from the Ref, applies the query pipeline (filter, sort, select, paginate),
- * and returns the result as a ReadonlyArray.
- *
- * @param ref - The collection Ref containing entities keyed by ID
- * @param config - Query configuration (where, sort, select, limit, offset)
- * @returns Effect producing the query result as a ReadonlyArray
- */
-const evaluateQuery = <T extends HasId>(
-	ref: Ref.Ref<ReadonlyMap<string, T>>,
-	config: WatchQueryConfig = {},
-): Effect.Effect<ReadonlyArray<T>> =>
-	Effect.gen(function* () {
-		// Read current state from Ref
-		const map = yield* Ref.get(ref);
-		const entities = Array.from(map.values());
-
-		// Build and execute the query pipeline
-		const stream = Stream.fromIterable(entities).pipe(
-			applyFilter(config.where),
-			applySort(config.sort),
-			applyPagination(config.offset, config.limit),
-			applySelect(config.select),
-		);
-
-		// Collect results into an array
-		const chunk = yield* Stream.runCollect(stream);
-		return Array.from(chunk) as ReadonlyArray<T>;
-	});
 
 /**
  * Creates a reactive watch stream that emits query results whenever the collection changes.
