@@ -26,6 +26,7 @@ import {
 	QueryPayloadSchema,
 	CreatePayloadSchema,
 	UpdatePayloadSchema,
+	DeletePayloadSchema,
 } from "./rpc-schemas.js";
 
 // ============================================================================
@@ -141,6 +142,11 @@ const UpdateErrorUnionSchema = Schema.Union(
 	UniqueConstraintErrorSchema,
 	HookErrorSchema,
 );
+
+/**
+ * Union schema for delete errors (NotFoundError | HookError).
+ */
+const DeleteErrorUnionSchema = Schema.Union(NotFoundErrorSchema, HookErrorSchema);
 
 /**
  * Creates a Query TaggedRequest class for a collection.
@@ -412,6 +418,89 @@ export type UpdateRequestClass<
 	};
 };
 
+/**
+ * Creates a Delete TaggedRequest class for a collection.
+ *
+ * The returned class extends Schema.TaggedRequest and can be used to:
+ * 1. Create request instances: new DeleteRequest({ id: "123" })
+ * 2. Define RPC handlers: Rpc.effect(DeleteRequest, (req) => ...)
+ * 3. Build RPC routers: RpcRouter.make(deleteRpc, ...)
+ *
+ * @param collectionName - The name of the collection (used as the request _tag prefix)
+ * @param entitySchema - The Effect Schema for the collection's entities
+ * @returns A TaggedRequest class for delete operations
+ *
+ * @example
+ * ```ts
+ * const BookSchema = Schema.Struct({
+ *   id: Schema.String,
+ *   title: Schema.String,
+ * })
+ *
+ * const DeleteRequest = makeDeleteRequest("books", BookSchema)
+ * // _tag: "books.delete"
+ * // payload: { id: string }
+ * // success: Book
+ * // failure: NotFoundError | HookError
+ * ```
+ */
+export function makeDeleteRequest<
+	CollectionName extends string,
+	EntitySchema extends Schema.Schema.Any,
+>(
+	collectionName: CollectionName,
+	entitySchema: EntitySchema,
+): DeleteRequestClass<CollectionName, EntitySchema> {
+	// Create a TaggedRequest class dynamically
+	// The class extends Schema.TaggedRequest with the collection-specific tag
+	const RequestClass = class DeleteRequest extends Schema.TaggedRequest<DeleteRequest>()(
+		`${collectionName}.delete` as `${CollectionName}.delete`,
+		{
+			failure: DeleteErrorUnionSchema,
+			success: entitySchema,
+			payload: {
+				id: DeletePayloadSchema.fields.id,
+			},
+		},
+	) {};
+
+	return RequestClass as unknown as DeleteRequestClass<
+		CollectionName,
+		EntitySchema
+	>;
+}
+
+/**
+ * Type for a Delete TaggedRequest class.
+ * This is the class type returned by makeDeleteRequest.
+ */
+export type DeleteRequestClass<
+	CollectionName extends string,
+	EntitySchema extends Schema.Schema.Any,
+> = {
+	/**
+	 * The request _tag (e.g., "books.delete")
+	 */
+	readonly _tag: `${CollectionName}.delete`;
+	/**
+	 * The success schema (entity type)
+	 */
+	readonly success: EntitySchema;
+	/**
+	 * The failure schema (NotFoundError | HookError)
+	 */
+	readonly failure: typeof DeleteErrorUnionSchema;
+	/**
+	 * Create a new request instance
+	 */
+	new (props: {
+		readonly id: typeof DeletePayloadSchema.Type.id;
+	}): Schema.TaggedRequest.Any & {
+		readonly _tag: `${CollectionName}.delete`;
+		readonly id: typeof DeletePayloadSchema.Type.id;
+	};
+};
+
 // ============================================================================
 // Collection RPC Definitions
 // ============================================================================
@@ -444,6 +533,11 @@ export interface CollectionRpcDefinitions<
 	 * Use with Rpc.effect() to create an RPC handler.
 	 */
 	readonly UpdateRequest: UpdateRequestClass<CollectionName, EntitySchema>;
+	/**
+	 * TaggedRequest class for delete operations.
+	 * Use with Rpc.effect() to create an RPC handler.
+	 */
+	readonly DeleteRequest: DeleteRequestClass<CollectionName, EntitySchema>;
 	/** The collection name */
 	readonly collectionName: CollectionName;
 	/** The entity schema for this collection */
@@ -471,12 +565,14 @@ export function makeCollectionRpcs<
 	const QueryRequest = makeQueryRequest(collectionName, entitySchema);
 	const CreateRequest = makeCreateRequest(collectionName, entitySchema);
 	const UpdateRequest = makeUpdateRequest(collectionName, entitySchema);
+	const DeleteRequest = makeDeleteRequest(collectionName, entitySchema);
 
 	return {
 		FindByIdRequest,
 		QueryRequest,
 		CreateRequest,
 		UpdateRequest,
+		DeleteRequest,
 		collectionName,
 		entitySchema,
 	};
@@ -495,9 +591,9 @@ export function makeCollectionRpcs<
  * - query: Query entities with filtering, sorting, pagination
  * - create: Create a new entity
  * - update: Update an existing entity by ID
+ * - delete: Delete an entity by ID
  *
- * Additional procedures (delete, aggregate, batch ops)
- * will be added in subsequent tasks.
+ * Additional procedures (aggregate, batch ops) will be added in subsequent tasks.
  *
  * @param config - The database configuration
  * @returns A mapping of collection names to their RPC definitions
@@ -531,8 +627,12 @@ export function makeCollectionRpcs<
  *   db.books.update(req.id, req.updates)
  * )
  *
+ * const deleteBook = Rpc.effect(rpcs.books.DeleteRequest, (req) =>
+ *   db.books.delete(req.id)
+ * )
+ *
  * // Build a router
- * const router = RpcRouter.make(findBookById, queryBooks, createBook, updateBook)
+ * const router = RpcRouter.make(findBookById, queryBooks, createBook, updateBook, deleteBook)
  * ```
  */
 export function makeRpcGroup<Config extends DatabaseConfig>(
