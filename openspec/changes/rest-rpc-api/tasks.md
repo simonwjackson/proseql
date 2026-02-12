@@ -83,7 +83,7 @@
 - [x] 10.5 Test query handler returns filtered results
 - [x] 10.6 Test create handler returns created entity
 - [x] 10.7 Test create handler returns typed ValidationError for invalid data
-- [ ] 10.8 Test update handler returns updated entity
+- [x] 10.8 Test update handler returns updated entity
 - [ ] 10.9 Test delete handler returns deleted entity
 - [ ] 10.10 Test aggregate handler returns correct scalar result
 - [ ] 10.11 Test batch handlers (createMany, deleteMany) work correctly
