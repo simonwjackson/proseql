@@ -13,6 +13,7 @@ import {
 	ConfigLoadError,
 	ConfigValidationError,
 } from "./config/loader.js"
+import { handleInit as handleInitCommand } from "./commands/init.js"
 
 const VERSION = "0.1.0"
 
@@ -294,9 +295,11 @@ async function resolveConfig(
 /**
  * Placeholder for command handlers (to be implemented in separate files)
  */
-async function handleInit(_args: ParsedArgs): Promise<void> {
+async function handleInit(args: ParsedArgs): Promise<void> {
   // init does not need config - it creates one
-  console.log("init command - not yet implemented")
+  await handleInitCommand({
+    format: args.flags.format,
+  })
 }
 
 async function handleQuery(

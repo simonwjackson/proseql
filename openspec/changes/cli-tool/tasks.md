@@ -14,7 +14,7 @@
 
 ## 3. Init Command
 
-- [ ] 3.1 Create `packages/cli/src/commands/init.ts`: check for existing config in cwd, abort with warning if found
+- [x] 3.1 Create `packages/cli/src/commands/init.ts`: check for existing config in cwd, abort with warning if found
 - [ ] 3.2 Scaffold `proseql.config.ts` with an example collection definition
 - [ ] 3.3 Create `data/` directory with an example data file in the chosen format (default JSON, override with `--format`)
 - [ ] 3.4 Detect `.git` directory and append data directory to `.gitignore` if appropriate
