@@ -5,7 +5,7 @@
  * and typed errors (ValidationError, DuplicateKeyError, ForeignKeyError).
  */
 
-import { Effect, Ref, type Schema } from "effect";
+import { Effect, PubSub, Ref, type Schema } from "effect";
 import {
 	DuplicateKeyError,
 	type ForeignKeyError,
@@ -29,6 +29,7 @@ import type {
 } from "../../types/crud-types.js";
 import type { HooksConfig } from "../../types/hook-types.js";
 import type { CollectionIndexes } from "../../types/index-types.js";
+import type { ChangeEvent } from "../../types/reactive-types.js";
 import type { SearchIndexMap } from "../../types/search-types.js";
 import { generateId } from "../../utils/id-generator.js";
 import { validateForeignKeysEffect } from "../../validators/foreign-key.js";
@@ -112,6 +113,7 @@ export const create =
 		searchIndexFields?: ReadonlyArray<string>,
 		idGeneratorName?: string,
 		idGeneratorMap?: Map<string, CustomIdGenerator>,
+		changePubSub?: PubSub.PubSub<ChangeEvent>,
 	) =>
 	(
 		input: CreateInput<T>,
@@ -223,6 +225,14 @@ export const create =
 				collection: collectionName,
 				entity,
 			});
+
+			// Publish change event to reactive subscribers
+			if (changePubSub) {
+				yield* PubSub.publish(changePubSub, {
+					collection: collectionName,
+					operation: "create",
+				});
+			}
 
 			return entity;
 		});
