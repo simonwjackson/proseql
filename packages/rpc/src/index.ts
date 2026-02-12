@@ -137,17 +137,38 @@ export {
 // ============================================================================
 
 export {
+	// Main entry point
 	makeRpcGroup,
+	makeCollectionRpcs,
+	RpcRouter,
+	// Request factory functions
 	makeFindByIdRequest,
 	makeQueryRequest,
 	makeQueryStreamRequest,
-	makeCollectionRpcs,
-	RpcRouter,
+	makeCreateRequest,
+	makeUpdateRequest,
+	makeDeleteRequest,
+	makeAggregateRequest,
+	makeCreateManyRequest,
+	makeUpdateManyRequest,
+	makeDeleteManyRequest,
+	makeUpsertRequest,
+	makeUpsertManyRequest,
+	// Type exports
 	type RpcGroupFromConfig,
 	type CollectionRpcDefinitions,
 	type FindByIdRequestClass,
 	type QueryRequestClass,
 	type QueryStreamRequestClass,
+	type CreateRequestClass,
+	type UpdateRequestClass,
+	type DeleteRequestClass,
+	type AggregateRequestClass,
+	type CreateManyRequestClass,
+	type UpdateManyRequestClass,
+	type DeleteManyRequestClass,
+	type UpsertRequestClass,
+	type UpsertManyRequestClass,
 } from "./rpc-group.js";
 
 // ============================================================================

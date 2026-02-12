@@ -116,7 +116,7 @@
 
 ## 12. Cleanup
 
-- [ ] 12.1 Update `rpc/src/index.ts` to re-export all public API: `makeRpcGroup`, `makeRpcHandlers`, error schemas, payload schemas
+- [x] 12.1 Update `rpc/src/index.ts` to re-export all public API: `makeRpcGroup`, `makeRpcHandlers`, error schemas, payload schemas
 - [ ] 12.2 Update `rest/src/index.ts` to re-export all public API: `createRestHandlers`, `parseQueryParams`, `mapErrorToResponse`
 - [ ] 12.3 Run full test suite (`bun test`) to verify no regressions in core
 - [ ] 12.4 Run type check (`bunx tsc --build`) to verify no type errors across all packages
