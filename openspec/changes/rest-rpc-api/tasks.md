@@ -80,7 +80,7 @@
 - [x] 10.2 Test multi-collection config produces namespaced procedures for each collection
 - [x] 10.3 Create `rpc/tests/rpc-handlers.test.ts`: test findById handler returns entity for valid id
 - [x] 10.4 Test findById handler returns typed NotFoundError for missing id
-- [ ] 10.5 Test query handler returns filtered results
+- [x] 10.5 Test query handler returns filtered results
 - [ ] 10.6 Test create handler returns created entity
 - [ ] 10.7 Test create handler returns typed ValidationError for invalid data
 - [ ] 10.8 Test update handler returns updated entity
