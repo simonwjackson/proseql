@@ -129,6 +129,37 @@ describe("makeRpcHandlers", () => {
 			}
 		});
 
+		it("findById should return typed NotFoundError that can be caught with Effect.catchTag", async () => {
+			const handlers = await Effect.runPromise(
+				makeRpcHandlers(singleCollectionConfig, {
+					books: initialBooks,
+				}),
+			);
+
+			// Use Effect.catchTag to verify the error is properly typed
+			// This demonstrates that the error type flows through correctly
+			const result = await Effect.runPromise(
+				handlers.books.findById({ id: "nonexistent" }).pipe(
+					Effect.catchTag("NotFoundError", (error) =>
+						// The error is typed - we can access its fields
+						Effect.succeed({
+							caught: true,
+							errorTag: error._tag,
+							errorCollection: error.collection,
+							errorId: error.id,
+						}),
+					),
+				),
+			);
+
+			expect(result).toEqual({
+				caught: true,
+				errorTag: "NotFoundError",
+				errorCollection: "books",
+				errorId: "nonexistent",
+			});
+		});
+
 		it("create should add a new entity", async () => {
 			const handlers = await Effect.runPromise(
 				makeRpcHandlers(singleCollectionConfig, {
