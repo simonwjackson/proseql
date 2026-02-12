@@ -404,3 +404,104 @@ describe("REST handlers — GET collection with query params (task 11.8)", () =>
 		expect(books[0].author).toBe("Frank Herbert");
 	});
 });
+
+// ============================================================================
+// Task 11.9: Test GET by id returns correct entity
+// ============================================================================
+
+describe("REST handlers — GET by id (task 11.9)", () => {
+	it("should return correct entity when id exists", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBookById = findRoute(routes, "GET", "/books/:id");
+		expect(getBookById).toBeDefined();
+
+		const request = createRequest({ params: { id: "1" } });
+		const response = await getBookById!.handler(request);
+
+		expect(response.status).toBe(200);
+		const book = response.body as { id: string; title: string; author: string; year: number; genre: string };
+		expect(book.id).toBe("1");
+		expect(book.title).toBe("Dune");
+		expect(book.author).toBe("Frank Herbert");
+		expect(book.year).toBe(1965);
+		expect(book.genre).toBe("sci-fi");
+	});
+
+	it("should return all entity fields in response", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBookById = findRoute(routes, "GET", "/books/:id");
+		const request = createRequest({ params: { id: "2" } });
+		const response = await getBookById!.handler(request);
+
+		expect(response.status).toBe(200);
+		const book = response.body as Record<string, unknown>;
+		expect(book).toHaveProperty("id");
+		expect(book).toHaveProperty("title");
+		expect(book).toHaveProperty("author");
+		expect(book).toHaveProperty("year");
+		expect(book).toHaveProperty("genre");
+		expect(book.id).toBe("2");
+		expect(book.title).toBe("Neuromancer");
+	});
+
+	it("should work with different collections", async () => {
+		const multiConfig = {
+			books: { schema: BookSchema, relationships: {} },
+			authors: {
+				schema: Schema.Struct({ id: Schema.String, name: Schema.String }),
+				relationships: {},
+			},
+		} as const;
+
+		const db = await Effect.runPromise(
+			createEffectDatabase(multiConfig, {
+				books: initialBooks,
+				authors: [{ id: "a1", name: "Frank Herbert" }],
+			}),
+		);
+		const routes = createRestHandlers(multiConfig, db);
+
+		// Test books endpoint
+		const getBooksById = findRoute(routes, "GET", "/books/:id");
+		const bookRequest = createRequest({ params: { id: "1" } });
+		const bookResponse = await getBooksById!.handler(bookRequest);
+		expect(bookResponse.status).toBe(200);
+		expect((bookResponse.body as { title: string }).title).toBe("Dune");
+
+		// Test authors endpoint
+		const getAuthorsById = findRoute(routes, "GET", "/authors/:id");
+		const authorRequest = createRequest({ params: { id: "a1" } });
+		const authorResponse = await getAuthorsById!.handler(authorRequest);
+		expect(authorResponse.status).toBe(200);
+		expect((authorResponse.body as { name: string }).name).toBe("Frank Herbert");
+	});
+
+	it("should return different entities for different ids", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const getBookById = findRoute(routes, "GET", "/books/:id");
+
+		// Request for id "1"
+		const request1 = createRequest({ params: { id: "1" } });
+		const response1 = await getBookById!.handler(request1);
+		expect(response1.status).toBe(200);
+		expect((response1.body as { title: string }).title).toBe("Dune");
+
+		// Request for id "2"
+		const request2 = createRequest({ params: { id: "2" } });
+		const response2 = await getBookById!.handler(request2);
+		expect(response2.status).toBe(200);
+		expect((response2.body as { title: string }).title).toBe("Neuromancer");
+
+		// Request for id "3"
+		const request3 = createRequest({ params: { id: "3" } });
+		const response3 = await getBookById!.handler(request3);
+		expect(response3.status).toBe(200);
+		expect((response3.body as { title: string }).title).toBe("The Left Hand of Darkness");
+	});
+});

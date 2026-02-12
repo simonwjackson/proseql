@@ -100,7 +100,7 @@
 - [x] 11.6 Test type coercion (numbers, booleans)
 - [x] 11.7 Create `rest/tests/handlers.test.ts`: test GET collection returns all entities
 - [x] 11.8 Test GET collection with query params returns filtered results
-- [ ] 11.9 Test GET by id returns correct entity
+- [x] 11.9 Test GET by id returns correct entity
 - [ ] 11.10 Test GET by id for missing entity returns 404
 - [ ] 11.11 Test POST creates entity and returns 201
 - [ ] 11.12 Test POST with invalid data returns 400
