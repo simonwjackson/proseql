@@ -2949,3 +2949,360 @@ describe("reactive queries - file changes", () => {
 		});
 	});
 });
+
+// ============================================================================
+// Tests - Debounce (17.1 - 17.2)
+// ============================================================================
+
+describe("reactive queries - debounce", () => {
+	describe("rapid mutations produce at most one emission (17.1)", () => {
+		it("50 creates in a loop produce at most one emission after debounce settles", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch all books sorted by year
+					const stream = yield* db.books.watch({
+						sort: { year: "asc" },
+					});
+
+					// Track all emissions received
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork collection with a timeout
+					const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "500 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission to be processed
+					yield* Effect.sleep("30 millis");
+
+					// Perform 50 rapid creates in a loop
+					for (let i = 0; i < 50; i++) {
+						yield* db.books.create({
+							title: `Book ${i}`,
+							author: `Author ${i}`,
+							year: 2000 + i,
+							genre: "sci-fi",
+						});
+					}
+
+					// Wait for debounce to settle and any emissions to occur
+					// Default debounce is 10ms, so 100ms should be plenty
+					yield* Effect.sleep("200 millis");
+
+					// Interrupt the fiber
+					yield* Fiber.interrupt(collectedFiber);
+
+					// Should have exactly 2 emissions:
+					// 1. Initial emission (3 books from testBooks)
+					// 2. ONE emission after debounce settles with all 53 books
+					// NOT 50+ emissions (one per create)
+					expect(emissions).toHaveLength(2);
+
+					// Initial emission: 3 books from testBooks (The Hobbit 1937, Dune 1965, Neuromancer 1984)
+					expect(emissions[0]).toHaveLength(3);
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"The Hobbit",
+						"Dune",
+						"Neuromancer",
+					]);
+
+					// After debounce: 53 books total (3 original + 50 created)
+					expect(emissions[1]).toHaveLength(53);
+					// Verify some of the new books are present
+					expect(emissions[1].some((b) => b.title === "Book 0")).toBe(true);
+					expect(emissions[1].some((b) => b.title === "Book 49")).toBe(true);
+				}),
+			);
+		});
+
+		it("rapid updates to the same entity produce at most one emission", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Track all emissions received
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork collection with a timeout
+					const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "500 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+
+					// Rapidly update the same entity 50 times
+					for (let i = 0; i < 50; i++) {
+						yield* db.books.update("1", { year: 1965 + i });
+					}
+
+					// Wait for debounce to settle
+					yield* Effect.sleep("200 millis");
+
+					// Interrupt the fiber
+					yield* Fiber.interrupt(collectedFiber);
+
+					// Should have exactly 2 emissions: initial + one after debounce
+					expect(emissions).toHaveLength(2);
+
+					// Initial: Dune 1965, Neuromancer 1984
+					expect(emissions[0]).toHaveLength(2);
+					expect(emissions[0][0].year).toBe(1965); // Dune
+
+					// After debounce: Dune's year should be final value (1965 + 49 = 2014)
+					// Note: Since we're updating to 2014, the order might change
+					// Neuromancer (1984) is now first, Dune (2014) is now second
+					expect(emissions[1]).toHaveLength(2);
+					const dune = emissions[1].find((b) => b.id === "1");
+					expect(dune?.year).toBe(2014);
+				}),
+			);
+		});
+
+		it("mixed rapid operations (create, update, delete) produce at most one emission", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Track all emissions
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork collection with a timeout
+					const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "500 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+
+					// Perform rapid mixed operations
+					for (let i = 0; i < 20; i++) {
+						// Create a new sci-fi book
+						yield* db.books.create({
+							title: `New Book ${i}`,
+							author: `New Author ${i}`,
+							year: 2000 + i,
+							genre: "sci-fi",
+						});
+
+						// Update an existing book's year
+						yield* db.books.update("1", { year: 1960 + i });
+					}
+
+					// Delete the original Neuromancer (id: "2")
+					yield* db.books.delete("2");
+
+					// Wait for debounce to settle
+					yield* Effect.sleep("200 millis");
+
+					// Interrupt the fiber
+					yield* Fiber.interrupt(collectedFiber);
+
+					// Should have exactly 2 emissions: initial + one after debounce
+					expect(emissions).toHaveLength(2);
+
+					// Initial: 2 sci-fi books
+					expect(emissions[0]).toHaveLength(2);
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+					]);
+
+					// After debounce:
+					// - Dune's year is now 1979 (1960 + 19 = final update)
+					// - Neuromancer is deleted
+					// - 20 new sci-fi books added
+					// Total: 1 (Dune) + 20 (new) = 21 books
+					expect(emissions[1]).toHaveLength(21);
+
+					// Verify Neuromancer is gone
+					expect(
+						emissions[1].find((b) => b.id === "2"),
+					).toBeUndefined();
+
+					// Verify Dune has the final year
+					const dune = emissions[1].find((b) => b.id === "1");
+					expect(dune?.year).toBe(1979);
+
+					// Verify new books are present
+					expect(emissions[1].some((b) => b.title === "New Book 0")).toBe(true);
+					expect(emissions[1].some((b) => b.title === "New Book 19")).toBe(true);
+				}),
+			);
+		});
+
+		it("createMany with many entities produces one emission after debounce", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch all books
+					const stream = yield* db.books.watch({
+						sort: { year: "asc" },
+					});
+
+					// Track all emissions
+					const emissions: Array<ReadonlyArray<Book>> = [];
+
+					// Fork collection with a timeout
+					const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
+						Effect.sync(() => {
+							emissions.push(emission);
+						}),
+					).pipe(
+						Effect.timeoutFail({
+							duration: "500 millis",
+							onTimeout: () => new Error("timeout"),
+						}),
+						Effect.catchAll(() => Effect.void),
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("30 millis");
+
+					// Create 100 books in one batch
+					const newBooks = Array.from({ length: 100 }, (_, i) => ({
+						title: `Batch Book ${i}`,
+						author: `Batch Author ${i}`,
+						year: 2100 + i,
+						genre: "sci-fi",
+					}));
+					yield* db.books.createMany(newBooks);
+
+					// Wait for debounce to settle
+					yield* Effect.sleep("200 millis");
+
+					// Interrupt the fiber
+					yield* Fiber.interrupt(collectedFiber);
+
+					// Should have exactly 2 emissions: initial + one after createMany
+					expect(emissions).toHaveLength(2);
+
+					// Initial: 3 books
+					expect(emissions[0]).toHaveLength(3);
+
+					// After createMany: 103 books total
+					expect(emissions[1]).toHaveLength(103);
+				}),
+			);
+		});
+
+		it("deleteMany with many entities produces one emission after debounce", async () => {
+			// First create many books, then delete them
+			const manyBooksConfig = {
+				books: {
+					schema: BookSchema,
+					relationships: {},
+				},
+				authors: {
+					schema: AuthorSchema,
+					relationships: {},
+				},
+			} as const;
+
+			// Create a lot of initial books
+			const manyBooks: ReadonlyArray<Book> = Array.from(
+				{ length: 100 },
+				(_, i) => ({
+					id: `book-${i}`,
+					title: `Book ${i}`,
+					author: `Author ${i}`,
+					year: 2000 + i,
+					genre: "sci-fi",
+				}),
+			);
+
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* createEffectDatabase(manyBooksConfig, {
+							books: manyBooks,
+							authors: [],
+						});
+
+						// Watch all books
+						const stream = yield* db.books.watch({
+							sort: { year: "asc" },
+						});
+
+						// Track all emissions
+						const emissions: Array<ReadonlyArray<Book>> = [];
+
+						// Fork collection with a timeout
+						const collectedFiber = yield* Stream.runForEach(
+							stream,
+							(emission) =>
+								Effect.sync(() => {
+									emissions.push(emission);
+								}),
+						).pipe(
+							Effect.timeoutFail({
+								duration: "500 millis",
+								onTimeout: () => new Error("timeout"),
+							}),
+							Effect.catchAll(() => Effect.void),
+							Effect.fork,
+						);
+
+						// Wait for initial emission
+						yield* Effect.sleep("30 millis");
+
+						// Delete 50 books using deleteMany with a predicate
+						yield* db.books.deleteMany((book: Book) => book.year < 2050);
+
+						// Wait for debounce to settle
+						yield* Effect.sleep("200 millis");
+
+						// Interrupt the fiber
+						yield* Fiber.interrupt(collectedFiber);
+
+						// Should have exactly 2 emissions: initial + one after deleteMany
+						expect(emissions).toHaveLength(2);
+
+						// Initial: 100 books
+						expect(emissions[0]).toHaveLength(100);
+
+						// After deleteMany: 50 books (years 2050-2099)
+						expect(emissions[1]).toHaveLength(50);
+						// All remaining books should have year >= 2050
+						expect(emissions[1].every((b) => b.year >= 2050)).toBe(true);
+					}),
+				),
+			);
+		});
+	});
+});

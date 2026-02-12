@@ -102,7 +102,7 @@
 
 ## 17. Tests — Debounce
 
-- [ ] 17.1 Test rapid mutations (e.g., 50 creates in a loop) produce at most one emission after debounce settles
+- [x] 17.1 Test rapid mutations (e.g., 50 creates in a loop) produce at most one emission after debounce settles
 - [ ] 17.2 Test configurable debounce interval is respected
 
 ## 18. Tests — Unsubscribe and Cleanup
