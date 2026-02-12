@@ -2,6 +2,7 @@ import { Stream } from "effect";
 import type { CustomOperator } from "../../plugins/plugin-types.js";
 import { isFilterOperatorObject, matchesFilter } from "../../types/operators.js";
 import type { SearchConfig } from "../../types/search-types.js";
+import { getNestedValue, isDotPath } from "../../utils/nested-path.js";
 import { tokenize } from "./search.js";
 
 /**
@@ -108,6 +109,12 @@ function matchesWhere<T extends Record<string, unknown>>(
 					return false;
 				}
 			} else if (!matchesFilter(itemValue, value, customOperators)) {
+				return false;
+			}
+		} else if (isDotPath(key)) {
+			// Dot-notation fallback: resolve nested value via path
+			const resolvedValue = getNestedValue(item, key);
+			if (!matchesFilter(resolvedValue, value, customOperators)) {
 				return false;
 			}
 		} else {
