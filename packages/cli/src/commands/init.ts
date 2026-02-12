@@ -18,6 +18,101 @@ const CONFIG_FILE_NAMES = [
 // Default config file name to create
 const DEFAULT_CONFIG_FILE = "proseql.config.ts"
 
+// Supported data file formats
+type DataFormat = "json" | "yaml" | "toml"
+
+// Map format to file extension
+const FORMAT_EXTENSIONS: Record<DataFormat, string> = {
+	json: "json",
+	yaml: "yaml",
+	toml: "toml",
+}
+
+/**
+ * Generate example note data for initial setup.
+ * Creates a realistic sample to help users understand the data structure.
+ */
+function generateExampleData(): readonly Record<string, unknown>[] {
+	const now = new Date().toISOString()
+	return [
+		{
+			id: "note_001",
+			title: "Welcome to ProseQL",
+			content:
+				"This is your first note. ProseQL stores your data in plain text files that you can read, edit, and version control.",
+			createdAt: now,
+			updatedAt: now,
+		},
+		{
+			id: "note_002",
+			title: "Getting Started",
+			content:
+				"Try running 'proseql query notes' to see your data, or 'proseql create notes --data '{...}'' to add new entries.",
+			createdAt: now,
+			updatedAt: now,
+		},
+	] as const
+}
+
+/**
+ * Serialize data to JSON format.
+ */
+function serializeJson(data: readonly Record<string, unknown>[]): string {
+	return JSON.stringify(data, null, 2)
+}
+
+/**
+ * Serialize data to YAML format.
+ * Simple implementation without external dependencies for the CLI.
+ */
+function serializeYaml(data: readonly Record<string, unknown>[]): string {
+	const lines: string[] = []
+	for (const item of data) {
+		lines.push("-")
+		for (const [key, value] of Object.entries(item)) {
+			const stringValue =
+				typeof value === "string" ? `"${value.replace(/"/g, '\\"')}"` : String(value)
+			lines.push(`  ${key}: ${stringValue}`)
+		}
+	}
+	return lines.join("\n") + "\n"
+}
+
+/**
+ * Serialize data to TOML format.
+ * TOML uses [[array]] syntax for arrays of tables.
+ */
+function serializeToml(data: readonly Record<string, unknown>[]): string {
+	const lines: string[] = []
+	for (const item of data) {
+		lines.push("[[notes]]")
+		for (const [key, value] of Object.entries(item)) {
+			const stringValue =
+				typeof value === "string" ? `"${value.replace(/"/g, '\\"')}"` : String(value)
+			lines.push(`${key} = ${stringValue}`)
+		}
+		lines.push("")
+	}
+	return lines.join("\n")
+}
+
+/**
+ * Serialize example data to the specified format.
+ */
+function serializeExampleData(
+	data: readonly Record<string, unknown>[],
+	format: DataFormat,
+): string {
+	switch (format) {
+		case "json":
+			return serializeJson(data)
+		case "yaml":
+			return serializeYaml(data)
+		case "toml":
+			return serializeToml(data)
+	}
+}
+
 /**
  * Generate the content for proseql.config.ts with an example collection.
  * The generated config includes a "notes" collection as a simple starting point.
@@ -141,8 +236,32 @@ export function runInit(options: InitOptions = {}): InitResult {
 		}
 	}
 
+	// Task 3.3: Create data/ directory with example data file
+	const dataDir = path.join(cwd, "data")
+	const extension = FORMAT_EXTENSIONS[format as DataFormat]
+	const dataFilePath = path.join(dataDir, `notes.${extension}`)
+
+	try {
+		// Create data directory if it doesn't exist
+		if (!fs.existsSync(dataDir)) {
+			fs.mkdirSync(dataDir, { recursive: true })
+		}
+		createdFiles.push("data/")
+
+		// Generate and write example data file
+		const exampleData = generateExampleData()
+		const dataContent = serializeExampleData(exampleData, format as DataFormat)
+		fs.writeFileSync(dataFilePath, dataContent, "utf-8")
+		createdFiles.push(`data/notes.${extension}`)
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		return {
+			success: false,
+			message: `Failed to create data directory or file: ${message}`,
+		}
+	}
+
 	// TODO: Subsequent tasks will implement:
-	// - 3.3: Create data/ directory with example data file
 	// - 3.4: Detect .git and update .gitignore
 	// - 3.5: Print summary of created files
 
