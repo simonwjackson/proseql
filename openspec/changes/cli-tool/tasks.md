@@ -74,7 +74,7 @@
 - [x] 10.7 Create `packages/cli/tests/commands/crud.test.ts`: test create with `--data`, update with `--set`, delete with `--force`, delete confirmation prompt
 - [x] 10.8 Create `packages/cli/tests/commands/migrate.test.ts`: test status display, dry-run output, migration execution
 - [x] 10.9 Create `packages/cli/tests/commands/convert.test.ts`: test format conversion writes correct file, updates config, removes old file
-- [ ] 10.10 Create `packages/cli/tests/commands/inspect.test.ts`: test collections listing, describe output, stats output
+- [x] 10.10 Create `packages/cli/tests/commands/inspect.test.ts`: test collections listing, describe output, stats output
 
 ## 11. Cleanup
 
