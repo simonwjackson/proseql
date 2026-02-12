@@ -1,8 +1,45 @@
 {
   "name": "@proseql/rest",
   "version": "0.0.0",
+  "description": "REST API handlers for ProseQL databases, framework-agnostic",
   "type": "module",
-  "main": "src/index.ts",
+  "scripts": {
+    "build": "bunx tsc --build",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "bun run build && bun test"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simonwjackson/proseql.git",
+    "directory": "packages/rest"
+  },
+  "keywords": [
+    "database",
+    "typescript",
+    "effect",
+    "rest",
+    "api",
+    "plain-text",
+    "type-safe"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
   "dependencies": {
     "@proseql/core": "workspace:*"
   },
