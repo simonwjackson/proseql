@@ -18,7 +18,7 @@
 - [x] 3.2 Add `"types": "dist/index.d.ts"`.
 - [x] 3.3 Add `"exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } }`.
 - [x] 3.4 Add `"files": ["dist", "LICENSE", "README.md"]`.
-- [ ] 3.5 Add `"license": "MIT"`.
+- [x] 3.5 Add `"license": "MIT"`.
 - [ ] 3.6 Add `"description"` with a concise package description.
 - [ ] 3.7 Add `"repository": { "type": "git", "url": "..." , "directory": "packages/core" }`.
 - [ ] 3.8 Add `"keywords": ["database", "typescript", "effect", "yaml", "json", "plain-text", "type-safe", "in-memory"]`.
