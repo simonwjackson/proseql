@@ -67,7 +67,7 @@
 - [x] 10.2 Test operator name conflicting with built-in operator fails with PluginError
 - [x] 10.3 Test missing dependency fails with PluginError listing the missing plugin
 - [x] 10.4 Test satisfied dependency passes validation
-- [ ] 10.5 Test invalid codec (missing encode/decode) fails with PluginError
+- [x] 10.5 Test invalid codec (missing encode/decode) fails with PluginError
 
 ## 11. Tests — Custom Codecs
 

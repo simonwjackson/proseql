@@ -512,5 +512,81 @@ describe("Plugin System", () => {
 			expect(db2).toBeDefined();
 			expect(db2.books).toBeDefined();
 		});
+
+		it("should fail with PluginError when codec is missing encode/decode", async () => {
+			// Task 10.5: Test invalid codec (missing encode/decode) fails with PluginError
+
+			// Test missing encode
+			const codecMissingEncode = {
+				name: "broken-codec",
+				extensions: [".broken"],
+				// missing encode
+				decode: () => ({}),
+			} as unknown as FormatCodec;
+
+			const pluginMissingEncode = createCodecPlugin("missing-encode-plugin", [
+				codecMissingEncode,
+			]);
+
+			const resultMissingEncode = await Effect.runPromise(
+				createEffectDatabase(baseConfig, initialData, {
+					plugins: [pluginMissingEncode],
+				}).pipe(Effect.flip),
+			);
+
+			expect(resultMissingEncode._tag).toBe("PluginError");
+			if (resultMissingEncode._tag === "PluginError") {
+				expect(resultMissingEncode.reason).toBe("invalid_codec");
+				expect(resultMissingEncode.message).toContain("encode");
+			}
+
+			// Test missing decode
+			const codecMissingDecode = {
+				name: "broken-codec",
+				extensions: [".broken"],
+				encode: () => "",
+				// missing decode
+			} as unknown as FormatCodec;
+
+			const pluginMissingDecode = createCodecPlugin("missing-decode-plugin", [
+				codecMissingDecode,
+			]);
+
+			const resultMissingDecode = await Effect.runPromise(
+				createEffectDatabase(baseConfig, initialData, {
+					plugins: [pluginMissingDecode],
+				}).pipe(Effect.flip),
+			);
+
+			expect(resultMissingDecode._tag).toBe("PluginError");
+			if (resultMissingDecode._tag === "PluginError") {
+				expect(resultMissingDecode.reason).toBe("invalid_codec");
+				expect(resultMissingDecode.message).toContain("decode");
+			}
+
+			// Test missing both encode and decode
+			const codecMissingBoth = {
+				name: "broken-codec",
+				extensions: [".broken"],
+				// missing both encode and decode
+			} as unknown as FormatCodec;
+
+			const pluginMissingBoth = createCodecPlugin("missing-both-plugin", [
+				codecMissingBoth,
+			]);
+
+			const resultMissingBoth = await Effect.runPromise(
+				createEffectDatabase(baseConfig, initialData, {
+					plugins: [pluginMissingBoth],
+				}).pipe(Effect.flip),
+			);
+
+			expect(resultMissingBoth._tag).toBe("PluginError");
+			if (resultMissingBoth._tag === "PluginError") {
+				expect(resultMissingBoth.reason).toBe("invalid_codec");
+				// Should fail on encode first (since it's validated before decode)
+				expect(resultMissingBoth.message).toContain("encode");
+			}
+		});
 	});
 });
