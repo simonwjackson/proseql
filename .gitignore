@@ -1,5 +1,6 @@
 node_modules
 effect/
+dist/
 packages/*/dist/
 bun.nix
 packages/*/*.tsbuildinfo
