@@ -16,9 +16,9 @@
 ## 3. Collection Scaling Benchmarks
 
 - [x] 3.1 Create `bench/scaling.bench.ts` with a tinybench suite for each collection size (100, 1K, 10K, 100K)
-- [ ] 3.2 Implement findById benchmark: lookup by known ID at each size, verify constant-time behavior across sizes
-- [ ] 3.3 Implement unindexed filter benchmark: filter on a non-indexed field at each size, verify linear scaling
-- [ ] 3.4 Implement indexed filter benchmark: filter on an indexed field at each size, verify sub-linear improvement over unindexed
+- [x] 3.2 Implement findById benchmark: lookup by known ID at each size, verify constant-time behavior across sizes
+- [x] 3.3 Implement unindexed filter benchmark: filter on a non-indexed field at each size, verify linear scaling
+- [x] 3.4 Implement indexed filter benchmark: filter on an indexed field at each size, verify sub-linear improvement over unindexed
 
 ## 4. CRUD Benchmarks
 
