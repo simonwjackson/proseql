@@ -38,32 +38,38 @@ export const mergeGlobalHooks = <T extends Record<string, unknown>>(
 	}
 
 	// Merge each hook array: global first, then collection
+	// Note: Global hooks have Record<string, unknown> type and need casting
+	// to the specific collection type T. This is safe because global hooks
+	// operate on any entity shape and T extends Record<string, unknown>.
 	return {
 		beforeCreate: mergeHookArrays(
-			globalHooks.beforeCreate,
+			globalHooks.beforeCreate as HooksConfig<T>["beforeCreate"],
 			collectionHooks.beforeCreate,
 		),
 		afterCreate: mergeHookArrays(
-			globalHooks.afterCreate,
+			globalHooks.afterCreate as HooksConfig<T>["afterCreate"],
 			collectionHooks.afterCreate,
 		),
 		beforeUpdate: mergeHookArrays(
-			globalHooks.beforeUpdate,
+			globalHooks.beforeUpdate as HooksConfig<T>["beforeUpdate"],
 			collectionHooks.beforeUpdate,
 		),
 		afterUpdate: mergeHookArrays(
-			globalHooks.afterUpdate,
+			globalHooks.afterUpdate as HooksConfig<T>["afterUpdate"],
 			collectionHooks.afterUpdate,
 		),
 		beforeDelete: mergeHookArrays(
-			globalHooks.beforeDelete,
+			globalHooks.beforeDelete as HooksConfig<T>["beforeDelete"],
 			collectionHooks.beforeDelete,
 		),
 		afterDelete: mergeHookArrays(
-			globalHooks.afterDelete,
+			globalHooks.afterDelete as HooksConfig<T>["afterDelete"],
 			collectionHooks.afterDelete,
 		),
-		onChange: mergeHookArrays(globalHooks.onChange, collectionHooks.onChange),
+		onChange: mergeHookArrays(
+			globalHooks.onChange as HooksConfig<T>["onChange"],
+			collectionHooks.onChange,
+		),
 	} as HooksConfig<T>;
 };
 

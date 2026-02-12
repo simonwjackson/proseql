@@ -509,13 +509,17 @@ type StateRefs = Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>;
 function normalizeSelectForLazySkip(
 	select: Record<string, unknown> | ReadonlyArray<string> | undefined,
 ): Record<string, unknown> | undefined {
-	if (select === undefined || Array.isArray(select)) {
-		// Array-based select or undefined: fall back to full resolution
-		// (undefined means select all, which includes computed fields)
-		// (array-based select is rare and we don't optimize for it)
+	if (select === undefined) {
+		// undefined means select all, which includes computed fields
 		return undefined;
 	}
-	return select;
+	// Array.isArray works for ReadonlyArray too but TypeScript needs help narrowing
+	if (Array.isArray(select as unknown)) {
+		// Array-based select is rare and we don't optimize for it
+		return undefined;
+	}
+	// TypeScript now knows select is Record<string, unknown>
+	return select as Record<string, unknown>;
 }
 
 function extractPopulateFromSelect(
@@ -1523,8 +1527,10 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		// B is registered first, so A (registered later) shuts down first.
 		for (const plugin of options?.plugins ?? []) {
 			if (plugin.shutdown !== undefined) {
+				// Capture shutdown function to avoid optional chaining in the finalizer
+				const shutdownFn = plugin.shutdown;
 				yield* Effect.addFinalizer(() =>
-					plugin.shutdown?.().pipe(Effect.catchAll(() => Effect.void)),
+					shutdownFn().pipe(Effect.catchAll(() => Effect.void)),
 				);
 			}
 		}

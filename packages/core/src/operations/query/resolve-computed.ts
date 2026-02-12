@@ -165,11 +165,8 @@ export const stripComputedFields = <
  * hasSelectedComputedFields(computedConfig, { title: true, year: true }) // false
  * ```
  */
-export const hasSelectedComputedFields = <
-	T extends Record<string, unknown>,
-	C extends ComputedFieldsConfig<T>,
->(
-	computedConfig: C | undefined,
+export const hasSelectedComputedFields = (
+	computedConfig: ComputedFieldsConfig<Record<string, unknown>> | undefined,
 	select: Record<string, unknown> | undefined,
 ): boolean => {
 	// No computed config means no computed fields to select
@@ -240,7 +237,15 @@ export const resolveComputedStreamWithLazySkip =
 		stream: Stream.Stream<T, E, R>,
 	): Stream.Stream<WithComputed<T, C>, E, R> => {
 		// Check if any computed fields are selected
-		if (!hasSelectedComputedFields(config, select)) {
+		// Cast to unknown first to bypass contravariance check - we're only checking keys
+		if (
+			!hasSelectedComputedFields(
+				config as unknown as
+					| ComputedFieldsConfig<Record<string, unknown>>
+					| undefined,
+				select,
+			)
+		) {
 			// No computed fields selected, return stream unchanged
 			return stream as unknown as Stream.Stream<WithComputed<T, C>, E, R>;
 		}

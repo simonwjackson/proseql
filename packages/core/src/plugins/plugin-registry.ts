@@ -18,6 +18,11 @@ import {
 	validatePlugin,
 } from "./plugin-validation.js";
 
+/**
+ * Type guard to filter out undefined values from arrays.
+ */
+const isDefined = <T>(value: T | undefined): value is T => value !== undefined;
+
 // ============================================================================
 // Plugin Registry Builder
 // ============================================================================
@@ -169,42 +174,42 @@ const mergeGlobalHooks = (
 	if (mutableResult.beforeCreate !== undefined) {
 		(
 			finalResult as { beforeCreate: GlobalHooksConfig["beforeCreate"] }
-		).beforeCreate = mutableResult.beforeCreate.flat();
+		).beforeCreate = mutableResult.beforeCreate.flat().filter(isDefined);
 	}
 
 	if (mutableResult.afterCreate !== undefined) {
 		(
 			finalResult as { afterCreate: GlobalHooksConfig["afterCreate"] }
-		).afterCreate = mutableResult.afterCreate.flat();
+		).afterCreate = mutableResult.afterCreate.flat().filter(isDefined);
 	}
 
 	if (mutableResult.beforeUpdate !== undefined) {
 		(
 			finalResult as { beforeUpdate: GlobalHooksConfig["beforeUpdate"] }
-		).beforeUpdate = mutableResult.beforeUpdate.flat();
+		).beforeUpdate = mutableResult.beforeUpdate.flat().filter(isDefined);
 	}
 
 	if (mutableResult.afterUpdate !== undefined) {
 		(
 			finalResult as { afterUpdate: GlobalHooksConfig["afterUpdate"] }
-		).afterUpdate = mutableResult.afterUpdate.flat();
+		).afterUpdate = mutableResult.afterUpdate.flat().filter(isDefined);
 	}
 
 	if (mutableResult.beforeDelete !== undefined) {
 		(
 			finalResult as { beforeDelete: GlobalHooksConfig["beforeDelete"] }
-		).beforeDelete = mutableResult.beforeDelete.flat();
+		).beforeDelete = mutableResult.beforeDelete.flat().filter(isDefined);
 	}
 
 	if (mutableResult.afterDelete !== undefined) {
 		(
 			finalResult as { afterDelete: GlobalHooksConfig["afterDelete"] }
-		).afterDelete = mutableResult.afterDelete.flat();
+		).afterDelete = mutableResult.afterDelete.flat().filter(isDefined);
 	}
 
 	if (mutableResult.onChange !== undefined) {
 		(finalResult as { onChange: GlobalHooksConfig["onChange"] }).onChange =
-			mutableResult.onChange.flat();
+			mutableResult.onChange.flat().filter(isDefined);
 	}
 
 	return finalResult;
