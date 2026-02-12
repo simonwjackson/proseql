@@ -36,7 +36,7 @@
 ## 6. CRUD Commands
 
 - [x] 6.1 Create `packages/cli/src/commands/create.ts`: parse `--data` as JSON string, call `create` on the collection, print the created entity
-- [ ] 6.2 Create `packages/cli/src/parsers/set-parser.ts`: parse `--set` assignment strings like `year=2025,title=New Title` into partial update objects with auto-detected value types
+- [x] 6.2 Create `packages/cli/src/parsers/set-parser.ts`: parse `--set` assignment strings like `year=2025,title=New Title` into partial update objects with auto-detected value types
 - [ ] 6.3 Create `packages/cli/src/commands/update.ts`: resolve collection and entity ID from positional args, parse `--set` into update payload, call `update`, print the updated entity
 - [ ] 6.4 Create `packages/cli/src/prompt.ts`: confirmation prompt reading `y/n` from stdin. Skip when `--force` is passed or stdin is not a TTY.
 - [ ] 6.5 Create `packages/cli/src/commands/delete.ts`: resolve collection and entity ID, prompt for confirmation (unless `--force`), call `delete`, print confirmation message
