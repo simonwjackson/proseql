@@ -650,6 +650,105 @@ describe("reactive queries - mutation triggers", () => {
 		});
 	});
 
+	describe("entity entering result set (13.4)", () => {
+		it("updating a non-matching entity to match the where clause triggers emission", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch sci-fi books only
+					const stream = yield* db.books.watch({
+						where: { genre: "sci-fi" },
+						sort: { year: "asc" },
+					});
+
+					// Fork collection to get 2 emissions: initial + after update
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission to be processed
+					yield* Effect.sleep("20 millis");
+
+					// Update The Hobbit (id: "3", genre: "fantasy") to be sci-fi
+					// This makes it match the watch filter
+					yield* db.books.update("3", { genre: "sci-fi" });
+
+					// Wait for the stream to emit and collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					// Should have 2 emissions
+					expect(emissions).toHaveLength(2);
+
+					// Initial emission: 2 sci-fi books (Dune 1965, Neuromancer 1984)
+					expect(emissions[0]).toHaveLength(2);
+					expect(emissions[0].map((b) => b.title)).toEqual([
+						"Dune",
+						"Neuromancer",
+					]);
+
+					// After update: 3 sci-fi books, sorted by year
+					// (The Hobbit 1937, Dune 1965, Neuromancer 1984)
+					expect(emissions[1]).toHaveLength(3);
+					expect(emissions[1].map((b) => b.title)).toEqual([
+						"The Hobbit",
+						"Dune",
+						"Neuromancer",
+					]);
+					// Verify The Hobbit is now included and has correct genre
+					const hobbit = emissions[1].find((b) => b.id === "3");
+					expect(hobbit).toBeDefined();
+					expect(hobbit?.genre).toBe("sci-fi");
+				}),
+			);
+		});
+
+		it("updating entity from one genre to another causes it to enter different watch result sets", async () => {
+			await runWithDb((db) =>
+				Effect.gen(function* () {
+					// Watch fantasy books only (initially only The Hobbit)
+					const stream = yield* db.books.watch({
+						where: { genre: "fantasy" },
+						sort: { title: "asc" },
+					});
+
+					// Fork collection to get 2 emissions
+					const collectedFiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.fork,
+					);
+
+					// Wait for initial emission
+					yield* Effect.sleep("20 millis");
+
+					// Update Dune (id: "1", genre: "sci-fi") to be fantasy
+					yield* db.books.update("1", { genre: "fantasy" });
+
+					// Collect results
+					const results = yield* Fiber.join(collectedFiber);
+					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+
+					expect(emissions).toHaveLength(2);
+
+					// Initial: 1 fantasy book (The Hobbit)
+					expect(emissions[0]).toHaveLength(1);
+					expect(emissions[0][0].title).toBe("The Hobbit");
+
+					// After update: 2 fantasy books (Dune and The Hobbit)
+					expect(emissions[1]).toHaveLength(2);
+					expect(emissions[1].map((b) => b.title)).toEqual([
+						"Dune",
+						"The Hobbit",
+					]);
+				}),
+			);
+		});
+	});
+
 	describe("delete triggers watch (13.3)", () => {
 		it("deleting a matched entity causes a new emission without the entity", async () => {
 			await runWithDb((db) =>
