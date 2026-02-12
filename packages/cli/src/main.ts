@@ -22,6 +22,7 @@ import { handleCreate as handleCreateCommand } from "./commands/create.js"
 import { handleUpdate as handleUpdateCommand } from "./commands/update.js"
 import { handleDelete as handleDeleteCommand } from "./commands/delete.js"
 import { handleMigrate as handleMigrateCommand, detectSubcommand } from "./commands/migrate.js"
+import { handleConvert as handleConvertCommand, isValidFormat, VALID_FORMATS } from "./commands/convert.js"
 import { format, type OutputFormat } from "./output/formatter.js"
 
 const VERSION = "0.1.0"
@@ -599,10 +600,46 @@ async function handleMigrate(
 }
 
 async function handleConvert(
-  _args: ParsedArgs,
-  _resolvedConfig: ResolvedConfig,
+  args: ParsedArgs,
+  resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  console.log("convert command - not yet implemented")
+  const collectionName = args.positionalArgs[0]
+  const targetFormat = args.flags.to
+
+  if (!targetFormat) {
+    exitWithError("convert command requires --to flag with target format (e.g., --to yaml)")
+  }
+
+  if (!isValidFormat(targetFormat)) {
+    exitWithError(`Invalid target format '${targetFormat}'. Valid formats: ${VALID_FORMATS.join(", ")}`)
+  }
+
+  const result = await handleConvertCommand({
+    collection: collectionName,
+    config: resolvedConfig.config,
+    configPath: resolvedConfig.configPath,
+    targetFormat,
+  })
+
+  if (!result.success) {
+    exitWithError(result.message ?? "Convert failed")
+  }
+
+  // Output the conversion summary
+  const outputFormat = getOutputFormat(args.flags)
+
+  if (result.data) {
+    if (outputFormat === "table") {
+      console.log(`\nConversion prepared:`)
+      console.log(`  Collection: ${result.data.collection}`)
+      console.log(`  Old file:   ${result.data.oldFile} (${result.data.oldFormat})`)
+      console.log(`  New file:   ${result.data.newFile} (${result.data.newFormat})`)
+      console.log(`\nNote: File writing will be implemented in a future update.`)
+    } else {
+      const output = format(outputFormat, [result.data as Record<string, unknown>])
+      console.log(output)
+    }
+  }
 }
 
 /**

@@ -50,7 +50,7 @@
 
 ## 8. Convert Command
 
-- [ ] 8.1 Create `packages/cli/src/commands/convert.ts`: resolve collection, read current data file, serialize in the target format using core serializers
+- [x] 8.1 Create `packages/cli/src/commands/convert.ts`: resolve collection, read current data file, serialize in the target format using core serializers
 - [ ] 8.2 Write the new data file with the correct extension, remove the old file
 - [ ] 8.3 Update the config file to reference the new file path/format
 - [ ] 8.4 Print summary of conversion (old format, new format, file paths)
