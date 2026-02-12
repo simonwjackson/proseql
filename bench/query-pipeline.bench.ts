@@ -318,8 +318,53 @@ export async function createSuite(): Promise<Bench> {
 	});
 
 	// -------------------------------------------------------------------------
-	// Task 5.2: Filter benchmarks will be added here
+	// Task 5.2: Filter benchmarks
 	// -------------------------------------------------------------------------
+
+	// Filter benchmark: Simple equality filter
+	// Tests filtering on a single field with exact match.
+	// Uses an indexed field (role) for realistic performance.
+	const filterEqualityDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("filter: equality (role = 'admin')", async () => {
+		await filterEqualityDb.users.query({
+			where: { role: "admin" },
+		}).runPromise;
+	});
+
+	// Filter benchmark: Range filter ($gt, $lt)
+	// Tests filtering on a numeric field with range operators.
+	// Uses an indexed field (age) for realistic performance.
+	const filterRangeDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("filter: range (age > 30 AND age < 50)", async () => {
+		await filterRangeDb.users.query({
+			where: { age: { $gt: 30, $lt: 50 } },
+		}).runPromise;
+	});
+
+	// Filter benchmark: Compound filter (multiple conditions)
+	// Tests filtering with multiple conditions combined using $and.
+	// This exercises more complex predicate evaluation.
+	const filterCompoundDb = await createBenchDatabase(basicDbConfig, {
+		users: usersArray,
+	});
+
+	bench.add("filter: compound ($and with 3 conditions)", async () => {
+		await filterCompoundDb.users.query({
+			where: {
+				$and: [
+					{ role: { $in: ["admin", "moderator"] } },
+					{ age: { $gte: 25, $lte: 60 } },
+					{ name: { $contains: "a" } },
+				],
+			},
+		}).runPromise;
+	});
 
 	// -------------------------------------------------------------------------
 	// Task 5.3: Sort benchmarks will be added here
