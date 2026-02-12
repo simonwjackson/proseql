@@ -42,7 +42,7 @@
 - [x] 7.1 Create `packages/core/tests/property/crud-invariants.test.ts`
 - [x] 7.2 Property: for any valid entity, `create` then `findById` returns a value deeply equal to the created entity
 - [x] 7.3 Property: for any existing entity, `delete` then `findById` fails with `NotFoundError`, and `query` does not include the entity
-- [ ] 7.4 Property: given a unique constraint on a field, creating multiple entities with the same unique value results in exactly one success and the rest failing with `UniqueConstraintError`
+- [x] 7.4 Property: given a unique constraint on a field, creating multiple entities with the same unique value results in exactly one success and the rest failing with `UniqueConstraintError`
 
 ## 8. Transaction Atomicity Properties
 

@@ -14,7 +14,10 @@
 import { Chunk, Effect, Schema, Stream } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { NotFoundError } from "../../src/errors/crud-errors";
+import {
+	NotFoundError,
+	UniqueConstraintError,
+} from "../../src/errors/crud-errors";
 import { createEffectDatabase } from "../../src/factories/database-effect";
 import { entityArbitrary, getNumRuns } from "./generators";
 
@@ -612,6 +615,377 @@ describe("CRUD invariant properties", () => {
 	});
 
 	describe("Task 7.4: Unique constraint enforcement", () => {
-		// Property tests will be added in task 7.4
+		it("should result in exactly one success when creating multiple entities with the same unique value", async () => {
+			// Generate an arbitrary unique ISBN value and the number of entities to create with that ISBN
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate a unique ISBN string
+					fc.string({ minLength: 5, maxLength: 20 }),
+					// Generate how many duplicate entities to attempt (2 to 5)
+					fc.integer({ min: 2, max: 5 }),
+					// Generate unique titles for each entity so we can differentiate them
+					fc.array(fc.string({ minLength: 1, maxLength: 20 }), {
+						minLength: 5,
+						maxLength: 5,
+					}),
+					// Generate unique authors for each entity
+					fc.array(fc.string({ minLength: 1, maxLength: 20 }), {
+						minLength: 5,
+						maxLength: 5,
+					}),
+					// Generate years for each entity
+					fc.array(fc.integer({ min: 1900, max: 2100 }), {
+						minLength: 5,
+						maxLength: 5,
+					}),
+					async (isbn, numDuplicates, titles, authors, years) => {
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(configWithUnique, {
+								books: [],
+							});
+
+							let successCount = 0;
+							let failureCount = 0;
+							const errors: UniqueConstraintError[] = [];
+
+							// Attempt to create numDuplicates entities, all with the same ISBN
+							for (let i = 0; i < numDuplicates; i++) {
+								const createResult = yield* db.books
+									.create({
+										title: titles[i],
+										author: authors[i],
+										isbn: isbn, // Same ISBN for all
+										year: years[i],
+									})
+									.pipe(
+										Effect.map((entity) => ({ success: true as const, entity })),
+										Effect.catchTag("UniqueConstraintError", (err) =>
+											Effect.succeed({
+												success: false as const,
+												error: err,
+											}),
+										),
+									);
+
+								if (createResult.success) {
+									successCount++;
+								} else {
+									failureCount++;
+									errors.push(createResult.error);
+								}
+							}
+
+							// Property: exactly one creation should succeed
+							expect(successCount).toBe(1);
+
+							// Property: all other creations should fail with UniqueConstraintError
+							expect(failureCount).toBe(numDuplicates - 1);
+
+							// Property: all errors should be UniqueConstraintError with correct structure
+							for (const error of errors) {
+								expect(error._tag).toBe("UniqueConstraintError");
+								expect(error).toBeInstanceOf(UniqueConstraintError);
+								expect(error.collection).toBe("books");
+								expect(error.fields).toContain("isbn");
+								expect(error.values).toEqual({ isbn });
+							}
+
+							// Property: only one entity should exist in the collection
+							const allBooksChunk = yield* Stream.runCollect(
+								db.books.query({}),
+							);
+							const allBooks = Chunk.toReadonlyArray(allBooksChunk);
+							expect(allBooks.length).toBe(1);
+							expect(allBooks[0].isbn).toBe(isbn);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should enforce unique constraint across multiple different unique values", async () => {
+			// Generate multiple distinct ISBN values and test that each can be used once
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate 3-5 distinct ISBN values
+					fc.uniqueArray(fc.string({ minLength: 5, maxLength: 20 }), {
+						minLength: 3,
+						maxLength: 5,
+					}),
+					async (isbns) => {
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(configWithUnique, {
+								books: [],
+							});
+
+							// Create first book with each ISBN - should all succeed
+							for (let i = 0; i < isbns.length; i++) {
+								const created = yield* db.books.create({
+									title: `Book ${i}`,
+									author: `Author ${i}`,
+									isbn: isbns[i],
+									year: 2000 + i,
+								});
+								expect(created.isbn).toBe(isbns[i]);
+							}
+
+							// Attempt to create duplicate for each ISBN - all should fail
+							for (let i = 0; i < isbns.length; i++) {
+								const error = yield* db.books
+									.create({
+										title: `Duplicate Book ${i}`,
+										author: `Duplicate Author ${i}`,
+										isbn: isbns[i], // Duplicate ISBN
+										year: 2020 + i,
+									})
+									.pipe(Effect.flip);
+
+								expect(error._tag).toBe("UniqueConstraintError");
+								if (error._tag === "UniqueConstraintError") {
+									expect(error.values).toEqual({ isbn: isbns[i] });
+								}
+							}
+
+							// Verify collection contains exactly the original entities
+							const allBooksChunk = yield* Stream.runCollect(
+								db.books.query({}),
+							);
+							const allBooks = Chunk.toReadonlyArray(allBooksChunk);
+							expect(allBooks.length).toBe(isbns.length);
+
+							// Each ISBN should appear exactly once
+							const foundIsbns = new Set(allBooks.map((b) => b.isbn));
+							expect(foundIsbns.size).toBe(isbns.length);
+							for (const isbn of isbns) {
+								expect(foundIsbns.has(isbn)).toBe(true);
+							}
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() / 2 },
+			);
+		});
+
+		it("should allow reusing a unique value after deleting the entity that held it", async () => {
+			// Property: after deleting an entity, its unique values become available again
+			await fc.assert(
+				fc.asyncProperty(
+					fc.string({ minLength: 5, maxLength: 20 }),
+					fc.string({ minLength: 1, maxLength: 20 }),
+					fc.string({ minLength: 1, maxLength: 20 }),
+					fc.integer({ min: 1900, max: 2100 }),
+					async (isbn, title, author, year) => {
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(configWithUnique, {
+								books: [],
+							});
+
+							// Create first entity with the ISBN
+							const first = yield* db.books.create({
+								title: `${title} Original`,
+								author,
+								isbn,
+								year,
+							});
+							expect(first.isbn).toBe(isbn);
+
+							// Attempting to create another with same ISBN should fail
+							const duplicateError = yield* db.books
+								.create({
+									title: `${title} Duplicate`,
+									author,
+									isbn,
+									year: year + 1,
+								})
+								.pipe(Effect.flip);
+							expect(duplicateError._tag).toBe("UniqueConstraintError");
+
+							// Delete the first entity
+							yield* db.books.delete(first.id);
+
+							// Now creating with the same ISBN should succeed
+							const second = yield* db.books.create({
+								title: `${title} After Delete`,
+								author,
+								isbn, // Same ISBN, now available
+								year: year + 2,
+							});
+							expect(second.isbn).toBe(isbn);
+							expect(second.id).not.toBe(first.id);
+
+							// Collection should have exactly one entity
+							const allBooksChunk = yield* Stream.runCollect(
+								db.books.query({}),
+							);
+							const allBooks = Chunk.toReadonlyArray(allBooksChunk);
+							expect(allBooks.length).toBe(1);
+							expect(allBooks[0].id).toBe(second.id);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should handle concurrent-like creation attempts with same unique value", async () => {
+			// Simulate multiple rapid creation attempts with the same unique value
+			// Even though JavaScript is single-threaded, this tests the constraint check logic
+			await fc.assert(
+				fc.asyncProperty(
+					fc.string({ minLength: 5, maxLength: 20 }),
+					fc.array(
+						fc.record({
+							title: fc.string({ minLength: 1, maxLength: 20 }),
+							author: fc.string({ minLength: 1, maxLength: 20 }),
+							year: fc.integer({ min: 1900, max: 2100 }),
+						}),
+						{ minLength: 3, maxLength: 7 },
+					),
+					async (isbn, entityData) => {
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(configWithUnique, {
+								books: [],
+							});
+
+							// Create all entities with the same ISBN in rapid succession
+							const results: Array<
+								| { success: true; entity: BookWithIsbn }
+								| { success: false; error: UniqueConstraintError }
+							> = [];
+
+							for (const data of entityData) {
+								const result = yield* db.books
+									.create({
+										...data,
+										isbn, // Same ISBN for all
+									})
+									.pipe(
+										Effect.map((entity) => ({ success: true as const, entity })),
+										Effect.catchTag("UniqueConstraintError", (err) =>
+											Effect.succeed({
+												success: false as const,
+												error: err,
+											}),
+										),
+									);
+								results.push(result);
+							}
+
+							// Count successes and failures
+							const successes = results.filter((r) => r.success);
+							const failures = results.filter((r) => !r.success);
+
+							// Property: exactly one success, rest are failures
+							expect(successes.length).toBe(1);
+							expect(failures.length).toBe(entityData.length - 1);
+
+							// Property: the first creation should be the successful one
+							expect(results[0].success).toBe(true);
+
+							// Property: all failures have correct error structure
+							for (const failure of failures) {
+								if (!failure.success) {
+									expect(failure.error.fields).toContain("isbn");
+									expect(failure.error.values).toEqual({ isbn });
+								}
+							}
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() / 2 },
+			);
+		});
+
+		it("should preserve unique constraint enforcement across mixed operations", async () => {
+			// Test that unique constraints work correctly with a mix of create, delete, create operations
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate 2-4 distinct ISBNs
+					fc.uniqueArray(fc.string({ minLength: 5, maxLength: 20 }), {
+						minLength: 2,
+						maxLength: 4,
+					}),
+					// Generate how many cycles of delete-recreate to perform
+					fc.integer({ min: 1, max: 3 }),
+					async (isbns, cycles) => {
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(configWithUnique, {
+								books: [],
+							});
+
+							// Initial creation of all books
+							const initialIds: string[] = [];
+							for (let i = 0; i < isbns.length; i++) {
+								const book = yield* db.books.create({
+									title: `Book ${i}`,
+									author: `Author ${i}`,
+									isbn: isbns[i],
+									year: 2000 + i,
+								});
+								initialIds.push(book.id);
+							}
+
+							// Perform cycles of delete-recreate
+							for (let cycle = 0; cycle < cycles; cycle++) {
+								// Pick one to delete and recreate
+								const targetIndex = cycle % isbns.length;
+								const targetIsbn = isbns[targetIndex];
+
+								// Find the current entity with this ISBN
+								const currentChunk = yield* Stream.runCollect(
+									db.books.query({ where: { isbn: targetIsbn } }),
+								);
+								const current = Chunk.toReadonlyArray(currentChunk);
+								expect(current.length).toBe(1);
+
+								// Delete it
+								yield* db.books.delete(current[0].id);
+
+								// Recreate with the same ISBN
+								const recreated = yield* db.books.create({
+									title: `Book ${targetIndex} Cycle ${cycle}`,
+									author: `Author ${targetIndex}`,
+									isbn: targetIsbn,
+									year: 2000 + targetIndex + (cycle + 1) * 100,
+								});
+								expect(recreated.isbn).toBe(targetIsbn);
+
+								// Verify unique constraint is still enforced
+								const duplicateError = yield* db.books
+									.create({
+										title: "Duplicate",
+										author: "Test",
+										isbn: targetIsbn,
+										year: 9999,
+									})
+									.pipe(Effect.flip);
+								expect(duplicateError._tag).toBe("UniqueConstraintError");
+							}
+
+							// Final verification: should have exactly isbns.length books
+							const finalChunk = yield* Stream.runCollect(db.books.query({}));
+							const finalBooks = Chunk.toReadonlyArray(finalChunk);
+							expect(finalBooks.length).toBe(isbns.length);
+
+							// Each ISBN should appear exactly once
+							const finalIsbns = new Set(finalBooks.map((b) => b.isbn));
+							expect(finalIsbns.size).toBe(isbns.length);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() / 2 },
+			);
+		});
 	});
 });
