@@ -1105,3 +1105,199 @@ describe("REST handlers — PUT updates entity (task 11.13)", () => {
 		expect(book.title).toBe("Dune");
 	});
 });
+
+// ============================================================================
+// Task 11.14: Test DELETE removes entity and returns 200
+// ============================================================================
+
+describe("REST handlers — DELETE removes entity (task 11.14)", () => {
+	it("should delete entity and return 200 with deleted entity", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const deleteBook = findRoute(routes, "DELETE", "/books/:id");
+		expect(deleteBook).toBeDefined();
+
+		const request = createRequest({ params: { id: "1" } });
+		const response = await deleteBook!.handler(request);
+
+		expect(response.status).toBe(200);
+		const deletedBook = response.body as {
+			id: string;
+			title: string;
+			author: string;
+			year: number;
+			genre: string;
+		};
+		expect(deletedBook.id).toBe("1");
+		expect(deletedBook.title).toBe("Dune");
+		expect(deletedBook.author).toBe("Frank Herbert");
+		expect(deletedBook.year).toBe(1965);
+		expect(deletedBook.genre).toBe("sci-fi");
+	});
+
+	it("should actually remove the entity from the database", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const deleteBook = findRoute(routes, "DELETE", "/books/:id");
+		const getBookById = findRoute(routes, "GET", "/books/:id");
+		const getBooks = findRoute(routes, "GET", "/books");
+
+		// Verify initial count
+		const initialResponse = await getBooks!.handler(createRequest());
+		expect((initialResponse.body as ReadonlyArray<unknown>).length).toBe(3);
+
+		// Delete the entity
+		const deleteRequest = createRequest({ params: { id: "1" } });
+		const deleteResponse = await deleteBook!.handler(deleteRequest);
+		expect(deleteResponse.status).toBe(200);
+
+		// Verify entity is gone
+		const getRequest = createRequest({ params: { id: "1" } });
+		const getResponse = await getBookById!.handler(getRequest);
+		expect(getResponse.status).toBe(404);
+
+		// Verify count decreased
+		const finalResponse = await getBooks!.handler(createRequest());
+		expect((finalResponse.body as ReadonlyArray<unknown>).length).toBe(2);
+	});
+
+	it("should return all entity fields in the response", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const deleteBook = findRoute(routes, "DELETE", "/books/:id");
+
+		const request = createRequest({ params: { id: "2" } });
+		const response = await deleteBook!.handler(request);
+
+		expect(response.status).toBe(200);
+		const body = response.body as Record<string, unknown>;
+		expect(body).toHaveProperty("id");
+		expect(body).toHaveProperty("title");
+		expect(body).toHaveProperty("author");
+		expect(body).toHaveProperty("year");
+		expect(body).toHaveProperty("genre");
+		expect(body.id).toBe("2");
+		expect(body.title).toBe("Neuromancer");
+	});
+
+	it("should work with different collections", async () => {
+		const multiConfig = {
+			books: { schema: BookSchema, relationships: {} },
+			authors: {
+				schema: Schema.Struct({ id: Schema.String, name: Schema.String }),
+				relationships: {},
+			},
+		} as const;
+
+		const db = await Effect.runPromise(
+			createEffectDatabase(multiConfig, {
+				books: initialBooks,
+				authors: [{ id: "a1", name: "Frank Herbert" }],
+			}),
+		);
+		const routes = createRestHandlers(multiConfig, db);
+
+		// Delete a book
+		const deleteBook = findRoute(routes, "DELETE", "/books/:id");
+		const bookRequest = createRequest({ params: { id: "1" } });
+		const bookResponse = await deleteBook!.handler(bookRequest);
+		expect(bookResponse.status).toBe(200);
+		expect((bookResponse.body as { title: string }).title).toBe("Dune");
+
+		// Delete an author
+		const deleteAuthor = findRoute(routes, "DELETE", "/authors/:id");
+		const authorRequest = createRequest({ params: { id: "a1" } });
+		const authorResponse = await deleteAuthor!.handler(authorRequest);
+		expect(authorResponse.status).toBe(200);
+		expect((authorResponse.body as { name: string }).name).toBe("Frank Herbert");
+	});
+
+	it("should return 404 when deleting non-existent entity", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const deleteBook = findRoute(routes, "DELETE", "/books/:id");
+
+		const request = createRequest({ params: { id: "nonexistent" } });
+		const response = await deleteBook!.handler(request);
+
+		expect(response.status).toBe(404);
+		const body = response.body as { _tag: string };
+		expect(body._tag).toBe("NotFoundError");
+	});
+
+	it("should not affect other entities in the collection", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const deleteBook = findRoute(routes, "DELETE", "/books/:id");
+		const getBookById = findRoute(routes, "GET", "/books/:id");
+
+		// Delete book with id "1"
+		const deleteRequest = createRequest({ params: { id: "1" } });
+		await deleteBook!.handler(deleteRequest);
+
+		// Verify other books are still there
+		const book2Response = await getBookById!.handler(createRequest({ params: { id: "2" } }));
+		expect(book2Response.status).toBe(200);
+		expect((book2Response.body as { title: string }).title).toBe("Neuromancer");
+
+		const book3Response = await getBookById!.handler(createRequest({ params: { id: "3" } }));
+		expect(book3Response.status).toBe(200);
+		expect((book3Response.body as { title: string }).title).toBe("The Left Hand of Darkness");
+	});
+
+	it("should return 404 for already deleted entity", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const deleteBook = findRoute(routes, "DELETE", "/books/:id");
+
+		// Delete the entity first time
+		const firstDelete = await deleteBook!.handler(createRequest({ params: { id: "1" } }));
+		expect(firstDelete.status).toBe(200);
+
+		// Try to delete again
+		const secondDelete = await deleteBook!.handler(createRequest({ params: { id: "1" } }));
+		expect(secondDelete.status).toBe(404);
+		expect((secondDelete.body as { _tag: string })._tag).toBe("NotFoundError");
+	});
+
+	it("should return 404 for empty collection", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: [] }));
+		const routes = createRestHandlers(config, db);
+
+		const deleteBook = findRoute(routes, "DELETE", "/books/:id");
+		const request = createRequest({ params: { id: "1" } });
+		const response = await deleteBook!.handler(request);
+
+		expect(response.status).toBe(404);
+		const body = response.body as { _tag: string };
+		expect(body._tag).toBe("NotFoundError");
+	});
+
+	it("should delete multiple entities sequentially", async () => {
+		const db = await Effect.runPromise(createEffectDatabase(config, { books: initialBooks }));
+		const routes = createRestHandlers(config, db);
+
+		const deleteBook = findRoute(routes, "DELETE", "/books/:id");
+		const getBooks = findRoute(routes, "GET", "/books");
+
+		// Delete all three books
+		const delete1 = await deleteBook!.handler(createRequest({ params: { id: "1" } }));
+		expect(delete1.status).toBe(200);
+
+		const delete2 = await deleteBook!.handler(createRequest({ params: { id: "2" } }));
+		expect(delete2.status).toBe(200);
+
+		const delete3 = await deleteBook!.handler(createRequest({ params: { id: "3" } }));
+		expect(delete3.status).toBe(200);
+
+		// Collection should now be empty
+		const finalResponse = await getBooks!.handler(createRequest());
+		expect(finalResponse.body).toEqual([]);
+	});
+});
