@@ -150,7 +150,212 @@ describe("CRUD invariant properties", () => {
 	});
 
 	describe("Task 7.2: Create then findById returns deeply equal entity", () => {
-		// Property tests will be added in task 7.2
+		it("should return the exact same entity after create then findById", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate a valid entity (without id, since create generates one)
+					entityArbitrary(BookSchema),
+					async (entityWithId) => {
+						// Remove the generated id since create() will generate its own
+						const { id: _unusedId, ...entityData } = entityWithId;
+
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(basicConfig, {
+								books: [],
+							});
+
+							// Create the entity
+							const created = yield* db.books.create(entityData);
+
+							// Verify create returned an entity with an id
+							expect(typeof created.id).toBe("string");
+							expect(created.id.length).toBeGreaterThan(0);
+
+							// Verify created entity has all the input fields
+							expect(created.title).toBe(entityData.title);
+							expect(created.author).toBe(entityData.author);
+							expect(created.year).toBe(entityData.year);
+							expect(created.rating).toBe(entityData.rating);
+							expect(created.isPublished).toBe(entityData.isPublished);
+							expect(created.tags).toEqual(entityData.tags);
+
+							// Find the entity by ID
+							const found = yield* db.books.findById(created.id);
+
+							// Verify findById returns deeply equal entity
+							expect(found).toEqual(created);
+
+							// Verify all fields match individually for clearer error messages
+							expect(found.id).toBe(created.id);
+							expect(found.title).toBe(created.title);
+							expect(found.author).toBe(created.author);
+							expect(found.year).toBe(created.year);
+							expect(found.rating).toBe(created.rating);
+							expect(found.isPublished).toBe(created.isPublished);
+							expect(found.tags).toEqual(created.tags);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should maintain entity integrity across multiple create-findById cycles", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					// Generate multiple entities
+					fc.array(entityArbitrary(BookSchema), { minLength: 1, maxLength: 10 }),
+					async (entitiesWithIds) => {
+						// Remove generated ids
+						const entitiesData = entitiesWithIds.map(({ id: _unusedId, ...data }) => data);
+
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(basicConfig, {
+								books: [],
+							});
+
+							const createdEntities: Book[] = [];
+
+							// Create all entities
+							for (const entityData of entitiesData) {
+								const created = yield* db.books.create(entityData);
+								createdEntities.push(created);
+							}
+
+							// Verify each entity can be found and is deeply equal
+							for (const created of createdEntities) {
+								const found = yield* db.books.findById(created.id);
+								expect(found).toEqual(created);
+							}
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() / 2 }, // Fewer runs since we create multiple entities per run
+			);
+		});
+
+		it("should preserve all field types correctly (strings, numbers, booleans, arrays)", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					entityArbitrary(BookSchema),
+					async (entityWithId) => {
+						const { id: _unusedId, ...entityData } = entityWithId;
+
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(basicConfig, {
+								books: [],
+							});
+
+							const created = yield* db.books.create(entityData);
+							const found = yield* db.books.findById(created.id);
+
+							// Verify type preservation
+							expect(typeof found.id).toBe("string");
+							expect(typeof found.title).toBe("string");
+							expect(typeof found.author).toBe("string");
+							expect(typeof found.year).toBe("number");
+							expect(typeof found.rating).toBe("number");
+							expect(typeof found.isPublished).toBe("boolean");
+							expect(Array.isArray(found.tags)).toBe(true);
+
+							// Verify array element types
+							for (const tag of found.tags) {
+								expect(typeof tag).toBe("string");
+							}
+
+							// Verify exact values match
+							expect(found.title).toBe(created.title);
+							expect(found.author).toBe(created.author);
+							expect(found.year).toBe(created.year);
+							expect(found.rating).toBe(created.rating);
+							expect(found.isPublished).toBe(created.isPublished);
+							expect(found.tags).toEqual(created.tags);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should handle entities with empty strings and zero values", async () => {
+			// Edge case: entities with boundary values
+			await fc.assert(
+				fc.asyncProperty(
+					fc.record({
+						title: fc.oneof(fc.constant(""), fc.string({ minLength: 1, maxLength: 10 })),
+						author: fc.oneof(fc.constant(""), fc.string({ minLength: 1, maxLength: 10 })),
+						year: fc.oneof(fc.constant(0), fc.integer({ min: -1000, max: 3000 })),
+						rating: fc.oneof(fc.constant(0), fc.float({ min: 0, max: 5, noNaN: true })),
+						isPublished: fc.boolean(),
+						tags: fc.oneof(fc.constant([]), fc.array(fc.string(), { minLength: 1, maxLength: 5 })),
+					}),
+					async (entityData) => {
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(basicConfig, {
+								books: [],
+							});
+
+							const created = yield* db.books.create(entityData);
+							const found = yield* db.books.findById(created.id);
+
+							expect(found).toEqual(created);
+							expect(found.title).toBe(entityData.title);
+							expect(found.author).toBe(entityData.author);
+							expect(found.year).toBe(entityData.year);
+							expect(found.rating).toBe(entityData.rating);
+							expect(found.isPublished).toBe(entityData.isPublished);
+							expect(found.tags).toEqual(entityData.tags);
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() },
+			);
+		});
+
+		it("should generate unique IDs for each created entity", async () => {
+			await fc.assert(
+				fc.asyncProperty(
+					fc.array(entityArbitrary(BookSchema), { minLength: 2, maxLength: 20 }),
+					async (entitiesWithIds) => {
+						const entitiesData = entitiesWithIds.map(({ id: _unusedId, ...data }) => data);
+
+						const program = Effect.gen(function* () {
+							const db = yield* createEffectDatabase(basicConfig, {
+								books: [],
+							});
+
+							const createdIds: string[] = [];
+
+							for (const entityData of entitiesData) {
+								const created = yield* db.books.create(entityData);
+								createdIds.push(created.id);
+							}
+
+							// All IDs should be unique
+							const uniqueIds = new Set(createdIds);
+							expect(uniqueIds.size).toBe(createdIds.length);
+
+							// Each entity should be findable by its unique ID
+							for (const id of createdIds) {
+								const found = yield* db.books.findById(id);
+								expect(found.id).toBe(id);
+							}
+						});
+
+						await Effect.runPromise(program);
+					},
+				),
+				{ numRuns: getNumRuns() / 2 },
+			);
+		});
 	});
 
 	describe("Task 7.3: Delete then findById fails with NotFoundError", () => {
