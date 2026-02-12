@@ -263,6 +263,7 @@ export const createMany =
 		searchIndexFields?: ReadonlyArray<string>,
 		idGeneratorName?: string,
 		idGeneratorMap?: Map<string, CustomIdGenerator>,
+		changePubSub?: PubSub.PubSub<ChangeEvent>,
 	) =>
 	(
 		inputs: ReadonlyArray<CreateInput<T>>,
@@ -508,6 +509,14 @@ export const createMany =
 					type: "create",
 					collection: collectionName,
 					entity,
+				});
+			}
+
+			// Publish a single change event after all entities are inserted
+			if (changePubSub && created.length > 0) {
+				yield* PubSub.publish(changePubSub, {
+					collection: collectionName,
+					operation: "create",
 				});
 			}
 
