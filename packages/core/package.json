@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "Type-safe in-memory database that persists to plain text files (JSON, YAML, TOML), built on Effect",
   "type": "module",
+  "scripts": {
+    "build": "bunx tsc --build",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
