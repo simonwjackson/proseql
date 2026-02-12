@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "paths": {
+      "@proseql/core": ["./packages/core/src/index.ts"],
+      "@proseql/core/*": ["./packages/core/src/*"],
+      "@proseql/node": ["./packages/node/src/index.ts"],
+      "@proseql/node/*": ["./packages/node/src/*"]
+    }
+  },
+  "include": ["examples/file-persistence.ts"]
+}

@@ -444,5 +444,32 @@ describe("Plugin System", () => {
 				expect(result.message).toContain("plugin-one");
 			}
 		});
+
+		it("should fail with PluginError when operator name conflicts with built-in operator", async () => {
+			// Task 10.2: Test operator name conflicting with built-in operator fails with PluginError
+			const builtInConflictOperator: CustomOperator = {
+				name: "$eq", // $eq is a built-in operator
+				types: ["string"],
+				evaluate: (fieldValue, operand) => fieldValue === operand,
+			};
+
+			const conflictPlugin = createOperatorPlugin(
+				"builtin-conflict-plugin",
+				builtInConflictOperator,
+			);
+
+			const result = await Effect.runPromise(
+				createEffectDatabase(baseConfig, initialData, {
+					plugins: [conflictPlugin],
+				}).pipe(Effect.flip),
+			);
+
+			expect(result._tag).toBe("PluginError");
+			if (result._tag === "PluginError") {
+				expect(result.reason).toBe("operator_conflict");
+				expect(result.message).toContain("$eq");
+				expect(result.message).toContain("built-in");
+			}
+		});
 	});
 });
