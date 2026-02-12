@@ -471,5 +471,25 @@ describe("Plugin System", () => {
 				expect(result.message).toContain("built-in");
 			}
 		});
+
+		it("should fail with PluginError when plugin has missing dependency", async () => {
+			// Task 10.3: Test missing dependency fails with PluginError listing the missing plugin
+			const dependentPlugin = createDependentPlugin("dependent-plugin", [
+				"non-existent-plugin",
+			]);
+
+			const result = await Effect.runPromise(
+				createEffectDatabase(baseConfig, initialData, {
+					plugins: [dependentPlugin],
+				}).pipe(Effect.flip),
+			);
+
+			expect(result._tag).toBe("PluginError");
+			if (result._tag === "PluginError") {
+				expect(result.plugin).toBe("dependent-plugin");
+				expect(result.reason).toBe("missing_dependencies");
+				expect(result.message).toContain("non-existent-plugin");
+			}
+		});
 	});
 });
