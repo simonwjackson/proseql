@@ -22,7 +22,7 @@
 
 ## 4. Query Command
 
-- [ ] 4.1 Create `packages/cli/src/parsers/filter-parser.ts`: parse `--where` strings like `year > 1970` into proseql `where` clause objects. Support operators `=`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `startsWith`, `endsWith`. Auto-detect value types (number, boolean, string).
+- [x] 4.1 Create `packages/cli/src/parsers/filter-parser.ts`: parse `--where` strings like `year > 1970` into proseql `where` clause objects. Support operators `=`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `startsWith`, `endsWith`. Auto-detect value types (number, boolean, string).
 - [ ] 4.2 Create `packages/cli/src/commands/query.ts`: boot database from config, resolve collection by name, execute `findMany` with parsed `where`, `select`, `orderBy`, and `limit` options
 - [ ] 4.3 Parse `--select` as comma-separated field list, `--sort` as `field:asc` or `field:desc`, `--limit` as integer
 - [ ] 4.4 Pipe query results to the output formatter with the active format flag
