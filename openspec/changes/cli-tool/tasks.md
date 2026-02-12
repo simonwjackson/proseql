@@ -9,7 +9,7 @@
 ## 2. Config Discovery
 
 - [x] 2.1 Create `packages/cli/src/config/discovery.ts`: `discoverConfig(cwd, overridePath?)` walks from `cwd` upward, checking for `proseql.config.ts`, `proseql.config.js`, `proseql.config.json` in order. Returns absolute path or fails with descriptive error.
-- [ ] 2.2 Create `packages/cli/src/config/loader.ts`: `loadConfig(configPath)` dynamic-imports `.ts`/`.js` files, JSON-parses `.json` files. Returns typed `DatabaseConfig`. Fails with clear error on invalid config.
+- [x] 2.2 Create `packages/cli/src/config/loader.ts`: `loadConfig(configPath)` dynamic-imports `.ts`/`.js` files, JSON-parses `.json` files. Returns typed `DatabaseConfig`. Fails with clear error on invalid config.
 - [ ] 2.3 Wire discovery and loading into `main.ts`: resolve config before dispatching to any command that needs it (all except `init` and `--help`/`--version`).
 
 ## 3. Init Command
