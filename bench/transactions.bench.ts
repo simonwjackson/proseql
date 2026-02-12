@@ -89,8 +89,40 @@ export async function createSuite(): Promise<Bench> {
 	const baselineUsers = generateUsers(BASELINE_SIZE);
 	const usersArray = [...baselineUsers];
 
-	// Placeholder comment: Individual benchmarks will be added in tasks 7.2-7.4
-	// Task 7.2: Direct multi-operation benchmark (no transaction wrapper)
+	// -------------------------------------------------------------------------
+	// 7.2: Direct multi-operation benchmark (no transaction wrapper)
+	// -------------------------------------------------------------------------
+
+	// For direct execution, we run a sequence of create, update, delete operations
+	// directly against the database without any transaction wrapper.
+	// This measures the baseline throughput without transaction overhead.
+	const directDb = await createBenchDatabase(dbConfig, { users: usersArray });
+	let directCounter = 0;
+
+	bench.add("direct (create + update + delete)", async () => {
+		// Use a counter to generate unique IDs for each iteration
+		const uniqueId = `direct_bench_${Date.now()}_${directCounter++}`;
+
+		// 1. Create a new user
+		const created = await directDb.users.create({
+			id: uniqueId,
+			name: `Direct User ${directCounter}`,
+			email: `direct${directCounter}@test.com`,
+			age: 25 + (directCounter % 50),
+			role: "user" as const,
+			createdAt: new Date().toISOString(),
+		}).runPromise;
+
+		// 2. Update the user we just created
+		await directDb.users.update(created.id, {
+			name: `Updated Direct User ${directCounter}`,
+			age: 30 + (directCounter % 40),
+		}).runPromise;
+
+		// 3. Delete the user to keep collection size stable
+		await directDb.users.delete(created.id).runPromise;
+	});
+
 	// Task 7.3: Transactional multi-operation benchmark (with $transaction)
 	// Task 7.4: Overhead delta reporting
 
