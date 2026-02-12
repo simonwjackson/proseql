@@ -7,8 +7,8 @@
  *
  * @example
  * ```ts
- * import { createRestHandlers } from "proseql-rest"
- * import { createEffectDatabase } from "proseql"
+ * import { createRestHandlers } from "@proseql/rest"
+ * import { createEffectDatabase } from "@proseql/core"
  *
  * const handlers = createRestHandlers(config, db)
  *
@@ -28,4 +28,42 @@
  * @module
  */
 
-export {};
+// ============================================================================
+// Handler Generation
+// ============================================================================
+
+export {
+	createRestHandlers,
+	type RestRequest,
+	type RestResponse,
+	type RestHandler,
+	type HttpMethod,
+	type RouteDescriptor,
+} from "./handlers.js";
+
+// ============================================================================
+// Query Parameter Parsing
+// ============================================================================
+
+export {
+	parseQueryParams,
+	parseAggregateParams,
+	type ParsedQueryConfig,
+	type QueryParams,
+	type ParsedAggregateConfig,
+} from "./query-params.js";
+
+// ============================================================================
+// Error Mapping
+// ============================================================================
+
+export { mapErrorToResponse, type ErrorResponse } from "./error-mapping.js";
+
+// ============================================================================
+// Relationship Routes
+// ============================================================================
+
+export {
+	createRelationshipRoutes,
+	extractRelationships,
+} from "./relationship-routes.js";
