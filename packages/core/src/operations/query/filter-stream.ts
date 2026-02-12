@@ -1,6 +1,6 @@
 import { Stream } from "effect";
 import type { CustomOperator } from "../../plugins/plugin-types.js";
-import { matchesFilter } from "../../types/operators.js";
+import { isFilterOperatorObject, matchesFilter } from "../../types/operators.js";
 import type { SearchConfig } from "../../types/search-types.js";
 import { tokenize } from "./search.js";
 
@@ -88,7 +88,28 @@ function matchesWhere<T extends Record<string, unknown>>(
 
 			if (!allTokensMatch) return false;
 		} else if (key in item) {
-			if (!matchesFilter(item[key], value, customOperators)) return false;
+			const itemValue = item[key];
+
+			// Shape-mirroring: If the filter value is a plain object with no $-prefixed keys
+			// and the item value is also a plain object, recurse into nested matching
+			if (
+				isValidWhereClause(value) &&
+				!isFilterOperatorObject(value, customOperators) &&
+				isValidWhereClause(itemValue)
+			) {
+				// Recurse into nested object matching
+				if (
+					!matchesWhere(
+						itemValue as Record<string, unknown>,
+						value,
+						customOperators,
+					)
+				) {
+					return false;
+				}
+			} else if (!matchesFilter(itemValue, value, customOperators)) {
+				return false;
+			}
 		} else {
 			// Field doesn't exist in item
 			if (isValidWhereClause(value)) {
