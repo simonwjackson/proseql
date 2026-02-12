@@ -531,6 +531,10 @@
     url = "https://registry.npmjs.org/tinybench/-/tinybench-2.9.0.tgz";
     hash = "sha512-0+DUvqWMValLmha6lr4kD8iAMK1HzV0/aKnCtWb9v9641TnP/MFb7Pc2bxoxQjTXAErryXVgUOfv2YqNllqGeg==";
   };
+  "tinybench@3.1.1" = fetchurl {
+    url = "https://registry.npmjs.org/tinybench/-/tinybench-3.1.1.tgz";
+    hash = "sha512-74pmf47HY/bHqamcCMGris+1AtGGsqTZ3Hc/UK4QvSmRuf/9PIF9753+c8XBh7JfX2r9KeZtVjOYjd6vFpc0qQ==";
+  };
   "tinypool@0.8.4" = fetchurl {
     url = "https://registry.npmjs.org/tinypool/-/tinypool-0.8.4.tgz";
     hash = "sha512-i11VH5gS6IFeLY3gMBQ00/MmLncVP7JLXOw1vlgkytLmJK7QnEr7NXf0LBdxfmNPAeyetukOk0bOYrJrFGjYJQ==";
