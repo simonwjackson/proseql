@@ -252,10 +252,18 @@ export const AggregatePayloadSchema = Schema.Struct({
 		Schema.Union(Schema.String, Schema.Array(Schema.String)),
 	),
 	count: Schema.optional(Schema.Literal(true)),
-	sum: Schema.optional(Schema.Union(Schema.String, Schema.Array(Schema.String))),
-	avg: Schema.optional(Schema.Union(Schema.String, Schema.Array(Schema.String))),
-	min: Schema.optional(Schema.Union(Schema.String, Schema.Array(Schema.String))),
-	max: Schema.optional(Schema.Union(Schema.String, Schema.Array(Schema.String))),
+	sum: Schema.optional(
+		Schema.Union(Schema.String, Schema.Array(Schema.String)),
+	),
+	avg: Schema.optional(
+		Schema.Union(Schema.String, Schema.Array(Schema.String)),
+	),
+	min: Schema.optional(
+		Schema.Union(Schema.String, Schema.Array(Schema.String)),
+	),
+	max: Schema.optional(
+		Schema.Union(Schema.String, Schema.Array(Schema.String)),
+	),
 });
 
 export type AggregatePayload = typeof AggregatePayloadSchema.Type;
@@ -374,12 +382,18 @@ export type UpsertManyPayload = typeof UpsertManyPayloadSchema.Type;
  */
 export const AggregateResultSchema = Schema.Struct({
 	count: Schema.optional(Schema.Number),
-	sum: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Number })),
+	sum: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Number }),
+	),
 	avg: Schema.optional(
 		Schema.Record({ key: Schema.String, value: Schema.NullOr(Schema.Number) }),
 	),
-	min: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-	max: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+	min: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	),
+	max: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	),
 });
 
 export type AggregateResultType = typeof AggregateResultSchema.Type;
@@ -390,12 +404,18 @@ export type AggregateResultType = typeof AggregateResultSchema.Type;
 export const GroupResultSchema = Schema.Struct({
 	group: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 	count: Schema.optional(Schema.Number),
-	sum: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Number })),
+	sum: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Number }),
+	),
 	avg: Schema.optional(
 		Schema.Record({ key: Schema.String, value: Schema.NullOr(Schema.Number) }),
 	),
-	min: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-	max: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+	min: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	),
+	max: Schema.optional(
+		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+	),
 });
 
 export type GroupResultType = typeof GroupResultSchema.Type;
@@ -405,7 +425,8 @@ export type GroupResultType = typeof GroupResultSchema.Type;
  */
 export const GroupedAggregateResultSchema = Schema.Array(GroupResultSchema);
 
-export type GroupedAggregateResultType = typeof GroupedAggregateResultSchema.Type;
+export type GroupedAggregateResultType =
+	typeof GroupedAggregateResultSchema.Type;
 
 /**
  * Schema for cursor page info.

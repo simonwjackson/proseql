@@ -13,12 +13,12 @@
  * @module
  */
 
-import { Cause, Chunk, Effect, Option, Runtime, Stream } from "effect";
 import type {
 	DatabaseConfig,
 	EffectDatabase,
 	EffectDatabaseWithPersistence,
 } from "@proseql/core";
+import { Cause, Chunk, Effect, Option, Runtime, Stream } from "effect";
 import type { RestHandler, RestResponse, RouteDescriptor } from "./handlers.js";
 
 // ============================================================================
@@ -112,9 +112,10 @@ const createRefRelationshipHandler = (
 
 		try {
 			// Find the source entity
-			const findSourceEffect = sourceCollection.findById(
-				id,
-			) as Effect.Effect<Record<string, unknown>, unknown>;
+			const findSourceEffect = sourceCollection.findById(id) as Effect.Effect<
+				Record<string, unknown>,
+				unknown
+			>;
 			const sourceEntity = await Effect.runPromise(findSourceEffect);
 
 			// Get the foreign key value
@@ -169,9 +170,10 @@ const createInverseRelationshipHandler = (
 
 		try {
 			// Verify the source entity exists
-			const findSourceEffect = sourceCollection.findById(
-				id,
-			) as Effect.Effect<Record<string, unknown>, unknown>;
+			const findSourceEffect = sourceCollection.findById(id) as Effect.Effect<
+				Record<string, unknown>,
+				unknown
+			>;
 			await Effect.runPromise(findSourceEffect);
 
 			// Query the target collection for related entities
@@ -243,7 +245,11 @@ export const createRelationshipRoutes = <Config extends DatabaseConfig>(
 	const routes: Array<RouteDescriptor> = [];
 	const relationships = extractRelationships(config);
 
-	for (const { sourceCollection, relationshipName, relationship } of relationships) {
+	for (const {
+		sourceCollection,
+		relationshipName,
+		relationship,
+	} of relationships) {
 		// Get the source and target collections from the database
 		// biome-ignore lint/suspicious/noExplicitAny: Collection type is dynamic
 		const source = (db as Record<string, any>)[sourceCollection];
@@ -268,7 +274,8 @@ export const createRelationshipRoutes = <Config extends DatabaseConfig>(
 		} else if (relationship.type === "inverse") {
 			// For inverse relationships, the foreign key is on the target entity
 			// The foreignKey in the config specifies the field on the target that points back
-			const foreignKey = relationship.foreignKey || deriveForeignKey(sourceCollection);
+			const foreignKey =
+				relationship.foreignKey || deriveForeignKey(sourceCollection);
 			routes.push({
 				method: "GET",
 				path,
@@ -322,7 +329,9 @@ const extractTaggedError = (
 	if (Runtime.isFiberFailure(error)) {
 		// Get the cause from the FiberFailure using the well-known symbol
 		const causeSymbol = Symbol.for("effect/Runtime/FiberFailure/Cause");
-		const cause = (error as unknown as Record<symbol, unknown>)[causeSymbol] as Cause.Cause<unknown>;
+		const cause = (error as unknown as Record<symbol, unknown>)[
+			causeSymbol
+		] as Cause.Cause<unknown>;
 
 		// Extract the failure from the cause
 		const failure = Cause.failureOption(cause);

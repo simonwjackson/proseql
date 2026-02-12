@@ -7,20 +7,20 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-	makeRpcGroup,
+	makeAggregateRequest,
 	makeCollectionRpcs,
+	makeCreateManyRequest,
+	makeCreateRequest,
+	makeDeleteManyRequest,
+	makeDeleteRequest,
 	makeFindByIdRequest,
 	makeQueryRequest,
 	makeQueryStreamRequest,
-	makeCreateRequest,
-	makeUpdateRequest,
-	makeDeleteRequest,
-	makeAggregateRequest,
-	makeCreateManyRequest,
+	makeRpcGroup,
 	makeUpdateManyRequest,
-	makeDeleteManyRequest,
-	makeUpsertRequest,
+	makeUpdateRequest,
 	makeUpsertManyRequest,
+	makeUpsertRequest,
 } from "../src/rpc-group.js";
 
 // ============================================================================
@@ -74,13 +74,21 @@ const multiCollectionConfig = {
 	books: {
 		schema: BookSchema,
 		relationships: {
-			author: { type: "ref" as const, target: "authors" as const, foreignKey: "authorId" },
+			author: {
+				type: "ref" as const,
+				target: "authors" as const,
+				foreignKey: "authorId",
+			},
 		},
 	},
 	authors: {
 		schema: AuthorSchema,
 		relationships: {
-			books: { type: "inverse" as const, target: "books" as const, foreignKey: "authorId" },
+			books: {
+				type: "inverse" as const,
+				target: "books" as const,
+				foreignKey: "authorId",
+			},
 		},
 	},
 	publishers: {
@@ -148,9 +156,16 @@ describe("RPC Group derivation (task 10.1)", () => {
 			const rpcs = makeRpcGroup(singleCollectionConfig);
 
 			const createMany = new rpcs.books.CreateManyRequest({ data: [] });
-			const updateMany = new rpcs.books.UpdateManyRequest({ where: {}, updates: {} });
+			const updateMany = new rpcs.books.UpdateManyRequest({
+				where: {},
+				updates: {},
+			});
 			const deleteMany = new rpcs.books.DeleteManyRequest({ where: {} });
-			const upsert = new rpcs.books.UpsertRequest({ where: {}, create: {}, update: {} });
+			const upsert = new rpcs.books.UpsertRequest({
+				where: {},
+				create: {},
+				update: {},
+			});
 			const upsertMany = new rpcs.books.UpsertManyRequest({ data: [] });
 
 			expect(createMany._tag).toBe("books.createMany");
@@ -315,10 +330,7 @@ describe("RPC Group derivation (task 10.1)", () => {
 		it("should create a correctly tagged request class", () => {
 			const CreateManyRequest = makeCreateManyRequest("books");
 			const request = new CreateManyRequest({
-				data: [
-					{ title: "Book 1" },
-					{ title: "Book 2" },
-				],
+				data: [{ title: "Book 1" }, { title: "Book 2" }],
 			});
 
 			expect(request._tag).toBe("books.createMany");
@@ -438,7 +450,10 @@ describe("RPC Group derivation with multi-collection config (task 10.2)", () => 
 			const booksFindById = new rpcs.books.FindByIdRequest({ id: "1" });
 			const booksQuery = new rpcs.books.QueryRequest({});
 			const booksCreate = new rpcs.books.CreateRequest({ data: {} });
-			const booksUpdate = new rpcs.books.UpdateRequest({ id: "1", updates: {} });
+			const booksUpdate = new rpcs.books.UpdateRequest({
+				id: "1",
+				updates: {},
+			});
 			const booksDelete = new rpcs.books.DeleteRequest({ id: "1" });
 			const booksAggregate = new rpcs.books.AggregateRequest({ count: true });
 
@@ -453,9 +468,14 @@ describe("RPC Group derivation with multi-collection config (task 10.2)", () => 
 			const authorsFindById = new rpcs.authors.FindByIdRequest({ id: "1" });
 			const authorsQuery = new rpcs.authors.QueryRequest({});
 			const authorsCreate = new rpcs.authors.CreateRequest({ data: {} });
-			const authorsUpdate = new rpcs.authors.UpdateRequest({ id: "1", updates: {} });
+			const authorsUpdate = new rpcs.authors.UpdateRequest({
+				id: "1",
+				updates: {},
+			});
 			const authorsDelete = new rpcs.authors.DeleteRequest({ id: "1" });
-			const authorsAggregate = new rpcs.authors.AggregateRequest({ count: true });
+			const authorsAggregate = new rpcs.authors.AggregateRequest({
+				count: true,
+			});
 
 			expect(authorsFindById._tag).toBe("authors.findById");
 			expect(authorsQuery._tag).toBe("authors.query");
@@ -465,12 +485,19 @@ describe("RPC Group derivation with multi-collection config (task 10.2)", () => 
 			expect(authorsAggregate._tag).toBe("authors.aggregate");
 
 			// Publishers procedures should have "publishers." prefix
-			const publishersFindById = new rpcs.publishers.FindByIdRequest({ id: "1" });
+			const publishersFindById = new rpcs.publishers.FindByIdRequest({
+				id: "1",
+			});
 			const publishersQuery = new rpcs.publishers.QueryRequest({});
 			const publishersCreate = new rpcs.publishers.CreateRequest({ data: {} });
-			const publishersUpdate = new rpcs.publishers.UpdateRequest({ id: "1", updates: {} });
+			const publishersUpdate = new rpcs.publishers.UpdateRequest({
+				id: "1",
+				updates: {},
+			});
 			const publishersDelete = new rpcs.publishers.DeleteRequest({ id: "1" });
-			const publishersAggregate = new rpcs.publishers.AggregateRequest({ count: true });
+			const publishersAggregate = new rpcs.publishers.AggregateRequest({
+				count: true,
+			});
 
 			expect(publishersFindById._tag).toBe("publishers.findById");
 			expect(publishersQuery._tag).toBe("publishers.query");
@@ -485,9 +512,16 @@ describe("RPC Group derivation with multi-collection config (task 10.2)", () => 
 
 			// Books batch operations
 			const booksCreateMany = new rpcs.books.CreateManyRequest({ data: [] });
-			const booksUpdateMany = new rpcs.books.UpdateManyRequest({ where: {}, updates: {} });
+			const booksUpdateMany = new rpcs.books.UpdateManyRequest({
+				where: {},
+				updates: {},
+			});
 			const booksDeleteMany = new rpcs.books.DeleteManyRequest({ where: {} });
-			const booksUpsert = new rpcs.books.UpsertRequest({ where: {}, create: {}, update: {} });
+			const booksUpsert = new rpcs.books.UpsertRequest({
+				where: {},
+				create: {},
+				update: {},
+			});
 			const booksUpsertMany = new rpcs.books.UpsertManyRequest({ data: [] });
 
 			expect(booksCreateMany._tag).toBe("books.createMany");
@@ -497,11 +531,24 @@ describe("RPC Group derivation with multi-collection config (task 10.2)", () => 
 			expect(booksUpsertMany._tag).toBe("books.upsertMany");
 
 			// Authors batch operations
-			const authorsCreateMany = new rpcs.authors.CreateManyRequest({ data: [] });
-			const authorsUpdateMany = new rpcs.authors.UpdateManyRequest({ where: {}, updates: {} });
-			const authorsDeleteMany = new rpcs.authors.DeleteManyRequest({ where: {} });
-			const authorsUpsert = new rpcs.authors.UpsertRequest({ where: {}, create: {}, update: {} });
-			const authorsUpsertMany = new rpcs.authors.UpsertManyRequest({ data: [] });
+			const authorsCreateMany = new rpcs.authors.CreateManyRequest({
+				data: [],
+			});
+			const authorsUpdateMany = new rpcs.authors.UpdateManyRequest({
+				where: {},
+				updates: {},
+			});
+			const authorsDeleteMany = new rpcs.authors.DeleteManyRequest({
+				where: {},
+			});
+			const authorsUpsert = new rpcs.authors.UpsertRequest({
+				where: {},
+				create: {},
+				update: {},
+			});
+			const authorsUpsertMany = new rpcs.authors.UpsertManyRequest({
+				data: [],
+			});
 
 			expect(authorsCreateMany._tag).toBe("authors.createMany");
 			expect(authorsUpdateMany._tag).toBe("authors.updateMany");
@@ -510,11 +557,24 @@ describe("RPC Group derivation with multi-collection config (task 10.2)", () => 
 			expect(authorsUpsertMany._tag).toBe("authors.upsertMany");
 
 			// Publishers batch operations
-			const publishersCreateMany = new rpcs.publishers.CreateManyRequest({ data: [] });
-			const publishersUpdateMany = new rpcs.publishers.UpdateManyRequest({ where: {}, updates: {} });
-			const publishersDeleteMany = new rpcs.publishers.DeleteManyRequest({ where: {} });
-			const publishersUpsert = new rpcs.publishers.UpsertRequest({ where: {}, create: {}, update: {} });
-			const publishersUpsertMany = new rpcs.publishers.UpsertManyRequest({ data: [] });
+			const publishersCreateMany = new rpcs.publishers.CreateManyRequest({
+				data: [],
+			});
+			const publishersUpdateMany = new rpcs.publishers.UpdateManyRequest({
+				where: {},
+				updates: {},
+			});
+			const publishersDeleteMany = new rpcs.publishers.DeleteManyRequest({
+				where: {},
+			});
+			const publishersUpsert = new rpcs.publishers.UpsertRequest({
+				where: {},
+				create: {},
+				update: {},
+			});
+			const publishersUpsertMany = new rpcs.publishers.UpsertManyRequest({
+				data: [],
+			});
 
 			expect(publishersCreateMany._tag).toBe("publishers.createMany");
 			expect(publishersUpdateMany._tag).toBe("publishers.updateMany");
@@ -542,14 +602,20 @@ describe("RPC Group derivation with multi-collection config (task 10.2)", () => 
 			// Each collection should have its own distinct request class instances
 			// (not shared across collections)
 			expect(rpcs.books.FindByIdRequest).not.toBe(rpcs.authors.FindByIdRequest);
-			expect(rpcs.books.FindByIdRequest).not.toBe(rpcs.publishers.FindByIdRequest);
-			expect(rpcs.authors.FindByIdRequest).not.toBe(rpcs.publishers.FindByIdRequest);
+			expect(rpcs.books.FindByIdRequest).not.toBe(
+				rpcs.publishers.FindByIdRequest,
+			);
+			expect(rpcs.authors.FindByIdRequest).not.toBe(
+				rpcs.publishers.FindByIdRequest,
+			);
 
 			expect(rpcs.books.QueryRequest).not.toBe(rpcs.authors.QueryRequest);
 			expect(rpcs.books.CreateRequest).not.toBe(rpcs.authors.CreateRequest);
 			expect(rpcs.books.UpdateRequest).not.toBe(rpcs.authors.UpdateRequest);
 			expect(rpcs.books.DeleteRequest).not.toBe(rpcs.authors.DeleteRequest);
-			expect(rpcs.books.AggregateRequest).not.toBe(rpcs.authors.AggregateRequest);
+			expect(rpcs.books.AggregateRequest).not.toBe(
+				rpcs.authors.AggregateRequest,
+			);
 		});
 
 		it("should include all CRUD and batch request classes for each collection", () => {

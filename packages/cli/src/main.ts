@@ -1,197 +1,201 @@
 #!/usr/bin/env bun
+
 /**
  * ProseQL CLI - Command line interface for proseql databases
  *
  * Entry point: parses top-level flags and dispatches to command handlers.
  */
 
-import { Effect } from "effect"
-import type { DatabaseConfig } from "@proseql/core"
-import { discoverConfig, ConfigNotFoundError } from "./config/discovery.js"
+import type { DatabaseConfig } from "@proseql/core";
+import { Effect } from "effect";
+import { handleCollections as handleCollectionsCommand } from "./commands/collections.js";
 import {
-	loadConfig,
-	ConfigLoadError,
-	ConfigValidationError,
-} from "./config/loader.js"
-import { handleInit as handleInitCommand } from "./commands/init.js"
-import { handleQuery as handleQueryCommand } from "./commands/query.js"
-import { handleCollections as handleCollectionsCommand } from "./commands/collections.js"
-import { handleDescribe as handleDescribeCommand } from "./commands/describe.js"
-import { handleStats as handleStatsCommand } from "./commands/stats.js"
-import { handleCreate as handleCreateCommand } from "./commands/create.js"
-import { handleUpdate as handleUpdateCommand } from "./commands/update.js"
-import { handleDelete as handleDeleteCommand } from "./commands/delete.js"
-import { handleMigrate as handleMigrateCommand, detectSubcommand } from "./commands/migrate.js"
-import { handleConvert as handleConvertCommand, isValidFormat, VALID_FORMATS } from "./commands/convert.js"
-import { format, type OutputFormat } from "./output/formatter.js"
+	handleConvert as handleConvertCommand,
+	isValidFormat,
+	VALID_FORMATS,
+} from "./commands/convert.js";
+import { handleCreate as handleCreateCommand } from "./commands/create.js";
+import { handleDelete as handleDeleteCommand } from "./commands/delete.js";
+import { handleDescribe as handleDescribeCommand } from "./commands/describe.js";
+import { handleInit as handleInitCommand } from "./commands/init.js";
+import {
+	detectSubcommand,
+	handleMigrate as handleMigrateCommand,
+} from "./commands/migrate.js";
+import { handleQuery as handleQueryCommand } from "./commands/query.js";
+import { handleStats as handleStatsCommand } from "./commands/stats.js";
+import { handleUpdate as handleUpdateCommand } from "./commands/update.js";
+import { discoverConfig } from "./config/discovery.js";
+import { loadConfig } from "./config/loader.js";
+import { format, type OutputFormat } from "./output/formatter.js";
 
-const VERSION = "0.1.0"
+const VERSION = "0.1.0";
 
 /**
  * Parsed CLI arguments
  */
 interface ParsedArgs {
-  readonly command: string | undefined
-  readonly positionalArgs: readonly string[]
-  readonly flags: {
-    readonly help: boolean
-    readonly version: boolean
-    readonly config: string | undefined
-    readonly json: boolean
-    readonly yaml: boolean
-    readonly csv: boolean
-    readonly force: boolean
-    // Command-specific flags stored here for forwarding
-    readonly where: readonly string[]
-    readonly select: string | undefined
-    readonly sort: string | undefined
-    readonly limit: number | undefined
-    readonly data: string | undefined
-    readonly set: string | undefined
-    readonly to: string | undefined
-    readonly format: string | undefined
-    readonly dryRun: boolean
-  }
+	readonly command: string | undefined;
+	readonly positionalArgs: readonly string[];
+	readonly flags: {
+		readonly help: boolean;
+		readonly version: boolean;
+		readonly config: string | undefined;
+		readonly json: boolean;
+		readonly yaml: boolean;
+		readonly csv: boolean;
+		readonly force: boolean;
+		// Command-specific flags stored here for forwarding
+		readonly where: readonly string[];
+		readonly select: string | undefined;
+		readonly sort: string | undefined;
+		readonly limit: number | undefined;
+		readonly data: string | undefined;
+		readonly set: string | undefined;
+		readonly to: string | undefined;
+		readonly format: string | undefined;
+		readonly dryRun: boolean;
+	};
 }
 
 /**
  * Determine output format from flags
  */
 function getOutputFormat(flags: ParsedArgs["flags"]): OutputFormat {
-  if (flags.json) return "json"
-  if (flags.yaml) return "yaml"
-  if (flags.csv) return "csv"
-  return "table"
+	if (flags.json) return "json";
+	if (flags.yaml) return "yaml";
+	if (flags.csv) return "csv";
+	return "table";
 }
 
 /**
  * Parse command line arguments
  */
 function parseArgs(argv: readonly string[]): ParsedArgs {
-  // Skip first two args (bun and script path)
-  const args = argv.slice(2)
+	// Skip first two args (bun and script path)
+	const args = argv.slice(2);
 
-  const flags: {
-    help: boolean
-    version: boolean
-    config: string | undefined
-    json: boolean
-    yaml: boolean
-    csv: boolean
-    force: boolean
-    where: string[]
-    select: string | undefined
-    sort: string | undefined
-    limit: number | undefined
-    data: string | undefined
-    set: string | undefined
-    to: string | undefined
-    format: string | undefined
-    dryRun: boolean
-  } = {
-    help: false,
-    version: false,
-    config: undefined,
-    json: false,
-    yaml: false,
-    csv: false,
-    force: false,
-    where: [],
-    select: undefined,
-    sort: undefined,
-    limit: undefined,
-    data: undefined,
-    set: undefined,
-    to: undefined,
-    format: undefined,
-    dryRun: false,
-  }
+	const flags: {
+		help: boolean;
+		version: boolean;
+		config: string | undefined;
+		json: boolean;
+		yaml: boolean;
+		csv: boolean;
+		force: boolean;
+		where: string[];
+		select: string | undefined;
+		sort: string | undefined;
+		limit: number | undefined;
+		data: string | undefined;
+		set: string | undefined;
+		to: string | undefined;
+		format: string | undefined;
+		dryRun: boolean;
+	} = {
+		help: false,
+		version: false,
+		config: undefined,
+		json: false,
+		yaml: false,
+		csv: false,
+		force: false,
+		where: [],
+		select: undefined,
+		sort: undefined,
+		limit: undefined,
+		data: undefined,
+		set: undefined,
+		to: undefined,
+		format: undefined,
+		dryRun: false,
+	};
 
-  const positionalArgs: string[] = []
-  let command: string | undefined = undefined
+	const positionalArgs: string[] = [];
+	let command: string | undefined;
 
-  let i = 0
-  while (i < args.length) {
-    const arg = args[i]
+	let i = 0;
+	while (i < args.length) {
+		const arg = args[i];
 
-    if (arg === "--help" || arg === "-h") {
-      flags.help = true
-      i++
-    } else if (arg === "--version" || arg === "-v") {
-      flags.version = true
-      i++
-    } else if (arg === "--config" || arg === "-c") {
-      flags.config = args[i + 1]
-      i += 2
-    } else if (arg === "--json") {
-      flags.json = true
-      i++
-    } else if (arg === "--yaml") {
-      flags.yaml = true
-      i++
-    } else if (arg === "--csv") {
-      flags.csv = true
-      i++
-    } else if (arg === "--force" || arg === "-f") {
-      flags.force = true
-      i++
-    } else if (arg === "--where" || arg === "-w") {
-      flags.where.push(args[i + 1])
-      i += 2
-    } else if (arg === "--select" || arg === "-s") {
-      flags.select = args[i + 1]
-      i += 2
-    } else if (arg === "--sort") {
-      flags.sort = args[i + 1]
-      i += 2
-    } else if (arg === "--limit" || arg === "-l") {
-      const limitValue = parseInt(args[i + 1], 10)
-      flags.limit = isNaN(limitValue) ? undefined : limitValue
-      i += 2
-    } else if (arg === "--data" || arg === "-d") {
-      flags.data = args[i + 1]
-      i += 2
-    } else if (arg === "--set") {
-      flags.set = args[i + 1]
-      i += 2
-    } else if (arg === "--to") {
-      flags.to = args[i + 1]
-      i += 2
-    } else if (arg === "--format") {
-      flags.format = args[i + 1]
-      i += 2
-    } else if (arg === "--dry-run") {
-      flags.dryRun = true
-      i++
-    } else if (arg.startsWith("-")) {
-      // Unknown flag - skip (could be command-specific)
-      i++
-    } else {
-      // Positional argument
-      if (command === undefined) {
-        command = arg
-      } else {
-        positionalArgs.push(arg)
-      }
-      i++
-    }
-  }
+		if (arg === "--help" || arg === "-h") {
+			flags.help = true;
+			i++;
+		} else if (arg === "--version" || arg === "-v") {
+			flags.version = true;
+			i++;
+		} else if (arg === "--config" || arg === "-c") {
+			flags.config = args[i + 1];
+			i += 2;
+		} else if (arg === "--json") {
+			flags.json = true;
+			i++;
+		} else if (arg === "--yaml") {
+			flags.yaml = true;
+			i++;
+		} else if (arg === "--csv") {
+			flags.csv = true;
+			i++;
+		} else if (arg === "--force" || arg === "-f") {
+			flags.force = true;
+			i++;
+		} else if (arg === "--where" || arg === "-w") {
+			flags.where.push(args[i + 1]);
+			i += 2;
+		} else if (arg === "--select" || arg === "-s") {
+			flags.select = args[i + 1];
+			i += 2;
+		} else if (arg === "--sort") {
+			flags.sort = args[i + 1];
+			i += 2;
+		} else if (arg === "--limit" || arg === "-l") {
+			const limitValue = parseInt(args[i + 1], 10);
+			flags.limit = Number.isNaN(limitValue) ? undefined : limitValue;
+			i += 2;
+		} else if (arg === "--data" || arg === "-d") {
+			flags.data = args[i + 1];
+			i += 2;
+		} else if (arg === "--set") {
+			flags.set = args[i + 1];
+			i += 2;
+		} else if (arg === "--to") {
+			flags.to = args[i + 1];
+			i += 2;
+		} else if (arg === "--format") {
+			flags.format = args[i + 1];
+			i += 2;
+		} else if (arg === "--dry-run") {
+			flags.dryRun = true;
+			i++;
+		} else if (arg.startsWith("-")) {
+			// Unknown flag - skip (could be command-specific)
+			i++;
+		} else {
+			// Positional argument
+			if (command === undefined) {
+				command = arg;
+			} else {
+				positionalArgs.push(arg);
+			}
+			i++;
+		}
+	}
 
-  return {
-    command,
-    positionalArgs,
-    flags: {
-      ...flags,
-      where: flags.where,
-    },
-  }
+	return {
+		command,
+		positionalArgs,
+		flags: {
+			...flags,
+			where: flags.where,
+		},
+	};
 }
 
 /**
  * Print help message
  */
 function printHelp(): void {
-  console.log(`proseql v${VERSION}
+	console.log(`proseql v${VERSION}
 
 A command-line interface for proseql databases.
 
@@ -248,31 +252,31 @@ EXAMPLES:
   proseql delete books abc123 --force
   proseql migrate status
   proseql convert books --to yaml
-`)
+`);
 }
 
 /**
  * Print version
  */
 function printVersion(): void {
-  console.log(`proseql v${VERSION}`)
+	console.log(`proseql v${VERSION}`);
 }
 
 /**
  * Print error and exit
  */
 function exitWithError(message: string): never {
-  console.error(`Error: ${message}`)
-  console.error(`Run 'proseql --help' for usage.`)
-  process.exit(1)
+	console.error(`Error: ${message}`);
+	console.error(`Run 'proseql --help' for usage.`);
+	process.exit(1);
 }
 
 /**
  * Resolved config result including both the config and its path.
  */
 interface ResolvedConfig {
-  readonly config: DatabaseConfig
-  readonly configPath: string
+	readonly config: DatabaseConfig;
+	readonly configPath: string;
 }
 
 /**
@@ -281,471 +285,512 @@ interface ResolvedConfig {
  * Returns both the config and its path (needed for resolving relative file paths).
  */
 async function resolveConfig(
-  configOverride: string | undefined,
+	configOverride: string | undefined,
 ): Promise<ResolvedConfig> {
-  const program = Effect.gen(function* () {
-    const configPath = yield* discoverConfig(process.cwd(), configOverride)
-    const config = yield* loadConfig(configPath)
-    return { config, configPath }
-  })
+	const program = Effect.gen(function* () {
+		const configPath = yield* discoverConfig(process.cwd(), configOverride);
+		const config = yield* loadConfig(configPath);
+		return { config, configPath };
+	});
 
-  const result = await Effect.runPromise(
-    program.pipe(
-      Effect.catchTag("ConfigNotFoundError", (error) => {
-        exitWithError(error.message)
-      }),
-      Effect.catchTag("ConfigLoadError", (error) => {
-        exitWithError(error.message)
-      }),
-      Effect.catchTag("ConfigValidationError", (error) => {
-        exitWithError(error.message)
-      }),
-    ),
-  )
+	const result = await Effect.runPromise(
+		program.pipe(
+			Effect.catchTag("ConfigNotFoundError", (error) => {
+				exitWithError(error.message);
+			}),
+			Effect.catchTag("ConfigLoadError", (error) => {
+				exitWithError(error.message);
+			}),
+			Effect.catchTag("ConfigValidationError", (error) => {
+				exitWithError(error.message);
+			}),
+		),
+	);
 
-  return result
+	return result;
 }
 
 /**
  * Placeholder for command handlers (to be implemented in separate files)
  */
 async function handleInit(args: ParsedArgs): Promise<void> {
-  // init does not need config - it creates one
-  await handleInitCommand({
-    format: args.flags.format,
-  })
+	// init does not need config - it creates one
+	await handleInitCommand({
+		format: args.flags.format,
+	});
 }
 
 async function handleQuery(
-  args: ParsedArgs,
-  resolvedConfig: ResolvedConfig,
+	args: ParsedArgs,
+	resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  const collectionName = args.positionalArgs[0]
-  const result = await handleQueryCommand({
-    collection: collectionName,
-    config: resolvedConfig.config,
-    configPath: resolvedConfig.configPath,
-    where: args.flags.where,
-    select: args.flags.select,
-    sort: args.flags.sort,
-    limit: args.flags.limit,
-  })
+	const collectionName = args.positionalArgs[0];
+	const result = await handleQueryCommand({
+		collection: collectionName,
+		config: resolvedConfig.config,
+		configPath: resolvedConfig.configPath,
+		where: args.flags.where,
+		select: args.flags.select,
+		sort: args.flags.sort,
+		limit: args.flags.limit,
+	});
 
-  if (!result.success) {
-    exitWithError(result.message ?? "Query failed")
-  }
+	if (!result.success) {
+		exitWithError(result.message ?? "Query failed");
+	}
 
-  // Output the results using the appropriate formatter
-  const outputFormat = getOutputFormat(args.flags)
-  const output = format(outputFormat, result.data ?? [])
-  console.log(output)
+	// Output the results using the appropriate formatter
+	const outputFormat = getOutputFormat(args.flags);
+	const output = format(outputFormat, result.data ?? []);
+	console.log(output);
 }
 
 async function handleCollections(
-  args: ParsedArgs,
-  resolvedConfig: ResolvedConfig,
+	args: ParsedArgs,
+	resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  const result = await handleCollectionsCommand({
-    config: resolvedConfig.config,
-    configPath: resolvedConfig.configPath,
-  })
+	const result = await handleCollectionsCommand({
+		config: resolvedConfig.config,
+		configPath: resolvedConfig.configPath,
+	});
 
-  if (!result.success) {
-    exitWithError(result.message ?? "Failed to list collections")
-  }
+	if (!result.success) {
+		exitWithError(result.message ?? "Failed to list collections");
+	}
 
-  // Output the results using the appropriate formatter
-  const outputFormat = getOutputFormat(args.flags)
-  const output = format(outputFormat, result.data ?? [])
-  console.log(output)
+	// Output the results using the appropriate formatter
+	const outputFormat = getOutputFormat(args.flags);
+	const output = format(outputFormat, result.data ?? []);
+	console.log(output);
 }
 
 async function handleDescribe(
-  args: ParsedArgs,
-  resolvedConfig: ResolvedConfig,
+	args: ParsedArgs,
+	resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  const collectionName = args.positionalArgs[0]
-  const result = await handleDescribeCommand({
-    collection: collectionName,
-    config: resolvedConfig.config,
-  })
+	const collectionName = args.positionalArgs[0];
+	const result = await handleDescribeCommand({
+		collection: collectionName,
+		config: resolvedConfig.config,
+	});
 
-  if (!result.success) {
-    exitWithError(result.message ?? "Failed to describe collection")
-  }
+	if (!result.success) {
+		exitWithError(result.message ?? "Failed to describe collection");
+	}
 
-  // Format output based on format flag
-  const outputFormat = getOutputFormat(args.flags)
+	// Format output based on format flag
+	const outputFormat = getOutputFormat(args.flags);
 
-  if (outputFormat === "json" || outputFormat === "yaml") {
-    // For structured formats, output the full data object
-    const output = format(outputFormat, [result.data as Record<string, unknown>])
-    console.log(output)
-  } else {
-    // For table/csv, format a human-readable summary
-    const data = result.data!
+	if (outputFormat === "json" || outputFormat === "yaml") {
+		// For structured formats, output the full data object
+		const output = format(outputFormat, [
+			result.data as Record<string, unknown>,
+		]);
+		console.log(output);
+	} else {
+		// For table/csv, format a human-readable summary
+		// We know data exists here because result.success is true (guarded above)
+		if (!result.data) {
+			exitWithError("Unexpected: describe succeeded but returned no data");
+			return;
+		}
+		const data = result.data;
 
-    // Print collection header
-    console.log(`\nCollection: ${data.collection}`)
-    if (data.version !== undefined) {
-      console.log(`Version: ${data.version}`)
-    }
-    if (data.appendOnly) {
-      console.log(`Mode: append-only`)
-    }
-    console.log("")
+		// Print collection header
+		console.log(`\nCollection: ${data.collection}`);
+		if (data.version !== undefined) {
+			console.log(`Version: ${data.version}`);
+		}
+		if (data.appendOnly) {
+			console.log(`Mode: append-only`);
+		}
+		console.log("");
 
-    // Print fields as a table
-    console.log("Fields:")
-    const fieldRecords = data.fields.map((f) => ({
-      name: f.name,
-      type: f.type,
-      required: f.required ? "yes" : "no",
-      indexed: f.indexed ? "yes" : "",
-      unique: f.unique ? "yes" : "",
-    }))
-    console.log(format("table", fieldRecords))
+		// Print fields as a table
+		console.log("Fields:");
+		const fieldRecords = data.fields.map((f) => ({
+			name: f.name,
+			type: f.type,
+			required: f.required ? "yes" : "no",
+			indexed: f.indexed ? "yes" : "",
+			unique: f.unique ? "yes" : "",
+		}));
+		console.log(format("table", fieldRecords));
 
-    // Print relationships if any
-    if (data.relationships.length > 0) {
-      console.log("\nRelationships:")
-      const relRecords = data.relationships.map((r) => ({
-        name: r.name,
-        type: r.type,
-        target: r.target,
-        foreignKey: r.foreignKey ?? "",
-      }))
-      console.log(format("table", relRecords))
-    }
+		// Print relationships if any
+		if (data.relationships.length > 0) {
+			console.log("\nRelationships:");
+			const relRecords = data.relationships.map((r) => ({
+				name: r.name,
+				type: r.type,
+				target: r.target,
+				foreignKey: r.foreignKey ?? "",
+			}));
+			console.log(format("table", relRecords));
+		}
 
-    // Print indexes if any
-    if (data.indexes.length > 0) {
-      console.log("\nIndexes:")
-      for (const index of data.indexes) {
-        if (typeof index === "string") {
-          console.log(`  - ${index}`)
-        } else {
-          console.log(`  - [${index.join(", ")}]`)
-        }
-      }
-    }
+		// Print indexes if any
+		if (data.indexes.length > 0) {
+			console.log("\nIndexes:");
+			for (const index of data.indexes) {
+				if (typeof index === "string") {
+					console.log(`  - ${index}`);
+				} else {
+					console.log(`  - [${index.join(", ")}]`);
+				}
+			}
+		}
 
-    // Print unique constraints if any
-    if (data.uniqueConstraints.length > 0) {
-      console.log("\nUnique Constraints:")
-      for (const constraint of data.uniqueConstraints) {
-        if (typeof constraint === "string") {
-          console.log(`  - ${constraint}`)
-        } else {
-          console.log(`  - [${constraint.join(", ")}]`)
-        }
-      }
-    }
+		// Print unique constraints if any
+		if (data.uniqueConstraints.length > 0) {
+			console.log("\nUnique Constraints:");
+			for (const constraint of data.uniqueConstraints) {
+				if (typeof constraint === "string") {
+					console.log(`  - ${constraint}`);
+				} else {
+					console.log(`  - [${constraint.join(", ")}]`);
+				}
+			}
+		}
 
-    // Print search index if configured
-    if (data.hasSearchIndex) {
-      console.log(`\nSearch Index: [${data.searchIndexFields.join(", ")}]`)
-    }
-  }
+		// Print search index if configured
+		if (data.hasSearchIndex) {
+			console.log(`\nSearch Index: [${data.searchIndexFields.join(", ")}]`);
+		}
+	}
 }
 
 async function handleStats(
-  args: ParsedArgs,
-  resolvedConfig: ResolvedConfig,
+	args: ParsedArgs,
+	resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  const result = await handleStatsCommand({
-    config: resolvedConfig.config,
-    configPath: resolvedConfig.configPath,
-  })
+	const result = await handleStatsCommand({
+		config: resolvedConfig.config,
+		configPath: resolvedConfig.configPath,
+	});
 
-  if (!result.success) {
-    exitWithError(result.message ?? "Failed to get collection stats")
-  }
+	if (!result.success) {
+		exitWithError(result.message ?? "Failed to get collection stats");
+	}
 
-  // Output the results using the appropriate formatter
-  const outputFormat = getOutputFormat(args.flags)
-  const output = format(outputFormat, result.data ?? [])
-  console.log(output)
+	// Output the results using the appropriate formatter
+	const outputFormat = getOutputFormat(args.flags);
+	const output = format(outputFormat, result.data ?? []);
+	console.log(output);
 }
 
 async function handleCreate(
-  args: ParsedArgs,
-  resolvedConfig: ResolvedConfig,
+	args: ParsedArgs,
+	resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  const collectionName = args.positionalArgs[0]
-  const dataArg = args.flags.data
+	const collectionName = args.positionalArgs[0];
+	const dataArg = args.flags.data;
 
-  if (!dataArg) {
-    exitWithError("create command requires --data flag with JSON data")
-  }
+	if (!dataArg) {
+		exitWithError("create command requires --data flag with JSON data");
+	}
 
-  const result = await handleCreateCommand({
-    collection: collectionName,
-    config: resolvedConfig.config,
-    configPath: resolvedConfig.configPath,
-    data: dataArg,
-  })
+	const result = await handleCreateCommand({
+		collection: collectionName,
+		config: resolvedConfig.config,
+		configPath: resolvedConfig.configPath,
+		data: dataArg,
+	});
 
-  if (!result.success) {
-    exitWithError(result.message ?? "Create failed")
-  }
+	if (!result.success) {
+		exitWithError(result.message ?? "Create failed");
+	}
 
-  // Output the created entity using the appropriate formatter
-  const outputFormat = getOutputFormat(args.flags)
-  const output = format(outputFormat, [result.data as Record<string, unknown>])
-  console.log(output)
+	// Output the created entity using the appropriate formatter
+	const outputFormat = getOutputFormat(args.flags);
+	const output = format(outputFormat, [result.data as Record<string, unknown>]);
+	console.log(output);
 }
 
 async function handleUpdate(
-  args: ParsedArgs,
-  resolvedConfig: ResolvedConfig,
+	args: ParsedArgs,
+	resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  const collectionName = args.positionalArgs[0]
-  const entityId = args.positionalArgs[1]
-  const setArg = args.flags.set
+	const collectionName = args.positionalArgs[0];
+	const entityId = args.positionalArgs[1];
+	const setArg = args.flags.set;
 
-  if (!setArg) {
-    exitWithError("update command requires --set flag with assignments (e.g., --set 'year=2025,title=New')")
-  }
+	if (!setArg) {
+		exitWithError(
+			"update command requires --set flag with assignments (e.g., --set 'year=2025,title=New')",
+		);
+	}
 
-  const result = await handleUpdateCommand({
-    collection: collectionName,
-    id: entityId,
-    config: resolvedConfig.config,
-    configPath: resolvedConfig.configPath,
-    set: setArg,
-  })
+	const result = await handleUpdateCommand({
+		collection: collectionName,
+		id: entityId,
+		config: resolvedConfig.config,
+		configPath: resolvedConfig.configPath,
+		set: setArg,
+	});
 
-  if (!result.success) {
-    exitWithError(result.message ?? "Update failed")
-  }
+	if (!result.success) {
+		exitWithError(result.message ?? "Update failed");
+	}
 
-  // Output the updated entity using the appropriate formatter
-  const outputFormat = getOutputFormat(args.flags)
-  const output = format(outputFormat, [result.data as Record<string, unknown>])
-  console.log(output)
+	// Output the updated entity using the appropriate formatter
+	const outputFormat = getOutputFormat(args.flags);
+	const output = format(outputFormat, [result.data as Record<string, unknown>]);
+	console.log(output);
 }
 
 async function handleDelete(
-  args: ParsedArgs,
-  resolvedConfig: ResolvedConfig,
+	args: ParsedArgs,
+	resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  const collectionName = args.positionalArgs[0]
-  const entityId = args.positionalArgs[1]
+	const collectionName = args.positionalArgs[0];
+	const entityId = args.positionalArgs[1];
 
-  const result = await handleDeleteCommand({
-    collection: collectionName,
-    id: entityId,
-    config: resolvedConfig.config,
-    configPath: resolvedConfig.configPath,
-    force: args.flags.force,
-  })
+	const result = await handleDeleteCommand({
+		collection: collectionName,
+		id: entityId,
+		config: resolvedConfig.config,
+		configPath: resolvedConfig.configPath,
+		force: args.flags.force,
+	});
 
-  if (!result.success) {
-    if (result.aborted) {
-      // User cancelled - just print the message, don't exit with error
-      console.log(result.message ?? "Operation cancelled.")
-      return
-    }
-    exitWithError(result.message ?? "Delete failed")
-  }
+	if (!result.success) {
+		if (result.aborted) {
+			// User cancelled - just print the message, don't exit with error
+			console.log(result.message ?? "Operation cancelled.");
+			return;
+		}
+		exitWithError(result.message ?? "Delete failed");
+	}
 
-  // Print confirmation message
-  console.log(result.message)
+	// Print confirmation message
+	console.log(result.message);
 }
 
 async function handleMigrate(
-  args: ParsedArgs,
-  resolvedConfig: ResolvedConfig,
+	args: ParsedArgs,
+	resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  // Detect subcommand from positional args and flags
-  const subcommand = detectSubcommand(args.positionalArgs, args.flags.dryRun)
+	// Detect subcommand from positional args and flags
+	const subcommand = detectSubcommand(args.positionalArgs, args.flags.dryRun);
 
-  const result = await handleMigrateCommand({
-    config: resolvedConfig.config,
-    configPath: resolvedConfig.configPath,
-    subcommand,
-    force: args.flags.force,
-  })
+	const result = await handleMigrateCommand({
+		config: resolvedConfig.config,
+		configPath: resolvedConfig.configPath,
+		subcommand,
+		force: args.flags.force,
+	});
 
-  if (!result.success) {
-    if (result.aborted) {
-      // User cancelled - just print the message, don't exit with error
-      console.log(result.message ?? "Operation cancelled.")
-      return
-    }
-    exitWithError(result.message ?? "Migration failed")
-  }
+	if (!result.success) {
+		if (result.aborted) {
+			// User cancelled - just print the message, don't exit with error
+			console.log(result.message ?? "Operation cancelled.");
+			return;
+		}
+		exitWithError(result.message ?? "Migration failed");
+	}
 
-  // Output the results
-  if (result.data) {
-    // For status and dry-run, format the collection results
-    const outputFormat = getOutputFormat(args.flags)
+	// Output the results
+	if (result.data) {
+		// For status and dry-run, format the collection results
+		const outputFormat = getOutputFormat(args.flags);
 
-    // Transform collection data for output
-    const records = result.data.collections.map((c) => ({
-      collection: c.name,
-      file: c.filePath,
-      currentVersion: c.currentVersion,
-      targetVersion: c.targetVersion,
-      status: c.status,
-      migrations: c.migrationsToApply.length,
-    }))
+		// Transform collection data for output
+		const records = result.data.collections.map((c) => ({
+			collection: c.name,
+			file: c.filePath,
+			currentVersion: c.currentVersion,
+			targetVersion: c.targetVersion,
+			status: c.status,
+			migrations: c.migrationsToApply.length,
+		}));
 
-    const output = format(outputFormat, records)
-    console.log(output)
-  } else if (result.message) {
-    console.log(result.message)
-  }
+		const output = format(outputFormat, records);
+		console.log(output);
+	} else if (result.message) {
+		console.log(result.message);
+	}
 }
 
 async function handleConvert(
-  args: ParsedArgs,
-  resolvedConfig: ResolvedConfig,
+	args: ParsedArgs,
+	resolvedConfig: ResolvedConfig,
 ): Promise<void> {
-  const collectionName = args.positionalArgs[0]
-  const targetFormat = args.flags.to
+	const collectionName = args.positionalArgs[0];
+	const targetFormat = args.flags.to;
 
-  if (!targetFormat) {
-    exitWithError("convert command requires --to flag with target format (e.g., --to yaml)")
-  }
+	if (!targetFormat) {
+		exitWithError(
+			"convert command requires --to flag with target format (e.g., --to yaml)",
+		);
+	}
 
-  if (!isValidFormat(targetFormat)) {
-    exitWithError(`Invalid target format '${targetFormat}'. Valid formats: ${VALID_FORMATS.join(", ")}`)
-  }
+	if (!isValidFormat(targetFormat)) {
+		exitWithError(
+			`Invalid target format '${targetFormat}'. Valid formats: ${VALID_FORMATS.join(", ")}`,
+		);
+	}
 
-  const result = await handleConvertCommand({
-    collection: collectionName,
-    config: resolvedConfig.config,
-    configPath: resolvedConfig.configPath,
-    targetFormat,
-  })
+	const result = await handleConvertCommand({
+		collection: collectionName,
+		config: resolvedConfig.config,
+		configPath: resolvedConfig.configPath,
+		targetFormat,
+	});
 
-  if (!result.success) {
-    exitWithError(result.message ?? "Convert failed")
-  }
+	if (!result.success) {
+		exitWithError(result.message ?? "Convert failed");
+	}
 
-  // Output the conversion summary
-  const outputFormat = getOutputFormat(args.flags)
+	// Output the conversion summary
+	const outputFormat = getOutputFormat(args.flags);
 
-  if (result.data) {
-    if (outputFormat === "table") {
-      console.log(`\nConversion complete:`)
-      console.log(`  Collection: ${result.data.collection}`)
-      console.log(`  Old file:   ${result.data.oldFile} (${result.data.oldFormat})`)
-      console.log(`  New file:   ${result.data.newFile} (${result.data.newFormat})`)
-      if (result.data.configUpdated) {
-        console.log(`  Config:     updated`)
-      } else {
-        console.log(`  Config:     not updated (manual update may be required)`)
-      }
-    } else {
-      const output = format(outputFormat, [result.data as Record<string, unknown>])
-      console.log(output)
-    }
-  }
+	if (result.data) {
+		if (outputFormat === "table") {
+			console.log(`\nConversion complete:`);
+			console.log(`  Collection: ${result.data.collection}`);
+			console.log(
+				`  Old file:   ${result.data.oldFile} (${result.data.oldFormat})`,
+			);
+			console.log(
+				`  New file:   ${result.data.newFile} (${result.data.newFormat})`,
+			);
+			if (result.data.configUpdated) {
+				console.log(`  Config:     updated`);
+			} else {
+				console.log(
+					`  Config:     not updated (manual update may be required)`,
+				);
+			}
+		} else {
+			const output = format(outputFormat, [
+				result.data as Record<string, unknown>,
+			]);
+			console.log(output);
+		}
+	}
 }
 
 /**
  * Commands that do NOT require a loaded config.
  */
-const COMMANDS_WITHOUT_CONFIG = new Set(["init"])
+const COMMANDS_WITHOUT_CONFIG = new Set(["init"]);
 
 /**
  * Main entry point
  */
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv)
+	const args = parseArgs(process.argv);
 
-  // Handle global flags first
-  if (args.flags.version) {
-    printVersion()
-    return
-  }
+	// Handle global flags first
+	if (args.flags.version) {
+		printVersion();
+		return;
+	}
 
-  if (args.flags.help || args.command === undefined) {
-    printHelp()
-    return
-  }
+	if (args.flags.help || args.command === undefined) {
+		printHelp();
+		return;
+	}
 
-  // Resolve config for commands that need it
-  const needsConfig = !COMMANDS_WITHOUT_CONFIG.has(args.command)
-  const resolvedConfig = needsConfig
-    ? await resolveConfig(args.flags.config)
-    : undefined
+	// Resolve config for commands that need it
+	const needsConfig = !COMMANDS_WITHOUT_CONFIG.has(args.command);
+	const resolvedConfig = needsConfig
+		? await resolveConfig(args.flags.config)
+		: undefined;
 
-  // Dispatch to command handlers
-  switch (args.command) {
-    case "init":
-      await handleInit(args)
-      break
+	/**
+	 * Helper to ensure config is available for commands that need it.
+	 * This is a type guard that narrows `resolvedConfig` from `ResolvedConfig | undefined`
+	 * to `ResolvedConfig` for commands that require configuration.
+	 */
+	function requireConfig(): ResolvedConfig {
+		if (!resolvedConfig) {
+			exitWithError(
+				"Configuration is required for this command but was not loaded",
+			);
+			// TypeScript doesn't know exitWithError never returns, so we add this unreachable return
+			throw new Error("Unreachable");
+		}
+		return resolvedConfig;
+	}
 
-    case "query":
-      if (args.positionalArgs.length < 1) {
-        exitWithError("query command requires a collection name")
-      }
-      await handleQuery(args, resolvedConfig!)
-      break
+	// Dispatch to command handlers
+	switch (args.command) {
+		case "init":
+			await handleInit(args);
+			break;
 
-    case "collections":
-      await handleCollections(args, resolvedConfig!)
-      break
+		case "query":
+			if (args.positionalArgs.length < 1) {
+				exitWithError("query command requires a collection name");
+			}
+			await handleQuery(args, requireConfig());
+			break;
 
-    case "describe":
-      if (args.positionalArgs.length < 1) {
-        exitWithError("describe command requires a collection name")
-      }
-      await handleDescribe(args, resolvedConfig!)
-      break
+		case "collections":
+			await handleCollections(args, requireConfig());
+			break;
 
-    case "stats":
-      await handleStats(args, resolvedConfig!)
-      break
+		case "describe":
+			if (args.positionalArgs.length < 1) {
+				exitWithError("describe command requires a collection name");
+			}
+			await handleDescribe(args, requireConfig());
+			break;
 
-    case "create":
-      if (args.positionalArgs.length < 1) {
-        exitWithError("create command requires a collection name")
-      }
-      await handleCreate(args, resolvedConfig!)
-      break
+		case "stats":
+			await handleStats(args, requireConfig());
+			break;
 
-    case "update":
-      if (args.positionalArgs.length < 2) {
-        exitWithError("update command requires a collection name and entity ID")
-      }
-      await handleUpdate(args, resolvedConfig!)
-      break
+		case "create":
+			if (args.positionalArgs.length < 1) {
+				exitWithError("create command requires a collection name");
+			}
+			await handleCreate(args, requireConfig());
+			break;
 
-    case "delete":
-      if (args.positionalArgs.length < 2) {
-        exitWithError("delete command requires a collection name and entity ID")
-      }
-      await handleDelete(args, resolvedConfig!)
-      break
+		case "update":
+			if (args.positionalArgs.length < 2) {
+				exitWithError(
+					"update command requires a collection name and entity ID",
+				);
+			}
+			await handleUpdate(args, requireConfig());
+			break;
 
-    case "migrate":
-      await handleMigrate(args, resolvedConfig!)
-      break
+		case "delete":
+			if (args.positionalArgs.length < 2) {
+				exitWithError(
+					"delete command requires a collection name and entity ID",
+				);
+			}
+			await handleDelete(args, requireConfig());
+			break;
 
-    case "convert":
-      if (args.positionalArgs.length < 1) {
-        exitWithError("convert command requires a collection name")
-      }
-      await handleConvert(args, resolvedConfig!)
-      break
+		case "migrate":
+			await handleMigrate(args, requireConfig());
+			break;
 
-    default:
-      exitWithError(`Unknown command: ${args.command}`)
-  }
+		case "convert":
+			if (args.positionalArgs.length < 1) {
+				exitWithError("convert command requires a collection name");
+			}
+			await handleConvert(args, requireConfig());
+			break;
+
+		default:
+			exitWithError(`Unknown command: ${args.command}`);
+	}
 }
 
 // Export for testing
-export { parseArgs, getOutputFormat, printHelp, printVersion, resolveConfig }
-export type { ParsedArgs }
-export type { OutputFormat } from "./output/formatter.js"
+export { parseArgs, getOutputFormat, printHelp, printVersion, resolveConfig };
+export type { ParsedArgs };
+export type { OutputFormat } from "./output/formatter.js";
 
 // Run main
 main().catch((error) => {
-  console.error("Fatal error:", error)
-  process.exit(1)
-})
+	console.error("Fatal error:", error);
+	process.exit(1);
+});

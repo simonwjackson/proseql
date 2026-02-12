@@ -2,20 +2,20 @@
  * Tests for the RPC handler layer implementation.
  */
 
-import { Chunk, Effect, Layer, Schema, Stream } from "effect";
-import { describe, expect, it } from "vitest";
 import {
 	createPersistentEffectDatabase,
 	jsonCodec,
 	makeInMemoryStorageLayer,
 	makeSerializerLayer,
 } from "@proseql/core";
+import { Chunk, Effect, Layer, Schema, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 import {
+	makeDatabaseContextTag,
 	makeRpcHandlers,
 	makeRpcHandlersFromDatabase,
 	makeRpcHandlersLayer,
 	makeRpcHandlersLayerFromDatabase,
-	makeDatabaseContextTag,
 } from "../src/rpc-handlers.js";
 
 // Test schema
@@ -44,7 +44,11 @@ const multiCollectionConfig = {
 	books: {
 		schema: BookSchema,
 		relationships: {
-			author: { type: "ref" as const, target: "authors" as const, foreignKey: "authorId" },
+			author: {
+				type: "ref" as const,
+				target: "authors" as const,
+				foreignKey: "authorId",
+			},
 		},
 	},
 	authors: {
@@ -108,8 +112,15 @@ describe("makeRpcHandlers", () => {
 				}),
 			);
 
-			const book = await Effect.runPromise(handlers.books.findById({ id: "1" }));
-			expect(book).toEqual({ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 });
+			const book = await Effect.runPromise(
+				handlers.books.findById({ id: "1" }),
+			);
+			expect(book).toEqual({
+				id: "1",
+				title: "Dune",
+				author: "Frank Herbert",
+				year: 1965,
+			});
 		});
 
 		it("findById should fail for non-existent entity", async () => {
@@ -169,7 +180,12 @@ describe("makeRpcHandlers", () => {
 
 			const newBook = await Effect.runPromise(
 				handlers.books.create({
-					data: { id: "3", title: "Snow Crash", author: "Neal Stephenson", year: 1992 },
+					data: {
+						id: "3",
+						title: "Snow Crash",
+						author: "Neal Stephenson",
+						year: 1992,
+					},
 				}),
 			);
 
@@ -177,7 +193,9 @@ describe("makeRpcHandlers", () => {
 			expect(newBook.title).toBe("Snow Crash");
 
 			// Verify it was added
-			const found = await Effect.runPromise(handlers.books.findById({ id: "3" }));
+			const found = await Effect.runPromise(
+				handlers.books.findById({ id: "3" }),
+			);
 			expect(found.title).toBe("Snow Crash");
 		});
 
@@ -192,7 +210,11 @@ describe("makeRpcHandlers", () => {
 			const result = await Effect.runPromise(
 				Effect.either(
 					handlers.books.create({
-						data: { id: "bad", title: "Bad Book", year: "not-a-number" } as unknown as Record<string, unknown>,
+						data: {
+							id: "bad",
+							title: "Bad Book",
+							year: "not-a-number",
+						} as unknown as Record<string, unknown>,
 					}),
 				),
 			);
@@ -214,7 +236,10 @@ describe("makeRpcHandlers", () => {
 			const result = await Effect.runPromise(
 				handlers.books
 					.create({
-						data: { id: "bad", title: "Bad Book" } as unknown as Record<string, unknown>,
+						data: { id: "bad", title: "Bad Book" } as unknown as Record<
+							string,
+							unknown
+						>,
 					})
 					.pipe(
 						Effect.catchTag("ValidationError", (error) =>
@@ -263,10 +288,12 @@ describe("makeRpcHandlers", () => {
 			);
 
 			const result = await Effect.runPromise(
-				Effect.either(handlers.books.update({
-					id: "nonexistent",
-					updates: { year: 2000 },
-				})),
+				Effect.either(
+					handlers.books.update({
+						id: "nonexistent",
+						updates: { year: 2000 },
+					}),
+				),
 			);
 
 			expect(result._tag).toBe("Left");
@@ -282,7 +309,9 @@ describe("makeRpcHandlers", () => {
 				}),
 			);
 
-			const deleted = await Effect.runPromise(handlers.books.delete({ id: "1" }));
+			const deleted = await Effect.runPromise(
+				handlers.books.delete({ id: "1" }),
+			);
 			expect(deleted.id).toBe("1");
 
 			// Verify it was removed
@@ -514,7 +543,9 @@ describe("makeRpcHandlers", () => {
 			});
 
 			await Effect.runPromise(
-				Stream.runCollect(observedStream).pipe(Effect.map(Chunk.toReadonlyArray)),
+				Stream.runCollect(observedStream).pipe(
+					Effect.map(Chunk.toReadonlyArray),
+				),
 			);
 
 			// With 5 items and chunkSize 2, we should get chunks of size 2, 2, 1
@@ -589,7 +620,12 @@ describe("makeRpcHandlers", () => {
 				handlers.books.createMany({
 					data: [
 						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
-						{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
+						{
+							id: "2",
+							title: "Neuromancer",
+							author: "William Gibson",
+							year: 1984,
+						},
 					],
 				}),
 			);
@@ -606,15 +642,27 @@ describe("makeRpcHandlers", () => {
 		it("createMany should support skipDuplicates option", async () => {
 			const handlers = await Effect.runPromise(
 				makeRpcHandlers(singleCollectionConfig, {
-					books: [{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 }],
+					books: [
+						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+					],
 				}),
 			);
 
 			const result = await Effect.runPromise(
 				handlers.books.createMany({
 					data: [
-						{ id: "1", title: "Dune Again", author: "Frank Herbert", year: 1965 }, // Duplicate ID
-						{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
+						{
+							id: "1",
+							title: "Dune Again",
+							author: "Frank Herbert",
+							year: 1965,
+						}, // Duplicate ID
+						{
+							id: "2",
+							title: "Neuromancer",
+							author: "William Gibson",
+							year: 1984,
+						},
 					],
 					options: { skipDuplicates: true },
 				}),
@@ -631,8 +679,18 @@ describe("makeRpcHandlers", () => {
 				makeRpcHandlers(singleCollectionConfig, {
 					books: [
 						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
-						{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
-						{ id: "3", title: "Foundation", author: "Isaac Asimov", year: 1951 },
+						{
+							id: "2",
+							title: "Neuromancer",
+							author: "William Gibson",
+							year: 1984,
+						},
+						{
+							id: "3",
+							title: "Foundation",
+							author: "Isaac Asimov",
+							year: 1951,
+						},
 					],
 				}),
 			);
@@ -649,7 +707,9 @@ describe("makeRpcHandlers", () => {
 			expect(result.updated[0].year).toBe(2000);
 
 			// Verify the update persisted
-			const dune = await Effect.runPromise(handlers.books.findById({ id: "1" }));
+			const dune = await Effect.runPromise(
+				handlers.books.findById({ id: "1" }),
+			);
 			expect(dune.year).toBe(2000);
 		});
 
@@ -658,8 +718,18 @@ describe("makeRpcHandlers", () => {
 				makeRpcHandlers(singleCollectionConfig, {
 					books: [
 						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
-						{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
-						{ id: "3", title: "Foundation", author: "Isaac Asimov", year: 1951 },
+						{
+							id: "2",
+							title: "Neuromancer",
+							author: "William Gibson",
+							year: 1984,
+						},
+						{
+							id: "3",
+							title: "Foundation",
+							author: "Isaac Asimov",
+							year: 1951,
+						},
 					],
 				}),
 			);
@@ -684,8 +754,18 @@ describe("makeRpcHandlers", () => {
 				makeRpcHandlers(singleCollectionConfig, {
 					books: [
 						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
-						{ id: "2", title: "Children of Dune", author: "Frank Herbert", year: 1976 },
-						{ id: "3", title: "Foundation", author: "Isaac Asimov", year: 1951 },
+						{
+							id: "2",
+							title: "Children of Dune",
+							author: "Frank Herbert",
+							year: 1976,
+						},
+						{
+							id: "3",
+							title: "Foundation",
+							author: "Isaac Asimov",
+							year: 1951,
+						},
 					],
 				}),
 			);
@@ -703,7 +783,7 @@ describe("makeRpcHandlers", () => {
 			// Verify one Frank Herbert book remains
 			const allBooks = await Effect.runPromise(handlers.books.query({}));
 			expect(allBooks).toHaveLength(2);
-			const herbertBooks = allBooks.filter(b => b.author === "Frank Herbert");
+			const herbertBooks = allBooks.filter((b) => b.author === "Frank Herbert");
 			expect(herbertBooks).toHaveLength(1);
 		});
 
@@ -717,7 +797,12 @@ describe("makeRpcHandlers", () => {
 			const result = await Effect.runPromise(
 				handlers.books.upsert({
 					where: { id: "1" },
-					create: { id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+					create: {
+						id: "1",
+						title: "Dune",
+						author: "Frank Herbert",
+						year: 1965,
+					},
 					update: { year: 2000 },
 				}),
 			);
@@ -731,14 +816,21 @@ describe("makeRpcHandlers", () => {
 		it("upsert should update when entity exists", async () => {
 			const handlers = await Effect.runPromise(
 				makeRpcHandlers(singleCollectionConfig, {
-					books: [{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 }],
+					books: [
+						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+					],
 				}),
 			);
 
 			const result = await Effect.runPromise(
 				handlers.books.upsert({
 					where: { id: "1" },
-					create: { id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+					create: {
+						id: "1",
+						title: "Dune",
+						author: "Frank Herbert",
+						year: 1965,
+					},
 					update: { year: 2000 },
 				}),
 			);
@@ -751,7 +843,9 @@ describe("makeRpcHandlers", () => {
 		it("upsertMany should create and update multiple entities", async () => {
 			const handlers = await Effect.runPromise(
 				makeRpcHandlers(singleCollectionConfig, {
-					books: [{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 }],
+					books: [
+						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+					],
 				}),
 			);
 
@@ -760,12 +854,22 @@ describe("makeRpcHandlers", () => {
 					data: [
 						{
 							where: { id: "1" },
-							create: { id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+							create: {
+								id: "1",
+								title: "Dune",
+								author: "Frank Herbert",
+								year: 1965,
+							},
 							update: { year: 2000 },
 						},
 						{
 							where: { id: "2" },
-							create: { id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
+							create: {
+								id: "2",
+								title: "Neuromancer",
+								author: "William Gibson",
+								year: 1984,
+							},
 							update: { year: 2001 },
 						},
 					],
@@ -792,7 +896,8 @@ describe("makeRpcHandlersLayer", () => {
 			books: initialBooks,
 		});
 
-		const DatabaseContextTag = makeDatabaseContextTag<typeof singleCollectionConfig>();
+		const DatabaseContextTag =
+			makeDatabaseContextTag<typeof singleCollectionConfig>();
 
 		const result = await Effect.runPromise(
 			Effect.gen(function* () {
@@ -862,7 +967,12 @@ describe("makeRpcHandlersFromDatabase", () => {
 
 				// Create a book via RPC handler
 				yield* handlers.books.create({
-					data: { id: "new-1", title: "Snow Crash", author: "Neal Stephenson", year: 1992 },
+					data: {
+						id: "new-1",
+						title: "Snow Crash",
+						author: "Neal Stephenson",
+						year: 1992,
+					},
 				});
 
 				// Flush to ensure persistence
@@ -870,7 +980,9 @@ describe("makeRpcHandlersFromDatabase", () => {
 
 				// Verify the file was written
 				expect(store.has("/data/books.json")).toBe(true);
-				const parsed = JSON.parse(store.get("/data/books.json")!);
+				const fileContent = store.get("/data/books.json");
+				expect(fileContent).toBeDefined();
+				const parsed = JSON.parse(fileContent ?? "{}");
 				expect(parsed["new-1"]).toBeDefined();
 				expect(parsed["new-1"].title).toBe("Snow Crash");
 			}).pipe(Effect.provide(layer), Effect.scoped),
@@ -887,7 +999,9 @@ describe("makeRpcHandlersFromDatabase", () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const db = yield* createPersistentEffectDatabase(persistentConfig, {
-					books: [{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 }],
+					books: [
+						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
+					],
 				});
 
 				const handlers = makeRpcHandlersFromDatabase(persistentConfig, db);
@@ -903,7 +1017,9 @@ describe("makeRpcHandlersFromDatabase", () => {
 
 				// Verify the update was persisted
 				expect(store.has("/data/books.json")).toBe(true);
-				const parsed = JSON.parse(store.get("/data/books.json")!);
+				const fileContent = store.get("/data/books.json");
+				expect(fileContent).toBeDefined();
+				const parsed = JSON.parse(fileContent ?? "{}");
 				expect(parsed["1"].title).toBe("Dune (Revised Edition)");
 			}).pipe(Effect.provide(layer), Effect.scoped),
 		);
@@ -921,7 +1037,12 @@ describe("makeRpcHandlersFromDatabase", () => {
 				const db = yield* createPersistentEffectDatabase(persistentConfig, {
 					books: [
 						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
-						{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
+						{
+							id: "2",
+							title: "Neuromancer",
+							author: "William Gibson",
+							year: 1984,
+						},
 					],
 				});
 
@@ -935,7 +1056,9 @@ describe("makeRpcHandlersFromDatabase", () => {
 
 				// Verify the deletion was persisted
 				expect(store.has("/data/books.json")).toBe(true);
-				const parsed = JSON.parse(store.get("/data/books.json")!);
+				const fileContent = store.get("/data/books.json");
+				expect(fileContent).toBeDefined();
+				const parsed = JSON.parse(fileContent ?? "{}");
 				expect(parsed["1"]).toBeUndefined();
 				expect(parsed["2"]).toBeDefined();
 			}).pipe(Effect.provide(layer), Effect.scoped),
@@ -961,8 +1084,18 @@ describe("makeRpcHandlersFromDatabase", () => {
 				yield* handlers.books.createMany({
 					data: [
 						{ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 },
-						{ id: "2", title: "Neuromancer", author: "William Gibson", year: 1984 },
-						{ id: "3", title: "Snow Crash", author: "Neal Stephenson", year: 1992 },
+						{
+							id: "2",
+							title: "Neuromancer",
+							author: "William Gibson",
+							year: 1984,
+						},
+						{
+							id: "3",
+							title: "Snow Crash",
+							author: "Neal Stephenson",
+							year: 1992,
+						},
 					],
 				});
 
@@ -971,7 +1104,9 @@ describe("makeRpcHandlersFromDatabase", () => {
 
 				// Verify all were persisted
 				expect(store.has("/data/books.json")).toBe(true);
-				const parsed = JSON.parse(store.get("/data/books.json")!);
+				const fileContent = store.get("/data/books.json");
+				expect(fileContent).toBeDefined();
+				const parsed = JSON.parse(fileContent ?? "{}");
 				expect(Object.keys(parsed)).toHaveLength(3);
 				expect(parsed["1"].title).toBe("Dune");
 				expect(parsed["2"].title).toBe("Neuromancer");
@@ -1022,7 +1157,10 @@ describe("typed error flow through to client", () => {
 		const validationResult = await Effect.runPromise(
 			handlers.books
 				.create({
-					data: { id: "invalid", title: 123 } as unknown as Record<string, unknown>,
+					data: { id: "invalid", title: 123 } as unknown as Record<
+						string,
+						unknown
+					>,
 				})
 				.pipe(
 					Effect.catchTag("NotFoundError", () =>
@@ -1071,13 +1209,18 @@ describe("typed error flow through to client", () => {
 		);
 
 		// Define a generic error handler that uses multiple catchTag calls
-		const handleOperation = <T>(operation: Effect.Effect<T, { _tag: string }>) =>
+		const handleOperation = <T>(
+			operation: Effect.Effect<T, { _tag: string }>,
+		) =>
 			operation.pipe(
 				Effect.catchTag("NotFoundError", (e) =>
 					Effect.succeed({ status: "not_found" as const, errorId: e.id }),
 				),
 				Effect.catchTag("ValidationError", (e) =>
-					Effect.succeed({ status: "validation_failed" as const, issues: e.issues.length }),
+					Effect.succeed({
+						status: "validation_failed" as const,
+						issues: e.issues.length,
+					}),
 				),
 				Effect.catchTag("DuplicateKeyError", (e) =>
 					Effect.succeed({ status: "duplicate" as const, field: e.field }),
@@ -1104,7 +1247,12 @@ describe("typed error flow through to client", () => {
 		const successResult = await Effect.runPromise(
 			handleOperation(handlers.books.findById({ id: "1" })),
 		);
-		expect(successResult).toEqual({ id: "1", title: "Dune", author: "Frank Herbert", year: 1965 });
+		expect(successResult).toEqual({
+			id: "1",
+			title: "Dune",
+			author: "Frank Herbert",
+			year: 1965,
+		});
 	});
 
 	it("should allow Effect.catchTags to handle multiple error types at once", async () => {
@@ -1119,7 +1267,10 @@ describe("typed error flow through to client", () => {
 			handlers.books.findById({ id: "nonexistent" }).pipe(
 				Effect.catchTags({
 					NotFoundError: (e) =>
-						Effect.succeed({ handled: "NotFoundError", collection: e.collection }),
+						Effect.succeed({
+							handled: "NotFoundError",
+							collection: e.collection,
+						}),
 					ValidationError: (e) =>
 						Effect.succeed({ handled: "ValidationError", issues: e.issues }),
 				}),
@@ -1146,7 +1297,8 @@ describe("makeRpcHandlersLayerFromDatabase", () => {
 			makeSerializerLayer([jsonCodec()]),
 		);
 
-		const DatabaseContextTag = makeDatabaseContextTag<typeof persistentConfig>();
+		const DatabaseContextTag =
+			makeDatabaseContextTag<typeof persistentConfig>();
 
 		await Effect.runPromise(
 			Effect.gen(function* () {

@@ -47,7 +47,9 @@ const extractTaggedError = (
 	if (Runtime.isFiberFailure(error)) {
 		// Get the cause from the FiberFailure using the well-known symbol
 		const causeSymbol = Symbol.for("effect/Runtime/FiberFailure/Cause");
-		const cause = (error as unknown as Record<symbol, unknown>)[causeSymbol] as Cause.Cause<unknown>;
+		const cause = (error as unknown as Record<symbol, unknown>)[
+			causeSymbol
+		] as Cause.Cause<unknown>;
 
 		// Extract the failure from the cause
 		const failure = Cause.failureOption(cause);
@@ -72,7 +74,7 @@ const extractTaggedError = (
  * Checks if an unknown value is an object with a _tag property.
  * Handles both direct tagged errors and FiberFailure wrappers.
  */
-const isTaggedError = (
+const _isTaggedError = (
 	error: unknown,
 ): error is { readonly _tag: string; readonly message?: string } => {
 	return extractTaggedError(error) !== null;

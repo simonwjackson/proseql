@@ -14,18 +14,23 @@
  */
 function escapeValue(value: unknown): string {
 	if (value === null || value === undefined) {
-		return ""
+		return "";
 	}
 
-	const str = typeof value === "object" ? JSON.stringify(value) : String(value)
+	const str = typeof value === "object" ? JSON.stringify(value) : String(value);
 
 	// Check if the value needs quoting
-	if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+	if (
+		str.includes(",") ||
+		str.includes('"') ||
+		str.includes("\n") ||
+		str.includes("\r")
+	) {
 		// Double any existing quotes and wrap in quotes
-		return `"${str.replace(/"/g, '""')}"`
+		return `"${str.replace(/"/g, '""')}"`;
 	}
 
-	return str
+	return str;
 }
 
 /**
@@ -39,25 +44,25 @@ export function formatAsCsv(
 	records: ReadonlyArray<Record<string, unknown>>,
 ): string {
 	if (records.length === 0) {
-		return ""
+		return "";
 	}
 
 	// Collect all unique field names across all records
-	const fieldSet = new Set<string>()
+	const fieldSet = new Set<string>();
 	for (const record of records) {
 		for (const key of Object.keys(record)) {
-			fieldSet.add(key)
+			fieldSet.add(key);
 		}
 	}
-	const fields = Array.from(fieldSet)
+	const fields = Array.from(fieldSet);
 
 	// Build header row
-	const headerRow = fields.map(escapeValue).join(",")
+	const headerRow = fields.map(escapeValue).join(",");
 
 	// Build data rows
 	const dataRows = records.map((record) =>
 		fields.map((field) => escapeValue(record[field])).join(","),
-	)
+	);
 
-	return [headerRow, ...dataRows].join("\n")
+	return [headerRow, ...dataRows].join("\n");
 }

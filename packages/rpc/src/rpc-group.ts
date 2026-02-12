@@ -11,36 +11,36 @@
  */
 
 import { Rpc, RpcRouter } from "@effect/rpc";
+import type { CollectionConfig, DatabaseConfig } from "@proseql/core";
 import { Schema } from "effect";
-import type { DatabaseConfig, CollectionConfig } from "@proseql/core";
 import {
-	NotFoundErrorSchema,
 	DanglingReferenceErrorSchema,
-	ValidationErrorSchema,
 	DuplicateKeyErrorSchema,
-	UniqueConstraintErrorSchema,
 	ForeignKeyErrorSchema,
 	HookErrorSchema,
+	NotFoundErrorSchema,
 	OperationErrorSchema,
+	UniqueConstraintErrorSchema,
+	ValidationErrorSchema,
 } from "./rpc-errors.js";
 import {
-	QueryPayloadSchema,
-	CreatePayloadSchema,
-	UpdatePayloadSchema,
-	DeletePayloadSchema,
 	AggregatePayloadSchema,
 	AggregateResultSchema,
-	GroupedAggregateResultSchema,
 	CreateManyPayloadSchema,
-	UpdateManyPayloadSchema,
-	DeleteManyPayloadSchema,
-	UpsertPayloadSchema,
-	UpsertManyPayloadSchema,
 	CreateManyResultSchema,
-	UpdateManyResultSchema,
+	CreatePayloadSchema,
+	DeleteManyPayloadSchema,
 	DeleteManyResultSchema,
-	UpsertResultSchema,
+	DeletePayloadSchema,
+	GroupedAggregateResultSchema,
+	QueryPayloadSchema,
+	UpdateManyPayloadSchema,
+	UpdateManyResultSchema,
+	UpdatePayloadSchema,
+	UpsertManyPayloadSchema,
 	UpsertManyResultSchema,
+	UpsertPayloadSchema,
+	UpsertResultSchema,
 } from "./rpc-schemas.js";
 
 // ============================================================================
@@ -122,7 +122,9 @@ export type FindByIdRequestClass<
 	/**
 	 * Create a new request instance
 	 */
-	new (props: { readonly id: string }): Schema.TaggedRequest.Any & {
+	new (props: {
+		readonly id: string;
+	}): Schema.TaggedRequest.Any & {
 		readonly _tag: `${CollectionName}.findById`;
 		readonly id: string;
 	};
@@ -160,7 +162,10 @@ const UpdateErrorUnionSchema = Schema.Union(
 /**
  * Union schema for delete errors (NotFoundError | HookError).
  */
-const DeleteErrorUnionSchema = Schema.Union(NotFoundErrorSchema, HookErrorSchema);
+const DeleteErrorUnionSchema = Schema.Union(
+	NotFoundErrorSchema,
+	HookErrorSchema,
+);
 
 /**
  * Union schema for createMany errors (ValidationError | DuplicateKeyError | UniqueConstraintError | ForeignKeyError | HookError).
@@ -349,23 +354,22 @@ export function makeQueryStreamRequest<
 ): QueryStreamRequestClass<CollectionName, EntitySchema> {
 	// Use Rpc.StreamRequest to create a streaming RPC schema
 	// The handler for this request must return a Stream, not an Effect
-	const RequestClass = Rpc.StreamRequest<QueryStreamRequestInstance<CollectionName, EntitySchema>>()(
-		`${collectionName}.queryStream` as `${CollectionName}.queryStream`,
-		{
-			failure: QueryErrorUnionSchema,
-			success: entitySchema,
-			payload: {
-				where: QueryPayloadSchema.fields.where,
-				sort: QueryPayloadSchema.fields.sort,
-				select: QueryPayloadSchema.fields.select,
-				populate: QueryPayloadSchema.fields.populate,
-				limit: QueryPayloadSchema.fields.limit,
-				offset: QueryPayloadSchema.fields.offset,
-				cursor: QueryPayloadSchema.fields.cursor,
-				streamingOptions: QueryPayloadSchema.fields.streamingOptions,
-			},
+	const RequestClass = Rpc.StreamRequest<
+		QueryStreamRequestInstance<CollectionName, EntitySchema>
+	>()(`${collectionName}.queryStream` as `${CollectionName}.queryStream`, {
+		failure: QueryErrorUnionSchema,
+		success: entitySchema,
+		payload: {
+			where: QueryPayloadSchema.fields.where,
+			sort: QueryPayloadSchema.fields.sort,
+			select: QueryPayloadSchema.fields.select,
+			populate: QueryPayloadSchema.fields.populate,
+			limit: QueryPayloadSchema.fields.limit,
+			offset: QueryPayloadSchema.fields.offset,
+			cursor: QueryPayloadSchema.fields.cursor,
+			streamingOptions: QueryPayloadSchema.fields.streamingOptions,
 		},
-	);
+	});
 
 	return RequestClass as unknown as QueryStreamRequestClass<
 		CollectionName,
@@ -1076,7 +1080,10 @@ export interface CollectionRpcDefinitions<
 	 * Unlike QueryRequest which collects all results, this streams results incrementally.
 	 * Use with Rpc.stream() to create a handler that returns a Stream.
 	 */
-	readonly QueryStreamRequest: QueryStreamRequestClass<CollectionName, EntitySchema>;
+	readonly QueryStreamRequest: QueryStreamRequestClass<
+		CollectionName,
+		EntitySchema
+	>;
 	/**
 	 * TaggedRequest class for create operations.
 	 * Use with Rpc.effect() to create an RPC handler.
@@ -1147,7 +1154,10 @@ export function makeCollectionRpcs<
 ): CollectionRpcDefinitions<CollectionName, EntitySchema> {
 	const FindByIdRequest = makeFindByIdRequest(collectionName, entitySchema);
 	const QueryRequest = makeQueryRequest(collectionName, entitySchema);
-	const QueryStreamRequest = makeQueryStreamRequest(collectionName, entitySchema);
+	const QueryStreamRequest = makeQueryStreamRequest(
+		collectionName,
+		entitySchema,
+	);
 	const CreateRequest = makeCreateRequest(collectionName, entitySchema);
 	const UpdateRequest = makeUpdateRequest(collectionName, entitySchema);
 	const DeleteRequest = makeDeleteRequest(collectionName, entitySchema);

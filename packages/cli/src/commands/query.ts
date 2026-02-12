@@ -5,47 +5,50 @@
  * queries with parsed where, select, sort, and limit options.
  */
 
-import { Chunk, Effect, Layer, Stream } from "effect"
-import * as path from "node:path"
+import * as path from "node:path";
 import {
 	createPersistentEffectDatabase,
-	NodeStorageLayer,
-	makeSerializerLayer,
-	jsonCodec,
-	yamlCodec,
-	tomlCodec,
 	type DatabaseConfig,
-} from "@proseql/node"
-import { parseFilters, type FilterParseError } from "../parsers/filter-parser.js"
+	jsonCodec,
+	makeSerializerLayer,
+	NodeStorageLayer,
+	tomlCodec,
+	yamlCodec,
+} from "@proseql/node";
+import { Chunk, Effect, Layer, Stream } from "effect";
+import {
+	type FilterParseError,
+	parseFilters,
+} from "../parsers/filter-parser.js";
 
 /**
  * Options for the query command.
  */
 export interface QueryOptions {
 	/** Name of the collection to query */
-	readonly collection: string
+	readonly collection: string;
 	/** The database configuration */
-	readonly config: DatabaseConfig
+	readonly config: DatabaseConfig;
 	/** The path to the config file (used for resolving relative file paths) */
-	readonly configPath: string
+	readonly configPath: string;
 	/** Filter expressions from --where flags */
-	readonly where?: readonly string[]
+	readonly where?: readonly string[];
 	/** Comma-separated field list from --select flag */
-	readonly select?: string
+	readonly select?: string;
 	/** Sort expression from --sort flag (e.g., "year:desc") */
-	readonly sort?: string
+	readonly sort?: string;
 	/** Limit from --limit flag */
-	readonly limit?: number
+	readonly limit?: number;
 }
 
 /**
  * Result of the query command.
  */
 export interface QueryResult {
-	readonly success: boolean
-	readonly message?: string
-	readonly data?: ReadonlyArray<Record<string, unknown>>
-	readonly count?: number
+	readonly success: boolean;
+	readonly message?: string;
+	readonly data?: ReadonlyArray<Record<string, unknown>>;
+	readonly count?: number;
 }
 
 /**
@@ -56,7 +59,7 @@ function parseSelect(select: string): ReadonlyArray<string> {
 	return select
 		.split(",")
 		.map((field) => field.trim())
-		.filter((field) => field.length > 0)
+		.filter((field) => field.length > 0);
 }
 
 /**
@@ -65,22 +68,22 @@ function parseSelect(select: string): ReadonlyArray<string> {
  * Examples: "year:desc", "title:asc"
  */
 function parseSort(sort: string): Record<string, "asc" | "desc"> | undefined {
-	const parts = sort.split(":")
+	const parts = sort.split(":");
 	if (parts.length !== 2) {
-		return undefined
+		return undefined;
 	}
-	const [field, direction] = parts
-	const trimmedField = field.trim()
-	const trimmedDirection = direction.trim().toLowerCase()
+	const [field, direction] = parts;
+	const trimmedField = field.trim();
+	const trimmedDirection = direction.trim().toLowerCase();
 
 	if (!trimmedField) {
-		return undefined
+		return undefined;
 	}
 	if (trimmedDirection !== "asc" && trimmedDirection !== "desc") {
-		return undefined
+		return undefined;
 	}
 
-	return { [trimmedField]: trimmedDirection }
+	return { [trimmedField]: trimmedDirection };
 }
 
 /**
@@ -91,21 +94,21 @@ function resolveConfigPaths(
 	config: DatabaseConfig,
 	configPath: string,
 ): DatabaseConfig {
-	const configDir = path.dirname(configPath)
-	const resolved: Record<string, (typeof config)[string]> = {}
+	const configDir = path.dirname(configPath);
+	const resolved: Record<string, (typeof config)[string]> = {};
 
 	for (const [collectionName, collectionConfig] of Object.entries(config)) {
 		if (collectionConfig.file && !path.isAbsolute(collectionConfig.file)) {
 			resolved[collectionName] = {
 				...collectionConfig,
 				file: path.resolve(configDir, collectionConfig.file),
-			}
+			};
 		} else {
-			resolved[collectionName] = collectionConfig
+			resolved[collectionName] = collectionConfig;
 		}
 	}
 
-	return resolved as DatabaseConfig
+	return resolved as DatabaseConfig;
 }
 
 /**
@@ -122,121 +125,120 @@ export function runQuery(
 ): Effect.Effect<QueryResult, FilterParseError> {
 	return Effect.gen(function* () {
 		const { collection, config, configPath, where, select, sort, limit } =
-			options
+			options;
 
 		// Check if collection exists in config
 		if (!(collection in config)) {
-			const availableCollections = Object.keys(config).join(", ")
+			const availableCollections = Object.keys(config).join(", ");
 			return {
 				success: false,
 				message: `Collection '${collection}' not found in config. Available collections: ${availableCollections || "(none)"}`,
-			}
+			};
 		}
 
 		// Parse filter expressions from --where flags
 		const whereClause =
-			where && where.length > 0 ? yield* parseFilters(where) : undefined
+			where && where.length > 0 ? yield* parseFilters(where) : undefined;
 
 		// Parse select fields
-		const selectFields = select ? parseSelect(select) : undefined
+		const selectFields = select ? parseSelect(select) : undefined;
 
 		// Parse sort
-		const sortConfig = sort ? parseSort(sort) : undefined
+		const sortConfig = sort ? parseSort(sort) : undefined;
 
 		if (sort && !sortConfig) {
 			return {
 				success: false,
 				message: `Invalid sort format: '${sort}'. Expected format: 'field:asc' or 'field:desc'`,
-			}
+			};
 		}
 
 		// Resolve relative file paths in the config
-		const resolvedConfig = resolveConfigPaths(config, configPath)
+		const resolvedConfig = resolveConfigPaths(config, configPath);
 
 		// Build the persistence layer for database operations
 		const PersistenceLayer = Layer.merge(
 			NodeStorageLayer,
 			makeSerializerLayer([jsonCodec(), yamlCodec(), tomlCodec()]),
-		)
+		);
 
 		// Boot the database and execute the query
 		const program = Effect.gen(function* () {
-			const db = yield* createPersistentEffectDatabase(resolvedConfig, {})
+			const db = yield* createPersistentEffectDatabase(resolvedConfig, {});
 
 			// Get the collection (type assertion needed since we check collection existence above)
 			const coll = db[collection as keyof typeof db] as {
 				readonly query: (options?: {
-					readonly where?: Record<string, unknown>
-					readonly select?: ReadonlyArray<string>
-					readonly sort?: Record<string, "asc" | "desc">
-					readonly limit?: number
+					readonly where?: Record<string, unknown>;
+					readonly select?: ReadonlyArray<string>;
+					readonly sort?: Record<string, "asc" | "desc">;
+					readonly limit?: number;
 				}) => Stream.Stream<Record<string, unknown>, unknown, never> & {
-					readonly runPromise: Promise<ReadonlyArray<Record<string, unknown>>>
-				}
-			}
+					readonly runPromise: Promise<ReadonlyArray<Record<string, unknown>>>;
+				};
+			};
 
 			// Execute the query
 			const queryOptions: {
-				where?: Record<string, unknown>
-				select?: ReadonlyArray<string>
-				sort?: Record<string, "asc" | "desc">
-				limit?: number
-			} = {}
+				where?: Record<string, unknown>;
+				select?: ReadonlyArray<string>;
+				sort?: Record<string, "asc" | "desc">;
+				limit?: number;
+			} = {};
 
 			if (whereClause && Object.keys(whereClause).length > 0) {
-				queryOptions.where = whereClause
+				queryOptions.where = whereClause;
 			}
 			if (selectFields && selectFields.length > 0) {
-				queryOptions.select = selectFields
+				queryOptions.select = selectFields;
 			}
 			if (sortConfig) {
-				queryOptions.sort = sortConfig
+				queryOptions.sort = sortConfig;
 			}
 			if (limit !== undefined && limit > 0) {
-				queryOptions.limit = limit
+				queryOptions.limit = limit;
 			}
 
 			// Execute the query and collect results
 			const stream = coll.query(
 				Object.keys(queryOptions).length > 0 ? queryOptions : undefined,
-			)
+			);
 
 			// Collect the stream into an array
-			const chunk = yield* Stream.runCollect(stream)
+			const chunk = yield* Stream.runCollect(stream);
 			const results = Chunk.toReadonlyArray(chunk) as ReadonlyArray<
 				Record<string, unknown>
-			>
+			>;
 
-			return results
-		})
+			return results;
+		});
 
 		// Run the program with the persistence layer
 		const result = yield* program.pipe(
 			Effect.provide(PersistenceLayer),
 			Effect.scoped,
 			Effect.catchAll((error) => {
-				const message =
-					error instanceof Error ? error.message : String(error)
+				const message = error instanceof Error ? error.message : String(error);
 				return Effect.succeed({
 					success: false as const,
 					message: `Query failed: ${message}`,
-				})
+				});
 			}),
-		)
+		);
 
 		// Check if we got an error result
 		if ("success" in result && result.success === false) {
-			return result as QueryResult
+			return result as QueryResult;
 		}
 
 		// We got data
-		const data = result as ReadonlyArray<Record<string, unknown>>
+		const data = result as ReadonlyArray<Record<string, unknown>>;
 		return {
 			success: true,
 			data,
 			count: data.length,
-		}
-	})
+		};
+	});
 }
 
 /**
@@ -256,7 +258,7 @@ export async function handleQuery(options: QueryOptions): Promise<QueryResult> {
 				}),
 			),
 		),
-	)
+	);
 
-	return result
+	return result;
 }

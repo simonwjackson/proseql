@@ -4,7 +4,7 @@
  * Formats records as YAML using the same YAML library as @proseql/core.
  */
 
-import YAML from "yaml"
+import YAML from "yaml";
 
 /**
  * Format records as YAML.
@@ -15,5 +15,5 @@ import YAML from "yaml"
 export function formatAsYaml(
 	records: ReadonlyArray<Record<string, unknown>>,
 ): string {
-	return YAML.stringify(records, { indent: 2 })
+	return YAML.stringify(records, { indent: 2 });
 }

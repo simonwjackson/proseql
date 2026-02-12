@@ -5,11 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import {
-	parseQueryParams,
-	parseAggregateParams,
-	type ParsedQueryConfig,
-} from "../src/query-params.js";
+import { parseQueryParams } from "../src/query-params.js";
 
 // ============================================================================
 // Task 11.1: Simple Equality Parsing
@@ -170,7 +166,9 @@ describe("parseQueryParams — operator syntax (task 11.2)", () => {
 
 	describe("array operators", () => {
 		it("should parse $in operator with comma-separated values", () => {
-			const result = parseQueryParams({ "genre[$in]": "sci-fi,fantasy,horror" });
+			const result = parseQueryParams({
+				"genre[$in]": "sci-fi,fantasy,horror",
+			});
 
 			expect(result.where).toEqual({
 				genre: { $in: ["sci-fi", "fantasy", "horror"] },
@@ -244,9 +242,13 @@ describe("parseQueryParams — operator syntax (task 11.2)", () => {
 		});
 
 		it("should parse $search operator", () => {
-			const result = parseQueryParams({ "description[$search]": "space travel" });
+			const result = parseQueryParams({
+				"description[$search]": "space travel",
+			});
 
-			expect(result.where).toEqual({ description: { $search: "space travel" } });
+			expect(result.where).toEqual({
+				description: { $search: "space travel" },
+			});
 		});
 	});
 
@@ -307,7 +309,9 @@ describe("parseQueryParams — operator syntax (task 11.2)", () => {
 		});
 
 		it("should handle whitespace in comma-separated values", () => {
-			const result = parseQueryParams({ "genre[$in]": "sci-fi, fantasy, horror" });
+			const result = parseQueryParams({
+				"genre[$in]": "sci-fi, fantasy, horror",
+			});
 
 			expect(result.where).toEqual({
 				genre: { $in: ["sci-fi", "fantasy", "horror"] },
@@ -369,7 +373,9 @@ describe("parseQueryParams — sort parsing (task 11.3)", () => {
 		});
 
 		it("should preserve order for multiple fields", () => {
-			const result = parseQueryParams({ sort: "genre:asc,year:desc,title:asc" });
+			const result = parseQueryParams({
+				sort: "genre:asc,year:desc,title:asc",
+			});
 
 			// Note: Object key order is preserved in modern JS
 			const sortKeys = Object.keys(result.sort!);
@@ -1020,7 +1026,7 @@ describe("parseQueryParams — type coercion (task 11.6)", () => {
 
 			// parseFloat("3.14159265358979").toString() may differ due to floating point representation
 			// But in this case it should match
-			expect(result.where).toEqual({ precise: 3.14159265358979 });
+			expect(result.where).toEqual({ precise: Math.PI });
 			expect(typeof result.where.precise).toBe("number");
 		});
 

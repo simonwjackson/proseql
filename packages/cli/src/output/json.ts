@@ -13,5 +13,5 @@
 export function formatAsJson(
 	records: ReadonlyArray<Record<string, unknown>>,
 ): string {
-	return JSON.stringify(records, null, 2)
+	return JSON.stringify(records, null, 2);
 }

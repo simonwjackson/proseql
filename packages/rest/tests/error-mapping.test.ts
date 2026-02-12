@@ -5,27 +5,27 @@
  * Task 11.18: Test unknown error maps to 500.
  */
 
-import { describe, expect, it } from "vitest";
-import { mapErrorToResponse } from "../src/error-mapping.js";
 import {
-	NotFoundError,
-	ValidationError,
+	CollectionNotFoundError,
+	ConcurrencyError,
+	DanglingReferenceError,
 	DuplicateKeyError,
-	UniqueConstraintError,
 	ForeignKeyError,
 	HookError,
-	TransactionError,
-	ConcurrencyError,
-	OperationError,
-	DanglingReferenceError,
-	CollectionNotFoundError,
-	PopulationError,
-	StorageError,
-	SerializationError,
-	UnsupportedFormatError,
 	MigrationError,
+	NotFoundError,
+	OperationError,
 	PluginError,
+	PopulationError,
+	SerializationError,
+	StorageError,
+	TransactionError,
+	UniqueConstraintError,
+	UnsupportedFormatError,
+	ValidationError,
 } from "@proseql/core";
+import { describe, expect, it } from "vitest";
+import { mapErrorToResponse } from "../src/error-mapping.js";
 
 // ============================================================================
 // Task 11.17: Test each tagged error maps to correct HTTP status
@@ -45,7 +45,9 @@ describe("Error mapping — CRUD errors (task 11.17)", () => {
 		expect(response.body._tag).toBe("NotFoundError");
 		expect(response.body.error).toBe("Not found");
 		expect(response.body.details).toBeDefined();
-		expect((response.body.details as Record<string, unknown>).collection).toBe("books");
+		expect((response.body.details as Record<string, unknown>).collection).toBe(
+			"books",
+		);
 		expect((response.body.details as Record<string, unknown>).id).toBe("123");
 	});
 
@@ -53,7 +55,12 @@ describe("Error mapping — CRUD errors (task 11.17)", () => {
 		const error = new ValidationError({
 			message: "Validation failed",
 			issues: [
-				{ field: "year", message: "Expected number", expected: "number", received: "string" },
+				{
+					field: "year",
+					message: "Expected number",
+					expected: "number",
+					received: "string",
+				},
 			],
 		});
 
@@ -63,7 +70,8 @@ describe("Error mapping — CRUD errors (task 11.17)", () => {
 		expect(response.body._tag).toBe("ValidationError");
 		expect(response.body.error).toBe("Validation error");
 		expect(response.body.details).toBeDefined();
-		const issues = (response.body.details as Record<string, unknown>).issues as ReadonlyArray<unknown>;
+		const issues = (response.body.details as Record<string, unknown>)
+			.issues as ReadonlyArray<unknown>;
 		expect(issues).toBeDefined();
 		expect(issues.length).toBe(1);
 	});
@@ -106,7 +114,9 @@ describe("Error mapping — CRUD errors (task 11.17)", () => {
 		expect(response.body._tag).toBe("UniqueConstraintError");
 		expect(response.body.error).toBe("Unique constraint violation");
 		expect(response.body.details).toBeDefined();
-		expect((response.body.details as Record<string, unknown>).constraint).toBe("isbn_unique");
+		expect((response.body.details as Record<string, unknown>).constraint).toBe(
+			"isbn_unique",
+		);
 	});
 
 	it("should map ForeignKeyError to 422", () => {

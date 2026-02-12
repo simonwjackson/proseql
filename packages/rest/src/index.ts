@@ -34,10 +34,10 @@
 
 export {
 	createRestHandlers,
+	type HttpMethod,
+	type RestHandler,
 	type RestRequest,
 	type RestResponse,
-	type RestHandler,
-	type HttpMethod,
 	type RouteDescriptor,
 } from "./handlers.js";
 
@@ -46,18 +46,18 @@ export {
 // ============================================================================
 
 export {
-	parseQueryParams,
-	parseAggregateParams,
-	type ParsedQueryConfig,
-	type QueryParams,
 	type ParsedAggregateConfig,
+	type ParsedQueryConfig,
+	parseAggregateParams,
+	parseQueryParams,
+	type QueryParams,
 } from "./query-params.js";
 
 // ============================================================================
 // Error Mapping
 // ============================================================================
 
-export { mapErrorToResponse, type ErrorResponse } from "./error-mapping.js";
+export { type ErrorResponse, mapErrorToResponse } from "./error-mapping.js";
 
 // ============================================================================
 // Relationship Routes

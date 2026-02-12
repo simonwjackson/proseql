@@ -14,7 +14,7 @@ import { Rpc, RpcRouter } from "@effect/rpc";
 import { Chunk, Effect, Schema, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { makeRpcHandlers } from "../src/rpc-handlers.js";
-import { QueryPayloadSchema, StreamingOptionsSchema } from "../src/rpc-schemas.js";
+import { QueryPayloadSchema } from "../src/rpc-schemas.js";
 
 // Test schema
 const BookSchema = Schema.Struct({
@@ -66,9 +66,8 @@ describe("RPC Streaming over in-process transport", () => {
 		);
 
 		// Create a stream handler using @effect/rpc v0.51.x API
-		const streamRpc = Rpc.stream(
-			BooksQueryStreamRequest,
-			(payload) => handlers.books.queryStream(payload),
+		const streamRpc = Rpc.stream(BooksQueryStreamRequest, (payload) =>
+			handlers.books.queryStream(payload),
 		);
 
 		// Create an RpcRouter with the streaming handler
@@ -110,9 +109,8 @@ describe("RPC Streaming over in-process transport", () => {
 			makeRpcHandlers(config, { books: initialBooks }),
 		);
 
-		const streamRpc = Rpc.stream(
-			BooksQueryStreamRequest,
-			(payload) => handlers.books.queryStream(payload),
+		const streamRpc = Rpc.stream(BooksQueryStreamRequest, (payload) =>
+			handlers.books.queryStream(payload),
 		);
 
 		const router = RpcRouter.make(streamRpc);
@@ -148,9 +146,8 @@ describe("RPC Streaming over in-process transport", () => {
 			makeRpcHandlers(config, { books: initialBooks }),
 		);
 
-		const streamRpc = Rpc.stream(
-			BooksQueryStreamRequest,
-			(payload) => handlers.books.queryStream(payload),
+		const streamRpc = Rpc.stream(BooksQueryStreamRequest, (payload) =>
+			handlers.books.queryStream(payload),
 		);
 
 		const router = RpcRouter.make(streamRpc);
@@ -195,9 +192,8 @@ describe("RPC Streaming over in-process transport", () => {
 			makeRpcHandlers(config, { books: manyBooks }),
 		);
 
-		const streamRpc = Rpc.stream(
-			BooksQueryStreamRequest,
-			(payload) => handlers.books.queryStream(payload),
+		const streamRpc = Rpc.stream(BooksQueryStreamRequest, (payload) =>
+			handlers.books.queryStream(payload),
 		);
 
 		const router = RpcRouter.make(streamRpc);
@@ -233,9 +229,8 @@ describe("RPC Streaming over in-process transport", () => {
 			makeRpcHandlers(config, { books: initialBooks }),
 		);
 
-		const streamRpc = Rpc.stream(
-			BooksQueryStreamRequest,
-			(payload) => handlers.books.queryStream(payload),
+		const streamRpc = Rpc.stream(BooksQueryStreamRequest, (payload) =>
+			handlers.books.queryStream(payload),
 		);
 
 		const router = RpcRouter.make(streamRpc);
@@ -278,9 +273,8 @@ describe("RPC Streaming over in-process transport", () => {
 			makeRpcHandlers(config, { books: initialBooks }),
 		);
 
-		const streamRpc = Rpc.stream(
-			BooksQueryStreamRequest,
-			(payload) => handlers.books.queryStream(payload),
+		const streamRpc = Rpc.stream(BooksQueryStreamRequest, (payload) =>
+			handlers.books.queryStream(payload),
 		);
 
 		const router = RpcRouter.make(streamRpc);
@@ -316,9 +310,8 @@ describe("RPC Streaming over in-process transport", () => {
 			makeRpcHandlers(config, { books: initialBooks }),
 		);
 
-		const streamRpc = Rpc.stream(
-			BooksQueryStreamRequest,
-			(payload) => handlers.books.queryStream(payload),
+		const streamRpc = Rpc.stream(BooksQueryStreamRequest, (payload) =>
+			handlers.books.queryStream(payload),
 		);
 
 		const router = RpcRouter.make(streamRpc);
@@ -354,9 +347,8 @@ describe("RPC Streaming over in-process transport", () => {
 			makeRpcHandlers(config, { books: initialBooks }),
 		);
 
-		const streamRpc = Rpc.stream(
-			BooksQueryStreamRequest,
-			(payload) => handlers.books.queryStream(payload),
+		const streamRpc = Rpc.stream(BooksQueryStreamRequest, (payload) =>
+			handlers.books.queryStream(payload),
 		);
 
 		const router = RpcRouter.make(streamRpc);

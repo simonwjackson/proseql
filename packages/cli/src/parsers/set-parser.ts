@@ -12,57 +12,57 @@
  *   "url=https://example.com/a=b" -> { url: "https://example.com/a=b" }
  */
 
-import { Data, Effect } from "effect"
+import { Data, Effect } from "effect";
 
 /**
  * Error thrown when a set expression cannot be parsed
  */
 export class SetParseError extends Data.TaggedError("SetParseError")<{
-  readonly expression: string
-  readonly reason: string
+	readonly expression: string;
+	readonly reason: string;
 }> {
-  get message(): string {
-    return `Failed to parse set expression "${this.expression}": ${this.reason}`
-  }
+	get message(): string {
+		return `Failed to parse set expression "${this.expression}": ${this.reason}`;
+	}
 }
 
 /**
  * Parse a string value into the appropriate type (number, boolean, or string)
  */
 function parseValue(value: string): string | number | boolean {
-  const trimmed = value.trim()
+	const trimmed = value.trim();
 
-  // Check for boolean
-  if (trimmed.toLowerCase() === "true") {
-    return true
-  }
-  if (trimmed.toLowerCase() === "false") {
-    return false
-  }
+	// Check for boolean
+	if (trimmed.toLowerCase() === "true") {
+		return true;
+	}
+	if (trimmed.toLowerCase() === "false") {
+		return false;
+	}
 
-  // Check for number
-  const num = Number(trimmed)
-  if (!Number.isNaN(num) && trimmed !== "") {
-    return num
-  }
+	// Check for number
+	const num = Number(trimmed);
+	if (!Number.isNaN(num) && trimmed !== "") {
+		return num;
+	}
 
-  // Default to string - strip quotes if present
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1)
-  }
+	// Default to string - strip quotes if present
+	if (
+		(trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+		(trimmed.startsWith("'") && trimmed.endsWith("'"))
+	) {
+		return trimmed.slice(1, -1);
+	}
 
-  return trimmed
+	return trimmed;
 }
 
 /**
  * Parsed assignment
  */
 interface ParsedAssignment {
-  readonly key: string
-  readonly value: string | number | boolean
+	readonly key: string;
+	readonly value: string | number | boolean;
 }
 
 /**
@@ -70,59 +70,59 @@ interface ParsedAssignment {
  * Handles values containing '=' by only splitting on the first '='
  */
 function parseAssignment(
-  assignment: string,
+	assignment: string,
 ): Effect.Effect<ParsedAssignment, SetParseError> {
-  return Effect.gen(function* () {
-    const trimmed = assignment.trim()
+	return Effect.gen(function* () {
+		const trimmed = assignment.trim();
 
-    if (!trimmed) {
-      return yield* Effect.fail(
-        new SetParseError({
-          expression: assignment,
-          reason: "Empty assignment",
-        }),
-      )
-    }
+		if (!trimmed) {
+			return yield* Effect.fail(
+				new SetParseError({
+					expression: assignment,
+					reason: "Empty assignment",
+				}),
+			);
+		}
 
-    // Find the first '=' to split key and value
-    const eqIndex = trimmed.indexOf("=")
+		// Find the first '=' to split key and value
+		const eqIndex = trimmed.indexOf("=");
 
-    if (eqIndex === -1) {
-      return yield* Effect.fail(
-        new SetParseError({
-          expression: assignment,
-          reason: "Missing '=' operator. Expected format: key=value",
-        }),
-      )
-    }
+		if (eqIndex === -1) {
+			return yield* Effect.fail(
+				new SetParseError({
+					expression: assignment,
+					reason: "Missing '=' operator. Expected format: key=value",
+				}),
+			);
+		}
 
-    if (eqIndex === 0) {
-      return yield* Effect.fail(
-        new SetParseError({
-          expression: assignment,
-          reason: "Missing key before '='",
-        }),
-      )
-    }
+		if (eqIndex === 0) {
+			return yield* Effect.fail(
+				new SetParseError({
+					expression: assignment,
+					reason: "Missing key before '='",
+				}),
+			);
+		}
 
-    const key = trimmed.slice(0, eqIndex).trim()
-    const valueStr = trimmed.slice(eqIndex + 1)
+		const key = trimmed.slice(0, eqIndex).trim();
+		const valueStr = trimmed.slice(eqIndex + 1);
 
-    // Validate key is a valid identifier
-    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
-      return yield* Effect.fail(
-        new SetParseError({
-          expression: assignment,
-          reason: `Invalid key "${key}". Keys must be valid identifiers (start with letter or underscore, contain only letters, numbers, and underscores)`,
-        }),
-      )
-    }
+		// Validate key is a valid identifier
+		if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
+			return yield* Effect.fail(
+				new SetParseError({
+					expression: assignment,
+					reason: `Invalid key "${key}". Keys must be valid identifiers (start with letter or underscore, contain only letters, numbers, and underscores)`,
+				}),
+			);
+		}
 
-    return {
-      key,
-      value: parseValue(valueStr),
-    }
-  })
+		return {
+			key,
+			value: parseValue(valueStr),
+		};
+	});
 }
 
 /**
@@ -130,44 +130,44 @@ function parseAssignment(
  * This handles cases where values might contain commas inside quotes
  */
 function splitAssignments(input: string): readonly string[] {
-  const assignments: string[] = []
-  let current = ""
-  let inQuotes = false
-  let quoteChar = ""
+	const assignments: string[] = [];
+	let current = "";
+	let inQuotes = false;
+	let quoteChar = "";
 
-  for (let i = 0; i < input.length; i++) {
-    const char = input[i]
+	for (let i = 0; i < input.length; i++) {
+		const char = input[i];
 
-    if (!inQuotes && (char === '"' || char === "'")) {
-      inQuotes = true
-      quoteChar = char
-      current += char
-    } else if (inQuotes && char === quoteChar) {
-      inQuotes = false
-      quoteChar = ""
-      current += char
-    } else if (!inQuotes && char === ",") {
-      if (current.trim()) {
-        assignments.push(current.trim())
-      }
-      current = ""
-    } else {
-      current += char
-    }
-  }
+		if (!inQuotes && (char === '"' || char === "'")) {
+			inQuotes = true;
+			quoteChar = char;
+			current += char;
+		} else if (inQuotes && char === quoteChar) {
+			inQuotes = false;
+			quoteChar = "";
+			current += char;
+		} else if (!inQuotes && char === ",") {
+			if (current.trim()) {
+				assignments.push(current.trim());
+			}
+			current = "";
+		} else {
+			current += char;
+		}
+	}
 
-  // Don't forget the last assignment
-  if (current.trim()) {
-    assignments.push(current.trim())
-  }
+	// Don't forget the last assignment
+	if (current.trim()) {
+		assignments.push(current.trim());
+	}
 
-  return assignments
+	return assignments;
 }
 
 /**
  * Update object type - record of field to value
  */
-export type UpdateObject = Record<string, string | number | boolean>
+export type UpdateObject = Record<string, string | number | boolean>;
 
 /**
  * Parse a single assignment string into an update object
@@ -176,14 +176,14 @@ export type UpdateObject = Record<string, string | number | boolean>
  * @returns Effect containing the update object or a SetParseError
  */
 export function parseSet(
-  assignment: string,
+	assignment: string,
 ): Effect.Effect<UpdateObject, SetParseError> {
-  return Effect.gen(function* () {
-    const parsed = yield* parseAssignment(assignment)
-    return {
-      [parsed.key]: parsed.value,
-    }
-  })
+	return Effect.gen(function* () {
+		const parsed = yield* parseAssignment(assignment);
+		return {
+			[parsed.key]: parsed.value,
+		};
+	});
 }
 
 /**
@@ -194,44 +194,44 @@ export function parseSet(
  * @returns Effect containing the combined update object or a SetParseError
  */
 export function parseSets(
-  input: string,
+	input: string,
 ): Effect.Effect<UpdateObject, SetParseError> {
-  return Effect.gen(function* () {
-    const trimmed = input.trim()
+	return Effect.gen(function* () {
+		const trimmed = input.trim();
 
-    if (!trimmed) {
-      return yield* Effect.fail(
-        new SetParseError({
-          expression: input,
-          reason: "Empty input",
-        }),
-      )
-    }
+		if (!trimmed) {
+			return yield* Effect.fail(
+				new SetParseError({
+					expression: input,
+					reason: "Empty input",
+				}),
+			);
+		}
 
-    const assignments = splitAssignments(trimmed)
+		const assignments = splitAssignments(trimmed);
 
-    if (assignments.length === 0) {
-      return yield* Effect.fail(
-        new SetParseError({
-          expression: input,
-          reason: "No valid assignments found",
-        }),
-      )
-    }
+		if (assignments.length === 0) {
+			return yield* Effect.fail(
+				new SetParseError({
+					expression: input,
+					reason: "No valid assignments found",
+				}),
+			);
+		}
 
-    const parsedAssignments = yield* Effect.all(assignments.map(parseSet))
+		const parsedAssignments = yield* Effect.all(assignments.map(parseSet));
 
-    // Merge all assignments into a single object
-    // Later assignments override earlier ones for the same key
-    const combined: UpdateObject = {}
-    for (const assignment of parsedAssignments) {
-      for (const [key, value] of Object.entries(assignment)) {
-        combined[key] = value
-      }
-    }
+		// Merge all assignments into a single object
+		// Later assignments override earlier ones for the same key
+		const combined: UpdateObject = {};
+		for (const assignment of parsedAssignments) {
+			for (const [key, value] of Object.entries(assignment)) {
+				combined[key] = value;
+			}
+		}
 
-    return combined
-  })
+		return combined;
+	});
 }
 
 /**
@@ -242,23 +242,23 @@ export function parseSets(
  * @returns Effect containing the combined update object or a SetParseError
  */
 export function parseMultipleSets(
-  inputs: readonly string[],
+	inputs: readonly string[],
 ): Effect.Effect<UpdateObject, SetParseError> {
-  return Effect.gen(function* () {
-    if (inputs.length === 0) {
-      return {}
-    }
+	return Effect.gen(function* () {
+		if (inputs.length === 0) {
+			return {};
+		}
 
-    const parsedInputs = yield* Effect.all(inputs.map(parseSets))
+		const parsedInputs = yield* Effect.all(inputs.map(parseSets));
 
-    // Merge all into a single object
-    const combined: UpdateObject = {}
-    for (const input of parsedInputs) {
-      for (const [key, value] of Object.entries(input)) {
-        combined[key] = value
-      }
-    }
+		// Merge all into a single object
+		const combined: UpdateObject = {};
+		for (const input of parsedInputs) {
+			for (const [key, value] of Object.entries(input)) {
+				combined[key] = value;
+			}
+		}
 
-    return combined
-  })
+		return combined;
+	});
 }

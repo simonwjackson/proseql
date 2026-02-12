@@ -5,7 +5,7 @@
 
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { makeRpcGroup, makeCollectionRpcs } from "../src/rpc-group.js";
+import { makeCollectionRpcs, makeRpcGroup } from "../src/rpc-group.js";
 
 // Define test schemas for multiple collections
 const BookSchema = Schema.Struct({
@@ -33,13 +33,21 @@ const multiCollectionConfig = {
 	books: {
 		schema: BookSchema,
 		relationships: {
-			author: { type: "ref" as const, target: "authors" as const, foreignKey: "authorId" },
+			author: {
+				type: "ref" as const,
+				target: "authors" as const,
+				foreignKey: "authorId",
+			},
 		},
 	},
 	authors: {
 		schema: AuthorSchema,
 		relationships: {
-			books: { type: "inverse" as const, target: "books" as const, foreignKey: "authorId" },
+			books: {
+				type: "inverse" as const,
+				target: "books" as const,
+				foreignKey: "authorId",
+			},
 		},
 	},
 	publishers: {
@@ -70,7 +78,9 @@ describe("Multi-collection RPC namespacing (task 2.9)", () => {
 			// Create request instances to verify _tag namespacing
 			const booksFindById = new rpcs.books.FindByIdRequest({ id: "1" });
 			const authorsFindById = new rpcs.authors.FindByIdRequest({ id: "1" });
-			const publishersFindById = new rpcs.publishers.FindByIdRequest({ id: "1" });
+			const publishersFindById = new rpcs.publishers.FindByIdRequest({
+				id: "1",
+			});
 
 			expect(booksFindById._tag).toBe("books.findById");
 			expect(authorsFindById._tag).toBe("authors.findById");
@@ -104,9 +114,18 @@ describe("Multi-collection RPC namespacing (task 2.9)", () => {
 		it("should namespace update requests with collection prefix", () => {
 			const rpcs = makeRpcGroup(multiCollectionConfig);
 
-			const booksUpdate = new rpcs.books.UpdateRequest({ id: "1", updates: {} });
-			const authorsUpdate = new rpcs.authors.UpdateRequest({ id: "1", updates: {} });
-			const publishersUpdate = new rpcs.publishers.UpdateRequest({ id: "1", updates: {} });
+			const booksUpdate = new rpcs.books.UpdateRequest({
+				id: "1",
+				updates: {},
+			});
+			const authorsUpdate = new rpcs.authors.UpdateRequest({
+				id: "1",
+				updates: {},
+			});
+			const publishersUpdate = new rpcs.publishers.UpdateRequest({
+				id: "1",
+				updates: {},
+			});
 
 			expect(booksUpdate._tag).toBe("books.update");
 			expect(authorsUpdate._tag).toBe("authors.update");
@@ -129,8 +148,12 @@ describe("Multi-collection RPC namespacing (task 2.9)", () => {
 			const rpcs = makeRpcGroup(multiCollectionConfig);
 
 			const booksAggregate = new rpcs.books.AggregateRequest({ count: true });
-			const authorsAggregate = new rpcs.authors.AggregateRequest({ count: true });
-			const publishersAggregate = new rpcs.publishers.AggregateRequest({ count: true });
+			const authorsAggregate = new rpcs.authors.AggregateRequest({
+				count: true,
+			});
+			const publishersAggregate = new rpcs.publishers.AggregateRequest({
+				count: true,
+			});
 
 			expect(booksAggregate._tag).toBe("books.aggregate");
 			expect(authorsAggregate._tag).toBe("authors.aggregate");
@@ -142,31 +165,51 @@ describe("Multi-collection RPC namespacing (task 2.9)", () => {
 
 			// createMany
 			const booksCreateMany = new rpcs.books.CreateManyRequest({ data: [] });
-			const authorsCreateMany = new rpcs.authors.CreateManyRequest({ data: [] });
+			const authorsCreateMany = new rpcs.authors.CreateManyRequest({
+				data: [],
+			});
 			expect(booksCreateMany._tag).toBe("books.createMany");
 			expect(authorsCreateMany._tag).toBe("authors.createMany");
 
 			// updateMany
-			const booksUpdateMany = new rpcs.books.UpdateManyRequest({ where: {}, updates: {} });
-			const authorsUpdateMany = new rpcs.authors.UpdateManyRequest({ where: {}, updates: {} });
+			const booksUpdateMany = new rpcs.books.UpdateManyRequest({
+				where: {},
+				updates: {},
+			});
+			const authorsUpdateMany = new rpcs.authors.UpdateManyRequest({
+				where: {},
+				updates: {},
+			});
 			expect(booksUpdateMany._tag).toBe("books.updateMany");
 			expect(authorsUpdateMany._tag).toBe("authors.updateMany");
 
 			// deleteMany
 			const booksDeleteMany = new rpcs.books.DeleteManyRequest({ where: {} });
-			const authorsDeleteMany = new rpcs.authors.DeleteManyRequest({ where: {} });
+			const authorsDeleteMany = new rpcs.authors.DeleteManyRequest({
+				where: {},
+			});
 			expect(booksDeleteMany._tag).toBe("books.deleteMany");
 			expect(authorsDeleteMany._tag).toBe("authors.deleteMany");
 
 			// upsert
-			const booksUpsert = new rpcs.books.UpsertRequest({ where: {}, create: {}, update: {} });
-			const authorsUpsert = new rpcs.authors.UpsertRequest({ where: {}, create: {}, update: {} });
+			const booksUpsert = new rpcs.books.UpsertRequest({
+				where: {},
+				create: {},
+				update: {},
+			});
+			const authorsUpsert = new rpcs.authors.UpsertRequest({
+				where: {},
+				create: {},
+				update: {},
+			});
 			expect(booksUpsert._tag).toBe("books.upsert");
 			expect(authorsUpsert._tag).toBe("authors.upsert");
 
 			// upsertMany
 			const booksUpsertMany = new rpcs.books.UpsertManyRequest({ data: [] });
-			const authorsUpsertMany = new rpcs.authors.UpsertManyRequest({ data: [] });
+			const authorsUpsertMany = new rpcs.authors.UpsertManyRequest({
+				data: [],
+			});
 			expect(booksUpsertMany._tag).toBe("books.upsertMany");
 			expect(authorsUpsertMany._tag).toBe("authors.upsertMany");
 		});
@@ -190,12 +233,22 @@ describe("Multi-collection RPC namespacing (task 2.9)", () => {
 			expect(rpcs.books.CreateRequest).not.toBe(rpcs.authors.CreateRequest);
 			expect(rpcs.books.UpdateRequest).not.toBe(rpcs.authors.UpdateRequest);
 			expect(rpcs.books.DeleteRequest).not.toBe(rpcs.authors.DeleteRequest);
-			expect(rpcs.books.AggregateRequest).not.toBe(rpcs.authors.AggregateRequest);
-			expect(rpcs.books.CreateManyRequest).not.toBe(rpcs.authors.CreateManyRequest);
-			expect(rpcs.books.UpdateManyRequest).not.toBe(rpcs.authors.UpdateManyRequest);
-			expect(rpcs.books.DeleteManyRequest).not.toBe(rpcs.authors.DeleteManyRequest);
+			expect(rpcs.books.AggregateRequest).not.toBe(
+				rpcs.authors.AggregateRequest,
+			);
+			expect(rpcs.books.CreateManyRequest).not.toBe(
+				rpcs.authors.CreateManyRequest,
+			);
+			expect(rpcs.books.UpdateManyRequest).not.toBe(
+				rpcs.authors.UpdateManyRequest,
+			);
+			expect(rpcs.books.DeleteManyRequest).not.toBe(
+				rpcs.authors.DeleteManyRequest,
+			);
 			expect(rpcs.books.UpsertRequest).not.toBe(rpcs.authors.UpsertRequest);
-			expect(rpcs.books.UpsertManyRequest).not.toBe(rpcs.authors.UpsertManyRequest);
+			expect(rpcs.books.UpsertManyRequest).not.toBe(
+				rpcs.authors.UpsertManyRequest,
+			);
 		});
 	});
 
@@ -213,9 +266,16 @@ describe("Multi-collection RPC namespacing (task 2.9)", () => {
 			const del = new bookRpcs.DeleteRequest({ id: "1" });
 			const aggregate = new bookRpcs.AggregateRequest({ count: true });
 			const createMany = new bookRpcs.CreateManyRequest({ data: [] });
-			const updateMany = new bookRpcs.UpdateManyRequest({ where: {}, updates: {} });
+			const updateMany = new bookRpcs.UpdateManyRequest({
+				where: {},
+				updates: {},
+			});
 			const deleteMany = new bookRpcs.DeleteManyRequest({ where: {} });
-			const upsert = new bookRpcs.UpsertRequest({ where: {}, create: {}, update: {} });
+			const upsert = new bookRpcs.UpsertRequest({
+				where: {},
+				create: {},
+				update: {},
+			});
 			const upsertMany = new bookRpcs.UpsertManyRequest({ data: [] });
 
 			expect(findById._tag).toBe("books.findById");
@@ -233,7 +293,7 @@ describe("Multi-collection RPC namespacing (task 2.9)", () => {
 
 		it("should produce unique tags for different collection names", () => {
 			const books = makeCollectionRpcs("books", BookSchema);
-			const authors = makeCollectionRpcs("authors", AuthorSchema);
+			const _authors = makeCollectionRpcs("authors", AuthorSchema);
 			const products = makeCollectionRpcs("products", BookSchema); // Reusing schema intentionally
 
 			// Same schema, different collection name should produce different tags

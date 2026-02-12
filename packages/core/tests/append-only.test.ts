@@ -1,6 +1,6 @@
 import { Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { OperationError } from "../src/errors/crud-errors.js";
+import type { OperationError } from "../src/errors/crud-errors.js";
 import { createPersistentEffectDatabase } from "../src/factories/database-effect.js";
 import { jsonlCodec } from "../src/serializers/codecs/jsonl.js";
 import { makeSerializerLayer } from "../src/serializers/format-codec.js";
@@ -287,7 +287,7 @@ describe("append-only collections", () => {
 			// Check that the file has one line
 			const content = store.get("./data/events.jsonl");
 			expect(content).toBeDefined();
-			const lines = content!.split("\n").filter((l) => l.trim() !== "");
+			const lines = content?.split("\n").filter((l) => l.trim() !== "");
 			expect(lines.length).toBe(1);
 			const parsed = JSON.parse(lines[0]);
 			expect(parsed.id).toBe("e1");
@@ -298,7 +298,7 @@ describe("append-only collections", () => {
 				.runPromise;
 
 			const content2 = store.get("./data/events.jsonl");
-			const lines2 = content2!.split("\n").filter((l) => l.trim() !== "");
+			const lines2 = content2?.split("\n").filter((l) => l.trim() !== "");
 			expect(lines2.length).toBe(2);
 			const parsed2 = JSON.parse(lines2[1]);
 			expect(parsed2.id).toBe("e2");
@@ -329,7 +329,7 @@ describe("append-only collections", () => {
 			]).runPromise;
 
 			const content = store.get("./data/events.jsonl");
-			const lines = content!.split("\n").filter((l) => l.trim() !== "");
+			const lines = content?.split("\n").filter((l) => l.trim() !== "");
 			expect(lines.length).toBe(3);
 		});
 
@@ -362,7 +362,7 @@ describe("append-only collections", () => {
 
 			const content = store.get("./data/events.jsonl");
 			expect(content).toBeDefined();
-			const lines = content!.split("\n").filter((l) => l.trim() !== "");
+			const lines = content?.split("\n").filter((l) => l.trim() !== "");
 			// After flush, we should have a clean file with all entities
 			expect(lines.length).toBe(2);
 			// Each line should be valid JSON
@@ -407,7 +407,7 @@ describe("append-only collections", () => {
 
 			const content = store.get("./data/events.jsonl");
 			expect(content).toBeDefined();
-			const lines = content!.split("\n").filter((l) => l.trim() !== "");
+			const lines = content?.split("\n").filter((l) => l.trim() !== "");
 			expect(lines.length).toBe(2);
 			// Verify each line is valid JSON with expected fields
 			for (const line of lines) {

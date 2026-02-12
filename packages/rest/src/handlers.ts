@@ -7,13 +7,13 @@
  * @module
  */
 
-import { Cause, Chunk, Effect, Option, Runtime, Stream } from "effect";
 import type {
 	DatabaseConfig,
 	EffectDatabase,
 	EffectDatabaseWithPersistence,
 } from "@proseql/core";
-import { parseQueryParams, parseAggregateParams } from "./query-params.js";
+import { Cause, Chunk, Effect, Option, Runtime, Stream } from "effect";
+import { parseAggregateParams, parseQueryParams } from "./query-params.js";
 
 // ============================================================================
 // Types
@@ -235,13 +235,19 @@ const createFindByIdHandler = (
 	return async (req: RestRequest): Promise<RestResponse> => {
 		const { id } = req.params;
 		try {
-			const findEffect = collection.findById(id) as Effect.Effect<Record<string, unknown>, unknown>;
+			const findEffect = collection.findById(id) as Effect.Effect<
+				Record<string, unknown>,
+				unknown
+			>;
 			const entity = await Effect.runPromise(findEffect);
 			return { status: 200, body: entity };
 		} catch (error) {
 			// TODO: Map errors via mapErrorToResponse (task 8.1)
 			if (isTaggedError(error, "NotFoundError")) {
-				return { status: 404, body: { error: "Not found", _tag: "NotFoundError" } };
+				return {
+					status: 404,
+					body: { error: "Not found", _tag: "NotFoundError" },
+				};
 			}
 			return { status: 500, body: { error: "Internal server error" } };
 		}
@@ -257,25 +263,46 @@ const createCreateHandler = (
 ): RestHandler => {
 	return async (req: RestRequest): Promise<RestResponse> => {
 		try {
-			const createEffect = collection.create(req.body) as Effect.Effect<Record<string, unknown>, unknown>;
+			const createEffect = collection.create(req.body) as Effect.Effect<
+				Record<string, unknown>,
+				unknown
+			>;
 			const entity = await Effect.runPromise(createEffect);
 			return { status: 201, body: entity };
 		} catch (error) {
 			// TODO: Map errors via mapErrorToResponse (task 8.1)
 			if (isTaggedError(error, "ValidationError")) {
-				return { status: 400, body: { error: "Validation error", _tag: "ValidationError" } };
+				return {
+					status: 400,
+					body: { error: "Validation error", _tag: "ValidationError" },
+				};
 			}
 			if (isTaggedError(error, "DuplicateKeyError")) {
-				return { status: 409, body: { error: "Duplicate key", _tag: "DuplicateKeyError" } };
+				return {
+					status: 409,
+					body: { error: "Duplicate key", _tag: "DuplicateKeyError" },
+				};
 			}
 			if (isTaggedError(error, "UniqueConstraintError")) {
-				return { status: 409, body: { error: "Unique constraint violation", _tag: "UniqueConstraintError" } };
+				return {
+					status: 409,
+					body: {
+						error: "Unique constraint violation",
+						_tag: "UniqueConstraintError",
+					},
+				};
 			}
 			if (isTaggedError(error, "ForeignKeyError")) {
-				return { status: 422, body: { error: "Foreign key violation", _tag: "ForeignKeyError" } };
+				return {
+					status: 422,
+					body: { error: "Foreign key violation", _tag: "ForeignKeyError" },
+				};
 			}
 			if (isTaggedError(error, "HookError")) {
-				return { status: 422, body: { error: "Hook error", _tag: "HookError" } };
+				return {
+					status: 422,
+					body: { error: "Hook error", _tag: "HookError" },
+				};
 			}
 			return { status: 500, body: { error: "Internal server error" } };
 		}
@@ -292,22 +319,40 @@ const createUpdateHandler = (
 	return async (req: RestRequest): Promise<RestResponse> => {
 		const { id } = req.params;
 		try {
-			const updateEffect = collection.update(id, req.body) as Effect.Effect<Record<string, unknown>, unknown>;
+			const updateEffect = collection.update(id, req.body) as Effect.Effect<
+				Record<string, unknown>,
+				unknown
+			>;
 			const entity = await Effect.runPromise(updateEffect);
 			return { status: 200, body: entity };
 		} catch (error) {
 			// TODO: Map errors via mapErrorToResponse (task 8.1)
 			if (isTaggedError(error, "NotFoundError")) {
-				return { status: 404, body: { error: "Not found", _tag: "NotFoundError" } };
+				return {
+					status: 404,
+					body: { error: "Not found", _tag: "NotFoundError" },
+				};
 			}
 			if (isTaggedError(error, "ValidationError")) {
-				return { status: 400, body: { error: "Validation error", _tag: "ValidationError" } };
+				return {
+					status: 400,
+					body: { error: "Validation error", _tag: "ValidationError" },
+				};
 			}
 			if (isTaggedError(error, "UniqueConstraintError")) {
-				return { status: 409, body: { error: "Unique constraint violation", _tag: "UniqueConstraintError" } };
+				return {
+					status: 409,
+					body: {
+						error: "Unique constraint violation",
+						_tag: "UniqueConstraintError",
+					},
+				};
 			}
 			if (isTaggedError(error, "HookError")) {
-				return { status: 422, body: { error: "Hook error", _tag: "HookError" } };
+				return {
+					status: 422,
+					body: { error: "Hook error", _tag: "HookError" },
+				};
 			}
 			return { status: 500, body: { error: "Internal server error" } };
 		}
@@ -324,16 +369,25 @@ const createDeleteHandler = (
 	return async (req: RestRequest): Promise<RestResponse> => {
 		const { id } = req.params;
 		try {
-			const deleteEffect = collection.delete(id) as Effect.Effect<Record<string, unknown>, unknown>;
+			const deleteEffect = collection.delete(id) as Effect.Effect<
+				Record<string, unknown>,
+				unknown
+			>;
 			const entity = await Effect.runPromise(deleteEffect);
 			return { status: 200, body: entity };
 		} catch (error) {
 			// TODO: Map errors via mapErrorToResponse (task 8.1)
 			if (isTaggedError(error, "NotFoundError")) {
-				return { status: 404, body: { error: "Not found", _tag: "NotFoundError" } };
+				return {
+					status: 404,
+					body: { error: "Not found", _tag: "NotFoundError" },
+				};
 			}
 			if (isTaggedError(error, "HookError")) {
-				return { status: 422, body: { error: "Hook error", _tag: "HookError" } };
+				return {
+					status: 422,
+					body: { error: "Hook error", _tag: "HookError" },
+				};
 			}
 			return { status: 500, body: { error: "Internal server error" } };
 		}
@@ -349,25 +403,46 @@ const createBatchHandler = (
 ): RestHandler => {
 	return async (req: RestRequest): Promise<RestResponse> => {
 		try {
-			const batchEffect = collection.createMany(req.body) as Effect.Effect<Record<string, unknown>, unknown>;
+			const batchEffect = collection.createMany(req.body) as Effect.Effect<
+				Record<string, unknown>,
+				unknown
+			>;
 			const result = await Effect.runPromise(batchEffect);
 			return { status: 201, body: result };
 		} catch (error) {
 			// TODO: Map errors via mapErrorToResponse (task 8.1)
 			if (isTaggedError(error, "ValidationError")) {
-				return { status: 400, body: { error: "Validation error", _tag: "ValidationError" } };
+				return {
+					status: 400,
+					body: { error: "Validation error", _tag: "ValidationError" },
+				};
 			}
 			if (isTaggedError(error, "DuplicateKeyError")) {
-				return { status: 409, body: { error: "Duplicate key", _tag: "DuplicateKeyError" } };
+				return {
+					status: 409,
+					body: { error: "Duplicate key", _tag: "DuplicateKeyError" },
+				};
 			}
 			if (isTaggedError(error, "UniqueConstraintError")) {
-				return { status: 409, body: { error: "Unique constraint violation", _tag: "UniqueConstraintError" } };
+				return {
+					status: 409,
+					body: {
+						error: "Unique constraint violation",
+						_tag: "UniqueConstraintError",
+					},
+				};
 			}
 			if (isTaggedError(error, "ForeignKeyError")) {
-				return { status: 422, body: { error: "Foreign key violation", _tag: "ForeignKeyError" } };
+				return {
+					status: 422,
+					body: { error: "Foreign key violation", _tag: "ForeignKeyError" },
+				};
 			}
 			if (isTaggedError(error, "HookError")) {
-				return { status: 422, body: { error: "Hook error", _tag: "HookError" } };
+				return {
+					status: 422,
+					body: { error: "Hook error", _tag: "HookError" },
+				};
 			}
 			return { status: 500, body: { error: "Internal server error" } };
 		}
@@ -397,10 +472,12 @@ const createAggregateHandler = (
 		try {
 			// Parse aggregate query params
 			const aggregateConfig = parseAggregateParams(req.query);
-			const aggregateEffect = collection.aggregate(aggregateConfig) as Effect.Effect<Record<string, unknown>, unknown>;
+			const aggregateEffect = collection.aggregate(
+				aggregateConfig,
+			) as Effect.Effect<Record<string, unknown>, unknown>;
 			const result = await Effect.runPromise(aggregateEffect);
 			return { status: 200, body: result };
-		} catch (error) {
+		} catch (_error) {
 			return { status: 500, body: { error: "Internal server error" } };
 		}
 	};
@@ -424,7 +501,9 @@ const extractTaggedError = (
 	if (Runtime.isFiberFailure(error)) {
 		// Get the cause from the FiberFailure using the well-known symbol
 		const causeSymbol = Symbol.for("effect/Runtime/FiberFailure/Cause");
-		const cause = (error as unknown as Record<symbol, unknown>)[causeSymbol] as Cause.Cause<unknown>;
+		const cause = (error as unknown as Record<symbol, unknown>)[
+			causeSymbol
+		] as Cause.Cause<unknown>;
 
 		// Extract the failure from the cause
 		const failure = Cause.failureOption(cause);

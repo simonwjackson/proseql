@@ -80,5 +80,5 @@
 
 - [x] 11.1 Run full test suite (`bun test`) to verify no regressions across all packages
 - [x] 11.2 Run type check (`bunx tsc --build`) to verify no type errors
-- [ ] 11.3 Run lint (`biome check .`) and fix any issues
+- [x] 11.3 Run lint (`biome check .`) and fix any issues
 - [ ] 11.4 Verify `proseql --help` prints usage information for all commands

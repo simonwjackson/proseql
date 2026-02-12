@@ -6,7 +6,6 @@
  * and wires each handler to the appropriate collection method.
  */
 
-import { Chunk, Context, Effect, Layer, Stream } from "effect";
 import {
 	createEffectDatabase,
 	type DatabaseConfig,
@@ -16,6 +15,7 @@ import {
 	type MigrationError,
 	type PluginError,
 } from "@proseql/core";
+import { Chunk, Context, Effect, Layer, Stream } from "effect";
 
 // ============================================================================
 // DatabaseContext Service
@@ -34,9 +34,7 @@ export interface DatabaseContext<Config extends DatabaseConfig> {
  * Each config type gets its own unique service identifier.
  */
 export const makeDatabaseContextTag = <Config extends DatabaseConfig>() =>
-	Context.GenericTag<DatabaseContext<Config>>(
-		"@proseql/rpc/DatabaseContext",
-	);
+	Context.GenericTag<DatabaseContext<Config>>("@proseql/rpc/DatabaseContext");
 
 // ============================================================================
 // Handler Implementations
@@ -50,12 +48,10 @@ const createCollectionHandlers = <Config extends DatabaseConfig>(
 	collectionName: keyof Config,
 	db: EffectDatabase<Config>,
 ) => {
-	// biome-ignore lint/suspicious/noExplicitAny: Collection type is dynamic based on config
 	const collection = db[collectionName] as EffectDatabase<Config>[keyof Config];
 
 	return {
-		findById: ({ id }: { readonly id: string }) =>
-			collection.findById(id),
+		findById: ({ id }: { readonly id: string }) => collection.findById(id),
 
 		query: (config: {
 			readonly where?: Record<string, unknown>;
@@ -68,9 +64,9 @@ const createCollectionHandlers = <Config extends DatabaseConfig>(
 			// Query returns a RunnableStream; collect it to an array for RPC response
 			const stream = collection.query(config);
 			// The stream is a Stream.Stream at runtime (RunnableStream wrapper)
-			return Stream.runCollect(stream as Stream.Stream<Record<string, unknown>, unknown>).pipe(
-				Effect.map(Chunk.toReadonlyArray),
-			);
+			return Stream.runCollect(
+				stream as Stream.Stream<Record<string, unknown>, unknown>,
+			).pipe(Effect.map(Chunk.toReadonlyArray));
 		},
 
 		queryStream: (config: {
@@ -87,7 +83,10 @@ const createCollectionHandlers = <Config extends DatabaseConfig>(
 		}) => {
 			// Return the stream directly for incremental delivery over RPC transport
 			// The RPC layer will serialize stream items as they are emitted
-			const baseStream = collection.query(config) as Stream.Stream<Record<string, unknown>, unknown>;
+			const baseStream = collection.query(config) as Stream.Stream<
+				Record<string, unknown>,
+				unknown
+			>;
 
 			// Apply rechunking if streamingOptions.chunkSize is specified
 			// This batches items into chunks of the specified size before they are
@@ -139,21 +138,20 @@ const createCollectionHandlers = <Config extends DatabaseConfig>(
 			readonly where: Record<string, unknown>;
 			readonly updates: Record<string, unknown>;
 		}) =>
-			// biome-ignore lint/suspicious/noExplicitAny: Predicate and updates are dynamic
 			collection.updateMany(
 				// For RPC we receive where clause, convert to predicate that matches records
-				// biome-ignore lint/suspicious/noExplicitAny: Dynamic predicate
+				// biome-ignore lint/suspicious/noExplicitAny: Dynamic predicate - entity type unknown at runtime
 				(entity: any) => {
 					for (const [key, value] of Object.entries(where)) {
 						if (entity[key] !== value) return false;
 					}
 					return true;
 				},
+				// biome-ignore lint/suspicious/noExplicitAny: Updates type is dynamic based on collection schema
 				updates as any,
 			),
 
-		delete: ({ id }: { readonly id: string }) =>
-			collection.delete(id),
+		delete: ({ id }: { readonly id: string }) => collection.delete(id),
 
 		deleteMany: ({
 			where,
@@ -193,11 +191,11 @@ const createCollectionHandlers = <Config extends DatabaseConfig>(
 			readonly create: Record<string, unknown>;
 			readonly update: Record<string, unknown>;
 		}) =>
-			// biome-ignore lint/suspicious/noExplicitAny: Upsert data is dynamic
 			collection.upsert({
 				where,
 				create: createData,
 				update: updateData,
+				// biome-ignore lint/suspicious/noExplicitAny: Upsert data is dynamic - types unknown at runtime
 			} as any),
 
 		upsertMany: ({
@@ -223,7 +221,9 @@ const createCollectionHandlers = <Config extends DatabaseConfig>(
  * This is the shape of handlers that need to be provided to the RpcGroup.
  */
 export type RpcHandlers<Config extends DatabaseConfig> = {
-	readonly [K in keyof Config & string]: ReturnType<typeof createCollectionHandlers<Config>>;
+	readonly [K in keyof Config & string]: ReturnType<
+		typeof createCollectionHandlers<Config>
+	>;
 };
 
 /**
@@ -267,7 +267,10 @@ export const makeRpcHandlers = <Config extends DatabaseConfig>(
 		const db = yield* createEffectDatabase(config, initialData as any);
 
 		// Build handlers for each collection
-		const handlers = {} as Record<string, ReturnType<typeof createCollectionHandlers>>;
+		const handlers = {} as Record<
+			string,
+			ReturnType<typeof createCollectionHandlers>
+		>;
 		for (const collectionName of Object.keys(config)) {
 			handlers[collectionName] = createCollectionHandlers(
 				collectionName as keyof Config,
@@ -383,7 +386,10 @@ export const makeRpcHandlersFromDatabase = <Config extends DatabaseConfig>(
 	db: EffectDatabase<Config> | EffectDatabaseWithPersistence<Config>,
 ): RpcHandlers<Config> => {
 	// Build handlers for each collection, delegating to the provided database
-	const handlers = {} as Record<string, ReturnType<typeof createCollectionHandlers>>;
+	const handlers = {} as Record<
+		string,
+		ReturnType<typeof createCollectionHandlers>
+	>;
 	for (const collectionName of Object.keys(config)) {
 		handlers[collectionName] = createCollectionHandlers(
 			collectionName as keyof Config,

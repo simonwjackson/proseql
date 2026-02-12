@@ -1,6 +1,6 @@
-import { Data, Effect } from "effect"
-import * as path from "node:path"
-import * as fs from "node:fs"
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { Data, Effect } from "effect";
 
 // ============================================================================
 // Config Discovery Error
@@ -9,9 +9,11 @@ import * as fs from "node:fs"
 /**
  * Error thrown when no config file can be found.
  */
-export class ConfigNotFoundError extends Data.TaggedError("ConfigNotFoundError")<{
-	readonly searchedPaths: readonly string[]
-	readonly message: string
+export class ConfigNotFoundError extends Data.TaggedError(
+	"ConfigNotFoundError",
+)<{
+	readonly searchedPaths: readonly string[];
+	readonly message: string;
 }> {}
 
 // ============================================================================
@@ -22,7 +24,7 @@ const CONFIG_FILE_NAMES = [
 	"proseql.config.ts",
 	"proseql.config.js",
 	"proseql.config.json",
-] as const
+] as const;
 
 // ============================================================================
 // Discovery Functions
@@ -33,9 +35,9 @@ const CONFIG_FILE_NAMES = [
  */
 function fileExists(filePath: string): boolean {
 	try {
-		return fs.existsSync(filePath) && fs.statSync(filePath).isFile()
+		return fs.existsSync(filePath) && fs.statSync(filePath).isFile();
 	} catch {
-		return false
+		return false;
 	}
 }
 
@@ -44,9 +46,9 @@ function fileExists(filePath: string): boolean {
  */
 function directoryExists(dirPath: string): boolean {
 	try {
-		return fs.existsSync(dirPath) && fs.statSync(dirPath).isDirectory()
+		return fs.existsSync(dirPath) && fs.statSync(dirPath).isDirectory();
 	} catch {
-		return false
+		return false;
 	}
 }
 
@@ -55,9 +57,9 @@ function directoryExists(dirPath: string): boolean {
  * Returns null if at filesystem root.
  */
 function getParentDirectory(dirPath: string): string | null {
-	const parent = path.dirname(dirPath)
+	const parent = path.dirname(dirPath);
 	// If dirname returns the same path, we're at the root
-	return parent === dirPath ? null : parent
+	return parent === dirPath ? null : parent;
 }
 
 /**
@@ -66,12 +68,12 @@ function getParentDirectory(dirPath: string): string | null {
  */
 function findConfigInDirectory(dirPath: string): string | null {
 	for (const configName of CONFIG_FILE_NAMES) {
-		const configPath = path.join(dirPath, configName)
+		const configPath = path.join(dirPath, configName);
 		if (fileExists(configPath)) {
-			return configPath
+			return configPath;
 		}
 	}
-	return null
+	return null;
 }
 
 /**
@@ -79,10 +81,10 @@ function findConfigInDirectory(dirPath: string): string | null {
  * collecting all directories searched.
  */
 function* walkUpward(startDir: string): Generator<string> {
-	let currentDir: string | null = startDir
+	let currentDir: string | null = startDir;
 	while (currentDir !== null) {
-		yield currentDir
-		currentDir = getParentDirectory(currentDir)
+		yield currentDir;
+		currentDir = getParentDirectory(currentDir);
 	}
 }
 
@@ -110,10 +112,10 @@ export function discoverConfig(
 		if (overridePath !== undefined) {
 			const absoluteOverridePath = path.isAbsolute(overridePath)
 				? overridePath
-				: path.resolve(cwd, overridePath)
+				: path.resolve(cwd, overridePath);
 
 			if (fileExists(absoluteOverridePath)) {
-				return absoluteOverridePath
+				return absoluteOverridePath;
 			}
 
 			// Override path was specified but doesn't exist
@@ -122,11 +124,11 @@ export function discoverConfig(
 					searchedPaths: [absoluteOverridePath],
 					message: `Config file not found: ${absoluteOverridePath}`,
 				}),
-			)
+			);
 		}
 
 		// Normalize and resolve the starting directory
-		const startDir = path.resolve(cwd)
+		const startDir = path.resolve(cwd);
 
 		// Validate that the starting directory exists
 		if (!directoryExists(startDir)) {
@@ -135,21 +137,21 @@ export function discoverConfig(
 					searchedPaths: [],
 					message: `Starting directory does not exist: ${startDir}`,
 				}),
-			)
+			);
 		}
 
 		// Track all directories searched for error reporting
-		const searchedPaths: string[] = []
+		const searchedPaths: string[] = [];
 
 		// Walk upward from cwd to filesystem root
 		for (const dir of walkUpward(startDir)) {
-			const configPath = findConfigInDirectory(dir)
+			const configPath = findConfigInDirectory(dir);
 			if (configPath !== null) {
-				return configPath
+				return configPath;
 			}
 			// Track all config file paths that were checked in this directory
 			for (const configName of CONFIG_FILE_NAMES) {
-				searchedPaths.push(path.join(dir, configName))
+				searchedPaths.push(path.join(dir, configName));
 			}
 		}
 
@@ -159,8 +161,8 @@ export function discoverConfig(
 				searchedPaths,
 				message: `No proseql config file found. Searched from ${startDir} to filesystem root.\nLooking for: ${CONFIG_FILE_NAMES.join(", ")}`,
 			}),
-		)
-	})
+		);
+	});
 }
 
 /**
@@ -169,41 +171,38 @@ export function discoverConfig(
  *
  * @throws Error if no config file is found
  */
-export function discoverConfigSync(
-	cwd: string,
-	overridePath?: string,
-): string {
+export function discoverConfigSync(cwd: string, overridePath?: string): string {
 	// If an override path is provided, validate and return it
 	if (overridePath !== undefined) {
 		const absoluteOverridePath = path.isAbsolute(overridePath)
 			? overridePath
-			: path.resolve(cwd, overridePath)
+			: path.resolve(cwd, overridePath);
 
 		if (fileExists(absoluteOverridePath)) {
-			return absoluteOverridePath
+			return absoluteOverridePath;
 		}
 
-		throw new Error(`Config file not found: ${absoluteOverridePath}`)
+		throw new Error(`Config file not found: ${absoluteOverridePath}`);
 	}
 
 	// Normalize and resolve the starting directory
-	const startDir = path.resolve(cwd)
+	const startDir = path.resolve(cwd);
 
 	// Validate that the starting directory exists
 	if (!directoryExists(startDir)) {
-		throw new Error(`Starting directory does not exist: ${startDir}`)
+		throw new Error(`Starting directory does not exist: ${startDir}`);
 	}
 
 	// Walk upward from cwd to filesystem root
 	for (const dir of walkUpward(startDir)) {
-		const configPath = findConfigInDirectory(dir)
+		const configPath = findConfigInDirectory(dir);
 		if (configPath !== null) {
-			return configPath
+			return configPath;
 		}
 	}
 
 	// No config file found anywhere
 	throw new Error(
 		`No proseql config file found. Searched from ${startDir} to filesystem root.\nLooking for: ${CONFIG_FILE_NAMES.join(", ")}`,
-	)
+	);
 }

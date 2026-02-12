@@ -1,7 +1,7 @@
-import { Data, Effect } from "effect"
-import * as path from "node:path"
-import * as fs from "node:fs"
-import type { DatabaseConfig } from "@proseql/core"
+import * as fs from "node:fs";
+import * as path from "node:path";
+import type { DatabaseConfig } from "@proseql/core";
+import { Data, Effect } from "effect";
 
 // ============================================================================
 // Config Loading Errors
@@ -11,9 +11,9 @@ import type { DatabaseConfig } from "@proseql/core"
  * Error thrown when a config file cannot be loaded.
  */
 export class ConfigLoadError extends Data.TaggedError("ConfigLoadError")<{
-	readonly configPath: string
-	readonly reason: string
-	readonly message: string
+	readonly configPath: string;
+	readonly reason: string;
+	readonly message: string;
 }> {}
 
 /**
@@ -22,23 +22,23 @@ export class ConfigLoadError extends Data.TaggedError("ConfigLoadError")<{
 export class ConfigValidationError extends Data.TaggedError(
 	"ConfigValidationError",
 )<{
-	readonly configPath: string
-	readonly reason: string
-	readonly message: string
+	readonly configPath: string;
+	readonly reason: string;
+	readonly message: string;
 }> {}
 
 // ============================================================================
 // Supported Extensions
 // ============================================================================
 
-const SUPPORTED_EXTENSIONS = [".ts", ".js", ".json"] as const
-type SupportedExtension = (typeof SUPPORTED_EXTENSIONS)[number]
+const SUPPORTED_EXTENSIONS = [".ts", ".js", ".json"] as const;
+type SupportedExtension = (typeof SUPPORTED_EXTENSIONS)[number];
 
 /**
  * Check if a file extension is supported.
  */
 function isSupportedExtension(ext: string): ext is SupportedExtension {
-	return (SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)
+	return (SUPPORTED_EXTENSIONS as readonly string[]).includes(ext);
 }
 
 // ============================================================================
@@ -53,20 +53,20 @@ function loadJsonConfig(
 ): Effect.Effect<unknown, ConfigLoadError> {
 	return Effect.gen(function* () {
 		try {
-			const content = fs.readFileSync(configPath, "utf-8")
-			return JSON.parse(content) as unknown
+			const content = fs.readFileSync(configPath, "utf-8");
+			return JSON.parse(content) as unknown;
 		} catch (error) {
 			const errorMessage =
-				error instanceof Error ? error.message : String(error)
+				error instanceof Error ? error.message : String(error);
 			return yield* Effect.fail(
 				new ConfigLoadError({
 					configPath,
 					reason: `Failed to parse JSON config: ${errorMessage}`,
 					message: `Failed to load config from ${configPath}: ${errorMessage}`,
 				}),
-			)
+			);
 		}
-	})
+	});
 }
 
 /**
@@ -77,31 +77,31 @@ function loadModuleConfig(
 	configPath: string,
 ): Effect.Effect<unknown, ConfigLoadError> {
 	// Use file:// URL for dynamic import to work correctly
-	const fileUrl = `file://${configPath}`
+	const fileUrl = `file://${configPath}`;
 
 	return Effect.tryPromise({
 		try: async () => {
-			const module = (await import(fileUrl)) as Record<string, unknown>
+			const module = (await import(fileUrl)) as Record<string, unknown>;
 
 			// Config should be the default export
 			if ("default" in module) {
-				return module.default
+				return module.default;
 			}
 
 			// If no default export, try to use the module itself
 			// (in case the config is exported as module.exports = {...})
-			return module
+			return module;
 		},
 		catch: (error) => {
 			const errorMessage =
-				error instanceof Error ? error.message : String(error)
+				error instanceof Error ? error.message : String(error);
 			return new ConfigLoadError({
 				configPath,
 				reason: `Failed to import config module: ${errorMessage}`,
 				message: `Failed to load config from ${configPath}: ${errorMessage}`,
-			})
+			});
 		},
-	})
+	});
 }
 
 /**
@@ -122,7 +122,7 @@ function validateConfigStructure(
 					reason: "Config must be an object",
 					message: `Invalid config in ${configPath}: Config must be an object, got ${typeof config}`,
 				}),
-			)
+			);
 		}
 
 		// Must be a plain object (not an array)
@@ -133,10 +133,10 @@ function validateConfigStructure(
 					reason: "Config must be an object, not an array",
 					message: `Invalid config in ${configPath}: Config must be an object, got array`,
 				}),
-			)
+			);
 		}
 
-		const configObj = config as Record<string, unknown>
+		const configObj = config as Record<string, unknown>;
 
 		// Check each collection
 		for (const [collectionName, collectionConfig] of Object.entries(
@@ -154,10 +154,10 @@ function validateConfigStructure(
 						reason: `Collection '${collectionName}' must be an object`,
 						message: `Invalid config in ${configPath}: Collection '${collectionName}' must be an object`,
 					}),
-				)
+				);
 			}
 
-			const collection = collectionConfig as Record<string, unknown>
+			const collection = collectionConfig as Record<string, unknown>;
 
 			// Must have a schema field
 			if (!("schema" in collection)) {
@@ -167,7 +167,7 @@ function validateConfigStructure(
 						reason: `Collection '${collectionName}' is missing required field 'schema'`,
 						message: `Invalid config in ${configPath}: Collection '${collectionName}' is missing required field 'schema'`,
 					}),
-				)
+				);
 			}
 
 			// Must have a relationships field
@@ -178,7 +178,7 @@ function validateConfigStructure(
 						reason: `Collection '${collectionName}' is missing required field 'relationships'`,
 						message: `Invalid config in ${configPath}: Collection '${collectionName}' is missing required field 'relationships'`,
 					}),
-				)
+				);
 			}
 
 			// Relationships must be an object
@@ -193,13 +193,13 @@ function validateConfigStructure(
 						reason: `Collection '${collectionName}' field 'relationships' must be an object`,
 						message: `Invalid config in ${configPath}: Collection '${collectionName}' field 'relationships' must be an object`,
 					}),
-				)
+				);
 			}
 		}
 
 		// Config is valid
-		return configObj as DatabaseConfig
-	})
+		return configObj as DatabaseConfig;
+	});
 }
 
 // ============================================================================
@@ -226,10 +226,10 @@ export function loadConfig(
 		// Ensure the path is absolute
 		const absolutePath = path.isAbsolute(configPath)
 			? configPath
-			: path.resolve(process.cwd(), configPath)
+			: path.resolve(process.cwd(), configPath);
 
 		// Get file extension
-		const ext = path.extname(absolutePath).toLowerCase()
+		const ext = path.extname(absolutePath).toLowerCase();
 
 		// Validate extension
 		if (!isSupportedExtension(ext)) {
@@ -239,23 +239,23 @@ export function loadConfig(
 					reason: `Unsupported config file extension: ${ext}`,
 					message: `Cannot load config from ${absolutePath}: Unsupported extension '${ext}'. Use .ts, .js, or .json`,
 				}),
-			)
+			);
 		}
 
 		// Load the raw config based on extension
 		const rawConfig: unknown =
 			ext === ".json"
 				? yield* loadJsonConfig(absolutePath)
-				: yield* loadModuleConfig(absolutePath)
+				: yield* loadModuleConfig(absolutePath);
 
 		// Validate the config structure
 		const validatedConfig = yield* validateConfigStructure(
 			rawConfig,
 			absolutePath,
-		)
+		);
 
-		return validatedConfig
-	})
+		return validatedConfig;
+	});
 }
 
 /**
@@ -264,6 +264,8 @@ export function loadConfig(
  *
  * @throws Error if config cannot be loaded or is invalid
  */
-export async function loadConfigAsync(configPath: string): Promise<DatabaseConfig> {
-	return Effect.runPromise(loadConfig(configPath))
+export async function loadConfigAsync(
+	configPath: string,
+): Promise<DatabaseConfig> {
+	return Effect.runPromise(loadConfig(configPath));
 }

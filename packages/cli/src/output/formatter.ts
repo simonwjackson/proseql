@@ -4,15 +4,15 @@
  * Accepts a format flag and record array, delegates to the appropriate formatter.
  */
 
-import { formatAsJson } from "./json.js"
-import { formatAsYaml } from "./yaml.js"
-import { formatAsCsv } from "./csv.js"
-import { formatAsTable } from "./table.js"
+import { formatAsCsv } from "./csv.js";
+import { formatAsJson } from "./json.js";
+import { formatAsTable } from "./table.js";
+import { formatAsYaml } from "./yaml.js";
 
 /**
  * Supported output formats.
  */
-export type OutputFormat = "table" | "json" | "yaml" | "csv"
+export type OutputFormat = "table" | "json" | "yaml" | "csv";
 
 /**
  * Format the given records based on the specified format.
@@ -27,12 +27,12 @@ export function format(
 ): string {
 	switch (format) {
 		case "json":
-			return formatAsJson(records)
+			return formatAsJson(records);
 		case "yaml":
-			return formatAsYaml(records)
+			return formatAsYaml(records);
 		case "csv":
-			return formatAsCsv(records)
+			return formatAsCsv(records);
 		case "table":
-			return formatAsTable(records)
+			return formatAsTable(records);
 	}
 }

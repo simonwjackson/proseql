@@ -1,9 +1,9 @@
-import { Effect, Schema } from "effect";
-import { describe, expect, it, beforeEach } from "vitest";
 import { createEffectDatabase } from "@proseql/core";
+import { Effect, Schema } from "effect";
+import { describe, expect, it } from "vitest";
 import {
-	extractRelationships,
 	createRelationshipRoutes,
+	extractRelationships,
 } from "../src/relationship-routes.js";
 
 // ============================================================================
@@ -62,8 +62,7 @@ describe("extractRelationships", () => {
 
 		// authors.books (inverse)
 		const authorBooks = relationships.find(
-			(r) =>
-				r.sourceCollection === "authors" && r.relationshipName === "books",
+			(r) => r.sourceCollection === "authors" && r.relationshipName === "books",
 		);
 		expect(authorBooks).toBeDefined();
 		expect(authorBooks?.relationship.type).toBe("inverse");
@@ -108,9 +107,7 @@ describe("ref relationship handler (GET /books/:id/author)", () => {
 		const db = await Effect.runPromise(
 			createEffectDatabase(config, {
 				authors: [{ id: "a1", name: "Frank Herbert", email: "frank@dune.com" }],
-				books: [
-					{ id: "b1", title: "Dune", authorId: "a1", year: 1965 },
-				],
+				books: [{ id: "b1", title: "Dune", authorId: "a1", year: 1965 }],
 			}),
 		);
 
@@ -118,7 +115,7 @@ describe("ref relationship handler (GET /books/:id/author)", () => {
 		const handler = routes.find((r) => r.path === "/books/:id/author")?.handler;
 		expect(handler).toBeDefined();
 
-		const response = await handler!({
+		const response = await handler?.({
 			params: { id: "b1" },
 			query: {},
 			body: undefined,
@@ -143,7 +140,7 @@ describe("ref relationship handler (GET /books/:id/author)", () => {
 		const routes = createRelationshipRoutes(config, db);
 		const handler = routes.find((r) => r.path === "/books/:id/author")?.handler;
 
-		const response = await handler!({
+		const response = await handler?.({
 			params: { id: "nonexistent" },
 			query: {},
 			body: undefined,
@@ -194,7 +191,7 @@ describe("ref relationship handler (GET /books/:id/author)", () => {
 		const routes = createRelationshipRoutes(nullableConfig, db);
 		const handler = routes.find((r) => r.path === "/books/:id/author")?.handler;
 
-		const response = await handler!({
+		const response = await handler?.({
 			params: { id: "b1" },
 			query: {},
 			body: undefined,
@@ -219,10 +216,12 @@ describe("inverse relationship handler (GET /authors/:id/books)", () => {
 		);
 
 		const routes = createRelationshipRoutes(config, db);
-		const handler = routes.find((r) => r.path === "/authors/:id/books")?.handler;
+		const handler = routes.find(
+			(r) => r.path === "/authors/:id/books",
+		)?.handler;
 		expect(handler).toBeDefined();
 
-		const response = await handler!({
+		const response = await handler?.({
 			params: { id: "a1" },
 			query: {},
 			body: undefined,
@@ -247,9 +246,11 @@ describe("inverse relationship handler (GET /authors/:id/books)", () => {
 		);
 
 		const routes = createRelationshipRoutes(config, db);
-		const handler = routes.find((r) => r.path === "/authors/:id/books")?.handler;
+		const handler = routes.find(
+			(r) => r.path === "/authors/:id/books",
+		)?.handler;
 
-		const response = await handler!({
+		const response = await handler?.({
 			params: { id: "a1" },
 			query: {},
 			body: undefined,
@@ -268,9 +269,11 @@ describe("inverse relationship handler (GET /authors/:id/books)", () => {
 		);
 
 		const routes = createRelationshipRoutes(config, db);
-		const handler = routes.find((r) => r.path === "/authors/:id/books")?.handler;
+		const handler = routes.find(
+			(r) => r.path === "/authors/:id/books",
+		)?.handler;
 
-		const response = await handler!({
+		const response = await handler?.({
 			params: { id: "nonexistent" },
 			query: {},
 			body: undefined,

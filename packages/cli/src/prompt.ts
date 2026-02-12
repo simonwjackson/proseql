@@ -5,18 +5,18 @@
  * Skipped when --force is passed or stdin is not a TTY (non-interactive mode).
  */
 
-import * as readline from "node:readline"
+import * as readline from "node:readline";
 
 /**
  * Options for the confirmation prompt.
  */
 export interface ConfirmOptions {
 	/** The message to display to the user */
-	readonly message: string
+	readonly message: string;
 	/** Whether to skip the prompt (e.g., --force flag was passed) */
-	readonly force?: boolean
+	readonly force?: boolean;
 	/** Default answer if the user just presses Enter (defaults to false) */
-	readonly defaultAnswer?: boolean
+	readonly defaultAnswer?: boolean;
 }
 
 /**
@@ -24,18 +24,18 @@ export interface ConfirmOptions {
  */
 export interface ConfirmResult {
 	/** Whether the user confirmed the action */
-	readonly confirmed: boolean
+	readonly confirmed: boolean;
 	/** Whether the prompt was skipped (force flag or non-TTY) */
-	readonly skipped: boolean
+	readonly skipped: boolean;
 	/** Reason why the prompt was skipped, if applicable */
-	readonly skipReason?: "force" | "non-tty"
+	readonly skipReason?: "force" | "non-tty";
 }
 
 /**
  * Check if stdin is a TTY (interactive terminal).
  */
 function isTTY(): boolean {
-	return process.stdin.isTTY === true
+	return process.stdin.isTTY === true;
 }
 
 /**
@@ -47,13 +47,13 @@ function readLine(prompt: string): Promise<string> {
 		const rl = readline.createInterface({
 			input: process.stdin,
 			output: process.stdout,
-		})
+		});
 
 		rl.question(prompt, (answer) => {
-			rl.close()
-			resolve(answer.trim().toLowerCase())
-		})
-	})
+			rl.close();
+			resolve(answer.trim().toLowerCase());
+		});
+	});
 }
 
 /**
@@ -62,20 +62,17 @@ function readLine(prompt: string): Promise<string> {
  * Empty string returns the default answer.
  * Invalid input returns null.
  */
-function parseAnswer(
-	answer: string,
-	defaultAnswer: boolean,
-): boolean | null {
+function parseAnswer(answer: string, defaultAnswer: boolean): boolean | null {
 	if (answer === "") {
-		return defaultAnswer
+		return defaultAnswer;
 	}
 	if (answer === "y" || answer === "yes") {
-		return true
+		return true;
 	}
 	if (answer === "n" || answer === "no") {
-		return false
+		return false;
 	}
-	return null
+	return null;
 }
 
 /**
@@ -83,8 +80,8 @@ function parseAnswer(
  * Shows the default option in uppercase.
  */
 function formatPrompt(message: string, defaultAnswer: boolean): string {
-	const yesNo = defaultAnswer ? "[Y/n]" : "[y/N]"
-	return `${message} ${yesNo} `
+	const yesNo = defaultAnswer ? "[Y/n]" : "[y/N]";
+	return `${message} ${yesNo} `;
 }
 
 /**
@@ -111,7 +108,7 @@ function formatPrompt(message: string, defaultAnswer: boolean): string {
  * ```
  */
 export async function confirm(options: ConfirmOptions): Promise<ConfirmResult> {
-	const { message, force = false, defaultAnswer = false } = options
+	const { message, force = false, defaultAnswer = false } = options;
 
 	// Skip if --force flag is passed
 	if (force) {
@@ -119,7 +116,7 @@ export async function confirm(options: ConfirmOptions): Promise<ConfirmResult> {
 			confirmed: true,
 			skipped: true,
 			skipReason: "force",
-		}
+		};
 	}
 
 	// Skip if stdin is not a TTY (non-interactive mode like CI or piped input)
@@ -129,26 +126,26 @@ export async function confirm(options: ConfirmOptions): Promise<ConfirmResult> {
 			confirmed: true,
 			skipped: true,
 			skipReason: "non-tty",
-		}
+		};
 	}
 
 	// Interactive prompt
-	const prompt = formatPrompt(message, defaultAnswer)
+	const prompt = formatPrompt(message, defaultAnswer);
 
 	// Keep prompting until we get a valid answer
 	while (true) {
-		const answer = await readLine(prompt)
-		const parsed = parseAnswer(answer, defaultAnswer)
+		const answer = await readLine(prompt);
+		const parsed = parseAnswer(answer, defaultAnswer);
 
 		if (parsed !== null) {
 			return {
 				confirmed: parsed,
 				skipped: false,
-			}
+			};
 		}
 
 		// Invalid input - show hint and ask again
-		console.log("Please answer 'y' or 'n'.")
+		console.log("Please answer 'y' or 'n'.");
 	}
 }
 
@@ -157,5 +154,5 @@ export async function confirm(options: ConfirmOptions): Promise<ConfirmResult> {
  * Exported for testing purposes.
  */
 export function isInteractive(): boolean {
-	return isTTY()
+	return isTTY();
 }

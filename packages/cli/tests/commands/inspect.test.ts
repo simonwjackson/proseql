@@ -1,24 +1,24 @@
-import * as fs from "node:fs"
-import * as os from "node:os"
-import * as path from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { Effect, Schema } from "effect"
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import type { DatabaseConfig } from "@proseql/core";
+import { Effect, Schema } from "effect";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-	runCollections,
 	type CollectionsOptions,
 	type CollectionsResult,
-} from "../../src/commands/collections"
+	runCollections,
+} from "../../src/commands/collections";
 import {
-	runDescribe,
 	type DescribeOptions,
 	type DescribeResult,
-} from "../../src/commands/describe"
+	runDescribe,
+} from "../../src/commands/describe";
 import {
 	runStats,
 	type StatsOptions,
 	type StatsResult,
-} from "../../src/commands/stats"
-import type { DatabaseConfig } from "@proseql/core"
+} from "../../src/commands/stats";
 
 /**
  * Tests for inspect commands (collections, describe, stats).
@@ -39,26 +39,26 @@ const BookSchema = Schema.Struct({
 	genre: Schema.String,
 	inStock: Schema.Boolean,
 	tags: Schema.optional(Schema.Array(Schema.String)),
-})
+});
 
 const AuthorSchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
 	birthYear: Schema.Number,
 	nationality: Schema.optional(Schema.String),
-})
+});
 
 // Sample test data - keyed by entity ID as proseql expects
 const sampleBooks: Record<
 	string,
 	{
-		id: string
-		title: string
-		author: string
-		year: number
-		genre: string
-		inStock: boolean
-		tags?: string[]
+		id: string;
+		title: string;
+		author: string;
+		year: number;
+		genre: string;
+		inStock: boolean;
+		tags?: string[];
 	}
 > = {
 	"1": {
@@ -87,58 +87,63 @@ const sampleBooks: Record<
 		genre: "classic",
 		inStock: false,
 	},
-}
+};
 
 const sampleAuthors: Record<
 	string,
 	{ id: string; name: string; birthYear: number; nationality?: string }
 > = {
-	"a1": {
+	a1: {
 		id: "a1",
 		name: "Frank Herbert",
 		birthYear: 1920,
 		nationality: "American",
 	},
-	"a2": { id: "a2", name: "William Gibson", birthYear: 1948, nationality: "American" },
-}
+	a2: {
+		id: "a2",
+		name: "William Gibson",
+		birthYear: 1948,
+		nationality: "American",
+	},
+};
 
 describe("Inspect Commands", () => {
-	let tempRoot: string
-	let configPath: string
-	let booksFilePath: string
-	let authorsFilePath: string
+	let tempRoot: string;
+	let configPath: string;
+	let booksFilePath: string;
+	let authorsFilePath: string;
 
 	beforeEach(() => {
 		// Create a unique temp directory for each test
-		tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "proseql-inspect-test-"))
+		tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "proseql-inspect-test-"));
 
 		// Create data directory and files
-		const dataDir = path.join(tempRoot, "data")
-		fs.mkdirSync(dataDir, { recursive: true })
+		const dataDir = path.join(tempRoot, "data");
+		fs.mkdirSync(dataDir, { recursive: true });
 
-		booksFilePath = path.join(dataDir, "books.json")
-		fs.writeFileSync(booksFilePath, JSON.stringify(sampleBooks, null, 2))
+		booksFilePath = path.join(dataDir, "books.json");
+		fs.writeFileSync(booksFilePath, JSON.stringify(sampleBooks, null, 2));
 
-		authorsFilePath = path.join(dataDir, "authors.yaml")
+		authorsFilePath = path.join(dataDir, "authors.yaml");
 		// Create a simple YAML file
 		const yamlContent = Object.entries(sampleAuthors)
 			.map(
 				([key, author]) =>
 					`"${key}":\n  id: "${author.id}"\n  name: "${author.name}"\n  birthYear: ${author.birthYear}${author.nationality ? `\n  nationality: "${author.nationality}"` : ""}`,
 			)
-			.join("\n")
-		fs.writeFileSync(authorsFilePath, yamlContent)
+			.join("\n");
+		fs.writeFileSync(authorsFilePath, yamlContent);
 
 		// Config file path
-		configPath = path.join(tempRoot, "proseql.config.json")
-	})
+		configPath = path.join(tempRoot, "proseql.config.json");
+	});
 
 	afterEach(() => {
 		// Clean up the temp directory
 		if (fs.existsSync(tempRoot)) {
-			fs.rmSync(tempRoot, { recursive: true, force: true })
+			fs.rmSync(tempRoot, { recursive: true, force: true });
 		}
-	})
+	});
 
 	/**
 	 * Helper to create a config with multiple collections and features
@@ -171,7 +176,7 @@ describe("Inspect Commands", () => {
 					},
 				},
 			},
-		} as DatabaseConfig
+		} as DatabaseConfig;
 	}
 
 	/**
@@ -184,7 +189,7 @@ describe("Inspect Commands", () => {
 				file: "./data/books.json",
 				relationships: {},
 			},
-		} as DatabaseConfig
+		} as DatabaseConfig;
 	}
 
 	/**
@@ -196,9 +201,9 @@ describe("Inspect Commands", () => {
 		const fullOptions: CollectionsOptions = {
 			config: options.config ?? createConfig(),
 			configPath: options.configPath ?? configPath,
-		}
+		};
 
-		return Effect.runPromise(runCollections(fullOptions))
+		return Effect.runPromise(runCollections(fullOptions));
 	}
 
 	/**
@@ -210,9 +215,9 @@ describe("Inspect Commands", () => {
 		const fullOptions: DescribeOptions = {
 			config: options.config ?? createConfig(),
 			collection: options.collection ?? "books",
-		}
+		};
 
-		return Effect.runPromise(runDescribe(fullOptions))
+		return Effect.runPromise(runDescribe(fullOptions));
 	}
 
 	/**
@@ -224,89 +229,95 @@ describe("Inspect Commands", () => {
 		const fullOptions: StatsOptions = {
 			config: options.config ?? createConfig(),
 			configPath: options.configPath ?? configPath,
-		}
+		};
 
-		return Effect.runPromise(runStats(fullOptions))
+		return Effect.runPromise(runStats(fullOptions));
 	}
 
 	describe("Collections Command", () => {
 		describe("basic listing", () => {
 			it("should list all collections", async () => {
-				const result = await executeCollections({})
+				const result = await executeCollections({});
 
-				expect(result.success).toBe(true)
-				expect(result.data).toBeDefined()
-				expect(result.data?.length).toBe(2)
+				expect(result.success).toBe(true);
+				expect(result.data).toBeDefined();
+				expect(result.data?.length).toBe(2);
 
-				const collectionNames = result.data?.map((c) => c.name) ?? []
-				expect(collectionNames).toContain("books")
-				expect(collectionNames).toContain("authors")
-			})
+				const collectionNames = result.data?.map((c) => c.name) ?? [];
+				expect(collectionNames).toContain("books");
+				expect(collectionNames).toContain("authors");
+			});
 
 			it("should include entity count for each collection", async () => {
-				const result = await executeCollections({})
+				const result = await executeCollections({});
 
-				expect(result.success).toBe(true)
-				expect(result.data).toBeDefined()
+				expect(result.success).toBe(true);
+				expect(result.data).toBeDefined();
 
-				const booksCollection = result.data?.find((c) => c.name === "books")
-				expect(booksCollection?.count).toBe(3)
+				const booksCollection = result.data?.find((c) => c.name === "books");
+				expect(booksCollection?.count).toBe(3);
 
-				const authorsCollection = result.data?.find((c) => c.name === "authors")
-				expect(authorsCollection?.count).toBe(2)
-			})
+				const authorsCollection = result.data?.find(
+					(c) => c.name === "authors",
+				);
+				expect(authorsCollection?.count).toBe(2);
+			});
 
 			it("should include file path for each collection", async () => {
-				const result = await executeCollections({})
+				const result = await executeCollections({});
 
-				expect(result.success).toBe(true)
-				expect(result.data).toBeDefined()
+				expect(result.success).toBe(true);
+				expect(result.data).toBeDefined();
 
-				const booksCollection = result.data?.find((c) => c.name === "books")
-				expect(booksCollection?.file).toContain("books.json")
+				const booksCollection = result.data?.find((c) => c.name === "books");
+				expect(booksCollection?.file).toContain("books.json");
 
-				const authorsCollection = result.data?.find((c) => c.name === "authors")
-				expect(authorsCollection?.file).toContain("authors.yaml")
-			})
+				const authorsCollection = result.data?.find(
+					(c) => c.name === "authors",
+				);
+				expect(authorsCollection?.file).toContain("authors.yaml");
+			});
 
 			it("should include serialization format for each collection", async () => {
-				const result = await executeCollections({})
+				const result = await executeCollections({});
 
-				expect(result.success).toBe(true)
-				expect(result.data).toBeDefined()
+				expect(result.success).toBe(true);
+				expect(result.data).toBeDefined();
 
-				const booksCollection = result.data?.find((c) => c.name === "books")
-				expect(booksCollection?.format).toBe("json")
+				const booksCollection = result.data?.find((c) => c.name === "books");
+				expect(booksCollection?.format).toBe("json");
 
-				const authorsCollection = result.data?.find((c) => c.name === "authors")
-				expect(authorsCollection?.format).toBe("yaml")
-			})
-		})
+				const authorsCollection = result.data?.find(
+					(c) => c.name === "authors",
+				);
+				expect(authorsCollection?.format).toBe("yaml");
+			});
+		});
 
 		describe("empty config", () => {
 			it("should handle empty config gracefully", async () => {
 				const result = await executeCollections({
 					config: {} as DatabaseConfig,
-				})
+				});
 
-				expect(result.success).toBe(true)
-				expect(result.data).toEqual([])
-				expect(result.message).toContain("No collections")
-			})
-		})
+				expect(result.success).toBe(true);
+				expect(result.data).toEqual([]);
+				expect(result.message).toContain("No collections");
+			});
+		});
 
 		describe("single collection", () => {
 			it("should list single collection", async () => {
 				const result = await executeCollections({
 					config: createMinimalConfig(),
-				})
+				});
 
-				expect(result.success).toBe(true)
-				expect(result.data).toBeDefined()
-				expect(result.data?.length).toBe(1)
-				expect(result.data?.[0].name).toBe("books")
-			})
-		})
+				expect(result.success).toBe(true);
+				expect(result.data).toBeDefined();
+				expect(result.data?.length).toBe(1);
+				expect(result.data?.[0].name).toBe("books");
+			});
+		});
 
 		describe("format detection", () => {
 			it("should detect JSON format", async () => {
@@ -318,12 +329,12 @@ describe("Inspect Commands", () => {
 							relationships: {},
 						},
 					} as DatabaseConfig,
-				})
+				});
 
-				expect(result.success).toBe(true)
-				const booksCollection = result.data?.find((c) => c.name === "books")
-				expect(booksCollection?.format).toBe("json")
-			})
+				expect(result.success).toBe(true);
+				const booksCollection = result.data?.find((c) => c.name === "books");
+				expect(booksCollection?.format).toBe("json");
+			});
 
 			it("should detect YAML format", async () => {
 				const result = await executeCollections({
@@ -334,12 +345,14 @@ describe("Inspect Commands", () => {
 							relationships: {},
 						},
 					} as DatabaseConfig,
-				})
+				});
 
-				expect(result.success).toBe(true)
-				const authorsCollection = result.data?.find((c) => c.name === "authors")
-				expect(authorsCollection?.format).toBe("yaml")
-			})
+				expect(result.success).toBe(true);
+				const authorsCollection = result.data?.find(
+					(c) => c.name === "authors",
+				);
+				expect(authorsCollection?.format).toBe("yaml");
+			});
 
 			it("should handle in-memory collections (no file)", async () => {
 				const result = await executeCollections({
@@ -349,203 +362,205 @@ describe("Inspect Commands", () => {
 							relationships: {},
 						},
 					} as DatabaseConfig,
-				})
+				});
 
-				expect(result.success).toBe(true)
-				const booksCollection = result.data?.find((c) => c.name === "books")
-				expect(booksCollection?.file).toBe("(in-memory)")
-				expect(booksCollection?.format).toBe("(in-memory)")
-			})
-		})
-	})
+				expect(result.success).toBe(true);
+				const booksCollection = result.data?.find((c) => c.name === "books");
+				expect(booksCollection?.file).toBe("(in-memory)");
+				expect(booksCollection?.format).toBe("(in-memory)");
+			});
+		});
+	});
 
 	describe("Describe Command", () => {
 		describe("field information", () => {
 			it("should list all fields in the schema", async () => {
-				const result = await executeDescribe({ collection: "books" })
+				const result = await executeDescribe({ collection: "books" });
 
-				expect(result.success).toBe(true)
-				expect(result.data).toBeDefined()
-				expect(result.data?.collection).toBe("books")
+				expect(result.success).toBe(true);
+				expect(result.data).toBeDefined();
+				expect(result.data?.collection).toBe("books");
 
-				const fieldNames = result.data?.fields.map((f) => f.name) ?? []
-				expect(fieldNames).toContain("id")
-				expect(fieldNames).toContain("title")
-				expect(fieldNames).toContain("author")
-				expect(fieldNames).toContain("year")
-				expect(fieldNames).toContain("genre")
-				expect(fieldNames).toContain("inStock")
-				expect(fieldNames).toContain("tags")
-			})
+				const fieldNames = result.data?.fields.map((f) => f.name) ?? [];
+				expect(fieldNames).toContain("id");
+				expect(fieldNames).toContain("title");
+				expect(fieldNames).toContain("author");
+				expect(fieldNames).toContain("year");
+				expect(fieldNames).toContain("genre");
+				expect(fieldNames).toContain("inStock");
+				expect(fieldNames).toContain("tags");
+			});
 
 			it("should show field types correctly", async () => {
-				const result = await executeDescribe({ collection: "books" })
+				const result = await executeDescribe({ collection: "books" });
 
-				expect(result.success).toBe(true)
-				expect(result.data?.fields).toBeDefined()
+				expect(result.success).toBe(true);
+				expect(result.data?.fields).toBeDefined();
 
-				const idField = result.data?.fields.find((f) => f.name === "id")
-				expect(idField?.type).toBe("string")
+				const idField = result.data?.fields.find((f) => f.name === "id");
+				expect(idField?.type).toBe("string");
 
-				const yearField = result.data?.fields.find((f) => f.name === "year")
-				expect(yearField?.type).toBe("number")
+				const yearField = result.data?.fields.find((f) => f.name === "year");
+				expect(yearField?.type).toBe("number");
 
-				const inStockField = result.data?.fields.find((f) => f.name === "inStock")
-				expect(inStockField?.type).toBe("boolean")
-			})
+				const inStockField = result.data?.fields.find(
+					(f) => f.name === "inStock",
+				);
+				expect(inStockField?.type).toBe("boolean");
+			});
 
 			it("should indicate required vs optional fields", async () => {
-				const result = await executeDescribe({ collection: "books" })
+				const result = await executeDescribe({ collection: "books" });
 
-				expect(result.success).toBe(true)
+				expect(result.success).toBe(true);
 
-				const titleField = result.data?.fields.find((f) => f.name === "title")
-				expect(titleField?.required).toBe(true)
+				const titleField = result.data?.fields.find((f) => f.name === "title");
+				expect(titleField?.required).toBe(true);
 
-				const tagsField = result.data?.fields.find((f) => f.name === "tags")
-				expect(tagsField?.required).toBe(false)
-			})
+				const tagsField = result.data?.fields.find((f) => f.name === "tags");
+				expect(tagsField?.required).toBe(false);
+			});
 
 			it("should indicate indexed fields", async () => {
-				const result = await executeDescribe({ collection: "books" })
+				const result = await executeDescribe({ collection: "books" });
 
-				expect(result.success).toBe(true)
+				expect(result.success).toBe(true);
 
-				const genreField = result.data?.fields.find((f) => f.name === "genre")
-				expect(genreField?.indexed).toBe(true)
+				const genreField = result.data?.fields.find((f) => f.name === "genre");
+				expect(genreField?.indexed).toBe(true);
 
-				const yearField = result.data?.fields.find((f) => f.name === "year")
-				expect(yearField?.indexed).toBe(true) // Part of compound index
+				const yearField = result.data?.fields.find((f) => f.name === "year");
+				expect(yearField?.indexed).toBe(true); // Part of compound index
 
-				const titleField = result.data?.fields.find((f) => f.name === "title")
-				expect(titleField?.indexed).toBe(false)
-			})
+				const titleField = result.data?.fields.find((f) => f.name === "title");
+				expect(titleField?.indexed).toBe(false);
+			});
 
 			it("should indicate unique fields", async () => {
-				const result = await executeDescribe({ collection: "books" })
+				const result = await executeDescribe({ collection: "books" });
 
-				expect(result.success).toBe(true)
+				expect(result.success).toBe(true);
 
-				const titleField = result.data?.fields.find((f) => f.name === "title")
-				expect(titleField?.unique).toBe(true)
+				const titleField = result.data?.fields.find((f) => f.name === "title");
+				expect(titleField?.unique).toBe(true);
 
-				const genreField = result.data?.fields.find((f) => f.name === "genre")
-				expect(genreField?.unique).toBe(false)
-			})
-		})
+				const genreField = result.data?.fields.find((f) => f.name === "genre");
+				expect(genreField?.unique).toBe(false);
+			});
+		});
 
 		describe("index information", () => {
 			it("should list single-field indexes", async () => {
-				const result = await executeDescribe({ collection: "books" })
+				const result = await executeDescribe({ collection: "books" });
 
-				expect(result.success).toBe(true)
-				expect(result.data?.indexes).toBeDefined()
-				expect(result.data?.indexes).toContain("genre")
-			})
+				expect(result.success).toBe(true);
+				expect(result.data?.indexes).toBeDefined();
+				expect(result.data?.indexes).toContain("genre");
+			});
 
 			it("should list compound indexes", async () => {
-				const result = await executeDescribe({ collection: "books" })
+				const result = await executeDescribe({ collection: "books" });
 
-				expect(result.success).toBe(true)
-				expect(result.data?.indexes).toBeDefined()
+				expect(result.success).toBe(true);
+				expect(result.data?.indexes).toBeDefined();
 
 				const compoundIndex = result.data?.indexes.find(
 					(idx) =>
 						Array.isArray(idx) &&
 						idx.includes("year") &&
 						idx.includes("inStock"),
-				)
-				expect(compoundIndex).toBeDefined()
-			})
-		})
+				);
+				expect(compoundIndex).toBeDefined();
+			});
+		});
 
 		describe("relationship information", () => {
 			it("should list ref relationships", async () => {
-				const result = await executeDescribe({ collection: "books" })
+				const result = await executeDescribe({ collection: "books" });
 
-				expect(result.success).toBe(true)
-				expect(result.data?.relationships).toBeDefined()
+				expect(result.success).toBe(true);
+				expect(result.data?.relationships).toBeDefined();
 
 				const authorRel = result.data?.relationships.find(
 					(r) => r.name === "authorRef",
-				)
-				expect(authorRel).toBeDefined()
-				expect(authorRel?.type).toBe("ref")
-				expect(authorRel?.target).toBe("authors")
-				expect(authorRel?.foreignKey).toBe("author")
-			})
+				);
+				expect(authorRel).toBeDefined();
+				expect(authorRel?.type).toBe("ref");
+				expect(authorRel?.target).toBe("authors");
+				expect(authorRel?.foreignKey).toBe("author");
+			});
 
 			it("should list inverse relationships", async () => {
-				const result = await executeDescribe({ collection: "authors" })
+				const result = await executeDescribe({ collection: "authors" });
 
-				expect(result.success).toBe(true)
+				expect(result.success).toBe(true);
 
 				const booksRel = result.data?.relationships.find(
 					(r) => r.name === "books",
-				)
-				expect(booksRel).toBeDefined()
-				expect(booksRel?.type).toBe("inverse")
-				expect(booksRel?.target).toBe("books")
-			})
-		})
+				);
+				expect(booksRel).toBeDefined();
+				expect(booksRel?.type).toBe("inverse");
+				expect(booksRel?.target).toBe("books");
+			});
+		});
 
 		describe("search index information", () => {
 			it("should indicate when collection has search index", async () => {
-				const result = await executeDescribe({ collection: "books" })
+				const result = await executeDescribe({ collection: "books" });
 
-				expect(result.success).toBe(true)
-				expect(result.data?.hasSearchIndex).toBe(true)
-				expect(result.data?.searchIndexFields).toContain("title")
-				expect(result.data?.searchIndexFields).toContain("author")
-			})
+				expect(result.success).toBe(true);
+				expect(result.data?.hasSearchIndex).toBe(true);
+				expect(result.data?.searchIndexFields).toContain("title");
+				expect(result.data?.searchIndexFields).toContain("author");
+			});
 
 			it("should indicate when collection has no search index", async () => {
-				const result = await executeDescribe({ collection: "authors" })
+				const result = await executeDescribe({ collection: "authors" });
 
-				expect(result.success).toBe(true)
-				expect(result.data?.hasSearchIndex).toBe(false)
-				expect(result.data?.searchIndexFields).toEqual([])
-			})
-		})
+				expect(result.success).toBe(true);
+				expect(result.data?.hasSearchIndex).toBe(false);
+				expect(result.data?.searchIndexFields).toEqual([]);
+			});
+		});
 
 		describe("unique constraints", () => {
 			it("should list unique constraints", async () => {
-				const result = await executeDescribe({ collection: "books" })
+				const result = await executeDescribe({ collection: "books" });
 
-				expect(result.success).toBe(true)
-				expect(result.data?.uniqueConstraints).toBeDefined()
-				expect(result.data?.uniqueConstraints).toContain("title")
-			})
-		})
+				expect(result.success).toBe(true);
+				expect(result.data?.uniqueConstraints).toBeDefined();
+				expect(result.data?.uniqueConstraints).toContain("title");
+			});
+		});
 
 		describe("error handling", () => {
 			it("should fail for non-existent collection", async () => {
-				const result = await executeDescribe({ collection: "nonexistent" })
+				const result = await executeDescribe({ collection: "nonexistent" });
 
-				expect(result.success).toBe(false)
-				expect(result.message).toContain("not found")
-				expect(result.message).toContain("nonexistent")
-			})
+				expect(result.success).toBe(false);
+				expect(result.message).toContain("not found");
+				expect(result.message).toContain("nonexistent");
+			});
 
 			it("should list available collections in error message", async () => {
-				const result = await executeDescribe({ collection: "invalid" })
+				const result = await executeDescribe({ collection: "invalid" });
 
-				expect(result.success).toBe(false)
-				expect(result.message).toContain("Available collections")
-				expect(result.message).toContain("books")
-				expect(result.message).toContain("authors")
-			})
+				expect(result.success).toBe(false);
+				expect(result.message).toContain("Available collections");
+				expect(result.message).toContain("books");
+				expect(result.message).toContain("authors");
+			});
 
 			it("should handle empty config", async () => {
 				const result = await executeDescribe({
 					config: {} as DatabaseConfig,
 					collection: "anything",
-				})
+				});
 
-				expect(result.success).toBe(false)
-				expect(result.message).toContain("not found")
-			})
-		})
+				expect(result.success).toBe(false);
+				expect(result.message).toContain("not found");
+			});
+		});
 
 		describe("appendOnly flag", () => {
 			it("should detect appendOnly collections", async () => {
@@ -562,19 +577,19 @@ describe("Inspect Commands", () => {
 						},
 					} as DatabaseConfig,
 					collection: "events",
-				})
+				});
 
-				expect(result.success).toBe(true)
-				expect(result.data?.appendOnly).toBe(true)
-			})
+				expect(result.success).toBe(true);
+				expect(result.data?.appendOnly).toBe(true);
+			});
 
 			it("should show appendOnly as false for regular collections", async () => {
-				const result = await executeDescribe({ collection: "books" })
+				const result = await executeDescribe({ collection: "books" });
 
-				expect(result.success).toBe(true)
-				expect(result.data?.appendOnly).toBe(false)
-			})
-		})
+				expect(result.success).toBe(true);
+				expect(result.data?.appendOnly).toBe(false);
+			});
+		});
 
 		describe("schema versioning", () => {
 			it("should show version when present", async () => {
@@ -588,92 +603,92 @@ describe("Inspect Commands", () => {
 						},
 					} as DatabaseConfig,
 					collection: "books",
-				})
+				});
 
-				expect(result.success).toBe(true)
-				expect(result.data?.version).toBe(2)
-			})
+				expect(result.success).toBe(true);
+				expect(result.data?.version).toBe(2);
+			});
 
 			it("should handle collections without version", async () => {
 				const result = await executeDescribe({
 					config: createMinimalConfig(),
 					collection: "books",
-				})
+				});
 
-				expect(result.success).toBe(true)
-				expect(result.data?.version).toBeUndefined()
-			})
-		})
-	})
+				expect(result.success).toBe(true);
+				expect(result.data?.version).toBeUndefined();
+			});
+		});
+	});
 
 	describe("Stats Command", () => {
 		describe("basic stats", () => {
 			it("should report stats for all collections", async () => {
-				const result = await executeStats({})
+				const result = await executeStats({});
 
-				expect(result.success).toBe(true)
-				expect(result.data).toBeDefined()
-				expect(result.data?.length).toBe(2)
-			})
+				expect(result.success).toBe(true);
+				expect(result.data).toBeDefined();
+				expect(result.data?.length).toBe(2);
+			});
 
 			it("should include entity count per collection", async () => {
-				const result = await executeStats({})
+				const result = await executeStats({});
 
-				expect(result.success).toBe(true)
+				expect(result.success).toBe(true);
 
-				const booksStats = result.data?.find((s) => s.name === "books")
-				expect(booksStats?.count).toBe(3)
+				const booksStats = result.data?.find((s) => s.name === "books");
+				expect(booksStats?.count).toBe(3);
 
-				const authorsStats = result.data?.find((s) => s.name === "authors")
-				expect(authorsStats?.count).toBe(2)
-			})
+				const authorsStats = result.data?.find((s) => s.name === "authors");
+				expect(authorsStats?.count).toBe(2);
+			});
 
 			it("should include file path per collection", async () => {
-				const result = await executeStats({})
+				const result = await executeStats({});
 
-				expect(result.success).toBe(true)
+				expect(result.success).toBe(true);
 
-				const booksStats = result.data?.find((s) => s.name === "books")
-				expect(booksStats?.file).toContain("books.json")
+				const booksStats = result.data?.find((s) => s.name === "books");
+				expect(booksStats?.file).toContain("books.json");
 
-				const authorsStats = result.data?.find((s) => s.name === "authors")
-				expect(authorsStats?.file).toContain("authors.yaml")
-			})
+				const authorsStats = result.data?.find((s) => s.name === "authors");
+				expect(authorsStats?.file).toContain("authors.yaml");
+			});
 
 			it("should include format per collection", async () => {
-				const result = await executeStats({})
+				const result = await executeStats({});
 
-				expect(result.success).toBe(true)
+				expect(result.success).toBe(true);
 
-				const booksStats = result.data?.find((s) => s.name === "books")
-				expect(booksStats?.format).toBe("json")
+				const booksStats = result.data?.find((s) => s.name === "books");
+				expect(booksStats?.format).toBe("json");
 
-				const authorsStats = result.data?.find((s) => s.name === "authors")
-				expect(authorsStats?.format).toBe("yaml")
-			})
-		})
+				const authorsStats = result.data?.find((s) => s.name === "authors");
+				expect(authorsStats?.format).toBe("yaml");
+			});
+		});
 
 		describe("file size", () => {
 			it("should include file size in bytes", async () => {
-				const result = await executeStats({})
+				const result = await executeStats({});
 
-				expect(result.success).toBe(true)
+				expect(result.success).toBe(true);
 
-				const booksStats = result.data?.find((s) => s.name === "books")
-				expect(booksStats?.sizeBytes).toBeGreaterThan(0)
-			})
+				const booksStats = result.data?.find((s) => s.name === "books");
+				expect(booksStats?.sizeBytes).toBeGreaterThan(0);
+			});
 
 			it("should include human-readable file size", async () => {
-				const result = await executeStats({})
+				const result = await executeStats({});
 
-				expect(result.success).toBe(true)
+				expect(result.success).toBe(true);
 
-				const booksStats = result.data?.find((s) => s.name === "books")
-				expect(booksStats?.size).toBeDefined()
-				expect(booksStats?.size).not.toBe("(in-memory)")
+				const booksStats = result.data?.find((s) => s.name === "books");
+				expect(booksStats?.size).toBeDefined();
+				expect(booksStats?.size).not.toBe("(in-memory)");
 				// Should contain unit like "B", "KB", etc.
-				expect(booksStats?.size).toMatch(/\d+(\.\d+)?\s*(B|KB|MB|GB)/)
-			})
+				expect(booksStats?.size).toMatch(/\d+(\.\d+)?\s*(B|KB|MB|GB)/);
+			});
 
 			it("should show (in-memory) for collections without files", async () => {
 				const result = await executeStats({
@@ -683,53 +698,53 @@ describe("Inspect Commands", () => {
 							relationships: {},
 						},
 					} as DatabaseConfig,
-				})
+				});
 
-				expect(result.success).toBe(true)
+				expect(result.success).toBe(true);
 
-				const booksStats = result.data?.find((s) => s.name === "books")
-				expect(booksStats?.size).toBe("(in-memory)")
-				expect(booksStats?.sizeBytes).toBe(0)
-			})
-		})
+				const booksStats = result.data?.find((s) => s.name === "books");
+				expect(booksStats?.size).toBe("(in-memory)");
+				expect(booksStats?.sizeBytes).toBe(0);
+			});
+		});
 
 		describe("empty config", () => {
 			it("should handle empty config gracefully", async () => {
 				const result = await executeStats({
 					config: {} as DatabaseConfig,
-				})
+				});
 
-				expect(result.success).toBe(true)
-				expect(result.data).toEqual([])
-				expect(result.message).toContain("No collections")
-			})
-		})
+				expect(result.success).toBe(true);
+				expect(result.data).toEqual([]);
+				expect(result.message).toContain("No collections");
+			});
+		});
 
 		describe("missing files", () => {
 			it("should handle missing data file gracefully", async () => {
 				// Delete the data file
-				fs.unlinkSync(booksFilePath)
+				fs.unlinkSync(booksFilePath);
 
 				const result = await executeStats({
 					config: createMinimalConfig(),
-				})
+				});
 
-				expect(result.success).toBe(true)
-				const booksStats = result.data?.find((s) => s.name === "books")
+				expect(result.success).toBe(true);
+				const booksStats = result.data?.find((s) => s.name === "books");
 				// Should show 0 entities when file is missing
-				expect(booksStats?.count).toBe(0)
-				expect(booksStats?.sizeBytes).toBe(0)
-			})
-		})
+				expect(booksStats?.count).toBe(0);
+				expect(booksStats?.sizeBytes).toBe(0);
+			});
+		});
 
 		describe("various formats", () => {
 			it("should detect TOML format", async () => {
 				// Create a TOML file
-				const tomlPath = path.join(tempRoot, "data", "config.toml")
+				const tomlPath = path.join(tempRoot, "data", "config.toml");
 				fs.writeFileSync(
 					tomlPath,
 					'[entry]\nid = "1"\nname = "Test"\nvalue = 42',
-				)
+				);
 
 				const result = await executeStats({
 					config: {
@@ -743,18 +758,18 @@ describe("Inspect Commands", () => {
 							relationships: {},
 						},
 					} as DatabaseConfig,
-				})
+				});
 
-				expect(result.success).toBe(true)
-				const configStats = result.data?.find((s) => s.name === "configs")
-				expect(configStats?.format).toBe("toml")
-			})
+				expect(result.success).toBe(true);
+				const configStats = result.data?.find((s) => s.name === "configs");
+				expect(configStats?.format).toBe("toml");
+			});
 
-	it("should detect JSON5 format from extension", async () => {
+			it("should detect JSON5 format from extension", async () => {
 				// Create a JSON5 file (even though we're not loading it with the right codec,
 				// we're testing format detection)
-				const json5Path = path.join(tempRoot, "data", "config.json5")
-				fs.writeFileSync(json5Path, '{"id": "1", "name": "Test"}')
+				const json5Path = path.join(tempRoot, "data", "config.json5");
+				fs.writeFileSync(json5Path, '{"id": "1", "name": "Test"}');
 
 				const result = await executeStats({
 					config: {
@@ -767,57 +782,57 @@ describe("Inspect Commands", () => {
 							relationships: {},
 						},
 					} as DatabaseConfig,
-				})
+				});
 
 				// The format detection still works, though the codec might fail
 				// We expect the command to succeed or fail gracefully
 				// What matters is that if it succeeds, the format is correct
 				if (result.success) {
-					const configStats = result.data?.find((s) => s.name === "configs")
-					expect(configStats?.format).toBe("json5")
+					const configStats = result.data?.find((s) => s.name === "configs");
+					expect(configStats?.format).toBe("json5");
 				}
-			})
-		})
-	})
+			});
+		});
+	});
 
 	describe("Integration scenarios", () => {
 		it("should provide consistent data across all inspect commands", async () => {
 			// Run all three commands
-			const collectionsResult = await executeCollections({})
-			const describeResult = await executeDescribe({ collection: "books" })
-			const statsResult = await executeStats({})
+			const collectionsResult = await executeCollections({});
+			const describeResult = await executeDescribe({ collection: "books" });
+			const statsResult = await executeStats({});
 
 			// All should succeed
-			expect(collectionsResult.success).toBe(true)
-			expect(describeResult.success).toBe(true)
-			expect(statsResult.success).toBe(true)
+			expect(collectionsResult.success).toBe(true);
+			expect(describeResult.success).toBe(true);
+			expect(statsResult.success).toBe(true);
 
 			// Entity counts should match
 			const collectionsBookCount = collectionsResult.data?.find(
 				(c) => c.name === "books",
-			)?.count
+			)?.count;
 			const statsBookCount = statsResult.data?.find(
 				(s) => s.name === "books",
-			)?.count
-			expect(collectionsBookCount).toBe(statsBookCount)
+			)?.count;
+			expect(collectionsBookCount).toBe(statsBookCount);
 
 			// File paths should match
 			const collectionsBookFile = collectionsResult.data?.find(
 				(c) => c.name === "books",
-			)?.file
+			)?.file;
 			const statsBookFile = statsResult.data?.find(
 				(s) => s.name === "books",
-			)?.file
-			expect(collectionsBookFile).toBe(statsBookFile)
+			)?.file;
+			expect(collectionsBookFile).toBe(statsBookFile);
 
 			// Formats should match
 			const collectionsBookFormat = collectionsResult.data?.find(
 				(c) => c.name === "books",
-			)?.format
+			)?.format;
 			const statsBookFormat = statsResult.data?.find(
 				(s) => s.name === "books",
-			)?.format
-			expect(collectionsBookFormat).toBe(statsBookFormat)
-		})
-	})
-})
+			)?.format;
+			expect(collectionsBookFormat).toBe(statsBookFormat);
+		});
+	});
+});
