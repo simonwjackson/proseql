@@ -97,12 +97,12 @@
 ## 13. Tests — IndexedDB Adapter
 
 - [x] 13.1 Create `packages/browser/tests/indexeddb-adapter.test.ts` using `fake-indexeddb` or a similar mock
-- [ ] 13.2 Test `write` then `read` round-trip
-- [ ] 13.3 Test `exists` returns `false` for missing key, `true` after write
-- [ ] 13.4 Test `remove` deletes the entry
-- [ ] 13.5 Test `read` on missing key fails with `StorageError`
-- [ ] 13.6 Test database and object store are created on first access
-- [ ] 13.7 Test multiple collections can coexist in the same object store with different keys
+- [x] 13.2 Test `write` then `read` round-trip
+- [x] 13.3 Test `exists` returns `false` for missing key, `true` after write
+- [x] 13.4 Test `remove` deletes the entry
+- [x] 13.5 Test `read` on missing key fails with `StorageError`
+- [x] 13.6 Test database and object store are created on first access
+- [x] 13.7 Test multiple collections can coexist in the same object store with different keys
 
 ## 14. Tests — Cross-Tab Sync
 
