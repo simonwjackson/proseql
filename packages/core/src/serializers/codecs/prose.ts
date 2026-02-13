@@ -857,6 +857,75 @@ export const decodeOverflowLines = (
 };
 
 // ============================================================================
+// Directive Scanner
+// ============================================================================
+
+/**
+ * Result of scanning for the @prose directive in a document.
+ */
+export interface ScanDirectiveResult {
+	/** Index of the last line before the directive (or -1 if no preamble) */
+	readonly preambleEnd: number;
+	/** Index of the line containing the @prose directive */
+	readonly directiveStart: number;
+}
+
+/**
+ * Scans a document for the @prose directive.
+ * The directive is a line starting with `@prose ` (note the trailing space).
+ *
+ * Rules:
+ * - Exactly one @prose directive must exist in the file
+ * - If no directive is found, throws an error
+ * - If multiple directives are found, throws an error
+ * - All lines before the directive are preamble
+ *
+ * @param lines - Array of lines from the document
+ * @returns The position information for preamble and directive
+ * @throws Error if no directive found or multiple directives found
+ *
+ * @example
+ * ```typescript
+ * const lines = ['# My Books', '', '@prose #{id} {title}', '#1 Dune']
+ * const result = scanDirective(lines)
+ * // → { preambleEnd: 1, directiveStart: 2 }
+ *
+ * const linesNoPreable = ['@prose #{id} {title}', '#1 Dune']
+ * const result2 = scanDirective(linesNoPreable)
+ * // → { preambleEnd: -1, directiveStart: 0 }
+ * ```
+ */
+export const scanDirective = (lines: ReadonlyArray<string>): ScanDirectiveResult => {
+	let directiveIndex: number | null = null;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+
+		// Check if this line starts with "@prose "
+		if (line.startsWith("@prose ")) {
+			if (directiveIndex !== null) {
+				// Multiple directives found
+				throw new Error(
+					`Multiple @prose directives found: first at line ${directiveIndex + 1}, second at line ${i + 1}. Only one directive per file is allowed.`
+				);
+			}
+			directiveIndex = i;
+		}
+	}
+
+	if (directiveIndex === null) {
+		throw new Error(
+			"No @prose directive found. The file must contain a line starting with '@prose ' to define the record template."
+		);
+	}
+
+	return {
+		preambleEnd: directiveIndex > 0 ? directiveIndex - 1 : -1,
+		directiveStart: directiveIndex,
+	};
+};
+
+// ============================================================================
 // Array Parsing Helpers
 // ============================================================================
 
