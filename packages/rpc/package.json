@@ -1,6 +1,6 @@
 {
   "name": "@proseql/rpc",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Effect RPC integration for ProseQL type-safe in-memory database",
   "type": "module",
   "scripts": {

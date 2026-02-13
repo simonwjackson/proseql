@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.1 (2026-02-13)
+
+### Fixes
+- Skip prepublishOnly during npm publish in CI (e4a38d8)
+
+
 ## v0.2.0 (2026-02-13)
 
 ### Features
