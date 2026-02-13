@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.3 (2026-02-13)
+
+### Other
+- Add github release creation step (726ab8f)
+
+
 ## v0.2.2 (2026-02-13)
 
 ### Fixes
