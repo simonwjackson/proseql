@@ -715,4 +715,93 @@ describe("applyFilter Stream combinator", () => {
 			expect(result).toHaveLength(0);
 		});
 	});
+
+	describe("nested $search field resolution", () => {
+		const nestedSearchData = [
+			{
+				id: "1",
+				title: "Dune",
+				genre: "sci-fi",
+				metadata: { description: "A desert planet story with sandworms", views: 150 },
+			},
+			{
+				id: "2",
+				title: "Neuromancer",
+				genre: "sci-fi",
+				metadata: { description: "Cyberpunk hacking adventure", views: 80 },
+			},
+			{
+				id: "3",
+				title: "Foundation",
+				genre: "sci-fi",
+				metadata: { description: "Galactic empire and psychohistory", views: 200 },
+			},
+			{
+				id: "4",
+				title: "1984",
+				genre: "dystopian",
+				metadata: { description: "Totalitarian surveillance society", views: 50 },
+			},
+		];
+
+		it("should search nested field via dot-notation in $search fields array", async () => {
+			const result = await collectFiltered(nestedSearchData, {
+				$search: { query: "desert", fields: ["metadata.description"] },
+			});
+			expect(result).toHaveLength(1);
+			expect(result[0].id).toBe("1");
+			expect(result[0].title).toBe("Dune");
+		});
+
+		it("should search multiple nested fields via dot-notation", async () => {
+			const result = await collectFiltered(nestedSearchData, {
+				$search: { query: "cyberpunk", fields: ["metadata.description", "title"] },
+			});
+			expect(result).toHaveLength(1);
+			expect(result[0].id).toBe("2");
+		});
+
+		it("should search nested field with multiple query tokens", async () => {
+			const result = await collectFiltered(nestedSearchData, {
+				$search: { query: "galactic empire", fields: ["metadata.description"] },
+			});
+			expect(result).toHaveLength(1);
+			expect(result[0].id).toBe("3");
+		});
+
+		it("should return no results when nested field search has no matches", async () => {
+			const result = await collectFiltered(nestedSearchData, {
+				$search: { query: "nonexistent", fields: ["metadata.description"] },
+			});
+			expect(result).toHaveLength(0);
+		});
+
+		it("should search nested string fields automatically when fields array is omitted", async () => {
+			// Without explicit fields, $search should discover nested string fields
+			const result = await collectFiltered(nestedSearchData, {
+				$search: { query: "sandworms" },
+			});
+			expect(result).toHaveLength(1);
+			expect(result[0].id).toBe("1");
+		});
+
+		it("should combine nested $search with other filters", async () => {
+			const result = await collectFiltered(nestedSearchData, {
+				genre: "sci-fi",
+				$search: { query: "hacking", fields: ["metadata.description"] },
+			});
+			expect(result).toHaveLength(1);
+			expect(result[0].id).toBe("2");
+		});
+
+		it("should combine nested $search with nested filter", async () => {
+			const result = await collectFiltered(nestedSearchData, {
+				metadata: { views: { $gt: 100 } },
+				$search: { query: "planet", fields: ["metadata.description"] },
+			});
+			// Only Dune (id 1) has "planet" in description AND views > 100 (150)
+			expect(result).toHaveLength(1);
+			expect(result[0].id).toBe("1");
+		});
+	});
 });

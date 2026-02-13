@@ -26,7 +26,7 @@
 - [x] 3.9 Test nested string operators: `where: { author: { name: { $startsWith: "Frank" } } }`.
 - [x] 3.10 Test 3-level nesting: `where: { a: { b: { c: { $eq: "deep" } } } }`.
 - [x] 3.11 Test mixed flat + nested in same where: `where: { title: "Dune", metadata: { views: { $gt: 100 } } }`.
-- [ ] 3.12 Test nested `$search` field resolution: `where: { $search: { query: "hello", fields: ["metadata.description"] } }`.
+- [x] 3.12 Test nested `$search` field resolution: `where: { $search: { query: "hello", fields: ["metadata.description"] } }`.
 
 ## 4. Deep Merge Updates
 
