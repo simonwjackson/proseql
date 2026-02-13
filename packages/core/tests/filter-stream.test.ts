@@ -547,6 +547,39 @@ describe("applyFilter Stream combinator", () => {
 			expect(result).toHaveLength(2);
 			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
 		});
+
+		it("should filter by mixed flat + nested in same where clause (title + metadata.views)", async () => {
+			const result = await collectFiltered(nestedData, {
+				title: "Dune",
+				metadata: { views: { $gt: 100 } },
+			});
+			// Only "Dune" (id 1) has title "Dune" AND metadata.views > 100 (150 > 100)
+			expect(result).toHaveLength(1);
+			expect(result[0].id).toBe("1");
+			expect(result[0].title).toBe("Dune");
+		});
+
+		it("should filter by mixed flat exact match + nested operators with no matches", async () => {
+			const result = await collectFiltered(nestedData, {
+				title: "Dune",
+				metadata: { views: { $gt: 200 } },
+			});
+			// "Dune" has views = 150, which is NOT > 200
+			expect(result).toHaveLength(0);
+		});
+
+		it("should filter by mixed flat + multiple nested conditions", async () => {
+			const result = await collectFiltered(nestedData, {
+				genre: "sci-fi",
+				metadata: { views: { $gt: 100 }, rating: 5 },
+				author: { country: "USA" },
+			});
+			// Must be sci-fi, views > 100, rating = 5, and country = USA
+			// id 1 (Dune): sci-fi, 150 > 100, rating 5, USA -> matches
+			// id 3 (Foundation): sci-fi, 200 > 100, rating 5, but Russia -> no match
+			expect(result).toHaveLength(1);
+			expect(result[0].id).toBe("1");
+		});
 	});
 
 	describe("nested filtering (dot-notation)", () => {
