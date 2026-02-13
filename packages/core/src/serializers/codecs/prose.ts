@@ -204,8 +204,12 @@ export const serializeValue = (value: unknown): string => {
 	if (Array.isArray(value)) {
 		const elements = value.map((element) => {
 			const serialized = serializeValue(element);
-			// Quote elements that contain comma or closing bracket
-			if (serialized.includes(",") || serialized.includes("]")) {
+			// Quote elements that contain comma, closing bracket, or double quote
+			if (
+				serialized.includes(",") ||
+				serialized.includes("]") ||
+				serialized.includes('"')
+			) {
 				return `"${serialized.replace(/"/g, '\\"')}"`;
 			}
 			return serialized;
