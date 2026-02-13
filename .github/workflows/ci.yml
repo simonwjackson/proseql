@@ -55,7 +55,7 @@ jobs:
           nix develop --command bash -c "bun install && bun run scripts/release.ts"
           echo "version=$(node -p "require('./packages/core/package.json').version")" >> "$GITHUB_OUTPUT"
 
-  publish:
+  publish-npm:
     needs: [release]
     runs-on: ubuntu-latest
     permissions:
@@ -89,3 +89,49 @@ jobs:
       - name: Publish @proseql/rpc
         run: npm publish --provenance --access public --ignore-scripts
         working-directory: packages/rpc
+
+  publish-gpr:
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+      - uses: cachix/install-nix-action@v31
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@proseql'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: nix develop --command bash -c "bun install && bun run build"
+      - name: Resolve workspace references
+        run: |
+          CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
+          for pkg in node rest rpc; do
+            sed -i "s/\"workspace:\*\"/\"^${CORE_VERSION}\"/" "packages/${pkg}/package.json"
+          done
+      - name: Publish @proseql/core
+        run: npm publish --access public --ignore-scripts
+        working-directory: packages/core
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish @proseql/node
+        run: npm publish --access public --ignore-scripts
+        working-directory: packages/node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish @proseql/rest
+        run: npm publish --access public --ignore-scripts
+        working-directory: packages/rest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish @proseql/rpc
+        run: npm publish --access public --ignore-scripts
+        working-directory: packages/rpc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
