@@ -44,7 +44,7 @@
 
 ## 5. Nested Indexing
 
-- [ ] 5.1 In `core/indexes/index-manager.ts` `computeIndexKey`: replace `(entity as Record<string, unknown>)[field]` with `getNestedValue(entity as Record<string, unknown>, field)`.
+- [x] 5.1 In `core/indexes/index-manager.ts` `computeIndexKey`: replace `(entity as Record<string, unknown>)[field]` with `getNestedValue(entity as Record<string, unknown>, field)`.
 - [ ] 5.2 Test dot-path single index: `indexes: ["metadata.views"]` accelerates `where: { "metadata.views": 100 }`.
 - [ ] 5.3 Test dot-path compound index: `indexes: [["metadata.rating", "genre"]]` accelerates `where: { "metadata.rating": 5, genre: "sci-fi" }`.
 - [ ] 5.4 Test index maintenance on update: changing `metadata.views` updates the index correctly.

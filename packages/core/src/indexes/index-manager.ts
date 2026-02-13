@@ -11,6 +11,7 @@ import type {
 	IndexMap,
 	NormalizedIndex,
 } from "../types/index-types.js";
+import { getNestedValue } from "../utils/nested-path.js";
 
 /**
  * Entity constraint: must have a readonly string `id` field.
@@ -29,8 +30,8 @@ const computeIndexKey = <T extends HasId>(
 	entity: T,
 	fields: NormalizedIndex,
 ): unknown | undefined => {
-	const values = fields.map(
-		(field) => (entity as Record<string, unknown>)[field],
+	const values = fields.map((field) =>
+		getNestedValue(entity as Record<string, unknown>, field),
 	);
 
 	// Skip if any indexed field is null or undefined
