@@ -1,0 +1,5 @@
+@prose [{id}] "{title}" by {author} ({year}) — {genre}
+
+[b1] "Dune" by Frank Herbert (1965) — sci-fi
+[b2] "Neuromancer" by William Gibson (1984) — sci-fi
+[b3] "The Left Hand of Darkness" by Ursula K. Le Guin (1969) — sci-fi

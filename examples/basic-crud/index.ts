@@ -6,8 +6,8 @@
  * with Effect.catchTag.
  */
 
-import { Effect, Schema } from "effect"
-import { createEffectDatabase, NotFoundError } from "@proseql/core"
+import { createEffectDatabase, NotFoundError } from "@proseql/core";
+import { Effect, Schema } from "effect";
 
 // ============================================================================
 // 1. Define Schemas using Effect Schema
@@ -21,7 +21,7 @@ const UserSchema = Schema.Struct({
 	companyId: Schema.String,
 	createdAt: Schema.optional(Schema.String),
 	updatedAt: Schema.optional(Schema.String),
-})
+});
 
 const CompanySchema = Schema.Struct({
 	id: Schema.String,
@@ -29,7 +29,7 @@ const CompanySchema = Schema.Struct({
 	industry: Schema.String,
 	createdAt: Schema.optional(Schema.String),
 	updatedAt: Schema.optional(Schema.String),
-})
+});
 
 // ============================================================================
 // 2. Configure the Database
@@ -48,7 +48,7 @@ const config = {
 			employees: { type: "inverse" as const, target: "users" as const },
 		},
 	},
-} as const
+} as const;
 
 // ============================================================================
 // 3. Create the Database and Perform Operations
@@ -64,7 +64,7 @@ async function main() {
 				{ id: "c2", name: "FinanceInc", industry: "Finance" },
 			],
 		}),
-	)
+	);
 
 	// --- CREATE ---
 	// .runPromise converts the Effect into a Promise
@@ -73,49 +73,94 @@ async function main() {
 		email: "alice@example.com",
 		age: 30,
 		companyId: "c1",
-	}).runPromise
+	}).runPromise;
 
-	console.log("Created:", alice.name, alice.id)
+	console.log("Created:", alice.name, alice.id);
 
 	// Batch create
 	const batch = await db.users.createMany([
 		{ name: "Bob", email: "bob@example.com", age: 25, companyId: "c1" },
 		{ name: "Charlie", email: "charlie@example.com", age: 35, companyId: "c2" },
-	]).runPromise
+	]).runPromise;
 
-	console.log(`Batch created ${batch.created.length} users`)
+	console.log(`Batch created ${batch.created.length} users`);
 
 	// --- READ ---
 	// O(1) lookup by ID
-	const found = await db.users.findById(alice.id).runPromise
-	console.log("Found by ID:", found.name)
+	const found = await db.users.findById(alice.id).runPromise;
+	console.log("Found by ID:", found.name);
 
 	// Query all users (stream mode, no cursor)
-	const allUsers = await db.users.query().runPromise
-	console.log(`Total users: ${allUsers.length}`)
+	const allUsers = await db.users.query().runPromise;
+	console.log(`Total users: ${allUsers.length}`);
 
 	// Query with filter and sort (stream mode, no cursor)
 	const filtered = await db.users.query({
 		where: { age: { $gte: 30 } },
 		sort: { name: "asc" },
-	}).runPromise
-	console.log(`Users >= 30: ${filtered.length}`)
+	}).runPromise;
+	console.log(`Users >= 30: ${filtered.length}`);
 
 	// --- UPDATE ---
-	const updated = await db.users.update(alice.id, { age: 31 }).runPromise
-	console.log("Updated age:", updated.age)
+	const updated = await db.users.update(alice.id, { age: 31 }).runPromise;
+	console.log("Updated age:", updated.age);
 
 	// --- UPSERT ---
 	const upserted = await db.users.upsert({
 		where: { id: "new-user" },
-		create: { name: "Diana", email: "diana@example.com", age: 28, companyId: "c2" },
+		create: {
+			name: "Diana",
+			email: "diana@example.com",
+			age: 28,
+			companyId: "c2",
+		},
 		update: { age: 29 },
-	}).runPromise
-	console.log("Upserted:", upserted.name, upserted.__action)
+	}).runPromise;
+	console.log("Upserted:", upserted.name, upserted.__action);
+
+	// --- UPDATE MANY ---
+	// Update by predicate — all users at company c1
+	const updateResult = await db.users.updateMany(
+		(user) => user.companyId === "c1",
+		{ age: { $increment: 1 } },
+	).runPromise;
+	console.log(`Updated ${updateResult.count} users at TechCorp`);
+
+	// --- UPSERT MANY ---
+	const upsertResult = await db.users.upsertMany([
+		{
+			where: { id: alice.id },
+			create: {
+				name: "Alice",
+				email: "alice@example.com",
+				age: 30,
+				companyId: "c1",
+			},
+			update: { age: 32 },
+		},
+		{
+			where: { id: "new-id" },
+			create: {
+				name: "Eve",
+				email: "eve@example.com",
+				age: 22,
+				companyId: "c2",
+			},
+			update: { age: 23 },
+		},
+	]).runPromise;
+	console.log(
+		`Upserted ${upsertResult.created.length + upsertResult.updated.length} users`,
+	);
+
+	// --- DELETE MANY ---
+	const deleteResult = await db.users.deleteMany((user) => user.age < 25)
+		.runPromise;
+	console.log(`Deleted ${deleteResult.count} young users`);
 
 	// --- DELETE ---
-	const deleted = await db.users.delete(alice.id).runPromise
-	console.log("Deleted:", deleted.name)
+	const deleted = await db.users.delete(alice.id).runPromise;
+	console.log("Deleted:", deleted.name);
 
 	// ============================================================================
 	// 4. Error Handling with Effect
@@ -123,22 +168,24 @@ async function main() {
 
 	// Using Effect.runPromise — errors become rejected promises
 	try {
-		await db.users.findById("nonexistent").runPromise
+		await db.users.findById("nonexistent").runPromise;
 	} catch (err) {
 		if (err instanceof NotFoundError) {
-			console.log(`Not found: ${err.collection}/${err.id}`)
+			console.log(`Not found: ${err.collection}/${err.id}`);
 		}
 	}
 
 	// Using Effect directly for typed error handling with catchTag
 	const result = await Effect.runPromise(
-		db.users.findById("nonexistent").pipe(
-			Effect.catchTag("NotFoundError", (err) =>
-				Effect.succeed({ fallback: true, message: err.message }),
+		db.users
+			.findById("nonexistent")
+			.pipe(
+				Effect.catchTag("NotFoundError", (err) =>
+					Effect.succeed({ fallback: true, message: err.message }),
+				),
 			),
-		),
-	)
-	console.log("Caught with catchTag:", result)
+	);
+	console.log("Caught with catchTag:", result);
 }
 
-main().catch(console.error)
+main().catch(console.error);
