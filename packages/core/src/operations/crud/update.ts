@@ -57,6 +57,20 @@ type RelationshipConfig = {
 // ============================================================================
 
 /**
+ * Check if an object is a plain object (not null, not an array).
+ */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Check if an object contains any $-prefixed keys (operator object).
+ */
+function hasOperatorKeys(obj: Record<string, unknown>): boolean {
+	return Object.keys(obj).some((k) => k.startsWith("$"));
+}
+
+/**
  * Apply update operators to a value.
  * Supports: $increment, $decrement, $multiply (number),
  *           $append, $prepend (string/array), $remove (array),
@@ -139,6 +153,57 @@ function applyOperator<T>(
 
 	// If no operator matched, return current value
 	return currentValue;
+}
+
+/**
+ * Deep merge an update object into a current object, handling operators at any level.
+ *
+ * Rules:
+ * 1. If update value has $-prefixed keys → it's an operator, apply to current value
+ * 2. If update value is a plain object with no $-keys AND current value is also a plain object → recurse
+ * 3. Otherwise → direct assignment (replace current value with update value)
+ *
+ * This allows nested updates like:
+ * - `{ metadata: { views: 500 } }` → merges into metadata, preserving other fields
+ * - `{ metadata: { views: { $increment: 1 } } }` → applies operator to metadata.views
+ * - `{ metadata: { $set: { views: 0 } } }` → replaces entire metadata
+ *
+ * @param current - The current object to merge into
+ * @param updates - The update object containing values and/or operators
+ * @returns A new object with updates applied
+ */
+export function deepMergeUpdates(
+	current: Record<string, unknown>,
+	updates: Record<string, unknown>,
+): Record<string, unknown> {
+	const result = { ...current };
+
+	for (const [key, updateValue] of Object.entries(updates)) {
+		if (updateValue === undefined) {
+			// Skip undefined values
+			continue;
+		}
+
+		const currentValue = current[key];
+
+		if (isPlainObject(updateValue)) {
+			if (hasOperatorKeys(updateValue)) {
+				// Update value is an operator object → apply operator to current value
+				result[key] = applyOperator(currentValue, updateValue);
+			} else if (isPlainObject(currentValue)) {
+				// Both update and current are plain objects with no $ keys → recurse
+				result[key] = deepMergeUpdates(currentValue, updateValue);
+			} else {
+				// Current value is not a plain object → direct assignment
+				result[key] = updateValue;
+			}
+		} else {
+			// Update value is a primitive or array → direct assignment
+			result[key] = updateValue;
+		}
+	}
+
+	return result;
 }
 
 /**
