@@ -148,5 +148,32 @@ describe("Nested Schema Update Operations", () => {
 			const found = await db.books.findById("book1").runPromise;
 			expect(found.metadata).toEqual({ views: 0, rating: 1, tags: [] });
 		});
+
+		it("should handle mixed nested + flat update (task 4.6)", async () => {
+			// Update both a top-level field (title) and a nested field (metadata.rating)
+			const result = await db.books.update("book1", {
+				title: "New Title",
+				metadata: { rating: 5 },
+			}).runPromise;
+
+			// Flat field should be updated
+			expect(result.title).toBe("New Title");
+			// Nested field should be updated
+			expect(result.metadata.rating).toBe(5);
+			// Other nested fields should be preserved
+			expect(result.metadata.views).toBe(150);
+			expect(result.metadata.tags).toEqual(["classic", "epic"]);
+			expect(result.metadata.description).toBe("A desert planet story");
+			expect(result.metadata.featured).toBe(true);
+			// Other flat fields should be preserved
+			expect(result.genre).toBe("sci-fi");
+
+			// Verify in database
+			const found = await db.books.findById("book1").runPromise;
+			expect(found.title).toBe("New Title");
+			expect(found.metadata.rating).toBe(5);
+			expect(found.metadata.views).toBe(150);
+			expect(found.genre).toBe("sci-fi");
+		});
 	});
 });
