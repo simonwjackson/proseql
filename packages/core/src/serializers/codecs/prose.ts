@@ -582,10 +582,82 @@ const deserializeFieldValue = (fieldValue: string): unknown => {
 const OVERFLOW_INDENT = "  ";
 
 /**
+ * Deeper indentation for continuation lines (multi-line values).
+ */
+const CONTINUATION_INDENT = "    ";
+
+/**
+ * Checks if any field value in a record contains newlines for the given fields.
+ *
+ * @param record - The record to check
+ * @param fields - The field names to check
+ * @returns The first field name with a multi-line value, or null if none
+ */
+const findMultiLineField = (
+	record: Record<string, unknown>,
+	fields: ReadonlyArray<string>
+): string | null => {
+	for (const fieldName of fields) {
+		const value = record[fieldName];
+		if (typeof value === "string" && value.includes("\n")) {
+			return fieldName;
+		}
+	}
+	return null;
+};
+
+/**
+ * Encodes a record with multi-line field handling.
+ * If the field value contains newlines, the first line goes on the template line
+ * and subsequent lines become continuation lines with deeper indentation.
+ *
+ * @param record - The record object with field values
+ * @param template - The compiled template
+ * @param multiLineField - The field name that contains multi-line content
+ * @returns Array of line strings: first line is the overflow line, rest are continuation lines
+ */
+const encodeMultiLineOverflow = (
+	record: Record<string, unknown>,
+	template: CompiledTemplate,
+	multiLineField: string
+): string[] => {
+	const value = record[multiLineField];
+	if (typeof value !== "string") {
+		// Should not happen, but handle gracefully
+		return [OVERFLOW_INDENT + encodeHeadline(record, template)];
+	}
+
+	const valueLines = value.split("\n");
+	const firstLineValue = valueLines[0];
+
+	// Create a modified record with only the first line of the multi-line value
+	const modifiedRecord = {
+		...record,
+		[multiLineField]: firstLineValue,
+	};
+
+	const lines: string[] = [];
+
+	// First line: the overflow template with first line of value
+	lines.push(OVERFLOW_INDENT + encodeHeadline(modifiedRecord, template));
+
+	// Continuation lines: deeper indented
+	for (let i = 1; i < valueLines.length; i++) {
+		lines.push(CONTINUATION_INDENT + valueLines[i]);
+	}
+
+	return lines;
+};
+
+/**
  * Encodes overflow fields for a record as indented lines.
  * For each overflow template, if the record has a non-null/non-undefined value
  * for the field in that template, emits an indented line using the template.
  * Overflow fields with null or undefined values are omitted.
+ *
+ * For multi-line string values (containing newlines), the first line is encoded
+ * on the template line, and subsequent lines are emitted as continuation lines
+ * with deeper indentation.
  *
  * @param record - The record object with field values
  * @param overflowTemplates - Array of compiled overflow templates
@@ -598,6 +670,11 @@ const OVERFLOW_INDENT = "  ";
  * encodeOverflowLines(record, templates)
  * // → ['  tagged [classic]']
  * // Note: description is null, so its overflow line is omitted
+ *
+ * // Multi-line value:
+ * const record2 = { id: "1", description: "Line one\nLine two" }
+ * encodeOverflowLines(record2, compileOverflowTemplates(['~ {description}']))
+ * // → ['  ~ Line one', '    Line two']
  * ```
  */
 export const encodeOverflowLines = (
@@ -615,9 +692,22 @@ export const encodeOverflowLines = (
 		});
 
 		if (hasNonNullValue) {
-			// Encode the overflow line using the template
-			const overflowLine = encodeHeadline(record, template);
-			lines.push(OVERFLOW_INDENT + overflowLine);
+			// Check for multi-line field values
+			const multiLineField = findMultiLineField(record, template.fields);
+
+			if (multiLineField !== null) {
+				// Handle multi-line value with continuation lines
+				const overflowLines = encodeMultiLineOverflow(
+					record,
+					template,
+					multiLineField
+				);
+				lines.push(...overflowLines);
+			} else {
+				// Single-line value: encode normally
+				const overflowLine = encodeHeadline(record, template);
+				lines.push(OVERFLOW_INDENT + overflowLine);
+			}
 		}
 	}
 
