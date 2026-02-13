@@ -468,13 +468,16 @@ const findNextLiteralText = (
 
 /**
  * Captures a field value from the line, handling quoted values.
- * If the value starts with a quote, scans for the closing quote (respecting escapes).
+ * If the value starts with a quote, scans for the closing quote (respecting `\"` escapes).
  * Otherwise, scans for the next occurrence of the delimiter.
+ *
+ * The endPos returned is the position where the delimiter starts (not after it),
+ * so the calling loop can process the literal segment normally.
  *
  * @param line - The full line being parsed
  * @param startPos - The starting position for capture
  * @param delimiter - The literal delimiter to find
- * @returns The captured value and ending position, or null if delimiter not found
+ * @returns The captured value and position where delimiter starts, or null if not found
  */
 const captureFieldValue = (
 	line: string,
@@ -496,7 +499,7 @@ const captureFieldValue = (
 
 		return {
 			value: quoteResult.value,
-			endPos: quoteResult.endPos + delimiter.length,
+			endPos: quoteResult.endPos, // Position after closing quote, before delimiter
 		};
 	}
 
@@ -508,7 +511,7 @@ const captureFieldValue = (
 
 	return {
 		value: line.slice(startPos, delimiterPos),
-		endPos: delimiterPos + delimiter.length,
+		endPos: delimiterPos, // Position where delimiter starts, not ends
 	};
 };
 
