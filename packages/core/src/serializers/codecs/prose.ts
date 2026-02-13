@@ -375,6 +375,200 @@ const findNextLiteral = (
 	return null;
 };
 
+// ============================================================================
+// Headline Decoder
+// ============================================================================
+
+/**
+ * Decodes a headline string back to a record using a compiled template.
+ * Performs a left-to-right scan matching literals and capturing field text between them.
+ * Returns null if the line doesn't match the template structure.
+ *
+ * @param line - The headline string to decode
+ * @param template - The compiled template with segments and fields
+ * @returns The decoded record object, or null if the line doesn't match
+ *
+ * @example
+ * ```typescript
+ * const template = compileTemplate('#{id} "{title}" by {author}')
+ * decodeHeadline('#1 "Dune" by Frank Herbert', template)
+ * // → { id: "1", title: "Dune", author: "Frank Herbert" }
+ *
+ * decodeHeadline('This does not match', template)
+ * // → null
+ * ```
+ */
+export const decodeHeadline = (
+	line: string,
+	template: CompiledTemplate
+): Record<string, unknown> | null => {
+	const { segments } = template;
+	const result: Record<string, unknown> = {};
+	let pos = 0;
+
+	for (let i = 0; i < segments.length; i++) {
+		const segment = segments[i];
+
+		if (segment.type === "literal") {
+			// Check if the literal matches at the current position
+			if (!line.startsWith(segment.text, pos)) {
+				return null; // No match
+			}
+			pos += segment.text.length;
+		} else {
+			// Field segment - capture text until the next literal (or end of line)
+			const nextLiteralText = findNextLiteralText(segments, i);
+
+			let fieldValue: string;
+
+			if (nextLiteralText === null) {
+				// This is the last field - greedy capture to end of line
+				fieldValue = line.slice(pos);
+				pos = line.length;
+			} else {
+				// Find the next literal delimiter, respecting quoted values
+				const captureResult = captureFieldValue(line, pos, nextLiteralText);
+
+				if (captureResult === null) {
+					return null; // Delimiter not found, no match
+				}
+
+				fieldValue = captureResult.value;
+				pos = captureResult.endPos;
+			}
+
+			// Deserialize the captured field value
+			result[segment.name] = deserializeFieldValue(fieldValue);
+		}
+	}
+
+	// Ensure we consumed the entire line
+	if (pos !== line.length) {
+		return null;
+	}
+
+	return result;
+};
+
+/**
+ * Finds the text of the next literal segment after a given index.
+ * Returns null if there is no subsequent literal.
+ */
+const findNextLiteralText = (
+	segments: ReadonlyArray<ProseSegment>,
+	currentIndex: number
+): string | null => {
+	for (let i = currentIndex + 1; i < segments.length; i++) {
+		if (segments[i].type === "literal") {
+			return (segments[i] as { readonly type: "literal"; readonly text: string }).text;
+		}
+	}
+	return null;
+};
+
+/**
+ * Captures a field value from the line, handling quoted values.
+ * If the value starts with a quote, scans for the closing quote (respecting escapes).
+ * Otherwise, scans for the next occurrence of the delimiter.
+ *
+ * @param line - The full line being parsed
+ * @param startPos - The starting position for capture
+ * @param delimiter - The literal delimiter to find
+ * @returns The captured value and ending position, or null if delimiter not found
+ */
+const captureFieldValue = (
+	line: string,
+	startPos: number,
+	delimiter: string
+): { value: string; endPos: number } | null => {
+	// Check if the field value is quoted
+	if (line[startPos] === '"') {
+		// Quoted value - scan for closing quote respecting escapes
+		const quoteResult = scanQuotedValue(line, startPos);
+		if (quoteResult === null) {
+			return null; // Unclosed quote
+		}
+
+		// After the quoted value, expect the delimiter
+		if (!line.startsWith(delimiter, quoteResult.endPos)) {
+			return null; // Delimiter not found after quoted value
+		}
+
+		return {
+			value: quoteResult.value,
+			endPos: quoteResult.endPos + delimiter.length,
+		};
+	}
+
+	// Unquoted value - find the next occurrence of the delimiter
+	const delimiterPos = line.indexOf(delimiter, startPos);
+	if (delimiterPos === -1) {
+		return null; // Delimiter not found
+	}
+
+	return {
+		value: line.slice(startPos, delimiterPos),
+		endPos: delimiterPos + delimiter.length,
+	};
+};
+
+/**
+ * Scans a quoted value starting at the given position.
+ * Handles escaped quotes (\" inside the quoted string).
+ *
+ * @param line - The line being parsed
+ * @param startPos - The position of the opening quote
+ * @returns The unquoted, unescaped value and the position after the closing quote
+ */
+const scanQuotedValue = (
+	line: string,
+	startPos: number
+): { value: string; endPos: number } | null => {
+	// Skip the opening quote
+	let pos = startPos + 1;
+	let value = "";
+
+	while (pos < line.length) {
+		const char = line[pos];
+
+		if (char === "\\") {
+			// Escape sequence - check the next character
+			if (pos + 1 < line.length) {
+				const nextChar = line[pos + 1];
+				if (nextChar === '"') {
+					// Escaped quote - add the quote to value
+					value += '"';
+					pos += 2;
+					continue;
+				}
+			}
+			// Not an escape sequence, just a backslash
+			value += char;
+			pos++;
+		} else if (char === '"') {
+			// Closing quote found
+			return { value, endPos: pos + 1 };
+		} else {
+			value += char;
+			pos++;
+		}
+	}
+
+	// Unclosed quote
+	return null;
+};
+
+/**
+ * Deserializes a field value captured from a headline.
+ * This is the same as deserializeValue but handles already-unquoted values.
+ *
+ * @param fieldValue - The raw field value string
+ * @returns The deserialized value
+ */
+const deserializeFieldValue = (fieldValue: string): unknown => {
+	return deserializeValue(fieldValue);
+};
+
 /**
  * Parses array element string into an array of deserialized values.
  * Handles quoted elements that may contain commas or brackets.
