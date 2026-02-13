@@ -5,6 +5,7 @@
 			"packages/*/src/**/*.ts",
 			"packages/*/tests/**/*.ts",
 			"bench/**/*.ts",
+			"scripts/**/*.ts",
 			"!**/dist",
 			"!!node_modules"
 		]

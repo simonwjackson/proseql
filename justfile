@@ -44,3 +44,7 @@ format:
 # Clean
 clean:
     rm -rf packages/*/dist packages/*/.tsbuildinfo
+
+# Release a new version (auto-detects bump type, or pass patch/minor/major)
+release *bump:
+    bun run scripts/release.ts {{bump}}
