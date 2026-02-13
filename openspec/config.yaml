@@ -1,20 +1,22 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
-
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+rules:
+  tasks:
+    - |
+      Optimize for 200k-token AI agents. Each group gets ONE dense task that
+      packs all related work into a single checkbox. The agent has enough context
+      to figure out the details — don't over-decompose.
+    - |
+      Use parallel tracks with dependency annotations in group headers:
+        ## 1. Track A — short description (parallel with Track B)
+        ## 2. Track B — short description (parallel with Track A)
+        ## 3. Track C — short description (blocked by Track A + B)
+        ## 4. Track D — short description (blocked by Track A + B + C)
+      Groups without "blocked by" run concurrently. An orchestrator parses
+      these annotations to spawn parallel agents.
+    - |
+      Track letter maps to group number: Track A = group 1, Track B = group 2, etc.
+      Use "(parallel with Track X)" for groups that can run at the same time.
+      Use "(blocked by Track X + Y)" for groups that depend on prior tracks.
+    - Exactly ONE checkbox per group. Combine all related subtasks into a single dense description.
+    - Always end with a verification track that runs all tests.
