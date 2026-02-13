@@ -114,3 +114,46 @@ export const compileTemplate = (template: string): CompiledTemplate => {
 
 	return { segments, fields };
 };
+
+/**
+ * Compiles an array of overflow template strings into CompiledTemplates.
+ * Each overflow template follows the same {fieldName} placeholder syntax as the headline template.
+ *
+ * @param overflow - Optional array of overflow template strings
+ * @returns An array of CompiledTemplate objects, or empty array if no overflow templates
+ *
+ * @example
+ * ```typescript
+ * const compiled = compileOverflowTemplates(['tagged {tags}', '~ {description}'])
+ * // compiled[0].segments = [
+ * //   { type: "literal", text: "tagged " },
+ * //   { type: "field", name: "tags" },
+ * // ]
+ * // compiled[0].fields = ["tags"]
+ * // compiled[1].segments = [
+ * //   { type: "literal", text: "~ " },
+ * //   { type: "field", name: "description" },
+ * // ]
+ * // compiled[1].fields = ["description"]
+ * ```
+ */
+export const compileOverflowTemplates = (
+	overflow: ReadonlyArray<string> | undefined
+): ReadonlyArray<CompiledTemplate> => {
+	if (!overflow || overflow.length === 0) {
+		return [];
+	}
+
+	return overflow.map((template, index) => {
+		try {
+			return compileTemplate(template);
+		} catch (error) {
+			if (error instanceof Error) {
+				throw new Error(
+					`Error in overflow template at index ${index}: ${error.message}`
+				);
+			}
+			throw error;
+		}
+	});
+};

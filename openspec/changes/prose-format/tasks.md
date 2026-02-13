@@ -3,7 +3,7 @@
 - [x] 1.1 Create `packages/core/src/serializers/codecs/prose.ts` with types: `ProseSegment` (field | literal), `CompiledTemplate`, `ProseCodecOptions`
 - [x] 1.2 Implement `compileTemplate(template: string): CompiledTemplate` — parse `{fieldName}` placeholders and literal text into an ordered segment list
 - [x] 1.3 Validate template at compile time: reject adjacent fields with no literal separator, reject empty field names, reject unclosed `{`
-- [ ] 1.4 Implement overflow template compilation — compile each overflow template string into its own `CompiledTemplate`
+- [x] 1.4 Implement overflow template compilation — compile each overflow template string into its own `CompiledTemplate`
 - [ ] 1.5 Write tests for template compilation: simple template, leading literal, trailing literal, adjacent fields error, unclosed brace error
 
 ## 2. Value Serialization
