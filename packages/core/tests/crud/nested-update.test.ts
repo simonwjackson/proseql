@@ -175,5 +175,29 @@ describe("Nested Schema Update Operations", () => {
 			expect(found.metadata.views).toBe(150);
 			expect(found.genre).toBe("sci-fi");
 		});
+
+		it("should apply $append operator on nested string field (task 4.7)", async () => {
+			// Initial metadata.description is "A desert planet story"
+			const result = await db.books.update("book1", {
+				metadata: { description: { $append: " (Updated)" } },
+			}).runPromise;
+
+			expect(result.metadata.description).toBe(
+				"A desert planet story (Updated)",
+			);
+			// Other nested fields should be preserved
+			expect(result.metadata.views).toBe(150);
+			expect(result.metadata.rating).toBe(5);
+			expect(result.metadata.tags).toEqual(["classic", "epic"]);
+			expect(result.metadata.featured).toBe(true);
+
+			// Verify in database
+			const found = await db.books.findById("book1").runPromise;
+			expect(found.metadata.description).toBe(
+				"A desert planet story (Updated)",
+			);
+			expect(found.metadata.views).toBe(150);
+			expect(found.metadata.rating).toBe(5);
+		});
 	});
 });

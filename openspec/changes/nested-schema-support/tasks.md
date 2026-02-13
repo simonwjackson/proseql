@@ -36,7 +36,7 @@
 - [x] 4.4 Test nested operator: `update(id, { metadata: { views: { $increment: 1 } } })` increments only `metadata.views`.
 - [x] 4.5 Test nested `$set` replaces: `update(id, { metadata: { $set: { views: 0 } } })` replaces entire metadata.
 - [x] 4.6 Test mixed nested + flat update: `update(id, { title: "New Title", metadata: { rating: 5 } })`.
-- [ ] 4.7 Test nested string operator: `update(id, { metadata: { description: { $append: " (Updated)" } } })`.
+- [x] 4.7 Test nested string operator: `update(id, { metadata: { description: { $append: " (Updated)" } } })`.
 - [ ] 4.8 Test nested array operator: `update(id, { metadata: { tags: { $append: "classic" } } })`.
 - [ ] 4.9 Test nested boolean operator: `update(id, { metadata: { featured: { $toggle: true } } })`.
 - [ ] 4.10 Test deep merge on non-existent nested key: `update(id, { metadata: { newField: 42 } })` adds the field to metadata.
