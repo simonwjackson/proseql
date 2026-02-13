@@ -29,6 +29,44 @@ import type { SearchConfig } from "./search-types.js";
 // Generic record type for objects with string keys
 export type UnknownRecord = Record<string, unknown>;
 
+// ============================================================================
+// Nested Object Type Helpers
+// ============================================================================
+
+/**
+ * Primitive types that should not be treated as "nestable" objects for WhereClause
+ */
+type Primitive = string | number | boolean | bigint | symbol | undefined | null;
+
+/**
+ * Field filter that supports nested object shape-mirroring.
+ * When T is an object type (not primitive, array, Date, etc.), this allows either:
+ * - Direct value T (exact match)
+ * - Standard filter operators (FilterOperators<T>)
+ * - Nested object with filters on T's own fields (shape-mirroring)
+ *
+ * The nested form is limited to 2 levels to avoid infinite recursion.
+ */
+type FieldFilter<T> = T extends Primitive
+	? T | FilterOperators<T>
+	: T extends readonly unknown[]
+		? T | FilterOperators<T>
+		: T extends Date
+			? T | FilterOperators<T>
+			: T extends (...args: unknown[]) => unknown
+				? T | FilterOperators<T>
+				: T extends object
+					? T | FilterOperators<T> | NestedFieldFilter<T>
+					: T | FilterOperators<T>;
+
+/**
+ * Nested field filter for second level (no further recursion).
+ * Allows specifying filters on the nested object's fields.
+ */
+type NestedFieldFilter<T> = {
+	[K in keyof T]?: T[K] | FilterOperators<T[K]>;
+};
+
 // Filter operators
 export type FilterOperators<T> = T extends string
 	? {
@@ -136,8 +174,9 @@ type ExtractNestedPaths<T> = {
 
 // Create a where clause type for an entity with its relationships
 // Supports field filters, relationship filters, nested field paths, and conditional logic ($or, $and, $not)
+// When T[K] is an object type, also allows nested shape-mirroring (NestedFieldFilter)
 export type WhereClause<T, Relations, DB> = {
-	[K in keyof T]?: T[K] | FilterOperators<T[K]>;
+	[K in keyof T]?: FieldFilter<T[K]>;
 } & {
 	[K in keyof Relations]?: Relations[K] extends RelationshipDef<
 		infer _,
