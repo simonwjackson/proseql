@@ -1,0 +1,16 @@
+pre-commit:
+  parallel: true
+  commands:
+    format:
+      glob: "**/*.ts"
+      run: biome format --write {staged_files} && git add {staged_files}
+    lint:
+      glob: "**/*.ts"
+      run: biome check {staged_files}
+
+pre-push:
+  commands:
+    typecheck:
+      run: bunx tsc --build
+    test:
+      run: bun test packages/*/tests/

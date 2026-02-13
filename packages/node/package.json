@@ -22,6 +22,10 @@
     "README.md"
   ],
   "license": "MIT",
+  "author": "Simon W. Jackson",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/simonwjackson/proseql.git",

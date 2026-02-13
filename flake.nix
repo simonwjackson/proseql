@@ -59,10 +59,13 @@
               pkgs.just
               bun2nixPkgs.default
               pkgs.git
+              pkgs.lefthook
             ];
 
             shellHook = ''
               echo "proseql development environment"
+              git config --local core.hooksPath .git/hooks
+              lefthook install --force
             '';
 
             NODE_ENV = "development";
