@@ -289,8 +289,21 @@ export const deserializeValue = (text: string): unknown => {
 // ============================================================================
 
 /**
+ * Quotes a value for embedding in a headline.
+ * Wraps the value in double quotes and escapes any inner double quotes.
+ *
+ * @param value - The serialized value to quote
+ * @returns The quoted value with escaped inner quotes
+ */
+const quoteValue = (value: string): string => {
+	return `"${value.replace(/"/g, '\\"')}"`;
+};
+
+/**
  * Encodes a record into a headline string using a compiled template.
  * Substitutes field values into the template, emitting literals verbatim.
+ * For non-last fields, if the serialized value contains the next literal
+ * delimiter, the value is quoted to prevent parsing ambiguity.
  *
  * @param record - The record object with field values
  * @param template - The compiled template with segments and fields
@@ -302,6 +315,11 @@ export const deserializeValue = (text: string): unknown => {
  * const record = { id: "1", title: "Dune", author: "Frank Herbert" }
  * encodeHeadline(record, template)
  * // → '#1 "Dune" by Frank Herbert'
+ *
+ * // When value contains the next delimiter:
+ * const record2 = { id: "1", title: 'Say "hello"', author: "Test" }
+ * encodeHeadline(record2, template)
+ * // → '#1 "Say \"hello\"" by Test'
  * ```
  */
 export const encodeHeadline = (
@@ -309,18 +327,52 @@ export const encodeHeadline = (
 	template: CompiledTemplate
 ): string => {
 	let result = "";
+	const { segments } = template;
 
-	for (const segment of template.segments) {
+	for (let i = 0; i < segments.length; i++) {
+		const segment = segments[i];
+
 		if (segment.type === "literal") {
 			result += segment.text;
 		} else {
 			// Field segment - serialize the value
 			const value = record[segment.name];
-			result += serializeValue(value);
+			const serialized = serializeValue(value);
+
+			// Find the next literal after this field (if any)
+			const nextLiteral = findNextLiteral(segments, i);
+
+			// If this is not the last field (has a subsequent literal delimiter)
+			// and the serialized value contains that delimiter, quote it
+			if (nextLiteral !== null && serialized.includes(nextLiteral)) {
+				result += quoteValue(serialized);
+			} else {
+				result += serialized;
+			}
 		}
 	}
 
 	return result;
+};
+
+/**
+ * Finds the next literal text after a given segment index.
+ * Returns null if there is no subsequent literal (meaning this is the last field).
+ *
+ * @param segments - The template segments
+ * @param currentIndex - The current segment index
+ * @returns The next literal text, or null if none exists
+ */
+const findNextLiteral = (
+	segments: ReadonlyArray<ProseSegment>,
+	currentIndex: number
+): string | null => {
+	for (let i = currentIndex + 1; i < segments.length; i++) {
+		if (segments[i].type === "literal") {
+			return (segments[i] as { readonly type: "literal"; readonly text: string }).text;
+		}
+	}
+	return null;
 };
 
 /**
