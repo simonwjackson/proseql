@@ -199,5 +199,25 @@ describe("Nested Schema Update Operations", () => {
 			expect(found.metadata.views).toBe(150);
 			expect(found.metadata.rating).toBe(5);
 		});
+
+		it("should apply $append operator on nested array field (task 4.8)", async () => {
+			// Initial metadata.tags is ["classic", "epic"]
+			const result = await db.books.update("book1", {
+				metadata: { tags: { $append: "classic" } },
+			}).runPromise;
+
+			expect(result.metadata.tags).toEqual(["classic", "epic", "classic"]);
+			// Other nested fields should be preserved
+			expect(result.metadata.views).toBe(150);
+			expect(result.metadata.rating).toBe(5);
+			expect(result.metadata.description).toBe("A desert planet story");
+			expect(result.metadata.featured).toBe(true);
+
+			// Verify in database
+			const found = await db.books.findById("book1").runPromise;
+			expect(found.metadata.tags).toEqual(["classic", "epic", "classic"]);
+			expect(found.metadata.views).toBe(150);
+			expect(found.metadata.rating).toBe(5);
+		});
 	});
 });
