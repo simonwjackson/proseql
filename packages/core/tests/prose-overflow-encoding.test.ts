@@ -72,10 +72,7 @@ describe("encodeOverflowLines", () => {
 
 			const lines = encodeOverflowLines(record, templates);
 
-			expect(lines).toEqual([
-				"  tagged [sci-fi]",
-				"  ~ Epic space opera",
-			]);
+			expect(lines).toEqual(["  tagged [sci-fi]", "  ~ Epic space opera"]);
 		});
 
 		it("encodes three overflow fields", () => {
@@ -209,10 +206,7 @@ describe("encodeOverflowLines", () => {
 
 			const lines = encodeOverflowLines(record, templates);
 
-			expect(lines).toEqual([
-				"  tagged [sci-fi]",
-				"  notes: Must read",
-			]);
+			expect(lines).toEqual(["  tagged [sci-fi]", "  notes: Must read"]);
 		});
 	});
 
@@ -227,10 +221,7 @@ describe("encodeOverflowLines", () => {
 
 			const lines = encodeOverflowLines(record, templates);
 
-			expect(lines).toEqual([
-				"  ~ Line one",
-				"    Line two",
-			]);
+			expect(lines).toEqual(["  ~ Line one", "    Line two"]);
 		});
 
 		it("encodes multi-line value with three lines", () => {
@@ -260,11 +251,7 @@ describe("encodeOverflowLines", () => {
 
 			const lines = encodeOverflowLines(record, templates);
 
-			expect(lines).toEqual([
-				"  ~ Line one",
-				"    ",
-				"    Line three",
-			]);
+			expect(lines).toEqual(["  ~ Line one", "    ", "    Line three"]);
 		});
 
 		it("handles multi-line with trailing newline", () => {
@@ -277,11 +264,7 @@ describe("encodeOverflowLines", () => {
 
 			const lines = encodeOverflowLines(record, templates);
 
-			expect(lines).toEqual([
-				"  ~ Line one",
-				"    Line two",
-				"    ",
-			]);
+			expect(lines).toEqual(["  ~ Line one", "    Line two", "    "]);
 		});
 
 		it("handles single-line value (no continuation)", () => {

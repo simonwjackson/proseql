@@ -76,11 +76,7 @@ describe("decodeOverflowLines", () => {
 				"active: {active}",
 				"label: {label}",
 			]);
-			const lines = [
-				"  count: 42",
-				"  active: false",
-				"  label: test-item",
-			];
+			const lines = ["  count: 42", "  active: false", "  label: test-item"];
 
 			const result = decodeOverflowLines(lines, templates);
 
@@ -259,7 +255,9 @@ describe("decodeOverflowLines", () => {
 
 			const result = decodeOverflowLines(lines, templates);
 
-			expect(result.fields).toEqual({ description: "First record description" });
+			expect(result.fields).toEqual({
+				description: "First record description",
+			});
 			expect(result.linesConsumed).toBe(1);
 		});
 	});
@@ -369,7 +367,7 @@ describe("decodeOverflowLines", () => {
 			// but it's indented deeper (4 spaces vs 2), so it's a continuation
 			const lines = [
 				"  ~ First line",
-				"    tagged something",  // This should be continuation, not a new template match
+				"    tagged something", // This should be continuation, not a new template match
 			];
 
 			const result = decodeOverflowLines(lines, templates);
@@ -406,7 +404,7 @@ describe("decodeOverflowLines", () => {
 			// not be treated as continuation
 			const lines = [
 				"  ~ Description text",
-				"  notes: This is a note",  // Same indent as first line = new template
+				"  notes: This is a note", // Same indent as first line = new template
 			];
 
 			const result = decodeOverflowLines(lines, templates);
@@ -423,15 +421,16 @@ describe("decodeOverflowLines", () => {
 			// A code block containing what looks like overflow templates
 			const lines = [
 				"  ~ Here is some code:",
-				"    tagged {tags}",  // Looks like a template but is continuation
-				"    ~ {other}",      // Looks like a template but is continuation
+				"    tagged {tags}", // Looks like a template but is continuation
+				"    ~ {other}", // Looks like a template but is continuation
 				"    notes: {notes}", // Looks like a template but is continuation
 			];
 
 			const result = decodeOverflowLines(lines, templates);
 
 			expect(result.fields).toEqual({
-				description: "Here is some code:\ntagged {tags}\n~ {other}\nnotes: {notes}",
+				description:
+					"Here is some code:\ntagged {tags}\n~ {other}\nnotes: {notes}",
 			});
 			expect(result.linesConsumed).toBe(4);
 		});
@@ -452,7 +451,8 @@ describe("decodeOverflowLines", () => {
 
 			expect(result.fields).toEqual({
 				tags: ["sci-fi"],
-				description: "First line\ntagged [this is NOT a tag match, it's continuation text]\nmore continuation",
+				description:
+					"First line\ntagged [this is NOT a tag match, it's continuation text]\nmore continuation",
 			});
 			expect(result.linesConsumed).toBe(4);
 		});
@@ -472,8 +472,8 @@ describe("decodeOverflowLines", () => {
 		it("continuation with custom base indent", () => {
 			const templates = compileOverflowTemplates(["~ {description}"]);
 			const lines = [
-				"    ~ First line",   // 4 spaces (base)
-				"      Second line",  // 6 spaces (continuation)
+				"    ~ First line", // 4 spaces (base)
+				"      Second line", // 6 spaces (continuation)
 			];
 
 			const result = decodeOverflowLines(lines, templates, 4);
@@ -487,8 +487,8 @@ describe("decodeOverflowLines", () => {
 		it("stops when line has less than custom base indent", () => {
 			const templates = compileOverflowTemplates(["~ {description}"]);
 			const lines = [
-				"    ~ First line",  // 4 spaces (base)
-				"  ~ Second line",   // 2 spaces (less than base, stops)
+				"    ~ First line", // 4 spaces (base)
+				"  ~ Second line", // 2 spaces (less than base, stops)
 			];
 
 			const result = decodeOverflowLines(lines, templates, 4);

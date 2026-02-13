@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-	serializeValue,
 	deserializeValue,
+	serializeValue,
 } from "../src/serializers/codecs/prose.js";
 
 /**
@@ -79,7 +79,12 @@ describe("serializeValue", () => {
 		it("handles nested arrays (inner arrays become quoted strings)", () => {
 			// Nested arrays are serialized recursively - inner arrays become "[1, 2]" strings
 			// which contain brackets, so they get quoted
-			expect(serializeValue([[1, 2], [3, 4]])).toBe('["[1, 2]", "[3, 4]"]');
+			expect(
+				serializeValue([
+					[1, 2],
+					[3, 4],
+				]),
+			).toBe('["[1, 2]", "[3, 4]"]');
 		});
 	});
 });
@@ -123,7 +128,10 @@ describe("deserializeValue", () => {
 
 		it("deserializes simple arrays", () => {
 			expect(deserializeValue("[a, b, c]")).toEqual(["a", "b", "c"]);
-			expect(deserializeValue("[sci-fi, classic]")).toEqual(["sci-fi", "classic"]);
+			expect(deserializeValue("[sci-fi, classic]")).toEqual([
+				"sci-fi",
+				"classic",
+			]);
 		});
 
 		it("deserializes array with single element", () => {
@@ -131,7 +139,10 @@ describe("deserializeValue", () => {
 		});
 
 		it("deserializes quoted elements containing commas", () => {
-			expect(deserializeValue('["one, two", three]')).toEqual(["one, two", "three"]);
+			expect(deserializeValue('["one, two", three]')).toEqual([
+				"one, two",
+				"three",
+			]);
 		});
 
 		it("deserializes quoted elements containing brackets", () => {
@@ -143,7 +154,12 @@ describe("deserializeValue", () => {
 		});
 
 		it("deserializes mixed type arrays", () => {
-			expect(deserializeValue("[1, two, true, ~]")).toEqual([1, "two", true, null]);
+			expect(deserializeValue("[1, two, true, ~]")).toEqual([
+				1,
+				"two",
+				true,
+				null,
+			]);
 		});
 
 		it("handles arrays with extra whitespace", () => {
@@ -175,7 +191,9 @@ describe("round-trip value serialization", () => {
 
 		it("round-trips strings", () => {
 			expect(deserializeValue(serializeValue("hello"))).toBe("hello");
-			expect(deserializeValue(serializeValue("hello world"))).toBe("hello world");
+			expect(deserializeValue(serializeValue("hello world"))).toBe(
+				"hello world",
+			);
 		});
 
 		// Note: empty string round-trips, but deserializes to empty string

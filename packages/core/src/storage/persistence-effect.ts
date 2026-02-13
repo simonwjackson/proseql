@@ -131,14 +131,15 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 		const parsed = yield* serializer.deserialize(raw, ext);
 
 		// The on-disk format depends on the file extension:
-		// - JSONL/NDJSON: array of entity objects (one entity per line)
+		// - JSONL/NDJSON/Prose: array of entity objects
 		// - All other formats: Record<string, object> keyed by entity ID
-		const isJsonl = ext === "jsonl" || ext === "ndjson";
+		const isArrayFormat =
+			ext === "jsonl" || ext === "ndjson" || ext === "prose";
 		const entityMap: Record<string, unknown> = {};
 		let fileVersion = 0;
 
-		if (isJsonl && Array.isArray(parsed)) {
-			// JSONL format: array of entity objects → convert to Record keyed by id
+		if (isArrayFormat && Array.isArray(parsed)) {
+			// Array format (JSONL/Prose): array of entity objects → convert to Record keyed by id
 			for (const item of parsed) {
 				if (isRecord(item) && typeof item.id === "string") {
 					entityMap[item.id] = item;
@@ -302,10 +303,11 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 
 		// Encode each entity through the schema
 		const encode = Schema.encode(schema);
-		const isJsonl = ext === "jsonl" || ext === "ndjson";
+		const isArrayFormat =
+			ext === "jsonl" || ext === "ndjson" || ext === "prose";
 
-		if (isJsonl) {
-			// JSONL format: encode as array of entities (one JSON line per entity)
+		if (isArrayFormat) {
+			// Array format (JSONL/Prose): encode as array of entities
 			const entities: Array<I> = [];
 			for (const [id, entity] of data) {
 				const encoded = yield* encode(entity).pipe(

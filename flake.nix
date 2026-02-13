@@ -59,6 +59,7 @@
               pkgs.just
               bun2nixPkgs.default
               pkgs.git
+              pkgs.gh
               pkgs.lefthook
             ];
 

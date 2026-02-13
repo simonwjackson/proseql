@@ -148,16 +148,10 @@ export type ExtractDBMapping<DB> = {
 }[keyof DB];
 
 // Automatically find relations for any entity type by collection name
-export type FindRelationsByCollection<
-	DB,
-	CollectionName extends keyof DB,
-> = DB[CollectionName] extends SmartCollection<
-	infer _Entity,
-	infer Relations,
-	DB
->
-	? Relations
-	: Record<string, never>;
+export type FindRelationsByCollection<DB, CollectionName extends keyof DB> =
+	DB[CollectionName] extends SmartCollection<infer _Entity, infer Relations, DB>
+		? Relations
+		: Record<string, never>;
 
 // Keep the old one for backward compatibility but simplified
 export type FindRelationsForEntity<_DB, _T> = Record<string, never>; // Simplified for now
@@ -358,15 +352,16 @@ export type ApplySelectConfig<
 	Config,
 	Relations = Record<string, never>,
 	DB = Record<string, never>,
-> = Config extends ReadonlyArray<keyof T>
-	? ApplyArraySelectConfig<T, Config>
-	: Config extends Record<string, unknown>
-		? Relations extends Record<string, unknown>
-			? DB extends Record<string, unknown>
-				? ApplyObjectSelectWithPopulation<T, Config, Relations, DB>
+> =
+	Config extends ReadonlyArray<keyof T>
+		? ApplyArraySelectConfig<T, Config>
+		: Config extends Record<string, unknown>
+			? Relations extends Record<string, unknown>
+				? DB extends Record<string, unknown>
+					? ApplyObjectSelectWithPopulation<T, Config, Relations, DB>
+					: ApplyObjectSelectConfig<T, Config>
 				: ApplyObjectSelectConfig<T, Config>
-			: ApplyObjectSelectConfig<T, Config>
-		: T;
+			: T;
 
 // Helper types for separating ref and inverse relationships
 type RefRelationKeys<Relations> = {
@@ -631,16 +626,10 @@ export type PopulateConfig<
 		};
 
 // Helper to get entity type from collection
-export type GetEntityFromCollection<
-	DB,
-	CollectionName extends keyof DB,
-> = DB[CollectionName] extends SmartCollection<
-	infer Entity,
-	infer _Relations,
-	DB
->
-	? Entity
-	: never;
+export type GetEntityFromCollection<DB, CollectionName extends keyof DB> =
+	DB[CollectionName] extends SmartCollection<infer Entity, infer _Relations, DB>
+		? Entity
+		: never;
 
 // Apply populate configuration to transform entity type
 export type ApplyPopulateObject<T, Relations, Config, DB> = T & {
@@ -683,49 +672,44 @@ export type ApplyPopulateObject<T, Relations, Config, DB> = T & {
 export type SortOrder = "asc" | "desc";
 
 // Helper to extract valid sort paths based on populated relationships
-type ExtractSortPaths<
-	T,
-	Relations,
-	Config,
-	DB,
-	Prefix extends string = "",
-> = // Direct fields of the entity
-| (Prefix extends "" ? keyof T : never)
-// Relationship paths based on what's populated
-| (Config extends { populate: infer P }
-		? P extends PopulateConfig<Relations, DB>
-			? {
-					[K in keyof P & keyof Relations]: P[K] extends true
-						? GetTargetCollection<Relations, K> extends keyof DB
-							? Relations[K] extends RelationshipDef<infer _, "ref">
-								? `${K & string}.${keyof GetEntityFromCollection<DB, GetTargetCollection<Relations, K>> & string}`
-								: never
-							: never
-						: P[K] extends PopulateConfig<infer _, DB>
+type ExtractSortPaths<T, Relations, Config, DB, Prefix extends string = ""> =
+	// Direct fields of the entity
+	| (Prefix extends "" ? keyof T : never)
+	// Relationship paths based on what's populated
+	| (Config extends { populate: infer P }
+			? P extends PopulateConfig<Relations, DB>
+				? {
+						[K in keyof P & keyof Relations]: P[K] extends true
 							? GetTargetCollection<Relations, K> extends keyof DB
 								? Relations[K] extends RelationshipDef<infer _, "ref">
-									?
-											| `${K & string}.${keyof GetEntityFromCollection<DB, GetTargetCollection<Relations, K>> & string}`
-											| `${K & string}.${ExtractSortPaths<
-													GetEntityFromCollection<
-														DB,
-														GetTargetCollection<Relations, K>
-													>,
-													FindRelationsByCollection<
-														DB,
-														GetTargetCollection<Relations, K>
-													>,
-													{ populate: P[K] },
-													DB,
-													`${K & string}.`
-											  > &
-													string}`
+									? `${K & string}.${keyof GetEntityFromCollection<DB, GetTargetCollection<Relations, K>> & string}`
 									: never
 								: never
-							: never;
-				}[keyof P & keyof Relations]
-			: never
-		: never);
+							: P[K] extends PopulateConfig<infer _, DB>
+								? GetTargetCollection<Relations, K> extends keyof DB
+									? Relations[K] extends RelationshipDef<infer _, "ref">
+										?
+												| `${K & string}.${keyof GetEntityFromCollection<DB, GetTargetCollection<Relations, K>> & string}`
+												| `${K & string}.${ExtractSortPaths<
+														GetEntityFromCollection<
+															DB,
+															GetTargetCollection<Relations, K>
+														>,
+														FindRelationsByCollection<
+															DB,
+															GetTargetCollection<Relations, K>
+														>,
+														{ populate: P[K] },
+														DB,
+														`${K & string}.`
+												  > &
+														string}`
+										: never
+									: never
+								: never;
+					}[keyof P & keyof Relations]
+				: never
+			: never);
 
 // Sort configuration type with support for nested object paths
 export type SortConfig<T, Relations, Config, DB> = Partial<
@@ -955,16 +939,14 @@ export type GenerateDatabaseWithPersistence<Config> =
 	};
 
 // Type-safe populate helper for better IntelliSense
-export type TypedPopulate<
-	DB,
-	Collection extends keyof DB,
-> = DB[Collection] extends SmartCollection<
-	infer _T,
-	infer Relations,
-	infer DBType
->
-	? PopulateConfig<Relations, DBType>
-	: never;
+export type TypedPopulate<DB, Collection extends keyof DB> =
+	DB[Collection] extends SmartCollection<
+		infer _T,
+		infer Relations,
+		infer DBType
+	>
+		? PopulateConfig<Relations, DBType>
+		: never;
 
 // Type for the dataset that matches the config
 export type DatasetFor<Config> = {

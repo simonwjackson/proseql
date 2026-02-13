@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-	compileTemplate,
-	compileOverflowTemplates,
 	type CompiledTemplate,
+	compileOverflowTemplates,
+	compileTemplate,
 	type ProseSegment,
 } from "../src/serializers/codecs/prose.js";
 
@@ -136,9 +136,7 @@ describe("compileTemplate", () => {
 		});
 
 		it("throws error for multiple unclosed braces", () => {
-			expect(() => compileTemplate("{first {second")).toThrow(
-				/Unclosed brace/,
-			);
+			expect(() => compileTemplate("{first {second")).toThrow(/Unclosed brace/);
 		});
 
 		it("includes position in error message", () => {

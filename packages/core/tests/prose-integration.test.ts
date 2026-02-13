@@ -155,8 +155,20 @@ describe("proseCodec integration with makeSerializerLayer", () => {
 			const ProseLayer = makeSerializerLayer([codec]);
 
 			const originalRecords = [
-				{ id: 1, title: "Dune", author: "Frank Herbert", year: 1965, tags: ["sci-fi"] },
-				{ id: 2, title: "Neuromancer", author: "William Gibson", year: 1984, tags: ["cyberpunk"] },
+				{
+					id: 1,
+					title: "Dune",
+					author: "Frank Herbert",
+					year: 1965,
+					tags: ["sci-fi"],
+				},
+				{
+					id: 2,
+					title: "Neuromancer",
+					author: "William Gibson",
+					year: 1984,
+					tags: ["cyberpunk"],
+				},
 			];
 
 			await Effect.runPromise(
@@ -412,9 +424,18 @@ describe("proseCodec alongside other codecs", () => {
 						const registry = yield* SerializerRegistry;
 
 						// Deserialize each format
-						const proseRecords = yield* registry.deserialize(proseContent, "prose");
-						const jsonRecords = yield* registry.deserialize(jsonContent, "json");
-						const yamlRecords = yield* registry.deserialize(yamlContent, "yaml");
+						const proseRecords = yield* registry.deserialize(
+							proseContent,
+							"prose",
+						);
+						const jsonRecords = yield* registry.deserialize(
+							jsonContent,
+							"json",
+						);
+						const yamlRecords = yield* registry.deserialize(
+							yamlContent,
+							"yaml",
+						);
 
 						// All should produce equivalent records
 						const expected = [
@@ -449,7 +470,10 @@ describe("proseCodec alongside other codecs", () => {
 						const registry = yield* SerializerRegistry;
 
 						// Serialize to prose, deserialize, serialize to JSON, deserialize
-						const proseOutput = yield* registry.serialize(originalRecords, "prose");
+						const proseOutput = yield* registry.serialize(
+							originalRecords,
+							"prose",
+						);
 						const fromProse = yield* registry.deserialize(proseOutput, "prose");
 						const jsonOutput = yield* registry.serialize(fromProse, "json");
 						const fromJson = yield* registry.deserialize(jsonOutput, "json");
@@ -458,10 +482,22 @@ describe("proseCodec alongside other codecs", () => {
 						expect(fromJson).toEqual(originalRecords);
 
 						// And the reverse: JSON → prose → JSON
-						const jsonFirst = yield* registry.serialize(originalRecords, "json");
-						const fromJsonFirst = yield* registry.deserialize(jsonFirst, "json");
-						const proseFromJson = yield* registry.serialize(fromJsonFirst, "prose");
-						const finalRecords = yield* registry.deserialize(proseFromJson, "prose");
+						const jsonFirst = yield* registry.serialize(
+							originalRecords,
+							"json",
+						);
+						const fromJsonFirst = yield* registry.deserialize(
+							jsonFirst,
+							"json",
+						);
+						const proseFromJson = yield* registry.serialize(
+							fromJsonFirst,
+							"prose",
+						);
+						const finalRecords = yield* registry.deserialize(
+							proseFromJson,
+							"prose",
+						);
 
 						expect(finalRecords).toEqual(originalRecords);
 					}),
@@ -485,12 +521,18 @@ describe("proseCodec alongside other codecs", () => {
 						const registry = yield* SerializerRegistry;
 
 						// prose extension should use prose codec
-						const proseResult = yield* registry.serialize([{ id: 1, name: "Test" }], "prose");
+						const proseResult = yield* registry.serialize(
+							[{ id: 1, name: "Test" }],
+							"prose",
+						);
 						expect(proseResult).toContain("@prose");
 						expect(proseResult).toContain("#1 Test");
 
 						// json extension should use json codec
-						const jsonResult = yield* registry.serialize([{ id: 1, name: "Test" }], "json");
+						const jsonResult = yield* registry.serialize(
+							[{ id: 1, name: "Test" }],
+							"json",
+						);
 						expect(jsonResult).toContain('"id": 1');
 						expect(jsonResult).not.toContain("@prose");
 					}),
@@ -587,7 +629,10 @@ describe("proseCodec alongside other codecs", () => {
 						expect(proseError._tag).toBe("SerializationError");
 
 						// JSON decode should still work fine
-						const jsonResult = yield* registry.deserialize('[{"id": 1}]', "json");
+						const jsonResult = yield* registry.deserialize(
+							'[{"id": 1}]',
+							"json",
+						);
 						expect(jsonResult).toEqual([{ id: 1 }]);
 					}),
 					MultiCodecLayer,
@@ -623,7 +668,10 @@ describe("proseCodec alongside other codecs", () => {
 						const proseContent = `@prose #{id} {name}
 
 #1 Test`;
-						const proseResult = yield* registry.deserialize(proseContent, "prose");
+						const proseResult = yield* registry.deserialize(
+							proseContent,
+							"prose",
+						);
 						expect(proseResult).toEqual([{ id: 1, name: "Test" }]);
 					}),
 					MultiCodecLayer,

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { scanDirective, type ScanDirectiveResult } from "../src/serializers/codecs/prose.js";
+import {
+	type ScanDirectiveResult,
+	scanDirective,
+} from "../src/serializers/codecs/prose.js";
 
 /**
  * Tests for prose directive scanner.
@@ -42,11 +45,7 @@ describe("scanDirective", () => {
 		});
 
 		it("finds directive after single preamble line", () => {
-			const lines = [
-				"# Title",
-				'@prose #{id} "{title}"',
-				"#1 Dune",
-			];
+			const lines = ["# Title", '@prose #{id} "{title}"', "#1 Dune"];
 			const result = scanDirective(lines);
 
 			expect(result.preambleEnd).toBe(0);
@@ -54,12 +53,7 @@ describe("scanDirective", () => {
 		});
 
 		it("finds directive after empty preamble lines", () => {
-			const lines = [
-				"",
-				"",
-				"@prose {name}",
-				"Alice",
-			];
+			const lines = ["", "", "@prose {name}", "Alice"];
 			const result = scanDirective(lines);
 
 			expect(result.preambleEnd).toBe(1);
@@ -151,21 +145,13 @@ describe("scanDirective", () => {
 		});
 
 		it("throws error for adjacent directives", () => {
-			const lines = [
-				"@prose {a}",
-				"@prose {b}",
-			];
+			const lines = ["@prose {a}", "@prose {b}"];
 
 			expect(() => scanDirective(lines)).toThrow(/Multiple @prose directives/);
 		});
 
 		it("error message includes line numbers", () => {
-			const lines = [
-				"# Preamble",
-				"@prose {first}",
-				"data",
-				"@prose {second}",
-			];
+			const lines = ["# Preamble", "@prose {first}", "data", "@prose {second}"];
 
 			try {
 				scanDirective(lines);
@@ -180,10 +166,7 @@ describe("scanDirective", () => {
 		});
 
 		it("error message states only one allowed", () => {
-			const lines = [
-				"@prose {a}",
-				"@prose {b}",
-			];
+			const lines = ["@prose {a}", "@prose {b}"];
 
 			try {
 				scanDirective(lines);

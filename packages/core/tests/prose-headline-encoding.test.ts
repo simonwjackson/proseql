@@ -16,7 +16,9 @@ describe("encodeHeadline", () => {
 			const template = compileTemplate('#{id} "{title}" by {author}');
 			const record = { id: "1", title: "Dune", author: "Frank Herbert" };
 
-			expect(encodeHeadline(record, template)).toBe('#1 "Dune" by Frank Herbert');
+			expect(encodeHeadline(record, template)).toBe(
+				'#1 "Dune" by Frank Herbert',
+			);
 		});
 
 		it("encodes a record with number fields", () => {
@@ -37,14 +39,18 @@ describe("encodeHeadline", () => {
 			const template = compileTemplate("{title} tagged {tags}");
 			const record = { title: "Dune", tags: ["sci-fi", "classic"] };
 
-			expect(encodeHeadline(record, template)).toBe("Dune tagged [sci-fi, classic]");
+			expect(encodeHeadline(record, template)).toBe(
+				"Dune tagged [sci-fi, classic]",
+			);
 		});
 
 		it("encodes a record with mixed types", () => {
 			const template = compileTemplate('#{id} "{title}" ({year}) - {genre}');
 			const record = { id: 1, title: "Dune", year: 1965, genre: "sci-fi" };
 
-			expect(encodeHeadline(record, template)).toBe('#1 "Dune" (1965) - sci-fi');
+			expect(encodeHeadline(record, template)).toBe(
+				'#1 "Dune" (1965) - sci-fi',
+			);
 		});
 
 		it("handles template with leading literal only", () => {
@@ -105,7 +111,9 @@ describe("encodeHeadline", () => {
 			// title contains " by " which is the delimiter before author
 			const record = { title: "Written by Me", author: "Author Name" };
 
-			expect(encodeHeadline(record, template)).toBe('"Written by Me" by Author Name');
+			expect(encodeHeadline(record, template)).toBe(
+				'"Written by Me" by Author Name',
+			);
 		});
 
 		it("escapes quotes in quoted value", () => {
@@ -145,7 +153,9 @@ describe("encodeHeadline", () => {
 			const template = compileTemplate("{title} - {desc}");
 			const record = { title: 'Title - with "quotes"', desc: "description" };
 
-			expect(encodeHeadline(record, template)).toBe('"Title - with \\"quotes\\"" - description');
+			expect(encodeHeadline(record, template)).toBe(
+				'"Title - with \\"quotes\\"" - description',
+			);
 		});
 	});
 
@@ -162,15 +172,22 @@ describe("encodeHeadline", () => {
 			const template = compileTemplate("{value}");
 			const record = { value: "anything: including delimiters -> here" };
 
-			expect(encodeHeadline(record, template)).toBe("anything: including delimiters -> here");
+			expect(encodeHeadline(record, template)).toBe(
+				"anything: including delimiters -> here",
+			);
 		});
 
 		it("does not quote last field with quotes in value", () => {
 			const template = compileTemplate("{title}: {description}");
 			// description has quotes but is last field, so no quoting needed
-			const record = { title: "Title", description: 'Say "hello" to the world' };
+			const record = {
+				title: "Title",
+				description: 'Say "hello" to the world',
+			};
 
-			expect(encodeHeadline(record, template)).toBe('Title: Say "hello" to the world');
+			expect(encodeHeadline(record, template)).toBe(
+				'Title: Say "hello" to the world',
+			);
 		});
 
 		it("only quotes non-last fields that need it", () => {
@@ -180,7 +197,9 @@ describe("encodeHeadline", () => {
 			// c contains delimiter but is last, should NOT be quoted
 			const record = { a: "x | y", b: "p | q", c: "m | n" };
 
-			expect(encodeHeadline(record, template)).toBe('"x | y" | "p | q" | m | n');
+			expect(encodeHeadline(record, template)).toBe(
+				'"x | y" | "p | q" | m | n',
+			);
 		});
 	});
 
@@ -194,7 +213,11 @@ describe("encodeHeadline", () => {
 
 		it("handles record with extra fields (ignored)", () => {
 			const template = compileTemplate("{title} by {author}");
-			const record = { title: "Dune", author: "Frank Herbert", extra: "ignored" };
+			const record = {
+				title: "Dune",
+				author: "Frank Herbert",
+				extra: "ignored",
+			};
 
 			expect(encodeHeadline(record, template)).toBe("Dune by Frank Herbert");
 		});
@@ -207,7 +230,7 @@ describe("encodeHeadline", () => {
 		});
 
 		it("handles special characters in literal text", () => {
-			const template = compileTemplate('★ {title} © {year} ™');
+			const template = compileTemplate("★ {title} © {year} ™");
 			const record = { title: "Dune", year: 1965 };
 
 			expect(encodeHeadline(record, template)).toBe("★ Dune © 1965 ™");

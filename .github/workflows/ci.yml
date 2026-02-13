@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
-      - run: nix develop --command bash -c "bun install && bun test"
+      - run: nix develop --command bash -c "bun install && bunx tsc --build && bun test"
 
   typecheck:
     runs-on: ubuntu-latest
