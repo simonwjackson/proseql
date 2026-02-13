@@ -62,6 +62,7 @@ export const compileTemplate = (template: string): CompiledTemplate => {
 
 	let pos = 0;
 	let literalStart = 0;
+	let lastSegmentWasField = false;
 
 	while (pos < template.length) {
 		const char = template[pos];
@@ -70,6 +71,14 @@ export const compileTemplate = (template: string): CompiledTemplate => {
 			// Emit any accumulated literal text before this field
 			if (pos > literalStart) {
 				segments.push({ type: "literal", text: template.slice(literalStart, pos) });
+				lastSegmentWasField = false;
+			}
+
+			// Check for adjacent fields with no literal separator
+			if (lastSegmentWasField) {
+				throw new Error(
+					`Adjacent fields with no literal separator at position ${pos}: fields must be separated by literal text`
+				);
 			}
 
 			// Find the closing brace
@@ -88,6 +97,7 @@ export const compileTemplate = (template: string): CompiledTemplate => {
 
 			segments.push({ type: "field", name: fieldName });
 			fields.push(fieldName);
+			lastSegmentWasField = true;
 
 			// Move past the closing brace
 			pos = closePos + 1;
