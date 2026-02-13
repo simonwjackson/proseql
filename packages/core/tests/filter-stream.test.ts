@@ -453,4 +453,138 @@ describe("applyFilter Stream combinator", () => {
 			expect(result[0].id).toBe("3");
 		});
 	});
+
+	describe("nested filtering (dot-notation)", () => {
+		const nestedData = [
+			{
+				id: "1",
+				title: "Dune",
+				genre: "sci-fi",
+				metadata: { views: 150, rating: 5, tags: ["classic"] },
+				author: { name: "Frank Herbert", country: "USA" },
+			},
+			{
+				id: "2",
+				title: "Neuromancer",
+				genre: "sci-fi",
+				metadata: { views: 80, rating: 4, tags: ["cyberpunk"] },
+				author: { name: "William Gibson", country: "USA" },
+			},
+			{
+				id: "3",
+				title: "Foundation",
+				genre: "sci-fi",
+				metadata: { views: 200, rating: 5, tags: ["epic", "classic"] },
+				author: { name: "Isaac Asimov", country: "Russia" },
+			},
+			{
+				id: "4",
+				title: "1984",
+				genre: "dystopian",
+				metadata: { views: 50, rating: 3, tags: ["political"] },
+				author: { name: "George Orwell", country: "UK" },
+			},
+		];
+
+		it("should filter by dot-notation with $gt and match shape-mirroring results", async () => {
+			const shapeMirroringResult = await collectFiltered(nestedData, {
+				metadata: { views: { $gt: 100 } },
+			});
+			const dotNotationResult = await collectFiltered(nestedData, {
+				"metadata.views": { $gt: 100 },
+			});
+			expect(dotNotationResult).toHaveLength(2);
+			expect(dotNotationResult.map((r) => r.id)).toEqual(["1", "3"]);
+			expect(dotNotationResult).toEqual(shapeMirroringResult);
+		});
+
+		it("should filter by dot-notation with $gte", async () => {
+			const result = await collectFiltered(nestedData, {
+				"metadata.views": { $gte: 150 },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
+
+		it("should filter by dot-notation with $lt", async () => {
+			const result = await collectFiltered(nestedData, {
+				"metadata.views": { $lt: 100 },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["2", "4"]);
+		});
+
+		it("should filter by dot-notation with $lte", async () => {
+			const result = await collectFiltered(nestedData, {
+				"metadata.views": { $lte: 80 },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["2", "4"]);
+		});
+
+		it("should filter by dot-notation with $eq", async () => {
+			const result = await collectFiltered(nestedData, {
+				"metadata.rating": { $eq: 5 },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
+
+		it("should filter by dot-notation with $ne", async () => {
+			const result = await collectFiltered(nestedData, {
+				"metadata.rating": { $ne: 5 },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["2", "4"]);
+		});
+
+		it("should filter by dot-notation with $in", async () => {
+			const result = await collectFiltered(nestedData, {
+				"metadata.rating": { $in: [4, 5] },
+			});
+			expect(result).toHaveLength(3);
+			expect(result.map((r) => r.id)).toEqual(["1", "2", "3"]);
+		});
+
+		it("should filter by dot-notation for author.name", async () => {
+			const result = await collectFiltered(nestedData, {
+				"author.name": { $startsWith: "Frank" },
+			});
+			expect(result).toHaveLength(1);
+			expect(result[0].id).toBe("1");
+		});
+
+		it("should filter by dot-notation with exact value match", async () => {
+			const result = await collectFiltered(nestedData, {
+				"metadata.rating": 5,
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
+
+		it("should combine multiple dot-notation filters", async () => {
+			const result = await collectFiltered(nestedData, {
+				"metadata.views": { $gt: 100 },
+				"metadata.rating": 5,
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
+
+		it("should combine dot-notation with flat field filters", async () => {
+			const result = await collectFiltered(nestedData, {
+				genre: "sci-fi",
+				"metadata.views": { $gt: 100 },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
+
+		it("should return empty when dot-notation path does not exist", async () => {
+			const result = await collectFiltered(nestedData, {
+				"nonexistent.path": { $gt: 100 },
+			});
+			expect(result).toHaveLength(0);
+		});
+	});
 });
