@@ -1154,6 +1154,175 @@ export const parseBody = (
 };
 
 // ============================================================================
+// Prose Codec Factory
+// ============================================================================
+
+/**
+ * Internal compiled state for a prose codec instance.
+ * Created once at construction time and reused for all encode/decode calls.
+ */
+interface CompiledProseCodec {
+	readonly headlineTemplate: CompiledTemplate;
+	readonly overflowTemplates: ReadonlyArray<CompiledTemplate>;
+	readonly rawHeadlineTemplate: string;
+	readonly rawOverflowTemplates: ReadonlyArray<string>;
+}
+
+/**
+ * Compiles prose codec options into internal state.
+ * Called once at codec construction time.
+ *
+ * @param options - The prose codec options
+ * @returns The compiled codec state
+ */
+const compileProseCodecOptions = (options: ProseCodecOptions): CompiledProseCodec => {
+	const headlineTemplate = compileTemplate(options.template);
+	const overflowTemplates = compileOverflowTemplates(options.overflow);
+
+	return {
+		headlineTemplate,
+		overflowTemplates,
+		rawHeadlineTemplate: options.template,
+		rawOverflowTemplates: options.overflow ?? [],
+	};
+};
+
+/**
+ * Creates a prose format codec for human-readable, template-driven serialization.
+ *
+ * The prose format uses a `@prose` directive to define a sentence-like pattern
+ * mapping field names to positions within literal delimiter text. Records follow
+ * this pattern, producing human-readable lines.
+ *
+ * Templates use `{fieldName}` placeholders mixed with literal text:
+ * ```
+ * @prose #{id} "{title}" by {authorId} ({year}) — {genre}
+ *   tagged {tags}
+ *   ~ {description}
+ * ```
+ *
+ * The codec compiles templates at construction time and returns a standard
+ * FormatCodec with encode/decode functions.
+ *
+ * @param options - Codec configuration with headline and overflow templates
+ * @param options.template - The headline template with {fieldName} placeholders
+ * @param options.overflow - Optional array of overflow templates for additional fields
+ * @returns A FormatCodec for prose serialization
+ *
+ * @example
+ * ```typescript
+ * const codec = proseCodec({
+ *   template: '#{id} "{title}" by {author}',
+ *   overflow: ['tagged {tags}', '~ {description}'],
+ * })
+ *
+ * const layer = makeSerializerLayer([codec])
+ *
+ * // Encoded output:
+ * // @prose #{id} "{title}" by {author}
+ * //   tagged {tags}
+ * //   ~ {description}
+ * //
+ * // #1 "Dune" by Frank Herbert
+ * //   tagged [sci-fi, classic]
+ * //   ~ A masterpiece of science fiction
+ * ```
+ */
+export const proseCodec = (options: ProseCodecOptions): FormatCodec => {
+	// Compile templates at construction time
+	const compiled = compileProseCodecOptions(options);
+
+	return {
+		name: "prose",
+		extensions: ["prose"],
+
+		encode: (data: unknown, _formatOptions?: FormatOptions): string => {
+			// Task 8.2 will implement the full encode logic
+			// For now, validate input and return basic structure
+			if (!Array.isArray(data)) {
+				throw new Error(
+					"Prose codec expects an array of records to encode"
+				);
+			}
+
+			const lines: string[] = [];
+
+			// Write the @prose directive
+			lines.push(`@prose ${compiled.rawHeadlineTemplate}`);
+
+			// Write overflow template declarations (indented)
+			for (const overflowTemplate of compiled.rawOverflowTemplates) {
+				lines.push(`  ${overflowTemplate}`);
+			}
+
+			// Blank line to separate directive block from body
+			lines.push("");
+
+			// Encode each record
+			for (const record of data as ReadonlyArray<Record<string, unknown>>) {
+				// Encode headline
+				const headline = encodeHeadline(record, compiled.headlineTemplate);
+				lines.push(headline);
+
+				// Encode overflow lines
+				const overflowLines = encodeOverflowLines(record, compiled.overflowTemplates);
+				lines.push(...overflowLines);
+			}
+
+			return lines.join("\n");
+		},
+
+		decode: (raw: string): unknown => {
+			// Task 8.3 will implement the full decode logic
+			// For now, parse the structure and return records
+			const lines = raw.split("\n");
+
+			// Scan for the directive
+			const scanResult = scanDirective(lines);
+
+			// Parse the directive block
+			const directiveBlock = parseDirectiveBlock(lines, scanResult.directiveStart);
+
+			// Compile the file's headline template for parsing
+			// Note: We use the file's template for decoding, ensuring self-describing files work
+			const fileHeadlineTemplate = compileTemplate(directiveBlock.headlineTemplate);
+			const fileOverflowTemplates = compileOverflowTemplates(directiveBlock.overflowTemplates);
+
+			// Parse the body
+			const bodyResult = parseBody(lines, directiveBlock.bodyStart, fileHeadlineTemplate);
+
+			// Extract records from entries, decoding overflow fields
+			const records: Array<Record<string, unknown>> = [];
+
+			for (const entry of bodyResult.entries) {
+				if (entry.type === "record") {
+					// Start with headline fields
+					const record: Record<string, unknown> = { ...entry.fields };
+
+					// Decode overflow lines to get additional fields
+					if (entry.overflowLines.length > 0) {
+						const overflowResult = decodeOverflowLines(
+							entry.overflowLines,
+							fileOverflowTemplates
+						);
+
+						// Merge overflow fields into the record
+						for (const [fieldName, value] of Object.entries(overflowResult.fields)) {
+							record[fieldName] = value;
+						}
+					}
+
+					records.push(record);
+				}
+				// Pass-through entries are skipped (v1: not preserved through re-encode)
+			}
+
+			return records;
+		},
+	};
+};
+
+// ============================================================================
 // Array Parsing Helpers
 // ============================================================================
 
