@@ -24,7 +24,7 @@
 
 - [x] 4.1 Implement `decodeHeadline(line: string, template: CompiledTemplate): Record<string, unknown> | null` — left-to-right scanner matching literals, capturing field text between them, returning null on non-match
 - [x] 4.2 Implement quoted value detection in scanner — if field text starts with `"`, scan for closing `"` respecting `\"` escapes
-- [ ] 4.3 Implement greedy last field — capture to end of line
+- [x] 4.3 Implement greedy last field — capture to end of line
 - [ ] 4.4 Write tests for headline decoding: matching line, non-matching line returns null, quoted fields, escaped quotes, greedy last field
 
 ## 5. Overflow Encoder
