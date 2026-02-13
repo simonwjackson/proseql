@@ -103,5 +103,32 @@ describe("Nested Schema Update Operations", () => {
 			expect(found.metadata.rating).toBe(5);
 			expect(found.metadata.tags).toEqual(["classic", "epic"]);
 		});
+
+		it("should apply $increment operator on nested field while preserving siblings (task 4.4)", async () => {
+			// Initial metadata.views is 150
+			const result = await db.books.update("book1", {
+				metadata: { views: { $increment: 1 } },
+			}).runPromise;
+
+			expect(result.metadata.views).toBe(151); // incremented by 1
+			expect(result.metadata.rating).toBe(5); // preserved
+			expect(result.metadata.tags).toEqual(["classic", "epic"]); // preserved
+			expect(result.metadata.description).toBe("A desert planet story"); // preserved
+			expect(result.metadata.featured).toBe(true); // preserved
+
+			// Apply another increment
+			const result2 = await db.books.update("book1", {
+				metadata: { views: { $increment: 10 } },
+			}).runPromise;
+
+			expect(result2.metadata.views).toBe(161); // incremented by 10 from 151
+			expect(result2.metadata.rating).toBe(5); // still preserved
+
+			// Verify in database
+			const found = await db.books.findById("book1").runPromise;
+			expect(found.metadata.views).toBe(161);
+			expect(found.metadata.rating).toBe(5);
+			expect(found.metadata.tags).toEqual(["classic", "epic"]);
+		});
 	});
 });
