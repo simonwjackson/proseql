@@ -31,7 +31,7 @@
 ## 4. Deep Merge Updates
 
 - [x] 4.1 In `core/operations/crud/update.ts`: create `deepMergeUpdates(current, updates)` helper. For each key in updates: if value has `$`-keys → `applyOperator`; if value is a plain object with no `$`-keys and current value is also a plain object → recurse; otherwise → direct assignment.
-- [ ] 4.2 Refactor `applyUpdates` to use `deepMergeUpdates` instead of flat iteration.
+- [x] 4.2 Refactor `applyUpdates` to use `deepMergeUpdates` instead of flat iteration.
 - [ ] 4.3 Test deep merge: `update(id, { metadata: { views: 500 } })` preserves `metadata.rating` and `metadata.tags`.
 - [ ] 4.4 Test nested operator: `update(id, { metadata: { views: { $increment: 1 } } })` increments only `metadata.views`.
 - [ ] 4.5 Test nested `$set` replaces: `update(id, { metadata: { $set: { views: 0 } } })` replaces entire metadata.

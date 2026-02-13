@@ -208,51 +208,28 @@ export function deepMergeUpdates(
 
 /**
  * Apply update operations to an entity.
- * Handles both direct value assignments and operator objects.
+ * Handles both direct value assignments and operator objects at any nesting level.
+ * Uses deepMergeUpdates for nested object merging with operator support.
  * Automatically sets updatedAt timestamp.
  */
 export function applyUpdates<T extends MinimalEntity>(
 	entity: T,
 	updates: UpdateWithOperators<T>,
 ): T {
-	const updated = { ...entity };
 	const now = new Date().toISOString();
 
-	for (const [key, value] of Object.entries(updates)) {
-		if (key === "updatedAt" && !value) {
-			// Auto-set updatedAt if not provided
-			(updated as Record<string, unknown>).updatedAt = now;
-		} else if (value !== undefined || value === null) {
-			// Check if it's an operator
-			if (
-				typeof value === "object" &&
-				value !== null &&
-				!Array.isArray(value)
-			) {
-				const hasOperator = Object.keys(value).some((k) => k.startsWith("$"));
-				if (hasOperator) {
-					const currentValue = (entity as Record<string, unknown>)[key];
-					(updated as Record<string, unknown>)[key] = applyOperator(
-						currentValue,
-						value,
-					);
-				} else {
-					// Direct assignment (for nested objects)
-					(updated as Record<string, unknown>)[key] = value;
-				}
-			} else {
-				// Direct assignment (including null values)
-				(updated as Record<string, unknown>)[key] = value;
-			}
-		}
-	}
+	// Use deepMergeUpdates to handle nested objects and operators at any level
+	const merged = deepMergeUpdates(
+		entity as Record<string, unknown>,
+		updates as Record<string, unknown>,
+	);
 
 	// Ensure updatedAt is set
 	if (!("updatedAt" in updates)) {
-		(updated as Record<string, unknown>).updatedAt = now;
+		merged.updatedAt = now;
 	}
 
-	return updated;
+	return merged as T;
 }
 
 /**
