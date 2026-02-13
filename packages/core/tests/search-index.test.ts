@@ -1292,3 +1292,586 @@ describe("Search Index Maintenance with Nested Fields (task 7.4)", () => {
 		});
 	});
 });
+
+// ============================================================================
+// $search Query Against Nested Indexed Fields (task 7.5)
+// ============================================================================
+
+describe("$search Query Against Nested Indexed Fields (task 7.5)", () => {
+	// Schema with nested fields for testing $search queries
+	const ArticleSchema = Schema.Struct({
+		id: Schema.String,
+		title: Schema.String,
+		content: Schema.Struct({
+			summary: Schema.String,
+			body: Schema.String,
+			metadata: Schema.Struct({
+				keywords: Schema.String,
+				category: Schema.String,
+			}),
+		}),
+		author: Schema.Struct({
+			name: Schema.String,
+			profile: Schema.String,
+		}),
+	});
+
+	const createArticle = (
+		id: string,
+		title: string,
+		summary: string,
+		body: string,
+		keywords: string,
+		category: string,
+		authorName: string,
+		authorProfile: string,
+	) => ({
+		id,
+		title,
+		content: {
+			summary,
+			body,
+			metadata: {
+				keywords,
+				category,
+			},
+		},
+		author: {
+			name: authorName,
+			profile: authorProfile,
+		},
+	});
+
+	const testArticles = [
+		createArticle(
+			"1",
+			"Introduction to TypeScript",
+			"A beginner guide to TypeScript programming",
+			"TypeScript is a typed superset of JavaScript that compiles to plain JavaScript.",
+			"typescript javascript programming",
+			"technology",
+			"Alice Johnson",
+			"Senior software engineer specializing in frontend development",
+		),
+		createArticle(
+			"2",
+			"Machine Learning Basics",
+			"Understanding neural networks and deep learning",
+			"Machine learning is a subset of artificial intelligence that enables systems to learn.",
+			"ai machinelearning deeplearning",
+			"science",
+			"Bob Smith",
+			"Data scientist with expertise in neural networks",
+		),
+		createArticle(
+			"3",
+			"Cooking Italian Pasta",
+			"Traditional recipes from Italy",
+			"Learn how to make authentic Italian pasta dishes from scratch.",
+			"cooking recipes italian",
+			"lifestyle",
+			"Maria Romano",
+			"Professional chef trained in Italian cuisine",
+		),
+		createArticle(
+			"4",
+			"Advanced TypeScript Patterns",
+			"Design patterns and advanced techniques in TypeScript",
+			"Explore generics, decorators, and other advanced TypeScript features.",
+			"typescript patterns generics",
+			"technology",
+			"Charlie Brown",
+			"Full-stack developer passionate about clean code",
+		),
+	];
+
+	describe("field-level $search on nested indexed field", () => {
+		it("7.5: field-level $search on nested path returns correct results", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.summary", "content.body"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search for "neural" in content.summary field
+			const results = await db.articles.query({
+				where: { "content.summary": { $search: "neural" } },
+			}).runPromise;
+
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("2");
+			expect(results[0].title).toBe("Machine Learning Basics");
+		});
+
+		it("7.5: field-level $search on deeply nested path returns correct results", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.metadata.keywords", "content.metadata.category"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search for "typescript" in content.metadata.keywords
+			const results = await db.articles.query({
+				where: { "content.metadata.keywords": { $search: "typescript" } },
+			}).runPromise;
+
+			expect(results.length).toBe(2);
+			expect(results.some((r) => r.id === "1")).toBe(true);
+			expect(results.some((r) => r.id === "4")).toBe(true);
+		});
+
+		it("7.5: field-level $search with multi-word query on nested field", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["author.profile"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search for "neural networks" in author.profile (both words must match)
+			const results = await db.articles.query({
+				where: { "author.profile": { $search: "neural networks" } },
+			}).runPromise;
+
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("2");
+		});
+
+		it("7.5: field-level $search with no matches returns empty array", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.summary"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search for term that doesn't exist
+			const results = await db.articles.query({
+				where: { "content.summary": { $search: "quantum" } },
+			}).runPromise;
+
+			expect(results.length).toBe(0);
+		});
+	});
+
+	describe("top-level $search with explicit nested fields", () => {
+		it("7.5: top-level $search with single nested field returns correct results", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.summary", "content.body", "author.profile"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search only in content.summary
+			const results = await db.articles.query({
+				where: { $search: { query: "beginner", fields: ["content.summary"] } },
+			}).runPromise;
+
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("1");
+		});
+
+		it("7.5: top-level $search with multiple nested fields returns union of matches", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.summary", "author.profile"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search in both content.summary and author.profile
+			// "italian" appears in article 3's summary and author.profile
+			const results = await db.articles.query({
+				where: { $search: { query: "italian", fields: ["content.summary", "author.profile"] } },
+			}).runPromise;
+
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("3");
+		});
+
+		it("7.5: top-level $search with nested fields and additional filters", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.metadata.category", "content.summary"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search for "technology" category AND title containing "Advanced"
+			const results = await db.articles.query({
+				where: {
+					$search: { query: "technology", fields: ["content.metadata.category"] },
+					title: { $contains: "Advanced" },
+				},
+			}).runPromise;
+
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("4");
+			expect(results[0].title).toBe("Advanced TypeScript Patterns");
+		});
+
+		it("7.5: top-level $search without explicit fields searches all indexed nested fields", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.summary", "author.profile"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// "chef" appears only in author.profile of article 3
+			const results = await db.articles.query({
+				where: { $search: { query: "chef" } },
+			}).runPromise;
+
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("3");
+		});
+	});
+
+	describe("$search with mixed flat and nested indexed fields", () => {
+		it("7.5: $search works when index has both flat and nested fields", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["title", "content.summary", "author.name"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search for "TypeScript" - appears in title of articles 1 and 4
+			const titleResults = await db.articles.query({
+				where: { $search: { query: "typescript", fields: ["title"] } },
+			}).runPromise;
+			expect(titleResults.length).toBe(2);
+
+			// Search for "beginner" - appears only in content.summary of article 1
+			const summaryResults = await db.articles.query({
+				where: { $search: { query: "beginner", fields: ["content.summary"] } },
+			}).runPromise;
+			expect(summaryResults.length).toBe(1);
+			expect(summaryResults[0].id).toBe("1");
+
+			// Search for "Maria" - appears only in author.name of article 3
+			const authorResults = await db.articles.query({
+				where: { $search: { query: "maria", fields: ["author.name"] } },
+			}).runPromise;
+			expect(authorResults.length).toBe(1);
+			expect(authorResults[0].id).toBe("3");
+		});
+
+		it("7.5: cross-field search finds terms across different nested levels", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["title", "content.summary", "content.body"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search for "typescript" and "superset" - both terms exist but in different fields
+			// "typescript" in title, "superset" in content.body for article 1
+			const results = await db.articles.query({
+				where: { $search: { query: "typescript superset" } },
+			}).runPromise;
+
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("1");
+		});
+	});
+
+	describe("$search query result ordering and accuracy", () => {
+		it("7.5: $search returns all matching entities for nested field query", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.metadata.category"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search for "technology" - articles 1 and 4 have this category
+			const results = await db.articles.query({
+				where: { $search: { query: "technology" } },
+			}).runPromise;
+
+			expect(results.length).toBe(2);
+			const ids = results.map((r) => r.id);
+			expect(ids).toContain("1");
+			expect(ids).toContain("4");
+		});
+
+		it("7.5: $search with prefix matching works on nested fields", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.metadata.keywords"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search for "machine" - should prefix-match "machinelearning" in article 2
+			const results = await db.articles.query({
+				where: { $search: { query: "machine" } },
+			}).runPromise;
+
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("2");
+		});
+
+		it("7.5: $search combined with sort on nested field query results", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.metadata.category"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search for "technology" and sort by title descending
+			const results = await db.articles.query({
+				where: { $search: { query: "technology" } },
+				sort: { title: "desc" },
+			}).runPromise;
+
+			expect(results.length).toBe(2);
+			// "Introduction to TypeScript" should come after "Advanced TypeScript Patterns" in desc order
+			expect(results[0].title).toBe("Introduction to TypeScript");
+			expect(results[1].title).toBe("Advanced TypeScript Patterns");
+		});
+
+		it("7.5: $search combined with pagination on nested field query results", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.metadata.category"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search for "technology" with pagination
+			const page1 = await db.articles.query({
+				where: { $search: { query: "technology" } },
+				sort: { title: "asc" },
+				limit: 1,
+				offset: 0,
+			}).runPromise;
+
+			expect(page1.length).toBe(1);
+			expect(page1[0].title).toBe("Advanced TypeScript Patterns");
+
+			const page2 = await db.articles.query({
+				where: { $search: { query: "technology" } },
+				sort: { title: "asc" },
+				limit: 1,
+				offset: 1,
+			}).runPromise;
+
+			expect(page2.length).toBe(1);
+			expect(page2[0].title).toBe("Introduction to TypeScript");
+		});
+
+		it("7.5: $search with select returns only requested fields", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.summary"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search and select only specific fields
+			const results = await db.articles.query({
+				where: { $search: { query: "neural" } },
+				select: ["id", "title"],
+			}).runPromise;
+
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("2");
+			expect(results[0].title).toBe("Machine Learning Basics");
+			// Other fields should not be present
+			expect("content" in results[0]).toBe(false);
+			expect("author" in results[0]).toBe(false);
+		});
+	});
+
+	describe("edge cases for $search on nested indexed fields", () => {
+		it("7.5: $search handles empty query string gracefully", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.summary"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Empty query should return all articles
+			const results = await db.articles.query({
+				where: { $search: { query: "" } },
+			}).runPromise;
+
+			expect(results.length).toBe(4);
+		});
+
+		it("7.5: $search handles whitespace-only query gracefully", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.summary"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Whitespace-only query should return all articles
+			const results = await db.articles.query({
+				where: { $search: { query: "   " } },
+			}).runPromise;
+
+			expect(results.length).toBe(4);
+		});
+
+		it("7.5: $search is case-insensitive on nested fields", async () => {
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["author.name"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: testArticles }),
+			);
+
+			// Search with different cases
+			const lowercaseResults = await db.articles.query({
+				where: { $search: { query: "alice" } },
+			}).runPromise;
+			expect(lowercaseResults.length).toBe(1);
+
+			const uppercaseResults = await db.articles.query({
+				where: { $search: { query: "ALICE" } },
+			}).runPromise;
+			expect(uppercaseResults.length).toBe(1);
+
+			const mixedResults = await db.articles.query({
+				where: { $search: { query: "AlIcE" } },
+			}).runPromise;
+			expect(mixedResults.length).toBe(1);
+		});
+
+		it("7.5: $search with special characters in nested field", async () => {
+			// Create an article with special characters in nested field
+			const specialArticles = [
+				createArticle(
+					"special",
+					"Special Article",
+					"Contains C++ and .NET frameworks",
+					"Programming with C++ is fun",
+					"c++ dotnet",
+					"technology",
+					"Test Author",
+					"Expert in C++ and .NET development",
+				),
+			];
+
+			const config = {
+				articles: {
+					schema: ArticleSchema,
+					relationships: {},
+					searchIndex: ["content.summary", "author.profile"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { articles: specialArticles }),
+			);
+
+			// Search for "NET" (from ".NET")
+			const results = await db.articles.query({
+				where: { $search: { query: "net" } },
+			}).runPromise;
+
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("special");
+		});
+	});
+});

@@ -64,7 +64,7 @@
 - [x] 7.2 Apply same fix to `removeEntityFromIndexMut` and the update path.
 - [x] 7.3 Test `searchIndex: ["metadata.description"]` builds correct inverted index from nested field values.
 - [x] 7.4 Test search index maintenance on create/update/delete with nested indexed field.
-- [ ] 7.5 Test `$search` query against nested indexed field returns correct results.
+- [x] 7.5 Test `$search` query against nested indexed field returns correct results.
 
 ## 8. Type System
 
