@@ -7,10 +7,10 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/simonwjackson/proseql/ci.yml?style=for-the-badge&label=CI&labelColor=161B22)](https://github.com/simonwjackson/proseql/actions)
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white&labelColor=161B22)](https://www.typescriptlang.org/)
-[![Effect](https://img.shields.io/badge/Built_with-Effect-black?style=for-the-badge&labelColor=161B22)](https://effect.website/)
-[![Bun](https://img.shields.io/badge/Bun-FBF0DF?style=for-the-badge&logo=bun&logoColor=161B22&labelColor=161B22)](https://bun.sh/)
+[![Effect](https://img.shields.io/badge/Built_with-Effect-white?style=for-the-badge&labelColor=161B22)](https://effect.website/)
+[![Bun](https://img.shields.io/badge/Bun-FBF0DF?style=for-the-badge&logo=bun&logoColor=FBF0DF&labelColor=161B22)](https://bun.sh/)
 
-[![Zero Dependencies](https://img.shields.io/badge/Zero_Dependencies-ff7b72?style=for-the-badge&labelColor=161B22)](.)
+[![No Server Required](https://img.shields.io/badge/No_Server_Required-ff7b72?style=for-the-badge&labelColor=161B22)](.)
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-9fdf9f?style=for-the-badge&logo=node.js&logoColor=9fdf9f&labelColor=161B22)](.)
 [![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-79c0ff?style=for-the-badge&labelColor=161B22)](https://github.com/simonwjackson/proseql/pulls)
 
@@ -80,17 +80,17 @@ Your data lives in plain text files. Here's `books.yaml`:
 And their authors in `authors.prose` — data that reads like English:
 
 ```
-@prose {name}, born {birthYear} — {country}
+@prose [{id}] {name}, born {birthYear} — {country}
 
-Frank Herbert, born 1920 — USA
-William Gibson, born 1948 — USA
-Ursula K. Le Guin, born 1929 — USA
+[1] Frank Herbert, born 1920 — USA
+[2] William Gibson, born 1948 — USA
+[3] Ursula K. Le Guin, born 1929 — USA
 ```
 
 Both are real database files. Query them, mutate them, `git diff` them:
 
 ```ts
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Layer } from "effect"
 import {
   createPersistentEffectDatabase,
   NodeStorageLayer,
@@ -99,31 +99,42 @@ import {
   proseCodec,
 } from "@proseql/node"
 
-const db = yield* createPersistentEffectDatabase({
-  books: {
-    schema: BookSchema,
-    file: "./data/books.yaml",
-    relationships: {},
-  },
-  authors: {
-    schema: AuthorSchema,
-    file: "./data/authors.prose",
-    relationships: {},
-  },
+const PersistenceLayer = Layer.merge(
+  NodeStorageLayer,
+  makeSerializerLayer([yamlCodec(), proseCodec({ template: '[{id}] {name}, born {birthYear} — {country}' })]),
+)
+
+const program = Effect.gen(function* () {
+  const db = yield* createPersistentEffectDatabase({
+    books: {
+      schema: BookSchema,
+      file: "./data/books.yaml",
+      relationships: {},
+    },
+    authors: {
+      schema: AuthorSchema,
+      file: "./data/authors.prose",
+      relationships: {},
+    },
+  })
+
+  // find it
+  const dune = await db.books.findById("1").runPromise
+
+  // query it
+  const classics = await db.books.query({
+    where: { year: { $lt: 1970 } },
+    sort: { year: "asc" },
+  }).runPromise
+
+  // change it
+  await db.books.update("1", { genre: "masterpiece" }).runPromise
+  // → books.yaml just changed on disk. go open it.
 })
 
-// find it
-const dune = await db.books.findById("1").runPromise
-
-// query it
-const classics = await db.books.query({
-  where: { year: { $lt: 1970 } },
-  sort: { year: "asc" },
-}).runPromise
-
-// change it
-await db.books.update("1", { genre: "masterpiece" }).runPromise
-// → books.yaml just changed on disk. go open it.
+await Effect.runPromise(
+  program.pipe(Effect.provide(PersistenceLayer), Effect.scoped),
+)
 ```
 
 ### Nested Data
@@ -247,7 +258,7 @@ const config = {
 
 // prose requires a template — each record becomes a sentence
 makeSerializerLayer([
-  proseCodec({ template: '"{title}" by {author} ({year}) — {genre}' }),
+  proseCodec({ template: '[{id}] "{title}" by {author} ({year}) — {genre}' }),
   jsonCodec(),
 ])
 ```
@@ -255,10 +266,10 @@ makeSerializerLayer([
 On disk, it looks like this:
 
 ```
-@prose "{title}" by {author} ({year}) — {genre}
+@prose [{id}] "{title}" by {author} ({year}) — {genre}
 
-"Dune" by Frank Herbert (1965) — sci-fi
-"Neuromancer" by William Gibson (1984) — sci-fi
+[1] "Dune" by Frank Herbert (1965) — sci-fi
+[2] "Neuromancer" by William Gibson (1984) — sci-fi
 ```
 
 The `@prose` directive tells the parser which template to use for decoding. Because `proseCodec` requires a `template` argument, it isn't included in `AllTextFormatsLayer` — you always register it explicitly.
