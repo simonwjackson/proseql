@@ -141,7 +141,7 @@ const program = Effect.gen(function* () {
 	})
 
 	// Check if data already exists from a previous run
-	const existingAuthors = yield* collect(db.authors.query() as unknown as Stream.Stream<Record<string, unknown>, never, never>)
+	const existingAuthors = yield* collect(db.authors.query())
 
 	if (existingAuthors.length > 0) {
 		console.log("Found existing data from a previous run!\n")

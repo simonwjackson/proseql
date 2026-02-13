@@ -13,7 +13,6 @@
 import { Effect, Layer, Schema, Scope } from "effect"
 import {
 	createPersistentEffectDatabase,
-	type EffectDatabaseWithPersistence,
 	NodeStorageLayer,
 	makeSerializerLayer,
 	jsonCodec,

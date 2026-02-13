@@ -17,14 +17,16 @@ your-project/
 ## Install
 
 ```sh
-npm install proseql
+npm install @proseql/core
+# For file persistence (Node.js):
+npm install @proseql/node
 ```
 
 ## Enough. Show Me.
 
 ```ts
 import { Effect, Schema } from "effect"
-import { createEffectDatabase } from "proseql"
+import { createEffectDatabase } from "@proseql/core"
 
 const BookSchema = Schema.Struct({
   id: Schema.String,
@@ -107,7 +109,7 @@ import {
   makeSerializerLayer,
   yamlCodec,
   jsonCodec,
-} from "proseql"
+} from "@proseql/node"
 
 const config = {
   books: {
@@ -163,7 +165,7 @@ Writes are debounced. Call `db.flush()` when you're impatient.
 makeSerializerLayer([jsonCodec(), yamlCodec(), tomlCodec()])
 
 // or just take them all
-import { AllTextFormatsLayer } from "proseql"
+import { AllTextFormatsLayer } from "@proseql/core"
 ```
 
 ### Append-Only Collections
@@ -758,7 +760,7 @@ beforeCreate: (ctx) =>
 Schemas change. Data files shouldn't break. Migrations run automatically on load.
 
 ```ts
-import type { Migration } from "proseql"
+import type { Migration } from "@proseql/core"
 
 const migrations: ReadonlyArray<Migration> = [
   {
@@ -848,7 +850,7 @@ await db.books.create({ title: "Dune (but again)", isbn: "978-0441172719", ... }
 Extend ProseQL with custom codecs, operators, ID generators, and global hooks.
 
 ```ts
-import type { ProseQLPlugin } from "proseql"
+import type { ProseQLPlugin } from "@proseql/core"
 
 const regexPlugin: ProseQLPlugin = {
   name: "regex-search",
@@ -943,7 +945,7 @@ import {
   generateTimestampId,
   generatePrefixedId,
   generateTypedId,
-} from "proseql"
+} from "@proseql/core"
 
 generateUUID()              // "550e8400-e29b-41d4-a716-446655440000"
 generateNanoId()            // "V1StGXR8_Z5jdHi6B-myT"

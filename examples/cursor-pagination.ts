@@ -7,7 +7,6 @@
 
 import { Effect, Schema } from "effect"
 import { createEffectDatabase } from "@proseql/core"
-import type { CursorPageResult } from "@proseql/core"
 
 // ============================================================================
 // 1. Schema
@@ -73,14 +72,11 @@ async function main() {
 	// === Cursor-Based Pagination ===
 	console.log("\n=== Cursor-Based Pagination ===")
 
-	// Helper to cast cursor query results (query returns a union type)
-	type CursorResult = CursorPageResult<Record<string, unknown>>
-
 	// First page — no "after" cursor
 	const page1 = await db.items.query({
 		sort: { name: "asc" },
 		cursor: { key: "name", limit: 3 },
-	}).runPromise as unknown as CursorResult
+	}).runPromise
 	console.log(`Page 1: ${page1.items.map((i) => i.name).join(", ")}`)
 	console.log(`  endCursor: ${page1.pageInfo.endCursor}`)
 	console.log(`  hasNextPage: ${page1.pageInfo.hasNextPage}`)
@@ -89,7 +85,7 @@ async function main() {
 	const page2 = await db.items.query({
 		sort: { name: "asc" },
 		cursor: { key: "name", after: page1.pageInfo.endCursor as string, limit: 3 },
-	}).runPromise as unknown as CursorResult
+	}).runPromise
 	console.log(`\nPage 2: ${page2.items.map((i) => i.name).join(", ")}`)
 	console.log(`  endCursor: ${page2.pageInfo.endCursor}`)
 	console.log(`  hasNextPage: ${page2.pageInfo.hasNextPage}`)
@@ -98,7 +94,7 @@ async function main() {
 	const page3 = await db.items.query({
 		sort: { name: "asc" },
 		cursor: { key: "name", after: page2.pageInfo.endCursor as string, limit: 3 },
-	}).runPromise as unknown as CursorResult
+	}).runPromise
 	console.log(`\nPage 3: ${page3.items.map((i) => i.name).join(", ")}`)
 	console.log(`  endCursor: ${page3.pageInfo.endCursor}`)
 	console.log(`  hasNextPage: ${page3.pageInfo.hasNextPage}`)
@@ -107,7 +103,7 @@ async function main() {
 	const page4 = await db.items.query({
 		sort: { name: "asc" },
 		cursor: { key: "name", after: page3.pageInfo.endCursor as string, limit: 3 },
-	}).runPromise as unknown as CursorResult
+	}).runPromise
 	console.log(`\nPage 4: ${page4.items.map((i) => i.name).join(", ")}`)
 	console.log(`  hasNextPage: ${page4.pageInfo.hasNextPage}`)
 
@@ -118,7 +114,7 @@ async function main() {
 		where: { category: "a" },
 		sort: { name: "asc" },
 		cursor: { key: "name", limit: 3 },
-	}).runPromise as unknown as CursorResult
+	}).runPromise
 	console.log(`Category "a" page 1: ${filtered.items.map((i) => i.name).join(", ")}`)
 	console.log(`  hasNextPage: ${filtered.pageInfo.hasNextPage}`)
 }

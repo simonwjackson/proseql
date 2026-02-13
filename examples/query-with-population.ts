@@ -198,7 +198,7 @@ async function main() {
 
 	// --- Using Effect directly (for Effect-native consumers) ---
 	console.log("\n=== Using Effect directly with Stream.runCollect ===")
-	const stream = db.posts.query({ where: { published: true } }) as unknown as Stream.Stream<Record<string, unknown>, never, never>
+	const stream = db.posts.query({ where: { published: true } })
 	const results = await Effect.runPromise(
 		Stream.runCollect(stream).pipe(Effect.map(Chunk.toReadonlyArray)),
 	)
