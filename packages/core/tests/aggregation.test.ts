@@ -672,5 +672,33 @@ describe("Aggregation", () => {
 			// Max rating: 5 (Dune, The Hobbit)
 			expect(result.max?.["metadata.rating"]).toBe(5);
 		});
+
+		it("6.4 grouped aggregate on nested field → groups by nested path correctly", async () => {
+			const db = await createNestedTestDb();
+			const result = await db.books.aggregate({
+				groupBy: "metadata.rating",
+				count: true,
+			}).runPromise;
+
+			// Expected groups by metadata.rating:
+			// rating 5: Dune, The Hobbit → count: 2
+			// rating 4: Neuromancer, 1984 → count: 2
+			// rating 3: Foundation → count: 1
+			expect(result).toHaveLength(3);
+
+			const rating5 = result.find(
+				(g) => g.group["metadata.rating"] === 5,
+			);
+			const rating4 = result.find(
+				(g) => g.group["metadata.rating"] === 4,
+			);
+			const rating3 = result.find(
+				(g) => g.group["metadata.rating"] === 3,
+			);
+
+			expect(rating5?.count).toBe(2);
+			expect(rating4?.count).toBe(2);
+			expect(rating3?.count).toBe(1);
+		});
 	});
 });
