@@ -9,34 +9,21 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        bun-version: [latest, "1.2"]
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ matrix.bun-version }}
-          cache: true
-      - run: bun install
-      - run: bun test
+      - uses: cachix/install-nix-action@v31
+      - run: nix develop --command bash -c "bun install && bun test"
 
   typecheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          cache: true
-      - run: bun install
-      - run: bunx tsc --build
+      - uses: cachix/install-nix-action@v31
+      - run: nix develop --command bash -c "bun install && bunx tsc --build"
 
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          cache: true
-      - run: bun install
-      - run: biome check .
+      - uses: cachix/install-nix-action@v31
+      - run: nix develop --command bash -c "bun install && biome check ."
