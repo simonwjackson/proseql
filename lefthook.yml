@@ -13,4 +13,4 @@ pre-push:
     typecheck:
       run: bun x tsc --build
     test:
-      run: bun test packages/core/tests/ packages/node/tests/
+      run: bun test packages/*/tests/

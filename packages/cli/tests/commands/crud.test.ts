@@ -544,15 +544,19 @@ describe("CRUD Commands", () => {
 
 		describe("confirmation prompt behavior in non-TTY", () => {
 			it("should auto-confirm in non-TTY environment (test runner)", async () => {
-				// Tests run in non-TTY mode, so confirmation is automatically
-				// skipped and treated as confirmed
-				const result = await executeDelete({
-					id: "1",
-					force: false, // Not forcing, but non-TTY will auto-confirm
-				});
+				const originalIsTTY = process.stdin.isTTY;
+				process.stdin.isTTY = false as unknown as true;
+				try {
+					const result = await executeDelete({
+						id: "1",
+						force: false, // Not forcing, but non-TTY will auto-confirm
+					});
 
-				expect(result.success).toBe(true);
-				expect(result.message).toContain("Successfully deleted");
+					expect(result.success).toBe(true);
+					expect(result.message).toContain("Successfully deleted");
+				} finally {
+					process.stdin.isTTY = originalIsTTY;
+				}
 			});
 		});
 	});
