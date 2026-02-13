@@ -1,8 +1,15 @@
 import { Stream } from "effect";
 import type { CustomOperator } from "../../plugins/plugin-types.js";
-import { isFilterOperatorObject, matchesFilter } from "../../types/operators.js";
+import {
+	isFilterOperatorObject,
+	matchesFilter,
+} from "../../types/operators.js";
 import type { SearchConfig } from "../../types/search-types.js";
-import { collectStringPaths, getNestedValue, isDotPath } from "../../utils/nested-path.js";
+import {
+	collectStringPaths,
+	getNestedValue,
+	isDotPath,
+} from "../../utils/nested-path.js";
 import { tokenize } from "./search.js";
 
 /**

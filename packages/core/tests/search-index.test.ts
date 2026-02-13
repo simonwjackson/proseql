@@ -952,13 +952,28 @@ describe("Search Index Maintenance with Nested Fields (task 7.4)", () => {
 
 			// Create multiple entities
 			await db.books.create(
-				createNestedBook("1", "Book One", "Story about spaceships", "Author bio 1"),
+				createNestedBook(
+					"1",
+					"Book One",
+					"Story about spaceships",
+					"Author bio 1",
+				),
 			).runPromise;
 			await db.books.create(
-				createNestedBook("2", "Book Two", "Tale of ancient kingdoms", "Author bio 2"),
+				createNestedBook(
+					"2",
+					"Book Two",
+					"Tale of ancient kingdoms",
+					"Author bio 2",
+				),
 			).runPromise;
 			await db.books.create(
-				createNestedBook("3", "Book Three", "Adventures in spaceships and kingdoms", "Author bio 3"),
+				createNestedBook(
+					"3",
+					"Book Three",
+					"Adventures in spaceships and kingdoms",
+					"Author bio 3",
+				),
 			).runPromise;
 
 			// Search should find correct entities
@@ -991,7 +1006,12 @@ describe("Search Index Maintenance with Nested Fields (task 7.4)", () => {
 			const db = await Effect.runPromise(
 				createEffectDatabase(config, {
 					books: [
-						createNestedBook("1", "Test Book", "Story about pirates and treasure", "Bio"),
+						createNestedBook(
+							"1",
+							"Test Book",
+							"Story about pirates and treasure",
+							"Bio",
+						),
 					],
 				}),
 			);
@@ -1035,7 +1055,12 @@ describe("Search Index Maintenance with Nested Fields (task 7.4)", () => {
 			const db = await Effect.runPromise(
 				createEffectDatabase(config, {
 					books: [
-						createNestedBook("1", "Test Book", "Story about robots", "Original bio"),
+						createNestedBook(
+							"1",
+							"Test Book",
+							"Story about robots",
+							"Original bio",
+						),
 					],
 				}),
 			);
@@ -1122,8 +1147,18 @@ describe("Search Index Maintenance with Nested Fields (task 7.4)", () => {
 			const db = await Effect.runPromise(
 				createEffectDatabase(config, {
 					books: [
-						createNestedBook("1", "Book One", "Tale of unicorns and magic", "Bio 1"),
-						createNestedBook("2", "Book Two", "Story of dragons and fire", "Bio 2"),
+						createNestedBook(
+							"1",
+							"Book One",
+							"Tale of unicorns and magic",
+							"Bio 1",
+						),
+						createNestedBook(
+							"2",
+							"Book Two",
+							"Story of dragons and fire",
+							"Bio 2",
+						),
 					],
 				}),
 			);
@@ -1171,7 +1206,12 @@ describe("Search Index Maintenance with Nested Fields (task 7.4)", () => {
 				createEffectDatabase(config, {
 					books: [
 						createNestedBook("1", "Book One", "Epic adventure story", "Bio 1"),
-						createNestedBook("2", "Book Two", "Another adventure tale", "Bio 2"),
+						createNestedBook(
+							"2",
+							"Book Two",
+							"Another adventure tale",
+							"Bio 2",
+						),
 					],
 				}),
 			);
@@ -1219,8 +1259,8 @@ describe("Search Index Maintenance with Nested Fields (task 7.4)", () => {
 			);
 
 			// Delete books with "unique" in description
-			await db.books.deleteMany(
-				(book) => book.metadata.description.includes("unique"),
+			await db.books.deleteMany((book) =>
+				book.metadata.description.includes("unique"),
 			).runPromise;
 
 			// Books 1 and 2 should be gone
@@ -1414,7 +1454,10 @@ describe("$search Query Against Nested Indexed Fields (task 7.5)", () => {
 				articles: {
 					schema: ArticleSchema,
 					relationships: {},
-					searchIndex: ["content.metadata.keywords", "content.metadata.category"] as const,
+					searchIndex: [
+						"content.metadata.keywords",
+						"content.metadata.category",
+					] as const,
 				},
 			} as const;
 
@@ -1482,7 +1525,11 @@ describe("$search Query Against Nested Indexed Fields (task 7.5)", () => {
 				articles: {
 					schema: ArticleSchema,
 					relationships: {},
-					searchIndex: ["content.summary", "content.body", "author.profile"] as const,
+					searchIndex: [
+						"content.summary",
+						"content.body",
+						"author.profile",
+					] as const,
 				},
 			} as const;
 
@@ -1515,7 +1562,12 @@ describe("$search Query Against Nested Indexed Fields (task 7.5)", () => {
 			// Search in both content.summary and author.profile
 			// "italian" appears in article 3's summary and author.profile
 			const results = await db.articles.query({
-				where: { $search: { query: "italian", fields: ["content.summary", "author.profile"] } },
+				where: {
+					$search: {
+						query: "italian",
+						fields: ["content.summary", "author.profile"],
+					},
+				},
 			}).runPromise;
 
 			expect(results.length).toBe(1);
@@ -1527,7 +1579,10 @@ describe("$search Query Against Nested Indexed Fields (task 7.5)", () => {
 				articles: {
 					schema: ArticleSchema,
 					relationships: {},
-					searchIndex: ["content.metadata.category", "content.summary"] as const,
+					searchIndex: [
+						"content.metadata.category",
+						"content.summary",
+					] as const,
 				},
 			} as const;
 
@@ -1538,7 +1593,10 @@ describe("$search Query Against Nested Indexed Fields (task 7.5)", () => {
 			// Search for "technology" category AND title containing "Advanced"
 			const results = await db.articles.query({
 				where: {
-					$search: { query: "technology", fields: ["content.metadata.category"] },
+					$search: {
+						query: "technology",
+						fields: ["content.metadata.category"],
+					},
 					title: { $contains: "Advanced" },
 				},
 			}).runPromise;

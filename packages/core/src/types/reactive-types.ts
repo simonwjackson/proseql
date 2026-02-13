@@ -45,28 +45,29 @@ export type WatchConfig<
 	T,
 	Relations extends Record<string, unknown> = Record<string, never>,
 	DB = unknown,
-> = // Without populate
-| {
-		readonly where?: WhereClause<T, Relations, DB>;
-		readonly sort?: SortConfig<T, Relations, Record<string, never>, DB>;
-		readonly select?: SelectConfig<T, Relations, DB>;
-		readonly limit?: number;
-		readonly offset?: number;
-  }
-// With populate
-| {
-		readonly populate: PopulateConfig<Relations, DB>;
-		readonly where?: WhereClause<T, Relations, DB>;
-		readonly sort?: SortConfig<
-			T,
-			Relations,
-			{ populate: PopulateConfig<Relations, DB> },
-			DB
-		>;
-		readonly select?: SelectConfig<T, Relations, DB>;
-		readonly limit?: number;
-		readonly offset?: number;
-  };
+> =
+	// Without populate
+	| {
+			readonly where?: WhereClause<T, Relations, DB>;
+			readonly sort?: SortConfig<T, Relations, Record<string, never>, DB>;
+			readonly select?: SelectConfig<T, Relations, DB>;
+			readonly limit?: number;
+			readonly offset?: number;
+	  }
+	// With populate
+	| {
+			readonly populate: PopulateConfig<Relations, DB>;
+			readonly where?: WhereClause<T, Relations, DB>;
+			readonly sort?: SortConfig<
+				T,
+				Relations,
+				{ populate: PopulateConfig<Relations, DB> },
+				DB
+			>;
+			readonly select?: SelectConfig<T, Relations, DB>;
+			readonly limit?: number;
+			readonly offset?: number;
+	  };
 
 // ============================================================================
 // Watch Method Signatures

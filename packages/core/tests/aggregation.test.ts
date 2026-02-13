@@ -686,15 +686,9 @@ describe("Aggregation", () => {
 			// rating 3: Foundation → count: 1
 			expect(result).toHaveLength(3);
 
-			const rating5 = result.find(
-				(g) => g.group["metadata.rating"] === 5,
-			);
-			const rating4 = result.find(
-				(g) => g.group["metadata.rating"] === 4,
-			);
-			const rating3 = result.find(
-				(g) => g.group["metadata.rating"] === 3,
-			);
+			const rating5 = result.find((g) => g.group["metadata.rating"] === 5);
+			const rating4 = result.find((g) => g.group["metadata.rating"] === 4);
+			const rating3 = result.find((g) => g.group["metadata.rating"] === 3);
 
 			expect(rating5?.count).toBe(2);
 			expect(rating4?.count).toBe(2);

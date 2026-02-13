@@ -87,6 +87,6 @@
 
 ## 10. Cleanup
 
-- [ ] 10.1 Run full test suite (`just test`) — all existing tests pass.
-- [ ] 10.2 Run type check (`just typecheck`) — no type errors.
-- [ ] 10.3 Run lint (`just lint`) — no lint errors.
+- [x] 10.1 Run full test suite (`just test`) — all existing tests pass.
+- [x] 10.2 Run type check (`just typecheck`) — no type errors.
+- [x] 10.3 Run lint (`just lint`) — no lint errors.

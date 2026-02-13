@@ -758,8 +758,13 @@ describe("Nested Schema Update Operations", () => {
 			).runPromise;
 
 			expect(result.count).toBe(2);
-			expect(result.updated.map((b) => b.id).sort()).toEqual(["flat1", "flat2"]);
-			expect(result.updated.every((b) => b.tags.includes("updated"))).toBe(true);
+			expect(result.updated.map((b) => b.id).sort()).toEqual([
+				"flat1",
+				"flat2",
+			]);
+			expect(result.updated.every((b) => b.tags.includes("updated"))).toBe(
+				true,
+			);
 
 			// Verify individual updates
 			const book1 = await flatDb.flatBooks.findById("flat1").runPromise;

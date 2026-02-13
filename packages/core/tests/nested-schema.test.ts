@@ -745,7 +745,9 @@ describe("Nested Schema Integration Tests", () => {
 			await Effect.runPromise(
 				Effect.scoped(
 					Effect.gen(function* () {
-						const db = yield* createEffectDatabase(config, { books: testBooks });
+						const db = yield* createEffectDatabase(config, {
+							books: testBooks,
+						});
 
 						// Watch books with rating >= 4
 						const stream = yield* db.books.watch({
@@ -782,7 +784,9 @@ describe("Nested Schema Integration Tests", () => {
 			await Effect.runPromise(
 				Effect.scoped(
 					Effect.gen(function* () {
-						const db = yield* createEffectDatabase(config, { books: testBooks });
+						const db = yield* createEffectDatabase(config, {
+							books: testBooks,
+						});
 
 						// Watch a specific book
 						const stream = yield* db.books.watchById("b1");
@@ -846,10 +850,7 @@ describe("Nested Schema Integration Tests", () => {
 			const db = await createTestDb();
 			const results = await db.books.query({
 				where: {
-					$or: [
-						{ metadata: { rating: 5 } },
-						{ author: { country: "UK" } },
-					],
+					$or: [{ metadata: { rating: 5 } }, { author: { country: "UK" } }],
 				},
 			}).runPromise;
 

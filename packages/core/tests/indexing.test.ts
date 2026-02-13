@@ -7410,7 +7410,9 @@ describe("Indexing - Nested Field Indexing", () => {
 				where: { "metadata.views": 200 },
 			}).runPromise;
 			expect(sharedValueResults.length).toBe(2);
-			const ids = sharedValueResults.map((r) => (r as { id: string }).id).sort();
+			const ids = sharedValueResults
+				.map((r) => (r as { id: string }).id)
+				.sort();
 			expect(ids).toEqual(["b1", "b2"]);
 		});
 
@@ -7490,9 +7492,9 @@ describe("Indexing - Nested Field Indexing", () => {
 
 			// Verify the rating was actually changed
 			const book = await db.books.findById("b1").runPromise;
-			expect(
-				(book as { metadata: { rating: number } }).metadata.rating,
-			).toBe(3);
+			expect((book as { metadata: { rating: number } }).metadata.rating).toBe(
+				3,
+			);
 		});
 
 		it("should update index when using $increment operator on nested indexed field", async () => {
@@ -7848,9 +7850,9 @@ describe("Indexing - Nested Field Indexing", () => {
 				({
 					books: {
 						schema: BookWithMetadataSchema,
-						indexes: [
-							["metadata.rating", "genre"],
-						] as ReadonlyArray<ReadonlyArray<string>>,
+						indexes: [["metadata.rating", "genre"]] as ReadonlyArray<
+							ReadonlyArray<string>
+						>,
 						relationships: {} as const,
 					},
 				}) as const;
@@ -7903,9 +7905,9 @@ describe("Indexing - Nested Field Indexing", () => {
 				({
 					books: {
 						schema: BookWithMetadataSchema,
-						indexes: [
-							["metadata.rating", "genre"],
-						] as ReadonlyArray<ReadonlyArray<string>>,
+						indexes: [["metadata.rating", "genre"]] as ReadonlyArray<
+							ReadonlyArray<string>
+						>,
 						relationships: {} as const,
 					},
 				}) as const;

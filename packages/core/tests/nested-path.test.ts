@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
 	collectStringPaths,
 	getNestedValue,
-	setNestedValue,
 	isDotPath,
+	setNestedValue,
 } from "../src/utils/nested-path";
 
 describe("nested-path utilities", () => {

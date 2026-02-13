@@ -722,7 +722,10 @@ describe("applyFilter Stream combinator", () => {
 				id: "1",
 				title: "Dune",
 				genre: "sci-fi",
-				metadata: { description: "A desert planet story with sandworms", views: 150 },
+				metadata: {
+					description: "A desert planet story with sandworms",
+					views: 150,
+				},
 			},
 			{
 				id: "2",
@@ -734,13 +737,19 @@ describe("applyFilter Stream combinator", () => {
 				id: "3",
 				title: "Foundation",
 				genre: "sci-fi",
-				metadata: { description: "Galactic empire and psychohistory", views: 200 },
+				metadata: {
+					description: "Galactic empire and psychohistory",
+					views: 200,
+				},
 			},
 			{
 				id: "4",
 				title: "1984",
 				genre: "dystopian",
-				metadata: { description: "Totalitarian surveillance society", views: 50 },
+				metadata: {
+					description: "Totalitarian surveillance society",
+					views: 50,
+				},
 			},
 		];
 
@@ -755,7 +764,10 @@ describe("applyFilter Stream combinator", () => {
 
 		it("should search multiple nested fields via dot-notation", async () => {
 			const result = await collectFiltered(nestedSearchData, {
-				$search: { query: "cyberpunk", fields: ["metadata.description", "title"] },
+				$search: {
+					query: "cyberpunk",
+					fields: ["metadata.description", "title"],
+				},
 			});
 			expect(result).toHaveLength(1);
 			expect(result[0].id).toBe("2");

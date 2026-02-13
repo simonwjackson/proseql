@@ -77,7 +77,11 @@ export function collectStringPaths(
 
 		if (typeof value === "string") {
 			paths.push(path);
-		} else if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+		} else if (
+			value !== null &&
+			typeof value === "object" &&
+			!Array.isArray(value)
+		) {
 			// Recurse into nested objects (but not arrays)
 			paths.push(...collectStringPaths(value as Record<string, unknown>, path));
 		}
