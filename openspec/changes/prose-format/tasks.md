@@ -55,7 +55,7 @@
 
 ## 9. Integration and Export
 
-- [ ] 9.1 Export `proseCodec` from `packages/core/src/serializers/codecs/prose.ts`
+- [x] 9.1 Export `proseCodec` from `packages/core/src/serializers/codecs/prose.ts`
 - [ ] 9.2 Add `proseCodec` export to `packages/core/src/index.ts`
 - [ ] 9.3 Write integration test: create a `makeSerializerLayer` with `proseCodec`, serialize and deserialize through the registry
 - [ ] 9.4 Write integration test: prose codec alongside other codecs in the same registry (no extension conflicts)
