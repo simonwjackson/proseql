@@ -37,7 +37,7 @@
 
 - [x] 6.1 Implement overflow decoding — collect indented lines for a record, try each overflow template in order, skip on non-match, capture on match
 - [x] 6.2 Implement multi-line continuation — lines indented deeper than overflow template level are concatenated to the previous field with newline separator
-- [ ] 6.3 Write tests for overflow decoding: fields in order, skipped field is null, no overflow lines, multi-line continuation, continuation line that looks like a template but is deeper-indented
+- [x] 6.3 Write tests for overflow decoding: fields in order, skipped field is null, no overflow lines, multi-line continuation, continuation line that looks like a template but is deeper-indented
 
 ## 7. Directive Scanner and Document Parser
 
