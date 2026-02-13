@@ -1237,8 +1237,6 @@ export const proseCodec = (options: ProseCodecOptions): FormatCodec => {
 		extensions: ["prose"],
 
 		encode: (data: unknown, _formatOptions?: FormatOptions): string => {
-			// Task 8.2 will implement the full encode logic
-			// For now, validate input and return basic structure
 			if (!Array.isArray(data)) {
 				throw new Error(
 					"Prose codec expects an array of records to encode"
