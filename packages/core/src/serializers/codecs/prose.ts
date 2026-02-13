@@ -284,6 +284,45 @@ export const deserializeValue = (text: string): unknown => {
 	return text;
 };
 
+// ============================================================================
+// Headline Encoder
+// ============================================================================
+
+/**
+ * Encodes a record into a headline string using a compiled template.
+ * Substitutes field values into the template, emitting literals verbatim.
+ *
+ * @param record - The record object with field values
+ * @param template - The compiled template with segments and fields
+ * @returns The encoded headline string
+ *
+ * @example
+ * ```typescript
+ * const template = compileTemplate('#{id} "{title}" by {author}')
+ * const record = { id: "1", title: "Dune", author: "Frank Herbert" }
+ * encodeHeadline(record, template)
+ * // → '#1 "Dune" by Frank Herbert'
+ * ```
+ */
+export const encodeHeadline = (
+	record: Record<string, unknown>,
+	template: CompiledTemplate
+): string => {
+	let result = "";
+
+	for (const segment of template.segments) {
+		if (segment.type === "literal") {
+			result += segment.text;
+		} else {
+			// Field segment - serialize the value
+			const value = record[segment.name];
+			result += serializeValue(value);
+		}
+	}
+
+	return result;
+};
+
 /**
  * Parses array element string into an array of deserialized values.
  * Handles quoted elements that may contain commas or brackets.

@@ -16,7 +16,7 @@
 
 ## 3. Headline Encoder
 
-- [ ] 3.1 Implement `encodeHeadline(record: Record<string, unknown>, template: CompiledTemplate): string` — substitute field values into template, emit literals verbatim
+- [x] 3.1 Implement `encodeHeadline(record: Record<string, unknown>, template: CompiledTemplate): string` — substitute field values into template, emit literals verbatim
 - [ ] 3.2 Implement quoting logic — for each non-last field, check if serialized value contains the next literal delimiter; if so, wrap in `"..."` with `\"` escaping
 - [ ] 3.3 Write tests for headline encoding: flat record, null field, value needing quoting, last field not quoted
 
