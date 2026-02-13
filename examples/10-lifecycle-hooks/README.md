@@ -15,7 +15,7 @@ Demonstrates lifecycle hooks for transforming data and executing side effects du
 ## Run
 
 ```sh
-bun run examples/lifecycle-hooks/index.ts
+bun run examples/10-lifecycle-hooks/index.ts
 ```
 
 ## Key Concepts

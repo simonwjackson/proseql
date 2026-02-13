@@ -13,7 +13,7 @@ Demonstrates the prose file format -- data that reads like English. Prose files 
 ## Run
 
 ```sh
-bun run examples/prose-format/index.ts
+bun run examples/13-prose-format/index.ts
 ```
 
 ## Key Concepts

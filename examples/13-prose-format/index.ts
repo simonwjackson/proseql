@@ -34,12 +34,12 @@ const QuoteSchema = Schema.Struct({
 const config = {
 	books: {
 		schema: BookSchema,
-		file: "./examples/prose-format/data/books.prose",
+		file: "./examples/13-prose-format/data/books.prose",
 		relationships: {},
 	},
 	quotes: {
 		schema: QuoteSchema,
-		file: "./examples/prose-format/data/quotes.md",
+		file: "./examples/13-prose-format/data/quotes.md",
 		format: "prose", // ← use prose codec, not markdown
 		relationships: {},
 	},

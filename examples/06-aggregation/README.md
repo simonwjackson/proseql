@@ -13,7 +13,7 @@ Demonstrates scalar aggregation operations (count, sum, min, max, avg), filtered
 ## Run
 
 ```sh
-bun run examples/aggregation/index.ts
+bun run examples/06-aggregation/index.ts
 ```
 
 ## Key Concepts

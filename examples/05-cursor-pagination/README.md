@@ -14,7 +14,7 @@ Demonstrates offset-based and cursor-based pagination strategies with pageInfo.e
 ## Run
 
 ```sh
-bun run examples/cursor-pagination/index.ts
+bun run examples/05-cursor-pagination/index.ts
 ```
 
 ## Key Concepts

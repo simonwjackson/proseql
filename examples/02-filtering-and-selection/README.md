@@ -15,7 +15,7 @@ Demonstrates all query operators using the database API including comparison, st
 ## Run
 
 ```sh
-bun run examples/filtering-and-selection/index.ts
+bun run examples/02-filtering-and-selection/index.ts
 ```
 
 ## Key Concepts

@@ -13,7 +13,7 @@ Demonstrates derived values that exist only at query time and are never persiste
 ## Run
 
 ```sh
-bun run examples/computed-fields/index.ts
+bun run examples/07-computed-fields/index.ts
 ```
 
 ## Key Concepts

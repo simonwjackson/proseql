@@ -17,7 +17,7 @@ Demonstrates nested Schema.Struct support with shape-mirroring vs dot-notation f
 ## Run
 
 ```sh
-bun run examples/nested-data/index.ts
+bun run examples/04-nested-data/index.ts
 ```
 
 ## Key Concepts

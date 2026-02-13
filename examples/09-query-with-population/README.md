@@ -15,7 +15,7 @@ Demonstrates the Stream-based query pipeline with filtering, sorting, pagination
 ## Run
 
 ```sh
-bun run examples/query-with-population/index.ts
+bun run examples/09-query-with-population/index.ts
 ```
 
 ## Key Concepts

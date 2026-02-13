@@ -14,7 +14,7 @@ Demonstrates append-only collections for event logs, audit trails, and write-onc
 ## Run
 
 ```sh
-bun run examples/append-only-jsonl/index.ts
+bun run examples/14-append-only-jsonl/index.ts
 ```
 
 ## Key Concepts

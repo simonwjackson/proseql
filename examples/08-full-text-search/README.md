@@ -13,7 +13,7 @@ Demonstrates field-level and multi-field text search with optional inverted inde
 ## Run
 
 ```sh
-bun run examples/full-text-search/index.ts
+bun run examples/08-full-text-search/index.ts
 ```
 
 ## Key Concepts

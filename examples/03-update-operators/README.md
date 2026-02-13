@@ -14,7 +14,7 @@ Demonstrates atomic, type-safe mutation operators for numeric fields, strings, a
 ## Run
 
 ```sh
-bun run examples/update-operators/index.ts
+bun run examples/03-update-operators/index.ts
 ```
 
 ## Key Concepts

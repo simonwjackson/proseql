@@ -56,7 +56,7 @@ const ManualLayer = Layer.merge(
 ## Running
 
 ```bash
-bun run examples/persistence-setup/index.ts
+bun run examples/11-persistence-setup/index.ts
 ```
 
 Output files are written to `./data/users.json` and `./data/posts.json`.

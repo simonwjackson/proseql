@@ -13,7 +13,7 @@ Demonstrates live query results that automatically update when mutations occur u
 ## Run
 
 ```sh
-bun run examples/reactive-queries/index.ts
+bun run examples/15-reactive-queries/index.ts
 ```
 
 ## Key Concepts

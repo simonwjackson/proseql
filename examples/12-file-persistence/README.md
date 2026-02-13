@@ -34,7 +34,7 @@ then runs the same queries against the loaded data.
 ## Running
 
 ```bash
-bun run examples/file-persistence/index.ts
+bun run examples/12-file-persistence/index.ts
 ```
 
 Data files are written to `./examples/data/`. Open any of them -- they are

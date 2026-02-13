@@ -5,7 +5,7 @@
  * Run it twice — the second run loads existing data from the files.
  *
  * Usage:
- *   bun run examples/file-persistence/index.ts
+ *   bun run examples/12-file-persistence/index.ts
  */
 
 import {
