@@ -7074,6 +7074,262 @@ describe("Indexing - Nested Field Indexing", () => {
 			expect(ids).toEqual(["b1", "b2"]);
 		});
 	});
+
+	describe("Task 5.3: dot-path compound index accelerates where clause", () => {
+		/**
+		 * Helper to create a database config with a compound index that includes a dot-path.
+		 */
+		const createCompoundNestedIndexConfig = () =>
+			({
+				books: {
+					schema: BookWithMetadataSchema,
+					indexes: [["metadata.rating", "genre"]] as ReadonlyArray<
+						string | ReadonlyArray<string>
+					>,
+					relationships: {} as const,
+				},
+			}) as const;
+
+		it("should build compound index with nested field metadata.rating and genre", async () => {
+			const config = createCompoundNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 200, rating: 5, featured: false },
+				},
+				{
+					id: "b3",
+					title: "Foundation",
+					genre: "sci-fi",
+					metadata: { views: 150, rating: 4, featured: true },
+				},
+				{
+					id: "b4",
+					title: "The Hobbit",
+					genre: "fantasy",
+					metadata: { views: 300, rating: 5, featured: true },
+				},
+				{
+					id: "b5",
+					title: "1984",
+					genre: "dystopia",
+					metadata: { views: 250, rating: 5, featured: false },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Query using both fields in the compound index
+			const results = await db.books.query({
+				where: { "metadata.rating": 5, genre: "sci-fi" },
+			}).runPromise;
+
+			// Should return b1 and b2 (rating=5 AND genre=sci-fi)
+			expect(results.length).toBe(2);
+			const ids = results.map((r) => (r as { id: string }).id).sort();
+			expect(ids).toEqual(["b1", "b2"]);
+		});
+
+		it("should use $eq operators on compound index fields", async () => {
+			const config = createCompoundNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "The Hobbit",
+					genre: "fantasy",
+					metadata: { views: 200, rating: 5, featured: false },
+				},
+				{
+					id: "b3",
+					title: "Foundation",
+					genre: "sci-fi",
+					metadata: { views: 150, rating: 4, featured: true },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Query using $eq on both compound index fields
+			const results = await db.books.query({
+				where: {
+					"metadata.rating": { $eq: 5 },
+					genre: { $eq: "fantasy" },
+				},
+			}).runPromise;
+
+			// Should return only b2 (rating=5 AND genre=fantasy)
+			expect(results.length).toBe(1);
+			expect((results[0] as { id: string }).id).toBe("b2");
+		});
+
+		it("should return empty array when compound index lookup finds no matches", async () => {
+			const config = createCompoundNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "The Hobbit",
+					genre: "fantasy",
+					metadata: { views: 200, rating: 4, featured: false },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// No book has rating=5 AND genre=fantasy
+			const results = await db.books.query({
+				where: { "metadata.rating": 5, genre: "fantasy" },
+			}).runPromise;
+
+			expect(results.length).toBe(0);
+		});
+
+		it("should collect all IDs for compound index with duplicate key combinations", async () => {
+			const config = createCompoundNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 200, rating: 5, featured: false },
+				},
+				{
+					id: "b3",
+					title: "Foundation",
+					genre: "sci-fi",
+					metadata: { views: 150, rating: 5, featured: true },
+				},
+				{
+					id: "b4",
+					title: "The Hobbit",
+					genre: "fantasy",
+					metadata: { views: 300, rating: 5, featured: true },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Query for rating=5 AND genre=sci-fi → multiple matches
+			const results = await db.books.query({
+				where: { "metadata.rating": 5, genre: "sci-fi" },
+			}).runPromise;
+
+			// Should return b1, b2, b3 (all have rating=5 AND genre=sci-fi)
+			expect(results.length).toBe(3);
+			const ids = results.map((r) => (r as { id: string }).id).sort();
+			expect(ids).toEqual(["b1", "b2", "b3"]);
+		});
+
+		it("should handle mixed compound index + additional non-indexed field in where clause", async () => {
+			const config = createCompoundNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 200, rating: 5, featured: false },
+				},
+				{
+					id: "b3",
+					title: "Foundation",
+					genre: "sci-fi",
+					metadata: { views: 150, rating: 5, featured: true },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Query using compound index fields + additional non-indexed field (featured)
+			const results = await db.books.query({
+				where: {
+					"metadata.rating": 5,
+					genre: "sci-fi",
+					"metadata.featured": true,
+				},
+			}).runPromise;
+
+			// Compound index narrows to b1, b2, b3 (rating=5 AND genre=sci-fi)
+			// Post-filter keeps only featured=true → b1, b3
+			expect(results.length).toBe(2);
+			const ids = results.map((r) => (r as { id: string }).id).sort();
+			expect(ids).toEqual(["b1", "b3"]);
+		});
+
+		it("should query compound index using shape-mirror syntax for nested field", async () => {
+			const config = createCompoundNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "The Hobbit",
+					genre: "fantasy",
+					metadata: { views: 200, rating: 5, featured: false },
+				},
+				{
+					id: "b3",
+					title: "Foundation",
+					genre: "sci-fi",
+					metadata: { views: 150, rating: 4, featured: true },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Query using shape-mirror syntax for the nested field
+			const results = await db.books.query({
+				where: {
+					metadata: { rating: 5 },
+					genre: "sci-fi",
+				},
+			}).runPromise;
+
+			// Should return b1 (rating=5 AND genre=sci-fi)
+			expect(results.length).toBe(1);
+			expect((results[0] as { id: string }).id).toBe("b1");
+		});
+	});
 });
 
 // Export helpers for use in other test files
