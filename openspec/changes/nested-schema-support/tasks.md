@@ -70,7 +70,7 @@
 
 - [x] 8.1 In `core/types/types.ts` `WhereClause`: verify/extend to support recursive nested object form. When `T[K]` is an object type, `WhereClause` should accept either `FilterOperators<T[K]>` or a nested `WhereClause` over the nested type's fields.
 - [x] 8.2 In `core/types/crud-types.ts` `UpdateWithOperators`: extend to support deep partial with operator detection at any level. When the field type is an object, the update value can be a recursive `UpdateWithOperators` of that nested type.
-- [ ] 8.3 Verify `ExtractNestedPaths<T>` covers dot-paths for index config, aggregate field references, and search index fields.
+- [x] 8.3 Verify `ExtractNestedPaths<T>` covers dot-paths for index config, aggregate field references, and search index fields.
 - [ ] 8.4 Write type-level tests: verify TypeScript accepts nested where clauses, nested update operators, dot-path index declarations, and dot-path aggregate field refs. Verify TypeScript rejects invalid nested paths.
 
 ## 9. Integration Tests
