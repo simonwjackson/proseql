@@ -529,3 +529,328 @@ describe("Search Index in Query Pipeline (task 7.3)", () => {
 		expect(results.length).toBe(2);
 	});
 });
+
+// ============================================================================
+// Nested Search Index Tests (task 7.3)
+// ============================================================================
+
+describe("Nested Search Index (task 7.3)", () => {
+	// Schema with nested fields
+	const NestedBookSchema = Schema.Struct({
+		id: Schema.String,
+		title: Schema.String,
+		genre: Schema.String,
+		metadata: Schema.Struct({
+			description: Schema.String,
+			tags: Schema.Array(Schema.String),
+			stats: Schema.Struct({
+				views: Schema.Number,
+			}),
+		}),
+		author: Schema.Struct({
+			name: Schema.String,
+			bio: Schema.String,
+		}),
+	});
+
+	const nestedTestBooks = [
+		{
+			id: "1",
+			title: "Dune",
+			genre: "sci-fi",
+			metadata: {
+				description: "Epic desert planet saga about spice and sandworms",
+				tags: ["sci-fi", "classic"],
+				stats: { views: 1000 },
+			},
+			author: {
+				name: "Frank Herbert",
+				bio: "American science fiction author",
+			},
+		},
+		{
+			id: "2",
+			title: "Neuromancer",
+			genre: "cyberpunk",
+			metadata: {
+				description: "Groundbreaking cyberpunk novel about hackers and AI",
+				tags: ["cyberpunk", "noir"],
+				stats: { views: 800 },
+			},
+			author: {
+				name: "William Gibson",
+				bio: "Father of cyberpunk literature",
+			},
+		},
+		{
+			id: "3",
+			title: "Foundation",
+			genre: "sci-fi",
+			metadata: {
+				description: "Psychohistory and the fall of a galactic empire",
+				tags: ["sci-fi", "space opera"],
+				stats: { views: 1200 },
+			},
+			author: {
+				name: "Isaac Asimov",
+				bio: "Prolific science fiction and popular science author",
+			},
+		},
+	];
+
+	describe("buildSearchIndex with nested fields", () => {
+		it("7.3: builds index from nested field metadata.description", async () => {
+			const indexRef = await Effect.runPromise(
+				buildSearchIndex(["metadata.description"], nestedTestBooks),
+			);
+			const index = await Effect.runPromise(Ref.get(indexRef));
+
+			// "desert" from book 1's metadata.description
+			expect(index.get("desert")?.has("1")).toBe(true);
+			// "cyberpunk" from book 2's metadata.description
+			expect(index.get("cyberpunk")?.has("2")).toBe(true);
+			// "psychohistory" from book 3's metadata.description
+			expect(index.get("psychohistory")?.has("3")).toBe(true);
+		});
+
+		it("7.3: builds index from nested field author.bio", async () => {
+			const indexRef = await Effect.runPromise(
+				buildSearchIndex(["author.bio"], nestedTestBooks),
+			);
+			const index = await Effect.runPromise(Ref.get(indexRef));
+
+			// "american" from book 1's author.bio
+			expect(index.get("american")?.has("1")).toBe(true);
+			// "father" from book 2's author.bio
+			expect(index.get("father")?.has("2")).toBe(true);
+			// "prolific" from book 3's author.bio
+			expect(index.get("prolific")?.has("3")).toBe(true);
+		});
+
+		it("7.3: builds index from multiple nested fields", async () => {
+			const indexRef = await Effect.runPromise(
+				buildSearchIndex(
+					["metadata.description", "author.bio"],
+					nestedTestBooks,
+				),
+			);
+			const index = await Effect.runPromise(Ref.get(indexRef));
+
+			// Check tokens from both fields are indexed
+			// From metadata.description
+			expect(index.get("desert")?.has("1")).toBe(true);
+			expect(index.get("hackers")?.has("2")).toBe(true);
+			// From author.bio
+			expect(index.get("american")?.has("1")).toBe(true);
+			expect(index.get("prolific")?.has("3")).toBe(true);
+		});
+
+		it("7.3: builds index from mix of flat and nested fields", async () => {
+			const indexRef = await Effect.runPromise(
+				buildSearchIndex(["title", "metadata.description"], nestedTestBooks),
+			);
+			const index = await Effect.runPromise(Ref.get(indexRef));
+
+			// From flat field "title"
+			expect(index.get("dune")?.has("1")).toBe(true);
+			expect(index.get("neuromancer")?.has("2")).toBe(true);
+			expect(index.get("foundation")?.has("3")).toBe(true);
+			// From nested field "metadata.description"
+			expect(index.get("desert")?.has("1")).toBe(true);
+			expect(index.get("cyberpunk")?.has("2")).toBe(true);
+		});
+
+		it("7.3: skips non-string nested fields gracefully", async () => {
+			// metadata.stats.views is a number, should be skipped
+			const indexRef = await Effect.runPromise(
+				buildSearchIndex(
+					["metadata.stats.views", "metadata.description"],
+					nestedTestBooks,
+				),
+			);
+			const index = await Effect.runPromise(Ref.get(indexRef));
+
+			// Should not have the number indexed as a string
+			expect(index.has("1000")).toBe(false);
+			expect(index.has("800")).toBe(false);
+			// But description should still be indexed
+			expect(index.get("desert")?.has("1")).toBe(true);
+		});
+	});
+
+	describe("lookupSearchIndex with nested indexed fields", () => {
+		it("7.3: finds entities via nested field tokens", async () => {
+			const indexRef = await Effect.runPromise(
+				buildSearchIndex(["metadata.description"], nestedTestBooks),
+			);
+
+			const ids = await Effect.runPromise(
+				lookupSearchIndex(indexRef, ["sandworms"]),
+			);
+			expect(ids.has("1")).toBe(true);
+			expect(ids.size).toBe(1);
+		});
+
+		it("7.3: multi-token search works with nested fields", async () => {
+			const indexRef = await Effect.runPromise(
+				buildSearchIndex(["metadata.description"], nestedTestBooks),
+			);
+
+			// Both "hackers" and "ai" are in book 2's description
+			const ids = await Effect.runPromise(
+				lookupSearchIndex(indexRef, ["hackers", "ai"]),
+			);
+			expect(ids.has("2")).toBe(true);
+			expect(ids.size).toBe(1);
+		});
+
+		it("7.3: prefix match works with nested fields", async () => {
+			const indexRef = await Effect.runPromise(
+				buildSearchIndex(["metadata.description"], nestedTestBooks),
+			);
+
+			// "psycho" should prefix-match "psychohistory" from book 3
+			const ids = await Effect.runPromise(
+				lookupSearchIndex(indexRef, ["psycho"]),
+			);
+			expect(ids.has("3")).toBe(true);
+		});
+	});
+
+	describe("Search Index Integration with nested fields in database", () => {
+		it("7.3: searchIndex with nested field builds correct inverted index", async () => {
+			const config = {
+				books: {
+					schema: NestedBookSchema,
+					relationships: {},
+					searchIndex: ["metadata.description"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, {
+					books: nestedTestBooks,
+				}),
+			);
+
+			// Search for term only in nested description field
+			const results = await db.books.query({
+				where: { $search: { query: "sandworms" } },
+			}).runPromise;
+
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("1");
+			expect(results[0].title).toBe("Dune");
+		});
+
+		it("7.3: searchIndex with deeply nested path builds correct index", async () => {
+			const config = {
+				books: {
+					schema: NestedBookSchema,
+					relationships: {},
+					searchIndex: ["author.bio"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, {
+					books: nestedTestBooks,
+				}),
+			);
+
+			// Search for term only in nested author.bio field
+			const results = await db.books.query({
+				where: { $search: { query: "cyberpunk literature" } },
+			}).runPromise;
+
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("2");
+		});
+
+		it("7.3: searchIndex with multiple nested fields works", async () => {
+			const config = {
+				books: {
+					schema: NestedBookSchema,
+					relationships: {},
+					searchIndex: ["metadata.description", "author.bio"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, {
+					books: nestedTestBooks,
+				}),
+			);
+
+			// Search for term in description
+			const descResults = await db.books.query({
+				where: { $search: { query: "galactic empire" } },
+			}).runPromise;
+			expect(descResults.length).toBe(1);
+			expect(descResults[0].id).toBe("3");
+
+			// Search for term in author.bio
+			const bioResults = await db.books.query({
+				where: { $search: { query: "american" } },
+			}).runPromise;
+			expect(bioResults.length).toBe(1);
+			expect(bioResults[0].id).toBe("1");
+		});
+
+		it("7.3: searchIndex with mix of flat and nested fields works", async () => {
+			const config = {
+				books: {
+					schema: NestedBookSchema,
+					relationships: {},
+					searchIndex: ["title", "metadata.description"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, {
+					books: nestedTestBooks,
+				}),
+			);
+
+			// Search for term in title (flat field)
+			const titleResults = await db.books.query({
+				where: { $search: { query: "foundation" } },
+			}).runPromise;
+			expect(titleResults.length).toBe(1);
+			expect(titleResults[0].id).toBe("3");
+
+			// Search for term in metadata.description (nested field)
+			const descResults = await db.books.query({
+				where: { $search: { query: "hackers" } },
+			}).runPromise;
+			expect(descResults.length).toBe(1);
+			expect(descResults[0].id).toBe("2");
+		});
+
+		it("7.3: top-level $search with specific nested fields uses index", async () => {
+			const config = {
+				books: {
+					schema: NestedBookSchema,
+					relationships: {},
+					searchIndex: ["metadata.description", "author.bio"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, {
+					books: nestedTestBooks,
+				}),
+			);
+
+			// Search with explicit nested fields
+			const results = await db.books.query({
+				where: {
+					$search: { query: "prolific", fields: ["author.bio"] },
+				},
+			}).runPromise;
+
+			expect(results.length).toBe(1);
+			expect(results[0].id).toBe("3"); // Asimov's bio contains "prolific"
+		});
+	});
+});
