@@ -130,5 +130,23 @@ describe("Nested Schema Update Operations", () => {
 			expect(found.metadata.rating).toBe(5);
 			expect(found.metadata.tags).toEqual(["classic", "epic"]);
 		});
+
+		it("should replace entire nested object when using $set at object level (task 4.5)", async () => {
+			// Using $set at the nested object level should replace the entire object
+			// This means { metadata: { $set: { views: 0 } } } replaces metadata entirely
+			const result = await db.books.update("book1", {
+				metadata: { $set: { views: 0, rating: 1, tags: [] } },
+			}).runPromise;
+
+			// metadata should be completely replaced with only the $set value
+			expect(result.metadata).toEqual({ views: 0, rating: 1, tags: [] });
+			// Previous fields that weren't in $set should NOT be present
+			expect(result.metadata.description).toBeUndefined();
+			expect(result.metadata.featured).toBeUndefined();
+
+			// Verify in database
+			const found = await db.books.findById("book1").runPromise;
+			expect(found.metadata).toEqual({ views: 0, rating: 1, tags: [] });
+		});
 	});
 });

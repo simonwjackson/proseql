@@ -34,7 +34,7 @@
 - [x] 4.2 Refactor `applyUpdates` to use `deepMergeUpdates` instead of flat iteration.
 - [x] 4.3 Test deep merge: `update(id, { metadata: { views: 500 } })` preserves `metadata.rating` and `metadata.tags`.
 - [x] 4.4 Test nested operator: `update(id, { metadata: { views: { $increment: 1 } } })` increments only `metadata.views`.
-- [ ] 4.5 Test nested `$set` replaces: `update(id, { metadata: { $set: { views: 0 } } })` replaces entire metadata.
+- [x] 4.5 Test nested `$set` replaces: `update(id, { metadata: { $set: { views: 0 } } })` replaces entire metadata.
 - [ ] 4.6 Test mixed nested + flat update: `update(id, { title: "New Title", metadata: { rating: 5 } })`.
 - [ ] 4.7 Test nested string operator: `update(id, { metadata: { description: { $append: " (Updated)" } } })`.
 - [ ] 4.8 Test nested array operator: `update(id, { metadata: { tags: { $append: "classic" } } })`.
