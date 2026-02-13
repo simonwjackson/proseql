@@ -219,5 +219,42 @@ describe("Nested Schema Update Operations", () => {
 			expect(found.metadata.views).toBe(150);
 			expect(found.metadata.rating).toBe(5);
 		});
+
+		it("should apply $toggle operator on nested boolean field (task 4.9)", async () => {
+			// Initial metadata.featured is true for book1
+			const result = await db.books.update("book1", {
+				metadata: { featured: { $toggle: true } },
+			}).runPromise;
+
+			expect(result.metadata.featured).toBe(false); // toggled from true to false
+			// Other nested fields should be preserved
+			expect(result.metadata.views).toBe(150);
+			expect(result.metadata.rating).toBe(5);
+			expect(result.metadata.tags).toEqual(["classic", "epic"]);
+			expect(result.metadata.description).toBe("A desert planet story");
+
+			// Verify in database
+			const found = await db.books.findById("book1").runPromise;
+			expect(found.metadata.featured).toBe(false);
+			expect(found.metadata.views).toBe(150);
+			expect(found.metadata.rating).toBe(5);
+
+			// Toggle again to verify it works both ways
+			const result2 = await db.books.update("book1", {
+				metadata: { featured: { $toggle: true } },
+			}).runPromise;
+
+			expect(result2.metadata.featured).toBe(true); // toggled from false back to true
+			expect(result2.metadata.views).toBe(150); // still preserved
+
+			// Test on book2 which has featured: false
+			const result3 = await db.books.update("book2", {
+				metadata: { featured: { $toggle: true } },
+			}).runPromise;
+
+			expect(result3.metadata.featured).toBe(true); // toggled from false to true
+			expect(result3.metadata.views).toBe(80); // preserved
+			expect(result3.metadata.rating).toBe(4); // preserved
+		});
 	});
 });
