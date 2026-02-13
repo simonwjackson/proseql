@@ -507,6 +507,46 @@ describe("applyFilter Stream combinator", () => {
 			expect(result).toHaveLength(1);
 			expect(result[0].id).toBe("3");
 		});
+
+		it("should filter by 3-level nested path", async () => {
+			const deepNestedData = [
+				{ id: "1", a: { b: { c: "deep" } } },
+				{ id: "2", a: { b: { c: "shallow" } } },
+				{ id: "3", a: { b: { c: "deep" } } },
+				{ id: "4", a: { b: { c: "other" } } },
+			];
+			const result = await collectFiltered(deepNestedData, {
+				a: { b: { c: { $eq: "deep" } } },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
+
+		it("should filter by 3-level nested path with exact value match", async () => {
+			const deepNestedData = [
+				{ id: "1", a: { b: { c: "deep" } } },
+				{ id: "2", a: { b: { c: "shallow" } } },
+				{ id: "3", a: { b: { c: "deep" } } },
+			];
+			const result = await collectFiltered(deepNestedData, {
+				a: { b: { c: "deep" } },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
+
+		it("should filter by 3-level nested path with $gt operator", async () => {
+			const deepNestedData = [
+				{ id: "1", a: { b: { c: 100 } } },
+				{ id: "2", a: { b: { c: 50 } } },
+				{ id: "3", a: { b: { c: 200 } } },
+			];
+			const result = await collectFiltered(deepNestedData, {
+				a: { b: { c: { $gt: 75 } } },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
 	});
 
 	describe("nested filtering (dot-notation)", () => {
