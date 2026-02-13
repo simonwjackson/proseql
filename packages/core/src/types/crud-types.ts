@@ -92,13 +92,63 @@ export type UpdateOperatorValue<T> = T extends number
 						$set?: T;
 					};
 
+// ============================================================================
+// Nested Update Types
+// ============================================================================
+
 /**
- * Update input with support for operators
+ * Primitive types that should not be treated as "nestable" objects for updates
+ */
+type UpdatePrimitive =
+	| string
+	| number
+	| boolean
+	| bigint
+	| symbol
+	| undefined
+	| null;
+
+/**
+ * Field update value that supports nested object deep merge.
+ * When T is an object type (not primitive, array, Date, etc.), this allows either:
+ * - Direct value T (replace entirely)
+ * - Standard update operators (UpdateOperatorValue<T>)
+ * - Nested object with update values on T's own fields (deep merge)
+ *
+ * The nested form is limited to 2 levels to avoid infinite recursion.
+ */
+type FieldUpdateValue<T> = T extends UpdatePrimitive
+	? T | UpdateOperatorValue<T>
+	: T extends readonly unknown[]
+		? T | UpdateOperatorValue<T>
+		: T extends Date
+			? T | UpdateOperatorValue<T>
+			: T extends (...args: unknown[]) => unknown
+				? T | UpdateOperatorValue<T>
+				: T extends object
+					? T | UpdateOperatorValue<T> | NestedFieldUpdateValue<T>
+					: T | UpdateOperatorValue<T>;
+
+/**
+ * Nested field update value for second level (no further recursion).
+ * Allows specifying partial update values on the nested object's fields.
+ */
+type NestedFieldUpdateValue<T> = {
+	[K in keyof T]?: T[K] | UpdateOperatorValue<T[K]>;
+};
+
+/**
+ * Update input with support for operators and nested object deep merge.
+ *
+ * For nested objects, this allows:
+ * - `{ metadata: { views: 500 } }` - deep merge, preserves sibling fields
+ * - `{ metadata: { views: { $increment: 1 } } }` - operator at nested level
+ * - `{ metadata: { $set: { views: 0 } } }` - replace entire nested object
  */
 export type UpdateWithOperators<T> = {
-	[K in keyof UpdateInput<T>]?:
-		| UpdateInput<T>[K]
-		| UpdateOperatorValue<K extends keyof T ? T[K] : never>;
+	[K in keyof UpdateInput<T>]?: FieldUpdateValue<
+		K extends keyof T ? T[K] : never
+	>;
 };
 
 // ============================================================================
