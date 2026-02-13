@@ -296,4 +296,482 @@ describe("Nested Schema Update Operations", () => {
 			expect(result2.metadata.views).toBe(150); // still preserved
 		});
 	});
+
+	describe("flat schema regression (task 4.11)", () => {
+		/**
+		 * These tests verify that flat schemas (schemas with no nested objects)
+		 * behave identically after the deep merge update changes.
+		 *
+		 * This is a regression test to ensure the new deepMergeUpdates logic
+		 * doesn't break existing flat schema behavior.
+		 */
+
+		// Define a flat schema (no nested objects)
+		const FlatBookSchema = Schema.Struct({
+			id: Schema.String,
+			title: Schema.String,
+			genre: Schema.String,
+			year: Schema.Number,
+			inStock: Schema.Boolean,
+			tags: Schema.Array(Schema.String),
+			description: Schema.optional(Schema.String),
+			rating: Schema.optional(Schema.Number),
+			createdAt: Schema.optional(Schema.String),
+			updatedAt: Schema.optional(Schema.String),
+		});
+
+		const flatConfig = {
+			flatBooks: {
+				schema: FlatBookSchema,
+				relationships: {},
+			},
+		} as const;
+
+		it("should update a single flat field without affecting others", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Original Title",
+							genre: "sci-fi",
+							year: 2020,
+							inStock: true,
+							tags: ["space", "adventure"],
+							description: "A space story",
+							rating: 4,
+						},
+					],
+				}),
+			);
+
+			const result = await flatDb.flatBooks.update("flat1", {
+				title: "Updated Title",
+			}).runPromise;
+
+			// Updated field
+			expect(result.title).toBe("Updated Title");
+			// All other fields should be preserved
+			expect(result.genre).toBe("sci-fi");
+			expect(result.year).toBe(2020);
+			expect(result.inStock).toBe(true);
+			expect(result.tags).toEqual(["space", "adventure"]);
+			expect(result.description).toBe("A space story");
+			expect(result.rating).toBe(4);
+		});
+
+		it("should apply $increment operator on flat number field", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Test Book",
+							genre: "sci-fi",
+							year: 2020,
+							inStock: true,
+							tags: ["tag1"],
+							rating: 3,
+						},
+					],
+				}),
+			);
+
+			const result = await flatDb.flatBooks.update("flat1", {
+				rating: { $increment: 2 },
+			}).runPromise;
+
+			expect(result.rating).toBe(5);
+			// Other fields preserved
+			expect(result.year).toBe(2020);
+			expect(result.title).toBe("Test Book");
+		});
+
+		it("should apply $decrement operator on flat number field", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Test Book",
+							genre: "sci-fi",
+							year: 2020,
+							inStock: true,
+							tags: ["tag1"],
+							rating: 5,
+						},
+					],
+				}),
+			);
+
+			const result = await flatDb.flatBooks.update("flat1", {
+				year: { $decrement: 10 },
+			}).runPromise;
+
+			expect(result.year).toBe(2010);
+			expect(result.rating).toBe(5); // preserved
+		});
+
+		it("should apply $multiply operator on flat number field", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Test Book",
+							genre: "sci-fi",
+							year: 100,
+							inStock: true,
+							tags: ["tag1"],
+						},
+					],
+				}),
+			);
+
+			const result = await flatDb.flatBooks.update("flat1", {
+				year: { $multiply: 20 },
+			}).runPromise;
+
+			expect(result.year).toBe(2000);
+		});
+
+		it("should apply $append operator on flat string field", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Test Book",
+							genre: "sci-fi",
+							year: 2020,
+							inStock: true,
+							tags: ["tag1"],
+							description: "A story about",
+						},
+					],
+				}),
+			);
+
+			const result = await flatDb.flatBooks.update("flat1", {
+				description: { $append: " space travel" },
+			}).runPromise;
+
+			expect(result.description).toBe("A story about space travel");
+		});
+
+		it("should apply $prepend operator on flat string field", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Test Book",
+							genre: "sci-fi",
+							year: 2020,
+							inStock: true,
+							tags: ["tag1"],
+							description: "about space travel",
+						},
+					],
+				}),
+			);
+
+			const result = await flatDb.flatBooks.update("flat1", {
+				description: { $prepend: "A story " },
+			}).runPromise;
+
+			expect(result.description).toBe("A story about space travel");
+		});
+
+		it("should apply $append operator on flat array field", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Test Book",
+							genre: "sci-fi",
+							year: 2020,
+							inStock: true,
+							tags: ["sci-fi", "adventure"],
+						},
+					],
+				}),
+			);
+
+			const result = await flatDb.flatBooks.update("flat1", {
+				tags: { $append: "classic" },
+			}).runPromise;
+
+			expect(result.tags).toEqual(["sci-fi", "adventure", "classic"]);
+		});
+
+		it("should apply $prepend operator on flat array field", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Test Book",
+							genre: "sci-fi",
+							year: 2020,
+							inStock: true,
+							tags: ["adventure"],
+						},
+					],
+				}),
+			);
+
+			const result = await flatDb.flatBooks.update("flat1", {
+				tags: { $prepend: "must-read" },
+			}).runPromise;
+
+			expect(result.tags).toEqual(["must-read", "adventure"]);
+		});
+
+		it("should apply $remove operator on flat array field", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Test Book",
+							genre: "sci-fi",
+							year: 2020,
+							inStock: true,
+							tags: ["sci-fi", "adventure", "classic"],
+						},
+					],
+				}),
+			);
+
+			const result = await flatDb.flatBooks.update("flat1", {
+				tags: { $remove: "adventure" },
+			}).runPromise;
+
+			expect(result.tags).toEqual(["sci-fi", "classic"]);
+		});
+
+		it("should apply $toggle operator on flat boolean field", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Test Book",
+							genre: "sci-fi",
+							year: 2020,
+							inStock: true,
+							tags: [],
+						},
+					],
+				}),
+			);
+
+			const result = await flatDb.flatBooks.update("flat1", {
+				inStock: { $toggle: true },
+			}).runPromise;
+
+			expect(result.inStock).toBe(false);
+
+			// Toggle again
+			const result2 = await flatDb.flatBooks.update("flat1", {
+				inStock: { $toggle: true },
+			}).runPromise;
+
+			expect(result2.inStock).toBe(true);
+		});
+
+		it("should apply $set operator on flat fields", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Test Book",
+							genre: "sci-fi",
+							year: 2020,
+							inStock: true,
+							tags: ["old-tag"],
+						},
+					],
+				}),
+			);
+
+			const result = await flatDb.flatBooks.update("flat1", {
+				title: { $set: "New Title" },
+				tags: { $set: ["new-tag", "another"] },
+				rating: { $set: 5 },
+			}).runPromise;
+
+			expect(result.title).toBe("New Title");
+			expect(result.tags).toEqual(["new-tag", "another"]);
+			expect(result.rating).toBe(5);
+		});
+
+		it("should apply multiple operators in a single update on flat schema", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Original",
+							genre: "sci-fi",
+							year: 2020,
+							inStock: false,
+							tags: ["tag1"],
+							rating: 3,
+						},
+					],
+				}),
+			);
+
+			const result = await flatDb.flatBooks.update("flat1", {
+				title: { $append: " (Updated)" },
+				rating: { $increment: 1 },
+				inStock: { $toggle: true },
+				tags: { $append: "tag2" },
+			}).runPromise;
+
+			expect(result.title).toBe("Original (Updated)");
+			expect(result.rating).toBe(4);
+			expect(result.inStock).toBe(true);
+			expect(result.tags).toEqual(["tag1", "tag2"]);
+		});
+
+		it("should update multiple flat fields directly without operators", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Original",
+							genre: "sci-fi",
+							year: 2020,
+							inStock: true,
+							tags: ["tag1"],
+						},
+					],
+				}),
+			);
+
+			const result = await flatDb.flatBooks.update("flat1", {
+				title: "New Title",
+				genre: "fantasy",
+				year: 2024,
+				inStock: false,
+			}).runPromise;
+
+			expect(result.title).toBe("New Title");
+			expect(result.genre).toBe("fantasy");
+			expect(result.year).toBe(2024);
+			expect(result.inStock).toBe(false);
+			// Unchanged field should be preserved
+			expect(result.tags).toEqual(["tag1"]);
+		});
+
+		it("should preserve state after multiple sequential flat updates", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Book",
+							genre: "sci-fi",
+							year: 2020,
+							inStock: true,
+							tags: ["tag1"],
+							rating: 3,
+						},
+					],
+				}),
+			);
+
+			// First update
+			await flatDb.flatBooks.update("flat1", {
+				title: "Updated Book",
+			}).runPromise;
+
+			// Second update
+			await flatDb.flatBooks.update("flat1", {
+				rating: { $increment: 1 },
+			}).runPromise;
+
+			// Third update
+			await flatDb.flatBooks.update("flat1", {
+				tags: { $append: "tag2" },
+			}).runPromise;
+
+			// Verify final state
+			const final = await flatDb.flatBooks.findById("flat1").runPromise;
+			expect(final.title).toBe("Updated Book");
+			expect(final.rating).toBe(4);
+			expect(final.tags).toEqual(["tag1", "tag2"]);
+			// Unchanged fields
+			expect(final.genre).toBe("sci-fi");
+			expect(final.year).toBe(2020);
+			expect(final.inStock).toBe(true);
+		});
+
+		it("should handle flat updateMany with operators", async () => {
+			const flatDb = await Effect.runPromise(
+				createEffectDatabase(flatConfig, {
+					flatBooks: [
+						{
+							id: "flat1",
+							title: "Book 1",
+							genre: "sci-fi",
+							year: 2020,
+							inStock: true,
+							tags: [],
+							rating: 3,
+						},
+						{
+							id: "flat2",
+							title: "Book 2",
+							genre: "sci-fi",
+							year: 2021,
+							inStock: false,
+							tags: [],
+							rating: 4,
+						},
+						{
+							id: "flat3",
+							title: "Book 3",
+							genre: "fantasy",
+							year: 2022,
+							inStock: true,
+							tags: [],
+							rating: 5,
+						},
+					],
+				}),
+			);
+
+			// Update all sci-fi books
+			const result = await flatDb.flatBooks.updateMany(
+				(b) => b.genre === "sci-fi",
+				{
+					rating: { $increment: 1 },
+					tags: { $append: "updated" },
+				},
+			).runPromise;
+
+			expect(result.count).toBe(2);
+			expect(result.updated.map((b) => b.id).sort()).toEqual(["flat1", "flat2"]);
+			expect(result.updated.every((b) => b.tags.includes("updated"))).toBe(true);
+
+			// Verify individual updates
+			const book1 = await flatDb.flatBooks.findById("flat1").runPromise;
+			expect(book1.rating).toBe(4); // 3 + 1
+
+			const book2 = await flatDb.flatBooks.findById("flat2").runPromise;
+			expect(book2.rating).toBe(5); // 4 + 1
+
+			// Verify non-matching book was not updated
+			const book3 = await flatDb.flatBooks.findById("flat3").runPromise;
+			expect(book3.rating).toBe(5); // unchanged
+			expect(book3.tags).toEqual([]); // unchanged
+		});
+	});
 });
