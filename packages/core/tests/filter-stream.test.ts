@@ -460,6 +460,19 @@ describe("applyFilter Stream combinator", () => {
 			expect(result).toHaveLength(1);
 			expect(result[0].id).toBe("3");
 		});
+
+		it("should filter with $or on nested conditions", async () => {
+			const result = await collectFiltered(nestedData, {
+				$or: [
+					{ metadata: { views: { $gt: 1000 } } },
+					{ metadata: { rating: 5 } },
+				],
+			});
+			// views > 1000: none
+			// rating === 5: id 1 (rating 5) and id 3 (rating 5)
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
 	});
 
 	describe("nested filtering (dot-notation)", () => {
