@@ -43,19 +43,29 @@ jobs:
   publish:
     needs: [test, typecheck, lint]
     runs-on: ubuntu-latest
-    env:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
       - run: bun install
+      - run: bun run build
       - name: Publish @proseql/core
-        run: bun publish --cwd packages/core
+        run: npm publish --provenance --access public
+        working-directory: packages/core
       - name: Publish @proseql/node
-        run: bun publish --cwd packages/node
+        run: npm publish --provenance --access public
+        working-directory: packages/node
       - name: Publish @proseql/rest
-        run: bun publish --cwd packages/rest
+        run: npm publish --provenance --access public
+        working-directory: packages/rest
       - name: Publish @proseql/rpc
-        run: bun publish --cwd packages/rpc
+        run: npm publish --provenance --access public
+        working-directory: packages/rpc
