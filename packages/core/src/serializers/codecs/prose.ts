@@ -572,6 +572,62 @@ const deserializeFieldValue = (fieldValue: string): unknown => {
 	return deserializeValue(fieldValue);
 };
 
+// ============================================================================
+// Overflow Encoder
+// ============================================================================
+
+/**
+ * Default indentation for overflow lines.
+ */
+const OVERFLOW_INDENT = "  ";
+
+/**
+ * Encodes overflow fields for a record as indented lines.
+ * For each overflow template, if the record has a non-null/non-undefined value
+ * for the field in that template, emits an indented line using the template.
+ * Overflow fields with null or undefined values are omitted.
+ *
+ * @param record - The record object with field values
+ * @param overflowTemplates - Array of compiled overflow templates
+ * @returns Array of indented overflow line strings
+ *
+ * @example
+ * ```typescript
+ * const templates = compileOverflowTemplates(['tagged {tags}', '~ {description}'])
+ * const record = { id: "1", title: "Dune", tags: ["classic"], description: null }
+ * encodeOverflowLines(record, templates)
+ * // → ['  tagged [classic]']
+ * // Note: description is null, so its overflow line is omitted
+ * ```
+ */
+export const encodeOverflowLines = (
+	record: Record<string, unknown>,
+	overflowTemplates: ReadonlyArray<CompiledTemplate>
+): ReadonlyArray<string> => {
+	const lines: string[] = [];
+
+	for (const template of overflowTemplates) {
+		// Check if any field in this template has a non-null value
+		// Overflow templates typically have a single field, but we support multiple
+		const hasNonNullValue = template.fields.some((fieldName) => {
+			const value = record[fieldName];
+			return value !== null && value !== undefined;
+		});
+
+		if (hasNonNullValue) {
+			// Encode the overflow line using the template
+			const overflowLine = encodeHeadline(record, template);
+			lines.push(OVERFLOW_INDENT + overflowLine);
+		}
+	}
+
+	return lines;
+};
+
+// ============================================================================
+// Array Parsing Helpers
+// ============================================================================
+
 /**
  * Parses array element string into an array of deserialized values.
  * Handles quoted elements that may contain commas or brackets.

@@ -29,7 +29,7 @@
 
 ## 5. Overflow Encoder
 
-- [ ] 5.1 Implement overflow encoding — for each overflow template, if the record has a non-null value for the field, emit the indented overflow line using the template
+- [x] 5.1 Implement overflow encoding — for each overflow template, if the record has a non-null value for the field, emit the indented overflow line using the template
 - [ ] 5.2 Implement multi-line value encoding — if a field value contains newlines, emit the first line on the template line and subsequent lines as deeper-indented continuation lines
 - [ ] 5.3 Write tests for overflow encoding: single overflow field, multiple overflow fields, null overflow omitted, multi-line value continuation
 
