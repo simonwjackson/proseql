@@ -16,6 +16,7 @@ const BookSchema = Schema.Struct({
 		tags: Schema.Array(Schema.String),
 		description: Schema.optional(Schema.String),
 		featured: Schema.optional(Schema.Boolean),
+		popularity: Schema.optional(Schema.Number),
 	}),
 	author: Schema.optional(
 		Schema.Struct({
@@ -255,6 +256,44 @@ describe("Nested Schema Update Operations", () => {
 			expect(result3.metadata.featured).toBe(true); // toggled from false to true
 			expect(result3.metadata.views).toBe(80); // preserved
 			expect(result3.metadata.rating).toBe(4); // preserved
+		});
+
+		it("should add a new field to nested object when field does not exist (task 4.10)", async () => {
+			// Initial metadata does NOT have 'popularity' field (it's optional in schema)
+			// Verify initial state
+			const initial = await db.books.findById("book1").runPromise;
+			expect(initial.metadata.popularity).toBeUndefined();
+
+			// Update with a new nested field that doesn't exist yet
+			const result = await db.books.update("book1", {
+				metadata: { popularity: 42 },
+			}).runPromise;
+
+			// New field should be added
+			expect(result.metadata.popularity).toBe(42);
+			// All existing nested fields should be preserved
+			expect(result.metadata.views).toBe(150);
+			expect(result.metadata.rating).toBe(5);
+			expect(result.metadata.tags).toEqual(["classic", "epic"]);
+			expect(result.metadata.description).toBe("A desert planet story");
+			expect(result.metadata.featured).toBe(true);
+
+			// Verify in database
+			const found = await db.books.findById("book1").runPromise;
+			expect(found.metadata.popularity).toBe(42);
+			expect(found.metadata.views).toBe(150);
+			expect(found.metadata.rating).toBe(5);
+			expect(found.metadata.tags).toEqual(["classic", "epic"]);
+			expect(found.metadata.description).toBe("A desert planet story");
+			expect(found.metadata.featured).toBe(true);
+
+			// Update the newly added field to verify it can be modified
+			const result2 = await db.books.update("book1", {
+				metadata: { popularity: 100 },
+			}).runPromise;
+
+			expect(result2.metadata.popularity).toBe(100);
+			expect(result2.metadata.views).toBe(150); // still preserved
 		});
 	});
 });

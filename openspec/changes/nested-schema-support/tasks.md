@@ -39,7 +39,7 @@
 - [x] 4.7 Test nested string operator: `update(id, { metadata: { description: { $append: " (Updated)" } } })`.
 - [x] 4.8 Test nested array operator: `update(id, { metadata: { tags: { $append: "classic" } } })`.
 - [x] 4.9 Test nested boolean operator: `update(id, { metadata: { featured: { $toggle: true } } })`.
-- [ ] 4.10 Test deep merge on non-existent nested key: `update(id, { metadata: { newField: 42 } })` adds the field to metadata.
+- [x] 4.10 Test deep merge on non-existent nested key: `update(id, { metadata: { newField: 42 } })` adds the field to metadata.
 - [ ] 4.11 Test that flat schemas (no nested objects) behave identically to before (regression).
 
 ## 5. Nested Indexing
