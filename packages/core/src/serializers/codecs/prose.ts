@@ -715,6 +715,148 @@ export const encodeOverflowLines = (
 };
 
 // ============================================================================
+// Overflow Decoder
+// ============================================================================
+
+/**
+ * Result of decoding overflow lines for a record.
+ */
+export interface DecodeOverflowResult {
+	/** The decoded field values from overflow lines */
+	readonly fields: Record<string, unknown>;
+	/** Number of lines consumed (including continuation lines) */
+	readonly linesConsumed: number;
+}
+
+/**
+ * Measures the indentation level of a line (number of leading spaces/tabs).
+ *
+ * @param line - The line to measure
+ * @returns The number of leading whitespace characters
+ */
+const measureIndent = (line: string): number => {
+	let indent = 0;
+	for (const char of line) {
+		if (char === " " || char === "\t") {
+			indent++;
+		} else {
+			break;
+		}
+	}
+	return indent;
+};
+
+/**
+ * Decodes overflow lines for a record using the configured overflow templates.
+ * Collects indented lines belonging to the record, tries each overflow template
+ * in order, skips on non-match, and captures field values on match.
+ *
+ * For each indented line:
+ * 1. Try matching against each overflow template (in order)
+ * 2. If a template matches, capture the field values and move to next line
+ * 3. If no template matches, check if it's a continuation line (deeper indentation)
+ * 4. Continuation lines are appended to the previous field's value with newline
+ *
+ * @param lines - Array of indented lines (already collected for this record)
+ * @param overflowTemplates - Array of compiled overflow templates
+ * @param baseIndent - The expected indentation level for overflow lines (default: 2)
+ * @returns The decoded field values and number of lines consumed
+ *
+ * @example
+ * ```typescript
+ * const templates = compileOverflowTemplates(['tagged {tags}', '~ {description}'])
+ * const lines = ['  tagged [sci-fi]', '  ~ A classic novel']
+ * const result = decodeOverflowLines(lines, templates)
+ * // → { fields: { tags: ['sci-fi'], description: 'A classic novel' }, linesConsumed: 2 }
+ * ```
+ */
+export const decodeOverflowLines = (
+	lines: ReadonlyArray<string>,
+	overflowTemplates: ReadonlyArray<CompiledTemplate>,
+	baseIndent = 2
+): DecodeOverflowResult => {
+	const fields: Record<string, unknown> = {};
+	let lineIndex = 0;
+	let lastMatchedField: string | null = null;
+
+	while (lineIndex < lines.length) {
+		const line = lines[lineIndex];
+		const indent = measureIndent(line);
+
+		// Check if line is indented enough to be part of this record's overflow
+		if (indent < baseIndent) {
+			// Line is not indented enough, stop processing
+			break;
+		}
+
+		// Check if this is a continuation line (deeper indentation than base)
+		if (indent > baseIndent && lastMatchedField !== null) {
+			// Continuation line - append to the last matched field
+			const existingValue = fields[lastMatchedField];
+			const continuationContent = line.slice(indent); // Strip all leading whitespace
+
+			if (typeof existingValue === "string") {
+				fields[lastMatchedField] = existingValue + "\n" + continuationContent;
+			} else {
+				// Shouldn't happen in well-formed input, but handle it
+				fields[lastMatchedField] = String(existingValue) + "\n" + continuationContent;
+			}
+
+			lineIndex++;
+			continue;
+		}
+
+		// Strip the base indentation to get the content
+		const content = line.slice(baseIndent);
+
+		// Try each overflow template in order
+		let matched = false;
+		for (const template of overflowTemplates) {
+			const decoded = decodeHeadline(content, template);
+
+			if (decoded !== null) {
+				// Template matched - merge the decoded fields
+				for (const [fieldName, value] of Object.entries(decoded)) {
+					fields[fieldName] = value;
+
+					// Track the last matched field for continuation lines
+					// (typically the last field in the template, often the only one)
+					lastMatchedField = fieldName;
+				}
+
+				matched = true;
+				break;
+			}
+		}
+
+		if (!matched) {
+			// No template matched - this could be:
+			// 1. A malformed overflow line (skip it)
+			// 2. Or we're past the record's overflow section
+			// For robustness, we skip and continue trying
+			// If it's deeply indented, it might be a continuation without a prior match
+			if (indent > baseIndent && lastMatchedField !== null) {
+				// Treat as continuation anyway
+				const existingValue = fields[lastMatchedField];
+				const continuationContent = line.slice(indent);
+
+				if (typeof existingValue === "string") {
+					fields[lastMatchedField] = existingValue + "\n" + continuationContent;
+				}
+			}
+			// If no match and no prior field, we just skip this line
+		}
+
+		lineIndex++;
+	}
+
+	return {
+		fields,
+		linesConsumed: lineIndex,
+	};
+};
+
+// ============================================================================
 // Array Parsing Helpers
 // ============================================================================
 
