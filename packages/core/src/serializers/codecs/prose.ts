@@ -25,8 +25,8 @@ export interface CompiledTemplate {
  * Options for creating a prose codec.
  */
 export interface ProseCodecOptions {
-	/** The headline template with {fieldName} placeholders */
-	readonly template: string;
+	/** The headline template with {fieldName} placeholders. Optional — if omitted, the template is learned from the first decoded .prose file's @prose directive. */
+	readonly template?: string;
 	/** Optional overflow templates for additional fields on indented lines */
 	readonly overflow?: ReadonlyArray<string>;
 }
@@ -70,14 +70,17 @@ export const compileTemplate = (template: string): CompiledTemplate => {
 		if (char === "{") {
 			// Emit any accumulated literal text before this field
 			if (pos > literalStart) {
-				segments.push({ type: "literal", text: template.slice(literalStart, pos) });
+				segments.push({
+					type: "literal",
+					text: template.slice(literalStart, pos),
+				});
 				lastSegmentWasField = false;
 			}
 
 			// Check for adjacent fields with no literal separator
 			if (lastSegmentWasField) {
 				throw new Error(
-					`Adjacent fields with no literal separator at position ${pos}: fields must be separated by literal text`
+					`Adjacent fields with no literal separator at position ${pos}: fields must be separated by literal text`,
 				);
 			}
 
@@ -85,7 +88,7 @@ export const compileTemplate = (template: string): CompiledTemplate => {
 			const closePos = template.indexOf("}", pos + 1);
 			if (closePos === -1) {
 				throw new Error(
-					`Unclosed brace in template at position ${pos}: "${template.slice(pos)}"`
+					`Unclosed brace in template at position ${pos}: "${template.slice(pos)}"`,
 				);
 			}
 
@@ -138,7 +141,7 @@ export const compileTemplate = (template: string): CompiledTemplate => {
  * ```
  */
 export const compileOverflowTemplates = (
-	overflow: ReadonlyArray<string> | undefined
+	overflow: ReadonlyArray<string> | undefined,
 ): ReadonlyArray<CompiledTemplate> => {
 	if (!overflow || overflow.length === 0) {
 		return [];
@@ -150,7 +153,7 @@ export const compileOverflowTemplates = (
 		} catch (error) {
 			if (error instanceof Error) {
 				throw new Error(
-					`Error in overflow template at index ${index}: ${error.message}`
+					`Error in overflow template at index ${index}: ${error.message}`,
 				);
 			}
 			throw error;
@@ -324,7 +327,7 @@ const quoteValue = (value: string): string => {
  */
 export const encodeHeadline = (
 	record: Record<string, unknown>,
-	template: CompiledTemplate
+	template: CompiledTemplate,
 ): string => {
 	let result = "";
 	const { segments } = template;
@@ -365,11 +368,13 @@ export const encodeHeadline = (
  */
 const findNextLiteral = (
 	segments: ReadonlyArray<ProseSegment>,
-	currentIndex: number
+	currentIndex: number,
 ): string | null => {
 	for (let i = currentIndex + 1; i < segments.length; i++) {
 		if (segments[i].type === "literal") {
-			return (segments[i] as { readonly type: "literal"; readonly text: string }).text;
+			return (
+				segments[i] as { readonly type: "literal"; readonly text: string }
+			).text;
 		}
 	}
 	return null;
@@ -400,7 +405,7 @@ const findNextLiteral = (
  */
 export const decodeHeadline = (
 	line: string,
-	template: CompiledTemplate
+	template: CompiledTemplate,
 ): Record<string, unknown> | null => {
 	const { segments } = template;
 	const result: Record<string, unknown> = {};
@@ -456,11 +461,13 @@ export const decodeHeadline = (
  */
 const findNextLiteralText = (
 	segments: ReadonlyArray<ProseSegment>,
-	currentIndex: number
+	currentIndex: number,
 ): string | null => {
 	for (let i = currentIndex + 1; i < segments.length; i++) {
 		if (segments[i].type === "literal") {
-			return (segments[i] as { readonly type: "literal"; readonly text: string }).text;
+			return (
+				segments[i] as { readonly type: "literal"; readonly text: string }
+			).text;
 		}
 	}
 	return null;
@@ -482,7 +489,7 @@ const findNextLiteralText = (
 const captureFieldValue = (
 	line: string,
 	startPos: number,
-	delimiter: string
+	delimiter: string,
 ): { value: string; endPos: number } | null => {
 	// Check if the field value is quoted
 	if (line[startPos] === '"') {
@@ -525,7 +532,7 @@ const captureFieldValue = (
  */
 const scanQuotedValue = (
 	line: string,
-	startPos: number
+	startPos: number,
 ): { value: string; endPos: number } | null => {
 	// Skip the opening quote
 	let pos = startPos + 1;
@@ -595,7 +602,7 @@ const CONTINUATION_INDENT = "    ";
  */
 const findMultiLineField = (
 	record: Record<string, unknown>,
-	fields: ReadonlyArray<string>
+	fields: ReadonlyArray<string>,
 ): string | null => {
 	for (const fieldName of fields) {
 		const value = record[fieldName];
@@ -619,7 +626,7 @@ const findMultiLineField = (
 const encodeMultiLineOverflow = (
 	record: Record<string, unknown>,
 	template: CompiledTemplate,
-	multiLineField: string
+	multiLineField: string,
 ): string[] => {
 	const value = record[multiLineField];
 	if (typeof value !== "string") {
@@ -679,7 +686,7 @@ const encodeMultiLineOverflow = (
  */
 export const encodeOverflowLines = (
 	record: Record<string, unknown>,
-	overflowTemplates: ReadonlyArray<CompiledTemplate>
+	overflowTemplates: ReadonlyArray<CompiledTemplate>,
 ): ReadonlyArray<string> => {
 	const lines: string[] = [];
 
@@ -700,7 +707,7 @@ export const encodeOverflowLines = (
 				const overflowLines = encodeMultiLineOverflow(
 					record,
 					template,
-					multiLineField
+					multiLineField,
 				);
 				lines.push(...overflowLines);
 			} else {
@@ -773,7 +780,7 @@ const measureIndent = (line: string): number => {
 export const decodeOverflowLines = (
 	lines: ReadonlyArray<string>,
 	overflowTemplates: ReadonlyArray<CompiledTemplate>,
-	baseIndent = 2
+	baseIndent = 2,
 ): DecodeOverflowResult => {
 	const fields: Record<string, unknown> = {};
 	let lineIndex = 0;
@@ -796,10 +803,11 @@ export const decodeOverflowLines = (
 			const continuationContent = line.slice(indent); // Strip all leading whitespace
 
 			if (typeof existingValue === "string") {
-				fields[lastMatchedField] = existingValue + "\n" + continuationContent;
+				fields[lastMatchedField] = `${existingValue}\n${continuationContent}`;
 			} else {
 				// Shouldn't happen in well-formed input, but handle it
-				fields[lastMatchedField] = String(existingValue) + "\n" + continuationContent;
+				fields[lastMatchedField] =
+					`${String(existingValue)}\n${continuationContent}`;
 			}
 
 			lineIndex++;
@@ -895,7 +903,9 @@ export interface ScanDirectiveResult {
  * // → { preambleEnd: -1, directiveStart: 0 }
  * ```
  */
-export const scanDirective = (lines: ReadonlyArray<string>): ScanDirectiveResult => {
+export const scanDirective = (
+	lines: ReadonlyArray<string>,
+): ScanDirectiveResult => {
 	let directiveIndex: number | null = null;
 
 	for (let i = 0; i < lines.length; i++) {
@@ -906,7 +916,7 @@ export const scanDirective = (lines: ReadonlyArray<string>): ScanDirectiveResult
 			if (directiveIndex !== null) {
 				// Multiple directives found
 				throw new Error(
-					`Multiple @prose directives found: first at line ${directiveIndex + 1}, second at line ${i + 1}. Only one directive per file is allowed.`
+					`Multiple @prose directives found: first at line ${directiveIndex + 1}, second at line ${i + 1}. Only one directive per file is allowed.`,
 				);
 			}
 			directiveIndex = i;
@@ -915,7 +925,7 @@ export const scanDirective = (lines: ReadonlyArray<string>): ScanDirectiveResult
 
 	if (directiveIndex === null) {
 		throw new Error(
-			"No @prose directive found. The file must contain a line starting with '@prose ' to define the record template."
+			"No @prose directive found. The file must contain a line starting with '@prose ' to define the record template.",
 		);
 	}
 
@@ -981,7 +991,7 @@ export interface DirectiveBlock {
  */
 export const parseDirectiveBlock = (
 	lines: ReadonlyArray<string>,
-	directiveStart: number
+	directiveStart: number,
 ): DirectiveBlock => {
 	const directiveLine = lines[directiveStart];
 
@@ -1087,7 +1097,7 @@ export interface ParseBodyResult {
 export const parseBody = (
 	lines: ReadonlyArray<string>,
 	bodyStart: number,
-	headlineTemplate: CompiledTemplate
+	headlineTemplate: CompiledTemplate,
 ): ParseBodyResult => {
 	const entries: ProseEntry[] = [];
 	let lineIndex = bodyStart;
@@ -1175,15 +1185,18 @@ interface CompiledProseCodec {
  * @param options - The prose codec options
  * @returns The compiled codec state
  */
-const compileProseCodecOptions = (options: ProseCodecOptions): CompiledProseCodec => {
-	const headlineTemplate = compileTemplate(options.template);
-	const overflowTemplates = compileOverflowTemplates(options.overflow);
+const compileProseCodecOptions = (
+	template: string,
+	overflow?: ReadonlyArray<string>,
+): CompiledProseCodec => {
+	const headlineTemplate = compileTemplate(template);
+	const overflowTemplates = compileOverflowTemplates(overflow);
 
 	return {
 		headlineTemplate,
 		overflowTemplates,
-		rawHeadlineTemplate: options.template,
-		rawOverflowTemplates: options.overflow ?? [],
+		rawHeadlineTemplate: template,
+		rawOverflowTemplates: overflow ?? [],
 	};
 };
 
@@ -1228,19 +1241,25 @@ const compileProseCodecOptions = (options: ProseCodecOptions): CompiledProseCode
  * //   ~ A masterpiece of science fiction
  * ```
  */
-export const proseCodec = (options: ProseCodecOptions): FormatCodec => {
-	// Compile templates at construction time
-	const compiled = compileProseCodecOptions(options);
+export const proseCodec = (options?: ProseCodecOptions): FormatCodec => {
+	// Mutable state: starts null if no template provided, populated on first decode
+	let compiled: CompiledProseCodec | null = options?.template
+		? compileProseCodecOptions(options.template, options.overflow)
+		: null;
 
 	return {
 		name: "prose",
 		extensions: ["prose"],
 
 		encode: (data: unknown, _formatOptions?: FormatOptions): string => {
-			if (!Array.isArray(data)) {
+			if (!compiled) {
 				throw new Error(
-					"Prose codec expects an array of records to encode"
+					"Cannot encode prose: no template provided and no file has been decoded yet. Either pass a template to proseCodec() or decode a .prose file first.",
 				);
+			}
+
+			if (!Array.isArray(data)) {
+				throw new Error("Prose codec expects an array of records to encode");
 			}
 
 			const lines: string[] = [];
@@ -1263,7 +1282,10 @@ export const proseCodec = (options: ProseCodecOptions): FormatCodec => {
 				lines.push(headline);
 
 				// Encode overflow lines
-				const overflowLines = encodeOverflowLines(record, compiled.overflowTemplates);
+				const overflowLines = encodeOverflowLines(
+					record,
+					compiled.overflowTemplates,
+				);
 				lines.push(...overflowLines);
 			}
 
@@ -1277,15 +1299,36 @@ export const proseCodec = (options: ProseCodecOptions): FormatCodec => {
 			const scanResult = scanDirective(lines);
 
 			// Parse the directive block
-			const directiveBlock = parseDirectiveBlock(lines, scanResult.directiveStart);
+			const directiveBlock = parseDirectiveBlock(
+				lines,
+				scanResult.directiveStart,
+			);
 
 			// Compile the file's headline template for parsing
 			// Note: We use the file's template for decoding, ensuring self-describing files work
-			const fileHeadlineTemplate = compileTemplate(directiveBlock.headlineTemplate);
-			const fileOverflowTemplates = compileOverflowTemplates(directiveBlock.overflowTemplates);
+			const fileHeadlineTemplate = compileTemplate(
+				directiveBlock.headlineTemplate,
+			);
+			const fileOverflowTemplates = compileOverflowTemplates(
+				directiveBlock.overflowTemplates,
+			);
+
+			// Cache the template from the file for future encode calls
+			if (!compiled) {
+				compiled = {
+					headlineTemplate: fileHeadlineTemplate,
+					overflowTemplates: fileOverflowTemplates,
+					rawHeadlineTemplate: directiveBlock.headlineTemplate,
+					rawOverflowTemplates: directiveBlock.overflowTemplates,
+				};
+			}
 
 			// Parse the body
-			const bodyResult = parseBody(lines, directiveBlock.bodyStart, fileHeadlineTemplate);
+			const bodyResult = parseBody(
+				lines,
+				directiveBlock.bodyStart,
+				fileHeadlineTemplate,
+			);
 
 			// Extract records from entries, decoding overflow fields
 			const records: Array<Record<string, unknown>> = [];
@@ -1299,11 +1342,13 @@ export const proseCodec = (options: ProseCodecOptions): FormatCodec => {
 					if (entry.overflowLines.length > 0) {
 						const overflowResult = decodeOverflowLines(
 							entry.overflowLines,
-							fileOverflowTemplates
+							fileOverflowTemplates,
 						);
 
 						// Merge overflow fields into the record
-						for (const [fieldName, value] of Object.entries(overflowResult.fields)) {
+						for (const [fieldName, value] of Object.entries(
+							overflowResult.fields,
+						)) {
 							record[fieldName] = value;
 						}
 					}

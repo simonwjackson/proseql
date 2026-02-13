@@ -258,9 +258,7 @@ describe("proseCodec round-trip", () => {
 			});
 
 			// Title contains quote character which is a delimiter
-			const records = [
-				{ id: 1, title: 'Say "Hello"', year: 2024 },
-			];
+			const records = [{ id: 1, title: 'Say "Hello"', year: 2024 }];
 
 			const encoded = codec.encode(records);
 			const decoded = codec.decode(encoded);
@@ -291,9 +289,7 @@ describe("proseCodec round-trip", () => {
 			});
 
 			// First field value contains the delimiter ":"
-			const records = [
-				{ id: "note: important", message: "test" },
-			];
+			const records = [{ id: "note: important", message: "test" }];
 
 			const encoded = codec.encode(records);
 			const decoded = codec.decode(encoded);
@@ -338,9 +334,7 @@ describe("proseCodec round-trip", () => {
 				template: "{id}: {items}",
 			});
 
-			const records = [
-				{ id: "item-a", items: ["has]bracket", "normal"] },
-			];
+			const records = [{ id: "item-a", items: ["has]bracket", "normal"] }];
 
 			const encoded = codec.encode(records);
 			const decoded = codec.decode(encoded);
@@ -353,9 +347,7 @@ describe("proseCodec round-trip", () => {
 				template: "{id}: {items}",
 			});
 
-			const records = [
-				{ id: "item-a", items: ['has "quotes"', "normal"] },
-			];
+			const records = [{ id: "item-a", items: ['has "quotes"', "normal"] }];
 
 			const encoded = codec.encode(records);
 			const decoded = codec.decode(encoded);
@@ -370,7 +362,7 @@ describe("proseCodec round-trip", () => {
 
 			// Last field can contain anything without quoting
 			const records = [
-				{ id: 1, title: "Contains: colons and \"quotes\" freely" },
+				{ id: 1, title: 'Contains: colons and "quotes" freely' },
 			];
 
 			const encoded = codec.encode(records);
@@ -620,9 +612,7 @@ BOOK #2 Neuromancer (1984)`;
 				overflow: ["~ {description}"],
 			});
 
-			const records = [
-				{ id: 1, title: "Dune", description: "A classic" },
-			];
+			const records = [{ id: 1, title: "Dune", description: "A classic" }];
 
 			const encoded = codec.encode(records);
 			const lines = encoded.split("\n");
@@ -651,7 +641,7 @@ BOOK #2 Neuromancer (1984)`;
 			});
 
 			expect(() => codec.encode({ id: "1", name: "Alice" })).toThrow(
-				/expects an array/
+				/expects an array/,
 			);
 			expect(() => codec.encode("not an array")).toThrow(/expects an array/);
 			expect(() => codec.encode(42)).toThrow(/expects an array/);
@@ -663,7 +653,7 @@ BOOK #2 Neuromancer (1984)`;
 			});
 
 			expect(() => codec.decode("#1 Alice\n#2 Bob")).toThrow(
-				/No @prose directive/
+				/No @prose directive/,
 			);
 		});
 
@@ -678,6 +668,105 @@ BOOK #2 Neuromancer (1984)`;
 #2 Bob`;
 
 			expect(() => codec.decode(input)).toThrow(/Multiple @prose directives/);
+		});
+	});
+
+	describe("template-less proseCodec", () => {
+		it("decodes a .prose file without a constructor template", () => {
+			const codec = proseCodec();
+
+			const input = `@prose #{id} {name}
+
+#1 Alice
+#2 Bob`;
+
+			const decoded = codec.decode(input);
+
+			expect(decoded).toEqual([
+				{ id: 1, name: "Alice" },
+				{ id: 2, name: "Bob" },
+			]);
+		});
+
+		it("can encode after decoding (learns template from file)", () => {
+			const codec = proseCodec();
+
+			const input = `@prose #{id} {name}
+
+#1 Alice
+#2 Bob`;
+
+			const decoded = codec.decode(input);
+			const encoded = codec.encode(decoded);
+
+			expect(encoded).toBe(`@prose #{id} {name}
+
+#1 Alice
+#2 Bob`);
+		});
+
+		it("encode before decode throws a clear error", () => {
+			const codec = proseCodec();
+
+			expect(() => codec.encode([{ id: 1, name: "Alice" }])).toThrow(
+				/Cannot encode prose: no template provided/,
+			);
+		});
+
+		it("learns overflow templates from file", () => {
+			const codec = proseCodec();
+
+			const input = `@prose #{id} {title}
+  ~ {description}
+
+#1 Dune
+  ~ A sci-fi classic
+#2 Neuromancer
+  ~ Cyberpunk pioneer`;
+
+			const decoded = codec.decode(input);
+
+			expect(decoded).toEqual([
+				{ id: 1, title: "Dune", description: "A sci-fi classic" },
+				{ id: 2, title: "Neuromancer", description: "Cyberpunk pioneer" },
+			]);
+
+			// Re-encode should use learned template including overflow
+			const encoded = codec.encode(decoded);
+
+			expect(encoded).toBe(`@prose #{id} {title}
+  ~ {description}
+
+#1 Dune
+  ~ A sci-fi classic
+#2 Neuromancer
+  ~ Cyberpunk pioneer`);
+		});
+
+		it("round-trips correctly with template-less codec", () => {
+			const codec = proseCodec();
+
+			const input = `@prose [{id}] {name}, born {birthYear} — {country}
+
+[1] Frank Herbert, born 1920 — USA
+[2] William Gibson, born 1948 — USA`;
+
+			const decoded = codec.decode(input);
+			const encoded = codec.encode(decoded);
+			const decoded2 = codec.decode(encoded);
+
+			expect(decoded2).toEqual(decoded);
+		});
+
+		it("accepts empty options object", () => {
+			const codec = proseCodec({});
+
+			const input = `@prose #{id} {name}
+
+#1 Alice`;
+
+			const decoded = codec.decode(input);
+			expect(decoded).toEqual([{ id: 1, name: "Alice" }]);
 		});
 	});
 });

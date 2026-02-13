@@ -25,6 +25,13 @@ export type CollectionConfig = {
 	readonly file?: string;
 
 	/**
+	 * Explicit serialization format override.
+	 * When provided, this format is used instead of inferring from file extension.
+	 * Value should match a codec's extension (e.g., "prose", "yaml", "json").
+	 */
+	readonly format?: string;
+
+	/**
 	 * Relationship definitions for this collection
 	 */
 	readonly relationships: Record<

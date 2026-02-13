@@ -1,6 +1,6 @@
 {
   "name": "@proseql/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Type-safe in-memory database that persists to plain text files (JSON, YAML, TOML), built on Effect",
   "type": "module",
   "scripts": {

@@ -1771,6 +1771,10 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			if (filePath) {
 				// Only pass version options when collection is versioned
 				// Build options object conditionally to satisfy exactOptionalPropertyTypes
+				const formatOverride =
+					collectionConfig.format !== undefined
+						? { format: collectionConfig.format }
+						: {};
 				const loadOptions =
 					collectionConfig.version !== undefined
 						? collectionConfig.migrations !== undefined
@@ -1778,9 +1782,16 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 									version: collectionConfig.version,
 									migrations: collectionConfig.migrations,
 									collectionName,
+									...formatOverride,
 								}
-							: { version: collectionConfig.version, collectionName }
-						: undefined;
+							: {
+									version: collectionConfig.version,
+									collectionName,
+									...formatOverride,
+								}
+						: Object.keys(formatOverride).length > 0
+							? formatOverride
+							: undefined;
 				loadedData = yield* loadData(
 					filePath,
 					collectionConfig.schema as Schema.Schema<HasId, unknown>,
@@ -1859,9 +1870,17 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 						filePath,
 						collectionConfig.schema as Schema.Schema<HasId, unknown>,
 						currentData,
-						// Pass version option to stamp _version in output for versioned collections
-						collectionConfig.version !== undefined
-							? { version: collectionConfig.version }
+						// Pass version and format options for versioned/format-overridden collections
+						collectionConfig.version !== undefined ||
+							collectionConfig.format !== undefined
+							? {
+									...(collectionConfig.version !== undefined
+										? { version: collectionConfig.version }
+										: {}),
+									...(collectionConfig.format !== undefined
+										? { format: collectionConfig.format }
+										: {}),
+								}
 							: undefined,
 					);
 				}),

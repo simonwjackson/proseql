@@ -6,6 +6,11 @@
 
 // Re-export everything from core
 export * from "@proseql/core";
+// Convenience wrappers (config-driven, no manual layer wiring)
+export {
+	createNodeDatabase,
+	makeNodePersistenceLayer,
+} from "./convenience.js";
 export type { NodeAdapterConfig } from "./node-adapter-layer.js";
 // Export Node.js storage adapter
 export {

@@ -57,6 +57,12 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - run: bun install
       - run: bun run build
+      - name: Resolve workspace references
+        run: |
+          CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
+          for pkg in node rest rpc; do
+            sed -i "s/\"workspace:\*\"/\"^${CORE_VERSION}\"/" "packages/${pkg}/package.json"
+          done
       - name: Publish @proseql/core
         run: npm publish --provenance --access public
         working-directory: packages/core

@@ -349,6 +349,8 @@ export {
 	makeSerializerLayer,
 	mergeSerializerWithPluginCodecs,
 } from "./serializers/format-codec.js";
+// Codec inference from config
+export { inferCodecsFromConfig } from "./serializers/infer-codecs.js";
 // Preset Layers
 export {
 	AllTextFormatsLayer,

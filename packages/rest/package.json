@@ -1,6 +1,6 @@
 {
   "name": "@proseql/rest",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "REST API handlers for ProseQL databases, framework-agnostic",
   "type": "module",
   "scripts": {

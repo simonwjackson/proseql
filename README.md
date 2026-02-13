@@ -90,22 +90,11 @@ And their authors in `authors.prose` — data that reads like English:
 Both are real database files. Query them, mutate them, `git diff` them:
 
 ```ts
-import { Effect, Layer } from "effect"
-import {
-  createPersistentEffectDatabase,
-  NodeStorageLayer,
-  makeSerializerLayer,
-  yamlCodec,
-  proseCodec,
-} from "@proseql/node"
-
-const PersistenceLayer = Layer.merge(
-  NodeStorageLayer,
-  makeSerializerLayer([yamlCodec(), proseCodec({ template: '[{id}] {name}, born {birthYear} — {country}' })]),
-)
+import { Effect } from "effect"
+import { createNodeDatabase } from "@proseql/node"
 
 const program = Effect.gen(function* () {
-  const db = yield* createPersistentEffectDatabase({
+  const db = yield* createNodeDatabase({
     books: {
       schema: BookSchema,
       file: "./data/books.yaml",
@@ -132,10 +121,10 @@ const program = Effect.gen(function* () {
   // → books.yaml just changed on disk. go open it.
 })
 
-await Effect.runPromise(
-  program.pipe(Effect.provide(PersistenceLayer), Effect.scoped),
-)
+await Effect.runPromise(Effect.scoped(program))
 ```
+
+Codecs are inferred from file extensions — no manual wiring needed. For explicit control, see [Persist to Files](#persist-to-files).
 
 ### Nested Data
 
@@ -176,14 +165,8 @@ Both are equivalent. Use whichever reads better in context.
 Add a `file` field. Mutations save automatically. Your data is always a plain text file on disk.
 
 ```ts
-import { Effect, Layer } from "effect"
-import {
-  createPersistentEffectDatabase,
-  NodeStorageLayer,
-  makeSerializerLayer,
-  yamlCodec,
-  jsonCodec,
-} from "@proseql/node"
+import { Effect } from "effect"
+import { createNodeDatabase } from "@proseql/node"
 
 const config = {
   books: {
@@ -199,7 +182,7 @@ const config = {
 } as const
 
 const program = Effect.gen(function* () {
-  const db = yield* createPersistentEffectDatabase(config, {
+  const db = yield* createNodeDatabase(config, {
     books: [],
     authors: [],
   })
@@ -209,17 +192,38 @@ const program = Effect.gen(function* () {
   // → go ahead, open the file. it's right there.
 })
 
-const PersistenceLayer = Layer.merge(
-  NodeStorageLayer,
-  makeSerializerLayer([yamlCodec(), jsonCodec()]),
-)
+await Effect.runPromise(Effect.scoped(program))
+```
+
+Writes are debounced. Call `db.flush()` when you're impatient.
+
+For explicit layer control (custom codecs, non-standard setups), use `makeNodePersistenceLayer` or wire layers manually:
+
+```ts
+import { Effect } from "effect"
+import {
+  createPersistentEffectDatabase,
+  makeNodePersistenceLayer,
+} from "@proseql/node"
+
+// Option A: auto-inferred layer from config
+const PersistenceLayer = makeNodePersistenceLayer(config)
+
+// Option B: fully manual (for custom codec options, plugin codecs, etc.)
+// const PersistenceLayer = Layer.merge(
+//   NodeStorageLayer,
+//   makeSerializerLayer([yamlCodec({ indent: 4 }), jsonCodec()]),
+// )
+
+const program = Effect.gen(function* () {
+  const db = yield* createPersistentEffectDatabase(config)
+  // ...
+})
 
 await Effect.runPromise(
   program.pipe(Effect.provide(PersistenceLayer), Effect.scoped),
 )
 ```
-
-Writes are debounced. Call `db.flush()` when you're impatient.
 
 ### Pick Your Format
 
@@ -245,7 +249,7 @@ import { AllTextFormatsLayer } from "@proseql/core"
 
 ### Prose Format
 
-Most codecs are zero-config. Prose is different — it needs a template that describes how each record becomes a sentence.
+Prose files are self-describing — the `@prose` directive in the file contains the template, so `proseCodec()` can learn it automatically:
 
 ```ts
 const config = {
@@ -256,9 +260,9 @@ const config = {
   },
 }
 
-// prose requires a template — each record becomes a sentence
+// no template needed — the codec learns it from the file's @prose directive
 makeSerializerLayer([
-  proseCodec({ template: '[{id}] "{title}" by {author} ({year}) — {genre}' }),
+  proseCodec(),
   jsonCodec(),
 ])
 ```
@@ -272,7 +276,28 @@ On disk, it looks like this:
 [2] "Neuromancer" by William Gibson (1984) — sci-fi
 ```
 
-The `@prose` directive tells the parser which template to use for decoding. Because `proseCodec` requires a `template` argument, it isn't included in `AllTextFormatsLayer` — you always register it explicitly.
+The `@prose` directive tells the parser which template to use for decoding. On the first `decode()`, the codec caches the template for future `encode()` calls. You can also pass a template explicitly if you prefer:
+
+```ts
+proseCodec({ template: '[{id}] "{title}" by {author} ({year}) — {genre}' })
+```
+
+Because `proseCodec` isn't included in `AllTextFormatsLayer`, you always register it explicitly.
+
+#### Format Override
+
+When prose data lives inside a file with a non-prose extension (e.g., `.md`), use the `format` field to override the inferred codec:
+
+```ts
+const config = {
+  catalog: {
+    schema: CatalogSchema,
+    file: "./docs/catalog.md",
+    format: "prose",           // ← use prose codec, not markdown
+    relationships: {},
+  },
+} as const
+```
 
 ### Append-Only Collections
 

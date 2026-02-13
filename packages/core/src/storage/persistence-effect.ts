@@ -74,6 +74,11 @@ export interface LoadDataOptions {
 	 * Required when version is provided.
 	 */
 	readonly collectionName?: string;
+	/**
+	 * Explicit serialization format override.
+	 * When provided, this format is used instead of inferring from the file extension.
+	 */
+	readonly format?: string;
 }
 
 /**
@@ -113,7 +118,7 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 	Effect.gen(function* () {
 		const storage = yield* StorageAdapter;
 		const serializer = yield* SerializerRegistry;
-		const ext = yield* resolveExtension(filePath);
+		const ext = options?.format ?? (yield* resolveExtension(filePath));
 
 		// If file doesn't exist, return empty map
 		const exists = yield* storage.exists(filePath);
@@ -240,7 +245,10 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 
 		// If migrations were run, write the migrated data back to disk with new version
 		if (needsWriteBack && targetVersion !== undefined) {
-			yield* saveData(filePath, schema, result, { version: targetVersion });
+			yield* saveData(filePath, schema, result, {
+				version: targetVersion,
+				...(options?.format !== undefined ? { format: options.format } : {}),
+			});
 		}
 
 		return result;
@@ -259,6 +267,11 @@ export interface SaveDataOptions {
 	 * When provided, `_version` is injected at the top level before entities.
 	 */
 	readonly version?: number;
+	/**
+	 * Explicit serialization format override.
+	 * When provided, this format is used instead of inferring from the file extension.
+	 */
+	readonly format?: string;
 }
 
 /**
@@ -285,7 +298,7 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 	Effect.gen(function* () {
 		const storage = yield* StorageAdapter;
 		const serializer = yield* SerializerRegistry;
-		const ext = yield* resolveExtension(filePath);
+		const ext = options?.format ?? (yield* resolveExtension(filePath));
 
 		// Encode each entity through the schema
 		const encode = Schema.encode(schema);
