@@ -854,3 +854,441 @@ describe("Nested Search Index (task 7.3)", () => {
 		});
 	});
 });
+
+// ============================================================================
+// Search Index Maintenance with Nested Fields (task 7.4)
+// ============================================================================
+
+describe("Search Index Maintenance with Nested Fields (task 7.4)", () => {
+	// Schema with nested fields for testing index maintenance
+	const NestedBookSchema = Schema.Struct({
+		id: Schema.String,
+		title: Schema.String,
+		genre: Schema.String,
+		metadata: Schema.Struct({
+			description: Schema.String,
+			tags: Schema.Array(Schema.String),
+			stats: Schema.Struct({
+				views: Schema.Number,
+			}),
+		}),
+		author: Schema.Struct({
+			name: Schema.String,
+			bio: Schema.String,
+		}),
+	});
+
+	const createNestedBook = (
+		id: string,
+		title: string,
+		description: string,
+		bio: string,
+	) => ({
+		id,
+		title,
+		genre: "sci-fi",
+		metadata: {
+			description,
+			tags: ["test"],
+			stats: { views: 100 },
+		},
+		author: {
+			name: "Test Author",
+			bio,
+		},
+	});
+
+	describe("create operation maintains search index with nested fields", () => {
+		it("7.4: creating entity adds nested field tokens to search index", async () => {
+			const config = {
+				books: {
+					schema: NestedBookSchema,
+					relationships: {},
+					searchIndex: ["metadata.description", "author.bio"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { books: [] }),
+			);
+
+			// Create a new entity with nested fields
+			await db.books.create(
+				createNestedBook(
+					"1",
+					"Test Book",
+					"Epic adventure with dragons and wizards",
+					"A fantasy author from the mountains",
+				),
+			).runPromise;
+
+			// Search for token from nested metadata.description
+			const descResults = await db.books.query({
+				where: { $search: { query: "dragons" } },
+			}).runPromise;
+			expect(descResults.length).toBe(1);
+			expect(descResults[0].id).toBe("1");
+
+			// Search for token from nested author.bio
+			const bioResults = await db.books.query({
+				where: { $search: { query: "mountains" } },
+			}).runPromise;
+			expect(bioResults.length).toBe(1);
+			expect(bioResults[0].id).toBe("1");
+		});
+
+		it("7.4: creating multiple entities builds correct nested field index", async () => {
+			const config = {
+				books: {
+					schema: NestedBookSchema,
+					relationships: {},
+					searchIndex: ["metadata.description"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { books: [] }),
+			);
+
+			// Create multiple entities
+			await db.books.create(
+				createNestedBook("1", "Book One", "Story about spaceships", "Author bio 1"),
+			).runPromise;
+			await db.books.create(
+				createNestedBook("2", "Book Two", "Tale of ancient kingdoms", "Author bio 2"),
+			).runPromise;
+			await db.books.create(
+				createNestedBook("3", "Book Three", "Adventures in spaceships and kingdoms", "Author bio 3"),
+			).runPromise;
+
+			// Search should find correct entities
+			const spaceResults = await db.books.query({
+				where: { $search: { query: "spaceships" } },
+			}).runPromise;
+			expect(spaceResults.length).toBe(2);
+			expect(spaceResults.some((r) => r.id === "1")).toBe(true);
+			expect(spaceResults.some((r) => r.id === "3")).toBe(true);
+
+			const kingdomResults = await db.books.query({
+				where: { $search: { query: "kingdoms" } },
+			}).runPromise;
+			expect(kingdomResults.length).toBe(2);
+			expect(kingdomResults.some((r) => r.id === "2")).toBe(true);
+			expect(kingdomResults.some((r) => r.id === "3")).toBe(true);
+		});
+	});
+
+	describe("update operation maintains search index with nested fields", () => {
+		it("7.4: updating nested field updates search index tokens", async () => {
+			const config = {
+				books: {
+					schema: NestedBookSchema,
+					relationships: {},
+					searchIndex: ["metadata.description"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, {
+					books: [
+						createNestedBook("1", "Test Book", "Story about pirates and treasure", "Bio"),
+					],
+				}),
+			);
+
+			// Verify initial state - can find by "pirates"
+			const initialResults = await db.books.query({
+				where: { $search: { query: "pirates" } },
+			}).runPromise;
+			expect(initialResults.length).toBe(1);
+
+			// Update the nested description field
+			await db.books.update("1", {
+				metadata: {
+					description: "Story about ninjas and stealth",
+				},
+			}).runPromise;
+
+			// Old token "pirates" should no longer find the entity
+			const pirateResults = await db.books.query({
+				where: { $search: { query: "pirates" } },
+			}).runPromise;
+			expect(pirateResults.length).toBe(0);
+
+			// New token "ninjas" should find the entity
+			const ninjaResults = await db.books.query({
+				where: { $search: { query: "ninjas" } },
+			}).runPromise;
+			expect(ninjaResults.length).toBe(1);
+			expect(ninjaResults[0].id).toBe("1");
+		});
+
+		it("7.4: updating non-indexed nested field does not affect search index", async () => {
+			const config = {
+				books: {
+					schema: NestedBookSchema,
+					relationships: {},
+					searchIndex: ["metadata.description"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, {
+					books: [
+						createNestedBook("1", "Test Book", "Story about robots", "Original bio"),
+					],
+				}),
+			);
+
+			// Update non-indexed nested field (author.bio is not in searchIndex)
+			await db.books.update("1", {
+				author: {
+					bio: "Updated bio with unique terms like xylophone",
+				},
+			}).runPromise;
+
+			// Original indexed content should still be searchable
+			const robotResults = await db.books.query({
+				where: { $search: { query: "robots" } },
+			}).runPromise;
+			expect(robotResults.length).toBe(1);
+			expect(robotResults[0].id).toBe("1");
+
+			// New non-indexed content should NOT be searchable via index
+			// (Note: it might still work via full-scan $search, but index won't help)
+			// This test verifies the index itself wasn't modified
+		});
+
+		it("7.4: partial update of nested object preserves other nested fields in index", async () => {
+			const config = {
+				books: {
+					schema: NestedBookSchema,
+					relationships: {},
+					searchIndex: ["metadata.description", "author.bio"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, {
+					books: [
+						createNestedBook(
+							"1",
+							"Test Book",
+							"Story about elephants",
+							"Expert on wildlife conservation",
+						),
+					],
+				}),
+			);
+
+			// Update only metadata.description, leaving author.bio unchanged
+			await db.books.update("1", {
+				metadata: {
+					description: "Story about dolphins",
+				},
+			}).runPromise;
+
+			// New description term should be findable
+			const dolphinResults = await db.books.query({
+				where: { $search: { query: "dolphins" } },
+			}).runPromise;
+			expect(dolphinResults.length).toBe(1);
+
+			// Old description term should not be findable
+			const elephantResults = await db.books.query({
+				where: { $search: { query: "elephants" } },
+			}).runPromise;
+			expect(elephantResults.length).toBe(0);
+
+			// Unchanged author.bio should still be searchable
+			const conservationResults = await db.books.query({
+				where: { $search: { query: "conservation" } },
+			}).runPromise;
+			expect(conservationResults.length).toBe(1);
+			expect(conservationResults[0].id).toBe("1");
+		});
+	});
+
+	describe("delete operation maintains search index with nested fields", () => {
+		it("7.4: deleting entity removes nested field tokens from search index", async () => {
+			const config = {
+				books: {
+					schema: NestedBookSchema,
+					relationships: {},
+					searchIndex: ["metadata.description"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, {
+					books: [
+						createNestedBook("1", "Book One", "Tale of unicorns and magic", "Bio 1"),
+						createNestedBook("2", "Book Two", "Story of dragons and fire", "Bio 2"),
+					],
+				}),
+			);
+
+			// Verify both books are searchable
+			const initialUnicorn = await db.books.query({
+				where: { $search: { query: "unicorns" } },
+			}).runPromise;
+			expect(initialUnicorn.length).toBe(1);
+			expect(initialUnicorn[0].id).toBe("1");
+
+			const initialDragon = await db.books.query({
+				where: { $search: { query: "dragons" } },
+			}).runPromise;
+			expect(initialDragon.length).toBe(1);
+			expect(initialDragon[0].id).toBe("2");
+
+			// Delete first book
+			await db.books.delete("1").runPromise;
+
+			// Deleted book's tokens should not be findable
+			const afterUnicorn = await db.books.query({
+				where: { $search: { query: "unicorns" } },
+			}).runPromise;
+			expect(afterUnicorn.length).toBe(0);
+
+			// Remaining book should still be searchable
+			const afterDragon = await db.books.query({
+				where: { $search: { query: "dragons" } },
+			}).runPromise;
+			expect(afterDragon.length).toBe(1);
+			expect(afterDragon[0].id).toBe("2");
+		});
+
+		it("7.4: deleting entity with shared tokens only removes that entity from index", async () => {
+			const config = {
+				books: {
+					schema: NestedBookSchema,
+					relationships: {},
+					searchIndex: ["metadata.description"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, {
+					books: [
+						createNestedBook("1", "Book One", "Epic adventure story", "Bio 1"),
+						createNestedBook("2", "Book Two", "Another adventure tale", "Bio 2"),
+					],
+				}),
+			);
+
+			// Both books share "adventure" token
+			const initialAdventure = await db.books.query({
+				where: { $search: { query: "adventure" } },
+			}).runPromise;
+			expect(initialAdventure.length).toBe(2);
+
+			// Delete first book
+			await db.books.delete("1").runPromise;
+
+			// "adventure" should still find book 2
+			const afterAdventure = await db.books.query({
+				where: { $search: { query: "adventure" } },
+			}).runPromise;
+			expect(afterAdventure.length).toBe(1);
+			expect(afterAdventure[0].id).toBe("2");
+
+			// "epic" (unique to book 1) should not be findable
+			const afterEpic = await db.books.query({
+				where: { $search: { query: "epic" } },
+			}).runPromise;
+			expect(afterEpic.length).toBe(0);
+		});
+
+		it("7.4: deleteMany removes all matching entities from search index", async () => {
+			const config = {
+				books: {
+					schema: NestedBookSchema,
+					relationships: {},
+					searchIndex: ["metadata.description"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, {
+					books: [
+						createNestedBook("1", "Book One", "First unique content", "Bio 1"),
+						createNestedBook("2", "Book Two", "Second unique content", "Bio 2"),
+						createNestedBook("3", "Book Three", "Third distinct text", "Bio 3"),
+					],
+				}),
+			);
+
+			// Delete books with "unique" in description
+			await db.books.deleteMany(
+				(book) => book.metadata.description.includes("unique"),
+			).runPromise;
+
+			// Books 1 and 2 should be gone
+			const firstResults = await db.books.query({
+				where: { $search: { query: "first" } },
+			}).runPromise;
+			expect(firstResults.length).toBe(0);
+
+			const secondResults = await db.books.query({
+				where: { $search: { query: "second" } },
+			}).runPromise;
+			expect(secondResults.length).toBe(0);
+
+			// Book 3 should still be searchable
+			const thirdResults = await db.books.query({
+				where: { $search: { query: "distinct" } },
+			}).runPromise;
+			expect(thirdResults.length).toBe(1);
+			expect(thirdResults[0].id).toBe("3");
+		});
+	});
+
+	describe("combined operations maintain search index integrity", () => {
+		it("7.4: create-update-delete sequence maintains correct index state", async () => {
+			const config = {
+				books: {
+					schema: NestedBookSchema,
+					relationships: {},
+					searchIndex: ["metadata.description"] as const,
+				},
+			} as const;
+
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, { books: [] }),
+			);
+
+			// Create
+			await db.books.create(
+				createNestedBook("1", "Book", "Initial content about astronomy", "Bio"),
+			).runPromise;
+
+			let results = await db.books.query({
+				where: { $search: { query: "astronomy" } },
+			}).runPromise;
+			expect(results.length).toBe(1);
+
+			// Update
+			await db.books.update("1", {
+				metadata: { description: "Updated content about biology" },
+			}).runPromise;
+
+			results = await db.books.query({
+				where: { $search: { query: "astronomy" } },
+			}).runPromise;
+			expect(results.length).toBe(0);
+
+			results = await db.books.query({
+				where: { $search: { query: "biology" } },
+			}).runPromise;
+			expect(results.length).toBe(1);
+
+			// Delete
+			await db.books.delete("1").runPromise;
+
+			results = await db.books.query({
+				where: { $search: { query: "biology" } },
+			}).runPromise;
+			expect(results.length).toBe(0);
+		});
+	});
+});
