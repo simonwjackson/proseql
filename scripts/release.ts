@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const root = join(import.meta.dirname, "..");
@@ -169,10 +169,23 @@ execSync(`git commit -m "chore: release v${next}"`, {
 execSync(`git tag v${next}`, { cwd: root, stdio: "inherit" });
 execSync("git push && git push --tags", { cwd: root, stdio: "inherit" });
 
+// --- Create GitHub Release ---
+const notesFile = join(root, ".release-notes.tmp");
+writeFileSync(notesFile, entry);
+try {
+	execSync(
+		`gh release create v${next} --title "v${next}" --notes-file "${notesFile}"`,
+		{ cwd: root, stdio: "inherit" },
+	);
+} finally {
+	if (existsSync(notesFile)) unlinkSync(notesFile);
+}
+
 console.log(`\nReleased v${next}`);
 console.log(`  Commit: chore: release v${next}`);
 console.log(`  Tag: v${next}`);
 console.log("  Pushed to origin");
+console.log("  GitHub Release created");
 
 function capitalize(s: string): string {
 	return s.charAt(0).toUpperCase() + s.slice(1);

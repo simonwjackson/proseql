@@ -50,6 +50,7 @@ jobs:
         id: release
         env:
           LEFTHOOK: '0'
+          GH_TOKEN: ${{ github.token }}
         run: |
           nix develop --command bash -c "bun install && bun run scripts/release.ts"
           echo "version=$(node -p "require('./packages/core/package.json').version")" >> "$GITHUB_OUTPUT"
