@@ -6,3 +6,4 @@ bun.nix
 packages/*/*.tsbuildinfo
 packages/*/LICENSE
 coverage/
+.direnv/
