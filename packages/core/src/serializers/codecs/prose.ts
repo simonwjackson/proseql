@@ -157,3 +157,62 @@ export const compileOverflowTemplates = (
 		}
 	});
 };
+
+// ============================================================================
+// Value Serialization
+// ============================================================================
+
+/**
+ * Serializes a value to its prose format string representation.
+ *
+ * Type mapping:
+ * - null/undefined → `~`
+ * - boolean → `true` / `false`
+ * - number → digit characters (e.g., `42`, `-3.14`)
+ * - array → `[a, b, c]` with element quoting for `,` and `]`
+ * - string → bare text (quoting for delimiters handled by encodeHeadline)
+ *
+ * @param value - The value to serialize
+ * @returns The serialized string representation
+ *
+ * @example
+ * ```typescript
+ * serializeValue(42)           // "42"
+ * serializeValue(true)         // "true"
+ * serializeValue(null)         // "~"
+ * serializeValue("hello")      // "hello"
+ * serializeValue(["a", "b"])   // "[a, b]"
+ * ```
+ */
+export const serializeValue = (value: unknown): string => {
+	// null or undefined → tilde
+	if (value === null || value === undefined) {
+		return "~";
+	}
+
+	// boolean → true/false
+	if (typeof value === "boolean") {
+		return value ? "true" : "false";
+	}
+
+	// number → digit representation
+	if (typeof value === "number") {
+		return String(value);
+	}
+
+	// array → [element, element, ...]
+	if (Array.isArray(value)) {
+		const elements = value.map((element) => {
+			const serialized = serializeValue(element);
+			// Quote elements that contain comma or closing bracket
+			if (serialized.includes(",") || serialized.includes("]")) {
+				return `"${serialized.replace(/"/g, '\\"')}"`;
+			}
+			return serialized;
+		});
+		return `[${elements.join(", ")}]`;
+	}
+
+	// string (or anything else) → bare text
+	return String(value);
+};
