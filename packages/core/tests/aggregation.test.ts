@@ -592,4 +592,85 @@ describe("Aggregation", () => {
 			expect(result[2].count).toBe(2); // electronics: p4, p6
 		});
 	});
+
+	// ============================================================================
+	// Tests — Nested Field Aggregates
+	// ============================================================================
+
+	describe("nested field aggregates", () => {
+		// Schema with nested metadata object
+		const NestedBookSchema = Schema.Struct({
+			id: Schema.String,
+			title: Schema.String,
+			genre: Schema.String,
+			metadata: Schema.Struct({
+				views: Schema.Number,
+				rating: Schema.Number,
+				tags: Schema.Array(Schema.String),
+			}),
+		});
+
+		const nestedConfig = {
+			books: {
+				schema: NestedBookSchema,
+				relationships: {},
+			},
+		} as const;
+
+		const nestedTestBooks = [
+			{
+				id: "b1",
+				title: "Dune",
+				genre: "sci-fi",
+				metadata: { views: 1000, rating: 5, tags: ["classic"] },
+			},
+			{
+				id: "b2",
+				title: "Neuromancer",
+				genre: "sci-fi",
+				metadata: { views: 800, rating: 4, tags: ["cyberpunk"] },
+			},
+			{
+				id: "b3",
+				title: "The Hobbit",
+				genre: "fantasy",
+				metadata: { views: 1200, rating: 5, tags: ["adventure"] },
+			},
+			{
+				id: "b4",
+				title: "1984",
+				genre: "dystopian",
+				metadata: { views: 600, rating: 4, tags: ["political"] },
+			},
+			{
+				id: "b5",
+				title: "Foundation",
+				genre: "sci-fi",
+				metadata: { views: 400, rating: 3, tags: ["epic"] },
+			},
+		];
+
+		const createNestedTestDb = () =>
+			Effect.runPromise(
+				createEffectDatabase(nestedConfig, { books: nestedTestBooks }),
+			);
+
+		it("6.3 scalar aggregate on nested fields → sum, min, max work correctly", async () => {
+			const db = await createNestedTestDb();
+			const result = await db.books.aggregate({
+				sum: "metadata.views",
+				min: "metadata.rating",
+				max: "metadata.rating",
+			}).runPromise;
+
+			// Sum of views: 1000 + 800 + 1200 + 600 + 400 = 4000
+			expect(result.sum?.["metadata.views"]).toBe(4000);
+
+			// Min rating: 3 (Foundation)
+			expect(result.min?.["metadata.rating"]).toBe(3);
+
+			// Max rating: 5 (Dune, The Hobbit)
+			expect(result.max?.["metadata.rating"]).toBe(5);
+		});
+	});
 });

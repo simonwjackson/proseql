@@ -54,7 +54,7 @@
 
 - [x] 6.1 In `core/operations/query/aggregate.ts` `updateAccumulators`: replace `entity[field]` with `getNestedValue(entity, field)` for sum, avg, min, max field resolution.
 - [x] 6.2 In `computeGroupedAggregates`: replace `entity[f]` with `getNestedValue(entity, f)` for groupBy key extraction.
-- [ ] 6.3 Test scalar aggregate: `aggregate({ sum: "metadata.views", min: "metadata.rating", max: "metadata.rating" })`.
+- [x] 6.3 Test scalar aggregate: `aggregate({ sum: "metadata.views", min: "metadata.rating", max: "metadata.rating" })`.
 - [ ] 6.4 Test grouped aggregate: `aggregate({ groupBy: "metadata.rating", count: true })`.
 - [ ] 6.5 Test avg on nested field: `aggregate({ avg: "metadata.views" })`.
 
