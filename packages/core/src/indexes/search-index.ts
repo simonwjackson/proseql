@@ -376,7 +376,7 @@ const removeEntityFromIndexMut = <T extends HasId>(
 	const entityId = entity.id;
 
 	for (const field of fields) {
-		const fieldValue = entityRecord[field];
+		const fieldValue = getNestedValue(entityRecord, field);
 
 		// Only process string fields
 		if (typeof fieldValue !== "string") {
@@ -477,8 +477,8 @@ export const updateInSearchIndex = <T extends HasId>(
 		// Find which fields have actually changed
 		const changedFields: Array<string> = [];
 		for (const field of fields) {
-			const oldValue = oldRecord[field];
-			const newValue = newRecord[field];
+			const oldValue = getNestedValue(oldRecord, field);
+			const newValue = getNestedValue(newRecord, field);
 			if (oldValue !== newValue) {
 				changedFields.push(field);
 			}

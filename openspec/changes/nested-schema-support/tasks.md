@@ -61,7 +61,7 @@
 ## 7. Nested Search Index
 
 - [x] 7.1 In `core/indexes/search-index.ts` `addEntityToIndexMut`: replace `entityRecord[field]` with `getNestedValue(entityRecord, field)`.
-- [ ] 7.2 Apply same fix to `removeEntityFromIndexMut` and the update path.
+- [x] 7.2 Apply same fix to `removeEntityFromIndexMut` and the update path.
 - [ ] 7.3 Test `searchIndex: ["metadata.description"]` builds correct inverted index from nested field values.
 - [ ] 7.4 Test search index maintenance on create/update/delete with nested indexed field.
 - [ ] 7.5 Test `$search` query against nested indexed field returns correct results.
