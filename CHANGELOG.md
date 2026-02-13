@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.4 (2026-02-13)
+
+### Other
+- Verify all package READMEs complete and well-formed (16cc716)
+- Slim root README to landing page with package links (9a8a5a0)
+- Add comprehensive README for @proseql/cli (957dce4)
+- Add comprehensive README for @proseql/rpc (aa10eec)
+- Add comprehensive README for @proseql/rest (c293380)
+- Add comprehensive README for @proseql/node (108eea0)
+- Add package-specific readme specifications (01e8786)
+- Update task rules for dense parallel execution (84ea5ca)
+- Add gpr publish workflow and rename npm job (7f11398)
+- Add comprehensive API README for @proseql/core (f19654a)
+
+
 ## v0.2.3 (2026-02-13)
 
 ### Other
