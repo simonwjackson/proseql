@@ -1,5 +1,21 @@
 # proseql
 
+<div align="center">
+
+[![License: MIT](https://img.shields.io/github/license/simonwjackson/proseql?style=for-the-badge&labelColor=161B22&color=DDB6F2)](LICENSE)
+[![npm](https://img.shields.io/npm/v/@proseql/core?style=for-the-badge&label=%40proseql%2Fcore&labelColor=161B22&color=9fdf9f)](https://www.npmjs.com/package/@proseql/core)
+[![CI](https://img.shields.io/github/actions/workflow/status/simonwjackson/proseql/ci.yml?style=for-the-badge&label=CI&labelColor=161B22)](https://github.com/simonwjackson/proseql/actions)
+
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white&labelColor=161B22)](https://www.typescriptlang.org/)
+[![Effect](https://img.shields.io/badge/Built_with-Effect-black?style=for-the-badge&labelColor=161B22)](https://effect.website/)
+[![Bun](https://img.shields.io/badge/Bun-FBF0DF?style=for-the-badge&logo=bun&logoColor=161B22&labelColor=161B22)](https://bun.sh/)
+
+[![Zero Dependencies](https://img.shields.io/badge/Zero_Dependencies-ff7b72?style=for-the-badge&labelColor=161B22)](.)
+[![Node](https://img.shields.io/badge/Node-%3E%3D18-9fdf9f?style=for-the-badge&logo=node.js&logoColor=9fdf9f&labelColor=161B22)](.)
+[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-79c0ff?style=for-the-badge&labelColor=161B22)](https://github.com/simonwjackson/proseql/pulls)
+
+</div>
+
 **prose** /prōz/ *n.* — written language in its ordinary form.
 **SQL** /ˈsiːkwəl/ *n.* — the language of relational databases.
 
@@ -25,29 +41,76 @@ npm install @proseql/node
 
 ## Enough. Show Me.
 
+Your data lives in plain text files. Here's `books.yaml`:
+
+```yaml
+- id: "1"
+  title: Dune
+  author: Frank Herbert
+  year: 1965
+  genre: sci-fi
+  metadata:
+    rating: 4.8
+    tags:
+      - desert
+      - politics
+      - ecology
+- id: "2"
+  title: Neuromancer
+  author: William Gibson
+  year: 1984
+  genre: sci-fi
+  metadata:
+    rating: 4.5
+    tags:
+      - cyberpunk
+      - AI
+- id: "3"
+  title: The Left Hand of Darkness
+  author: Ursula K. Le Guin
+  year: 1969
+  genre: sci-fi
+  metadata:
+    rating: 4.7
+    tags:
+      - gender
+      - anthropology
+```
+
+And their authors in `authors.prose` — data that reads like English:
+
+```
+@prose {name}, born {birthYear} — {country}
+
+Frank Herbert, born 1920 — USA
+William Gibson, born 1948 — USA
+Ursula K. Le Guin, born 1929 — USA
+```
+
+Both are real database files. Query them, mutate them, `git diff` them:
+
 ```ts
-import { Effect, Schema } from "effect"
-import { createEffectDatabase } from "@proseql/core"
+import { Effect, Layer, Schema } from "effect"
+import {
+  createPersistentEffectDatabase,
+  NodeStorageLayer,
+  makeSerializerLayer,
+  yamlCodec,
+  proseCodec,
+} from "@proseql/node"
 
-const BookSchema = Schema.Struct({
-  id: Schema.String,
-  title: Schema.String,
-  author: Schema.String,
-  year: Schema.Number,
-  genre: Schema.String,
+const db = yield* createPersistentEffectDatabase({
+  books: {
+    schema: BookSchema,
+    file: "./data/books.yaml",
+    relationships: {},
+  },
+  authors: {
+    schema: AuthorSchema,
+    file: "./data/authors.prose",
+    relationships: {},
+  },
 })
-
-const db = await Effect.runPromise(
-  createEffectDatabase({
-    books: { schema: BookSchema, relationships: {} },
-  }, {
-    books: [
-      { id: "1", title: "Dune", author: "Frank Herbert", year: 1965, genre: "sci-fi" },
-      { id: "2", title: "Neuromancer", author: "William Gibson", year: 1984, genre: "sci-fi" },
-      { id: "3", title: "The Left Hand of Darkness", author: "Ursula K. Le Guin", year: 1969, genre: "sci-fi" },
-    ],
-  }),
-)
 
 // find it
 const dune = await db.books.findById("1").runPromise
@@ -60,8 +123,7 @@ const classics = await db.books.query({
 
 // change it
 await db.books.update("1", { genre: "masterpiece" }).runPromise
-
-// that's it. that's the database.
+// → books.yaml just changed on disk. go open it.
 ```
 
 ### Nested Data
