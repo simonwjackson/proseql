@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.2 (2026-02-13)
+
+### Fixes
+- Allow release job on push and workflow_dispatch (4495a3e)
+
+
 ## v0.2.1 (2026-02-13)
 
 ### Fixes
