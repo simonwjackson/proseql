@@ -16,7 +16,7 @@
 
 ## 5. CLI README (parallel with Track A, B, C, D)
 
-- [ ] 5.1 Create `packages/cli/README.md` documenting the command-line interface. Cover installation (`npx @proseql/cli` or global install), all commands: `init` (scaffold config), `query` (filter/sort/select), `create` (insert records), `update` (modify by ID), `delete` (remove by ID), `describe` (show collection schema), `collections` (list collections), `stats` (collection statistics), `convert` (format conversion between JSON/YAML/TOML/etc.), `migrate` (run schema migrations). Document output format flag (`--format json|table|yaml`), config discovery. Follow consistent structure.
+- [x] 5.1 Create `packages/cli/README.md` documenting the command-line interface. Cover installation (`npx @proseql/cli` or global install), all commands: `init` (scaffold config), `query` (filter/sort/select), `create` (insert records), `update` (modify by ID), `delete` (remove by ID), `describe` (show collection schema), `collections` (list collections), `stats` (collection statistics), `convert` (format conversion between JSON/YAML/TOML/etc.), `migrate` (run schema migrations). Document output format flag (`--format json|table|yaml`), config discovery. Follow consistent structure.
 
 ## 6. Root README refactor (blocked by Track A + B)
 
