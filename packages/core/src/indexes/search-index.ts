@@ -10,6 +10,7 @@
 import { Effect, Ref } from "effect";
 import { tokenize } from "../operations/query/search.js";
 import type { SearchIndexMap } from "../types/search-types.js";
+import { getNestedValue } from "../utils/nested-path.js";
 
 /**
  * Entity constraint: must have a readonly string `id` field.
@@ -301,7 +302,7 @@ const addEntityToIndexMut = <T extends HasId>(
 	const entityId = entity.id;
 
 	for (const field of fields) {
-		const fieldValue = entityRecord[field];
+		const fieldValue = getNestedValue(entityRecord, field);
 
 		// Only index string fields
 		if (typeof fieldValue !== "string") {
