@@ -273,7 +273,9 @@ export const computeGroupedAggregates = (
 
 	for (const entity of entities) {
 		// Build group key from grouping field values
-		const groupKey = createGroupKey(groupByFields.map((f) => entity[f]));
+		const groupKey = createGroupKey(
+			groupByFields.map((f) => getNestedValue(entity, f)),
+		);
 
 		const existing = groups.get(groupKey);
 		if (existing !== undefined) {
