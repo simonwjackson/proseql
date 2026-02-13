@@ -1271,8 +1271,6 @@ export const proseCodec = (options: ProseCodecOptions): FormatCodec => {
 		},
 
 		decode: (raw: string): unknown => {
-			// Task 8.3 will implement the full decode logic
-			// For now, parse the structure and return records
 			const lines = raw.split("\n");
 
 			// Scan for the directive

@@ -50,7 +50,7 @@
 
 - [x] 8.1 Implement `proseCodec(options: ProseCodecOptions): FormatCodec` factory — compile templates at construction, return `{ name, extensions, encode, decode }`
 - [x] 8.2 Implement `encode(data: unknown): string` — write `@prose` directive, overflow declarations, blank line, then encode each record (headline + overflow lines)
-- [ ] 8.3 Implement `decode(raw: string): unknown` — scan directive, parse body into records, return array of record objects
+- [x] 8.3 Implement `decode(raw: string): unknown` — scan directive, parse body into records, return array of record objects
 - [ ] 8.4 Write round-trip tests: flat records, records with overflow, records with quoting, empty collection, mixed pass-through text
 
 ## 9. Integration and Export
