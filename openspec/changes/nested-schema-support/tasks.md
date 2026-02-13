@@ -79,7 +79,7 @@
 - [x] 9.2 Test end-to-end: create entities, query with nested filter + sort + select, verify results.
 - [x] 9.3 Test nested filter + pagination (offset-based).
 - [x] 9.4 Test nested filter + cursor pagination.
-- [ ] 9.5 Test nested filter + aggregation in same test flow.
+- [x] 9.5 Test nested filter + aggregation in same test flow.
 - [ ] 9.6 Test nested updates + re-query to verify state consistency.
 - [ ] 9.7 Test persistence round-trip with nested data: create, flush, reload, verify nested fields intact.
 - [ ] 9.8 Test computed fields on nested source data: `computed: { viewCount: (e) => e.metadata.views }` works after nesting support is in place.
