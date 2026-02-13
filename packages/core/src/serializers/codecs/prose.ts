@@ -216,3 +216,114 @@ export const serializeValue = (value: unknown): string => {
 	// string (or anything else) → bare text
 	return String(value);
 };
+
+/**
+ * Deserializes a prose format string back to its typed value.
+ * Uses heuristic type detection:
+ * - Numbers: matches `/^-?\d+(\.\d+)?$/`
+ * - Booleans: exact match `true` or `false`
+ * - Null: exact match `~`
+ * - Arrays: starts with `[`, ends with `]`
+ * - Strings: default (anything not matching above)
+ *
+ * @param text - The serialized string to deserialize
+ * @returns The deserialized value with its inferred type
+ *
+ * @example
+ * ```typescript
+ * deserializeValue("42")           // 42 (number)
+ * deserializeValue("-3.14")        // -3.14 (number)
+ * deserializeValue("true")         // true (boolean)
+ * deserializeValue("false")        // false (boolean)
+ * deserializeValue("~")            // null
+ * deserializeValue("[a, b, c]")    // ["a", "b", "c"] (array)
+ * deserializeValue("hello")        // "hello" (string)
+ * ```
+ */
+export const deserializeValue = (text: string): unknown => {
+	// null → tilde
+	if (text === "~") {
+		return null;
+	}
+
+	// boolean → true/false exact match
+	if (text === "true") {
+		return true;
+	}
+	if (text === "false") {
+		return false;
+	}
+
+	// number → matches /^-?\d+(\.\d+)?$/
+	const numberRegex = /^-?\d+(\.\d+)?$/;
+	if (numberRegex.test(text)) {
+		return Number(text);
+	}
+
+	// array → starts with [, ends with ]
+	if (text.startsWith("[") && text.endsWith("]")) {
+		// Extract inner content and parse array elements
+		// Task 2.4 will implement full element parsing with quoting support
+		// For now, do a simple split respecting quoted elements
+		const inner = text.slice(1, -1).trim();
+
+		// Handle empty array
+		if (inner === "") {
+			return [];
+		}
+
+		// Parse array elements (basic version, full implementation in task 2.4)
+		return parseArrayElements(inner);
+	}
+
+	// default → string
+	return text;
+};
+
+/**
+ * Parses array element string into an array of deserialized values.
+ * Handles quoted elements that may contain commas or brackets.
+ *
+ * @param inner - The content between [ and ]
+ * @returns Array of deserialized values
+ */
+const parseArrayElements = (inner: string): unknown[] => {
+	const elements: unknown[] = [];
+	let pos = 0;
+	let elementStart = 0;
+	let inQuotes = false;
+
+	while (pos <= inner.length) {
+		if (pos === inner.length || (!inQuotes && inner[pos] === ",")) {
+			// Extract and trim the element
+			const element = inner.slice(elementStart, pos).trim();
+
+			if (element !== "") {
+				// Handle quoted elements
+				if (element.startsWith('"') && element.endsWith('"')) {
+					// Remove quotes and unescape
+					const unquoted = element.slice(1, -1).replace(/\\"/g, '"');
+					elements.push(deserializeValue(unquoted));
+				} else {
+					elements.push(deserializeValue(element));
+				}
+			}
+
+			elementStart = pos + 1;
+			pos++;
+			continue;
+		}
+
+		if (inner[pos] === '"' && (pos === 0 || inner[pos - 1] !== "\\")) {
+			// Check if this is at the start of an element (accounting for whitespace)
+			const elementSoFar = inner.slice(elementStart, pos).trim();
+			if (elementSoFar === "" || inQuotes) {
+				inQuotes = !inQuotes;
+			}
+		}
+
+		pos++;
+	}
+
+	return elements;
+};
