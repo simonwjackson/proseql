@@ -75,7 +75,7 @@
 
 ## 9. Integration Tests
 
-- [ ] 9.1 Create `tests/nested-schema.test.ts` with test schema: entity has `id`, `title`, `genre`, `metadata: { views, rating, tags, description }`, `author: { name, country }`.
+- [x] 9.1 Create `tests/nested-schema.test.ts` with test schema: entity has `id`, `title`, `genre`, `metadata: { views, rating, tags, description }`, `author: { name, country }`.
 - [ ] 9.2 Test end-to-end: create entities, query with nested filter + sort + select, verify results.
 - [ ] 9.3 Test nested filter + pagination (offset-based).
 - [ ] 9.4 Test nested filter + cursor pagination.
