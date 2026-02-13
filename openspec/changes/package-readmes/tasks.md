@@ -20,7 +20,7 @@
 
 ## 6. Root README refactor (blocked by Track A + B)
 
-- [ ] 6.1 Slim root `README.md` to a landing page. Keep: badges, project description ("A type-safe relational database that persists to plain text files"), the directory-tree ASCII art, a minimal quick-start example (createNodeDatabase, basic query, file mutation). Replace the full API docs with a packages table linking to each package README (core, node, browser, cli, rest, rpc). Keep the examples listing (updated to numbered prefixes). Remove all detailed API sections (CRUD, querying, aggregation, pagination, search, computed fields, relationships, indexing, hooks, migrations, transactions, unique constraints, plugins, errors, ID generation, persistence setup, format table, prose format, append-only). Keep license.
+- [x] 6.1 Slim root `README.md` to a landing page. Keep: badges, project description ("A type-safe relational database that persists to plain text files"), the directory-tree ASCII art, a minimal quick-start example (createNodeDatabase, basic query, file mutation). Replace the full API docs with a packages table linking to each package README (core, node, browser, cli, rest, rpc). Keep the examples listing (updated to numbered prefixes). Remove all detailed API sections (CRUD, querying, aggregation, pagination, search, computed fields, relationships, indexing, hooks, migrations, transactions, unique constraints, plugins, errors, ID generation, persistence setup, format table, prose format, append-only). Keep license.
 
 ## 7. Verification (blocked by Track A + B + C + D + E + F)
 
