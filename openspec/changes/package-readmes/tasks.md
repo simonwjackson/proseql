@@ -4,7 +4,7 @@
 
 ## 2. Node README (parallel with Track A, C, D, E)
 
-- [ ] 2.1 Create `packages/node/README.md` covering Node.js file persistence. Document three approaches: zero-config `createNodeDatabase`, explicit `makeNodePersistenceLayer`, manual `Layer.merge` with `NodeStorageLayer` + `makeSerializerLayer`. Include file format table (JSON/JSONL/YAML/JSON5/JSONC/TOML/TOON/Hjson/Prose with extensions), prose format (@prose directive, template-less codec, explicit template, format override), append-only JSONL (appendOnly config, OperationError on update/delete), debounced writes and `flush()`. Link to `@proseql/core` for query/mutation API. Follow consistent structure.
+- [x] 2.1 Create `packages/node/README.md` covering Node.js file persistence. Document three approaches: zero-config `createNodeDatabase`, explicit `makeNodePersistenceLayer`, manual `Layer.merge` with `NodeStorageLayer` + `makeSerializerLayer`. Include file format table (JSON/JSONL/YAML/JSON5/JSONC/TOML/TOON/Hjson/Prose with extensions), prose format (@prose directive, template-less codec, explicit template, format override), append-only JSONL (appendOnly config, OperationError on update/delete), debounced writes and `flush()`. Link to `@proseql/core` for query/mutation API. Follow consistent structure.
 
 ## 3. REST README (parallel with Track A, B, D, E)
 
