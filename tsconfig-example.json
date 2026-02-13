@@ -12,5 +12,5 @@
       "@proseql/node/*": ["./packages/node/src/*"]
     }
   },
-  "include": ["examples/file-persistence.ts"]
+  "include": ["examples/*.ts"]
 }

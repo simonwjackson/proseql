@@ -141,7 +141,7 @@ const program = Effect.gen(function* () {
 	})
 
 	// Check if data already exists from a previous run
-	const existingAuthors = yield* collect(db.authors.query())
+	const existingAuthors = yield* collect(db.authors.query() as unknown as Stream.Stream<Record<string, unknown>, never, never>)
 
 	if (existingAuthors.length > 0) {
 		console.log("Found existing data from a previous run!\n")
@@ -192,7 +192,7 @@ const program = Effect.gen(function* () {
 	const books = yield* collect(db.books.query({
 		populate: { author: true },
 		sort: { year: "asc" },
-	}))
+	}) as unknown as Stream.Stream<Record<string, unknown>, never, never>)
 	for (const b of books) {
 		const author = b.author as Record<string, unknown> | undefined
 		console.log(`  ${b.year} — "${b.title}" by ${author?.name}`)
@@ -203,7 +203,7 @@ const program = Effect.gen(function* () {
 	const reviews = yield* collect(db.reviews.query({
 		where: { rating: 5 },
 		populate: { book: true },
-	}))
+	}) as unknown as Stream.Stream<Record<string, unknown>, never, never>)
 	for (const r of reviews) {
 		const book = r.book as Record<string, unknown> | undefined
 		console.log(`  ★★★★★ "${book?.title}" — ${r.text}`)

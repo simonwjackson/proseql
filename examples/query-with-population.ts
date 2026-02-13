@@ -119,10 +119,10 @@ async function main() {
 	const engineers = await db.users.query({
 		where: { role: "engineer" },
 		sort: { name: "asc" },
-	}).runPromise
+	}).runPromise as ReadonlyArray<Record<string, unknown>>
 
 	for (const u of engineers) {
-		console.log(`  ${(u as Record<string, unknown>).name}`)
+		console.log(`  ${u.name}`)
 	}
 
 	// --- Pagination ---
@@ -132,10 +132,10 @@ async function main() {
 		sort: { title: "asc" },
 		limit: 2,
 		offset: 0,
-	}).runPromise
+	}).runPromise as ReadonlyArray<Record<string, unknown>>
 
 	for (const p of page1) {
-		console.log(`  ${(p as Record<string, unknown>).title}`)
+		console.log(`  ${p.title}`)
 	}
 
 	console.log("=== Posts page 2 (limit 2) ===")
@@ -144,10 +144,10 @@ async function main() {
 		sort: { title: "asc" },
 		limit: 2,
 		offset: 2,
-	}).runPromise
+	}).runPromise as ReadonlyArray<Record<string, unknown>>
 
 	for (const p of page2) {
-		console.log(`  ${(p as Record<string, unknown>).title}`)
+		console.log(`  ${p.title}`)
 	}
 
 	// --- Population: resolve ref relationships ---
@@ -155,7 +155,7 @@ async function main() {
 	const postsWithAuthor = await db.posts.query({
 		where: { published: true },
 		populate: { author: true },
-	}).runPromise
+	}).runPromise as ReadonlyArray<Record<string, unknown>>
 
 	for (const p of postsWithAuthor) {
 		const post = p as Record<string, unknown>
@@ -167,7 +167,7 @@ async function main() {
 	console.log("\n=== Companies with employees ===")
 	const companiesWithEmployees = await db.companies.query({
 		populate: { employees: true },
-	}).runPromise
+	}).runPromise as ReadonlyArray<Record<string, unknown>>
 
 	for (const c of companiesWithEmployees) {
 		const company = c as Record<string, unknown>
@@ -184,7 +184,7 @@ async function main() {
 				populate: { company: true },
 			},
 		},
-	}).runPromise
+	}).runPromise as ReadonlyArray<Record<string, unknown>>
 
 	for (const p of deepPopulated) {
 		const post = p as Record<string, unknown>
@@ -197,7 +197,7 @@ async function main() {
 	console.log("\n=== Users with selected fields ===")
 	const selectedUsers = await db.users.query({
 		select: ["id", "name", "email"],
-	}).runPromise
+	}).runPromise as ReadonlyArray<Record<string, unknown>>
 
 	for (const u of selectedUsers) {
 		console.log(`  ${JSON.stringify(u)}`)
@@ -205,7 +205,7 @@ async function main() {
 
 	// --- Using Effect directly (for Effect-native consumers) ---
 	console.log("\n=== Using Effect directly with Stream.runCollect ===")
-	const stream = db.posts.query({ where: { published: true } })
+	const stream = db.posts.query({ where: { published: true } }) as unknown as Stream.Stream<Record<string, unknown>, never, never>
 	const results = await Effect.runPromise(
 		Stream.runCollect(stream).pipe(Effect.map(Chunk.toReadonlyArray)),
 	)
@@ -221,10 +221,10 @@ async function main() {
 			],
 		},
 		sort: { name: "asc" },
-	}).runPromise
+	}).runPromise as ReadonlyArray<Record<string, unknown>>
 
 	for (const u of complex) {
-		console.log(`  ${(u as Record<string, unknown>).name} (${(u as Record<string, unknown>).role})`)
+		console.log(`  ${u.name} (${u.role})`)
 	}
 }
 

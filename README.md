@@ -61,6 +61,40 @@ await db.books.update("1", { genre: "masterpiece" }).runPromise
 // that's it. that's the database.
 ```
 
+### Nested Data
+
+Schemas can contain nested objects. ProseQL supports them everywhere — filtering, sorting, updates, aggregation, indexing, search, and computed fields.
+
+```ts
+const BookSchema = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  genre: Schema.String,
+  metadata: Schema.Struct({
+    views: Schema.Number,
+    rating: Schema.Number,
+    tags: Schema.Array(Schema.String),
+    description: Schema.String,
+  }),
+  author: Schema.Struct({
+    name: Schema.String,
+    country: Schema.String,
+  }),
+})
+```
+
+Two ways to reference nested fields:
+
+```ts
+// shape-mirroring — mirrors the object structure
+await db.books.query({ where: { metadata: { rating: 5 } } }).runPromise
+
+// dot-notation — flat string path
+await db.books.query({ where: { "metadata.rating": 5 } }).runPromise
+```
+
+Both are equivalent. Use whichever reads better in context.
+
 ## Persist to Files
 
 Add a `file` field. Mutations save automatically. Your data is always a plain text file on disk.
@@ -238,6 +272,19 @@ await db.books.update("1", { inStock: { $toggle: true } }).runPromise
 
 // explicit set (same as plain value, but composable with other operators)
 await db.books.update("1", { genre: { $set: "masterpiece" } }).runPromise
+
+// nested updates — deep merge preserves sibling fields
+await db.books.update("1", { metadata: { views: 500 } }).runPromise
+// → metadata.views = 500, metadata.rating/tags/description unchanged
+
+// nested operators
+await db.books.update("1", { metadata: { views: { $increment: 100 } } }).runPromise
+
+// update multiple nested paths at once
+await db.books.update("1", {
+  metadata: { rating: 5, views: { $increment: 200 } },
+  author: { country: "CA" },
+}).runPromise
 ```
 
 | Operator | Works On | What It Does |
@@ -279,6 +326,20 @@ const results = await db.books.query({
 | `$and` | clauses | Match **all** of the given conditions |
 | `$not` | clause | Negate a condition |
 
+Nested fields work with any operator — use shape-mirroring or dot-notation:
+
+```ts
+// shape-mirroring
+const popular = await db.books.query({
+  where: { metadata: { views: { $gt: 700 } } },
+}).runPromise
+
+// dot-notation
+const highlyRated = await db.books.query({
+  where: { "metadata.rating": { $gte: 4 } },
+}).runPromise
+```
+
 Or just pass a value for exact match:
 
 ```ts
@@ -316,6 +377,16 @@ const complex = await db.books.query({
     ],
   },
 }).runPromise
+
+// logical operators work with nested fields too
+const featured = await db.books.query({
+  where: {
+    $or: [
+      { metadata: { rating: 5 } },
+      { author: { country: "UK" } },
+    ],
+  },
+}).runPromise
 ```
 
 ### Sorting
@@ -323,6 +394,11 @@ const complex = await db.books.query({
 ```ts
 const sorted = await db.books.query({
   sort: { year: "desc", title: "asc" },
+}).runPromise
+
+// sort by nested fields using dot-notation
+const mostViewed = await db.books.query({
+  sort: { "metadata.views": "desc" },
 }).runPromise
 ```
 
@@ -387,6 +463,25 @@ const modern = await db.books.aggregate({
   where: { year: { $gte: 2000 } },
   count: true,
 }).runPromise
+
+// aggregate nested fields using dot-notation
+const nested = await db.books.aggregate({
+  where: { metadata: { rating: { $gte: 4 } } },
+  count: true,
+  sum: "metadata.views",
+  avg: "metadata.rating",
+}).runPromise
+// → { count: 4, sum: { "metadata.views": 3600 }, avg: { "metadata.rating": 4.5 } }
+
+// group by nested field
+const byCountry = await db.books.aggregate({
+  groupBy: "author.country",
+  count: true,
+}).runPromise
+// → [
+//   { group: { "author.country": "USA" }, count: 3 },
+//   { group: { "author.country": "UK" }, count: 2 },
+// ]
 ```
 
 ## Reactive Queries
@@ -434,7 +529,7 @@ const program = Effect.gen(function* () {
 })
 ```
 
-Streams are debounced and deduplicated automatically — rapid mutations produce at most one emission after the debounce interval settles.
+Streams are debounced and deduplicated automatically — rapid mutations produce at most one emission after the debounce interval settles. Nested field changes trigger emissions too — updating `metadata.views` on a watched entity re-emits the stream.
 
 ## Full-Text Search
 
@@ -461,13 +556,23 @@ const results = await db.books.query({
 }).runPromise
 ```
 
+Search nested fields by specifying dot-paths:
+
+```ts
+const results = await db.books.query({
+  where: {
+    $search: { query: "cyberpunk", fields: ["metadata.description"] },
+  },
+}).runPromise
+```
+
 Add a `searchIndex` for faster lookups on large collections:
 
 ```ts
 const config = {
   books: {
     schema: BookSchema,
-    searchIndex: ["title", "author", "description"],
+    searchIndex: ["title", "metadata.description", "author.name"],
     relationships: {},
   },
 } as const
@@ -486,6 +591,10 @@ const config = {
     computed: {
       displayName: (book) => `${book.title} (${book.year})`,
       isClassic: (book) => book.year < 1980,
+      // computed fields can read nested data
+      viewCount: (book) => book.metadata.views,
+      isHighlyRated: (book) => book.metadata.rating >= 4,
+      summary: (book) => `${book.title} by ${book.author.name} (${book.metadata.rating}/5)`,
     },
     relationships: {},
   },
@@ -565,6 +674,18 @@ const config = {
   books: {
     schema: BookSchema,
     indexes: ["genre", "authorId", ["genre", "year"]],
+    relationships: {},
+  },
+} as const
+```
+
+Nested fields use dot-notation in index declarations:
+
+```ts
+const config = {
+  books: {
+    schema: BookSchema,
+    indexes: ["metadata.views", "metadata.rating", "author.country"],
     relationships: {},
   },
 } as const
