@@ -10,7 +10,8 @@ your-project/
 ├── data/
 │   ├── books.yaml          ← you can just open this
 │   ├── authors.json         ← or this
-│   └── publishers.toml      ← or this, we don't judge
+│   ├── publishers.toml      ← or this, we don't judge
+│   └── catalog.prose        ← or this, it reads like English
 └── ...
 ```
 
@@ -159,6 +160,7 @@ Writes are debounced. Call `db.flush()` when you're impatient.
 | TOML   | `.toml`   | Config-brained perfection |
 | TOON   | `.toon`   | Compact and LLM-friendly |
 | Hjson  | `.hjson`  | JSON for people who make typos |
+| Prose  | `.prose`  | Data that reads like a sentence |
 
 ```ts
 // pick and choose
@@ -167,6 +169,37 @@ makeSerializerLayer([jsonCodec(), yamlCodec(), tomlCodec()])
 // or just take them all
 import { AllTextFormatsLayer } from "@proseql/core"
 ```
+
+### Prose Format
+
+Most codecs are zero-config. Prose is different — it needs a template that describes how each record becomes a sentence.
+
+```ts
+const config = {
+  books: {
+    schema: BookSchema,
+    file: "./data/books.prose",
+    relationships: {},
+  },
+}
+
+// prose requires a template — each record becomes a sentence
+makeSerializerLayer([
+  proseCodec({ template: '"{title}" by {author} ({year}) — {genre}' }),
+  jsonCodec(),
+])
+```
+
+On disk, it looks like this:
+
+```
+@prose "{title}" by {author} ({year}) — {genre}
+
+"Dune" by Frank Herbert (1965) — sci-fi
+"Neuromancer" by William Gibson (1984) — sci-fi
+```
+
+The `@prose` directive tells the parser which template to use for decoding. Because `proseCodec` requires a `template` argument, it isn't included in `AllTextFormatsLayer` — you always register it explicitly.
 
 ### Append-Only Collections
 

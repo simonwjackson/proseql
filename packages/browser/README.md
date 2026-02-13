@@ -97,6 +97,7 @@ All ProseQL serialization codecs are browser-compatible:
 | YAML | `yaml` | ✓ | Pure JavaScript |
 | TOML | `smol-toml` | ✓ | Pure JavaScript, ESM/CJS dual package |
 | TOON | `@toon-format/toon` | ✓ | Pure JavaScript |
+| Prose | built-in | ✓ | Template-driven, human-readable sentences |
 
 All codecs work identically in Node.js and browser environments. No special configuration is required.
 
