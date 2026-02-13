@@ -1015,6 +1015,145 @@ export const parseDirectiveBlock = (
 };
 
 // ============================================================================
+// Body Parser
+// ============================================================================
+
+/**
+ * Represents a parsed entry from the body section of a prose document.
+ * Can be either a record (matched the headline template) or pass-through text.
+ */
+export type ProseEntry =
+	| {
+			readonly type: "record";
+			/** The decoded headline fields */
+			readonly fields: Record<string, unknown>;
+			/** The raw headline line */
+			readonly headline: string;
+			/** Indented overflow lines belonging to this record */
+			readonly overflowLines: ReadonlyArray<string>;
+	  }
+	| {
+			readonly type: "passthrough";
+			/** Raw text lines that didn't match the template */
+			readonly lines: ReadonlyArray<string>;
+	  };
+
+/**
+ * Result of parsing the body section of a prose document.
+ */
+export interface ParseBodyResult {
+	/** The parsed entries (interleaved records and pass-through text) */
+	readonly entries: ReadonlyArray<ProseEntry>;
+}
+
+/**
+ * Parses the body section of a prose document.
+ * Iterates lines after the directive block and classifies each as:
+ * - Record headline (matches the compiled template)
+ * - Indented overflow/continuation (part of the current record)
+ * - Pass-through text (doesn't match, preserved verbatim)
+ *
+ * @param lines - Array of lines from the document
+ * @param bodyStart - Index of the first line of the body (after directive block)
+ * @param headlineTemplate - The compiled headline template
+ * @returns The parsed body with interleaved records and pass-through text
+ *
+ * @example
+ * ```typescript
+ * const lines = [
+ *   '@prose #{id} "{title}"',
+ *   '',
+ *   '## Science Fiction',
+ *   '#1 "Dune"',
+ *   '  tagged [classic]',
+ *   '#2 "Neuromancer"',
+ *   '',
+ *   '## Fantasy',
+ *   '#3 "The Hobbit"',
+ * ]
+ * const template = compileTemplate('#{id} "{title}"')
+ * const result = parseBody(lines, 1, template)
+ * // → {
+ * //   entries: [
+ * //     { type: "passthrough", lines: ["", "## Science Fiction"] },
+ * //     { type: "record", fields: { id: "1", title: "Dune" }, headline: '#1 "Dune"', overflowLines: ["  tagged [classic]"] },
+ * //     { type: "record", fields: { id: "2", title: "Neuromancer" }, headline: '#2 "Neuromancer"', overflowLines: [] },
+ * //     { type: "passthrough", lines: ["", "## Fantasy"] },
+ * //     { type: "record", fields: { id: "3", title: "The Hobbit" }, headline: '#3 "The Hobbit"', overflowLines: [] },
+ * //   ]
+ * // }
+ * ```
+ */
+export const parseBody = (
+	lines: ReadonlyArray<string>,
+	bodyStart: number,
+	headlineTemplate: CompiledTemplate
+): ParseBodyResult => {
+	const entries: ProseEntry[] = [];
+	let lineIndex = bodyStart;
+	let currentPassthrough: string[] = [];
+
+	// Helper to flush accumulated pass-through lines into an entry
+	const flushPassthrough = (): void => {
+		if (currentPassthrough.length > 0) {
+			entries.push({
+				type: "passthrough",
+				lines: [...currentPassthrough],
+			});
+			currentPassthrough = [];
+		}
+	};
+
+	while (lineIndex < lines.length) {
+		const line = lines[lineIndex];
+
+		// Check if this line is indented (starts with whitespace)
+		if (line.length > 0 && (line[0] === " " || line[0] === "\t")) {
+			// Indented line — belongs to the previous record's overflow
+			// If we have a current record (last entry is a record), add to its overflow
+			// Otherwise, treat as pass-through (malformed input)
+			const lastEntry = entries[entries.length - 1];
+			if (lastEntry && lastEntry.type === "record") {
+				// Add to the record's overflow lines (we need to mutate, so cast)
+				(lastEntry.overflowLines as string[]).push(line);
+			} else {
+				// No record to attach to — treat as pass-through
+				currentPassthrough.push(line);
+			}
+			lineIndex++;
+			continue;
+		}
+
+		// Not indented — try to match against the headline template
+		const decoded = decodeHeadline(line, headlineTemplate);
+
+		if (decoded !== null) {
+			// Line matches the template — it's a record headline
+			// First, flush any accumulated pass-through
+			flushPassthrough();
+
+			// Create a new record entry
+			entries.push({
+				type: "record",
+				fields: decoded,
+				headline: line,
+				overflowLines: [],
+			});
+			lineIndex++;
+		} else {
+			// Line doesn't match — it's pass-through text
+			currentPassthrough.push(line);
+			lineIndex++;
+		}
+	}
+
+	// Flush any remaining pass-through lines
+	flushPassthrough();
+
+	return { entries };
+};
+
+// ============================================================================
 // Array Parsing Helpers
 // ============================================================================
 
