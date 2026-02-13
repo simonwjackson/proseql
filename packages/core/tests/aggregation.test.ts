@@ -700,5 +700,16 @@ describe("Aggregation", () => {
 			expect(rating4?.count).toBe(2);
 			expect(rating3?.count).toBe(1);
 		});
+
+		it("6.5 avg on nested field → computes correct mean from nested path", async () => {
+			const db = await createNestedTestDb();
+			const result = await db.books.aggregate({
+				avg: "metadata.views",
+			}).runPromise;
+
+			// Views by book: Dune (1000), Neuromancer (800), The Hobbit (1200), 1984 (600), Foundation (400)
+			// Average: (1000 + 800 + 1200 + 600 + 400) / 5 = 4000 / 5 = 800
+			expect(result.avg?.["metadata.views"]).toBe(800);
+		});
 	});
 });

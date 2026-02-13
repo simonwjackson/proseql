@@ -56,7 +56,7 @@
 - [x] 6.2 In `computeGroupedAggregates`: replace `entity[f]` with `getNestedValue(entity, f)` for groupBy key extraction.
 - [x] 6.3 Test scalar aggregate: `aggregate({ sum: "metadata.views", min: "metadata.rating", max: "metadata.rating" })`.
 - [x] 6.4 Test grouped aggregate: `aggregate({ groupBy: "metadata.rating", count: true })`.
-- [ ] 6.5 Test avg on nested field: `aggregate({ avg: "metadata.views" })`.
+- [x] 6.5 Test avg on nested field: `aggregate({ avg: "metadata.views" })`.
 
 ## 7. Nested Search Index
 
