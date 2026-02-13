@@ -483,6 +483,30 @@ describe("applyFilter Stream combinator", () => {
 			expect(result).toHaveLength(2);
 			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
 		});
+
+		it("should filter by nested string field with $startsWith operator", async () => {
+			const result = await collectFiltered(nestedData, {
+				author: { name: { $startsWith: "Frank" } },
+			});
+			expect(result).toHaveLength(1);
+			expect(result[0].id).toBe("1");
+		});
+
+		it("should filter by nested string field with $endsWith operator", async () => {
+			const result = await collectFiltered(nestedData, {
+				author: { name: { $endsWith: "Gibson" } },
+			});
+			expect(result).toHaveLength(1);
+			expect(result[0].id).toBe("2");
+		});
+
+		it("should filter by nested string field with $contains operator", async () => {
+			const result = await collectFiltered(nestedData, {
+				author: { name: { $contains: "Asimov" } },
+			});
+			expect(result).toHaveLength(1);
+			expect(result[0].id).toBe("3");
+		});
 	});
 
 	describe("nested filtering (dot-notation)", () => {
