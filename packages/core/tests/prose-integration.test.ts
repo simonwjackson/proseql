@@ -332,3 +332,303 @@ describe("proseCodec integration with makeSerializerLayer", () => {
 		});
 	});
 });
+
+/**
+ * Integration tests for prose codec alongside other codecs.
+ * Task 9.4: Verify that prose codec works correctly alongside other codecs
+ * in the same registry without extension conflicts.
+ */
+import { jsonCodec } from "../src/serializers/codecs/json.js";
+import { yamlCodec } from "../src/serializers/codecs/yaml.js";
+
+describe("proseCodec alongside other codecs", () => {
+	describe("multi-codec registry", () => {
+		it("prose codec coexists with json and yaml codecs", async () => {
+			const prose = proseCodec({
+				template: '#{id} "{title}" by {author}',
+			});
+			const json = jsonCodec();
+			const yaml = yamlCodec();
+			const MultiCodecLayer = makeSerializerLayer([prose, json, yaml]);
+
+			const records = [
+				{ id: 1, title: "Dune", author: "Frank Herbert" },
+				{ id: 2, title: "Neuromancer", author: "William Gibson" },
+			];
+
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const registry = yield* SerializerRegistry;
+
+						// Serialize to all three formats
+						const proseOutput = yield* registry.serialize(records, "prose");
+						const jsonOutput = yield* registry.serialize(records, "json");
+						const yamlOutput = yield* registry.serialize(records, "yaml");
+
+						// Verify each format produces expected output
+						expect(proseOutput).toContain('@prose #{id} "{title}" by {author}');
+						expect(proseOutput).toContain('#1 "Dune" by Frank Herbert');
+
+						expect(jsonOutput).toContain('"title": "Dune"');
+						expect(jsonOutput).toContain('"author": "Frank Herbert"');
+
+						expect(yamlOutput).toContain("title: Dune");
+						expect(yamlOutput).toContain("author: Frank Herbert");
+					}),
+					MultiCodecLayer,
+				),
+			);
+		});
+
+		it("each codec deserializes only its own format", async () => {
+			const prose = proseCodec({
+				template: '#{id} "{title}" by {author}',
+			});
+			const json = jsonCodec();
+			const yaml = yamlCodec();
+			const MultiCodecLayer = makeSerializerLayer([prose, json, yaml]);
+
+			const proseContent = `@prose #{id} "{title}" by {author}
+
+#1 "Dune" by Frank Herbert
+#2 "Neuromancer" by William Gibson`;
+
+			const jsonContent = JSON.stringify([
+				{ id: 1, title: "Dune", author: "Frank Herbert" },
+				{ id: 2, title: "Neuromancer", author: "William Gibson" },
+			]);
+
+			const yamlContent = `- id: 1
+  title: Dune
+  author: Frank Herbert
+- id: 2
+  title: Neuromancer
+  author: William Gibson`;
+
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const registry = yield* SerializerRegistry;
+
+						// Deserialize each format
+						const proseRecords = yield* registry.deserialize(proseContent, "prose");
+						const jsonRecords = yield* registry.deserialize(jsonContent, "json");
+						const yamlRecords = yield* registry.deserialize(yamlContent, "yaml");
+
+						// All should produce equivalent records
+						const expected = [
+							{ id: 1, title: "Dune", author: "Frank Herbert" },
+							{ id: 2, title: "Neuromancer", author: "William Gibson" },
+						];
+
+						expect(proseRecords).toEqual(expected);
+						expect(jsonRecords).toEqual(expected);
+						expect(yamlRecords).toEqual(expected);
+					}),
+					MultiCodecLayer,
+				),
+			);
+		});
+
+		it("round-trip through different formats produces consistent data", async () => {
+			const prose = proseCodec({
+				template: "#{id} {title} ({year})",
+			});
+			const json = jsonCodec();
+			const MultiCodecLayer = makeSerializerLayer([prose, json]);
+
+			const originalRecords = [
+				{ id: 1, title: "Dune", year: 1965 },
+				{ id: 2, title: "Neuromancer", year: 1984 },
+			];
+
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const registry = yield* SerializerRegistry;
+
+						// Serialize to prose, deserialize, serialize to JSON, deserialize
+						const proseOutput = yield* registry.serialize(originalRecords, "prose");
+						const fromProse = yield* registry.deserialize(proseOutput, "prose");
+						const jsonOutput = yield* registry.serialize(fromProse, "json");
+						const fromJson = yield* registry.deserialize(jsonOutput, "json");
+
+						// Data should be preserved through cross-format round-trips
+						expect(fromJson).toEqual(originalRecords);
+
+						// And the reverse: JSON → prose → JSON
+						const jsonFirst = yield* registry.serialize(originalRecords, "json");
+						const fromJsonFirst = yield* registry.deserialize(jsonFirst, "json");
+						const proseFromJson = yield* registry.serialize(fromJsonFirst, "prose");
+						const finalRecords = yield* registry.deserialize(proseFromJson, "prose");
+
+						expect(finalRecords).toEqual(originalRecords);
+					}),
+					MultiCodecLayer,
+				),
+			);
+		});
+	});
+
+	describe("extension isolation", () => {
+		it("prose extension does not conflict with json extension", async () => {
+			const prose = proseCodec({
+				template: "#{id} {name}",
+			});
+			const json = jsonCodec();
+			const MultiCodecLayer = makeSerializerLayer([prose, json]);
+
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const registry = yield* SerializerRegistry;
+
+						// prose extension should use prose codec
+						const proseResult = yield* registry.serialize([{ id: 1, name: "Test" }], "prose");
+						expect(proseResult).toContain("@prose");
+						expect(proseResult).toContain("#1 Test");
+
+						// json extension should use json codec
+						const jsonResult = yield* registry.serialize([{ id: 1, name: "Test" }], "json");
+						expect(jsonResult).toContain('"id": 1');
+						expect(jsonResult).not.toContain("@prose");
+					}),
+					MultiCodecLayer,
+				),
+			);
+		});
+
+		it("error messages list all available formats", async () => {
+			const prose = proseCodec({
+				template: "#{id} {name}",
+			});
+			const json = jsonCodec();
+			const yaml = yamlCodec();
+			const MultiCodecLayer = makeSerializerLayer([prose, json, yaml]);
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const registry = yield* SerializerRegistry;
+						return yield* registry.serialize([], "unknown").pipe(
+							Effect.matchEffect({
+								onFailure: (e) => Effect.succeed(e),
+								onSuccess: () => Effect.fail("should not succeed" as const),
+							}),
+						);
+					}),
+					MultiCodecLayer,
+				),
+			);
+
+			expect(result._tag).toBe("UnsupportedFormatError");
+			if (result._tag === "UnsupportedFormatError") {
+				// Error message should mention all available formats
+				expect(result.message).toContain(".prose");
+				expect(result.message).toContain(".json");
+				expect(result.message).toContain(".yaml");
+				expect(result.message).toContain(".yml");
+			}
+		});
+	});
+
+	describe("codec ordering", () => {
+		it("last codec wins when extensions conflict (but prose has unique extension)", async () => {
+			// This test verifies that prose, json, and yaml each own distinct extensions
+			// and there's no conflict when combined
+			const prose = proseCodec({
+				template: "#{id} {name}",
+			});
+			const json = jsonCodec();
+			const yaml = yamlCodec();
+
+			// The extensions should all be distinct
+			expect(prose.extensions).toEqual(["prose"]);
+			expect(json.extensions).toEqual(["json"]);
+			expect(yaml.extensions).toContain("yaml");
+			expect(yaml.extensions).toContain("yml");
+
+			// No overlap
+			const proseExts = new Set(prose.extensions);
+			const jsonExts = new Set(json.extensions);
+			const yamlExts = new Set(yaml.extensions);
+
+			for (const ext of proseExts) {
+				expect(jsonExts.has(ext)).toBe(false);
+				expect(yamlExts.has(ext)).toBe(false);
+			}
+		});
+	});
+
+	describe("error isolation", () => {
+		it("prose decode error does not affect json codec", async () => {
+			const prose = proseCodec({
+				template: "#{id} {name}",
+			});
+			const json = jsonCodec();
+			const MultiCodecLayer = makeSerializerLayer([prose, json]);
+
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const registry = yield* SerializerRegistry;
+
+						// Prose decode should fail (no @prose directive)
+						const proseError = yield* registry
+							.deserialize("not a prose file", "prose")
+							.pipe(
+								Effect.matchEffect({
+									onFailure: (e) => Effect.succeed(e),
+									onSuccess: () => Effect.fail("should not succeed" as const),
+								}),
+							);
+
+						expect(proseError._tag).toBe("SerializationError");
+
+						// JSON decode should still work fine
+						const jsonResult = yield* registry.deserialize('[{"id": 1}]', "json");
+						expect(jsonResult).toEqual([{ id: 1 }]);
+					}),
+					MultiCodecLayer,
+				),
+			);
+		});
+
+		it("json decode error does not affect prose codec", async () => {
+			const prose = proseCodec({
+				template: "#{id} {name}",
+			});
+			const json = jsonCodec();
+			const MultiCodecLayer = makeSerializerLayer([prose, json]);
+
+			await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const registry = yield* SerializerRegistry;
+
+						// JSON decode should fail (invalid JSON)
+						const jsonError = yield* registry
+							.deserialize("{ invalid json }", "json")
+							.pipe(
+								Effect.matchEffect({
+									onFailure: (e) => Effect.succeed(e),
+									onSuccess: () => Effect.fail("should not succeed" as const),
+								}),
+							);
+
+						expect(jsonError._tag).toBe("SerializationError");
+
+						// Prose decode should still work fine
+						const proseContent = `@prose #{id} {name}
+
+#1 Test`;
+						const proseResult = yield* registry.deserialize(proseContent, "prose");
+						expect(proseResult).toEqual([{ id: 1, name: "Test" }]);
+					}),
+					MultiCodecLayer,
+				),
+			);
+		});
+	});
+});
