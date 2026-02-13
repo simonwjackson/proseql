@@ -8,7 +8,7 @@
 
 ## 3. REST README (parallel with Track A, B, D, E)
 
-- [ ] 3.1 Create `packages/rest/README.md` documenting framework-agnostic REST handler generation. Cover `createRestHandlers(config, db)`, route table (GET/POST/PUT/DELETE per collection + batch + aggregate), `RestHandler`/`RestRequest`/`RestResponse` types, query parameter parsing (`parseQueryParams`/`parseAggregateParams` for filters, sort, pagination, select), error mapping (`mapErrorToResponse` with HTTP status codes), relationship routes (`createRelationshipRoutes`). Show Express/Hono integration example. Follow consistent structure.
+- [x] 3.1 Create `packages/rest/README.md` documenting framework-agnostic REST handler generation. Cover `createRestHandlers(config, db)`, route table (GET/POST/PUT/DELETE per collection + batch + aggregate), `RestHandler`/`RestRequest`/`RestResponse` types, query parameter parsing (`parseQueryParams`/`parseAggregateParams` for filters, sort, pagination, select), error mapping (`mapErrorToResponse` with HTTP status codes), relationship routes (`createRelationshipRoutes`). Show Express/Hono integration example. Follow consistent structure.
 
 ## 4. RPC README (parallel with Track A, B, C, E)
 
