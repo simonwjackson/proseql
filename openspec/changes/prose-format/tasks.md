@@ -12,7 +12,7 @@
 - [x] 2.2 Implement array element quoting — elements containing `,` or `]` are double-quoted with `\"` escaping
 - [x] 2.3 Implement `deserializeValue(text: string): unknown` — heuristic type detection: number regex, boolean exact match, `~` as null, `[...]` as array, default to string
 - [x] 2.4 Implement array element parsing — split on `,` respecting quoted elements
-- [ ] 2.5 Write tests for value round-trips: numbers, booleans, null, strings, arrays, arrays with commas, edge cases (empty string, empty array, negative numbers, floats)
+- [x] 2.5 Write tests for value round-trips: numbers, booleans, null, strings, arrays, arrays with commas, edge cases (empty string, empty array, negative numbers, floats)
 
 ## 3. Headline Encoder
 
