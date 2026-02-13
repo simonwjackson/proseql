@@ -473,6 +473,16 @@ describe("applyFilter Stream combinator", () => {
 			expect(result).toHaveLength(2);
 			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
 		});
+
+		it("should filter with $not on nested conditions", async () => {
+			const result = await collectFiltered(nestedData, {
+				$not: { metadata: { views: { $lt: 100 } } },
+			});
+			// Exclude items where views < 100 (id 2: 80, id 4: 50)
+			// Keep items where views >= 100 (id 1: 150, id 3: 200)
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
 	});
 
 	describe("nested filtering (dot-notation)", () => {
