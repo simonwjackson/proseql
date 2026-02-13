@@ -355,6 +355,14 @@ describe("applyFilter Stream combinator", () => {
 			},
 		];
 
+		it("should filter by nested exact match (shape-mirroring)", async () => {
+			const result = await collectFiltered(nestedData, {
+				metadata: { rating: 5 },
+			});
+			expect(result).toHaveLength(2);
+			expect(result.map((r) => r.id)).toEqual(["1", "3"]);
+		});
+
 		it("should filter by nested field with $gt operator (shape-mirroring)", async () => {
 			const result = await collectFiltered(nestedData, {
 				metadata: { views: { $gt: 100 } },

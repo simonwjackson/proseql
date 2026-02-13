@@ -20,7 +20,7 @@
 - [x] 3.3 In the top-level `$search` handler: replace `item[field]` with `getNestedValue(item, field)` when resolving field values for tokenization. Replace the "all string fields" discovery with a recursive object walker that collects all string-valued paths.
 - [x] 3.4 Test shape-mirroring: `where: { metadata: { views: { $gt: 100 } } }` matches entities with `metadata.views > 100`.
 - [x] 3.5 Test dot-notation: `where: { "metadata.views": { $gt: 100 } }` produces same results as shape-mirroring.
-- [ ] 3.6 Test nested exact match: `where: { metadata: { rating: 5 } }` matches entities with `metadata.rating === 5`.
+- [x] 3.6 Test nested exact match: `where: { metadata: { rating: 5 } }` matches entities with `metadata.rating === 5`.
 - [ ] 3.7 Test nested with `$or`: `where: { $or: [{ metadata: { views: { $gt: 1000 } } }, { metadata: { rating: 5 } }] }`.
 - [ ] 3.8 Test nested with `$not`: `where: { $not: { metadata: { views: { $lt: 10 } } } }`.
 - [ ] 3.9 Test nested string operators: `where: { author: { name: { $startsWith: "Frank" } } }`.
