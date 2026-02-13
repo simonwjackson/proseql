@@ -24,4 +24,4 @@
 
 ## 7. Verification (blocked by Track A + B + C + D + E + F)
 
-- [ ] 7.1 Verify all READMEs exist and are well-formed: confirm `packages/{core,node,rest,rpc,cli}/README.md` all exist, `packages/browser/README.md` is unchanged, root README links resolve to real files, no broken internal references, all code examples use correct import paths. Run `just typecheck` and `just test` to confirm no regressions.
+- [x] 7.1 Verify all READMEs exist and are well-formed: confirm `packages/{core,node,rest,rpc,cli}/README.md` all exist, `packages/browser/README.md` is unchanged, root README links resolve to real files, no broken internal references, all code examples use correct import paths. Run `just typecheck` and `just test` to confirm no regressions.
