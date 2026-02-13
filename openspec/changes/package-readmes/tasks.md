@@ -12,7 +12,7 @@
 
 ## 4. RPC README (parallel with Track A, B, C, E)
 
-- [ ] 4.1 Create `packages/rpc/README.md` documenting Effect RPC integration. Cover `makeRpcGroup(config)` to derive typed RPC group from database config, `makeRpcHandlers`/`makeRpcHandlersFromDatabase` for handler layers, `RpcRouter` for routing, error schemas (all CRUD + query errors as RPC-safe schemas), payload schemas (FindById/Query/Create/Update/Delete/Upsert/Aggregate + Many variants + cursor pagination). Show end-to-end example: derive group → create handlers → type-safe client call. Follow consistent structure.
+- [x] 4.1 Create `packages/rpc/README.md` documenting Effect RPC integration. Cover `makeRpcGroup(config)` to derive typed RPC group from database config, `makeRpcHandlers`/`makeRpcHandlersFromDatabase` for handler layers, `RpcRouter` for routing, error schemas (all CRUD + query errors as RPC-safe schemas), payload schemas (FindById/Query/Create/Update/Delete/Upsert/Aggregate + Many variants + cursor pagination). Show end-to-end example: derive group → create handlers → type-safe client call. Follow consistent structure.
 
 ## 5. CLI README (parallel with Track A, B, C, D)
 
