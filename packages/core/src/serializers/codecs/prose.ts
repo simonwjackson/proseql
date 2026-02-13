@@ -926,6 +926,95 @@ export const scanDirective = (lines: ReadonlyArray<string>): ScanDirectiveResult
 };
 
 // ============================================================================
+// Directive Block Parser
+// ============================================================================
+
+/**
+ * Result of parsing a directive block.
+ */
+export interface DirectiveBlock {
+	/** The headline template (content after @prose) */
+	readonly headlineTemplate: string;
+	/** Overflow templates (indented lines immediately after @prose) */
+	readonly overflowTemplates: ReadonlyArray<string>;
+	/** Index of the first line after the directive block (body start) */
+	readonly bodyStart: number;
+}
+
+/**
+ * Parses a directive block from the document.
+ * Extracts the headline template from the @prose line and collects
+ * any indented overflow templates that immediately follow.
+ *
+ * The directive block structure:
+ * ```
+ * @prose #{id} "{title}" by {author}   ← headline template
+ *   tagged {tags}                       ← overflow template 1
+ *   ~ {description}                     ← overflow template 2
+ *                                       ← blank line or non-indented = end of block
+ * ```
+ *
+ * Overflow templates are lines that:
+ * - Immediately follow the @prose line (no blank lines between)
+ * - Are indented (start with whitespace)
+ *
+ * @param lines - Array of lines from the document
+ * @param directiveStart - Index of the @prose directive line
+ * @returns The parsed directive block with template strings and body start index
+ *
+ * @example
+ * ```typescript
+ * const lines = [
+ *   '@prose #{id} "{title}"',
+ *   '  tagged {tags}',
+ *   '  ~ {description}',
+ *   '',
+ *   '#1 "Dune"',
+ * ]
+ * const result = parseDirectiveBlock(lines, 0)
+ * // → {
+ * //   headlineTemplate: '#{id} "{title}"',
+ * //   overflowTemplates: ['tagged {tags}', '~ {description}'],
+ * //   bodyStart: 3
+ * // }
+ * ```
+ */
+export const parseDirectiveBlock = (
+	lines: ReadonlyArray<string>,
+	directiveStart: number
+): DirectiveBlock => {
+	const directiveLine = lines[directiveStart];
+
+	// Extract headline template: everything after "@prose "
+	const headlineTemplate = directiveLine.slice("@prose ".length);
+
+	// Collect overflow templates: indented lines immediately following
+	const overflowTemplates: string[] = [];
+	let lineIndex = directiveStart + 1;
+
+	while (lineIndex < lines.length) {
+		const line = lines[lineIndex];
+
+		// Check if line is indented (starts with whitespace)
+		if (line.length > 0 && (line[0] === " " || line[0] === "\t")) {
+			// This is an overflow template - strip leading whitespace
+			const templateContent = line.trimStart();
+			overflowTemplates.push(templateContent);
+			lineIndex++;
+		} else {
+			// Not indented or empty line - end of directive block
+			break;
+		}
+	}
+
+	return {
+		headlineTemplate,
+		overflowTemplates,
+		bodyStart: lineIndex,
+	};
+};
+
+// ============================================================================
 // Array Parsing Helpers
 // ============================================================================
 

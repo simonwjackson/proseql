@@ -42,7 +42,7 @@
 ## 7. Directive Scanner and Document Parser
 
 - [x] 7.1 Implement `scanDirective(lines: string[]): { preambleEnd: number, directiveStart: number }` — scan for `@prose ` line, error if not found or if multiple found
-- [ ] 7.2 Implement directive block parsing — extract headline template and overflow templates (indented lines immediately after `@prose`)
+- [x] 7.2 Implement directive block parsing — extract headline template and overflow templates (indented lines immediately after `@prose`)
 - [ ] 7.3 Implement body parsing — iterate lines after directive block, classify each as record headline (matches template), indented overflow/continuation (part of current record), or pass-through text
 - [ ] 7.4 Write tests for directive scanning: first line, mid-file, missing directive error, multiple directives error, preamble preservation
 
