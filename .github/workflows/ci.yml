@@ -77,14 +77,14 @@ jobs:
             sed -i "s/\"workspace:\*\"/\"^${CORE_VERSION}\"/" "packages/${pkg}/package.json"
           done
       - name: Publish @proseql/core
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --ignore-scripts
         working-directory: packages/core
       - name: Publish @proseql/node
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --ignore-scripts
         working-directory: packages/node
       - name: Publish @proseql/rest
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --ignore-scripts
         working-directory: packages/rest
       - name: Publish @proseql/rpc
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --ignore-scripts
         working-directory: packages/rpc
