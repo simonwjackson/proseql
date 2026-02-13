@@ -7330,6 +7330,302 @@ describe("Indexing - Nested Field Indexing", () => {
 			expect((results[0] as { id: string }).id).toBe("b1");
 		});
 	});
+
+	describe("Task 5.4: dot-path index maintenance on update", () => {
+		it("should update index when changing nested indexed field metadata.views", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 4, featured: false },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Verify initial index state - both books have views=100
+			const initialResults = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(initialResults.length).toBe(2);
+
+			// Update b1's metadata.views from 100 to 500
+			await db.books.update("b1", { metadata: { views: 500 } }).runPromise;
+
+			// Query by OLD value - should only find b2 now
+			const oldValueResults = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(oldValueResults.length).toBe(1);
+			expect((oldValueResults[0] as { id: string }).id).toBe("b2");
+
+			// Query by NEW value - should find b1
+			const newValueResults = await db.books.query({
+				where: { "metadata.views": 500 },
+			}).runPromise;
+			expect(newValueResults.length).toBe(1);
+			expect((newValueResults[0] as { id: string }).id).toBe("b1");
+		});
+
+		it("should handle update moving entity to shared index value", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 200, rating: 4, featured: false },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Update b1's views to match b2's value (200)
+			await db.books.update("b1", { metadata: { views: 200 } }).runPromise;
+
+			// Query by old value - should be empty
+			const oldValueResults = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(oldValueResults.length).toBe(0);
+
+			// Query by shared value - should return both books
+			const sharedValueResults = await db.books.query({
+				where: { "metadata.views": 200 },
+			}).runPromise;
+			expect(sharedValueResults.length).toBe(2);
+			const ids = sharedValueResults.map((r) => (r as { id: string }).id).sort();
+			expect(ids).toEqual(["b1", "b2"]);
+		});
+
+		it("should handle update splitting shared index entry", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 4, featured: false },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Verify both books share views=100 initially
+			const sharedInitial = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(sharedInitial.length).toBe(2);
+
+			// Update b1's views to a unique value
+			await db.books.update("b1", { metadata: { views: 999 } }).runPromise;
+
+			// Query shared value - should only have b2 now
+			const sharedAfter = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(sharedAfter.length).toBe(1);
+			expect((sharedAfter[0] as { id: string }).id).toBe("b2");
+
+			// Query unique value - should have b1
+			const uniqueResults = await db.books.query({
+				where: { "metadata.views": 999 },
+			}).runPromise;
+			expect(uniqueResults.length).toBe(1);
+			expect((uniqueResults[0] as { id: string }).id).toBe("b1");
+		});
+
+		it("should keep index unchanged when updating only non-indexed nested fields", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Verify initial index lookup works
+			const initialResults = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(initialResults.length).toBe(1);
+
+			// Update non-indexed nested field (rating) via deep merge
+			await db.books.update("b1", { metadata: { rating: 3 } }).runPromise;
+
+			// Index should still work - views is unchanged
+			const afterResults = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(afterResults.length).toBe(1);
+			expect((afterResults[0] as { id: string }).id).toBe("b1");
+
+			// Verify the rating was actually changed
+			const book = await db.books.findById("b1").runPromise;
+			expect(
+				(book as { metadata: { rating: number } }).metadata.rating,
+			).toBe(3);
+		});
+
+		it("should update index when using $increment operator on nested indexed field", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 4, featured: false },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Increment b1's views via nested operator
+			await db.books.update("b1", { metadata: { views: { $increment: 50 } } })
+				.runPromise;
+
+			// Query by old value - should only find b2
+			const oldValueResults = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(oldValueResults.length).toBe(1);
+			expect((oldValueResults[0] as { id: string }).id).toBe("b2");
+
+			// Query by new value (100 + 50 = 150) - should find b1
+			const newValueResults = await db.books.query({
+				where: { "metadata.views": 150 },
+			}).runPromise;
+			expect(newValueResults.length).toBe(1);
+			expect((newValueResults[0] as { id: string }).id).toBe("b1");
+		});
+
+		it("should update compound index when nested field in compound key changes", async () => {
+			const config = {
+				books: {
+					schema: BookWithMetadataSchema,
+					indexes: [["metadata.rating", "genre"]] as ReadonlyArray<
+						string | ReadonlyArray<string>
+					>,
+					relationships: {} as const,
+				},
+			} as const;
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Foundation",
+					genre: "sci-fi",
+					metadata: { views: 200, rating: 5, featured: false },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Verify initial compound index state
+			const initialResults = await db.books.query({
+				where: { "metadata.rating": 5, genre: "sci-fi" },
+			}).runPromise;
+			expect(initialResults.length).toBe(2);
+
+			// Update b1's rating from 5 to 4
+			await db.books.update("b1", { metadata: { rating: 4 } }).runPromise;
+
+			// Query old compound key - should only find b2
+			const oldCompound = await db.books.query({
+				where: { "metadata.rating": 5, genre: "sci-fi" },
+			}).runPromise;
+			expect(oldCompound.length).toBe(1);
+			expect((oldCompound[0] as { id: string }).id).toBe("b2");
+
+			// Query new compound key - should find b1
+			const newCompound = await db.books.query({
+				where: { "metadata.rating": 4, genre: "sci-fi" },
+			}).runPromise;
+			expect(newCompound.length).toBe(1);
+			expect((newCompound[0] as { id: string }).id).toBe("b1");
+		});
+
+		it("should handle consecutive updates to nested indexed field", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// First update: 100 -> 200
+			await db.books.update("b1", { metadata: { views: 200 } }).runPromise;
+			let results = await db.books.query({
+				where: { "metadata.views": 200 },
+			}).runPromise;
+			expect(results.length).toBe(1);
+
+			// Second update: 200 -> 300
+			await db.books.update("b1", { metadata: { views: 300 } }).runPromise;
+			results = await db.books.query({
+				where: { "metadata.views": 300 },
+			}).runPromise;
+			expect(results.length).toBe(1);
+
+			// Old values should not be in index
+			const oldResults200 = await db.books.query({
+				where: { "metadata.views": 200 },
+			}).runPromise;
+			expect(oldResults200.length).toBe(0);
+
+			const oldResults100 = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(oldResults100.length).toBe(0);
+		});
+	});
 });
 
 // Export helpers for use in other test files
