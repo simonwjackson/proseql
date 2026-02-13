@@ -167,10 +167,12 @@ execSync(`git commit -m "chore: release v${next}"`, {
 	stdio: "inherit",
 });
 execSync(`git tag v${next}`, { cwd: root, stdio: "inherit" });
+execSync("git push && git push --tags", { cwd: root, stdio: "inherit" });
 
 console.log(`\nReleased v${next}`);
 console.log(`  Commit: chore: release v${next}`);
 console.log(`  Tag: v${next}`);
+console.log("  Pushed to origin");
 
 function capitalize(s: string): string {
 	return s.charAt(0).toUpperCase() + s.slice(1);
