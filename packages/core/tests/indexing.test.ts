@@ -6874,6 +6874,208 @@ describe("Indexing - Query Acceleration", () => {
 	});
 });
 
+// ============================================================================
+// Nested Field Indexing
+// ============================================================================
+
+describe("Indexing - Nested Field Indexing", () => {
+	// Schema with nested metadata object for testing dot-path indexes
+	const BookWithMetadataSchema = Schema.Struct({
+		id: Schema.String,
+		title: Schema.String,
+		genre: Schema.String,
+		metadata: Schema.Struct({
+			views: Schema.Number,
+			rating: Schema.Number,
+			featured: Schema.Boolean,
+		}),
+	});
+
+	type BookWithMetadata = Schema.Schema.Type<typeof BookWithMetadataSchema>;
+
+	/**
+	 * Helper to create a database config with a nested field index.
+	 */
+	const createNestedIndexConfig = () =>
+		({
+			books: {
+				schema: BookWithMetadataSchema,
+				indexes: ["metadata.views"] as ReadonlyArray<string>,
+				relationships: {} as const,
+			},
+		}) as const;
+
+	describe("Task 5.2: dot-path single index accelerates where clause with dot-path", () => {
+		it("should build index on nested field metadata.views", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 4, featured: false },
+				},
+				{
+					id: "b3",
+					title: "Foundation",
+					genre: "sci-fi",
+					metadata: { views: 200, rating: 5, featured: true },
+				},
+				{
+					id: "b4",
+					title: "1984",
+					genre: "dystopia",
+					metadata: { views: 50, rating: 4, featured: false },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Query using dot-path notation for nested indexed field
+			const results = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+
+			// Should return entities matching metadata.views = 100
+			expect(results.length).toBe(2);
+			const ids = results.map((r) => (r as { id: string }).id).sort();
+			expect(ids).toEqual(["b1", "b2"]);
+		});
+
+		it("should use $eq operator on dot-path indexed field", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 200, rating: 4, featured: false },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Query using $eq on dot-path
+			const results = await db.books.query({
+				where: { "metadata.views": { $eq: 200 } },
+			}).runPromise;
+
+			expect(results.length).toBe(1);
+			expect((results[0] as { id: string }).id).toBe("b2");
+		});
+
+		it("should use $in operator on dot-path indexed field", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 200, rating: 4, featured: false },
+				},
+				{
+					id: "b3",
+					title: "Foundation",
+					genre: "sci-fi",
+					metadata: { views: 300, rating: 5, featured: true },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Query using $in on dot-path
+			const results = await db.books.query({
+				where: { "metadata.views": { $in: [100, 300] } },
+			}).runPromise;
+
+			expect(results.length).toBe(2);
+			const ids = results.map((r) => (r as { id: string }).id).sort();
+			expect(ids).toEqual(["b1", "b3"]);
+		});
+
+		it("should return empty array when dot-path index lookup finds no matches", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Query for a value that doesn't exist
+			const results = await db.books.query({
+				where: { "metadata.views": 999 },
+			}).runPromise;
+
+			expect(results.length).toBe(0);
+		});
+
+		it("should handle mixed dot-path indexed field + non-indexed field query", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 4, featured: false },
+				},
+				{
+					id: "b3",
+					title: "1984",
+					genre: "dystopia",
+					metadata: { views: 100, rating: 4, featured: false },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Query with indexed dot-path + non-indexed genre
+			const results = await db.books.query({
+				where: { "metadata.views": 100, genre: "sci-fi" },
+			}).runPromise;
+
+			// Index narrows to b1, b2, b3 (all have views=100)
+			// Post-filter keeps only genre="sci-fi" → b1, b2
+			expect(results.length).toBe(2);
+			const ids = results.map((r) => (r as { id: string }).id).sort();
+			expect(ids).toEqual(["b1", "b2"]);
+		});
+	});
+});
+
 // Export helpers for use in other test files
 export {
 	UserSchema,
