@@ -12,6 +12,7 @@ import type {
 	GroupResult,
 	ScalarAggregateConfig,
 } from "../../types/aggregate-types.js";
+import { getNestedValue } from "../../utils/nested-path.js";
 
 /**
  * Normalize a field spec (string or array) to an array.
@@ -123,7 +124,7 @@ const updateAccumulators = (
 	// Sum: accumulate numeric values, skip non-numeric
 	const newSum = { ...acc.sum };
 	for (const field of sumFields) {
-		const value = entity[field];
+		const value = getNestedValue(entity, field);
 		if (isNumeric(value)) {
 			newSum[field] = (newSum[field] ?? 0) + value;
 		}
@@ -132,7 +133,7 @@ const updateAccumulators = (
 	// Avg: track sum and count of numeric values
 	const newAvg = { ...acc.avg };
 	for (const field of avgFields) {
-		const value = entity[field];
+		const value = getNestedValue(entity, field);
 		if (isNumeric(value)) {
 			const current = newAvg[field] ?? { sum: 0, count: 0 };
 			newAvg[field] = {
@@ -145,7 +146,7 @@ const updateAccumulators = (
 	// Min: track minimum comparable value
 	const newMin = { ...acc.min };
 	for (const field of minFields) {
-		const value = entity[field];
+		const value = getNestedValue(entity, field);
 		if (isComparable(value)) {
 			const current = newMin[field];
 			// Type-safe comparison: we check current is undefined or compare as primitives
@@ -161,7 +162,7 @@ const updateAccumulators = (
 	// Max: track maximum comparable value
 	const newMax = { ...acc.max };
 	for (const field of maxFields) {
-		const value = entity[field];
+		const value = getNestedValue(entity, field);
 		if (isComparable(value)) {
 			const current = newMax[field];
 			// Type-safe comparison: we check current is undefined or compare as primitives
