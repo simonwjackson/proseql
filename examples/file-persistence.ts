@@ -192,10 +192,9 @@ const program = Effect.gen(function* () {
 	const books = yield* collect(db.books.query({
 		populate: { author: true },
 		sort: { year: "asc" },
-	}) as unknown as Stream.Stream<Record<string, unknown>, never, never>)
+	}))
 	for (const b of books) {
-		const author = b.author as Record<string, unknown> | undefined
-		console.log(`  ${b.year} — "${b.title}" by ${author?.name}`)
+		console.log(`  ${b.year} — "${b.title}" by ${b.author?.name}`)
 	}
 
 	// Reviews with book populated
@@ -203,10 +202,9 @@ const program = Effect.gen(function* () {
 	const reviews = yield* collect(db.reviews.query({
 		where: { rating: 5 },
 		populate: { book: true },
-	}) as unknown as Stream.Stream<Record<string, unknown>, never, never>)
+	}))
 	for (const r of reviews) {
-		const book = r.book as Record<string, unknown> | undefined
-		console.log(`  ★★★★★ "${book?.title}" — ${r.text}`)
+		console.log(`  ★★★★★ "${r.book?.title}" — ${r.text}`)
 	}
 
 	// Aggregation across formats

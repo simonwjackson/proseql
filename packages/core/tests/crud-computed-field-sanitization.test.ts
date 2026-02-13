@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { EffectDatabase } from "../src/factories/database-effect";
 import { createEffectDatabase } from "../src/factories/database-effect";
+import type { GenerateDatabase } from "../src/types/types";
 
 /**
  * Task 7.4 & 7.5: Test CRUD input sanitization for computed fields.
@@ -72,7 +72,7 @@ const config = {
 } as const;
 
 describe("Task 7.4: Create with computed field names in input", () => {
-	let db: EffectDatabase<typeof config>;
+	let db: GenerateDatabase<typeof config>;
 
 	beforeEach(async () => {
 		db = await Effect.runPromise(
@@ -331,7 +331,7 @@ describe("Task 7.4: Create with computed field names in input", () => {
 });
 
 describe("Task 7.5: Update with computed field names in input", () => {
-	let db: EffectDatabase<typeof config>;
+	let db: GenerateDatabase<typeof config>;
 	let bookId: string;
 
 	beforeEach(async () => {

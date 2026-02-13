@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { EffectDatabase } from "../../src/factories/database-effect";
 import { createEffectDatabase } from "../../src/factories/database-effect";
+import type { GenerateDatabase } from "../../src/types/types";
 
 /**
  * Schema with nested metadata object for testing deep merge updates.
@@ -36,7 +36,7 @@ const config = {
 } as const;
 
 describe("Nested Schema Update Operations", () => {
-	let db: EffectDatabase<typeof config>;
+	let db: GenerateDatabase<typeof config>;
 	let now: string;
 
 	beforeEach(async () => {

@@ -75,12 +75,12 @@ async function indexingExample() {
 	// These queries hit the index for fast lookups
 	const scifi = await db.books.query({
 		where: { genre: "sci-fi" },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`  Indexed query (genre = "sci-fi"): ${scifi.length} results`)
 
 	const scifi1984 = await db.books.query({
 		where: { genre: "sci-fi", year: 1984 },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`  Compound index (genre + year): ${scifi1984.length} result — ${scifi1984[0]?.title}`)
 }
 
@@ -172,18 +172,18 @@ async function transactionsExample() {
 				name: "Alice",
 				email: "alice@test.com",
 				age: 30,
-			} as Record<string, unknown>)
+			})
 
 			yield* ctx.posts.create({
 				title: "Hello World",
 				content: "First post",
 				authorId: user.id,
-			} as Record<string, unknown>)
+			})
 		}),
 	).pipe(Effect.runPromise)
 
-	const users = await db.users.query().runPromise as ReadonlyArray<Record<string, unknown>>
-	const posts = await db.posts.query().runPromise as ReadonlyArray<Record<string, unknown>>
+	const users = await db.users.query().runPromise
+	const posts = await db.posts.query().runPromise
 	console.log(`  After commit: ${users.length} user, ${posts.length} post`)
 
 	// Failed transaction — rolls back
@@ -193,7 +193,7 @@ async function transactionsExample() {
 				name: "Bob",
 				email: "bob@test.com",
 				age: 25,
-			} as Record<string, unknown>)
+			})
 			// Force a rollback
 			return yield* Effect.fail(new Error("Something went wrong"))
 		}),
@@ -203,7 +203,7 @@ async function transactionsExample() {
 	)
 	console.log(`  Transaction failed: ${result}`)
 
-	const usersAfter = await db.users.query().runPromise as ReadonlyArray<Record<string, unknown>>
+	const usersAfter = await db.users.query().runPromise
 	console.log(`  After rollback: ${usersAfter.length} user (Bob not added)`)
 }
 
@@ -251,7 +251,7 @@ async function migrationsExample() {
 		}),
 	)
 
-	const books = await db.books.query().runPromise as ReadonlyArray<Record<string, unknown>>
+	const books = await db.books.query().runPromise
 	console.log(`  Migrated book: ${books[0]?.title}, genre: ${books[0]?.genre}`)
 }
 
@@ -313,9 +313,8 @@ async function pluginExample() {
 	)
 
 	// Use the custom $regex operator
-	const theBooks = await db.books.query({
-		where: { title: { $regex: "^The.*" } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	// biome-ignore lint/suspicious/noExplicitAny: custom plugin operators are outside the type system
+	const theBooks = await db.books.query({ where: { title: { $regex: "^The.*" } } as any }).runPromise
 	console.log(`  $regex "^The.*": ${theBooks.length} result — ${theBooks[0]?.title}`)
 }
 

@@ -12,6 +12,8 @@ import {
 	type DatasetFor,
 	type EffectDatabase,
 	type EffectDatabaseWithPersistence,
+	type GenerateDatabase,
+	type GenerateDatabaseWithPersistence,
 	type MigrationError,
 	type PluginError,
 } from "@proseql/core";
@@ -26,7 +28,7 @@ import { Chunk, Context, Effect, Layer, Stream } from "effect";
  * This allows handlers to access the database without creating it themselves.
  */
 export interface DatabaseContext<Config extends DatabaseConfig> {
-	readonly db: EffectDatabase<Config>;
+	readonly db: GenerateDatabase<Config>;
 }
 
 /**
@@ -46,9 +48,10 @@ export const makeDatabaseContextTag = <Config extends DatabaseConfig>() =>
  */
 const createCollectionHandlers = <Config extends DatabaseConfig>(
 	collectionName: keyof Config,
-	db: EffectDatabase<Config>,
+	db: GenerateDatabase<Config>,
 ) => {
-	const collection = db[collectionName] as EffectDatabase<Config>[keyof Config];
+	// biome-ignore lint/suspicious/noExplicitAny: Collection type is dynamic based on config
+	const collection = (db as Record<string, any>)[collectionName as string];
 
 	return {
 		findById: ({ id }: { readonly id: string }) => collection.findById(id),
@@ -383,7 +386,7 @@ export const makeRpcHandlersLayer = <Config extends DatabaseConfig>(
  */
 export const makeRpcHandlersFromDatabase = <Config extends DatabaseConfig>(
 	config: Config,
-	db: EffectDatabase<Config> | EffectDatabaseWithPersistence<Config>,
+	db: GenerateDatabase<Config> | GenerateDatabaseWithPersistence<Config>,
 ): RpcHandlers<Config> => {
 	// Build handlers for each collection, delegating to the provided database
 	const handlers = {} as Record<
@@ -426,7 +429,7 @@ export const makeRpcHandlersFromDatabase = <Config extends DatabaseConfig>(
  * ```
  */
 export const makeRpcHandlersLayerFromDatabase = <Config extends DatabaseConfig>(
-	db: EffectDatabase<Config> | EffectDatabaseWithPersistence<Config>,
+	db: GenerateDatabase<Config> | GenerateDatabaseWithPersistence<Config>,
 ): Layer.Layer<DatabaseContext<Config>> => {
 	const DatabaseContextTag = makeDatabaseContextTag<Config>();
 

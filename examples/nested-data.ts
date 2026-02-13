@@ -84,25 +84,25 @@ async function main() {
 	// shape-mirroring — mirrors the object structure
 	const highRated = await db.books.query({
 		where: { metadata: { rating: 5 } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`rating = 5 (shape-mirroring): ${highRated.length} books`)
 
 	// dot-notation — flat string path (equivalent)
 	const highRatedDot = await db.books.query({
 		where: { "metadata.rating": 5 },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`rating = 5 (dot-notation): ${highRatedDot.length} books`)
 
 	// nested field with comparison operator
 	const popular = await db.books.query({
 		where: { metadata: { views: { $gt: 700 } } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`views > 700: ${popular.length} books`)
 
 	// filter by nested author field
 	const fromUSA = await db.books.query({
 		where: { author: { country: "USA" } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`author.country = "USA": ${fromUSA.length} books`)
 
 	// === Sorting on Nested Fields ===
@@ -110,10 +110,10 @@ async function main() {
 
 	const byViews = await db.books.query({
 		sort: { "metadata.views": "desc" },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log("Sorted by views (desc):")
 	for (const b of byViews) {
-		const meta = b.metadata as Record<string, unknown>
+		const meta = b.metadata
 		console.log(`  ${meta.views} views — ${b.title}`)
 	}
 
@@ -124,7 +124,7 @@ async function main() {
 	const updated = await db.books.update("b1", {
 		metadata: { views: 1500 },
 	}).runPromise
-	const meta = updated.metadata as Record<string, unknown>
+	const meta = updated.metadata
 	console.log(`Updated views: ${meta.views}`)
 	console.log(`Rating preserved: ${meta.rating}`)
 	console.log(`Description preserved: ${meta.description}`)
@@ -136,7 +136,7 @@ async function main() {
 	const incremented = await db.books.update("b2", {
 		metadata: { views: { $increment: 100 } },
 	}).runPromise
-	const incMeta = incremented.metadata as Record<string, unknown>
+	const incMeta = incremented.metadata
 	console.log(`$increment views by 100: ${incMeta.views}`) // 900
 
 	// Update multiple nested paths at once
@@ -144,8 +144,8 @@ async function main() {
 		metadata: { rating: 5, views: { $increment: 200 } },
 		author: { country: "US" },
 	}).runPromise
-	const multiMeta = multi.metadata as Record<string, unknown>
-	const multiAuthor = multi.author as Record<string, unknown>
+	const multiMeta = multi.metadata
+	const multiAuthor = multi.author
 	console.log(`Multi-path update — views: ${multiMeta.views}, rating: ${multiMeta.rating}, country: ${multiAuthor.country}`)
 
 	// === Aggregation on Nested Fields ===
@@ -158,8 +158,8 @@ async function main() {
 		avg: "metadata.rating",
 	}).runPromise
 	console.log(`Total books: ${stats.count}`)
-	console.log(`Total views: ${(stats as Record<string, Record<string, unknown>>).sum["metadata.views"]}`)
-	console.log(`Avg rating: ${(stats as Record<string, Record<string, unknown>>).avg["metadata.rating"]}`)
+	console.log(`Total views: ${stats.sum?.["metadata.views"]}`)
+	console.log(`Avg rating: ${stats.avg?.["metadata.rating"]}`)
 
 	// Group by nested field
 	const byCountry = await db.books.aggregate({
@@ -167,7 +167,7 @@ async function main() {
 		count: true,
 	}).runPromise
 	console.log("\nBooks by country:")
-	for (const entry of byCountry as ReadonlyArray<GroupResult>) {
+	for (const entry of byCountry) {
 		console.log(`  ${entry.group["author.country"]}: ${entry.count}`)
 	}
 }

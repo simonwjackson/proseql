@@ -1,6 +1,5 @@
 import { Chunk, Effect, Layer, Schema, Stream } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { EffectDatabase } from "../src/factories/database-effect";
 import {
 	createEffectDatabase,
 	createPersistentEffectDatabase,
@@ -10,6 +9,7 @@ import { jsonCodec } from "../src/serializers/codecs/json";
 import { yamlCodec } from "../src/serializers/codecs/yaml";
 import { makeSerializerLayer } from "../src/serializers/format-codec";
 import { makeInMemoryStorageLayer } from "../src/storage/in-memory-adapter-layer";
+import type { GenerateDatabase } from "../src/types/types";
 
 /**
  * Task 6.1: Verify that computed fields are never written into the Ref.
@@ -78,7 +78,7 @@ const config = {
 } as const;
 
 describe("Task 6.1: Computed fields are never written into the Ref", () => {
-	let db: EffectDatabase<typeof config>;
+	let db: GenerateDatabase<typeof config>;
 
 	beforeEach(async () => {
 		db = await Effect.runPromise(

@@ -64,10 +64,10 @@ async function main() {
 	}).runPromise
 
 	console.log(`Total orders: ${stats.count}`)
-	console.log(`Sum of prices: $${(stats as Record<string, Record<string, number>>).sum.price}`)
-	console.log(`Min price: $${(stats as Record<string, Record<string, number>>).min.price}`)
-	console.log(`Max price: $${(stats as Record<string, Record<string, number>>).max.price}`)
-	console.log(`Avg price: $${(stats as Record<string, Record<string, number>>).avg.price}`)
+	console.log(`Sum of prices: $${stats.sum?.price}`)
+	console.log(`Min price: $${stats.min?.price}`)
+	console.log(`Max price: $${stats.max?.price}`)
+	console.log(`Avg price: $${stats.avg?.price}`)
 
 	// === Filtered Aggregation ===
 	console.log("\n=== Filtered Aggregation ===")
@@ -78,7 +78,7 @@ async function main() {
 		sum: "price",
 	}).runPromise
 	console.log(`Delivered orders: ${delivered.count}`)
-	console.log(`Delivered total: $${(delivered as Record<string, Record<string, number>>).sum.price}`)
+	console.log(`Delivered total: $${delivered.sum?.price}`)
 
 	// === GroupBy ===
 	console.log("\n=== GroupBy Category ===")
@@ -88,7 +88,7 @@ async function main() {
 		count: true,
 	}).runPromise
 
-	for (const entry of byCategory as ReadonlyArray<GroupResult>) {
+	for (const entry of byCategory) {
 		console.log(`  ${entry.group.category}: ${entry.count} orders`)
 	}
 
@@ -102,10 +102,10 @@ async function main() {
 		avg: "quantity",
 	}).runPromise
 
-	for (const entry of byStatus as ReadonlyArray<GroupResult>) {
-		const sum = entry.sum as Record<string, number>
-		const avg = entry.avg as Record<string, number>
-		console.log(`  ${entry.group.status}: ${entry.count} orders, total $${sum.price}, avg qty ${avg.quantity}`)
+	for (const entry of byStatus) {
+		const sum = entry.sum
+		const avg = entry.avg
+		console.log(`  ${entry.group.status}: ${entry.count} orders, total $${sum?.price}, avg qty ${avg?.quantity}`)
 	}
 }
 

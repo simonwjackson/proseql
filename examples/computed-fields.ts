@@ -66,7 +66,7 @@ async function main() {
 	// === Computed Fields in Results ===
 	console.log("=== Computed Fields in Results ===")
 
-	const allBooks = await db.books.query().runPromise as ReadonlyArray<Record<string, unknown>>
+	const allBooks = await db.books.query().runPromise
 	for (const b of allBooks) {
 		console.log(`  ${b.displayName} — classic: ${b.isClassic}, length: ${b.pageCategory}`)
 	}
@@ -76,7 +76,7 @@ async function main() {
 
 	const classics = await db.books.query({
 		where: { isClassic: true },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`Classics (year < 1980): ${classics.length} books`)
 	for (const b of classics) {
 		console.log(`  ${b.displayName}`)
@@ -84,7 +84,7 @@ async function main() {
 
 	const longBooks = await db.books.query({
 		where: { pageCategory: "long" },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`Long books (400+ pages): ${longBooks.length} books`)
 
 	// === Sort by Computed Fields ===
@@ -92,7 +92,7 @@ async function main() {
 
 	const sortedByDisplay = await db.books.query({
 		sort: { displayName: "asc" },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log("Sorted by displayName (asc):")
 	for (const b of sortedByDisplay) {
 		console.log(`  ${b.displayName}`)
@@ -103,7 +103,7 @@ async function main() {
 
 	const labels = await db.books.query({
 		select: ["displayName", "isClassic"],
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log("Selected displayName + isClassic:")
 	for (const b of labels) {
 		console.log(`  ${JSON.stringify(b)}`)

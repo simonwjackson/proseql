@@ -1,8 +1,8 @@
 import { Effect, Schema } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { EffectDatabase } from "../../src/factories/database-effect";
 import { createEffectDatabase } from "../../src/factories/database-effect";
 import type { CreateInput } from "../../src/types/crud-types";
+import type { GenerateDatabase } from "../../src/types/types";
 
 // Effect Schemas
 const UserSchema = Schema.Struct({
@@ -41,7 +41,7 @@ const config = {
 } as const;
 
 describe("CRUD Create Operations (Effect-based)", () => {
-	let db: EffectDatabase<typeof config>;
+	let db: GenerateDatabase<typeof config>;
 
 	beforeEach(async () => {
 		db = await Effect.runPromise(

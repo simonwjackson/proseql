@@ -9,8 +9,8 @@
 
 import type {
 	DatabaseConfig,
-	EffectDatabase,
-	EffectDatabaseWithPersistence,
+	GenerateDatabase,
+	GenerateDatabaseWithPersistence,
 } from "@proseql/core";
 import { Cause, Chunk, Effect, Option, Runtime, Stream } from "effect";
 import { parseAggregateParams, parseQueryParams } from "./query-params.js";
@@ -137,7 +137,7 @@ export interface RouteDescriptor {
  */
 export const createRestHandlers = <Config extends DatabaseConfig>(
 	config: Config,
-	db: EffectDatabase<Config> | EffectDatabaseWithPersistence<Config>,
+	db: GenerateDatabase<Config> | GenerateDatabaseWithPersistence<Config>,
 ): ReadonlyArray<RouteDescriptor> => {
 	const routes: Array<RouteDescriptor> = [];
 

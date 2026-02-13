@@ -137,7 +137,11 @@ import type {
 import type { CollectionIndexes } from "../types/index-types.js";
 import type { ChangeEvent } from "../types/reactive-types.js";
 import type { SearchIndexMap } from "../types/search-types.js";
-import type { RelationshipDef } from "../types/types.js";
+import type {
+	GenerateDatabase,
+	GenerateDatabaseWithPersistence,
+	RelationshipDef,
+} from "../types/types.js";
 
 // ============================================================================
 // Convenience API: runPromise
@@ -1495,7 +1499,7 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 		readonly [K in keyof Config]?: ReadonlyArray<Record<string, unknown>>;
 	},
 	options?: EffectDatabaseOptions,
-): Effect.Effect<EffectDatabase<Config>, MigrationError | PluginError> =>
+): Effect.Effect<GenerateDatabase<Config>, MigrationError | PluginError> =>
 	Effect.gen(function* () {
 		// 0. Validate migration registries for all versioned collections at startup
 		for (const collectionName of Object.keys(config)) {
@@ -1616,7 +1620,7 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 		// Create the $transaction method
 		const $transactionMethod = <A, E>(
 			fn: (
-				ctx: TransactionContext<EffectDatabase<Config>>,
+				ctx: TransactionContext<GenerateDatabase<Config>>,
 			) => Effect.Effect<A, E>,
 		): Effect.Effect<A, E | TransactionError> =>
 			$transactionImpl(
@@ -1633,13 +1637,7 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 		// Return database with $transaction method
 		return Object.assign(collections, {
 			$transaction: $transactionMethod,
-		}) as unknown as EffectDatabase<Config> & {
-			$transaction<A, E>(
-				fn: (
-					ctx: TransactionContext<EffectDatabase<Config>>,
-				) => Effect.Effect<A, E>,
-			): Effect.Effect<A, E | TransactionError>;
-		};
+		}) as unknown as GenerateDatabase<Config>;
 	});
 
 /**
@@ -1680,7 +1678,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 	persistenceConfig?: EffectDatabasePersistenceConfig,
 	options?: EffectDatabaseOptions,
 ): Effect.Effect<
-	EffectDatabaseWithPersistence<Config>,
+	GenerateDatabaseWithPersistence<Config>,
 	| MigrationError
 	| StorageError
 	| SerializationError
@@ -1959,7 +1957,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			);
 		}
 
-		const db = collections as unknown as EffectDatabase<Config>;
+		const db = collections as unknown as GenerateDatabase<Config>;
 
 		// 10. Create file watchers for persistent collections to detect external file changes
 		// Each watcher monitors its file and reloads data into the Ref on changes,
@@ -2012,7 +2010,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		// Create the $transaction method with persistence trigger
 		const $transactionMethod = <A, E>(
 			fn: (
-				ctx: TransactionContext<EffectDatabase<Config>>,
+				ctx: TransactionContext<GenerateDatabase<Config>>,
 			) => Effect.Effect<A, E>,
 		): Effect.Effect<A, E | TransactionError> =>
 			$transactionImpl(
@@ -2053,5 +2051,5 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			pendingCount: () => trigger.pendingCount(),
 			$dryRunMigrations: dryRunMigrationsFn,
 			$transaction: $transactionMethod,
-		}) as EffectDatabaseWithPersistence<Config>;
+		}) as GenerateDatabaseWithPersistence<Config>;
 	});

@@ -119,7 +119,7 @@ async function main() {
 	const engineers = await db.users.query({
 		where: { role: "engineer" },
 		sort: { name: "asc" },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 
 	for (const u of engineers) {
 		console.log(`  ${u.name}`)
@@ -132,7 +132,7 @@ async function main() {
 		sort: { title: "asc" },
 		limit: 2,
 		offset: 0,
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 
 	for (const p of page1) {
 		console.log(`  ${p.title}`)
@@ -144,7 +144,7 @@ async function main() {
 		sort: { title: "asc" },
 		limit: 2,
 		offset: 2,
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 
 	for (const p of page2) {
 		console.log(`  ${p.title}`)
@@ -155,24 +155,20 @@ async function main() {
 	const postsWithAuthor = await db.posts.query({
 		where: { published: true },
 		populate: { author: true },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 
 	for (const p of postsWithAuthor) {
-		const post = p as Record<string, unknown>
-		const author = post.author as Record<string, unknown> | undefined
-		console.log(`  "${post.title}" by ${author?.name ?? "unknown"}`)
+		console.log(`  "${p.title}" by ${p.author?.name ?? "unknown"}`)
 	}
 
 	// --- Population: resolve inverse relationships ---
 	console.log("\n=== Companies with employees ===")
 	const companiesWithEmployees = await db.companies.query({
 		populate: { employees: true },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 
 	for (const c of companiesWithEmployees) {
-		const company = c as Record<string, unknown>
-		const employees = company.employees as ReadonlyArray<Record<string, unknown>>
-		console.log(`  ${company.name}: ${employees.map((e) => e.name).join(", ")}`)
+		console.log(`  ${c.name}: ${c.employees.map((e: { name: string }) => e.name).join(", ")}`)
 	}
 
 	// --- Nested population: post -> author -> company ---
@@ -180,24 +176,21 @@ async function main() {
 	const deepPopulated = await db.posts.query({
 		where: { published: true },
 		populate: {
-			author: {
-				populate: { company: true },
-			},
+			author: { company: true },
 		},
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 
 	for (const p of deepPopulated) {
-		const post = p as Record<string, unknown>
-		const author = post.author as Record<string, unknown> | undefined
-		const company = author?.company as Record<string, unknown> | undefined
-		console.log(`  "${post.title}" by ${author?.name} @ ${company?.name ?? "N/A"}`)
+		const author = p.author
+		const company = author?.company
+		console.log(`  "${p.title}" by ${author?.name} @ ${company?.name ?? "N/A"}`)
 	}
 
 	// --- Field selection (array syntax) ---
 	console.log("\n=== Users with selected fields ===")
 	const selectedUsers = await db.users.query({
 		select: ["id", "name", "email"],
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 
 	for (const u of selectedUsers) {
 		console.log(`  ${JSON.stringify(u)}`)
@@ -221,7 +214,7 @@ async function main() {
 			],
 		},
 		sort: { name: "asc" },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 
 	for (const u of complex) {
 		console.log(`  ${u.name} (${u.role})`)

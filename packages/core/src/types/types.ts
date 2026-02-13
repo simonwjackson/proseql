@@ -3,12 +3,19 @@ import type {
 	TransactionError,
 	ValidationError,
 } from "../errors/crud-errors.js";
+import type { MigrationError } from "../errors/migration-errors.js";
 import type { DanglingReferenceError } from "../errors/query-errors.js";
+import type {
+	SerializationError,
+	StorageError,
+	UnsupportedFormatError,
+} from "../errors/storage-errors.js";
 import type {
 	EffectCollection,
 	RunnableEffect,
 	RunnableStream,
 } from "../factories/database-effect.js";
+import type { DryRunResult } from "../migrations/migration-types.js";
 import type {
 	AggregateConfig,
 	AggregateResult,
@@ -141,10 +148,16 @@ export type ExtractDBMapping<DB> = {
 }[keyof DB];
 
 // Automatically find relations for any entity type by collection name
-export type FindRelationsByCollection<DB, CollectionName extends keyof DB> =
-	DB[CollectionName] extends SmartCollection<infer _Entity, infer Relations, DB>
-		? Relations
-		: Record<string, never>;
+export type FindRelationsByCollection<
+	DB,
+	CollectionName extends keyof DB,
+> = DB[CollectionName] extends SmartCollection<
+	infer _Entity,
+	infer Relations,
+	DB
+>
+	? Relations
+	: Record<string, never>;
 
 // Keep the old one for backward compatibility but simplified
 export type FindRelationsForEntity<_DB, _T> = Record<string, never>; // Simplified for now
@@ -345,16 +358,15 @@ export type ApplySelectConfig<
 	Config,
 	Relations = Record<string, never>,
 	DB = Record<string, never>,
-> =
-	Config extends ReadonlyArray<keyof T>
-		? ApplyArraySelectConfig<T, Config>
-		: Config extends Record<string, unknown>
-			? Relations extends Record<string, unknown>
-				? DB extends Record<string, unknown>
-					? ApplyObjectSelectWithPopulation<T, Config, Relations, DB>
-					: ApplyObjectSelectConfig<T, Config>
+> = Config extends ReadonlyArray<keyof T>
+	? ApplyArraySelectConfig<T, Config>
+	: Config extends Record<string, unknown>
+		? Relations extends Record<string, unknown>
+			? DB extends Record<string, unknown>
+				? ApplyObjectSelectWithPopulation<T, Config, Relations, DB>
 				: ApplyObjectSelectConfig<T, Config>
-			: T;
+			: ApplyObjectSelectConfig<T, Config>
+		: T;
 
 // Helper types for separating ref and inverse relationships
 type RefRelationKeys<Relations> = {
@@ -619,10 +631,16 @@ export type PopulateConfig<
 		};
 
 // Helper to get entity type from collection
-export type GetEntityFromCollection<DB, CollectionName extends keyof DB> =
-	DB[CollectionName] extends SmartCollection<infer Entity, infer _Relations, DB>
-		? Entity
-		: never;
+export type GetEntityFromCollection<
+	DB,
+	CollectionName extends keyof DB,
+> = DB[CollectionName] extends SmartCollection<
+	infer Entity,
+	infer _Relations,
+	DB
+>
+	? Entity
+	: never;
 
 // Apply populate configuration to transform entity type
 export type ApplyPopulateObject<T, Relations, Config, DB> = T & {
@@ -665,44 +683,49 @@ export type ApplyPopulateObject<T, Relations, Config, DB> = T & {
 export type SortOrder = "asc" | "desc";
 
 // Helper to extract valid sort paths based on populated relationships
-type ExtractSortPaths<T, Relations, Config, DB, Prefix extends string = ""> =
-	// Direct fields of the entity
-	| (Prefix extends "" ? keyof T : never)
-	// Relationship paths based on what's populated
-	| (Config extends { populate: infer P }
-			? P extends PopulateConfig<Relations, DB>
-				? {
-						[K in keyof P & keyof Relations]: P[K] extends true
+type ExtractSortPaths<
+	T,
+	Relations,
+	Config,
+	DB,
+	Prefix extends string = "",
+> = // Direct fields of the entity
+| (Prefix extends "" ? keyof T : never)
+// Relationship paths based on what's populated
+| (Config extends { populate: infer P }
+		? P extends PopulateConfig<Relations, DB>
+			? {
+					[K in keyof P & keyof Relations]: P[K] extends true
+						? GetTargetCollection<Relations, K> extends keyof DB
+							? Relations[K] extends RelationshipDef<infer _, "ref">
+								? `${K & string}.${keyof GetEntityFromCollection<DB, GetTargetCollection<Relations, K>> & string}`
+								: never
+							: never
+						: P[K] extends PopulateConfig<infer _, DB>
 							? GetTargetCollection<Relations, K> extends keyof DB
 								? Relations[K] extends RelationshipDef<infer _, "ref">
-									? `${K & string}.${keyof GetEntityFromCollection<DB, GetTargetCollection<Relations, K>> & string}`
+									?
+											| `${K & string}.${keyof GetEntityFromCollection<DB, GetTargetCollection<Relations, K>> & string}`
+											| `${K & string}.${ExtractSortPaths<
+													GetEntityFromCollection<
+														DB,
+														GetTargetCollection<Relations, K>
+													>,
+													FindRelationsByCollection<
+														DB,
+														GetTargetCollection<Relations, K>
+													>,
+													{ populate: P[K] },
+													DB,
+													`${K & string}.`
+											  > &
+													string}`
 									: never
 								: never
-							: P[K] extends PopulateConfig<infer _, DB>
-								? GetTargetCollection<Relations, K> extends keyof DB
-									? Relations[K] extends RelationshipDef<infer _, "ref">
-										?
-												| `${K & string}.${keyof GetEntityFromCollection<DB, GetTargetCollection<Relations, K>> & string}`
-												| `${K & string}.${ExtractSortPaths<
-														GetEntityFromCollection<
-															DB,
-															GetTargetCollection<Relations, K>
-														>,
-														FindRelationsByCollection<
-															DB,
-															GetTargetCollection<Relations, K>
-														>,
-														{ populate: P[K] },
-														DB,
-														`${K & string}.`
-												  > &
-														string}`
-										: never
-									: never
-								: never;
-					}[keyof P & keyof Relations]
-				: never
-			: never);
+							: never;
+				}[keyof P & keyof Relations]
+			: never
+		: never);
 
 // Sort configuration type with support for nested object paths
 export type SortConfig<T, Relations, Config, DB> = Partial<
@@ -908,15 +931,40 @@ export type GenerateDatabase<Config> = {
 	): Effect.Effect<A, E | TransactionError>;
 };
 
+/**
+ * Extended GenerateDatabase type with persistence control methods.
+ * Mirrors EffectDatabaseWithPersistence but based on GenerateDatabase for full type inference.
+ */
+export type GenerateDatabaseWithPersistence<Config> =
+	GenerateDatabase<Config> & {
+		/** Flush all pending debounced writes immediately. Returns a Promise. */
+		readonly flush: () => Promise<void>;
+		/** Returns the number of writes currently pending. */
+		readonly pendingCount: () => number;
+		/**
+		 * Preview which files need migration and what transforms would apply.
+		 * No transforms are executed. No files are written.
+		 */
+		readonly $dryRunMigrations: () => RunnableEffect<
+			DryRunResult,
+			| MigrationError
+			| StorageError
+			| SerializationError
+			| UnsupportedFormatError
+		>;
+	};
+
 // Type-safe populate helper for better IntelliSense
-export type TypedPopulate<DB, Collection extends keyof DB> =
-	DB[Collection] extends SmartCollection<
-		infer _T,
-		infer Relations,
-		infer DBType
-	>
-		? PopulateConfig<Relations, DBType>
-		: never;
+export type TypedPopulate<
+	DB,
+	Collection extends keyof DB,
+> = DB[Collection] extends SmartCollection<
+	infer _T,
+	infer Relations,
+	infer DBType
+>
+	? PopulateConfig<Relations, DBType>
+	: never;
 
 // Type for the dataset that matches the config
 export type DatasetFor<Config> = {

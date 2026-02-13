@@ -15,8 +15,8 @@
 
 import type {
 	DatabaseConfig,
-	EffectDatabase,
-	EffectDatabaseWithPersistence,
+	GenerateDatabase,
+	GenerateDatabaseWithPersistence,
 } from "@proseql/core";
 import { Cause, Chunk, Effect, Option, Runtime, Stream } from "effect";
 import type { RestHandler, RestResponse, RouteDescriptor } from "./handlers.js";
@@ -240,7 +240,7 @@ const createInverseRelationshipHandler = (
  */
 export const createRelationshipRoutes = <Config extends DatabaseConfig>(
 	config: Config,
-	db: EffectDatabase<Config> | EffectDatabaseWithPersistence<Config>,
+	db: GenerateDatabase<Config> | GenerateDatabaseWithPersistence<Config>,
 ): ReadonlyArray<RouteDescriptor> => {
 	const routes: Array<RouteDescriptor> = [];
 	const relationships = extractRelationships(config);

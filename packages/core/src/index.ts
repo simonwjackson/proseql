@@ -104,6 +104,7 @@ export type {
 export type {
 	DatasetFor,
 	GenerateDatabase,
+	GenerateDatabaseWithPersistence,
 	PopulateConfig,
 	QueryConfig,
 	QueryReturnType,

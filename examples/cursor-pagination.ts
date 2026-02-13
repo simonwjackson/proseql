@@ -60,14 +60,14 @@ async function main() {
 		sort: { name: "asc" },
 		limit: 3,
 		offset: 0,
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`Page 1: ${page1Offset.map((i) => i.name).join(", ")}`)
 
 	const page2Offset = await db.items.query({
 		sort: { name: "asc" },
 		limit: 3,
 		offset: 3,
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`Page 2: ${page2Offset.map((i) => i.name).join(", ")}`)
 
 	// === Cursor-Based Pagination ===

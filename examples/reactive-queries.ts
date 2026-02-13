@@ -78,7 +78,7 @@ const watchFilteredExample = Effect.gen(function* () {
 
 	console.log(`Received ${emissions.length} emissions:`)
 	for (let i = 0; i < emissions.length; i++) {
-		const books = emissions[i] as ReadonlyArray<Record<string, unknown>>
+		const books = emissions[i]
 		console.log(`  Emission ${i + 1}: ${books.length} sci-fi books`)
 	}
 })
@@ -111,7 +111,7 @@ const watchByIdExample = Effect.gen(function* () {
 	const emissions = Chunk.toReadonlyArray(yield* Fiber.join(fiber))
 
 	for (let i = 0; i < emissions.length; i++) {
-		const book = emissions[i] as Record<string, unknown> | null
+		const book = emissions[i]
 		if (book) {
 			console.log(`  Emission ${i + 1}: "${book.title}"`)
 		} else {

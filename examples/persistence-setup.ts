@@ -133,14 +133,12 @@ const program = Effect.gen(function* () {
 
 	// --- Query with population (stream mode, no cursor) ---
 	const postsWithAuthors = yield* Effect.promise(() =>
-		db.posts.query({ populate: { author: true } }).runPromise as Promise<readonly Record<string, unknown>[]>,
+		db.posts.query({ populate: { author: true } }).runPromise,
 	)
 
 	console.log("\nAll posts with authors:")
 	for (const p of postsWithAuthors) {
-		const entry = p as Record<string, unknown>
-		const author = entry.author as Record<string, unknown> | undefined
-		console.log(`  "${entry.title}" by ${author?.name ?? "unknown"}`)
+		console.log(`  "${p.title}" by ${p.author?.name ?? "unknown"}`)
 	}
 
 	// --- Flush: force all pending writes to disk immediately ---

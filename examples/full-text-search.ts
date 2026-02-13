@@ -50,13 +50,13 @@ async function main() {
 	// Search a single field
 	const duneResults = await db.books.query({
 		where: { title: { $search: "dune" } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`title $search "dune": ${duneResults.length} result — ${duneResults[0]?.title}`)
 
 	// Multi-term search — all terms must match
 	const leftHand = await db.books.query({
 		where: { title: { $search: "left hand darkness" } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`title $search "left hand darkness": ${leftHand.length} result — ${leftHand[0]?.title}`)
 
 	// === Multi-Field Search ===
@@ -67,7 +67,7 @@ async function main() {
 		where: {
 			$search: { query: "herbert dune", fields: ["title", "author"] },
 		},
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`$search "herbert dune" across [title, author]: ${multiField.length} result — ${multiField[0]?.title}`)
 
 	// === All-Fields Search ===
@@ -76,13 +76,13 @@ async function main() {
 	// Search all string fields when fields is omitted
 	const allFields = await db.books.query({
 		where: { $search: { query: "cyberpunk" } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`$search "cyberpunk" (all fields): ${allFields.length} result — ${allFields[0]?.title}`)
 
 	// Description field is also searched
 	const desertSearch = await db.books.query({
 		where: { $search: { query: "desert planet" } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`$search "desert planet" (all fields): ${desertSearch.length} result — ${desertSearch[0]?.title}`)
 
 	// === With Search Index (faster for large collections) ===
@@ -104,14 +104,14 @@ async function main() {
 	// Same queries, but backed by inverted index for O(tokens) lookup
 	const indexed = await dbIndexed.books.query({
 		where: { title: { $search: "foundation" } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`Indexed search "foundation": ${indexed.length} result — ${indexed[0]?.title}`)
 
 	const indexedMulti = await dbIndexed.books.query({
 		where: {
 			$search: { query: "gibson neuromancer", fields: ["title", "author"] },
 		},
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`Indexed multi-field "gibson neuromancer": ${indexedMulti.length} result — ${indexedMulti[0]?.title}`)
 }
 

@@ -59,19 +59,19 @@ async function main() {
 	// $eq (implicit — just pass a value)
 	const electronics = await db.products.query({
 		where: { category: "electronics" },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`category = "electronics": ${electronics.length} results`)
 
 	// $ne
 	const notElectronics = await db.products.query({
 		where: { category: { $ne: "electronics" } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`category != "electronics": ${notElectronics.length} results`)
 
 	// $gt, $gte, $lt, $lte
 	const midRange = await db.products.query({
 		where: { price: { $gte: 50, $lt: 200 } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`price >= 50 and < 200: ${midRange.length} results`)
 
 	// === String Operators ===
@@ -79,17 +79,17 @@ async function main() {
 
 	const startsWithW = await db.products.query({
 		where: { name: { $startsWith: "W" } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`name starts with "W": ${startsWithW.length} results`)
 
 	const endsWithArm = await db.products.query({
 		where: { name: { $endsWith: "Arm" } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`name ends with "Arm": ${endsWithArm.length} results`)
 
 	const containsDesk = await db.products.query({
 		where: { name: { $contains: "Desk" } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`name contains "Desk": ${containsDesk.length} results`)
 
 	// === Set Operators ===
@@ -97,12 +97,12 @@ async function main() {
 
 	const inCategories = await db.products.query({
 		where: { category: { $in: ["electronics", "accessories"] } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`category in [electronics, accessories]: ${inCategories.length} results`)
 
 	const notInCategories = await db.products.query({
 		where: { category: { $nin: ["furniture"] } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`category not in [furniture]: ${notInCategories.length} results`)
 
 	// === Array Operators ===
@@ -110,17 +110,17 @@ async function main() {
 
 	const hasErgo = await db.products.query({
 		where: { tags: { $contains: "ergonomic" } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`tags contains "ergonomic": ${hasErgo.length} results`)
 
 	const hasAllTags = await db.products.query({
 		where: { tags: { $all: ["ergonomic", "adjustable"] } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`tags has all [ergonomic, adjustable]: ${hasAllTags.length} results`)
 
 	const exactTagCount = await db.products.query({
 		where: { tags: { $size: 2 } },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`tags size = 2: ${exactTagCount.length} results`)
 
 	// === Logical Operators ===
@@ -134,7 +134,7 @@ async function main() {
 				{ category: "furniture" },
 			],
 		},
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`price < 50 OR furniture: ${cheapOrFurniture.length} results`)
 
 	// $and (explicit)
@@ -145,7 +145,7 @@ async function main() {
 				{ inStock: true },
 			],
 		},
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`price >= 100 AND in stock: ${expensiveAndInStock.length} results`)
 
 	// $not
@@ -153,7 +153,7 @@ async function main() {
 		where: {
 			$not: { category: "accessories" },
 		},
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`NOT accessories: ${notAccessories.length} results`)
 
 	// nested logical: (electronics OR furniture) AND in stock
@@ -164,7 +164,7 @@ async function main() {
 				{ inStock: true },
 			],
 		},
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log(`(electronics OR furniture) AND in stock: ${nested.length} results`)
 
 	// === Field Selection ===
@@ -172,7 +172,7 @@ async function main() {
 
 	const nameAndPrice = await db.products.query({
 		select: ["name", "price"],
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log("Selected fields:", JSON.stringify(nameAndPrice[0]))
 
 	// === Multi-Field Sorting ===
@@ -180,7 +180,7 @@ async function main() {
 
 	const sorted = await db.products.query({
 		sort: { category: "asc", price: "desc" },
-	}).runPromise as ReadonlyArray<Record<string, unknown>>
+	}).runPromise
 	console.log("Sorted by category asc, price desc:")
 	for (const p of sorted) {
 		console.log(`  ${p.category} — $${p.price} — ${p.name}`)
