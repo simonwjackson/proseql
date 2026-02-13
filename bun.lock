@@ -62,10 +62,13 @@
       "dependencies": {
         "@proseql/core": "workspace:*",
       },
+      "peerDependencies": {
+        "effect": "^3.15.2",
+      },
     },
     "packages/rest": {
       "name": "@proseql/rest",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "dependencies": {
         "@proseql/core": "workspace:*",
       },
@@ -75,12 +78,12 @@
     },
     "packages/rpc": {
       "name": "@proseql/rpc",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "dependencies": {
-        "@effect/rpc": "^0.51.0",
         "@proseql/core": "workspace:*",
       },
       "peerDependencies": {
+        "@effect/rpc": "^0.51.0",
         "effect": "^3.15.0",
       },
     },

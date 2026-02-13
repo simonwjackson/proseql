@@ -1,5 +1,5 @@
 /**
- * Main entry point for the plan-text-db library.
+ * Main entry point for the proseql library.
  *
  * Exports the Effect-based API: typed errors, Schema validation,
  * Stream query pipeline, Ref state, Service/Layer persistence.
