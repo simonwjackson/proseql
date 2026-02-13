@@ -7626,6 +7626,477 @@ describe("Indexing - Nested Field Indexing", () => {
 			expect(oldResults100.length).toBe(0);
 		});
 	});
+
+	describe("Task 5.5: dot-path index maintenance on create/delete", () => {
+		it("should add new entity to index when created with nested indexed field", async () => {
+			const config = createNestedIndexConfig();
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: [] }),
+			);
+
+			// Create a book with nested metadata
+			const newBook = await db.books.create({
+				id: "b1",
+				title: "Dune",
+				genre: "sci-fi",
+				metadata: { views: 100, rating: 5, featured: true },
+			}).runPromise;
+
+			expect(newBook.id).toBe("b1");
+
+			// Query using the nested indexed field - should find the new book
+			const results = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect((results[0] as { id: string }).id).toBe("b1");
+		});
+
+		it("should add entity to nested index alongside existing entries via create", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Verify initial book is queryable via nested index
+			const initialResults = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(initialResults.length).toBe(1);
+
+			// Create another book with different nested views value
+			await db.books.create({
+				id: "b2",
+				title: "Neuromancer",
+				genre: "sci-fi",
+				metadata: { views: 200, rating: 4, featured: false },
+			}).runPromise;
+
+			// Query for new book via nested indexed field
+			const newResults = await db.books.query({
+				where: { "metadata.views": 200 },
+			}).runPromise;
+			expect(newResults.length).toBe(1);
+			expect((newResults[0] as { id: string }).id).toBe("b2");
+
+			// Original book should still be queryable
+			const originalStillThere = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(originalStillThere.length).toBe(1);
+			expect((originalStillThere[0] as { id: string }).id).toBe("b1");
+		});
+
+		it("should add entity to existing nested index Set when same nested value exists", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Create another book with the SAME nested views value
+			await db.books.create({
+				id: "b2",
+				title: "Neuromancer",
+				genre: "sci-fi",
+				metadata: { views: 100, rating: 4, featured: false },
+			}).runPromise;
+
+			// Query should return both books with views=100
+			const results = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(results.length).toBe(2);
+			const ids = results.map((r) => (r as { id: string }).id).sort();
+			expect(ids).toEqual(["b1", "b2"]);
+		});
+
+		it("should remove entity from nested index when deleted", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 200, rating: 4, featured: false },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Verify initial state
+			const duneInitial = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(duneInitial.length).toBe(1);
+			expect((duneInitial[0] as { id: string }).id).toBe("b1");
+
+			// Delete Dune
+			const deleted = await db.books.delete("b1").runPromise;
+			expect((deleted as { id: string }).id).toBe("b1");
+
+			// Query by deleted nested value - should not find Dune anymore
+			const duneAfter = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(duneAfter.length).toBe(0);
+
+			// Neuromancer should still be queryable
+			const neuroResults = await db.books.query({
+				where: { "metadata.views": 200 },
+			}).runPromise;
+			expect(neuroResults.length).toBe(1);
+			expect((neuroResults[0] as { id: string }).id).toBe("b2");
+		});
+
+		it("should remove entity from shared nested index Set, leaving other entities", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 4, featured: false },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Verify both are queryable initially via shared nested value
+			const sharedInitial = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(sharedInitial.length).toBe(2);
+
+			// Delete b1
+			await db.books.delete("b1").runPromise;
+
+			// Query shared nested value - should now only have b2
+			const sharedAfter = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(sharedAfter.length).toBe(1);
+			expect((sharedAfter[0] as { id: string }).id).toBe("b2");
+		});
+
+		it("should clean up empty nested index Set when last entity with that value is deleted", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 200, rating: 4, featured: false },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Delete Dune - should clean up the views=100 nested index entry
+			await db.books.delete("b1").runPromise;
+
+			// Query by deleted nested value - should return empty (not error)
+			const duneAfter = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(duneAfter.length).toBe(0);
+
+			// Verify remaining book is still queryable
+			const allBooks = await db.books.query().runPromise;
+			expect(allBooks.length).toBe(1);
+			expect((allBooks[0] as { id: string }).id).toBe("b2");
+		});
+
+		it("should add entities to nested compound index via createMany", async () => {
+			const createCompoundNestedIndexConfig = () =>
+				({
+					books: {
+						schema: BookWithMetadataSchema,
+						indexes: [
+							["metadata.rating", "genre"],
+						] as ReadonlyArray<ReadonlyArray<string>>,
+						relationships: {} as const,
+					},
+				}) as const;
+
+			const config = createCompoundNestedIndexConfig();
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: [] }),
+			);
+
+			// Create multiple books with varying nested rating + genre combos
+			await db.books.createMany([
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 200, rating: 4, featured: false },
+				},
+				{
+					id: "b3",
+					title: "Foundation",
+					genre: "sci-fi",
+					metadata: { views: 300, rating: 5, featured: true },
+				},
+			]).runPromise;
+
+			// Query by compound nested key (rating=5, genre="sci-fi")
+			const fiveStarSciFi = await db.books.query({
+				where: { "metadata.rating": 5, genre: "sci-fi" },
+			}).runPromise;
+			expect(fiveStarSciFi.length).toBe(2);
+			const ids = fiveStarSciFi.map((r) => (r as { id: string }).id).sort();
+			expect(ids).toEqual(["b1", "b3"]);
+
+			// Query by different compound key (rating=4, genre="sci-fi")
+			const fourStarSciFi = await db.books.query({
+				where: { "metadata.rating": 4, genre: "sci-fi" },
+			}).runPromise;
+			expect(fourStarSciFi.length).toBe(1);
+			expect((fourStarSciFi[0] as { id: string }).id).toBe("b2");
+		});
+
+		it("should remove entity from nested compound index when deleted", async () => {
+			const createCompoundNestedIndexConfig = () =>
+				({
+					books: {
+						schema: BookWithMetadataSchema,
+						indexes: [
+							["metadata.rating", "genre"],
+						] as ReadonlyArray<ReadonlyArray<string>>,
+						relationships: {} as const,
+					},
+				}) as const;
+
+			const config = createCompoundNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 200, rating: 5, featured: false },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Verify initial compound index query works
+			const initialResults = await db.books.query({
+				where: { "metadata.rating": 5, genre: "sci-fi" },
+			}).runPromise;
+			expect(initialResults.length).toBe(2);
+
+			// Delete b1
+			await db.books.delete("b1").runPromise;
+
+			// Query compound nested key - should only have b2 now
+			const afterDelete = await db.books.query({
+				where: { "metadata.rating": 5, genre: "sci-fi" },
+			}).runPromise;
+			expect(afterDelete.length).toBe(1);
+			expect((afterDelete[0] as { id: string }).id).toBe("b2");
+		});
+
+		it("should handle interleaved create and delete with nested indexed field", async () => {
+			const config = createNestedIndexConfig();
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: [] }),
+			);
+
+			// Create first book
+			await db.books.create({
+				id: "b1",
+				title: "Dune",
+				genre: "sci-fi",
+				metadata: { views: 100, rating: 5, featured: true },
+			}).runPromise;
+
+			// Query works
+			let results = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(results.length).toBe(1);
+
+			// Create second book with same nested value
+			await db.books.create({
+				id: "b2",
+				title: "Neuromancer",
+				genre: "sci-fi",
+				metadata: { views: 100, rating: 4, featured: false },
+			}).runPromise;
+
+			results = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(results.length).toBe(2);
+
+			// Delete first book
+			await db.books.delete("b1").runPromise;
+
+			results = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect((results[0] as { id: string }).id).toBe("b2");
+
+			// Create third book with different nested value
+			await db.books.create({
+				id: "b3",
+				title: "Foundation",
+				genre: "sci-fi",
+				metadata: { views: 200, rating: 5, featured: true },
+			}).runPromise;
+
+			// Both nested values should be queryable
+			const views100 = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(views100.length).toBe(1);
+			expect((views100[0] as { id: string }).id).toBe("b2");
+
+			const views200 = await db.books.query({
+				where: { "metadata.views": 200 },
+			}).runPromise;
+			expect(views200.length).toBe(1);
+			expect((views200[0] as { id: string }).id).toBe("b3");
+
+			// Delete second book (last with views=100)
+			await db.books.delete("b2").runPromise;
+
+			const views100After = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(views100After.length).toBe(0);
+
+			// views=200 still has an entry
+			const views200Still = await db.books.query({
+				where: { "metadata.views": 200 },
+			}).runPromise;
+			expect(views200Still.length).toBe(1);
+		});
+
+		it("should add entity via upsert create path with nested indexed field", async () => {
+			const config = createNestedIndexConfig();
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: [] }),
+			);
+
+			// Upsert - entity doesn't exist, so create path
+			const result = await db.books.upsert({
+				where: { id: "b1" },
+				create: {
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				update: { title: "Updated Dune" },
+			}).runPromise;
+
+			expect((result as { id: string }).id).toBe("b1");
+
+			// Query by nested indexed field - should find the created book
+			const results = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(results.length).toBe(1);
+			expect((results[0] as { id: string }).id).toBe("b1");
+		});
+
+		it("should handle deleteMany with nested indexed fields", async () => {
+			const config = createNestedIndexConfig();
+			const initialBooks: ReadonlyArray<BookWithMetadata> = [
+				{
+					id: "b1",
+					title: "Dune",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 5, featured: true },
+				},
+				{
+					id: "b2",
+					title: "Neuromancer",
+					genre: "sci-fi",
+					metadata: { views: 100, rating: 4, featured: false },
+				},
+				{
+					id: "b3",
+					title: "Foundation",
+					genre: "sci-fi",
+					metadata: { views: 200, rating: 5, featured: true },
+				},
+			];
+			const db = await Effect.runPromise(
+				createIndexedDatabase(config, { books: initialBooks }),
+			);
+
+			// Delete books with views=100 via predicate
+			await db.books.deleteMany(
+				(book) => (book as BookWithMetadata).metadata.views === 100,
+			).runPromise;
+
+			// Query by views=100 - should be empty
+			const views100 = await db.books.query({
+				where: { "metadata.views": 100 },
+			}).runPromise;
+			expect(views100.length).toBe(0);
+
+			// Query by views=200 - should still have b3
+			const views200 = await db.books.query({
+				where: { "metadata.views": 200 },
+			}).runPromise;
+			expect(views200.length).toBe(1);
+			expect((views200[0] as { id: string }).id).toBe("b3");
+		});
+	});
 });
 
 // Export helpers for use in other test files

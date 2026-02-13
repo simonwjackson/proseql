@@ -48,7 +48,7 @@
 - [x] 5.2 Test dot-path single index: `indexes: ["metadata.views"]` accelerates `where: { "metadata.views": 100 }`.
 - [x] 5.3 Test dot-path compound index: `indexes: [["metadata.rating", "genre"]]` accelerates `where: { "metadata.rating": 5, genre: "sci-fi" }`.
 - [x] 5.4 Test index maintenance on update: changing `metadata.views` updates the index correctly.
-- [ ] 5.5 Test index maintenance on create/delete with nested indexed fields.
+- [x] 5.5 Test index maintenance on create/delete with nested indexed fields.
 
 ## 6. Nested Aggregation
 
