@@ -74,7 +74,7 @@ jobs:
       - name: Resolve workspace references
         run: |
           CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
-          for pkg in node rest rpc; do
+          for pkg in node rest rpc cli; do
             sed -i "s/\"workspace:\*\"/\"^${CORE_VERSION}\"/" "packages/${pkg}/package.json"
           done
       - name: Publish @proseql/core
@@ -89,6 +89,9 @@ jobs:
       - name: Publish @proseql/rpc
         run: npm publish --provenance --access public --ignore-scripts
         working-directory: packages/rpc
+      - name: Publish @proseql/cli
+        run: npm publish --provenance --access public --ignore-scripts
+        working-directory: packages/cli
 
   publish-gpr:
     needs: [release]
@@ -112,7 +115,7 @@ jobs:
       - name: Resolve workspace references
         run: |
           CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
-          for pkg in node rest rpc; do
+          for pkg in node rest rpc cli; do
             sed -i "s/\"workspace:\*\"/\"^${CORE_VERSION}\"/" "packages/${pkg}/package.json"
           done
       - name: Publish @proseql/core
@@ -133,5 +136,10 @@ jobs:
       - name: Publish @proseql/rpc
         run: npm publish --access public --ignore-scripts
         working-directory: packages/rpc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish @proseql/cli
+        run: npm publish --access public --ignore-scripts
+        working-directory: packages/cli
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

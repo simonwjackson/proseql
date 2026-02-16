@@ -4,6 +4,7 @@
     { "path": "./packages/core" },
     { "path": "./packages/node" },
     { "path": "./packages/rest" },
-    { "path": "./packages/rpc" }
+    { "path": "./packages/rpc" },
+    { "path": "./packages/cli" }
   ]
 }

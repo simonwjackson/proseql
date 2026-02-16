@@ -124,6 +124,17 @@ for (const pkg of packages) {
 	console.log(`  Updated packages/${pkg}/package.json`);
 }
 
+// --- Sync VERSION constant in CLI main.ts ---
+
+const cliMainPath = join(root, "packages/cli/src/main.ts");
+const cliMainContent = readFileSync(cliMainPath, "utf-8");
+const updatedCliMain = cliMainContent.replace(
+	/const VERSION = "[^"]+";/,
+	`const VERSION = "${next}";`,
+);
+writeFileSync(cliMainPath, updatedCliMain);
+console.log("  Updated packages/cli/src/main.ts VERSION constant");
+
 // --- Generate changelog ---
 
 const today = new Date().toISOString().split("T")[0];
@@ -159,6 +170,7 @@ console.log("  Updated CHANGELOG.md");
 
 const filesToStage = [
 	"CHANGELOG.md",
+	"packages/cli/src/main.ts",
 	...packages.map((p) => `packages/${p}/package.json`),
 ];
 execSync(`git add ${filesToStage.join(" ")}`, { cwd: root, stdio: "inherit" });

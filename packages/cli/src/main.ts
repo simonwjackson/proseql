@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 /**
  * ProseQL CLI - Command line interface for proseql databases
@@ -29,7 +29,7 @@ import { discoverConfig } from "./config/discovery.js";
 import { loadConfig } from "./config/loader.js";
 import { format, type OutputFormat } from "./output/formatter.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.3";
 
 /**
  * Parsed CLI arguments

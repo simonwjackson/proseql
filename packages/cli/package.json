@@ -1,13 +1,59 @@
 {
   "name": "@proseql/cli",
   "version": "0.2.4",
+  "description": "Command-line interface for ProseQL databases. Query, create, update, and manage plain text database files from the terminal.",
   "type": "module",
-  "bin": {
-    "proseql": "./src/main.ts"
+  "scripts": {
+    "build": "bunx tsc --build",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "bun run build && bun test"
   },
-  "main": "src/index.ts",
+  "bin": {
+    "proseql": "./dist/main.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "license": "MIT",
+  "author": "Simon W. Jackson",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simonwjackson/proseql.git",
+    "directory": "packages/cli"
+  },
+  "keywords": [
+    "database",
+    "typescript",
+    "effect",
+    "cli",
+    "command-line",
+    "plain-text",
+    "yaml",
+    "json",
+    "toml"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
   "dependencies": {
     "@proseql/core": "workspace:*",
     "@proseql/node": "workspace:*"
+  },
+  "peerDependencies": {
+    "effect": "^3.15.2"
   }
 }
