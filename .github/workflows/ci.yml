@@ -82,6 +82,11 @@ jobs:
           for pkg in node rest rpc cli; do
             sed -i "s/\"workspace:\*\"/\"^${CORE_VERSION}\"/" "packages/${pkg}/package.json"
           done
+      - name: Fix package.json validation issues
+        run: |
+          for pkg in core node rest rpc cli; do
+            (cd "packages/${pkg}" && npm pkg fix)
+          done
       - name: Publish @proseql/core
         run: npm publish --provenance --access public --ignore-scripts || true
         working-directory: packages/core
