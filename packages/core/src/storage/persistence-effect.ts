@@ -184,7 +184,10 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 		// - All other formats: Record<string, object> keyed by entity ID
 		// When a path is specified, the resolved value may also be an array
 		const isArrayFormat =
-			ext === "jsonl" || ext === "ndjson" || ext === "prose" || (options?.path !== undefined && Array.isArray(resolved));
+			ext === "jsonl" ||
+			ext === "ndjson" ||
+			ext === "prose" ||
+			(options?.path !== undefined && Array.isArray(resolved));
 		const entityMap: Record<string, unknown> = {};
 		let fileVersion = 0;
 
@@ -197,7 +200,8 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 			}
 		} else if (isRecord(resolved)) {
 			// Standard format: Record keyed by entity ID
-			fileVersion = typeof resolved._version === "number" ? resolved._version : 0;
+			fileVersion =
+				typeof resolved._version === "number" ? resolved._version : 0;
 			for (const [key, value] of Object.entries(resolved)) {
 				if (key !== "_version") {
 					entityMap[key] = value;
@@ -207,7 +211,9 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 			return yield* Effect.fail(
 				new SerializationError({
 					format: ext,
-					message: `Invalid data format in '${filePath}'${options?.path ? ` at path '${options.path}'` : ""}: expected object or array, got ${typeof resolved}`,
+					message: `Invalid data format in '${filePath}'${options?.path ? ` at path '${options.path}'` : ""}: expected object or array, got ${
+					typeof resolved
+				}`,
 				}),
 			);
 		}
