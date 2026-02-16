@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.6.0 (2026-02-16)
+
+### Features
+- Add `path` option for reading/writing nested documents (0e43610)
+
+### Other
+- Apply biome auto-fixes (bc9a217)
+- Fix biome line length formatting (1ba4cb4)
+
+
 ## v0.5.0 (2026-02-16)
 
 ### Features
