@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.1 (2026-02-16)
+
+### Fixes
+- Resolve @proseql/cli npm publish 404 by fixing invalid bin path (247e8e7)
+
+
 ## v0.4.0 (2026-02-16)
 
 ### Features
