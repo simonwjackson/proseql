@@ -968,9 +968,7 @@ describe("persistence-effect: path option", () => {
 			expect(parsed.agents.defaults).toEqual({ workspace: "/tmp" });
 
 			// Collection data written as array at path
-			expect(parsed.agents.list).toEqual([
-				{ id: "main", workspace: "/home" },
-			]);
+			expect(parsed.agents.list).toEqual([{ id: "main", workspace: "/home" }]);
 		});
 
 		it("creates intermediate objects when path does not exist yet", async () => {
@@ -992,9 +990,7 @@ describe("persistence-effect: path option", () => {
 			const stored = store.get("/config/new.json");
 			const parsed = JSON.parse(stored!);
 
-			expect(parsed.deep.nested.list).toEqual([
-				{ id: "a1", workspace: "/w" },
-			]);
+			expect(parsed.deep.nested.list).toEqual([{ id: "a1", workspace: "/w" }]);
 		});
 	});
 

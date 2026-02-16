@@ -211,9 +211,7 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 			return yield* Effect.fail(
 				new SerializationError({
 					format: ext,
-					message: `Invalid data format in '${filePath}'${options?.path ? ` at path '${options.path}'` : ""}: expected object or array, got ${
-					typeof resolved
-				}`,
+					message: `Invalid data format in '${filePath}'${options?.path ? ` at path '${options.path}'` : ""}: expected object or array, got ${typeof resolved}`,
 				}),
 			);
 		}
