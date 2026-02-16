@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.2 (2026-02-16)
+
+### Other
+- Add npm pkg fix step to CI publish workflow (869dab0)
+
+
 ## v0.4.1 (2026-02-16)
 
 ### Fixes
