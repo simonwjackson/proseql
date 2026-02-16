@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.2 (2026-02-16)
+
+### Other
+- Auto-rebase on origin/main before push via lefthook (6b4a7c3)
+- Cache nix store with DeterminateSystems magic-nix-cache (ccf274c)
+
+
 ## v0.3.1 (2026-02-16)
 
 ### Fixes
