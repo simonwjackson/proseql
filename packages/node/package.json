@@ -1,6 +1,6 @@
 {
   "name": "@proseql/node",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Node.js file system adapter for ProseQL, re-exports core plus NodeStorageLayer",
   "type": "module",
   "scripts": {

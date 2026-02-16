@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.0 (2026-02-16)
+
+### Features
+- Add npm publish step to release script (fixes workspace:* in published packages) (baab820)
+
+
 ## v0.3.2 (2026-02-16)
 
 ### Other
