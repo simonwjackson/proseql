@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.0 (2026-02-16)
+
+### Features
+- Add makeProseQLTag and makeProseQLLayer convenience helpers (69f1cf2)
+
+
 ## v0.4.2 (2026-02-16)
 
 ### Other
