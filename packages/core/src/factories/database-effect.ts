@@ -1775,6 +1775,10 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 					collectionConfig.format !== undefined
 						? { format: collectionConfig.format }
 						: {};
+				const pathOverride =
+					collectionConfig.path !== undefined
+						? { path: collectionConfig.path }
+						: {};
 				const loadOptions =
 					collectionConfig.version !== undefined
 						? collectionConfig.migrations !== undefined
@@ -1783,14 +1787,16 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 									migrations: collectionConfig.migrations,
 									collectionName,
 									...formatOverride,
+									...pathOverride,
 								}
 							: {
 									version: collectionConfig.version,
 									collectionName,
 									...formatOverride,
+									...pathOverride,
 								}
-						: Object.keys(formatOverride).length > 0
-							? formatOverride
+						: Object.keys({ ...formatOverride, ...pathOverride }).length > 0
+							? { ...formatOverride, ...pathOverride }
 							: undefined;
 				loadedData = yield* loadData(
 					filePath,
@@ -1870,15 +1876,19 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 						filePath,
 						collectionConfig.schema as Schema.Schema<HasId, unknown>,
 						currentData,
-						// Pass version and format options for versioned/format-overridden collections
+						// Pass version, format, and path options
 						collectionConfig.version !== undefined ||
-							collectionConfig.format !== undefined
+							collectionConfig.format !== undefined ||
+							collectionConfig.path !== undefined
 							? {
 									...(collectionConfig.version !== undefined
 										? { version: collectionConfig.version }
 										: {}),
 									...(collectionConfig.format !== undefined
 										? { format: collectionConfig.format }
+										: {}),
+									...(collectionConfig.path !== undefined
+										? { path: collectionConfig.path }
 										: {}),
 								}
 							: undefined,

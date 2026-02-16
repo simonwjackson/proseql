@@ -51,6 +51,41 @@ const resolveExtension = (
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
+/**
+ * Navigate into a nested object using a dot-notation path.
+ * Returns undefined if any segment along the path is missing.
+ */
+const getAtPath = (obj: unknown, path: string): unknown => {
+	let current: unknown = obj;
+	for (const segment of path.split(".")) {
+		if (!isRecord(current)) return undefined;
+		current = current[segment];
+	}
+	return current;
+};
+
+/**
+ * Set a value at a dot-notation path within a nested object.
+ * Creates intermediate objects as needed. Returns a shallow copy.
+ */
+const setAtPath = (
+	obj: Record<string, unknown>,
+	path: string,
+	value: unknown,
+): Record<string, unknown> => {
+	const segments = path.split(".");
+	const root = { ...obj };
+	let current: Record<string, unknown> = root;
+	for (let i = 0; i < segments.length - 1; i++) {
+		const seg = segments[i];
+		const next = current[seg];
+		current[seg] = isRecord(next) ? { ...next } : {};
+		current = current[seg] as Record<string, unknown>;
+	}
+	current[segments[segments.length - 1]] = value;
+	return root;
+};
+
 // ============================================================================
 // loadData
 // ============================================================================
@@ -79,6 +114,12 @@ export interface LoadDataOptions {
 	 * When provided, this format is used instead of inferring from the file extension.
 	 */
 	readonly format?: string;
+	/**
+	 * Dot-notation path into the parsed document where the collection data lives.
+	 * When provided, navigates into the document structure before loading entities.
+	 * The resolved value can be a Record keyed by entity ID or an array of objects with `id`.
+	 */
+	readonly path?: string;
 }
 
 /**
@@ -130,25 +171,34 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 		const raw = yield* storage.read(filePath);
 		const parsed = yield* serializer.deserialize(raw, ext);
 
+		// If a path is specified, navigate into the document structure
+		const resolved = options?.path ? getAtPath(parsed, options.path) : parsed;
+
+		// If path navigation resolved to undefined, return empty map
+		if (resolved === undefined) {
+			return new Map<string, A>() as ReadonlyMap<string, A>;
+		}
+
 		// The on-disk format depends on the file extension:
 		// - JSONL/NDJSON/Prose: array of entity objects
 		// - All other formats: Record<string, object> keyed by entity ID
+		// When a path is specified, the resolved value may also be an array
 		const isArrayFormat =
-			ext === "jsonl" || ext === "ndjson" || ext === "prose";
+			ext === "jsonl" || ext === "ndjson" || ext === "prose" || (options?.path !== undefined && Array.isArray(resolved));
 		const entityMap: Record<string, unknown> = {};
 		let fileVersion = 0;
 
-		if (isArrayFormat && Array.isArray(parsed)) {
-			// Array format (JSONL/Prose): array of entity objects → convert to Record keyed by id
-			for (const item of parsed) {
+		if (isArrayFormat && Array.isArray(resolved)) {
+			// Array format: array of entity objects → convert to Record keyed by id
+			for (const item of resolved) {
 				if (isRecord(item) && typeof item.id === "string") {
 					entityMap[item.id] = item;
 				}
 			}
-		} else if (isRecord(parsed)) {
+		} else if (isRecord(resolved)) {
 			// Standard format: Record keyed by entity ID
-			fileVersion = typeof parsed._version === "number" ? parsed._version : 0;
-			for (const [key, value] of Object.entries(parsed)) {
+			fileVersion = typeof resolved._version === "number" ? resolved._version : 0;
+			for (const [key, value] of Object.entries(resolved)) {
 				if (key !== "_version") {
 					entityMap[key] = value;
 				}
@@ -157,7 +207,7 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 			return yield* Effect.fail(
 				new SerializationError({
 					format: ext,
-					message: `Invalid data format in '${filePath}': expected object, got ${typeof parsed}`,
+					message: `Invalid data format in '${filePath}'${options?.path ? ` at path '${options.path}'` : ""}: expected object or array, got ${typeof resolved}`,
 				}),
 			);
 		}
@@ -273,6 +323,12 @@ export interface SaveDataOptions {
 	 * When provided, this format is used instead of inferring from the file extension.
 	 */
 	readonly format?: string;
+	/**
+	 * Dot-notation path into the document where the collection data should be written.
+	 * When provided, the existing file is read first and the collection data is set
+	 * at the specified path, preserving sibling data in the document.
+	 */
+	readonly path?: string;
 }
 
 /**
@@ -306,7 +362,7 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 		const isArrayFormat =
 			ext === "jsonl" || ext === "ndjson" || ext === "prose";
 
-		if (isArrayFormat) {
+		if (isArrayFormat && !options?.path) {
 			// Array format (JSONL/Prose): encode as array of entities
 			const entities: Array<I> = [];
 			for (const [id, entity] of data) {
@@ -330,7 +386,7 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 			yield* storage.ensureDir(filePath);
 			yield* storage.write(filePath, content);
 		} else {
-			// Standard format: encode as Record keyed by entity ID
+			// Encode entities
 			const entityMap: Record<string, I> = {};
 			for (const [id, entity] of data) {
 				const encoded = yield* encode(entity).pipe(
@@ -350,11 +406,31 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 				entityMap[id] = encoded;
 			}
 
-			// Build output object, injecting _version first if provided for readability
-			const output: Record<string, unknown> =
-				options?.version !== undefined
-					? { _version: options.version, ...entityMap }
-					: entityMap;
+			// Build the collection data object
+			const collectionData: unknown =
+				options?.path !== undefined
+					? // Path mode: encode as array of entity values (matches how arrays are loaded)
+						Object.values(entityMap)
+					: options?.version !== undefined
+						? { _version: options.version, ...entityMap }
+						: entityMap;
+
+			// If path is specified, read-modify-write to preserve sibling data
+			let output: unknown;
+			if (options?.path) {
+				let existing: Record<string, unknown> = {};
+				const fileExists = yield* storage.exists(filePath);
+				if (fileExists) {
+					const raw = yield* storage.read(filePath);
+					const parsed = yield* serializer.deserialize(raw, ext);
+					if (isRecord(parsed)) {
+						existing = parsed as Record<string, unknown>;
+					}
+				}
+				output = setAtPath(existing, options.path, collectionData);
+			} else {
+				output = collectionData;
+			}
 
 			// Serialize and write
 			const content = yield* serializer.serialize(output, ext);

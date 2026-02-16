@@ -32,6 +32,30 @@ export type CollectionConfig = {
 	readonly format?: string;
 
 	/**
+	 * Dot-notation path into the file where this collection's data lives.
+	 * When provided, ProseQL navigates into the parsed document structure
+	 * before applying normal collection loading logic.
+	 *
+	 * The resolved value can be either a Record keyed by entity ID or an
+	 * array of entity objects (each must have an `id` field).
+	 *
+	 * On save, the existing file is read first and the collection data is
+	 * set at the specified path, preserving sibling data.
+	 *
+	 * @example
+	 * ```ts
+	 * // Read from { agents: { list: [{ id: "a1", ... }] } }
+	 * projects: {
+	 *   schema: ProjectSchema,
+	 *   file: "~/.config/app.json",
+	 *   path: "agents.list",
+	 *   relationships: {},
+	 * }
+	 * ```
+	 */
+	readonly path?: string;
+
+	/**
 	 * Relationship definitions for this collection
 	 */
 	readonly relationships: Record<

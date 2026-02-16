@@ -816,3 +816,223 @@ describe("persistence-effect: multi-collection file operations", () => {
 		});
 	});
 });
+
+// ============================================================================
+// loadData / saveData with path option
+// ============================================================================
+
+describe("persistence-effect: path option", () => {
+	const AgentSchema = Schema.Struct({
+		id: Schema.String,
+		workspace: Schema.String,
+	});
+
+	type Agent = typeof AgentSchema.Type;
+
+	describe("loadData with path", () => {
+		it("loads entities from a nested array at a dot-notation path", async () => {
+			const { store, layer } = makeTestEnv();
+
+			store.set(
+				"/config/app.json",
+				JSON.stringify({
+					meta: { version: "1.0" },
+					agents: {
+						defaults: { workspace: "/tmp" },
+						list: [
+							{ id: "main", workspace: "/home/user" },
+							{ id: "dev", workspace: "/home/user/code" },
+						],
+					},
+				}),
+			);
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					loadData("/config/app.json", AgentSchema, {
+						path: "agents.list",
+					}),
+					layer,
+				),
+			);
+
+			expect(result.size).toBe(2);
+			expect(result.get("main")).toEqual({
+				id: "main",
+				workspace: "/home/user",
+			});
+			expect(result.get("dev")).toEqual({
+				id: "dev",
+				workspace: "/home/user/code",
+			});
+		});
+
+		it("loads entities from a nested Record at a path", async () => {
+			const { store, layer } = makeTestEnv();
+
+			store.set(
+				"/config/db.json",
+				JSON.stringify({
+					data: {
+						agents: {
+							main: { id: "main", workspace: "/home" },
+							dev: { id: "dev", workspace: "/code" },
+						},
+					},
+				}),
+			);
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					loadData("/config/db.json", AgentSchema, {
+						path: "data.agents",
+					}),
+					layer,
+				),
+			);
+
+			expect(result.size).toBe(2);
+			expect(result.get("main")?.workspace).toBe("/home");
+		});
+
+		it("returns empty map when path resolves to undefined", async () => {
+			const { store, layer } = makeTestEnv();
+
+			store.set(
+				"/config/app.json",
+				JSON.stringify({ meta: { version: "1.0" } }),
+			);
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					loadData("/config/app.json", AgentSchema, {
+						path: "agents.list",
+					}),
+					layer,
+				),
+			);
+
+			expect(result.size).toBe(0);
+		});
+
+		it("returns empty map when file does not exist (with path)", async () => {
+			const { layer } = makeTestEnv();
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					loadData("/config/missing.json", AgentSchema, {
+						path: "agents.list",
+					}),
+					layer,
+				),
+			);
+
+			expect(result.size).toBe(0);
+		});
+	});
+
+	describe("saveData with path", () => {
+		it("writes entities at the specified path, preserving siblings", async () => {
+			const { store, layer } = makeTestEnv();
+
+			// Pre-existing file with other data
+			store.set(
+				"/config/app.json",
+				JSON.stringify({
+					meta: { version: "1.0" },
+					agents: {
+						defaults: { workspace: "/tmp" },
+						list: [{ id: "old", workspace: "/old" }],
+					},
+				}),
+			);
+
+			const data: ReadonlyMap<string, Agent> = new Map([
+				["main", { id: "main", workspace: "/home" }],
+			]);
+
+			await Effect.runPromise(
+				Effect.provide(
+					saveData("/config/app.json", AgentSchema, data, {
+						path: "agents.list",
+					}),
+					layer,
+				),
+			);
+
+			const stored = store.get("/config/app.json");
+			const parsed = JSON.parse(stored!);
+
+			// Sibling data preserved
+			expect(parsed.meta).toEqual({ version: "1.0" });
+			expect(parsed.agents.defaults).toEqual({ workspace: "/tmp" });
+
+			// Collection data written as array at path
+			expect(parsed.agents.list).toEqual([
+				{ id: "main", workspace: "/home" },
+			]);
+		});
+
+		it("creates intermediate objects when path does not exist yet", async () => {
+			const { store, layer } = makeTestEnv();
+
+			const data: ReadonlyMap<string, Agent> = new Map([
+				["a1", { id: "a1", workspace: "/w" }],
+			]);
+
+			await Effect.runPromise(
+				Effect.provide(
+					saveData("/config/new.json", AgentSchema, data, {
+						path: "deep.nested.list",
+					}),
+					layer,
+				),
+			);
+
+			const stored = store.get("/config/new.json");
+			const parsed = JSON.parse(stored!);
+
+			expect(parsed.deep.nested.list).toEqual([
+				{ id: "a1", workspace: "/w" },
+			]);
+		});
+	});
+
+	describe("round-trip with path", () => {
+		it("saveData then loadData with path returns the same entities", async () => {
+			const { store, layer } = makeTestEnv();
+
+			// Set up a file with sibling data
+			store.set(
+				"/config/app.json",
+				JSON.stringify({
+					meta: { version: "2.0" },
+					agents: { defaults: {} },
+				}),
+			);
+
+			const original: ReadonlyMap<string, Agent> = new Map([
+				["a1", { id: "a1", workspace: "/w1" }],
+				["a2", { id: "a2", workspace: "/w2" }],
+			]);
+
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						yield* saveData("/config/app.json", AgentSchema, original, {
+							path: "agents.list",
+						});
+						return yield* loadData("/config/app.json", AgentSchema, {
+							path: "agents.list",
+						});
+					}),
+					layer,
+				),
+			);
+
+			expect(result.size).toBe(2);
+			expect(result.get("a1")).toEqual({ id: "a1", workspace: "/w1" });
+			expect(result.get("a2")).toEqual({ id: "a2", workspace: "/w2" });
+		});
+	});
+});
