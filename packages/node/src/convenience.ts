@@ -23,7 +23,7 @@ import {
 	type UnsupportedFormatError,
 	type ValidationError,
 } from "@proseql/core";
-import { Effect, Layer, type Scope } from "effect";
+import { type Context, Effect, Layer, type Scope } from "effect";
 import { NodeStorageLayer } from "./node-adapter-layer.js";
 
 /**
@@ -82,3 +82,50 @@ export const createNodeDatabase = <Config extends DatabaseConfig>(
 		options,
 	).pipe(Effect.provide(layer));
 };
+
+/**
+ * Create a Layer that provides a persistent ProseQL database via a Context.Tag.
+ *
+ * Combines `createNodeDatabase` with `Layer.scoped` so consumers only need
+ * to provide the layer — no manual wiring of storage, serializers, or scoping.
+ *
+ * @param tag - A Context.Tag (typically from `makeProseQLTag`) to bind the database to
+ * @param config - Database configuration (schemas, file paths, relationships, etc.)
+ * @param initialData - Optional initial data arrays per collection
+ * @param persistenceConfig - Optional persistence tuning (debounce, plugin codecs)
+ * @param options - Optional database options (plugins)
+ * @returns A Layer providing the database via the given tag
+ *
+ * @example
+ * ```typescript
+ * import { makeProseQLTag, makeProseQLLayer } from "@proseql/node"
+ *
+ * const dbConfig = {
+ *   books: { schema: BookSchema, file: "./data/books.json", relationships: {} },
+ * } as const
+ *
+ * const ProseQLDatabase = makeProseQLTag<typeof dbConfig>("ProseQLDatabase")
+ * const ProseQLDatabaseLive = makeProseQLLayer(ProseQLDatabase, dbConfig)
+ * ```
+ */
+export const makeProseQLLayer = <Config extends DatabaseConfig, I>(
+	tag: Context.Tag<I, GenerateDatabaseWithPersistence<Config>>,
+	config: Config,
+	initialData?: {
+		readonly [K in keyof Config]?: ReadonlyArray<Record<string, unknown>>;
+	},
+	persistenceConfig?: EffectDatabasePersistenceConfig,
+	options?: EffectDatabaseOptions,
+): Layer.Layer<
+	I,
+	| MigrationError
+	| StorageError
+	| SerializationError
+	| UnsupportedFormatError
+	| ValidationError
+	| PluginError
+> =>
+	Layer.scoped(
+		tag,
+		createNodeDatabase(config, initialData, persistenceConfig, options),
+	);
