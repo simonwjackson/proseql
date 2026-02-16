@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.1 (2026-02-16)
+
+### Fixes
+- Skip already-published versions in publish jobs (e909cd5)
+
+
 ## v0.3.0 (2026-02-16)
 
 ### Features
