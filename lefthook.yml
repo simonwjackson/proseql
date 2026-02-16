@@ -10,7 +10,12 @@ pre-commit:
 
 pre-push:
   commands:
+    rebase:
+      priority: 1
+      run: git fetch origin main --quiet && git rebase origin/main --quiet
     typecheck:
+      priority: 2
       run: bun x tsc --build
     test:
+      priority: 2
       run: bun test packages/*/tests/
