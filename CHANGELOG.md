@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.0 (2026-02-16)
+
+### Features
+- Prepare @proseql/cli for npm publishing (58d5704)
+
+### Fixes
+- Resolve 19 pre-existing type errors in CLI package (b44ff1d)
+
+
 ## v0.2.4 (2026-02-13)
 
 ### Other
