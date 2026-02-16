@@ -29,7 +29,7 @@ import { discoverConfig } from "./config/discovery.js";
 import { loadConfig } from "./config/loader.js";
 import { format, type OutputFormat } from "./output/formatter.js";
 
-const VERSION = "0.2.3";
+const VERSION = "0.2.4";
 
 /**
  * Parsed CLI arguments
@@ -295,15 +295,9 @@ async function resolveConfig(
 
 	const result = await Effect.runPromise(
 		program.pipe(
-			Effect.catchTag("ConfigNotFoundError", (error) => {
-				exitWithError(error.message);
-			}),
-			Effect.catchTag("ConfigLoadError", (error) => {
-				exitWithError(error.message);
-			}),
-			Effect.catchTag("ConfigValidationError", (error) => {
-				exitWithError(error.message);
-			}),
+			Effect.catchAll((error) =>
+				Effect.sync(() => exitWithError(error.message)),
+			),
 		),
 	);
 
@@ -360,7 +354,10 @@ async function handleCollections(
 
 	// Output the results using the appropriate formatter
 	const outputFormat = getOutputFormat(args.flags);
-	const output = format(outputFormat, result.data ?? []);
+	const output = format(
+		outputFormat,
+		(result.data ?? []) as unknown as ReadonlyArray<Record<string, unknown>>,
+	);
 	console.log(output);
 }
 
@@ -475,7 +472,10 @@ async function handleStats(
 
 	// Output the results using the appropriate formatter
 	const outputFormat = getOutputFormat(args.flags);
-	const output = format(outputFormat, result.data ?? []);
+	const output = format(
+		outputFormat,
+		(result.data ?? []) as unknown as ReadonlyArray<Record<string, unknown>>,
+	);
 	console.log(output);
 }
 

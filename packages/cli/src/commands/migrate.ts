@@ -125,14 +125,7 @@ function buildPersistenceLayer() {
  * @param filePath - Path to the data file
  * @returns Effect yielding the file version and existence status
  */
-function readFileVersion(
-	filePath: string,
-): Effect.Effect<
-	{ version: number; exists: boolean },
-	never,
-	| typeof StorageAdapterService.Service
-	| typeof SerializerRegistryService.Service
-> {
+function readFileVersion(filePath: string) {
 	return Effect.gen(function* () {
 		const storage = yield* StorageAdapterService;
 		const serializer = yield* SerializerRegistryService;
@@ -231,10 +224,7 @@ function getMigrationsToApply(
  * Displays each collection's current file version vs config version,
  * highlighting collections that need migration.
  */
-function runMigrateStatus(
-	config: DatabaseConfig,
-	configPath: string,
-): Effect.Effect<MigrateResult, never> {
+function runMigrateStatus(config: DatabaseConfig, configPath: string) {
 	const resolvedConfig = resolveConfigPaths(config, configPath);
 
 	const program = Effect.gen(function* () {
@@ -292,16 +282,7 @@ function runMigrateStatus(
 	});
 
 	// Run with the persistence layer
-	return program.pipe(
-		Effect.provide(buildPersistenceLayer()),
-		Effect.catchAll((error) => {
-			const message = error instanceof Error ? error.message : String(error);
-			return Effect.succeed({
-				success: false as const,
-				message: `Failed to check migration status: ${message}`,
-			});
-		}),
-	);
+	return program.pipe(Effect.provide(buildPersistenceLayer()));
 }
 
 /**
@@ -311,10 +292,7 @@ function runMigrateStatus(
  * This reads the current file versions and determines which migrations
  * would be applied, but does not actually execute any transforms or write files.
  */
-function runMigrateDryRun(
-	config: DatabaseConfig,
-	configPath: string,
-): Effect.Effect<MigrateResult, never> {
+function runMigrateDryRun(config: DatabaseConfig, configPath: string) {
 	const resolvedConfig = resolveConfigPaths(config, configPath);
 
 	const program = Effect.gen(function* () {
@@ -372,16 +350,7 @@ function runMigrateDryRun(
 	});
 
 	// Run with the persistence layer
-	return program.pipe(
-		Effect.provide(buildPersistenceLayer()),
-		Effect.catchAll((error) => {
-			const message = error instanceof Error ? error.message : String(error);
-			return Effect.succeed({
-				success: false as const,
-				message: `Failed to check dry-run status: ${message}`,
-			});
-		}),
-	);
+	return program.pipe(Effect.provide(buildPersistenceLayer()));
 }
 
 /**
@@ -419,12 +388,7 @@ function migrateCollection(
 	name: string,
 	collectionConfig: DatabaseConfig[string],
 	fileVersion: number,
-): Effect.Effect<
-	CollectionMigrationResult,
-	never,
-	| typeof StorageAdapterService.Service
-	| typeof SerializerRegistryService.Service
-> {
+) {
 	const targetVersion = collectionConfig.version ?? 0;
 	const filePath = collectionConfig.file;
 
@@ -554,7 +518,7 @@ function runMigrate(
 	config: DatabaseConfig,
 	configPath: string,
 	force: boolean,
-): Effect.Effect<MigrateResult, never> {
+) {
 	const resolvedConfig = resolveConfigPaths(config, configPath);
 
 	const program = Effect.gen(function* () {
@@ -699,16 +663,7 @@ function runMigrate(
 	});
 
 	// Run with the persistence layer
-	return program.pipe(
-		Effect.provide(buildPersistenceLayer()),
-		Effect.catchAll((error) => {
-			const message = error instanceof Error ? error.message : String(error);
-			return Effect.succeed({
-				success: false as const,
-				message: `Failed to run migrations: ${message}`,
-			});
-		}),
-	);
+	return program.pipe(Effect.provide(buildPersistenceLayer()));
 }
 
 /**
@@ -721,7 +676,7 @@ function runMigrate(
  */
 export function runMigrateCommand(
 	options: MigrateOptions,
-): Effect.Effect<MigrateResult, never> {
+): Effect.Effect<MigrateResult> {
 	const { config, configPath, subcommand, force = false } = options;
 
 	switch (subcommand) {
