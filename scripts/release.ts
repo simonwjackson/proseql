@@ -193,11 +193,32 @@ try {
 	if (existsSync(notesFile)) unlinkSync(notesFile);
 }
 
+// --- Publish packages to npm ---
+// bun publish resolves workspace:* → actual versions automatically
+
+const publishOrder = ["core", "node", "browser", "cli", "rest", "rpc"];
+console.log("\nPublishing to npm...");
+
+// Build first to ensure dist/ is fresh
+execSync("bun run build", { cwd: root, stdio: "inherit" });
+
+for (const pkg of publishOrder) {
+	const pkgDir = join(root, `packages/${pkg}`);
+	try {
+		execSync("bun publish --access public", { cwd: pkgDir, stdio: "inherit" });
+		console.log(`  Published @proseql/${pkg}@${next}`);
+	} catch (e) {
+		console.error(`  Failed to publish @proseql/${pkg}: ${e}`);
+		// Don't abort — some packages might already be published at this version
+	}
+}
+
 console.log(`\nReleased v${next}`);
 console.log(`  Commit: chore: release v${next}`);
 console.log(`  Tag: v${next}`);
 console.log("  Pushed to origin");
 console.log("  GitHub Release created");
+console.log("  Published to npm");
 
 function capitalize(s: string): string {
 	return s.charAt(0).toUpperCase() + s.slice(1);
