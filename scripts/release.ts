@@ -196,7 +196,7 @@ try {
 // --- Publish packages to npm ---
 // bun publish resolves workspace:* → actual versions automatically
 
-const publishOrder = ["core", "node", "browser", "cli", "rest", "rpc"];
+const publishOrder = ["core", "node", "browser", "cli", "rest", "rpc", "ai"];
 console.log("\nPublishing to npm...");
 
 // Build first to ensure dist/ is fresh

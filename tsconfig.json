@@ -5,6 +5,7 @@
     { "path": "./packages/node" },
     { "path": "./packages/rest" },
     { "path": "./packages/rpc" },
-    { "path": "./packages/cli" }
+    { "path": "./packages/cli" },
+    { "path": "./packages/ai" }
   ]
 }
