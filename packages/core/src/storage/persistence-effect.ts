@@ -193,9 +193,12 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 
 		if (isArrayFormat && Array.isArray(resolved)) {
 			// Array format: array of entity objects → convert to Record keyed by id
-			for (const item of resolved) {
-				if (isRecord(item) && typeof item.id === "string") {
-					entityMap[item.id] = item;
+			// Entries without a string `id` get their array index as a fallback key
+			for (let i = 0; i < resolved.length; i++) {
+				const item = resolved[i];
+				if (isRecord(item)) {
+					const id = typeof item.id === "string" ? item.id : String(i);
+					entityMap[id] = item;
 				}
 			}
 		} else if (isRecord(resolved)) {
