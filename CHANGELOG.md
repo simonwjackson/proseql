@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.0 (2026-02-19)
+
+### Features
+- Add aggregation CLI flags to proseql query command (bafcadf)
+- Add @proseql/ai package for LLM tool integration (81a1a00)
+
+### Other
+- Fix import ordering and formatting in @proseql/ai (e835ddb)
+
+
 ## v0.6.0 (2026-02-16)
 
 ### Features
