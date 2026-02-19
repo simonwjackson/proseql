@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { Effect, Schema } from "effect";
-import { createEffectDatabase } from "@proseql/core";
 import type { DatabaseConfig } from "@proseql/core";
-import { makeReadOnlyTools, makeTools, describeConfig } from "../src/index.js";
+import { createEffectDatabase } from "@proseql/core";
+import { Effect, Schema } from "effect";
+import { describeConfig, makeReadOnlyTools, makeTools } from "../src/index.js";
 
 const ProjectSchema = Schema.Struct({
 	id: Schema.String,
@@ -178,7 +178,9 @@ describe("@proseql/ai", () => {
 				}),
 			);
 			expect(result).toHaveLength(2);
-			expect(result.every((r: Record<string, unknown>) => r.status === "active")).toBe(true);
+			expect(
+				result.every((r: Record<string, unknown>) => r.status === "active"),
+			).toBe(true);
 		});
 
 		it("should support sort", async () => {
@@ -348,9 +350,7 @@ describe("@proseql/ai", () => {
 			const db = await createTestDb();
 			const { execute } = makeReadOnlyTools(db, config);
 
-			const result = JSON.parse(
-				await execute("nonexistent_tool", {}),
-			);
+			const result = JSON.parse(await execute("nonexistent_tool", {}));
 			expect(result.error).toContain("Unknown tool");
 		});
 	});

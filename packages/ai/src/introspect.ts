@@ -3,9 +3,9 @@
  * from a DatabaseConfig by walking Effect Schema ASTs.
  */
 
+import type { DatabaseConfig } from "@proseql/core";
 import type { Schema } from "effect";
 import type { AST } from "effect/SchemaAST";
-import type { DatabaseConfig } from "@proseql/core";
 import type { CollectionDescription, SchemaDescription } from "./types.js";
 
 const OPERATORS_BY_TYPE: Record<string, ReadonlyArray<string>> = {
@@ -84,9 +84,7 @@ function getUnionTypeString(ast: AST & { _tag: "Union" }): string {
 	return "string";
 }
 
-function extractFieldsFromAST(
-	ast: AST,
-): Record<string, string> {
+function extractFieldsFromAST(ast: AST): Record<string, string> {
 	// Unwrap Transformation (Schema.Struct with transforms wraps in Transformation)
 	if (ast._tag === "Transformation") {
 		return extractFieldsFromAST(ast.from);

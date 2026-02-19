@@ -5,13 +5,21 @@
 import type { DatabaseConfig } from "@proseql/core";
 import { describeConfig } from "./introspect.js";
 
-type AnyDb = Record<string, {
-	query: (options?: Record<string, unknown>) => { runPromise: Promise<ReadonlyArray<unknown>> };
-	findById: (id: string) => { runPromise: Promise<unknown> };
-	create: (data: Record<string, unknown>) => { runPromise: Promise<unknown> };
-	update: (id: string, data: Record<string, unknown>) => { runPromise: Promise<unknown> };
-	delete: (id: string) => { runPromise: Promise<unknown> };
-}>;
+type AnyDb = Record<
+	string,
+	{
+		query: (options?: Record<string, unknown>) => {
+			runPromise: Promise<ReadonlyArray<unknown>>;
+		};
+		findById: (id: string) => { runPromise: Promise<unknown> };
+		create: (data: Record<string, unknown>) => { runPromise: Promise<unknown> };
+		update: (
+			id: string,
+			data: Record<string, unknown>,
+		) => { runPromise: Promise<unknown> };
+		delete: (id: string) => { runPromise: Promise<unknown> };
+	}
+>;
 
 function getCollection(db: AnyDb, collection: string) {
 	const col = db[collection];
@@ -108,8 +116,7 @@ export function makeExecutor(
 					return JSON.stringify({ error: `Unknown tool: ${toolName}` });
 			}
 		} catch (error) {
-			const message =
-				error instanceof Error ? error.message : String(error);
+			const message = error instanceof Error ? error.message : String(error);
 			return JSON.stringify({ error: message });
 		}
 	};

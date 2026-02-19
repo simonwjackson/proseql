@@ -5,6 +5,11 @@
  * executor directly from a live database instance + config.
  */
 
+export {
+	buildFullDefinitions,
+	buildReadOnlyDefinitions,
+} from "./definitions.js";
+export { describeCollection, describeConfig } from "./introspect.js";
 export type {
 	CollectionDescription,
 	JsonSchemaProperty,
@@ -12,14 +17,12 @@ export type {
 	SchemaDescription,
 	ToolDefinition,
 } from "./types.js";
-export { describeCollection, describeConfig } from "./introspect.js";
-export {
+
+import type { DatabaseConfig } from "@proseql/core";
+import {
 	buildFullDefinitions,
 	buildReadOnlyDefinitions,
 } from "./definitions.js";
-
-import type { DatabaseConfig } from "@proseql/core";
-import { buildFullDefinitions, buildReadOnlyDefinitions } from "./definitions.js";
 import { makeExecutor } from "./executor.js";
 import type { ProseQLToolKit } from "./types.js";
 
