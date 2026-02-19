@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.1 (2026-02-19)
+
+### Fixes
+- Auto-assign index-based IDs for JSONL entries without `id` field (324aa9c)
+
+
 ## v0.7.0 (2026-02-19)
 
 ### Features
