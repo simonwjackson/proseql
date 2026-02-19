@@ -55,6 +55,13 @@ interface ParsedArgs {
 		readonly to: string | undefined;
 		readonly format: string | undefined;
 		readonly dryRun: boolean;
+		// Aggregate flags
+		readonly count: boolean;
+		readonly sum: string | undefined;
+		readonly avg: string | undefined;
+		readonly min: string | undefined;
+		readonly max: string | undefined;
+		readonly groupBy: string | undefined;
 	};
 }
 
@@ -92,6 +99,12 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
 		to: string | undefined;
 		format: string | undefined;
 		dryRun: boolean;
+		count: boolean;
+		sum: string | undefined;
+		avg: string | undefined;
+		min: string | undefined;
+		max: string | undefined;
+		groupBy: string | undefined;
 	} = {
 		help: false,
 		version: false,
@@ -109,6 +122,12 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
 		to: undefined,
 		format: undefined,
 		dryRun: false,
+		count: false,
+		sum: undefined,
+		avg: undefined,
+		min: undefined,
+		max: undefined,
+		groupBy: undefined,
 	};
 
 	const positionalArgs: string[] = [];
@@ -167,6 +186,24 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
 		} else if (arg === "--dry-run") {
 			flags.dryRun = true;
 			i++;
+		} else if (arg === "--count") {
+			flags.count = true;
+			i++;
+		} else if (arg === "--sum") {
+			flags.sum = args[i + 1];
+			i += 2;
+		} else if (arg === "--avg") {
+			flags.avg = args[i + 1];
+			i += 2;
+		} else if (arg === "--min") {
+			flags.min = args[i + 1];
+			i += 2;
+		} else if (arg === "--max") {
+			flags.max = args[i + 1];
+			i += 2;
+		} else if (arg === "--group-by") {
+			flags.groupBy = args[i + 1];
+			i += 2;
 		} else if (arg.startsWith("-")) {
 			// Unknown flag - skip (could be command-specific)
 			i++;
@@ -227,6 +264,14 @@ QUERY OPTIONS:
   -s, --select <fields> Comma-separated fields to include
   --sort <field:dir>    Sort by field (asc/desc)
   -l, --limit <n>       Limit number of results
+
+AGGREGATE OPTIONS:
+  --count               Count matching records
+  --sum <fields>        Sum numeric fields (comma-separated)
+  --avg <fields>        Average numeric fields (comma-separated)
+  --min <fields>        Minimum values (comma-separated)
+  --max <fields>        Maximum values (comma-separated)
+  --group-by <fields>   Group results by fields (comma-separated)
 
 CRUD OPTIONS:
   -d, --data <json>     JSON data for create
@@ -327,6 +372,12 @@ async function handleQuery(
 		select: args.flags.select,
 		sort: args.flags.sort,
 		limit: args.flags.limit,
+		count: args.flags.count,
+		sum: args.flags.sum,
+		avg: args.flags.avg,
+		min: args.flags.min,
+		max: args.flags.max,
+		groupBy: args.flags.groupBy,
 	});
 
 	if (!result.success) {

@@ -7,19 +7,16 @@
 
 import * as path from "node:path";
 import {
+	AllTextFormatsLayer,
 	type DatabaseConfig,
 	type DryRunCollectionResult,
 	type DryRunMigration,
 	type DryRunResult,
 	type DryRunStatus,
 	getFileExtension,
-	jsonCodec,
-	makeSerializerLayer,
 	NodeStorageLayer,
 	SerializerRegistryService,
 	StorageAdapterService,
-	tomlCodec,
-	yamlCodec,
 } from "@proseql/node";
 import { Effect, Layer } from "effect";
 import { confirm } from "../prompt.js";
@@ -112,10 +109,7 @@ function resolveConfigPaths(
  * Build the persistence layer for storage and serializer operations.
  */
 function buildPersistenceLayer() {
-	return Layer.merge(
-		NodeStorageLayer,
-		makeSerializerLayer([jsonCodec(), yamlCodec(), tomlCodec()]),
-	);
+	return Layer.merge(NodeStorageLayer, AllTextFormatsLayer);
 }
 
 /**

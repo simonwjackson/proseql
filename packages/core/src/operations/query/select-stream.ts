@@ -1,4 +1,5 @@
 import { Stream } from "effect";
+import { getNestedValue, isDotPath } from "../../utils/nested-path.js";
 
 /**
  * A select configuration can be either:
@@ -25,6 +26,16 @@ function applyObjectSelect(
 	const result: Record<string, unknown> = {};
 
 	for (const [key, value] of Object.entries(selection)) {
+		if (isDotPath(key)) {
+			if (value === true) {
+				const nestedVal = getNestedValue(item, key);
+				if (nestedVal !== undefined) {
+					result[key] = nestedVal;
+				}
+			}
+			continue;
+		}
+
 		if (!(key in item)) continue;
 
 		if (value === true) {
