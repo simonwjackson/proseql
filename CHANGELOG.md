@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.10.0 (2026-02-25)
+
+### Features
+- Update landing page to showcase CLI instead of library (999066b)
+
+
 ## v0.9.0 (2026-02-25)
 
 ### Features
