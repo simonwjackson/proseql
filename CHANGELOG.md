@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.8.0 (2026-02-25)
+
+### Features
+- Add directory-mode persistence for per-entity file storage (d6183db)
+
+### Fixes
+- Always emit overflow lines for null values in prose codec (1ac379b)
+
+
 ## v0.7.1 (2026-02-19)
 
 ### Fixes
