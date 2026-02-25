@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.10.5 (2026-02-25)
+
+### Other
+- Remove terminal typing animations and link author name (46e0548)
+
+
 ## v0.10.4 (2026-02-25)
 
 ### Other

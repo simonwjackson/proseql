@@ -1,6 +1,6 @@
 {
   "name": "@proseql/browser",
-  "version": "0.10.4",
+  "version": "0.10.5",
   "type": "module",
   "main": "src/index.ts",
   "dependencies": {
