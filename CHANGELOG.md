@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.10.3 (2026-02-25)
+
+### Other
+- Rebrand landing page with dark-first Dexie-inspired theme (a124c4f)
+
+
 ## v0.10.2 (2026-02-25)
 
 
