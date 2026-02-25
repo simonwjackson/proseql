@@ -1,4 +1,7 @@
-import { parse, stringify } from "hjson";
+import pkg from "hjson";
+
+const { parse, stringify } = pkg;
+
 import type { FormatCodec, FormatOptions } from "../format-codec.js";
 
 /**
