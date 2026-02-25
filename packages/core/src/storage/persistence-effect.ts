@@ -6,7 +6,16 @@
  * Includes DebouncedWriter for coalescing rapid mutations into single file writes.
  */
 
-import { Effect, Fiber, PubSub, Queue, Ref, Schema, type Scope } from "effect";
+import {
+	Effect,
+	Fiber,
+	PubSub,
+	Queue,
+	Ref,
+	Schema,
+	type Scope,
+	Stream,
+} from "effect";
 import { ValidationError } from "../errors/crud-errors.js";
 import { MigrationError } from "../errors/migration-errors.js";
 import {
@@ -766,6 +775,396 @@ export function saveCollectionsToFile<T extends HasId, I>(
 		yield* storage.write(filePath, content);
 	});
 }
+
+// ============================================================================
+// Directory-mode persistence
+// ============================================================================
+
+/**
+ * Options for loadDataFromDirectory.
+ */
+export interface LoadDataFromDirectoryOptions {
+	/**
+	 * Optional schema version from collection config.
+	 */
+	readonly version?: number;
+	/**
+	 * Optional migrations array for automatic data migration.
+	 */
+	readonly migrations?: ReadonlyArray<Migration>;
+	/**
+	 * Collection name for error messages.
+	 */
+	readonly collectionName?: string;
+}
+
+/**
+ * Load collection data from a directory where each entity is a separate file.
+ *
+ * Flow:
+ * 1. List files in directory via StorageAdapter.listDirectory
+ * 2. Filter files matching the given format extension
+ * 3. Read and deserialize each file
+ * 4. Decode each entity through the Schema
+ * 5. Return a ReadonlyMap<string, A> keyed by entity ID (derived from filename)
+ *
+ * If the directory does not exist, returns an empty ReadonlyMap.
+ */
+export const loadDataFromDirectory = <A extends { readonly id: string }, I, R>(
+	dirPath: string,
+	schema: Schema.Schema<A, I, R>,
+	format: string,
+	_options?: LoadDataFromDirectoryOptions,
+): Effect.Effect<
+	ReadonlyMap<string, A>,
+	| StorageError
+	| SerializationError
+	| UnsupportedFormatError
+	| ValidationError
+	| MigrationError,
+	StorageAdapter | SerializerRegistry | R
+> =>
+	Effect.gen(function* () {
+		const storage = yield* StorageAdapter;
+		const serializer = yield* SerializerRegistry;
+		const ext = format;
+		const suffix = `.${ext}`;
+
+		// List files in directory
+		const files = yield* storage.listDirectory(dirPath);
+
+		// Filter by format extension
+		const matchingFiles = files.filter((f) => f.endsWith(suffix));
+
+		if (matchingFiles.length === 0) {
+			return new Map<string, A>() as ReadonlyMap<string, A>;
+		}
+
+		// Decode each file
+		const decode = Schema.decodeUnknown(schema);
+		const entries: Array<[string, A]> = [];
+
+		for (const filePath of matchingFiles) {
+			const raw = yield* storage.read(filePath);
+			const parsed = yield* serializer.deserialize(raw, ext);
+
+			// Extract ID from filename (strip directory and extension)
+			const filename = filePath.slice(filePath.lastIndexOf("/") + 1);
+			const id = filename.slice(0, filename.length - suffix.length);
+
+			const decoded = yield* decode(parsed).pipe(
+				Effect.mapError(
+					(parseError) =>
+						new ValidationError({
+							message: `Failed to decode entity from '${filePath}': ${parseError.message}`,
+							issues: [
+								{
+									field: id,
+									message: parseError.message,
+								},
+							],
+						}),
+				),
+			);
+			entries.push([id, decoded]);
+		}
+
+		return new Map(entries) as ReadonlyMap<string, A>;
+	});
+
+/**
+ * Save a single entity to a directory as `<dirPath>/<id>.<format>`.
+ */
+export const saveEntityToDirectory = <A extends { readonly id: string }, I, R>(
+	dirPath: string,
+	entity: A,
+	schema: Schema.Schema<A, I, R>,
+	format: string,
+): Effect.Effect<
+	void,
+	StorageError | SerializationError | UnsupportedFormatError | ValidationError,
+	StorageAdapter | SerializerRegistry | R
+> =>
+	Effect.gen(function* () {
+		const storage = yield* StorageAdapter;
+		const serializer = yield* SerializerRegistry;
+		const encode = Schema.encode(schema);
+
+		const encoded = yield* encode(entity).pipe(
+			Effect.mapError(
+				(parseError) =>
+					new ValidationError({
+						message: `Failed to encode entity '${entity.id}' for directory '${dirPath}': ${parseError.message}`,
+						issues: [
+							{
+								field: entity.id,
+								message: parseError.message,
+							},
+						],
+					}),
+			),
+		);
+
+		const content = yield* serializer.serialize(encoded, format);
+		const filePath = `${dirPath}/${entity.id}.${format}`;
+		yield* storage.ensureDir(filePath);
+		yield* storage.write(filePath, content);
+	});
+
+/**
+ * Remove a single entity file from a directory.
+ */
+export const removeEntityFromDirectory = (
+	dirPath: string,
+	id: string,
+	format: string,
+): Effect.Effect<void, StorageError, StorageAdapter> =>
+	Effect.gen(function* () {
+		const storage = yield* StorageAdapter;
+		const filePath = `${dirPath}/${id}.${format}`;
+		const exists = yield* storage.exists(filePath);
+		if (exists) {
+			yield* storage.remove(filePath);
+		}
+	});
+
+/**
+ * Entry type for streaming directory reads.
+ */
+export interface StreamCollectionEntry<A> {
+	readonly id: string;
+	readonly data: A;
+}
+
+/**
+ * Stream collection entities from a directory, reading files lazily.
+ *
+ * Returns a Stream that eagerly lists files, then lazily reads/decodes each.
+ */
+export const streamCollectionFromDirectory = <
+	A extends { readonly id: string },
+	I,
+	R,
+>(
+	dirPath: string,
+	schema: Schema.Schema<A, I, R>,
+	format: string,
+): Stream.Stream<
+	StreamCollectionEntry<A>,
+	StorageError | SerializationError | UnsupportedFormatError | ValidationError,
+	StorageAdapter | SerializerRegistry | R
+> => {
+	const suffix = `.${format}`;
+
+	return Stream.unwrap(
+		Effect.gen(function* () {
+			const storage = yield* StorageAdapter;
+			const files = yield* storage.listDirectory(dirPath);
+			const matchingFiles = files.filter((f) => f.endsWith(suffix));
+
+			return Stream.fromIterable(matchingFiles).pipe(
+				Stream.mapEffect((filePath) =>
+					Effect.gen(function* () {
+						const storage = yield* StorageAdapter;
+						const serializer = yield* SerializerRegistry;
+						const decode = Schema.decodeUnknown(schema);
+
+						const raw = yield* storage.read(filePath);
+						const parsed = yield* serializer.deserialize(raw, format);
+
+						const filename = filePath.slice(filePath.lastIndexOf("/") + 1);
+						const id = filename.slice(0, filename.length - suffix.length);
+
+						const decoded = yield* decode(parsed).pipe(
+							Effect.mapError(
+								(parseError) =>
+									new ValidationError({
+										message: `Failed to decode entity from '${filePath}': ${parseError.message}`,
+										issues: [
+											{
+												field: id,
+												message: parseError.message,
+											},
+										],
+									}),
+							),
+						);
+
+						return { id, data: decoded } as StreamCollectionEntry<A>;
+					}),
+				),
+			);
+		}),
+	);
+};
+
+// ============================================================================
+// DirectoryWatcher
+// ============================================================================
+
+/**
+ * Configuration for a directory watcher.
+ */
+export interface DirectoryWatcherConfig<
+	A extends { readonly id: string },
+	I,
+	R,
+> {
+	/** Path to the directory to watch */
+	readonly dirPath: string;
+	/** Serialization format (e.g., "yaml", "json") */
+	readonly format: string;
+	/** Schema to decode loaded data through */
+	readonly schema: Schema.Schema<A, I, R>;
+	/** Ref holding the collection state to update on file change */
+	readonly ref: Ref.Ref<ReadonlyMap<string, A>>;
+	/** Optional debounce delay in ms for reload after change (default 50) */
+	readonly debounceMs?: number;
+	/** Optional PubSub to publish reload events to for reactive query subscriptions */
+	readonly changePubSub?: PubSub.PubSub<ChangeEvent>;
+	/** Collection name (required when changePubSub is provided) */
+	readonly collectionName?: string;
+}
+
+/**
+ * Create a managed directory watcher using Effect.acquireRelease.
+ *
+ * The watcher monitors a directory for file changes. When a change is detected,
+ * it reloads the affected entity (or the full directory for unknown filenames)
+ * and updates the collection Ref.
+ */
+export const createDirectoryWatcher = <A extends { readonly id: string }, I, R>(
+	config: DirectoryWatcherConfig<A, I, R>,
+): Effect.Effect<
+	FileWatcher,
+	StorageError,
+	Scope.Scope | StorageAdapter | SerializerRegistry | R
+> => {
+	const debounceMs = config.debounceMs ?? 50;
+	const suffix = `.${config.format}`;
+
+	return Effect.gen(function* () {
+		const storage = yield* StorageAdapter;
+		const active = yield* Ref.make(true);
+
+		const changeQueue = yield* Queue.unbounded<{
+			readonly filename: string | null;
+			readonly type: "add" | "change" | "remove";
+		}>();
+
+		const pendingReload = yield* Ref.make<Fiber.RuntimeFiber<
+			void,
+			| StorageError
+			| SerializationError
+			| UnsupportedFormatError
+			| ValidationError
+			| MigrationError
+		> | null>(null);
+
+		const processorFiber = yield* Effect.fork(
+			Effect.forever(
+				Effect.gen(function* () {
+					const event = yield* Queue.take(changeQueue);
+					// Drain any queued signals
+					yield* Queue.takeAll(changeQueue);
+
+					const isActive = yield* Ref.get(active);
+					if (!isActive) return;
+
+					// Cancel existing pending reload
+					const existing = yield* Ref.get(pendingReload);
+					if (existing !== null) {
+						yield* Fiber.interrupt(existing);
+					}
+
+					const fiber = yield* Effect.fork(
+						Effect.gen(function* () {
+							yield* Effect.sleep(debounceMs);
+
+							if (event.filename?.endsWith(suffix)) {
+								const id = event.filename.slice(
+									0,
+									event.filename.length - suffix.length,
+								);
+								if (event.type === "remove") {
+									// Remove entity from Ref
+									yield* Ref.update(config.ref, (m) => {
+										const next = new Map(m);
+										next.delete(id);
+										return next;
+									});
+								} else {
+									// add or change: read and upsert
+									const filePath = `${config.dirPath}/${event.filename}`;
+									const storage = yield* StorageAdapter;
+									const serializer = yield* SerializerRegistry;
+									const decode = Schema.decodeUnknown(config.schema);
+
+									const raw = yield* storage.read(filePath);
+									const parsed = yield* serializer.deserialize(
+										raw,
+										config.format,
+									);
+									const decoded = yield* decode(parsed).pipe(
+										Effect.catchAll(() => Effect.succeed(null)),
+									);
+									if (decoded !== null) {
+										yield* Ref.update(config.ref, (m) => {
+											const next = new Map(m);
+											next.set(id, decoded);
+											return next;
+										});
+									}
+								}
+							} else {
+								// Unknown filename or null — full reload
+								const newData = yield* loadDataFromDirectory(
+									config.dirPath,
+									config.schema,
+									config.format,
+								);
+								yield* Ref.set(config.ref, newData);
+							}
+
+							// Publish reload event
+							if (
+								config.changePubSub !== undefined &&
+								config.collectionName !== undefined
+							) {
+								yield* PubSub.publish(
+									config.changePubSub,
+									reloadEvent(config.collectionName),
+								);
+							}
+						}),
+					);
+
+					yield* Ref.set(pendingReload, fiber);
+				}),
+			),
+		);
+
+		yield* Effect.acquireRelease(
+			storage.watchDir(config.dirPath, (event) => {
+				Queue.unsafeOffer(changeQueue, event);
+			}),
+			(stopWatching) =>
+				Effect.gen(function* () {
+					yield* Ref.set(active, false);
+					yield* Fiber.interrupt(processorFiber);
+					const pending = yield* Ref.get(pendingReload);
+					if (pending !== null) {
+						yield* Fiber.interrupt(pending);
+					}
+					stopWatching();
+				}),
+		);
+
+		return {
+			isActive: () => Ref.get(active),
+		} satisfies FileWatcher;
+	});
+};
 
 // ============================================================================
 // DebouncedWriter

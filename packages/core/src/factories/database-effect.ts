@@ -94,9 +94,13 @@ import {
 } from "../serializers/format-codec.js";
 import { SerializerRegistry } from "../serializers/serializer-service.js";
 import {
+	createDirectoryWatcher,
 	createFileWatcher,
 	loadData,
+	loadDataFromDirectory,
+	removeEntityFromDirectory,
 	saveData,
+	saveEntityToDirectory,
 } from "../storage/persistence-effect.js";
 import { StorageAdapter } from "../storage/storage-service.js";
 import { $transaction as $transactionImpl } from "../transactions/transaction.js";
@@ -130,9 +134,10 @@ import type {
 	CursorPageResult,
 	RunnableCursorPage,
 } from "../types/cursor-types.js";
-import type {
-	CollectionConfig,
-	DatabaseConfig,
+import {
+	type CollectionConfig,
+	type DatabaseConfig,
+	isCollectionDirectoryMode,
 } from "../types/database-config-types.js";
 import type { CollectionIndexes } from "../types/index-types.js";
 import type { ChangeEvent } from "../types/reactive-types.js";
@@ -260,6 +265,8 @@ export interface EffectCollection<T extends HasId> {
 		  >;
 
 	readonly findById: (id: string) => RunnableEffect<T, NotFoundError>;
+
+	readonly exists: (id: string) => RunnableEffect<boolean, never>;
 
 	readonly create: (
 		input: CreateInput<T>,
@@ -1270,6 +1277,12 @@ const buildCollection = <T extends HasId>(
 		return withRunPromise(effect);
 	};
 
+	// exists: O(1) check directly from the ReadonlyMap
+	const existsFn = (id: string): RunnableEffect<boolean, never> => {
+		const effect = Ref.get(ref).pipe(Effect.map((map) => map.has(id)));
+		return withRunPromise(effect);
+	};
+
 	// aggregate: read Ref → filter → collect → delegate to aggregate functions
 	const aggregateFn = <C extends AggregateConfig>(
 		config: C,
@@ -1356,6 +1369,7 @@ const buildCollection = <T extends HasId>(
 	return {
 		query: queryFn,
 		findById: findByIdFn,
+		exists: existsFn,
 		create: createFn,
 		createMany: createManyFn,
 		update: updateFn,
@@ -1713,7 +1727,68 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			}
 		}
 
-		// 0e. Register plugin shutdown effects as scope finalizers.
+		// 0e. Validate directory-mode config constraints
+		for (const collectionName of Object.keys(config)) {
+			const cc = config[collectionName];
+			if (isCollectionDirectoryMode(cc)) {
+				if (cc.file) {
+					return yield* Effect.fail(
+						new ValidationError({
+							message: `Collection '${collectionName}': 'directory' and 'file' are mutually exclusive`,
+							issues: [
+								{
+									field: "directory",
+									message: "'directory' and 'file' cannot both be set",
+								},
+							],
+						}),
+					);
+				}
+				if (!cc.format) {
+					return yield* Effect.fail(
+						new ValidationError({
+							message: `Collection '${collectionName}': 'directory' mode requires 'format' to be specified`,
+							issues: [
+								{
+									field: "format",
+									message:
+										"'format' is required when using directory mode (no file extension to infer from)",
+								},
+							],
+						}),
+					);
+				}
+				if (cc.appendOnly) {
+					return yield* Effect.fail(
+						new ValidationError({
+							message: `Collection '${collectionName}': 'directory' and 'appendOnly' are incompatible`,
+							issues: [
+								{
+									field: "directory",
+									message: "'directory' mode is incompatible with 'appendOnly'",
+								},
+							],
+						}),
+					);
+				}
+				if (cc.path) {
+					return yield* Effect.fail(
+						new ValidationError({
+							message: `Collection '${collectionName}': 'directory' and 'path' are incompatible`,
+							issues: [
+								{
+									field: "path",
+									message:
+										"'path' is meaningless in directory mode (each entity is a separate file)",
+								},
+							],
+						}),
+					);
+				}
+			}
+		}
+
+		// 0f. Register plugin shutdown effects as scope finalizers.
 		// Register BEFORE the flush finalizer so they run AFTER flush (LIFO order).
 		// Iterate in registration order so that when finalizers run in LIFO order,
 		// plugins shut down in reverse registration order (last registered = first to shut down).
@@ -1766,9 +1841,19 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			const collectionConfig = config[collectionName];
 			const filePath = collectionConfig.file;
 
-			// Load from file if configured, passing version and migrations for auto-migration
+			const dirPath = collectionConfig.directory;
+			const dirFormat = collectionConfig.format;
+
+			// Load from file or directory if configured
 			let loadedData: ReadonlyMap<string, HasId> = new Map();
-			if (filePath) {
+			if (dirPath && dirFormat && isCollectionDirectoryMode(collectionConfig)) {
+				// Directory mode: load each entity from its own file
+				loadedData = yield* loadDataFromDirectory(
+					dirPath,
+					collectionConfig.schema as Schema.Schema<HasId, unknown>,
+					dirFormat,
+				);
+			} else if (filePath) {
 				// Only pass version options when collection is versioned
 				// Build options object conditionally to satisfy exactOptionalPropertyTypes
 				const formatOverride =
@@ -1863,9 +1948,76 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			}
 		}
 
-		const makeSaveEffect = (
-			collectionName: string,
-		): Effect.Effect<void, unknown> => {
+		// Track which collections use directory mode
+		const directoryModeConfigs: Record<
+			string,
+			{ readonly dirPath: string; readonly format: string }
+		> = {};
+		for (const collectionName of Object.keys(config)) {
+			const cc = config[collectionName];
+			if (isCollectionDirectoryMode(cc)) {
+				directoryModeConfigs[collectionName] = {
+					dirPath: cc.directory,
+					format: cc.format,
+				};
+			}
+		}
+
+		const makeSaveEffect = (key: string): Effect.Effect<void, unknown> => {
+			const collectionName = key;
+
+			// Directory mode: save each entity as a separate file
+			const dirConfig = directoryModeConfigs[collectionName];
+			if (dirConfig) {
+				const collectionConfig = config[collectionName];
+				return Effect.provide(
+					Effect.gen(function* () {
+						const storage = yield* StorageAdapter;
+						const currentData = yield* Ref.get(typedRefs[collectionName]);
+						const schema = collectionConfig.schema as Schema.Schema<
+							HasId,
+							unknown
+						>;
+
+						// Get existing files to detect deletions
+						const existingFiles = yield* storage.listDirectory(
+							dirConfig.dirPath,
+						);
+						const suffix = `.${dirConfig.format}`;
+						const existingIds = new Set(
+							existingFiles
+								.filter((f) => f.endsWith(suffix))
+								.map((f) => {
+									const filename = f.slice(f.lastIndexOf("/") + 1);
+									return filename.slice(0, filename.length - suffix.length);
+								}),
+						);
+
+						// Save all current entities
+						for (const [, entity] of currentData) {
+							yield* saveEntityToDirectory(
+								dirConfig.dirPath,
+								entity,
+								schema,
+								dirConfig.format,
+							);
+							existingIds.delete(entity.id);
+						}
+
+						// Remove files for deleted entities
+						for (const deletedId of existingIds) {
+							yield* removeEntityFromDirectory(
+								dirConfig.dirPath,
+								deletedId,
+								dirConfig.format,
+							);
+						}
+					}),
+					serviceLayer,
+				);
+			}
+
+			// File mode: save entire collection to a single file
 			const filePath = collectionFilePaths[collectionName];
 			if (!filePath) return Effect.void;
 			const collectionConfig = config[collectionName];
@@ -1925,10 +2077,14 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			const filePath = collectionConfig.file;
 			const isAppendOnly = collectionConfig.appendOnly === true;
 
+			const isDirMode = isCollectionDirectoryMode(collectionConfig);
+
 			// For append-only collections, afterMutation is undefined (no debounced full-file save).
 			// Instead, each create appends a single JSONL line via appendOnlyConfig.
+			// For directory-mode, afterMutation schedules a save keyed by collectionName.
+			// The makeSaveEffect handles both file-mode and directory-mode saves.
 			const afterMutation =
-				filePath && !isAppendOnly
+				(filePath && !isAppendOnly) || isDirMode
 					? () =>
 							Ref.get(transactionLock).pipe(
 								Effect.flatMap((isLocked) =>
@@ -2000,6 +2156,15 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			if (filePath) {
 				yield* createFileWatcher({
 					filePath,
+					schema: collectionConfig.schema as Schema.Schema<HasId, unknown>,
+					ref: typedRefs[collectionName],
+					changePubSub,
+					collectionName,
+				}).pipe(Effect.catchAll(() => Effect.void));
+			} else if (isCollectionDirectoryMode(collectionConfig)) {
+				yield* createDirectoryWatcher({
+					dirPath: collectionConfig.directory,
+					format: collectionConfig.format,
 					schema: collectionConfig.schema as Schema.Schema<HasId, unknown>,
 					ref: typedRefs[collectionName],
 					changePubSub,
