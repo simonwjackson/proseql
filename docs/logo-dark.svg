@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 256" width="960" height="256">
+  <!-- H3: Steeper quill, white-filled doc with dark content, lowercase prose -->
+  <!-- Document outline — white fill, dark stroke -->
+  <path d="M28 16 L168 16 L200 48 L200 240 L28 240 Z" fill="#dee2e6" stroke="#1a1a1a" stroke-width="5"/>
+  <path d="M168 16 L168 48 L200 48" fill="none" stroke="#1a1a1a" stroke-width="5" stroke-linejoin="round"/>
+  <!-- Dog-ear fill to match doc -->
+  <path d="M168 16 L200 48 L168 48 Z" fill="#c8ccd0"/>
+  <!-- Record 1 in dark -->
+  <rect x="52" y="68" width="6" height="6" rx="1" fill="#1a1a1a" opacity="0.4"/>
+  <rect x="66" y="68" width="20" height="5" rx="1" fill="#1a1a1a" opacity="0.25"/>
+  <rect x="92" y="68" width="40" height="5" rx="1" fill="#1a1a1a" opacity="0.15"/>
+  <rect x="66" y="86" width="24" height="5" rx="1" fill="#1a1a1a" opacity="0.25"/>
+  <rect x="96" y="86" width="50" height="5" rx="1" fill="#1a1a1a" opacity="0.15"/>
+  <rect x="66" y="104" width="18" height="5" rx="1" fill="#1a1a1a" opacity="0.25"/>
+  <rect x="90" y="104" width="32" height="5" rx="1" fill="#1a1a1a" opacity="0.15"/>
+  <!-- Highlighted record — accent -->
+  <rect x="44" y="124" width="148" height="52" rx="4" fill="#c77dff" opacity="0.15"/>
+  <rect x="52" y="132" width="6" height="6" rx="1" fill="#c77dff" opacity="0.8"/>
+  <rect x="66" y="132" width="20" height="5" rx="1" fill="#c77dff" opacity="0.7"/>
+  <rect x="92" y="132" width="48" height="5" rx="1" fill="#c77dff" opacity="0.6"/>
+  <rect x="66" y="150" width="24" height="5" rx="1" fill="#c77dff" opacity="0.7"/>
+  <rect x="96" y="150" width="56" height="5" rx="1" fill="#c77dff" opacity="0.6"/>
+  <rect x="66" y="168" width="18" height="5" rx="1" fill="#c77dff" opacity="0.7"/>
+  <rect x="90" y="168" width="36" height="5" rx="1" fill="#c77dff" opacity="0.6"/>
+  <!-- Record 3 in dark -->
+  <rect x="52" y="196" width="6" height="6" rx="1" fill="#1a1a1a" opacity="0.4"/>
+  <rect x="66" y="196" width="20" height="5" rx="1" fill="#1a1a1a" opacity="0.25"/>
+  <rect x="92" y="196" width="44" height="5" rx="1" fill="#1a1a1a" opacity="0.15"/>
+  <rect x="66" y="214" width="24" height="5" rx="1" fill="#1a1a1a" opacity="0.25"/>
+  <rect x="96" y="214" width="46" height="5" rx="1" fill="#1a1a1a" opacity="0.15"/>
+  <!-- Quill — steeper angle, rotated 15° clockwise -->
+  <g transform="rotate(15, 190, 140)">
+    <path d="M172 200 Q192 160 210 80 Q214 60 208 48 Q204 40 196 44 Q186 52 182 80 Q176 120 168 168"
+          fill="#c77dff"/>
+    <line x1="168" y1="210" x2="206" y2="62" stroke="#a855f7" stroke-width="2.5"/>
+    <path d="M166 224 L168 220 L172 222 Z" fill="#c77dff"/>
+    <circle cx="168" cy="224" r="2" fill="#c77dff"/>
+  </g>
+  <!-- Wordmark — lowercase prose -->
+  <text font-family="'Playfair Display', Georgia, serif" font-size="112" font-weight="700" letter-spacing="-2" y="172">
+    <tspan x="248" font-style="italic" fill="#dee2e6">prose</tspan><tspan font-style="normal" fill="#c77dff">QL</tspan>
+  </text>
+</svg>

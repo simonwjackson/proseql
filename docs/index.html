@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <style>
     :root {
       --bg: #000;
@@ -134,23 +135,14 @@
     }
 
     .hero h1 {
-      font-size: clamp(3rem, 8vw, 5rem);
-      font-weight: 800;
-      letter-spacing: -0.03em;
       margin-bottom: 0.75rem;
       position: relative;
       z-index: 1;
-      background: linear-gradient(135deg, #c77dff, #6cb6ff, #c77dff);
-      background-size: 200% 200%;
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      animation: gradientShift 6s ease-in-out infinite;
     }
 
-    @keyframes gradientShift {
-      0%, 100% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
+    .hero-logo {
+      height: 5rem;
+      width: auto;
     }
 
     .hero p {
@@ -450,7 +442,7 @@
   <!-- Hero -->
   <section class="hero">
     <div class="hero-orb-3"></div>
-    <h1>proseql</h1>
+    <h1><img src="logo-dark.svg" alt="proseQL" class="hero-logo"></h1>
     <p>Type-safe database that persists to plain text. No server. No binary blobs. Just files you can read, diff, and commit.</p>
     <div class="install" role="button" tabindex="0" title="Click to copy">
       <span>npm i -g @proseql/cli</span>

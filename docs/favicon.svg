@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- H3 icon: Simplified — doc shape + quill, no inner data rows -->
+  <!-- Document -->
+  <path d="M40 16 L176 16 L216 56 L216 240 L40 240 Z" fill="#dee2e6" stroke="#1a1a1a" stroke-width="12"/>
+  <path d="M176 16 L176 56 L216 56" fill="none" stroke="#1a1a1a" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M176 16 L216 56 L176 56 Z" fill="#c8ccd0"/>
+  <!-- Highlight bar -->
+  <rect x="60" y="108" width="136" height="48" rx="8" fill="#c77dff" opacity="0.3"/>
+  <!-- Quill — steeper angle -->
+  <g transform="rotate(15, 200, 140)">
+    <path d="M184 210 Q204 165 222 80 Q226 58 220 44 Q216 36 208 40 Q198 48 194 78 Q188 120 180 175"
+          fill="#c77dff"/>
+    <line x1="180" y1="200" x2="220" y2="54" stroke="#a855f7" stroke-width="5.5"/>
+  </g>
+</svg>

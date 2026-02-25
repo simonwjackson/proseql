@@ -1,4 +1,12 @@
-# proseql
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/logo-light.svg">
+  <img alt="proseQL" src="docs/logo-light.svg" width="480">
+</picture>
+
+</div>
 
 <div align="center">
 
