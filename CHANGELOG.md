@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.9.0 (2026-02-25)
+
+### Features
+- Add proseql.com landing page and GitHub Pages deployment (9de0b02)
+
+
 ## v0.8.0 (2026-02-25)
 
 ### Features
