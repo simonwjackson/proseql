@@ -385,19 +385,6 @@
       color: #6bdf6b;
     }
 
-    .terminal-body .cursor {
-      display: inline-block;
-      width: 8px;
-      height: 1.1em;
-      background: #d4d4d4;
-      vertical-align: text-bottom;
-      animation: blink 1s step-end infinite;
-    }
-
-    @keyframes blink {
-      50% { opacity: 0; }
-    }
-
     .terminal-body .output {
       color: #9e9e9e;
     }
@@ -605,7 +592,7 @@
   <!-- Footer -->
   <footer class="site-footer fade-in">
     <div class="container">
-      <p>MIT &middot; Simon W. Jackson</p>
+      <p>MIT &middot; <a href="https://simonwjackson.io" style="color: var(--accent); text-decoration: none;">Simon W. Jackson</a></p>
       <p>Built with <a href="https://effect.website" style="color: var(--accent); text-decoration: none;">Effect</a></p>
     </div>
   </footer>
@@ -633,15 +620,7 @@
       }
     });
 
-    // Terminal typing animation
-    const CHAR_DELAY = 40;
-    const OUTPUT_DELAY = 300;
-    const LINE_PAUSE = 600;
-
-    function sleep(ms) {
-      return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
+    // Render terminal content immediately
     function renderFormattedOutput(text, format) {
       if (format === 'diff') {
         return text.split('\n').map(line => {
@@ -684,43 +663,18 @@
       return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
-    async function animateTerminal(el) {
+    function renderTerminal(el) {
       const body = el.querySelector('.terminal-body');
       const script = JSON.parse(el.dataset.script);
 
-      for (let i = 0; i < script.length; i++) {
-        const step = script[i];
-
-        if (step.type === 'pause') {
-          await sleep(LINE_PAUSE);
-          continue;
-        }
+      for (const step of script) {
+        if (step.type === 'pause') continue;
 
         const line = document.createElement('div');
         line.className = 'line';
 
         if (step.type === 'input') {
-          const prompt = document.createElement('span');
-          prompt.className = 'prompt';
-          prompt.textContent = '$ ';
-          line.appendChild(prompt);
-
-          const text = document.createElement('span');
-          line.appendChild(text);
-
-          const cursor = document.createElement('span');
-          cursor.className = 'cursor';
-          line.appendChild(cursor);
-
-          body.appendChild(line);
-
-          for (let j = 0; j < step.text.length; j++) {
-            text.textContent += step.text[j];
-            await sleep(CHAR_DELAY);
-          }
-
-          cursor.remove();
-          await sleep(OUTPUT_DELAY);
+          line.innerHTML = '<span class="prompt">$ </span>' + escapeHtml(step.text);
         } else if (step.type === 'output') {
           line.className = 'line output';
           if (step.format) {
@@ -728,23 +682,13 @@
           } else {
             line.textContent = step.text;
           }
-          body.appendChild(line);
-          await sleep(LINE_PAUSE);
         }
+
+        body.appendChild(line);
       }
     }
 
-    // IntersectionObserver for terminal animations
-    const terminalObserver = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          terminalObserver.unobserve(entry.target);
-          animateTerminal(entry.target);
-        }
-      });
-    }, { threshold: 0.3 });
-
-    document.querySelectorAll('.terminal').forEach(el => terminalObserver.observe(el));
+    document.querySelectorAll('.terminal').forEach(el => renderTerminal(el));
 
     // IntersectionObserver for scroll fade-in animations
     const fadeObserver = new IntersectionObserver((entries) => {
