@@ -7,27 +7,15 @@
   <meta name="description" content="Type-safe in-memory database that persists to plain text files. No server. No binary blobs. Just files you can read, diff, and commit.">
   <style>
     :root {
-      --bg: #fafafa;
-      --fg: #1a1a1a;
-      --muted: #666;
-      --border: #e0e0e0;
-      --link: #0969da;
-      --link-hover: #0550ae;
-      --install-bg: #f0f0f0;
-      --feature-bg: #f5f5f5;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #111;
-        --fg: #e0e0e0;
-        --muted: #999;
-        --border: #333;
-        --link: #58a6ff;
-        --link-hover: #79c0ff;
-        --install-bg: #1a1a1a;
-        --feature-bg: #1a1a1a;
-      }
+      --bg: #000;
+      --bg-surface: #111;
+      --bg-raised: #1a1a1a;
+      --fg: #dee2e6;
+      --fg-muted: rgba(255, 255, 255, 0.5);
+      --fg-subtle: rgba(255, 255, 255, 0.7);
+      --accent: #c77dff;
+      --accent-hover: #d9a0ff;
+      --border: rgba(255, 255, 255, 0.1);
     }
 
     * {
@@ -37,25 +25,25 @@
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
       background: var(--bg);
       color: var(--fg);
       line-height: 1.6;
     }
 
     .container {
-      max-width: 640px;
+      max-width: 900px;
       margin: 0 auto;
       padding: 0 1.5rem;
     }
 
     header {
       text-align: center;
-      padding: 4rem 0 3rem;
+      padding: 5rem 0 3.5rem;
     }
 
     header h1 {
-      font-size: 2.5rem;
+      font-size: clamp(2rem, 5vw, 3rem);
       font-weight: 700;
       letter-spacing: -0.02em;
       margin-bottom: 0.5rem;
@@ -63,7 +51,7 @@
 
     header p {
       font-size: 1.15rem;
-      color: var(--muted);
+      color: var(--fg-subtle);
       margin-bottom: 2rem;
       max-width: 28rem;
       margin-left: auto;
@@ -74,25 +62,26 @@
       display: inline-flex;
       align-items: center;
       gap: 0.75rem;
-      background: var(--install-bg);
+      background: var(--bg-raised);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 0.75rem 1.25rem;
       font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
       font-size: 0.95rem;
       cursor: pointer;
-      transition: border-color 0.15s;
+      transition: border-color 0.2s, box-shadow 0.2s;
       color: var(--fg);
     }
 
     .install:hover {
-      border-color: var(--link);
+      border-color: var(--accent);
+      box-shadow: 0 0 12px rgba(199, 125, 255, 0.15);
     }
 
     .install-icon {
       opacity: 0.5;
       font-size: 0.85rem;
-      transition: opacity 0.15s;
+      transition: opacity 0.2s;
     }
 
     .install:hover .install-icon {
@@ -127,23 +116,30 @@
     }
 
     .links a {
-      color: var(--link);
+      color: var(--accent);
       text-decoration: none;
       font-weight: 500;
       font-size: 0.95rem;
+      transition: color 0.2s;
     }
 
     .links a:hover {
-      color: var(--link-hover);
+      color: var(--accent-hover);
       text-decoration: underline;
     }
 
     /* Features grid */
     .features {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(3, 1fr);
       gap: 1rem;
-      padding: 0 0 2.5rem;
+      padding: 0 0 3rem;
+    }
+
+    @media (max-width: 700px) {
+      .features {
+        grid-template-columns: 1fr 1fr;
+      }
     }
 
     @media (max-width: 500px) {
@@ -153,7 +149,8 @@
     }
 
     .feature {
-      background: var(--feature-bg);
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
       border-radius: 8px;
       padding: 1rem 1.25rem;
     }
@@ -162,10 +159,11 @@
       display: block;
       margin-bottom: 0.2rem;
       font-size: 0.95rem;
+      color: var(--fg);
     }
 
     .feature span {
-      color: var(--muted);
+      color: var(--fg-muted);
       font-size: 0.85rem;
     }
 
@@ -181,14 +179,14 @@
       font-size: 0.95rem;
       font-weight: 600;
       margin-bottom: 0.75rem;
-      color: var(--fg);
+      color: var(--fg-subtle);
     }
 
     .terminal {
       background: #1e1e1e;
       border-radius: 10px;
       overflow: hidden;
-      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+      border: 1px solid var(--border);
     }
 
     .terminal-bar {
@@ -260,7 +258,7 @@
       text-align: center;
       padding: 2rem 0 3rem;
       border-top: 1px solid var(--border);
-      color: var(--muted);
+      color: var(--fg-muted);
       font-size: 0.85rem;
     }
   </style>
