@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.10.6 (2026-02-25)
+
+### Other
+- Add logo and favicon to README and docs site (0da63f7)
+
+
 ## v0.10.5 (2026-02-25)
 
 ### Other
