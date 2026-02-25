@@ -181,12 +181,8 @@ describe("proseCodec round-trip", () => {
 			const encoded = codec.encode(records);
 			const decoded = codec.decode(encoded);
 
-			// Null overflow fields are omitted from encoding, so they won't appear in decoded
-			// The decoded records will not have those fields at all
-			expect(decoded).toEqual([
-				{ id: 1, title: "Dune", description: "A masterpiece" },
-				{ id: 2, title: "Neuromancer", tags: ["cyberpunk"] },
-			]);
+			// Null overflow fields are now preserved as null via ~ encoding
+			expect(decoded).toEqual(records);
 		});
 
 		it("round-trips records with array overflow field", () => {
@@ -235,17 +231,17 @@ describe("proseCodec round-trip", () => {
 
 			const records = [
 				{ id: 1, title: "Dune", description: "Has description" },
-				{ id: 2, title: "Neuromancer" }, // No description field
+				{ id: 2, title: "Neuromancer" }, // No description field → encoded as ~, decoded as null
 				{ id: 3, title: "Snow Crash", description: "Another one" },
 			];
 
 			const encoded = codec.encode(records);
 			const decoded = codec.decode(encoded);
 
-			// Records without the overflow field won't have it in decoded output
+			// Records without the overflow field get null after round-trip (undefined → ~ → null)
 			expect(decoded).toEqual([
 				{ id: 1, title: "Dune", description: "Has description" },
-				{ id: 2, title: "Neuromancer" },
+				{ id: 2, title: "Neuromancer", description: null },
 				{ id: 3, title: "Snow Crash", description: "Another one" },
 			]);
 		});
