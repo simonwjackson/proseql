@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>proseql — Type-safe database that persists to plain text</title>
+  <meta name="description" content="Type-safe in-memory database that persists to plain text files. No server. No binary blobs. Just files you can read, diff, and commit.">
+  <style>
+    :root {
+      --bg: #fafafa;
+      --fg: #1a1a1a;
+      --muted: #666;
+      --border: #e0e0e0;
+      --link: #0969da;
+      --link-hover: #0550ae;
+      --install-bg: #f0f0f0;
+      --feature-bg: #f5f5f5;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111;
+        --fg: #e0e0e0;
+        --muted: #999;
+        --border: #333;
+        --link: #58a6ff;
+        --link-hover: #79c0ff;
+        --install-bg: #1a1a1a;
+        --feature-bg: #1a1a1a;
+      }
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    header {
+      text-align: center;
+      padding: 4rem 0 3rem;
+    }
+
+    header h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.5rem;
+    }
+
+    header p {
+      font-size: 1.15rem;
+      color: var(--muted);
+      margin-bottom: 2rem;
+      max-width: 28rem;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .install {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      background: var(--install-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1.25rem;
+      font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: border-color 0.15s;
+      color: var(--fg);
+    }
+
+    .install:hover {
+      border-color: var(--link);
+    }
+
+    .install-icon {
+      opacity: 0.5;
+      font-size: 0.85rem;
+      transition: opacity 0.15s;
+    }
+
+    .install:hover .install-icon {
+      opacity: 1;
+    }
+
+    .install-toast {
+      position: fixed;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%) translateY(1rem);
+      background: var(--fg);
+      color: var(--bg);
+      padding: 0.5rem 1.25rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      opacity: 0;
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+    }
+
+    .install-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .links {
+      margin-top: 1.5rem;
+      display: flex;
+      justify-content: center;
+      gap: 1.5rem;
+    }
+
+    .links a {
+      color: var(--link);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 0.95rem;
+    }
+
+    .links a:hover {
+      color: var(--link-hover);
+      text-decoration: underline;
+    }
+
+    /* Features grid */
+    .features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      padding: 0 0 2.5rem;
+    }
+
+    @media (max-width: 500px) {
+      .features {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .feature {
+      background: var(--feature-bg);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+    }
+
+    .feature strong {
+      display: block;
+      margin-bottom: 0.2rem;
+      font-size: 0.95rem;
+    }
+
+    .feature span {
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    /* Terminals */
+    main {
+      padding: 1rem 0 3rem;
+      display: flex;
+      flex-direction: column;
+      gap: 2.5rem;
+    }
+
+    .demo-label {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+      color: var(--fg);
+    }
+
+    .terminal {
+      background: #1e1e1e;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+    }
+
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 12px 16px;
+      background: #2d2d2d;
+    }
+
+    .terminal-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .terminal-dot.red { background: #ff5f57; }
+    .terminal-dot.yellow { background: #febc2e; }
+    .terminal-dot.green { background: #28c840; }
+
+    .terminal-body {
+      padding: 1rem 1.25rem 1.25rem;
+      font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+      font-size: 0.85rem;
+      line-height: 1.7;
+      color: #d4d4d4;
+      min-height: 3rem;
+    }
+
+    .terminal-body .prompt {
+      color: #6bdf6b;
+    }
+
+    .terminal-body .cursor {
+      display: inline-block;
+      width: 8px;
+      height: 1.1em;
+      background: #d4d4d4;
+      vertical-align: text-bottom;
+      animation: blink 1s step-end infinite;
+    }
+
+    @keyframes blink {
+      50% { opacity: 0; }
+    }
+
+    .terminal-body .output {
+      color: #9e9e9e;
+    }
+
+    .terminal-body .line {
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* Git diff colors */
+    .diff-add { color: #4ec94e; }
+    .diff-del { color: #f47067; }
+    .diff-hunk { color: #6cb6ff; }
+    .diff-meta { color: #d4d4d4; font-weight: bold; }
+
+    /* YAML syntax highlighting */
+    .yaml-key { color: #79c0ff; }
+    .yaml-str { color: #a5d6a7; }
+    .yaml-num { color: #f9c859; }
+    .yaml-sep { color: #888; }
+
+    footer {
+      text-align: center;
+      padding: 2rem 0 3rem;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>proseql</h1>
+      <p>Type-safe database that persists to plain text.<br>No server. No binary blobs. Just files.</p>
+      <div class="install" role="button" tabindex="0" title="Click to copy">
+        <span>npm i @proseql/node</span>
+        <span class="install-icon">&#x2398;</span>
+      </div>
+      <div class="links">
+        <a href="https://github.com/simonwjackson/proseql">GitHub</a>
+        <a href="https://www.npmjs.com/package/@proseql/node">npm</a>
+      </div>
+    </header>
+
+    <section class="features">
+      <div class="feature">
+        <strong>No server</strong>
+        <span>In-memory database, files on disk</span>
+      </div>
+      <div class="feature">
+        <strong>Git-friendly</strong>
+        <span>Plain text diffs you can read</span>
+      </div>
+      <div class="feature">
+        <strong>Type-safe</strong>
+        <span>Effect Schema validation at compile time</span>
+      </div>
+      <div class="feature">
+        <strong>9+ formats</strong>
+        <span>YAML, JSON, TOML, JSON5, JSONC, Hjson, TOON, JSONL, Prose</span>
+      </div>
+      <div class="feature">
+        <strong>Relationships</strong>
+        <span>Foreign key refs, populated at query time</span>
+      </div>
+      <div class="feature">
+        <strong>Reactive</strong>
+        <span>Stream-based live queries</span>
+      </div>
+    </section>
+
+    <main>
+      <!-- Demo 1: Your data is just a file -->
+      <div>
+        <div class="demo-label">Your data is just a file</div>
+        <div class="terminal" data-script='[
+          {"type":"input","text":"cat data/books.yaml"},
+          {"type":"output","text":"- id: dune\n  title: Dune\n  author: Frank Herbert\n  year: 1965\n\n- id: neuromancer\n  title: Neuromancer\n  author: William Gibson\n  year: 1984","format":"yaml"}
+        ]'>
+          <div class="terminal-bar">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+          </div>
+          <div class="terminal-body"></div>
+        </div>
+      </div>
+
+      <!-- Demo 2: Mutate, then check the file -->
+      <div>
+        <div class="demo-label">Mutate, then check the file</div>
+        <div class="terminal" data-script='[
+          {"type":"input","text":"node -e \"db.update(\u0027books\u0027, \u0027dune\u0027, { year: 2025 })\""},
+          {"type":"output","text":"{ updated: 1 }"},
+          {"type":"pause"},
+          {"type":"input","text":"cat data/books.yaml"},
+          {"type":"output","text":"- id: dune\n  title: Dune\n  author: Frank Herbert\n  year: 2025\n\n- id: neuromancer\n  title: Neuromancer\n  author: William Gibson\n  year: 1984","format":"yaml"}
+        ]'>
+          <div class="terminal-bar">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+          </div>
+          <div class="terminal-body"></div>
+        </div>
+      </div>
+
+      <!-- Demo 3: 9 formats, same API -->
+      <div>
+        <div class="demo-label">9 formats, same API</div>
+        <div class="terminal" data-script='[
+          {"type":"input","text":"ls data/"},
+          {"type":"output","text":"books.yaml\nauthors.json\nsettings.toml\nnotes.json5\nconfig.jsonc\nprefs.hjson\nmeta.toon\nlog.jsonl\nreadme.prose"},
+          {"type":"pause"},
+          {"type":"input","text":"cat data/readme.prose"},
+          {"type":"output","text":"--- id: welcome\ntitle: Welcome to ProseQL\n---\nYour data lives in plain text files.\nEdit them with any tool you like.\n\n--- id: formats\ntitle: Pick Your Format\n---\nYAML, JSON, TOML, and 6 more.\nSame API, same types, your choice."}
+        ]'>
+          <div class="terminal-bar">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+          </div>
+          <div class="terminal-body"></div>
+        </div>
+      </div>
+
+      <!-- Demo 4: Git-friendly diffs -->
+      <div>
+        <div class="demo-label">Git-friendly diffs</div>
+        <div class="terminal" data-script='[
+          {"type":"input","text":"git diff data/books.yaml"},
+          {"type":"output","text":"diff --git a/data/books.yaml b/data/books.yaml\nindex 3a1b2c4..7d8e9f0 100644\n--- a/data/books.yaml\n+++ b/data/books.yaml\n@@ -1,6 +1,6 @@\n - id: dune\n   title: Dune\n   author: Frank Herbert\n-  year: 1965\n+  year: 2025","format":"diff"}
+        ]'>
+          <div class="terminal-bar">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+          </div>
+          <div class="terminal-body"></div>
+        </div>
+      </div>
+    </main>
+
+    <footer>
+      MIT &middot; Simon W. Jackson
+    </footer>
+  </div>
+
+  <div class="install-toast" id="toast">Copied to clipboard</div>
+
+  <script>
+    // Click-to-copy install command
+    const installBtn = document.querySelector('.install');
+    const toast = document.getElementById('toast');
+
+    function showToast() {
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 1500);
+    }
+
+    installBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText('npm i @proseql/node').then(showToast);
+    });
+
+    installBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        navigator.clipboard.writeText('npm i @proseql/node').then(showToast);
+      }
+    });
+
+    // Terminal typing animation
+    const CHAR_DELAY = 40;
+    const OUTPUT_DELAY = 300;
+    const LINE_PAUSE = 600;
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function renderFormattedOutput(text, format) {
+      if (format === 'diff') {
+        return text.split('\n').map(line => {
+          if (line.startsWith('+++') || line.startsWith('---')) {
+            return '<span class="diff-meta">' + escapeHtml(line) + '</span>';
+          } else if (line.startsWith('+')) {
+            return '<span class="diff-add">' + escapeHtml(line) + '</span>';
+          } else if (line.startsWith('-')) {
+            return '<span class="diff-del">' + escapeHtml(line) + '</span>';
+          } else if (line.startsWith('@@')) {
+            return '<span class="diff-hunk">' + escapeHtml(line) + '</span>';
+          } else if (line.startsWith('diff ') || line.startsWith('index ')) {
+            return '<span class="diff-meta">' + escapeHtml(line) + '</span>';
+          }
+          return escapeHtml(line);
+        }).join('\n');
+      }
+
+      if (format === 'yaml') {
+        return text.split('\n').map(line => {
+          // Match "  key: value" pattern
+          const match = line.match(/^(\s*-?\s*)(\w[\w\s]*)(:)\s*(.*)$/);
+          if (match) {
+            const indent = escapeHtml(match[1]);
+            const key = '<span class="yaml-key">' + escapeHtml(match[2]) + '</span>';
+            const sep = '<span class="yaml-sep">' + escapeHtml(match[3]) + '</span>';
+            const val = match[4];
+            // Numbers vs strings
+            const valSpan = /^\d+$/.test(val)
+              ? ' <span class="yaml-num">' + escapeHtml(val) + '</span>'
+              : ' <span class="yaml-str">' + escapeHtml(val) + '</span>';
+            return indent + key + sep + valSpan;
+          }
+          return escapeHtml(line);
+        }).join('\n');
+      }
+
+      return escapeHtml(text);
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    async function animateTerminal(el) {
+      const body = el.querySelector('.terminal-body');
+      const script = JSON.parse(el.dataset.script);
+
+      for (let i = 0; i < script.length; i++) {
+        const step = script[i];
+
+        if (step.type === 'pause') {
+          await sleep(LINE_PAUSE);
+          continue;
+        }
+
+        const line = document.createElement('div');
+        line.className = 'line';
+
+        if (step.type === 'input') {
+          const prompt = document.createElement('span');
+          prompt.className = 'prompt';
+          prompt.textContent = '$ ';
+          line.appendChild(prompt);
+
+          const text = document.createElement('span');
+          line.appendChild(text);
+
+          const cursor = document.createElement('span');
+          cursor.className = 'cursor';
+          line.appendChild(cursor);
+
+          body.appendChild(line);
+
+          for (let j = 0; j < step.text.length; j++) {
+            text.textContent += step.text[j];
+            await sleep(CHAR_DELAY);
+          }
+
+          cursor.remove();
+          await sleep(OUTPUT_DELAY);
+        } else if (step.type === 'output') {
+          line.className = 'line output';
+          if (step.format) {
+            line.innerHTML = renderFormattedOutput(step.text, step.format);
+          } else {
+            line.textContent = step.text;
+          }
+          body.appendChild(line);
+          await sleep(LINE_PAUSE);
+        }
+      }
+    }
+
+    // IntersectionObserver to trigger animations on scroll
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          observer.unobserve(entry.target);
+          animateTerminal(entry.target);
+        }
+      });
+    }, { threshold: 0.3 });
+
+    document.querySelectorAll('.terminal').forEach(el => observer.observe(el));
+  </script>
+</body>
+</html>
