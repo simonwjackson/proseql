@@ -271,12 +271,12 @@
       <h1>proseql</h1>
       <p>Type-safe database that persists to plain text.<br>No server. No binary blobs. Just files.</p>
       <div class="install" role="button" tabindex="0" title="Click to copy">
-        <span>npm i @proseql/node</span>
+        <span>npm i -g @proseql/cli</span>
         <span class="install-icon">&#x2398;</span>
       </div>
       <div class="links">
         <a href="https://github.com/simonwjackson/proseql">GitHub</a>
-        <a href="https://www.npmjs.com/package/@proseql/node">npm</a>
+        <a href="https://www.npmjs.com/package/@proseql/cli">npm</a>
       </div>
     </header>
 
@@ -308,12 +308,12 @@
     </section>
 
     <main>
-      <!-- Demo 1: Your data is just a file -->
+      <!-- Demo 1: Init a project in seconds -->
       <div>
-        <div class="demo-label">Your data is just a file</div>
+        <div class="demo-label">Init a project in seconds</div>
         <div class="terminal" data-script='[
-          {"type":"input","text":"cat data/books.yaml"},
-          {"type":"output","text":"- id: dune\n  title: Dune\n  author: Frank Herbert\n  year: 1965\n\n- id: neuromancer\n  title: Neuromancer\n  author: William Gibson\n  year: 1984","format":"yaml"}
+          {"type":"input","text":"proseql init --format yaml"},
+          {"type":"output","text":"ProseQL project initialized!\n\nCreated files:\n  + proseql.config.ts\n  + data/\n  + data/notes.yaml\n\nNext steps:\n  1. Edit proseql.config.ts to define your collections\n  2. Run \u0027proseql query notes\u0027 to see example data"}
         ]'>
           <div class="terminal-bar">
             <span class="terminal-dot red"></span>
@@ -324,34 +324,31 @@
         </div>
       </div>
 
-      <!-- Demo 2: Mutate, then check the file -->
+      <!-- Demo 2: Query from the terminal -->
+      <div>
+        <div class="demo-label">Query from the terminal</div>
+        <div class="terminal" data-script='[
+          {"type":"input","text":"proseql query books --where \u0027genre = \"sci-fi\"\u0027 --sort year:desc"},
+          {"type":"output","text":"id    title          author            year\n--    -----          ------            ----\n2     Neuromancer    William Gibson    1984\n1     Dune           Frank Herbert     1965"}
+        ]'>
+          <div class="terminal-bar">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+          </div>
+          <div class="terminal-body"></div>
+        </div>
+      </div>
+
+      <!-- Demo 3: Mutate, then check the file -->
       <div>
         <div class="demo-label">Mutate, then check the file</div>
         <div class="terminal" data-script='[
-          {"type":"input","text":"node -e \"db.update(\u0027books\u0027, \u0027dune\u0027, { year: 2025 })\""},
-          {"type":"output","text":"{ updated: 1 }"},
+          {"type":"input","text":"proseql update books 1 --set \u0027year=2025\u0027"},
+          {"type":"output","text":"id    title   author          year\n--    -----   ------          ----\n1     Dune    Frank Herbert   2025"},
           {"type":"pause"},
           {"type":"input","text":"cat data/books.yaml"},
-          {"type":"output","text":"- id: dune\n  title: Dune\n  author: Frank Herbert\n  year: 2025\n\n- id: neuromancer\n  title: Neuromancer\n  author: William Gibson\n  year: 1984","format":"yaml"}
-        ]'>
-          <div class="terminal-bar">
-            <span class="terminal-dot red"></span>
-            <span class="terminal-dot yellow"></span>
-            <span class="terminal-dot green"></span>
-          </div>
-          <div class="terminal-body"></div>
-        </div>
-      </div>
-
-      <!-- Demo 3: 9 formats, same API -->
-      <div>
-        <div class="demo-label">9 formats, same API</div>
-        <div class="terminal" data-script='[
-          {"type":"input","text":"ls data/"},
-          {"type":"output","text":"books.yaml\nauthors.json\nsettings.toml\nnotes.json5\nconfig.jsonc\nprefs.hjson\nmeta.toon\nlog.jsonl\nreadme.prose"},
-          {"type":"pause"},
-          {"type":"input","text":"cat data/readme.prose"},
-          {"type":"output","text":"--- id: welcome\ntitle: Welcome to ProseQL\n---\nYour data lives in plain text files.\nEdit them with any tool you like.\n\n--- id: formats\ntitle: Pick Your Format\n---\nYAML, JSON, TOML, and 6 more.\nSame API, same types, your choice."}
+          {"type":"output","text":"- id: 1\n  title: Dune\n  author: Frank Herbert\n  year: 2025\n\n- id: 2\n  title: Neuromancer\n  author: William Gibson\n  year: 1984","format":"yaml"}
         ]'>
           <div class="terminal-bar">
             <span class="terminal-dot red"></span>
@@ -397,13 +394,13 @@
     }
 
     installBtn.addEventListener('click', () => {
-      navigator.clipboard.writeText('npm i @proseql/node').then(showToast);
+      navigator.clipboard.writeText('npm i -g @proseql/cli').then(showToast);
     });
 
     installBtn.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        navigator.clipboard.writeText('npm i @proseql/node').then(showToast);
+        navigator.clipboard.writeText('npm i -g @proseql/cli').then(showToast);
       }
     });
 
