@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.10.7 (2026-02-26)
+
+### Fixes
+- Resolve CLI config module imports and add lenient JSONL validation (a84eaad)
+
+
 ## v0.10.6 (2026-02-25)
 
 ### Other
