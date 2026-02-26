@@ -348,7 +348,8 @@ export { hjsonCodec } from "./serializers/codecs/hjson.js";
 export { jsonCodec } from "./serializers/codecs/json.js";
 export { json5Codec } from "./serializers/codecs/json5.js";
 export { jsoncCodec } from "./serializers/codecs/jsonc.js";
-export { jsonlCodec } from "./serializers/codecs/jsonl.js";
+export type { ParsedLine } from "./serializers/codecs/jsonl.js";
+export { jsonlCodec, jsonlDecodeLines } from "./serializers/codecs/jsonl.js";
 export type {
 	CompiledTemplate,
 	ProseCodecOptions,

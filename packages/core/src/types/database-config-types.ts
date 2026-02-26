@@ -186,6 +186,15 @@ export type CollectionConfig = {
 	 * ```
 	 */
 	readonly appendOnly?: boolean;
+
+	/**
+	 * Validation mode for loading persisted data.
+	 *
+	 * - `"strict"` (default): Abort on the first entity that fails schema validation.
+	 * - `"lenient"`: Skip invalid entities with warnings and load remaining valid data.
+	 *   For JSONL files, warnings include 1-based line numbers.
+	 */
+	readonly validation?: "strict" | "lenient";
 };
 
 /**

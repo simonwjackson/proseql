@@ -26,6 +26,7 @@ import {
 import { runMigrations } from "../migrations/migration-runner.js";
 import type { Migration } from "../migrations/migration-types.js";
 import { reloadEvent } from "../reactive/change-event.js";
+import { jsonlDecodeLines } from "../serializers/codecs/jsonl.js";
 import { SerializerRegistry } from "../serializers/serializer-service.js";
 import type { ChangeEvent } from "../types/reactive-types.js";
 import { getFileExtension } from "../utils/path.js";
@@ -129,6 +130,11 @@ export interface LoadDataOptions {
 	 * The resolved value can be a Record keyed by entity ID or an array of objects with `id`.
 	 */
 	readonly path?: string;
+	/**
+	 * Validation mode: "strict" (default) aborts on first invalid entity,
+	 * "lenient" skips invalid entities with warnings.
+	 */
+	readonly validation?: "strict" | "lenient";
 }
 
 /**
@@ -176,56 +182,85 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 			return new Map<string, A>() as ReadonlyMap<string, A>;
 		}
 
-		// Read and deserialize
+		// Read raw content
 		const raw = yield* storage.read(filePath);
-		const parsed = yield* serializer.deserialize(raw, ext);
 
-		// If a path is specified, navigate into the document structure
-		const resolved = options?.path ? getAtPath(parsed, options.path) : parsed;
-
-		// If path navigation resolved to undefined, return empty map
-		if (resolved === undefined) {
-			return new Map<string, A>() as ReadonlyMap<string, A>;
-		}
-
-		// The on-disk format depends on the file extension:
-		// - JSONL/NDJSON/Prose: array of entity objects
-		// - All other formats: Record<string, object> keyed by entity ID
-		// When a path is specified, the resolved value may also be an array
-		const isArrayFormat =
-			ext === "jsonl" ||
-			ext === "ndjson" ||
-			ext === "prose" ||
-			(options?.path !== undefined && Array.isArray(resolved));
+		const isJsonlFormat = ext === "jsonl" || ext === "ndjson";
+		const isLenient = options?.validation === "lenient";
 		const entityMap: Record<string, unknown> = {};
+		// Map entity ID → 1-based line number (JSONL lenient mode only)
+		const lineNumberMap = new Map<string, number>();
 		let fileVersion = 0;
 
-		if (isArrayFormat && Array.isArray(resolved)) {
-			// Array format: array of entity objects → convert to Record keyed by id
-			// Entries without a string `id` get their array index as a fallback key
-			for (let i = 0; i < resolved.length; i++) {
-				const item = resolved[i];
-				if (isRecord(item)) {
-					const id = typeof item.id === "string" ? item.id : String(i);
-					entityMap[id] = item;
+		if (isJsonlFormat && isLenient) {
+			// JSONL lenient: parse line-by-line to track line numbers and
+			// tolerate malformed JSON lines (skip serializer.deserialize which
+			// would abort on the first bad line).
+			const parsedLines = jsonlDecodeLines(raw);
+			for (const line of parsedLines) {
+				if (line.parseError) {
+					yield* Effect.logWarning(
+						`[proseql] Skipping malformed JSON at line ${line.lineNumber} in '${filePath}': ${line.parseError}`,
+					);
+					continue;
 				}
-			}
-		} else if (isRecord(resolved)) {
-			// Standard format: Record keyed by entity ID
-			fileVersion =
-				typeof resolved._version === "number" ? resolved._version : 0;
-			for (const [key, value] of Object.entries(resolved)) {
-				if (key !== "_version") {
-					entityMap[key] = value;
+				if (isRecord(line.parsed)) {
+					const id =
+						typeof line.parsed.id === "string"
+							? line.parsed.id
+							: String(line.lineNumber);
+					entityMap[id] = line.parsed;
+					lineNumberMap.set(id, line.lineNumber);
 				}
 			}
 		} else {
-			return yield* Effect.fail(
-				new SerializationError({
-					format: ext,
-					message: `Invalid data format in '${filePath}'${options?.path ? ` at path '${options.path}'` : ""}: expected object or array, got ${typeof resolved}`,
-				}),
-			);
+			// Standard path: deserialize the entire file at once
+			const parsed = yield* serializer.deserialize(raw, ext);
+
+			// If a path is specified, navigate into the document structure
+			const resolved = options?.path ? getAtPath(parsed, options.path) : parsed;
+
+			// If path navigation resolved to undefined, return empty map
+			if (resolved === undefined) {
+				return new Map<string, A>() as ReadonlyMap<string, A>;
+			}
+
+			// The on-disk format depends on the file extension:
+			// - JSONL/NDJSON/Prose: array of entity objects
+			// - All other formats: Record<string, object> keyed by entity ID
+			// When a path is specified, the resolved value may also be an array
+			const isArrayFormat =
+				isJsonlFormat ||
+				ext === "prose" ||
+				(options?.path !== undefined && Array.isArray(resolved));
+
+			if (isArrayFormat && Array.isArray(resolved)) {
+				// Array format: array of entity objects → convert to Record keyed by id
+				// Entries without a string `id` get their array index as a fallback key
+				for (let i = 0; i < resolved.length; i++) {
+					const item = resolved[i];
+					if (isRecord(item)) {
+						const id = typeof item.id === "string" ? item.id : String(i);
+						entityMap[id] = item;
+					}
+				}
+			} else if (isRecord(resolved)) {
+				// Standard format: Record keyed by entity ID
+				fileVersion =
+					typeof resolved._version === "number" ? resolved._version : 0;
+				for (const [key, value] of Object.entries(resolved)) {
+					if (key !== "_version") {
+						entityMap[key] = value;
+					}
+				}
+			} else {
+				return yield* Effect.fail(
+					new SerializationError({
+						format: ext,
+						message: `Invalid data format in '${filePath}'${options?.path ? ` at path '${options.path}'` : ""}: expected object or array, got ${typeof resolved}`,
+					}),
+				);
+			}
 		}
 
 		// Determine the data to decode (may be migrated)
@@ -281,31 +316,46 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 		const entries: Array<[string, A]> = [];
 
 		for (const [id, value] of Object.entries(dataToLoad)) {
-			const decoded = yield* decode(value).pipe(
-				Effect.mapError((parseError) =>
-					// If migrations were run, produce MigrationError with step: -1
-					// Otherwise, produce ValidationError for normal schema mismatch
-					migrationsRan
-						? new MigrationError({
-								collection: collectionNameForError,
-								fromVersion: fromVersionForError,
-								toVersion: targetVersion ?? 0,
-								step: -1,
-								reason: "post-migration-validation-failed",
-								message: `Post-migration validation failed for entity '${id}': ${parseError.message}`,
-							})
-						: new ValidationError({
-								message: `Failed to decode entity '${id}' in '${filePath}': ${parseError.message}`,
-								issues: [
-									{
-										field: id,
-										message: parseError.message,
-									},
-								],
-							}),
-				),
-			);
-			entries.push([id, decoded]);
+			if (isLenient) {
+				// Lenient mode: skip invalid entities with warnings
+				const result = yield* Effect.either(decode(value));
+				if (result._tag === "Left") {
+					const lineNum = lineNumberMap.get(id);
+					const location = lineNum ? ` (line ${lineNum})` : "";
+					yield* Effect.logWarning(
+						`[proseql] Skipping entity '${id}'${location} in '${filePath}': ${result.left.message}`,
+					);
+				} else {
+					entries.push([id, result.right]);
+				}
+			} else {
+				// Strict mode: abort on first failure
+				const decoded = yield* decode(value).pipe(
+					Effect.mapError((parseError) =>
+						// If migrations were run, produce MigrationError with step: -1
+						// Otherwise, produce ValidationError for normal schema mismatch
+						migrationsRan
+							? new MigrationError({
+									collection: collectionNameForError,
+									fromVersion: fromVersionForError,
+									toVersion: targetVersion ?? 0,
+									step: -1,
+									reason: "post-migration-validation-failed",
+									message: `Post-migration validation failed for entity '${id}': ${parseError.message}`,
+								})
+							: new ValidationError({
+									message: `Failed to decode entity '${id}' in '${filePath}': ${parseError.message}`,
+									issues: [
+										{
+											field: id,
+											message: parseError.message,
+										},
+									],
+								}),
+					),
+				);
+				entries.push([id, decoded]);
+			}
 		}
 
 		const result = new Map(entries) as ReadonlyMap<string, A>;
@@ -796,6 +846,11 @@ export interface LoadDataFromDirectoryOptions {
 	 * Collection name for error messages.
 	 */
 	readonly collectionName?: string;
+	/**
+	 * Validation mode: "strict" (default) aborts on first invalid entity,
+	 * "lenient" skips invalid entities with warnings.
+	 */
+	readonly validation?: "strict" | "lenient";
 }
 
 /**
@@ -843,6 +898,7 @@ export const loadDataFromDirectory = <A extends { readonly id: string }, I, R>(
 		// Decode each file
 		const decode = Schema.decodeUnknown(schema);
 		const entries: Array<[string, A]> = [];
+		const isLenient = _options?.validation === "lenient";
 
 		for (const filePath of matchingFiles) {
 			const raw = yield* storage.read(filePath);
@@ -852,21 +908,32 @@ export const loadDataFromDirectory = <A extends { readonly id: string }, I, R>(
 			const filename = filePath.slice(filePath.lastIndexOf("/") + 1);
 			const id = filename.slice(0, filename.length - suffix.length);
 
-			const decoded = yield* decode(parsed).pipe(
-				Effect.mapError(
-					(parseError) =>
-						new ValidationError({
-							message: `Failed to decode entity from '${filePath}': ${parseError.message}`,
-							issues: [
-								{
-									field: id,
-									message: parseError.message,
-								},
-							],
-						}),
-				),
-			);
-			entries.push([id, decoded]);
+			if (isLenient) {
+				const result = yield* Effect.either(decode(parsed));
+				if (result._tag === "Left") {
+					yield* Effect.logWarning(
+						`[proseql] Skipping entity '${id}' in '${filePath}': ${result.left.message}`,
+					);
+				} else {
+					entries.push([id, result.right]);
+				}
+			} else {
+				const decoded = yield* decode(parsed).pipe(
+					Effect.mapError(
+						(parseError) =>
+							new ValidationError({
+								message: `Failed to decode entity from '${filePath}': ${parseError.message}`,
+								issues: [
+									{
+										field: id,
+										message: parseError.message,
+									},
+								],
+							}),
+					),
+				);
+				entries.push([id, decoded]);
+			}
 		}
 
 		return new Map(entries) as ReadonlyMap<string, A>;

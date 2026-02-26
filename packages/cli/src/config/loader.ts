@@ -1,7 +1,19 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { DatabaseConfig } from "@proseql/core";
 import { Data, Effect } from "effect";
+
+/**
+ * Path to the CLI's own node_modules directory.
+ * Computed from this file's location (dist/config/loader.js → ../../node_modules).
+ */
+const cliNodeModulesPath = path.resolve(
+	path.dirname(fileURLToPath(import.meta.url)),
+	"..",
+	"..",
+	"node_modules",
+);
 
 // ============================================================================
 // Config Loading Errors
@@ -81,6 +93,15 @@ function loadModuleConfig(
 
 	return Effect.tryPromise({
 		try: async () => {
+			// Prepend the CLI's own node_modules to NODE_PATH so that config files
+			// can resolve packages (e.g. `effect`, `@proseql/core`) that ship with
+			// the CLI, even when the config lives in a project that doesn't have
+			// those packages installed locally.
+			const existing = process.env.NODE_PATH ?? "";
+			process.env.NODE_PATH = existing
+				? `${cliNodeModulesPath}${path.delimiter}${existing}`
+				: cliNodeModulesPath;
+
 			const module = (await import(fileUrl)) as Record<string, unknown>;
 
 			// Config should be the default export
@@ -95,10 +116,18 @@ function loadModuleConfig(
 		catch: (error) => {
 			const errorMessage =
 				error instanceof Error ? error.message : String(error);
+			const isModuleNotFound =
+				errorMessage.includes("Cannot find package") ||
+				errorMessage.includes("Cannot find module");
+			const hint = isModuleNotFound
+				? "\n\nHint: If the config file imports packages like 'effect' or '@proseql/core', " +
+					"ensure they are installed in your project, or use 'bunx' which resolves " +
+					"dependencies from the CLI's own node_modules."
+				: "";
 			return new ConfigLoadError({
 				configPath,
 				reason: `Failed to import config module: ${errorMessage}`,
-				message: `Failed to load config from ${configPath}: ${errorMessage}`,
+				message: `Failed to load config from ${configPath}: ${errorMessage}${hint}`,
 			});
 		},
 	});

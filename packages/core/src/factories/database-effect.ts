@@ -1848,10 +1848,15 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			let loadedData: ReadonlyMap<string, HasId> = new Map();
 			if (dirPath && dirFormat && isCollectionDirectoryMode(collectionConfig)) {
 				// Directory mode: load each entity from its own file
+				const dirOptions =
+					collectionConfig.validation !== undefined
+						? { validation: collectionConfig.validation }
+						: undefined;
 				loadedData = yield* loadDataFromDirectory(
 					dirPath,
 					collectionConfig.schema as Schema.Schema<HasId, unknown>,
 					dirFormat,
+					dirOptions,
 				);
 			} else if (filePath) {
 				// Only pass version options when collection is versioned
@@ -1864,6 +1869,10 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 					collectionConfig.path !== undefined
 						? { path: collectionConfig.path }
 						: {};
+				const validationOverride =
+					collectionConfig.validation !== undefined
+						? { validation: collectionConfig.validation }
+						: {};
 				const loadOptions =
 					collectionConfig.version !== undefined
 						? collectionConfig.migrations !== undefined
@@ -1873,15 +1882,25 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 									collectionName,
 									...formatOverride,
 									...pathOverride,
+									...validationOverride,
 								}
 							: {
 									version: collectionConfig.version,
 									collectionName,
 									...formatOverride,
 									...pathOverride,
+									...validationOverride,
 								}
-						: Object.keys({ ...formatOverride, ...pathOverride }).length > 0
-							? { ...formatOverride, ...pathOverride }
+						: Object.keys({
+									...formatOverride,
+									...pathOverride,
+									...validationOverride,
+								}).length > 0
+							? {
+									...formatOverride,
+									...pathOverride,
+									...validationOverride,
+								}
 							: undefined;
 				loadedData = yield* loadData(
 					filePath,
