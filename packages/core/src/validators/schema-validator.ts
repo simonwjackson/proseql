@@ -5,7 +5,7 @@
  * ValidationError type for consistent error handling across CRUD operations.
  */
 
-import { Effect, ParseResult, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { ValidationError } from "../errors/index.js";
 
 /**
@@ -13,10 +13,10 @@ import { ValidationError } from "../errors/index.js";
  * Maps Schema ParseError to the database's ValidationError.
  */
 export const validateEntity = <A, I, R>(
-	schema: Schema.Schema<A, I, R>,
+	schema: Schema.Codec<A, I, R, R>,
 	data: unknown,
 ): Effect.Effect<A, ValidationError, R> =>
-	Schema.decodeUnknown(schema)(data).pipe(
+	Schema.decodeUnknownEffect(schema)(data).pipe(
 		Effect.mapError((parseError) => parseErrorToValidationError(parseError)),
 	);
 
@@ -25,10 +25,10 @@ export const validateEntity = <A, I, R>(
  * Maps Schema ParseError to the database's ValidationError.
  */
 export const encodeEntity = <A, I, R>(
-	schema: Schema.Schema<A, I, R>,
+	schema: Schema.Codec<A, I, R, R>,
 	entity: A,
 ): Effect.Effect<I, ValidationError, R> =>
-	Schema.encode(schema)(entity).pipe(
+	Schema.encodeEffect(schema)(entity).pipe(
 		Effect.mapError((parseError) => parseErrorToValidationError(parseError)),
 	);
 
@@ -37,16 +37,17 @@ export const encodeEntity = <A, I, R>(
  * extracting structured issue details via ArrayFormatter.
  */
 const parseErrorToValidationError = (
-	parseError: ParseResult.ParseError,
+	parseError: Schema.SchemaError,
 ): ValidationError => {
-	const arrayIssues = ParseResult.ArrayFormatter.formatErrorSync(parseError);
-	const message = ParseResult.TreeFormatter.formatErrorSync(parseError);
+	const message = String(parseError.issue);
 
 	return new ValidationError({
 		message,
-		issues: arrayIssues.map((issue) => ({
-			field: issue.path.map(String).join(".") || "(root)",
-			message: issue.message,
-		})),
+		issues: [
+			{
+				field: "(root)",
+				message,
+			},
+		],
 	});
 };

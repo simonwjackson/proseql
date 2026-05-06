@@ -5,7 +5,7 @@
  * aggregation, pagination, updates, persistence, computed fields, and reactive queries.
  */
 
-import { Chunk, Effect, Layer, Schema, Stream } from "effect";
+import { Effect, Layer, Schema, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	createEffectDatabase,
@@ -758,7 +758,7 @@ describe("Nested Schema Integration Tests", () => {
 						const firstEmission = yield* Stream.runCollect(
 							Stream.take(stream, 1),
 						);
-						const initial = Chunk.toReadonlyArray(firstEmission)[0];
+						const initial = firstEmission[0];
 
 						// Should have 4 books with rating >= 4
 						expect(initial).toHaveLength(4);
@@ -770,7 +770,7 @@ describe("Nested Schema Integration Tests", () => {
 						const secondEmission = yield* Stream.runCollect(
 							Stream.take(stream, 1),
 						);
-						const updated = Chunk.toReadonlyArray(secondEmission)[0];
+						const updated = secondEmission[0];
 
 						// Now should have 5 books with rating >= 4
 						expect(updated).toHaveLength(5);
@@ -795,7 +795,7 @@ describe("Nested Schema Integration Tests", () => {
 						const firstEmission = yield* Stream.runCollect(
 							Stream.take(stream, 1),
 						);
-						const initial = Chunk.toReadonlyArray(firstEmission)[0];
+						const initial = firstEmission[0];
 
 						expect(initial?.metadata.views).toBe(1000);
 
@@ -806,7 +806,7 @@ describe("Nested Schema Integration Tests", () => {
 						const secondEmission = yield* Stream.runCollect(
 							Stream.take(stream, 1),
 						);
-						const updated = Chunk.toReadonlyArray(secondEmission)[0];
+						const updated = secondEmission[0];
 
 						expect(updated?.metadata.views).toBe(5000);
 					}),

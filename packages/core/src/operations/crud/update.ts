@@ -352,7 +352,7 @@ function updateTouchesUniqueFields<T>(
 export const update =
 	<T extends HasId, I = T>(
 		collectionName: string,
-		schema: Schema.Schema<T, I>,
+		schema: Schema.Codec<T, I>,
 		relationships: Record<string, RelationshipConfig>,
 		ref: Ref.Ref<ReadonlyMap<string, T>>,
 		stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
@@ -533,7 +533,7 @@ export const update =
 export const updateMany =
 	<T extends HasId, I = T>(
 		collectionName: string,
-		schema: Schema.Schema<T, I>,
+		schema: Schema.Codec<T, I>,
 		relationships: Record<string, RelationshipConfig>,
 		ref: Ref.Ref<ReadonlyMap<string, T>>,
 		stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,

@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { applySort } from "../src/operations/query/sort-stream.js";
 
@@ -63,7 +63,7 @@ describe("applySort Stream combinator", () => {
 	) =>
 		Effect.runPromise(
 			Stream.runCollect(toStream(items).pipe(applySort<T>(sort))),
-		).then(Chunk.toArray);
+		).then((items) => items);
 
 	// ============================================================================
 	// Pass-through behavior
@@ -290,10 +290,10 @@ describe("applySort Stream combinator", () => {
 
 			const sorted = failingStream.pipe(applySort({ name: "asc" }));
 			const result = await Effect.runPromise(
-				Effect.either(Stream.runCollect(sorted)),
+				Effect.result(Stream.runCollect(sorted)),
 			);
 
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 		});
 
 		it("should preserve Stream context (R) type", async () => {
@@ -303,7 +303,7 @@ describe("applySort Stream combinator", () => {
 			const sorted = stream.pipe(applySort({ name: "asc" }));
 
 			const result = await Effect.runPromise(Stream.runCollect(sorted));
-			expect(Chunk.toArray(result)).toEqual([{ id: "1", name: "A" }]);
+			expect(result).toEqual([{ id: "1", name: "A" }]);
 		});
 	});
 });

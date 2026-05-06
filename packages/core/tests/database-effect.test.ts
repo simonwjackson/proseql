@@ -163,7 +163,7 @@ describe("createEffectDatabase", () => {
 					return yield* Stream.runCollect(db.users.query());
 				}),
 			);
-			expect(Chunk.toArray(result)).toHaveLength(3);
+			expect(result).toHaveLength(3);
 		});
 
 		it("should filter with where clause", async () => {
@@ -175,7 +175,7 @@ describe("createEffectDatabase", () => {
 					);
 				}),
 			);
-			const items = Chunk.toArray(result);
+			const items = result;
 			expect(items).toHaveLength(2);
 			expect(items.map((i) => i.name)).toContain("Alice");
 			expect(items.map((i) => i.name)).toContain("Charlie");
@@ -190,7 +190,7 @@ describe("createEffectDatabase", () => {
 					);
 				}),
 			);
-			const items = Chunk.toArray(result);
+			const items = result;
 			expect(items).toHaveLength(1);
 			expect(items[0].name).toBe("Alice");
 		});
@@ -204,7 +204,7 @@ describe("createEffectDatabase", () => {
 					);
 				}),
 			);
-			const items = Chunk.toArray(result);
+			const items = result;
 			expect(items).toHaveLength(3);
 			expect(items[0].name).toBe("Bob");
 			expect(items[1].name).toBe("Alice");
@@ -220,7 +220,7 @@ describe("createEffectDatabase", () => {
 					);
 				}),
 			);
-			const items = Chunk.toArray(result);
+			const items = result;
 			expect(items).toHaveLength(1);
 			expect(items[0].name).toBe("Alice");
 		});
@@ -234,7 +234,7 @@ describe("createEffectDatabase", () => {
 					);
 				}),
 			);
-			const items = Chunk.toArray(result);
+			const items = result;
 			expect(items).toHaveLength(3);
 			for (const item of items) {
 				expect(Object.keys(item)).toContain("name");
@@ -252,7 +252,7 @@ describe("createEffectDatabase", () => {
 					);
 				}),
 			);
-			const items = Chunk.toArray(result);
+			const items = result;
 			expect(items).toHaveLength(3);
 			for (const item of items) {
 				expect(Object.keys(item)).toContain("name");
@@ -274,7 +274,7 @@ describe("createEffectDatabase", () => {
 					);
 				}),
 			);
-			const items = Chunk.toArray(result);
+			const items = result;
 			expect(items).toHaveLength(1);
 			expect(items[0].name).toBe("Alice"); // age 30 > 25
 		});
@@ -291,7 +291,7 @@ describe("createEffectDatabase", () => {
 					);
 				}),
 			);
-			const items = Chunk.toArray(result);
+			const items = result;
 			expect(items).toHaveLength(1);
 			const user = items[0] as Record<string, unknown>;
 			expect(user.name).toBe("Alice");
@@ -312,7 +312,7 @@ describe("createEffectDatabase", () => {
 					);
 				}),
 			);
-			const items = Chunk.toArray(result);
+			const items = result;
 			expect(items).toHaveLength(1);
 			const company = items[0] as Record<string, unknown>;
 			expect(company.name).toBe("TechCorp");
@@ -580,7 +580,7 @@ describe("createEffectDatabase", () => {
 							populate: { company: true },
 						}),
 					);
-					return Chunk.toArray(users);
+					return users;
 				}),
 			);
 			expect(result).toHaveLength(1);
@@ -766,7 +766,7 @@ describe("createEffectDatabase", () => {
 			const viaPromise = await db.users.query().runPromise;
 			// Also use as Stream (native Effect)
 			const viaStream = await Effect.runPromise(
-				Stream.runCollect(db.users.query()).pipe(Effect.map(Chunk.toArray)),
+				Stream.runCollect(db.users.query()).pipe(Effect.map((items) => items)),
 			);
 			expect(viaPromise).toHaveLength(3);
 			expect(viaStream).toHaveLength(3);

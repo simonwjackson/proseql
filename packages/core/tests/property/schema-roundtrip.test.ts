@@ -7,7 +7,7 @@
  * Task 3.3: Property - a randomly mutated entity (wrong field types, missing required fields)
  *           is rejected by Schema.decode with a validation error, never silently accepted
  */
-import { Either, Schema } from "effect";
+import { Result, Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { entityArbitrary, getNumRuns } from "./generators";
@@ -540,96 +540,96 @@ describe("Schema round-trip properties", () => {
 
 	describe("Task 3.3: Schema rejection of invalid data", () => {
 		it("should reject SimpleSchema entities with wrong field types", () => {
-			const decode = Schema.decodeUnknownEither(SimpleSchema);
+			const decode = Schema.decodeUnknownResult(SimpleSchema);
 
 			fc.assert(
 				fc.property(simpleSchemaInvalidArbitrary(), (invalidEntity) => {
 					const result = decode(invalidEntity);
 					// The result should be a Left (failure), never a Right (success)
-					expect(Either.isLeft(result)).toBe(true);
+					expect(Result.isFailure(result)).toBe(true);
 				}),
 				{ numRuns: getNumRuns() },
 			);
 		});
 
 		it("should reject ComplexSchema entities with wrong field types or missing fields", () => {
-			const decode = Schema.decodeUnknownEither(ComplexSchema);
+			const decode = Schema.decodeUnknownResult(ComplexSchema);
 
 			fc.assert(
 				fc.property(complexSchemaInvalidArbitrary(), (invalidEntity) => {
 					const result = decode(invalidEntity);
-					expect(Either.isLeft(result)).toBe(true);
+					expect(Result.isFailure(result)).toBe(true);
 				}),
 				{ numRuns: getNumRuns() },
 			);
 		});
 
 		it("should reject ArrayHeavySchema entities with wrong array element types", () => {
-			const decode = Schema.decodeUnknownEither(ArrayHeavySchema);
+			const decode = Schema.decodeUnknownResult(ArrayHeavySchema);
 
 			fc.assert(
 				fc.property(arraySchemaInvalidArbitrary(), (invalidEntity) => {
 					const result = decode(invalidEntity);
-					expect(Either.isLeft(result)).toBe(true);
+					expect(Result.isFailure(result)).toBe(true);
 				}),
 				{ numRuns: getNumRuns() },
 			);
 		});
 
 		it("should reject completely invalid data types for SimpleSchema", () => {
-			const decode = Schema.decodeUnknownEither(SimpleSchema);
+			const decode = Schema.decodeUnknownResult(SimpleSchema);
 
 			fc.assert(
 				fc.property(totallyInvalidArbitrary(), (invalidData) => {
 					const result = decode(invalidData);
 					// Non-object inputs should always be rejected
-					expect(Either.isLeft(result)).toBe(true);
+					expect(Result.isFailure(result)).toBe(true);
 				}),
 				{ numRuns: getNumRuns() },
 			);
 		});
 
 		it("should reject completely invalid data types for ComplexSchema", () => {
-			const decode = Schema.decodeUnknownEither(ComplexSchema);
+			const decode = Schema.decodeUnknownResult(ComplexSchema);
 
 			fc.assert(
 				fc.property(totallyInvalidArbitrary(), (invalidData) => {
 					const result = decode(invalidData);
-					expect(Either.isLeft(result)).toBe(true);
+					expect(Result.isFailure(result)).toBe(true);
 				}),
 				{ numRuns: getNumRuns() },
 			);
 		});
 
 		it("should reject null and undefined for all schemas", () => {
-			const decodeSimple = Schema.decodeUnknownEither(SimpleSchema);
-			const decodeComplex = Schema.decodeUnknownEither(ComplexSchema);
-			const decodeArray = Schema.decodeUnknownEither(ArrayHeavySchema);
+			const decodeSimple = Schema.decodeUnknownResult(SimpleSchema);
+			const decodeComplex = Schema.decodeUnknownResult(ComplexSchema);
+			const decodeArray = Schema.decodeUnknownResult(ArrayHeavySchema);
 
 			// null should be rejected
-			expect(Either.isLeft(decodeSimple(null))).toBe(true);
-			expect(Either.isLeft(decodeComplex(null))).toBe(true);
-			expect(Either.isLeft(decodeArray(null))).toBe(true);
+			expect(Result.isFailure(decodeSimple(null))).toBe(true);
+			expect(Result.isFailure(decodeComplex(null))).toBe(true);
+			expect(Result.isFailure(decodeArray(null))).toBe(true);
 
 			// undefined should be rejected
-			expect(Either.isLeft(decodeSimple(undefined))).toBe(true);
-			expect(Either.isLeft(decodeComplex(undefined))).toBe(true);
-			expect(Either.isLeft(decodeArray(undefined))).toBe(true);
+			expect(Result.isFailure(decodeSimple(undefined))).toBe(true);
+			expect(Result.isFailure(decodeComplex(undefined))).toBe(true);
+			expect(Result.isFailure(decodeArray(undefined))).toBe(true);
 		});
 
 		it("should reject empty objects for schemas with required fields", () => {
-			const decodeSimple = Schema.decodeUnknownEither(SimpleSchema);
-			const decodeComplex = Schema.decodeUnknownEither(ComplexSchema);
-			const decodeArray = Schema.decodeUnknownEither(ArrayHeavySchema);
+			const decodeSimple = Schema.decodeUnknownResult(SimpleSchema);
+			const decodeComplex = Schema.decodeUnknownResult(ComplexSchema);
+			const decodeArray = Schema.decodeUnknownResult(ArrayHeavySchema);
 
 			// Empty objects are missing all required fields
-			expect(Either.isLeft(decodeSimple({}))).toBe(true);
-			expect(Either.isLeft(decodeComplex({}))).toBe(true);
-			expect(Either.isLeft(decodeArray({}))).toBe(true);
+			expect(Result.isFailure(decodeSimple({}))).toBe(true);
+			expect(Result.isFailure(decodeComplex({}))).toBe(true);
+			expect(Result.isFailure(decodeArray({}))).toBe(true);
 		});
 
 		it("should reject objects with extra fields of wrong types mixed with valid fields", () => {
-			const decode = Schema.decodeUnknownEither(SimpleSchema);
+			const decode = Schema.decodeUnknownResult(SimpleSchema);
 
 			// Object has all required fields with correct types,
 			// but we're testing that partial objects are rejected
@@ -639,11 +639,11 @@ describe("Schema round-trip properties", () => {
 				// missing: age, isActive
 			};
 
-			expect(Either.isLeft(decode(partialObject))).toBe(true);
+			expect(Result.isFailure(decode(partialObject))).toBe(true);
 		});
 
 		it("should consistently reject the same invalid input (deterministic)", () => {
-			const decode = Schema.decodeUnknownEither(SimpleSchema);
+			const decode = Schema.decodeUnknownResult(SimpleSchema);
 
 			fc.assert(
 				fc.property(simpleSchemaInvalidArbitrary(), (invalidEntity) => {
@@ -653,9 +653,9 @@ describe("Schema round-trip properties", () => {
 					const result3 = decode(invalidEntity);
 
 					// All should be Left (failure)
-					expect(Either.isLeft(result1)).toBe(true);
-					expect(Either.isLeft(result2)).toBe(true);
-					expect(Either.isLeft(result3)).toBe(true);
+					expect(Result.isFailure(result1)).toBe(true);
+					expect(Result.isFailure(result2)).toBe(true);
+					expect(Result.isFailure(result3)).toBe(true);
 				}),
 				{ numRuns: getNumRuns() },
 			);
@@ -664,7 +664,7 @@ describe("Schema round-trip properties", () => {
 		it("should never silently accept invalid data as valid (discrimination test)", () => {
 			// This test verifies the core property: invalid data is NEVER silently accepted.
 			// We generate valid entities, then mutate them to be invalid, and verify rejection.
-			const decode = Schema.decodeUnknownEither(SimpleSchema);
+			const decode = Schema.decodeUnknownResult(SimpleSchema);
 
 			fc.assert(
 				fc.property(
@@ -686,7 +686,7 @@ describe("Schema round-trip properties", () => {
 						const result = decode(mutatedEntity);
 
 						// The mutated entity should be rejected
-						expect(Either.isLeft(result)).toBe(true);
+						expect(Result.isFailure(result)).toBe(true);
 					},
 				),
 				{ numRuns: getNumRuns() },

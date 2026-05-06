@@ -9,16 +9,7 @@
  * Persistence: Optional debounced save after each CRUD mutation via Effect.fork
  */
 
-import {
-	Chunk,
-	Effect,
-	Layer,
-	PubSub,
-	Ref,
-	Schema,
-	type Scope,
-	Stream,
-} from "effect";
+import { Effect, Layer, PubSub, Ref, Schema, type Scope, Stream } from "effect";
 import {
 	type DuplicateKeyError,
 	type ForeignKeyError,
@@ -195,9 +186,7 @@ const withStreamRunPromise = <A, E>(
 	Object.defineProperty(stream, "runPromise", {
 		get() {
 			if (cached === undefined) {
-				cached = Effect.runPromise(
-					Stream.runCollect(stream).pipe(Effect.map(Chunk.toReadonlyArray)),
-				);
+				cached = Effect.runPromise(Stream.runCollect(stream));
 			}
 			return cached;
 		},
@@ -503,7 +492,7 @@ const createPersistenceTrigger = (
 
 	const executeSave = (key: string): Promise<void> =>
 		Effect.runPromise(
-			makeSaveEffect(key).pipe(Effect.catchAll(() => Effect.void)),
+			makeSaveEffect(key).pipe(Effect.catch(() => Effect.void)),
 		);
 
 	const schedule = (key: string): void => {
@@ -668,7 +657,7 @@ const buildCollection = <T extends HasId>(
 	>,
 	appendOnlyConfig?: AppendOnlyConfig,
 ): EffectCollection<T> => {
-	const schema = collectionConfig.schema as Schema.Schema<T, unknown>;
+	const schema = collectionConfig.schema as Schema.Codec<T, unknown>;
 	const relationships = collectionConfig.relationships as Record<
 		string,
 		{
@@ -812,7 +801,7 @@ const buildCollection = <T extends HasId>(
 					dbConfig as Record<
 						string,
 						{
-							readonly schema: Schema.Schema<HasId, unknown>;
+							readonly schema: Schema.Codec<HasId, unknown>;
 							readonly relationships: Record<
 								string,
 								{
@@ -897,7 +886,7 @@ const buildCollection = <T extends HasId>(
 					dbConfig as Record<
 						string,
 						{
-							readonly schema: Schema.Schema<HasId, unknown>;
+							readonly schema: Schema.Codec<HasId, unknown>;
 							readonly relationships: Record<
 								string,
 								{
@@ -1153,7 +1142,7 @@ const buildCollection = <T extends HasId>(
 			dbConfig as Record<
 				string,
 				{
-					readonly schema: Schema.Schema<HasId, unknown>;
+					readonly schema: Schema.Codec<HasId, unknown>;
 					readonly relationships: Record<
 						string,
 						{
@@ -1182,7 +1171,7 @@ const buildCollection = <T extends HasId>(
 					dbConfig as Record<
 						string,
 						{
-							readonly schema: Schema.Schema<HasId, unknown>;
+							readonly schema: Schema.Codec<HasId, unknown>;
 							readonly relationships: Record<
 								string,
 								{
@@ -1292,8 +1281,7 @@ const buildCollection = <T extends HasId>(
 			)(s);
 
 			// 3. Collect filtered entities
-			const chunk = yield* Stream.runCollect(s);
-			const entities = Chunk.toReadonlyArray(chunk);
+			const entities = yield* Stream.runCollect(s);
 
 			// 4. Delegate to appropriate aggregate function based on groupBy presence
 			if (isGroupedAggregateConfig(config)) {
@@ -1724,7 +1712,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				// Capture shutdown function to avoid optional chaining in the finalizer
 				const shutdownFn = plugin.shutdown;
 				yield* Effect.addFinalizer(() =>
-					shutdownFn().pipe(Effect.catchAll(() => Effect.void)),
+					shutdownFn().pipe(Effect.catch(() => Effect.void)),
 				);
 			}
 		}
@@ -1794,7 +1782,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 							: undefined;
 				loadedData = yield* loadData(
 					filePath,
-					collectionConfig.schema as Schema.Schema<HasId, unknown>,
+					collectionConfig.schema as Schema.Codec<HasId, unknown>,
 					loadOptions,
 				);
 			}
@@ -1868,7 +1856,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 					const currentData = yield* Ref.get(typedRefs[collectionName]);
 					yield* saveData(
 						filePath,
-						collectionConfig.schema as Schema.Schema<HasId, unknown>,
+						collectionConfig.schema as Schema.Codec<HasId, unknown>,
 						currentData,
 						// Pass version and format options for versioned/format-overridden collections
 						collectionConfig.version !== undefined ||
@@ -1897,7 +1885,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		// 7. Register scope finalizer: flush pending writes and shut down timers
 		yield* Effect.addFinalizer(() =>
 			Effect.promise(() => trigger.flush()).pipe(
-				Effect.catchAll(() => Effect.void),
+				Effect.catch(() => Effect.void),
 				Effect.tap(() => Effect.sync(() => trigger.shutdown())),
 			),
 		);
@@ -1932,7 +1920,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			// Build appendOnlyConfig for append-only persistent collections
 			let appendOnlyConfig: AppendOnlyConfig | undefined;
 			if (isAppendOnly && filePath) {
-				const appendSchema = collectionConfig.schema as Schema.Schema<
+				const appendSchema = collectionConfig.schema as Schema.Codec<
 					HasId,
 					unknown
 				>;
@@ -1941,9 +1929,9 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 						Effect.provide(
 							Effect.gen(function* () {
 								const storage = yield* StorageAdapter;
-								const encode = Schema.encode(appendSchema);
+								const encode = Schema.encodeEffect(appendSchema);
 								const encoded = yield* encode(entity).pipe(
-									Effect.catchAll(() => Effect.succeed(entity)),
+									Effect.catch(() => Effect.succeed(entity)),
 								);
 								const line = `${JSON.stringify(encoded)}\n`;
 								yield* storage.ensureDir(filePath);
@@ -1951,7 +1939,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 							}).pipe(
 								// Catch storage errors to avoid propagating them to the caller.
 								// The entity was already created in memory; storage failure is logged but not fatal.
-								Effect.catchAll(() => Effect.void),
+								Effect.catch(() => Effect.void),
 							),
 							serviceLayer,
 						),
@@ -1990,11 +1978,11 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			if (filePath) {
 				yield* createFileWatcher({
 					filePath,
-					schema: collectionConfig.schema as Schema.Schema<HasId, unknown>,
+					schema: collectionConfig.schema as Schema.Codec<HasId, unknown>,
 					ref: typedRefs[collectionName],
 					changePubSub,
 					collectionName,
-				}).pipe(Effect.catchAll(() => Effect.void));
+				}).pipe(Effect.catch(() => Effect.void));
 			}
 		}
 
@@ -2056,7 +2044,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 					appendOnlyFlushes.push(
 						Effect.runPromise(
 							makeSaveEffect(collectionName).pipe(
-								Effect.catchAll(() => Effect.void),
+								Effect.catch(() => Effect.void),
 							),
 						),
 					);

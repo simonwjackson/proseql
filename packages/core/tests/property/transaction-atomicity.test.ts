@@ -9,7 +9,7 @@
  * These tests verify that transactions maintain atomicity: either all operations
  * are applied (commit) or none are (rollback). Partial state is never observable.
  */
-import { Chunk, Effect, Schema, Stream } from "effect";
+import { Effect, Schema, Stream } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../../src/factories/database-effect";
@@ -148,16 +148,16 @@ describe("Transaction atomicity properties", () => {
 							);
 						}),
 					)
-					.pipe(Effect.either);
+					.pipe(Effect.result);
 
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					expect(result.left).toBeInstanceOf(SimulatedFailureError);
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					expect(result.failure).toBeInstanceOf(SimulatedFailureError);
 				}
 
 				// Verify collection is empty after rollback
 				const allBooksChunk = yield* Stream.runCollect(db.books.query({}));
-				const allBooks = Chunk.toReadonlyArray(allBooksChunk);
+				const allBooks = allBooksChunk;
 				expect(allBooks).toHaveLength(0);
 			});
 
@@ -229,9 +229,8 @@ describe("Transaction atomicity properties", () => {
 						const preTransactionChunk = await Effect.runPromise(
 							Stream.runCollect(db.books.query({})),
 						);
-						const preTransactionSnapshot = snapshotCollection(
-							Chunk.toReadonlyArray(preTransactionChunk),
-						);
+						const preTransactionSnapshot =
+							snapshotCollection(preTransactionChunk);
 
 						// Execute transaction that performs operations then fails at the specified point
 						const txResult = await Effect.runPromise(
@@ -248,15 +247,15 @@ describe("Transaction atomicity properties", () => {
 											if (op.op === "create") {
 												yield* ctx.books
 													.create(op.payload)
-													.pipe(Effect.catchAll(() => Effect.void));
+													.pipe(Effect.catch(() => Effect.void));
 											} else if (op.op === "update") {
 												yield* ctx.books
 													.update(op.id, op.payload)
-													.pipe(Effect.catchAll(() => Effect.void));
+													.pipe(Effect.catch(() => Effect.void));
 											} else if (op.op === "delete") {
 												yield* ctx.books
 													.delete(op.id)
-													.pipe(Effect.catchAll(() => Effect.void));
+													.pipe(Effect.catch(() => Effect.void));
 											}
 										}
 
@@ -268,22 +267,21 @@ describe("Transaction atomicity properties", () => {
 										);
 									}),
 								)
-								.pipe(Effect.either),
+								.pipe(Effect.result),
 						);
 
 						// Verify the transaction failed as expected
-						expect(txResult._tag).toBe("Left");
-						if (txResult._tag === "Left") {
-							expect(txResult.left).toBeInstanceOf(SimulatedFailureError);
+						expect(txResult._tag).toBe("Failure");
+						if (txResult._tag === "Failure") {
+							expect(txResult.failure).toBeInstanceOf(SimulatedFailureError);
 						}
 
 						// Snapshot collection state AFTER the failed transaction
 						const postTransactionChunk = await Effect.runPromise(
 							Stream.runCollect(db.books.query({})),
 						);
-						const postTransactionSnapshot = snapshotCollection(
-							Chunk.toReadonlyArray(postTransactionChunk),
-						);
+						const postTransactionSnapshot =
+							snapshotCollection(postTransactionChunk);
 
 						// CRITICAL PROPERTY: Post-transaction state must be identical to pre-transaction state
 						expect(
@@ -315,9 +313,8 @@ describe("Transaction atomicity properties", () => {
 						const preTransactionChunk = await Effect.runPromise(
 							Stream.runCollect(db.books.query({})),
 						);
-						const preTransactionSnapshot = snapshotCollection(
-							Chunk.toReadonlyArray(preTransactionChunk),
-						);
+						const preTransactionSnapshot =
+							snapshotCollection(preTransactionChunk);
 
 						// Execute transaction that fails immediately
 						const txResult = await Effect.runPromise(
@@ -330,19 +327,18 @@ describe("Transaction atomicity properties", () => {
 										);
 									}),
 								)
-								.pipe(Effect.either),
+								.pipe(Effect.result),
 						);
 
 						// Verify failure
-						expect(txResult._tag).toBe("Left");
+						expect(txResult._tag).toBe("Failure");
 
 						// Snapshot state after transaction
 						const postTransactionChunk = await Effect.runPromise(
 							Stream.runCollect(db.books.query({})),
 						);
-						const postTransactionSnapshot = snapshotCollection(
-							Chunk.toReadonlyArray(postTransactionChunk),
-						);
+						const postTransactionSnapshot =
+							snapshotCollection(postTransactionChunk);
 
 						// State should be unchanged
 						expect(
@@ -374,9 +370,8 @@ describe("Transaction atomicity properties", () => {
 						const preTransactionChunk = await Effect.runPromise(
 							Stream.runCollect(db.books.query({})),
 						);
-						const preTransactionSnapshot = snapshotCollection(
-							Chunk.toReadonlyArray(preTransactionChunk),
-						);
+						const preTransactionSnapshot =
+							snapshotCollection(preTransactionChunk);
 
 						// Execute transaction that performs all operations then explicitly rolls back
 						const txResult = await Effect.runPromise(
@@ -388,15 +383,15 @@ describe("Transaction atomicity properties", () => {
 											if (op.op === "create") {
 												yield* ctx.books
 													.create(op.payload)
-													.pipe(Effect.catchAll(() => Effect.void));
+													.pipe(Effect.catch(() => Effect.void));
 											} else if (op.op === "update") {
 												yield* ctx.books
 													.update(op.id, op.payload)
-													.pipe(Effect.catchAll(() => Effect.void));
+													.pipe(Effect.catch(() => Effect.void));
 											} else if (op.op === "delete") {
 												yield* ctx.books
 													.delete(op.id)
-													.pipe(Effect.catchAll(() => Effect.void));
+													.pipe(Effect.catch(() => Effect.void));
 											}
 										}
 
@@ -404,19 +399,18 @@ describe("Transaction atomicity properties", () => {
 										return yield* ctx.rollback();
 									}),
 								)
-								.pipe(Effect.either),
+								.pipe(Effect.result),
 						);
 
 						// Verify the transaction rolled back
-						expect(txResult._tag).toBe("Left");
+						expect(txResult._tag).toBe("Failure");
 
 						// Snapshot state after transaction
 						const postTransactionChunk = await Effect.runPromise(
 							Stream.runCollect(db.books.query({})),
 						);
-						const postTransactionSnapshot = snapshotCollection(
-							Chunk.toReadonlyArray(postTransactionChunk),
-						);
+						const postTransactionSnapshot =
+							snapshotCollection(postTransactionChunk);
 
 						// State should be restored to pre-transaction
 						expect(
@@ -513,15 +507,15 @@ describe("Transaction atomicity properties", () => {
 											if (op.op === "create") {
 												yield* ctx.books
 													.create(op.payload)
-													.pipe(Effect.catchAll(() => Effect.void));
+													.pipe(Effect.catch(() => Effect.void));
 											} else if (op.op === "update") {
 												yield* ctx.books
 													.update(op.id, op.payload)
-													.pipe(Effect.catchAll(() => Effect.void));
+													.pipe(Effect.catch(() => Effect.void));
 											} else if (op.op === "delete") {
 												yield* ctx.books
 													.delete(op.id)
-													.pipe(Effect.catchAll(() => Effect.void));
+													.pipe(Effect.catch(() => Effect.void));
 											}
 										}
 
@@ -529,22 +523,20 @@ describe("Transaction atomicity properties", () => {
 										return "committed" as const;
 									}),
 								)
-								.pipe(Effect.either),
+								.pipe(Effect.result),
 						);
 
 						// Verify the transaction succeeded
-						expect(txResult._tag).toBe("Right");
-						if (txResult._tag === "Right") {
-							expect(txResult.right).toBe("committed");
+						expect(txResult._tag).toBe("Success");
+						if (txResult._tag === "Success") {
+							expect(txResult.success).toBe("committed");
 						}
 
 						// Get actual final state
 						const actualFinalChunk = await Effect.runPromise(
 							Stream.runCollect(db.books.query({})),
 						);
-						const actualFinalState = snapshotCollection(
-							Chunk.toReadonlyArray(actualFinalChunk),
-						);
+						const actualFinalState = snapshotCollection(actualFinalChunk);
 
 						// CRITICAL PROPERTY: Final state must match expected state
 						expect(snapshotsEqual(expectedFinalState, actualFinalState)).toBe(
@@ -581,17 +573,17 @@ describe("Transaction atomicity properties", () => {
 										return "committed" as const;
 									}),
 								)
-								.pipe(Effect.either),
+								.pipe(Effect.result),
 						);
 
 						// Verify success
-						expect(txResult._tag).toBe("Right");
+						expect(txResult._tag).toBe("Success");
 
 						// Verify all books were created
 						const allBooksChunk = await Effect.runPromise(
 							Stream.runCollect(db.books.query({})),
 						);
-						const allBooks = Chunk.toReadonlyArray(allBooksChunk);
+						const allBooks = allBooksChunk;
 
 						expect(allBooks.length).toBe(booksToCreate.length);
 
@@ -649,11 +641,11 @@ describe("Transaction atomicity properties", () => {
 										return "committed" as const;
 									}),
 								)
-								.pipe(Effect.either),
+								.pipe(Effect.result),
 						);
 
 						// Verify success
-						expect(txResult._tag).toBe("Right");
+						expect(txResult._tag).toBe("Success");
 
 						// Verify each update was applied
 						for (const update of updates) {
@@ -705,25 +697,25 @@ describe("Transaction atomicity properties", () => {
 										return "committed" as const;
 									}),
 								)
-								.pipe(Effect.either),
+								.pipe(Effect.result),
 						);
 
 						// Verify success
-						expect(txResult._tag).toBe("Right");
+						expect(txResult._tag).toBe("Success");
 
 						// Verify deleted books no longer exist
 						for (const deletedId of idsToDelete) {
 							const result = await Effect.runPromise(
-								db.books.findById(deletedId).pipe(Effect.either),
+								db.books.findById(deletedId).pipe(Effect.result),
 							);
-							expect(result._tag).toBe("Left");
+							expect(result._tag).toBe("Failure");
 						}
 
 						// Verify remaining books still exist
 						const allBooksChunk = await Effect.runPromise(
 							Stream.runCollect(db.books.query({})),
 						);
-						const allBooks = Chunk.toReadonlyArray(allBooksChunk);
+						const allBooks = allBooksChunk;
 
 						expect(allBooks.length).toBe(initialBooks.length - deleteCount);
 
@@ -774,17 +766,17 @@ describe("Transaction atomicity properties", () => {
 										return "committed" as const;
 									}),
 								)
-								.pipe(Effect.either),
+								.pipe(Effect.result),
 						);
 
 						// Verify success
-						expect(txResult._tag).toBe("Right");
+						expect(txResult._tag).toBe("Success");
 
 						// Verify new book was created
 						const createdResult = await Effect.runPromise(
-							db.books.findById(newBook.id).pipe(Effect.either),
+							db.books.findById(newBook.id).pipe(Effect.result),
 						);
-						expect(createdResult._tag).toBe("Right");
+						expect(createdResult._tag).toBe("Success");
 
 						// Verify update was applied
 						const updatedBook = await Effect.runPromise(
@@ -794,15 +786,15 @@ describe("Transaction atomicity properties", () => {
 
 						// Verify delete was applied
 						const deletedResult = await Effect.runPromise(
-							db.books.findById(bookToDelete.id).pipe(Effect.either),
+							db.books.findById(bookToDelete.id).pipe(Effect.result),
 						);
-						expect(deletedResult._tag).toBe("Left");
+						expect(deletedResult._tag).toBe("Failure");
 
 						// Verify final count
 						const allBooksChunk = await Effect.runPromise(
 							Stream.runCollect(db.books.query({})),
 						);
-						const allBooks = Chunk.toReadonlyArray(allBooksChunk);
+						const allBooks = allBooksChunk;
 
 						// Original count - 1 deleted + 1 created = original count
 						expect(allBooks.length).toBe(initialBooks.length);
@@ -810,9 +802,9 @@ describe("Transaction atomicity properties", () => {
 						// Verify remaining original books are intact
 						for (const book of remainingBooks) {
 							const found = await Effect.runPromise(
-								db.books.findById(book.id).pipe(Effect.either),
+								db.books.findById(book.id).pipe(Effect.result),
 							);
-							expect(found._tag).toBe("Right");
+							expect(found._tag).toBe("Success");
 						}
 					},
 				),

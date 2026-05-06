@@ -14,7 +14,12 @@ export const getEntity = <T extends HasId>(
 	ref: Ref.Ref<ReadonlyMap<string, T>>,
 	id: string,
 ): Effect.Effect<Option.Option<T>> =>
-	Ref.get(ref).pipe(Effect.map((map) => Option.fromNullable(map.get(id))));
+	Ref.get(ref).pipe(
+		Effect.map((map) => {
+			const entity = map.get(id);
+			return entity === undefined ? Option.none<T>() : Option.some(entity);
+		}),
+	);
 
 /**
  * Gets a single entity by ID, failing with NotFoundError if not present.

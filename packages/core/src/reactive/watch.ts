@@ -10,11 +10,9 @@
 import {
 	Duration,
 	Effect,
-	ExecutionStrategy,
-	Exit,
-	PubSub,
+	type PubSub,
 	type Ref,
-	Scope,
+	type Scope,
 	Stream,
 } from "effect";
 import type { ChangeEvent } from "../types/reactive-types.js";
@@ -120,86 +118,49 @@ export const watch = <T extends HasId>(
 	collectionName: string,
 	config: WatchQueryConfig = {},
 ): Effect.Effect<Stream.Stream<ReadonlyArray<T>>, never, Scope.Scope> =>
-	Effect.gen(function* () {
-		// Get the current scope so we can fork a child scope for this subscription.
-		// The child scope allows us to clean up the subscription independently of
-		// the parent scope - either when the stream ends OR when the parent closes.
-		const parentScope = yield* Scope.Scope;
+	Effect.succeed(
+		(() => {
+			// Create a stream from the PubSub. The stream manages subscription lifetime.
+			const changeStream = Stream.fromPubSub(pubsub);
 
-		// Fork a child scope that will manage the subscription lifetime.
-		// When this child scope closes, the subscription will be cleaned up.
-		const subscriptionScope = yield* Scope.fork(
-			parentScope,
-			ExecutionStrategy.sequential,
-		);
+			// Filter to only events for this collection
+			const filteredStream = Stream.filter(
+				changeStream,
+				(event: ChangeEvent) => event.collection === collectionName,
+			);
 
-		// Use Effect.acquireRelease to manage the subscription:
-		// - Acquire: Subscribe to the PubSub (returns a Dequeue of ChangeEvents)
-		// - Release: Close the subscription scope (which triggers subscription cleanup)
-		//
-		// This explicit acquireRelease pattern makes the resource management visible
-		// and ensures proper cleanup when the stream is interrupted or completes.
-		const subscription = yield* Effect.acquireRelease(
-			// Acquire: Subscribe to the PubSub within the child scope
-			// PubSub.subscribe returns Effect<Dequeue, never, Scope.Scope>
-			// We provide the subscription scope so cleanup is tied to it
-			PubSub.subscribe(pubsub).pipe(
-				Effect.provideService(Scope.Scope, subscriptionScope),
-			),
-			// Release: Close the child scope to trigger subscription cleanup
-			// This runs when the enclosing scope closes
-			() => Scope.close(subscriptionScope, Exit.void),
-		);
+			// Apply debouncing to coalesce rapid mutations into a single re-evaluation.
+			// This prevents re-evaluating the query on every single mutation when they
+			// arrive in bursts (e.g., createMany inserting 100 entities).
+			const debounceMs = config.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+			const debouncedStream = Stream.debounce(
+				filteredStream,
+				Duration.millis(debounceMs),
+			);
 
-		// Create a stream from the subscription queue
-		const changeStream = Stream.fromQueue(subscription);
+			// Map each (debounced) change event to a re-evaluation of the query.
+			// This transforms Stream<ChangeEvent> into Stream<ReadonlyArray<T>>
+			const changeResultStream = Stream.mapEffect(debouncedStream, () =>
+				evaluateQuery(ref, config),
+			);
 
-		// Filter to only events for this collection
-		const filteredStream = Stream.filter(
-			changeStream,
-			(event) => event.collection === collectionName,
-		);
+			// Create the initial emission stream: emit current result set immediately
+			const initialStream = Stream.fromEffect(evaluateQuery(ref, config));
 
-		// Apply debouncing to coalesce rapid mutations into a single re-evaluation.
-		// This prevents re-evaluating the query on every single mutation when they
-		// arrive in bursts (e.g., createMany inserting 100 entities).
-		const debounceMs = config.debounceMs ?? DEFAULT_DEBOUNCE_MS;
-		const debouncedStream = Stream.debounce(
-			filteredStream,
-			Duration.millis(debounceMs),
-		);
+			// Concatenate initial emission with the change-driven stream
+			// This ensures subscribers receive the current state immediately,
+			// then receive updates as changes occur
+			const combinedStream = Stream.concat(initialStream, changeResultStream);
 
-		// Map each (debounced) change event to a re-evaluation of the query.
-		// This transforms Stream<ChangeEvent> into Stream<ReadonlyArray<T>>
-		const changeResultStream = Stream.mapEffect(debouncedStream, () =>
-			evaluateQuery(ref, config),
-		);
+			// Deduplicate consecutive identical result sets to avoid spurious emissions.
+			// This prevents re-emitting the same result set when a change event occurs
+			// but doesn't actually affect the query results (e.g., inserting an entity
+			// that doesn't match the where clause).
+			const deduplicatedStream = Stream.changesWith(
+				combinedStream,
+				resultsAreEqual,
+			);
 
-		// Create the initial emission stream: emit current result set immediately
-		const initialStream = Stream.fromEffect(evaluateQuery(ref, config));
-
-		// Concatenate initial emission with the change-driven stream
-		// This ensures subscribers receive the current state immediately,
-		// then receive updates as changes occur
-		const combinedStream = Stream.concat(initialStream, changeResultStream);
-
-		// Deduplicate consecutive identical result sets to avoid spurious emissions.
-		// This prevents re-emitting the same result set when a change event occurs
-		// but doesn't actually affect the query results (e.g., inserting an entity
-		// that doesn't match the where clause).
-		const deduplicatedStream = Stream.changesWith(
-			combinedStream,
-			resultsAreEqual,
-		);
-
-		// Ensure the subscription is cleaned up when the stream ends.
-		// This handles the case where the stream is interrupted or completed
-		// before the parent scope closes (e.g., Stream.take(n) stopping early).
-		// Closing the subscription scope triggers the acquireRelease cleanup.
-		const resultStream = Stream.ensuring(
-			deduplicatedStream,
-			Scope.close(subscriptionScope, Exit.void),
-		);
-
-		return resultStream;
-	});
+			return deduplicatedStream;
+		})(),
+	);

@@ -11,7 +11,7 @@
  * across arbitrary valid inputs: entities that are created can be retrieved, deleted
  * entities cannot be retrieved, and unique constraints are properly enforced.
  */
-import { Chunk, Effect, Schema, Stream } from "effect";
+import { Effect, Schema, Stream } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
@@ -439,7 +439,7 @@ describe("CRUD invariant properties", () => {
 						const beforeDeleteChunk = yield* Stream.runCollect(
 							db.books.query({}),
 						);
-						const beforeDelete = Chunk.toReadonlyArray(beforeDeleteChunk);
+						const beforeDelete = beforeDeleteChunk;
 						const existsBefore = beforeDelete.some(
 							(book) => book.id === created.id,
 						);
@@ -452,7 +452,7 @@ describe("CRUD invariant properties", () => {
 						const afterDeleteChunk = yield* Stream.runCollect(
 							db.books.query({}),
 						);
-						const afterDelete = Chunk.toReadonlyArray(afterDeleteChunk);
+						const afterDelete = afterDeleteChunk;
 						const existsAfter = afterDelete.some(
 							(book) => book.id === created.id,
 						);
@@ -516,7 +516,7 @@ describe("CRUD invariant properties", () => {
 
 							// Verify query returns exactly the remaining entities
 							const queryChunk = yield* Stream.runCollect(db.books.query({}));
-							const queryResult = Chunk.toReadonlyArray(queryChunk);
+							const queryResult = queryChunk;
 							expect(queryResult.length).toBe(createdEntities.length - 1);
 
 							// Verify deleted entity is not in query results
@@ -614,7 +614,7 @@ describe("CRUD invariant properties", () => {
 							const beforeDeleteChunk = yield* Stream.runCollect(
 								db.books.query({ where: { id: entityToDelete.id } }),
 							);
-							const beforeDelete = Chunk.toReadonlyArray(beforeDeleteChunk);
+							const beforeDelete = beforeDeleteChunk;
 							expect(beforeDelete.length).toBe(1);
 							expect(beforeDelete[0].id).toBe(entityToDelete.id);
 
@@ -625,7 +625,7 @@ describe("CRUD invariant properties", () => {
 							const afterDeleteChunk = yield* Stream.runCollect(
 								db.books.query({ where: { id: entityToDelete.id } }),
 							);
-							const afterDelete = Chunk.toReadonlyArray(afterDeleteChunk);
+							const afterDelete = afterDeleteChunk;
 							expect(afterDelete.length).toBe(0);
 						});
 
@@ -720,7 +720,7 @@ describe("CRUD invariant properties", () => {
 							const allBooksChunk = yield* Stream.runCollect(
 								db.books.query({}),
 							);
-							const allBooks = Chunk.toReadonlyArray(allBooksChunk);
+							const allBooks = allBooksChunk;
 							expect(allBooks.length).toBe(1);
 							expect(allBooks[0].isbn).toBe(isbn);
 						});
@@ -779,7 +779,7 @@ describe("CRUD invariant properties", () => {
 							const allBooksChunk = yield* Stream.runCollect(
 								db.books.query({}),
 							);
-							const allBooks = Chunk.toReadonlyArray(allBooksChunk);
+							const allBooks = allBooksChunk;
 							expect(allBooks.length).toBe(isbns.length);
 
 							// Each ISBN should appear exactly once
@@ -848,7 +848,7 @@ describe("CRUD invariant properties", () => {
 							const allBooksChunk = yield* Stream.runCollect(
 								db.books.query({}),
 							);
-							const allBooks = Chunk.toReadonlyArray(allBooksChunk);
+							const allBooks = allBooksChunk;
 							expect(allBooks.length).toBe(1);
 							expect(allBooks[0].id).toBe(second.id);
 						});
@@ -973,7 +973,7 @@ describe("CRUD invariant properties", () => {
 								const currentChunk = yield* Stream.runCollect(
 									db.books.query({ where: { isbn: targetIsbn } }),
 								);
-								const current = Chunk.toReadonlyArray(currentChunk);
+								const current = currentChunk;
 								expect(current.length).toBe(1);
 
 								// Delete it
@@ -1002,7 +1002,7 @@ describe("CRUD invariant properties", () => {
 
 							// Final verification: should have exactly isbns.length books
 							const finalChunk = yield* Stream.runCollect(db.books.query({}));
-							const finalBooks = Chunk.toReadonlyArray(finalChunk);
+							const finalBooks = finalChunk;
 							expect(finalBooks.length).toBe(isbns.length);
 
 							// Each ISBN should appear exactly once

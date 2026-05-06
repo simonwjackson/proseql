@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { ValidationError } from "../../errors/crud-errors.js";
 import type {
 	CursorConfig,
@@ -150,8 +150,7 @@ export const applyCursor =
 			const limitedStream = Stream.takeRight(filteredStream, limit + 1);
 
 			return Effect.gen(function* () {
-				const chunk = yield* Stream.runCollect(limitedStream);
-				const items = Chunk.toReadonlyArray(chunk) as ReadonlyArray<T>;
+				const items = yield* Stream.runCollect(limitedStream);
 
 				// Handle empty results: return empty items, null cursors, both has-flags false
 				if (items.length === 0) {
@@ -205,8 +204,7 @@ export const applyCursor =
 			const limitedStream = Stream.take(filteredStream, limit + 1);
 
 			return Effect.gen(function* () {
-				const chunk = yield* Stream.runCollect(limitedStream);
-				const items = Chunk.toReadonlyArray(chunk) as ReadonlyArray<T>;
+				const items = yield* Stream.runCollect(limitedStream);
 
 				// Handle empty results: return empty items, null cursors, both has-flags false
 				if (items.length === 0) {

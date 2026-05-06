@@ -15,7 +15,7 @@ export type CollectionConfig = {
 	/**
 	 * Effect Schema for validating and encoding/decoding entities in this collection
 	 */
-	readonly schema: Schema.Schema.All;
+	readonly schema: Schema.Top;
 
 	/**
 	 * Optional file path for persisting this collection.

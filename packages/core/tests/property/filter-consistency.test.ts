@@ -10,7 +10,7 @@
  * where clause semantics: no false positives (entities that shouldn't match)
  * and no false negatives (entities that should match but are excluded).
  */
-import { Chunk, Effect, Schema, Stream } from "effect";
+import { Effect, Schema, Stream } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../../src/factories/database-effect";
@@ -89,7 +89,7 @@ describe("Filter consistency properties", () => {
 				});
 
 				const chunk = yield* Stream.runCollect(db.books.query({}));
-				const books = Chunk.toReadonlyArray(chunk);
+				const books = chunk;
 				expect(books).toHaveLength(1);
 				expect(books[0].title).toBe("Dune");
 			});
@@ -124,7 +124,7 @@ describe("Filter consistency properties", () => {
 
 							// Query with the generated where clause
 							const chunk = yield* Stream.runCollect(db.books.query({ where }));
-							const queryResults = Chunk.toReadonlyArray(chunk);
+							const queryResults = chunk;
 
 							// Calculate expected results using the reference implementation
 							const expectedResults = entities.filter((entity) =>
@@ -171,7 +171,7 @@ describe("Filter consistency properties", () => {
 							});
 
 							const chunk = yield* Stream.runCollect(db.books.query({ where }));
-							const queryResults = Chunk.toReadonlyArray(chunk);
+							const queryResults = chunk;
 
 							const shouldMatch = matchesWhere(entity, where);
 
@@ -208,17 +208,17 @@ describe("Filter consistency properties", () => {
 							const chunk1 = yield* Stream.runCollect(
 								db.books.query({ where }),
 							);
-							const results1 = Chunk.toReadonlyArray(chunk1);
+							const results1 = chunk1;
 
 							const chunk2 = yield* Stream.runCollect(
 								db.books.query({ where }),
 							);
-							const results2 = Chunk.toReadonlyArray(chunk2);
+							const results2 = chunk2;
 
 							const chunk3 = yield* Stream.runCollect(
 								db.books.query({ where }),
 							);
-							const results3 = Chunk.toReadonlyArray(chunk3);
+							const results3 = chunk3;
 
 							// All queries should return the same results
 							const ids1 = new Set(results1.map((e) => e.id));
@@ -256,7 +256,7 @@ describe("Filter consistency properties", () => {
 							const chunk = yield* Stream.runCollect(
 								db.books.query({ where: {} }),
 							);
-							const queryResults = Chunk.toReadonlyArray(chunk);
+							const queryResults = chunk;
 
 							// All entities should be returned
 							expect(queryResults.length).toBe(entities.length);
@@ -289,7 +289,7 @@ describe("Filter consistency properties", () => {
 
 							// Query with no where clause (undefined)
 							const chunk = yield* Stream.runCollect(db.books.query({}));
-							const queryResults = Chunk.toReadonlyArray(chunk);
+							const queryResults = chunk;
 
 							// All entities should be returned
 							expect(queryResults.length).toBe(entities.length);
@@ -317,7 +317,7 @@ describe("Filter consistency properties", () => {
 
 						// Query with arbitrary where clause
 						const chunk = yield* Stream.runCollect(db.books.query({ where }));
-						const queryResults = Chunk.toReadonlyArray(chunk);
+						const queryResults = chunk;
 
 						// Empty collection always returns empty results
 						expect(queryResults.length).toBe(0);
@@ -346,15 +346,15 @@ describe("Filter consistency properties", () => {
 							const chunk1 = yield* Stream.runCollect(
 								db.books.query({ where: {} }),
 							);
-							const results1 = Chunk.toReadonlyArray(chunk1);
+							const results1 = chunk1;
 
 							const chunk2 = yield* Stream.runCollect(db.books.query({}));
-							const results2 = Chunk.toReadonlyArray(chunk2);
+							const results2 = chunk2;
 
 							const chunk3 = yield* Stream.runCollect(
 								db.books.query({ where: {} }),
 							);
-							const results3 = Chunk.toReadonlyArray(chunk3);
+							const results3 = chunk3;
 
 							// All should return the same count
 							expect(results1.length).toBe(entities.length);
@@ -394,7 +394,7 @@ describe("Filter consistency properties", () => {
 							const chunk = yield* Stream.runCollect(
 								db.books.query({ where: {} }),
 							);
-							const queryResults = Chunk.toReadonlyArray(chunk);
+							const queryResults = chunk;
 
 							// All entities should be returned
 							expect(queryResults.length).toBe(entities.length);

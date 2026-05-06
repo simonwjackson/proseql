@@ -857,7 +857,7 @@ export type SmartCollection<
 // Extract all entity types from config
 export type ExtractEntityTypes<Config> = {
 	[K in keyof Config]: Config[K] extends {
-		schema: Schema.Schema<infer T, infer _E, infer _R>;
+		schema: Schema.Codec<infer T, infer _E, infer _R, infer _R>;
 	}
 		? T
 		: never;
@@ -892,7 +892,7 @@ type EntityWithComputed<Entity, Computed> =
 // Generate the full database type automatically
 export type GenerateDatabase<Config> = {
 	[K in keyof Config]: Config[K] extends {
-		schema: Schema.Schema<infer Entity, infer _E, infer _R>;
+		schema: Schema.Codec<infer Entity, infer _E, infer _R, infer _R>;
 		relationships: infer Relations;
 		computed?: infer Computed;
 	}
@@ -951,7 +951,7 @@ export type TypedPopulate<DB, Collection extends keyof DB> =
 // Type for the dataset that matches the config
 export type DatasetFor<Config> = {
 	[K in keyof Config]: Config[K] extends {
-		schema: Schema.Schema<infer T, infer _E, infer _R>;
+		schema: Schema.Codec<infer T, infer _E, infer _R, infer _R>;
 	}
 		? T[]
 		: never;

@@ -1,4 +1,4 @@
-import { Chunk, Effect, Schema, Stream } from "effect";
+import { Effect, Schema, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../src/factories/database-effect";
 
@@ -258,7 +258,7 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 					>
 				)[collection];
 				return yield* Stream.runCollect(coll.query(options)).pipe(
-					Effect.map(Chunk.toReadonlyArray),
+					Effect.map((items) => items),
 				);
 			}),
 		);
@@ -475,7 +475,7 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 							populate: { organization: true },
 							where: { id: "emp1" },
 						}),
-					).pipe(Effect.map(Chunk.toReadonlyArray));
+					).pipe(Effect.map((items) => items));
 				}),
 			);
 
@@ -495,7 +495,7 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 							populate: { employees: true },
 							where: { id: "org1" },
 						}),
-					).pipe(Effect.map(Chunk.toReadonlyArray));
+					).pipe(Effect.map((items) => items));
 				}),
 			);
 
@@ -595,7 +595,7 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 							populate: { company: true },
 							where: { id: "u1" },
 						}),
-					).pipe(Effect.map(Chunk.toReadonlyArray));
+					).pipe(Effect.map((items) => items));
 				}),
 			);
 
@@ -628,7 +628,7 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 							populate: { company: true },
 							where: { id: "u5" },
 						}),
-					).pipe(Effect.map(Chunk.toReadonlyArray));
+					).pipe(Effect.map((items) => items));
 				}),
 			);
 
@@ -697,7 +697,7 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 								},
 							},
 						}),
-					).pipe(Effect.map(Chunk.toReadonlyArray));
+					).pipe(Effect.map((items) => items));
 				}),
 			);
 
@@ -769,7 +769,7 @@ describe("Database v2 - Object-based Populate Syntax (Effect/Stream)", () => {
 							populate: { company: true },
 							where: { id: "u6" },
 						}),
-					).pipe(Effect.map(Chunk.toReadonlyArray));
+					).pipe(Effect.map((items) => items));
 				}),
 			);
 

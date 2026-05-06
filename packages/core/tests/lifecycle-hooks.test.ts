@@ -1,4 +1,4 @@
-import { Chunk, Effect, Schema, Stream } from "effect";
+import { Effect, Schema, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { HookError } from "../src/errors/crud-errors.js";
 import { createEffectDatabase } from "../src/factories/database-effect.js";
@@ -383,7 +383,7 @@ describe("lifecycle-hooks", () => {
 					const allUsersChunk = yield* Stream.runCollect(
 						db.users.query({}) as Stream.Stream<User>,
 					);
-					const allUsers = Chunk.toReadonlyArray(allUsersChunk);
+					const allUsers = allUsersChunk;
 
 					return { createResult, allUsers };
 				}),
@@ -1549,7 +1549,7 @@ describe("lifecycle-hooks", () => {
 					const allUsersChunk = yield* Stream.runCollect(
 						db.users.query({}) as Stream.Stream<User>,
 					);
-					const allUsers = Chunk.toReadonlyArray(allUsersChunk);
+					const allUsers = allUsersChunk;
 
 					return { createResult, allUsers };
 				}),
@@ -1649,7 +1649,7 @@ describe("lifecycle-hooks", () => {
 					const allUsersChunk = yield* Stream.runCollect(
 						db.users.query({}) as Stream.Stream<User>,
 					);
-					const allUsers = Chunk.toReadonlyArray(allUsersChunk);
+					const allUsers = allUsersChunk;
 
 					return { updateResult, allUsers };
 				}),
@@ -1740,7 +1740,7 @@ describe("lifecycle-hooks", () => {
 					const allUsersChunk = yield* Stream.runCollect(
 						db.users.query({}) as Stream.Stream<User>,
 					);
-					const allUsers = Chunk.toReadonlyArray(allUsersChunk);
+					const allUsers = allUsersChunk;
 
 					return { deleteResult, allUsers };
 				}),

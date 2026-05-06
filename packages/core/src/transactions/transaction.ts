@@ -124,12 +124,14 @@ export const createTransaction = <
 			Effect.suspend(() =>
 				isActive
 					? Effect.void
-					: new TransactionError({
-							operation: "begin",
-							reason: "transaction is no longer active",
-							message:
-								"Cannot perform operation: transaction is no longer active",
-						}),
+					: Effect.fail(
+							new TransactionError({
+								operation: "begin",
+								reason: "transaction is no longer active",
+								message:
+									"Cannot perform operation: transaction is no longer active",
+							}),
+						),
 			);
 
 		// Helper to wrap an effect-returning method with isActive check
@@ -338,13 +340,13 @@ export const $transaction = <
 				}),
 			),
 			// On failure: rollback and re-raise the original error
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.gen(function* () {
 					// Only rollback if still active (might have been explicitly rolled back)
 					if (ctx.isActive) {
 						// Rollback always fails with TransactionError, but we want to
 						// re-raise the original error, so we catch the rollback error
-						yield* ctx.rollback().pipe(Effect.catchAll(() => Effect.void));
+						yield* ctx.rollback().pipe(Effect.catch(() => Effect.void));
 					}
 					// Re-raise the original error
 					return yield* Effect.fail(error);

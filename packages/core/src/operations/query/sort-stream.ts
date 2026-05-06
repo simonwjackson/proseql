@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import {
 	SEARCH_SCORE_KEY,
 	type SearchConfig,
@@ -128,8 +128,8 @@ export const applyRelevanceSort =
 		if (queryTokens.length === 0) return stream;
 
 		return Stream.unwrap(
-			Effect.map(Stream.runCollect(stream), (chunk: Chunk.Chunk<T>) => {
-				const arr = Chunk.toArray(chunk) as Array<T>;
+			Effect.map(Stream.runCollect(stream), (items) => {
+				const arr = [...items];
 
 				// Sort by pre-computed score, or compute on-the-fly if not present
 				const scored = arr.map((item) => {
@@ -175,8 +175,8 @@ export const applySort =
 		const sortFields = Object.entries(sort);
 
 		return Stream.unwrap(
-			Effect.map(Stream.runCollect(stream), (chunk: Chunk.Chunk<T>) => {
-				const arr = Chunk.toArray(chunk) as Array<T>;
+			Effect.map(Stream.runCollect(stream), (items) => {
+				const arr = [...items];
 
 				arr.sort((a, b) => {
 					for (const [field, order] of sortFields) {

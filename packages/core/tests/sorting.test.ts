@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { applyFilter } from "../src/operations/query/filter-stream";
 import { applySort } from "../src/operations/query/sort-stream";
@@ -11,7 +11,7 @@ const collectSorted = <T extends Record<string, unknown>>(
 		Stream.fromIterable(data).pipe(
 			applySort<T>(sort),
 			Stream.runCollect,
-			Effect.map(Chunk.toReadonlyArray),
+			Effect.map((items) => items),
 		),
 	);
 
@@ -25,7 +25,7 @@ const collectFilteredSorted = <T extends Record<string, unknown>>(
 			applyFilter<T>(where),
 			applySort<T>(sort),
 			Stream.runCollect,
-			Effect.map(Chunk.toReadonlyArray),
+			Effect.map((items) => items),
 		),
 	);
 
@@ -677,7 +677,7 @@ describe("Database v2 - Sorting (Stream-based)", () => {
 					applySort<(typeof users)[number]>({ score: "desc" }),
 					Stream.take(3),
 					Stream.runCollect,
-					Effect.map(Chunk.toReadonlyArray),
+					Effect.map((items) => items),
 				),
 			);
 
@@ -693,7 +693,7 @@ describe("Database v2 - Sorting (Stream-based)", () => {
 					Stream.drop(2),
 					Stream.take(2),
 					Stream.runCollect,
-					Effect.map(Chunk.toReadonlyArray),
+					Effect.map((items) => items),
 				),
 			);
 

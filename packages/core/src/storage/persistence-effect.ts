@@ -6,7 +6,7 @@
  * Includes DebouncedWriter for coalescing rapid mutations into single file writes.
  */
 
-import { Effect, Fiber, PubSub, Queue, Ref, Schema, type Scope } from "effect";
+import { Effect, Fiber, PubSub, Ref, Schema, type Scope } from "effect";
 import { ValidationError } from "../errors/crud-errors.js";
 import { MigrationError } from "../errors/migration-errors.js";
 import {
@@ -104,7 +104,7 @@ export interface LoadDataOptions {
  */
 export const loadData = <A extends { readonly id: string }, I, R>(
 	filePath: string,
-	schema: Schema.Schema<A, I, R>,
+	schema: Schema.Codec<A, I, R, R>,
 	options?: LoadDataOptions,
 ): Effect.Effect<
 	ReadonlyMap<string, A>,
@@ -211,7 +211,7 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 		}
 
 		// Decode each entity through the schema
-		const decode = Schema.decodeUnknown(schema);
+		const decode = Schema.decodeUnknownEffect(schema);
 		const entries: Array<[string, A]> = [];
 
 		for (const [id, value] of Object.entries(dataToLoad)) {
@@ -288,7 +288,7 @@ export interface SaveDataOptions {
  */
 export const saveData = <A extends { readonly id: string }, I, R>(
 	filePath: string,
-	schema: Schema.Schema<A, I, R>,
+	schema: Schema.Codec<A, I, R, R>,
 	data: ReadonlyMap<string, A>,
 	options?: SaveDataOptions,
 ): Effect.Effect<
@@ -302,7 +302,7 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 		const ext = options?.format ?? (yield* resolveExtension(filePath));
 
 		// Encode each entity through the schema
-		const encode = Schema.encode(schema);
+		const encode = Schema.encodeEffect(schema);
 		const isArrayFormat =
 			ext === "jsonl" || ext === "ndjson" || ext === "prose";
 
@@ -372,7 +372,7 @@ export const saveData = <A extends { readonly id: string }, I, R>(
  */
 export interface LoadCollectionConfig {
 	readonly name: string;
-	readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>;
+	readonly schema: Schema.Codec<{ readonly id: string }, unknown, never, never>;
 	/**
 	 * Optional schema version from collection config.
 	 * When provided, enables version checking and migration support.
@@ -451,7 +451,12 @@ export const loadCollectionsFromFile = (
 		// Store migrated data for write-back (maps collection name to encoded entities + version)
 		const writeBackData: Array<{
 			readonly name: string;
-			readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>;
+			readonly schema: Schema.Codec<
+				{ readonly id: string },
+				unknown,
+				never,
+				never
+			>;
 			readonly data: ReadonlyMap<string, { readonly id: string }>;
 			readonly version?: number;
 		}> = [];
@@ -463,9 +468,10 @@ export const loadCollectionsFromFile = (
 				// Build write-back entry, only adding version if defined
 				const emptyEntry: {
 					readonly name: string;
-					readonly schema: Schema.Schema<
+					readonly schema: Schema.Codec<
 						{ readonly id: string },
 						unknown,
+						never,
 						never
 					>;
 					readonly data: ReadonlyMap<string, { readonly id: string }>;
@@ -538,7 +544,7 @@ export const loadCollectionsFromFile = (
 			}
 
 			// Decode each entity through the schema
-			const decode = Schema.decodeUnknown(col.schema);
+			const decode = Schema.decodeUnknownEffect(col.schema);
 			const entries: Array<[string, { readonly id: string }]> = [];
 
 			for (const [id, value] of Object.entries(dataToLoad)) {
@@ -578,7 +584,12 @@ export const loadCollectionsFromFile = (
 			// Track for write-back, only adding version if defined
 			const entry: {
 				readonly name: string;
-				readonly schema: Schema.Schema<{ readonly id: string }, unknown, never>;
+				readonly schema: Schema.Codec<
+					{ readonly id: string },
+					unknown,
+					never,
+					never
+				>;
 				readonly data: ReadonlyMap<string, { readonly id: string }>;
 				readonly version?: number;
 			} = {
@@ -616,7 +627,7 @@ type HasId = { readonly id: string };
  */
 export interface SaveCollectionConfig<T extends HasId = HasId, I = T> {
 	readonly name: string;
-	readonly schema: Schema.Schema<T, I, never>;
+	readonly schema: Schema.Codec<T, I, never, never>;
 	readonly data: ReadonlyMap<string, T>;
 	/**
 	 * Optional schema version to stamp into this collection's section.
@@ -650,7 +661,7 @@ export function saveCollectionsToFile<T extends HasId, I>(
 		const fileObj: Record<string, Record<string, unknown>> = {};
 
 		for (const col of collections) {
-			const encode = Schema.encode(col.schema);
+			const encode = Schema.encodeEffect(col.schema);
 			const entityMap: Record<string, unknown> = {};
 
 			for (const [id, entity] of col.data) {
@@ -693,7 +704,7 @@ export function saveCollectionsToFile<T extends HasId, I>(
  * the save effect itself (so flush can execute it immediately).
  */
 interface PendingWrite {
-	readonly fiber: Fiber.RuntimeFiber<
+	readonly fiber: Fiber.Fiber<
 		void,
 		StorageError | SerializationError | UnsupportedFormatError | ValidationError
 	>;
@@ -727,7 +738,11 @@ export interface DebouncedWriter {
 			| ValidationError,
 			StorageAdapter | SerializerRegistry
 		>,
-	) => Effect.Effect<void, never, StorageAdapter | SerializerRegistry>;
+	) => Effect.Effect<
+		void,
+		never,
+		Scope.Scope | StorageAdapter | SerializerRegistry
+	>;
 	/**
 	 * Immediately execute all pending writes, cancelling their debounce timers.
 	 * Errors from individual saves are collected but do not prevent other saves.
@@ -774,7 +789,7 @@ export const createDebouncedWriter = (
 				}
 
 				// Fork a fiber that sleeps then executes the save
-				const fiber = yield* Effect.fork(
+				const fiber = yield* Effect.forkDetach(
 					Effect.gen(function* () {
 						yield* Effect.sleep(delayMs);
 						yield* save;
@@ -785,6 +800,7 @@ export const createDebouncedWriter = (
 							return next;
 						});
 					}),
+					{ startImmediately: true },
 				);
 
 				// Store the pending write
@@ -840,7 +856,7 @@ export interface FileWatcherConfig<A extends { readonly id: string }, I, R> {
 	/** Path to the file to watch */
 	readonly filePath: string;
 	/** Schema to decode loaded data through */
-	readonly schema: Schema.Schema<A, I, R>;
+	readonly schema: Schema.Codec<A, I, R, R>;
 	/** Ref holding the collection state to update on file change */
 	readonly ref: Ref.Ref<ReadonlyMap<string, A>>;
 	/** Optional debounce delay in ms for reload after change (default 50) */
@@ -876,15 +892,15 @@ export const createFileWatcher = <A extends { readonly id: string }, I, R>(
 	const debounceMs = config.debounceMs ?? 50;
 
 	return Effect.gen(function* () {
+		const scope = yield* Effect.scope;
 		const storage = yield* StorageAdapter;
+		const runtimeContext = yield* Effect.context<
+			StorageAdapter | SerializerRegistry | R
+		>();
 		const active = yield* Ref.make(true);
 
-		// Queue bridges the sync onChange callback to the Effect world.
-		// The callback pushes a signal; a background fiber consumes it.
-		const changeQueue = yield* Queue.unbounded<void>();
-
 		// Ref to hold the debounce timer fiber so it can be cancelled on new events
-		const pendingReload = yield* Ref.make<Fiber.RuntimeFiber<
+		const pendingReload = yield* Ref.make<Fiber.Fiber<
 			void,
 			| StorageError
 			| SerializationError
@@ -893,60 +909,49 @@ export const createFileWatcher = <A extends { readonly id: string }, I, R>(
 			| MigrationError
 		> | null>(null);
 
-		// Background fiber: waits for change signals, debounces, then reloads.
-		const processorFiber = yield* Effect.fork(
-			Effect.forever(
+		const scheduleReload = Effect.gen(function* () {
+			const isActive = yield* Ref.get(active);
+			if (!isActive) return;
+
+			// Cancel any existing pending reload
+			const existing = yield* Ref.get(pendingReload);
+			if (existing !== null) {
+				yield* Fiber.interrupt(existing);
+			}
+
+			// Fork a debounced reload
+			const fiber = yield* Effect.forkIn(
 				Effect.gen(function* () {
-					// Block until a change signal arrives
-					yield* Queue.take(changeQueue);
-					// Drain any queued signals (batch rapid events)
-					yield* Queue.takeAll(changeQueue);
-
-					const isActive = yield* Ref.get(active);
-					if (!isActive) return;
-
-					// Cancel any existing pending reload
-					const existing = yield* Ref.get(pendingReload);
-					if (existing !== null) {
-						yield* Fiber.interrupt(existing);
+					yield* Effect.sleep(debounceMs);
+					const newData = yield* loadData(config.filePath, config.schema);
+					yield* Ref.set(config.ref, newData);
+					// Publish reload event if PubSub is provided
+					if (
+						config.changePubSub !== undefined &&
+						config.collectionName !== undefined
+					) {
+						yield* PubSub.publish(
+							config.changePubSub,
+							reloadEvent(config.collectionName),
+						);
 					}
-
-					// Fork a debounced reload
-					const fiber = yield* Effect.fork(
-						Effect.gen(function* () {
-							yield* Effect.sleep(debounceMs);
-							const newData = yield* loadData(config.filePath, config.schema);
-							yield* Ref.set(config.ref, newData);
-							// Publish reload event if PubSub is provided
-							if (
-								config.changePubSub !== undefined &&
-								config.collectionName !== undefined
-							) {
-								yield* PubSub.publish(
-									config.changePubSub,
-									reloadEvent(config.collectionName),
-								);
-							}
-						}),
-					);
-
-					yield* Ref.set(pendingReload, fiber);
 				}),
-			),
-		);
+				scope,
+				{ startImmediately: true },
+			);
+
+			yield* Ref.set(pendingReload, fiber);
+		}).pipe(Effect.provide(runtimeContext));
 
 		// Acquire the watcher via StorageAdapter.watch, release by calling the
 		// returned stop function. acquireRelease ties the lifetime to the Scope.
 		yield* Effect.acquireRelease(
 			storage.watch(config.filePath, () => {
-				// Push a change signal into the queue (sync-safe)
-				Queue.unsafeOffer(changeQueue, undefined);
+				Effect.runFork(scheduleReload);
 			}),
 			(stopWatching) =>
 				Effect.gen(function* () {
 					yield* Ref.set(active, false);
-					// Stop the processor fiber
-					yield* Fiber.interrupt(processorFiber);
 					// Cancel any pending reload
 					const pending = yield* Ref.get(pendingReload);
 					if (pending !== null) {

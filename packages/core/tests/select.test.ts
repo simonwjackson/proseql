@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	applyObjectSelection,
@@ -19,7 +19,7 @@ const collectSelected = <T extends Record<string, unknown>>(
 ) =>
 	Effect.runPromise(
 		Stream.runCollect(Stream.fromIterable(items).pipe(applySelect<T>(select))),
-	).then(Chunk.toArray);
+	).then((items) => items);
 
 describe("Field Selection (Stream-based + utility functions)", () => {
 	// ============================================================================
@@ -398,10 +398,10 @@ describe("Field Selection (Stream-based + utility functions)", () => {
 
 			const selected = failingStream.pipe(applySelect({ name: true }));
 			const result = await Effect.runPromise(
-				Effect.either(Stream.runCollect(selected)),
+				Effect.result(Stream.runCollect(selected)),
 			);
 
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 		});
 	});
 });

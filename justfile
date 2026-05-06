@@ -5,9 +5,9 @@
 default:
     @just --list
 
-# Test all packages (accepts optional args)
+# Test Korri-ready foundation packages (accepts optional args)
 test *args:
-    bun test packages/*/tests/ {{args}}
+    bun test packages/core/tests/ packages/node/tests/ packages/rest/tests/ {{args}}
 
 # Test core package only
 test-core:

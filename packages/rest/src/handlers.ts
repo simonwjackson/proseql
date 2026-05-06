@@ -12,7 +12,7 @@ import type {
 	GenerateDatabase,
 	GenerateDatabaseWithPersistence,
 } from "@proseql/core";
-import { Cause, Chunk, Effect, Option, Runtime, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { parseAggregateParams, parseQueryParams } from "./query-params.js";
 
 // ============================================================================
@@ -217,9 +217,7 @@ const createQueryHandler = (
 		const queryConfig = parseQueryParams(req.query);
 		const stream = collection.query(queryConfig);
 		const result = await Effect.runPromise(
-			Stream.runCollect(stream as Stream.Stream<Record<string, unknown>>).pipe(
-				Effect.map(Chunk.toReadonlyArray),
-			),
+			Stream.runCollect(stream as Stream.Stream<Record<string, unknown>>),
 		);
 		return { status: 200, body: result };
 	};
@@ -497,25 +495,7 @@ const createAggregateHandler = (
 const extractTaggedError = (
 	error: unknown,
 ): { readonly _tag: string; [key: string]: unknown } | null => {
-	// Check if it's a FiberFailure (from Effect.runPromise)
-	if (Runtime.isFiberFailure(error)) {
-		// Get the cause from the FiberFailure using the well-known symbol
-		const causeSymbol = Symbol.for("effect/Runtime/FiberFailure/Cause");
-		const cause = (error as unknown as Record<symbol, unknown>)[
-			causeSymbol
-		] as Cause.Cause<unknown>;
-
-		// Extract the failure from the cause
-		const failure = Cause.failureOption(cause);
-		if (Option.isSome(failure)) {
-			const value = failure.value;
-			if (value !== null && typeof value === "object" && "_tag" in value) {
-				return value as { readonly _tag: string; [key: string]: unknown };
-			}
-		}
-	}
-
-	// Check if it's already a tagged error
+	// Effect v4 runPromise throws failed values directly.
 	if (error !== null && typeof error === "object" && "_tag" in error) {
 		return error as { readonly _tag: string; [key: string]: unknown };
 	}

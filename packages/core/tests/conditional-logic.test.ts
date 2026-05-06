@@ -1,4 +1,4 @@
-import { Chunk, Effect, Schema, Stream } from "effect";
+import { Effect, Schema, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../src/factories/database-effect";
 
@@ -271,7 +271,7 @@ describe("Database v2 - Conditional Logic (OR/AND/NOT) (Effect/Stream)", () => {
 					>
 				)[collection];
 				return yield* Stream.runCollect(coll.query(options)).pipe(
-					Effect.map(Chunk.toReadonlyArray),
+					Effect.map((items) => items),
 				);
 			}),
 		);

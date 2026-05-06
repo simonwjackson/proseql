@@ -10,7 +10,7 @@
  * data through arbitrary operation sequences: any query on an indexed field should
  * return identical results whether the index is used or a full scan is performed.
  */
-import { Chunk, Effect, Ref, Schema, Stream } from "effect";
+import { Effect, Ref, Schema, Stream } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../../src/factories/database-effect";
@@ -200,7 +200,7 @@ describe("Index consistency properties", () => {
 				const chunk = yield* Stream.runCollect(
 					db.books.query({ where: { genre: "sci-fi" } }),
 				);
-				const books = Chunk.toReadonlyArray(chunk);
+				const books = chunk;
 				expect(books).toHaveLength(2);
 				expect(books.every((b) => b.genre === "sci-fi")).toBe(true);
 			});
@@ -239,7 +239,7 @@ describe("Index consistency properties", () => {
 				const chunk = yield* Stream.runCollect(
 					db.books.query({ where: { genre: "sci-fi" } }),
 				);
-				const books = Chunk.toReadonlyArray(chunk);
+				const books = chunk;
 				expect(books).toHaveLength(1);
 				expect(books[0].title).toBe("Dune");
 			});
@@ -349,7 +349,7 @@ describe("Index consistency properties", () => {
 
 				// Query and verify
 				const chunk = yield* Stream.runCollect(db.books.query({}));
-				const books = Chunk.toReadonlyArray(chunk);
+				const books = chunk;
 				expect(books).toHaveLength(2);
 
 				// The first book should now be "science-fiction" after the update
@@ -385,12 +385,12 @@ describe("Index consistency properties", () => {
 					} else if (operation.op === "update") {
 						yield* Effect.promise(
 							() => db.books.update(operation.id, operation.payload).runPromise,
-						).pipe(Effect.catchAll(() => Effect.void)); // Ignore NotFoundError for updates
+						).pipe(Effect.catch(() => Effect.void)); // Ignore NotFoundError for updates
 					} else if (operation.op === "delete") {
 						yield* Effect.promise(
 							() => db.books.delete(operation.id).runPromise,
 						).pipe(
-							Effect.catchAll(() => Effect.void), // Ignore NotFoundError for deletes
+							Effect.catch(() => Effect.void), // Ignore NotFoundError for deletes
 						);
 					}
 				}

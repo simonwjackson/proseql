@@ -1,4 +1,4 @@
-import { Cause, Effect, Runtime, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import type { ValidationError } from "../src/errors/crud-errors.js";
 import { createEffectDatabase } from "../src/factories/database-effect.js";
@@ -1694,26 +1694,8 @@ describe("Cursor Pagination", () => {
 	});
 
 	describe("validation errors", () => {
-		/**
-		 * Helper to extract the actual error from Effect's FiberFailure wrapper.
-		 * When Effect.runPromise rejects, it wraps the error in a FiberFailure.
-		 */
-		const extractEffectError = (e: unknown): unknown => {
-			if (
-				Runtime.isFiberFailure(e) &&
-				Cause.isCause(
-					(e as Record<symbol, unknown>)[Runtime.FiberFailureCauseId],
-				)
-			) {
-				const cause = (e as Record<symbol, unknown>)[
-					Runtime.FiberFailureCauseId
-				] as Cause.Cause<unknown>;
-				if (Cause.isFailType(cause)) {
-					return cause.error;
-				}
-			}
-			return e;
-		};
+		/** Effect v4 runPromise rejects with failed values directly. */
+		const extractEffectError = (e: unknown): unknown => e;
 
 		it("both after and before set produces ValidationError", async () => {
 			const items = generateItems(10);

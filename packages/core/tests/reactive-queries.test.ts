@@ -7,7 +7,6 @@
  */
 
 import {
-	Chunk,
 	Effect,
 	ExecutionStrategy,
 	Exit,
@@ -143,7 +142,7 @@ describe("reactive queries - basic watch", () => {
 
 					// Take one emission to verify the stream works
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(results)[0];
+					const emission = results[0];
 
 					expect(emission).toBeDefined();
 					expect(Array.isArray(emission)).toBe(true);
@@ -160,9 +159,9 @@ describe("reactive queries - basic watch", () => {
 
 					// Take just the initial emission
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(
+					const emission = 
 						results,
-					)[0] as ReadonlyArray<Book>;
+					[0] _as ReadonlyArray<Book>;
 
 					// Should emit all books immediately
 					expect(emission).toHaveLength(3);
@@ -181,9 +180,9 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(
+					const emission = 
 						results,
-					)[0] as ReadonlyArray<Book>;
+					[0] _as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(0);
 				}),
@@ -200,9 +199,9 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(
+					const emission = 
 						results,
-					)[0] as ReadonlyArray<Book>;
+					[0] _as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(2);
 					expect(emission.every((b) => b.genre === "sci-fi")).toBe(true);
@@ -218,9 +217,9 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(
+					const emission = 
 						results,
-					)[0] as ReadonlyArray<Book>;
+					[0] _as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(3);
 					expect(emission[0].year).toBe(1937);
@@ -238,7 +237,7 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(results)[0] as ReadonlyArray<
+					const emission = results[0] as ReadonlyArray<
 						Record<string, unknown>
 					>;
 
@@ -259,9 +258,9 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(
+					const emission = 
 						results,
-					)[0] as ReadonlyArray<Book>;
+					[0] _as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(2);
 					expect(emission[0].title).toBe("The Hobbit");
@@ -280,9 +279,9 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(
+					const emission = 
 						results,
-					)[0] as ReadonlyArray<Book>;
+					[0] _as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(2);
 					expect(emission[0].title).toBe("Dune");
@@ -302,7 +301,7 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(results)[0] as ReadonlyArray<
+					const emission = results[0] as ReadonlyArray<
 						Record<string, unknown>
 					>;
 
@@ -338,7 +337,7 @@ describe("reactive queries - basic watch", () => {
 
 					// Wait for second emission and collect
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -382,7 +381,7 @@ describe("reactive queries - basic watch", () => {
 					const countStream = Stream.map(stream, (books) => books.length);
 
 					const results = yield* Stream.runCollect(Stream.take(countStream, 1));
-					const counts = Chunk.toReadonlyArray(results);
+					const counts = results;
 
 					expect(counts[0]).toBe(2);
 				}),
@@ -411,12 +410,12 @@ describe("reactive queries - basic watch", () => {
 					const results1 = yield* Fiber.join(fiber1);
 					const results2 = yield* Fiber.join(fiber2);
 
-					const emission1 = Chunk.toReadonlyArray(
+					const emission1 = 
 						results1,
-					)[0] as ReadonlyArray<Book>;
-					const emission2 = Chunk.toReadonlyArray(
+					[0] _as ReadonlyArray<Book>;
+					const emission2 = 
 						results2,
-					)[0] as ReadonlyArray<Book>;
+					[0] _as ReadonlyArray<Book>;
 
 					// Each subscription should have its own filtered results
 					expect(emission1).toHaveLength(2);
@@ -464,7 +463,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Wait for the stream to emit and collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -528,7 +527,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Wait for emission and collect
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -574,7 +573,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Wait for the stream to emit and collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -614,7 +613,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -662,7 +661,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -703,7 +702,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Wait for the stream to emit and collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -756,7 +755,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -802,7 +801,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Wait for the stream to emit and collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -850,7 +849,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -896,7 +895,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -942,7 +941,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Wait for the stream to emit and collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -987,7 +986,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -1038,7 +1037,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -1089,7 +1088,7 @@ describe("reactive queries - irrelevant mutations", () => {
 							duration: "100 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -1145,7 +1144,7 @@ describe("reactive queries - irrelevant mutations", () => {
 							duration: "100 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -1209,7 +1208,7 @@ describe("reactive queries - irrelevant mutations", () => {
 							duration: "100 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -1255,7 +1254,7 @@ describe("reactive queries - irrelevant mutations", () => {
 							duration: "100 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -1302,7 +1301,7 @@ describe("reactive queries - irrelevant mutations", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -1343,7 +1342,7 @@ describe("reactive queries - irrelevant mutations", () => {
 							onTimeout: () => new Error("timeout"),
 						}),
 						Effect.catchTag("NoSuchElementException", () => Effect.void),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -1396,7 +1395,7 @@ describe("reactive queries - irrelevant mutations", () => {
 							duration: "100 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -1446,7 +1445,7 @@ describe("reactive queries - irrelevant mutations", () => {
 							duration: "150 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -1461,7 +1460,7 @@ describe("reactive queries - irrelevant mutations", () => {
 							duration: "150 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -1523,7 +1522,7 @@ describe("reactive queries - transactions", () => {
 							duration: "200 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -1620,7 +1619,7 @@ describe("reactive queries - transactions", () => {
 							duration: "200 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -1635,7 +1634,7 @@ describe("reactive queries - transactions", () => {
 							duration: "200 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -1736,7 +1735,7 @@ describe("reactive queries - transactions", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -1820,7 +1819,7 @@ describe("reactive queries - transactions", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -1899,12 +1898,12 @@ describe("reactive queries - transactions", () => {
 					const booksResults = yield* Fiber.join(booksFiber);
 					const authorsResults = yield* Fiber.join(authorsFiber);
 
-					const bookEmissions = Chunk.toReadonlyArray(
+					const bookEmissions = 
 						booksResults,
-					) as ReadonlyArray<ReadonlyArray<Book>>;
-					const authorEmissions = Chunk.toReadonlyArray(
+					 _as ReadonlyArray<ReadonlyArray<Book>>;
+					const authorEmissions = 
 						authorsResults,
-					) as ReadonlyArray<ReadonlyArray<Author>>;
+					 as ReadonlyArray<ReadonlyArray<Author>>;
 
 					// Books: exactly 2 emissions (initial + one post-commit)
 					expect(bookEmissions).toHaveLength(2);
@@ -1951,7 +1950,7 @@ describe("reactive queries - transactions", () => {
 							duration: "200 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -1983,7 +1982,7 @@ describe("reactive queries - transactions", () => {
 								return yield* Effect.fail(new Error("intentional failure"));
 							}),
 						)
-						.pipe(Effect.catchAll(() => Effect.void)); // Catch the intentional failure
+						.pipe(Effect.catch(() => Effect.void)); // Catch the intentional failure
 
 					// Wait for any potential emissions after rollback
 					yield* Effect.sleep("50 millis");
@@ -2026,7 +2025,7 @@ describe("reactive queries - transactions", () => {
 							duration: "200 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -2056,7 +2055,7 @@ describe("reactive queries - transactions", () => {
 								return yield* Effect.fail(new Error("intentional failure"));
 							}),
 						)
-						.pipe(Effect.catchAll(() => Effect.void));
+						.pipe(Effect.catch(() => Effect.void));
 
 					// Wait for any potential emissions after rollback
 					yield* Effect.sleep("50 millis");
@@ -2101,7 +2100,7 @@ describe("reactive queries - transactions", () => {
 							duration: "200 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -2116,7 +2115,7 @@ describe("reactive queries - transactions", () => {
 							duration: "200 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -2155,7 +2154,7 @@ describe("reactive queries - transactions", () => {
 								return yield* Effect.fail(new Error("intentional failure"));
 							}),
 						)
-						.pipe(Effect.catchAll(() => Effect.void));
+						.pipe(Effect.catch(() => Effect.void));
 
 					// Wait for any potential emissions after rollback
 					yield* Effect.sleep("50 millis");
@@ -2308,7 +2307,7 @@ describe("reactive queries - file changes", () => {
 						duration: "300 millis",
 						onTimeout: () => new Error("timeout"),
 					}),
-					Effect.catchAll(() => Effect.void),
+					Effect.catch(() => Effect.void),
 					Effect.fork,
 				);
 
@@ -2431,7 +2430,7 @@ describe("reactive queries - file changes", () => {
 						duration: "300 millis",
 						onTimeout: () => new Error("timeout"),
 					}),
-					Effect.catchAll(() => Effect.void),
+					Effect.catch(() => Effect.void),
 					Effect.fork,
 				);
 
@@ -2535,7 +2534,7 @@ describe("reactive queries - file changes", () => {
 						duration: "300 millis",
 						onTimeout: () => new Error("timeout"),
 					}),
-					Effect.catchAll(() => Effect.void),
+					Effect.catch(() => Effect.void),
 					Effect.fork,
 				);
 
@@ -2646,7 +2645,7 @@ describe("reactive queries - file changes", () => {
 						duration: "300 millis",
 						onTimeout: () => new Error("timeout"),
 					}),
-					Effect.catchAll(() => Effect.void),
+					Effect.catch(() => Effect.void),
 					Effect.fork,
 				);
 
@@ -2742,7 +2741,7 @@ describe("reactive queries - file changes", () => {
 						duration: "300 millis",
 						onTimeout: () => new Error("timeout"),
 					}),
-					Effect.catchAll(() => Effect.void),
+					Effect.catch(() => Effect.void),
 					Effect.fork,
 				);
 
@@ -2855,7 +2854,7 @@ describe("reactive queries - file changes", () => {
 						duration: "300 millis",
 						onTimeout: () => new Error("timeout"),
 					}),
-					Effect.catchAll(() => Effect.void),
+					Effect.catch(() => Effect.void),
 					Effect.fork,
 				);
 
@@ -2954,7 +2953,7 @@ describe("reactive queries - file changes", () => {
 						duration: "400 millis",
 						onTimeout: () => new Error("timeout"),
 					}),
-					Effect.catchAll(() => Effect.void),
+					Effect.catch(() => Effect.void),
 					Effect.fork,
 				);
 
@@ -3016,7 +3015,7 @@ describe("reactive queries - debounce", () => {
 							duration: "500 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -3085,7 +3084,7 @@ describe("reactive queries - debounce", () => {
 							duration: "500 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -3142,7 +3141,7 @@ describe("reactive queries - debounce", () => {
 							duration: "500 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -3226,7 +3225,7 @@ describe("reactive queries - debounce", () => {
 							duration: "500 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -3313,7 +3312,7 @@ describe("reactive queries - debounce", () => {
 								duration: "500 millis",
 								onTimeout: () => new Error("timeout"),
 							}),
-							Effect.catchAll(() => Effect.void),
+							Effect.catch(() => Effect.void),
 							Effect.fork,
 						);
 
@@ -3741,7 +3740,7 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 
 					// Wait for the fiber to complete (should complete after 2 emissions)
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = Chunk.toReadonlyArray(results) as ReadonlyArray<
+					const emissions = results as ReadonlyArray<
 						ReadonlyArray<Book>
 					>;
 
@@ -4047,7 +4046,7 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 
 					// Take just the initial emission
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(results)[0] as Book | null;
+					const emission = results[0] as Book | null;
 
 					// Should emit the entity immediately
 					expect(emission).not.toBeNull();
@@ -4066,7 +4065,7 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 
 					// Take the initial emission
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = Chunk.toReadonlyArray(results)[0];
+					const emission = results[0];
 
 					// Should emit null for non-existent entity
 					expect(emission).toBeNull();
@@ -4093,7 +4092,7 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 							duration: "200 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -4142,7 +4141,7 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 							duration: "200 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -4187,7 +4186,7 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 							duration: "400 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -4244,7 +4243,7 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 							duration: "200 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -4287,7 +4286,7 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 							duration: "200 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 
@@ -4338,7 +4337,7 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 							duration: "500 millis",
 							onTimeout: () => new Error("timeout"),
 						}),
-						Effect.catchAll(() => Effect.void),
+						Effect.catch(() => Effect.void),
 						Effect.fork,
 					);
 

@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { applySelect } from "../src/operations/query/select-stream.js";
 
@@ -30,7 +30,7 @@ describe("applySelect Stream combinator", () => {
 	) =>
 		Effect.runPromise(
 			Stream.runCollect(toStream(items).pipe(applySelect<T>(select))),
-		).then(Chunk.toArray);
+		).then((items) => items);
 
 	// ============================================================================
 	// Pass-through behavior
@@ -273,10 +273,10 @@ describe("applySelect Stream combinator", () => {
 
 			const selected = failingStream.pipe(applySelect({ name: true }));
 			const result = await Effect.runPromise(
-				Effect.either(Stream.runCollect(selected)),
+				Effect.result(Stream.runCollect(selected)),
 			);
 
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 		});
 
 		it("should preserve Stream context (R) type", async () => {
@@ -285,7 +285,7 @@ describe("applySelect Stream combinator", () => {
 			const selected = stream.pipe(applySelect({ name: true }));
 
 			const result = await Effect.runPromise(Stream.runCollect(selected));
-			expect(Chunk.toArray(result)).toEqual([{ name: "A" }]);
+			expect(result).toEqual([{ name: "A" }]);
 		});
 	});
 });

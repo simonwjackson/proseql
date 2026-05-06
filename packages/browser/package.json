@@ -5,5 +5,8 @@
   "main": "src/index.ts",
   "dependencies": {
     "@proseql/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-beta.60"
   }
 }

@@ -529,7 +529,7 @@ describe("schema-migrations: migration registry validation", () => {
 			const result = await Effect.runPromise(
 				validateMigrationRegistry("users", 3, allMigrations).pipe(
 					Effect.map(() => "success"),
-					Effect.catchAll((e) => Effect.succeed(e)),
+					Effect.catch((e) => Effect.succeed(e)),
 				),
 			);
 			expect(result).toBe("success");
@@ -539,7 +539,7 @@ describe("schema-migrations: migration registry validation", () => {
 			const result = await Effect.runPromise(
 				validateMigrationRegistry("users", 1, migrationsTo1).pipe(
 					Effect.map(() => "success"),
-					Effect.catchAll((e) => Effect.succeed(e)),
+					Effect.catch((e) => Effect.succeed(e)),
 				),
 			);
 			expect(result).toBe("success");
@@ -549,7 +549,7 @@ describe("schema-migrations: migration registry validation", () => {
 			const result = await Effect.runPromise(
 				validateMigrationRegistry("users", 0, []).pipe(
 					Effect.map(() => "success"),
-					Effect.catchAll((e) => Effect.succeed(e)),
+					Effect.catch((e) => Effect.succeed(e)),
 				),
 			);
 			expect(result).toBe("success");
@@ -565,7 +565,7 @@ describe("schema-migrations: migration registry validation", () => {
 			const result = await Effect.runPromise(
 				validateMigrationRegistry("users", 3, unordered).pipe(
 					Effect.map(() => "success"),
-					Effect.catchAll((e) => Effect.succeed(e)),
+					Effect.catch((e) => Effect.succeed(e)),
 				),
 			);
 			expect(result).toBe("success");
@@ -856,7 +856,7 @@ describe("schema-migrations: migration registry validation", () => {
 			const result = await Effect.runPromise(
 				validateMigrationRegistry("users", 0, []).pipe(
 					Effect.map(() => "success"),
-					Effect.catchAll((e) => Effect.succeed(e)),
+					Effect.catch((e) => Effect.succeed(e)),
 				),
 			);
 			expect(result).toBe("success");

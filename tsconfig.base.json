@@ -10,6 +10,7 @@
     "composite": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
+    "types": ["bun", "node"],
     "paths": {
       "@proseql/core": ["./packages/core/src/index.ts"],
       "@proseql/core/*": ["./packages/core/src/*"]

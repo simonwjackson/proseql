@@ -88,7 +88,7 @@ describe("FileWatcher", () => {
 
 						const scope = yield* Scope.make();
 
-						const watcher = yield* Scope.extend(
+						const watcher = yield* Scope.provide(
 							createFileWatcher({
 								filePath: "/data/users.json",
 								schema: UserSchema,
@@ -129,7 +129,7 @@ describe("FileWatcher", () => {
 
 						const scope = yield* Scope.make();
 
-						yield* Scope.extend(
+						yield* Scope.provide(
 							createFileWatcher({
 								filePath: "/data/users.json",
 								schema: UserSchema,
@@ -333,7 +333,7 @@ describe("FileWatcher", () => {
 
 						const scope = yield* Scope.make();
 
-						const watchers = yield* Scope.extend(
+						const watchers = yield* Scope.provide(
 							createFileWatchers([
 								{
 									filePath: "/data/users.json",

@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { resolveComputedFields } from "../src/operations/query/resolve-computed";
 import { sortData } from "../src/operations/query/sort";
@@ -58,7 +58,7 @@ const collectSorted = <T extends Record<string, unknown>>(
 		Stream.fromIterable(data).pipe(
 			applySort<T>(sort),
 			Stream.runCollect,
-			Effect.map(Chunk.toReadonlyArray),
+			Effect.map((items) => items),
 		),
 	);
 

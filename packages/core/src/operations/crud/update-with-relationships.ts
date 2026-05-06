@@ -41,7 +41,7 @@ type RelationshipConfig = {
 };
 
 type CollectionConfig = {
-	readonly schema: Schema.Schema<HasId, unknown>;
+	readonly schema: Schema.Codec<HasId, unknown>;
 	readonly relationships: Record<string, RelationshipConfig>;
 };
 
@@ -489,7 +489,7 @@ const stripComputedFromInput = <T>(
 export const updateWithRelationships =
 	<T extends HasId, I = T>(
 		collectionName: string,
-		schema: Schema.Schema<T, I>,
+		schema: Schema.Codec<T, I>,
 		relationships: Record<string, RelationshipConfig>,
 		ref: Ref.Ref<ReadonlyMap<string, T>>,
 		stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,

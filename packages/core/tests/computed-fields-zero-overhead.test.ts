@@ -1,4 +1,4 @@
-import { Chunk, Effect, Schema, Stream } from "effect";
+import { Effect, Schema, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../src/factories/database-effect";
 import {
@@ -46,12 +46,10 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 			// The returned stream should be the same reference (no wrapping)
 			// We verify this by checking the streams produce identical results
 			const originalItems = await Effect.runPromise(
-				Stream.runCollect(originalStream).pipe(
-					Effect.map(Chunk.toReadonlyArray),
-				),
+				Stream.runCollect(originalStream).pipe(Effect.map((items) => items)),
 			);
 			const resultItems = await Effect.runPromise(
-				Stream.runCollect(resultStream).pipe(Effect.map(Chunk.toReadonlyArray)),
+				Stream.runCollect(resultStream).pipe(Effect.map((items) => items)),
 			);
 
 			expect(resultItems).toEqual(originalItems);
@@ -67,7 +65,7 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 			)(originalStream);
 
 			const resultItems = await Effect.runPromise(
-				Stream.runCollect(resultStream).pipe(Effect.map(Chunk.toReadonlyArray)),
+				Stream.runCollect(resultStream).pipe(Effect.map((items) => items)),
 			);
 
 			expect(resultItems).toHaveLength(3);
@@ -81,7 +79,7 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 			);
 
 			const items = await Effect.runPromise(
-				Stream.runCollect(resultStream).pipe(Effect.map(Chunk.toReadonlyArray)),
+				Stream.runCollect(resultStream).pipe(Effect.map((items) => items)),
 			);
 
 			// Verify entities are unchanged (no extra properties)
@@ -103,7 +101,7 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 			)(originalStream);
 
 			const resultItems = await Effect.runPromise(
-				Stream.runCollect(resultStream).pipe(Effect.map(Chunk.toReadonlyArray)),
+				Stream.runCollect(resultStream).pipe(Effect.map((items) => items)),
 			);
 
 			expect(resultItems).toEqual(testBooks);
@@ -119,7 +117,7 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 			)(originalStream);
 
 			const resultItems = await Effect.runPromise(
-				Stream.runCollect(resultStream).pipe(Effect.map(Chunk.toReadonlyArray)),
+				Stream.runCollect(resultStream).pipe(Effect.map((items) => items)),
 			);
 
 			expect(resultItems).toEqual(testBooks);
@@ -136,7 +134,7 @@ describe("Computed Fields Zero Overhead (Task 8.3)", () => {
 			)(originalStream);
 
 			const items = await Effect.runPromise(
-				Stream.runCollect(resultStream).pipe(Effect.map(Chunk.toReadonlyArray)),
+				Stream.runCollect(resultStream).pipe(Effect.map((items) => items)),
 			);
 
 			// Verify no extra fields were added

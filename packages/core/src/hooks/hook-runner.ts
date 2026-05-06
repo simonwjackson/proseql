@@ -43,12 +43,16 @@ export const runBeforeCreateHooks = <T>(
 		return Effect.succeed(initialCtx.data);
 	}
 
-	return Effect.reduce(hooks, initialCtx.data, (data, hook) =>
-		hook({
-			...initialCtx,
-			data,
-		}),
-	);
+	return Effect.gen(function* () {
+		let data = initialCtx.data;
+		for (const hook of hooks) {
+			data = yield* hook({
+				...initialCtx,
+				data,
+			});
+		}
+		return data;
+	});
 };
 
 /**
@@ -65,12 +69,16 @@ export const runBeforeUpdateHooks = <T>(
 		return Effect.succeed(initialCtx.update);
 	}
 
-	return Effect.reduce(hooks, initialCtx.update, (update, hook) =>
-		hook({
-			...initialCtx,
-			update,
-		}),
-	);
+	return Effect.gen(function* () {
+		let update = initialCtx.update;
+		for (const hook of hooks) {
+			update = yield* hook({
+				...initialCtx,
+				update,
+			});
+		}
+		return update;
+	});
 };
 
 /**
@@ -111,7 +119,7 @@ export const runAfterCreateHooks = <T>(
 	return Effect.forEach(
 		hooks,
 		(hook) =>
-			Effect.catchAll(
+			Effect.catch(
 				hook(ctx) as Effect.Effect<void, unknown>,
 				() => Effect.void,
 			),
@@ -136,7 +144,7 @@ export const runAfterUpdateHooks = <T>(
 	return Effect.forEach(
 		hooks,
 		(hook) =>
-			Effect.catchAll(
+			Effect.catch(
 				hook(ctx) as Effect.Effect<void, unknown>,
 				() => Effect.void,
 			),
@@ -161,7 +169,7 @@ export const runAfterDeleteHooks = <T>(
 	return Effect.forEach(
 		hooks,
 		(hook) =>
-			Effect.catchAll(
+			Effect.catch(
 				hook(ctx) as Effect.Effect<void, unknown>,
 				() => Effect.void,
 			),
@@ -190,7 +198,7 @@ export const runOnChangeHooks = <T>(
 	return Effect.forEach(
 		hooks,
 		(hook) =>
-			Effect.catchAll(
+			Effect.catch(
 				hook(ctx) as Effect.Effect<void, unknown>,
 				() => Effect.void,
 			),

@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { applyFilter } from "../src/operations/query/filter-stream";
 import {
@@ -24,7 +24,7 @@ const collectPipeline = <T extends Record<string, unknown>>(
 			applySort<T>(options.sort),
 			applySelect<T>(options.select),
 			Stream.runCollect,
-			Effect.map(Chunk.toReadonlyArray),
+			Effect.map((items) => items),
 		),
 	);
 
@@ -196,7 +196,7 @@ describe("Field Selection Integration (Stream-based)", () => {
 				Stream.fromIterable(largeDataset).pipe(
 					applySelect({ id: true, name: true, department: true }),
 					Stream.runCollect,
-					Effect.map(Chunk.toArray),
+					Effect.map((items) => items),
 				),
 			);
 
@@ -360,10 +360,10 @@ describe("Field Selection Integration (Stream-based)", () => {
 			);
 
 			const result = await Effect.runPromise(
-				Effect.either(Stream.runCollect(selected)),
+				Effect.result(Stream.runCollect(selected)),
 			);
 
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 		});
 	});
 });

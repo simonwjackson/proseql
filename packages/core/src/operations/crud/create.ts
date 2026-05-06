@@ -101,7 +101,7 @@ const stripComputedFromInput = <T>(
 export const create =
 	<T extends HasId, I = T>(
 		collectionName: string,
-		schema: Schema.Schema<T, I>,
+		schema: Schema.Codec<T, I>,
 		relationships: Record<string, RelationshipConfig>,
 		ref: Ref.Ref<ReadonlyMap<string, T>>,
 		stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
@@ -251,7 +251,7 @@ export const create =
 export const createMany =
 	<T extends HasId, I = T>(
 		collectionName: string,
-		schema: Schema.Schema<T, I>,
+		schema: Schema.Codec<T, I>,
 		relationships: Record<string, RelationshipConfig>,
 		ref: Ref.Ref<ReadonlyMap<string, T>>,
 		stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,

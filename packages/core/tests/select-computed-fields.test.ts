@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { resolveComputedFields } from "../src/operations/query/resolve-computed";
 import { applyObjectSelection } from "../src/operations/query/select";
@@ -61,7 +61,7 @@ const collectSelected = <T extends Record<string, unknown>>(
 		Stream.fromIterable(data).pipe(
 			applySelect<T>(select),
 			Stream.runCollect,
-			Effect.map(Chunk.toReadonlyArray),
+			Effect.map((items) => items),
 		),
 	);
 

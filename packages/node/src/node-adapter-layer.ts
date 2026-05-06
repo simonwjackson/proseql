@@ -51,9 +51,8 @@ const toStorageError = (
 	});
 
 const retryPolicy = (config: Required<NodeAdapterConfig>) =>
-	Schedule.intersect(
-		Schedule.exponential(config.baseDelay),
-		Schedule.recurs(config.maxRetries),
+	Schedule.exponential(`${config.baseDelay} millis`).pipe(
+		Schedule.both(Schedule.recurs(config.maxRetries)),
 	);
 
 // ============================================================================
@@ -63,10 +62,13 @@ const retryPolicy = (config: Required<NodeAdapterConfig>) =>
 const makeRead =
 	(config: Required<NodeAdapterConfig>) =>
 	(path: string): Effect.Effect<string, StorageError> =>
-		Effect.tryPromise({
+		Effect.tryPromise<string, StorageError>({
 			try: () => fs.readFile(path, "utf-8"),
 			catch: (error) => toStorageError(path, "read", error),
-		}).pipe(Effect.retry(retryPolicy(config)));
+		}).pipe(Effect.retry(retryPolicy(config))) as Effect.Effect<
+			string,
+			StorageError
+		>;
 
 const makeWrite =
 	(config: Required<NodeAdapterConfig>) =>
@@ -94,7 +96,7 @@ const makeWrite =
 					catch: (error) => toStorageError(path, "write", error),
 				}),
 			),
-			Effect.catchAll((error) =>
+			Effect.catch((error) =>
 				Effect.tryPromise({
 					try: () => fs.unlink(tempPath),
 					catch: () => error,
@@ -136,10 +138,13 @@ const makeAppend =
 const makeExists =
 	(_config: Required<NodeAdapterConfig>) =>
 	(path: string): Effect.Effect<boolean, StorageError> =>
-		Effect.tryPromise({
+		Effect.tryPromise<boolean, StorageError>({
 			try: () => fs.access(path).then(() => true),
-			catch: () => false as never,
-		}).pipe(Effect.catchAll(() => Effect.succeed(false)));
+			catch: (error) => toStorageError(path, "read", error),
+		}).pipe(Effect.catch(() => Effect.succeed(false))) as Effect.Effect<
+			boolean,
+			StorageError
+		>;
 
 const makeRemove =
 	(config: Required<NodeAdapterConfig>) =>
@@ -170,11 +175,15 @@ const makeWatch =
 	): Effect.Effect<() => void, StorageError> =>
 		Effect.try({
 			try: () => {
-				const watcher = fsWatch(path, { persistent: false }, (eventType) => {
-					if (eventType === "change") {
-						onChange();
-					}
-				});
+				const watcher = fsWatch(
+					path,
+					{ persistent: false },
+					(eventType: string) => {
+						if (eventType === "change") {
+							onChange();
+						}
+					},
+				);
 				return () => {
 					watcher.close();
 				};

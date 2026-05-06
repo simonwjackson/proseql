@@ -619,7 +619,7 @@ describe("CRUD with Relationships (Effect-based)", () => {
 
 				// Try to delete category with restrict — should fail
 				const result = await Effect.runPromise(
-					Effect.either(
+					Effect.result(
 						db.categories.deleteWithRelationships(category.id, {
 							include: {
 								posts: "restrict",
@@ -628,9 +628,9 @@ describe("CRUD with Relationships (Effect-based)", () => {
 					),
 				);
 
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					expect(result.left._tag).toBe("ValidationError");
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					expect(result.failure._tag).toBe("ValidationError");
 				}
 			});
 		});

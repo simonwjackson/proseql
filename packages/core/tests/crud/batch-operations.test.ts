@@ -14,7 +14,7 @@ const UserSchema = Schema.Struct({
 		default: () => [] as ReadonlyArray<string>,
 	}),
 	metadata: Schema.optional(
-		Schema.NullOr(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+		Schema.NullOr(Schema.Record(Schema.String, Schema.Unknown)),
 	),
 	companyId: Schema.String,
 	createdAt: Schema.optional(Schema.String),
@@ -39,9 +39,7 @@ const AuditLogSchema = Schema.Struct({
 	entityType: Schema.String,
 	entityId: Schema.String,
 	userId: Schema.optional(Schema.String),
-	changes: Schema.optional(
-		Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-	),
+	changes: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 	timestamp: Schema.String,
 	createdAt: Schema.optional(Schema.String),
 });

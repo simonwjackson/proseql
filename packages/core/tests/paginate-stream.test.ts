@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { applyPagination } from "../src/operations/query/paginate-stream.js";
 
@@ -24,7 +24,7 @@ describe("applyPagination Stream combinator", () => {
 	) =>
 		Effect.runPromise(
 			Stream.runCollect(toStream(items).pipe(applyPagination(offset, limit))),
-		).then(Chunk.toArray);
+		).then((items) => items);
 
 	// ============================================================================
 	// Pass-through behavior
@@ -128,7 +128,7 @@ describe("applyPagination Stream combinator", () => {
 		it("should handle empty stream", async () => {
 			const result = await Effect.runPromise(
 				Stream.runCollect(Stream.fromIterable([]).pipe(applyPagination(0, 5))),
-			).then(Chunk.toArray);
+			).then((items) => items);
 			expect(result).toEqual([]);
 		});
 
@@ -140,11 +140,11 @@ describe("applyPagination Stream combinator", () => {
 
 			const paginated = failingStream.pipe(applyPagination(0, 5));
 			const result = await Effect.runPromise(
-				Effect.either(Stream.runCollect(paginated)),
+				Effect.result(Stream.runCollect(paginated)),
 			);
 
 			// Takes 5 items before hitting the error, so should succeed
-			expect(result._tag).toBe("Right");
+			expect(result._tag).toBe("Success");
 		});
 
 		it("should propagate Stream error when it occurs within the window", async () => {
@@ -155,10 +155,10 @@ describe("applyPagination Stream combinator", () => {
 
 			const paginated = failingStream.pipe(applyPagination(0, 5));
 			const result = await Effect.runPromise(
-				Effect.either(Stream.runCollect(paginated)),
+				Effect.result(Stream.runCollect(paginated)),
 			);
 
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 		});
 	});
 });

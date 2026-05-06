@@ -121,7 +121,7 @@ const findByWhere = <T extends HasId>(
 export const upsert =
 	<T extends HasId, I = T>(
 		collectionName: string,
-		schema: Schema.Schema<T, I>,
+		schema: Schema.Codec<T, I>,
 		relationships: Record<string, RelationshipConfig>,
 		ref: Ref.Ref<ReadonlyMap<string, T>>,
 		stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,
@@ -344,7 +344,7 @@ export const upsert =
 export const upsertMany =
 	<T extends HasId, I = T>(
 		collectionName: string,
-		schema: Schema.Schema<T, I>,
+		schema: Schema.Codec<T, I>,
 		relationships: Record<string, RelationshipConfig>,
 		ref: Ref.Ref<ReadonlyMap<string, T>>,
 		stateRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>>,

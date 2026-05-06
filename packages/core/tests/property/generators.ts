@@ -12,7 +12,9 @@
  * - operationSequenceArbitrary(schema): generate CRUD operation sequences
  */
 
-import { Arbitrary, type Schema, SchemaAST } from "effect";
+import type { Schema } from "effect";
+import * as EffectSchema from "effect/Schema";
+import type * as SchemaAST from "effect/SchemaAST";
 import * as fc from "fast-check";
 
 /**
@@ -64,24 +66,13 @@ export const extractFieldsFromSchema = <A, I, R>(
 	const ast = schema.ast;
 	const fields: FieldInfo[] = [];
 
-	// Handle TypeLiteral (Struct schemas)
-	if (SchemaAST.isTypeLiteral(ast)) {
+	// Handle Objects (Struct schemas)
+	if (ast._tag === "Objects") {
 		for (const prop of ast.propertySignatures) {
 			const name = String(prop.name);
-			const fieldInfo = extractFieldType(prop.type, name, prop.isOptional);
+			const isOptional = prop.type.context?.isOptional === true;
+			const fieldInfo = extractFieldType(prop.type, name, isOptional);
 			fields.push(fieldInfo);
-		}
-	}
-	// Handle Transformation (e.g., schemas with optional with default)
-	else if (SchemaAST.isTransformation(ast)) {
-		// For transformations, we need to look at the "to" type which is the decoded type
-		const toAst = ast.to;
-		if (SchemaAST.isTypeLiteral(toAst)) {
-			for (const prop of toAst.propertySignatures) {
-				const name = String(prop.name);
-				const fieldInfo = extractFieldType(prop.type, name, prop.isOptional);
-				fields.push(fieldInfo);
-			}
 		}
 	}
 
@@ -96,16 +87,9 @@ const extractFieldType = (
 	name: string,
 	isOptional: boolean,
 ): FieldInfo => {
-	// Unwrap transformations
-	if (SchemaAST.isTransformation(ast)) {
-		return extractFieldType(ast.to, name, isOptional);
-	}
-
 	// Handle Union types (for optional fields represented as T | undefined)
-	if (SchemaAST.isUnion(ast)) {
-		const nonUndefinedTypes = ast.types.filter(
-			(t) => !SchemaAST.isUndefinedKeyword(t),
-		);
+	if (ast._tag === "Union") {
+		const nonUndefinedTypes = ast.types.filter((t) => t._tag !== "Undefined");
 		if (nonUndefinedTypes.length === 1) {
 			return extractFieldType(nonUndefinedTypes[0], name, true);
 		}
@@ -114,33 +98,28 @@ const extractFieldType = (
 	}
 
 	// Handle basic types
-	if (SchemaAST.isStringKeyword(ast)) {
+	if (ast._tag === "String") {
 		return { name, type: "string", isOptional };
 	}
-	if (SchemaAST.isNumberKeyword(ast)) {
+	if (ast._tag === "Number") {
 		return { name, type: "number", isOptional };
 	}
-	if (SchemaAST.isBooleanKeyword(ast)) {
+	if (ast._tag === "Boolean") {
 		return { name, type: "boolean", isOptional };
 	}
 
-	// Handle arrays (TupleType with rest element)
-	if (SchemaAST.isTupleType(ast) && ast.rest.length > 0) {
+	// Handle arrays
+	if (ast._tag === "Arrays" && ast.rest.length > 0) {
 		const elementAst = ast.rest[0].type;
 		let elementType: "string" | "number" | "boolean" | "unknown" = "unknown";
-		if (SchemaAST.isStringKeyword(elementAst)) {
+		if (elementAst._tag === "String") {
 			elementType = "string";
-		} else if (SchemaAST.isNumberKeyword(elementAst)) {
+		} else if (elementAst._tag === "Number") {
 			elementType = "number";
-		} else if (SchemaAST.isBooleanKeyword(elementAst)) {
+		} else if (elementAst._tag === "Boolean") {
 			elementType = "boolean";
 		}
 		return { name, type: "array", isOptional, elementType };
-	}
-
-	// Handle Refinement (e.g., branded types, validated strings, etc.)
-	if (SchemaAST.isRefinement(ast)) {
-		return extractFieldType(ast.from, name, isOptional);
 	}
 
 	return { name, type: "unknown", isOptional };
@@ -239,7 +218,7 @@ export const entityArbitrary = <A extends { id: string }, I, R>(
 export const entityArbitraryFromEffect = <A, I, R>(
 	schema: Schema.Schema<A, I, R>,
 ): fc.Arbitrary<A> => {
-	return Arbitrary.make(schema);
+	return EffectSchema.toArbitrary(schema);
 };
 
 // ============================================================================

@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { applyFilter } from "../src/operations/query/filter-stream";
 
@@ -10,7 +10,7 @@ const collectFiltered = <T extends Record<string, unknown>>(
 		Stream.fromIterable(data).pipe(
 			applyFilter<T>(where),
 			Stream.runCollect,
-			Effect.map(Chunk.toReadonlyArray),
+			Effect.map((items) => items),
 		),
 	);
 
@@ -303,7 +303,7 @@ describe("applyFilter Stream combinator", () => {
 					applyFilter({ role: "admin" }),
 					Stream.map((item) => item.name),
 					Stream.runCollect,
-					Effect.map(Chunk.toReadonlyArray),
+					Effect.map((items) => items),
 				),
 			);
 			expect(result).toEqual(["John Doe", "John Smith"]);
@@ -315,7 +315,7 @@ describe("applyFilter Stream combinator", () => {
 					applyFilter({ role: "admin" }),
 					applyFilter({ age: { $gte: 30 } }),
 					Stream.runCollect,
-					Effect.map(Chunk.toReadonlyArray),
+					Effect.map((items) => items),
 				),
 			);
 			expect(result).toHaveLength(1);

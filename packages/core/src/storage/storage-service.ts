@@ -34,7 +34,6 @@ export interface StorageAdapterShape {
 	) => Effect.Effect</** stop watching */ () => void, StorageError>;
 }
 
-export class StorageAdapter extends Context.Tag("StorageAdapter")<
-	StorageAdapter,
-	StorageAdapterShape
->() {}
+export const StorageAdapter =
+	Context.Service<StorageAdapterShape>("StorageAdapter");
+export type StorageAdapter = StorageAdapterShape;

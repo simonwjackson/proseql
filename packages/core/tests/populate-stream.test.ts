@@ -1,4 +1,4 @@
-import { Chunk, Effect, Ref, Stream } from "effect";
+import { Effect, Ref, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { DanglingReferenceError } from "../src/errors/query-errors.js";
 import { applySelect } from "../src/operations/query/select-stream.js";
@@ -35,7 +35,7 @@ const collectPopulated = <T extends Record<string, unknown>>(
 		Stream.fromIterable(items).pipe(
 			applyPopulate(populateConfig, stateRefs, dbConfig, collectionName),
 			Stream.runCollect,
-			Effect.map(Chunk.toReadonlyArray),
+			Effect.map((items) => items),
 		),
 	);
 
@@ -549,7 +549,7 @@ describe("applyPopulate Stream combinator", () => {
 					),
 					applySelect({ name: true, company: { name: true } }),
 					Stream.runCollect,
-					Effect.map(Chunk.toReadonlyArray),
+					Effect.map((items) => items),
 				),
 			);
 
@@ -575,7 +575,7 @@ describe("applyPopulate Stream combinator", () => {
 						company: { name: true, industry: { sector: true } },
 					}),
 					Stream.runCollect,
-					Effect.map(Chunk.toReadonlyArray),
+					Effect.map((items) => items),
 				),
 			);
 
@@ -596,7 +596,7 @@ describe("applyPopulate Stream combinator", () => {
 					applyPopulate({ users: true }, refs, dbConfig, "companies"),
 					applySelect({ name: true, users: { name: true } }),
 					Stream.runCollect,
-					Effect.map(Chunk.toReadonlyArray),
+					Effect.map((items) => items),
 				),
 			);
 
@@ -624,10 +624,10 @@ describe("applyPopulate Stream combinator", () => {
 				Stream.runCollect,
 			);
 
-			const result = await Effect.runPromise(Effect.either(program));
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				const error = result.left;
+			const result = await Effect.runPromise(Effect.result(program));
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				const error = result.failure;
 				expect(error).toBeInstanceOf(DanglingReferenceError);
 				expect((error as DanglingReferenceError).collection).toBe("companies");
 				expect((error as DanglingReferenceError).field).toBe("companyId");
@@ -689,14 +689,14 @@ describe("applyPopulate Stream combinator", () => {
 				Stream.runCollect,
 			);
 
-			const result = await Effect.runPromise(Effect.either(program));
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toBeInstanceOf(DanglingReferenceError);
-				expect((result.left as DanglingReferenceError).collection).toBe(
+			const result = await Effect.runPromise(Effect.result(program));
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expect(result.failure).toBeInstanceOf(DanglingReferenceError);
+				expect((result.failure as DanglingReferenceError).collection).toBe(
 					"industries",
 				);
-				expect((result.left as DanglingReferenceError).targetId).toBe(
+				expect((result.failure as DanglingReferenceError).targetId).toBe(
 					"nonexistent",
 				);
 			}
@@ -720,9 +720,9 @@ describe("applyPopulate Stream combinator", () => {
 			);
 
 			const result = await Effect.runPromise(
-				Effect.either(Stream.runCollect(populated)),
+				Effect.result(Stream.runCollect(populated)),
 			);
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 		});
 
 		it("should work with empty stream", async () => {

@@ -24,9 +24,10 @@ import type { Schema } from "effect";
  * type Check = typeof UserSchema extends EntitySchema<Schema.Schema.Type<typeof UserSchema>> ? true : false
  * ```
  */
-export type EntitySchema<T extends { readonly id: string }> = Schema.Schema<
+export type EntitySchema<T extends { readonly id: string }> = Schema.Codec<
 	T,
 	unknown,
+	never,
 	never
 >;
 
@@ -41,7 +42,7 @@ export type EntitySchema<T extends { readonly id: string }> = Schema.Schema<
  * // => { readonly id: string; readonly name: string }
  * ```
  */
-export type InferEntity<S extends Schema.Schema.All> = Schema.Schema.Type<S>;
+export type InferEntity<S extends Schema.Top> = Schema.Schema.Type<S>;
 
 /**
  * Extract the encoded (on-disk) type from a schema.
@@ -58,5 +59,4 @@ export type InferEntity<S extends Schema.Schema.All> = Schema.Schema.Type<S>;
  * // => { readonly id: string; readonly name: string }
  * ```
  */
-export type InferEncoded<S extends Schema.Schema.All> =
-	Schema.Schema.Encoded<S>;
+export type InferEncoded<S extends Schema.Top> = S["Encoded"];

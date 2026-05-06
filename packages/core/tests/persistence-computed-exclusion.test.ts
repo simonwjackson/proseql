@@ -1,4 +1,4 @@
-import { Chunk, Effect, Layer, Schema, Stream } from "effect";
+import { Effect, Layer, Schema, Stream } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	createEffectDatabase,
@@ -835,7 +835,7 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 
 						// Query all books (stored fields only, no computed resolution in pipeline yet)
 						const chunk = yield* Stream.runCollect(db.books.query({}));
-						return Chunk.toReadonlyArray(chunk);
+						return chunk;
 					}),
 				),
 			);
@@ -938,7 +938,7 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 						);
 
 						const chunk = yield* Stream.runCollect(db.books.query({}));
-						return Chunk.toReadonlyArray(chunk);
+						return chunk;
 					}),
 				),
 			);
@@ -1024,7 +1024,7 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 						);
 
 						const chunk = yield* Stream.runCollect(db.books.query({}));
-						return Chunk.toReadonlyArray(chunk);
+						return chunk;
 					}),
 				),
 			);
@@ -1094,7 +1094,7 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 
 						// Query and manually verify initial computed state
 						const initialChunk = yield* Stream.runCollect(db.books.query({}));
-						const initialStored = Chunk.toReadonlyArray(initialChunk);
+						const initialStored = initialChunk;
 						const initialResults = initialStored.map((entity) =>
 							resolveComputedFields(entity as Book, booksComputedConfig),
 						);
@@ -1126,7 +1126,7 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 						);
 
 						const chunk = yield* Stream.runCollect(db.books.query({}));
-						return Chunk.toReadonlyArray(chunk);
+						return chunk;
 					}),
 				),
 			);
@@ -1208,7 +1208,7 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 						);
 
 						const chunk = yield* Stream.runCollect(db.books.query({}));
-						return Chunk.toReadonlyArray(chunk);
+						return chunk;
 					}),
 				),
 			);
@@ -1271,7 +1271,7 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 						);
 
 						const chunk = yield* Stream.runCollect(db.authors.query({}));
-						return Chunk.toReadonlyArray(chunk);
+						return chunk;
 					}),
 				),
 			);
@@ -1344,8 +1344,8 @@ describe("Task 6.3: Round-trip persistence with computed fields", () => {
 						const booksChunk = yield* Stream.runCollect(db.books.query({}));
 						const authorsChunk = yield* Stream.runCollect(db.authors.query({}));
 						return {
-							storedBooks: Chunk.toReadonlyArray(booksChunk),
-							storedAuthors: Chunk.toReadonlyArray(authorsChunk),
+							storedBooks: booksChunk,
+							storedAuthors: authorsChunk,
 						};
 					}),
 				),

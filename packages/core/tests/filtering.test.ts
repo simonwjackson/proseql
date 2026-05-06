@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { applyFilter } from "../src/operations/query/filter-stream";
 
@@ -10,7 +10,7 @@ const collectFiltered = <T extends Record<string, unknown>>(
 		Stream.fromIterable(data).pipe(
 			applyFilter<T>(where),
 			Stream.runCollect,
-			Effect.map(Chunk.toReadonlyArray),
+			Effect.map((items) => items),
 		),
 	);
 

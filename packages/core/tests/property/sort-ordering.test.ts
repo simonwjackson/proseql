@@ -12,7 +12,7 @@
  * elements are ordered according to the specified direction, and the sort is stable
  * for equal values.
  */
-import { Chunk, Effect, Schema, Stream } from "effect";
+import { Effect, Schema, Stream } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../../src/factories/database-effect";
@@ -110,7 +110,7 @@ describe("Sort ordering properties", () => {
 				const chunk = yield* Stream.runCollect(
 					db.books.query({ sort: { year: "asc" } }),
 				);
-				const books = Chunk.toReadonlyArray(chunk);
+				const books = chunk;
 				expect(books).toHaveLength(2);
 				expect(books[0].year).toBe(1965);
 				expect(books[1].year).toBe(1984);
@@ -150,7 +150,7 @@ describe("Sort ordering properties", () => {
 				const chunk = yield* Stream.runCollect(
 					db.books.query({ sort: { year: "desc" } }),
 				);
-				const books = Chunk.toReadonlyArray(chunk);
+				const books = chunk;
 				expect(books).toHaveLength(2);
 				expect(books[0].year).toBe(1984);
 				expect(books[1].year).toBe(1965);
@@ -287,7 +287,7 @@ describe("Sort ordering properties", () => {
 
 							// Query with the generated sort configuration
 							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
-							const sortedResults = Chunk.toReadonlyArray(chunk);
+							const sortedResults = chunk;
 
 							// Verify: all unique entities are returned
 							expect(sortedResults.length).toBe(uniqueEntities.length);
@@ -351,7 +351,7 @@ describe("Sort ordering properties", () => {
 							});
 
 							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
-							const sortedResults = Chunk.toReadonlyArray(chunk);
+							const sortedResults = chunk;
 
 							expect(sortedResults.length).toBe(uniqueEntities.length);
 
@@ -389,7 +389,7 @@ describe("Sort ordering properties", () => {
 							});
 
 							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
-							const sortedResults = Chunk.toReadonlyArray(chunk);
+							const sortedResults = chunk;
 
 							const field = Object.keys(sort)[0];
 
@@ -433,7 +433,7 @@ describe("Sort ordering properties", () => {
 							});
 
 							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
-							const sortedResults = Chunk.toReadonlyArray(chunk);
+							const sortedResults = chunk;
 
 							const field = Object.keys(sort)[0];
 
@@ -472,7 +472,7 @@ describe("Sort ordering properties", () => {
 							const chunk = yield* Stream.runCollect(
 								db.books.query({ sort: {} }),
 							);
-							const results = Chunk.toReadonlyArray(chunk);
+							const results = chunk;
 
 							// All entities should be returned (order undefined)
 							expect(results.length).toBe(entities.length);
@@ -502,7 +502,7 @@ describe("Sort ordering properties", () => {
 							});
 
 							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
-							const results = Chunk.toReadonlyArray(chunk);
+							const results = chunk;
 
 							// Single entity is always "sorted"
 							expect(results.length).toBe(1);
@@ -533,7 +533,7 @@ describe("Sort ordering properties", () => {
 							const chunk = yield* Stream.runCollect(
 								db.books.query({ sort: { year: "asc" } }),
 							);
-							const results = Chunk.toReadonlyArray(chunk);
+							const results = chunk;
 
 							expect(results.length).toBe(2);
 
@@ -580,7 +580,7 @@ describe("Sort ordering properties", () => {
 									sort,
 								}),
 							);
-							const sortedResults = Chunk.toReadonlyArray(chunk);
+							const sortedResults = chunk;
 
 							// Verify: only published books are returned
 							for (const result of sortedResults) {
@@ -679,7 +679,7 @@ describe("Sort ordering properties", () => {
 								const chunk = yield* Stream.runCollect(
 									db.books.query({ sort }),
 								);
-								return Chunk.toReadonlyArray(chunk).map((b) => b.id);
+								return chunk.map((b) => b.id);
 							});
 
 							const ids = await Effect.runPromise(program);
@@ -754,7 +754,7 @@ describe("Sort ordering properties", () => {
 								const chunk = yield* Stream.runCollect(
 									db.books.query({ sort }),
 								);
-								return Chunk.toReadonlyArray(chunk).map((b) => b.id);
+								return chunk.map((b) => b.id);
 							});
 
 							const ids = await Effect.runPromise(program);
@@ -809,7 +809,7 @@ describe("Sort ordering properties", () => {
 								const chunk = yield* Stream.runCollect(
 									db.books.query({ sort }),
 								);
-								return Chunk.toReadonlyArray(chunk).map((b) => b.id);
+								return chunk.map((b) => b.id);
 							});
 
 							const ids = await Effect.runPromise(program);
@@ -828,7 +828,7 @@ describe("Sort ordering properties", () => {
 							});
 
 							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
-							return Chunk.toReadonlyArray(chunk);
+							return chunk;
 						});
 
 						const results = await Effect.runPromise(program);
@@ -887,7 +887,7 @@ describe("Sort ordering properties", () => {
 								books: uniqueEntities,
 							});
 							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
-							return Chunk.toReadonlyArray(chunk).map((b) => b.id);
+							return chunk.map((b) => b.id);
 						});
 
 						const program2 = Effect.gen(function* () {
@@ -895,7 +895,7 @@ describe("Sort ordering properties", () => {
 								books: uniqueEntities,
 							});
 							const chunk = yield* Stream.runCollect(db.books.query({ sort }));
-							return Chunk.toReadonlyArray(chunk).map((b) => b.id);
+							return chunk.map((b) => b.id);
 						});
 
 						const [ids1, ids2] = await Promise.all([
@@ -948,7 +948,7 @@ describe("Sort ordering properties", () => {
 								const chunk = yield* Stream.runCollect(
 									db.books.query({ sort }),
 								);
-								return Chunk.toReadonlyArray(chunk).map((b) => b.id);
+								return chunk.map((b) => b.id);
 							});
 
 							const ids = await Effect.runPromise(program);

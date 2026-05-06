@@ -1,4 +1,4 @@
-import { Chunk, Effect, Ref, Schema, Stream } from "effect";
+import { Effect, Ref, Schema, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { NotFoundError } from "../src/errors/crud-errors.js";
 import {
@@ -114,11 +114,11 @@ describe("$transaction", () => {
 
 			// Verify initial state
 			const initialUsers = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			const initialPosts = await Stream.runCollect(db.posts.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			expect(initialUsers).toHaveLength(2);
@@ -153,11 +153,11 @@ describe("$transaction", () => {
 
 			// Verify both entities are visible in the database after commit
 			const finalUsers = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			const finalPosts = await Stream.runCollect(db.posts.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 
@@ -183,11 +183,11 @@ describe("$transaction", () => {
 
 			// Verify initial state
 			const initialUsers = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			const initialPosts = await Stream.runCollect(db.posts.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			expect(initialUsers).toHaveLength(2);
@@ -222,13 +222,13 @@ describe("$transaction", () => {
 						return yield* ctx.rollback();
 					}),
 				)
-				.pipe(Effect.either, Effect.runPromise);
+				.pipe(Effect.result, Effect.runPromise);
 
 			// Verify the transaction resulted in a TransactionError from rollback
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
 				// The error should be a TransactionError with operation "rollback"
-				const error = result.left as {
+				const error = result.failure as {
 					readonly _tag?: string;
 					readonly operation?: string;
 				};
@@ -238,11 +238,11 @@ describe("$transaction", () => {
 
 			// Verify all changes were reverted
 			const finalUsers = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			const finalPosts = await Stream.runCollect(db.posts.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 
@@ -267,7 +267,7 @@ describe("$transaction", () => {
 
 			// Verify initial state
 			const initialUsers = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			expect(initialUsers).toHaveLength(2);
@@ -295,20 +295,20 @@ describe("$transaction", () => {
 						);
 					}),
 				)
-				.pipe(Effect.either, Effect.runPromise);
+				.pipe(Effect.result, Effect.runPromise);
 
 			// Verify the transaction failed with our error
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toBeInstanceOf(TestBusinessError);
-				expect((result.left as TestBusinessError).message).toBe(
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expect(result.failure).toBeInstanceOf(TestBusinessError);
+				expect((result.failure as TestBusinessError).message).toBe(
 					"Simulated failure after user creation",
 				);
 			}
 
 			// Verify the user creation was reverted
 			const finalUsers = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			expect(finalUsers).toHaveLength(2);
@@ -354,7 +354,7 @@ describe("$transaction", () => {
 
 			// Verify database state is unchanged (rollback happened)
 			const users = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			expect(users).toHaveLength(2);
@@ -406,7 +406,7 @@ describe("$transaction", () => {
 
 			// Verify user creation was rolled back
 			const users = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			expect(users).toHaveLength(2);
@@ -446,12 +446,12 @@ describe("$transaction", () => {
 						return nestedResult;
 					}),
 				)
-				.pipe(Effect.either, Effect.runPromise);
+				.pipe(Effect.result, Effect.runPromise);
 
 			// Verify the transaction failed with TransactionError
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				const error = result.left as {
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				const error = result.failure as {
 					readonly _tag?: string;
 					readonly operation?: string;
 					readonly reason?: string;
@@ -463,7 +463,7 @@ describe("$transaction", () => {
 
 			// Verify both user creations were rolled back (the outer transaction's user too)
 			const users = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			expect(users).toHaveLength(2);
@@ -506,7 +506,7 @@ describe("$transaction", () => {
 
 			// Verify both users were created
 			const users = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			expect(users).toHaveLength(4);
@@ -765,13 +765,13 @@ describe("createTransaction (Manual)", () => {
 
 			// Manually rollback
 			const rollbackResult = await Effect.runPromise(
-				ctx.rollback().pipe(Effect.either),
+				ctx.rollback().pipe(Effect.result),
 			);
 
 			// Verify rollback returns TransactionError
-			expect(rollbackResult._tag).toBe("Left");
-			if (rollbackResult._tag === "Left") {
-				const error = rollbackResult.left as {
+			expect(rollbackResult._tag).toBe("Failure");
+			if (rollbackResult._tag === "Failure") {
+				const error = rollbackResult.failure as {
 					readonly _tag?: string;
 					readonly operation?: string;
 				};
@@ -880,12 +880,12 @@ describe("createTransaction (Manual)", () => {
 
 			// Second commit should fail with TransactionError
 			const secondCommitResult = await Effect.runPromise(
-				ctx.commit().pipe(Effect.either),
+				ctx.commit().pipe(Effect.result),
 			);
 
-			expect(secondCommitResult._tag).toBe("Left");
-			if (secondCommitResult._tag === "Left") {
-				const error = secondCommitResult.left as {
+			expect(secondCommitResult._tag).toBe("Failure");
+			if (secondCommitResult._tag === "Failure") {
+				const error = secondCommitResult.failure as {
 					readonly _tag?: string;
 					readonly operation?: string;
 					readonly reason?: string;
@@ -931,13 +931,13 @@ describe("createTransaction (Manual)", () => {
 
 			// Rollback the transaction first
 			const rollbackResult = await Effect.runPromise(
-				ctx.rollback().pipe(Effect.either),
+				ctx.rollback().pipe(Effect.result),
 			);
 
 			// Verify rollback returns TransactionError with operation "rollback"
-			expect(rollbackResult._tag).toBe("Left");
-			if (rollbackResult._tag === "Left") {
-				const error = rollbackResult.left as {
+			expect(rollbackResult._tag).toBe("Failure");
+			if (rollbackResult._tag === "Failure") {
+				const error = rollbackResult.failure as {
 					readonly _tag?: string;
 					readonly operation?: string;
 					readonly reason?: string;
@@ -952,12 +952,12 @@ describe("createTransaction (Manual)", () => {
 
 			// Now try to commit - should fail with TransactionError
 			const commitResult = await Effect.runPromise(
-				ctx.commit().pipe(Effect.either),
+				ctx.commit().pipe(Effect.result),
 			);
 
-			expect(commitResult._tag).toBe("Left");
-			if (commitResult._tag === "Left") {
-				const error = commitResult.left as {
+			expect(commitResult._tag).toBe("Failure");
+			if (commitResult._tag === "Failure") {
+				const error = commitResult.failure as {
 					readonly _tag?: string;
 					readonly operation?: string;
 					readonly reason?: string;
@@ -1179,7 +1179,7 @@ describe("createTransaction (Manual)", () => {
 			expect(ctx.isActive).toBe(true);
 
 			// Rollback the transaction (this fails with TransactionError, which is expected)
-			await Effect.runPromise(ctx.rollback().pipe(Effect.either));
+			await Effect.runPromise(ctx.rollback().pipe(Effect.result));
 
 			// Now should be false
 			expect(ctx.isActive).toBe(false);
@@ -1213,7 +1213,7 @@ describe("createTransaction (Manual)", () => {
 			);
 
 			expect(ctx2.isActive).toBe(true);
-			await Effect.runPromise(ctx2.rollback().pipe(Effect.either));
+			await Effect.runPromise(ctx2.rollback().pipe(Effect.result));
 			expect(ctx2.isActive).toBe(false);
 
 			// Verify first transaction's isActive is still false (state is captured per-context)
@@ -1250,13 +1250,13 @@ describe("createTransaction (Manual)", () => {
 
 			// First rollback should succeed (returns TransactionError, but that's expected)
 			const firstRollbackResult = await Effect.runPromise(
-				ctx.rollback().pipe(Effect.either),
+				ctx.rollback().pipe(Effect.result),
 			);
 
 			// Verify first rollback returns TransactionError with operation "rollback"
-			expect(firstRollbackResult._tag).toBe("Left");
-			if (firstRollbackResult._tag === "Left") {
-				const error = firstRollbackResult.left as {
+			expect(firstRollbackResult._tag).toBe("Failure");
+			if (firstRollbackResult._tag === "Failure") {
+				const error = firstRollbackResult.failure as {
 					readonly _tag?: string;
 					readonly operation?: string;
 					readonly reason?: string;
@@ -1271,12 +1271,12 @@ describe("createTransaction (Manual)", () => {
 
 			// Second rollback should fail with TransactionError
 			const secondRollbackResult = await Effect.runPromise(
-				ctx.rollback().pipe(Effect.either),
+				ctx.rollback().pipe(Effect.result),
 			);
 
-			expect(secondRollbackResult._tag).toBe("Left");
-			if (secondRollbackResult._tag === "Left") {
-				const error = secondRollbackResult.left as {
+			expect(secondRollbackResult._tag).toBe("Failure");
+			if (secondRollbackResult._tag === "Failure") {
+				const error = secondRollbackResult.failure as {
 					readonly _tag?: string;
 					readonly operation?: string;
 					readonly reason?: string;
@@ -1305,7 +1305,7 @@ describe("Snapshot Isolation", () => {
 
 			// Verify initial state
 			const initialUsers = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			expect(initialUsers).toHaveLength(2);
@@ -1325,7 +1325,7 @@ describe("Snapshot Isolation", () => {
 						// Query for the user immediately - should find it (read-own-writes)
 						const queryResult = yield* Stream.runCollect(
 							ctx.users.query({ where: { id: "u3" } }),
-						).pipe(Effect.map(Chunk.toArray));
+						).pipe(Effect.map((items) => items));
 
 						expect(queryResult).toHaveLength(1);
 						expect(queryResult[0].id).toBe("u3");
@@ -1333,7 +1333,7 @@ describe("Snapshot Isolation", () => {
 
 						// Also query all users - should see all 3
 						const allUsers = yield* Stream.runCollect(ctx.users.query({})).pipe(
-							Effect.map(Chunk.toArray),
+							Effect.map((items) => items),
 						);
 
 						expect(allUsers).toHaveLength(3);
@@ -1350,7 +1350,7 @@ describe("Snapshot Isolation", () => {
 
 			// Verify data persists after commit
 			const finalUsers = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			expect(finalUsers).toHaveLength(3);
@@ -1363,11 +1363,11 @@ describe("Snapshot Isolation", () => {
 
 			// Verify initial state - should have 2 users and 2 posts
 			const initialUsers = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			const initialPosts = await Stream.runCollect(db.posts.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			expect(initialUsers).toHaveLength(2);
@@ -1392,7 +1392,7 @@ describe("Snapshot Isolation", () => {
 						// Verify the post is deleted within the transaction
 						const postsAfterDelete = yield* Stream.runCollect(
 							ctx.posts.query({}),
-						).pipe(Effect.map(Chunk.toArray));
+						).pipe(Effect.map((items) => items));
 						expect(postsAfterDelete).toHaveLength(1);
 						expect(postsAfterDelete.find((p) => p.id === "p1")).toBeUndefined();
 
@@ -1402,7 +1402,7 @@ describe("Snapshot Isolation", () => {
 						// Verify the user is deleted within the transaction
 						const usersAfterDelete = yield* Stream.runCollect(
 							ctx.users.query({}),
-						).pipe(Effect.map(Chunk.toArray));
+						).pipe(Effect.map((items) => items));
 						expect(usersAfterDelete).toHaveLength(1);
 						expect(usersAfterDelete.find((u) => u.id === "u1")).toBeUndefined();
 
@@ -1420,7 +1420,7 @@ describe("Snapshot Isolation", () => {
 						// Verify all changes are visible within transaction
 						const finalInTx = yield* Stream.runCollect(
 							ctx.users.query({}),
-						).pipe(Effect.map(Chunk.toArray));
+						).pipe(Effect.map((items) => items));
 						expect(finalInTx).toHaveLength(2); // u2 and u3 (u1 deleted)
 						expect(finalInTx.find((u) => u.id === "u1")).toBeUndefined();
 						expect(finalInTx.find((u) => u.id === "u2")?.name).toBe(
@@ -1432,12 +1432,12 @@ describe("Snapshot Isolation", () => {
 						return yield* ctx.rollback();
 					}),
 				)
-				.pipe(Effect.either, Effect.runPromise);
+				.pipe(Effect.result, Effect.runPromise);
 
 			// Verify the transaction was rolled back (returns TransactionError)
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				const error = result.left as {
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				const error = result.failure as {
 					readonly _tag?: string;
 					readonly operation?: string;
 				};
@@ -1447,11 +1447,11 @@ describe("Snapshot Isolation", () => {
 
 			// Verify snapshot was restored exactly - deleted entities are back
 			const finalUsers = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			const finalPosts = await Stream.runCollect(db.posts.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 
@@ -1492,7 +1492,7 @@ describe("Snapshot Isolation", () => {
 
 			// Verify initial state
 			const initialPosts = await Stream.runCollect(db.posts.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			expect(initialPosts).toHaveLength(2);
@@ -1510,7 +1510,7 @@ describe("Snapshot Isolation", () => {
 						// Verify deletion within transaction
 						const postsAfterDelete = yield* Stream.runCollect(
 							ctx.posts.query({}),
-						).pipe(Effect.map(Chunk.toArray));
+						).pipe(Effect.map((items) => items));
 						expect(postsAfterDelete).toHaveLength(1);
 						expect(postsAfterDelete.find((p) => p.id === "p1")).toBeUndefined();
 
@@ -1520,17 +1520,17 @@ describe("Snapshot Isolation", () => {
 						);
 					}),
 				)
-				.pipe(Effect.either, Effect.runPromise);
+				.pipe(Effect.result, Effect.runPromise);
 
 			// Verify the transaction failed with our error
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toBeInstanceOf(TestBusinessError);
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expect(result.failure).toBeInstanceOf(TestBusinessError);
 			}
 
 			// Verify the post was restored
 			const finalPosts = await Stream.runCollect(db.posts.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			expect(finalPosts).toHaveLength(2);
@@ -1634,18 +1634,21 @@ describe("Snapshot Isolation", () => {
 						);
 					}),
 				)
-				.pipe(Effect.either, Effect.runPromise);
+				.pipe(Effect.result, Effect.runPromise);
 
 			// Verify first transaction failed
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toBeInstanceOf(TestBusinessError);
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expect(result.failure).toBeInstanceOf(TestBusinessError);
 			}
 
 			// Verify the user was rolled back
 			const usersAfterFailure = await Stream.runCollect(
 				db.users.query({}),
-			).pipe(Effect.map(Chunk.toArray), Effect.runPromise);
+			).pipe(
+				Effect.map((items) => items),
+				Effect.runPromise,
+			);
 			expect(usersAfterFailure).toHaveLength(2);
 			expect(usersAfterFailure.find((u) => u.id === "u3")).toBeUndefined();
 
@@ -1669,7 +1672,7 @@ describe("Snapshot Isolation", () => {
 
 			// Verify the new user exists
 			const finalUsers = await Stream.runCollect(db.users.query({})).pipe(
-				Effect.map(Chunk.toArray),
+				Effect.map((items) => items),
 				Effect.runPromise,
 			);
 			expect(finalUsers).toHaveLength(3);
@@ -1713,13 +1716,13 @@ describe("Snapshot Isolation", () => {
 					setup.transactionLock,
 					setup.buildCollectionForTx,
 					undefined,
-				).pipe(Effect.either),
+				).pipe(Effect.result),
 			);
 
 			// Verify the second transaction was rejected
-			expect(secondTxResult._tag).toBe("Left");
-			if (secondTxResult._tag === "Left") {
-				const error = secondTxResult.left as {
+			expect(secondTxResult._tag).toBe("Failure");
+			if (secondTxResult._tag === "Failure") {
+				const error = secondTxResult.failure as {
 					readonly _tag?: string;
 					readonly operation?: string;
 					readonly reason?: string;
@@ -1770,7 +1773,7 @@ describe("Snapshot Isolation", () => {
 						setup.transactionLock,
 						setup.buildCollectionForTx,
 						undefined,
-					).pipe(Effect.either),
+					).pipe(Effect.result),
 				),
 				Effect.runPromise(
 					createTransaction(
@@ -1778,7 +1781,7 @@ describe("Snapshot Isolation", () => {
 						setup.transactionLock,
 						setup.buildCollectionForTx,
 						undefined,
-					).pipe(Effect.either),
+					).pipe(Effect.result),
 				),
 				Effect.runPromise(
 					createTransaction(
@@ -1786,15 +1789,15 @@ describe("Snapshot Isolation", () => {
 						setup.transactionLock,
 						setup.buildCollectionForTx,
 						undefined,
-					).pipe(Effect.either),
+					).pipe(Effect.result),
 				),
 			]);
 
 			// All concurrent attempts should fail
 			for (const result of [result2, result3, result4]) {
-				expect(result._tag).toBe("Left");
-				if (result._tag === "Left") {
-					const error = result.left as {
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure") {
+					const error = result.failure as {
 						readonly _tag?: string;
 						readonly operation?: string;
 						readonly reason?: string;
@@ -1847,13 +1850,13 @@ describe("Snapshot Isolation", () => {
 
 			// Rollback first transaction (this returns a TransactionError, which is expected)
 			const rollbackResult = await Effect.runPromise(
-				ctx1.rollback().pipe(Effect.either),
+				ctx1.rollback().pipe(Effect.result),
 			);
 
 			// Verify rollback returned the expected TransactionError
-			expect(rollbackResult._tag).toBe("Left");
-			if (rollbackResult._tag === "Left") {
-				const error = rollbackResult.left as {
+			expect(rollbackResult._tag).toBe("Failure");
+			if (rollbackResult._tag === "Failure") {
+				const error = rollbackResult.failure as {
 					readonly _tag?: string;
 					readonly operation?: string;
 				};
@@ -2525,13 +2528,13 @@ describe("Persistence Integration", () => {
 
 			// Rollback the transaction (returns TransactionError, which is expected)
 			const rollbackResult = await Effect.runPromise(
-				ctx.rollback().pipe(Effect.either),
+				ctx.rollback().pipe(Effect.result),
 			);
 
 			// Verify rollback completed
-			expect(rollbackResult._tag).toBe("Left");
-			if (rollbackResult._tag === "Left") {
-				const error = rollbackResult.left as {
+			expect(rollbackResult._tag).toBe("Failure");
+			if (rollbackResult._tag === "Failure") {
+				const error = rollbackResult.failure as {
 					readonly _tag?: string;
 					readonly operation?: string;
 				};
@@ -2585,13 +2588,13 @@ describe("Persistence Integration", () => {
 								new TestBusinessError("Intentional failure"),
 							);
 						}),
-				).pipe(Effect.either),
+				).pipe(Effect.result),
 			);
 
 			// Verify transaction failed with our error
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				expect(result.left).toBeInstanceOf(TestBusinessError);
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				expect(result.failure).toBeInstanceOf(TestBusinessError);
 			}
 
 			// CRITICAL: No persistence calls after automatic rollback from error
@@ -2643,13 +2646,13 @@ describe("Persistence Integration", () => {
 							// Explicitly rollback
 							return yield* ctx.rollback();
 						}),
-				).pipe(Effect.either),
+				).pipe(Effect.result),
 			);
 
 			// Verify transaction resulted in TransactionError from rollback
-			expect(result._tag).toBe("Left");
-			if (result._tag === "Left") {
-				const error = result.left as {
+			expect(result._tag).toBe("Failure");
+			if (result._tag === "Failure") {
+				const error = result.failure as {
 					readonly _tag?: string;
 					readonly operation?: string;
 				};
@@ -2710,7 +2713,7 @@ describe("Persistence Integration", () => {
 					age: 30,
 				}),
 			);
-			await Effect.runPromise(ctxRollback.rollback().pipe(Effect.either));
+			await Effect.runPromise(ctxRollback.rollback().pipe(Effect.result));
 
 			// Rollback does NOT trigger persistence
 			expect(setupRollback.scheduleCalls).toHaveLength(0);

@@ -19,7 +19,6 @@ export interface SerializerRegistryShape {
 	) => Effect.Effect<unknown, SerializationError | UnsupportedFormatError>;
 }
 
-export class SerializerRegistry extends Context.Tag("SerializerRegistry")<
-	SerializerRegistry,
-	SerializerRegistryShape
->() {}
+export const SerializerRegistry =
+	Context.Service<SerializerRegistryShape>("SerializerRegistry");
+export type SerializerRegistry = SerializerRegistryShape;

@@ -280,10 +280,10 @@ describe("Effect.catchTag pattern matching", () => {
 				Effect.succeed("should not happen"),
 			),
 		);
-		const either = await Effect.runPromise(Effect.either(uncaught));
-		expect(either._tag).toBe("Left");
-		if (either._tag === "Left") {
-			expect(either.left._tag).toBe("NotFoundError");
+		const either = await Effect.runPromise(Effect.result(uncaught));
+		expect(either._tag).toBe("Failure");
+		if (either._tag === "Failure") {
+			expect(either.failure._tag).toBe("NotFoundError");
 		}
 	});
 

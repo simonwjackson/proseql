@@ -38,36 +38,36 @@ describe("validateEntity", () => {
 			name: 123,
 			age: "not a number",
 		});
-		const result = await Effect.runPromise(Effect.either(effect));
+		const result = await Effect.runPromise(Effect.result(effect));
 
-		expect(result._tag).toBe("Left");
-		if (result._tag === "Left") {
-			expect(result.left).toBeInstanceOf(ValidationError);
-			expect(result.left._tag).toBe("ValidationError");
-			expect(result.left.issues.length).toBeGreaterThan(0);
+		expect(result._tag).toBe("Failure");
+		if (result._tag === "Failure") {
+			expect(result.failure).toBeInstanceOf(ValidationError);
+			expect(result.failure._tag).toBe("ValidationError");
+			expect(result.failure.issues.length).toBeGreaterThan(0);
 		}
 	});
 
 	it("fails with ValidationError for missing required fields", async () => {
 		const effect = validateEntity(UserSchema, { id: "1" });
-		const result = await Effect.runPromise(Effect.either(effect));
+		const result = await Effect.runPromise(Effect.result(effect));
 
-		expect(result._tag).toBe("Left");
-		if (result._tag === "Left") {
-			expect(result.left._tag).toBe("ValidationError");
-			expect(result.left.issues.length).toBeGreaterThan(0);
-			expect(result.left.issues[0].message).toBe("is missing");
+		expect(result._tag).toBe("Failure");
+		if (result._tag === "Failure") {
+			expect(result.failure._tag).toBe("ValidationError");
+			expect(result.failure.issues.length).toBeGreaterThan(0);
+			expect(result.failure.issues[0].message).toContain("Missing key");
 		}
 	});
 
 	it("fails with ValidationError for completely wrong input", async () => {
 		const effect = validateEntity(UserSchema, "not an object");
-		const result = await Effect.runPromise(Effect.either(effect));
+		const result = await Effect.runPromise(Effect.result(effect));
 
-		expect(result._tag).toBe("Left");
-		if (result._tag === "Left") {
-			expect(result.left._tag).toBe("ValidationError");
-			expect(result.left.message).toBeTruthy();
+		expect(result._tag).toBe("Failure");
+		if (result._tag === "Failure") {
+			expect(result.failure._tag).toBe("ValidationError");
+			expect(result.failure.message).toBeTruthy();
 		}
 	});
 
@@ -103,11 +103,11 @@ describe("encodeEntity", () => {
 			name: null,
 			age: "bad",
 		} as never);
-		const result = await Effect.runPromise(Effect.either(effect));
+		const result = await Effect.runPromise(Effect.result(effect));
 
-		expect(result._tag).toBe("Left");
-		if (result._tag === "Left") {
-			expect(result.left._tag).toBe("ValidationError");
+		expect(result._tag).toBe("Failure");
+		if (result._tag === "Failure") {
+			expect(result.failure._tag).toBe("ValidationError");
 		}
 	});
 });

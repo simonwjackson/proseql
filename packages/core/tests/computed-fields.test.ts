@@ -1,4 +1,4 @@
-import { Chunk, Effect, Layer, Schema, Stream } from "effect";
+import { Effect, Layer, Schema, Stream } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	createEffectDatabase,
@@ -1775,7 +1775,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 						const chunk = yield* Stream.runCollect(
 							db.books.query({ sort: { id: "asc" } }),
 						);
-						return Chunk.toReadonlyArray(chunk);
+						return chunk;
 					}),
 				),
 			);
@@ -1858,7 +1858,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 						);
 
 						const chunk = yield* Stream.runCollect(db.books.query({}));
-						return Chunk.toReadonlyArray(chunk);
+						return chunk;
 					}),
 				),
 			);
@@ -1937,7 +1937,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 						const chunk = yield* Stream.runCollect(
 							db.books.query({ where: { isClassic: true } }),
 						);
-						return Chunk.toReadonlyArray(chunk);
+						return chunk;
 					}),
 				),
 			);
@@ -2018,7 +2018,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 						const chunk = yield* Stream.runCollect(
 							db.books.query({ sort: { displayName: "asc" } }),
 						);
-						return Chunk.toReadonlyArray(chunk);
+						return chunk;
 					}),
 				),
 			);
@@ -2082,7 +2082,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 						const initialChunk = yield* Stream.runCollect(
 							db.books.query({ where: { id: "book1" } }),
 						);
-						const initial = Chunk.toReadonlyArray(initialChunk);
+						const initial = initialChunk;
 						expect(initial).toHaveLength(1);
 						expect(initial[0].isClassic).toBe(false);
 						expect(initial[0].displayName).toBe("Dune (1985)");
@@ -2114,7 +2114,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 						const chunk = yield* Stream.runCollect(
 							db.books.query({ where: { id: "book1" } }),
 						);
-						return Chunk.toReadonlyArray(chunk);
+						return chunk;
 					}),
 				),
 			);
@@ -2180,7 +2180,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 								select: { title: true, displayName: true, isClassic: true },
 							}),
 						);
-						return Chunk.toReadonlyArray(chunk);
+						return chunk;
 					}),
 				),
 			);
@@ -2274,7 +2274,7 @@ describe("Computed Fields — Edge Cases (Task 10)", () => {
 								select: { title: true, displayName: true, isClassic: true },
 							}),
 						);
-						return Chunk.toReadonlyArray(chunk);
+						return chunk;
 					}),
 				),
 			);

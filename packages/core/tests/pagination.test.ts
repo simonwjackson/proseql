@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { applyFilter } from "../src/operations/query/filter-stream";
 import { applyPagination } from "../src/operations/query/paginate-stream";
@@ -14,7 +14,7 @@ const collectPaginated = <T>(
 		Stream.fromIterable(data).pipe(
 			applyPagination(offset, limit),
 			Stream.runCollect,
-			Effect.map(Chunk.toReadonlyArray),
+			Effect.map((items) => items),
 		),
 	);
 
@@ -34,7 +34,7 @@ const collectPipeline = <T extends Record<string, unknown>>(
 			applySort<T>(options.sort),
 			applyPagination(options.offset, options.limit),
 			Stream.runCollect,
-			Effect.map(Chunk.toReadonlyArray),
+			Effect.map((items) => items),
 		),
 	);
 
