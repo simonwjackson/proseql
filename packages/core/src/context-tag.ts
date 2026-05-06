@@ -30,4 +30,4 @@ import type { GenerateDatabaseWithPersistence } from "./types/types.js";
  * ```
  */
 export const makeProseQLTag = <Config extends DatabaseConfig>(id?: string) =>
-	Context.GenericTag<GenerateDatabaseWithPersistence<Config>>(id ?? "ProseQL");
+	Context.Service<GenerateDatabaseWithPersistence<Config>>(id ?? "ProseQL");

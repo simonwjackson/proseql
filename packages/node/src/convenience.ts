@@ -86,7 +86,7 @@ export const createNodeDatabase = <Config extends DatabaseConfig>(
 /**
  * Create a Layer that provides a persistent ProseQL database via a Context.Tag.
  *
- * Combines `createNodeDatabase` with `Layer.scoped` so consumers only need
+ * Combines `createNodeDatabase` with `Layer.effect` so consumers only need
  * to provide the layer — no manual wiring of storage, serializers, or scoping.
  *
  * @param tag - A Context.Tag (typically from `makeProseQLTag`) to bind the database to
@@ -109,7 +109,7 @@ export const createNodeDatabase = <Config extends DatabaseConfig>(
  * ```
  */
 export const makeProseQLLayer = <Config extends DatabaseConfig, I>(
-	tag: Context.Tag<I, GenerateDatabaseWithPersistence<Config>>,
+	tag: Context.Key<I, GenerateDatabaseWithPersistence<Config>>,
 	config: Config,
 	initialData?: {
 		readonly [K in keyof Config]?: ReadonlyArray<Record<string, unknown>>;
@@ -125,7 +125,7 @@ export const makeProseQLLayer = <Config extends DatabaseConfig, I>(
 	| ValidationError
 	| PluginError
 > =>
-	Layer.scoped(
+	Layer.effect(
 		tag,
 		createNodeDatabase(config, initialData, persistenceConfig, options),
 	);

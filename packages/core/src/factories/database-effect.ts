@@ -1842,7 +1842,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 						: undefined;
 				loadedData = yield* loadDataFromDirectory(
 					dirPath,
-					collectionConfig.schema as Schema.Schema<HasId, unknown>,
+					collectionConfig.schema as Schema.Codec<HasId, unknown>,
 					dirFormat,
 					dirOptions,
 				);
@@ -1981,7 +1981,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 					Effect.gen(function* () {
 						const storage = yield* StorageAdapter;
 						const currentData = yield* Ref.get(typedRefs[collectionName]);
-						const schema = collectionConfig.schema as Schema.Schema<
+						const schema = collectionConfig.schema as Schema.Codec<
 							HasId,
 							unknown
 						>;

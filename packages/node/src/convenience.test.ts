@@ -25,10 +25,10 @@ describe("makeProseQLLayer", () => {
 	});
 
 	test("creates a layer from class-based tag and config", () => {
-		type DB = Effect.Effect.Success<
+		type DB = Effect.Success<
 			ReturnType<typeof createNodeDatabase<typeof testConfig>>
 		>;
-		class MyDB extends Context.Tag("MyDB")<MyDB, DB>() {}
+		class MyDB extends Context.Service<MyDB, DB>()("MyDB") {}
 		const layer = makeProseQLLayer(MyDB, testConfig);
 		expect(layer).toBeDefined();
 	});

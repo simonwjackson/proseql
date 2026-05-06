@@ -12,6 +12,7 @@ import {
 	PubSub,
 	Queue,
 	Ref,
+	Result,
 	Schema,
 	type Scope,
 	Stream,
@@ -318,15 +319,15 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 		for (const [id, value] of Object.entries(dataToLoad)) {
 			if (isLenient) {
 				// Lenient mode: skip invalid entities with warnings
-				const result = yield* Effect.either(decode(value));
-				if (result._tag === "Left") {
+				const result = yield* Effect.result(decode(value));
+				if (Result.isFailure(result)) {
 					const lineNum = lineNumberMap.get(id);
 					const location = lineNum ? ` (line ${lineNum})` : "";
 					yield* Effect.logWarning(
-						`[proseql] Skipping entity '${id}'${location} in '${filePath}': ${result.left.message}`,
+						`[proseql] Skipping entity '${id}'${location} in '${filePath}': ${result.failure.message}`,
 					);
 				} else {
-					entries.push([id, result.right]);
+					entries.push([id, result.success]);
 				}
 			} else {
 				// Strict mode: abort on first failure
@@ -878,7 +879,7 @@ export interface LoadDataFromDirectoryOptions {
  */
 export const loadDataFromDirectory = <A extends { readonly id: string }, I, R>(
 	dirPath: string,
-	schema: Schema.Schema<A, I, R>,
+	schema: Schema.Codec<A, I, R, R>,
 	format: string,
 	_options?: LoadDataFromDirectoryOptions,
 ): Effect.Effect<
@@ -907,7 +908,7 @@ export const loadDataFromDirectory = <A extends { readonly id: string }, I, R>(
 		}
 
 		// Decode each file
-		const decode = Schema.decodeUnknown(schema);
+		const decode = Schema.decodeUnknownEffect(schema);
 		const entries: Array<[string, A]> = [];
 		const isLenient = _options?.validation === "lenient";
 
@@ -920,13 +921,13 @@ export const loadDataFromDirectory = <A extends { readonly id: string }, I, R>(
 			const id = filename.slice(0, filename.length - suffix.length);
 
 			if (isLenient) {
-				const result = yield* Effect.either(decode(parsed));
-				if (result._tag === "Left") {
+				const result = yield* Effect.result(decode(parsed));
+				if (Result.isFailure(result)) {
 					yield* Effect.logWarning(
-						`[proseql] Skipping entity '${id}' in '${filePath}': ${result.left.message}`,
+						`[proseql] Skipping entity '${id}' in '${filePath}': ${result.failure.message}`,
 					);
 				} else {
-					entries.push([id, result.right]);
+					entries.push([id, result.success]);
 				}
 			} else {
 				const decoded = yield* decode(parsed).pipe(
@@ -956,7 +957,7 @@ export const loadDataFromDirectory = <A extends { readonly id: string }, I, R>(
 export const saveEntityToDirectory = <A extends { readonly id: string }, I, R>(
 	dirPath: string,
 	entity: A,
-	schema: Schema.Schema<A, I, R>,
+	schema: Schema.Codec<A, I, R, R>,
 	format: string,
 ): Effect.Effect<
 	void,
@@ -966,7 +967,7 @@ export const saveEntityToDirectory = <A extends { readonly id: string }, I, R>(
 	Effect.gen(function* () {
 		const storage = yield* StorageAdapter;
 		const serializer = yield* SerializerRegistry;
-		const encode = Schema.encode(schema);
+		const encode = Schema.encodeEffect(schema);
 
 		const encoded = yield* encode(entity).pipe(
 			Effect.mapError(
@@ -1025,7 +1026,7 @@ export const streamCollectionFromDirectory = <
 	R,
 >(
 	dirPath: string,
-	schema: Schema.Schema<A, I, R>,
+	schema: Schema.Codec<A, I, R, R>,
 	format: string,
 ): Stream.Stream<
 	StreamCollectionEntry<A>,
@@ -1045,7 +1046,7 @@ export const streamCollectionFromDirectory = <
 					Effect.gen(function* () {
 						const storage = yield* StorageAdapter;
 						const serializer = yield* SerializerRegistry;
-						const decode = Schema.decodeUnknown(schema);
+						const decode = Schema.decodeUnknownEffect(schema);
 
 						const raw = yield* storage.read(filePath);
 						const parsed = yield* serializer.deserialize(raw, format);
@@ -1093,7 +1094,7 @@ export interface DirectoryWatcherConfig<
 	/** Serialization format (e.g., "yaml", "json") */
 	readonly format: string;
 	/** Schema to decode loaded data through */
-	readonly schema: Schema.Schema<A, I, R>;
+	readonly schema: Schema.Codec<A, I, R, R>;
 	/** Ref holding the collection state to update on file change */
 	readonly ref: Ref.Ref<ReadonlyMap<string, A>>;
 	/** Optional debounce delay in ms for reload after change (default 50) */
@@ -1122,7 +1123,11 @@ export const createDirectoryWatcher = <A extends { readonly id: string }, I, R>(
 	const suffix = `.${config.format}`;
 
 	return Effect.gen(function* () {
+		const scope = yield* Effect.scope;
 		const storage = yield* StorageAdapter;
+		const runtimeContext = yield* Effect.context<
+			StorageAdapter | SerializerRegistry | R
+		>();
 		const active = yield* Ref.make(true);
 
 		const changeQueue = yield* Queue.unbounded<{
@@ -1130,7 +1135,7 @@ export const createDirectoryWatcher = <A extends { readonly id: string }, I, R>(
 			readonly type: "add" | "change" | "remove";
 		}>();
 
-		const pendingReload = yield* Ref.make<Fiber.RuntimeFiber<
+		const pendingReload = yield* Ref.make<Fiber.Fiber<
 			void,
 			| StorageError
 			| SerializationError
@@ -1139,7 +1144,7 @@ export const createDirectoryWatcher = <A extends { readonly id: string }, I, R>(
 			| MigrationError
 		> | null>(null);
 
-		const processorFiber = yield* Effect.fork(
+		const processorFiber = yield* Effect.forkIn(
 			Effect.forever(
 				Effect.gen(function* () {
 					const event = yield* Queue.take(changeQueue);
@@ -1155,7 +1160,7 @@ export const createDirectoryWatcher = <A extends { readonly id: string }, I, R>(
 						yield* Fiber.interrupt(existing);
 					}
 
-					const fiber = yield* Effect.fork(
+					const fiber = yield* Effect.forkIn(
 						Effect.gen(function* () {
 							yield* Effect.sleep(debounceMs);
 
@@ -1176,7 +1181,7 @@ export const createDirectoryWatcher = <A extends { readonly id: string }, I, R>(
 									const filePath = `${config.dirPath}/${event.filename}`;
 									const storage = yield* StorageAdapter;
 									const serializer = yield* SerializerRegistry;
-									const decode = Schema.decodeUnknown(config.schema);
+									const decode = Schema.decodeUnknownEffect(config.schema);
 
 									const raw = yield* storage.read(filePath);
 									const parsed = yield* serializer.deserialize(
@@ -1184,7 +1189,7 @@ export const createDirectoryWatcher = <A extends { readonly id: string }, I, R>(
 										config.format,
 									);
 									const decoded = yield* decode(parsed).pipe(
-										Effect.catchAll(() => Effect.succeed(null)),
+										Effect.catch(() => Effect.succeed(null)),
 									);
 									if (decoded !== null) {
 										yield* Ref.update(config.ref, (m) => {
@@ -1215,16 +1220,20 @@ export const createDirectoryWatcher = <A extends { readonly id: string }, I, R>(
 								);
 							}
 						}),
+						scope,
+						{ startImmediately: true },
 					);
 
 					yield* Ref.set(pendingReload, fiber);
 				}),
-			),
+			).pipe(Effect.provide(runtimeContext)),
+			scope,
+			{ startImmediately: true },
 		);
 
 		yield* Effect.acquireRelease(
 			storage.watchDir(config.dirPath, (event) => {
-				Queue.unsafeOffer(changeQueue, event);
+				Queue.offerUnsafe(changeQueue, event);
 			}),
 			(stopWatching) =>
 				Effect.gen(function* () {

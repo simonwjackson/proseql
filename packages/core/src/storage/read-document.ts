@@ -42,7 +42,7 @@ export interface ReadDocumentOptions {
  */
 export const readDocument = <A, I, R>(
 	filePath: string,
-	schema: Schema.Schema<A, I, R>,
+	schema: Schema.Codec<A, I, R, unknown>,
 	options?: ReadDocumentOptions,
 ): Effect.Effect<
 	A,
@@ -70,7 +70,7 @@ export const readDocument = <A, I, R>(
 		const parsed = yield* serializer.deserialize(raw, ext);
 
 		// Decode through schema
-		const decode = Schema.decodeUnknown(schema);
+		const decode = Schema.decodeUnknownEffect(schema);
 		const decoded = yield* decode(parsed).pipe(
 			Effect.mapError(
 				(parseError) =>

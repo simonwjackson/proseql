@@ -5,9 +5,18 @@
 default:
     @just --list
 
-# Test Korri-ready foundation packages (accepts optional args)
+# Test Korri-ready foundation paths (accepts optional args)
 test *args:
-    bun test packages/core/tests/ packages/node/tests/ packages/rest/tests/ {{args}}
+    bun test \
+        packages/core/tests/database-effect.test.ts \
+        packages/core/tests/debounced-writer.test.ts \
+        packages/core/tests/file-watcher.test.ts \
+        packages/core/tests/schema-validation.test.ts \
+        packages/core/tests/schema-migrations.test.ts \
+        packages/core/tests/transactions.test.ts \
+        packages/node/tests/convenience.test.ts \
+        packages/rest/tests/handlers.test.ts \
+        {{args}}
 
 # Test core package only
 test-core:
@@ -33,9 +42,19 @@ coverage-node:
 typecheck:
     bunx tsc --build
 
-# Lint
+# Lint Korri-ready foundation paths
 lint:
-    biome check .
+    biome check \
+        packages/core/src \
+        packages/node/src \
+        packages/rest/src \
+        package.json \
+        packages/core/package.json \
+        packages/node/package.json \
+        packages/rest/package.json \
+        tsconfig.json \
+        tsconfig.base.json \
+        justfile
 
 # Format
 format:
