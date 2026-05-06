@@ -7,6 +7,14 @@
 
 import { Effect, Schema } from "effect";
 import { ValidationError } from "../errors/index.js";
+import {
+	type HasId,
+	hydrateDerivedId,
+	isDerivedIdConfig,
+	requireHydratablePayload,
+	stripDerivedIdField,
+} from "../storage/derived-id.js";
+import type { DerivedIdConfig } from "../types/database-config-types.js";
 
 /**
  * Decode unknown data through an Effect Schema, producing a typed entity.
@@ -19,6 +27,48 @@ export const validateEntity = <A, I, R>(
 	Schema.decodeUnknownEffect(schema)(data).pipe(
 		Effect.mapError((parseError) => parseErrorToValidationError(parseError)),
 	);
+
+export const validateEntityWithDerivedId = <A extends HasId, I, R>(
+	schema: Schema.Codec<unknown, I, R, R>,
+	data: A,
+	derivedId?: DerivedIdConfig,
+): Effect.Effect<A, ValidationError, R> =>
+	Effect.gen(function* () {
+		if (!isDerivedIdConfig(derivedId)) {
+			return yield* validateEntity(schema as Schema.Codec<A, I, R, R>, data);
+		}
+
+		const id = data[derivedId.field];
+		if (typeof id !== "string") {
+			return yield* Effect.fail(
+				new ValidationError({
+					message: `Derived id field '${derivedId.field}' must be a string`,
+					issues: [
+						{
+							field: derivedId.field,
+							message: `Derived id field '${derivedId.field}' must be a string`,
+							value: id,
+						},
+					],
+				}),
+			);
+		}
+
+		const decoded = yield* validateEntity(
+			schema,
+			stripDerivedIdField(data, derivedId),
+		);
+		const hydratableError = requireHydratablePayload(
+			id,
+			decoded,
+			derivedId,
+			"entity",
+		);
+		if (hydratableError !== undefined) {
+			return yield* Effect.fail(hydratableError);
+		}
+		return hydrateDerivedId<A>(id, decoded, derivedId);
+	});
 
 /**
  * Encode a typed entity through an Effect Schema, producing the encoded (on-disk) form.

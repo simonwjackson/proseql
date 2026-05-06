@@ -37,13 +37,14 @@ import type {
 	UpsertManyResult,
 	UpsertResult,
 } from "../../types/crud-types.js";
+import type { DerivedIdConfig } from "../../types/database-config-types.js";
 import type { HooksConfig } from "../../types/hook-types.js";
 import type { CollectionIndexes } from "../../types/index-types.js";
 import type { ChangeEvent } from "../../types/reactive-types.js";
 import type { SearchIndexMap } from "../../types/search-types.js";
 import { generateId } from "../../utils/id-generator.js";
 import { validateForeignKeysEffect } from "../../validators/foreign-key.js";
-import { validateEntity } from "../../validators/schema-validator.js";
+import { validateEntityWithDerivedId } from "../../validators/schema-validator.js";
 import {
 	checkBatchUniqueConstraints,
 	checkUniqueConstraints,
@@ -131,6 +132,7 @@ export const upsert =
 		searchIndexRef?: Ref.Ref<SearchIndexMap>,
 		searchIndexFields?: ReadonlyArray<string>,
 		changePubSub?: PubSub.PubSub<ChangeEvent>,
+		derivedId?: DerivedIdConfig,
 	) =>
 	(
 		input: UpsertInternalInput<T>,
@@ -167,7 +169,11 @@ export const upsert =
 				);
 
 				// Validate through Effect Schema
-				const validated = yield* validateEntity(schema, updated);
+				const validated = yield* validateEntityWithDerivedId(
+					schema as Schema.Codec<unknown, I>,
+					updated as T,
+					derivedId,
+				);
 
 				// Validate foreign keys if relationship fields were updated
 				const relationshipFields = Object.keys(relationships).map(
@@ -256,7 +262,11 @@ export const upsert =
 			};
 
 			// Validate through Effect Schema
-			const validated = yield* validateEntity(schema, createData);
+			const validated = yield* validateEntityWithDerivedId(
+				schema as Schema.Codec<unknown, I>,
+				createData as unknown as T,
+				derivedId,
+			);
 
 			// Run beforeCreate hooks (can transform the entity)
 			const entity = yield* runBeforeCreateHooks(hooks?.beforeCreate, {
@@ -354,6 +364,7 @@ export const upsertMany =
 		searchIndexRef?: Ref.Ref<SearchIndexMap>,
 		searchIndexFields?: ReadonlyArray<string>,
 		changePubSub?: PubSub.PubSub<ChangeEvent>,
+		derivedId?: DerivedIdConfig,
 	) =>
 	(
 		inputs: ReadonlyArray<UpsertInternalInput<T>>,
@@ -431,7 +442,11 @@ export const upsertMany =
 					);
 
 					// Validate
-					const validated = yield* validateEntity(schema, updatedEntity);
+					const validated = yield* validateEntityWithDerivedId(
+						schema as Schema.Codec<unknown, I>,
+						updatedEntity as T,
+						derivedId,
+					);
 					toUpdate.push({
 						oldEntity: existing,
 						newEntity: validated,
@@ -452,7 +467,11 @@ export const upsertMany =
 					};
 
 					// Validate through schema first
-					const validated = yield* validateEntity(schema, createData);
+					const validated = yield* validateEntityWithDerivedId(
+						schema as Schema.Codec<unknown, I>,
+						createData as unknown as T,
+						derivedId,
+					);
 
 					// Run beforeCreate hooks (can transform the entity)
 					const entity = yield* runBeforeCreateHooks(hooks?.beforeCreate, {

@@ -84,6 +84,7 @@ import {
 	mergeSerializerWithPluginCodecs,
 } from "../serializers/format-codec.js";
 import { SerializerRegistry } from "../serializers/serializer-service.js";
+import { isDerivedIdConfig } from "../storage/derived-id.js";
 import {
 	createDirectoryWatcher,
 	createFileWatcher,
@@ -138,6 +139,7 @@ import type {
 	GenerateDatabaseWithPersistence,
 	RelationshipDef,
 } from "../types/types.js";
+import { getFileExtension } from "../utils/path.js";
 
 // ============================================================================
 // Convenience API: runPromise
@@ -687,6 +689,7 @@ const buildCollection = <T extends HasId>(
 	const computed = collectionConfig.computed;
 	// Get ID generator name from collection config (used with idGeneratorMap)
 	const idGeneratorName = collectionConfig.idGenerator;
+	const derivedId = collectionConfig.id;
 
 	// Build allRelationships map for delete (needs all collections' relationships)
 	const allRelationships: Record<
@@ -982,6 +985,7 @@ const buildCollection = <T extends HasId>(
 		idGeneratorName,
 		idGeneratorMap,
 		changePubSub,
+		derivedId,
 	);
 	const rawCreateMany = createMany(
 		collectionName,
@@ -998,6 +1002,7 @@ const buildCollection = <T extends HasId>(
 		idGeneratorName,
 		idGeneratorMap,
 		changePubSub,
+		derivedId,
 	);
 
 	// For append-only: wrap create to also append each entity to the file
@@ -1042,6 +1047,7 @@ const buildCollection = <T extends HasId>(
 					searchIndexRef,
 					searchIndexFields,
 					changePubSub,
+					derivedId,
 				),
 			);
 	const updateManyFn = appendOnlyConfig
@@ -1061,6 +1067,7 @@ const buildCollection = <T extends HasId>(
 					searchIndexRef,
 					searchIndexFields,
 					changePubSub,
+					derivedId,
 				),
 			);
 	// Check if schema defines a deletedAt field for soft delete support
@@ -1119,6 +1126,7 @@ const buildCollection = <T extends HasId>(
 					searchIndexRef,
 					searchIndexFields,
 					changePubSub,
+					derivedId,
 				),
 			);
 	const upsertManyFn = appendOnlyConfig
@@ -1137,6 +1145,7 @@ const buildCollection = <T extends HasId>(
 					searchIndexRef,
 					searchIndexFields,
 					changePubSub,
+					derivedId,
 				),
 			);
 	const createWithRelsFn = wrapEffect(
@@ -1163,6 +1172,7 @@ const buildCollection = <T extends HasId>(
 			>,
 			computed,
 			changePubSub,
+			derivedId,
 		),
 	);
 	const updateWithRelsFn = appendOnlyConfig
@@ -1192,6 +1202,7 @@ const buildCollection = <T extends HasId>(
 					>,
 					computed,
 					changePubSub,
+					derivedId,
 				),
 			);
 	const deleteWithRelsFn = appendOnlyConfig
@@ -1715,9 +1726,80 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			}
 		}
 
-		// 0e. Validate directory-mode config constraints
+		// 0e. Validate persistence config constraints
 		for (const collectionName of Object.keys(config)) {
 			const cc = config[collectionName];
+			if (isDerivedIdConfig(cc.id)) {
+				if (cc.id.field !== "id") {
+					return yield* Effect.fail(
+						new ValidationError({
+							message: `Collection '${collectionName}': derived id field must be 'id'`,
+							issues: [
+								{
+									field: "id.field",
+									message: "Only field 'id' is supported for derived identity",
+								},
+							],
+						}),
+					);
+				}
+				if (cc.appendOnly) {
+					return yield* Effect.fail(
+						new ValidationError({
+							message: `Collection '${collectionName}': derived ids are incompatible with append-only persistence`,
+							issues: [
+								{
+									field: "appendOnly",
+									message:
+										"Derived ids require object-keyed persistence and cannot be used with append-only formats",
+								},
+							],
+						}),
+					);
+				}
+				if (cc.directory) {
+					return yield* Effect.fail(
+						new ValidationError({
+							message: `Collection '${collectionName}': derived ids are not supported in directory mode`,
+							issues: [
+								{
+									field: "directory",
+									message:
+										"Directory-mode derived ids are deferred; use object-keyed file persistence",
+								},
+							],
+						}),
+					);
+				}
+				if (cc.path) {
+					return yield* Effect.fail(
+						new ValidationError({
+							message: `Collection '${collectionName}': derived ids are not supported with path mode`,
+							issues: [
+								{
+									field: "path",
+									message:
+										"Path mode may resolve to arrays; derived ids require an object-keyed collection root",
+								},
+							],
+						}),
+					);
+				}
+				const ext = cc.format ?? (cc.file ? getFileExtension(cc.file) : "");
+				if (ext === "jsonl" || ext === "ndjson" || ext === "prose") {
+					return yield* Effect.fail(
+						new ValidationError({
+							message: `Collection '${collectionName}': derived ids require an object-keyed format`,
+							issues: [
+								{
+									field: "file",
+									message: `Format '${ext}' is array-backed and cannot derive ids from object keys`,
+								},
+							],
+						}),
+					);
+				}
+			}
 			if (isCollectionDirectoryMode(cc)) {
 				if (cc.file) {
 					return yield* Effect.fail(
@@ -1861,6 +1943,10 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 					collectionConfig.validation !== undefined
 						? { validation: collectionConfig.validation }
 						: {};
+				const derivedIdOverride =
+					collectionConfig.id !== undefined
+						? { derivedId: collectionConfig.id }
+						: {};
 				const loadOptions =
 					collectionConfig.version !== undefined
 						? collectionConfig.migrations !== undefined
@@ -1871,6 +1957,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 									...formatOverride,
 									...pathOverride,
 									...validationOverride,
+									...derivedIdOverride,
 								}
 							: {
 									version: collectionConfig.version,
@@ -1878,16 +1965,19 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 									...formatOverride,
 									...pathOverride,
 									...validationOverride,
+									...derivedIdOverride,
 								}
 						: Object.keys({
 									...formatOverride,
 									...pathOverride,
 									...validationOverride,
+									...derivedIdOverride,
 								}).length > 0
 							? {
 									...formatOverride,
 									...pathOverride,
 									...validationOverride,
+									...derivedIdOverride,
 								}
 							: undefined;
 				loadedData = yield* loadData(
@@ -2035,10 +2125,11 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 						filePath,
 						collectionConfig.schema as Schema.Codec<HasId, unknown>,
 						currentData,
-						// Pass version, format, and path options
+						// Pass version, format, path, and derived id options
 						collectionConfig.version !== undefined ||
 							collectionConfig.format !== undefined ||
-							collectionConfig.path !== undefined
+							collectionConfig.path !== undefined ||
+							collectionConfig.id !== undefined
 							? {
 									...(collectionConfig.version !== undefined
 										? { version: collectionConfig.version }
@@ -2048,6 +2139,9 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 										: {}),
 									...(collectionConfig.path !== undefined
 										? { path: collectionConfig.path }
+										: {}),
+									...(collectionConfig.id !== undefined
+										? { derivedId: collectionConfig.id }
 										: {}),
 								}
 							: undefined,
@@ -2167,6 +2261,9 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 					ref: typedRefs[collectionName],
 					changePubSub,
 					collectionName,
+					...(collectionConfig.id !== undefined
+						? { derivedId: collectionConfig.id }
+						: {}),
 				}).pipe(Effect.catch(() => Effect.void));
 			} else if (isCollectionDirectoryMode(collectionConfig)) {
 				yield* createDirectoryWatcher({

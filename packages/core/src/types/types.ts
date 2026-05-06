@@ -854,13 +854,26 @@ export type SmartCollection<
 		: RunnableEffect<AggregateResult, never>;
 } & EffectCollection<T & MinimalEntity>;
 
-// Extract all entity types from config
+type ExtractSchemaEntity<Collection> = Collection extends {
+	schema: Schema.Codec<infer T, infer _E, infer _R, infer _R>;
+}
+	? T
+	: never;
+
+type IsDerivedIdCollection<Collection> = Collection extends {
+	id: { readonly kind: "derivedFromKey"; readonly field: "id" };
+}
+	? true
+	: false;
+
+export type RuntimeEntityFromCollection<Collection> =
+	IsDerivedIdCollection<Collection> extends true
+		? ExtractSchemaEntity<Collection> & MinimalEntity
+		: ExtractSchemaEntity<Collection>;
+
+// Extract all runtime entity types from config
 export type ExtractEntityTypes<Config> = {
-	[K in keyof Config]: Config[K] extends {
-		schema: Schema.Codec<infer T, infer _E, infer _R, infer _R>;
-	}
-		? T
-		: never;
+	[K in keyof Config]: RuntimeEntityFromCollection<Config[K]>;
 };
 
 // Convert string targets to actual types
@@ -892,12 +905,11 @@ type EntityWithComputed<Entity, Computed> =
 // Generate the full database type automatically
 export type GenerateDatabase<Config> = {
 	[K in keyof Config]: Config[K] extends {
-		schema: Schema.Codec<infer Entity, infer _E, infer _R, infer _R>;
 		relationships: infer Relations;
 		computed?: infer Computed;
 	}
 		? SmartCollection<
-				EntityWithComputed<Entity, Computed>,
+				EntityWithComputed<RuntimeEntityFromCollection<Config[K]>, Computed>,
 				ResolveRelationships<Relations, ExtractEntityTypes<Config>>,
 				GenerateDatabase<Config>
 			>
@@ -950,9 +962,5 @@ export type TypedPopulate<DB, Collection extends keyof DB> =
 
 // Type for the dataset that matches the config
 export type DatasetFor<Config> = {
-	[K in keyof Config]: Config[K] extends {
-		schema: Schema.Codec<infer T, infer _E, infer _R, infer _R>;
-	}
-		? T[]
-		: never;
+	[K in keyof Config]: RuntimeEntityFromCollection<Config[K]>[];
 };

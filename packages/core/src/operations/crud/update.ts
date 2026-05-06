@@ -29,12 +29,13 @@ import type {
 	UpdateManyResult,
 	UpdateWithOperators,
 } from "../../types/crud-types.js";
+import type { DerivedIdConfig } from "../../types/database-config-types.js";
 import type { HooksConfig } from "../../types/hook-types.js";
 import type { CollectionIndexes } from "../../types/index-types.js";
 import type { ChangeEvent } from "../../types/reactive-types.js";
 import type { SearchIndexMap } from "../../types/search-types.js";
 import { validateForeignKeysEffect } from "../../validators/foreign-key.js";
-import { validateEntity } from "../../validators/schema-validator.js";
+import { validateEntityWithDerivedId } from "../../validators/schema-validator.js";
 import {
 	checkUniqueConstraints,
 	type NormalizedConstraints,
@@ -363,6 +364,7 @@ export const update =
 		searchIndexRef?: Ref.Ref<SearchIndexMap>,
 		searchIndexFields?: ReadonlyArray<string>,
 		changePubSub?: PubSub.PubSub<ChangeEvent>,
+		derivedId?: DerivedIdConfig,
 	) =>
 	(
 		id: string,
@@ -428,7 +430,11 @@ export const update =
 			);
 
 			// Validate through Effect Schema
-			const validated = yield* validateEntity(schema, updated);
+			const validated = yield* validateEntityWithDerivedId(
+				schema as Schema.Codec<unknown, I>,
+				updated as T,
+				derivedId,
+			);
 
 			// Validate foreign keys if any relationship fields were updated
 			const relationshipFields = Object.keys(relationships).map(
@@ -544,6 +550,7 @@ export const updateMany =
 		searchIndexRef?: Ref.Ref<SearchIndexMap>,
 		searchIndexFields?: ReadonlyArray<string>,
 		changePubSub?: PubSub.PubSub<ChangeEvent>,
+		derivedId?: DerivedIdConfig,
 	) =>
 	(
 		predicate: (entity: T) => boolean,
@@ -611,7 +618,11 @@ export const updateMany =
 					entity as T & MinimalEntity,
 					transformedUpdates as UpdateWithOperators<T & MinimalEntity>,
 				);
-				const validated = yield* validateEntity(schema, updated);
+				const validated = yield* validateEntityWithDerivedId(
+					schema as Schema.Codec<unknown, I>,
+					updated as T,
+					derivedId,
+				);
 				entityPairs.push({
 					previous: entity,
 					validated,

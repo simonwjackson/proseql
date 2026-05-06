@@ -27,13 +27,14 @@ import type {
 	CreateManyOptions,
 	CreateManyResult,
 } from "../../types/crud-types.js";
+import type { DerivedIdConfig } from "../../types/database-config-types.js";
 import type { HooksConfig } from "../../types/hook-types.js";
 import type { CollectionIndexes } from "../../types/index-types.js";
 import type { ChangeEvent } from "../../types/reactive-types.js";
 import type { SearchIndexMap } from "../../types/search-types.js";
 import { generateId } from "../../utils/id-generator.js";
 import { validateForeignKeysEffect } from "../../validators/foreign-key.js";
-import { validateEntity } from "../../validators/schema-validator.js";
+import { validateEntityWithDerivedId } from "../../validators/schema-validator.js";
 import {
 	addEntityToBatchIndex,
 	checkEntityUniqueConstraints,
@@ -114,6 +115,7 @@ export const create =
 		idGeneratorName?: string,
 		idGeneratorMap?: Map<string, CustomIdGenerator>,
 		changePubSub?: PubSub.PubSub<ChangeEvent>,
+		derivedId?: DerivedIdConfig,
 	) =>
 	(
 		input: CreateInput<T>,
@@ -156,7 +158,11 @@ export const create =
 			};
 
 			// Validate through Effect Schema
-			const validated = yield* validateEntity(schema, raw);
+			const validated = yield* validateEntityWithDerivedId(
+				schema as Schema.Codec<unknown, I>,
+				raw as unknown as T,
+				derivedId,
+			);
 
 			// Run beforeCreate hooks (can transform the entity)
 			const entity = yield* runBeforeCreateHooks(hooks?.beforeCreate, {
@@ -264,6 +270,7 @@ export const createMany =
 		idGeneratorName?: string,
 		idGeneratorMap?: Map<string, CustomIdGenerator>,
 		changePubSub?: PubSub.PubSub<ChangeEvent>,
+		derivedId?: DerivedIdConfig,
 	) =>
 	(
 		inputs: ReadonlyArray<CreateInput<T>>,
@@ -335,7 +342,11 @@ export const createMany =
 				const raw = { ...sanitizedInput, id, createdAt: now, updatedAt: now };
 
 				// Validate through schema
-				const validationResult = yield* validateEntity(schema, raw).pipe(
+				const validationResult = yield* validateEntityWithDerivedId(
+					schema as Schema.Codec<unknown, I>,
+					raw as unknown as T,
+					derivedId,
+				).pipe(
 					Effect.map((validated) => ({ _tag: "ok" as const, validated })),
 					Effect.catchTag("ValidationError", (err) =>
 						skipOnError

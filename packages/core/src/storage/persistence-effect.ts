@@ -29,8 +29,16 @@ import type { Migration } from "../migrations/migration-types.js";
 import { reloadEvent } from "../reactive/change-event.js";
 import { jsonlDecodeLines } from "../serializers/codecs/jsonl.js";
 import { SerializerRegistry } from "../serializers/serializer-service.js";
+import type { DerivedIdConfig } from "../types/database-config-types.js";
 import type { ChangeEvent } from "../types/reactive-types.js";
 import { getFileExtension } from "../utils/path.js";
+import {
+	assertNoPhysicalDerivedId,
+	hydrateDerivedId,
+	isDerivedIdConfig,
+	requireHydratablePayload,
+	stripDerivedIdField,
+} from "./derived-id.js";
 import { StorageAdapter } from "./storage-service.js";
 
 // ============================================================================
@@ -136,6 +144,10 @@ export interface LoadDataOptions {
 	 * "lenient" skips invalid entities with warnings.
 	 */
 	readonly validation?: "strict" | "lenient";
+	/**
+	 * Optional policy for deriving runtime id from object keys.
+	 */
+	readonly derivedId?: DerivedIdConfig;
 }
 
 /**
@@ -317,19 +329,52 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 		const entries: Array<[string, A]> = [];
 
 		for (const [id, value] of Object.entries(dataToLoad)) {
+			const physicalIdError = assertNoPhysicalDerivedId(
+				id,
+				value,
+				options?.derivedId,
+				filePath,
+			);
+
 			if (isLenient) {
+				const lineNum = lineNumberMap.get(id);
+				const location = lineNum ? ` (line ${lineNum})` : "";
+				if (physicalIdError !== undefined) {
+					yield* Effect.logWarning(
+						`[proseql] Skipping entity '${id}'${location} in '${filePath}': ${physicalIdError.message}`,
+					);
+					continue;
+				}
+
 				// Lenient mode: skip invalid entities with warnings
 				const result = yield* Effect.result(decode(value));
 				if (Result.isFailure(result)) {
-					const lineNum = lineNumberMap.get(id);
-					const location = lineNum ? ` (line ${lineNum})` : "";
 					yield* Effect.logWarning(
 						`[proseql] Skipping entity '${id}'${location} in '${filePath}': ${result.failure.message}`,
 					);
 				} else {
-					entries.push([id, result.success]);
+					const hydratableError = requireHydratablePayload(
+						id,
+						result.success,
+						options?.derivedId,
+						filePath,
+					);
+					if (hydratableError !== undefined) {
+						yield* Effect.logWarning(
+							`[proseql] Skipping entity '${id}'${location} in '${filePath}': ${hydratableError.message}`,
+						);
+					} else {
+						entries.push([
+							id,
+							hydrateDerivedId<A>(id, result.success, options?.derivedId),
+						]);
+					}
 				}
 			} else {
+				if (physicalIdError !== undefined) {
+					return yield* Effect.fail(physicalIdError);
+				}
+
 				// Strict mode: abort on first failure
 				const decoded = yield* decode(value).pipe(
 					Effect.mapError((parseError) =>
@@ -355,7 +400,19 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 								}),
 					),
 				);
-				entries.push([id, decoded]);
+				const hydratableError = requireHydratablePayload(
+					id,
+					decoded,
+					options?.derivedId,
+					filePath,
+				);
+				if (hydratableError !== undefined) {
+					return yield* Effect.fail(hydratableError);
+				}
+				entries.push([
+					id,
+					hydrateDerivedId<A>(id, decoded, options?.derivedId),
+				]);
 			}
 		}
 
@@ -366,6 +423,9 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 			yield* saveData(filePath, schema, result, {
 				version: targetVersion,
 				...(options?.format !== undefined ? { format: options.format } : {}),
+				...(options?.derivedId !== undefined
+					? { derivedId: options.derivedId }
+					: {}),
 			});
 		}
 
@@ -396,6 +456,10 @@ export interface SaveDataOptions {
 	 * at the specified path, preserving sibling data in the document.
 	 */
 	readonly path?: string;
+	/**
+	 * Optional policy for deriving runtime id from object keys.
+	 */
+	readonly derivedId?: DerivedIdConfig;
 }
 
 /**
@@ -430,6 +494,20 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 			ext === "jsonl" || ext === "ndjson" || ext === "prose";
 
 		if (isArrayFormat && !options?.path) {
+			if (isDerivedIdConfig(options?.derivedId)) {
+				return yield* Effect.fail(
+					new ValidationError({
+						message: `Derived ids require object-keyed persistence; format '${ext}' is not supported for '${filePath}'`,
+						issues: [
+							{
+								field: "id",
+								message:
+									"Derived ids are only supported for object-keyed persistence formats",
+							},
+						],
+					}),
+				);
+			}
 			// Array format (JSONL/Prose): encode as array of entities
 			const entities: Array<I> = [];
 			for (const [id, entity] of data) {
@@ -456,7 +534,8 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 			// Encode entities
 			const entityMap: Record<string, I> = {};
 			for (const [id, entity] of data) {
-				const encoded = yield* encode(entity).pipe(
+				const valueToEncode = stripDerivedIdField(entity, options?.derivedId);
+				const encoded = yield* encode(valueToEncode as A).pipe(
 					Effect.mapError(
 						(parseError) =>
 							new ValidationError({
@@ -1423,6 +1502,8 @@ export interface FileWatcherConfig<A extends { readonly id: string }, I, R> {
 	readonly changePubSub?: PubSub.PubSub<ChangeEvent>;
 	/** Collection name (required when changePubSub is provided) */
 	readonly collectionName?: string;
+	/** Optional policy for deriving runtime id from object keys. */
+	readonly derivedId?: DerivedIdConfig;
 }
 
 /**
@@ -1481,7 +1562,11 @@ export const createFileWatcher = <A extends { readonly id: string }, I, R>(
 			const fiber = yield* Effect.forkIn(
 				Effect.gen(function* () {
 					yield* Effect.sleep(debounceMs);
-					const newData = yield* loadData(config.filePath, config.schema);
+					const newData = yield* loadData(config.filePath, config.schema, {
+						...(config.derivedId !== undefined
+							? { derivedId: config.derivedId }
+							: {}),
+					});
 					yield* Ref.set(config.ref, newData);
 					// Publish reload event if PubSub is provided
 					if (

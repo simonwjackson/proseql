@@ -22,10 +22,11 @@ import type {
 } from "../../types/crud-relationship-types.js";
 import { isRelationshipOperation } from "../../types/crud-relationship-types.js";
 import type { UpdateInput } from "../../types/crud-types.js";
+import type { DerivedIdConfig } from "../../types/database-config-types.js";
 import type { ChangeEvent } from "../../types/reactive-types.js";
 import type { RelationshipDef } from "../../types/types.js";
 import { validateForeignKeysEffect } from "../../validators/foreign-key.js";
-import { validateEntity } from "../../validators/schema-validator.js";
+import { validateEntityWithDerivedId } from "../../validators/schema-validator.js";
 
 // ============================================================================
 // Types
@@ -43,6 +44,7 @@ type RelationshipConfig = {
 type CollectionConfig = {
 	readonly schema: Schema.Codec<HasId, unknown>;
 	readonly relationships: Record<string, RelationshipConfig>;
+	readonly id?: DerivedIdConfig;
 };
 
 type DatabaseConfig = Record<string, CollectionConfig>;
@@ -496,6 +498,7 @@ export const updateWithRelationships =
 		dbConfig: DatabaseConfig,
 		computed?: ComputedFieldsConfig<unknown>,
 		changePubSub?: PubSub.PubSub<ChangeEvent>,
+		derivedId?: DerivedIdConfig,
 	) =>
 	(
 		id: string,
@@ -669,9 +672,10 @@ export const updateWithRelationships =
 				};
 
 				// Validate updated target
-				const validated = yield* validateEntity(
-					targetConfig.schema,
+				const validated = yield* validateEntityWithDerivedId(
+					targetConfig.schema as Schema.Codec<unknown, unknown>,
 					updatedTarget,
+					targetConfig.id,
 				).pipe(
 					Effect.mapError(
 						(ve) =>
@@ -785,7 +789,11 @@ export const updateWithRelationships =
 			Object.assign(updatedEntity, baseUpdate);
 			updatedEntity.updatedAt = now;
 
-			const validated = yield* validateEntity(schema, updatedEntity);
+			const validated = yield* validateEntityWithDerivedId(
+				schema as Schema.Codec<unknown, I>,
+				updatedEntity as T,
+				derivedId,
+			);
 
 			// Validate foreign keys
 			yield* validateForeignKeysEffect(

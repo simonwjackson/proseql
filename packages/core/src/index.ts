@@ -105,6 +105,7 @@ export type {
 	CollectionConfig,
 	DatabaseConfig,
 	DatabaseReactiveOptions,
+	DerivedIdConfig,
 	ReactiveConfig,
 } from "./types/database-config-types.js";
 export { isCollectionDirectoryMode } from "./types/database-config-types.js";

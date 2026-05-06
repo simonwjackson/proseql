@@ -9,6 +9,14 @@ import type { ComputedFieldsConfig } from "./computed-types.js";
 import type { HooksConfig } from "./hook-types.js";
 
 /**
+ * Configuration for deriving runtime entity identity from the persisted object key.
+ */
+export type DerivedIdConfig = {
+	readonly kind: "derivedFromKey";
+	readonly field: "id";
+};
+
+/**
  * Configuration for a single collection, now with optional persistence support.
  */
 export type CollectionConfig = {
@@ -16,6 +24,19 @@ export type CollectionConfig = {
 	 * Effect Schema for validating and encoding/decoding entities in this collection
 	 */
 	readonly schema: Schema.Top;
+
+	/**
+	 * Optional identity derivation policy.
+	 *
+	 * When set to `{ kind: "derivedFromKey", field: "id" }`, persisted object
+	 * entries omit the `id` field from each payload. The runtime entity is
+	 * hydrated with `id` from the enclosing storage key when loaded.
+	 *
+	 * In derived-id mode the configured schema describes the persisted payload,
+	 * not the hydrated runtime entity. Physical `id` fields in persisted payloads
+	 * are invalid; no backwards compatibility is provided for duplicated ids.
+	 */
+	readonly id?: DerivedIdConfig;
 
 	/**
 	 * Optional file path for persisting this collection.
