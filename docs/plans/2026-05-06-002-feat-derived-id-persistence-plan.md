@@ -1,7 +1,7 @@
 ---
 title: "feat: Add key-derived record identity"
 type: feat
-status: active
+status: implemented
 date: 2026-05-06
 origin: PROMPT_derived_ids_feasibility.md
 deepened: 2026-05-06
@@ -170,7 +170,7 @@ flowchart TB
 
 ## Implementation Units
 
-- [ ] **Unit 1: Add derived-id config and type inference**
+- [x] **Unit 1: Add derived-id config and type inference**
 
 **Goal:** Introduce the public opt-in config shape and update generated database types so derived-id collections expose hydrated runtime entities while schemas can describe id-less payloads.
 
@@ -210,7 +210,7 @@ flowchart TB
 - Derived-id collection types are ergonomic for the acceptance example.
 - Existing collection config and generated database types for non-derived collections remain unchanged.
 
-- [ ] **Unit 2: Centralize hydrate/dehydrate transforms for derived-id collections**
+- [x] **Unit 2: Centralize hydrate/dehydrate transforms for derived-id collections**
 
 **Goal:** Add shared runtime helpers that convert between keyed persisted payloads and hydrated runtime entities, explicitly rejecting duplicated physical id payloads.
 
@@ -262,7 +262,7 @@ dehydrate(entity, schema, derivedIdConfig)
 **Verification:**
 - Hydration and dehydration behavior is covered independently before being wired through database factories.
 
-- [ ] **Unit 3: Wire derived-id transforms into file persistence and database creation**
+- [x] **Unit 3: Wire derived-id transforms into file persistence and database creation**
 
 **Goal:** Make persistent databases load, save, flush, watch, and migrate derived-id collections through the new boundary transforms.
 
@@ -302,7 +302,7 @@ dehydrate(entity, schema, derivedIdConfig)
 - The acceptance YAML shape round-trips through the persistent database API.
 - Existing persistence tests continue to pass for normal collections.
 
-- [ ] **Unit 4: Adapt CRUD validation for payload-schema derived-id collections**
+- [x] **Unit 4: Adapt CRUD validation for payload-schema derived-id collections**
 
 **Goal:** Ensure create/update/upsert and relationship-aware CRUD validate payload schemas while still storing and returning hydrated runtime entities with `id`.
 
@@ -344,7 +344,7 @@ dehydrate(entity, schema, derivedIdConfig)
 - Derived-id collections behave like normal collections from the runtime CRUD user's perspective.
 - Payload schemas without `id` are valid for all normal mutation paths.
 
-- [ ] **Unit 5: Prove cross-surface behavior and Node convenience API**
+- [x] **Unit 5: Prove cross-surface behavior and Node convenience API**
 
 **Goal:** Cover the full Korri-facing usage path through `@proseql/node` and verify derived ids remain compatible with relationships, uniqueness, indexes, selection, cursors, and queries.
 
@@ -382,7 +382,7 @@ dehydrate(entity, schema, derivedIdConfig)
 - The exact acceptance example is possible through `@proseql/node`.
 - No new package such as `@proseql/bun` is required.
 
-- [ ] **Unit 6: Document API constraints and no-compatibility stance**
+- [x] **Unit 6: Document API constraints and no-compatibility stance**
 
 **Goal:** Explain the public feature, no-compatibility stance, and unsupported surfaces so downstream users can adopt it safely.
 

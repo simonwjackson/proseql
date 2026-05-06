@@ -45,6 +45,42 @@ await Effect.runPromise(Effect.scoped(program))
 
 For the full query and mutation API, see [`@proseql/core`](https://www.npmjs.com/package/@proseql/core).
 
+## Key-Derived IDs
+
+Object-keyed files can omit duplicated `id` fields from each payload while keeping runtime records hydrated with `id`.
+
+```ts
+const GamePayload = Schema.Struct({
+  metadata: Schema.optional(Schema.Struct({ name: Schema.String })),
+})
+
+const config = {
+  games: {
+    schema: GamePayload,
+    file: "./data/games.yaml",
+    id: { kind: "derivedFromKey", field: "id" },
+    relationships: {},
+  },
+} as const
+```
+
+On disk:
+
+```yaml
+472c8ba3-c51c-45ed-8bab-fc560edd83ea:
+  metadata:
+    name: Default
+```
+
+At runtime:
+
+```ts
+const game = yield* db.games.findById("472c8ba3-c51c-45ed-8bab-fc560edd83ea")
+// { id: "472c8ba3-c51c-45ed-8bab-fc560edd83ea", metadata: { name: "Default" } }
+```
+
+Derived IDs require object-keyed formats such as JSON, YAML, TOML, JSON5, JSONC, Hjson, or TOON. Append-only JSONL/NDJSON and Prose array files are rejected. Persisted payloads must not contain a physical `id` field in derived-id mode.
+
 ## Persistence Approaches
 
 Three ways to set up file persistence, from simplest to most configurable.
