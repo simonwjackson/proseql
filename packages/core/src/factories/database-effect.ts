@@ -84,7 +84,6 @@ import {
 	mergeSerializerWithPluginCodecs,
 } from "../serializers/format-codec.js";
 import { SerializerRegistry } from "../serializers/serializer-service.js";
-import { isDerivedIdConfig } from "../storage/derived-id.js";
 import {
 	createDirectoryWatcher,
 	createFileWatcher,
@@ -1729,7 +1728,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		// 0e. Validate persistence config constraints
 		for (const collectionName of Object.keys(config)) {
 			const cc = config[collectionName];
-			if (isDerivedIdConfig(cc.id)) {
+			if (cc.id?.kind === "derivedFromKey") {
 				if (cc.id.field !== "id") {
 					return yield* Effect.fail(
 						new ValidationError({

@@ -278,6 +278,32 @@ describe("derived id persistence", () => {
 		}
 	});
 
+	it("rejects derived id fields other than id at startup", async () => {
+		const store = new Map<string, string>();
+		const config = {
+			games: {
+				schema: GamePayload,
+				file: "/data/games.json",
+				id: { kind: "derivedFromKey", field: "slug" as "id" },
+				relationships: {},
+			},
+		} as const;
+
+		const result = await Effect.runPromise(
+			Effect.result(
+				Effect.scoped(createPersistentEffectDatabase(config)).pipe(
+					Effect.provide(makeLayer(store)),
+				),
+			),
+		);
+
+		expect(Result.isFailure(result)).toBe(true);
+		if (Result.isFailure(result)) {
+			expect(result.failure._tag).toBe("ValidationError");
+			expect(result.failure.message).toContain("derived id field must be 'id'");
+		}
+	});
+
 	it("leaves non-derived collections unchanged", async () => {
 		const store = new Map<string, string>();
 		const config = {
