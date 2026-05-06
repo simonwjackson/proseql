@@ -691,30 +691,21 @@ export const encodeOverflowLines = (
 	const lines: string[] = [];
 
 	for (const template of overflowTemplates) {
-		// Check if any field in this template has a non-null value
-		// Overflow templates typically have a single field, but we support multiple
-		const hasNonNullValue = template.fields.some((fieldName) => {
-			const value = record[fieldName];
-			return value !== null && value !== undefined;
-		});
+		// Check for multi-line field values
+		const multiLineField = findMultiLineField(record, template.fields);
 
-		if (hasNonNullValue) {
-			// Check for multi-line field values
-			const multiLineField = findMultiLineField(record, template.fields);
-
-			if (multiLineField !== null) {
-				// Handle multi-line value with continuation lines
-				const overflowLines = encodeMultiLineOverflow(
-					record,
-					template,
-					multiLineField,
-				);
-				lines.push(...overflowLines);
-			} else {
-				// Single-line value: encode normally
-				const overflowLine = encodeHeadline(record, template);
-				lines.push(OVERFLOW_INDENT + overflowLine);
-			}
+		if (multiLineField !== null) {
+			// Handle multi-line value with continuation lines
+			const overflowLines = encodeMultiLineOverflow(
+				record,
+				template,
+				multiLineField,
+			);
+			lines.push(...overflowLines);
+		} else {
+			// Single-line value: encode normally (null/undefined → ~)
+			const overflowLine = encodeHeadline(record, template);
+			lines.push(OVERFLOW_INDENT + overflowLine);
 		}
 	}
 
@@ -849,7 +840,7 @@ export const decodeOverflowLines = (
 				const continuationContent = line.slice(indent);
 
 				if (typeof existingValue === "string") {
-					fields[lastMatchedField] = existingValue + "\n" + continuationContent;
+					fields[lastMatchedField] = `${existingValue}\n${continuationContent}`;
 				}
 			}
 			// If no match and no prior field, we just skip this line

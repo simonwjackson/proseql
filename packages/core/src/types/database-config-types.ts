@@ -21,8 +21,17 @@ export type CollectionConfig = {
 	 * Optional file path for persisting this collection.
 	 * If not provided, the collection will be in-memory only.
 	 * Multiple collections can share the same file path.
+	 * Mutually exclusive with `directory`.
 	 */
 	readonly file?: string;
+
+	/**
+	 * Optional directory path for directory-per-collection persistence.
+	 * Each entity is stored as a separate file: `<directory>/<id>.<format>`.
+	 * Requires `format` to be specified (no file extension to infer from).
+	 * Mutually exclusive with `file`, `path`, and `appendOnly`.
+	 */
+	readonly directory?: string;
 
 	/**
 	 * Explicit serialization format override.
@@ -30,6 +39,30 @@ export type CollectionConfig = {
 	 * Value should match a codec's extension (e.g., "prose", "yaml", "json").
 	 */
 	readonly format?: string;
+
+	/**
+	 * Dot-notation path into the file where this collection's data lives.
+	 * When provided, ProseQL navigates into the parsed document structure
+	 * before applying normal collection loading logic.
+	 *
+	 * The resolved value can be either a Record keyed by entity ID or an
+	 * array of entity objects (each must have an `id` field).
+	 *
+	 * On save, the existing file is read first and the collection data is
+	 * set at the specified path, preserving sibling data.
+	 *
+	 * @example
+	 * ```ts
+	 * // Read from { agents: { list: [{ id: "a1", ... }] } }
+	 * projects: {
+	 *   schema: ProjectSchema,
+	 *   file: "~/.config/app.json",
+	 *   path: "agents.list",
+	 *   relationships: {},
+	 * }
+	 * ```
+	 */
+	readonly path?: string;
 
 	/**
 	 * Relationship definitions for this collection
@@ -153,6 +186,15 @@ export type CollectionConfig = {
 	 * ```
 	 */
 	readonly appendOnly?: boolean;
+
+	/**
+	 * Validation mode for loading persisted data.
+	 *
+	 * - `"strict"` (default): Abort on the first entity that fails schema validation.
+	 * - `"lenient"`: Skip invalid entities with warnings and load remaining valid data.
+	 *   For JSONL files, warnings include 1-based line numbers.
+	 */
+	readonly validation?: "strict" | "lenient";
 };
 
 /**
@@ -191,15 +233,29 @@ export interface DatabaseReactiveOptions {
  */
 export function isCollectionPersistent(
 	config: CollectionConfig,
-): config is CollectionConfig & { file: string } {
-	return typeof config.file === "string" && config.file.length > 0;
+): config is CollectionConfig & ({ file: string } | { directory: string }) {
+	return (
+		(typeof config.file === "string" && config.file.length > 0) ||
+		(typeof config.directory === "string" && config.directory.length > 0)
+	);
+}
+
+/**
+ * Type guard to check if a collection uses directory-per-collection mode
+ */
+export function isCollectionDirectoryMode(
+	config: CollectionConfig,
+): config is CollectionConfig & { directory: string; format: string } {
+	return typeof config.directory === "string" && config.directory.length > 0;
 }
 
 /**
  * Extract only the persistent collections from a database configuration
  */
 export type PersistentCollections<Config extends DatabaseConfig> = {
-	readonly [K in keyof Config]: Config[K] extends { file: string }
+	readonly [K in keyof Config]: Config[K] extends
+		| { file: string }
+		| { directory: string }
 		? Config[K]
 		: never;
 };

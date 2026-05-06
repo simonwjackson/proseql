@@ -184,3 +184,9 @@ export {
 	makeRpcHandlersLayerFromDatabase,
 	type RpcHandlers,
 } from "./rpc-handlers.js";
+
+// ============================================================================
+// Re-export core Context.Tag factory
+// ============================================================================
+
+export { makeProseQLTag } from "@proseql/core";

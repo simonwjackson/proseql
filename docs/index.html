@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>proseql — Type-safe database that persists to plain text</title>
+  <meta name="description" content="Type-safe in-memory database that persists to plain text files. No server. No binary blobs. Just files you can read, diff, and commit.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <style>
+    :root {
+      --bg: #000;
+      --bg-surface: #111;
+      --bg-raised: #1a1a1a;
+      --fg: #dee2e6;
+      --fg-muted: rgba(255, 255, 255, 0.5);
+      --fg-subtle: rgba(255, 255, 255, 0.7);
+      --accent: #c77dff;
+      --accent-hover: #d9a0ff;
+      --border: rgba(255, 255, 255, 0.1);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* ── Focus styles ── */
+    *:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    /* ── Scroll fade-in ── */
+    .fade-in {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+
+    .fade-in.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* ── Hero Section ── */
+    .hero {
+      position: relative;
+      text-align: center;
+      padding: 8rem 1.5rem 5rem;
+      overflow: hidden;
+    }
+
+    /* Gradient orbs */
+    .hero::before,
+    .hero::after {
+      content: '';
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.15;
+      pointer-events: none;
+      will-change: transform;
+    }
+
+    .hero::before {
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, #c77dff, transparent 70%);
+      top: -200px;
+      left: -100px;
+      animation: orbDrift1 20s ease-in-out infinite;
+    }
+
+    .hero::after {
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, #6cb6ff, transparent 70%);
+      bottom: -150px;
+      right: -100px;
+      animation: orbDrift2 25s ease-in-out infinite;
+    }
+
+    .hero-orb-3 {
+      position: absolute;
+      width: 400px;
+      height: 400px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #9b59b6, transparent 70%);
+      filter: blur(120px);
+      opacity: 0.1;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      animation: orbDrift3 18s ease-in-out infinite;
+    }
+
+    @keyframes orbDrift1 {
+      0%, 100% { transform: translate(0, 0); }
+      33% { transform: translate(60px, 40px); }
+      66% { transform: translate(-30px, 20px); }
+    }
+
+    @keyframes orbDrift2 {
+      0%, 100% { transform: translate(0, 0); }
+      33% { transform: translate(-50px, -30px); }
+      66% { transform: translate(40px, -20px); }
+    }
+
+    @keyframes orbDrift3 {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); }
+      50% { transform: translate(-40%, -60%) scale(1.2); }
+    }
+
+    .hero h1 {
+      margin-bottom: 0.75rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero-logo {
+      height: 5rem;
+      width: auto;
+    }
+
+    .hero p {
+      font-size: 1.25rem;
+      color: var(--fg-subtle);
+      margin-bottom: 2rem;
+      max-width: 36rem;
+      margin-left: auto;
+      margin-right: auto;
+      position: relative;
+      z-index: 1;
+    }
+
+    .install {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      background: var(--bg-raised);
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 0.9rem 1.5rem;
+      font-family: 'JetBrains Mono', "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+      font-size: 1rem;
+      cursor: pointer;
+      color: var(--fg);
+      position: relative;
+      z-index: 1;
+      transition: box-shadow 0.3s ease, border-color 0.3s ease;
+      background-image: linear-gradient(var(--bg-raised), var(--bg-raised)), linear-gradient(135deg, rgba(199, 125, 255, 0.3), rgba(108, 182, 255, 0.3));
+      background-origin: border-box;
+      background-clip: padding-box, border-box;
+    }
+
+    .install:hover {
+      box-shadow: 0 0 20px rgba(199, 125, 255, 0.25);
+      background-image: linear-gradient(var(--bg-raised), var(--bg-raised)), linear-gradient(135deg, rgba(199, 125, 255, 0.6), rgba(108, 182, 255, 0.6));
+    }
+
+    .install-icon {
+      opacity: 0.5;
+      font-size: 1rem;
+      transition: opacity 0.2s;
+    }
+
+    .install:hover .install-icon {
+      opacity: 1;
+    }
+
+    .install-toast {
+      position: fixed;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%) translateY(1rem);
+      background: var(--fg);
+      color: var(--bg);
+      padding: 0.5rem 1.25rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-family: 'Inter', system-ui, sans-serif;
+      opacity: 0;
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+      z-index: 100;
+    }
+
+    .install-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .links {
+      margin-top: 1.5rem;
+      display: flex;
+      justify-content: center;
+      gap: 1.5rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .links a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 0.95rem;
+      transition: color 0.2s;
+    }
+
+    .links a:hover {
+      color: var(--accent-hover);
+      text-decoration: underline;
+    }
+
+    /* ── Features Section ── */
+    .features-section {
+      background: var(--bg-surface);
+      padding: 5rem 0;
+    }
+
+    .features-heading {
+      text-align: center;
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--fg-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 2.5rem;
+    }
+
+    .features {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+    }
+
+    @media (max-width: 768px) {
+      .features {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 500px) {
+      .features {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .feature {
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 1.25rem 1.5rem;
+      transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .feature:hover {
+      border-color: var(--accent);
+      box-shadow: 0 0 20px rgba(199, 125, 255, 0.1);
+      transform: translateY(-2px);
+    }
+
+    .feature strong {
+      display: block;
+      margin-bottom: 0.25rem;
+      font-size: 0.95rem;
+      color: var(--fg);
+    }
+
+    .feature span {
+      color: var(--fg-muted);
+      font-size: 0.85rem;
+    }
+
+    /* ── Demos Section ── */
+    .demos-section {
+      background: var(--bg);
+      padding: 5rem 0;
+    }
+
+    .demo-block {
+      margin-bottom: 3.5rem;
+    }
+
+    .demo-block:last-child {
+      margin-bottom: 0;
+    }
+
+    .demo-inner {
+      display: grid;
+      grid-template-columns: 1fr 1.5fr;
+      gap: 2.5rem;
+      align-items: start;
+    }
+
+    @media (max-width: 768px) {
+      .demo-inner {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+      }
+    }
+
+    .demo-text h3 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--fg);
+      margin-bottom: 0.5rem;
+    }
+
+    .demo-text p {
+      font-size: 0.95rem;
+      color: var(--fg-muted);
+      line-height: 1.6;
+    }
+
+    /* ── Terminal ── */
+    .terminal {
+      background: #1e1e1e;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 12px 16px;
+      background: #2d2d2d;
+    }
+
+    .terminal-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .terminal-dot.red { background: #ff5f57; }
+    .terminal-dot.yellow { background: #febc2e; }
+    .terminal-dot.green { background: #28c840; }
+
+    .terminal-body {
+      padding: 1rem 1.25rem 1.25rem;
+      font-family: 'JetBrains Mono', "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+      font-size: 0.85rem;
+      line-height: 1.7;
+      color: #d4d4d4;
+      min-height: 3rem;
+    }
+
+    .terminal-body .prompt {
+      color: #6bdf6b;
+    }
+
+    .terminal-body .output {
+      color: #9e9e9e;
+    }
+
+    .terminal-body .line {
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* Git diff colors */
+    .diff-add { color: #4ec94e; }
+    .diff-del { color: #f47067; }
+    .diff-hunk { color: #6cb6ff; }
+    .diff-meta { color: #d4d4d4; font-weight: bold; }
+
+    /* YAML syntax highlighting */
+    .yaml-key { color: #79c0ff; }
+    .yaml-str { color: #a5d6a7; }
+    .yaml-num { color: #f9c859; }
+    .yaml-sep { color: #888; }
+
+    /* ── Footer ── */
+    .site-footer {
+      background: var(--bg-surface);
+      text-align: center;
+      padding: 2.5rem 0 3rem;
+      border-top: 1px solid var(--border);
+      color: var(--fg-muted);
+      font-size: 0.85rem;
+    }
+
+    .site-footer p + p {
+      margin-top: 0.35rem;
+    }
+
+    /* ── Noise texture overlay ── */
+    .noise-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.03;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-repeat: repeat;
+      background-size: 256px 256px;
+    }
+
+    /* ── Staggered card fade-in delays ── */
+    .feature:nth-child(1) { transition-delay: 0s; }
+    .feature:nth-child(2) { transition-delay: 0.05s; }
+    .feature:nth-child(3) { transition-delay: 0.1s; }
+    .feature:nth-child(4) { transition-delay: 0.15s; }
+    .feature:nth-child(5) { transition-delay: 0.2s; }
+    .feature:nth-child(6) { transition-delay: 0.25s; }
+  </style>
+</head>
+<body>
+  <div class="noise-overlay"></div>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-orb-3"></div>
+    <h1><img src="logo-dark.svg" alt="proseQL" class="hero-logo"></h1>
+    <p>Type-safe database that persists to plain text. No server. No binary blobs. Just files you can read, diff, and commit.</p>
+    <div class="install" role="button" tabindex="0" title="Click to copy">
+      <span>npm i -g @proseql/cli</span>
+      <span class="install-icon">&#x21B5;</span>
+    </div>
+    <div class="links">
+      <a href="https://github.com/simonwjackson/proseql">GitHub</a>
+      <a href="https://www.npmjs.com/package/@proseql/cli">npm</a>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="features-section">
+    <div class="container">
+      <div class="features-heading fade-in">Why proseql?</div>
+      <div class="features">
+        <div class="feature fade-in">
+          <strong>No server</strong>
+          <span>In-memory database, files on disk</span>
+        </div>
+        <div class="feature fade-in">
+          <strong>Git-friendly</strong>
+          <span>Plain text diffs you can read</span>
+        </div>
+        <div class="feature fade-in">
+          <strong>Type-safe</strong>
+          <span>Effect Schema validation at compile time</span>
+        </div>
+        <div class="feature fade-in">
+          <strong>9+ formats</strong>
+          <span>YAML, JSON, TOML, JSON5, JSONC, Hjson, TOON, JSONL, Prose</span>
+        </div>
+        <div class="feature fade-in">
+          <strong>Relationships</strong>
+          <span>Foreign key refs, populated at query time</span>
+        </div>
+        <div class="feature fade-in">
+          <strong>Reactive</strong>
+          <span>Stream-based live queries</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Demos -->
+  <section class="demos-section">
+    <div class="container">
+
+      <!-- Demo 1: Init a project in seconds -->
+      <div class="demo-block fade-in">
+        <div class="demo-inner">
+          <div class="demo-text">
+            <h3>Init a project in seconds</h3>
+            <p>One command sets up your config, data directory, and an example collection. Start querying immediately.</p>
+          </div>
+          <div class="terminal" data-script='[
+            {"type":"input","text":"proseql init --format yaml"},
+            {"type":"output","text":"ProseQL project initialized!\n\nCreated files:\n  + proseql.config.ts\n  + data/\n  + data/notes.yaml\n\nNext steps:\n  1. Edit proseql.config.ts to define your collections\n  2. Run \u0027proseql query notes\u0027 to see example data"}
+          ]'>
+            <div class="terminal-bar">
+              <span class="terminal-dot red"></span>
+              <span class="terminal-dot yellow"></span>
+              <span class="terminal-dot green"></span>
+            </div>
+            <div class="terminal-body"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Demo 2: Query from the terminal -->
+      <div class="demo-block fade-in">
+        <div class="demo-inner">
+          <div class="demo-text">
+            <h3>Query from the terminal</h3>
+            <p>Filter, sort, and project — right from your shell. No GUI needed, no SQL server to run.</p>
+          </div>
+          <div class="terminal" data-script='[
+            {"type":"input","text":"proseql query books --where \u0027genre = \"sci-fi\"\u0027 --sort year:desc"},
+            {"type":"output","text":"id    title          author            year\n--    -----          ------            ----\n2     Neuromancer    William Gibson    1984\n1     Dune           Frank Herbert     1965"}
+          ]'>
+            <div class="terminal-bar">
+              <span class="terminal-dot red"></span>
+              <span class="terminal-dot yellow"></span>
+              <span class="terminal-dot green"></span>
+            </div>
+            <div class="terminal-body"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Demo 3: Mutate, then check the file -->
+      <div class="demo-block fade-in">
+        <div class="demo-inner">
+          <div class="demo-text">
+            <h3>Mutate, then check the file</h3>
+            <p>Every write is immediately persisted to a plain text file you can open in any editor.</p>
+          </div>
+          <div class="terminal" data-script='[
+            {"type":"input","text":"proseql update books 1 --set \u0027year=2025\u0027"},
+            {"type":"output","text":"id    title   author          year\n--    -----   ------          ----\n1     Dune    Frank Herbert   2025"},
+            {"type":"pause"},
+            {"type":"input","text":"cat data/books.yaml"},
+            {"type":"output","text":"- id: 1\n  title: Dune\n  author: Frank Herbert\n  year: 2025\n\n- id: 2\n  title: Neuromancer\n  author: William Gibson\n  year: 1984","format":"yaml"}
+          ]'>
+            <div class="terminal-bar">
+              <span class="terminal-dot red"></span>
+              <span class="terminal-dot yellow"></span>
+              <span class="terminal-dot green"></span>
+            </div>
+            <div class="terminal-body"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Demo 4: Git-friendly diffs -->
+      <div class="demo-block fade-in">
+        <div class="demo-inner">
+          <div class="demo-text">
+            <h3>Git-friendly diffs</h3>
+            <p>Because your data is plain text, every change produces clean, readable diffs.</p>
+          </div>
+          <div class="terminal" data-script='[
+            {"type":"input","text":"git diff data/books.yaml"},
+            {"type":"output","text":"diff --git a/data/books.yaml b/data/books.yaml\nindex 3a1b2c4..7d8e9f0 100644\n--- a/data/books.yaml\n+++ b/data/books.yaml\n@@ -1,6 +1,6 @@\n - id: dune\n   title: Dune\n   author: Frank Herbert\n-  year: 1965\n+  year: 2025","format":"diff"}
+          ]'>
+            <div class="terminal-bar">
+              <span class="terminal-dot red"></span>
+              <span class="terminal-dot yellow"></span>
+              <span class="terminal-dot green"></span>
+            </div>
+            <div class="terminal-body"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="site-footer fade-in">
+    <div class="container">
+      <p>MIT &middot; <a href="https://simonwjackson.io" style="color: var(--accent); text-decoration: none;">Simon W. Jackson</a></p>
+      <p>Built with <a href="https://effect.website" style="color: var(--accent); text-decoration: none;">Effect</a></p>
+    </div>
+  </footer>
+
+  <div class="install-toast" id="toast">Copied to clipboard</div>
+
+  <script>
+    // Click-to-copy install command
+    const installBtn = document.querySelector('.install');
+    const toast = document.getElementById('toast');
+
+    function showToast() {
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 1500);
+    }
+
+    installBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText('npm i -g @proseql/cli').then(showToast);
+    });
+
+    installBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        navigator.clipboard.writeText('npm i -g @proseql/cli').then(showToast);
+      }
+    });
+
+    // Render terminal content immediately
+    function renderFormattedOutput(text, format) {
+      if (format === 'diff') {
+        return text.split('\n').map(line => {
+          if (line.startsWith('+++') || line.startsWith('---')) {
+            return '<span class="diff-meta">' + escapeHtml(line) + '</span>';
+          } else if (line.startsWith('+')) {
+            return '<span class="diff-add">' + escapeHtml(line) + '</span>';
+          } else if (line.startsWith('-')) {
+            return '<span class="diff-del">' + escapeHtml(line) + '</span>';
+          } else if (line.startsWith('@@')) {
+            return '<span class="diff-hunk">' + escapeHtml(line) + '</span>';
+          } else if (line.startsWith('diff ') || line.startsWith('index ')) {
+            return '<span class="diff-meta">' + escapeHtml(line) + '</span>';
+          }
+          return escapeHtml(line);
+        }).join('\n');
+      }
+
+      if (format === 'yaml') {
+        return text.split('\n').map(line => {
+          const match = line.match(/^(\s*-?\s*)(\w[\w\s]*)(:)\s*(.*)$/);
+          if (match) {
+            const indent = escapeHtml(match[1]);
+            const key = '<span class="yaml-key">' + escapeHtml(match[2]) + '</span>';
+            const sep = '<span class="yaml-sep">' + escapeHtml(match[3]) + '</span>';
+            const val = match[4];
+            const valSpan = /^\d+$/.test(val)
+              ? ' <span class="yaml-num">' + escapeHtml(val) + '</span>'
+              : ' <span class="yaml-str">' + escapeHtml(val) + '</span>';
+            return indent + key + sep + valSpan;
+          }
+          return escapeHtml(line);
+        }).join('\n');
+      }
+
+      return escapeHtml(text);
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function renderTerminal(el) {
+      const body = el.querySelector('.terminal-body');
+      const script = JSON.parse(el.dataset.script);
+
+      for (const step of script) {
+        if (step.type === 'pause') continue;
+
+        const line = document.createElement('div');
+        line.className = 'line';
+
+        if (step.type === 'input') {
+          line.innerHTML = '<span class="prompt">$ </span>' + escapeHtml(step.text);
+        } else if (step.type === 'output') {
+          line.className = 'line output';
+          if (step.format) {
+            line.innerHTML = renderFormattedOutput(step.text, step.format);
+          } else {
+            line.textContent = step.text;
+          }
+        }
+
+        body.appendChild(line);
+      }
+    }
+
+    document.querySelectorAll('.terminal').forEach(el => renderTerminal(el));
+
+    // IntersectionObserver for scroll fade-in animations
+    const fadeObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          fadeObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.1 });
+
+    document.querySelectorAll('.fade-in').forEach(el => fadeObserver.observe(el));
+  </script>
+</body>
+</html>

@@ -198,6 +198,12 @@
     url = "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-win32-x64/-/msgpackr-extract-win32-x64-3.0.3.tgz";
     hash = "sha512-x0fWaQtYp4E6sktbsdAqnehxDgEc/VwM7uLsRCYWaiGu0ykYdZPiS8zCWdnjHwyiumousxfBm4SO31eXqwEZhQ==";
   };
+  "@proseql/ai" = {
+    out_path = "@proseql/ai";
+    name = "@proseql/ai@workspace:packages/ai";
+    url = "https://registry.npmjs.org/@proseql/ai/-/ai-workspace:packages/ai.tgz";
+    hash = "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+  };
   "@proseql/browser" = {
     out_path = "@proseql/browser";
     name = "@proseql/browser@workspace:packages/browser";
@@ -215,6 +221,15 @@
     name = "@proseql/core@workspace:packages/core";
     url = "https://registry.npmjs.org/@proseql/core/-/core-workspace:packages/core.tgz";
     hash = "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+  };
+  "@proseql/core/yaml" = {
+    out_path = "@proseql/core/node_modules/yaml";
+    binaries = {
+      "yaml" = "../@proseql/core/node_modules/yaml/bin.mjs";
+    };
+    name = "yaml@2.8.4";
+    url = "https://registry.npmjs.org/yaml/-/yaml-2.8.4.tgz";
+    hash = "sha512-ml/JPOj9fOQK8RNnWojA67GbZ0ApXAUlN2UQclwv2eVgTgn7O9gg9o7paZWKMp4g0H3nTLtS9LVzhkpOFIKzog==";
   };
   "@proseql/node" = {
     out_path = "@proseql/node";

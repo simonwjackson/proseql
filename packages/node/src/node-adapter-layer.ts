@@ -5,7 +5,7 @@
 
 import { randomBytes } from "node:crypto";
 import { promises as fs, watch as fsWatch } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import {
 	StorageAdapterService as StorageAdapter,
 	type StorageAdapterShape,
@@ -191,6 +191,58 @@ const makeWatch =
 			catch: (error) => toStorageError(path, "watch", error),
 		});
 
+const makeListDirectory =
+	(_config: Required<NodeAdapterConfig>) =>
+	(dirPath: string): Effect.Effect<ReadonlyArray<string>, StorageError> =>
+		Effect.tryPromise({
+			try: async () => {
+				try {
+					const entries = await fs.readdir(dirPath, { withFileTypes: true });
+					return entries
+						.filter((entry) => entry.isFile())
+						.map((entry) => join(dirPath, entry.name));
+				} catch (err: unknown) {
+					// Directory doesn't exist — return empty array
+					if (err instanceof Error && "code" in err && err.code === "ENOENT") {
+						return [];
+					}
+					throw err;
+				}
+			},
+			catch: (error) => toStorageError(dirPath, "list", error),
+		});
+
+const makeWatchDir =
+	(_config: Required<NodeAdapterConfig>) =>
+	(
+		dirPath: string,
+		onChange: (event: {
+			readonly filename: string | null;
+			readonly type: "add" | "change" | "remove";
+		}) => void,
+	): Effect.Effect<() => void, StorageError> =>
+		Effect.try({
+			try: () => {
+				const watcher = fsWatch(
+					dirPath,
+					{ persistent: false },
+					(eventType, filename) => {
+						// Map fs.watch events to our event types
+						// "rename" can mean add or remove — callers must reconcile
+						const type = eventType === "rename" ? "add" : "change";
+						onChange({
+							filename: typeof filename === "string" ? filename : null,
+							type,
+						});
+					},
+				);
+				return () => {
+					watcher.close();
+				};
+			},
+			catch: (error) => toStorageError(dirPath, "watch", error),
+		});
+
 const makeAdapter = (
 	config: Required<NodeAdapterConfig>,
 ): StorageAdapterShape => ({
@@ -201,6 +253,8 @@ const makeAdapter = (
 	remove: makeRemove(config),
 	ensureDir: makeEnsureDir(config),
 	watch: makeWatch(config),
+	listDirectory: makeListDirectory(config),
+	watchDir: makeWatchDir(config),
 });
 
 /**

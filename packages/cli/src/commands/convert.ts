@@ -9,19 +9,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
+	AllTextFormatsLayer,
 	type DatabaseConfig,
 	getFileExtension,
-	hjsonCodec,
-	json5Codec,
-	jsonCodec,
-	jsoncCodec,
-	makeSerializerLayer,
 	NodeStorageLayer,
 	SerializerRegistryService,
 	StorageAdapterService,
-	tomlCodec,
-	toonCodec,
-	yamlCodec,
 } from "@proseql/node";
 import { Effect, Layer } from "effect";
 
@@ -111,18 +104,7 @@ function resolveFilePath(
  * Includes all supported formats for maximum compatibility.
  */
 function buildPersistenceLayer() {
-	return Layer.merge(
-		NodeStorageLayer,
-		makeSerializerLayer([
-			jsonCodec(),
-			yamlCodec(),
-			tomlCodec(),
-			json5Codec(),
-			jsoncCodec(),
-			hjsonCodec(),
-			toonCodec(),
-		]),
-	);
+	return Layer.merge(NodeStorageLayer, AllTextFormatsLayer);
 }
 
 /**

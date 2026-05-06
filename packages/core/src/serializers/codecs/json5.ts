@@ -1,4 +1,7 @@
-import { parse, stringify } from "json5";
+import pkg from "json5";
+
+const { parse, stringify } = pkg;
+
 import type { FormatCodec, FormatOptions } from "../format-codec.js";
 
 /**

@@ -1,5 +1,116 @@
 # Changelog
 
+## v0.10.7 (2026-02-26)
+
+### Fixes
+- Resolve CLI config module imports and add lenient JSONL validation (a84eaad)
+
+
+## v0.10.6 (2026-02-25)
+
+### Other
+- Add logo and favicon to README and docs site (0da63f7)
+
+
+## v0.10.5 (2026-02-25)
+
+### Other
+- Remove terminal typing animations and link author name (46e0548)
+
+
+## v0.10.4 (2026-02-25)
+
+### Other
+- Complete visual overhaul of landing page (b486170)
+
+
+## v0.10.3 (2026-02-25)
+
+### Other
+- Rebrand landing page with dark-first Dexie-inspired theme (a124c4f)
+
+
+## v0.10.2 (2026-02-25)
+
+
+## v0.10.0 (2026-02-25)
+
+### Features
+- Update landing page to showcase CLI instead of library (999066b)
+
+
+## v0.9.0 (2026-02-25)
+
+### Features
+- Add proseql.com landing page and GitHub Pages deployment (9de0b02)
+
+
+## v0.8.0 (2026-02-25)
+
+### Features
+- Add directory-mode persistence for per-entity file storage (d6183db)
+
+### Fixes
+- Always emit overflow lines for null values in prose codec (1ac379b)
+
+
+## v0.7.1 (2026-02-19)
+
+### Fixes
+- Auto-assign index-based IDs for JSONL entries without `id` field (324aa9c)
+
+
+## v0.7.0 (2026-02-19)
+
+### Features
+- Add aggregation CLI flags to proseql query command (bafcadf)
+- Add @proseql/ai package for LLM tool integration (81a1a00)
+
+### Other
+- Fix import ordering and formatting in @proseql/ai (e835ddb)
+
+
+## v0.6.0 (2026-02-16)
+
+### Features
+- Add `path` option for reading/writing nested documents (0e43610)
+
+### Other
+- Apply biome auto-fixes (bc9a217)
+- Fix biome line length formatting (1ba4cb4)
+
+
+## v0.5.0 (2026-02-16)
+
+### Features
+- Add makeProseQLTag and makeProseQLLayer convenience helpers (69f1cf2)
+
+
+## v0.4.2 (2026-02-16)
+
+### Other
+- Add npm pkg fix step to CI publish workflow (869dab0)
+
+
+## v0.4.1 (2026-02-16)
+
+### Fixes
+- Resolve @proseql/cli npm publish 404 by fixing invalid bin path (247e8e7)
+
+
+## v0.4.0 (2026-02-16)
+
+### Features
+- Add npm publish step to release script (fixes workspace:* in published packages) (baab820)
+
+
+## v0.3.2 (2026-02-16)
+
+### Other
+- Auto-rebase on origin/main before push via lefthook (6b4a7c3)
+- Cache nix store with DeterminateSystems magic-nix-cache (ccf274c)
+
+
 ## v0.3.1 (2026-02-16)
 
 ### Fixes

@@ -6,14 +6,17 @@
  */
 
 import * as path from "node:path";
+import type {
+	AggregateConfig,
+	AggregateResult,
+	GroupedAggregateResult,
+	GroupResult,
+} from "@proseql/core";
 import {
+	AllTextFormatsLayer,
 	createPersistentEffectDatabase,
 	type DatabaseConfig,
-	jsonCodec,
-	makeSerializerLayer,
 	NodeStorageLayer,
-	tomlCodec,
-	yamlCodec,
 } from "@proseql/node";
 import { Chunk, Effect, Layer, Stream } from "effect";
 import {
@@ -39,6 +42,18 @@ export interface QueryOptions {
 	readonly sort?: string;
 	/** Limit from --limit flag */
 	readonly limit?: number;
+	/** Count matching records */
+	readonly count?: boolean;
+	/** Comma-separated fields to sum */
+	readonly sum?: string;
+	/** Comma-separated fields to average */
+	readonly avg?: string;
+	/** Comma-separated fields to find minimum */
+	readonly min?: string;
+	/** Comma-separated fields to find maximum */
+	readonly max?: string;
+	/** Comma-separated fields to group by */
+	readonly groupBy?: string;
 }
 
 /**
@@ -84,6 +99,100 @@ function parseSort(sort: string): Record<string, "asc" | "desc"> | undefined {
 	}
 
 	return { [trimmedField]: trimmedDirection };
+}
+
+/**
+ * Check if any aggregate flags are present.
+ */
+function isAggregateRequest(options: QueryOptions): boolean {
+	return !!(
+		options.count ||
+		options.sum ||
+		options.avg ||
+		options.min ||
+		options.max ||
+		options.groupBy
+	);
+}
+
+/**
+ * Parse a comma-separated field string into an array.
+ */
+function parseFields(csv: string): ReadonlyArray<string> {
+	return csv
+		.split(",")
+		.map((f) => f.trim())
+		.filter((f) => f.length > 0);
+}
+
+/**
+ * Build an AggregateConfig from CLI options and optional where clause.
+ */
+function buildAggregateConfig(
+	options: QueryOptions,
+	whereClause: Record<string, unknown> | undefined,
+): AggregateConfig {
+	const config: Record<string, unknown> = {};
+
+	if (whereClause && Object.keys(whereClause).length > 0) {
+		config.where = whereClause;
+	}
+	if (options.count) {
+		config.count = true;
+	}
+	if (options.sum) {
+		config.sum = parseFields(options.sum);
+	}
+	if (options.avg) {
+		config.avg = parseFields(options.avg);
+	}
+	if (options.min) {
+		config.min = parseFields(options.min);
+	}
+	if (options.max) {
+		config.max = parseFields(options.max);
+	}
+	if (options.groupBy) {
+		config.groupBy = parseFields(options.groupBy);
+	}
+
+	return config as AggregateConfig;
+}
+
+/**
+ * Flatten a scalar AggregateResult into a plain record for output formatters.
+ * Nested records become keys like "sum(macros.cal)".
+ */
+function flattenAggregateResult(
+	result: AggregateResult,
+): Record<string, unknown> {
+	const flat: Record<string, unknown> = {};
+
+	if (result.count !== undefined) {
+		flat.count = result.count;
+	}
+
+	for (const op of ["sum", "avg", "min", "max"] as const) {
+		const nested = result[op];
+		if (nested !== undefined) {
+			for (const [field, value] of Object.entries(nested)) {
+				flat[`${op}(${field})`] = value;
+			}
+		}
+	}
+
+	return flat;
+}
+
+/**
+ * Flatten a GroupResult into a plain record, spreading group fields into the record.
+ */
+function flattenGroupResult(result: GroupResult): Record<string, unknown> {
+	const { group, ...aggregates } = result;
+	return {
+		...group,
+		...flattenAggregateResult(aggregates),
+	};
 }
 
 /**
@@ -140,6 +249,61 @@ export function runQuery(
 		const whereClause =
 			where && where.length > 0 ? yield* parseFilters(where) : undefined;
 
+		// Resolve relative file paths in the config
+		const resolvedConfig = resolveConfigPaths(config, configPath);
+
+		// Build the persistence layer for database operations
+		const PersistenceLayer = Layer.merge(NodeStorageLayer, AllTextFormatsLayer);
+
+		// Aggregate path
+		if (isAggregateRequest(options)) {
+			const aggregateConfig = buildAggregateConfig(options, whereClause);
+
+			const program = Effect.gen(function* () {
+				const db = yield* createPersistentEffectDatabase(resolvedConfig, {});
+
+				const coll = db[collection as keyof typeof db] as {
+					readonly aggregate: (
+						config: AggregateConfig,
+					) => Effect.Effect<
+						AggregateResult | GroupedAggregateResult,
+						never,
+						never
+					>;
+				};
+
+				return yield* coll.aggregate(aggregateConfig);
+			});
+
+			const result = yield* program.pipe(
+				Effect.provide(PersistenceLayer),
+				Effect.scoped,
+				Effect.catchAll((error) => {
+					const message =
+						error instanceof Error ? error.message : String(error);
+					return Effect.succeed({
+						success: false as const,
+						message: `Aggregate failed: ${message}`,
+					});
+				}),
+			);
+
+			if ("success" in result && result.success === false) {
+				return result as QueryResult;
+			}
+
+			const flattened = Array.isArray(result)
+				? (result as GroupedAggregateResult).map(flattenGroupResult)
+				: [flattenAggregateResult(result as AggregateResult)];
+
+			return {
+				success: true,
+				data: flattened,
+				count: flattened.length,
+			};
+		}
+
+		// Regular query path
 		// Parse select fields
 		const selectFields = select ? parseSelect(select) : undefined;
 
@@ -152,15 +316,6 @@ export function runQuery(
 				message: `Invalid sort format: '${sort}'. Expected format: 'field:asc' or 'field:desc'`,
 			};
 		}
-
-		// Resolve relative file paths in the config
-		const resolvedConfig = resolveConfigPaths(config, configPath);
-
-		// Build the persistence layer for database operations
-		const PersistenceLayer = Layer.merge(
-			NodeStorageLayer,
-			makeSerializerLayer([jsonCodec(), yamlCodec(), tomlCodec()]),
-		);
 
 		// Boot the database and execute the query
 		const program = Effect.gen(function* () {

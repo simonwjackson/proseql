@@ -92,6 +92,12 @@ export type {
 } from "./migrations/migration-types.js";
 
 // ============================================================================
+// Context Tag Factory
+// ============================================================================
+
+export { makeProseQLTag } from "./context-tag.js";
+
+// ============================================================================
 // Core Types and Configurations
 // ============================================================================
 
@@ -101,6 +107,7 @@ export type {
 	DatabaseReactiveOptions,
 	ReactiveConfig,
 } from "./types/database-config-types.js";
+export { isCollectionDirectoryMode } from "./types/database-config-types.js";
 export type {
 	DatasetFor,
 	GenerateDatabase,
@@ -297,23 +304,34 @@ export {
 } from "./storage/in-memory-adapter-layer.js";
 export type {
 	DebouncedWriter,
+	DirectoryWatcherConfig,
 	FileWatcher,
 	FileWatcherConfig,
 	LoadCollectionConfig,
+	LoadDataFromDirectoryOptions,
 	LoadDataOptions,
 	SaveCollectionConfig,
 	SaveDataOptions,
+	StreamCollectionEntry,
 } from "./storage/persistence-effect.js";
 // Persistence utilities
 export {
 	createDebouncedWriter,
+	createDirectoryWatcher,
 	createFileWatcher,
 	createFileWatchers,
 	loadCollectionsFromFile,
 	loadData,
+	loadDataFromDirectory,
+	removeEntityFromDirectory,
 	saveCollectionsToFile,
 	saveData,
+	saveEntityToDirectory,
+	streamCollectionFromDirectory,
 } from "./storage/persistence-effect.js";
+// Standalone document reader
+export type { ReadDocumentOptions } from "./storage/read-document.js";
+export { readDocument } from "./storage/read-document.js";
 export type {
 	StorageAdapterShape,
 	StorageReadWriteError,
@@ -330,7 +348,8 @@ export { hjsonCodec } from "./serializers/codecs/hjson.js";
 export { jsonCodec } from "./serializers/codecs/json.js";
 export { json5Codec } from "./serializers/codecs/json5.js";
 export { jsoncCodec } from "./serializers/codecs/jsonc.js";
-export { jsonlCodec } from "./serializers/codecs/jsonl.js";
+export type { ParsedLine } from "./serializers/codecs/jsonl.js";
+export { jsonlCodec, jsonlDecodeLines } from "./serializers/codecs/jsonl.js";
 export type {
 	CompiledTemplate,
 	ProseCodecOptions,

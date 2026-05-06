@@ -7,13 +7,10 @@
 
 import * as path from "node:path";
 import {
+	AllTextFormatsLayer,
 	createPersistentEffectDatabase,
 	type DatabaseConfig,
-	jsonCodec,
-	makeSerializerLayer,
 	NodeStorageLayer,
-	tomlCodec,
-	yamlCodec,
 } from "@proseql/node";
 import { Chunk, Effect, Layer, Stream } from "effect";
 
@@ -133,10 +130,7 @@ export function runCollections(
 		const resolvedConfig = resolveConfigPaths(config, configPath);
 
 		// Build the persistence layer for database operations
-		const PersistenceLayer = Layer.merge(
-			NodeStorageLayer,
-			makeSerializerLayer([jsonCodec(), yamlCodec(), tomlCodec()]),
-		);
+		const PersistenceLayer = Layer.merge(NodeStorageLayer, AllTextFormatsLayer);
 
 		// Boot the database and gather collection info
 		const program = Effect.gen(function* () {

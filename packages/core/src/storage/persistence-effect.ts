@@ -6,7 +6,16 @@
  * Includes DebouncedWriter for coalescing rapid mutations into single file writes.
  */
 
-import { Effect, Fiber, PubSub, Ref, Schema, type Scope } from "effect";
+import {
+	Effect,
+	Fiber,
+	PubSub,
+	Queue,
+	Ref,
+	Schema,
+	type Scope,
+	Stream,
+} from "effect";
 import { ValidationError } from "../errors/crud-errors.js";
 import { MigrationError } from "../errors/migration-errors.js";
 import {
@@ -17,6 +26,7 @@ import {
 import { runMigrations } from "../migrations/migration-runner.js";
 import type { Migration } from "../migrations/migration-types.js";
 import { reloadEvent } from "../reactive/change-event.js";
+import { jsonlDecodeLines } from "../serializers/codecs/jsonl.js";
 import { SerializerRegistry } from "../serializers/serializer-service.js";
 import type { ChangeEvent } from "../types/reactive-types.js";
 import { getFileExtension } from "../utils/path.js";
@@ -51,6 +61,41 @@ const resolveExtension = (
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
+/**
+ * Navigate into a nested object using a dot-notation path.
+ * Returns undefined if any segment along the path is missing.
+ */
+const getAtPath = (obj: unknown, path: string): unknown => {
+	let current: unknown = obj;
+	for (const segment of path.split(".")) {
+		if (!isRecord(current)) return undefined;
+		current = current[segment];
+	}
+	return current;
+};
+
+/**
+ * Set a value at a dot-notation path within a nested object.
+ * Creates intermediate objects as needed. Returns a shallow copy.
+ */
+const setAtPath = (
+	obj: Record<string, unknown>,
+	path: string,
+	value: unknown,
+): Record<string, unknown> => {
+	const segments = path.split(".");
+	const root = { ...obj };
+	let current: Record<string, unknown> = root;
+	for (let i = 0; i < segments.length - 1; i++) {
+		const seg = segments[i];
+		const next = current[seg];
+		current[seg] = isRecord(next) ? { ...next } : {};
+		current = current[seg] as Record<string, unknown>;
+	}
+	current[segments[segments.length - 1]] = value;
+	return root;
+};
+
 // ============================================================================
 // loadData
 // ============================================================================
@@ -79,6 +124,17 @@ export interface LoadDataOptions {
 	 * When provided, this format is used instead of inferring from the file extension.
 	 */
 	readonly format?: string;
+	/**
+	 * Dot-notation path into the parsed document where the collection data lives.
+	 * When provided, navigates into the document structure before loading entities.
+	 * The resolved value can be a Record keyed by entity ID or an array of objects with `id`.
+	 */
+	readonly path?: string;
+	/**
+	 * Validation mode: "strict" (default) aborts on first invalid entity,
+	 * "lenient" skips invalid entities with warnings.
+	 */
+	readonly validation?: "strict" | "lenient";
 }
 
 /**
@@ -126,40 +182,85 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 			return new Map<string, A>() as ReadonlyMap<string, A>;
 		}
 
-		// Read and deserialize
+		// Read raw content
 		const raw = yield* storage.read(filePath);
-		const parsed = yield* serializer.deserialize(raw, ext);
 
-		// The on-disk format depends on the file extension:
-		// - JSONL/NDJSON/Prose: array of entity objects
-		// - All other formats: Record<string, object> keyed by entity ID
-		const isArrayFormat =
-			ext === "jsonl" || ext === "ndjson" || ext === "prose";
+		const isJsonlFormat = ext === "jsonl" || ext === "ndjson";
+		const isLenient = options?.validation === "lenient";
 		const entityMap: Record<string, unknown> = {};
+		// Map entity ID → 1-based line number (JSONL lenient mode only)
+		const lineNumberMap = new Map<string, number>();
 		let fileVersion = 0;
 
-		if (isArrayFormat && Array.isArray(parsed)) {
-			// Array format (JSONL/Prose): array of entity objects → convert to Record keyed by id
-			for (const item of parsed) {
-				if (isRecord(item) && typeof item.id === "string") {
-					entityMap[item.id] = item;
+		if (isJsonlFormat && isLenient) {
+			// JSONL lenient: parse line-by-line to track line numbers and
+			// tolerate malformed JSON lines (skip serializer.deserialize which
+			// would abort on the first bad line).
+			const parsedLines = jsonlDecodeLines(raw);
+			for (const line of parsedLines) {
+				if (line.parseError) {
+					yield* Effect.logWarning(
+						`[proseql] Skipping malformed JSON at line ${line.lineNumber} in '${filePath}': ${line.parseError}`,
+					);
+					continue;
 				}
-			}
-		} else if (isRecord(parsed)) {
-			// Standard format: Record keyed by entity ID
-			fileVersion = typeof parsed._version === "number" ? parsed._version : 0;
-			for (const [key, value] of Object.entries(parsed)) {
-				if (key !== "_version") {
-					entityMap[key] = value;
+				if (isRecord(line.parsed)) {
+					const id =
+						typeof line.parsed.id === "string"
+							? line.parsed.id
+							: String(line.lineNumber);
+					entityMap[id] = line.parsed;
+					lineNumberMap.set(id, line.lineNumber);
 				}
 			}
 		} else {
-			return yield* Effect.fail(
-				new SerializationError({
-					format: ext,
-					message: `Invalid data format in '${filePath}': expected object, got ${typeof parsed}`,
-				}),
-			);
+			// Standard path: deserialize the entire file at once
+			const parsed = yield* serializer.deserialize(raw, ext);
+
+			// If a path is specified, navigate into the document structure
+			const resolved = options?.path ? getAtPath(parsed, options.path) : parsed;
+
+			// If path navigation resolved to undefined, return empty map
+			if (resolved === undefined) {
+				return new Map<string, A>() as ReadonlyMap<string, A>;
+			}
+
+			// The on-disk format depends on the file extension:
+			// - JSONL/NDJSON/Prose: array of entity objects
+			// - All other formats: Record<string, object> keyed by entity ID
+			// When a path is specified, the resolved value may also be an array
+			const isArrayFormat =
+				isJsonlFormat ||
+				ext === "prose" ||
+				(options?.path !== undefined && Array.isArray(resolved));
+
+			if (isArrayFormat && Array.isArray(resolved)) {
+				// Array format: array of entity objects → convert to Record keyed by id
+				// Entries without a string `id` get their array index as a fallback key
+				for (let i = 0; i < resolved.length; i++) {
+					const item = resolved[i];
+					if (isRecord(item)) {
+						const id = typeof item.id === "string" ? item.id : String(i);
+						entityMap[id] = item;
+					}
+				}
+			} else if (isRecord(resolved)) {
+				// Standard format: Record keyed by entity ID
+				fileVersion =
+					typeof resolved._version === "number" ? resolved._version : 0;
+				for (const [key, value] of Object.entries(resolved)) {
+					if (key !== "_version") {
+						entityMap[key] = value;
+					}
+				}
+			} else {
+				return yield* Effect.fail(
+					new SerializationError({
+						format: ext,
+						message: `Invalid data format in '${filePath}'${options?.path ? ` at path '${options.path}'` : ""}: expected object or array, got ${typeof resolved}`,
+					}),
+				);
+			}
 		}
 
 		// Determine the data to decode (may be migrated)
@@ -215,31 +316,46 @@ export const loadData = <A extends { readonly id: string }, I, R>(
 		const entries: Array<[string, A]> = [];
 
 		for (const [id, value] of Object.entries(dataToLoad)) {
-			const decoded = yield* decode(value).pipe(
-				Effect.mapError((parseError) =>
-					// If migrations were run, produce MigrationError with step: -1
-					// Otherwise, produce ValidationError for normal schema mismatch
-					migrationsRan
-						? new MigrationError({
-								collection: collectionNameForError,
-								fromVersion: fromVersionForError,
-								toVersion: targetVersion ?? 0,
-								step: -1,
-								reason: "post-migration-validation-failed",
-								message: `Post-migration validation failed for entity '${id}': ${parseError.message}`,
-							})
-						: new ValidationError({
-								message: `Failed to decode entity '${id}' in '${filePath}': ${parseError.message}`,
-								issues: [
-									{
-										field: id,
-										message: parseError.message,
-									},
-								],
-							}),
-				),
-			);
-			entries.push([id, decoded]);
+			if (isLenient) {
+				// Lenient mode: skip invalid entities with warnings
+				const result = yield* Effect.either(decode(value));
+				if (result._tag === "Left") {
+					const lineNum = lineNumberMap.get(id);
+					const location = lineNum ? ` (line ${lineNum})` : "";
+					yield* Effect.logWarning(
+						`[proseql] Skipping entity '${id}'${location} in '${filePath}': ${result.left.message}`,
+					);
+				} else {
+					entries.push([id, result.right]);
+				}
+			} else {
+				// Strict mode: abort on first failure
+				const decoded = yield* decode(value).pipe(
+					Effect.mapError((parseError) =>
+						// If migrations were run, produce MigrationError with step: -1
+						// Otherwise, produce ValidationError for normal schema mismatch
+						migrationsRan
+							? new MigrationError({
+									collection: collectionNameForError,
+									fromVersion: fromVersionForError,
+									toVersion: targetVersion ?? 0,
+									step: -1,
+									reason: "post-migration-validation-failed",
+									message: `Post-migration validation failed for entity '${id}': ${parseError.message}`,
+								})
+							: new ValidationError({
+									message: `Failed to decode entity '${id}' in '${filePath}': ${parseError.message}`,
+									issues: [
+										{
+											field: id,
+											message: parseError.message,
+										},
+									],
+								}),
+					),
+				);
+				entries.push([id, decoded]);
+			}
 		}
 
 		const result = new Map(entries) as ReadonlyMap<string, A>;
@@ -273,6 +389,12 @@ export interface SaveDataOptions {
 	 * When provided, this format is used instead of inferring from the file extension.
 	 */
 	readonly format?: string;
+	/**
+	 * Dot-notation path into the document where the collection data should be written.
+	 * When provided, the existing file is read first and the collection data is set
+	 * at the specified path, preserving sibling data in the document.
+	 */
+	readonly path?: string;
 }
 
 /**
@@ -306,7 +428,7 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 		const isArrayFormat =
 			ext === "jsonl" || ext === "ndjson" || ext === "prose";
 
-		if (isArrayFormat) {
+		if (isArrayFormat && !options?.path) {
 			// Array format (JSONL/Prose): encode as array of entities
 			const entities: Array<I> = [];
 			for (const [id, entity] of data) {
@@ -330,7 +452,7 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 			yield* storage.ensureDir(filePath);
 			yield* storage.write(filePath, content);
 		} else {
-			// Standard format: encode as Record keyed by entity ID
+			// Encode entities
 			const entityMap: Record<string, I> = {};
 			for (const [id, entity] of data) {
 				const encoded = yield* encode(entity).pipe(
@@ -350,11 +472,31 @@ export const saveData = <A extends { readonly id: string }, I, R>(
 				entityMap[id] = encoded;
 			}
 
-			// Build output object, injecting _version first if provided for readability
-			const output: Record<string, unknown> =
-				options?.version !== undefined
-					? { _version: options.version, ...entityMap }
-					: entityMap;
+			// Build the collection data object
+			const collectionData: unknown =
+				options?.path !== undefined
+					? // Path mode: encode as array of entity values (matches how arrays are loaded)
+						Object.values(entityMap)
+					: options?.version !== undefined
+						? { _version: options.version, ...entityMap }
+						: entityMap;
+
+			// If path is specified, read-modify-write to preserve sibling data
+			let output: unknown;
+			if (options?.path) {
+				let existing: Record<string, unknown> = {};
+				const fileExists = yield* storage.exists(filePath);
+				if (fileExists) {
+					const raw = yield* storage.read(filePath);
+					const parsed = yield* serializer.deserialize(raw, ext);
+					if (isRecord(parsed)) {
+						existing = parsed as Record<string, unknown>;
+					}
+				}
+				output = setAtPath(existing, options.path, collectionData);
+			} else {
+				output = collectionData;
+			}
 
 			// Serialize and write
 			const content = yield* serializer.serialize(output, ext);
@@ -694,6 +836,413 @@ export function saveCollectionsToFile<T extends HasId, I>(
 		yield* storage.write(filePath, content);
 	});
 }
+
+// ============================================================================
+// Directory-mode persistence
+// ============================================================================
+
+/**
+ * Options for loadDataFromDirectory.
+ */
+export interface LoadDataFromDirectoryOptions {
+	/**
+	 * Optional schema version from collection config.
+	 */
+	readonly version?: number;
+	/**
+	 * Optional migrations array for automatic data migration.
+	 */
+	readonly migrations?: ReadonlyArray<Migration>;
+	/**
+	 * Collection name for error messages.
+	 */
+	readonly collectionName?: string;
+	/**
+	 * Validation mode: "strict" (default) aborts on first invalid entity,
+	 * "lenient" skips invalid entities with warnings.
+	 */
+	readonly validation?: "strict" | "lenient";
+}
+
+/**
+ * Load collection data from a directory where each entity is a separate file.
+ *
+ * Flow:
+ * 1. List files in directory via StorageAdapter.listDirectory
+ * 2. Filter files matching the given format extension
+ * 3. Read and deserialize each file
+ * 4. Decode each entity through the Schema
+ * 5. Return a ReadonlyMap<string, A> keyed by entity ID (derived from filename)
+ *
+ * If the directory does not exist, returns an empty ReadonlyMap.
+ */
+export const loadDataFromDirectory = <A extends { readonly id: string }, I, R>(
+	dirPath: string,
+	schema: Schema.Schema<A, I, R>,
+	format: string,
+	_options?: LoadDataFromDirectoryOptions,
+): Effect.Effect<
+	ReadonlyMap<string, A>,
+	| StorageError
+	| SerializationError
+	| UnsupportedFormatError
+	| ValidationError
+	| MigrationError,
+	StorageAdapter | SerializerRegistry | R
+> =>
+	Effect.gen(function* () {
+		const storage = yield* StorageAdapter;
+		const serializer = yield* SerializerRegistry;
+		const ext = format;
+		const suffix = `.${ext}`;
+
+		// List files in directory
+		const files = yield* storage.listDirectory(dirPath);
+
+		// Filter by format extension
+		const matchingFiles = files.filter((f) => f.endsWith(suffix));
+
+		if (matchingFiles.length === 0) {
+			return new Map<string, A>() as ReadonlyMap<string, A>;
+		}
+
+		// Decode each file
+		const decode = Schema.decodeUnknown(schema);
+		const entries: Array<[string, A]> = [];
+		const isLenient = _options?.validation === "lenient";
+
+		for (const filePath of matchingFiles) {
+			const raw = yield* storage.read(filePath);
+			const parsed = yield* serializer.deserialize(raw, ext);
+
+			// Extract ID from filename (strip directory and extension)
+			const filename = filePath.slice(filePath.lastIndexOf("/") + 1);
+			const id = filename.slice(0, filename.length - suffix.length);
+
+			if (isLenient) {
+				const result = yield* Effect.either(decode(parsed));
+				if (result._tag === "Left") {
+					yield* Effect.logWarning(
+						`[proseql] Skipping entity '${id}' in '${filePath}': ${result.left.message}`,
+					);
+				} else {
+					entries.push([id, result.right]);
+				}
+			} else {
+				const decoded = yield* decode(parsed).pipe(
+					Effect.mapError(
+						(parseError) =>
+							new ValidationError({
+								message: `Failed to decode entity from '${filePath}': ${parseError.message}`,
+								issues: [
+									{
+										field: id,
+										message: parseError.message,
+									},
+								],
+							}),
+					),
+				);
+				entries.push([id, decoded]);
+			}
+		}
+
+		return new Map(entries) as ReadonlyMap<string, A>;
+	});
+
+/**
+ * Save a single entity to a directory as `<dirPath>/<id>.<format>`.
+ */
+export const saveEntityToDirectory = <A extends { readonly id: string }, I, R>(
+	dirPath: string,
+	entity: A,
+	schema: Schema.Schema<A, I, R>,
+	format: string,
+): Effect.Effect<
+	void,
+	StorageError | SerializationError | UnsupportedFormatError | ValidationError,
+	StorageAdapter | SerializerRegistry | R
+> =>
+	Effect.gen(function* () {
+		const storage = yield* StorageAdapter;
+		const serializer = yield* SerializerRegistry;
+		const encode = Schema.encode(schema);
+
+		const encoded = yield* encode(entity).pipe(
+			Effect.mapError(
+				(parseError) =>
+					new ValidationError({
+						message: `Failed to encode entity '${entity.id}' for directory '${dirPath}': ${parseError.message}`,
+						issues: [
+							{
+								field: entity.id,
+								message: parseError.message,
+							},
+						],
+					}),
+			),
+		);
+
+		const content = yield* serializer.serialize(encoded, format);
+		const filePath = `${dirPath}/${entity.id}.${format}`;
+		yield* storage.ensureDir(filePath);
+		yield* storage.write(filePath, content);
+	});
+
+/**
+ * Remove a single entity file from a directory.
+ */
+export const removeEntityFromDirectory = (
+	dirPath: string,
+	id: string,
+	format: string,
+): Effect.Effect<void, StorageError, StorageAdapter> =>
+	Effect.gen(function* () {
+		const storage = yield* StorageAdapter;
+		const filePath = `${dirPath}/${id}.${format}`;
+		const exists = yield* storage.exists(filePath);
+		if (exists) {
+			yield* storage.remove(filePath);
+		}
+	});
+
+/**
+ * Entry type for streaming directory reads.
+ */
+export interface StreamCollectionEntry<A> {
+	readonly id: string;
+	readonly data: A;
+}
+
+/**
+ * Stream collection entities from a directory, reading files lazily.
+ *
+ * Returns a Stream that eagerly lists files, then lazily reads/decodes each.
+ */
+export const streamCollectionFromDirectory = <
+	A extends { readonly id: string },
+	I,
+	R,
+>(
+	dirPath: string,
+	schema: Schema.Schema<A, I, R>,
+	format: string,
+): Stream.Stream<
+	StreamCollectionEntry<A>,
+	StorageError | SerializationError | UnsupportedFormatError | ValidationError,
+	StorageAdapter | SerializerRegistry | R
+> => {
+	const suffix = `.${format}`;
+
+	return Stream.unwrap(
+		Effect.gen(function* () {
+			const storage = yield* StorageAdapter;
+			const files = yield* storage.listDirectory(dirPath);
+			const matchingFiles = files.filter((f) => f.endsWith(suffix));
+
+			return Stream.fromIterable(matchingFiles).pipe(
+				Stream.mapEffect((filePath) =>
+					Effect.gen(function* () {
+						const storage = yield* StorageAdapter;
+						const serializer = yield* SerializerRegistry;
+						const decode = Schema.decodeUnknown(schema);
+
+						const raw = yield* storage.read(filePath);
+						const parsed = yield* serializer.deserialize(raw, format);
+
+						const filename = filePath.slice(filePath.lastIndexOf("/") + 1);
+						const id = filename.slice(0, filename.length - suffix.length);
+
+						const decoded = yield* decode(parsed).pipe(
+							Effect.mapError(
+								(parseError) =>
+									new ValidationError({
+										message: `Failed to decode entity from '${filePath}': ${parseError.message}`,
+										issues: [
+											{
+												field: id,
+												message: parseError.message,
+											},
+										],
+									}),
+							),
+						);
+
+						return { id, data: decoded } as StreamCollectionEntry<A>;
+					}),
+				),
+			);
+		}),
+	);
+};
+
+// ============================================================================
+// DirectoryWatcher
+// ============================================================================
+
+/**
+ * Configuration for a directory watcher.
+ */
+export interface DirectoryWatcherConfig<
+	A extends { readonly id: string },
+	I,
+	R,
+> {
+	/** Path to the directory to watch */
+	readonly dirPath: string;
+	/** Serialization format (e.g., "yaml", "json") */
+	readonly format: string;
+	/** Schema to decode loaded data through */
+	readonly schema: Schema.Schema<A, I, R>;
+	/** Ref holding the collection state to update on file change */
+	readonly ref: Ref.Ref<ReadonlyMap<string, A>>;
+	/** Optional debounce delay in ms for reload after change (default 50) */
+	readonly debounceMs?: number;
+	/** Optional PubSub to publish reload events to for reactive query subscriptions */
+	readonly changePubSub?: PubSub.PubSub<ChangeEvent>;
+	/** Collection name (required when changePubSub is provided) */
+	readonly collectionName?: string;
+}
+
+/**
+ * Create a managed directory watcher using Effect.acquireRelease.
+ *
+ * The watcher monitors a directory for file changes. When a change is detected,
+ * it reloads the affected entity (or the full directory for unknown filenames)
+ * and updates the collection Ref.
+ */
+export const createDirectoryWatcher = <A extends { readonly id: string }, I, R>(
+	config: DirectoryWatcherConfig<A, I, R>,
+): Effect.Effect<
+	FileWatcher,
+	StorageError,
+	Scope.Scope | StorageAdapter | SerializerRegistry | R
+> => {
+	const debounceMs = config.debounceMs ?? 50;
+	const suffix = `.${config.format}`;
+
+	return Effect.gen(function* () {
+		const storage = yield* StorageAdapter;
+		const active = yield* Ref.make(true);
+
+		const changeQueue = yield* Queue.unbounded<{
+			readonly filename: string | null;
+			readonly type: "add" | "change" | "remove";
+		}>();
+
+		const pendingReload = yield* Ref.make<Fiber.RuntimeFiber<
+			void,
+			| StorageError
+			| SerializationError
+			| UnsupportedFormatError
+			| ValidationError
+			| MigrationError
+		> | null>(null);
+
+		const processorFiber = yield* Effect.fork(
+			Effect.forever(
+				Effect.gen(function* () {
+					const event = yield* Queue.take(changeQueue);
+					// Drain any queued signals
+					yield* Queue.takeAll(changeQueue);
+
+					const isActive = yield* Ref.get(active);
+					if (!isActive) return;
+
+					// Cancel existing pending reload
+					const existing = yield* Ref.get(pendingReload);
+					if (existing !== null) {
+						yield* Fiber.interrupt(existing);
+					}
+
+					const fiber = yield* Effect.fork(
+						Effect.gen(function* () {
+							yield* Effect.sleep(debounceMs);
+
+							if (event.filename?.endsWith(suffix)) {
+								const id = event.filename.slice(
+									0,
+									event.filename.length - suffix.length,
+								);
+								if (event.type === "remove") {
+									// Remove entity from Ref
+									yield* Ref.update(config.ref, (m) => {
+										const next = new Map(m);
+										next.delete(id);
+										return next;
+									});
+								} else {
+									// add or change: read and upsert
+									const filePath = `${config.dirPath}/${event.filename}`;
+									const storage = yield* StorageAdapter;
+									const serializer = yield* SerializerRegistry;
+									const decode = Schema.decodeUnknown(config.schema);
+
+									const raw = yield* storage.read(filePath);
+									const parsed = yield* serializer.deserialize(
+										raw,
+										config.format,
+									);
+									const decoded = yield* decode(parsed).pipe(
+										Effect.catchAll(() => Effect.succeed(null)),
+									);
+									if (decoded !== null) {
+										yield* Ref.update(config.ref, (m) => {
+											const next = new Map(m);
+											next.set(id, decoded);
+											return next;
+										});
+									}
+								}
+							} else {
+								// Unknown filename or null — full reload
+								const newData = yield* loadDataFromDirectory(
+									config.dirPath,
+									config.schema,
+									config.format,
+								);
+								yield* Ref.set(config.ref, newData);
+							}
+
+							// Publish reload event
+							if (
+								config.changePubSub !== undefined &&
+								config.collectionName !== undefined
+							) {
+								yield* PubSub.publish(
+									config.changePubSub,
+									reloadEvent(config.collectionName),
+								);
+							}
+						}),
+					);
+
+					yield* Ref.set(pendingReload, fiber);
+				}),
+			),
+		);
+
+		yield* Effect.acquireRelease(
+			storage.watchDir(config.dirPath, (event) => {
+				Queue.unsafeOffer(changeQueue, event);
+			}),
+			(stopWatching) =>
+				Effect.gen(function* () {
+					yield* Ref.set(active, false);
+					yield* Fiber.interrupt(processorFiber);
+					const pending = yield* Ref.get(pendingReload);
+					if (pending !== null) {
+						yield* Fiber.interrupt(pending);
+					}
+					stopWatching();
+				}),
+		);
+
+		return {
+			isActive: () => Ref.get(active),
+		} satisfies FileWatcher;
+	});
+};
 
 // ============================================================================
 // DebouncedWriter

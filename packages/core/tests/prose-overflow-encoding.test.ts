@@ -121,8 +121,8 @@ describe("encodeOverflowLines", () => {
 		});
 	});
 
-	describe("null overflow omitted", () => {
-		it("omits overflow line when field value is null", () => {
+	describe("null overflow emitted as tilde", () => {
+		it("emits overflow line with ~ when field value is null", () => {
 			const templates = compileOverflowTemplates([
 				"tagged {tags}",
 				"~ {description}",
@@ -136,10 +136,10 @@ describe("encodeOverflowLines", () => {
 
 			const lines = encodeOverflowLines(record, templates);
 
-			expect(lines).toEqual(["  tagged [sci-fi]"]);
+			expect(lines).toEqual(["  tagged [sci-fi]", "  ~ ~"]);
 		});
 
-		it("omits overflow line when field value is undefined", () => {
+		it("emits overflow line with ~ when field value is undefined", () => {
 			const templates = compileOverflowTemplates([
 				"tagged {tags}",
 				"~ {description}",
@@ -153,10 +153,10 @@ describe("encodeOverflowLines", () => {
 
 			const lines = encodeOverflowLines(record, templates);
 
-			expect(lines).toEqual(["  tagged [sci-fi]"]);
+			expect(lines).toEqual(["  tagged [sci-fi]", "  ~ ~"]);
 		});
 
-		it("omits all overflow lines when all fields are null", () => {
+		it("emits all overflow lines with ~ when all fields are null", () => {
 			const templates = compileOverflowTemplates([
 				"tagged {tags}",
 				"~ {description}",
@@ -170,10 +170,10 @@ describe("encodeOverflowLines", () => {
 
 			const lines = encodeOverflowLines(record, templates);
 
-			expect(lines).toEqual([]);
+			expect(lines).toEqual(["  tagged ~", "  ~ ~"]);
 		});
 
-		it("omits first overflow but keeps second", () => {
+		it("emits first overflow with ~ and keeps second with value", () => {
 			const templates = compileOverflowTemplates([
 				"tagged {tags}",
 				"~ {description}",
@@ -187,10 +187,10 @@ describe("encodeOverflowLines", () => {
 
 			const lines = encodeOverflowLines(record, templates);
 
-			expect(lines).toEqual(["  ~ A classic novel"]);
+			expect(lines).toEqual(["  tagged ~", "  ~ A classic novel"]);
 		});
 
-		it("omits middle overflow in a sequence", () => {
+		it("emits middle overflow with ~ in a sequence", () => {
 			const templates = compileOverflowTemplates([
 				"tagged {tags}",
 				"~ {description}",
@@ -206,7 +206,11 @@ describe("encodeOverflowLines", () => {
 
 			const lines = encodeOverflowLines(record, templates);
 
-			expect(lines).toEqual(["  tagged [sci-fi]", "  notes: Must read"]);
+			expect(lines).toEqual([
+				"  tagged [sci-fi]",
+				"  ~ ~",
+				"  notes: Must read",
+			]);
 		});
 	});
 
@@ -390,13 +394,13 @@ describe("encodeOverflowLines", () => {
 			expect(lines).toEqual(["  meta: 5 / ~"]);
 		});
 
-		it("omits overflow when all fields in template are null", () => {
+		it("emits overflow with ~ when all fields in template are null", () => {
 			const templates = compileOverflowTemplates(["meta: {count} / {total}"]);
 			const record = { id: "1", count: null, total: null };
 
 			const lines = encodeOverflowLines(record, templates);
 
-			expect(lines).toEqual([]);
+			expect(lines).toEqual(["  meta: ~ / ~"]);
 		});
 	});
 });

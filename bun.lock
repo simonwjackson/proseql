@@ -26,9 +26,19 @@
         "vitest": "^1.1.1",
       },
     },
+    "packages/ai": {
+      "name": "@proseql/ai",
+      "version": "0.5.0",
+      "dependencies": {
+        "@proseql/core": "workspace:*",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-beta.60",
+      },
+    },
     "packages/browser": {
       "name": "@proseql/browser",
-      "version": "0.3.1",
+      "version": "0.10.7",
       "dependencies": {
         "@proseql/core": "workspace:*",
       },
@@ -38,7 +48,7 @@
     },
     "packages/cli": {
       "name": "@proseql/cli",
-      "version": "0.3.1",
+      "version": "0.10.7",
       "bin": {
         "proseql": "./dist/main.js",
       },
@@ -52,7 +62,7 @@
     },
     "packages/core": {
       "name": "@proseql/core",
-      "version": "0.3.1",
+      "version": "0.10.7",
       "dependencies": {
         "@toon-format/toon": "^2.1.0",
         "effect": "4.0.0-beta.60",
@@ -65,7 +75,7 @@
     },
     "packages/node": {
       "name": "@proseql/node",
-      "version": "0.3.1",
+      "version": "0.10.7",
       "dependencies": {
         "@proseql/core": "workspace:*",
       },
@@ -75,7 +85,7 @@
     },
     "packages/rest": {
       "name": "@proseql/rest",
-      "version": "0.3.1",
+      "version": "0.10.7",
       "dependencies": {
         "@proseql/core": "workspace:*",
       },
@@ -85,7 +95,7 @@
     },
     "packages/rpc": {
       "name": "@proseql/rpc",
-      "version": "0.3.1",
+      "version": "0.10.7",
       "dependencies": {
         "@proseql/core": "workspace:*",
       },
@@ -161,6 +171,8 @@
     "@msgpackr-extract/msgpackr-extract-linux-x64": ["@msgpackr-extract/msgpackr-extract-linux-x64@3.0.3", "", { "os": "linux", "cpu": "x64" }, "sha512-cvwNfbP07pKUfq1uH+S6KJ7dT9K8WOE4ZiAcsrSes+UY55E/0jLYc+vq+DO7jlmqRb5zAggExKm0H7O/CBaesg=="],
 
     "@msgpackr-extract/msgpackr-extract-win32-x64": ["@msgpackr-extract/msgpackr-extract-win32-x64@3.0.3", "", { "os": "win32", "cpu": "x64" }, "sha512-x0fWaQtYp4E6sktbsdAqnehxDgEc/VwM7uLsRCYWaiGu0ykYdZPiS8zCWdnjHwyiumousxfBm4SO31eXqwEZhQ=="],
+
+    "@proseql/ai": ["@proseql/ai@workspace:packages/ai"],
 
     "@proseql/browser": ["@proseql/browser@workspace:packages/browser"],
 
@@ -411,6 +423,8 @@
     "yaml": ["yaml@2.8.2", "", { "bin": { "yaml": "bin.mjs" } }, "sha512-mplynKqc1C2hTVYxd0PU2xQAc22TI1vShAYGksCCfxbn/dFwnHTNi1bvYsBTkhdUNtGIf5xNOg938rrSSYvS9A=="],
 
     "yocto-queue": ["yocto-queue@1.2.2", "", {}, "sha512-4LCcse/U2MHZ63HAJVE+v71o7yOdIe4cZ70Wpf8D/IyjDKYQLV5GD46B+hSTjJsvV5PztjvHoU580EftxjDZFQ=="],
+
+    "@proseql/core/yaml": ["yaml@2.8.4", "", { "bin": { "yaml": "bin.mjs" } }, "sha512-ml/JPOj9fOQK8RNnWojA67GbZ0ApXAUlN2UQclwv2eVgTgn7O9gg9o7paZWKMp4g0H3nTLtS9LVzhkpOFIKzog=="],
 
     "bun-types/@types/node": ["@types/node@25.2.2", "", { "dependencies": { "undici-types": "~7.16.0" } }, "sha512-BkmoP5/FhRYek5izySdkOneRyXYN35I860MFAGupTdebyE66uZaR+bXLHq8k4DirE5DwQi3NuhvRU1jqTVwUrQ=="],
 

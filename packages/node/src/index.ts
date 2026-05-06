@@ -10,6 +10,7 @@ export * from "@proseql/core";
 export {
 	createNodeDatabase,
 	makeNodePersistenceLayer,
+	makeProseQLLayer,
 } from "./convenience.js";
 export type { NodeAdapterConfig } from "./node-adapter-layer.js";
 // Export Node.js storage adapter

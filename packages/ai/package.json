@@ -1,7 +1,7 @@
 {
-  "name": "@proseql/rest",
-  "version": "0.10.7",
-  "description": "REST API handlers for ProseQL databases, framework-agnostic",
+  "name": "@proseql/ai",
+  "version": "0.5.0",
+  "description": "AI tool definitions and executor for ProseQL databases",
   "type": "module",
   "scripts": {
     "build": "bunx tsc --build",
@@ -25,14 +25,15 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/simonwjackson/proseql.git",
-    "directory": "packages/rest"
+    "directory": "packages/ai"
   },
   "keywords": [
     "database",
     "typescript",
     "effect",
-    "rest",
-    "api",
+    "ai",
+    "tools",
+    "llm",
     "plain-text",
     "type-safe"
   ],

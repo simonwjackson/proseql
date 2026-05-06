@@ -32,6 +32,16 @@ export interface StorageAdapterShape {
 		path: string,
 		onChange: () => void,
 	) => Effect.Effect</** stop watching */ () => void, StorageError>;
+	readonly listDirectory: (
+		dirPath: string,
+	) => Effect.Effect<ReadonlyArray<string>, StorageError>;
+	readonly watchDir: (
+		dirPath: string,
+		onChange: (event: {
+			readonly filename: string | null;
+			readonly type: "add" | "change" | "remove";
+		}) => void,
+	) => Effect.Effect</** stop watching */ () => void, StorageError>;
 }
 
 export const StorageAdapter =
