@@ -10,11 +10,13 @@ test *args:
     bun test \
         packages/core/tests/database-effect.test.ts \
         packages/core/tests/debounced-writer.test.ts \
+        packages/core/tests/derived-id.test.ts \
         packages/core/tests/file-watcher.test.ts \
         packages/core/tests/schema-validation.test.ts \
         packages/core/tests/schema-migrations.test.ts \
         packages/core/tests/transactions.test.ts \
         packages/node/tests/convenience.test.ts \
+        packages/node/tests/derived-id-convenience.test.ts \
         packages/rest/tests/handlers.test.ts \
         {{args}}
 
