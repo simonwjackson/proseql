@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.11.0 (2026-05-06)
+
+### Features
+- Migrate foundation packages to Effect v4 beta (5ffd9d2)
+
+### Fixes
+- Restore Effect v4 foundation CI (05ba923)
+
+### Other
+- Integrate origin/main (ce33610)
+- Document Effect v4 migration learning (6d08a3f)
+- Plan Korri foundation hardening (b6a7281)
+
+
 ## v0.10.7 (2026-02-26)
 
 ### Fixes
