@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.12.0 (2026-05-06)
+
+### Features
+- Add derived id persistence (1a8aa32)
+
+### Fixes
+- Reject invalid derived id fields (be8a6ad)
+
+### Other
+- Add derived id suites to foundation gate (292dd80)
+- Document derived id persistence (6f1e066)
+- Plan derived id persistence (9cf0c63)
+
+
 ## v0.11.0 (2026-05-06)
 
 ### Features
