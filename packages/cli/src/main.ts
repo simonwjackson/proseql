@@ -340,9 +340,7 @@ async function resolveConfig(
 
 	const result = await Effect.runPromise(
 		program.pipe(
-			Effect.catchAll((error) =>
-				Effect.sync(() => exitWithError(error.message)),
-			),
+			Effect.catch((error) => Effect.sync(() => exitWithError(error.message))),
 		),
 	);
 

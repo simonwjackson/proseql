@@ -3,6 +3,7 @@ effect/
 dist/
 packages/*/dist/
 bun.nix
+*.tsbuildinfo
 packages/*/*.tsbuildinfo
 packages/*/LICENSE
 coverage/

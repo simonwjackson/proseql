@@ -134,7 +134,7 @@ export function runUpdate(
 		const result = yield* program.pipe(
 			Effect.provide(PersistenceLayer),
 			Effect.scoped,
-			Effect.catchAll((error) => {
+			Effect.catch((error) => {
 				// Extract error message based on error type
 				let message: string;
 				if (error && typeof error === "object") {

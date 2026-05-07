@@ -12,7 +12,7 @@ import {
 	type DatabaseConfig,
 	NodeStorageLayer,
 } from "@proseql/node";
-import { Chunk, Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Stream } from "effect";
 
 /**
  * Options for the collections command.
@@ -151,8 +151,8 @@ export function runCollections(
 
 				// Count entities by querying all and collecting
 				const stream = coll.query();
-				const chunk = yield* Stream.runCollect(stream);
-				const count = Chunk.size(chunk);
+				const records = yield* Stream.runCollect(stream);
+				const count = records.length;
 
 				// Get format from file extension
 				const format = getFormatFromFile(filePath);
@@ -178,7 +178,7 @@ export function runCollections(
 		const result = yield* program.pipe(
 			Effect.provide(PersistenceLayer),
 			Effect.scoped,
-			Effect.catchAll((error) => {
+			Effect.catch((error) => {
 				const message = error instanceof Error ? error.message : String(error);
 				return Effect.succeed({
 					success: false as const,

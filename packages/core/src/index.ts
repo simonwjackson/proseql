@@ -73,6 +73,8 @@ export {
 // Schema Types
 // ============================================================================
 
+export { Schema } from "effect";
+
 export type {
 	EntitySchema,
 	InferEncoded,

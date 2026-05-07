@@ -44,6 +44,10 @@ coverage-node:
 typecheck:
     bunx tsc --build
 
+# Verify npm packages include required built artifacts
+verify-packages:
+    bun run scripts/verify-package-artifacts.ts
+
 # Lint Korri-ready foundation paths
 lint:
     biome check \
@@ -64,7 +68,7 @@ format:
 
 # Clean
 clean:
-    rm -rf packages/*/dist packages/*/.tsbuildinfo
+    rm -rf packages/*/dist packages/*/*.tsbuildinfo *.tsbuildinfo dist/**/*.tsbuildinfo
 
 # Release a new version (auto-detects bump type, or pass patch/minor/major)
 release *bump:

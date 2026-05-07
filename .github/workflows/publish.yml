@@ -44,18 +44,20 @@ jobs:
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-      - run: nix develop --command bash -c "bun install && bun run build"
+      - run: nix develop --command bash -c "bun install && bun run build:clean"
       - name: Resolve workspace references
         run: |
           CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
-          for pkg in node rest rpc cli; do
+          for pkg in node rest cli; do
             sed -i "s/\"workspace:\*\"/\"^${CORE_VERSION}\"/" "packages/${pkg}/package.json"
           done
       - name: Fix package.json validation issues
         run: |
-          for pkg in core node rest rpc cli; do
+          for pkg in core node rest cli; do
             (cd "packages/${pkg}" && npm pkg fix)
           done
+      - name: Verify package artifacts
+        run: nix develop --command bash -c "bun run verify:packages"
       - name: Publish @proseql/core
         run: npm publish --provenance --access public --ignore-scripts || true
         working-directory: packages/core
@@ -65,9 +67,6 @@ jobs:
       - name: Publish @proseql/rest
         run: npm publish --provenance --access public --ignore-scripts || true
         working-directory: packages/rest
-      - name: Publish @proseql/rpc
-        run: npm publish --provenance --access public --ignore-scripts || true
-        working-directory: packages/rpc
       - name: Publish @proseql/cli
         run: npm publish --provenance --access public --ignore-scripts || true
         working-directory: packages/cli

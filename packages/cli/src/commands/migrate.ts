@@ -136,7 +136,7 @@ function readFileVersion(filePath: string) {
 
 		const parsed = yield* serializer
 			.deserialize(raw, ext)
-			.pipe(Effect.catchAll(() => Effect.succeed(null)));
+			.pipe(Effect.catch(() => Effect.succeed(null)));
 
 		// Extract _version from parsed data
 		if (
@@ -154,7 +154,7 @@ function readFileVersion(filePath: string) {
 		return { version: 0, exists: true };
 	}).pipe(
 		// Catch any storage/serialization errors and return version 0
-		Effect.catchAll(() => Effect.succeed({ version: 0, exists: true })),
+		Effect.catch(() => Effect.succeed({ version: 0, exists: true })),
 	);
 }
 
@@ -408,7 +408,7 @@ function migrateCollection(
 		const raw = yield* storage
 			.read(filePath)
 			.pipe(
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					Effect.fail(new Error(`Failed to read file: ${err}`)),
 				),
 			);
@@ -417,7 +417,7 @@ function migrateCollection(
 		const parsed = yield* serializer
 			.deserialize(raw, ext)
 			.pipe(
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					Effect.fail(new Error(`Failed to parse file: ${err}`)),
 				),
 			);
@@ -467,7 +467,7 @@ function migrateCollection(
 		const serialized = yield* serializer
 			.serialize(migratedData, ext)
 			.pipe(
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					Effect.fail(new Error(`Failed to serialize data: ${err}`)),
 				),
 			);
@@ -476,7 +476,7 @@ function migrateCollection(
 		yield* storage
 			.write(filePath, serialized)
 			.pipe(
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					Effect.fail(new Error(`Failed to write file: ${err}`)),
 				),
 			);
@@ -489,7 +489,7 @@ function migrateCollection(
 			migrationsApplied: applicableMigrations.length,
 		};
 	}).pipe(
-		Effect.catchAll((err) =>
+		Effect.catch((err) =>
 			Effect.succeed({
 				name,
 				success: false,

@@ -196,11 +196,12 @@ try {
 // --- Publish packages to npm ---
 // bun publish resolves workspace:* → actual versions automatically
 
-const publishOrder = ["core", "node", "browser", "cli", "rest", "rpc", "ai"];
+const publishOrder = ["core", "node", "cli", "rest"];
 console.log("\nPublishing to npm...");
 
-// Build first to ensure dist/ is fresh
-execSync("bun run build", { cwd: root, stdio: "inherit" });
+// Build from a clean tree to ensure dist/ is fresh, then verify packages before publishing.
+execSync("bun run build:clean", { cwd: root, stdio: "inherit" });
+execSync("bun run verify:packages", { cwd: root, stdio: "inherit" });
 
 for (const pkg of publishOrder) {
 	const pkgDir = join(root, `packages/${pkg}`);

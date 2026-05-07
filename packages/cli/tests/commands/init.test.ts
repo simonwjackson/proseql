@@ -123,7 +123,9 @@ describe("Init Command", () => {
 			const content = readFile("project/proseql.config.ts");
 
 			// Should contain schema import
-			expect(content).toContain('import { Schema } from "effect"');
+			expect(content).toContain(
+				'import { Schema, type DatabaseConfig } from "@proseql/core"',
+			);
 			// Should contain DatabaseConfig type
 			expect(content).toContain("DatabaseConfig");
 			// Should reference the data file

@@ -371,7 +371,7 @@ export function runConvert(
 		const rawContent = yield* storage
 			.read(absoluteFilePath)
 			.pipe(
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					Effect.fail(new Error(`Failed to read file: ${err}`)),
 				),
 			);
@@ -380,7 +380,7 @@ export function runConvert(
 		const data = yield* serializer
 			.deserialize(rawContent, currentExt)
 			.pipe(
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					Effect.fail(new Error(`Failed to parse ${currentExt} file: ${err}`)),
 				),
 			);
@@ -389,7 +389,7 @@ export function runConvert(
 		const newContent = yield* serializer
 			.serialize(data, targetExt)
 			.pipe(
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					Effect.fail(
 						new Error(`Failed to serialize to ${targetFormat}: ${err}`),
 					),
@@ -403,7 +403,7 @@ export function runConvert(
 		yield* storage
 			.write(newFilePath, newContent)
 			.pipe(
-				Effect.catchAll((err) =>
+				Effect.catch((err) =>
 					Effect.fail(
 						new Error(`Failed to write new file '${newFilePath}': ${err}`),
 					),
@@ -415,7 +415,7 @@ export function runConvert(
 			yield* storage
 				.remove(absoluteFilePath)
 				.pipe(
-					Effect.catchAll((err) =>
+					Effect.catch((err) =>
 						Effect.fail(
 							new Error(
 								`Failed to remove old file '${absoluteFilePath}': ${err}`,
@@ -460,7 +460,7 @@ export function runConvert(
 	// Run with the persistence layer
 	return program.pipe(
 		Effect.provide(buildPersistenceLayer()),
-		Effect.catchAll((error) => {
+		Effect.catch((error) => {
 			const message = error instanceof Error ? error.message : String(error);
 			return Effect.succeed({
 				success: false as const,

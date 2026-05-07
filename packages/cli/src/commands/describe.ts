@@ -7,7 +7,7 @@
  */
 
 import type { CollectionConfig, DatabaseConfig } from "@proseql/core";
-import { Effect, type Schema, SchemaAST } from "effect";
+import { Effect, type Schema } from "effect";
 
 /**
  * Options for the describe command.
@@ -59,74 +59,107 @@ export interface DescribeResult {
 	};
 }
 
+type AstElement = AstNode | { readonly type?: AstNode };
+
+type AstNode = {
+	readonly _tag?: string;
+	readonly literal?: unknown;
+	readonly enums?: ReadonlyArray<readonly [string, unknown]>;
+	readonly elements?: ReadonlyArray<AstElement>;
+	readonly rest?: ReadonlyArray<AstElement>;
+	readonly types?: ReadonlyArray<AstNode>;
+	readonly propertySignatures?: ReadonlyArray<PropertySignatureNode>;
+	readonly indexSignatures?: ReadonlyArray<unknown>;
+	readonly from?: AstNode;
+	readonly to?: AstNode;
+	readonly annotations?: {
+		readonly identifier?: unknown;
+		readonly title?: unknown;
+	};
+	readonly context?: { readonly isOptional?: boolean };
+};
+
+type PropertySignatureNode = {
+	readonly name: PropertyKey;
+	readonly type?: AstNode;
+	readonly isOptional?: boolean;
+	readonly context?: { readonly isOptional?: boolean };
+};
+
 /**
  * Convert an AST type to a human-readable type name.
  */
-function astTypeToString(ast: SchemaAST.AST): string {
+function astTypeToString(ast: AstNode | undefined): string {
+	if (!ast) return "unknown";
 	switch (ast._tag) {
+		case "String":
 		case "StringKeyword":
 			return "string";
+		case "Number":
 		case "NumberKeyword":
 			return "number";
+		case "Boolean":
 		case "BooleanKeyword":
 			return "boolean";
+		case "BigInt":
 		case "BigIntKeyword":
 			return "bigint";
+		case "Symbol":
 		case "SymbolKeyword":
 			return "symbol";
+		case "Undefined":
 		case "UndefinedKeyword":
 			return "undefined";
+		case "Void":
 		case "VoidKeyword":
 			return "void";
+		case "Never":
 		case "NeverKeyword":
 			return "never";
+		case "Unknown":
 		case "UnknownKeyword":
 			return "unknown";
+		case "Any":
 		case "AnyKeyword":
 			return "any";
 		case "ObjectKeyword":
+		case "Objects":
 			return "object";
 		case "Literal": {
 			const value = ast.literal;
-			if (typeof value === "string") {
-				return `"${value}"`;
-			}
+			if (typeof value === "string") return `"${value}"`;
 			return String(value);
 		}
 		case "UniqueSymbol":
-			return `unique symbol`;
+			return "unique symbol";
 		case "Enums":
-			return `enum(${ast.enums.map(([name]) => name).join(" | ")})`;
+			return `enum(${(ast.enums ?? []).map(([name]) => name).join(" | ")})`;
 		case "TemplateLiteral":
 			return "template literal";
-		case "TupleType": {
-			const elements = ast.elements.map((e) => astTypeToString(e.type));
-			const rest = ast.rest.map((r) => `...${astTypeToString(r.type)}`);
+		case "TupleType":
+		case "Tuple": {
+			const elements = (ast.elements ?? []).map((element) =>
+				astTypeToString(getElementType(element)),
+			);
+			const rest = (ast.rest ?? []).map(
+				(element) => `...${astTypeToString(getElementType(element))}`,
+			);
 			return `[${[...elements, ...rest].join(", ")}]`;
 		}
-		case "TypeLiteral": {
-			if (
-				ast.propertySignatures.length === 0 &&
-				ast.indexSignatures.length === 0
-			) {
-				return "{}";
-			}
-			if (ast.propertySignatures.length > 0) {
-				return "object";
-			}
-			return "Record";
+		case "TypeLiteral":
+		case "Struct": {
+			if ((ast.propertySignatures ?? []).length > 0) return "object";
+			if ((ast.indexSignatures ?? []).length > 0) return "Record";
+			return "{}";
 		}
 		case "Union": {
-			const types = ast.types.map((t) => astTypeToString(t));
-			// Simplify common patterns
+			const types = (ast.types ?? []).map((type) => astTypeToString(type));
 			if (types.length === 2 && types.includes("undefined")) {
-				const other = types.find((t) => t !== "undefined");
-				return `${other} | undefined`;
+				return `${types.find((t: string) => t !== "undefined")} | undefined`;
 			}
-			if (types.length <= 4) {
-				return types.join(" | ");
-			}
-			return `union(${types.length} types)`;
+			return types.length <= 4
+				? types.join(" | ")
+				: `union(${types.length} types)`;
 		}
 		case "Suspend":
 			return "recursive";
@@ -135,16 +168,16 @@ function astTypeToString(ast: SchemaAST.AST): string {
 		case "Transformation":
 			return astTypeToString(ast.to);
 		case "Declaration": {
-			// Try to get identifier annotation
-			const identifier = ast.annotations[SchemaAST.IdentifierAnnotationId];
-			if (typeof identifier === "string") {
-				return identifier;
-			}
-			return "declaration";
+			const identifier = ast.annotations?.identifier ?? ast.annotations?.title;
+			return typeof identifier === "string" ? identifier : "declaration";
 		}
 		default:
 			return "unknown";
 	}
+}
+
+function getElementType(element: AstElement): AstNode | undefined {
+	return "type" in element ? element.type : (element as AstNode);
 }
 
 /**
@@ -184,19 +217,30 @@ function isFieldUnique(
  * Extract field information from a schema.
  */
 function extractFieldInfo(
-	schema: Schema.Schema.All,
+	schema: Schema.Schema<unknown>,
 	config: CollectionConfig,
 ): ReadonlyArray<FieldInfo> {
-	const ast = schema.ast;
-	const propertySignatures = SchemaAST.getPropertySignatures(ast);
+	const ast = schema.ast as unknown as AstNode;
+	const propertySignatures = ast.propertySignatures ?? [];
 
-	return propertySignatures.map((ps) => ({
-		name: String(ps.name),
-		type: astTypeToString(ps.type),
-		required: !ps.isOptional,
-		indexed: isFieldIndexed(String(ps.name), config.indexes),
-		unique: isFieldUnique(String(ps.name), config.uniqueFields),
-	}));
+	return propertySignatures.map((ps) => {
+		const name = String(ps.name);
+		const optional =
+			ps.isOptional === true ||
+			ps.context?.isOptional === true ||
+			ps.type?.context?.isOptional === true ||
+			(ps.type?._tag === "Union" &&
+				Array.isArray(ps.type.types) &&
+				ps.type.types.some((type) => type._tag === "Undefined"));
+
+		return {
+			name,
+			type: astTypeToString(ps.type),
+			required: !optional,
+			indexed: isFieldIndexed(name, config.indexes),
+			unique: isFieldUnique(name, config.uniqueFields),
+		};
+	});
 }
 
 /**

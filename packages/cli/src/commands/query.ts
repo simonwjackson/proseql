@@ -18,7 +18,7 @@ import {
 	type DatabaseConfig,
 	NodeStorageLayer,
 } from "@proseql/node";
-import { Chunk, Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import {
 	type FilterParseError,
 	parseFilters,
@@ -278,7 +278,7 @@ export function runQuery(
 			const result = yield* program.pipe(
 				Effect.provide(PersistenceLayer),
 				Effect.scoped,
-				Effect.catchAll((error) => {
+				Effect.catch((error) => {
 					const message =
 						error instanceof Error ? error.message : String(error);
 					return Effect.succeed({
@@ -360,19 +360,16 @@ export function runQuery(
 			);
 
 			// Collect the stream into an array
-			const chunk = yield* Stream.runCollect(stream);
-			const results = Chunk.toReadonlyArray(chunk) as ReadonlyArray<
-				Record<string, unknown>
-			>;
+			const results = yield* Stream.runCollect(stream);
 
-			return results;
+			return results as ReadonlyArray<Record<string, unknown>>;
 		});
 
 		// Run the program with the persistence layer
 		const result = yield* program.pipe(
 			Effect.provide(PersistenceLayer),
 			Effect.scoped,
-			Effect.catchAll((error) => {
+			Effect.catch((error) => {
 				const message = error instanceof Error ? error.message : String(error);
 				return Effect.succeed({
 					success: false as const,
