@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.12.1 (2026-05-07)
+
+### Fixes
+- Publish built executable (e0531ab)
+
+
 ## v0.12.0 (2026-05-06)
 
 ### Features
