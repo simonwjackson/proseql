@@ -1487,6 +1487,91 @@ export interface FileWatcher {
 }
 
 /**
+ * Configuration for a document-source watcher.
+ */
+export interface DocumentSourceWatcherConfig<E, R> {
+	/** Root directory for the document source. */
+	readonly root: string;
+	/** Effect that rediscovers and reloads the source after a filesystem event. */
+	readonly onReload: Effect.Effect<void, E, R>;
+	/** Optional debounce delay in ms for reload after change (default 50) */
+	readonly debounceMs?: number;
+}
+
+/**
+ * Create a managed document-source watcher.
+ *
+ * Document sources are reloaded by debounced whole-source rediscovery instead
+ * of attempting to interpret individual adapter events. Failed reloads are
+ * logged and leave the previous in-memory state intact.
+ */
+export const createDocumentSourceWatcher = <E, R>(
+	config: DocumentSourceWatcherConfig<E, R>,
+): Effect.Effect<
+	FileWatcher,
+	StorageError,
+	Scope.Scope | StorageAdapter | R
+> => {
+	const debounceMs = config.debounceMs ?? 50;
+
+	return Effect.gen(function* () {
+		const scope = yield* Effect.scope;
+		const storage = yield* StorageAdapter;
+		const runtimeContext = yield* Effect.context<R>();
+		const active = yield* Ref.make(true);
+		const pendingReload = yield* Ref.make<Fiber.Fiber<void, never> | null>(
+			null,
+		);
+
+		const scheduleReload = Effect.gen(function* () {
+			const isActive = yield* Ref.get(active);
+			if (!isActive) return;
+
+			const existing = yield* Ref.get(pendingReload);
+			if (existing !== null) {
+				yield* Fiber.interrupt(existing);
+			}
+
+			const fiber = yield* Effect.forkIn(
+				Effect.gen(function* () {
+					yield* Effect.sleep(debounceMs);
+					yield* config.onReload.pipe(
+						Effect.catch((error) =>
+							Effect.logWarning(
+								`[proseql] Document source reload failed for '${config.root}': ${String(error)}`,
+							),
+						),
+					);
+				}),
+				scope,
+				{ startImmediately: true },
+			);
+
+			yield* Ref.set(pendingReload, fiber);
+		}).pipe(Effect.provide(runtimeContext));
+
+		yield* Effect.acquireRelease(
+			storage.watchDir(config.root, () => {
+				Effect.runFork(scheduleReload);
+			}),
+			(stopWatching) =>
+				Effect.gen(function* () {
+					yield* Ref.set(active, false);
+					const pending = yield* Ref.get(pendingReload);
+					if (pending !== null) {
+						yield* Fiber.interrupt(pending);
+					}
+					stopWatching();
+				}),
+		);
+
+		return {
+			isActive: () => Ref.get(active),
+		} satisfies FileWatcher;
+	});
+};
+
+/**
  * Configuration for a single file watcher.
  */
 export interface FileWatcherConfig<A extends { readonly id: string }, I, R> {

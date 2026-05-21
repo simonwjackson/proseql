@@ -78,6 +78,7 @@ import type {
 	ProseQLPlugin,
 } from "../plugins/plugin-types.js";
 import { validateIdGeneratorReferences } from "../plugins/plugin-validation.js";
+import { reloadEvent } from "../reactive/change-event.js";
 import { watch } from "../reactive/watch.js";
 import { watchById } from "../reactive/watch-by-id.js";
 import {
@@ -92,6 +93,7 @@ import {
 import { emptyOriginIndex, type OriginIndex } from "../storage/origin-index.js";
 import {
 	createDirectoryWatcher,
+	createDocumentSourceWatcher,
 	createFileWatcher,
 	loadData,
 	loadDataFromDirectory,
@@ -2360,12 +2362,78 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 
 		const db = collections as unknown as GenerateDatabase<Config>;
 
+		const reloadDocumentSources = (
+			sourceId: string,
+		): Effect.Effect<void, never> =>
+			Effect.provide(
+				Effect.gen(function* () {
+					if (normalizedSourceConfig === undefined) return;
+					const source = normalizedSourceConfig.sources.find(
+						(candidate) => candidate.id === sourceId,
+					);
+					if (source === undefined) return;
+
+					const loaded = yield* loadDocumentSources(normalizedSourceConfig);
+					for (const collectionName of normalizedSourceConfig.collections) {
+						const newData =
+							loaded.collections[collectionName] ?? new Map<string, HasId>();
+						yield* Ref.set(typedRefs[collectionName], newData);
+
+						const collectionConfig = collectionConfigs[collectionName];
+						const items = Array.from(newData.values());
+						const rebuiltIndexes = yield* buildIndexes(
+							normalizeIndexes(collectionConfig.indexes),
+							items,
+						);
+						for (const [indexKey, indexRef] of collectionIndexes[
+							collectionName
+						]) {
+							const rebuiltIndexRef = rebuiltIndexes.get(indexKey);
+							if (rebuiltIndexRef === undefined) continue;
+							const rebuiltIndex = yield* Ref.get(rebuiltIndexRef);
+							yield* Ref.set(indexRef, rebuiltIndex);
+						}
+
+						const searchIndexRef = searchIndexRefs[collectionName];
+						const fields = searchIndexFields[collectionName];
+						if (searchIndexRef !== undefined && fields !== undefined) {
+							const rebuiltSearchIndexRef = yield* buildSearchIndex(
+								fields,
+								items,
+							);
+							const rebuiltSearchIndex = yield* Ref.get(rebuiltSearchIndexRef);
+							yield* Ref.set(searchIndexRef, rebuiltSearchIndex);
+						}
+					}
+					yield* Ref.set(documentOriginsRef, loaded.origins);
+					yield* Ref.set(documentSourceDocumentsRef, loaded.documents);
+
+					for (const collectionName of source.collections) {
+						yield* PubSub.publish(changePubSub, reloadEvent(collectionName));
+					}
+				}),
+				serviceLayer,
+			).pipe(
+				Effect.catch((error) =>
+					Effect.logWarning(
+						`[proseql] Document source reload failed for '${sourceId}': ${String(error)}`,
+					),
+				),
+			);
+
 		// 10. Create file watchers for persistent collections to detect external file changes
 		// Each watcher monitors its file and reloads data into the Ref on changes,
 		// publishing a reload event to the changePubSub for reactive query subscribers.
 		// File watching is best-effort: if the storage adapter doesn't support watching
 		// (e.g., browser adapters in test environments), the database still functions
 		// without reactive file change detection.
+		for (const source of normalizedSourceConfig?.sources ?? []) {
+			yield* createDocumentSourceWatcher({
+				root: source.root,
+				onReload: reloadDocumentSources(source.id),
+			}).pipe(Effect.catch(() => Effect.void));
+		}
+
 		for (const collectionName of collectionNames) {
 			const collectionConfig = collectionConfigs[collectionName];
 			const filePath = collectionConfig.file;
