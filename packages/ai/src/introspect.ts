@@ -3,7 +3,11 @@
  * from a DatabaseConfig by walking Effect Schema ASTs.
  */
 
-import type { DatabaseConfig } from "@proseql/core";
+import {
+	type CollectionConfig,
+	type DatabaseConfig,
+	getCollectionConfigs,
+} from "@proseql/core";
 import type { Schema } from "effect";
 import type { AST } from "effect/SchemaAST";
 import type { CollectionDescription, SchemaDescription } from "./types.js";
@@ -30,34 +34,22 @@ const OPERATORS_BY_TYPE: Record<string, ReadonlyArray<string>> = {
 
 function getTypeString(ast: AST): string {
 	switch (ast._tag) {
-		case "StringKeyword":
+		case "String":
 			return "string";
-		case "NumberKeyword":
+		case "Number":
 			return "number";
-		case "BooleanKeyword":
+		case "Boolean":
 			return "boolean";
-		case "BigIntKeyword":
+		case "BigInt":
 			return "bigint";
-		case "TupleType":
+		case "Arrays":
 			return "array";
-		case "TypeLiteral":
-			// Could be an empty object {} or a nested struct
-			if (
-				ast.propertySignatures.length === 0 &&
-				ast.indexSignatures.length === 0
-			) {
-				return "object";
-			}
+		case "Objects":
 			return "object";
 		case "Union":
-			// Check for optionals (undefined | T) and enums
 			return getUnionTypeString(ast);
-		case "Transformation":
-			return getTypeString(ast.from);
-		case "Refinement":
-			return getTypeString(ast.from);
 		case "Suspend":
-			return getTypeString(ast.f());
+			return getTypeString(ast.thunk());
 		case "Declaration":
 			// Declarations like Date, etc.
 			return "string";
@@ -66,33 +58,29 @@ function getTypeString(ast: AST): string {
 	}
 }
 
-function getUnionTypeString(ast: AST & { _tag: "Union" }): string {
-	// Filter out UndefinedKeyword (optionals)
-	const nonUndefined = ast.types.filter((t) => t._tag !== "UndefinedKeyword");
+function getUnionTypeString(ast: AST & { readonly _tag: "Union" }): string {
+	// Filter out Undefined optionals.
+	const nonUndefined = ast.types.filter((type) => type._tag !== "Undefined");
 	if (nonUndefined.length === 1) {
 		return getTypeString(nonUndefined[0]);
 	}
 	// Multiple types — check if all are literals (enum)
-	const allLiterals = nonUndefined.every((t) => t._tag === "Literal");
+	const allLiterals = nonUndefined.every((type) => type._tag === "Literal");
 	if (allLiterals) {
 		// Infer type from first literal
 		const first = nonUndefined[0];
-		if (first._tag === "Literal") {
-			return typeof first.literal as string;
+		if (first?._tag === "Literal") {
+			return typeof first.literal;
 		}
 	}
 	return "string";
 }
 
 function extractFieldsFromAST(ast: AST): Record<string, string> {
-	// Unwrap Transformation (Schema.Struct with transforms wraps in Transformation)
-	if (ast._tag === "Transformation") {
-		return extractFieldsFromAST(ast.from);
+	if (ast._tag === "Suspend") {
+		return extractFieldsFromAST(ast.thunk());
 	}
-	if (ast._tag === "Refinement") {
-		return extractFieldsFromAST(ast.from);
-	}
-	if (ast._tag !== "TypeLiteral") {
+	if (ast._tag !== "Objects") {
 		return {};
 	}
 
@@ -105,9 +93,9 @@ function extractFieldsFromAST(ast: AST): Record<string, string> {
 }
 
 export function describeCollection(
-	config: DatabaseConfig[string],
+	config: CollectionConfig,
 ): CollectionDescription {
-	const schema = config.schema as Schema.Schema.All;
+	const schema = config.schema as Schema.Top;
 	const fields = extractFieldsFromAST(schema.ast);
 
 	return {
@@ -120,7 +108,9 @@ export function describeCollection(
 export function describeConfig(config: DatabaseConfig): SchemaDescription {
 	const collections: Record<string, CollectionDescription> = {};
 
-	for (const [name, collectionConfig] of Object.entries(config)) {
+	for (const [name, collectionConfig] of Object.entries(
+		getCollectionConfigs(config),
+	)) {
 		collections[name] = describeCollection(collectionConfig);
 	}
 

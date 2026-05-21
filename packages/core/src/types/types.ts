@@ -968,5 +968,7 @@ export type TypedPopulate<DB, Collection extends keyof DB> =
 
 // Type for the dataset that matches the config
 export type DatasetFor<Config> = {
-	[K in keyof Config]: RuntimeEntityFromCollection<Config[K]>[];
+	[K in keyof ConfiguredCollections<Config>]: RuntimeEntityFromCollection<
+		ConfiguredCollections<Config>[K]
+	>[];
 };

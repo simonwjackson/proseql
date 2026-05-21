@@ -7,17 +7,17 @@
  */
 
 import {
+	type ConfiguredCollections,
 	createEffectDatabase,
 	type DatabaseConfig,
 	type DatasetFor,
-	type EffectDatabase,
-	type EffectDatabaseWithPersistence,
 	type GenerateDatabase,
 	type GenerateDatabaseWithPersistence,
+	getCollectionConfigs,
 	type MigrationError,
 	type PluginError,
 } from "@proseql/core";
-import { Chunk, Context, Effect, Layer, Stream } from "effect";
+import { Context, Effect, Layer, Stream } from "effect";
 
 // ============================================================================
 // DatabaseContext Service
@@ -36,7 +36,7 @@ export interface DatabaseContext<Config extends DatabaseConfig> {
  * Each config type gets its own unique service identifier.
  */
 export const makeDatabaseContextTag = <Config extends DatabaseConfig>() =>
-	Context.GenericTag<DatabaseContext<Config>>("@proseql/rpc/DatabaseContext");
+	Context.Service<DatabaseContext<Config>>("@proseql/rpc/DatabaseContext");
 
 // ============================================================================
 // Handler Implementations
@@ -47,7 +47,7 @@ export const makeDatabaseContextTag = <Config extends DatabaseConfig>() =>
  * Returns an object with handler functions for each RPC operation.
  */
 const createCollectionHandlers = <Config extends DatabaseConfig>(
-	collectionName: keyof Config,
+	collectionName: keyof ConfiguredCollections<Config> & string,
 	db: GenerateDatabase<Config>,
 ) => {
 	// biome-ignore lint/suspicious/noExplicitAny: Collection type is dynamic based on config
@@ -69,7 +69,7 @@ const createCollectionHandlers = <Config extends DatabaseConfig>(
 			// The stream is a Stream.Stream at runtime (RunnableStream wrapper)
 			return Stream.runCollect(
 				stream as Stream.Stream<Record<string, unknown>, unknown>,
-			).pipe(Effect.map(Chunk.toReadonlyArray));
+			);
 		},
 
 		queryStream: (config: {
@@ -224,7 +224,7 @@ const createCollectionHandlers = <Config extends DatabaseConfig>(
  * This is the shape of handlers that need to be provided to the RpcGroup.
  */
 export type RpcHandlers<Config extends DatabaseConfig> = {
-	readonly [K in keyof Config & string]: ReturnType<
+	readonly [K in keyof ConfiguredCollections<Config> & string]: ReturnType<
 		typeof createCollectionHandlers<Config>
 	>;
 };
@@ -274,11 +274,8 @@ export const makeRpcHandlers = <Config extends DatabaseConfig>(
 			string,
 			ReturnType<typeof createCollectionHandlers>
 		>;
-		for (const collectionName of Object.keys(config)) {
-			handlers[collectionName] = createCollectionHandlers(
-				collectionName as keyof Config,
-				db,
-			);
+		for (const collectionName of Object.keys(getCollectionConfigs(config))) {
+			handlers[collectionName] = createCollectionHandlers(collectionName, db);
 		}
 
 		return handlers as RpcHandlers<Config>;
@@ -393,11 +390,8 @@ export const makeRpcHandlersFromDatabase = <Config extends DatabaseConfig>(
 		string,
 		ReturnType<typeof createCollectionHandlers>
 	>;
-	for (const collectionName of Object.keys(config)) {
-		handlers[collectionName] = createCollectionHandlers(
-			collectionName as keyof Config,
-			db,
-		);
+	for (const collectionName of Object.keys(getCollectionConfigs(config))) {
+		handlers[collectionName] = createCollectionHandlers(collectionName, db);
 	}
 
 	return handlers as RpcHandlers<Config>;

@@ -11,7 +11,12 @@
  */
 
 import { Rpc, RpcRouter } from "@effect/rpc";
-import type { CollectionConfig, DatabaseConfig } from "@proseql/core";
+import {
+	type CollectionConfig,
+	type ConfiguredCollections,
+	type DatabaseConfig,
+	getCollectionConfigs,
+} from "@proseql/core";
 import { Schema } from "effect";
 import {
 	DanglingReferenceErrorSchema,
@@ -1261,14 +1266,16 @@ export function makeRpcGroup<Config extends DatabaseConfig>(
 ): RpcGroupFromConfig<Config> {
 	const result: Record<
 		string,
-		CollectionRpcDefinitions<string, Schema.Schema.Any>
+		CollectionRpcDefinitions<string, Schema.Top>
 	> = {};
+	const collections = getCollectionConfigs(config);
 
-	for (const collectionName of Object.keys(config)) {
-		const collectionConfig = config[collectionName];
+	for (const [collectionName, collectionConfig] of Object.entries(
+		collections,
+	)) {
 		result[collectionName] = makeCollectionRpcs(
 			collectionName,
-			collectionConfig.schema as Schema.Schema.Any,
+			collectionConfig.schema as Schema.Top,
 		);
 	}
 
@@ -1289,11 +1296,11 @@ type ExtractCollectionSchema<C extends CollectionConfig> = C["schema"];
  * Maps each collection name to its RPC definitions.
  */
 export type RpcGroupFromConfig<Config extends DatabaseConfig> = {
-	readonly [K in keyof Config]: CollectionRpcDefinitions<
+	readonly [K in keyof ConfiguredCollections<Config>]: CollectionRpcDefinitions<
 		K & string,
-		ExtractCollectionSchema<Config[K]> extends Schema.Schema.Any
-			? ExtractCollectionSchema<Config[K]>
-			: Schema.Schema<unknown, unknown, never>
+		ExtractCollectionSchema<ConfiguredCollections<Config>[K]> extends Schema.Top
+			? ExtractCollectionSchema<ConfiguredCollections<Config>[K]>
+			: Schema.Schema<unknown>
 	>;
 };
 

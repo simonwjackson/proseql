@@ -111,7 +111,7 @@ const toStorageError = (
 const openDatabase = (
 	config: ResolvedIndexedDBConfig,
 ): Effect.Effect<IDBDatabase, StorageError> =>
-	Effect.async<IDBDatabase, StorageError>((resume) => {
+	Effect.callback<IDBDatabase, StorageError>((resume) => {
 		const request = indexedDB.open(config.databaseName, config.version);
 
 		request.onupgradeneeded = () => {
@@ -195,7 +195,7 @@ const makeRead =
 
 			const db = yield* getDatabase(config);
 
-			return yield* Effect.async<string, StorageError>((resume) => {
+			return yield* Effect.callback<string, StorageError>((resume) => {
 				try {
 					const transaction = db.transaction(config.storeName, "readonly");
 					const store = transaction.objectStore(config.storeName);
@@ -241,7 +241,7 @@ const makeWrite =
 
 			const db = yield* getDatabase(config);
 
-			return yield* Effect.async<void, StorageError>((resume) => {
+			return yield* Effect.callback<void, StorageError>((resume) => {
 				try {
 					const transaction = db.transaction(config.storeName, "readwrite");
 					const store = transaction.objectStore(config.storeName);
@@ -284,7 +284,7 @@ const makeExists =
 		return Effect.gen(function* () {
 			const db = yield* getDatabase(config);
 
-			return yield* Effect.async<boolean, StorageError>((resume) => {
+			return yield* Effect.callback<boolean, StorageError>((resume) => {
 				try {
 					const transaction = db.transaction(config.storeName, "readonly");
 					const store = transaction.objectStore(config.storeName);
@@ -312,7 +312,7 @@ const makeRemove =
 		return Effect.gen(function* () {
 			const db = yield* getDatabase(config);
 
-			return yield* Effect.async<void, StorageError>((resume) => {
+			return yield* Effect.callback<void, StorageError>((resume) => {
 				try {
 					const transaction = db.transaction(config.storeName, "readwrite");
 					const store = transaction.objectStore(config.storeName);
@@ -346,25 +346,27 @@ const makeAppend =
 			const db = yield* getDatabase(config);
 
 			// Read existing value, concatenate, then write back
-			const existing = yield* Effect.async<string, StorageError>((resume) => {
-				try {
-					const transaction = db.transaction(config.storeName, "readonly");
-					const store = transaction.objectStore(config.storeName);
-					const request = store.get(key);
+			const existing = yield* Effect.callback<string, StorageError>(
+				(resume) => {
+					try {
+						const transaction = db.transaction(config.storeName, "readonly");
+						const store = transaction.objectStore(config.storeName);
+						const request = store.get(key);
 
-					request.onsuccess = () => {
-						resume(Effect.succeed((request.result as string) ?? ""));
-					};
+						request.onsuccess = () => {
+							resume(Effect.succeed((request.result as string) ?? ""));
+						};
 
-					request.onerror = () => {
-						resume(Effect.fail(toStorageError(path, "read", request.error)));
-					};
-				} catch (error) {
-					resume(Effect.fail(toStorageError(path, "read", error)));
-				}
-			});
+						request.onerror = () => {
+							resume(Effect.fail(toStorageError(path, "read", request.error)));
+						};
+					} catch (error) {
+						resume(Effect.fail(toStorageError(path, "read", error)));
+					}
+				},
+			);
 
-			yield* Effect.async<void, StorageError>((resume) => {
+			yield* Effect.callback<void, StorageError>((resume) => {
 				try {
 					const transaction = db.transaction(config.storeName, "readwrite");
 					const store = transaction.objectStore(config.storeName);
@@ -399,7 +401,19 @@ const unsupportedList = (
 			path,
 			operation: "list",
 			message:
-				"IndexedDB recursive document-source discovery is not supported by this adapter",
+				"IndexedDB document-source discovery is not supported by this adapter",
+		}),
+	);
+
+const unsupportedWatchDir = (
+	path: string,
+): Effect.Effect<() => void, StorageError> =>
+	Effect.fail(
+		new StorageError({
+			path,
+			operation: "watch",
+			message:
+				"IndexedDB document-source directory watching is not supported by this adapter",
 		}),
 	);
 
@@ -455,7 +469,7 @@ export function makeIndexedDBAdapter(
 		watch: makeWatch(resolved),
 		listDirectory: makeListDirectory(resolved),
 		listRecursive: makeListRecursive(resolved),
-		watchDir: (_dirPath, _onChange) => Effect.succeed(() => {}),
+		watchDir: (dirPath, _onChange) => unsupportedWatchDir(dirPath),
 	};
 }
 

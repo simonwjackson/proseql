@@ -241,6 +241,18 @@ const makeListDirectory =
 			}),
 		);
 
+const unsupportedWatchDir = (
+	path: string,
+): Effect.Effect<() => void, StorageError> =>
+	Effect.fail(
+		new StorageError({
+			path,
+			operation: "watch",
+			message:
+				"Web Storage document-source directory watching is not supported by this adapter",
+		}),
+	);
+
 // ============================================================================
 // Factory
 // ============================================================================
@@ -282,6 +294,6 @@ export function makeWebStorageAdapter(
 		},
 		listDirectory: makeListDirectory(storage, resolved),
 		listRecursive: makeListRecursive(storage, resolved),
-		watchDir: (_dirPath, _onChange) => Effect.succeed(() => {}),
+		watchDir: (dirPath, _onChange) => unsupportedWatchDir(dirPath),
 	};
 }

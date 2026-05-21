@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Schema } from "effect";
+import { Effect, Schema, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	createNodeDatabase,
@@ -15,8 +15,44 @@ const BookSchema = Schema.Struct({
 	year: Schema.Number,
 });
 
+const GamePayloadSchema = Schema.Struct({
+	name: Schema.String,
+	systemId: Schema.String,
+});
+
+const SystemPayloadSchema = Schema.Struct({
+	name: Schema.String,
+});
+
 const makeTempDir = () =>
 	join(tmpdir(), `proseql-convenience-${randomBytes(8).toString("hex")}`);
+
+const makeDocumentSourceConfig = (root: string) =>
+	({
+		collections: {
+			games: {
+				schema: GamePayloadSchema,
+				id: { kind: "derivedFromKey", field: "id" },
+				relationships: {},
+			},
+			systems: {
+				schema: SystemPayloadSchema,
+				id: { kind: "derivedFromKey", field: "id" },
+				relationships: {},
+			},
+		},
+		sources: [
+			{
+				id: "library",
+				kind: "documents",
+				root,
+				include: "**/*.yaml",
+				format: "yaml",
+				collections: "all",
+				outbox: "generated/outbox.yaml",
+			},
+		],
+	}) as const;
 
 describe("makeNodePersistenceLayer", () => {
 	it("creates a working layer from config", async () => {
@@ -149,5 +185,121 @@ describe("createNodeDatabase", () => {
 
 		expect(result.title).toBe("Dune");
 		await fs.rm(tempDir, { recursive: true, force: true });
+	});
+
+	it("loads document sources from real nested YAML files", async () => {
+		const tempDir = makeTempDir();
+		await fs.mkdir(join(tempDir, "nested"), { recursive: true });
+		await fs.writeFile(
+			join(tempDir, "base.yaml"),
+			`games:\n  smw:\n    name: Super Mario World\n    systemId: snes\nsystems:\n  snes:\n    name: Super Nintendo\n`,
+		);
+		await fs.writeFile(
+			join(tempDir, "nested", "more.yaml"),
+			`games:\n  sonic:\n    name: Sonic the Hedgehog\n    systemId: genesis\nsystems:\n  genesis:\n    name: Genesis\n`,
+		);
+
+		try {
+			const result = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* createNodeDatabase(
+							makeDocumentSourceConfig(tempDir),
+							undefined,
+							{ writeDebounce: 60_000 },
+						);
+						const games = yield* Stream.runCollect(db.games.query());
+						return {
+							gameIds: games.map((game) => game.id).sort(),
+							snes: yield* db.systems.findById("snes"),
+						};
+					}),
+				),
+			);
+
+			expect(result.gameIds).toEqual(["smw", "sonic"]);
+			expect(result.snes).toEqual({ id: "snes", name: "Super Nintendo" });
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("writes created document-source records to a real outbox file", async () => {
+		const tempDir = makeTempDir();
+		await fs.mkdir(tempDir, { recursive: true });
+		await fs.writeFile(
+			join(tempDir, "base.yaml"),
+			`systems:\n  snes:\n    name: Super Nintendo\n`,
+		);
+		const outboxPath = join(tempDir, "generated", "outbox.yaml");
+
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* createNodeDatabase(
+							makeDocumentSourceConfig(tempDir),
+							undefined,
+							{ writeDebounce: 60_000 },
+						);
+						yield* db.games.create({
+							id: "smw",
+							name: "Super Mario World",
+							systemId: "snes",
+						});
+						yield* Effect.promise(() => db.flush());
+					}),
+				),
+			);
+
+			const content = await fs.readFile(outboxPath, "utf-8");
+			expect(content).toContain("games:");
+			expect(content).toContain("smw:");
+			expect(content).toContain("name: Super Mario World");
+			expect(content).not.toContain("id: smw");
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("flushes document-source updates and deletes to each record origin", async () => {
+		const tempDir = makeTempDir();
+		await fs.mkdir(tempDir, { recursive: true });
+		const basePath = join(tempDir, "base.yaml");
+		const morePath = join(tempDir, "more.yaml");
+		await fs.writeFile(
+			basePath,
+			`games:\n  smw:\n    name: Super Mario World\n    systemId: snes\nsystems:\n  snes:\n    name: Super Nintendo\n`,
+		);
+		await fs.writeFile(
+			morePath,
+			`games:\n  sonic:\n    name: Sonic the Hedgehog\n    systemId: genesis\nsystems:\n  genesis:\n    name: Genesis\n`,
+		);
+
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* createNodeDatabase(
+							makeDocumentSourceConfig(tempDir),
+							undefined,
+							{ writeDebounce: 60_000 },
+						);
+						yield* db.games.update("smw", { name: "SMW" });
+						yield* db.games.delete("sonic");
+						yield* Effect.promise(() => db.flush());
+					}),
+				),
+			);
+
+			const baseContent = await fs.readFile(basePath, "utf-8");
+			const moreContent = await fs.readFile(morePath, "utf-8");
+			expect(baseContent).toContain("name: SMW");
+			expect(baseContent).toContain("systems:");
+			expect(moreContent).not.toContain("sonic:");
+			expect(moreContent).toContain("systems:");
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
 	});
 });
