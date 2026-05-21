@@ -5,6 +5,7 @@
 
 import { Effect, Layer } from "effect";
 import { StorageError } from "../errors/storage-errors.js";
+import { normalizePath } from "../utils/path.js";
 import { StorageAdapter, type StorageAdapterShape } from "./storage-service.js";
 
 // ============================================================================
@@ -85,7 +86,16 @@ const makeInMemoryAdapter = (
 				notifyDirWatchers(path, existed ? "change" : "add");
 			}),
 
-		exists: (path: string) => Effect.sync(() => store.has(path)),
+		exists: (path: string) =>
+			Effect.sync(() => {
+				if (store.has(path)) return true;
+				const normalized = normalizePath(path);
+				const prefix = normalized.endsWith("/") ? normalized : `${normalized}/`;
+				for (const key of store.keys()) {
+					if (normalizePath(key).startsWith(prefix)) return true;
+				}
+				return false;
+			}),
 
 		remove: (path: string) =>
 			Effect.suspend(() => {
@@ -132,6 +142,22 @@ const makeInMemoryAdapter = (
 					}
 				}
 				return result as ReadonlyArray<string>;
+			}),
+
+		listRecursive: (rootPath: string) =>
+			Effect.sync(() => {
+				const normalizedRoot = normalizePath(rootPath);
+				const prefix = normalizedRoot.endsWith("/")
+					? normalizedRoot
+					: `${normalizedRoot}/`;
+				const result: string[] = [];
+				for (const key of store.keys()) {
+					const normalizedKey = normalizePath(key);
+					if (normalizedKey.startsWith(prefix)) {
+						result.push(normalizedKey);
+					}
+				}
+				return result.sort() as ReadonlyArray<string>;
 			}),
 
 		watchDir: (dirPath: string, onChange: (event: DirWatchEvent) => void) =>

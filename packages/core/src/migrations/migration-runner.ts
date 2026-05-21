@@ -14,7 +14,11 @@ import type {
 } from "../errors/storage-errors.js";
 import { SerializerRegistry } from "../serializers/serializer-service.js";
 import { StorageAdapter } from "../storage/storage-service.js";
-import type { DatabaseConfig } from "../types/database-config-types.js";
+import {
+	type CollectionConfig,
+	type DatabaseConfig,
+	getCollectionConfigs,
+} from "../types/database-config-types.js";
 import type {
 	DryRunCollectionResult,
 	DryRunMigration,
@@ -263,8 +267,12 @@ export const dryRunMigrations = (
 
 		const collectionResults: Array<DryRunCollectionResult> = [];
 
-		for (const collectionName of Object.keys(config)) {
-			const collectionConfig = config[collectionName];
+		const collectionConfigs = getCollectionConfigs(config) as Record<
+			string,
+			CollectionConfig
+		>;
+		for (const collectionName of Object.keys(collectionConfigs)) {
+			const collectionConfig = collectionConfigs[collectionName];
 
 			// Skip unversioned collections
 			if (collectionConfig.version === undefined) {

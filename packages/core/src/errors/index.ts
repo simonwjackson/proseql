@@ -37,6 +37,19 @@ export {
 } from "./storage-errors.js";
 
 // ============================================================================
+// Source Errors (re-exported from source-errors.ts)
+// ============================================================================
+
+export type { SourceError, SourceRecordOrigin } from "./source-errors.js";
+export {
+	DuplicatePhysicalFileError,
+	DuplicateRecordError,
+	InvalidDocumentSourceError,
+	SourceConfigError,
+	UnknownCollectionError,
+} from "./source-errors.js";
+
+// ============================================================================
 // Migration Errors (re-exported from migration-errors.ts)
 // ============================================================================
 
@@ -57,11 +70,13 @@ import type { CrudError } from "./crud-errors.js";
 import type { MigrationErrors } from "./migration-errors.js";
 import type { PluginError } from "./plugin-errors.js";
 import type { QueryError } from "./query-errors.js";
+import type { SourceError } from "./source-errors.js";
 import type { PersistenceError } from "./storage-errors.js";
 
 export type DatabaseError =
 	| CrudError
 	| QueryError
 	| PersistenceError
+	| SourceError
 	| MigrationErrors
 	| PluginError;

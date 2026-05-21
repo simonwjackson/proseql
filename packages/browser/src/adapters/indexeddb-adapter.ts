@@ -391,6 +391,28 @@ const makeEnsureDir =
 		return Effect.void;
 	};
 
+const unsupportedList = (
+	path: string,
+): Effect.Effect<ReadonlyArray<string>, StorageError> =>
+	Effect.fail(
+		new StorageError({
+			path,
+			operation: "list",
+			message:
+				"IndexedDB recursive document-source discovery is not supported by this adapter",
+		}),
+	);
+
+const makeListRecursive =
+	(_config: ResolvedIndexedDBConfig) =>
+	(rootPath: string): Effect.Effect<ReadonlyArray<string>, StorageError> =>
+		unsupportedList(rootPath);
+
+const makeListDirectory =
+	(_config: ResolvedIndexedDBConfig) =>
+	(dirPath: string): Effect.Effect<ReadonlyArray<string>, StorageError> =>
+		unsupportedList(dirPath);
+
 /**
  * No-op watch implementation for IndexedDB.
  *
@@ -431,6 +453,9 @@ export function makeIndexedDBAdapter(
 		remove: makeRemove(resolved),
 		ensureDir: makeEnsureDir(resolved),
 		watch: makeWatch(resolved),
+		listDirectory: makeListDirectory(resolved),
+		listRecursive: makeListRecursive(resolved),
+		watchDir: (_dirPath, _onChange) => Effect.succeed(() => {}),
 	};
 }
 

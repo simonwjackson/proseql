@@ -55,6 +55,37 @@ const writeAndReadBack = (path: string, extension: string) =>
 // ============================================================================
 
 describe("NodeStorageLayer (filesystem)", () => {
+	it("recursively lists nested files in deterministic order", async () => {
+		const tempDir = join(
+			tmpdir(),
+			`ptdb-test-${randomBytes(8).toString("hex")}`,
+		);
+		await fs.mkdir(join(tempDir, "nested", "deeper"), { recursive: true });
+		await fs.writeFile(join(tempDir, "z.yaml"), "z");
+		await fs.writeFile(join(tempDir, "nested", "a.yaml"), "a");
+		await fs.writeFile(join(tempDir, "nested", "deeper", "b.json"), "b");
+
+		try {
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const storage = yield* StorageAdapter;
+						return yield* storage.listRecursive(tempDir);
+					}),
+					makeNodeStorageLayer(),
+				),
+			);
+
+			expect(result).toEqual([
+				join(tempDir, "nested", "a.yaml"),
+				join(tempDir, "nested", "deeper", "b.json"),
+				join(tempDir, "z.yaml"),
+			]);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("runs the same program against NodeStorageLayer (filesystem)", async () => {
 		const tempDir = join(
 			tmpdir(),

@@ -212,6 +212,46 @@ const makeListDirectory =
 			catch: (error) => toStorageError(dirPath, "list", error),
 		});
 
+const makeListRecursive =
+	(_config: Required<NodeAdapterConfig>) =>
+	(rootPath: string): Effect.Effect<ReadonlyArray<string>, StorageError> =>
+		Effect.tryPromise({
+			try: async () => {
+				const files: string[] = [];
+				const visit = async (dirPath: string): Promise<void> => {
+					let entries: ReadonlyArray<{
+						readonly name: string;
+						readonly isDirectory: () => boolean;
+						readonly isFile: () => boolean;
+					}>;
+					try {
+						entries = await fs.readdir(dirPath, { withFileTypes: true });
+					} catch (err: unknown) {
+						if (
+							err instanceof Error &&
+							"code" in err &&
+							err.code === "ENOENT"
+						) {
+							return;
+						}
+						throw err;
+					}
+
+					for (const entry of entries) {
+						const child = join(dirPath, entry.name);
+						if (entry.isDirectory()) {
+							await visit(child);
+						} else if (entry.isFile()) {
+							files.push(child);
+						}
+					}
+				};
+				await visit(rootPath);
+				return files.sort();
+			},
+			catch: (error) => toStorageError(rootPath, "list", error),
+		});
+
 const makeWatchDir =
 	(_config: Required<NodeAdapterConfig>) =>
 	(
@@ -254,6 +294,7 @@ const makeAdapter = (
 	ensureDir: makeEnsureDir(config),
 	watch: makeWatch(config),
 	listDirectory: makeListDirectory(config),
+	listRecursive: makeListRecursive(config),
 	watchDir: makeWatchDir(config),
 });
 

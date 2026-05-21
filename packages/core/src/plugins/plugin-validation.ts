@@ -7,7 +7,11 @@
 import { Effect } from "effect";
 import { PluginError } from "../errors/plugin-errors.js";
 import type { FormatCodec } from "../serializers/format-codec.js";
-import type { DatabaseConfig } from "../types/database-config-types.js";
+import {
+	type CollectionConfig,
+	type DatabaseConfig,
+	getCollectionConfigs,
+} from "../types/database-config-types.js";
 import type {
 	CustomIdGenerator,
 	CustomOperator,
@@ -348,8 +352,12 @@ export const validateIdGeneratorReferences = (
 	idGenerators: Map<string, CustomIdGenerator>,
 ): Effect.Effect<void, PluginError> => {
 	return Effect.gen(function* () {
-		for (const collectionName of Object.keys(config)) {
-			const collectionConfig = config[collectionName];
+		const collectionConfigs = getCollectionConfigs(config) as Record<
+			string,
+			CollectionConfig
+		>;
+		for (const collectionName of Object.keys(collectionConfigs)) {
+			const collectionConfig = collectionConfigs[collectionName];
 			const idGeneratorName = collectionConfig.idGenerator;
 
 			// Skip collections without idGenerator configured

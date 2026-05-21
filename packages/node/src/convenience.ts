@@ -7,6 +7,7 @@
 
 import type { PluginError } from "@proseql/core";
 import {
+	type ConfiguredCollections,
 	createPersistentEffectDatabase,
 	type DatabaseConfig,
 	type EffectDatabaseOptions,
@@ -18,6 +19,7 @@ import {
 	makeSerializerLayer,
 	type SerializationError,
 	type SerializerRegistryService,
+	type SourceError,
 	type StorageAdapterService,
 	type StorageError,
 	type UnsupportedFormatError,
@@ -60,7 +62,9 @@ export const makeNodePersistenceLayer = <Config extends DatabaseConfig>(
 export const createNodeDatabase = <Config extends DatabaseConfig>(
 	config: Config,
 	initialData?: {
-		readonly [K in keyof Config]?: ReadonlyArray<Record<string, unknown>>;
+		readonly [K in keyof ConfiguredCollections<Config>]?: ReadonlyArray<
+			Record<string, unknown>
+		>;
 	},
 	persistenceConfig?: EffectDatabasePersistenceConfig,
 	options?: EffectDatabaseOptions,
@@ -71,7 +75,8 @@ export const createNodeDatabase = <Config extends DatabaseConfig>(
 	| SerializationError
 	| UnsupportedFormatError
 	| ValidationError
-	| PluginError,
+	| PluginError
+	| SourceError,
 	Scope.Scope
 > => {
 	const layer = makeNodePersistenceLayer(config);
@@ -112,7 +117,9 @@ export const makeProseQLLayer = <Config extends DatabaseConfig, I>(
 	tag: Context.Key<I, GenerateDatabaseWithPersistence<Config>>,
 	config: Config,
 	initialData?: {
-		readonly [K in keyof Config]?: ReadonlyArray<Record<string, unknown>>;
+		readonly [K in keyof ConfiguredCollections<Config>]?: ReadonlyArray<
+			Record<string, unknown>
+		>;
 	},
 	persistenceConfig?: EffectDatabasePersistenceConfig,
 	options?: EffectDatabaseOptions,
@@ -124,6 +131,7 @@ export const makeProseQLLayer = <Config extends DatabaseConfig, I>(
 	| UnsupportedFormatError
 	| ValidationError
 	| PluginError
+	| SourceError
 > =>
 	Layer.effect(
 		tag,

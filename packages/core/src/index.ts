@@ -61,6 +61,18 @@ export {
 	PopulationError,
 } from "./errors/query-errors.js";
 
+export type {
+	SourceError,
+	SourceRecordOrigin,
+} from "./errors/source-errors.js";
+export {
+	DuplicatePhysicalFileError,
+	DuplicateRecordError,
+	InvalidDocumentSourceError,
+	SourceConfigError,
+	UnknownCollectionError,
+} from "./errors/source-errors.js";
+
 export type { PersistenceError } from "./errors/storage-errors.js";
 // Storage errors
 export {
@@ -103,14 +115,33 @@ export { makeProseQLTag } from "./context-tag.js";
 // Core Types and Configurations
 // ============================================================================
 
+export type { LoadedDocumentSources } from "./storage/document-source.js";
+export { loadDocumentSources } from "./storage/document-source.js";
+export type { OriginIndex, RecordOrigin } from "./storage/origin-index.js";
+export { getOrigin } from "./storage/origin-index.js";
+export type {
+	DatabaseSourceConfig,
+	DocumentSourceConfig,
+	NormalizedDatabaseSourceConfig,
+	NormalizedDocumentSourceConfig,
+	NormalizedSourceConfig,
+} from "./storage/source-config.js";
+export { normalizeSourceConfig } from "./storage/source-config.js";
 export type {
 	CollectionConfig,
+	ConfiguredCollections,
 	DatabaseConfig,
 	DatabaseReactiveOptions,
 	DerivedIdConfig,
+	LegacyDatabaseConfig,
 	ReactiveConfig,
+	SourceOrientedDatabaseConfig,
 } from "./types/database-config-types.js";
-export { isCollectionDirectoryMode } from "./types/database-config-types.js";
+export {
+	getCollectionConfigs,
+	isCollectionDirectoryMode,
+	isSourceOrientedDatabaseConfig,
+} from "./types/database-config-types.js";
 export type {
 	DatasetFor,
 	GenerateDatabase,

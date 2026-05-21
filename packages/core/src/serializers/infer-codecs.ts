@@ -2,7 +2,11 @@
  * Infer which codecs are needed from a database config's file extensions and format overrides.
  */
 
-import type { DatabaseConfig } from "../types/database-config-types.js";
+import {
+	type DatabaseConfig,
+	getCollectionConfigs,
+	isSourceOrientedDatabaseConfig,
+} from "../types/database-config-types.js";
 import { getFileExtension } from "../utils/path.js";
 import { hjsonCodec } from "./codecs/hjson.js";
 import { jsonCodec } from "./codecs/json.js";
@@ -47,20 +51,35 @@ export const inferCodecsFromConfig = (
 	const seen = new Set<string>();
 	const codecs: FormatCodec[] = [];
 
-	for (const collectionConfig of Object.values(config)) {
-		const format =
-			collectionConfig.format ??
-			(collectionConfig.file ? getFileExtension(collectionConfig.file) : "");
-		if (!format) continue;
-
+	const addFormat = (format: string): void => {
+		if (!format) return;
 		const factory = CODEC_FACTORIES[format];
-		if (!factory) continue;
+		if (!factory) return;
 
 		const codec = factory();
 		if (!seen.has(codec.name)) {
 			seen.add(codec.name);
 			codecs.push(codec);
 		}
+	};
+
+	if (isSourceOrientedDatabaseConfig(config)) {
+		for (const source of config.sources ?? []) {
+			if (source.kind === "documents") {
+				addFormat(source.format ?? "yaml");
+			} else if (source.kind === "directory") {
+				addFormat(source.format);
+			} else {
+				addFormat(source.format ?? getFileExtension(source.file));
+			}
+		}
+	}
+
+	for (const collectionConfig of Object.values(getCollectionConfigs(config))) {
+		const format =
+			collectionConfig.format ??
+			(collectionConfig.file ? getFileExtension(collectionConfig.file) : "");
+		addFormat(format);
 	}
 
 	return codecs;

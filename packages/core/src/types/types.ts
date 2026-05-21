@@ -27,6 +27,7 @@ import type {
 } from "./computed-types.js";
 import type { MinimalEntity, TransactionContext } from "./crud-types.js";
 import type { CursorConfig, RunnableCursorPage } from "./cursor-types.js";
+import type { ConfiguredCollections } from "./database-config-types.js";
 import type { SearchConfig } from "./search-types.js";
 
 // ============================================================================
@@ -873,7 +874,9 @@ export type RuntimeEntityFromCollection<Collection> =
 
 // Extract all runtime entity types from config
 export type ExtractEntityTypes<Config> = {
-	[K in keyof Config]: RuntimeEntityFromCollection<Config[K]>;
+	[K in keyof ConfiguredCollections<Config>]: RuntimeEntityFromCollection<
+		ConfiguredCollections<Config>[K]
+	>;
 };
 
 // Convert string targets to actual types
@@ -904,12 +907,15 @@ type EntityWithComputed<Entity, Computed> =
 
 // Generate the full database type automatically
 export type GenerateDatabase<Config> = {
-	[K in keyof Config]: Config[K] extends {
+	[K in keyof ConfiguredCollections<Config>]: ConfiguredCollections<Config>[K] extends {
 		relationships: infer Relations;
 		computed?: infer Computed;
 	}
 		? SmartCollection<
-				EntityWithComputed<RuntimeEntityFromCollection<Config[K]>, Computed>,
+				EntityWithComputed<
+					RuntimeEntityFromCollection<ConfiguredCollections<Config>[K]>,
+					Computed
+				>,
 				ResolveRelationships<Relations, ExtractEntityTypes<Config>>,
 				GenerateDatabase<Config>
 			>

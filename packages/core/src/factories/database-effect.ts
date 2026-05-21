@@ -23,6 +23,7 @@ import {
 import type { MigrationError } from "../errors/migration-errors.js";
 import type { PluginError } from "../errors/plugin-errors.js";
 import type { DanglingReferenceError } from "../errors/query-errors.js";
+import type { SourceError } from "../errors/source-errors.js";
 import type {
 	SerializationError,
 	StorageError,
@@ -85,6 +86,11 @@ import {
 } from "../serializers/format-codec.js";
 import { SerializerRegistry } from "../serializers/serializer-service.js";
 import {
+	loadDocumentSources,
+	saveDocumentSource,
+} from "../storage/document-source.js";
+import { emptyOriginIndex, type OriginIndex } from "../storage/origin-index.js";
+import {
 	createDirectoryWatcher,
 	createFileWatcher,
 	loadData,
@@ -93,6 +99,10 @@ import {
 	saveData,
 	saveEntityToDirectory,
 } from "../storage/persistence-effect.js";
+import {
+	type NormalizedSourceConfig,
+	normalizeSourceConfig,
+} from "../storage/source-config.js";
 import { StorageAdapter } from "../storage/storage-service.js";
 import { $transaction as $transactionImpl } from "../transactions/transaction.js";
 import {
@@ -127,8 +137,11 @@ import type {
 } from "../types/cursor-types.js";
 import {
 	type CollectionConfig,
+	type ConfiguredCollections,
 	type DatabaseConfig,
+	getCollectionConfigs,
 	isCollectionDirectoryMode,
+	isSourceOrientedDatabaseConfig,
 } from "../types/database-config-types.js";
 import type { CollectionIndexes } from "../types/index-types.js";
 import type { ChangeEvent } from "../types/reactive-types.js";
@@ -418,8 +431,8 @@ export interface EffectCollection<T extends HasId> {
  * plus the $transaction method for atomic operations.
  */
 export type EffectDatabase<Config extends DatabaseConfig> = {
-	readonly [K in keyof Config]: EffectCollection<
-		Schema.Schema.Type<Config[K]["schema"]> & HasId
+	readonly [K in keyof ConfiguredCollections<Config>]: EffectCollection<
+		Schema.Schema.Type<ConfiguredCollections<Config>[K]["schema"]> & HasId
 	>;
 } & {
 	/**
@@ -498,9 +511,11 @@ const createPersistenceTrigger = (
 ): PersistenceTrigger => {
 	const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-	const executeSave = (key: string): Promise<void> =>
+	const executeSave = (key: string, swallowErrors: boolean): Promise<void> =>
 		Effect.runPromise(
-			makeSaveEffect(key).pipe(Effect.catch(() => Effect.void)),
+			swallowErrors
+				? makeSaveEffect(key).pipe(Effect.catch(() => Effect.void))
+				: makeSaveEffect(key),
 		);
 
 	const schedule = (key: string): void => {
@@ -512,7 +527,7 @@ const createPersistenceTrigger = (
 		// Schedule new debounced write
 		const timer = setTimeout(() => {
 			pendingTimers.delete(key);
-			executeSave(key);
+			executeSave(key, true);
 		}, delayMs);
 		pendingTimers.set(key, timer);
 	};
@@ -525,7 +540,7 @@ const createPersistenceTrigger = (
 		}
 		pendingTimers.clear();
 		// Execute all saves
-		await Promise.all(keys.map((key) => executeSave(key)));
+		await Promise.all(keys.map((key) => executeSave(key, false)));
 	};
 
 	const pendingCount = (): number => pendingTimers.size;
@@ -702,7 +717,7 @@ const buildCollection = <T extends HasId>(
 			}
 		>
 	> = {};
-	for (const [name, config] of Object.entries(dbConfig)) {
+	for (const [name, config] of Object.entries(getCollectionConfigs(dbConfig))) {
 		allRelationships[name] = config.relationships;
 	}
 
@@ -1433,6 +1448,10 @@ const makeBuildCollectionForTx = (
 	>,
 	globalHooks?: GlobalHooksConfig,
 ): BuildCollectionForTx => {
+	const collectionConfigs = getCollectionConfigs(config) as Record<
+		string,
+		CollectionConfig
+	>;
 	return (collectionName: string, addMutation: (name: string) => void) => {
 		// Transaction-aware afterMutation: records mutation instead of scheduling persistence
 		const afterMutation = () => Effect.sync(() => addMutation(collectionName));
@@ -1442,7 +1461,7 @@ const makeBuildCollectionForTx = (
 		// events are only published after commit (see task 7.3).
 		return buildCollection(
 			collectionName,
-			config[collectionName],
+			collectionConfigs[collectionName],
 			typedRefs[collectionName],
 			stateRefs,
 			config,
@@ -1508,14 +1527,21 @@ export interface EffectDatabaseOptions {
 export const createEffectDatabase = <Config extends DatabaseConfig>(
 	config: Config,
 	initialData?: {
-		readonly [K in keyof Config]?: ReadonlyArray<Record<string, unknown>>;
+		readonly [K in keyof ConfiguredCollections<Config>]?: ReadonlyArray<
+			Record<string, unknown>
+		>;
 	},
 	options?: EffectDatabaseOptions,
 ): Effect.Effect<GenerateDatabase<Config>, MigrationError | PluginError> =>
 	Effect.gen(function* () {
+		const collectionConfigs = getCollectionConfigs(config) as Record<
+			string,
+			CollectionConfig
+		>;
+		const collectionNames = Object.keys(collectionConfigs);
 		// 0. Validate migration registries for all versioned collections at startup
-		for (const collectionName of Object.keys(config)) {
-			const collectionConfig = config[collectionName];
+		for (const collectionName of collectionNames) {
+			const collectionConfig = collectionConfigs[collectionName];
 			if (collectionConfig.version !== undefined) {
 				yield* validateMigrationRegistry(
 					collectionName,
@@ -1545,7 +1571,7 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 		const stateRefs: StateRefs = {};
 		const typedRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>> = {};
 
-		for (const collectionName of Object.keys(config)) {
+		for (const collectionName of collectionNames) {
 			const items = (initialData?.[collectionName] ??
 				[]) as ReadonlyArray<HasId>;
 			const map: ReadonlyMap<string, HasId> = new Map(
@@ -1559,8 +1585,8 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 		// 3. Build indexes for each collection from initial data
 		const collectionIndexes: Record<string, CollectionIndexes> = {};
 
-		for (const collectionName of Object.keys(config)) {
-			const collectionConfig = config[collectionName];
+		for (const collectionName of collectionNames) {
+			const collectionConfig = collectionConfigs[collectionName];
 			const normalizedIndexes = normalizeIndexes(collectionConfig.indexes);
 			const items = (initialData?.[collectionName] ??
 				[]) as ReadonlyArray<HasId>;
@@ -1572,8 +1598,8 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 		const searchIndexRefs: Record<string, Ref.Ref<SearchIndexMap>> = {};
 		const searchIndexFields: Record<string, ReadonlyArray<string>> = {};
 
-		for (const collectionName of Object.keys(config)) {
-			const collectionConfig = config[collectionName];
+		for (const collectionName of collectionNames) {
+			const collectionConfig = collectionConfigs[collectionName];
 			if (
 				collectionConfig.searchIndex &&
 				collectionConfig.searchIndex.length > 0
@@ -1598,10 +1624,10 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 		// Pass the shared changePubSub so CRUD operations publish ChangeEvents
 		const collections: Record<string, EffectCollection<HasId>> = {};
 
-		for (const collectionName of Object.keys(config)) {
+		for (const collectionName of collectionNames) {
 			collections[collectionName] = buildCollection(
 				collectionName,
-				config[collectionName],
+				collectionConfigs[collectionName],
 				typedRefs[collectionName],
 				stateRefs,
 				config,
@@ -1685,7 +1711,9 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 	config: Config,
 	initialData?: {
-		readonly [K in keyof Config]?: ReadonlyArray<Record<string, unknown>>;
+		readonly [K in keyof ConfiguredCollections<Config>]?: ReadonlyArray<
+			Record<string, unknown>
+		>;
 	},
 	persistenceConfig?: EffectDatabasePersistenceConfig,
 	options?: EffectDatabaseOptions,
@@ -1696,13 +1724,24 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 	| SerializationError
 	| UnsupportedFormatError
 	| ValidationError
+	| SourceError
 	| PluginError,
 	StorageAdapter | SerializerRegistry | Scope.Scope
 > =>
 	Effect.gen(function* () {
+		const collectionConfigs = getCollectionConfigs(config) as Record<
+			string,
+			CollectionConfig
+		>;
+		const collectionNames = Object.keys(collectionConfigs);
+		const normalizedSourceConfig: NormalizedSourceConfig | undefined =
+			isSourceOrientedDatabaseConfig(config)
+				? normalizeSourceConfig(config)
+				: undefined;
+
 		// 0. Validate migration registries for all versioned collections at startup
-		for (const collectionName of Object.keys(config)) {
-			const collectionConfig = config[collectionName];
+		for (const collectionName of collectionNames) {
+			const collectionConfig = collectionConfigs[collectionName];
 			if (collectionConfig.version !== undefined) {
 				yield* validateMigrationRegistry(
 					collectionName,
@@ -1726,8 +1765,8 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		}
 
 		// 0e. Validate persistence config constraints
-		for (const collectionName of Object.keys(config)) {
-			const cc = config[collectionName];
+		for (const collectionName of collectionNames) {
+			const cc = collectionConfigs[collectionName];
 			if (cc.id?.kind === "derivedFromKey") {
 				if (cc.id.field !== "id") {
 					return yield* Effect.fail(
@@ -1898,6 +1937,21 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			Layer.succeed(SerializerRegistry, serializerRegistry),
 		);
 
+		const loadedDocumentSources =
+			normalizedSourceConfig !== undefined &&
+			normalizedSourceConfig.sources.length > 0
+				? yield* Effect.provide(
+						loadDocumentSources(normalizedSourceConfig),
+						serviceLayer,
+					)
+				: undefined;
+		const documentOriginsRef = yield* Ref.make<OriginIndex>(
+			loadedDocumentSources?.origins ?? emptyOriginIndex(),
+		);
+		const documentSourceDocumentsRef = yield* Ref.make(
+			loadedDocumentSources?.documents ?? [],
+		);
+
 		// 2. Create transaction lock for single-writer isolation
 		const transactionLock = yield* Ref.make(false);
 
@@ -1906,15 +1960,16 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		const stateRefs: StateRefs = {};
 		const typedRefs: Record<string, Ref.Ref<ReadonlyMap<string, HasId>>> = {};
 
-		for (const collectionName of Object.keys(config)) {
-			const collectionConfig = config[collectionName];
+		for (const collectionName of collectionNames) {
+			const collectionConfig = collectionConfigs[collectionName];
 			const filePath = collectionConfig.file;
 
 			const dirPath = collectionConfig.directory;
 			const dirFormat = collectionConfig.format;
 
-			// Load from file or directory if configured
-			let loadedData: ReadonlyMap<string, HasId> = new Map();
+			// Load from file, directory, or document sources if configured
+			let loadedData: ReadonlyMap<string, HasId> =
+				loadedDocumentSources?.collections[collectionName] ?? new Map();
 			if (dirPath && dirFormat && isCollectionDirectoryMode(collectionConfig)) {
 				// Directory mode: load each entity from its own file
 				const dirOptions =
@@ -2002,8 +2057,8 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		// 4. Build indexes for each collection from loaded/merged data
 		const collectionIndexes: Record<string, CollectionIndexes> = {};
 
-		for (const collectionName of Object.keys(config)) {
-			const collectionConfig = config[collectionName];
+		for (const collectionName of collectionNames) {
+			const collectionConfig = collectionConfigs[collectionName];
 			const normalizedIndexes = normalizeIndexes(collectionConfig.indexes);
 			// Use actual data from the Ref (loaded from file + initialData)
 			const dataMap = yield* Ref.get(typedRefs[collectionName]);
@@ -2016,8 +2071,8 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		const searchIndexRefs: Record<string, Ref.Ref<SearchIndexMap>> = {};
 		const searchIndexFields: Record<string, ReadonlyArray<string>> = {};
 
-		for (const collectionName of Object.keys(config)) {
-			const collectionConfig = config[collectionName];
+		for (const collectionName of collectionNames) {
+			const collectionConfig = collectionConfigs[collectionName];
 			if (
 				collectionConfig.searchIndex &&
 				collectionConfig.searchIndex.length > 0
@@ -2037,8 +2092,8 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		// 5. Build the save effect factory. Each save reads the Ref at execution
 		// time (capturing latest state) and writes through saveData with services.
 		const collectionFilePaths: Record<string, string> = {};
-		for (const collectionName of Object.keys(config)) {
-			const filePath = config[collectionName].file;
+		for (const collectionName of collectionNames) {
+			const filePath = collectionConfigs[collectionName].file;
 			if (filePath) {
 				collectionFilePaths[collectionName] = filePath;
 			}
@@ -2049,8 +2104,8 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			string,
 			{ readonly dirPath: string; readonly format: string }
 		> = {};
-		for (const collectionName of Object.keys(config)) {
-			const cc = config[collectionName];
+		for (const collectionName of collectionNames) {
+			const cc = collectionConfigs[collectionName];
 			if (isCollectionDirectoryMode(cc)) {
 				directoryModeConfigs[collectionName] = {
 					dirPath: cc.directory,
@@ -2059,13 +2114,66 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			}
 		}
 
+		const documentSourceKey = (sourceId: string): string =>
+			`source:${sourceId}`;
+		const documentSourceKeysByCollection: Record<
+			string,
+			ReadonlyArray<string>
+		> = {};
+		for (const collectionName of collectionNames) {
+			documentSourceKeysByCollection[collectionName] = [];
+		}
+		for (const source of normalizedSourceConfig?.sources ?? []) {
+			const key = documentSourceKey(source.id);
+			for (const collectionName of source.collections) {
+				documentSourceKeysByCollection[collectionName] = [
+					...(documentSourceKeysByCollection[collectionName] ?? []),
+					key,
+				];
+			}
+		}
+
 		const makeSaveEffect = (key: string): Effect.Effect<void, unknown> => {
+			if (key.startsWith("source:")) {
+				const sourceId = key.slice("source:".length);
+				return Effect.provide(
+					Effect.gen(function* () {
+						if (normalizedSourceConfig === undefined) return;
+						const source = normalizedSourceConfig.sources.find(
+							(candidate) => candidate.id === sourceId,
+						);
+						if (source === undefined) return;
+						const currentCollections: Record<
+							string,
+							ReadonlyMap<string, HasId>
+						> = {};
+						for (const collectionName of source.collections) {
+							currentCollections[collectionName] = yield* Ref.get(
+								typedRefs[collectionName],
+							);
+						}
+						const origins = yield* Ref.get(documentOriginsRef);
+						const documents = yield* Ref.get(documentSourceDocumentsRef);
+						const saved = yield* saveDocumentSource({
+							config: normalizedSourceConfig,
+							sourceId,
+							collections: currentCollections,
+							origins,
+							documents,
+						});
+						yield* Ref.set(documentOriginsRef, saved.origins);
+						yield* Ref.set(documentSourceDocumentsRef, saved.documents);
+					}),
+					serviceLayer,
+				);
+			}
+
 			const collectionName = key;
 
 			// Directory mode: save each entity as a separate file
 			const dirConfig = directoryModeConfigs[collectionName];
 			if (dirConfig) {
-				const collectionConfig = config[collectionName];
+				const collectionConfig = collectionConfigs[collectionName];
 				return Effect.provide(
 					Effect.gen(function* () {
 						const storage = yield* StorageAdapter;
@@ -2116,7 +2224,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			// File mode: save entire collection to a single file
 			const filePath = collectionFilePaths[collectionName];
 			if (!filePath) return Effect.void;
-			const collectionConfig = config[collectionName];
+			const collectionConfig = collectionConfigs[collectionName];
 			return Effect.provide(
 				Effect.gen(function* () {
 					const currentData = yield* Ref.get(typedRefs[collectionName]);
@@ -2172,8 +2280,8 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		// Pass the shared changePubSub so CRUD operations publish ChangeEvents
 		const collections: Record<string, EffectCollection<HasId>> = {};
 
-		for (const collectionName of Object.keys(config)) {
-			const collectionConfig = config[collectionName];
+		for (const collectionName of collectionNames) {
+			const collectionConfig = collectionConfigs[collectionName];
 			const filePath = collectionConfig.file;
 			const isAppendOnly = collectionConfig.appendOnly === true;
 
@@ -2183,14 +2291,22 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			// Instead, each create appends a single JSONL line via appendOnlyConfig.
 			// For directory-mode, afterMutation schedules a save keyed by collectionName.
 			// The makeSaveEffect handles both file-mode and directory-mode saves.
+			const persistenceKeys = [
+				...((filePath && !isAppendOnly) || isDirMode ? [collectionName] : []),
+				...(documentSourceKeysByCollection[collectionName] ?? []),
+			];
 			const afterMutation =
-				(filePath && !isAppendOnly) || isDirMode
+				persistenceKeys.length > 0
 					? () =>
 							Ref.get(transactionLock).pipe(
 								Effect.flatMap((isLocked) =>
 									isLocked
 										? Effect.void // Skip persistence during transactions
-										: Effect.sync(() => trigger.schedule(collectionName)),
+										: Effect.sync(() => {
+												for (const persistenceKey of persistenceKeys) {
+													trigger.schedule(persistenceKey);
+												}
+											}),
 								),
 							)
 					: undefined;
@@ -2250,8 +2366,8 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		// File watching is best-effort: if the storage adapter doesn't support watching
 		// (e.g., browser adapters in test environments), the database still functions
 		// without reactive file change detection.
-		for (const collectionName of Object.keys(config)) {
-			const collectionConfig = config[collectionName];
+		for (const collectionName of collectionNames) {
+			const collectionConfig = collectionConfigs[collectionName];
 			const filePath = collectionConfig.file;
 			if (filePath) {
 				yield* createFileWatcher({
@@ -2304,6 +2420,21 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			pluginRegistry.globalHooks,
 		);
 
+		const transactionPersistenceTrigger = {
+			schedule: (collectionName: string): void => {
+				const persistenceKeys = [
+					...(collectionFilePaths[collectionName] !== undefined ||
+					directoryModeConfigs[collectionName] !== undefined
+						? [collectionName]
+						: []),
+					...(documentSourceKeysByCollection[collectionName] ?? []),
+				];
+				for (const persistenceKey of persistenceKeys) {
+					trigger.schedule(persistenceKey);
+				}
+			},
+		};
+
 		// Create the $transaction method with persistence trigger
 		const $transactionMethod = <A, E>(
 			fn: (
@@ -2314,7 +2445,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				stateRefs,
 				transactionLock,
 				buildCollectionForTx,
-				trigger, // persistence trigger for debounced saves on commit
+				transactionPersistenceTrigger, // persistence trigger for debounced saves on commit
 				changePubSub, // shared PubSub for reactive change notifications
 				fn as unknown as (
 					ctx: TransactionContext<Record<string, EffectCollection<HasId>>>,
@@ -2328,8 +2459,8 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			await trigger.flush();
 			// Write canonical JSONL files for append-only collections
 			const appendOnlyFlushes: Array<Promise<void>> = [];
-			for (const collectionName of Object.keys(config)) {
-				const cc = config[collectionName];
+			for (const collectionName of collectionNames) {
+				const cc = collectionConfigs[collectionName];
 				if (cc.appendOnly && cc.file) {
 					appendOnlyFlushes.push(
 						Effect.runPromise(

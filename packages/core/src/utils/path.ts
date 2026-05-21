@@ -27,3 +27,29 @@ export function getFileExtension(filePath: string): string {
 
 	return filePath.slice(lastDotIndex + 1).toLowerCase();
 }
+
+export function normalizePath(path: string): string {
+	const isAbsolute = path.startsWith("/");
+	const parts: string[] = [];
+	for (const part of path.replace(/\\/g, "/").split("/")) {
+		if (part === "" || part === ".") continue;
+		if (part === "..") {
+			const previous = parts.at(-1);
+			if (previous !== undefined && previous !== "..") {
+				parts.pop();
+			} else if (!isAbsolute) {
+				parts.push(part);
+			}
+			continue;
+		}
+		parts.push(part);
+	}
+	const normalized = parts.join("/");
+	if (isAbsolute) return normalized.length === 0 ? "/" : `/${normalized}`;
+	return normalized.length === 0 ? "." : normalized;
+}
+
+export function joinPath(root: string, path: string): string {
+	if (path.startsWith("/")) return normalizePath(path);
+	return normalizePath(`${root.replace(/\/$/, "")}/${path}`);
+}

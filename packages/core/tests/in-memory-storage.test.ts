@@ -108,6 +108,32 @@ describe("InMemoryStorageLayer", () => {
 		expect(result).toBe("second");
 	});
 
+	it("listRecursive returns nested files sorted by normalized path", async () => {
+		const store = new Map<string, string>([
+			["/data/z.yaml", "z"],
+			["/data/nested/a.yaml", "a"],
+			["/data/nested/deeper/b.json", "b"],
+			["/other/c.yaml", "c"],
+		]);
+		const layer = makeInMemoryStorageLayer(store);
+
+		const result = await Effect.runPromise(
+			Effect.provide(
+				Effect.gen(function* () {
+					const adapter = yield* StorageAdapter;
+					return yield* adapter.listRecursive("/data");
+				}),
+				layer,
+			),
+		);
+
+		expect(result).toEqual([
+			"/data/nested/a.yaml",
+			"/data/nested/deeper/b.json",
+			"/data/z.yaml",
+		]);
+	});
+
 	it("makeInMemoryStorageLayer accepts an external Map for inspection", async () => {
 		const store = new Map<string, string>();
 		const layer = makeInMemoryStorageLayer(store);

@@ -9,6 +9,32 @@ const TestSchema = Schema.Struct({
 });
 
 describe("inferCodecsFromConfig", () => {
+	it("returns yaml codec for a database-level document source", () => {
+		const config: DatabaseConfig = {
+			collections: {
+				books: {
+					schema: TestSchema,
+					relationships: {},
+				},
+			},
+			sources: [
+				{
+					id: "library",
+					kind: "documents",
+					root: "./data",
+					include: "**/*.yaml",
+					format: "yaml",
+					collections: "all",
+					outbox: "./data/generated.yaml",
+				},
+			],
+		};
+
+		const codecs = inferCodecsFromConfig(config);
+		expect(codecs).toHaveLength(1);
+		expect(codecs[0].name).toBe("yaml");
+	});
+
 	it("returns yaml codec for a .yaml config", () => {
 		const config: DatabaseConfig = {
 			books: {

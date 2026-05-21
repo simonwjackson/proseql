@@ -203,6 +203,44 @@ const makeEnsureDir =
 		return Effect.void;
 	};
 
+const normalizeStoragePath = (path: string): string =>
+	path.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
+
+const makeListRecursive =
+	(storage: Storage, config: ResolvedWebStorageConfig) =>
+	(rootPath: string): Effect.Effect<ReadonlyArray<string>, StorageError> =>
+		Effect.sync(() => {
+			const root = normalizeStoragePath(rootPath);
+			const prefix = `${config.keyPrefix}${root}${root.length > 0 ? "/" : ""}`;
+			const paths: string[] = [];
+			for (let i = 0; i < storage.length; i++) {
+				const key = storage.key(i);
+				if (key?.startsWith(prefix)) {
+					paths.push(key.slice(config.keyPrefix.length));
+				}
+			}
+			return paths.sort() as ReadonlyArray<string>;
+		});
+
+const makeListDirectory =
+	(storage: Storage, config: ResolvedWebStorageConfig) =>
+	(dirPath: string): Effect.Effect<ReadonlyArray<string>, StorageError> =>
+		makeListRecursive(
+			storage,
+			config,
+		)(dirPath).pipe(
+			Effect.map((paths) => {
+				const root = normalizeStoragePath(dirPath);
+				const prefix = root.length > 0 ? `${root}/` : "";
+				return paths.filter((path) => {
+					const rest = path.startsWith(prefix)
+						? path.slice(prefix.length)
+						: path;
+					return rest.length > 0 && !rest.includes("/");
+				});
+			}),
+		);
+
 // ============================================================================
 // Factory
 // ============================================================================
@@ -242,5 +280,8 @@ export function makeWebStorageAdapter(
 			const key = pathToKey(path, resolved.keyPrefix);
 			return watchImpl(key, onChange);
 		},
+		listDirectory: makeListDirectory(storage, resolved),
+		listRecursive: makeListRecursive(storage, resolved),
+		watchDir: (_dirPath, _onChange) => Effect.succeed(() => {}),
 	};
 }

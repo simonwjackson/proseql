@@ -5,6 +5,7 @@
 
 import type { Schema } from "effect";
 import type { Migration } from "../migrations/migration-types.js";
+import type { DatabaseSourceConfig } from "../storage/source-config.js";
 import type { ComputedFieldsConfig } from "./computed-types.js";
 import type { HooksConfig } from "./hook-types.js";
 
@@ -219,9 +220,61 @@ export type CollectionConfig = {
 };
 
 /**
- * Complete database configuration type that preserves literal types
+ * Legacy collection map shape retained internally while factories migrate to
+ * source-oriented configuration.
  */
-export type DatabaseConfig = Record<string, CollectionConfig>;
+export type LegacyDatabaseConfig = Record<string, CollectionConfig>;
+
+/**
+ * Source-oriented database configuration. Collections define logical schema and
+ * behavior; sources define where persistent documents live.
+ */
+export type SourceOrientedDatabaseConfig<
+	Collections extends Record<string, CollectionConfig> = Record<
+		string,
+		CollectionConfig
+	>,
+> = {
+	readonly collections: Collections;
+	readonly sources?: ReadonlyArray<DatabaseSourceConfig>;
+};
+
+/**
+ * Complete database configuration type that preserves literal types.
+ */
+export type DatabaseConfig =
+	| LegacyDatabaseConfig
+	| SourceOrientedDatabaseConfig;
+
+export type ConfiguredCollections<Config> = Config extends {
+	readonly collections: infer Collections extends Record<
+		string,
+		CollectionConfig
+	>;
+}
+	? Collections
+	: Config extends Record<string, CollectionConfig>
+		? Config
+		: never;
+
+export const isSourceOrientedDatabaseConfig = (
+	config: DatabaseConfig,
+): config is SourceOrientedDatabaseConfig => {
+	if (!("collections" in config)) return false;
+	const value = (config as { readonly collections?: unknown }).collections;
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		!("schema" in (value as Record<string, unknown>))
+	);
+};
+
+export const getCollectionConfigs = <Config extends DatabaseConfig>(
+	config: Config,
+): ConfiguredCollections<Config> =>
+	(isSourceOrientedDatabaseConfig(config)
+		? config.collections
+		: config) as ConfiguredCollections<Config>;
 
 /**
  * Reactive query configuration options for the database.
@@ -274,10 +327,10 @@ export function isCollectionDirectoryMode(
  * Extract only the persistent collections from a database configuration
  */
 export type PersistentCollections<Config extends DatabaseConfig> = {
-	readonly [K in keyof Config]: Config[K] extends
+	readonly [K in keyof ConfiguredCollections<Config>]: ConfiguredCollections<Config>[K] extends
 		| { file: string }
 		| { directory: string }
-		? Config[K]
+		? ConfiguredCollections<Config>[K]
 		: never;
 };
 
@@ -285,8 +338,10 @@ export type PersistentCollections<Config extends DatabaseConfig> = {
  * Extract only the in-memory collections from a database configuration
  */
 export type InMemoryCollections<Config extends DatabaseConfig> = {
-	readonly [K in keyof Config]: Config[K] extends { file?: undefined }
-		? Config[K]
+	readonly [K in keyof ConfiguredCollections<Config>]: ConfiguredCollections<Config>[K] extends {
+		file?: undefined;
+	}
+		? ConfiguredCollections<Config>[K]
 		: never;
 };
 
@@ -294,8 +349,12 @@ export type InMemoryCollections<Config extends DatabaseConfig> = {
  * Helper type to extract file paths from a database configuration
  */
 export type ExtractFilePaths<Config extends DatabaseConfig> = {
-	readonly [K in keyof Config]: Config[K] extends { file: infer F } ? F : never;
-}[keyof Config];
+	readonly [K in keyof ConfiguredCollections<Config>]: ConfiguredCollections<Config>[K] extends {
+		file: infer F;
+	}
+		? F
+		: never;
+}[keyof ConfiguredCollections<Config>];
 
 /**
  * Type for mapping file paths to the collections that use them

@@ -35,6 +35,9 @@ export interface StorageAdapterShape {
 	readonly listDirectory: (
 		dirPath: string,
 	) => Effect.Effect<ReadonlyArray<string>, StorageError>;
+	readonly listRecursive: (
+		rootPath: string,
+	) => Effect.Effect<ReadonlyArray<string>, StorageError>;
 	readonly watchDir: (
 		dirPath: string,
 		onChange: (event: {
