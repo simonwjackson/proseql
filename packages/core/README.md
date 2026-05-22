@@ -23,9 +23,11 @@ const BookSchema = Schema.Struct({
 })
 
 const config = {
-  books: {
-    schema: BookSchema,
-    relationships: {},
+  collections: {
+    books: {
+      schema: BookSchema,
+      relationships: {},
+    },
   },
 } as const
 
@@ -931,9 +933,63 @@ On disk, prose files look like this:
 
 ## Persistence
 
-For file persistence on Node.js, see [`@proseql/node`](https://www.npmjs.com/package/@proseql/node).
+Collections define schemas, relationships, indexes, hooks, migrations, and identity policy. Persistent storage is configured separately with database-level `sources`.
 
-For browser storage (localStorage, sessionStorage, IndexedDB), see [`@proseql/browser`](https://www.npmjs.com/package/@proseql/browser).
+```ts
+const config = {
+  collections: {
+    games: {
+      schema: GamePayload,
+      id: { kind: "derivedFromKey", field: "id" },
+      relationships: {},
+    },
+    systems: {
+      schema: SystemPayload,
+      id: { kind: "derivedFromKey", field: "id" },
+      relationships: {},
+    },
+  },
+  sources: [
+    {
+      id: "library",
+      kind: "documents",
+      root: "./data/library",
+      include: "**/*.yaml",
+      format: "yaml",
+      collections: "all",
+      outbox: "generated.yaml",
+    },
+  ],
+} as const
+```
+
+A YAML document source expects each file to be a top-level object keyed by collection name:
+
+```yaml
+systems:
+  snes:
+    name: Super Nintendo
+
+games:
+  smw:
+    title: Super Mario World
+    systemId: snes
+```
+
+With `id: { kind: "derivedFromKey", field: "id" }`, persisted records omit a physical `id` field. At runtime ProseQL hydrates `id` from the object key (`smw` above). A physical `id` inside the persisted payload is invalid.
+
+Document sources are strict by default:
+
+- duplicate `(collection, id)` records across matching files fail database load;
+- unknown top-level collection keys fail unless `unknownCollections: "preserve"` is configured;
+- new records without an origin file are written to the source `outbox` on debounced save or `flush()`;
+- existing records update/delete in their origin file;
+- empty matched files and existing empty source roots are valid;
+- missing source roots fail by default unless `optional: true` is configured.
+
+`flush()` is the durability boundary for pending debounced writes. It surfaces persistence failures to callers; background debounced writes are best-effort. Document-source writes preserve data and sibling collection sections, but YAML comments and original formatting are not preserved.
+
+For Node.js filesystem persistence and watcher support, see [`@proseql/node`](https://www.npmjs.com/package/@proseql/node). For browser storage (localStorage, sessionStorage, IndexedDB), see [`@proseql/browser`](https://www.npmjs.com/package/@proseql/browser).
 
 ## License
 

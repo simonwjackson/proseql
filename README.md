@@ -32,10 +32,10 @@ A type-safe relational database that persists to plain text files. No server. No
 ```
 your-project/
 ├── data/
-│   ├── books.yaml          ← you can just open this
-│   ├── authors.json         ← or this
-│   ├── publishers.toml      ← or this, we don't judge
-│   └── catalog.prose        ← or this, it reads like English
+│   └── library/
+│       ├── base.yaml        ← top-level collections in one file
+│       ├── rpgs.yaml        ← more records for the same collections
+│       └── generated.yaml   ← outbox for newly-created records
 └── ...
 ```
 
@@ -49,14 +49,26 @@ npm install @proseql/node
 
 ## Quick Start
 
-Your data lives in plain text files. Here's `books.yaml`:
+Your data lives in plain text files. A document source can merge many YAML files into one logical database. Here's `data/library/base.yaml`:
 
 ```yaml
-- id: "1"
-  title: Dune
-  author: Frank Herbert
-  year: 1965
-  genre: sci-fi
+systems:
+  snes:
+    name: Super Nintendo
+
+games:
+  smw:
+    title: Super Mario World
+    systemId: snes
+```
+
+And another file in the same source, `data/library/rpgs.yaml`:
+
+```yaml
+games:
+  chrono-trigger:
+    title: Chrono Trigger
+    systemId: snes
 ```
 
 Query and mutate with type-safe APIs:
@@ -65,39 +77,63 @@ Query and mutate with type-safe APIs:
 import { Effect, Schema } from "effect"
 import { createNodeDatabase } from "@proseql/node"
 
-const BookSchema = Schema.Struct({
-  id: Schema.String,
+const GamePayload = Schema.Struct({
   title: Schema.String,
-  author: Schema.String,
-  year: Schema.Number,
-  genre: Schema.String,
+  systemId: Schema.String,
 })
 
-const program = Effect.gen(function* () {
-  const db = yield* createNodeDatabase({
-    books: {
-      schema: BookSchema,
-      file: "./data/books.yaml",
+const SystemPayload = Schema.Struct({
+  name: Schema.String,
+})
+
+const config = {
+  collections: {
+    games: {
+      schema: GamePayload,
+      id: { kind: "derivedFromKey", field: "id" },
+      relationships: {
+        system: { type: "ref", target: "systems", foreignKey: "systemId" },
+      },
+    },
+    systems: {
+      schema: SystemPayload,
+      id: { kind: "derivedFromKey", field: "id" },
       relationships: {},
     },
-  })
+  },
+  sources: [
+    {
+      id: "library",
+      kind: "documents",
+      root: "./data/library",
+      include: "**/*.yaml",
+      format: "yaml",
+      collections: "all",
+      outbox: "generated.yaml",
+    },
+  ],
+} as const
 
-  // find it
-  const dune = await db.books.findById("1").runPromise
+const program = Effect.gen(function* () {
+  const db = yield* createNodeDatabase(config)
 
-  // query it
-  const classics = await db.books.query({
-    where: { year: { $lt: 1970 } },
-    sort: { year: "asc" },
-  }).runPromise
+  const snesGames = yield* Effect.promise(() =>
+    db.games.query({ where: { systemId: "snes" }, sort: { title: "asc" } }).runPromise,
+  )
 
-  // change it
-  await db.books.update("1", { genre: "masterpiece" }).runPromise
-  // → books.yaml just changed on disk. go open it.
+  yield* db.games.update("smw", { title: "Super Mario World (SNES)" })
+  yield* db.games.create({ id: "earthbound", title: "EarthBound", systemId: "snes" })
+  yield* Effect.promise(() => db.flush())
+
+  return snesGames
 })
 
 await Effect.runPromise(Effect.scoped(program))
 ```
+
+Existing records write back to their origin file. New records without an origin write to the source `outbox` (`generated.yaml` above) when debounced persistence runs or `flush()` is called.
+
+Document sources are strict by default: duplicate `(collection, id)` records across files and unknown top-level collection keys fail loudly. Use `unknownCollections: "preserve"` only when non-ProseQL top-level data must survive rewrites. YAML writes preserve data and sibling collection sections, not comments or exact original formatting. Node-backed document sources support watcher-driven whole-source reloads for normal `watch()` and `watchById()` subscribers.
 
 ## Packages
 
@@ -129,7 +165,7 @@ await Effect.runPromise(Effect.scoped(program))
 | [13-prose-format](examples/13-prose-format) | Human-readable prose files |
 | [14-append-only-jsonl](examples/14-append-only-jsonl) | Event logs, audit trails |
 | [15-reactive-queries](examples/15-reactive-queries) | Live query streams |
-| [16-advanced-features](examples/16-advanced-features) | ID generation, indexing, unique constraints, transactions, migrations, plugins, foreign keys |
+| [16-advanced-features](examples/16-advanced-features) | ID generation, indexing, unique constraints, transactions, migrations, plugins, foreign keys, document sources |
 
 ## License
 

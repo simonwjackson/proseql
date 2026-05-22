@@ -11,33 +11,50 @@ npm install @proseql/node
 ## Quick Start
 
 ```ts
+import { mkdir } from "node:fs/promises"
 import { Effect, Schema } from "effect"
 import { createNodeDatabase } from "@proseql/node"
 
-const BookSchema = Schema.Struct({
-  id: Schema.String,
+const BookPayload = Schema.Struct({
   title: Schema.String,
   author: Schema.String,
   year: Schema.Number,
 })
 
 const config = {
-  books: {
-    schema: BookSchema,
-    file: "./data/books.yaml",
-    relationships: {},
+  collections: {
+    books: {
+      schema: BookPayload,
+      id: { kind: "derivedFromKey", field: "id" },
+      relationships: {},
+    },
   },
+  sources: [
+    {
+      id: "library",
+      kind: "documents",
+      root: "./data/library",
+      include: "**/*.yaml",
+      format: "yaml",
+      collections: "all",
+      outbox: "generated.yaml",
+    },
+  ],
 } as const
 
 const program = Effect.gen(function* () {
+  yield* Effect.promise(() => mkdir("./data/library", { recursive: true }))
   const db = yield* createNodeDatabase(config)
 
-  yield* db.books.create({ title: "Dune", author: "Frank Herbert", year: 1965 })
-  // → saved to ./data/books.yaml
+  yield* db.books.create({ id: "dune", title: "Dune", author: "Frank Herbert", year: 1965 })
+  yield* Effect.promise(() => db.flush())
+  // → saved under books.dune in ./data/library/generated.yaml
 
-  const classics = yield* Effect.promise(
-    () => db.books.query({ where: { year: { $lt: 1970 } } }).runPromise
+  const classics = yield* Effect.promise(() =>
+    db.books.query({ where: { year: { $lt: 1970 } } }).runPromise,
   )
+
+  return classics
 })
 
 await Effect.runPromise(Effect.scoped(program))
@@ -45,41 +62,82 @@ await Effect.runPromise(Effect.scoped(program))
 
 For the full query and mutation API, see [`@proseql/core`](https://www.npmjs.com/package/@proseql/core).
 
-## Key-Derived IDs
+## Document Sources
 
-Object-keyed files can omit duplicated `id` fields from each payload while keeping runtime records hydrated with `id`.
+Document sources are the source-oriented persistence shape for plain-text documents that can contain several collections in the same file. Collections define logical behavior; sources define discovery and write routing.
 
 ```ts
-const GamePayload = Schema.Struct({
-  metadata: Schema.optional(Schema.Struct({ name: Schema.String })),
-})
-
 const config = {
-  games: {
-    schema: GamePayload,
-    file: "./data/games.yaml",
-    id: { kind: "derivedFromKey", field: "id" },
-    relationships: {},
+  collections: {
+    games: {
+      schema: GamePayload,
+      id: { kind: "derivedFromKey", field: "id" },
+      relationships: {},
+    },
+    systems: {
+      schema: SystemPayload,
+      id: { kind: "derivedFromKey", field: "id" },
+      relationships: {},
+    },
   },
+  sources: [
+    {
+      id: "library",
+      kind: "documents",
+      root: "./data/library",
+      include: "**/*.yaml",
+      format: "yaml",
+      collections: "all",
+      outbox: "generated.yaml",
+    },
+  ],
 } as const
 ```
 
-On disk:
+Any matching YAML file can contribute records to any selected collection:
 
 ```yaml
-472c8ba3-c51c-45ed-8bab-fc560edd83ea:
-  metadata:
-    name: Default
+systems:
+  snes:
+    name: Super Nintendo
+
+games:
+  smw:
+    title: Super Mario World
+    systemId: snes
+```
+
+Another matching file can add more `games`; all records merge into the logical `db.games` collection. Duplicate `(collection, id)` records fail loudly by default, and unknown top-level collection keys fail unless the source opts into `unknownCollections: "preserve"`.
+
+### Key-Derived IDs
+
+Document sources use object keys as record IDs. With `id: { kind: "derivedFromKey", field: "id" }`, persisted payloads omit `id` and runtime records are hydrated from the enclosing key. A physical `id` field in persisted YAML is invalid.
+
+```yaml
+games:
+  smw:
+    title: Super Mario World
+    systemId: snes
 ```
 
 At runtime:
 
 ```ts
-const game = yield* db.games.findById("472c8ba3-c51c-45ed-8bab-fc560edd83ea")
-// { id: "472c8ba3-c51c-45ed-8bab-fc560edd83ea", metadata: { name: "Default" } }
+const game = yield* db.games.findById("smw")
+// { id: "smw", title: "Super Mario World", systemId: "snes" }
 ```
 
-Derived IDs require object-keyed formats such as JSON, YAML, TOML, JSON5, JSONC, Hjson, or TOON. Append-only JSONL/NDJSON and Prose array files are rejected. Persisted payloads must not contain a physical `id` field in derived-id mode.
+### Outbox and durability
+
+Existing records retain origin-file attribution. Updates and deletes rewrite the file where the record was loaded. New records have no origin, so they are written to the configured `outbox`; the outbox must be rediscoverable by the source include patterns. Empty matched files and existing empty source roots are valid. Missing source roots fail by default unless `optional: true` is configured. Missing outbox parent directories are created by the Node storage adapter on first write.
+
+Mutations are debounced. Call `await db.flush()` when a process or CLI command needs durable filesystem persistence before exit. `flush()` surfaces persistence failures. Without `flush()`, a mutation may only be in memory until the debounced write runs or the scope finalizer flushes.
+
+### Watchers and formatting
+
+Node-backed persistent databases watch document-source roots. Add, change, and remove events trigger a debounced whole-source rediscovery/reload and publish the normal reactive reload events used by `watch()` and `watchById()`.
+
+Writes preserve semantic data and sibling collection sections, but YAML comments, exact ordering, and original formatting are not preserved.
 
 ## Persistence Approaches
 
@@ -87,7 +145,7 @@ Three ways to set up file persistence, from simplest to most configurable.
 
 ### A. `createNodeDatabase` (Zero-Config)
 
-Codecs are inferred from file extensions. No manual layer wiring needed.
+Codecs are inferred from source formats, source paths, and file extensions. No manual layer wiring needed.
 
 ```ts
 import { Effect } from "effect"
@@ -98,8 +156,8 @@ const program = Effect.gen(function* () {
     writeDebounce: 50,  // optional: debounce writes (ms)
   })
 
-  yield* db.books.create({ title: "Neuromancer", author: "William Gibson", year: 1984 })
-  // → triggers debounced write to ./data/books.yaml
+  yield* db.books.create({ id: "neuromancer", title: "Neuromancer", author: "William Gibson", year: 1984 })
+  // → triggers debounced write to the configured source outbox
 })
 
 await Effect.runPromise(Effect.scoped(program))
@@ -159,7 +217,7 @@ await Effect.runPromise(
 
 ## File Formats
 
-Codecs are inferred from file extensions. Mix formats across collections.
+Codecs are inferred from document source `format` values, source paths, and file extensions. Document sources use one object-document format per source; YAML is the primary multi-collection format.
 
 | Format | Extension | Description |
 |--------|-----------|-------------|
@@ -175,9 +233,21 @@ Codecs are inferred from file extensions. Mix formats across collections.
 
 ```ts
 const config = {
-  books: { schema: BookSchema, file: "./data/books.yaml", relationships: {} },
-  authors: { schema: AuthorSchema, file: "./data/authors.json", relationships: {} },
-  events: { schema: EventSchema, file: "./data/events.jsonl", relationships: {} },
+  collections: {
+    books: { schema: BookPayload, id: { kind: "derivedFromKey", field: "id" }, relationships: {} },
+    authors: { schema: AuthorPayload, id: { kind: "derivedFromKey", field: "id" }, relationships: {} },
+  },
+  sources: [
+    {
+      id: "library",
+      kind: "documents",
+      root: "./data/library",
+      include: "**/*.yaml",
+      format: "yaml",
+      collections: "all",
+      outbox: "generated.yaml",
+    },
+  ],
 } as const
 ```
 

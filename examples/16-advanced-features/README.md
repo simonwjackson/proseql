@@ -1,6 +1,6 @@
 # Advanced Features Example
 
-Demonstrates seven advanced proseql features in a single file: ID generation, indexing (including nested fields), unique constraints (single and compound), transactions with rollback, chained schema migrations, the plugin system, and foreign key enforcement.
+Demonstrates advanced proseql features: ID generation, indexing (including nested fields), unique constraints (single and compound), transactions with rollback, chained schema migrations, the plugin system, foreign key enforcement, and source-oriented document persistence.
 
 ## What This Example Covers
 
@@ -64,13 +64,24 @@ Define `ref` relationships with a `foreignKey` field to enforce referential inte
 - Creating a record with a valid foreign key succeeds.
 - Creating a record with a nonexistent foreign key raises `ForeignKeyError`.
 
+### 8. Document Sources
+
+`document-sources.ts` shows a source-oriented Node database where several YAML files under one root contribute records to logical `games` and `systems` collections.
+
+- YAML files are top-level objects keyed by collection name.
+- Records are object-keyed by id and use `id: { kind: "derivedFromKey", field: "id" }`.
+- Duplicate `(collection, id)` records and unknown top-level keys fail by default.
+- Creates write to the configured source outbox on `flush()`.
+
 ## Running
 
 ```bash
 bun run index.ts
+bun run document-sources.ts
 ```
 
 ## Dependencies
 
 - `@proseql/core`
+- `@proseql/node` (for `document-sources.ts`)
 - `effect`

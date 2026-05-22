@@ -31,6 +31,53 @@ proseql update books abc123 --set 'year=2025,title=New Title'
 proseql delete books abc123 --force
 ```
 
+## Config Shape
+
+New ProseQL configs use top-level `collections` plus `sources`. Collections define schemas and identity policy; sources define where the CLI reads and writes documents. Relative source paths are resolved relative to the config file. Document-source `outbox` paths are resolved under the source root.
+
+```ts
+import { Schema, type DatabaseConfig } from "@proseql/core"
+
+const BookPayload = Schema.Struct({
+  title: Schema.String,
+  author: Schema.String,
+  year: Schema.Number,
+})
+
+export default {
+  collections: {
+    books: {
+      schema: BookPayload,
+      id: { kind: "derivedFromKey", field: "id" },
+      relationships: {},
+    },
+  },
+  sources: [
+    {
+      id: "library",
+      kind: "documents",
+      root: "./data",
+      include: "**/*.yaml",
+      format: "yaml",
+      collections: "all",
+      outbox: "generated.yaml",
+    },
+  ],
+} as const satisfies DatabaseConfig
+```
+
+Matching YAML files are top-level objects keyed by collection name, then record id:
+
+```yaml
+books:
+  dune:
+    title: Dune
+    author: Frank Herbert
+    year: 1965
+```
+
+The `id` above is derived from the object key (`dune`); do not duplicate it inside the persisted payload.
+
 ## Commands
 
 ### `init`
@@ -44,9 +91,10 @@ proseql init --format toml
 ```
 
 Creates:
-- `proseql.config.ts` with an example `notes` collection
-- `data/notes.{json,yaml,toml}` with sample data
-- Updates `.gitignore` to exclude the data directory (if in a git repo)
+- `proseql.config.ts` with an example `notes` collection under `collections`
+- a document source under `sources` with `root: "./data"` and `outbox: "generated.<format>"`
+- `data/notes.{json,yaml,toml}` with sample object-keyed document-source data
+- updates `.gitignore` to exclude the data directory (if in a git repo)
 
 | Option | Description |
 |--------|-------------|
@@ -137,15 +185,14 @@ Without `--force`, you'll be prompted to confirm the deletion.
 
 ### `collections`
 
-List all collections with entity counts and file paths.
+List all collections with entity counts and persistence locations.
 
 ```sh
 proseql collections
 
 # Output:
-# name     count  file              format
-# books    42     data/books.yaml   yaml
-# authors  12     data/authors.json json
+# name   count  file                                                   format
+# books  42     document source 'library' (root: data, outbox: data/generated.yaml) yaml
 ```
 
 ### `describe`
@@ -171,18 +218,17 @@ Displays:
 
 ### `stats`
 
-Show statistics for all collections.
+Show statistics for all collections. Document-source-backed collections report the source and outbox rather than a single collection file.
 
 ```sh
 proseql stats
 
 # Output:
-# name     count  file              format  size
-# books    42     data/books.yaml   yaml    12.5 KB
-# authors  12     data/authors.json json    2.1 KB
+# name   count  file                                                   format  size
+# books  42     document source 'library' (root: data, outbox: data/generated.yaml) yaml    (document source)
 ```
 
-Includes entity counts, file paths, formats, and file sizes on disk.
+Includes entity counts, persistence locations, formats, and file sizes when a collection has a single file. Document sources report `(document source)` because records can be spread across many files.
 
 ### `migrate`
 
@@ -212,7 +258,7 @@ Migration status shows:
 
 ### `convert`
 
-Convert a collection's data file to a different format.
+Convert a single-file collection's data file to a different format.
 
 ```sh
 proseql convert <collection> --to <format>
@@ -229,12 +275,16 @@ proseql convert config --to toml
 
 Supported formats: `json`, `yaml`, `toml`, `json5`, `jsonc`, `hjson`, `toon`
 
-The command:
-1. Reads the current data file
-2. Re-serializes in the target format
-3. Writes the new file with the correct extension
-4. Removes the old file
-5. Updates the config file to reference the new path
+The command works for single-file collection configs. It explicitly rejects document-source-backed collections because converting a merged multi-file source needs deliberate routing and outbox semantics.
+
+## Document-source behavior in CLI commands
+
+- `query` reads the merged logical collection across all matching source files.
+- `create` writes new records to the configured source `outbox` and flushes before exit.
+- `update` and `delete` rewrite the record's origin file and flush before exit.
+- Duplicate `(collection, id)` records across source files and unknown top-level collection keys fail loudly by default, with file/collection/id context in the error.
+- `unknownCollections: "preserve"` can be used when non-ProseQL top-level data must survive rewrites.
+- YAML comments and exact formatting are not preserved after CLI writes.
 
 ## Global Options
 
@@ -275,7 +325,7 @@ The CLI automatically discovers your config file by searching upward from the cu
 2. `proseql.config.js`
 3. `proseql.config.json`
 
-The first file found is used. Override with `--config`:
+The first file found is used. Source roots are resolved relative to that config file. Override with `--config`:
 
 ```sh
 proseql query books --config ./path/to/proseql.config.ts

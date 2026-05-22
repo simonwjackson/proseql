@@ -1,13 +1,14 @@
 /**
  * Persistence Setup Example - Effect API
  *
- * Demonstrates three ways to set up file persistence, from simplest to most
- * configurable:
+ * Demonstrates three ways to set up Node file persistence with a source-oriented
+ * document source:
  *   1. createNodeDatabase() — zero-config convenience wrapper
  *   2. makeNodePersistenceLayer() — explicit layer from config
  *   3. Manual Layer.merge() — full control over codecs and storage
  */
 
+import { mkdir } from "node:fs/promises";
 import { createNodeDatabase } from "@proseql/node";
 import { Effect, Schema } from "effect";
 
@@ -15,8 +16,7 @@ import { Effect, Schema } from "effect";
 // 1. Schemas
 // ============================================================================
 
-const UserSchema = Schema.Struct({
-	id: Schema.String,
+const UserPayloadSchema = Schema.Struct({
 	name: Schema.String,
 	email: Schema.String,
 	age: Schema.Number,
@@ -24,8 +24,7 @@ const UserSchema = Schema.Struct({
 	updatedAt: Schema.optional(Schema.String),
 });
 
-const PostSchema = Schema.Struct({
-	id: Schema.String,
+const PostPayloadSchema = Schema.Struct({
 	title: Schema.String,
 	content: Schema.String,
 	authorId: Schema.String,
@@ -35,41 +34,60 @@ const PostSchema = Schema.Struct({
 });
 
 // ============================================================================
-// 2. Config — the `file` field enables persistence for that collection
+// 2. Config — collections define behavior, sources define persistence
 // ============================================================================
 
 const config = {
-	users: {
-		schema: UserSchema,
-		file: "./data/users.json",
-		relationships: {
-			posts: {
-				type: "inverse" as const,
-				target: "posts" as const,
-				foreignKey: "authorId",
+	collections: {
+		users: {
+			schema: UserPayloadSchema,
+			id: { kind: "derivedFromKey", field: "id" },
+			relationships: {
+				posts: {
+					type: "inverse" as const,
+					target: "posts" as const,
+					foreignKey: "authorId",
+				},
+			},
+		},
+		posts: {
+			schema: PostPayloadSchema,
+			id: { kind: "derivedFromKey", field: "id" },
+			relationships: {
+				author: {
+					type: "ref" as const,
+					target: "users" as const,
+					foreignKey: "authorId",
+				},
 			},
 		},
 	},
-	posts: {
-		schema: PostSchema,
-		file: "./data/posts.json",
-		relationships: {
-			author: {
-				type: "ref" as const,
-				target: "users" as const,
-				foreignKey: "authorId",
-			},
+	sources: [
+		{
+			id: "content",
+			kind: "documents",
+			root: "./data/document-source",
+			include: "**/*.yaml",
+			format: "yaml",
+			collections: "all",
+			outbox: "generated.yaml",
 		},
-	},
+	],
 } as const;
 
 // ============================================================================
 // 3. Approach A: createNodeDatabase() — the simplest path
 // ============================================================================
-// Codecs are inferred from file extensions. No manual layer wiring needed.
+// Codecs are inferred from source formats. No manual layer wiring needed.
 // The returned Effect only requires Scope.
 
 const program = Effect.gen(function* () {
+	// Required source roots must exist before load. The outbox file itself is
+	// created on first write if it does not exist yet.
+	yield* Effect.promise(() =>
+		mkdir("./data/document-source", { recursive: true }),
+	);
+
 	const db = yield* createNodeDatabase(
 		config,
 		{
@@ -81,7 +99,7 @@ const program = Effect.gen(function* () {
 		},
 	);
 
-	// --- Create some data (automatically persisted to ./data/users.json) ---
+	// --- Create some data (persisted to the document source outbox) ---
 	const alice = yield* db.users.create({
 		name: "Alice Johnson",
 		email: "alice@example.com",
@@ -96,7 +114,7 @@ const program = Effect.gen(function* () {
 	});
 	console.log("Created user:", bob.name, bob.id);
 
-	// --- Create posts (automatically persisted to ./data/posts.json) ---
+	// --- Create posts (same source outbox, different collection section) ---
 	const post = yield* db.posts.create({
 		title: "Getting Started with Effect",
 		content: "Effect is a powerful library for TypeScript...",
@@ -112,18 +130,16 @@ const program = Effect.gen(function* () {
 		tags: ["database", "design"],
 	});
 
-	// --- Update (triggers debounced save) ---
+	// --- Update (triggers debounced source save) ---
 	yield* db.users.update(alice.id, { age: 29 });
 	console.log("Updated Alice's age to 29");
 
-	// --- Query with population ---
-	const postsWithAuthors = yield* Effect.promise(
-		() => db.posts.query({ populate: { author: true } }).runPromise,
-	);
+	// --- Query persisted collections through the normal API ---
+	const posts = yield* Effect.promise(() => db.posts.query().runPromise);
 
-	console.log("\nAll posts with authors:");
-	for (const p of postsWithAuthors) {
-		console.log(`  "${p.title}" by ${p.author?.name ?? "unknown"}`);
+	console.log("\nAll posts:");
+	for (const p of posts) {
+		console.log(`  "${p.title}" by user ${p.authorId}`);
 	}
 
 	// --- Flush: force all pending writes to disk immediately ---
@@ -132,8 +148,7 @@ const program = Effect.gen(function* () {
 	console.log(`Pending count after flush: ${db.pendingCount()}`);
 
 	console.log("\nData persisted to:");
-	console.log("  ./data/users.json");
-	console.log("  ./data/posts.json");
+	console.log("  ./data/document-source/generated.yaml");
 });
 
 // ============================================================================
@@ -167,11 +182,11 @@ Effect.runPromise(Effect.scoped(program)).catch(console.error);
 // When you need custom codec options, plugin codecs, etc.
 //
 // import { Layer } from "effect"
-// import { NodeStorageLayer, makeSerializerLayer, jsonCodec } from "@proseql/node"
+// import { NodeStorageLayer, makeSerializerLayer, yamlCodec } from "@proseql/node"
 //
 // const ManualLayer = Layer.merge(
 //   NodeStorageLayer,
-//   makeSerializerLayer([jsonCodec()]),
+//   makeSerializerLayer([yamlCodec()]),
 // )
 //
 // Effect.runPromise(
