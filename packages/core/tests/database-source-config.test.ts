@@ -5,6 +5,7 @@ import {
 	createEffectDatabase,
 	createPersistentEffectDatabase,
 } from "../src/factories/database-effect.js";
+import type { Migration } from "../src/migrations/migration-types.js";
 import { yamlCodec } from "../src/serializers/codecs/yaml.js";
 import { makeSerializerLayer } from "../src/serializers/format-codec.js";
 import { makeInMemoryStorageLayer } from "../src/storage/in-memory-adapter-layer.js";
@@ -26,6 +27,31 @@ const GamePayloadSchema = Schema.Struct({
 const SystemPayloadSchema = Schema.Struct({
 	name: Schema.String,
 });
+
+const VersionedGamePayloadSchema = Schema.Struct({
+	name: Schema.String,
+	systemId: Schema.String,
+});
+
+const migrateGameTitleToName: Migration = {
+	from: 0,
+	to: 1,
+	transform: (data) => {
+		const migrated: Record<string, unknown> = {};
+		for (const [id, value] of Object.entries(data)) {
+			if (typeof value !== "object" || value === null || Array.isArray(value)) {
+				migrated[id] = value;
+				continue;
+			}
+			const record = value as Record<string, unknown>;
+			migrated[id] = {
+				name: record.title,
+				systemId: record.systemId,
+			};
+		}
+		return migrated;
+	},
+};
 
 const sourceConfig = {
 	collections: {
@@ -212,6 +238,102 @@ describe("source-oriented database config", () => {
 					expect(store.has("/config/base.yaml")).toBe(true);
 					expect(store.get("/config/base.yaml")).not.toContain("smw:");
 					expect(store.get("/config/base.yaml")).toContain("systems:");
+				}),
+			),
+		);
+	});
+
+	it("preserves unknown top-level sections when configured", async () => {
+		const store = new Map<string, string>([
+			[
+				"/config/base.yaml",
+				`games:\n  smw:\n    name: Super Mario World\n    systemId: snes\nnotes:\n  owner: ops\n`,
+			],
+		]);
+		const config = {
+			...sourceConfig,
+			sources: [
+				{
+					...sourceConfig.sources[0],
+					unknownCollections: "preserve",
+				},
+			],
+		} as const;
+
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const db = yield* Effect.provide(
+						createPersistentEffectDatabase(config, undefined, {
+							writeDebounce: 60_000,
+						}),
+						makeYamlLayer(store),
+					);
+
+					yield* db.games.update("smw", { name: "SMW" });
+					yield* Effect.promise(() => db.flush());
+
+					const content = store.get("/config/base.yaml");
+					expect(content).toContain("name: SMW");
+					expect(content).toContain("notes:");
+					expect(content).toContain("owner: ops");
+				}),
+			),
+		);
+	});
+
+	it("stamps migrated versioned document-source sections before saving", async () => {
+		const store = new Map<string, string>([
+			[
+				"/config/base.yaml",
+				`games:\n  _version: 0\n  smw:\n    title: Super Mario World\n    systemId: snes\n`,
+			],
+		]);
+		const config = {
+			collections: {
+				games: {
+					schema: VersionedGamePayloadSchema,
+					id: { kind: "derivedFromKey", field: "id" },
+					version: 1,
+					migrations: [migrateGameTitleToName],
+					relationships: {},
+				},
+			},
+			sources: [
+				{
+					id: "library",
+					kind: "documents",
+					root: "/config",
+					include: "**/*.yaml",
+					format: "yaml",
+					collections: "all",
+					outbox: "/config/generated.yaml",
+				},
+			],
+		} as const;
+
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const db = yield* Effect.provide(
+						createPersistentEffectDatabase(config, undefined, {
+							writeDebounce: 60_000,
+						}),
+						makeYamlLayer(store),
+					);
+
+					expect(yield* db.games.findById("smw")).toEqual({
+						id: "smw",
+						name: "Super Mario World",
+						systemId: "snes",
+					});
+					yield* db.games.update("smw", { name: "SMW" });
+					yield* Effect.promise(() => db.flush());
+
+					const content = store.get("/config/base.yaml");
+					expect(content).toContain("_version: 1");
+					expect(content).toContain("name: SMW");
+					expect(content).not.toContain("title:");
 				}),
 			),
 		);

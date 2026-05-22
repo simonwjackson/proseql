@@ -261,23 +261,65 @@ const makeWatchDir =
 			readonly type: "add" | "change" | "remove";
 		}) => void,
 	): Effect.Effect<() => void, StorageError> =>
-		Effect.try({
-			try: () => {
-				const watcher = fsWatch(
-					dirPath,
-					{ persistent: false },
-					(eventType, filename) => {
-						// Map fs.watch events to our event types
-						// "rename" can mean add or remove — callers must reconcile
-						const type = eventType === "rename" ? "add" : "change";
-						onChange({
-							filename: typeof filename === "string" ? filename : null,
-							type,
-						});
-					},
-				);
+		Effect.tryPromise({
+			try: async () => {
+				const watchers = new Map<string, ReturnType<typeof fsWatch>>();
+				const watchDirectory = async (watchedDir: string): Promise<void> => {
+					if (watchers.has(watchedDir)) return;
+					let entries: ReadonlyArray<{
+						readonly name: string;
+						readonly isDirectory: () => boolean;
+					}>;
+					try {
+						entries = await fs.readdir(watchedDir, { withFileTypes: true });
+					} catch (err: unknown) {
+						if (
+							err instanceof Error &&
+							"code" in err &&
+							err.code === "ENOENT"
+						) {
+							return;
+						}
+						throw err;
+					}
+
+					const watcher = fsWatch(
+						watchedDir,
+						{ persistent: false },
+						(eventType, filename) => {
+							const type = eventType === "rename" ? "add" : "change";
+							const childPath =
+								typeof filename === "string"
+									? join(watchedDir, filename)
+									: null;
+							onChange({ filename: childPath, type });
+							if (childPath !== null) {
+								void fs
+									.stat(childPath)
+									.then((stat) => {
+										if (stat.isDirectory()) {
+											return watchDirectory(childPath);
+										}
+									})
+									.catch(() => undefined);
+							}
+						},
+					);
+					watchers.set(watchedDir, watcher);
+
+					for (const entry of entries) {
+						if (entry.isDirectory()) {
+							await watchDirectory(join(watchedDir, entry.name));
+						}
+					}
+				};
+
+				await watchDirectory(dirPath);
 				return () => {
-					watcher.close();
+					for (const watcher of watchers.values()) {
+						watcher.close();
+					}
+					watchers.clear();
 				};
 			},
 			catch: (error) => toStorageError(dirPath, "watch", error),

@@ -224,6 +224,47 @@ describe("createNodeDatabase", () => {
 		}
 	});
 
+	it("reloads document sources when nested real YAML files change", async () => {
+		const tempDir = makeTempDir();
+		const nestedDir = join(tempDir, "nested");
+		await fs.mkdir(nestedDir, { recursive: true });
+		const nestedPath = join(nestedDir, "more.yaml");
+		await fs.writeFile(
+			nestedPath,
+			`games:\n  sonic:\n    name: Sonic the Hedgehog\n    systemId: genesis\n`,
+		);
+
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* createNodeDatabase(
+							makeDocumentSourceConfig(tempDir),
+							undefined,
+							{ writeDebounce: 60_000 },
+						);
+
+						yield* Effect.promise(() =>
+							fs.writeFile(
+								nestedPath,
+								`games:\n  sonic:\n    name: Sonic Reloaded\n    systemId: genesis\n`,
+							),
+						);
+						yield* Effect.sleep("250 millis");
+
+						expect(yield* db.games.findById("sonic")).toEqual({
+							id: "sonic",
+							name: "Sonic Reloaded",
+							systemId: "genesis",
+						});
+					}),
+				),
+			);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("writes created document-source records to a real outbox file", async () => {
 		const tempDir = makeTempDir();
 		await fs.mkdir(tempDir, { recursive: true });

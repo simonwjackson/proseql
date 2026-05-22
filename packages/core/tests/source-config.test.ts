@@ -139,4 +139,23 @@ describe("source config normalization", () => {
 			"both document sources",
 		);
 	});
+
+	it("fails unsupported non-document source kinds instead of accepting ignored persistence", () => {
+		const config = {
+			...makeConfig(),
+			sources: [
+				{
+					id: "legacy-file",
+					kind: "file",
+					collection: "games",
+					file: "/config/games.yaml",
+				},
+			],
+		} as const;
+
+		expect(() => normalizeSourceConfig(config)).toThrow(SourceConfigError);
+		expect(() => normalizeSourceConfig(config)).toThrow(
+			"unsupported source kind",
+		);
+	});
 });

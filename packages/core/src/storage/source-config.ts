@@ -179,7 +179,11 @@ export const normalizeSourceConfig = (
 					collection,
 				});
 			}
-			continue;
+			throw new SourceConfigError({
+				message: `Source '${source.id}' uses unsupported source kind '${source.kind}'; only 'documents' sources are supported in source-oriented configs`,
+				sourceId: source.id,
+				collection,
+			});
 		}
 
 		const selectedCollections =

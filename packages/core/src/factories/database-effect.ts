@@ -512,13 +512,26 @@ const createPersistenceTrigger = (
 	makeSaveEffect: (key: string) => Effect.Effect<void, unknown>,
 ): PersistenceTrigger => {
 	const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	const inFlightSaves = new Map<string, Promise<void>>();
 
-	const executeSave = (key: string, swallowErrors: boolean): Promise<void> =>
-		Effect.runPromise(
-			swallowErrors
-				? makeSaveEffect(key).pipe(Effect.catch(() => Effect.void))
-				: makeSaveEffect(key),
-		);
+	const executeSave = (key: string, swallowErrors: boolean): Promise<void> => {
+		const previous = inFlightSaves.get(key) ?? Promise.resolve();
+		const run = async (): Promise<void> => {
+			await previous.catch(() => undefined);
+			await Effect.runPromise(
+				swallowErrors
+					? makeSaveEffect(key).pipe(Effect.catch(() => Effect.void))
+					: makeSaveEffect(key),
+			);
+		};
+		const promise = run().finally(() => {
+			if (inFlightSaves.get(key) === promise) {
+				inFlightSaves.delete(key);
+			}
+		});
+		inFlightSaves.set(key, promise);
+		return promise;
+	};
 
 	const schedule = (key: string): void => {
 		// Cancel existing timer for this key
@@ -529,7 +542,7 @@ const createPersistenceTrigger = (
 		// Schedule new debounced write
 		const timer = setTimeout(() => {
 			pendingTimers.delete(key);
-			executeSave(key, true);
+			void executeSave(key, true);
 		}, delayMs);
 		pendingTimers.set(key, timer);
 	};
@@ -541,8 +554,11 @@ const createPersistenceTrigger = (
 			clearTimeout(timer);
 		}
 		pendingTimers.clear();
-		// Execute all saves
-		await Promise.all(keys.map((key) => executeSave(key, false)));
+		// Execute all pending saves and wait for any timer-started writes already in flight.
+		await Promise.all([
+			...Array.from(inFlightSaves.values()),
+			...keys.map((key) => executeSave(key, false)),
+		]);
 	};
 
 	const pendingCount = (): number => pendingTimers.size;
@@ -2373,8 +2389,15 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 					);
 					if (source === undefined) return;
 
+					yield* Effect.promise(() => trigger.flush());
+
 					const loaded = yield* loadDocumentSources(normalizedSourceConfig);
-					for (const collectionName of normalizedSourceConfig.collections) {
+					const sourceBackedCollections = new Set(
+						normalizedSourceConfig.sources.flatMap(
+							(candidate) => candidate.collections,
+						),
+					);
+					for (const collectionName of sourceBackedCollections) {
 						const newData =
 							loaded.collections[collectionName] ?? new Map<string, HasId>();
 						yield* Ref.set(typedRefs[collectionName], newData);

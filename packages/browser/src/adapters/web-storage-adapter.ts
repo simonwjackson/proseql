@@ -153,7 +153,14 @@ const makeExists =
 	(storage: Storage, config: ResolvedWebStorageConfig) =>
 	(path: string): Effect.Effect<boolean, StorageError> => {
 		const key = pathToKey(path, config.keyPrefix);
-		return Effect.sync(() => storage.getItem(key) !== null);
+		const directoryPrefix = `${key}/`;
+		return Effect.sync(() => {
+			if (storage.getItem(key) !== null) return true;
+			for (let i = 0; i < storage.length; i++) {
+				if (storage.key(i)?.startsWith(directoryPrefix)) return true;
+			}
+			return false;
+		});
 	};
 
 const makeRemove =

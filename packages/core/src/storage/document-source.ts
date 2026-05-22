@@ -191,7 +191,7 @@ export const saveDocumentSource = (
 		for (const document of sourceDocuments) {
 			projectedByPath.set(
 				document.path,
-				cloneDocumentForSource(source, document),
+				cloneDocumentForSource(source, document, collectionConfigs),
 			);
 		}
 		const newOrigins = new Map(input.origins);
@@ -227,6 +227,7 @@ export const saveDocumentSource = (
 				const path = existingOrigin?.path ?? source.outbox;
 				const targetDocument = getOrCreateDocument(projectedByPath, path);
 				const section = getOrCreateSection(targetDocument, collectionName);
+				stampSectionVersion(section, collectionConfig);
 				const encoded = yield* encodeDocumentSourceEntity(
 					source,
 					path,
@@ -279,13 +280,19 @@ export const saveDocumentSource = (
 const cloneDocumentForSource = (
 	source: NormalizedDocumentSourceConfig,
 	document: LoadedDocument,
+	collectionConfigs: ReadonlyMap<string, CollectionLoadConfig>,
 ): Record<string, unknown> => {
 	const cloned: Record<string, unknown> = { ...document.data };
 	for (const collectionName of source.collections) {
 		const section = cloned[collectionName];
 		if (!isRecord(section)) continue;
 		const nextSection: Record<string, unknown> = {};
-		if (section._version !== undefined) {
+		const collectionConfig = collectionConfigs.get(collectionName);
+		stampSectionVersion(nextSection, collectionConfig);
+		if (
+			collectionConfig?.version === undefined &&
+			section._version !== undefined
+		) {
 			nextSection._version = section._version;
 		}
 		cloned[collectionName] = nextSection;
@@ -313,6 +320,15 @@ const getOrCreateSection = (
 	const created: Record<string, unknown> = {};
 	document[collectionName] = created;
 	return created;
+};
+
+const stampSectionVersion = (
+	section: Record<string, unknown>,
+	collectionConfig: CollectionLoadConfig | undefined,
+): void => {
+	if (collectionConfig?.version !== undefined) {
+		section._version = collectionConfig.version;
+	}
 };
 
 const encodeDocumentSourceEntity = (
@@ -634,5 +650,15 @@ const loadCollectionSection = (
 			}
 			target.set(hydrated.id, hydrated);
 			setOrigin(origins, origin);
+		}
+
+		if (collectionConfig.version !== undefined) {
+			for (const key of Object.keys(section)) {
+				delete section[key];
+			}
+			section._version = collectionConfig.version;
+			for (const [id, value] of Object.entries(dataToLoad)) {
+				section[id] = value;
+			}
 		}
 	});
