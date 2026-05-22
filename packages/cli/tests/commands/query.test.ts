@@ -34,6 +34,14 @@ const BookSchema = Schema.Struct({
 	inStock: Schema.Boolean,
 });
 
+const BookPayloadSchema = Schema.Struct({
+	title: Schema.String,
+	author: Schema.String,
+	year: Schema.Number,
+	genre: Schema.String,
+	inStock: Schema.Boolean,
+});
+
 // Sample test data - keyed by entity ID as proseql expects
 const sampleBooks: Record<
 	string,
@@ -680,6 +688,49 @@ describe("Query Command", () => {
 			expect(result.success).toBe(true);
 			expect(result.data).toBeDefined();
 			expect(result.count).toBe(5);
+		});
+	});
+
+	describe("document sources", () => {
+		it("should query records merged from multiple YAML source files", async () => {
+			fs.writeFileSync(
+				path.join(tempRoot, "data", "source-a.yaml"),
+				"books:\n  dune:\n    title: Dune\n    author: Frank Herbert\n    year: 1965\n    genre: sci-fi\n    inStock: true\n",
+			);
+			fs.writeFileSync(
+				path.join(tempRoot, "data", "source-b.yaml"),
+				"books:\n  neuromancer:\n    title: Neuromancer\n    author: William Gibson\n    year: 1984\n    genre: sci-fi\n    inStock: true\n",
+			);
+
+			const result = await executeQuery({
+				config: {
+					collections: {
+						books: {
+							schema: BookPayloadSchema,
+							id: { kind: "derivedFromKey", field: "id" },
+							relationships: {},
+						},
+					},
+					sources: [
+						{
+							id: "library",
+							kind: "documents",
+							root: "./data",
+							include: "**/*.yaml",
+							format: "yaml",
+							collections: "all",
+							outbox: "generated.yaml",
+						},
+					],
+				} as const satisfies DatabaseConfig,
+			});
+
+			expect(result.success).toBe(true);
+			expect(result.count).toBe(2);
+			expect(result.data?.map((book) => book.id).sort()).toEqual([
+				"dune",
+				"neuromancer",
+			]);
 		});
 	});
 });

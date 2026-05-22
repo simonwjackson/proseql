@@ -6,7 +6,6 @@
  */
 
 import * as fs from "node:fs";
-import * as path from "node:path";
 import {
 	AllTextFormatsLayer,
 	createPersistentEffectDatabase,
@@ -14,6 +13,11 @@ import {
 	NodeStorageLayer,
 } from "@proseql/node";
 import { Effect, Layer, Stream } from "effect";
+import {
+	getCollectionPersistenceInfo,
+	listCollectionNames,
+	resolveConfigPaths,
+} from "../config/paths.js";
 
 /**
  * Options for the stats command.
@@ -47,64 +51,6 @@ export interface StatsResult {
 }
 
 /**
- * Resolve relative file paths in the config to absolute paths
- * based on the config file's directory.
- */
-function resolveConfigPaths(
-	config: DatabaseConfig,
-	configPath: string,
-): DatabaseConfig {
-	const configDir = path.dirname(configPath);
-	const resolved: Record<string, (typeof config)[string]> = {};
-
-	for (const [collectionName, collectionConfig] of Object.entries(config)) {
-		if (collectionConfig.file && !path.isAbsolute(collectionConfig.file)) {
-			resolved[collectionName] = {
-				...collectionConfig,
-				file: path.resolve(configDir, collectionConfig.file),
-			};
-		} else {
-			resolved[collectionName] = collectionConfig;
-		}
-	}
-
-	return resolved as DatabaseConfig;
-}
-
-/**
- * Determine the serialization format from a file path.
- * Returns the format based on the file extension.
- */
-function getFormatFromFile(filePath: string | undefined): string {
-	if (!filePath) {
-		return "(in-memory)";
-	}
-
-	const ext = path.extname(filePath).toLowerCase();
-	switch (ext) {
-		case ".json":
-			return "json";
-		case ".jsonl":
-			return "jsonl";
-		case ".yaml":
-		case ".yml":
-			return "yaml";
-		case ".toml":
-			return "toml";
-		case ".json5":
-			return "json5";
-		case ".jsonc":
-			return "jsonc";
-		case ".hjson":
-			return "hjson";
-		case ".toon":
-			return "toon";
-		default:
-			return ext ? ext.slice(1) : "unknown";
-	}
-}
-
-/**
  * Get the file size on disk.
  * Returns the size in bytes, or 0 if the file doesn't exist or path is undefined.
  */
@@ -123,30 +69,6 @@ function getFileSize(filePath: string | undefined): number {
 }
 
 /**
- * Format bytes into a human-readable string.
- */
-function formatBytes(bytes: number): string {
-	if (bytes === 0) {
-		return "(in-memory)";
-	}
-
-	const units = ["B", "KB", "MB", "GB"];
-	let unitIndex = 0;
-	let size = bytes;
-
-	while (size >= 1024 && unitIndex < units.length - 1) {
-		size /= 1024;
-		unitIndex++;
-	}
-
-	// Use fixed precision for KB and above, no decimals for bytes
-	if (unitIndex === 0) {
-		return `${size} ${units[unitIndex]}`;
-	}
-	return `${size.toFixed(2)} ${units[unitIndex]}`;
-}
-
-/**
  * Execute the stats command.
  *
  * Boots the database from the config, and reports statistics for all collections
@@ -159,7 +81,7 @@ export function runStats(options: StatsOptions): Effect.Effect<StatsResult> {
 	return Effect.gen(function* () {
 		const { config, configPath } = options;
 
-		const collectionNames = Object.keys(config);
+		const collectionNames = listCollectionNames(config);
 
 		if (collectionNames.length === 0) {
 			return {
@@ -182,9 +104,6 @@ export function runStats(options: StatsOptions): Effect.Effect<StatsResult> {
 			const results: CollectionStats[] = [];
 
 			for (const name of collectionNames) {
-				const collectionConfig = resolvedConfig[name];
-				const filePath = collectionConfig?.file;
-
 				// Get the collection (type assertion needed since we verify existence via config)
 				const coll = db[name as keyof typeof db] as {
 					readonly query: (
@@ -197,26 +116,20 @@ export function runStats(options: StatsOptions): Effect.Effect<StatsResult> {
 				const records = yield* Stream.runCollect(stream);
 				const count = records.length;
 
-				// Get format from file extension
-				const format = getFormatFromFile(filePath);
-
-				// Get file size on disk
-				const sizeBytes = getFileSize(filePath);
-				const size = formatBytes(sizeBytes);
-
-				// Get relative file path for display (relative to config dir)
-				const configDir = path.dirname(configPath);
-				const displayPath = filePath
-					? path.relative(configDir, filePath) || filePath
-					: "(in-memory)";
+				const persistence = getCollectionPersistenceInfo(
+					resolvedConfig,
+					name,
+					configPath,
+					getFileSize,
+				);
 
 				results.push({
 					name,
 					count,
-					file: displayPath,
-					format,
-					size,
-					sizeBytes,
+					file: persistence.file,
+					format: persistence.format,
+					size: persistence.sizeLabel,
+					sizeBytes: persistence.sizeBytes,
 				});
 			}
 

@@ -5,14 +5,18 @@
  * calls update on the collection, and prints the updated entity.
  */
 
-import * as path from "node:path";
 import {
 	AllTextFormatsLayer,
 	createPersistentEffectDatabase,
 	type DatabaseConfig,
 	NodeStorageLayer,
 } from "@proseql/node";
-import { Effect, Layer } from "effect";
+import { Cause, Effect, Layer } from "effect";
+import {
+	getCliCollectionConfig,
+	listCollectionNames,
+	resolveConfigPaths,
+} from "../config/paths.js";
 import { parseSets, type SetParseError } from "../parsers/set-parser.js";
 
 /**
@@ -40,29 +44,17 @@ export interface UpdateResult {
 	readonly data?: Record<string, unknown>;
 }
 
-/**
- * Resolve relative file paths in the config to absolute paths
- * based on the config file's directory.
- */
-function resolveConfigPaths(
-	config: DatabaseConfig,
-	configPath: string,
-): DatabaseConfig {
-	const configDir = path.dirname(configPath);
-	const resolved: Record<string, (typeof config)[string]> = {};
-
-	for (const [collectionName, collectionConfig] of Object.entries(config)) {
-		if (collectionConfig.file && !path.isAbsolute(collectionConfig.file)) {
-			resolved[collectionName] = {
-				...collectionConfig,
-				file: path.resolve(configDir, collectionConfig.file),
-			};
-		} else {
-			resolved[collectionName] = collectionConfig;
+function getErrorMessage(error: unknown): string {
+	if (error && typeof error === "object") {
+		const errorObj = error as Record<string, unknown>;
+		if ("_tag" in errorObj && typeof errorObj.message === "string") {
+			return errorObj.message;
+		}
+		if (error instanceof Error) {
+			return error.message;
 		}
 	}
-
-	return resolved as DatabaseConfig;
+	return String(error);
 }
 
 /**
@@ -81,8 +73,8 @@ export function runUpdate(
 		const { collection, id, config, configPath, set } = options;
 
 		// Check if collection exists in config
-		if (!(collection in config)) {
-			const availableCollections = Object.keys(config).join(", ");
+		if (getCliCollectionConfig(config, collection) === undefined) {
+			const availableCollections = listCollectionNames(config).join(", ");
 			return {
 				success: false,
 				message: `Collection '${collection}' not found in config. Available collections: ${availableCollections || "(none)"}`,
@@ -124,8 +116,9 @@ export function runUpdate(
 				) => Effect.Effect<Record<string, unknown>, unknown>;
 			};
 
-			// Execute the update operation
+			// Execute the update operation and force durable persistence before exit
 			const updated = yield* coll.update(id, updateData);
+			yield* Effect.promise(() => db.flush());
 
 			return updated as Record<string, unknown>;
 		});
@@ -134,22 +127,8 @@ export function runUpdate(
 		const result = yield* program.pipe(
 			Effect.provide(PersistenceLayer),
 			Effect.scoped,
-			Effect.catch((error) => {
-				// Extract error message based on error type
-				let message: string;
-				if (error && typeof error === "object") {
-					const errorObj = error as Record<string, unknown>;
-					if ("_tag" in errorObj && typeof errorObj.message === "string") {
-						// Tagged error with message field
-						message = errorObj.message;
-					} else if (error instanceof Error) {
-						message = error.message;
-					} else {
-						message = String(error);
-					}
-				} else {
-					message = String(error);
-				}
+			Effect.catchCause((cause) => {
+				const message = getErrorMessage(Cause.squash(cause));
 				return Effect.succeed({
 					success: false as const,
 					message: `Update failed: ${message}`,

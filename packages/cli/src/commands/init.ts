@@ -57,45 +57,68 @@ function generateExampleData(): readonly Record<string, unknown>[] {
 /**
  * Serialize data to JSON format.
  */
-function serializeJson(data: readonly Record<string, unknown>[]): string {
+type DocumentSourceData = Record<
+	string,
+	Record<string, Record<string, unknown>>
+>;
+
+function toDocumentSourceData(
+	data: readonly Record<string, unknown>[],
+): DocumentSourceData {
+	const notes: Record<string, Record<string, unknown>> = {};
+	for (const item of data) {
+		const id = item.id;
+		if (typeof id !== "string") continue;
+		const payload: Record<string, unknown> = {};
+		for (const [key, value] of Object.entries(item)) {
+			if (key !== "id") payload[key] = value;
+		}
+		notes[id] = payload;
+	}
+	return { notes };
+}
+
+function serializeJson(data: DocumentSourceData): string {
 	return JSON.stringify(data, null, 2);
 }
 
+const quoteString = (value: string): string =>
+	`"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+
 /**
- * Serialize data to YAML format.
- * Simple implementation without external dependencies for the CLI.
+ * Serialize document-source data to YAML format.
  */
-function serializeYaml(data: readonly Record<string, unknown>[]): string {
+function serializeYaml(data: DocumentSourceData): string {
 	const lines: string[] = [];
-	for (const item of data) {
-		lines.push("-");
-		for (const [key, value] of Object.entries(item)) {
-			const stringValue =
-				typeof value === "string"
-					? `"${value.replace(/"/g, '\\"')}"`
-					: String(value);
-			lines.push(`  ${key}: ${stringValue}`);
+	for (const [collection, records] of Object.entries(data)) {
+		lines.push(`${collection}:`);
+		for (const [id, payload] of Object.entries(records)) {
+			lines.push(`  ${id}:`);
+			for (const [key, value] of Object.entries(payload)) {
+				const stringValue =
+					typeof value === "string" ? quoteString(value) : String(value);
+				lines.push(`    ${key}: ${stringValue}`);
+			}
 		}
 	}
 	return `${lines.join("\n")}\n`;
 }
 
 /**
- * Serialize data to TOML format.
- * TOML uses [[array]] syntax for arrays of tables.
+ * Serialize document-source data to TOML format.
  */
-function serializeToml(data: readonly Record<string, unknown>[]): string {
+function serializeToml(data: DocumentSourceData): string {
 	const lines: string[] = [];
-	for (const item of data) {
-		lines.push("[[notes]]");
-		for (const [key, value] of Object.entries(item)) {
-			const stringValue =
-				typeof value === "string"
-					? `"${value.replace(/"/g, '\\"')}"`
-					: String(value);
-			lines.push(`${key} = ${stringValue}`);
+	for (const [collection, records] of Object.entries(data)) {
+		for (const [id, payload] of Object.entries(records)) {
+			lines.push(`[${collection}.${id}]`);
+			for (const [key, value] of Object.entries(payload)) {
+				const stringValue =
+					typeof value === "string" ? quoteString(value) : String(value);
+				lines.push(`${key} = ${stringValue}`);
+			}
+			lines.push("");
 		}
-		lines.push("");
 	}
 	return lines.join("\n");
 }
@@ -104,7 +127,7 @@ function serializeToml(data: readonly Record<string, unknown>[]): string {
  * Serialize example data to the specified format.
  */
 function serializeExampleData(
-	data: readonly Record<string, unknown>[],
+	data: DocumentSourceData,
 	format: DataFormat,
 ): string {
 	switch (format) {
@@ -134,7 +157,6 @@ function generateConfigContent(format: string): string {
  * Customize this schema to match your data structure.
  */
 const NoteSchema = Schema.Struct({
-  id: Schema.String,
   title: Schema.String,
   content: Schema.String,
   createdAt: Schema.String,
@@ -143,17 +165,27 @@ const NoteSchema = Schema.Struct({
 
 /**
  * ProseQL database configuration.
- * Add your collections here. Each collection needs:
- * - schema: An Effect Schema for validation
- * - file: Path to the data file (optional for in-memory only)
- * - relationships: Related collections (empty object if none)
+ * Collections define schemas and sources define persistence locations.
  */
 const config = {
-  notes: {
-    schema: NoteSchema,
-    file: "./data/notes.${extension}",
-    relationships: {},
+  collections: {
+    notes: {
+      schema: NoteSchema,
+      id: { kind: "derivedFromKey", field: "id" },
+      relationships: {},
+    },
   },
+  sources: [
+    {
+      id: "local",
+      kind: "documents",
+      root: "./data",
+      include: "**/*.${extension}",
+      format: "${extension}",
+      collections: "all",
+      outbox: "generated.${extension}",
+    },
+  ],
 } as const satisfies DatabaseConfig
 
 export default config
@@ -322,8 +354,8 @@ export function runInit(options: InitOptions = {}): InitResult {
 		}
 		createdFiles.push("data/");
 
-		// Generate and write example data file
-		const exampleData = generateExampleData();
+		// Generate and write example document-source data file
+		const exampleData = toDocumentSourceData(generateExampleData());
 		const dataContent = serializeExampleData(exampleData, format as DataFormat);
 		fs.writeFileSync(dataFilePath, dataContent, "utf-8");
 		createdFiles.push(`data/notes.${extension}`);

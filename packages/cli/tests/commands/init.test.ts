@@ -106,13 +106,13 @@ describe("Init Command", () => {
 			const content = readFile("project/data/notes.json");
 			const data = JSON.parse(content);
 
-			expect(Array.isArray(data)).toBe(true);
-			expect(data.length).toBeGreaterThan(0);
-			expect(data[0]).toHaveProperty("id");
-			expect(data[0]).toHaveProperty("title");
-			expect(data[0]).toHaveProperty("content");
-			expect(data[0]).toHaveProperty("createdAt");
-			expect(data[0]).toHaveProperty("updatedAt");
+			expect(data).toHaveProperty("notes");
+			expect(data.notes).toHaveProperty("note_001");
+			expect(data.notes.note_001).not.toHaveProperty("id");
+			expect(data.notes.note_001).toHaveProperty("title");
+			expect(data.notes.note_001).toHaveProperty("content");
+			expect(data.notes.note_001).toHaveProperty("createdAt");
+			expect(data.notes.note_001).toHaveProperty("updatedAt");
 		});
 
 		it("should create config file with correct collection reference", () => {
@@ -128,8 +128,11 @@ describe("Init Command", () => {
 			);
 			// Should contain DatabaseConfig type
 			expect(content).toContain("DatabaseConfig");
-			// Should reference the data file
-			expect(content).toContain("./data/notes.json");
+			// Should define source-oriented persistence
+			expect(content).toContain("collections:");
+			expect(content).toContain("sources:");
+			expect(content).toContain('kind: "documents"');
+			expect(content).toContain('root: "./data"');
 			// Should define NoteSchema
 			expect(content).toContain("NoteSchema");
 			// Should have notes collection
@@ -184,10 +187,11 @@ describe("Init Command", () => {
 			expect(fileExists("project/data/notes.json")).toBe(false);
 			expect(fileExists("project/data/notes.toml")).toBe(false);
 
-			// Verify it has YAML structure
+			// Verify it has document-source YAML structure
 			const content = readFile("project/data/notes.yaml");
-			expect(content).toContain("-");
-			expect(content).toContain("id:");
+			expect(content).toContain("notes:");
+			expect(content).toContain("note_001:");
+			expect(content).not.toContain("id:");
 			expect(content).toContain("title:");
 		});
 
@@ -201,10 +205,10 @@ describe("Init Command", () => {
 			expect(fileExists("project/data/notes.json")).toBe(false);
 			expect(fileExists("project/data/notes.yaml")).toBe(false);
 
-			// Verify it has TOML structure
+			// Verify it has document-source TOML structure
 			const content = readFile("project/data/notes.toml");
-			expect(content).toContain("[[notes]]");
-			expect(content).toContain("id =");
+			expect(content).toContain("[notes.note_001]");
+			expect(content).not.toContain("id =");
 			expect(content).toContain("title =");
 		});
 
@@ -214,8 +218,9 @@ describe("Init Command", () => {
 			runInit({ cwd: projectDir, format: "yaml" });
 
 			const configContent = readFile("project/proseql.config.ts");
-			expect(configContent).toContain("./data/notes.yaml");
-			expect(configContent).not.toContain("./data/notes.json");
+			expect(configContent).toContain('include: "**/*.yaml"');
+			expect(configContent).toContain('outbox: "generated.yaml"');
+			expect(configContent).not.toContain('include: "**/*.json"');
 		});
 
 		it("should update config file to reference toml format", () => {
@@ -224,8 +229,9 @@ describe("Init Command", () => {
 			runInit({ cwd: projectDir, format: "toml" });
 
 			const configContent = readFile("project/proseql.config.ts");
-			expect(configContent).toContain("./data/notes.toml");
-			expect(configContent).not.toContain("./data/notes.json");
+			expect(configContent).toContain('include: "**/*.toml"');
+			expect(configContent).toContain('outbox: "generated.toml"');
+			expect(configContent).not.toContain('include: "**/*.json"');
 		});
 
 		it("should report correct file in createdFiles with yaml format", () => {
@@ -472,8 +478,8 @@ describe("Init Command", () => {
 			const data = JSON.parse(content);
 
 			// Check that timestamps are valid ISO strings
-			expect(data[0].createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-			expect(data[0].updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+			expect(data.notes.note_001.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+			expect(data.notes.note_001.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 		});
 
 		it("should create multiple example notes", () => {
@@ -484,9 +490,9 @@ describe("Init Command", () => {
 			const content = readFile("project/data/notes.json");
 			const data = JSON.parse(content);
 
-			expect(data.length).toBe(2);
-			expect(data[0].title).toContain("ProseQL");
-			expect(data[1].title).toContain("Getting Started");
+			expect(Object.keys(data.notes)).toHaveLength(2);
+			expect(data.notes.note_001.title).toContain("ProseQL");
+			expect(data.notes.note_002.title).toContain("Getting Started");
 		});
 	});
 });

@@ -5,7 +5,6 @@
  * queries with parsed where, select, sort, and limit options.
  */
 
-import * as path from "node:path";
 import type {
 	AggregateConfig,
 	AggregateResult,
@@ -19,6 +18,11 @@ import {
 	NodeStorageLayer,
 } from "@proseql/node";
 import { Effect, Layer, Stream } from "effect";
+import {
+	getCliCollectionConfig,
+	listCollectionNames,
+	resolveConfigPaths,
+} from "../config/paths.js";
 import {
 	type FilterParseError,
 	parseFilters,
@@ -196,31 +200,6 @@ function flattenGroupResult(result: GroupResult): Record<string, unknown> {
 }
 
 /**
- * Resolve relative file paths in the config to absolute paths
- * based on the config file's directory.
- */
-function resolveConfigPaths(
-	config: DatabaseConfig,
-	configPath: string,
-): DatabaseConfig {
-	const configDir = path.dirname(configPath);
-	const resolved: Record<string, (typeof config)[string]> = {};
-
-	for (const [collectionName, collectionConfig] of Object.entries(config)) {
-		if (collectionConfig.file && !path.isAbsolute(collectionConfig.file)) {
-			resolved[collectionName] = {
-				...collectionConfig,
-				file: path.resolve(configDir, collectionConfig.file),
-			};
-		} else {
-			resolved[collectionName] = collectionConfig;
-		}
-	}
-
-	return resolved as DatabaseConfig;
-}
-
-/**
  * Execute the query command.
  *
  * Boots the database from the config, resolves the collection by name,
@@ -237,8 +216,8 @@ export function runQuery(
 			options;
 
 		// Check if collection exists in config
-		if (!(collection in config)) {
-			const availableCollections = Object.keys(config).join(", ");
+		if (getCliCollectionConfig(config, collection) === undefined) {
+			const availableCollections = listCollectionNames(config).join(", ");
 			return {
 				success: false,
 				message: `Collection '${collection}' not found in config. Available collections: ${availableCollections || "(none)"}`,

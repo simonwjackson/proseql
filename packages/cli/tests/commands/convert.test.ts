@@ -31,6 +31,12 @@ const BookSchema = Schema.Struct({
 	year: Schema.Number,
 });
 
+const BookPayloadSchema = Schema.Struct({
+	title: Schema.String,
+	author: Schema.String,
+	year: Schema.Number,
+});
+
 // Sample test data - keyed by entity ID as proseql expects
 const sampleBooks: Record<
 	string,
@@ -691,6 +697,36 @@ describe("Convert Command", () => {
 			expect(result.success).toBe(false);
 			expect(result.message).toBeDefined();
 			expect(result.message?.length).toBeGreaterThan(0);
+		});
+	});
+	describe("document sources", () => {
+		it("should clearly reject document-source-backed collections", async () => {
+			const result = await executeConvert({
+				config: {
+					collections: {
+						books: {
+							schema: BookPayloadSchema,
+							id: { kind: "derivedFromKey", field: "id" },
+							relationships: {},
+						},
+					},
+					sources: [
+						{
+							id: "library",
+							kind: "documents",
+							root: "./data",
+							include: "**/*.yaml",
+							format: "yaml",
+							collections: "all",
+							outbox: "generated.yaml",
+						},
+					],
+				} as const satisfies DatabaseConfig,
+			});
+
+			expect(result.success).toBe(false);
+			expect(result.message).toContain("does not support document sources");
+			expect(result.message).toContain("library");
 		});
 	});
 });

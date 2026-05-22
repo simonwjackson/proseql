@@ -41,6 +41,14 @@ const BookSchema = Schema.Struct({
 	inStock: Schema.Boolean,
 });
 
+const BookPayloadSchema = Schema.Struct({
+	title: Schema.String,
+	author: Schema.String,
+	year: Schema.Number,
+	genre: Schema.String,
+	inStock: Schema.Boolean,
+});
+
 // Sample test data - keyed by entity ID as proseql expects
 const sampleBooks: Record<
 	string,
@@ -710,6 +718,125 @@ describe("CRUD Commands", () => {
 
 				expect(result.success).toBe(true);
 			});
+		});
+	});
+	describe("Document Source CRUD", () => {
+		function createDocumentSourceConfig(): DatabaseConfig {
+			return {
+				collections: {
+					books: {
+						schema: BookPayloadSchema,
+						id: { kind: "derivedFromKey", field: "id" },
+						relationships: {},
+					},
+				},
+				sources: [
+					{
+						id: "library",
+						kind: "documents",
+						root: "./data",
+						include: "**/*.yaml",
+						format: "yaml",
+						collections: "all",
+						outbox: "generated.yaml",
+					},
+				],
+			} as const satisfies DatabaseConfig;
+		}
+
+		function writeDocumentSource(): string {
+			const sourcePath = path.join(tempRoot, "data", "library.yaml");
+			fs.writeFileSync(
+				sourcePath,
+				"books:\n  dune:\n    title: Dune\n    author: Frank Herbert\n    year: 1965\n    genre: sci-fi\n    inStock: true\n",
+			);
+			return sourcePath;
+		}
+
+		it("should create into the configured document source outbox", async () => {
+			writeDocumentSource();
+
+			const result = await executeCreate({
+				config: createDocumentSourceConfig(),
+				data: JSON.stringify({
+					id: "foundation",
+					title: "Foundation",
+					author: "Isaac Asimov",
+					year: 1951,
+					genre: "sci-fi",
+					inStock: true,
+				}),
+			});
+
+			expect(result.success).toBe(true);
+			const outbox = fs.readFileSync(
+				path.join(tempRoot, "data", "generated.yaml"),
+				"utf-8",
+			);
+			expect(outbox).toContain("foundation:");
+			expect(outbox).toContain("title: Foundation");
+			expect(outbox).not.toContain("id: foundation");
+		});
+
+		it("should update and delete records in their origin file", async () => {
+			const sourcePath = writeDocumentSource();
+
+			const updateResult = await executeUpdate({
+				config: createDocumentSourceConfig(),
+				id: "dune",
+				set: "year=1966",
+			});
+
+			expect(updateResult.success).toBe(true);
+			expect(fs.readFileSync(sourcePath, "utf-8")).toContain("year: 1966");
+
+			const deleteResult = await executeDelete({
+				config: createDocumentSourceConfig(),
+				id: "dune",
+				force: true,
+			});
+
+			expect(deleteResult.success).toBe(true);
+			expect(fs.readFileSync(sourcePath, "utf-8")).not.toContain("dune:");
+		});
+
+		it("should fail create when flush cannot persist the outbox", async () => {
+			writeDocumentSource();
+			fs.writeFileSync(path.join(tempRoot, "data", "blocked"), "not a dir");
+
+			const result = await executeCreate({
+				config: {
+					collections: {
+						books: {
+							schema: BookPayloadSchema,
+							id: { kind: "derivedFromKey", field: "id" },
+							relationships: {},
+						},
+					},
+					sources: [
+						{
+							id: "library",
+							kind: "documents",
+							root: "./data",
+							include: ["library.yaml", "blocked/generated.yaml"],
+							format: "yaml",
+							collections: "all",
+							outbox: "blocked/generated.yaml",
+						},
+					],
+				} as const satisfies DatabaseConfig,
+				data: JSON.stringify({
+					id: "foundation",
+					title: "Foundation",
+					author: "Isaac Asimov",
+					year: 1951,
+					genre: "sci-fi",
+					inStock: true,
+				}),
+			});
+
+			expect(result.success).toBe(false);
+			expect(result.message).toContain("Create failed");
 		});
 	});
 });

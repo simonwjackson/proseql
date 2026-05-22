@@ -8,6 +8,10 @@
 
 import type { CollectionConfig, DatabaseConfig } from "@proseql/core";
 import { Effect, type Schema } from "effect";
+import {
+	getCliCollectionConfig,
+	listCollectionNames,
+} from "../config/paths.js";
 
 /**
  * Options for the describe command.
@@ -274,9 +278,9 @@ export function runDescribe(
 		const { config, collection } = options;
 
 		// Check if the collection exists
-		const collectionConfig = config[collection];
+		const collectionConfig = getCliCollectionConfig(config, collection);
 		if (!collectionConfig) {
-			const availableCollections = Object.keys(config);
+			const availableCollections = listCollectionNames(config);
 			return {
 				success: false,
 				message: `Collection "${collection}" not found. Available collections: ${availableCollections.join(", ") || "(none)"}`,

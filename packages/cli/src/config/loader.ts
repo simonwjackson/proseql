@@ -2,6 +2,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DatabaseConfig } from "@proseql/core";
+import {
+	getCollectionConfigs,
+	isSourceOrientedDatabaseConfig,
+	normalizeSourceConfig,
+} from "@proseql/core";
 import { Data, Effect } from "effect";
 
 /**
@@ -166,11 +171,43 @@ function validateConfigStructure(
 		}
 
 		const configObj = config as Record<string, unknown>;
+		const databaseConfig = configObj as DatabaseConfig;
+		let collectionEntries: ReadonlyArray<readonly [string, unknown]>;
+
+		if (isSourceOrientedDatabaseConfig(databaseConfig)) {
+			if (
+				configObj.sources !== undefined &&
+				!Array.isArray(configObj.sources)
+			) {
+				return yield* Effect.fail(
+					new ConfigValidationError({
+						configPath,
+						reason: "Field 'sources' must be an array",
+						message: `Invalid config in ${configPath}: Field 'sources' must be an array`,
+					}),
+				);
+			}
+
+			try {
+				normalizeSourceConfig(databaseConfig);
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : String(error);
+				return yield* Effect.fail(
+					new ConfigValidationError({
+						configPath,
+						reason,
+						message: `Invalid source config in ${configPath}: ${reason}`,
+					}),
+				);
+			}
+
+			collectionEntries = Object.entries(getCollectionConfigs(databaseConfig));
+		} else {
+			collectionEntries = Object.entries(configObj);
+		}
 
 		// Check each collection
-		for (const [collectionName, collectionConfig] of Object.entries(
-			configObj,
-		)) {
+		for (const [collectionName, collectionConfig] of collectionEntries) {
 			// Each collection config must be an object
 			if (
 				collectionConfig === null ||
@@ -227,7 +264,7 @@ function validateConfigStructure(
 		}
 
 		// Config is valid
-		return configObj as DatabaseConfig;
+		return databaseConfig;
 	});
 }
 

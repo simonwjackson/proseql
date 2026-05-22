@@ -5,7 +5,6 @@
  * file path, and serialization format.
  */
 
-import * as path from "node:path";
 import {
 	AllTextFormatsLayer,
 	createPersistentEffectDatabase,
@@ -13,6 +12,11 @@ import {
 	NodeStorageLayer,
 } from "@proseql/node";
 import { Effect, Layer, Stream } from "effect";
+import {
+	getCollectionPersistenceInfo,
+	listCollectionNames,
+	resolveConfigPaths,
+} from "../config/paths.js";
 
 /**
  * Options for the collections command.
@@ -44,64 +48,6 @@ export interface CollectionsResult {
 }
 
 /**
- * Resolve relative file paths in the config to absolute paths
- * based on the config file's directory.
- */
-function resolveConfigPaths(
-	config: DatabaseConfig,
-	configPath: string,
-): DatabaseConfig {
-	const configDir = path.dirname(configPath);
-	const resolved: Record<string, (typeof config)[string]> = {};
-
-	for (const [collectionName, collectionConfig] of Object.entries(config)) {
-		if (collectionConfig.file && !path.isAbsolute(collectionConfig.file)) {
-			resolved[collectionName] = {
-				...collectionConfig,
-				file: path.resolve(configDir, collectionConfig.file),
-			};
-		} else {
-			resolved[collectionName] = collectionConfig;
-		}
-	}
-
-	return resolved as DatabaseConfig;
-}
-
-/**
- * Determine the serialization format from a file path.
- * Returns the format based on the file extension.
- */
-function getFormatFromFile(filePath: string | undefined): string {
-	if (!filePath) {
-		return "(in-memory)";
-	}
-
-	const ext = path.extname(filePath).toLowerCase();
-	switch (ext) {
-		case ".json":
-			return "json";
-		case ".jsonl":
-			return "jsonl";
-		case ".yaml":
-		case ".yml":
-			return "yaml";
-		case ".toml":
-			return "toml";
-		case ".json5":
-			return "json5";
-		case ".jsonc":
-			return "jsonc";
-		case ".hjson":
-			return "hjson";
-		case ".toon":
-			return "toon";
-		default:
-			return ext ? ext.slice(1) : "unknown";
-	}
-}
-
-/**
  * Execute the collections command.
  *
  * Boots the database from the config, and lists all collections with
@@ -116,7 +62,7 @@ export function runCollections(
 	return Effect.gen(function* () {
 		const { config, configPath } = options;
 
-		const collectionNames = Object.keys(config);
+		const collectionNames = listCollectionNames(config);
 
 		if (collectionNames.length === 0) {
 			return {
@@ -139,9 +85,6 @@ export function runCollections(
 			const results: CollectionInfo[] = [];
 
 			for (const name of collectionNames) {
-				const collectionConfig = resolvedConfig[name];
-				const filePath = collectionConfig?.file;
-
 				// Get the collection (type assertion needed since we verify existence via config)
 				const coll = db[name as keyof typeof db] as {
 					readonly query: (
@@ -154,20 +97,18 @@ export function runCollections(
 				const records = yield* Stream.runCollect(stream);
 				const count = records.length;
 
-				// Get format from file extension
-				const format = getFormatFromFile(filePath);
-
-				// Get relative file path for display (relative to config dir)
-				const configDir = path.dirname(configPath);
-				const displayPath = filePath
-					? path.relative(configDir, filePath) || filePath
-					: "(in-memory)";
+				const persistence = getCollectionPersistenceInfo(
+					resolvedConfig,
+					name,
+					configPath,
+					() => 0,
+				);
 
 				results.push({
 					name,
 					count,
-					file: displayPath,
-					format,
+					file: persistence.file,
+					format: persistence.format,
 				});
 			}
 

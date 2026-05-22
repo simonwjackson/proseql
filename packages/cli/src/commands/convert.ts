@@ -12,11 +12,13 @@ import {
 	AllTextFormatsLayer,
 	type DatabaseConfig,
 	getFileExtension,
+	isSourceOrientedDatabaseConfig,
 	NodeStorageLayer,
 	SerializerRegistryService,
 	StorageAdapterService,
 } from "@proseql/node";
 import { Effect, Layer } from "effect";
+import { getCliCollectionConfig, resolveConfigPaths } from "../config/paths.js";
 
 /**
  * Supported target formats for conversion.
@@ -79,24 +81,6 @@ export interface ConvertResult {
 		readonly newFormat: string;
 		readonly configUpdated: boolean;
 	};
-}
-
-/**
- * Resolve relative file paths in the config to absolute paths
- * based on the config file's directory.
- */
-function resolveFilePath(
-	filePath: string | undefined,
-	configPath: string,
-): string | undefined {
-	if (!filePath) {
-		return undefined;
-	}
-	if (path.isAbsolute(filePath)) {
-		return filePath;
-	}
-	const configDir = path.dirname(configPath);
-	return path.resolve(configDir, filePath);
 }
 
 /**
@@ -306,8 +290,29 @@ export function runConvert(
 	const { collection, config, configPath, targetFormat } = options;
 
 	const program = Effect.gen(function* () {
+		if (isSourceOrientedDatabaseConfig(config)) {
+			const documentSource = (config.sources ?? []).find(
+				(source) =>
+					source.kind === "documents" &&
+					((source.collections ?? "all") === "all" ||
+						(source.collections ?? []).includes(collection)),
+			);
+			if (documentSource !== undefined) {
+				return {
+					success: false,
+					message: `Convert does not support document sources yet. Collection '${collection}' is backed by document source '${documentSource.id}'.`,
+				};
+			}
+		}
+
+		const unresolvedCollectionConfig = getCliCollectionConfig(
+			config,
+			collection,
+		);
+		const resolvedConfig = resolveConfigPaths(config, configPath);
+
 		// Look up the collection in the config
-		const collectionConfig = config[collection];
+		const collectionConfig = getCliCollectionConfig(resolvedConfig, collection);
 		if (!collectionConfig) {
 			return {
 				success: false,
@@ -324,17 +329,7 @@ export function runConvert(
 			};
 		}
 
-		// Resolve the file path to absolute
-		// Note: resolveFilePath returns undefined only when filePath is undefined,
-		// but we've already checked originalFilePath is defined above
-		const resolvedFilePath = resolveFilePath(originalFilePath, configPath);
-		if (!resolvedFilePath) {
-			return {
-				success: false,
-				message: `Could not resolve file path for collection '${collection}'`,
-			};
-		}
-		const absoluteFilePath = resolvedFilePath;
+		const absoluteFilePath = originalFilePath;
 
 		// Get the current format from the file extension
 		const currentExt = getFileExtension(absoluteFilePath);
@@ -440,7 +435,7 @@ export function runConvert(
 		const configUpdated = updateConfigFile(
 			configPath,
 			collection,
-			originalFilePath,
+			unresolvedCollectionConfig?.file ?? originalFilePath,
 			configRelativeNewPath,
 		);
 

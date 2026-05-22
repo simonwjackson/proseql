@@ -48,6 +48,15 @@ const AuthorSchema = Schema.Struct({
 	nationality: Schema.optional(Schema.String),
 });
 
+const BookPayloadSchema = Schema.Struct({
+	title: Schema.String,
+	author: Schema.String,
+	year: Schema.Number,
+	genre: Schema.String,
+	inStock: Schema.Boolean,
+	tags: Schema.optional(Schema.Array(Schema.String)),
+});
+
 // Sample test data - keyed by entity ID as proseql expects
 const sampleBooks: Record<
 	string,
@@ -833,6 +842,52 @@ describe("Inspect Commands", () => {
 				(s) => s.name === "books",
 			)?.format;
 			expect(collectionsBookFormat).toBe(statsBookFormat);
+		});
+	});
+	describe("document source inspection", () => {
+		function createDocumentSourceConfig(): DatabaseConfig {
+			return {
+				collections: {
+					books: {
+						schema: BookPayloadSchema,
+						id: { kind: "derivedFromKey", field: "id" },
+						relationships: {},
+					},
+				},
+				sources: [
+					{
+						id: "library",
+						kind: "documents",
+						root: "./data",
+						include: ["library.yaml", "generated.yaml"],
+						format: "yaml",
+						collections: "all",
+						outbox: "generated.yaml",
+					},
+				],
+			} as const satisfies DatabaseConfig;
+		}
+
+		it("should describe document-source-backed collections and stats", async () => {
+			fs.writeFileSync(
+				path.join(tempRoot, "data", "library.yaml"),
+				"books:\n  dune:\n    title: Dune\n    author: Frank Herbert\n    year: 1965\n    genre: sci-fi\n    inStock: true\n",
+			);
+
+			const config = createDocumentSourceConfig();
+			const collections = await executeCollections({ config });
+			const stats = await executeStats({ config });
+
+			expect(collections.success).toBe(true);
+			expect(collections.data).toHaveLength(1);
+			expect(collections.data?.[0]?.file).toContain(
+				"document source 'library'",
+			);
+			expect(collections.data?.[0]?.format).toBe("yaml");
+			expect(collections.data?.[0]?.count).toBe(1);
+			expect(stats.success).toBe(true);
+			expect(stats.data?.[0]?.file).toContain("document source 'library'");
+			expect(stats.data?.[0]?.size).toBe("(document source)");
 		});
 	});
 });

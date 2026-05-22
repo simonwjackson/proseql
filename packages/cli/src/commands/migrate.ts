@@ -5,9 +5,9 @@
  * Supports subcommands: `migrate status`, `migrate --dry-run`, `migrate` (run).
  */
 
-import * as path from "node:path";
 import {
 	AllTextFormatsLayer,
+	type CollectionConfig,
 	type DatabaseConfig,
 	type DryRunCollectionResult,
 	type DryRunMigration,
@@ -19,6 +19,10 @@ import {
 	StorageAdapterService,
 } from "@proseql/node";
 import { Effect, Layer } from "effect";
+import {
+	getCliCollectionConfigs,
+	resolveConfigPaths,
+} from "../config/paths.js";
 import { confirm } from "../prompt.js";
 
 /**
@@ -78,31 +82,6 @@ export function detectSubcommand(
 
 	// Default to "run" - actually execute migrations
 	return "run";
-}
-
-/**
- * Resolve relative file paths in the config to absolute paths
- * based on the config file's directory.
- */
-function resolveConfigPaths(
-	config: DatabaseConfig,
-	configPath: string,
-): DatabaseConfig {
-	const configDir = path.dirname(configPath);
-	const resolved: Record<string, (typeof config)[string]> = {};
-
-	for (const [collectionName, collectionConfig] of Object.entries(config)) {
-		if (collectionConfig.file && !path.isAbsolute(collectionConfig.file)) {
-			resolved[collectionName] = {
-				...collectionConfig,
-				file: path.resolve(configDir, collectionConfig.file),
-			};
-		} else {
-			resolved[collectionName] = collectionConfig;
-		}
-	}
-
-	return resolved as DatabaseConfig;
 }
 
 /**
@@ -192,7 +171,7 @@ function determineStatus(
  * @returns Array of migrations to apply
  */
 function getMigrationsToApply(
-	collectionConfig: DatabaseConfig[string],
+	collectionConfig: CollectionConfig,
 	fileVersion: number,
 	targetVersion: number,
 ): ReadonlyArray<DryRunMigration> {
@@ -224,7 +203,9 @@ function runMigrateStatus(config: DatabaseConfig, configPath: string) {
 	const program = Effect.gen(function* () {
 		const collections: DryRunCollectionResult[] = [];
 
-		for (const [name, collectionConfig] of Object.entries(resolvedConfig)) {
+		for (const [name, collectionConfig] of Object.entries(
+			getCliCollectionConfigs(resolvedConfig),
+		)) {
 			// Only include versioned collections
 			if (collectionConfig.version === undefined) {
 				continue;
@@ -292,7 +273,9 @@ function runMigrateDryRun(config: DatabaseConfig, configPath: string) {
 	const program = Effect.gen(function* () {
 		const collections: DryRunCollectionResult[] = [];
 
-		for (const [name, collectionConfig] of Object.entries(resolvedConfig)) {
+		for (const [name, collectionConfig] of Object.entries(
+			getCliCollectionConfigs(resolvedConfig),
+		)) {
 			// Only include versioned collections
 			if (collectionConfig.version === undefined) {
 				continue;
@@ -380,7 +363,7 @@ interface MigrationRunResult {
  */
 function migrateCollection(
 	name: string,
-	collectionConfig: DatabaseConfig[string],
+	collectionConfig: CollectionConfig,
 	fileVersion: number,
 ) {
 	const targetVersion = collectionConfig.version ?? 0;
@@ -514,12 +497,15 @@ function runMigrate(
 	force: boolean,
 ) {
 	const resolvedConfig = resolveConfigPaths(config, configPath);
+	const resolvedCollections = getCliCollectionConfigs(resolvedConfig);
 
 	const program = Effect.gen(function* () {
 		// First, do a dry-run to determine which collections need migration
 		const dryRunCollections: DryRunCollectionResult[] = [];
 
-		for (const [name, collectionConfig] of Object.entries(resolvedConfig)) {
+		for (const [name, collectionConfig] of Object.entries(
+			getCliCollectionConfigs(resolvedConfig),
+		)) {
 			// Only include versioned collections
 			if (collectionConfig.version === undefined) {
 				continue;
@@ -601,7 +587,10 @@ function runMigrate(
 		const migrationResults: CollectionMigrationResult[] = [];
 
 		for (const collectionDryRun of collectionsToMigrate) {
-			const collectionConfig = resolvedConfig[collectionDryRun.name];
+			const collectionConfig = resolvedCollections[collectionDryRun.name];
+			if (collectionConfig === undefined) {
+				continue;
+			}
 			const result = yield* migrateCollection(
 				collectionDryRun.name,
 				collectionConfig,
