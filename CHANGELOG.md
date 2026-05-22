@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.13.0 (2026-05-22)
+
+### Features
+- Support document source configs (3e87f90)
+- Support document sources in convenience API (bc55902)
+- Reload document sources on file changes (c05cd26)
+- Add document source load and persistence (264e073)
+
+### Fixes
+- Harden document source persistence (0cdf724)
+
+### Other
+- Document multi-collection document sources (5c8c128)
+- Plan multi-collection document sources (4405284)
+
+
 ## v0.12.1 (2026-05-07)
 
 ### Fixes
