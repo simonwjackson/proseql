@@ -1,6 +1,6 @@
 {
   "name": "@proseql/cli",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "description": "Command-line interface for ProseQL databases. Query, create, update, and manage plain text database files from the terminal.",
   "type": "module",
   "scripts": {

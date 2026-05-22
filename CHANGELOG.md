@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.13.2 (2026-05-22)
+
+### Other
+- Route npm publishing through main release workflow (8e4783d)
+
+
 ## v0.13.1 (2026-05-22)
 
 
