@@ -104,6 +104,7 @@ jobs:
 
   publish-gpr:
     needs: [release]
+    if: "${{ vars.PUBLISH_GPR == 'true' }}"
     runs-on: ubuntu-latest
     permissions:
       contents: read
