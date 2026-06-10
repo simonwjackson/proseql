@@ -10,11 +10,17 @@ test *args:
     bun test \
         packages/core/tests/database-effect.test.ts \
         packages/core/tests/database-source-config.test.ts \
+        packages/core/tests/database-document-graph.test.ts \
         packages/core/tests/debounced-writer.test.ts \
+        packages/core/tests/deep-merge.test.ts \
         packages/core/tests/derived-id.test.ts \
+        packages/core/tests/document-graph-config.test.ts \
+        packages/core/tests/document-graph-source.test.ts \
         packages/core/tests/file-watcher.test.ts \
+        packages/core/tests/glob-match.test.ts \
         packages/core/tests/schema-validation.test.ts \
         packages/core/tests/schema-migrations.test.ts \
+        packages/core/tests/serializer-service.test.ts \
         packages/core/tests/source-config.test.ts \
         packages/core/tests/transactions.test.ts \
         packages/node/tests/convenience.test.ts \

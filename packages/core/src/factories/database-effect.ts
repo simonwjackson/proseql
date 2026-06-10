@@ -86,6 +86,7 @@ import {
 	mergeSerializerWithPluginCodecs,
 } from "../serializers/format-codec.js";
 import { SerializerRegistry } from "../serializers/serializer-service.js";
+import { loadDocumentGraphSources } from "../storage/document-graph-source.js";
 import {
 	loadDocumentSources,
 	saveDocumentSource,
@@ -101,7 +102,9 @@ import {
 	saveData,
 	saveEntityToDirectory,
 } from "../storage/persistence-effect.js";
+import { SourceConfigError } from "../errors/source-errors.js";
 import {
+	type NormalizedDocumentGraphSourceConfig,
 	type NormalizedSourceConfig,
 	normalizeSourceConfig,
 } from "../storage/source-config.js";
@@ -697,6 +700,7 @@ const buildCollection = <T extends HasId>(
 		import("../types/reactive-types.js").ChangeEvent
 	>,
 	appendOnlyConfig?: AppendOnlyConfig,
+	readOnly = false,
 ): EffectCollection<T> => {
 	const schema = collectionConfig.schema as Schema.Codec<T, unknown>;
 	const relationships = collectionConfig.relationships as Record<
@@ -987,16 +991,19 @@ const buildCollection = <T extends HasId>(
 			return withRunPromise(effect);
 		};
 
-	// Helper to create a forbidden operation for append-only collections
+	// Helper to create a forbidden operation for append-only or read-only collections
 	const forbiddenOp =
-		(opName: string) =>
+		(opName: string, reason: "append-only" | "read-only-source" = "append-only") =>
 		(..._args: ReadonlyArray<unknown>) =>
 			withRunPromise(
 				Effect.fail(
 					new OperationError({
 						operation: opName,
-						reason: "append-only",
-						message: `Operation '${opName}' is not allowed on append-only collection '${collectionName}'`,
+						reason,
+						message:
+							reason === "read-only-source"
+								? `Operation '${opName}' is not allowed on read-only collection '${collectionName}' (backed by a documentGraph source)`
+								: `Operation '${opName}' is not allowed on append-only collection '${collectionName}'`,
 					}),
 				),
 			);
@@ -1397,6 +1404,40 @@ const buildCollection = <T extends HasId>(
 		return watchById(changePubSub, ref, collectionName, id);
 	};
 
+	// Read-only (documentGraph-owned) collections reject every mutation before
+	// touching in-memory state. This signal is independent of appendOnlyConfig so
+	// it also applies inside $transaction (see makeBuildCollectionForTx).
+	const readOnlyOverrides = (
+		readOnly
+			? {
+					create: forbiddenOp("create", "read-only-source"),
+					createMany: forbiddenOp("createMany", "read-only-source"),
+					update: forbiddenOp("update", "read-only-source"),
+					updateMany: forbiddenOp("updateMany", "read-only-source"),
+					delete: forbiddenOp("delete", "read-only-source"),
+					deleteMany: forbiddenOp("deleteMany", "read-only-source"),
+					upsert: forbiddenOp("upsert", "read-only-source"),
+					upsertMany: forbiddenOp("upsertMany", "read-only-source"),
+					createWithRelationships: forbiddenOp(
+						"createWithRelationships",
+						"read-only-source",
+					),
+					updateWithRelationships: forbiddenOp(
+						"updateWithRelationships",
+						"read-only-source",
+					),
+					deleteWithRelationships: forbiddenOp(
+						"deleteWithRelationships",
+						"read-only-source",
+					),
+					deleteManyWithRelationships: forbiddenOp(
+						"deleteManyWithRelationships",
+						"read-only-source",
+					),
+				}
+			: {}
+	) as unknown as Partial<EffectCollection<T>>;
+
 	return {
 		query: queryFn,
 		findById: findByIdFn,
@@ -1416,6 +1457,7 @@ const buildCollection = <T extends HasId>(
 		aggregate: aggregateFn,
 		watch: watchFn,
 		watchById: watchByIdFn,
+		...readOnlyOverrides,
 	};
 };
 
@@ -1465,6 +1507,7 @@ const makeBuildCollectionForTx = (
 		import("../plugins/plugin-types.js").CustomIdGenerator
 	>,
 	globalHooks?: GlobalHooksConfig,
+	readOnlyCollections?: ReadonlySet<string>,
 ): BuildCollectionForTx => {
 	const collectionConfigs = getCollectionConfigs(config) as Record<
 		string,
@@ -1491,6 +1534,8 @@ const makeBuildCollectionForTx = (
 			idGeneratorMap,
 			globalHooks,
 			undefined, // changePubSub: suppressed during transactions
+			undefined, // appendOnlyConfig: not used in transactions
+			readOnlyCollections?.has(collectionName) ?? false,
 		);
 	};
 };
@@ -1970,6 +2015,39 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			loadedDocumentSources?.documents ?? [],
 		);
 
+		// documentGraph sources: read-only overlay collections assembled from many
+		// fragments. Loaded separately from the writable documents loader; invalid
+		// initial graph fails database creation here.
+		const graphOwnedCollections = new Set<string>(
+			(normalizedSourceConfig?.sources ?? [])
+				.filter(
+					(source): source is NormalizedDocumentGraphSourceConfig =>
+						source.kind === "documentGraph",
+				)
+				.flatMap((source) => source.collections),
+		);
+		if (initialData !== undefined) {
+			for (const collectionName of graphOwnedCollections) {
+				if (
+					(initialData as Record<string, unknown>)[collectionName] !== undefined
+				) {
+					return yield* Effect.fail(
+						new SourceConfigError({
+							message: `Collection '${collectionName}' is backed by a read-only documentGraph source and cannot accept initialData`,
+							collection: collectionName,
+						}),
+					);
+				}
+			}
+		}
+		const loadedDocumentGraph =
+			graphOwnedCollections.size > 0 && normalizedSourceConfig !== undefined
+				? yield* Effect.provide(
+						loadDocumentGraphSources(normalizedSourceConfig),
+						serviceLayer,
+					)
+				: undefined;
+
 		// 2. Create transaction lock for single-writer isolation
 		const transactionLock = yield* Ref.make(false);
 
@@ -1985,9 +2063,11 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			const dirPath = collectionConfig.directory;
 			const dirFormat = collectionConfig.format;
 
-			// Load from file, directory, or document sources if configured
+			// Load from file, directory, document sources, or a document graph.
 			let loadedData: ReadonlyMap<string, HasId> =
-				loadedDocumentSources?.collections[collectionName] ?? new Map();
+				loadedDocumentGraph?.collections[collectionName] ??
+				loadedDocumentSources?.collections[collectionName] ??
+				new Map();
 			if (dirPath && dirFormat && isCollectionDirectoryMode(collectionConfig)) {
 				// Directory mode: load each entity from its own file
 				const dirOptions =
@@ -2142,6 +2222,9 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			documentSourceKeysByCollection[collectionName] = [];
 		}
 		for (const source of normalizedSourceConfig?.sources ?? []) {
+			// documentGraph sources are read-only: no save key is registered, so no
+			// persistence is ever scheduled for graph-owned collections.
+			if (source.kind !== "documents") continue;
 			const key = documentSourceKey(source.id);
 			for (const collectionName of source.collections) {
 				documentSourceKeysByCollection[collectionName] = [
@@ -2373,6 +2456,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				pluginRegistry.globalHooks,
 				changePubSub,
 				appendOnlyConfig,
+				graphOwnedCollections.has(collectionName),
 			);
 		}
 
@@ -2392,10 +2476,13 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 					yield* Effect.promise(() => trigger.flush());
 
 					const loaded = yield* loadDocumentSources(normalizedSourceConfig);
+					// Only writable documents sources are reloaded here; graph-owned
+					// collections have their own reload path and must not be clobbered
+					// with the documents loader's empty result for them.
 					const sourceBackedCollections = new Set(
-						normalizedSourceConfig.sources.flatMap(
-							(candidate) => candidate.collections,
-						),
+						normalizedSourceConfig.sources
+							.filter((candidate) => candidate.kind === "documents")
+							.flatMap((candidate) => candidate.collections),
 					);
 					for (const collectionName of sourceBackedCollections) {
 						const newData =
@@ -2512,6 +2599,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			pluginRegistry.operators,
 			pluginRegistry.idGenerators,
 			pluginRegistry.globalHooks,
+			graphOwnedCollections,
 		);
 
 		const transactionPersistenceTrigger = {
