@@ -2531,6 +2531,68 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				),
 			);
 
+		// Rebuild a documentGraph source on a watched change. Refs/indexes are only
+		// swapped after a successful rebuild, so an invalid reload keeps the
+		// last-known-good graph (the catch logs and leaves state untouched).
+		const reloadDocumentGraph = (
+			sourceId: string,
+		): Effect.Effect<void, never> =>
+			Effect.provide(
+				Effect.gen(function* () {
+					if (normalizedSourceConfig === undefined) return;
+					const source = normalizedSourceConfig.sources.find(
+						(candidate) => candidate.id === sourceId,
+					);
+					if (source === undefined || source.kind !== "documentGraph") return;
+
+					const loaded =
+						yield* loadDocumentGraphSources(normalizedSourceConfig);
+					for (const collectionName of source.collections) {
+						const newData =
+							loaded.collections[collectionName] ?? new Map<string, HasId>();
+						yield* Ref.set(typedRefs[collectionName], newData);
+
+						const collectionConfig = collectionConfigs[collectionName];
+						const items = Array.from(newData.values());
+						const rebuiltIndexes = yield* buildIndexes(
+							normalizeIndexes(collectionConfig.indexes),
+							items,
+						);
+						for (const [indexKey, indexRef] of collectionIndexes[
+							collectionName
+						]) {
+							const rebuiltIndexRef = rebuiltIndexes.get(indexKey);
+							if (rebuiltIndexRef === undefined) continue;
+							const rebuiltIndex = yield* Ref.get(rebuiltIndexRef);
+							yield* Ref.set(indexRef, rebuiltIndex);
+						}
+
+						const searchIndexRef = searchIndexRefs[collectionName];
+						const fields = searchIndexFields[collectionName];
+						if (searchIndexRef !== undefined && fields !== undefined) {
+							const rebuiltSearchIndexRef = yield* buildSearchIndex(
+								fields,
+								items,
+							);
+							const rebuiltSearchIndex = yield* Ref.get(rebuiltSearchIndexRef);
+							yield* Ref.set(searchIndexRef, rebuiltSearchIndex);
+						}
+
+						yield* PubSub.publish(
+							changePubSub,
+							reloadEvent(collectionName),
+						);
+					}
+				}),
+				serviceLayer,
+			).pipe(
+				Effect.catch((error) =>
+					Effect.logWarning(
+						`[proseql] Document graph reload failed for '${sourceId}', keeping last-known-good: ${String(error)}`,
+					),
+				),
+			);
+
 		// 10. Create file watchers for persistent collections to detect external file changes
 		// Each watcher monitors its file and reloads data into the Ref on changes,
 		// publishing a reload event to the changePubSub for reactive query subscribers.
@@ -2545,6 +2607,22 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				root: source.root,
 				onReload: reloadDocumentSources(source.id),
 			}).pipe(Effect.catch(() => Effect.void));
+		}
+
+		// documentGraph sources: watch each startup-present root. Roots absent at
+		// startup are not watched (no late detection).
+		for (const source of normalizedSourceConfig?.sources ?? []) {
+			if (source.kind !== "documentGraph") continue;
+			for (const root of source.roots) {
+				const rootPresent = yield* storageAdapter
+					.exists(root.root)
+					.pipe(Effect.catch(() => Effect.succeed(false)));
+				if (!rootPresent) continue;
+				yield* createDocumentSourceWatcher({
+					root: root.root,
+					onReload: reloadDocumentGraph(source.id),
+				}).pipe(Effect.catch(() => Effect.void));
+			}
 		}
 
 		for (const collectionName of collectionNames) {

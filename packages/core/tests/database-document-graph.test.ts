@@ -7,6 +7,7 @@ import { jsonCodec } from "../src/serializers/codecs/json.js";
 import { yamlCodec } from "../src/serializers/codecs/yaml.js";
 import { makeSerializerLayer } from "../src/serializers/format-codec.js";
 import { makeInMemoryStorageLayer } from "../src/storage/in-memory-adapter-layer.js";
+import { StorageAdapter } from "../src/storage/storage-service.js";
 
 const FoodSchema = Schema.Struct({
 	name: Schema.String,
@@ -223,5 +224,139 @@ describe("documentGraph database integration", () => {
 			),
 		);
 		expect(Result.isFailure(result)).toBe(true);
+	});
+});
+
+describe("documentGraph watcher reloads", () => {
+	const reloadConfig = () =>
+		({
+			collections: {
+				foods: {
+					schema: FoodSchema,
+					id: { kind: "derivedFromKey", field: "id" },
+					relationships: {},
+				},
+			},
+			sources: [
+				{
+					id: "config-graph",
+					kind: "documentGraph",
+					include: "**/*.yaml",
+					roots: [{ root: "/a" }],
+				},
+			],
+		}) as const;
+
+	it("reflects new data after a valid fragment change", async () => {
+		const store = new Map<string, string>([
+			["/a/base.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n"],
+		]);
+		const layer = makeLayer(store);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const db = yield* createPersistentEffectDatabase(
+						reloadConfig(),
+						undefined,
+						{ writeDebounce: 60_000 },
+					);
+					const storage = yield* StorageAdapter;
+					yield* storage.write(
+						"/a/base.yaml",
+						"foods:\n  apple:\n    name: Apple\n    macros: { cal: 50 }\n",
+					);
+					yield* Effect.sleep("200 millis");
+					expect(yield* db.foods.findById("apple")).toMatchObject({
+						macros: { cal: 50 },
+					});
+				}),
+			).pipe(Effect.provide(layer)),
+		);
+	});
+
+	it("keeps last-known-good on an invalid reload, then recovers when fixed", async () => {
+		const store = new Map<string, string>([
+			["/a/base.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n"],
+		]);
+		const layer = makeLayer(store);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const db = yield* createPersistentEffectDatabase(
+						reloadConfig(),
+						undefined,
+						{ writeDebounce: 60_000 },
+					);
+					const storage = yield* StorageAdapter;
+
+					// Invalid reload: cal is not a number.
+					yield* storage.write(
+						"/a/base.yaml",
+						"foods:\n  apple:\n    name: Apple\n    macros: { cal: nope }\n",
+					);
+					yield* Effect.sleep("200 millis");
+					expect(yield* db.foods.findById("apple")).toMatchObject({
+						macros: { cal: 10 },
+					});
+
+					// Fix it: the graph recovers.
+					yield* storage.write(
+						"/a/base.yaml",
+						"foods:\n  apple:\n    name: Apple\n    macros: { cal: 11 }\n",
+					);
+					yield* Effect.sleep("200 millis");
+					expect(yield* db.foods.findById("apple")).toMatchObject({
+						macros: { cal: 11 },
+					});
+				}),
+			).pipe(Effect.provide(layer)),
+		);
+	});
+
+	it("does not detect an optional root that was absent at startup", async () => {
+		const store = new Map<string, string>([
+			["/a/base.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n"],
+		]);
+		const layer = makeLayer(store);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const db = yield* createPersistentEffectDatabase(
+						{
+							collections: {
+								foods: {
+									schema: FoodSchema,
+									id: { kind: "derivedFromKey", field: "id" },
+									relationships: {},
+								},
+							},
+							sources: [
+								{
+									id: "config-graph",
+									kind: "documentGraph",
+									include: "**/*.yaml",
+									roots: [
+										{ root: "/a" },
+										{ root: "/late", optional: true },
+									],
+								},
+							],
+						} as const,
+						undefined,
+						{ writeDebounce: 60_000 },
+					);
+					const storage = yield* StorageAdapter;
+
+					// The /late root did not exist at startup, so it is not watched.
+					yield* storage.write(
+						"/late/extra.yaml",
+						"foods:\n  banana:\n    name: Banana\n    macros: { cal: 90 }\n",
+					);
+					yield* Effect.sleep("200 millis");
+					const result = yield* Effect.result(db.foods.findById("banana"));
+					expect(Result.isFailure(result)).toBe(true);
+				}),
+			).pipe(Effect.provide(layer)),
+		);
 	});
 });
