@@ -196,6 +196,30 @@ describe("inferCodecsFromConfig", () => {
 		expect(codecs).toHaveLength(9);
 	});
 
+	it("registers all base codecs for a documentGraph source", () => {
+		const config: DatabaseConfig = {
+			collections: {
+				foods: { schema: TestSchema, relationships: {} },
+			},
+			sources: [
+				{
+					id: "graph",
+					kind: "documentGraph",
+					include: "**/*.{yaml,json,toml}",
+					roots: [{ root: "/a" }],
+				},
+			],
+		};
+
+		const codecs = inferCodecsFromConfig(config);
+		const names = codecs.map((c) => c.name);
+		// A graph is multi-format by definition; every base codec must be present.
+		expect(names).toContain("yaml");
+		expect(names).toContain("json");
+		expect(names).toContain("toml");
+		expect(codecs.length).toBeGreaterThanOrEqual(6);
+	});
+
 	it("mixes in-memory and persistent collections", () => {
 		const config: DatabaseConfig = {
 			books: {

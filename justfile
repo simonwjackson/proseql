@@ -18,6 +18,7 @@ test *args:
         packages/core/tests/document-graph-source.test.ts \
         packages/core/tests/file-watcher.test.ts \
         packages/core/tests/glob-match.test.ts \
+        packages/core/tests/infer-codecs.test.ts \
         packages/core/tests/schema-validation.test.ts \
         packages/core/tests/schema-migrations.test.ts \
         packages/core/tests/serializer-service.test.ts \
@@ -25,6 +26,7 @@ test *args:
         packages/core/tests/transactions.test.ts \
         packages/node/tests/convenience.test.ts \
         packages/node/tests/derived-id-convenience.test.ts \
+        packages/node/tests/document-graph.test.ts \
         packages/rest/tests/handlers.test.ts \
         packages/cli/tests/ \
         {{args}}
