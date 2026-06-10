@@ -441,6 +441,12 @@
     url = "https://registry.npmjs.org/@types/node/-/node-25.6.0.tgz";
     hash = "sha512-+qIYRKdNYJwY3vRCZMdJbPLJAtGjQBudzZzdzwQYkEPQd+PJGixUL5QfvCLDaULoLv+RhT3LDkwEfKaAkgSmNQ==";
   };
+  "@types/picomatch" = {
+    out_path = "@types/picomatch";
+    name = "@types/picomatch@4.0.3";
+    url = "https://registry.npmjs.org/@types/picomatch/-/picomatch-4.0.3.tgz";
+    hash = "sha512-iG0T6+nYJ9FAPmx9SsUlnwcq1ZVRuCXcVEvWnntoPlrOpwtSTKNDC9uVAxTsC3PUvJ+99n4RpAcNgBbHX3JSnQ==";
+  };
   "@vitest/expect" = {
     out_path = "@vitest/expect";
     name = "@vitest/expect@1.6.1";
@@ -844,6 +850,12 @@
     name = "picocolors@1.1.1";
     url = "https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz";
     hash = "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==";
+  };
+  "picomatch" = {
+    out_path = "picomatch";
+    name = "picomatch@4.0.4";
+    url = "https://registry.npmjs.org/picomatch/-/picomatch-4.0.4.tgz";
+    hash = "sha512-QP88BAKvMam/3NxH6vj2o21R6MjxZUAd6nlwAS/pnGvN9IVLocLHxGYIzFhg6fUQ+5th6P4dv4eW9jX3DSIj7A==";
   };
   "pkg-types" = {
     out_path = "pkg-types";
