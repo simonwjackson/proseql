@@ -130,8 +130,8 @@ export type {
 	DocumentGraphTransformContext,
 	DocumentSourceConfig,
 	NormalizedDatabaseSourceConfig,
-	NormalizedDocumentGraphSourceConfig,
 	NormalizedDocumentGraphRootConfig,
+	NormalizedDocumentGraphSourceConfig,
 	NormalizedDocumentSourceConfig,
 	NormalizedSourceConfig,
 } from "./storage/source-config.js";

@@ -24,6 +24,7 @@ import type { MigrationError } from "../errors/migration-errors.js";
 import type { PluginError } from "../errors/plugin-errors.js";
 import type { DanglingReferenceError } from "../errors/query-errors.js";
 import type { SourceError } from "../errors/source-errors.js";
+import { SourceConfigError } from "../errors/source-errors.js";
 import type {
 	SerializationError,
 	StorageError,
@@ -102,7 +103,6 @@ import {
 	saveData,
 	saveEntityToDirectory,
 } from "../storage/persistence-effect.js";
-import { SourceConfigError } from "../errors/source-errors.js";
 import {
 	type NormalizedDocumentGraphSourceConfig,
 	type NormalizedSourceConfig,
@@ -993,7 +993,10 @@ const buildCollection = <T extends HasId>(
 
 	// Helper to create a forbidden operation for append-only or read-only collections
 	const forbiddenOp =
-		(opName: string, reason: "append-only" | "read-only-source" = "append-only") =>
+		(
+			opName: string,
+			reason: "append-only" | "read-only-source" = "append-only",
+		) =>
 		(..._args: ReadonlyArray<unknown>) =>
 			withRunPromise(
 				Effect.fail(
@@ -1407,36 +1410,34 @@ const buildCollection = <T extends HasId>(
 	// Read-only (documentGraph-owned) collections reject every mutation before
 	// touching in-memory state. This signal is independent of appendOnlyConfig so
 	// it also applies inside $transaction (see makeBuildCollectionForTx).
-	const readOnlyOverrides = (
-		readOnly
-			? {
-					create: forbiddenOp("create", "read-only-source"),
-					createMany: forbiddenOp("createMany", "read-only-source"),
-					update: forbiddenOp("update", "read-only-source"),
-					updateMany: forbiddenOp("updateMany", "read-only-source"),
-					delete: forbiddenOp("delete", "read-only-source"),
-					deleteMany: forbiddenOp("deleteMany", "read-only-source"),
-					upsert: forbiddenOp("upsert", "read-only-source"),
-					upsertMany: forbiddenOp("upsertMany", "read-only-source"),
-					createWithRelationships: forbiddenOp(
-						"createWithRelationships",
-						"read-only-source",
-					),
-					updateWithRelationships: forbiddenOp(
-						"updateWithRelationships",
-						"read-only-source",
-					),
-					deleteWithRelationships: forbiddenOp(
-						"deleteWithRelationships",
-						"read-only-source",
-					),
-					deleteManyWithRelationships: forbiddenOp(
-						"deleteManyWithRelationships",
-						"read-only-source",
-					),
-				}
-			: {}
-	) as unknown as Partial<EffectCollection<T>>;
+	const readOnlyOverrides = (readOnly
+		? {
+				create: forbiddenOp("create", "read-only-source"),
+				createMany: forbiddenOp("createMany", "read-only-source"),
+				update: forbiddenOp("update", "read-only-source"),
+				updateMany: forbiddenOp("updateMany", "read-only-source"),
+				delete: forbiddenOp("delete", "read-only-source"),
+				deleteMany: forbiddenOp("deleteMany", "read-only-source"),
+				upsert: forbiddenOp("upsert", "read-only-source"),
+				upsertMany: forbiddenOp("upsertMany", "read-only-source"),
+				createWithRelationships: forbiddenOp(
+					"createWithRelationships",
+					"read-only-source",
+				),
+				updateWithRelationships: forbiddenOp(
+					"updateWithRelationships",
+					"read-only-source",
+				),
+				deleteWithRelationships: forbiddenOp(
+					"deleteWithRelationships",
+					"read-only-source",
+				),
+				deleteManyWithRelationships: forbiddenOp(
+					"deleteManyWithRelationships",
+					"read-only-source",
+				),
+			}
+		: {}) as unknown as Partial<EffectCollection<T>>;
 
 	return {
 		query: queryFn,
@@ -2545,8 +2546,9 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 					);
 					if (source === undefined || source.kind !== "documentGraph") return;
 
-					const loaded =
-						yield* loadDocumentGraphSources(normalizedSourceConfig);
+					const loaded = yield* loadDocumentGraphSources(
+						normalizedSourceConfig,
+					);
 					for (const collectionName of source.collections) {
 						const newData =
 							loaded.collections[collectionName] ?? new Map<string, HasId>();
@@ -2578,10 +2580,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 							yield* Ref.set(searchIndexRef, rebuiltSearchIndex);
 						}
 
-						yield* PubSub.publish(
-							changePubSub,
-							reloadEvent(collectionName),
-						);
+						yield* PubSub.publish(changePubSub, reloadEvent(collectionName));
 					}
 				}),
 				serviceLayer,

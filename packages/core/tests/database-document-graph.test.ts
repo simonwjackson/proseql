@@ -45,9 +45,15 @@ const graphConfig = (overrides: Record<string, unknown> = {}) =>
 
 const seedStore = () =>
 	new Map<string, string>([
-		["/a/base.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n"],
+		[
+			"/a/base.yaml",
+			"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+		],
 		["/b/over.yaml", "foods:\n  apple:\n    macros: { fat: 2 }\n"],
-		["/b/banana.json", '{ "foods": { "banana": { "name": "Banana", "macros": { "cal": 90 } } } }'],
+		[
+			"/b/banana.json",
+			'{ "foods": { "banana": { "name": "Banana", "macros": { "cal": 90 } } } }',
+		],
 	]);
 
 describe("documentGraph database integration", () => {
@@ -88,9 +94,7 @@ describe("documentGraph database integration", () => {
 
 					const attempts: Array<Effect.Effect<unknown, unknown>> = [
 						db.foods.create({ id: "x", name: "X", macros: { cal: 1 } }),
-						db.foods.createMany([
-							{ id: "x", name: "X", macros: { cal: 1 } },
-						]),
+						db.foods.createMany([{ id: "x", name: "X", macros: { cal: 1 } }]),
 						db.foods.update("apple", { name: "Mutated" }),
 						db.foods.updateMany({ where: {} }, { name: "Mutated" }),
 						db.foods.delete("apple"),
@@ -249,7 +253,10 @@ describe("documentGraph watcher reloads", () => {
 
 	it("reflects new data after a valid fragment change", async () => {
 		const store = new Map<string, string>([
-			["/a/base.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n"],
+			[
+				"/a/base.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
 		]);
 		const layer = makeLayer(store);
 		await Effect.runPromise(
@@ -276,7 +283,10 @@ describe("documentGraph watcher reloads", () => {
 
 	it("keeps last-known-good on an invalid reload, then recovers when fixed", async () => {
 		const store = new Map<string, string>([
-			["/a/base.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n"],
+			[
+				"/a/base.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
 		]);
 		const layer = makeLayer(store);
 		await Effect.runPromise(
@@ -315,7 +325,10 @@ describe("documentGraph watcher reloads", () => {
 
 	it("does not detect an optional root that was absent at startup", async () => {
 		const store = new Map<string, string>([
-			["/a/base.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n"],
+			[
+				"/a/base.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
 		]);
 		const layer = makeLayer(store);
 		await Effect.runPromise(
@@ -335,10 +348,7 @@ describe("documentGraph watcher reloads", () => {
 									id: "config-graph",
 									kind: "documentGraph",
 									include: "**/*.yaml",
-									roots: [
-										{ root: "/a" },
-										{ root: "/late", optional: true },
-									],
+									roots: [{ root: "/a" }, { root: "/late", optional: true }],
 								},
 							],
 						} as const,

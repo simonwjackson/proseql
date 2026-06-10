@@ -6,6 +6,7 @@ import type {
 } from "../src/errors/storage-errors.js";
 import { jsonCodec } from "../src/serializers/codecs/json.js";
 import { yamlCodec } from "../src/serializers/codecs/yaml.js";
+import type { FormatCodec } from "../src/serializers/format-codec.js";
 import {
 	makeSerializerLayer,
 	mergeSerializerWithPluginCodecs,
@@ -15,7 +16,6 @@ import {
 	SerializerRegistry,
 	type SerializerRegistryShape,
 } from "../src/serializers/serializer-service.js";
-import type { FormatCodec } from "../src/serializers/format-codec.js";
 
 // Single-format layer for basic tests
 const JsonOnlyLayer = makeSerializerLayer([jsonCodec()]);
@@ -208,9 +208,7 @@ describe("SerializerRegistry service", () => {
 		it("lists every extension of the base codecs in registration order", () => {
 			const registry = makeSerializerLayer([jsonCodec(), yamlCodec()]).pipe(
 				(layer) =>
-					Effect.runSync(
-						Effect.provide(getSupportedExtensions, layer),
-					),
+					Effect.runSync(Effect.provide(getSupportedExtensions, layer)),
 			);
 			expect(registry).toContain("json");
 			expect(registry).toContain("yaml");

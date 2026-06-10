@@ -63,9 +63,13 @@ describe("documentGraph through @proseql/node", () => {
 		const result = await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					const db = yield* createNodeDatabase(graphConfig(rootA, rootB), undefined, {
-						writeDebounce: 60_000,
-					});
+					const db = yield* createNodeDatabase(
+						graphConfig(rootA, rootB),
+						undefined,
+						{
+							writeDebounce: 60_000,
+						},
+					);
 					return yield* db.foods.findById("apple");
 				}),
 			),
@@ -94,9 +98,13 @@ describe("documentGraph through @proseql/node", () => {
 		const ids = await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					const db = yield* createNodeDatabase(graphConfig(rootA, rootB), undefined, {
-						writeDebounce: 60_000,
-					});
+					const db = yield* createNodeDatabase(
+						graphConfig(rootA, rootB),
+						undefined,
+						{
+							writeDebounce: 60_000,
+						},
+					);
 					const foods = yield* Stream.runCollect(db.foods.query());
 					return foods.map((f) => f.id).sort();
 				}),
@@ -118,9 +126,13 @@ describe("documentGraph through @proseql/node", () => {
 		const result = await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					const db = yield* createNodeDatabase(graphConfig(rootA, rootB), undefined, {
-						writeDebounce: 60_000,
-					});
+					const db = yield* createNodeDatabase(
+						graphConfig(rootA, rootB),
+						undefined,
+						{
+							writeDebounce: 60_000,
+						},
+					);
 					return yield* Effect.result(
 						db.foods.create({ id: "x", name: "X", macros: { cal: 1 } }),
 					);

@@ -1,5 +1,5 @@
 import { Effect, Result, Schema } from "effect";
-import { ValidationError } from "../errors/crud-errors.js";
+import type { ValidationError } from "../errors/crud-errors.js";
 import type { MigrationError } from "../errors/migration-errors.js";
 import { DocumentGraphSourceError } from "../errors/source-errors.js";
 import type {
@@ -87,12 +87,7 @@ export const loadDocumentGraphSources = (
 		);
 
 		for (const source of graphSources) {
-			yield* loadGraphSource(
-				source,
-				config,
-				collections,
-				contributingPaths,
-			);
+			yield* loadGraphSource(source, config, collections, contributingPaths);
 		}
 
 		return { collections, contributingPaths };
@@ -274,10 +269,11 @@ const loadGraphSource = (
 		for (const collectionName of source.collections) {
 			const collectionConfig = collectionConfigs.get(collectionName);
 			if (collectionConfig === undefined) continue;
-			const target = (collections[collectionName] ??= new Map<
-				string,
-				HasId
-			>());
+			let target = collections[collectionName];
+			if (target === undefined) {
+				target = new Map<string, HasId>();
+				collections[collectionName] = target;
+			}
 			const fragments = fragmentsByCollection.get(collectionName) ?? [];
 			const effective = deepMergeAll(fragments);
 			yield* validateEffectiveSection(
@@ -306,9 +302,7 @@ const buildCollectionConfigs = (
 				never,
 				never
 			>,
-			...(collectionConfig.id !== undefined
-				? { id: collectionConfig.id }
-				: {}),
+			...(collectionConfig.id !== undefined ? { id: collectionConfig.id } : {}),
 			...(collectionConfig.version !== undefined
 				? { version: collectionConfig.version }
 				: {}),

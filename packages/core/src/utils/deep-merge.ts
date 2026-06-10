@@ -13,18 +13,17 @@
 type PlainObject = Record<string, unknown>;
 
 function isPlainObject(value: unknown): value is PlainObject {
-	return (
-		typeof value === "object" &&
-		value !== null &&
-		!Array.isArray(value)
-	);
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
  * Merge two plain objects, with `overlay` winning on conflicts. Neither input is
  * mutated.
  */
-export function deepMerge(base: PlainObject, overlay: PlainObject): PlainObject {
+export function deepMerge(
+	base: PlainObject,
+	overlay: PlainObject,
+): PlainObject {
 	const result: PlainObject = { ...base };
 	for (const key of Object.keys(overlay)) {
 		const overlayValue = overlay[key];

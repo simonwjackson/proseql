@@ -7,11 +7,11 @@ import { yamlCodec } from "../src/serializers/codecs/yaml.js";
 import { makeSerializerLayer } from "../src/serializers/format-codec.js";
 import { loadDocumentGraphSources } from "../src/storage/document-graph-source.js";
 import { makeInMemoryStorageLayer } from "../src/storage/in-memory-adapter-layer.js";
+import type { DocumentGraphTransform } from "../src/storage/source-config.js";
 import {
 	normalizeSourceConfig,
 	type SourceOrientedConfigInput,
 } from "../src/storage/source-config.js";
-import type { DocumentGraphTransform } from "../src/storage/source-config.js";
 
 const FoodPayload = Schema.Struct({
 	name: Schema.String,
@@ -75,17 +75,27 @@ const loadResult = (
 describe("loadDocumentGraphSources", () => {
 	it("overlays a later root over an earlier root on a shared record, deep-merging nested objects", async () => {
 		const store = new Map<string, string>([
-			["/a/base.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n"],
+			[
+				"/a/base.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
 			["/b/over.yaml", "foods:\n  apple:\n    macros: { fat: 2 }\n"],
 		]);
 		const graph = await load(store);
 		const apple = graph.collections.foods.get("apple");
-		expect(apple).toEqual({ id: "apple", name: "Apple", macros: { cal: 10, fat: 2 } });
+		expect(apple).toEqual({
+			id: "apple",
+			name: "Apple",
+			macros: { cal: 10, fat: 2 },
+		});
 	});
 
 	it("overlays a lexically later file within one root over an earlier file", async () => {
 		const store = new Map<string, string>([
-			["/a/01-base.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n"],
+			[
+				"/a/01-base.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
 			["/a/02-over.yaml", "foods:\n  apple:\n    macros: { cal: 99 }\n"],
 		]);
 		const graph = await load(store, baseConfig({ roots: [{ root: "/a" }] }));
@@ -96,9 +106,18 @@ describe("loadDocumentGraphSources", () => {
 
 	it("composes mixed-format fragments (YAML + JSON + TOML) into one graph", async () => {
 		const store = new Map<string, string>([
-			["/a/y.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n"],
-			["/a/j.json", '{ "foods": { "banana": { "name": "Banana", "macros": { "cal": 90 } } } }'],
-			["/b/t.toml", "[foods.cherry.macros]\ncal = 5\n[foods.cherry]\nname = \"Cherry\"\n"],
+			[
+				"/a/y.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
+			[
+				"/a/j.json",
+				'{ "foods": { "banana": { "name": "Banana", "macros": { "cal": 90 } } } }',
+			],
+			[
+				"/b/t.toml",
+				'[foods.cherry.macros]\ncal = 5\n[foods.cherry]\nname = "Cherry"\n',
+			],
 		]);
 		const graph = await load(store);
 		expect([...graph.collections.foods.keys()].sort()).toEqual([
@@ -110,7 +129,10 @@ describe("loadDocumentGraphSources", () => {
 
 	it("makes a partial overlay valid only after merging with the base record", async () => {
 		const store = new Map<string, string>([
-			["/a/base.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n"],
+			[
+				"/a/base.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
 			// This fragment alone lacks `name` and would fail validation; merged it is valid.
 			["/b/over.yaml", "foods:\n  apple:\n    macros: { cal: 12, fat: 1 }\n"],
 		]);
@@ -123,9 +145,7 @@ describe("loadDocumentGraphSources", () => {
 	});
 
 	it("treats empty optional root, empty root, and zero-match glob as empty contributions", async () => {
-		const store = new Map<string, string>([
-			["/b/empty.yaml", "foods: {}\n"],
-		]);
+		const store = new Map<string, string>([["/b/empty.yaml", "foods: {}\n"]]);
 		const config = baseConfig({
 			roots: [{ root: "/missing", optional: true }, { root: "/b" }],
 		});
@@ -135,7 +155,10 @@ describe("loadDocumentGraphSources", () => {
 
 	it("records contributing paths for an effective record (provenance)", async () => {
 		const store = new Map<string, string>([
-			["/a/base.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n"],
+			[
+				"/a/base.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
 			["/b/over.yaml", "foods:\n  apple:\n    macros: { fat: 2 }\n"],
 		]);
 		const graph = await load(store);
@@ -144,9 +167,7 @@ describe("loadDocumentGraphSources", () => {
 	});
 
 	it("fails when a matched file has an unregistered extension", async () => {
-		const store = new Map<string, string>([
-			["/a/data.ini", "foods=bad"],
-		]);
+		const store = new Map<string, string>([["/a/data.ini", "foods=bad"]]);
 		const config = baseConfig({
 			include: "**/*",
 			roots: [{ root: "/a" }],
@@ -163,7 +184,10 @@ describe("loadDocumentGraphSources", () => {
 
 	it("fails when a decode transform returns a Result failure", async () => {
 		const store = new Map<string, string>([
-			["/a/x.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n"],
+			[
+				"/a/x.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
 		]);
 		const transform: DocumentGraphTransform = () =>
 			Result.fail(new Error("nope"));
@@ -181,7 +205,10 @@ describe("loadDocumentGraphSources", () => {
 
 	it("wraps a thrown transform as an unexpected defect", async () => {
 		const store = new Map<string, string>([
-			["/a/x.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n"],
+			[
+				"/a/x.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
 		]);
 		const transform: DocumentGraphTransform = () => {
 			throw new Error("boom");
@@ -230,7 +257,10 @@ describe("loadDocumentGraphSources", () => {
 
 	it("fails an effective record that violates the schema, naming collection, id, and contributing paths", async () => {
 		const store = new Map<string, string>([
-			["/a/x.yaml", "foods:\n  apple:\n    name: Apple\n    macros: { cal: not-a-number }\n"],
+			[
+				"/a/x.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: not-a-number }\n",
+			],
 		]);
 		const result = await loadResult(
 			store,
@@ -248,7 +278,10 @@ describe("loadDocumentGraphSources", () => {
 
 	it("rejects a physical derived-id field in a derived-id payload", async () => {
 		const store = new Map<string, string>([
-			["/a/x.yaml", "foods:\n  apple:\n    id: apple\n    name: Apple\n    macros: { cal: 10 }\n"],
+			[
+				"/a/x.yaml",
+				"foods:\n  apple:\n    id: apple\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
 		]);
 		const result = await loadResult(
 			store,
@@ -323,10 +356,7 @@ describe("loadDocumentGraphSources migrations", () => {
 		]);
 		const normalized = normalizeSourceConfig(migrationConfig());
 		const graph = await Effect.runPromise(
-			Effect.provide(
-				loadDocumentGraphSources(normalized),
-				makeLayer(store),
-			),
+			Effect.provide(loadDocumentGraphSources(normalized), makeLayer(store)),
 		);
 		expect(graph.collections.foods.get("apple")).toEqual({
 			id: "apple",
