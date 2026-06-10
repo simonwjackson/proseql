@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.14.0 (2026-06-10)
+
+### Features
+- Reload documentGraph on watch with last-known-good (0212f24)
+- Wire read-only documentGraph into database factory (f50ada9)
+- Add documentGraph loader with merge and validation (806b742)
+- Add documentGraph config types and normalization (6ba417b)
+- Expose serializer extension introspection (928deb8)
+- Add picomatch glob-match seam for document graph (81b9d35)
+- Add pure deep-merge overlay utility (0b3a9a0)
+
+### Other
+- Apply biome formatting to documentGraph sources (0c7968b)
+- Document read-only documentGraph overlay source (47791cc)
+- Cover documentGraph via convenience API on real fs (fc3e780)
+
+
 ## v0.13.2 (2026-05-22)
 
 ### Other
