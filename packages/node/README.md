@@ -139,6 +139,35 @@ Node-backed persistent databases watch document-source roots. Add, change, and r
 
 Writes preserve semantic data and sibling collection sections, but YAML comments, exact ordering, and original formatting are not preserved.
 
+### Read-only document graphs
+
+A `documentGraph` source assembles one effective, read-only collection graph from an ordered set of directory roots, merging many physical fragments into one logical read model (later fragments overlay earlier ones). It is the overlay counterpart to the writable `documents` source and never writes back.
+
+```ts
+const db = yield* createNodeDatabase({
+  collections: {
+    foods: {
+      schema: FoodPayload,
+      id: { kind: "derivedFromKey", field: "id" },
+      relationships: {},
+    },
+  },
+  sources: [
+    {
+      id: "config-graph",
+      kind: "documentGraph",
+      include: "**/*.config.{yaml,json,toml}",
+      roots: [
+        { root: "./config/base" },
+        { root: "./config/overrides", optional: true },
+      ],
+    },
+  ],
+})
+```
+
+Through `@proseql/node`, a graph reads from the real filesystem with codecs inferred automatically (a graph registers all base codecs, since fragments are decoded by extension). Discovery uses real glob semantics across nested directories; each startup-present root is watched, and a valid fragment change rebuilds the graph while an invalid reload keeps the last-known-good graph. Graph-owned collections reject every mutation with `OperationError` (`reason: "read-only-source"`), including inside `$transaction`, and `initialData` for a graph-owned collection fails database creation. See the [`@proseql/core` README](https://www.npmjs.com/package/@proseql/core) for the full merge, transform, and migration semantics.
+
 ## Persistence Approaches
 
 Three ways to set up file persistence, from simplest to most configurable.

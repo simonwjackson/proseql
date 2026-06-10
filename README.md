@@ -135,6 +135,8 @@ Existing records write back to their origin file. New records without an origin 
 
 Document sources are strict by default: duplicate `(collection, id)` records across files and unknown top-level collection keys fail loudly. Use `unknownCollections: "preserve"` only when non-ProseQL top-level data must survive rewrites. YAML writes preserve data and sibling collection sections, not comments or exact original formatting. Node-backed document sources support watcher-driven whole-source reloads for normal `watch()` and `watchById()` subscribers.
 
+Need the opposite shape — many fragments merged into one read-only view rather than independent write targets? A `documentGraph` source overlays an ordered set of directory roots into one effective, read-only collection graph (later fragments win, mixed formats by extension, reload with last-known-good). See the [`@proseql/core`](packages/core/README.md) and [`@proseql/node`](packages/node/README.md) READMEs for details.
+
 ## Packages
 
 | Package | Description |
