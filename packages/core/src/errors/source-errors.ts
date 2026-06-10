@@ -51,9 +51,37 @@ export class InvalidDocumentSourceError extends Data.TaggedError(
 	readonly id?: string;
 }> {}
 
+/**
+ * Failure loading or building a `documentGraph` source. `kind` distinguishes a
+ * transform that returned a `Result` failure (`transform-failure`) from a
+ * transform that threw unexpectedly (`transform-defect`) and from structural
+ * load/validation failures.
+ */
+export class DocumentGraphSourceError extends Data.TaggedError(
+	"DocumentGraphSourceError",
+)<{
+	readonly sourceId: string;
+	readonly path: string;
+	readonly message: string;
+	readonly kind:
+		| "missing-root"
+		| "unsupported-extension"
+		| "transform-failure"
+		| "transform-defect"
+		| "non-object"
+		| "unknown-collection"
+		| "validation"
+		| "migration";
+	readonly collection?: string;
+	readonly recordId?: string;
+	readonly contributingPaths?: ReadonlyArray<string>;
+	readonly cause?: unknown;
+}> {}
+
 export type SourceError =
 	| SourceConfigError
 	| UnknownCollectionError
 	| DuplicateRecordError
 	| DuplicatePhysicalFileError
-	| InvalidDocumentSourceError;
+	| InvalidDocumentSourceError
+	| DocumentGraphSourceError;

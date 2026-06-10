@@ -59,6 +59,14 @@ const resolveSourceConfigPaths = (
 				...source,
 				directory: resolvePathFrom(configDir, source.directory),
 			};
+		case "documentGraph":
+			return {
+				...source,
+				roots: source.roots.map((rootConfig) => ({
+					...rootConfig,
+					root: resolvePathFrom(configDir, rootConfig.root),
+				})),
+			};
 	}
 };
 

@@ -1,3 +1,4 @@
+import type { Result } from "effect";
 import { SourceConfigError } from "../errors/source-errors.js";
 import type { CollectionConfig } from "../types/database-config-types.js";
 import { joinPath, normalizePath } from "../utils/path.js";
@@ -45,11 +46,51 @@ export interface AppendOnlyLogSourceConfig {
 	readonly format?: string;
 }
 
+/**
+ * Context passed to a {@link DocumentGraphTransform} for one decoded fragment.
+ */
+export interface DocumentGraphTransformContext {
+	readonly sourceId: string;
+	readonly rootId: string;
+	readonly path: string;
+	readonly extension: string;
+}
+
+/**
+ * Pure decode transform for a document-graph fragment. Receives the decoded
+ * document and returns a {@link Result}: success carries the (possibly reshaped)
+ * document, failure carries a user-defined typed error wrapped by the loader
+ * with source/path context.
+ */
+export type DocumentGraphTransform = (
+	document: unknown,
+	context: DocumentGraphTransformContext,
+) => Result.Result<unknown, unknown>;
+
+export interface DocumentGraphRootConfig {
+	readonly id?: string;
+	readonly root: string;
+	readonly optional?: boolean;
+	readonly include?: string | ReadonlyArray<string>;
+	readonly exclude?: string | ReadonlyArray<string>;
+}
+
+export interface DocumentGraphSourceConfig {
+	readonly id: string;
+	readonly kind: "documentGraph";
+	readonly roots: ReadonlyArray<DocumentGraphRootConfig>;
+	readonly collections?: SourceCollectionSelection;
+	readonly include?: string | ReadonlyArray<string>;
+	readonly exclude?: string | ReadonlyArray<string>;
+	readonly transform?: DocumentGraphTransform;
+}
+
 export type DatabaseSourceConfig =
 	| DocumentSourceConfig
 	| FileSourceConfig
 	| DirectorySourceConfig
-	| AppendOnlyLogSourceConfig;
+	| AppendOnlyLogSourceConfig
+	| DocumentGraphSourceConfig;
 
 export interface NormalizedDocumentSourceConfig {
 	readonly id: string;
@@ -65,7 +106,25 @@ export interface NormalizedDocumentSourceConfig {
 	readonly optional: boolean;
 }
 
-export type NormalizedDatabaseSourceConfig = NormalizedDocumentSourceConfig;
+export interface NormalizedDocumentGraphRootConfig {
+	readonly id: string;
+	readonly root: string;
+	readonly optional: boolean;
+	readonly include: ReadonlyArray<string>;
+	readonly exclude: ReadonlyArray<string>;
+}
+
+export interface NormalizedDocumentGraphSourceConfig {
+	readonly id: string;
+	readonly kind: "documentGraph";
+	readonly roots: ReadonlyArray<NormalizedDocumentGraphRootConfig>;
+	readonly collections: ReadonlyArray<string>;
+	readonly transform?: DocumentGraphTransform;
+}
+
+export type NormalizedDatabaseSourceConfig =
+	| NormalizedDocumentSourceConfig
+	| NormalizedDocumentGraphSourceConfig;
 
 export interface SourceOrientedConfigInput {
 	readonly collections: Record<string, CollectionConfig>;
@@ -83,6 +142,15 @@ const toArray = (
 	fallback: ReadonlyArray<string>,
 ): ReadonlyArray<string> => {
 	if (value === undefined) return fallback;
+	return typeof value === "string" ? [value] : [...value];
+};
+
+// Preserves the difference between "unset" (undefined) and "set to empty" so the
+// document-graph include-required rule can detect a genuinely absent include.
+const optionalToArray = (
+	value: string | ReadonlyArray<string> | undefined,
+): ReadonlyArray<string> | undefined => {
+	if (value === undefined) return undefined;
 	return typeof value === "string" ? [value] : [...value];
 };
 
@@ -169,6 +237,66 @@ export const normalizeSourceConfig = (
 			});
 		}
 		sourceIds.add(source.id);
+
+		if (source.kind === "documentGraph") {
+			const selectedCollections =
+				source.collections === undefined || source.collections === "all"
+					? collectionNames
+					: [...source.collections].sort();
+
+			for (const collection of selectedCollections) {
+				if (!collectionNameSet.has(collection)) {
+					throw new SourceConfigError({
+						message: `Source '${source.id}' references undeclared collection '${collection}'`,
+						sourceId: source.id,
+						collection,
+					});
+				}
+				const existingOwner = collectionSourceOwners.get(collection);
+				if (existingOwner !== undefined) {
+					throw new SourceConfigError({
+						message: `Collection '${collection}' is backed by both sources '${existingOwner}' and '${source.id}'`,
+						sourceId: source.id,
+						collection,
+					});
+				}
+				collectionSourceOwners.set(collection, source.id);
+			}
+
+			const graphInclude = optionalToArray(source.include);
+			const graphExclude = toArray(source.exclude, []);
+			const normalizedRoots = source.roots.map((rootConfig, index) => {
+				const rootInclude = optionalToArray(rootConfig.include);
+				const effectiveInclude = rootInclude ?? graphInclude;
+				if (effectiveInclude === undefined || effectiveInclude.length === 0) {
+					throw new SourceConfigError({
+						message: `Document graph source '${source.id}' root '${rootConfig.root}' has no include pattern; provide a graph-level or root-level include`,
+						sourceId: source.id,
+						path: rootConfig.root,
+					});
+				}
+				const rootExclude = toArray(rootConfig.exclude, []);
+				return {
+					id: rootConfig.id ?? `${source.id}:${index}`,
+					root: normalizeRoot(rootConfig.root),
+					optional: rootConfig.optional ?? false,
+					include: effectiveInclude,
+					exclude: [...graphExclude, ...rootExclude],
+				};
+			});
+
+			const normalizedGraph: NormalizedDocumentGraphSourceConfig = {
+				id: source.id,
+				kind: "documentGraph",
+				roots: normalizedRoots,
+				collections: selectedCollections,
+				...(source.transform !== undefined
+					? { transform: source.transform }
+					: {}),
+			};
+			sources.push(normalizedGraph);
+			continue;
+		}
 
 		if (source.kind !== "documents") {
 			const collection = source.collection;

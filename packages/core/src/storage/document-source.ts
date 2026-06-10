@@ -120,6 +120,9 @@ export const loadDocumentSources = (
 		const documents: LoadedDocument[] = [];
 
 		for (const source of config.sources) {
+			// documentGraph sources are loaded separately by loadDocumentGraphSources;
+			// the writable documents loader only handles `documents` sources.
+			if (source.kind !== "documents") continue;
 			yield* loadDocumentSource(
 				source,
 				collectionConfigs,
@@ -157,6 +160,16 @@ export const saveDocumentSource = (
 					sourceId: input.sourceId,
 					path: "",
 					message: `Unknown document source '${input.sourceId}'`,
+				}),
+			);
+		}
+		if (source.kind !== "documents") {
+			// documentGraph (and any future read-only source) has no write path.
+			return yield* Effect.fail(
+				new InvalidDocumentSourceError({
+					sourceId: input.sourceId,
+					path: "",
+					message: `Source '${input.sourceId}' is read-only and cannot be saved`,
 				}),
 			);
 		}

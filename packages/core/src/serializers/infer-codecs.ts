@@ -69,6 +69,12 @@ export const inferCodecsFromConfig = (
 				addFormat(source.format ?? "yaml");
 			} else if (source.kind === "directory") {
 				addFormat(source.format);
+			} else if (source.kind === "documentGraph") {
+				// A document graph is multi-format by definition: fragments are decoded
+				// by file extension, so every base codec must be available.
+				for (const format of Object.keys(CODEC_FACTORIES)) {
+					addFormat(format);
+				}
 			} else {
 				addFormat(source.format ?? getFileExtension(source.file));
 			}

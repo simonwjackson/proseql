@@ -66,6 +66,7 @@ export type {
 	SourceRecordOrigin,
 } from "./errors/source-errors.js";
 export {
+	DocumentGraphSourceError,
 	DuplicatePhysicalFileError,
 	DuplicateRecordError,
 	InvalidDocumentSourceError,
@@ -121,8 +122,14 @@ export type { OriginIndex, RecordOrigin } from "./storage/origin-index.js";
 export { getOrigin } from "./storage/origin-index.js";
 export type {
 	DatabaseSourceConfig,
+	DocumentGraphRootConfig,
+	DocumentGraphSourceConfig,
+	DocumentGraphTransform,
+	DocumentGraphTransformContext,
 	DocumentSourceConfig,
 	NormalizedDatabaseSourceConfig,
+	NormalizedDocumentGraphSourceConfig,
+	NormalizedDocumentGraphRootConfig,
 	NormalizedDocumentSourceConfig,
 	NormalizedSourceConfig,
 } from "./storage/source-config.js";

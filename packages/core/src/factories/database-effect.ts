@@ -2451,6 +2451,9 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		// (e.g., browser adapters in test environments), the database still functions
 		// without reactive file change detection.
 		for (const source of normalizedSourceConfig?.sources ?? []) {
+			// documentGraph sources have multiple roots and a separate reload path;
+			// they are watched below. This loop handles single-root documents sources.
+			if (source.kind !== "documents") continue;
 			yield* createDocumentSourceWatcher({
 				root: source.root,
 				onReload: reloadDocumentSources(source.id),
