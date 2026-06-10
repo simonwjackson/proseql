@@ -6,8 +6,16 @@ import type {
 } from "../src/errors/storage-errors.js";
 import { jsonCodec } from "../src/serializers/codecs/json.js";
 import { yamlCodec } from "../src/serializers/codecs/yaml.js";
-import { makeSerializerLayer } from "../src/serializers/format-codec.js";
-import { SerializerRegistry } from "../src/serializers/serializer-service.js";
+import {
+	makeSerializerLayer,
+	mergeSerializerWithPluginCodecs,
+} from "../src/serializers/format-codec.js";
+import {
+	getSupportedExtensions,
+	SerializerRegistry,
+	type SerializerRegistryShape,
+} from "../src/serializers/serializer-service.js";
+import type { FormatCodec } from "../src/serializers/format-codec.js";
 
 // Single-format layer for basic tests
 const JsonOnlyLayer = makeSerializerLayer([jsonCodec()]);
@@ -195,4 +203,65 @@ describe("SerializerRegistry service", () => {
 			}
 		});
 	});
+
+	describe("supportedExtensions introspection", () => {
+		it("lists every extension of the base codecs in registration order", () => {
+			const registry = makeSerializerLayer([jsonCodec(), yamlCodec()]).pipe(
+				(layer) =>
+					Effect.runSync(
+						Effect.provide(getSupportedExtensions, layer),
+					),
+			);
+			expect(registry).toContain("json");
+			expect(registry).toContain("yaml");
+			expect(registry).toContain("yml");
+		});
+
+		it("returns an empty list for an empty registry", () => {
+			const extensions = Effect.runSync(
+				Effect.provide(getSupportedExtensions, makeSerializerLayer([])),
+			);
+			expect(extensions).toEqual([]);
+		});
+
+		it("includes plugin-added extensions (active registry, not built-in only)", () => {
+			const base: SerializerRegistryShape = makeBaseShape();
+			const customCodec: FormatCodec = {
+				name: "custom",
+				extensions: ["cfg"],
+				encode: (data) => JSON.stringify(data),
+				decode: (raw) => JSON.parse(raw),
+			};
+			const merged = mergeSerializerWithPluginCodecs(base, [customCodec]);
+			expect(merged.supportedExtensions()).toContain("json");
+			expect(merged.supportedExtensions()).toContain("cfg");
+		});
+
+		it("produces a product-agnostic extension-only result", () => {
+			const extensions = Effect.runSync(
+				Effect.provide(
+					getSupportedExtensions,
+					makeSerializerLayer([jsonCodec()]),
+				),
+			);
+			for (const ext of extensions) {
+				expect(ext.includes(".")).toBe(false);
+				expect(ext.includes("/")).toBe(false);
+			}
+		});
+	});
 });
+
+function makeBaseShape(): SerializerRegistryShape {
+	let captured: SerializerRegistryShape | undefined;
+	Effect.runSync(
+		Effect.provide(
+			Effect.gen(function* () {
+				captured = yield* SerializerRegistry;
+			}),
+			makeSerializerLayer([jsonCodec(), yamlCodec()]),
+		),
+	);
+	if (captured === undefined) throw new Error("registry not captured");
+	return captured;
+}

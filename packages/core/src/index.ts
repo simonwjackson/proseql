@@ -411,7 +411,10 @@ export {
 } from "./serializers/presets.js";
 export type { SerializerRegistryShape } from "./serializers/serializer-service.js";
 // Serializer registry service
-export { SerializerRegistry as SerializerRegistryService } from "./serializers/serializer-service.js";
+export {
+	getSupportedExtensions,
+	SerializerRegistry as SerializerRegistryService,
+} from "./serializers/serializer-service.js";
 
 // ============================================================================
 // Data Transformation Utilities

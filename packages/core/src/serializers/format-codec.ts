@@ -77,7 +77,11 @@ export const makeSerializerLayer = (
 		.map((ext) => `.${ext}`)
 		.join(", ");
 
+	// Stable registration-order list of decodable extensions (no leading dots).
+	const registeredExtensions = Array.from(extensionMap.keys());
+
 	const registry: SerializerRegistryShape = {
+		supportedExtensions: () => registeredExtensions,
 		serialize: (data, extension) => {
 			const codec = extensionMap.get(extension);
 			if (!codec) {
@@ -174,7 +178,22 @@ export const mergeSerializerWithPluginCodecs = (
 		}
 	}
 
+	// Active-registry extensions: base extensions, then any plugin-added
+	// extensions not already present. De-duplicated, stable order.
+	const mergedExtensions = (() => {
+		const seen = new Set(baseRegistry.supportedExtensions());
+		const extensions = [...baseRegistry.supportedExtensions()];
+		for (const ext of pluginExtensionMap.keys()) {
+			if (!seen.has(ext)) {
+				seen.add(ext);
+				extensions.push(ext);
+			}
+		}
+		return extensions;
+	})();
+
 	return {
+		supportedExtensions: () => mergedExtensions,
 		serialize: (data, extension) => {
 			// Check plugin codecs first (plugins take precedence)
 			const pluginCodec = pluginExtensionMap.get(extension);
