@@ -80,6 +80,84 @@ describe("documentGraph database integration", () => {
 		);
 	});
 
+	it("exposes documentGraph record provenance through a database helper", async () => {
+		const store = seedStore();
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const db = yield* Effect.provide(
+						createPersistentEffectDatabase(graphConfig(), undefined, {
+							writeDebounce: 60_000,
+						}),
+						makeLayer(store),
+					);
+					const provenance = yield* db.$documentGraph.getRecordProvenance(
+						"foods",
+						"apple",
+					);
+					expect(provenance).toMatchObject({
+						sourceId: "config-graph",
+						collection: "foods",
+						id: "apple",
+						effectiveContributor: {
+							rootId: "config-graph:1",
+							path: "/b/over.yaml",
+						},
+					});
+					expect(provenance?.contributors.map((c) => c.path)).toEqual([
+						"/a/base.yaml",
+						"/b/over.yaml",
+					]);
+					expect(
+						yield* db.$documentGraph.getRecordProvenance("foods", "missing"),
+					).toBeUndefined();
+				}),
+			),
+		);
+	});
+
+	it("exposes documentGraph skip diagnostics through a database helper", async () => {
+		const store = new Map<string, string>([
+			[
+				"/a/good.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
+			["/a/bad.ini", "foods=bad"],
+		]);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const db = yield* Effect.provide(
+						createPersistentEffectDatabase(
+							graphConfig({
+								sources: [
+									{
+										id: "config-graph",
+										kind: "documentGraph",
+										include: "**/*",
+										roots: [{ root: "/a" }],
+										onFragmentError: "skip-fragment",
+									},
+								],
+							}),
+							undefined,
+							{ writeDebounce: 60_000 },
+						),
+						makeLayer(store),
+					);
+					const diagnostics = yield* db.$documentGraph.getDiagnostics();
+					expect(diagnostics).toHaveLength(1);
+					expect(diagnostics[0]).toMatchObject({
+						sourceId: "config-graph",
+						rootId: "config-graph:0",
+						path: "/a/bad.ini",
+						action: "skipped-fragment",
+					});
+				}),
+			),
+		);
+	});
+
 	it("rejects every mutation on a graph-owned collection without changing state", async () => {
 		const store = seedStore();
 		await Effect.runPromise(
@@ -276,6 +354,89 @@ describe("documentGraph watcher reloads", () => {
 					expect(yield* db.foods.findById("apple")).toMatchObject({
 						macros: { cal: 50 },
 					});
+				}),
+			).pipe(Effect.provide(layer)),
+		);
+	});
+
+	it("updates documentGraph provenance after a valid reload", async () => {
+		const store = new Map<string, string>([
+			[
+				"/a/base.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
+		]);
+		const layer = makeLayer(store);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const db = yield* createPersistentEffectDatabase(
+						reloadConfig(),
+						undefined,
+						{ writeDebounce: 60_000 },
+					);
+					const storage = yield* StorageAdapter;
+					expect(
+						(yield* db.$documentGraph.getRecordProvenance(
+							"foods",
+							"apple",
+						))?.contributors.map((c) => c.path),
+					).toEqual(["/a/base.yaml"]);
+
+					yield* storage.write(
+						"/a/over.yaml",
+						"foods:\n  apple:\n    macros: { fat: 2 }\n",
+					);
+					yield* Effect.sleep("200 millis");
+					expect(
+						(yield* db.$documentGraph.getRecordProvenance(
+							"foods",
+							"apple",
+						))?.contributors.map((c) => c.path),
+					).toEqual(["/a/base.yaml", "/a/over.yaml"]);
+				}),
+			).pipe(Effect.provide(layer)),
+		);
+	});
+
+	it("updates documentGraph diagnostics after a skip-policy reload", async () => {
+		const store = new Map<string, string>([
+			[
+				"/a/base.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
+		]);
+		const layer = makeLayer(store);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const db = yield* createPersistentEffectDatabase(
+						{
+							...reloadConfig(),
+							sources: [
+								{
+									id: "config-graph",
+									kind: "documentGraph",
+									include: "**/*",
+									roots: [{ root: "/a" }],
+									onFragmentError: "skip-fragment",
+								},
+							],
+						} as const,
+						undefined,
+						{ writeDebounce: 60_000 },
+					);
+					const storage = yield* StorageAdapter;
+					expect(yield* db.$documentGraph.getDiagnostics()).toEqual([]);
+
+					yield* storage.write("/a/bad.ini", "foods=bad");
+					yield* Effect.sleep("200 millis");
+					expect(yield* db.$documentGraph.getDiagnostics()).toContainEqual(
+						expect.objectContaining({
+							path: "/a/bad.ini",
+							action: "skipped-fragment",
+						}),
+					);
 				}),
 			).pipe(Effect.provide(layer)),
 		);

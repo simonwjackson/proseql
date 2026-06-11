@@ -84,6 +84,46 @@ describe("documentGraph config normalization", () => {
 		expect(source.roots[1].optional).toBe(false);
 	});
 
+	it("defaults documentGraph fragment error handling to strict error mode", () => {
+		const source = onlyGraph(graphSource());
+		expect(source.onFragmentError).toBe("error");
+	});
+
+	it("normalizes an explicit documentGraph fragment error policy", () => {
+		const source = onlyGraph(
+			graphSource({
+				onFragmentError: "skip-fragment",
+			}),
+		);
+		expect(source.onFragmentError).toBe("skip-fragment");
+	});
+
+	it("lets a root-level collection allowlist narrow graph-level collections", () => {
+		const source = onlyGraph(
+			graphSource({
+				collections: ["foods", "drinks"],
+				roots: [
+					{ root: "/trusted", collections: "all" },
+					{ root: "/media", collections: ["foods"] },
+				],
+			}),
+		);
+		expect(source.collections).toEqual(["drinks", "foods"]);
+		expect(source.roots[0].collections).toEqual(["drinks", "foods"]);
+		expect(source.roots[1].collections).toEqual(["foods"]);
+	});
+
+	it("rejects a root collection outside the graph source collections", () => {
+		expect(() =>
+			normalizeSourceConfig(
+				graphSource({
+					collections: ["foods"],
+					roots: [{ root: "/media", collections: ["drinks"] }],
+				}),
+			),
+		).toThrowError(SourceConfigError);
+	});
+
 	it("fails when neither graph nor a root provides an include", () => {
 		expect(() =>
 			normalizeSourceConfig(

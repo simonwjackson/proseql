@@ -10,6 +10,7 @@
 // ============================================================================
 
 export type {
+	DocumentGraphMetadata,
 	EffectCollection,
 	EffectDatabase,
 	EffectDatabaseOptions,
@@ -116,7 +117,13 @@ export { makeProseQLTag } from "./context-tag.js";
 // Core Types and Configurations
 // ============================================================================
 
-export type { LoadedDocumentGraph } from "./storage/document-graph-source.js";
+export type {
+	DocumentGraphDiagnostic,
+	DocumentGraphDiagnosticAction,
+	DocumentGraphRecordContribution,
+	DocumentGraphRecordProvenance,
+	LoadedDocumentGraph,
+} from "./storage/document-graph-source.js";
 export { loadDocumentGraphSources } from "./storage/document-graph-source.js";
 export type { LoadedDocumentSources } from "./storage/document-source.js";
 export { loadDocumentSources } from "./storage/document-source.js";
@@ -124,6 +131,7 @@ export type { OriginIndex, RecordOrigin } from "./storage/origin-index.js";
 export { getOrigin } from "./storage/origin-index.js";
 export type {
 	DatabaseSourceConfig,
+	DocumentGraphFragmentErrorPolicy,
 	DocumentGraphRootConfig,
 	DocumentGraphSourceConfig,
 	DocumentGraphTransform,

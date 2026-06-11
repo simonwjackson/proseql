@@ -11,6 +11,7 @@ import type {
 	UnsupportedFormatError,
 } from "../errors/storage-errors.js";
 import type {
+	DocumentGraphMetadata,
 	EffectCollection,
 	RunnableEffect,
 	RunnableStream,
@@ -931,6 +932,7 @@ export type GenerateDatabase<Config> = {
 			ctx: TransactionContext<GenerateDatabase<Config>>,
 		) => Effect.Effect<A, E>,
 	): Effect.Effect<A, E | TransactionError>;
+	readonly $documentGraph: DocumentGraphMetadata;
 };
 
 /**

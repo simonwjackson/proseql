@@ -148,6 +148,90 @@ describe("documentGraph through @proseql/node", () => {
 		}
 	});
 
+	it("exposes provenance for real filesystem graph fragments", async () => {
+		const rootA = join(tempDir, "a");
+		const rootB = join(tempDir, "b");
+		await fs.mkdir(rootA, { recursive: true });
+		await fs.mkdir(rootB, { recursive: true });
+		await fs.writeFile(
+			join(rootA, "apple.yaml"),
+			"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+		);
+		await fs.writeFile(
+			join(rootB, "apple-over.yaml"),
+			"foods:\n  apple:\n    macros: { fat: 2 }\n",
+		);
+
+		const provenance = await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const db = yield* createNodeDatabase(
+						graphConfig(rootA, rootB),
+						undefined,
+						{ writeDebounce: 60_000 },
+					);
+					return yield* db.$documentGraph.getRecordProvenance("foods", "apple");
+				}),
+			),
+		);
+		expect(provenance?.contributors.map((c) => c.path)).toEqual([
+			join(rootA, "apple.yaml"),
+			join(rootB, "apple-over.yaml"),
+		]);
+		expect(provenance?.effectiveContributor.rootId).toBe("config-graph:1");
+	});
+
+	it("loads valid real files and reports diagnostics for skipped fragments", async () => {
+		const rootA = join(tempDir, "a");
+		await fs.mkdir(rootA, { recursive: true });
+		await fs.writeFile(
+			join(rootA, "apple.yaml"),
+			"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+		);
+		await fs.writeFile(join(rootA, "bad.ini"), "foods=bad");
+
+		const { ids, diagnostics } = await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const db = yield* createNodeDatabase(
+						{
+							collections: {
+								foods: {
+									schema: FoodSchema,
+									id: { kind: "derivedFromKey", field: "id" },
+									relationships: {},
+								},
+							},
+							sources: [
+								{
+									id: "config-graph",
+									kind: "documentGraph",
+									include: "**/*",
+									roots: [{ root: rootA }],
+									onFragmentError: "skip-fragment",
+								},
+							],
+						} as const,
+						undefined,
+						{ writeDebounce: 60_000 },
+					);
+					const foods = yield* Stream.runCollect(db.foods.query());
+					return {
+						ids: foods.map((f) => f.id),
+						diagnostics: yield* db.$documentGraph.getDiagnostics(),
+					};
+				}),
+			),
+		);
+		expect(ids).toEqual(["apple"]);
+		expect(diagnostics).toContainEqual(
+			expect.objectContaining({
+				path: join(rootA, "bad.ini"),
+				action: "skipped-fragment",
+			}),
+		);
+	});
+
 	it("treats an optional missing root on disk as an empty contribution", async () => {
 		const rootA = join(tempDir, "a");
 		const rootB = join(tempDir, "missing");

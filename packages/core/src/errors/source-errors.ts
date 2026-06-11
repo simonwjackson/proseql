@@ -66,6 +66,7 @@ export class DocumentGraphSourceError extends Data.TaggedError(
 	readonly kind:
 		| "missing-root"
 		| "unsupported-extension"
+		| "deserialize"
 		| "transform-failure"
 		| "transform-defect"
 		| "non-object"

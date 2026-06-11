@@ -87,7 +87,11 @@ import {
 	mergeSerializerWithPluginCodecs,
 } from "../serializers/format-codec.js";
 import { SerializerRegistry } from "../serializers/serializer-service.js";
-import { loadDocumentGraphSources } from "../storage/document-graph-source.js";
+import {
+	type DocumentGraphDiagnostic,
+	type DocumentGraphRecordProvenance,
+	loadDocumentGraphSources,
+} from "../storage/document-graph-source.js";
 import {
 	loadDocumentSources,
 	saveDocumentSource,
@@ -435,6 +439,16 @@ export interface EffectCollection<T extends HasId> {
  * Database type: a record of collection names to EffectCollections,
  * plus the $transaction method for atomic operations.
  */
+export interface DocumentGraphMetadata {
+	readonly getRecordProvenance: (
+		collection: string,
+		id: string,
+	) => Effect.Effect<DocumentGraphRecordProvenance | undefined>;
+	readonly getDiagnostics: () => Effect.Effect<
+		ReadonlyArray<DocumentGraphDiagnostic>
+	>;
+}
+
 export type EffectDatabase<Config extends DatabaseConfig> = {
 	readonly [K in keyof ConfiguredCollections<Config>]: EffectCollection<
 		Schema.Schema.Type<ConfiguredCollections<Config>[K]["schema"]> & HasId
@@ -448,6 +462,7 @@ export type EffectDatabase<Config extends DatabaseConfig> = {
 	readonly $transaction: <A, E>(
 		fn: (ctx: TransactionContext) => Effect.Effect<A, E>,
 	) => RunnableEffect<A, E | TransactionError>;
+	readonly $documentGraph: DocumentGraphMetadata;
 };
 
 /**
@@ -1736,9 +1751,15 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 				) => Effect.Effect<A, E>,
 			);
 
+		const $documentGraph: DocumentGraphMetadata = {
+			getRecordProvenance: () => Effect.succeed(undefined),
+			getDiagnostics: () => Effect.succeed([]),
+		};
+
 		// Return database with $transaction method
 		return Object.assign(collections, {
 			$transaction: $transactionMethod,
+			$documentGraph,
 		}) as unknown as GenerateDatabase<Config>;
 	});
 
@@ -2048,6 +2069,12 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 						serviceLayer,
 					)
 				: undefined;
+		const documentGraphProvenanceRef = yield* Ref.make<
+			ReadonlyMap<string, DocumentGraphRecordProvenance>
+		>(loadedDocumentGraph?.provenance ?? new Map());
+		const documentGraphDiagnosticsRef = yield* Ref.make<
+			ReadonlyArray<DocumentGraphDiagnostic>
+		>(loadedDocumentGraph?.diagnostics ?? []);
 
 		// 2. Create transaction lock for single-writer isolation
 		const transactionLock = yield* Ref.make(false);
@@ -2549,6 +2576,9 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 					const loaded = yield* loadDocumentGraphSources(
 						normalizedSourceConfig,
 					);
+					yield* Ref.set(documentGraphProvenanceRef, loaded.provenance);
+					yield* Ref.set(documentGraphDiagnosticsRef, loaded.diagnostics);
+
 					for (const collectionName of source.collections) {
 						const newData =
 							loaded.collections[collectionName] ?? new Map<string, HasId>();
@@ -2733,10 +2763,19 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			await Promise.all(appendOnlyFlushes);
 		};
 
+		const $documentGraph: DocumentGraphMetadata = {
+			getRecordProvenance: (collection, id) =>
+				Ref.get(documentGraphProvenanceRef).pipe(
+					Effect.map((index) => index.get(`${collection}\u0000${id}`)),
+				),
+			getDiagnostics: () => Ref.get(documentGraphDiagnosticsRef),
+		};
+
 		return Object.assign(db, {
 			flush: flushAll,
 			pendingCount: () => trigger.pendingCount(),
 			$dryRunMigrations: dryRunMigrationsFn,
 			$transaction: $transactionMethod,
+			$documentGraph,
 		}) as GenerateDatabaseWithPersistence<Config>;
 	});

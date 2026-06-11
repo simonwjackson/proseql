@@ -7,6 +7,10 @@ export type SourceCollectionSelection = "all" | ReadonlyArray<string>;
 
 export type SourceStrictness = "error";
 export type UnknownCollectionPolicy = "error" | "preserve";
+export type DocumentGraphFragmentErrorPolicy =
+	| "error"
+	| "skip-fragment"
+	| "skip-root";
 
 export interface DocumentSourceConfig {
 	readonly id: string;
@@ -73,6 +77,7 @@ export interface DocumentGraphRootConfig {
 	readonly optional?: boolean;
 	readonly include?: string | ReadonlyArray<string>;
 	readonly exclude?: string | ReadonlyArray<string>;
+	readonly collections?: SourceCollectionSelection;
 }
 
 export interface DocumentGraphSourceConfig {
@@ -83,6 +88,7 @@ export interface DocumentGraphSourceConfig {
 	readonly include?: string | ReadonlyArray<string>;
 	readonly exclude?: string | ReadonlyArray<string>;
 	readonly transform?: DocumentGraphTransform;
+	readonly onFragmentError?: DocumentGraphFragmentErrorPolicy;
 }
 
 export type DatabaseSourceConfig =
@@ -112,6 +118,7 @@ export interface NormalizedDocumentGraphRootConfig {
 	readonly optional: boolean;
 	readonly include: ReadonlyArray<string>;
 	readonly exclude: ReadonlyArray<string>;
+	readonly collections: ReadonlyArray<string>;
 }
 
 export interface NormalizedDocumentGraphSourceConfig {
@@ -120,6 +127,7 @@ export interface NormalizedDocumentGraphSourceConfig {
 	readonly roots: ReadonlyArray<NormalizedDocumentGraphRootConfig>;
 	readonly collections: ReadonlyArray<string>;
 	readonly transform?: DocumentGraphTransform;
+	readonly onFragmentError: DocumentGraphFragmentErrorPolicy;
 }
 
 export type NormalizedDatabaseSourceConfig =
@@ -159,6 +167,29 @@ const defaultIncludesForFormat = (format: string): ReadonlyArray<string> =>
 
 const normalizeRoot = (root: string): string =>
 	normalizePath(root).replace(/\/$/, "");
+
+const documentGraphFragmentErrorPolicies = new Set<string>([
+	"error",
+	"skip-fragment",
+	"skip-root",
+]);
+
+const normalizeDocumentGraphFragmentErrorPolicy = (
+	value: unknown,
+	sourceId: string,
+): DocumentGraphFragmentErrorPolicy => {
+	if (value === undefined) return "error";
+	if (
+		typeof value === "string" &&
+		documentGraphFragmentErrorPolicies.has(value)
+	) {
+		return value as DocumentGraphFragmentErrorPolicy;
+	}
+	throw new SourceConfigError({
+		message: `Document graph source '${sourceId}' has invalid onFragmentError policy`,
+		sourceId,
+	});
+};
 
 export const relativeToRoot = (root: string, path: string): string => {
 	const normalizedRoot = normalizeRoot(root);
@@ -243,6 +274,11 @@ export const normalizeSourceConfig = (
 				source.collections === undefined || source.collections === "all"
 					? collectionNames
 					: [...source.collections].sort();
+			const selectedCollectionSet = new Set(selectedCollections);
+			const onFragmentError = normalizeDocumentGraphFragmentErrorPolicy(
+				source.onFragmentError,
+				source.id,
+			);
 
 			for (const collection of selectedCollections) {
 				if (!collectionNameSet.has(collection)) {
@@ -275,6 +311,21 @@ export const normalizeSourceConfig = (
 						path: rootConfig.root,
 					});
 				}
+				const rootCollections =
+					rootConfig.collections === undefined ||
+					rootConfig.collections === "all"
+						? selectedCollections
+						: [...rootConfig.collections].sort();
+				for (const collection of rootCollections) {
+					if (!selectedCollectionSet.has(collection)) {
+						throw new SourceConfigError({
+							message: `Document graph source '${source.id}' root '${rootConfig.root}' references collection '${collection}' outside the graph source collections`,
+							sourceId: source.id,
+							collection,
+							path: rootConfig.root,
+						});
+					}
+				}
 				const rootExclude = toArray(rootConfig.exclude, []);
 				return {
 					id: rootConfig.id ?? `${source.id}:${index}`,
@@ -282,6 +333,7 @@ export const normalizeSourceConfig = (
 					optional: rootConfig.optional ?? false,
 					include: effectiveInclude,
 					exclude: [...graphExclude, ...rootExclude],
+					collections: rootCollections,
 				};
 			});
 
@@ -290,6 +342,7 @@ export const normalizeSourceConfig = (
 				kind: "documentGraph",
 				roots: normalizedRoots,
 				collections: selectedCollections,
+				onFragmentError,
 				...(source.transform !== undefined
 					? { transform: source.transform }
 					: {}),

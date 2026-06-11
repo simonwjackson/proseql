@@ -21,6 +21,10 @@ const FoodPayload = Schema.Struct({
 	}),
 });
 
+const DrinkPayload = Schema.Struct({
+	name: Schema.String,
+});
+
 const makeLayer = (store: Map<string, string>) =>
 	Layer.merge(
 		makeInMemoryStorageLayer(store),
@@ -166,6 +170,31 @@ describe("loadDocumentGraphSources", () => {
 		expect(paths).toEqual(["/a/base.yaml", "/b/over.yaml"]);
 	});
 
+	it("records structured provenance with contributors and latest contributor", async () => {
+		const store = new Map<string, string>([
+			[
+				"/a/base.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
+			["/b/over.yaml", "foods:\n  apple:\n    macros: { fat: 2 }\n"],
+		]);
+		const graph = await load(store);
+		const provenance = graph.provenance.get("foods\u0000apple");
+		expect(provenance).toMatchObject({
+			sourceId: "graph",
+			collection: "foods",
+			id: "apple",
+			effectiveContributor: {
+				rootId: "graph:1",
+				path: "/b/over.yaml",
+			},
+		});
+		expect(provenance?.contributors).toEqual([
+			expect.objectContaining({ rootId: "graph:0", path: "/a/base.yaml" }),
+			expect.objectContaining({ rootId: "graph:1", path: "/b/over.yaml" }),
+		]);
+	});
+
 	it("fails when a matched file has an unregistered extension", async () => {
 		const store = new Map<string, string>([["/a/data.ini", "foods=bad"]]);
 		const config = baseConfig({
@@ -180,6 +209,63 @@ describe("loadDocumentGraphSources", () => {
 				"unsupported-extension",
 			);
 		}
+	});
+
+	it("skips a bad fragment when onFragmentError is skip-fragment", async () => {
+		const store = new Map<string, string>([
+			[
+				"/a/good.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
+			["/a/bad.ini", "foods=bad"],
+		]);
+		const graph = await load(
+			store,
+			baseConfig({
+				include: "**/*",
+				roots: [{ root: "/a" }],
+				onFragmentError: "skip-fragment",
+			}),
+		);
+		expect([...graph.collections.foods.keys()]).toEqual(["apple"]);
+		expect(graph.diagnostics).toHaveLength(1);
+		expect(graph.diagnostics[0]).toMatchObject({
+			sourceId: "graph",
+			rootId: "graph:0",
+			path: "/a/bad.ini",
+			action: "skipped-fragment",
+		});
+		expect(graph.diagnostics[0]?.error.kind).toBe("unsupported-extension");
+	});
+
+	it("skips every fragment in a root when onFragmentError is skip-root", async () => {
+		const store = new Map<string, string>([
+			[
+				"/a/apple.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+			],
+			[
+				"/b/banana.yaml",
+				"foods:\n  banana:\n    name: Banana\n    macros: { cal: 90 }\n",
+			],
+			["/b/bad.ini", "foods=bad"],
+		]);
+		const graph = await load(
+			store,
+			baseConfig({
+				include: "**/*",
+				roots: [{ root: "/a" }, { root: "/b" }],
+				onFragmentError: "skip-root",
+			}),
+		);
+		expect([...graph.collections.foods.keys()]).toEqual(["apple"]);
+		expect(graph.diagnostics).toHaveLength(1);
+		expect(graph.diagnostics[0]).toMatchObject({
+			sourceId: "graph",
+			rootId: "graph:1",
+			path: "/b/bad.ini",
+			action: "skipped-root",
+		});
 	});
 
 	it("fails when a decode transform returns a Result failure", async () => {
@@ -253,6 +339,53 @@ describe("loadDocumentGraphSources", () => {
 			expect(error.kind).toBe("unknown-collection");
 			expect(error.collection).toBe("drinks");
 		}
+	});
+
+	it("ignores graph-owned collections that are disallowed by the contributing root", async () => {
+		const config: SourceOrientedConfigInput = {
+			collections: {
+				foods: {
+					schema: FoodPayload,
+					id: { kind: "derivedFromKey", field: "id" },
+					relationships: {},
+				},
+				drinks: {
+					schema: DrinkPayload,
+					id: { kind: "derivedFromKey", field: "id" },
+					relationships: {},
+				},
+			},
+			sources: [
+				{
+					id: "graph",
+					kind: "documentGraph",
+					include: "**/*.yaml",
+					collections: "all",
+					roots: [
+						{ root: "/trusted" },
+						{ root: "/media", collections: ["foods"] },
+					],
+				},
+			],
+		} as SourceOrientedConfigInput;
+		const store = new Map<string, string>([
+			["/trusted/base.yaml", "drinks:\n  water:\n    name: Water\n"],
+			[
+				"/media/card.yaml",
+				"foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\ndrinks:\n  soda:\n    name: Soda\n",
+			],
+		]);
+		const graph = await load(store, config);
+		expect([...graph.collections.foods.keys()]).toEqual(["apple"]);
+		expect([...graph.collections.drinks.keys()]).toEqual(["water"]);
+		expect(graph.diagnostics).toContainEqual(
+			expect.objectContaining({
+				rootId: "graph:1",
+				path: "/media/card.yaml",
+				action: "ignored-collection",
+				collection: "drinks",
+			}),
+		);
 	});
 
 	it("fails an effective record that violates the schema, naming collection, id, and contributing paths", async () => {

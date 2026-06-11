@@ -1010,8 +1010,12 @@ const config = {
       include: "**/*.config.{yaml,json,toml}",
       roots: [
         { root: "./config/base" },
-        { root: "./config/overrides", optional: true },
+        // Root-level collections narrow what this root may contribute.
+        { root: "./config/overrides", optional: true, collections: ["foods"] },
       ],
+      // Default: "error". Opt into "skip-fragment" or "skip-root" when
+      // a bad removable/user-provided fragment should not reject the whole graph.
+      onFragmentError: "skip-fragment",
       // Optional pure decode transform per fragment (returns a Result).
       // transform: (doc, ctx) => Result.succeed(reshape(doc)),
     },
@@ -1022,18 +1026,33 @@ const config = {
 How a graph is built:
 
 - **Discovery is opt-in.** Every root needs an effective `include` glob — supplied at the graph level or per root (a root-level `include` overrides the graph-level one; `exclude` patterns combine). Real glob semantics (`**`, brace groups) are supported.
-- **Mixed formats by extension.** Each matched file is decoded by its extension through the active serializer registry, so one graph can mix YAML, JSON, TOML, and so on. A matched file whose extension is not registered fails the load with a path-attributed error.
+- **Mixed formats by extension.** Each matched file is decoded by its extension through the active serializer registry, so one graph can mix YAML, JSON, TOML, and so on. A matched file whose extension is not registered fails the load with a path-attributed error unless an explicit skip policy contains it.
 - **Pure decode transform.** An optional `transform(document, context)` hook may reshape each decoded fragment, returning a `Result` (`Result.succeed` → transformed document, `Result.fail` → typed error). After the transform the value must be a plain object.
+- **Root collection allowlists.** A root-level `collections` setting narrows the graph-level collection set for that root. Known graph collections outside the root allowlist are ignored for that root; truly unknown top-level keys still fail or are skipped according to `onFragmentError`.
 - **Deterministic overlay merge.** Fragments merge in order — roots in configured order, then files lexically within a root, later wins. Objects merge recursively; arrays, scalars, and `null` replace. There is no delete/tombstone syntax.
 - **Migrate per fragment, validate after merge.** Per-collection migrations run on each fragment using that fragment's own `_version` (bringing every fragment to the current schema version) *before* merge; the merged effective records are validated once. A partial overlay that is only valid once combined still passes.
 
 Read-only and lifecycle behavior:
 
 - **Graph-owned collections are read-only.** Every mutation (`create`/`update`/`delete`/`upsert` and their `*Many` / `*WithRelationships` variants) fails with `OperationError` (`reason: "read-only-source"`) before touching in-memory state, including inside `$transaction`. No writes are ever scheduled.
-- **`initialData` for a graph-owned collection fails database creation**, as does an invalid initial graph.
-- **Watched roots reload with last-known-good.** A valid fragment change rebuilds and replaces the active graph and notifies `watch()` subscribers; an invalid reload keeps the previous valid graph and logs a warning. Roots absent at startup are not watched (no late detection).
+- **`initialData` for a graph-owned collection fails database creation**, as does an invalid initial graph under the default strict policy.
+- **Fragment/root containment is opt-in.** `onFragmentError: "error"` is the default. `"skip-fragment"` excludes only the bad fragment; `"skip-root"` excludes the entire root for that rebuild. Skipped entries are available through diagnostics so leniency is not silent.
+- **Watched roots reload with last-known-good.** A valid fragment change rebuilds and replaces the active graph and notifies `watch()` subscribers; an invalid reload keeps the previous valid graph and logs a warning. When a skip policy turns a bad fragment/root into a valid rebuild, the active graph and diagnostics update together. Roots absent at startup are not watched (no late detection).
 
-v1 limits: CLI command support and a graph lifecycle event API are deferred; record provenance is internal (used only to enrich error messages); the existing `documents` source is unchanged.
+Graph metadata is available without changing record shapes:
+
+```ts
+const appleProvenance = yield* db.$documentGraph.getRecordProvenance(
+  "foods",
+  "apple",
+)
+
+const diagnostics = yield* db.$documentGraph.getDiagnostics()
+```
+
+`appleProvenance` includes the source id, collection, record id, ordered contributors, and latest/effective contributor. Diagnostics include skipped fragments/roots and ignored root-disallowed collections with source/root/path context.
+
+v1 limits: CLI command support, write/outbox support, delete/tombstone semantics, and a full graph lifecycle event API are deferred; the existing `documents` source is unchanged.
 
 For Node.js filesystem persistence and watcher support, see [`@proseql/node`](https://www.npmjs.com/package/@proseql/node). For browser storage (localStorage, sessionStorage, IndexedDB), see [`@proseql/browser`](https://www.npmjs.com/package/@proseql/browser).
 

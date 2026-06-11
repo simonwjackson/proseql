@@ -32,9 +32,43 @@ import { StorageAdapter } from "./storage-service.js";
  * record-level provenance (which file paths contributed each record), used only
  * to enrich error messages.
  */
+export type DocumentGraphDiagnosticAction =
+	| "skipped-fragment"
+	| "skipped-root"
+	| "ignored-collection";
+
+export interface DocumentGraphDiagnostic {
+	readonly sourceId: string;
+	readonly rootId: string;
+	readonly path?: string;
+	readonly action: DocumentGraphDiagnosticAction;
+	readonly collection?: string;
+	readonly recordId?: string;
+	readonly message: string;
+	readonly error?: DocumentGraphSourceError;
+}
+
+export interface DocumentGraphRecordContribution {
+	readonly sourceId: string;
+	readonly rootId: string;
+	readonly path: string;
+	readonly collection: string;
+	readonly id: string;
+}
+
+export interface DocumentGraphRecordProvenance {
+	readonly sourceId: string;
+	readonly collection: string;
+	readonly id: string;
+	readonly contributors: ReadonlyArray<DocumentGraphRecordContribution>;
+	readonly effectiveContributor: DocumentGraphRecordContribution;
+}
+
 export interface LoadedDocumentGraph {
 	readonly collections: Record<string, ReadonlyMap<string, HasId>>;
 	readonly contributingPaths: ReadonlyMap<string, ReadonlyArray<string>>;
+	readonly provenance: ReadonlyMap<string, DocumentGraphRecordProvenance>;
+	readonly diagnostics: ReadonlyArray<DocumentGraphDiagnostic>;
 }
 
 type CollectionLoadConfig = {
@@ -80,6 +114,8 @@ export const loadDocumentGraphSources = (
 	Effect.gen(function* () {
 		const collections: Record<string, Map<string, HasId>> = {};
 		const contributingPaths = new Map<string, string[]>();
+		const provenance = new Map<string, DocumentGraphRecordProvenance>();
+		const diagnostics: DocumentGraphDiagnostic[] = [];
 
 		const graphSources = config.sources.filter(
 			(source): source is NormalizedDocumentGraphSourceConfig =>
@@ -87,10 +123,17 @@ export const loadDocumentGraphSources = (
 		);
 
 		for (const source of graphSources) {
-			yield* loadGraphSource(source, config, collections, contributingPaths);
+			yield* loadGraphSource(
+				source,
+				config,
+				collections,
+				contributingPaths,
+				provenance,
+				diagnostics,
+			);
 		}
 
-		return { collections, contributingPaths };
+		return { collections, contributingPaths, provenance, diagnostics };
 	});
 
 const loadGraphSource = (
@@ -98,6 +141,8 @@ const loadGraphSource = (
 	config: NormalizedSourceConfig,
 	collections: Record<string, Map<string, HasId>>,
 	contributingPaths: Map<string, string[]>,
+	provenance: Map<string, DocumentGraphRecordProvenance>,
+	diagnostics: DocumentGraphDiagnostic[],
 ): Effect.Effect<void, GraphLoadError, StorageAdapter | SerializerRegistry> =>
 	Effect.gen(function* () {
 		const storage = yield* StorageAdapter;
@@ -105,7 +150,7 @@ const loadGraphSource = (
 		const supportedExtensions = new Set(serializer.supportedExtensions());
 
 		const collectionConfigs = buildCollectionConfigs(source, config);
-		const allowedCollections = new Set(source.collections);
+		const sourceAllowedCollections = new Set(source.collections);
 
 		// Per collection, an ordered list of migrated fragment sections (id -> record).
 		const fragmentsByCollection = new Map<
@@ -116,9 +161,33 @@ const loadGraphSource = (
 			fragmentsByCollection.set(collectionName, []);
 		}
 
-		// 1. Discover fragments across roots, preserving root order then lexical
-		//    order within a root.
-		const orderedFragments: Array<{ path: string; rootId: string }> = [];
+		const handleFragmentError = (
+			error: DocumentGraphSourceError,
+			rootId: string,
+		): "fail" | "skip-fragment" | "skip-root" => {
+			if (source.onFragmentError === "error") return "fail";
+			const action =
+				source.onFragmentError === "skip-root"
+					? "skipped-root"
+					: "skipped-fragment";
+			diagnostics.push({
+				sourceId: source.id,
+				rootId,
+				path: error.path,
+				action,
+				...(error.collection !== undefined
+					? { collection: error.collection }
+					: {}),
+				...(error.recordId !== undefined ? { recordId: error.recordId } : {}),
+				message: error.message,
+				error,
+			});
+			return source.onFragmentError;
+		};
+
+		// Discover and process fragments root-by-root. Root-local fragments are only
+		// committed to the graph after the root succeeds, so skip-root can discard
+		// earlier valid fragments from the same root atomically for this rebuild.
 		for (const root of source.roots) {
 			const exists = yield* storage.exists(root.root);
 			if (!exists) {
@@ -132,6 +201,7 @@ const loadGraphSource = (
 					}),
 				);
 			}
+
 			const discovered = yield* storage.listRecursive(root.root);
 			const matched: string[] = [];
 			for (const path of discovered) {
@@ -144,128 +214,268 @@ const loadGraphSource = (
 			matched.sort((a, b) =>
 				relativeToRoot(root.root, a) < relativeToRoot(root.root, b) ? -1 : 1,
 			);
-			for (const path of matched) {
-				orderedFragments.push({ path, rootId: root.id });
+
+			const rootAllowedCollections = new Set(root.collections);
+			const rootFragmentsByCollection = new Map<
+				string,
+				Array<Record<string, unknown>>
+			>();
+			for (const collectionName of source.collections) {
+				rootFragmentsByCollection.set(collectionName, []);
 			}
-		}
+			const rootContributingPaths = new Map<string, string[]>();
+			const rootContributions = new Map<
+				string,
+				DocumentGraphRecordContribution[]
+			>();
+			let skipRoot = false;
 
-		// 2. Decode -> transform -> unknown-key check -> per-fragment migrate.
-		for (const fragment of orderedFragments) {
-			const { path, rootId } = fragment;
-			const raw = yield* storage.read(path);
-			if (raw.trim().length === 0) continue;
+			for (const path of matched) {
+				const raw = yield* storage.read(path);
+				if (raw.trim().length === 0) continue;
 
-			const extension = getFileExtension(path);
-			if (!supportedExtensions.has(extension)) {
-				return yield* Effect.fail(
-					new DocumentGraphSourceError({
+				const extension = getFileExtension(path);
+				if (!supportedExtensions.has(extension)) {
+					const error = new DocumentGraphSourceError({
 						sourceId: source.id,
 						path,
 						kind: "unsupported-extension",
 						message: `Document graph source '${source.id}' cannot decode '${path}': extension '.${extension}' is not registered`,
-					}),
+					});
+					const action = handleFragmentError(error, root.id);
+					if (action === "fail") return yield* Effect.fail(error);
+					if (action === "skip-root") {
+						skipRoot = true;
+						break;
+					}
+					continue;
+				}
+
+				const parsedResult = yield* Effect.result(
+					serializer.deserialize(raw, extension),
 				);
-			}
+				if (Result.isFailure(parsedResult)) {
+					const error = new DocumentGraphSourceError({
+						sourceId: source.id,
+						path,
+						kind: "deserialize",
+						message: `Document graph source '${source.id}' cannot decode '${path}': ${String(parsedResult.failure)}`,
+						cause: parsedResult.failure,
+					});
+					const action = handleFragmentError(error, root.id);
+					if (action === "fail")
+						return yield* Effect.fail(parsedResult.failure);
+					if (action === "skip-root") {
+						skipRoot = true;
+						break;
+					}
+					continue;
+				}
+				const parsed = parsedResult.success;
+				if (parsed === null || parsed === undefined) continue;
 
-			const parsed = yield* serializer.deserialize(raw, extension);
-			if (parsed === null || parsed === undefined) continue;
-
-			let document: unknown = parsed;
-			if (source.transform !== undefined) {
-				const transform = source.transform;
-				const outcome = yield* Effect.try({
-					try: () =>
-						transform(parsed, {
-							sourceId: source.id,
-							rootId,
-							path,
-							extension,
+				let document: unknown = parsed;
+				if (source.transform !== undefined) {
+					const transform = source.transform;
+					const outcomeResult = yield* Effect.result(
+						Effect.try({
+							try: () =>
+								transform(parsed, {
+									sourceId: source.id,
+									rootId: root.id,
+									path,
+									extension,
+								}),
+							catch: (error) =>
+								new DocumentGraphSourceError({
+									sourceId: source.id,
+									path,
+									kind: "transform-defect",
+									message: `Document graph transform threw for '${path}': ${error instanceof Error ? error.message : String(error)}`,
+									cause: error,
+								}),
 						}),
-					catch: (error) =>
-						new DocumentGraphSourceError({
-							sourceId: source.id,
-							path,
-							kind: "transform-defect",
-							message: `Document graph transform threw for '${path}': ${error instanceof Error ? error.message : String(error)}`,
-							cause: error,
-						}),
-				});
-				if (Result.isFailure(outcome)) {
-					return yield* Effect.fail(
-						new DocumentGraphSourceError({
+					);
+					if (Result.isFailure(outcomeResult)) {
+						const error = outcomeResult.failure;
+						const action = handleFragmentError(error, root.id);
+						if (action === "fail") return yield* Effect.fail(error);
+						if (action === "skip-root") {
+							skipRoot = true;
+							break;
+						}
+						continue;
+					}
+					const outcome = outcomeResult.success;
+					if (Result.isFailure(outcome)) {
+						const error = new DocumentGraphSourceError({
 							sourceId: source.id,
 							path,
 							kind: "transform-failure",
 							message: `Document graph transform rejected '${path}'`,
 							cause: outcome.failure,
-						}),
-					);
+						});
+						const action = handleFragmentError(error, root.id);
+						if (action === "fail") return yield* Effect.fail(error);
+						if (action === "skip-root") {
+							skipRoot = true;
+							break;
+						}
+						continue;
+					}
+					document = outcome.success;
 				}
-				document = outcome.success;
-			}
 
-			if (!isRecord(document)) {
-				return yield* Effect.fail(
-					new DocumentGraphSourceError({
+				if (!isRecord(document)) {
+					const error = new DocumentGraphSourceError({
 						sourceId: source.id,
 						path,
 						kind: "non-object",
 						message: `Document graph source '${source.id}' file '${path}' must resolve to a top-level object`,
-					}),
-				);
-			}
+					});
+					const action = handleFragmentError(error, root.id);
+					if (action === "fail") return yield* Effect.fail(error);
+					if (action === "skip-root") {
+						skipRoot = true;
+						break;
+					}
+					continue;
+				}
 
-			for (const key of Object.keys(document)) {
-				if (!allowedCollections.has(key)) {
-					return yield* Effect.fail(
-						new DocumentGraphSourceError({
+				for (const key of Object.keys(document)) {
+					if (!sourceAllowedCollections.has(key)) {
+						const error = new DocumentGraphSourceError({
 							sourceId: source.id,
 							path,
 							kind: "unknown-collection",
 							collection: key,
 							message: `Document graph source '${source.id}' file '${path}' contains unknown collection '${key}'`,
-						}),
-					);
+						});
+						const action = handleFragmentError(error, root.id);
+						if (action === "fail") return yield* Effect.fail(error);
+						if (action === "skip-root") {
+							skipRoot = true;
+							break;
+						}
+						continue;
+					}
+					if (!rootAllowedCollections.has(key)) {
+						diagnostics.push({
+							sourceId: source.id,
+							rootId: root.id,
+							path,
+							action: "ignored-collection",
+							collection: key,
+							message: `Document graph source '${source.id}' root '${root.id}' ignored collection '${key}' from '${path}'`,
+						});
+					}
 				}
-			}
+				if (skipRoot) break;
 
-			for (const collectionName of source.collections) {
-				const section = document[collectionName];
-				if (section === undefined) continue;
-				const collectionConfig = collectionConfigs.get(collectionName);
-				if (collectionConfig === undefined) continue;
-				if (!isRecord(section)) {
-					return yield* Effect.fail(
-						new DocumentGraphSourceError({
+				for (const collectionName of source.collections) {
+					if (!rootAllowedCollections.has(collectionName)) continue;
+					const section = document[collectionName];
+					if (section === undefined) continue;
+					const collectionConfig = collectionConfigs.get(collectionName);
+					if (collectionConfig === undefined) continue;
+					if (!isRecord(section)) {
+						const error = new DocumentGraphSourceError({
 							sourceId: source.id,
 							path,
 							kind: "non-object",
 							collection: collectionName,
 							message: `Collection '${collectionName}' in '${path}' must be an object keyed by record id`,
-						}),
-					);
-				}
-
-				const migrated = yield* migrateFragmentSection(
-					source,
-					path,
-					collectionConfig,
-					section,
-				);
-				fragmentsByCollection.get(collectionName)?.push(migrated);
-				for (const id of Object.keys(migrated)) {
-					const key = provenanceKey(collectionName, id);
-					const paths = contributingPaths.get(key);
-					if (paths === undefined) {
-						contributingPaths.set(key, [path]);
-					} else if (!paths.includes(path)) {
-						paths.push(path);
+						});
+						const action = handleFragmentError(error, root.id);
+						if (action === "fail") return yield* Effect.fail(error);
+						if (action === "skip-root") {
+							skipRoot = true;
+							break;
+						}
+						continue;
 					}
+
+					const migratedResult = yield* Effect.result(
+						migrateFragmentSection(source, path, collectionConfig, section),
+					);
+					if (Result.isFailure(migratedResult)) {
+						const failure = migratedResult.failure;
+						if (failure instanceof DocumentGraphSourceError) {
+							const action = handleFragmentError(failure, root.id);
+							if (action === "fail") return yield* Effect.fail(failure);
+							if (action === "skip-root") {
+								skipRoot = true;
+								break;
+							}
+							continue;
+						}
+						return yield* Effect.fail(failure);
+					}
+
+					const migrated = migratedResult.success;
+					rootFragmentsByCollection.get(collectionName)?.push(migrated);
+					for (const id of Object.keys(migrated)) {
+						const key = provenanceKey(collectionName, id);
+						const paths = rootContributingPaths.get(key);
+						if (paths === undefined) {
+							rootContributingPaths.set(key, [path]);
+						} else if (!paths.includes(path)) {
+							paths.push(path);
+						}
+						const contribution: DocumentGraphRecordContribution = {
+							sourceId: source.id,
+							rootId: root.id,
+							path,
+							collection: collectionName,
+							id,
+						};
+						const contributions = rootContributions.get(key);
+						if (contributions === undefined) {
+							rootContributions.set(key, [contribution]);
+						} else {
+							contributions.push(contribution);
+						}
+					}
+				}
+				if (skipRoot) break;
+			}
+
+			if (skipRoot) continue;
+			for (const collectionName of source.collections) {
+				const rootFragments =
+					rootFragmentsByCollection.get(collectionName) ?? [];
+				fragmentsByCollection.get(collectionName)?.push(...rootFragments);
+			}
+			for (const [key, rootPaths] of rootContributingPaths) {
+				const paths = contributingPaths.get(key);
+				if (paths === undefined) {
+					contributingPaths.set(key, [...rootPaths]);
+				} else {
+					for (const path of rootPaths) {
+						if (!paths.includes(path)) paths.push(path);
+					}
+				}
+			}
+			for (const [key, rootRecordContributions] of rootContributions) {
+				const existing = provenance.get(key);
+				const contributors = [
+					...(existing?.contributors ?? []),
+					...rootRecordContributions,
+				];
+				const effectiveContributor = contributors[contributors.length - 1];
+				if (effectiveContributor !== undefined) {
+					provenance.set(key, {
+						sourceId: effectiveContributor.sourceId,
+						collection: effectiveContributor.collection,
+						id: effectiveContributor.id,
+						contributors,
+						effectiveContributor,
+					});
 				}
 			}
 		}
 
-		// 3. Deep-merge fragments per collection, then validate effective records.
+		// Deep-merge fragments per collection, then validate effective records.
 		for (const collectionName of source.collections) {
 			const collectionConfig = collectionConfigs.get(collectionName);
 			if (collectionConfig === undefined) continue;
