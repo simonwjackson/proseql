@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.15.0 (2026-06-11)
+
+### Features
+- Extend documentGraph containment and provenance (ab71251)
+
+
 ## v0.14.0 (2026-06-10)
 
 ### Features
