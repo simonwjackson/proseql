@@ -27,7 +27,10 @@ use crate::query::{
     SortOrder,
 };
 use crate::relationships::{
-    helpers::{col_nf, fk_field_names, payload_touches_fk_field, validate_fk_with_owner_snapshot},
+    helpers::{
+        col_nf, fk_field_names, payload_touches_fk_field, validate_fk,
+        validate_fk_with_owner_snapshot,
+    },
     Database,
 };
 
@@ -1363,22 +1366,82 @@ impl Database {
         self.reactive.publish(event);
     }
 
+    fn replace_collections_atomically_and_validate(
+        &mut self,
+        collections: IndexMap<String, Vec<Value>>,
+    ) -> Result<Vec<String>, EngineError> {
+        let snapshots = self.snapshot_all_collection_states();
+        let replaced = (|| {
+            for name in collections.keys() {
+                if !self.collections.contains_key(name) {
+                    return Err(missing_collection_error(name));
+                }
+            }
+
+            for (name, records) in collections {
+                self.collections
+                    .get_mut(&name)
+                    .ok_or_else(|| missing_collection_error(&name))?
+                    .replace_loaded_records(records)?;
+            }
+
+            for (name, collection) in &self.collections {
+                let relationships = collection.descriptor.relationships.clone();
+                for entity in collection.list() {
+                    validate_fk(name, &relationships, entity, &self.collections)?;
+                }
+            }
+
+            Ok(snapshots
+                .iter()
+                .filter_map(|(name, snapshot)| {
+                    self.collections
+                        .get(name)
+                        .map(|collection| (name, collection.snapshot_state() != *snapshot))
+                        .and_then(|(name, changed)| changed.then(|| name.clone()))
+                })
+                .collect::<Vec<_>>())
+        })();
+
+        match replaced {
+            Ok(changed_collections) => {
+                self.sync_reactive_snapshots();
+                Ok(changed_collections)
+            }
+            Err(error) => {
+                self.restore_all_collection_states(&snapshots);
+                self.sync_reactive_snapshots();
+                Err(error)
+            }
+        }
+    }
+
     pub fn reload_collection(
         &mut self,
         collection: &str,
         records: Vec<Value>,
     ) -> Result<(), EngineError> {
-        self.collections
-            .get_mut(collection)
-            .ok_or_else(|| missing_collection_error(collection))?
-            .replace_loaded_records(records)?;
+        self.replace_collections_atomically_and_validate(IndexMap::from([(
+            collection.to_owned(),
+            records,
+        )]))?;
 
-        self.reactive.sync_all_snapshots(&self.collections);
         self.reactive.publish(ChangeEvent {
             collection: collection.to_owned(),
             operation: ChangeOperation::Reload,
         });
         Ok(())
+    }
+
+    pub fn commit_snapshot_transaction(
+        &mut self,
+        collections: IndexMap<String, Vec<Value>>,
+    ) -> Result<Vec<String>, EngineError> {
+        let changed_collections = self.replace_collections_atomically_and_validate(collections)?;
+        for collection in &changed_collections {
+            self.emit_owner_change_event(collection, ChangeOperation::Update);
+        }
+        Ok(changed_collections)
     }
 
     pub fn create_many(

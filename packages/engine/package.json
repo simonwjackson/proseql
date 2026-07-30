@@ -1,0 +1,56 @@
+{
+  "name": "@proseql/engine",
+  "version": "0.15.0",
+  "description": "Promise-first WASM engine binding for proseQL",
+  "type": "module",
+  "scripts": {
+    "build:wasm": "bun ./scripts/build-wasm.mjs",
+    "build": "bun run build:wasm && bunx tsc --build",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "bun run build && bun test",
+    "test:node": "nix shell nixpkgs#nodejs -c node ./tests/node-smoke.mjs",
+    "typecheck:tests": "bunx tsc --build ../core ."
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "license": "MIT",
+  "author": "Simon W. Jackson",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simonwjackson/proseql.git",
+    "directory": "packages/engine"
+  },
+  "keywords": [
+    "database",
+    "typescript",
+    "wasm",
+    "effect",
+    "plain-text",
+    "promise"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@proseql/core": "workspace:*",
+    "effect": "4.0.0-beta.60"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-beta.60"
+  }
+}

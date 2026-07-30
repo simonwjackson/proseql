@@ -6,6 +6,7 @@ bun.nix
 *.tsbuildinfo
 packages/*/*.tsbuildinfo
 packages/*/LICENSE
+packages/*/.wasm-bindgen-cli/
 coverage/
 .direnv/
 .worktrees

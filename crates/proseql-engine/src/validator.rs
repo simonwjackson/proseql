@@ -158,6 +158,22 @@ fn validate_at(schema: &SchemaNode, value: &Value, path: &str) -> Result<(), Eng
 
         SchemaNode::Unknown => Ok(()),
 
+        SchemaNode::Literal { value: expected } => {
+            if js_eq(value, expected) {
+                Ok(())
+            } else {
+                Err(literal_mismatch(path, expected, value))
+            }
+        }
+
+        SchemaNode::LiteralUnion { values } => {
+            if values.iter().any(|expected| js_eq(value, expected)) {
+                Ok(())
+            } else {
+                Err(literal_union_mismatch(path, values, value))
+            }
+        }
+
         // When validate_at is called with Optional, a value IS present.
         // null is NOT the same as absent: Schema.optional(T) = T | undefined
         // (source: effect/packages/effect/src/Schema.ts, `optional` fn → UndefinedOr(self).ast)
@@ -377,6 +393,22 @@ fn decode_at(schema: &SchemaNode, value: &Value, path: &str) -> Result<Value, En
 
         SchemaNode::Unknown => Ok(value.clone()),
 
+        SchemaNode::Literal { value: expected } => {
+            if js_eq(value, expected) {
+                Ok(value.clone())
+            } else {
+                Err(literal_mismatch(path, expected, value))
+            }
+        }
+
+        SchemaNode::LiteralUnion { values } => {
+            if values.iter().any(|expected| js_eq(value, expected)) {
+                Ok(value.clone())
+            } else {
+                Err(literal_union_mismatch(path, values, value))
+            }
+        }
+
         // Optional: if value is present, decode against inner.
         // Absence is handled by decode_struct; here a value IS present.
         SchemaNode::Optional(inner) => decode_at(inner, value, path),
@@ -542,6 +574,43 @@ fn type_mismatch(path: &str, expected: &str, actual: &Value) -> EngineError {
             value: Some(actual.clone()),
             expected: Some(expected.into()),
             received: Some(received.into()),
+        }],
+    })
+}
+
+fn literal_mismatch(path: &str, expected: &Value, actual: &Value) -> EngineError {
+    let expected_json = serde_json::to_string(expected).unwrap_or_else(|_| "null".to_owned());
+    let actual_json = serde_json::to_string(actual).unwrap_or_else(|_| "null".to_owned());
+    EngineError::Validation(ValidationError {
+        message: format!("Expected literal {expected_json} at \"{path}\", received {actual_json}"),
+        issues: vec![ValidationIssue {
+            field: path.into(),
+            message: format!("Expected literal {expected_json}, received {actual_json}"),
+            value: Some(actual.clone()),
+            expected: Some(expected_json),
+            received: Some(actual_json),
+        }],
+    })
+}
+
+fn literal_union_mismatch(path: &str, expected: &[Value], actual: &Value) -> EngineError {
+    let expected_json = format!(
+        "one of [{}]",
+        expected
+            .iter()
+            .map(|value| serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let actual_json = serde_json::to_string(actual).unwrap_or_else(|_| "null".to_owned());
+    EngineError::Validation(ValidationError {
+        message: format!("Expected {expected_json} at \"{path}\", received {actual_json}"),
+        issues: vec![ValidationIssue {
+            field: path.into(),
+            message: format!("Expected {expected_json}, received {actual_json}"),
+            value: Some(actual.clone()),
+            expected: Some(expected_json),
+            received: Some(actual_json),
         }],
     })
 }

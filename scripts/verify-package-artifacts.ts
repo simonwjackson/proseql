@@ -16,7 +16,7 @@ type PackFile = { path: string };
 type PackResult = { files: PackFile[] };
 
 const root = join(import.meta.dirname, "..");
-const packageNames = ["core", "node", "rest", "cli"];
+const packageNames = ["core", "engine", "node", "rest", "cli"];
 
 let failed = false;
 

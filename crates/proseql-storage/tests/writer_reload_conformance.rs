@@ -9,7 +9,8 @@ use proseql_engine::callbacks::CallbackRegistry;
 use proseql_engine::clock::FixedClock;
 use proseql_engine::collection::Collection;
 use proseql_engine::descriptor::{
-    CollectionDescriptor, IdStrategy, SchemaNode, StructField, ValidationMode,
+    CollectionDescriptor, IdStrategy, RelationshipDescriptor, RelationshipKind, SchemaNode,
+    StructField, ValidationMode,
 };
 use proseql_engine::errors::{EngineError, StorageError, StorageOperation};
 use proseql_engine::id_gen::SequentialGenerator;
@@ -423,6 +424,160 @@ fn books_collection_descriptor() -> CollectionDescriptor {
     }
 }
 
+fn relationship_source_config(
+    root: &str,
+) -> proseql_storage::source_config::NormalizedSourceConfig {
+    normalize_source_config(SourceConfigInput {
+        collections: IndexMap::from([
+            (
+                "users".to_owned(),
+                proseql_storage::persistence::CollectionStorageConfig {
+                    name: "users".to_owned(),
+                    schema: SchemaNode::Struct {
+                        fields: vec![
+                            StructField {
+                                name: "name".to_owned(),
+                                schema: SchemaNode::Str,
+                            },
+                            StructField {
+                                name: "companyId".to_owned(),
+                                schema: SchemaNode::Optional(Box::new(SchemaNode::NullOr(
+                                    Box::new(SchemaNode::Str),
+                                ))),
+                            },
+                        ],
+                    },
+                    id_strategy: IdStrategy::DerivedFromKey,
+                    version: None,
+                    migrations: vec![],
+                },
+            ),
+            (
+                "companies".to_owned(),
+                proseql_storage::persistence::CollectionStorageConfig {
+                    name: "companies".to_owned(),
+                    schema: SchemaNode::Struct {
+                        fields: vec![StructField {
+                            name: "name".to_owned(),
+                            schema: SchemaNode::Str,
+                        }],
+                    },
+                    id_strategy: IdStrategy::DerivedFromKey,
+                    version: None,
+                    migrations: vec![],
+                },
+            ),
+        ]),
+        sources: vec![DatabaseSourceConfig::Documents(
+            proseql_storage::source_config::DocumentSourceConfig {
+                id: "relationships-source".to_owned(),
+                root: root.to_owned(),
+                include: Some(vec!["**/*.yaml".to_owned()]),
+                exclude: vec![],
+                format: Some("yaml".to_owned()),
+                collections: Some(SourceCollectionSelection::All),
+                unknown_collections: proseql_storage::source_config::UnknownCollectionPolicy::Error,
+                outbox: "generated.yaml".to_owned(),
+                optional: false,
+            },
+        )],
+    })
+    .unwrap()
+}
+
+fn users_collection_descriptor() -> CollectionDescriptor {
+    CollectionDescriptor {
+        name: "users".to_owned(),
+        schema: SchemaNode::Struct {
+            fields: vec![
+                StructField {
+                    name: "name".to_owned(),
+                    schema: SchemaNode::Str,
+                },
+                StructField {
+                    name: "companyId".to_owned(),
+                    schema: SchemaNode::Optional(Box::new(SchemaNode::NullOr(Box::new(
+                        SchemaNode::Str,
+                    )))),
+                },
+                StructField {
+                    name: "createdAt".to_owned(),
+                    schema: SchemaNode::Optional(Box::new(SchemaNode::Str)),
+                },
+                StructField {
+                    name: "updatedAt".to_owned(),
+                    schema: SchemaNode::Optional(Box::new(SchemaNode::Str)),
+                },
+            ],
+        },
+        id_strategy: IdStrategy::DerivedFromKey,
+        relationships: vec![(
+            "company".to_owned(),
+            RelationshipDescriptor {
+                kind: RelationshipKind::Ref,
+                target: "companies".to_owned(),
+                foreign_key: Some("companyId".to_owned()),
+            },
+        )],
+        indexes: vec![],
+        unique_fields: vec![],
+        before_create_hooks: vec![],
+        after_create_hooks: vec![],
+        before_update_hooks: vec![],
+        after_update_hooks: vec![],
+        before_delete_hooks: vec![],
+        after_delete_hooks: vec![],
+        on_change_hooks: vec![],
+        computed_fields: vec![],
+        search_index: vec![],
+        id_generator: None,
+        version: None,
+        migrations: vec![],
+        append_only: false,
+        validation_mode: ValidationMode::Strict,
+    }
+}
+
+fn companies_collection_descriptor() -> CollectionDescriptor {
+    CollectionDescriptor {
+        name: "companies".to_owned(),
+        schema: SchemaNode::Struct {
+            fields: vec![
+                StructField {
+                    name: "name".to_owned(),
+                    schema: SchemaNode::Str,
+                },
+                StructField {
+                    name: "createdAt".to_owned(),
+                    schema: SchemaNode::Optional(Box::new(SchemaNode::Str)),
+                },
+                StructField {
+                    name: "updatedAt".to_owned(),
+                    schema: SchemaNode::Optional(Box::new(SchemaNode::Str)),
+                },
+            ],
+        },
+        id_strategy: IdStrategy::DerivedFromKey,
+        relationships: vec![],
+        indexes: vec![],
+        unique_fields: vec![],
+        before_create_hooks: vec![],
+        after_create_hooks: vec![],
+        before_update_hooks: vec![],
+        after_update_hooks: vec![],
+        before_delete_hooks: vec![],
+        after_delete_hooks: vec![],
+        on_change_hooks: vec![],
+        computed_fields: vec![],
+        search_index: vec![],
+        id_generator: None,
+        version: None,
+        migrations: vec![],
+        append_only: false,
+        validation_mode: ValidationMode::Strict,
+    }
+}
+
 fn graph_reload_config(root: &str) -> proseql_storage::source_config::NormalizedSourceConfig {
     normalize_source_config(SourceConfigInput {
         collections: IndexMap::from([(
@@ -724,6 +879,147 @@ fn fs_watch_dir_document_source_reload_updates_database_watch_and_invalid_edits_
         lkg.current().collections["books"]["dune"]["title"],
         json!("Dune Messiah")
     );
+
+    handle.stop().unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn fs_watch_dir_relationship_reload_keeps_last_known_good_on_dangling_foreign_key_edit() {
+    let dir = tempdir().unwrap();
+    let nested = dir.path().join("nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    let file = nested.join("relationships.yaml");
+    std::fs::write(
+        &file,
+        "companies:\n  c1:\n    name: Acme\nusers:\n  u1:\n    name: Alice\n    companyId: c1\n",
+    )
+    .unwrap();
+
+    let host = FsStorageHost::new_polling(Duration::from_millis(50)).unwrap();
+    let formats = FormatRegistry::with_builtins();
+    let config = relationship_source_config(dir.path().to_str().unwrap());
+    let initial = load_document_sources(&host, &formats, &config, None).unwrap();
+    let lkg = LastKnownGood::new(initial.clone());
+    let coordinator = ReloadCoordinator::new(lkg.clone());
+
+    let scheduler = Arc::new(ManualReactiveScheduler::default());
+    let registry = Arc::new(CallbackRegistry::new());
+    let companies = Collection::new_with_clock(
+        "companies",
+        companies_collection_descriptor(),
+        Arc::clone(&registry),
+        Box::new(SequentialGenerator::new("company")),
+        Box::new(FixedClock::new("2024-01-01T00:00:00.000Z")),
+    );
+    let users = Collection::new_with_clock(
+        "users",
+        users_collection_descriptor(),
+        Arc::clone(&registry),
+        Box::new(SequentialGenerator::new("user")),
+        Box::new(FixedClock::new("2024-01-01T00:00:00.000Z")),
+    );
+    let mut collections = IndexMap::new();
+    collections.insert("companies".to_owned(), companies);
+    collections.insert("users".to_owned(), users);
+    let mut db = Database::new_with_reactive_scheduler(
+        collections,
+        registry,
+        Arc::clone(&scheduler) as Arc<dyn ReactiveScheduler>,
+    );
+    db.reload_collection(
+        "companies",
+        initial.collections["companies"].values().cloned().collect(),
+    )
+    .unwrap();
+    db.reload_collection(
+        "users",
+        initial.collections["users"].values().cloned().collect(),
+    )
+    .unwrap();
+    let watch = db.watch("users", WatchQueryConfig::default()).unwrap();
+    let initial_users = watch.try_recv().unwrap();
+    assert_eq!(
+        initial_users.as_array().unwrap()[0]["companyId"],
+        json!("c1")
+    );
+    let db = Arc::new(Mutex::new(db));
+
+    let (reload_tx, reload_rx) = mpsc::channel();
+    let host_for_watch = host.clone();
+    let config_for_watch = config.clone();
+    let coordinator_for_watch = coordinator.clone();
+    let db_for_watch = Arc::clone(&db);
+    let handle = host
+        .watch_dir(
+            dir.path().to_str().unwrap(),
+            Box::new(move |event| {
+                if event.filename.as_deref() != Some("relationships.yaml") {
+                    return;
+                }
+                let result = match load_document_sources(
+                    &host_for_watch,
+                    &FormatRegistry::with_builtins(),
+                    &config_for_watch,
+                    None,
+                ) {
+                    Ok(loaded) => coordinator_for_watch.reload(|| {
+                        let mut db = db_for_watch.lock().unwrap();
+                        db.reload_collection(
+                            "companies",
+                            loaded.collections["companies"].values().cloned().collect(),
+                        )?;
+                        db.reload_collection(
+                            "users",
+                            loaded.collections["users"].values().cloned().collect(),
+                        )?;
+                        Ok(loaded.clone())
+                    }),
+                    Err(error) => {
+                        let _ = coordinator_for_watch.reload(|| Err(error.clone()));
+                        Err(error)
+                    }
+                };
+                reload_tx
+                    .send(result.map_err(|error| error.tag().to_owned()))
+                    .unwrap();
+            }),
+        )
+        .unwrap();
+
+    let mut saw_invalid_reload = false;
+    for _ in 0..10 {
+        std::fs::write(
+            &file,
+            "companies:\n  c1:\n    name: Acme\nusers:\n  u1:\n    name: Alice\n    companyId: missing\n",
+        )
+        .unwrap();
+        if let Ok(Err(tag)) = reload_rx.recv_timeout(Duration::from_millis(700)) {
+            assert_eq!(tag, "ForeignKeyError");
+            saw_invalid_reload = true;
+            break;
+        }
+    }
+    assert!(
+        saw_invalid_reload,
+        "expected foreign-key reload error after invalid edit"
+    );
+    scheduler.advance(10);
+    assert!(watch.try_recv().is_err());
+    assert_eq!(
+        coordinator.last_error().map(|error| error.tag()),
+        Some("ForeignKeyError")
+    );
+    assert_eq!(
+        lkg.current().collections["users"]["u1"]["companyId"],
+        json!("c1")
+    );
+    let users = db
+        .lock()
+        .unwrap()
+        .query("users", Default::default(), None)
+        .unwrap();
+    assert_eq!(users[0]["companyId"], json!("c1"));
 
     handle.stop().unwrap();
 }

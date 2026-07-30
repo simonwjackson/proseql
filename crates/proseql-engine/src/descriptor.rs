@@ -104,6 +104,10 @@ pub enum SchemaNode {
     NumFromStr,
     /// `Schema.Unknown` — accepts any value without validation.
     Unknown,
+    /// `Schema.Literal(v)` — exact literal match.
+    Literal { value: serde_json::Value },
+    /// `Schema.Literal(v1, v2, …)` / union of literals — exact match against one member.
+    LiteralUnion { values: Vec<serde_json::Value> },
     /// `Schema.Struct({ field: SchemaNode, … })`.
     Struct { fields: Vec<StructField> },
     /// `Schema.Array(T)` — homogeneous array.
@@ -200,6 +204,10 @@ impl SchemaNode {
             SchemaNode::Bool => json!({"kind": "bool"}),
             SchemaNode::NumFromStr => json!({"kind": "numFromStr"}),
             SchemaNode::Unknown => json!({"kind": "unknown"}),
+            SchemaNode::Literal { value } => json!({"kind": "literal", "value": value}),
+            SchemaNode::LiteralUnion { values } => {
+                json!({"kind": "literalUnion", "values": values})
+            }
             SchemaNode::Struct { fields } => {
                 let fields_json: Vec<Value> = fields
                     .iter()
@@ -250,6 +258,23 @@ impl SchemaNode {
             "bool" => Ok(SchemaNode::Bool),
             "numFromStr" => Ok(SchemaNode::NumFromStr),
             "unknown" => Ok(SchemaNode::Unknown),
+            "literal" => {
+                let value = obj
+                    .get("value")
+                    .ok_or_else(|| "literal SchemaNode missing 'value'".to_string())?;
+                Ok(SchemaNode::Literal {
+                    value: value.clone(),
+                })
+            }
+            "literalUnion" => {
+                let values = obj
+                    .get("values")
+                    .and_then(|v| v.as_array())
+                    .ok_or_else(|| "literalUnion SchemaNode missing 'values'".to_string())?;
+                Ok(SchemaNode::LiteralUnion {
+                    values: values.clone(),
+                })
+            }
             "struct" => {
                 let fields_val = obj
                     .get("fields")

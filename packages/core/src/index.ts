@@ -106,6 +106,7 @@ export type {
 	DryRunStatus,
 	Migration,
 } from "./migrations/migration-types.js";
+export { dryRunMigrations } from "./migrations/migration-runner.js";
 
 // ============================================================================
 // Context Tag Factory
@@ -126,7 +127,7 @@ export type {
 } from "./storage/document-graph-source.js";
 export { loadDocumentGraphSources } from "./storage/document-graph-source.js";
 export type { LoadedDocumentSources } from "./storage/document-source.js";
-export { loadDocumentSources } from "./storage/document-source.js";
+export { loadDocumentSources, saveDocumentSource } from "./storage/document-source.js";
 export type { OriginIndex, RecordOrigin } from "./storage/origin-index.js";
 export { getOrigin } from "./storage/origin-index.js";
 export type {
@@ -160,6 +161,9 @@ export {
 	isSourceOrientedDatabaseConfig,
 } from "./types/database-config-types.js";
 export type {
+	ApplyPopulateObject,
+	ApplySelectAndPopulate,
+	ApplySelectConfig,
 	DatasetFor,
 	GenerateDatabase,
 	GenerateDatabaseWithPersistence,
@@ -167,6 +171,8 @@ export type {
 	QueryConfig,
 	QueryReturnType,
 	RelationshipDef,
+	ResolveRelationships,
+	RuntimeEntityFromCollection,
 	SelectConfig,
 	SmartCollection,
 	SortConfig,
@@ -275,9 +281,14 @@ export type { TransactionContext } from "./types/crud-types.js";
 // ============================================================================
 
 export type {
+	CreateInput,
+	CreateManyOptions,
 	CreateManyResult,
 	DeleteManyResult,
+	MinimalEntity,
 	UpdateManyResult,
+	UpdateWithOperators,
+	UpsertInput,
 	UpsertManyResult,
 	UpsertResult,
 } from "./types/crud-types.js";
@@ -287,6 +298,12 @@ export type {
 // ============================================================================
 
 export { $transaction, createTransaction } from "./transactions/transaction.js";
+export type {
+	CreateWithRelationshipsInput,
+	DeleteWithRelationshipsOptions,
+	DeleteWithRelationshipsResult,
+	UpdateWithRelationshipsInput,
+} from "./types/crud-relationship-types.js";
 
 // ============================================================================
 // Index Functions

@@ -63,7 +63,7 @@ use crate::operators::{
     deep_merge_updates, update_touches_unique_fields, validate_immutable_fields,
 };
 use crate::query::indexes::QueryIndexes;
-use crate::validator::{decode_value, js_eq};
+use crate::validator::{decode_value, js_eq, validate_value};
 
 // ── Result types ──────────────────────────────────────────────────────────────
 
@@ -937,8 +937,9 @@ impl Collection {
                     })
                 })?
                 .to_string();
-            let validated = self.validate_entity(Value::Object(obj), &id)?;
-            validated_records.push(validated);
+            let entity = Value::Object(obj);
+            self.validate_loaded_entity(&entity, &id)?;
+            validated_records.push(entity);
         }
 
         self.state = IndexMap::new();
@@ -1847,6 +1848,28 @@ impl Collection {
             Ok(Value::Object(obj))
         } else {
             decode_value(&self.descriptor.schema, &entity)
+        }
+    }
+
+    fn validate_loaded_entity(&self, entity: &Value, id: &str) -> Result<(), EngineError> {
+        if matches!(self.descriptor.id_strategy, IdStrategy::DerivedFromKey) {
+            let stripped = strip_id_field(entity.clone());
+            validate_value(&self.descriptor.schema, &stripped)?;
+            if entity.get("id").and_then(Value::as_str) != Some(id) {
+                return Err(EngineError::Validation(ValidationError {
+                    message: "Reloaded record id does not match derived key".to_string(),
+                    issues: vec![ValidationIssue {
+                        field: "id".to_string(),
+                        message: "Expected derived id to match the runtime key".to_string(),
+                        value: entity.get("id").cloned(),
+                        expected: Some(id.to_string()),
+                        received: entity.get("id").and_then(Value::as_str).map(str::to_string),
+                    }],
+                }));
+            }
+            Ok(())
+        } else {
+            validate_value(&self.descriptor.schema, entity)
         }
     }
 

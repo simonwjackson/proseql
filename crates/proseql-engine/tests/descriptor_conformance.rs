@@ -15,7 +15,7 @@ use proseql_engine::{
     validator::{decode_value, validate_value},
     value::Value,
 };
-use serde_json::{Map as JsonMap, Number};
+use serde_json::{json, Map as JsonMap, Number};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -82,6 +82,16 @@ fn schema_node_round_trips_json() {
     let json = serde_json::to_string(&schema).expect("serialize SchemaNode");
     let back: SchemaNode = serde_json::from_str(&json).expect("deserialize SchemaNode");
     assert_eq!(schema, back, "SchemaNode must survive a JSON round-trip");
+}
+
+#[test]
+fn literal_schema_nodes_round_trip_json() {
+    let schema = SchemaNode::LiteralUnion {
+        values: vec![json!("admin"), json!("user"), Value::Null],
+    };
+    let json = serde_json::to_string(&schema).expect("serialize literal schema");
+    let back: SchemaNode = serde_json::from_str(&json).expect("deserialize literal schema");
+    assert_eq!(schema, back);
 }
 
 #[test]
@@ -488,6 +498,25 @@ fn validate_value_num_from_str_accepts_number_decoded_form() {
         validate_value(&schema, &record).is_ok(),
         "validate_value: NumberFromString accepts number (the decoded/runtime form)"
     );
+}
+
+#[test]
+fn literal_and_literal_union_validate_exact_values() {
+    let literal = SchemaNode::Literal {
+        value: json!("admin"),
+    };
+    assert!(validate_value(&literal, &json!("admin")).is_ok());
+    assert!(validate_value(&literal, &json!("user")).is_err());
+
+    let union = SchemaNode::LiteralUnion {
+        values: vec![json!("admin"), json!("user"), Value::Null],
+    };
+    assert!(validate_value(&union, &json!("user")).is_ok());
+    assert!(validate_value(&union, &Value::Null).is_ok());
+    assert!(validate_value(&union, &json!("guest")).is_err());
+    assert!(decode_value(&union, &json!("admin")).is_ok());
+    assert!(decode_value(&SchemaNode::Literal { value: Value::Null }, &Value::Null).is_ok());
+    assert!(decode_value(&SchemaNode::Literal { value: Value::Null }, &json!(false)).is_err());
 }
 
 #[test]

@@ -11,6 +11,7 @@ use proseql_engine::{
     },
     errors::EngineError,
     id_gen::SequentialGenerator,
+    query::QueryInput,
     reactive::{
         ChangeEvent, ChangeOperation, ManualReactiveScheduler, ReactiveScheduler,
         UnsupportedReactiveScheduler, WatchQueryConfig,
@@ -876,6 +877,34 @@ fn reload_collection_replaces_state_emits_raw_reload_even_when_unchanged_and_kee
 }
 
 #[test]
+fn reload_collection_rejects_dangling_foreign_keys_atomically_and_emits_no_reload() {
+    let (mut db, scheduler) = make_relationship_db_with_scheduler();
+    let events = db.subscribe_change_events();
+    let users_watch = db.watch("users", WatchQueryConfig::default()).unwrap();
+    users_watch.try_recv().unwrap();
+
+    let error = db.reload_collection(
+        "users",
+        vec![json!({
+            "id":"u1",
+            "name":"Alice",
+            "companyId":"missing",
+            "createdAt":"2024-01-01T00:00:00.000Z",
+            "updatedAt":"2024-01-01T00:00:00.000Z"
+        })],
+    );
+    assert!(matches!(error, Err(EngineError::ForeignKey(_))));
+    scheduler.advance(10);
+    assert!(events.try_recv().is_err());
+    assert!(users_watch.try_recv().is_err());
+
+    let users = db.query("users", QueryInput::default(), None).unwrap();
+    assert_eq!(users.len(), 1);
+    assert_eq!(users[0]["companyId"], json!("c1"));
+    assert_eq!(users[0]["name"], json!("Alice"));
+}
+
+#[test]
 fn failed_relationship_mutations_sync_partial_side_effects_without_publishing_events() {
     let (mut db, scheduler) = make_relationship_db_with_scheduler();
     let events = db.subscribe_change_events();
@@ -1393,11 +1422,7 @@ fn batch_fk_validation_uses_pre_batch_state_for_self_refs() {
 #[test]
 fn fk_validation_gates_match_ts_for_singular_updates_but_not_upsert_many_updates() {
     let (mut db, scheduler) = make_relationship_db_with_scheduler();
-    db.reload_collection(
-        "posts",
-        vec![json!({"id":"p1","title":"Hello","authorId":"missing"})],
-    )
-    .unwrap();
+    db.delete("users", "u1").unwrap();
     let watch = db.watch("posts", WatchQueryConfig::default()).unwrap();
     assert_eq!(watch.try_recv().unwrap().as_array().unwrap().len(), 1);
 
@@ -1405,7 +1430,7 @@ fn fk_validation_gates_match_ts_for_singular_updates_but_not_upsert_many_updates
         .update("posts", "p1", json!({"title":"Single ok"}))
         .unwrap();
     assert_eq!(singular["title"], json!("Single ok"));
-    assert_eq!(singular["authorId"], json!("missing"));
+    assert_eq!(singular["authorId"], json!("u1"));
     scheduler.advance(10);
     assert_eq!(
         watch.try_recv().unwrap().as_array().unwrap()[0]["title"],
@@ -1422,38 +1447,34 @@ fn fk_validation_gates_match_ts_for_singular_updates_but_not_upsert_many_updates
         json!("Still ok")
     );
 
+    db.create("users", json!({"id":"u1","name":"Alice"}))
+        .unwrap();
     let touched = db.update_many("posts", json!({"id":"p1"}), json!({"authorId":"u1"}));
     assert!(touched.is_ok());
 
-    db.reload_collection(
-        "posts",
-        vec![json!({"id":"p1","title":"Broken again","authorId":"missing"})],
-    )
-    .unwrap();
+    db.delete("users", "u1").unwrap();
     let no_touch_upsert = db
         .upsert(
             "posts",
             json!({"id":"p1"}),
-            json!({"title":"ignored","authorId":"missing"}),
+            json!({"title":"ignored","authorId":"u1"}),
             json!({"title":"upsert ok"}),
         )
         .unwrap();
     assert_eq!(no_touch_upsert.entity["title"], json!("upsert ok"));
-    assert_eq!(no_touch_upsert.entity["authorId"], json!("missing"));
+    assert_eq!(no_touch_upsert.entity["authorId"], json!("u1"));
 
+    db.create("users", json!({"id":"u1","name":"Alice"}))
+        .unwrap();
     let touch_upsert = db.upsert(
         "posts",
         json!({"id":"p1"}),
-        json!({"title":"ignored","authorId":"missing"}),
+        json!({"title":"ignored","authorId":"u1"}),
         json!({"authorId":"u1"}),
     );
     assert!(touch_upsert.is_ok());
 
-    db.reload_collection(
-        "posts",
-        vec![json!({"id":"p1","title":"Broken once more","authorId":"missing"})],
-    )
-    .unwrap();
+    db.delete("users", "u1").unwrap();
     let many_failure = db.upsert_many(
         "posts",
         vec![
@@ -1473,11 +1494,11 @@ fn fk_validation_gates_match_ts_for_singular_updates_but_not_upsert_many_updates
     assert!(db.collection("posts").unwrap().get("p2").is_none());
     assert_eq!(
         db.collection("posts").unwrap().get("p1").unwrap()["title"],
-        json!("Broken once more")
+        json!("upsert ok")
     );
     assert_eq!(
         db.collection("posts").unwrap().get("p1").unwrap()["authorId"],
-        json!("missing")
+        json!("u1")
     );
 }
 

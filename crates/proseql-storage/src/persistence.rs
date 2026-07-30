@@ -13,7 +13,7 @@ use proseql_engine::migrations::{
     validate_migration_registry as engine_validate_migration_registry,
 };
 pub use proseql_engine::migrations::{DryRunMigration, DryRunStatus};
-use proseql_engine::validator::decode_value;
+use proseql_engine::validator::{decode_value, js_eq};
 use proseql_formats::codecs::jsonl_decode_lines;
 use proseql_formats::{FormatOptions, FormatRegistry, FormatRegistryError};
 use serde_json::{Map, Value};
@@ -439,6 +439,20 @@ pub(crate) fn encode_value(
             _ => Err(type_mismatch(path, "number", value)),
         },
         SchemaNode::Unknown => Ok(value.clone()),
+        SchemaNode::Literal { value: expected } => {
+            if js_eq(value, expected) {
+                Ok(value.clone())
+            } else {
+                Err(type_mismatch(path, "literal", value))
+            }
+        }
+        SchemaNode::LiteralUnion { values } => {
+            if values.iter().any(|expected| js_eq(value, expected)) {
+                Ok(value.clone())
+            } else {
+                Err(type_mismatch(path, "literal union", value))
+            }
+        }
         SchemaNode::Optional(inner) => encode_value(inner, value, path),
         SchemaNode::OptionalWithDefault { inner, .. } => encode_value(inner, value, path),
         SchemaNode::NullOr(inner) => {

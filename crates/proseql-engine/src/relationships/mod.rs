@@ -157,7 +157,7 @@ pub struct DeleteManyWithRelResult {
 
 /// Options controlling relationship cascade on delete operations.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct DeleteRelationshipsOptions {
     /// If `true`, the owner entity is soft-deleted instead of hard-deleted.
     /// Also causes `Cascade` to soft-delete related entities (mirrors TS `opts.soft`).

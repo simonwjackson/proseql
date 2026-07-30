@@ -4,6 +4,7 @@ members = [
     "proseql-engine",
     "proseql-formats",
     "proseql-storage",
+    "proseql-wasm",
 ]
 
 [workspace.dependencies]
