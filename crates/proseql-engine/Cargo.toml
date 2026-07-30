@@ -8,6 +8,7 @@ description = "proseQL platform-blind engine: config descriptor, boundary value 
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+indexmap = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

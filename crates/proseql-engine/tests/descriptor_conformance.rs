@@ -12,7 +12,7 @@ use proseql_engine::{
         ValidationMode,
     },
     errors::EngineError,
-    validator::validate_value,
+    validator::{decode_value, validate_value},
     value::Value,
 };
 use serde_json::{Map as JsonMap, Number};
@@ -457,8 +457,14 @@ fn num_from_str_accepts_numeric_string_encoded_form() {
     );
 }
 
+/// `validate_value` accepts the already-decoded (number) form because it is
+/// called against both wire and runtime values.
+///
+/// NOTE: `decode_value` does NOT accept a number as input for `NumFromStr`
+/// (a number is the output of decoding, not the input).  See the
+/// `decode_value_*` tests below for the `decode_value` contract.
 #[test]
-fn num_from_str_accepts_number_decoded_form() {
+fn validate_value_num_from_str_accepts_number_decoded_form() {
     let schema = SchemaNode::Struct {
         fields: vec![
             StructField {
@@ -475,9 +481,12 @@ fn num_from_str_accepts_number_decoded_form() {
     m.insert("id".into(), Value::String("1".into()));
     m.insert("count".into(), Value::Number(Number::from(42))); // decoded form: number
     let record = Value::Object(m);
+    // validate_value is deliberately permissive: it accepts both encoded (string)
+    // and decoded (number) forms.  This is intentional — it validates stored
+    // (already-decoded) values.  Use decode_value for wire-to-runtime decoding.
     assert!(
         validate_value(&schema, &record).is_ok(),
-        "NumberFromString accepts number (decoded form)"
+        "validate_value: NumberFromString accepts number (the decoded/runtime form)"
     );
 }
 
@@ -502,6 +511,169 @@ fn num_from_str_rejects_non_numeric_string() {
     assert!(
         validate_value(&schema, &record).is_err(),
         "NumberFromString must reject non-numeric strings"
+    );
+}
+
+// ── decode_value fixtures ──────────────────────────────────────────────────────
+//
+// Verify `decode_value` semantics (mirrors `Schema.decodeUnknownEffect`),
+// distinct from the permissive `validate_value` path.
+
+/// `decode_value` for `NumFromStr`: accepts the encoded (string) form and
+/// returns the decoded (number) form.
+///
+/// TS: `Schema.decodeUnknownEffect(NumberFromString)("42")` → `42`
+/// Grounded in Schema.ts `parseNumber`/`NumberFromString` → `transformOrFail(String, Number)`.
+#[test]
+fn decode_value_num_from_str_decodes_string_to_number() {
+    let schema = SchemaNode::Struct {
+        fields: vec![
+            StructField {
+                name: "id".into(),
+                schema: SchemaNode::Str,
+            },
+            StructField {
+                name: "count".into(),
+                schema: SchemaNode::NumFromStr,
+            },
+        ],
+    };
+    let mut m = JsonMap::new();
+    m.insert("id".into(), Value::String("1".into()));
+    m.insert("count".into(), Value::String("42".into())); // encoded form
+    let record = Value::Object(m);
+    let decoded = decode_value(&schema, &record)
+        .expect("decode_value must accept numeric string (encoded form)");
+    assert_eq!(
+        decoded["count"],
+        Value::Number(Number::from(42)),
+        "NumFromStr: string \"42\" must decode to number 42"
+    );
+    assert_eq!(decoded["id"], Value::String("1".into()));
+}
+
+/// `decode_value` for `NumFromStr`: rejects a bare number as input.
+///
+/// A number is the DECODED (output) form, NOT the encoded (input) form.
+/// `Schema.decodeUnknownEffect(NumberFromString)(42)` → ParseError.
+/// This is the correction of the wrong assumption that \"decoded number is
+/// valid decode input\". The permissive path is `validate_value`.
+#[test]
+fn decode_value_num_from_str_rejects_number_input() {
+    let schema = SchemaNode::NumFromStr;
+    let err = decode_value(&schema, &Value::Number(Number::from(42)))
+        .expect_err("decode_value must reject number input for NumFromStr");
+    match err {
+        EngineError::Validation(v) => {
+            assert!(
+                v.message.to_lowercase().contains("string"),
+                "error must mention 'string' (expected encoded form), got: {:?}",
+                v.message
+            );
+        }
+        other => panic!("expected ValidationError, got: {other:?}"),
+    }
+}
+
+/// `decode_value` for `Struct`: strips excess properties (TS `onExcessProperty: "ignore"`).
+/// `Schema.decodeUnknownEffect(Struct({id: S.String}))({id:"1",extra:"foo"})` → `{id:"1"}`
+#[test]
+fn decode_value_struct_strips_excess_properties() {
+    let schema = SchemaNode::Struct {
+        fields: vec![
+            StructField {
+                name: "id".into(),
+                schema: SchemaNode::Str,
+            },
+            StructField {
+                name: "name".into(),
+                schema: SchemaNode::Str,
+            },
+        ],
+    };
+    let mut m = JsonMap::new();
+    m.insert("id".into(), Value::String("1".into()));
+    m.insert("name".into(), Value::String("Alice".into()));
+    m.insert("extra".into(), Value::String("should be stripped".into()));
+    m.insert("createdAt".into(), Value::String("2024-01-01".into()));
+    let record = Value::Object(m);
+    let decoded =
+        decode_value(&schema, &record).expect("decode must succeed with excess properties present");
+    let obj = decoded.as_object().unwrap();
+    assert_eq!(
+        obj.len(),
+        2,
+        "decoded struct must have only 2 declared fields"
+    );
+    assert!(obj.contains_key("id"));
+    assert!(obj.contains_key("name"));
+    assert!(
+        !obj.contains_key("extra"),
+        "excess field 'extra' must be stripped"
+    );
+    assert!(
+        !obj.contains_key("createdAt"),
+        "excess field 'createdAt' must be stripped"
+    );
+}
+
+/// `decode_value` for absent optional field: stays absent (not set to null).
+#[test]
+fn decode_value_struct_absent_optional_stays_absent() {
+    let schema = SchemaNode::Struct {
+        fields: vec![
+            StructField {
+                name: "id".into(),
+                schema: SchemaNode::Str,
+            },
+            StructField {
+                name: "bio".into(),
+                schema: SchemaNode::Optional(Box::new(SchemaNode::Str)),
+            },
+        ],
+    };
+    let mut m = JsonMap::new();
+    m.insert("id".into(), Value::String("1".into()));
+    // bio is absent
+    let decoded = decode_value(&schema, &Value::Object(m))
+        .expect("absent optional field must not cause decode failure");
+    let obj = decoded.as_object().unwrap();
+    assert!(
+        !obj.contains_key("bio"),
+        "absent optional must remain absent after decode"
+    );
+    assert!(obj.contains_key("id"));
+}
+
+/// `decode_value` for Struct: combines transform (NumFromStr) + excess-property stripping.
+#[test]
+fn decode_value_struct_transforms_and_strips_combined() {
+    let schema = SchemaNode::Struct {
+        fields: vec![
+            StructField {
+                name: "id".into(),
+                schema: SchemaNode::Str,
+            },
+            StructField {
+                name: "count".into(),
+                schema: SchemaNode::NumFromStr,
+            },
+        ],
+    };
+    let mut m = JsonMap::new();
+    m.insert("id".into(), Value::String("1".into()));
+    m.insert("count".into(), Value::String("99".into())); // encoded form
+    m.insert("extra".into(), Value::String("noise".into())); // excess prop
+    let decoded = decode_value(&schema, &Value::Object(m))
+        .expect("decode must succeed with transform + excess prop");
+    assert_eq!(
+        decoded["count"],
+        Value::Number(Number::from(99)),
+        "NumFromStr must be decoded"
+    );
+    assert!(
+        decoded.get("extra").is_none(),
+        "excess prop must be stripped"
     );
 }
 

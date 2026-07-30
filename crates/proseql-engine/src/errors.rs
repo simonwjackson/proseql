@@ -438,6 +438,15 @@ pub enum EngineError {
     Plugin(PluginError),
 }
 
+impl std::fmt::Display for EngineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Delegate to Debug for a human-readable string.  The primary contract
+        // for EngineError is its `tag()` method and serde shape; Display is a
+        // convenience for Rust contexts (skipped-entry reason strings, etc.).
+        write!(f, "[{}] {:?}", self.tag(), self)
+    }
+}
+
 impl EngineError {
     /// Returns the TS `_tag` string for this error variant.
     ///

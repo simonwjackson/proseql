@@ -387,6 +387,23 @@ pub struct RelationshipDescriptor {
     pub foreign_key: Option<String>,
 }
 
+// ── Computed field descriptor ────────────────────────────────────────────────
+
+/// Descriptor for one computed field.
+///
+/// Mirrors one entry in `CollectionConfig.computed: ComputedFieldsConfig<T>`,
+/// where the key is the field name and the value is the derivation function.
+///
+/// The engine strips `name` from persisted data before validation; the host
+/// provides the implementation under `callback_id` in the `CallbackRegistry`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ComputedFieldDescriptor {
+    /// The field name that appears in query results but is never persisted.
+    pub name: String,
+    /// Stable id of the host callback that derives the value.
+    pub callback_id: String,
+}
+
 // ── Index & unique constraints ────────────────────────────────────────────────
 
 /// Descriptor for one index entry.  Mirrors the `indexes` array items in `CollectionConfig`.
@@ -541,8 +558,17 @@ pub struct CollectionDescriptor {
     pub before_delete_hooks: Vec<String>,
     pub after_delete_hooks: Vec<String>,
     pub on_change_hooks: Vec<String>,
-    /// Computed field callback ids (one per field name; engine invokes by id).
-    pub computed_fields: Vec<String>,
+    /// Computed field definitions: (field name, callback id) pairs.
+    ///
+    /// Each entry maps a field name that is stripped from create/update inputs
+    /// to a callback id that the host registers (for on-demand value derivation
+    /// in U3's query pipeline).  The engine strips the field names listed here
+    /// from persisted data; the query layer calls the callbacks to derive values
+    /// at read time.
+    ///
+    /// Mirrors `CollectionConfig.computed: ComputedFieldsConfig<T>` from
+    /// `packages/core/src/types/computed-types.ts`.
+    pub computed_fields: Vec<ComputedFieldDescriptor>,
     /// Fields included in the full-text search index.
     pub search_index: Vec<String>,
     /// Optional named id generator (references a plugin registration).

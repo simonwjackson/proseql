@@ -97,7 +97,7 @@ rust-test *args:
 
 # Lint the Rust engine workspace (Clippy)
 rust-lint:
-    cargo clippy --manifest-path crates/Cargo.toml -- -D warnings
+    cargo clippy --manifest-path crates/Cargo.toml --all-targets -- -D warnings
 
 # Format the Rust engine workspace
 rust-format:
