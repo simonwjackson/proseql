@@ -60,7 +60,7 @@ use super::aggregate::{
 };
 use super::computed::resolve_computed_for_all;
 use super::cursor::{apply_cursor, CursorConfig, CursorPageResult};
-use super::filter::matches_where;
+use super::filter::matches_where_with_registry;
 use super::paginate::paginate;
 use super::search::{compute_search_score, extract_search_config, resolve_score_fields, tokenize};
 use super::select::apply_selection;
@@ -128,7 +128,7 @@ pub fn execute_query(
         None => with_computed,
         Some(w) => with_computed
             .into_iter()
-            .filter(|e| matches_where(e, w))
+            .filter(|e| matches_where_with_registry(e, w, Some(registry.as_ref())))
             .collect(),
     };
 
@@ -210,7 +210,7 @@ pub fn execute_cursor_query(
         None => with_computed,
         Some(w) => with_computed
             .into_iter()
-            .filter(|e| matches_where(e, w))
+            .filter(|e| matches_where_with_registry(e, w, Some(registry.as_ref())))
             .collect(),
     };
 
@@ -254,7 +254,7 @@ pub fn execute_aggregate(
         None => with_computed,
         Some(w) => with_computed
             .into_iter()
-            .filter(|e| matches_where(e, w))
+            .filter(|e| matches_where_with_registry(e, w, Some(registry.as_ref())))
             .collect(),
     };
     Ok(compute_aggregates(&filtered, config))
@@ -278,7 +278,7 @@ pub fn execute_grouped_aggregate(
         None => with_computed,
         Some(w) => with_computed
             .into_iter()
-            .filter(|e| matches_where(e, w))
+            .filter(|e| matches_where_with_registry(e, w, Some(registry.as_ref())))
             .collect(),
     };
     Ok(compute_grouped_aggregates(&filtered, group_by, config))

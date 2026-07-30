@@ -23,7 +23,8 @@ use crate::collection::{
 };
 use crate::errors::{CollectionNotFoundError, EngineError, OperationError};
 use crate::query::{
-    apply_selection, matches_where, paginate, sort_entities_with_registry, SortEntry, SortOrder,
+    apply_selection, matches_where_with_registry, paginate, sort_entities_with_registry, SortEntry,
+    SortOrder,
 };
 use crate::relationships::{
     helpers::{col_nf, fk_field_names, payload_touches_fk_field, validate_fk_with_owner_snapshot},
@@ -1097,7 +1098,9 @@ fn evaluate_watch_array(
     match mode {
         WatchMode::Query => {
             if let Some(where_clause) = &config.r#where {
-                values.retain(|value| matches_where(value, where_clause));
+                values.retain(|value| {
+                    matches_where_with_registry(value, where_clause, Some(registry))
+                });
             }
         }
         WatchMode::ById { id } => {
@@ -1292,6 +1295,8 @@ impl Database {
             collections,
             registry,
             reactive,
+            active_transaction_kind: crate::transactions::ActiveTransactionKind::None,
+            reactive_event_suppression_depth: 0,
         }
     }
 
@@ -1395,11 +1400,12 @@ impl Database {
             .ok_or_else(|| col_nf(collection))?
             .snapshot_state();
 
-        let mut result = self
+        let internal = self
             .collections
             .get_mut(collection)
             .ok_or_else(|| col_nf(collection))?
-            .create_many(inputs, skip_duplicates)?;
+            .create_many_internal(inputs, skip_duplicates)?;
+        let mut result = internal.result;
 
         if skip_duplicates {
             let mut valid_created: Vec<Value> = Vec::new();
@@ -1446,6 +1452,11 @@ impl Database {
             return Err(error);
         }
 
+        if let Some(owner) = self.collections.get(collection) {
+            for entity in &result.created {
+                owner.run_after_create_entity(entity.clone());
+            }
+        }
         self.sync_reactive_snapshots();
         if !result.created.is_empty() {
             self.emit_owner_change_event(collection, ChangeOperation::Create);
@@ -1471,16 +1482,25 @@ impl Database {
             .get(collection)
             .ok_or_else(|| col_nf(collection))?
             .snapshot_state();
-        let fk_fields = fk_field_names(&relationships);
-        let touches_fk = payload_touches_fk_field(&updates, &fk_fields);
-
-        let result = self
+        let internal = self
             .collections
             .get_mut(collection)
             .ok_or_else(|| col_nf(collection))?
-            .update_many(|entity| matches_where(entity, &where_clause), updates)?;
+            .update_many_internal(
+                |entity| {
+                    matches_where_with_registry(entity, &where_clause, Some(self.registry.as_ref()))
+                },
+                updates,
+            )?;
+        let result = internal.result;
 
-        if touches_fk {
+        if internal
+            .contexts
+            .iter()
+            .any(|(_, _, _, transformed_updates)| {
+                payload_touches_fk_field(transformed_updates, &fk_field_names(&relationships))
+            })
+        {
             if let Some(error) = result.updated.iter().find_map(|entity| {
                 validate_fk_with_owner_snapshot(
                     collection,
@@ -1498,6 +1518,16 @@ impl Database {
             }
         }
 
+        if let Some(owner) = self.collections.get(collection) {
+            for (id, previous, current, transformed_updates) in &internal.contexts {
+                owner.run_after_update_context(
+                    id,
+                    previous.clone(),
+                    current.clone(),
+                    transformed_updates.clone(),
+                );
+            }
+        }
         self.sync_reactive_snapshots();
         if result.count > 0 {
             self.emit_owner_change_event(collection, ChangeOperation::Update);
@@ -1516,7 +1546,13 @@ impl Database {
             .collections
             .get_mut(collection)
             .ok_or_else(|| col_nf(collection))?
-            .delete_many(|entity| matches_where(entity, &where_clause), soft, limit)?;
+            .delete_many(
+                |entity| {
+                    matches_where_with_registry(entity, &where_clause, Some(self.registry.as_ref()))
+                },
+                soft,
+                limit,
+            )?;
 
         self.sync_reactive_snapshots();
         if result.count > 0 {
@@ -1544,19 +1580,21 @@ impl Database {
             .get(collection)
             .ok_or_else(|| col_nf(collection))?
             .snapshot_state();
-        let fk_fields = fk_field_names(&relationships);
-        let update_touches_fk = payload_touches_fk_field(&update_data, &fk_fields);
-
-        let result = self
+        let internal = self
             .collections
             .get_mut(collection)
             .ok_or_else(|| col_nf(collection))?
-            .upsert(where_clause, create_data, update_data)?;
+            .upsert_internal(where_clause, create_data, update_data)?;
+        let result = internal.result;
 
-        let should_validate = match result.action {
-            UpsertAction::Created => true,
-            UpsertAction::Updated => update_touches_fk,
+        let should_validate = match &internal.post {
+            crate::collection::InternalUpsertPost::Created(_) => true,
+            crate::collection::InternalUpsertPost::Updated {
+                transformed_updates,
+                ..
+            } => payload_touches_fk_field(transformed_updates, &fk_field_names(&relationships)),
         };
+
         if should_validate {
             if let Err(error) = validate_fk_with_owner_snapshot(
                 collection,
@@ -1572,6 +1610,24 @@ impl Database {
             }
         }
 
+        if let Some(owner) = self.collections.get(collection) {
+            match &internal.post {
+                crate::collection::InternalUpsertPost::Created(entity) => {
+                    owner.run_after_create_entity(entity.clone())
+                }
+                crate::collection::InternalUpsertPost::Updated {
+                    id,
+                    previous,
+                    current,
+                    transformed_updates,
+                } => owner.run_after_update_context(
+                    id,
+                    previous.clone(),
+                    current.clone(),
+                    transformed_updates.clone(),
+                ),
+            }
+        }
         self.sync_reactive_snapshots();
         self.emit_owner_change_event(
             collection,
@@ -1600,11 +1656,12 @@ impl Database {
             .get(collection)
             .ok_or_else(|| col_nf(collection))?
             .snapshot_state();
-        let result = self
+        let internal = self
             .collections
             .get_mut(collection)
             .ok_or_else(|| col_nf(collection))?
-            .upsert_many(inputs)?;
+            .upsert_many_internal(inputs)?;
+        let result = internal.result;
 
         let created_error = result.created.iter().find_map(|entity| {
             validate_fk_with_owner_snapshot(
@@ -1633,6 +1690,19 @@ impl Database {
             return Err(error);
         }
 
+        if let Some(owner) = self.collections.get(collection) {
+            for entity in &internal.created_contexts {
+                owner.run_after_create_entity(entity.clone());
+            }
+            for (id, previous, current, updates) in &internal.updated_contexts {
+                owner.run_after_update_context(
+                    id,
+                    previous.clone(),
+                    current.clone(),
+                    updates.clone(),
+                );
+            }
+        }
         self.sync_reactive_snapshots();
         if !result.created.is_empty() {
             self.emit_owner_change_event(collection, ChangeOperation::Create);
@@ -1648,6 +1718,9 @@ impl Database {
     }
 
     pub(crate) fn emit_owner_change_event(&self, collection: &str, operation: ChangeOperation) {
+        if self.reactive_event_suppression_depth > 0 {
+            return;
+        }
         self.reactive.publish(ChangeEvent {
             collection: collection.to_owned(),
             operation,

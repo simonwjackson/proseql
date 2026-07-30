@@ -96,6 +96,7 @@ use crate::reactive::ThreadReactiveScheduler;
 #[cfg(target_arch = "wasm32")]
 use crate::reactive::UnsupportedReactiveScheduler;
 use crate::reactive::{ChangeOperation, ReactiveHub, ReactiveScheduler};
+use crate::transactions::ActiveTransactionKind;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -174,9 +175,11 @@ pub struct DeleteRelationshipsOptions {
 
 /// Multi-collection database with relationship-aware CRUD and population.
 pub struct Database {
-    pub(super) collections: IndexMap<String, Collection>,
-    pub(super) registry: Arc<CallbackRegistry>,
-    pub(super) reactive: ReactiveHub,
+    pub(crate) collections: IndexMap<String, Collection>,
+    pub(crate) registry: Arc<CallbackRegistry>,
+    pub(crate) reactive: ReactiveHub,
+    pub(crate) active_transaction_kind: ActiveTransactionKind,
+    pub(crate) reactive_event_suppression_depth: usize,
 }
 
 impl Database {
@@ -226,12 +229,18 @@ impl Database {
     ///  3. FK-validate the DECODED entity.
     ///  4. If FK fails → `delete_raw` the just-created entity, return `ForeignKeyError`.
     pub fn create(&mut self, collection: &str, data: Value) -> Result<Value, EngineError> {
+        let snapshot = self
+            .collections
+            .get(collection)
+            .ok_or_else(|| col_nf(collection))?
+            .snapshot_state();
+
         // Step 1 & 2: schema / defaults / decode.  Entity is created in state on success.
         let entity = self
             .collections
             .get_mut(collection)
             .ok_or_else(|| col_nf(collection))?
-            .create(data)?;
+            .create_no_post_hooks(data)?;
 
         // Step 3: FK-validate the decoded entity.
         let rels = {
@@ -243,16 +252,14 @@ impl Database {
                 .clone()
         };
         if let Err(fk_err) = validate_fk(collection, &rels, &entity, &self.collections) {
-            // Step 4: remove the just-created entity (bypasses append-only guard).
-            let id = entity
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
             if let Some(col) = self.collections.get_mut(collection) {
-                col.delete_raw(&id);
+                col.restore_state(snapshot);
             }
             return Err(fk_err);
+        }
+
+        if let Some(owner) = self.collections.get(collection) {
+            owner.run_after_create_entity(entity.clone());
         }
 
         self.sync_reactive_snapshots();
@@ -287,21 +294,16 @@ impl Database {
             .descriptor
             .relationships
             .clone();
-        let fk_fields = fk_field_names(&rels);
-        let touches_fk = payload_touches_fk_field(&updates, &fk_fields);
-
-        let result = self
+        let internal = self
             .collections
             .get_mut(collection)
             .ok_or_else(|| col_nf(collection))?
-            .update(id, updates)?;
+            .update_internal(id, updates)?;
 
-        // TS `update.ts` only validates foreign keys when the update payload
-        // touches relationship/FK fields, so unrelated updates must not fail on
-        // pre-existing dangling references.
-        if touches_fk {
-            if let Err(fk_err) = validate_fk(collection, &rels, &result, &self.collections) {
-                // Restore the entity to its pre-update state.
+        if payload_touches_fk_field(&internal.transformed_updates, &fk_field_names(&rels)) {
+            if let Err(fk_err) =
+                validate_fk(collection, &rels, &internal.current, &self.collections)
+            {
                 if let Some(col) = self.collections.get_mut(collection) {
                     col.restore_entity_snapshot(id, snapshot);
                 }
@@ -309,10 +311,19 @@ impl Database {
             }
         }
 
+        if let Some(owner) = self.collections.get(collection) {
+            owner.run_after_update_context(
+                id,
+                internal.previous.clone(),
+                internal.current.clone(),
+                internal.transformed_updates.clone(),
+            );
+        }
+
         self.sync_reactive_snapshots();
         self.emit_owner_change_event(collection, ChangeOperation::Update);
 
-        Ok(result)
+        Ok(internal.current)
     }
 
     /// Hard-delete an entity by id (no cascade).

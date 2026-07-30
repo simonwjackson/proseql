@@ -34,6 +34,7 @@
 use serde_json::Value;
 
 use super::search::tokenize;
+use crate::callbacks::{CallbackRegistry, CustomOperatorEvaluation};
 use crate::validator::js_eq;
 
 // ── Dot-notation helpers ─────────────────────────────────────────────────────────────
@@ -101,6 +102,14 @@ fn collect_string_paths_rec(value: &Value, prefix: &str, paths: &mut Vec<String>
 ///
 /// Mirrors `filterData` from `packages/core/src/operations/query/filter.ts`.
 pub fn matches_where(entity: &Value, where_clause: &Value) -> bool {
+    matches_where_with_registry(entity, where_clause, None)
+}
+
+pub fn matches_where_with_registry(
+    entity: &Value,
+    where_clause: &Value,
+    registry: Option<&CallbackRegistry>,
+) -> bool {
     let where_obj = match where_clause.as_object() {
         Some(m) => m,
         None => return true, // null/non-object where → include all
@@ -121,7 +130,10 @@ pub fn matches_where(entity: &Value, where_clause: &Value) -> bool {
                 if arr.is_empty() {
                     return false;
                 }
-                if !arr.iter().any(|cond| matches_where(entity, cond)) {
+                if !arr
+                    .iter()
+                    .any(|cond| matches_where_with_registry(entity, cond, registry))
+                {
                     return false;
                 }
             }
@@ -132,13 +144,16 @@ pub fn matches_where(entity: &Value, where_clause: &Value) -> bool {
                     Some(a) => a,
                     None => return false,
                 };
-                if !arr.iter().all(|cond| matches_where(entity, cond)) {
+                if !arr
+                    .iter()
+                    .all(|cond| matches_where_with_registry(entity, cond, registry))
+                {
                     return false;
                 }
             }
             "$not" => {
                 // Sub-condition must NOT match.
-                if matches_where(entity, value) {
+                if matches_where_with_registry(entity, value, registry) {
                     return false;
                 }
             }
@@ -225,7 +240,7 @@ pub fn matches_where(entity: &Value, where_clause: &Value) -> bool {
 
                 match field_value {
                     Some(fv) => {
-                        if !matches_field_filter(fv, value) {
+                        if !matches_field_filter(fv, value, registry) {
                             return false;
                         }
                     }
@@ -285,15 +300,20 @@ fn missing_field_matches(filter: &Value) -> bool {
 /// - An object without operators → nested shape-mirroring (sub-field filters)
 ///
 /// Mirrors `matchesFilter` from `packages/core/src/types/operators.ts`.
-pub fn matches_field_filter(value: &Value, filter: &Value) -> bool {
+pub fn matches_field_filter(
+    value: &Value,
+    filter: &Value,
+    registry: Option<&CallbackRegistry>,
+) -> bool {
     // Check if filter is an operator object
     if let Some(ops) = filter.as_object() {
-        let has_operators = ops
-            .keys()
-            .any(|k| k.starts_with('$') && is_builtin_operator(k));
+        let has_operators = ops.keys().any(|k| {
+            k.starts_with('$')
+                && (is_builtin_operator(k) || registry.is_some_and(|r| r.has_custom_operator(k)))
+        });
 
         if has_operators {
-            return evaluate_operators(value, ops);
+            return evaluate_operators(value, ops, registry);
         }
 
         // No operator keys → nested shape-mirroring.
@@ -301,7 +321,7 @@ pub fn matches_field_filter(value: &Value, filter: &Value) -> bool {
         if let Value::Object(value_obj) = value {
             // Build a WhereClause-like value and recurse
             let entity_as_top = Value::Object(value_obj.clone());
-            return matches_where(&entity_as_top, filter);
+            return matches_where_with_registry(&entity_as_top, filter, registry);
         }
 
         // Non-object value with a non-operator object filter → no match
@@ -338,7 +358,11 @@ fn is_builtin_operator(key: &str) -> bool {
 /// Operators that are type-incompatible with `value` cause a false result.
 ///
 /// Mirrors the `matchesFilter` body for `isFilterOperatorObject(filter) === true`.
-fn evaluate_operators(value: &Value, ops: &serde_json::Map<String, Value>) -> bool {
+fn evaluate_operators(
+    value: &Value,
+    ops: &serde_json::Map<String, Value>,
+    registry: Option<&CallbackRegistry>,
+) -> bool {
     let mut results: Vec<bool> = Vec::new();
 
     // ── Universal operators ────────────────────────────────────────────────────
@@ -502,6 +526,18 @@ fn evaluate_operators(value: &Value, ops: &serde_json::Map<String, Value>) -> bo
         // null value with array operators → fail
         if ops.contains_key("$contains") || ops.contains_key("$all") || ops.contains_key("$size") {
             return false;
+        }
+    }
+
+    if let Some(registry) = registry {
+        for (key, operand) in ops {
+            if !key.starts_with('$') || is_builtin_operator(key) {
+                continue;
+            }
+            match registry.evaluate_custom_operator(key, value, operand) {
+                CustomOperatorEvaluation::Unknown | CustomOperatorEvaluation::Ignored => {}
+                CustomOperatorEvaluation::Matched(result) => results.push(result),
+            }
         }
     }
 

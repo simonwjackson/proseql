@@ -49,8 +49,14 @@ use crate::descriptor::{
     CollectionDescriptor, IdStrategy, SchemaNode, StructField, UniqueConstraintDescriptor,
 };
 use crate::errors::{
-    DuplicateKeyError, EngineError, NotFoundError, OperationError, UniqueConstraintError,
-    ValidationError, ValidationIssue,
+    DuplicateKeyError, EngineError, HookError, HookOperation, NotFoundError, OperationError,
+    PluginError, UniqueConstraintError, ValidationError, ValidationIssue,
+};
+use crate::hooks::{
+    run_after_create_hooks, run_after_delete_hooks, run_after_update_hooks,
+    run_before_create_hooks, run_before_delete_hooks, run_before_update_hooks, run_on_change_hooks,
+    AfterCreateContext, AfterDeleteContext, AfterUpdateContext, BeforeCreateContext,
+    BeforeDeleteContext, BeforeUpdateContext, OnChangeContext,
 };
 use crate::id_gen::IdGenerator;
 use crate::operators::{
@@ -121,6 +127,48 @@ pub struct SkippedEntry {
     pub reason: String,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct InternalUpdateOutcome {
+    pub previous: Value,
+    pub current: Value,
+    pub transformed_updates: Value,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct InternalCreateManyOutcome {
+    pub result: CreateManyResult,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct InternalUpdateManyOutcome {
+    pub result: UpdateManyResult,
+    pub contexts: Vec<(String, Value, Value, Value)>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum InternalUpsertPost {
+    Created(Value),
+    Updated {
+        id: String,
+        previous: Value,
+        current: Value,
+        transformed_updates: Value,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct InternalUpsertOutcome {
+    pub result: UpsertOutcome,
+    pub post: InternalUpsertPost,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct InternalUpsertManyOutcome {
+    pub result: UpsertManyResult,
+    pub created_contexts: Vec<Value>,
+    pub updated_contexts: Vec<(String, Value, Value, Value)>,
+}
+
 // ── Collection ────────────────────────────────────────────────────────────────
 
 /// In-memory collection of JSON entities keyed by `id`.
@@ -137,6 +185,7 @@ pub struct Collection {
     callbacks: Arc<CallbackRegistry>,
     /// ID generator used when the input does not supply an `id`.
     id_gen: Box<dyn IdGenerator>,
+    named_id_generator_error: Option<String>,
     /// Clock used to produce ISO 8601 UTC timestamps.
     clock: Box<dyn Clock>,
     /// Whether the schema declares an optional `deletedAt` field (soft-delete support).
@@ -188,12 +237,33 @@ impl Collection {
             .iter()
             .map(|cf| cf.name.clone())
             .collect();
+        let configured_named_generator = match &descriptor.id_strategy {
+            IdStrategy::NamedGenerator { name } => Some(name.clone()),
+            _ => descriptor.id_generator.clone(),
+        };
+        let (id_gen, named_id_generator_error) = if let Some(generator_name) =
+            configured_named_generator
+        {
+            match callbacks.instantiate_id_generator(generator_name.as_str()) {
+                Some(generator) => (generator, None),
+                None => (
+                    id_gen,
+                    Some(format!(
+                        "Collection '{}' references named id generator '{}' which is not registered",
+                        descriptor.name, generator_name
+                    )),
+                ),
+            }
+        } else {
+            (id_gen, None)
+        };
         Self {
             name: name.into(),
             descriptor,
             state: IndexMap::new(),
             callbacks,
             id_gen,
+            named_id_generator_error,
             clock,
             supports_soft_delete,
             computed_field_names,
@@ -262,6 +332,101 @@ impl Collection {
         self.state.values().collect()
     }
 
+    pub(crate) fn merged_hook_ids(&self, global: &[String], local: &[String]) -> Vec<String> {
+        global
+            .iter()
+            .cloned()
+            .chain(local.iter().cloned())
+            .collect()
+    }
+
+    fn hook_operation_label(operation: HookOperation) -> &'static str {
+        match operation {
+            HookOperation::Create => "create",
+            HookOperation::Update => "update",
+            HookOperation::Delete => "delete",
+        }
+    }
+
+    fn missing_local_hook_error(&self, hook_id: &str, operation: HookOperation) -> EngineError {
+        EngineError::Hook(HookError {
+            hook: hook_id.to_owned(),
+            collection: self.name.clone(),
+            operation,
+            reason: "missing-hook-callback".to_owned(),
+            message: format!(
+                "Hook callback '{}' for collection '{}' and operation '{}' is not registered",
+                hook_id,
+                self.name,
+                Self::hook_operation_label(operation)
+            ),
+        })
+    }
+
+    fn missing_global_hook_error(&self, phase: &str, hook_id: &str) -> EngineError {
+        EngineError::Plugin(Box::new(PluginError {
+            plugin: "global-hooks".to_owned(),
+            reason: "invalid_hook".to_owned(),
+            message: format!("Global {phase} hook '{}' is not registered", hook_id),
+        }))
+    }
+
+    fn validate_post_hook_registrations(
+        &self,
+        operation: HookOperation,
+    ) -> Result<(), EngineError> {
+        match operation {
+            HookOperation::Create => {
+                for hook_id in self.callbacks.global_after_create_hooks() {
+                    if self.callbacks.after_create_hook(hook_id).is_none() {
+                        return Err(self.missing_global_hook_error("afterCreate", hook_id));
+                    }
+                }
+                for hook_id in &self.descriptor.after_create_hooks {
+                    if self.callbacks.after_create_hook(hook_id).is_none() {
+                        return Err(self.missing_local_hook_error(hook_id, operation));
+                    }
+                }
+            }
+            HookOperation::Update => {
+                for hook_id in self.callbacks.global_after_update_hooks() {
+                    if self.callbacks.after_update_hook(hook_id).is_none() {
+                        return Err(self.missing_global_hook_error("afterUpdate", hook_id));
+                    }
+                }
+                for hook_id in &self.descriptor.after_update_hooks {
+                    if self.callbacks.after_update_hook(hook_id).is_none() {
+                        return Err(self.missing_local_hook_error(hook_id, operation));
+                    }
+                }
+            }
+            HookOperation::Delete => {
+                for hook_id in self.callbacks.global_after_delete_hooks() {
+                    if self.callbacks.after_delete_hook(hook_id).is_none() {
+                        return Err(self.missing_global_hook_error("afterDelete", hook_id));
+                    }
+                }
+                for hook_id in &self.descriptor.after_delete_hooks {
+                    if self.callbacks.after_delete_hook(hook_id).is_none() {
+                        return Err(self.missing_local_hook_error(hook_id, operation));
+                    }
+                }
+            }
+        }
+
+        for hook_id in self.callbacks.global_on_change_hooks() {
+            if self.callbacks.on_change_hook(hook_id).is_none() {
+                return Err(self.missing_global_hook_error("onChange", hook_id));
+            }
+        }
+        for hook_id in &self.descriptor.on_change_hooks {
+            if self.callbacks.on_change_hook(hook_id).is_none() {
+                return Err(self.missing_local_hook_error(hook_id, operation));
+            }
+        }
+        Ok(())
+    }
+
     /// Number of entities currently in the collection.
     pub fn len(&self) -> usize {
         self.state.len()
@@ -284,33 +449,44 @@ impl Collection {
     /// 4. Apply `OptionalWithDefault` callbacks for absent fields; fail loudly if
     ///    a required callback is not registered
     /// 5. Validate against schema
-    /// 6. Check for duplicate id → `DuplicateKeyError`
-    /// 7. Check unique constraints → `UniqueConstraintError`
-    /// 8. Insert into state
+    /// 6. Run beforeCreate hooks (global plugin hooks first)
+    /// 7. Check for duplicate id → `DuplicateKeyError`
+    /// 8. Check unique constraints → `UniqueConstraintError`
+    /// 9. Insert into state
     pub fn create(&mut self, input: Value) -> Result<Value, EngineError> {
+        let entity = self.create_no_post_hooks(input)?;
+        self.run_after_create_entity(entity.clone());
+        Ok(entity)
+    }
+
+    pub(crate) fn create_no_post_hooks(&mut self, input: Value) -> Result<Value, EngineError> {
         let mut obj = require_object(input, "create input")?;
 
-        // Strip computed fields (they are derived, not persisted)
         for name in &self.computed_field_names {
             obj.remove(name);
         }
 
         let id = self.resolve_id(&obj)?;
         let now = self.clock.now_iso();
-
-        // Always overwrite timestamps — mirrors TS unconditional spread:
-        // `const raw = { ...sanitizedInput, id, createdAt: now, updatedAt: now }`
         obj.insert("id".to_string(), Value::String(id.clone()));
         obj.insert("createdAt".to_string(), Value::String(now.clone()));
         obj.insert("updatedAt".to_string(), Value::String(now.clone()));
-
-        // Apply OptionalWithDefault callbacks for absent fields (fail loudly if missing)
         self.apply_defaults(&mut obj, &self.descriptor.schema.clone())?;
 
-        // Validate against schema (handles DerivedFromKey stripping)
-        let entity = self.validate_entity(Value::Object(obj), &id)?;
+        let hook_ids = self.merged_hook_ids(
+            self.callbacks.global_before_create_hooks(),
+            &self.descriptor.before_create_hooks,
+        );
+        let entity = run_before_create_hooks(
+            &self.callbacks,
+            &hook_ids,
+            BeforeCreateContext {
+                operation: HookOperation::Create,
+                collection: self.name.clone(),
+                data: self.validate_entity(Value::Object(obj), &id)?,
+            },
+        )?;
 
-        // Duplicate id check
         if self.state.contains_key(&id) {
             return Err(EngineError::DuplicateKey(Box::new(DuplicateKeyError {
                 collection: self.name.clone(),
@@ -321,16 +497,42 @@ impl Collection {
             })));
         }
 
-        // Unique constraint checks
         self.check_unique_constraints(&entity, None)?;
+        self.validate_post_hook_registrations(HookOperation::Create)?;
 
-        // Insert (appended at end in IndexMap)
-        let stored_id = entity["id"].as_str().unwrap_or_default().to_string();
-        self.state.insert(stored_id, entity.clone());
-
-        // Rebuild query indexes after successful mutation
+        self.state.insert(id.clone(), entity.clone());
         self.rebuild_indexes();
+        Ok(entity)
+    }
 
+    pub(crate) fn create_unhooked(&mut self, input: Value) -> Result<Value, EngineError> {
+        let mut obj = require_object(input, "create input")?;
+
+        for name in &self.computed_field_names {
+            obj.remove(name);
+        }
+
+        let id = self.resolve_id(&obj)?;
+        let now = self.clock.now_iso();
+        obj.insert("id".to_string(), Value::String(id.clone()));
+        obj.insert("createdAt".to_string(), Value::String(now.clone()));
+        obj.insert("updatedAt".to_string(), Value::String(now.clone()));
+        self.apply_defaults(&mut obj, &self.descriptor.schema.clone())?;
+        let entity = self.validate_entity(Value::Object(obj), &id)?;
+
+        if self.state.contains_key(&id) {
+            return Err(EngineError::DuplicateKey(Box::new(DuplicateKeyError {
+                collection: self.name.clone(),
+                field: "id".to_string(),
+                value: id.clone(),
+                existing_id: id,
+                message: format!("Duplicate value for field 'id': \"{}\"", entity["id"]),
+            })));
+        }
+
+        self.check_unique_constraints(&entity, None)?;
+        self.state.insert(id.clone(), entity.clone());
+        self.rebuild_indexes();
         Ok(entity)
     }
 
@@ -348,177 +550,11 @@ impl Collection {
         inputs: Vec<Value>,
         skip_duplicates: bool,
     ) -> Result<CreateManyResult, EngineError> {
-        let now = self.clock.now_iso();
-        let mut validated_entities: Vec<Value> = Vec::with_capacity(inputs.len());
-        let mut skipped: Vec<SkippedEntry> = vec![];
-        // Batch constraint index: constraintKey → id (for inter-batch dedup)
-        let mut batch_constraint_index: Map<String, Value> = Map::new();
-
-        for input in inputs {
-            let mut obj = match require_object(input.clone(), "createMany input") {
-                Ok(o) => o,
-                Err(e) => {
-                    if skip_duplicates {
-                        skipped.push(SkippedEntry {
-                            data: input,
-                            reason: e.to_string(),
-                        });
-                        continue;
-                    }
-                    return Err(e);
-                }
-            };
-
-            // Strip computed fields (TS: sanitizedInput = stripComputedFromInput(input))
-            for name in &self.computed_field_names {
-                obj.remove(name);
-            }
-
-            let id = match self.resolve_id(&obj) {
-                Ok(i) => i,
-                Err(e) => {
-                    if skip_duplicates {
-                        skipped.push(SkippedEntry {
-                            data: Value::Object(obj),
-                            reason: e.to_string(),
-                        });
-                        continue;
-                    }
-                    return Err(e);
-                }
-            };
-
-            // Insert resolved id into obj
-            obj.insert("id".to_string(), Value::String(id.clone()));
-
-            // TS skip data = { ...sanitizedInput, id } — stripped input WITH id, WITHOUT
-            // auto-generated timestamps.  Save it NOW before we overwrite timestamps.
-            let skip_data = Value::Object(obj.clone());
-
-            // TS: const raw = { ...sanitizedInput, id, createdAt: now, updatedAt: now }
-            // Always overwrite timestamps.
-            obj.insert("createdAt".to_string(), Value::String(now.clone()));
-            obj.insert("updatedAt".to_string(), Value::String(now.clone()));
-
-            // Apply defaults
-            let schema = self.descriptor.schema.clone();
-            if let Err(e) = self.apply_defaults(&mut obj, &schema) {
-                if skip_duplicates {
-                    skipped.push(SkippedEntry {
-                        data: skip_data,
-                        reason: e.to_string(),
-                    });
-                    continue;
-                }
-                return Err(e);
-            }
-
-            // Validate schema
-            // TS reason: `Validation failed: ${firstIssueMessage}`
-            let entity = match self.validate_entity(Value::Object(obj.clone()), &id) {
-                Ok(e) => e,
-                Err(e) => {
-                    if skip_duplicates {
-                        let reason = match &e {
-                            EngineError::Validation(v) => {
-                                let first_msg = v
-                                    .issues
-                                    .first()
-                                    .map(|i| i.message.clone())
-                                    .unwrap_or_else(|| v.message.clone());
-                                format!("Validation failed: {first_msg}")
-                            }
-                            other => format!("Validation failed: {other}"),
-                        };
-                        skipped.push(SkippedEntry {
-                            data: skip_data, // TS: { ...sanitizedInput, id } (no timestamps)
-                            reason,
-                        });
-                        continue;
-                    }
-                    return Err(e);
-                }
-            };
-
-            // Duplicate id check against existing state and within-batch validated list.
-            // TS reason: `Duplicate ID: ${id}`
-            // TS skip data: { ...sanitizedInput, id } = skip_data
-            if self.state.contains_key(&id) {
-                let e = EngineError::DuplicateKey(Box::new(DuplicateKeyError {
-                    collection: self.name.clone(),
-                    field: "id".to_string(),
-                    value: id.clone(),
-                    existing_id: id.clone(),
-                    message: format!("Duplicate value for field 'id': \"{id}\""),
-                }));
-                if skip_duplicates {
-                    skipped.push(SkippedEntry {
-                        data: skip_data,
-                        reason: format!("Duplicate ID: {id}"),
-                    });
-                    continue;
-                }
-                return Err(e);
-            }
-            if validated_entities
-                .iter()
-                .any(|e| e["id"].as_str() == Some(&id))
-            {
-                let e = EngineError::DuplicateKey(Box::new(DuplicateKeyError {
-                    collection: self.name.clone(),
-                    field: "id".to_string(),
-                    value: id.clone(),
-                    existing_id: id.clone(),
-                    message: format!("Duplicate value for field 'id': \"{id}\" (in batch)"),
-                }));
-                if skip_duplicates {
-                    skipped.push(SkippedEntry {
-                        data: skip_data,
-                        reason: format!("Duplicate ID: {id}"),
-                    });
-                    continue;
-                }
-                return Err(e);
-            }
-
-            // Unique constraints against state + batch.
-            // TS reason: `Unique constraint violation: ${error.message}`
-            // TS skip data: entity (the validated entity WITH timestamps)
-            if let Err(e) =
-                self.check_unique_constraints_with_batch(&entity, None, &batch_constraint_index)
-            {
-                if skip_duplicates {
-                    let reason = match &e {
-                        EngineError::UniqueConstraint(uc) => {
-                            format!("Unique constraint violation: {}", uc.message)
-                        }
-                        other => format!("Unique constraint violation: {other}"),
-                    };
-                    skipped.push(SkippedEntry {
-                        data: entity, // TS: entity (WITH timestamps)
-                        reason,
-                    });
-                    continue;
-                }
-                return Err(e);
-            }
-
-            // Add to batch index
-            self.add_to_batch_constraint_index(&entity, &mut batch_constraint_index);
-            validated_entities.push(entity);
+        let outcome = self.create_many_internal(inputs, skip_duplicates)?;
+        for entity in &outcome.result.created {
+            self.run_after_create_entity(entity.clone());
         }
-
-        // Atomic apply: only if nothing failed (or skip_duplicates collected failures)
-        let created: Vec<Value> = validated_entities.clone();
-        for entity in validated_entities {
-            let id = entity["id"].as_str().unwrap_or_default().to_string();
-            self.state.insert(id, entity);
-        }
-
-        // Rebuild query indexes after successful batch mutation
-        self.rebuild_indexes();
-
-        Ok(CreateManyResult { created, skipped })
+        Ok(outcome.result)
     }
 
     // ── Update ────────────────────────────────────────────────────────────────
@@ -535,53 +571,14 @@ impl Collection {
     /// 7. Check unique constraints only when update touches unique fields
     /// 8. Replace in state (preserving insertion position)
     pub fn update(&mut self, id: &str, updates: Value) -> Result<Value, EngineError> {
-        // Append-only guard
-        if self.descriptor.append_only {
-            return Err(append_only_error("update", &self.name));
-        }
-
-        // Immutability guard
-        validate_immutable_fields(&updates)?;
-
-        // Strip computed fields
-        let updates = strip_computed(&updates, &self.computed_field_names);
-
-        // Look up existing
-        let existing = self
-            .state
-            .get(id)
-            .ok_or_else(|| not_found(&self.name, id))?
-            .clone();
-
-        // Merge updates
-        let mut merged = deep_merge_updates(&existing, &updates, &self.callbacks)?;
-
-        // Auto-set updatedAt if not in updates
-        let explicitly_sets_updated_at = updates
-            .as_object()
-            .map(|m| m.contains_key("updatedAt"))
-            .unwrap_or(false);
-        if !explicitly_sets_updated_at {
-            if let Value::Object(ref mut m) = merged {
-                m.insert("updatedAt".to_string(), Value::String(self.clock.now_iso()));
-            }
-        }
-
-        // Validate
-        let validated = self.validate_entity(merged, id)?;
-
-        // Unique constraint check — only when update actually touches a unique field
-        if update_touches_unique_fields(&updates, &self.descriptor.unique_fields) {
-            self.check_unique_constraints(&validated, Some(id))?;
-        }
-
-        // Replace in state (IndexMap preserves insertion position on update)
-        self.state.insert(id.to_string(), validated.clone());
-
-        // Rebuild query indexes after successful mutation
-        self.rebuild_indexes();
-
-        Ok(validated)
+        let outcome = self.update_internal(id, updates)?;
+        self.run_after_update_context(
+            id,
+            outcome.previous.clone(),
+            outcome.current.clone(),
+            outcome.transformed_updates.clone(),
+        );
+        Ok(outcome.current)
     }
 
     /// Update all entities matching `predicate`.
@@ -600,77 +597,16 @@ impl Collection {
         predicate: impl Fn(&Value) -> bool,
         updates: Value,
     ) -> Result<UpdateManyResult, EngineError> {
-        if self.descriptor.append_only {
-            return Err(append_only_error("updateMany", &self.name));
+        let outcome = self.update_many_internal(predicate, updates)?;
+        for (id, previous, current, transformed_updates) in &outcome.contexts {
+            self.run_after_update_context(
+                id,
+                previous.clone(),
+                current.clone(),
+                transformed_updates.clone(),
+            );
         }
-
-        validate_immutable_fields(&updates)?;
-        let updates = strip_computed(&updates, &self.computed_field_names);
-
-        let now = self.clock.now_iso();
-        let explicitly_sets_updated_at = updates
-            .as_object()
-            .map(|m| m.contains_key("updatedAt"))
-            .unwrap_or(false);
-
-        // Find matching ids (collect first to avoid borrow conflicts)
-        let matching_ids: Vec<String> = self
-            .state
-            .iter()
-            .filter(|(_, v)| predicate(v))
-            .map(|(k, _)| k.clone())
-            .collect();
-
-        if matching_ids.is_empty() {
-            return Ok(UpdateManyResult::default());
-        }
-
-        // Validate all updates first (phase 1), then apply atomically (phase 2)
-        let mut validated_pairs: Vec<(String, Value)> = Vec::with_capacity(matching_ids.len());
-
-        for id in &matching_ids {
-            let existing = self.state.get(id.as_str()).unwrap().clone();
-            let mut merged = deep_merge_updates(&existing, &updates, &self.callbacks)?;
-            if !explicitly_sets_updated_at {
-                if let Value::Object(ref mut m) = merged {
-                    m.insert("updatedAt".to_string(), Value::String(now.clone()));
-                }
-            }
-            let validated = self.validate_entity(merged, id)?;
-            validated_pairs.push((id.clone(), validated));
-        }
-
-        // Check unique constraints against the FULL proposed state:
-        // for each proposed entity, exclude all entities being replaced from the
-        // state check and include all OTHER proposed entities (via the batch index).
-        // This catches conflicts where two batch members both propose the same
-        // unique value — the per-entity checks in the old code missed this.
-        if update_touches_unique_fields(&updates, &self.descriptor.unique_fields) {
-            let updating_ids: HashSet<String> = matching_ids.iter().cloned().collect();
-            let mut proposed_index: Map<String, Value> = Map::new();
-            for (id, validated) in &validated_pairs {
-                self.check_unique_constraints_update_batch(
-                    validated,
-                    id.as_str(),
-                    &updating_ids,
-                    &proposed_index,
-                )?;
-                self.add_to_batch_constraint_index(validated, &mut proposed_index);
-            }
-        }
-
-        // Phase 2: atomic apply
-        let mut updated = Vec::with_capacity(validated_pairs.len());
-        for (id, validated) in validated_pairs {
-            self.state.insert(id, validated.clone());
-            updated.push(validated);
-        }
-
-        // Rebuild query indexes after successful batch mutation
-        self.rebuild_indexes();
-
-        let count = updated.len();
-        Ok(UpdateManyResult { count, updated })
+        Ok(outcome.result)
     }
 
     // ── Delete ────────────────────────────────────────────────────────────────
@@ -696,6 +632,21 @@ impl Collection {
             .ok_or_else(|| not_found(&self.name, id))?
             .clone();
 
+        let hook_ids = self.merged_hook_ids(
+            self.callbacks.global_before_delete_hooks(),
+            &self.descriptor.before_delete_hooks,
+        );
+        run_before_delete_hooks(
+            &self.callbacks,
+            &hook_ids,
+            &BeforeDeleteContext {
+                operation: HookOperation::Delete,
+                collection: self.name.clone(),
+                id: id.to_owned(),
+                entity: entity.clone(),
+            },
+        )?;
+
         if soft && !self.supports_soft_delete {
             return Err(EngineError::Operation(OperationError {
                 operation: "soft delete".to_string(),
@@ -704,12 +655,13 @@ impl Collection {
             }));
         }
 
-        if soft {
+        self.validate_post_hook_registrations(HookOperation::Delete)?;
+
+        let deleted = if soft {
             let now = self.clock.now_iso();
             let mut soft_deleted: Map<String, Value> =
                 entity.as_object().cloned().unwrap_or_default();
 
-            // Preserve original deletedAt and updatedAt on repeated soft delete
             let already_deleted = soft_deleted
                 .get("deletedAt")
                 .map(|v| !v.is_null())
@@ -723,13 +675,15 @@ impl Collection {
             self.state
                 .insert(id.to_string(), soft_deleted_value.clone());
             self.rebuild_indexes();
-            Ok(soft_deleted_value)
+            soft_deleted_value
         } else {
-            // Hard delete: shift_remove preserves insertion order of remaining entries
             let removed = self.state.shift_remove(id).unwrap();
             self.rebuild_indexes();
-            Ok(removed)
-        }
+            removed
+        };
+
+        self.run_after_delete_entity(id, deleted.clone());
+        Ok(deleted)
     }
 
     /// Delete multiple entities matching `predicate`.
@@ -777,6 +731,26 @@ impl Collection {
             return Ok(DeleteManyResult::default());
         }
 
+        let hook_ids = self.merged_hook_ids(
+            self.callbacks.global_before_delete_hooks(),
+            &self.descriptor.before_delete_hooks,
+        );
+        for id in &matching_ids {
+            let entity = self.state.get(id.as_str()).cloned().unwrap_or(Value::Null);
+            run_before_delete_hooks(
+                &self.callbacks,
+                &hook_ids,
+                &BeforeDeleteContext {
+                    operation: HookOperation::Delete,
+                    collection: self.name.clone(),
+                    id: id.clone(),
+                    entity,
+                },
+            )?;
+        }
+
+        self.validate_post_hook_registrations(HookOperation::Delete)?;
+
         let now = self.clock.now_iso();
         let mut deleted = Vec::with_capacity(matching_ids.len());
 
@@ -814,6 +788,15 @@ impl Collection {
         // Rebuild indexes after successful batch delete
         self.rebuild_indexes();
 
+        for entity in &deleted {
+            let id = entity
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            self.run_after_delete_entity(&id, entity.clone());
+        }
+
         let count = deleted.len();
         Ok(DeleteManyResult { count, deleted })
     }
@@ -837,68 +820,22 @@ impl Collection {
         create_data: Value,
         update_data: Value,
     ) -> Result<UpsertOutcome, EngineError> {
-        if self.descriptor.append_only {
-            return Err(append_only_error("upsert", &self.name));
+        let outcome = self.upsert_internal(where_clause, create_data, update_data)?;
+        match &outcome.post {
+            InternalUpsertPost::Created(entity) => self.run_after_create_entity(entity.clone()),
+            InternalUpsertPost::Updated {
+                id,
+                previous,
+                current,
+                transformed_updates,
+            } => self.run_after_update_context(
+                id,
+                previous.clone(),
+                current.clone(),
+                transformed_updates.clone(),
+            ),
         }
-
-        let where_obj = require_object(where_clause, "upsert where")?;
-        let create_obj = require_object(create_data, "upsert create")?;
-
-        // Validate where clause targets a unique field or id
-        self.validate_upsert_where(&where_obj)?;
-
-        // Find existing entity
-        let existing_id = self.find_by_where(&where_obj);
-
-        if let Some(ref id) = existing_id {
-            let id = id.clone();
-            // UPDATE PATH: validate immutable fields first, then update
-            validate_immutable_fields(&update_data)?;
-            let validated = self.update(&id, update_data)?;
-            Ok(UpsertOutcome {
-                entity: validated,
-                action: UpsertAction::Updated,
-            })
-        } else {
-            // CREATE PATH: where → create → id → timestamps
-            //
-            // TS source (`upsert.ts`):
-            //   const id = typeof where.id === "string" ? where.id : generateId();
-            //   const createData = { ...where, ...input.create, id, createdAt: now, updatedAt: now };
-            //
-            // The `id` comes ONLY from `where.id` or `generateId()`.  Any `id`
-            // field in `create_data` is included in the spread but then
-            // overwritten by the explicitly set `id` — it is NOT used as a
-            // fallback.  Fix: remove the `or_else` fallback.
-            let mut base: Map<String, Value> = where_obj.clone();
-
-            // create_data fields override where fields
-            for (k, v) in create_obj {
-                base.insert(k, v);
-            }
-
-            // Strip computed fields
-            for name in &self.computed_field_names.clone() {
-                base.remove(name);
-            }
-
-            // id: where.id if it is a string, else generateId() — no fallback to create_data.id
-            let id = where_obj
-                .get("id")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| self.id_gen.generate());
-
-            // Always overwrite id (matches TS explicit `id` in the spread)
-            base.insert("id".to_string(), Value::String(id));
-
-            let entity = self.create(Value::Object(base))?;
-            Ok(UpsertOutcome {
-                entity,
-                action: UpsertAction::Created,
-            })
-        }
+        Ok(outcome.result)
     }
 
     /// Upsert multiple inputs — true two-phase atomic implementation.
@@ -919,172 +856,14 @@ impl Collection {
         &mut self,
         inputs: Vec<(Value, Value, Value)>, // (where, create, update)
     ) -> Result<UpsertManyResult, EngineError> {
-        if self.descriptor.append_only {
-            return Err(append_only_error("upsertMany", &self.name));
+        let outcome = self.upsert_many_internal(inputs)?;
+        for entity in &outcome.created_contexts {
+            self.run_after_create_entity(entity.clone());
         }
-
-        let now = self.clock.now_iso();
-
-        // Phase 1: Categorize all inputs without touching self.state.
-        // All WHERE lookups use the initial snapshot (no cross-batch visibility).
-        let mut candidates_create: Vec<Value> = vec![]; // schema-validated, ready to insert
-        let mut candidates_update: Vec<(String, Value)> = vec![]; // (id, validated proposed entity)
-        let mut result_unchanged: Vec<Value> = vec![];
-
-        for (where_clause, create_data, update_data) in inputs {
-            let where_obj = require_object(where_clause, "upsertMany where")?;
-            let create_obj = require_object(create_data, "upsertMany create")?;
-
-            self.validate_upsert_where(&where_obj)?;
-
-            if let Some(id) = self.find_by_where(&where_obj) {
-                // UPDATE PATH: validate but don't mutate
-                let existing = self.state.get(id.as_str()).unwrap().clone();
-
-                // TS: strip computed fields before any change detection or immutable
-                // validation, mirroring `stripComputedFromUpdates` in `update.ts`.
-                // A payload that contains only computed field names must be classified
-                // as "unchanged" after stripping, not dispatched to the update path.
-                // Without this ordering, computed-only payloads would be misclassified
-                // as "would change" (the computed key is absent from `existing`, so
-                // `would_update_change` sees an apparent new-field write).
-                let updates = strip_computed(&update_data, &self.computed_field_names);
-
-                // Detect unchanged using the sanitized (post-computed-strip) updates.
-                let would_change = would_update_change(&existing, &updates, &self.callbacks)?;
-                if !would_change {
-                    result_unchanged.push(existing);
-                    continue;
-                }
-
-                validate_immutable_fields(&updates)?;
-                let mut merged = deep_merge_updates(&existing, &updates, &self.callbacks)?;
-                let explicitly_sets_updated_at = updates
-                    .as_object()
-                    .map(|m| m.contains_key("updatedAt"))
-                    .unwrap_or(false);
-                if !explicitly_sets_updated_at {
-                    if let Value::Object(ref mut m) = merged {
-                        m.insert("updatedAt".to_string(), Value::String(now.clone()));
-                    }
-                }
-                let validated = self.validate_entity(merged, &id)?;
-                candidates_update.push((id, validated));
-            } else {
-                // CREATE PATH: build + validate candidate entity
-                let mut base: Map<String, Value> = where_obj.clone();
-                for (k, v) in create_obj {
-                    base.insert(k, v);
-                }
-                for name in &self.computed_field_names.clone() {
-                    base.remove(name);
-                }
-                // id: where.id if string, else generateId() — NO fallback to base.id.
-                // Mirrors TS: `const id = typeof where.id === "string" ? where.id : generateId()`
-                // Any `id` in create_data (base) is overwritten by the explicitly-set `id` below.
-                let id = where_obj
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| self.id_gen.generate());
-
-                base.insert("id".to_string(), Value::String(id.clone()));
-                // TS: always overwrite timestamps
-                base.insert("createdAt".to_string(), Value::String(now.clone()));
-                base.insert("updatedAt".to_string(), Value::String(now.clone()));
-
-                // Apply OptionalWithDefault callbacks
-                let schema = self.descriptor.schema.clone();
-                self.apply_defaults(&mut base, &schema)?;
-
-                // Schema validation
-                let entity = self.validate_entity(Value::Object(base), &id)?;
-                candidates_create.push(entity);
-            }
+        for (id, previous, validated, updates) in &outcome.updated_contexts {
+            self.run_after_update_context(id, previous.clone(), validated.clone(), updates.clone());
         }
-
-        // Phase 2a: Duplicate id check for creates
-        {
-            let mut seen_ids: HashSet<String> = HashSet::new();
-            for entity in &candidates_create {
-                let id = entity["id"].as_str().unwrap_or_default();
-                // Conflict with existing state
-                if self.state.contains_key(id) {
-                    return Err(EngineError::DuplicateKey(Box::new(DuplicateKeyError {
-                        collection: self.name.clone(),
-                        field: "id".to_string(),
-                        value: id.to_string(),
-                        existing_id: id.to_string(),
-                        message: format!("Duplicate value for field 'id': \"{id}\""),
-                    })));
-                }
-                // Conflict within the batch
-                if !seen_ids.insert(id.to_string()) {
-                    return Err(EngineError::DuplicateKey(Box::new(DuplicateKeyError {
-                        collection: self.name.clone(),
-                        field: "id".to_string(),
-                        value: id.to_string(),
-                        existing_id: id.to_string(),
-                        message: format!("Duplicate value for field 'id': \"{id}\" (in batch)"),
-                    })));
-                }
-            }
-        }
-
-        // Phase 2b: Unique constraint checks for creates (against existing + batch)
-        {
-            let mut batch_index: Map<String, Value> = Map::new();
-            for entity in &candidates_create {
-                self.check_unique_constraints_with_batch(entity, None, &batch_index)?;
-                self.add_to_batch_constraint_index(entity, &mut batch_index);
-            }
-        }
-
-        // Phase 2c: Unique constraint checks for updates (against non-updating state +
-        // all other proposed entities: already-processed updates + all creates)
-        if !candidates_update.is_empty() && !self.descriptor.unique_fields.is_empty() {
-            let updating_ids: HashSet<String> =
-                candidates_update.iter().map(|(id, _)| id.clone()).collect();
-
-            // Seed the combined proposed index with all create candidates first
-            let mut combined_proposed: Map<String, Value> = Map::new();
-            for entity in &candidates_create {
-                self.add_to_batch_constraint_index(entity, &mut combined_proposed);
-            }
-
-            // Check each update candidate in order, adding it to the index after check
-            for (id, validated) in &candidates_update {
-                self.check_unique_constraints_update_batch(
-                    validated,
-                    id.as_str(),
-                    &updating_ids,
-                    &combined_proposed,
-                )?;
-                self.add_to_batch_constraint_index(validated, &mut combined_proposed);
-            }
-        }
-
-        // Phase 3: Apply all atomically
-        let created: Vec<Value> = candidates_create.clone();
-        let updated: Vec<Value> = candidates_update.iter().map(|(_, e)| e.clone()).collect();
-
-        for entity in candidates_create {
-            let id = entity["id"].as_str().unwrap_or_default().to_string();
-            self.state.insert(id, entity);
-        }
-        for (id, validated) in candidates_update {
-            self.state.insert(id, validated);
-        }
-
-        // Rebuild query indexes after successful batch mutation
-        self.rebuild_indexes();
-
-        Ok(UpsertManyResult {
-            created,
-            updated,
-            unchanged: result_unchanged,
-        })
+        Ok(outcome.result)
     }
 
     // ── Package-internal seams ─────────────────────────────────────────────────
@@ -1316,6 +1095,633 @@ impl Collection {
 
     // ── Internal helpers ─────────────────────────────────────────────────
 
+    pub(crate) fn run_after_create_entity(&self, entity: Value) {
+        let after_hook_ids = self.merged_hook_ids(
+            self.callbacks.global_after_create_hooks(),
+            &self.descriptor.after_create_hooks,
+        );
+        let on_change_hook_ids = self.merged_hook_ids(
+            self.callbacks.global_on_change_hooks(),
+            &self.descriptor.on_change_hooks,
+        );
+        run_after_create_hooks(
+            &self.callbacks,
+            &after_hook_ids,
+            &AfterCreateContext {
+                operation: HookOperation::Create,
+                collection: self.name.clone(),
+                entity: entity.clone(),
+            },
+        );
+        run_on_change_hooks(
+            &self.callbacks,
+            &on_change_hook_ids,
+            &OnChangeContext::Create {
+                collection: self.name.clone(),
+                entity,
+            },
+        );
+    }
+
+    pub(crate) fn run_after_delete_entity(&self, id: &str, entity: Value) {
+        let after_hook_ids = self.merged_hook_ids(
+            self.callbacks.global_after_delete_hooks(),
+            &self.descriptor.after_delete_hooks,
+        );
+        let on_change_hook_ids = self.merged_hook_ids(
+            self.callbacks.global_on_change_hooks(),
+            &self.descriptor.on_change_hooks,
+        );
+        run_after_delete_hooks(
+            &self.callbacks,
+            &after_hook_ids,
+            &AfterDeleteContext {
+                operation: HookOperation::Delete,
+                collection: self.name.clone(),
+                id: id.to_owned(),
+                entity: entity.clone(),
+            },
+        );
+        run_on_change_hooks(
+            &self.callbacks,
+            &on_change_hook_ids,
+            &OnChangeContext::Delete {
+                collection: self.name.clone(),
+                id: id.to_owned(),
+                entity,
+            },
+        );
+    }
+
+    pub(crate) fn run_after_update_context(
+        &self,
+        id: &str,
+        previous: Value,
+        current: Value,
+        transformed_updates: Value,
+    ) {
+        let after_hook_ids = self.merged_hook_ids(
+            self.callbacks.global_after_update_hooks(),
+            &self.descriptor.after_update_hooks,
+        );
+        let on_change_hook_ids = self.merged_hook_ids(
+            self.callbacks.global_on_change_hooks(),
+            &self.descriptor.on_change_hooks,
+        );
+        run_after_update_hooks(
+            &self.callbacks,
+            &after_hook_ids,
+            &AfterUpdateContext {
+                operation: HookOperation::Update,
+                collection: self.name.clone(),
+                id: id.to_owned(),
+                previous: previous.clone(),
+                current: current.clone(),
+                update: transformed_updates,
+            },
+        );
+        run_on_change_hooks(
+            &self.callbacks,
+            &on_change_hook_ids,
+            &OnChangeContext::Update {
+                collection: self.name.clone(),
+                id: id.to_owned(),
+                previous,
+                current,
+            },
+        );
+    }
+
+    pub(crate) fn update_internal(
+        &mut self,
+        id: &str,
+        updates: Value,
+    ) -> Result<InternalUpdateOutcome, EngineError> {
+        if self.descriptor.append_only {
+            return Err(append_only_error("update", &self.name));
+        }
+
+        validate_immutable_fields(&updates)?;
+        let sanitized_updates = strip_computed(&updates, &self.computed_field_names);
+        let existing = self
+            .state
+            .get(id)
+            .ok_or_else(|| not_found(&self.name, id))?
+            .clone();
+
+        let hook_ids = self.merged_hook_ids(
+            self.callbacks.global_before_update_hooks(),
+            &self.descriptor.before_update_hooks,
+        );
+        let transformed_updates = run_before_update_hooks(
+            &self.callbacks,
+            &hook_ids,
+            BeforeUpdateContext {
+                operation: HookOperation::Update,
+                collection: self.name.clone(),
+                id: id.to_owned(),
+                existing: existing.clone(),
+                update: sanitized_updates,
+            },
+        )?;
+
+        let mut merged = deep_merge_updates(&existing, &transformed_updates, &self.callbacks)?;
+        let explicitly_sets_updated_at = transformed_updates
+            .as_object()
+            .map(|m| m.contains_key("updatedAt"))
+            .unwrap_or(false);
+        if !explicitly_sets_updated_at {
+            if let Value::Object(ref mut m) = merged {
+                m.insert("updatedAt".to_string(), Value::String(self.clock.now_iso()));
+            }
+        }
+
+        let validated = self.validate_entity(merged, id)?;
+        if update_touches_unique_fields(&transformed_updates, &self.descriptor.unique_fields) {
+            self.check_unique_constraints(&validated, Some(id))?;
+        }
+        self.validate_post_hook_registrations(HookOperation::Update)?;
+
+        self.state.insert(id.to_string(), validated.clone());
+        self.rebuild_indexes();
+        Ok(InternalUpdateOutcome {
+            previous: existing,
+            current: validated,
+            transformed_updates,
+        })
+    }
+
+    pub(crate) fn create_many_internal(
+        &mut self,
+        inputs: Vec<Value>,
+        skip_duplicates: bool,
+    ) -> Result<InternalCreateManyOutcome, EngineError> {
+        let now = self.clock.now_iso();
+        let mut validated_entities: Vec<Value> = Vec::with_capacity(inputs.len());
+        let mut skipped: Vec<SkippedEntry> = vec![];
+        let mut batch_constraint_index: Map<String, Value> = Map::new();
+
+        for input in inputs {
+            let mut obj = match require_object(input.clone(), "createMany input") {
+                Ok(o) => o,
+                Err(e) => {
+                    if skip_duplicates {
+                        skipped.push(SkippedEntry {
+                            data: input,
+                            reason: e.to_string(),
+                        });
+                        continue;
+                    }
+                    return Err(e);
+                }
+            };
+            for name in &self.computed_field_names {
+                obj.remove(name);
+            }
+            let id = match self.resolve_id(&obj) {
+                Ok(i) => i,
+                Err(e) => {
+                    if skip_duplicates {
+                        skipped.push(SkippedEntry {
+                            data: Value::Object(obj),
+                            reason: e.to_string(),
+                        });
+                        continue;
+                    }
+                    return Err(e);
+                }
+            };
+            obj.insert("id".to_string(), Value::String(id.clone()));
+            let skip_data = Value::Object(obj.clone());
+            obj.insert("createdAt".to_string(), Value::String(now.clone()));
+            obj.insert("updatedAt".to_string(), Value::String(now.clone()));
+            let schema = self.descriptor.schema.clone();
+            if let Err(e) = self.apply_defaults(&mut obj, &schema) {
+                if skip_duplicates {
+                    skipped.push(SkippedEntry {
+                        data: skip_data,
+                        reason: e.to_string(),
+                    });
+                    continue;
+                }
+                return Err(e);
+            }
+            let entity = match self.validate_entity(Value::Object(obj.clone()), &id) {
+                Ok(e) => e,
+                Err(e) => {
+                    if skip_duplicates {
+                        let reason = match &e {
+                            EngineError::Validation(v) => {
+                                let first_msg = v
+                                    .issues
+                                    .first()
+                                    .map(|i| i.message.clone())
+                                    .unwrap_or_else(|| v.message.clone());
+                                format!("Validation failed: {first_msg}")
+                            }
+                            other => format!("Validation failed: {other}"),
+                        };
+                        skipped.push(SkippedEntry {
+                            data: skip_data,
+                            reason,
+                        });
+                        continue;
+                    }
+                    return Err(e);
+                }
+            };
+            let before_hook_ids = self.merged_hook_ids(
+                self.callbacks.global_before_create_hooks(),
+                &self.descriptor.before_create_hooks,
+            );
+            let entity = match run_before_create_hooks(
+                &self.callbacks,
+                &before_hook_ids,
+                BeforeCreateContext {
+                    operation: HookOperation::Create,
+                    collection: self.name.clone(),
+                    data: entity,
+                },
+            ) {
+                Ok(entity) => entity,
+                Err(error) => {
+                    if skip_duplicates {
+                        skipped.push(SkippedEntry {
+                            data: skip_data,
+                            reason: format!("Hook rejected: {error}"),
+                        });
+                        continue;
+                    }
+                    return Err(error);
+                }
+            };
+            if self.state.contains_key(&id)
+                || validated_entities
+                    .iter()
+                    .any(|e| e["id"].as_str() == Some(&id))
+            {
+                let error = EngineError::DuplicateKey(Box::new(DuplicateKeyError {
+                    collection: self.name.clone(),
+                    field: "id".to_string(),
+                    value: id.clone(),
+                    existing_id: id.clone(),
+                    message: if self.state.contains_key(&id) {
+                        format!("Duplicate value for field 'id': \"{id}\"")
+                    } else {
+                        format!("Duplicate value for field 'id': \"{id}\" (in batch)")
+                    },
+                }));
+                if skip_duplicates {
+                    skipped.push(SkippedEntry {
+                        data: skip_data,
+                        reason: format!("Duplicate ID: {id}"),
+                    });
+                    continue;
+                }
+                return Err(error);
+            }
+            if let Err(e) =
+                self.check_unique_constraints_with_batch(&entity, None, &batch_constraint_index)
+            {
+                if skip_duplicates {
+                    let reason = match &e {
+                        EngineError::UniqueConstraint(uc) => {
+                            format!("Unique constraint violation: {}", uc.message)
+                        }
+                        other => format!("Unique constraint violation: {other}"),
+                    };
+                    skipped.push(SkippedEntry {
+                        data: entity,
+                        reason,
+                    });
+                    continue;
+                }
+                return Err(e);
+            }
+            self.add_to_batch_constraint_index(&entity, &mut batch_constraint_index);
+            validated_entities.push(entity);
+        }
+
+        let created: Vec<Value> = validated_entities.clone();
+        if !created.is_empty() {
+            self.validate_post_hook_registrations(HookOperation::Create)?;
+        }
+        for entity in validated_entities {
+            let id = entity["id"].as_str().unwrap_or_default().to_string();
+            self.state.insert(id, entity);
+        }
+        self.rebuild_indexes();
+        Ok(InternalCreateManyOutcome {
+            result: CreateManyResult { created, skipped },
+        })
+    }
+
+    pub(crate) fn update_many_internal(
+        &mut self,
+        predicate: impl Fn(&Value) -> bool,
+        updates: Value,
+    ) -> Result<InternalUpdateManyOutcome, EngineError> {
+        if self.descriptor.append_only {
+            return Err(append_only_error("updateMany", &self.name));
+        }
+        validate_immutable_fields(&updates)?;
+        let updates = strip_computed(&updates, &self.computed_field_names);
+        let now = self.clock.now_iso();
+        let matching_ids: Vec<String> = self
+            .state
+            .iter()
+            .filter(|(_, v)| predicate(v))
+            .map(|(k, _)| k.clone())
+            .collect();
+        if matching_ids.is_empty() {
+            return Ok(InternalUpdateManyOutcome {
+                result: UpdateManyResult::default(),
+                contexts: Vec::new(),
+            });
+        }
+        let mut validated_pairs: Vec<(String, Value, Value, Value)> =
+            Vec::with_capacity(matching_ids.len());
+        let before_hook_ids = self.merged_hook_ids(
+            self.callbacks.global_before_update_hooks(),
+            &self.descriptor.before_update_hooks,
+        );
+        for id in &matching_ids {
+            let existing = self.state.get(id.as_str()).unwrap().clone();
+            let transformed_updates = run_before_update_hooks(
+                &self.callbacks,
+                &before_hook_ids,
+                BeforeUpdateContext {
+                    operation: HookOperation::Update,
+                    collection: self.name.clone(),
+                    id: id.clone(),
+                    existing: existing.clone(),
+                    update: updates.clone(),
+                },
+            )?;
+            let mut merged = deep_merge_updates(&existing, &transformed_updates, &self.callbacks)?;
+            let explicitly_sets_updated_at = transformed_updates
+                .as_object()
+                .map(|m| m.contains_key("updatedAt"))
+                .unwrap_or(false);
+            if !explicitly_sets_updated_at {
+                if let Value::Object(ref mut m) = merged {
+                    m.insert("updatedAt".to_string(), Value::String(now.clone()));
+                }
+            }
+            let validated = self.validate_entity(merged, id)?;
+            validated_pairs.push((id.clone(), existing, validated, transformed_updates));
+        }
+        if validated_pairs.iter().any(|(_, _, _, transformed)| {
+            update_touches_unique_fields(transformed, &self.descriptor.unique_fields)
+        }) {
+            let updating_ids: HashSet<String> = matching_ids.iter().cloned().collect();
+            let mut proposed_index: Map<String, Value> = Map::new();
+            for (id, _, validated, _) in &validated_pairs {
+                self.check_unique_constraints_update_batch(
+                    validated,
+                    id.as_str(),
+                    &updating_ids,
+                    &proposed_index,
+                )?;
+                self.add_to_batch_constraint_index(validated, &mut proposed_index);
+            }
+        }
+        let mut updated = Vec::with_capacity(validated_pairs.len());
+        self.validate_post_hook_registrations(HookOperation::Update)?;
+        for (id, _, validated, _) in &validated_pairs {
+            self.state.insert(id.clone(), validated.clone());
+            updated.push(validated.clone());
+        }
+        self.rebuild_indexes();
+        let count = updated.len();
+        Ok(InternalUpdateManyOutcome {
+            result: UpdateManyResult { count, updated },
+            contexts: validated_pairs,
+        })
+    }
+
+    pub(crate) fn upsert_internal(
+        &mut self,
+        where_clause: Value,
+        create_data: Value,
+        update_data: Value,
+    ) -> Result<InternalUpsertOutcome, EngineError> {
+        if self.descriptor.append_only {
+            return Err(append_only_error("upsert", &self.name));
+        }
+        let where_obj = require_object(where_clause, "upsert where")?;
+        let create_obj = require_object(create_data, "upsert create")?;
+        self.validate_upsert_where(&where_obj)?;
+        let existing_id = self.find_by_where(&where_obj);
+        if let Some(id) = existing_id {
+            let outcome = self.update_internal(&id, update_data)?;
+            let result = UpsertOutcome {
+                entity: outcome.current.clone(),
+                action: UpsertAction::Updated,
+            };
+            Ok(InternalUpsertOutcome {
+                result,
+                post: InternalUpsertPost::Updated {
+                    id,
+                    previous: outcome.previous,
+                    current: outcome.current,
+                    transformed_updates: outcome.transformed_updates,
+                },
+            })
+        } else {
+            let mut base: Map<String, Value> = where_obj.clone();
+            for (k, v) in create_obj {
+                base.insert(k, v);
+            }
+            for name in &self.computed_field_names.clone() {
+                base.remove(name);
+            }
+            let id = where_obj
+                .get("id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| self.id_gen.generate());
+            base.insert("id".to_string(), Value::String(id));
+            let entity = self.create_no_post_hooks(Value::Object(base))?;
+            Ok(InternalUpsertOutcome {
+                result: UpsertOutcome {
+                    entity: entity.clone(),
+                    action: UpsertAction::Created,
+                },
+                post: InternalUpsertPost::Created(entity),
+            })
+        }
+    }
+
+    pub(crate) fn upsert_many_internal(
+        &mut self,
+        inputs: Vec<(Value, Value, Value)>,
+    ) -> Result<InternalUpsertManyOutcome, EngineError> {
+        if self.descriptor.append_only {
+            return Err(append_only_error("upsertMany", &self.name));
+        }
+        let now = self.clock.now_iso();
+        let mut candidates_create: Vec<Value> = vec![];
+        let mut candidates_update: Vec<(String, Value, Value, Value)> = vec![];
+        let mut result_unchanged: Vec<Value> = vec![];
+        let before_create_hook_ids = self.merged_hook_ids(
+            self.callbacks.global_before_create_hooks(),
+            &self.descriptor.before_create_hooks,
+        );
+        let before_update_hook_ids = self.merged_hook_ids(
+            self.callbacks.global_before_update_hooks(),
+            &self.descriptor.before_update_hooks,
+        );
+        for (where_clause, create_data, update_data) in inputs {
+            let where_obj = require_object(where_clause, "upsertMany where")?;
+            let create_obj = require_object(create_data, "upsertMany create")?;
+            self.validate_upsert_where(&where_obj)?;
+            if let Some(id) = self.find_by_where(&where_obj) {
+                let existing = self.state.get(id.as_str()).unwrap().clone();
+                let updates = strip_computed(&update_data, &self.computed_field_names);
+                let would_change = would_update_change(&existing, &updates, &self.callbacks)?;
+                if !would_change {
+                    result_unchanged.push(existing);
+                    continue;
+                }
+                validate_immutable_fields(&updates)?;
+                let transformed_updates = run_before_update_hooks(
+                    &self.callbacks,
+                    &before_update_hook_ids,
+                    BeforeUpdateContext {
+                        operation: HookOperation::Update,
+                        collection: self.name.clone(),
+                        id: id.clone(),
+                        existing: existing.clone(),
+                        update: updates,
+                    },
+                )?;
+                let mut merged =
+                    deep_merge_updates(&existing, &transformed_updates, &self.callbacks)?;
+                let explicitly_sets_updated_at = transformed_updates
+                    .as_object()
+                    .map(|m| m.contains_key("updatedAt"))
+                    .unwrap_or(false);
+                if !explicitly_sets_updated_at {
+                    if let Value::Object(ref mut m) = merged {
+                        m.insert("updatedAt".to_string(), Value::String(now.clone()));
+                    }
+                }
+                let validated = self.validate_entity(merged, &id)?;
+                candidates_update.push((id, existing, validated, transformed_updates));
+            } else {
+                let mut base: Map<String, Value> = where_obj.clone();
+                for (k, v) in create_obj {
+                    base.insert(k, v);
+                }
+                for name in &self.computed_field_names.clone() {
+                    base.remove(name);
+                }
+                let id = where_obj
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| self.id_gen.generate());
+                base.insert("id".to_string(), Value::String(id.clone()));
+                base.insert("createdAt".to_string(), Value::String(now.clone()));
+                base.insert("updatedAt".to_string(), Value::String(now.clone()));
+                let schema = self.descriptor.schema.clone();
+                self.apply_defaults(&mut base, &schema)?;
+                let entity = self.validate_entity(Value::Object(base), &id)?;
+                let entity = run_before_create_hooks(
+                    &self.callbacks,
+                    &before_create_hook_ids,
+                    BeforeCreateContext {
+                        operation: HookOperation::Create,
+                        collection: self.name.clone(),
+                        data: entity,
+                    },
+                )?;
+                candidates_create.push(entity);
+            }
+        }
+        {
+            let mut seen_ids: HashSet<String> = HashSet::new();
+            for entity in &candidates_create {
+                let id = entity["id"].as_str().unwrap_or_default();
+                if self.state.contains_key(id) {
+                    return Err(EngineError::DuplicateKey(Box::new(DuplicateKeyError {
+                        collection: self.name.clone(),
+                        field: "id".to_string(),
+                        value: id.to_string(),
+                        existing_id: id.to_string(),
+                        message: format!("Duplicate value for field 'id': \"{id}\""),
+                    })));
+                }
+                if !seen_ids.insert(id.to_string()) {
+                    return Err(EngineError::DuplicateKey(Box::new(DuplicateKeyError {
+                        collection: self.name.clone(),
+                        field: "id".to_string(),
+                        value: id.to_string(),
+                        existing_id: id.to_string(),
+                        message: format!("Duplicate value for field 'id': \"{id}\" (in batch)"),
+                    })));
+                }
+            }
+        }
+        {
+            let mut batch_index: Map<String, Value> = Map::new();
+            for entity in &candidates_create {
+                self.check_unique_constraints_with_batch(entity, None, &batch_index)?;
+                self.add_to_batch_constraint_index(entity, &mut batch_index);
+            }
+        }
+        if !candidates_update.is_empty() && !self.descriptor.unique_fields.is_empty() {
+            let updating_ids: HashSet<String> = candidates_update
+                .iter()
+                .map(|(id, _, _, _)| id.clone())
+                .collect();
+            let mut combined_proposed: Map<String, Value> = Map::new();
+            for entity in &candidates_create {
+                self.add_to_batch_constraint_index(entity, &mut combined_proposed);
+            }
+            for (id, _, validated, _) in &candidates_update {
+                self.check_unique_constraints_update_batch(
+                    validated,
+                    id.as_str(),
+                    &updating_ids,
+                    &combined_proposed,
+                )?;
+                self.add_to_batch_constraint_index(validated, &mut combined_proposed);
+            }
+        }
+        let created: Vec<Value> = candidates_create.clone();
+        let updated: Vec<Value> = candidates_update
+            .iter()
+            .map(|(_, _, e, _)| e.clone())
+            .collect();
+        if !created.is_empty() {
+            self.validate_post_hook_registrations(HookOperation::Create)?;
+        }
+        if !updated.is_empty() {
+            self.validate_post_hook_registrations(HookOperation::Update)?;
+        }
+        for entity in candidates_create {
+            let id = entity["id"].as_str().unwrap_or_default().to_string();
+            self.state.insert(id, entity);
+        }
+        for (id, _, validated, _) in &candidates_update {
+            self.state.insert(id.clone(), validated.clone());
+        }
+        self.rebuild_indexes();
+        Ok(InternalUpsertManyOutcome {
+            result: UpsertManyResult {
+                created: created.clone(),
+                updated,
+                unchanged: result_unchanged,
+            },
+            created_contexts: created,
+            updated_contexts: candidates_update,
+        })
+    }
+
     /// Resolve the id for a new entity from the input object and `id_strategy`.
     fn resolve_id(&mut self, obj: &Map<String, Value>) -> Result<String, EngineError> {
         match &self.descriptor.id_strategy {
@@ -1323,7 +1729,16 @@ impl Collection {
             | IdStrategy::DerivedFromKey
             | IdStrategy::NamedGenerator { .. } => match obj.get("id").and_then(|v| v.as_str()) {
                 Some(id) if !id.is_empty() => Ok(id.to_string()),
-                _ => Ok(self.id_gen.generate()),
+                _ => {
+                    if let Some(message) = &self.named_id_generator_error {
+                        return Err(EngineError::Operation(OperationError {
+                            operation: "create".to_string(),
+                            reason: "missing-id-generator".to_string(),
+                            message: message.clone(),
+                        }));
+                    }
+                    Ok(self.id_gen.generate())
+                }
             },
         }
     }

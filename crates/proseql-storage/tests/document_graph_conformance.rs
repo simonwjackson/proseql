@@ -178,6 +178,36 @@ impl DocumentGraphTransformHost for TestTransformHost {
 }
 
 #[test]
+fn graph_loader_ignores_nested_version_sidecars() {
+    let host = MemoryStorageHost::default();
+    let formats = FormatRegistry::with_builtins();
+    host.write(
+        "/a/base.yaml",
+        "foods:\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+    )
+    .unwrap();
+    host.write("/a/nested/._version.yaml", "_version: 99\n")
+        .unwrap();
+    host.write("/b/over.yaml", "foods:\n  apple:\n    macros: { fat: 2 }\n")
+        .unwrap();
+
+    let loaded = load_document_graph_sources(
+        &host,
+        &formats,
+        &base_graph(None, DocumentGraphFragmentErrorPolicy::Error),
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(loaded.collections["foods"]["apple"]["name"], "Apple");
+    assert_eq!(
+        loaded.collections["foods"]["apple"]["macros"],
+        json!({"cal": 10, "fat": 2})
+    );
+    assert!(loaded.diagnostics.is_empty());
+}
+
+#[test]
 fn graph_loader_orders_roots_and_lexical_files_then_deep_merges() {
     let host = MemoryStorageHost::default();
     let formats = FormatRegistry::with_builtins();
@@ -875,12 +905,20 @@ fn graph_loader_requires_migration_host_when_migrations_apply() {
                 schema: food_schema(),
                 id_strategy: IdStrategy::DerivedFromKey,
                 version: Some(2),
-                migrations: vec![MigrationStep {
-                    from: 1,
-                    to: 2,
-                    description: None,
-                    callback_id: "foods-v2".to_owned(),
-                }],
+                migrations: vec![
+                    MigrationStep {
+                        from: 0,
+                        to: 1,
+                        description: None,
+                        callback_id: "foods-v1".to_owned(),
+                    },
+                    MigrationStep {
+                        from: 1,
+                        to: 2,
+                        description: None,
+                        callback_id: "foods-v2".to_owned(),
+                    },
+                ],
             },
         )]),
         sources: vec![DatabaseSourceConfig::DocumentGraph(
@@ -913,6 +951,62 @@ fn graph_loader_requires_migration_host_when_migrations_apply() {
                 .as_ref()
                 .and_then(Value::as_str)
                 .map(|cause| cause.contains("missing-host"))
+                .unwrap_or(false));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn stale_document_graph_version_with_empty_registry_fails_empty_registry_instead_of_bypassing() {
+    let host = MemoryStorageHost::default();
+    let formats = FormatRegistry::with_builtins();
+    host.write(
+        "/a/old.yaml",
+        "foods:\n  _version: 0\n  apple:\n    name: Apple\n    macros: { cal: 10 }\n",
+    )
+    .unwrap();
+    let normalized = normalize_source_config(SourceConfigInput {
+        collections: IndexMap::from([(
+            "foods".to_owned(),
+            CollectionStorageConfig {
+                name: "foods".to_owned(),
+                schema: food_schema(),
+                id_strategy: IdStrategy::DerivedFromKey,
+                version: Some(1),
+                migrations: vec![],
+            },
+        )]),
+        sources: vec![DatabaseSourceConfig::DocumentGraph(
+            DocumentGraphSourceConfig {
+                id: "graph".to_owned(),
+                roots: vec![DocumentGraphRootConfig {
+                    id: None,
+                    root: "/a".to_owned(),
+                    optional: false,
+                    include: None,
+                    exclude: vec![],
+                    collections: None,
+                }],
+                collections: Some(SourceCollectionSelection::All),
+                include: Some(vec!["**/*.yaml".to_owned()]),
+                exclude: vec![],
+                transform_callback_id: None,
+                on_fragment_error: DocumentGraphFragmentErrorPolicy::Error,
+            },
+        )],
+    })
+    .unwrap();
+
+    let err = load_document_graph_sources(&host, &formats, &normalized, None, None).unwrap_err();
+    match err {
+        EngineError::DocumentGraphSource(error) => {
+            assert_eq!(error.kind, DocumentGraphErrorKind::Migration);
+            assert!(error
+                .cause
+                .as_ref()
+                .and_then(Value::as_str)
+                .map(|cause| cause.contains("empty-registry"))
                 .unwrap_or(false));
         }
         other => panic!("unexpected error: {other:?}"),
@@ -1069,12 +1163,20 @@ fn graph_loader_applies_per_fragment_migrations_before_merge() {
                 },
                 id_strategy: IdStrategy::DerivedFromKey,
                 version: Some(2),
-                migrations: vec![MigrationStep {
-                    from: 1,
-                    to: 2,
-                    description: None,
-                    callback_id: "foods-1-2".to_owned(),
-                }],
+                migrations: vec![
+                    MigrationStep {
+                        from: 0,
+                        to: 1,
+                        description: None,
+                        callback_id: "foods-0-1".to_owned(),
+                    },
+                    MigrationStep {
+                        from: 1,
+                        to: 2,
+                        description: None,
+                        callback_id: "foods-1-2".to_owned(),
+                    },
+                ],
             },
         )]),
         sources: vec![DatabaseSourceConfig::DocumentGraph(
@@ -1111,17 +1213,19 @@ fn graph_loader_applies_per_fragment_migrations_before_merge() {
         )],
     })
     .unwrap();
-    let migration_host = TestMigrationHost::default().with_callback("foods-1-2", |data| {
-        let mut out = Map::new();
-        for (id, value) in data {
-            let value = value.as_object().unwrap();
-            out.insert(
-                id.clone(),
-                json!({"name": value.get("title").unwrap(), "macros": {"cal": 10}}),
-            );
-        }
-        Ok(out)
-    });
+    let migration_host = TestMigrationHost::default()
+        .with_callback("foods-0-1", |data| Ok(data.clone()))
+        .with_callback("foods-1-2", |data| {
+            let mut out = Map::new();
+            for (id, value) in data {
+                let value = value.as_object().unwrap();
+                out.insert(
+                    id.clone(),
+                    json!({"name": value.get("title").unwrap(), "macros": {"cal": 10}}),
+                );
+            }
+            Ok(out)
+        });
 
     let loaded =
         load_document_graph_sources(&host, &formats, &normalized, Some(&migration_host), None)

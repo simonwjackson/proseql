@@ -1,3 +1,5 @@
+use proseql_engine::callbacks::CallbackRegistry;
+use proseql_engine::plugins::PluginCodecMetadata;
 use proseql_formats::codecs::{
     hjson_codec, json5_codec, json_codec, jsonc_codec, jsonl_codec, prose_codec, toml_codec,
     toon_codec, yaml_codec,
@@ -7,8 +9,12 @@ use proseql_formats::prose::{
     deserialize_value, encode_headline, encode_overflow_lines, jsonl_decode_lines,
     parse_directive_block, scan_directive, serialize_value,
 };
-use proseql_formats::{FormatCodec, FormatOptions, FormatRegistry, FormatRegistryError};
+use proseql_formats::{
+    format_registry_with_plugin_codecs, plugin_codec, FormatCodec, FormatOptions, FormatRegistry,
+    FormatRegistryError,
+};
 use serde_json::json;
+use std::sync::Arc;
 
 #[test]
 fn json_encode_matches_exact_default_indent_golden() {
@@ -741,6 +747,88 @@ fn invalid_prose_template_returns_error_without_panicking() {
 #[test]
 fn prose_object_fallback_matches_javascript_string_coercion() {
     assert_eq!(serialize_value(&json!({"a": 1})), "[object Object]");
+}
+
+#[test]
+fn plugin_codecs_override_builtins_and_later_duplicates_win_with_stable_supported_list() {
+    let mut callbacks = CallbackRegistry::new();
+    callbacks.register_codec_encode(
+        "yaml-encode-a",
+        Box::new(|value, _| Ok(format!("a:{}", value["id"].as_str().unwrap()))),
+    );
+    callbacks.register_codec_decode(
+        "yaml-decode-a",
+        Box::new(|raw| Ok(json!({"id": raw.strip_prefix("a:").unwrap()}))),
+    );
+    callbacks.register_codec_encode(
+        "yaml-encode-b",
+        Box::new(|value, _| Ok(format!("b:{}", value["id"].as_str().unwrap()))),
+    );
+    callbacks.register_codec_decode(
+        "yaml-decode-b",
+        Box::new(|raw| Ok(json!({"id": raw.strip_prefix("b:").unwrap()}))),
+    );
+    let callbacks = Arc::new(callbacks);
+    let registry = format_registry_with_plugin_codecs(
+        Arc::clone(&callbacks),
+        &[
+            PluginCodecMetadata {
+                name: "yaml-a".to_owned(),
+                extensions: vec!["yaml".to_owned()],
+                encode_callback_id: "yaml-encode-a".to_owned(),
+                decode_callback_id: "yaml-decode-a".to_owned(),
+            },
+            PluginCodecMetadata {
+                name: "yaml-b".to_owned(),
+                extensions: vec!["yaml".to_owned(), "custom".to_owned()],
+                encode_callback_id: "yaml-encode-b".to_owned(),
+                decode_callback_id: "yaml-decode-b".to_owned(),
+            },
+        ],
+    );
+
+    assert_eq!(registry.supported_extensions()[0], "yaml");
+    assert!(registry
+        .supported_extensions()
+        .contains(&"custom".to_owned()));
+    assert_eq!(
+        registry
+            .serialize(&json!({"id":"u1"}), "yaml", None)
+            .unwrap(),
+        "b:u1"
+    );
+    assert_eq!(
+        registry.deserialize("b:u1", "yaml").unwrap(),
+        json!({"id":"u1"})
+    );
+}
+
+#[test]
+fn plugin_codec_can_be_used_directly() {
+    let mut callbacks = CallbackRegistry::new();
+    callbacks.register_codec_encode(
+        "upper-encode",
+        Box::new(|value, _| Ok(value["name"].as_str().unwrap().to_ascii_uppercase())),
+    );
+    callbacks.register_codec_decode(
+        "upper-decode",
+        Box::new(|raw| Ok(json!({"name": raw.to_ascii_lowercase()}))),
+    );
+    let callbacks = Arc::new(callbacks);
+    let codec = plugin_codec(
+        Arc::clone(&callbacks),
+        &PluginCodecMetadata {
+            name: "upper".to_owned(),
+            extensions: vec!["upper".to_owned()],
+            encode_callback_id: "upper-encode".to_owned(),
+            decode_callback_id: "upper-decode".to_owned(),
+        },
+    );
+    assert_eq!(
+        codec.encode(&json!({"name":"Alice"}), None).unwrap(),
+        "ALICE"
+    );
+    assert_eq!(codec.decode("ALICE").unwrap(), json!({"name":"alice"}));
 }
 
 #[test]

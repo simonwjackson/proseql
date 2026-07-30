@@ -127,7 +127,7 @@ pub struct TransactionError {
 
 /// The discriminant for `HookError.operation`, matching the TS literal union
 /// `"create" | "update" | "delete"`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HookOperation {
     Create,

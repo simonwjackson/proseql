@@ -8,8 +8,8 @@ use serde_json::{Map, Value};
 
 use crate::host::StorageHost;
 use crate::persistence::{
-    decode_entity_map, encode_value, run_migrations, strip_derived_id_field, MigrationHost,
-    ValidationMode,
+    decode_entity_map, encode_value, is_version_sidecar_path, run_migrations,
+    strip_derived_id_field, MigrationHost, ValidationMode,
 };
 use crate::source_config::{
     matches_document_source_pattern, NormalizedDatabaseSourceConfig,
@@ -182,7 +182,10 @@ pub fn load_document_sources(
         let mut matched = host
             .list_recursive(&source.root)?
             .into_iter()
-            .filter(|path| matches_document_source_pattern(source, path))
+            .filter(|path| {
+                matches_document_source_pattern(source, path)
+                    && !is_version_sidecar_path(path, &source.format)
+            })
             .collect::<Vec<_>>();
         matched.sort();
         for path in matched {
@@ -282,15 +285,22 @@ pub fn load_document_sources(
                             },
                         )));
                     }
-                    if file_version < target_version && !collection_config.migrations.is_empty() {
-                        section = run_migrations(
-                            section,
-                            file_version,
+                    if file_version < target_version {
+                        crate::persistence::validate_migration_registry(
+                            collection_name,
                             target_version,
                             &collection_config.migrations,
-                            collection_name,
-                            migration_host,
                         )?;
+                        if !collection_config.migrations.is_empty() {
+                            section = run_migrations(
+                                section,
+                                file_version,
+                                target_version,
+                                &collection_config.migrations,
+                                collection_name,
+                                migration_host,
+                            )?;
+                        }
                     }
                 }
                 let decoded = decode_entity_map(

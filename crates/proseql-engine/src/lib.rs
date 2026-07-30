@@ -52,3 +52,9 @@ pub mod relationships;
 
 // U6
 pub mod reactive;
+
+// U7
+pub mod hooks;
+pub mod migrations;
+pub mod plugins;
+pub mod transactions;

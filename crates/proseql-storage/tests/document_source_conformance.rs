@@ -111,6 +111,30 @@ fn normalize_document_source_applies_defaults_and_lexical_collection_order() {
 }
 
 #[test]
+fn load_document_sources_ignores_nested_version_sidecars() {
+    let host = MemoryStorageHost::default();
+    let formats = FormatRegistry::with_builtins();
+    host.write(
+        "/config/base.yaml",
+        "games:\n  smw:\n    name: Super Mario World\n    systemId: snes\nsystems:\n  _version: 1\n  snes:\n    name: Super Nintendo\n",
+    )
+    .unwrap();
+    host.write("/config/nested/._version.yaml", "_version: 99\n")
+        .unwrap();
+
+    let loaded = load_document_sources(
+        &host,
+        &formats,
+        &config(UnknownCollectionPolicy::Error),
+        None,
+    )
+    .unwrap();
+    assert_eq!(loaded.collections["games"]["smw"]["id"], "smw");
+    assert_eq!(loaded.documents.len(), 1);
+    assert_eq!(loaded.documents[0].path, "/config/base.yaml");
+}
+
+#[test]
 fn load_document_sources_merges_files_and_records_origins_and_documents() {
     let host = MemoryStorageHost::default();
     let formats = FormatRegistry::with_builtins();
@@ -545,12 +569,20 @@ fn load_document_sources_require_migration_host_when_migrations_apply() {
                 schema: system_schema(),
                 id_strategy: IdStrategy::DerivedFromKey,
                 version: Some(2),
-                migrations: vec![proseql_storage::persistence::MigrationStep {
-                    from: 1,
-                    to: 2,
-                    description: None,
-                    callback_id: "systems-v2".to_owned(),
-                }],
+                migrations: vec![
+                    proseql_storage::persistence::MigrationStep {
+                        from: 0,
+                        to: 1,
+                        description: None,
+                        callback_id: "systems-v1".to_owned(),
+                    },
+                    proseql_storage::persistence::MigrationStep {
+                        from: 1,
+                        to: 2,
+                        description: None,
+                        callback_id: "systems-v2".to_owned(),
+                    },
+                ],
             },
         )]),
         sources: vec![DatabaseSourceConfig::Documents(DocumentSourceConfig {
@@ -578,6 +610,32 @@ fn load_document_sources_require_migration_host_when_migrations_apply() {
     match err {
         EngineError::Migration(error) => {
             assert_eq!(error.reason, "missing-host")
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn stale_document_source_version_with_empty_registry_fails_empty_registry_instead_of_bypassing() {
+    let host = MemoryStorageHost::default();
+    let formats = FormatRegistry::with_builtins();
+    host.write(
+        "/config/base.yaml",
+        "systems:\n  _version: 0\n  snes:\n    name: Super Nintendo\n",
+    )
+    .unwrap();
+
+    let err = load_document_sources(
+        &host,
+        &formats,
+        &config(UnknownCollectionPolicy::Error),
+        None,
+    )
+    .unwrap_err();
+    match err {
+        EngineError::Migration(error) => {
+            assert_eq!(error.collection, "systems");
+            assert_eq!(error.reason, "empty-registry");
         }
         other => panic!("unexpected error: {other:?}"),
     }

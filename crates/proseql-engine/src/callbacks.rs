@@ -1,189 +1,412 @@
 //! Callback registry for host-provided functions used by the engine.
 //!
-//! ## Registered callback kinds
-//!
-//! | Kind              | Used by                  | Signature                       |
-//! |-------------------|--------------------------|---------------------------------|
-//! | `DefaultCallback` | `OptionalWithDefault`    | `() -> Value`                   |
-//! | `PredicateCallback` | `$removeBy` operator   | `(&Value) -> bool`              |
-//! | `StringCollator`  | sort string comparison   | `(&str, &str) -> Ordering`      |
-//!
-//! ## Design decision: sync native execution
-//!
-//! Native Rust callbacks are synchronous closures.  This is appropriate because:
-//!
-//! - The native consumers (korrid, tests) supply Rust closures; no async boundary.
-//! - The WASM boundary (U8) wraps JS async default functions into *sync* Rust
-//!   closures at wasm-bindgen dispatch time, so the engine always sees a sync call.
-//!
-//! ## TS references
-//! - `Schema.optional(T, { default: () => V })` / `Schema.optionalWith` — default seam
-//! - `$remove: (item) => boolean` update operator — predicate seam
-//! - `computed: { fieldName: (entity) => value }` — computed field derivation (U3)
+//! Native Rust callbacks are synchronous closures; storage and JS hosts adapt
+//! their runtime model to this seam.
 
 use std::collections::HashMap;
 
-use crate::value::Value;
+use serde_json::{Map, Value};
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+use crate::errors::EngineError;
+use crate::hooks::{
+    AfterCreateContext, AfterDeleteContext, AfterUpdateContext, BeforeCreateContext,
+    BeforeDeleteContext, BeforeUpdateContext, OnChangeContext,
+};
+use crate::id_gen::IdGenerator;
+use crate::value::Value as BoundaryValue;
 
-/// A sync callback that produces a default `Value`.
-///
-/// The `Fn` bound (not `FnMut`) is intentional: defaults should be pure
-/// functions callable multiple times without side effects.
 pub type DefaultCallback = Box<dyn Fn() -> Value + Send + Sync>;
-
-/// A sync predicate over a JSON `Value`.
-///
-/// Used by the `$removeBy` operator to filter array elements.
-/// Mirrors TS `$remove: (item: U) => boolean`.
 pub type PredicateCallback = Box<dyn Fn(&Value) -> bool + Send + Sync>;
-
-/// A sync computed-field derivation callback.
-///
-/// Takes the full entity `Value` (with all stored fields resolved, and possibly
-/// populated relationships) and returns the derived field value.
-///
-/// Mirrors `ComputedFieldDefinition<T, R>` from
-/// `packages/core/src/types/computed-types.ts`:
-/// ```ts
-/// type ComputedFieldDefinition<T, R> = (entity: T) => R;
-/// ```
 pub type ComputedCallback = Box<dyn Fn(&Value) -> Value + Send + Sync>;
-
-/// A string-comparison callback for locale-aware sort.
-///
-/// When registered, replaces the bytewise fallback in the sort pipeline for
-/// all string comparisons (both string-vs-string and mixed-type coerced
-/// comparisons).
-///
-/// The U8 WASM boundary registers JS `localeCompare` here.  Native consumers
-/// (korrid) register their chosen ICU or system collator.  If none is
-/// registered, the sort engine falls back to bytewise ASCII ordering — this is
-/// documented as a fallback, not parity with JS.
 pub type StringCollatorFn = Box<dyn Fn(&str, &str) -> std::cmp::Ordering + Send + Sync>;
+pub type MigrationCallback =
+    Box<dyn Fn(&Map<String, Value>) -> Result<Map<String, Value>, EngineError> + Send + Sync>;
+pub type IdGeneratorFactory = Box<dyn Fn() -> Box<dyn IdGenerator> + Send + Sync>;
+pub type PluginLifecycleCallback = Box<dyn Fn() -> Result<(), EngineError> + Send + Sync>;
+pub type CodecEncodeCallback =
+    Box<dyn Fn(&BoundaryValue, Option<usize>) -> Result<String, EngineError> + Send + Sync>;
+pub type CodecDecodeCallback =
+    Box<dyn Fn(&str) -> Result<BoundaryValue, EngineError> + Send + Sync>;
 
-// ── Registry ──────────────────────────────────────────────────────────────────
+pub type BeforeCreateHookCallback =
+    Box<dyn Fn(&BeforeCreateContext) -> Result<Value, EngineError> + Send + Sync>;
+pub type BeforeUpdateHookCallback =
+    Box<dyn Fn(&BeforeUpdateContext) -> Result<Value, EngineError> + Send + Sync>;
+pub type BeforeDeleteHookCallback =
+    Box<dyn Fn(&BeforeDeleteContext) -> Result<(), EngineError> + Send + Sync>;
+pub type AfterCreateHookCallback =
+    Box<dyn Fn(&AfterCreateContext) -> Result<(), EngineError> + Send + Sync>;
+pub type AfterUpdateHookCallback =
+    Box<dyn Fn(&AfterUpdateContext) -> Result<(), EngineError> + Send + Sync>;
+pub type AfterDeleteHookCallback =
+    Box<dyn Fn(&AfterDeleteContext) -> Result<(), EngineError> + Send + Sync>;
+pub type OnChangeHookCallback =
+    Box<dyn Fn(&OnChangeContext) -> Result<(), EngineError> + Send + Sync>;
+pub type CustomOperatorCallback = Box<dyn Fn(&Value, &Value) -> bool + Send + Sync>;
 
-/// A registry mapping string callback IDs to their implementations.
-///
-/// The ID space is shared between:
-/// - `OptionalWithDefault.default_callback_id` — schema field defaults
-/// - `$removeBy` operator callback ids — array element predicates
-/// - Named id generators (`CollectionDescriptor.id_generator`) — U7+
-/// - Hook callback IDs — U7+
-/// - Plugin operator IDs — U7+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CustomOperatorEvaluation {
+    Unknown,
+    Ignored,
+    Matched(bool),
+}
+
+struct CustomOperatorRegistration {
+    supported_types: Vec<String>,
+    evaluate: CustomOperatorCallback,
+}
+
 #[derive(Default)]
 pub struct CallbackRegistry {
     defaults: HashMap<String, DefaultCallback>,
     predicates: HashMap<String, PredicateCallback>,
     computed: HashMap<String, ComputedCallback>,
-    /// Optional locale-aware string collator.  When `Some`, replaces the
-    /// bytewise ASCII fallback in the sort pipeline.
     collator: Option<StringCollatorFn>,
+    migrations: HashMap<String, MigrationCallback>,
+    before_create_hooks: HashMap<String, BeforeCreateHookCallback>,
+    before_update_hooks: HashMap<String, BeforeUpdateHookCallback>,
+    before_delete_hooks: HashMap<String, BeforeDeleteHookCallback>,
+    after_create_hooks: HashMap<String, AfterCreateHookCallback>,
+    after_update_hooks: HashMap<String, AfterUpdateHookCallback>,
+    after_delete_hooks: HashMap<String, AfterDeleteHookCallback>,
+    on_change_hooks: HashMap<String, OnChangeHookCallback>,
+    custom_operators: HashMap<String, CustomOperatorRegistration>,
+    id_generators: HashMap<String, IdGeneratorFactory>,
+    lifecycle_callbacks: HashMap<String, PluginLifecycleCallback>,
+    codec_encode_callbacks: HashMap<String, CodecEncodeCallback>,
+    codec_decode_callbacks: HashMap<String, CodecDecodeCallback>,
+    global_before_create_hooks: Vec<String>,
+    global_before_update_hooks: Vec<String>,
+    global_before_delete_hooks: Vec<String>,
+    global_after_create_hooks: Vec<String>,
+    global_after_update_hooks: Vec<String>,
+    global_after_delete_hooks: Vec<String>,
+    global_on_change_hooks: Vec<String>,
 }
 
 impl CallbackRegistry {
-    /// Create an empty registry.
     pub fn new() -> Self {
         Self::default()
     }
 
-    // ── Default callbacks ─────────────────────────────────────────────────────
-
-    /// Register a default-value callback for an `OptionalWithDefault` field.
-    ///
-    /// If a callback with the same `id` is already registered it is replaced.
     pub fn register_default(&mut self, id: impl Into<String>, f: DefaultCallback) {
         self.defaults.insert(id.into(), f);
     }
 
-    /// Invoke a registered default callback, returning `Some(value)` if registered.
-    ///
-    /// Returns `None` when no callback is registered for `id`.
-    /// Callers that treat a missing callback as a loud error should convert `None`
-    /// to an appropriate `EngineError` themselves.
     pub fn invoke_default(&self, id: &str) -> Option<Value> {
         self.defaults.get(id).map(|f| f())
     }
 
-    /// Check whether a default callback is registered under the given id.
     pub fn has_default(&self, id: &str) -> bool {
         self.defaults.contains_key(id)
     }
 
-    // ── Predicate callbacks ───────────────────────────────────────────────────
-
-    /// Register a predicate callback for the `$removeBy` operator.
-    ///
-    /// The predicate is called once per array element; elements for which it
-    /// returns `true` are removed.
-    ///
-    /// Mirrors TS `$remove: (item: U) => boolean`.
     pub fn register_predicate(&mut self, id: impl Into<String>, f: PredicateCallback) {
         self.predicates.insert(id.into(), f);
     }
 
-    /// Invoke a registered predicate callback on a value.
-    ///
-    /// Returns `Some(result)` if the id is registered, `None` if not.
     pub fn invoke_predicate(&self, id: &str, value: &Value) -> Option<bool> {
         self.predicates.get(id).map(|f| f(value))
     }
 
-    /// Check whether a predicate callback is registered under the given id.
     pub fn has_predicate(&self, id: &str) -> bool {
         self.predicates.contains_key(id)
     }
 
-    // ── String collation ───────────────────────────────────────────────────────
-
-    /// Register a string collation callback.
-    ///
-    /// Once registered, the sort pipeline calls `f(a, b)` instead of the
-    /// bytewise fallback for all string comparisons.
-    ///
-    /// Replacing an existing collator is allowed.
     pub fn register_collator(&mut self, f: StringCollatorFn) {
         self.collator = Some(f);
     }
 
-    /// Invoke the registered string collator for `a` vs `b`.
-    ///
-    /// Returns `Some(Ordering)` when a collator is registered, `None` when the
-    /// caller should fall back to bytewise ordering.
     pub fn collate_strings(&self, a: &str, b: &str) -> Option<std::cmp::Ordering> {
         self.collator.as_ref().map(|f| f(a, b))
     }
 
-    // ── Computed field callbacks ──────────────────────────────────────────────
-
-    /// Register a computed-field derivation callback.
-    ///
-    /// `id` must match the `ComputedFieldDescriptor.callback_id` from the
-    /// collection descriptor.  If a callback with the same id already exists
-    /// it is replaced.
     pub fn register_computed(&mut self, id: impl Into<String>, f: ComputedCallback) {
         self.computed.insert(id.into(), f);
     }
 
-    /// Invoke a computed-field callback for `entity`.
-    ///
-    /// Returns `Some(value)` if the callback is registered, `None` if not.
-    /// Callers that treat a missing callback as a loud error should convert
-    /// `None` to an appropriate `EngineError`.
     pub fn invoke_computed(&self, id: &str, entity: &Value) -> Option<Value> {
         self.computed.get(id).map(|f| f(entity))
     }
-}
 
-// ── Unit tests ─────────────────────────────────────────────────────────────────
+    pub fn register_migration(&mut self, id: impl Into<String>, f: MigrationCallback) {
+        self.migrations.insert(id.into(), f);
+    }
+
+    pub fn invoke_migration(
+        &self,
+        id: &str,
+        data: &Map<String, Value>,
+    ) -> Option<Result<Map<String, Value>, EngineError>> {
+        self.migrations.get(id).map(|f| f(data))
+    }
+
+    pub fn has_migration(&self, id: &str) -> bool {
+        self.migrations.contains_key(id)
+    }
+
+    pub fn register_before_create_hook(
+        &mut self,
+        id: impl Into<String>,
+        f: BeforeCreateHookCallback,
+    ) {
+        self.before_create_hooks.insert(id.into(), f);
+    }
+
+    pub fn before_create_hook(&self, id: &str) -> Option<&BeforeCreateHookCallback> {
+        self.before_create_hooks.get(id)
+    }
+
+    pub fn register_before_update_hook(
+        &mut self,
+        id: impl Into<String>,
+        f: BeforeUpdateHookCallback,
+    ) {
+        self.before_update_hooks.insert(id.into(), f);
+    }
+
+    pub fn before_update_hook(&self, id: &str) -> Option<&BeforeUpdateHookCallback> {
+        self.before_update_hooks.get(id)
+    }
+
+    pub fn register_before_delete_hook(
+        &mut self,
+        id: impl Into<String>,
+        f: BeforeDeleteHookCallback,
+    ) {
+        self.before_delete_hooks.insert(id.into(), f);
+    }
+
+    pub fn before_delete_hook(&self, id: &str) -> Option<&BeforeDeleteHookCallback> {
+        self.before_delete_hooks.get(id)
+    }
+
+    pub fn register_after_create_hook(
+        &mut self,
+        id: impl Into<String>,
+        f: AfterCreateHookCallback,
+    ) {
+        self.after_create_hooks.insert(id.into(), f);
+    }
+
+    pub fn after_create_hook(&self, id: &str) -> Option<&AfterCreateHookCallback> {
+        self.after_create_hooks.get(id)
+    }
+
+    pub fn register_after_update_hook(
+        &mut self,
+        id: impl Into<String>,
+        f: AfterUpdateHookCallback,
+    ) {
+        self.after_update_hooks.insert(id.into(), f);
+    }
+
+    pub fn after_update_hook(&self, id: &str) -> Option<&AfterUpdateHookCallback> {
+        self.after_update_hooks.get(id)
+    }
+
+    pub fn register_after_delete_hook(
+        &mut self,
+        id: impl Into<String>,
+        f: AfterDeleteHookCallback,
+    ) {
+        self.after_delete_hooks.insert(id.into(), f);
+    }
+
+    pub fn after_delete_hook(&self, id: &str) -> Option<&AfterDeleteHookCallback> {
+        self.after_delete_hooks.get(id)
+    }
+
+    pub fn register_on_change_hook(&mut self, id: impl Into<String>, f: OnChangeHookCallback) {
+        self.on_change_hooks.insert(id.into(), f);
+    }
+
+    pub fn on_change_hook(&self, id: &str) -> Option<&OnChangeHookCallback> {
+        self.on_change_hooks.get(id)
+    }
+
+    pub fn register_custom_operator(
+        &mut self,
+        name: impl Into<String>,
+        supported_types: Vec<String>,
+        evaluate: CustomOperatorCallback,
+    ) {
+        self.custom_operators.insert(
+            name.into(),
+            CustomOperatorRegistration {
+                supported_types,
+                evaluate,
+            },
+        );
+    }
+
+    pub fn has_custom_operator(&self, name: &str) -> bool {
+        self.custom_operators.contains_key(name)
+    }
+
+    pub fn custom_operator_names(&self) -> impl Iterator<Item = &str> {
+        self.custom_operators.keys().map(String::as_str)
+    }
+
+    pub fn evaluate_custom_operator(
+        &self,
+        name: &str,
+        field_value: &Value,
+        operand: &Value,
+    ) -> CustomOperatorEvaluation {
+        let Some(operator) = self.custom_operators.get(name) else {
+            return CustomOperatorEvaluation::Unknown;
+        };
+        let value_type = if field_value.is_string() {
+            "string"
+        } else if field_value.is_number() {
+            "number"
+        } else if field_value.is_boolean() {
+            "boolean"
+        } else if field_value.is_array() {
+            "array"
+        } else {
+            return CustomOperatorEvaluation::Ignored;
+        };
+        if !operator
+            .supported_types
+            .iter()
+            .any(|kind| kind == value_type)
+        {
+            return CustomOperatorEvaluation::Ignored;
+        }
+        CustomOperatorEvaluation::Matched((operator.evaluate)(field_value, operand))
+    }
+
+    pub fn register_id_generator(&mut self, name: impl Into<String>, factory: IdGeneratorFactory) {
+        self.id_generators.insert(name.into(), factory);
+    }
+
+    pub fn has_id_generator(&self, name: &str) -> bool {
+        self.id_generators.contains_key(name)
+    }
+
+    pub fn instantiate_id_generator(&self, name: &str) -> Option<Box<dyn IdGenerator>> {
+        self.id_generators.get(name).map(|factory| factory())
+    }
+
+    pub fn register_lifecycle_callback(
+        &mut self,
+        id: impl Into<String>,
+        callback: PluginLifecycleCallback,
+    ) {
+        self.lifecycle_callbacks.insert(id.into(), callback);
+    }
+
+    pub fn invoke_lifecycle_callback(&self, id: &str) -> Option<Result<(), EngineError>> {
+        self.lifecycle_callbacks.get(id).map(|callback| callback())
+    }
+
+    pub fn has_lifecycle_callback(&self, id: &str) -> bool {
+        self.lifecycle_callbacks.contains_key(id)
+    }
+
+    pub fn register_codec_encode(&mut self, id: impl Into<String>, callback: CodecEncodeCallback) {
+        self.codec_encode_callbacks.insert(id.into(), callback);
+    }
+
+    pub fn register_codec_decode(&mut self, id: impl Into<String>, callback: CodecDecodeCallback) {
+        self.codec_decode_callbacks.insert(id.into(), callback);
+    }
+
+    pub fn invoke_codec_encode(
+        &self,
+        id: &str,
+        value: &BoundaryValue,
+        indent: Option<usize>,
+    ) -> Option<Result<String, EngineError>> {
+        self.codec_encode_callbacks
+            .get(id)
+            .map(|callback| callback(value, indent))
+    }
+
+    pub fn invoke_codec_decode(
+        &self,
+        id: &str,
+        raw: &str,
+    ) -> Option<Result<BoundaryValue, EngineError>> {
+        self.codec_decode_callbacks
+            .get(id)
+            .map(|callback| callback(raw))
+    }
+
+    pub fn has_codec_encode(&self, id: &str) -> bool {
+        self.codec_encode_callbacks.contains_key(id)
+    }
+
+    pub fn has_codec_decode(&self, id: &str) -> bool {
+        self.codec_decode_callbacks.contains_key(id)
+    }
+
+    pub fn set_global_before_create_hooks(&mut self, hook_ids: Vec<String>) {
+        self.global_before_create_hooks = hook_ids;
+    }
+
+    pub fn set_global_before_update_hooks(&mut self, hook_ids: Vec<String>) {
+        self.global_before_update_hooks = hook_ids;
+    }
+
+    pub fn set_global_before_delete_hooks(&mut self, hook_ids: Vec<String>) {
+        self.global_before_delete_hooks = hook_ids;
+    }
+
+    pub fn set_global_after_create_hooks(&mut self, hook_ids: Vec<String>) {
+        self.global_after_create_hooks = hook_ids;
+    }
+
+    pub fn set_global_after_update_hooks(&mut self, hook_ids: Vec<String>) {
+        self.global_after_update_hooks = hook_ids;
+    }
+
+    pub fn set_global_after_delete_hooks(&mut self, hook_ids: Vec<String>) {
+        self.global_after_delete_hooks = hook_ids;
+    }
+
+    pub fn set_global_on_change_hooks(&mut self, hook_ids: Vec<String>) {
+        self.global_on_change_hooks = hook_ids;
+    }
+
+    pub fn global_before_create_hooks(&self) -> &[String] {
+        &self.global_before_create_hooks
+    }
+
+    pub fn global_before_update_hooks(&self) -> &[String] {
+        &self.global_before_update_hooks
+    }
+
+    pub fn global_before_delete_hooks(&self) -> &[String] {
+        &self.global_before_delete_hooks
+    }
+
+    pub fn global_after_create_hooks(&self) -> &[String] {
+        &self.global_after_create_hooks
+    }
+
+    pub fn global_after_update_hooks(&self) -> &[String] {
+        &self.global_after_update_hooks
+    }
+
+    pub fn global_after_delete_hooks(&self) -> &[String] {
+        &self.global_after_delete_hooks
+    }
+
+    pub fn global_on_change_hooks(&self) -> &[String] {
+        &self.global_on_change_hooks
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::hooks::{BeforeCreateContext, OnChangeContext};
+    use crate::id_gen::{IdGenerator, SequentialGenerator};
 
     #[test]
     fn invoke_registered_default_returns_value() {
@@ -222,7 +445,6 @@ mod tests {
     #[test]
     fn invoke_registered_predicate_returns_result() {
         let mut registry = CallbackRegistry::new();
-        // Remove values greater than 5
         registry.register_predicate(
             "gt5",
             Box::new(|v| v.as_f64().map(|n| n > 5.0).unwrap_or(false)),
@@ -236,5 +458,66 @@ mod tests {
     fn invoke_unregistered_predicate_returns_none() {
         let registry = CallbackRegistry::new();
         assert_eq!(registry.invoke_predicate("missing", &json!(1)), None);
+    }
+
+    #[test]
+    fn custom_operator_ignores_incompatible_types() {
+        let mut registry = CallbackRegistry::new();
+        registry.register_custom_operator(
+            "$odd",
+            vec!["number".to_owned()],
+            Box::new(|value, _| {
+                value
+                    .as_i64()
+                    .map(|number| number % 2 == 1)
+                    .unwrap_or(false)
+            }),
+        );
+        assert_eq!(
+            registry.evaluate_custom_operator("$odd", &json!("7"), &Value::Null),
+            CustomOperatorEvaluation::Ignored
+        );
+        assert_eq!(
+            registry.evaluate_custom_operator("$odd", &json!(7), &Value::Null),
+            CustomOperatorEvaluation::Matched(true)
+        );
+    }
+
+    #[test]
+    fn hook_callbacks_can_be_looked_up() {
+        let mut registry = CallbackRegistry::new();
+        registry.register_before_create_hook(
+            "normalize",
+            Box::new(|ctx: &BeforeCreateContext| Ok(ctx.data.clone())),
+        );
+        let context = BeforeCreateContext {
+            operation: crate::errors::HookOperation::Create,
+            collection: "users".to_owned(),
+            data: json!({"id":"u1"}),
+        };
+        let result = registry.before_create_hook("normalize").unwrap()(&context).unwrap();
+        assert_eq!(result, json!({"id":"u1"}));
+    }
+
+    #[test]
+    fn id_generators_can_be_instantiated() {
+        let mut registry = CallbackRegistry::new();
+        registry.register_id_generator(
+            "seq",
+            Box::new(|| Box::new(SequentialGenerator::new("plugin")) as Box<dyn IdGenerator>),
+        );
+        let mut generator = registry.instantiate_id_generator("seq").unwrap();
+        assert_eq!(generator.generate(), "plugin-1");
+    }
+
+    #[test]
+    fn on_change_hooks_can_be_looked_up() {
+        let mut registry = CallbackRegistry::new();
+        registry.register_on_change_hook("track", Box::new(|_| Ok(())));
+        let ctx = OnChangeContext::Create {
+            collection: "users".to_owned(),
+            entity: json!({"id":"u1"}),
+        };
+        assert!(registry.on_change_hook("track").unwrap()(&ctx).is_ok());
     }
 }

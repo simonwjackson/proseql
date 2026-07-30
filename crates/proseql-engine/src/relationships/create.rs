@@ -339,7 +339,7 @@ impl Database {
             .collections
             .get_mut(collection)
             .ok_or_else(|| col_nf(collection))?
-            .create(Value::Object(base_data));
+            .create_unhooked(Value::Object(base_data));
         let parent = match create_result {
             Ok(parent) => parent,
             Err(EngineError::DuplicateKey(error)) => {
@@ -419,5 +419,5 @@ fn create_nested(
         .collections
         .get_mut(target_collection)
         .ok_or_else(|| col_nf(target_collection))?
-        .create(Value::Object(data))
+        .create_unhooked(Value::Object(data))
 }

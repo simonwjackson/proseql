@@ -40,7 +40,7 @@ pub mod sort;
 // Re-export the public API consumed by external callers and conformance tests.
 pub use aggregate::{AggregateConfig, AggregateResult, GroupResult};
 pub use cursor::{apply_cursor, CursorConfig, CursorPageInfo, CursorPageResult};
-pub use filter::matches_where;
+pub use filter::{matches_where, matches_where_with_registry};
 pub use paginate::paginate;
 pub use pipeline::{
     execute_aggregate, execute_cursor_query, execute_grouped_aggregate, execute_query, query_input,

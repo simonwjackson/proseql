@@ -1,9 +1,18 @@
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+
 use indexmap::IndexMap;
-use proseql_engine::descriptor::{IdStrategy, SchemaNode};
+use proseql_engine::callbacks::CallbackRegistry;
+use proseql_engine::descriptor::{IdStrategy, MigrationDescriptor, SchemaNode};
 use proseql_engine::errors::{
-    EngineError, MigrationError, SerializationError, StorageError, StorageOperation,
-    ValidationError, ValidationIssue,
+    EngineError, MigrationError, OperationError, SerializationError, StorageError,
+    StorageOperation, ValidationError, ValidationIssue,
 };
+use proseql_engine::migrations::{
+    dry_run_report as engine_dry_run_report, post_migration_validation_error,
+    validate_migration_registry as engine_validate_migration_registry,
+};
+pub use proseql_engine::migrations::{DryRunMigration, DryRunStatus};
 use proseql_engine::validator::decode_value;
 use proseql_formats::codecs::jsonl_decode_lines;
 use proseql_formats::{FormatOptions, FormatRegistry, FormatRegistryError};
@@ -35,6 +44,82 @@ pub trait MigrationHost: Send + Sync {
     ) -> Result<Map<String, Value>, EngineError>;
 }
 
+fn to_engine_migration_descriptors(migrations: &[MigrationStep]) -> Vec<MigrationDescriptor> {
+    migrations
+        .iter()
+        .map(|step| MigrationDescriptor {
+            from: step.from,
+            to: step.to,
+            description: step.description.clone(),
+            callback_id: step.callback_id.clone(),
+        })
+        .collect()
+}
+
+pub(crate) fn validate_migration_registry(
+    collection: &str,
+    target_version: u32,
+    migrations: &[MigrationStep],
+) -> Result<(), EngineError> {
+    let descriptors = to_engine_migration_descriptors(migrations);
+    engine_validate_migration_registry(collection, target_version, &descriptors)
+}
+
+fn dry_run_collection(
+    file_path: &str,
+    file_exists: bool,
+    file_version: u32,
+    collection: &LoadCollectionConfig,
+) -> Result<DryRunCollectionResult, EngineError> {
+    let target_version = collection.version.unwrap_or(0);
+    validate_migration_registry(&collection.name, target_version, &collection.migrations)?;
+    let report = engine_dry_run_report(
+        file_exists,
+        file_version,
+        target_version,
+        &to_engine_migration_descriptors(&collection.migrations),
+    );
+    Ok(DryRunCollectionResult {
+        name: collection.name.clone(),
+        file_path: file_path.to_owned(),
+        current_version: report.current_version,
+        target_version: report.target_version,
+        migrations_to_apply: report.migrations_to_apply,
+        status: report.status,
+    })
+}
+
+pub struct CallbackRegistryMigrationHost<'a> {
+    registry: &'a CallbackRegistry,
+}
+
+impl<'a> CallbackRegistryMigrationHost<'a> {
+    pub fn new(registry: &'a CallbackRegistry) -> Self {
+        Self { registry }
+    }
+}
+
+impl MigrationHost for CallbackRegistryMigrationHost<'_> {
+    fn run_migration(
+        &self,
+        callback_id: &str,
+        data: &Map<String, Value>,
+    ) -> Result<Map<String, Value>, EngineError> {
+        self.registry
+            .invoke_migration(callback_id, data)
+            .unwrap_or_else(|| {
+                Err(EngineError::Operation(OperationError {
+                    operation: "migration".to_owned(),
+                    reason: "missing-callback".to_owned(),
+                    message: format!(
+                        "Migration callback '{}' is not registered in CallbackRegistry",
+                        callback_id
+                    ),
+                }))
+            })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CollectionStorageConfig {
     pub name: String,
@@ -42,6 +127,38 @@ pub struct CollectionStorageConfig {
     pub id_strategy: IdStrategy,
     pub version: Option<u32>,
     pub migrations: Vec<MigrationStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DryRunCollectionResult {
+    pub name: String,
+    pub file_path: String,
+    pub current_version: u32,
+    pub target_version: u32,
+    pub migrations_to_apply: Vec<DryRunMigration>,
+    pub status: DryRunStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DryRunResult {
+    pub collections: Vec<DryRunCollectionResult>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DryRunInput {
+    SingleFile {
+        file_path: String,
+        collection: LoadCollectionConfig,
+    },
+    Directory {
+        dir_path: String,
+        extension: String,
+        collection: LoadCollectionConfig,
+    },
+    MultiCollectionFile {
+        file_path: String,
+        collections: Vec<LoadCollectionConfig>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -163,6 +280,62 @@ fn set_at_path(obj: &mut Map<String, Value>, path: &str, value: Value) -> Result
 
 fn is_derived(id_strategy: &IdStrategy) -> bool {
     matches!(id_strategy, IdStrategy::DerivedFromKey)
+}
+
+fn directory_version_metadata_path(dir_path: &str, extension: &str) -> String {
+    format!(
+        "{}/._version.{}",
+        normalize_path(dir_path).trim_end_matches('/'),
+        extension
+    )
+}
+
+pub(crate) fn is_version_sidecar_path(path: &str, extension: &str) -> bool {
+    get_file_extension(path) == extension.to_ascii_lowercase()
+        && Path::new(path).file_stem().and_then(|name| name.to_str()) == Some("._version")
+}
+
+fn read_directory_version_metadata(
+    host: &dyn StorageHost,
+    formats: &FormatRegistry,
+    dir_path: &str,
+    extension: &str,
+) -> Result<Option<u32>, EngineError> {
+    let metadata_path = directory_version_metadata_path(dir_path, extension);
+    if !host.exists(&metadata_path)? {
+        return Ok(None);
+    }
+    let parsed = formats
+        .deserialize(&host.read(&metadata_path)?, extension)
+        .map_err(format_error)?;
+    let version = parsed
+        .as_object()
+        .and_then(|map| map.get("_version"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+    Ok(Some(version))
+}
+
+fn write_directory_version_metadata(
+    host: &dyn StorageHost,
+    formats: &FormatRegistry,
+    dir_path: &str,
+    extension: &str,
+    version: u32,
+) -> Result<(), EngineError> {
+    let metadata_path = directory_version_metadata_path(dir_path, extension);
+    let raw = formats
+        .serialize(
+            &Value::Object(Map::from_iter([(
+                "_version".to_owned(),
+                Value::Number(version.into()),
+            )])),
+            extension,
+            Some(FormatOptions::default()),
+        )
+        .map_err(format_error)?;
+    host.ensure_dir(&metadata_path)?;
+    host.write(&metadata_path, &raw)
 }
 
 pub(crate) fn assert_no_physical_derived_id(
@@ -409,6 +582,9 @@ pub(crate) fn run_migrations(
     if file_version >= target_version {
         return Ok(data);
     }
+
+    validate_migration_registry(collection_name, target_version, migrations)?;
+
     let mut applicable = migrations
         .iter()
         .filter(|step| step.from >= file_version && step.to <= target_version)
@@ -516,6 +692,15 @@ pub fn load_data(
         }
     } else {
         let parsed = formats.deserialize(&raw, &ext).map_err(format_error)?;
+        let enclosing_version = if options.path.is_some() {
+            parsed
+                .as_object()
+                .and_then(|map| map.get("_version"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as u32
+        } else {
+            0
+        };
         let resolved = if let Some(path) = &options.path {
             match get_at_path(&parsed, path) {
                 Some(value) => value.clone(),
@@ -529,6 +714,9 @@ pub fn load_data(
             || (options.path.is_some() && matches!(resolved, Value::Array(_)));
         match resolved {
             Value::Array(items) if is_array_format => {
+                if options.path.is_some() {
+                    file_version = enclosing_version;
+                }
                 for (index, item) in items.into_iter().enumerate() {
                     if let Value::Object(record) = item {
                         let id = record
@@ -541,7 +729,11 @@ pub fn load_data(
                 }
             }
             Value::Object(mut map) => {
-                file_version = map.get("_version").and_then(Value::as_u64).unwrap_or(0) as u32;
+                file_version = if options.path.is_some() {
+                    enclosing_version
+                } else {
+                    map.get("_version").and_then(Value::as_u64).unwrap_or(0) as u32
+                };
                 map.shift_remove("_version");
                 entity_map = map;
             }
@@ -563,14 +755,15 @@ pub fn load_data(
         }
     }
 
+    let mut migrated_target_version = None;
+    let collection_name = options
+        .collection_name
+        .clone()
+        .unwrap_or_else(|| "unknown".to_owned());
     if let Some(target_version) = options.version {
-        let collection_name = options
-            .collection_name
-            .clone()
-            .unwrap_or_else(|| "unknown".to_owned());
         if file_version > target_version {
             return Err(EngineError::Migration(Box::new(MigrationError {
-                collection: collection_name,
+                collection: collection_name.clone(),
                 from_version: target_version,
                 to_version: file_version,
                 step: -1,
@@ -580,15 +773,19 @@ pub fn load_data(
                 ),
             })));
         }
-        if file_version < target_version && !options.migrations.is_empty() {
-            entity_map = run_migrations(
-                entity_map,
-                file_version,
-                target_version,
-                &options.migrations,
-                &collection_name,
-                migration_host,
-            )?;
+        if file_version < target_version {
+            validate_migration_registry(&collection_name, target_version, &options.migrations)?;
+            if !options.migrations.is_empty() {
+                entity_map = run_migrations(
+                    entity_map,
+                    file_version,
+                    target_version,
+                    &options.migrations,
+                    &collection_name,
+                    migration_host,
+                )?;
+                migrated_target_version = Some(target_version);
+            }
         }
     }
 
@@ -599,24 +796,34 @@ pub fn load_data(
         &id_strategy,
         entity_map,
         options.validation,
-    )?;
-
-    if let Some(target_version) = options.version {
-        if file_version < target_version && !options.migrations.is_empty() {
-            save_data(
-                host,
-                formats,
-                file_path,
-                schema,
-                &decoded,
-                SaveDataOptions {
-                    version: Some(target_version),
-                    format: options.format,
-                    path: options.path,
-                    id_strategy: Some(id_strategy),
-                },
-            )?;
+    )
+    .map_err(|error| {
+        if let Some(target_version) = migrated_target_version {
+            post_migration_validation_error(
+                &collection_name,
+                file_version,
+                target_version,
+                error.to_string(),
+            )
+        } else {
+            error
         }
+    })?;
+
+    if let Some(target_version) = migrated_target_version {
+        save_data(
+            host,
+            formats,
+            file_path,
+            schema,
+            &decoded,
+            SaveDataOptions {
+                version: Some(target_version),
+                format: options.format,
+                path: options.path,
+                id_strategy: Some(id_strategy),
+            },
+        )?;
     }
 
     Ok(decoded)
@@ -664,22 +871,27 @@ pub fn append_data(
         }));
     }
 
+    let batch = data
+        .iter()
+        .map(|(id, value)| {
+            let encoded = encode_value(schema, value, id)?;
+            let line = serde_json::to_string(&encoded).map_err(|error| {
+                EngineError::Serialization(Box::new(SerializationError {
+                    format: ext.clone(),
+                    message: format!(
+                        "Invalid data format in '{}': failed to encode append-only line: {error}",
+                        file_path
+                    ),
+                    cause: None,
+                }))
+            })?;
+            Ok(format!("{line}\n"))
+        })
+        .collect::<Result<Vec<_>, EngineError>>()?
+        .join("");
+
     host.ensure_dir(file_path)?;
-    for (id, value) in data {
-        let encoded = encode_value(schema, value, id)?;
-        let line = serde_json::to_string(&encoded).map_err(|error| {
-            EngineError::Serialization(Box::new(SerializationError {
-                format: ext.clone(),
-                message: format!(
-                    "Invalid data format in '{}': failed to encode append-only line: {error}",
-                    file_path
-                ),
-                cause: None,
-            }))
-        })?;
-        host.append(file_path, &format!("{line}\n"))?;
-    }
-    Ok(())
+    host.append(file_path, &batch)
 }
 
 pub fn save_data(
@@ -748,6 +960,9 @@ pub fn save_data(
                 Map::new()
             };
             set_at_path(&mut root, path, collection_data)?;
+            if let Some(version) = options.version {
+                root.insert("_version".to_owned(), Value::Number(version.into()));
+            }
             Value::Object(root)
         } else {
             collection_data
@@ -792,6 +1007,8 @@ pub fn load_collections_from_file(
     };
 
     let mut result = IndexMap::new();
+    let mut root_for_writeback = root.clone();
+    let mut should_write_back = false;
     for collection in collections {
         let section = root
             .get(&collection.name)
@@ -805,6 +1022,7 @@ pub fn load_collections_from_file(
             map.shift_remove("_version");
             entity_map = map;
         }
+        let mut migrated_target_version = None;
         if let Some(target_version) = collection.version {
             if file_version > target_version {
                 return Err(EngineError::Migration(Box::new(MigrationError {
@@ -818,27 +1036,76 @@ pub fn load_collections_from_file(
                     ),
                 })));
             }
-            if file_version < target_version && !collection.migrations.is_empty() {
-                entity_map = run_migrations(
-                    entity_map,
-                    file_version,
+            if file_version < target_version {
+                validate_migration_registry(
+                    &collection.name,
                     target_version,
                     &collection.migrations,
-                    &collection.name,
-                    migration_host,
                 )?;
+                if !collection.migrations.is_empty() {
+                    entity_map = run_migrations(
+                        entity_map,
+                        file_version,
+                        target_version,
+                        &collection.migrations,
+                        &collection.name,
+                        migration_host,
+                    )?;
+                    migrated_target_version = Some(target_version);
+                }
             }
         }
-        result.insert(
-            collection.name.clone(),
-            decode_entity_map(
-                &temp_path,
-                &collection.schema,
-                &collection.id_strategy,
-                entity_map,
-                ValidationMode::Strict,
-            )?,
-        );
+        let decoded = decode_entity_map(
+            &temp_path,
+            &collection.schema,
+            &collection.id_strategy,
+            entity_map,
+            ValidationMode::Strict,
+        )
+        .map_err(|error| {
+            if let Some(target_version) = migrated_target_version {
+                post_migration_validation_error(
+                    &collection.name,
+                    file_version,
+                    target_version,
+                    error.to_string(),
+                )
+            } else {
+                error
+            }
+        })?;
+        if let Some(target_version) = migrated_target_version {
+            let records = decoded
+                .iter()
+                .map(|(id, value)| {
+                    encode_value(
+                        &collection.schema,
+                        &strip_derived_id_field(value, &collection.id_strategy),
+                        id,
+                    )
+                    .map(|encoded| (id.clone(), encoded))
+                })
+                .collect::<Result<Map<_, _>, _>>()?;
+            let mut section_out = Map::new();
+            section_out.insert("_version".to_owned(), Value::Number(target_version.into()));
+            for (id, value) in records {
+                section_out.insert(id, value);
+            }
+            root_for_writeback.insert(collection.name.clone(), Value::Object(section_out));
+            should_write_back = true;
+        }
+        result.insert(collection.name.clone(), decoded);
+    }
+    if should_write_back {
+        let content = formats
+            .serialize(
+                &Value::Object(root_for_writeback),
+                &ext,
+                Some(FormatOptions::default()),
+            )
+            .map_err(format_error)?;
+        host.ensure_dir(file_path)?;
+        host.write(file_path, &content)?;
     }
     Ok(result)
 }
@@ -901,6 +1168,9 @@ pub fn save_collection_to_directory(
         host.ensure_dir(&path)?;
         host.write(&path, &raw)?;
     }
+    if let Some(version) = collection.version {
+        write_directory_version_metadata(host, formats, dir_path, extension, version)?;
+    }
     Ok(())
 }
 
@@ -913,29 +1183,72 @@ pub fn load_collection_from_directory(
     migration_host: Option<&dyn MigrationHost>,
 ) -> Result<IndexMap<String, Value>, EngineError> {
     let mut output = IndexMap::new();
-    for path in host.list_recursive(dir_path)? {
-        if get_file_extension(&path) != extension {
-            continue;
+    let metadata_path = directory_version_metadata_path(dir_path, extension);
+    let file_version =
+        read_directory_version_metadata(host, formats, dir_path, extension)?.unwrap_or(0);
+    let mut migrated_target_version = None;
+
+    if let Some(target_version) = collection.version {
+        if file_version > target_version {
+            return Err(EngineError::Migration(Box::new(MigrationError {
+                collection: collection.name.clone(),
+                from_version: target_version,
+                to_version: file_version,
+                step: -1,
+                reason: "version-ahead".to_owned(),
+                message: format!(
+                    "File version {file_version} is ahead of config version {target_version}. Cannot load data from a future version."
+                ),
+            })));
         }
+        if file_version < target_version {
+            validate_migration_registry(&collection.name, target_version, &collection.migrations)?;
+            if !collection.migrations.is_empty() {
+                migrated_target_version = Some(target_version);
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct PendingWrite {
+        source_path: String,
+        target_path: String,
+        raw: String,
+    }
+
+    let record_paths = host
+        .list_recursive(dir_path)?
+        .into_iter()
+        .filter(|path| {
+            path != &metadata_path
+                && get_file_extension(path) == extension
+                && !is_version_sidecar_path(path, extension)
+        })
+        .collect::<Vec<_>>();
+    let existing_paths = record_paths.iter().cloned().collect::<HashSet<_>>();
+    let normalized_dir = normalize_path(dir_path);
+    let dir_prefix = normalized_dir.trim_end_matches('/');
+    let mut pending_writes = Vec::new();
+    let mut pending_removes = HashSet::new();
+
+    for path in record_paths {
         let raw = host.read(&path)?;
         let parsed = formats.deserialize(&raw, extension).map_err(format_error)?;
-        let stem = std::path::Path::new(&path)
+        let stem = Path::new(&path)
             .file_stem()
             .and_then(|name| name.to_str())
             .unwrap_or("")
             .to_owned();
         let mut entity_map = Map::from_iter([(stem.clone(), parsed)]);
-        if let Some(version) = collection.version {
-            if !collection.migrations.is_empty() {
-                entity_map = run_migrations(
-                    entity_map,
-                    0,
-                    version,
-                    &collection.migrations,
-                    &collection.name,
-                    migration_host,
-                )?;
-            }
+        if let Some(target_version) = migrated_target_version {
+            entity_map = run_migrations(
+                entity_map,
+                file_version,
+                target_version,
+                &collection.migrations,
+                &collection.name,
+                migration_host,
+            )?;
         }
         let decoded = decode_entity_map(
             &path,
@@ -943,10 +1256,212 @@ pub fn load_collection_from_directory(
             &collection.id_strategy,
             entity_map,
             ValidationMode::Strict,
-        )?;
+        )
+        .map_err(|error| {
+            if let Some(target_version) = migrated_target_version {
+                post_migration_validation_error(
+                    &collection.name,
+                    file_version,
+                    target_version,
+                    error.to_string(),
+                )
+            } else {
+                error
+            }
+        })?;
+
+        if migrated_target_version.is_some() {
+            if !decoded.contains_key(&stem) {
+                pending_removes.insert(path.clone());
+            }
+            for (encoded_id, value) in &decoded {
+                let encoded = encode_value(
+                    &collection.schema,
+                    &strip_derived_id_field(value, &collection.id_strategy),
+                    encoded_id,
+                )?;
+                let raw = formats
+                    .serialize(&encoded, extension, Some(FormatOptions::default()))
+                    .map_err(format_error)?;
+                let target_path = format!("{dir_prefix}/{encoded_id}.{extension}");
+                pending_writes.push(PendingWrite {
+                    source_path: path.clone(),
+                    target_path,
+                    raw,
+                });
+            }
+        }
+
         for (id, value) in decoded {
             output.insert(id, value);
         }
     }
+
+    if let Some(target_version) = migrated_target_version {
+        let mut seen_targets: HashMap<String, String> = HashMap::new();
+        for write in &pending_writes {
+            if write.target_path == metadata_path
+                || is_version_sidecar_path(&write.target_path, extension)
+            {
+                return Err(EngineError::Storage(Box::new(StorageError {
+                    path: write.target_path.clone(),
+                    operation: StorageOperation::Write,
+                    message: format!(
+                        "Directory migration output collision: '{}' is reserved for version metadata",
+                        write.target_path
+                    ),
+                    cause: None,
+                })));
+            }
+            if let Some(first_source) =
+                seen_targets.insert(write.target_path.clone(), write.source_path.clone())
+            {
+                return Err(EngineError::Storage(Box::new(StorageError {
+                    path: write.target_path.clone(),
+                    operation: StorageOperation::Write,
+                    message: format!(
+                        "Directory migration output collision at '{}': both '{}' and '{}' produce this path",
+                        write.target_path, first_source, write.source_path
+                    ),
+                    cause: None,
+                })));
+            }
+        }
+
+        for write in &pending_writes {
+            if existing_paths.contains(&write.target_path)
+                && !pending_removes.contains(&write.target_path)
+                && write.source_path != write.target_path
+            {
+                return Err(EngineError::Storage(Box::new(StorageError {
+                    path: write.target_path.clone(),
+                    operation: StorageOperation::Write,
+                    message: format!(
+                        "Directory migration output collision at '{}': an existing record would survive alongside migrated output from '{}'",
+                        write.target_path, write.source_path
+                    ),
+                    cause: None,
+                })));
+            }
+        }
+
+        for path in &pending_removes {
+            host.remove(path)?;
+        }
+        for write in pending_writes {
+            host.ensure_dir(&write.target_path)?;
+            host.write(&write.target_path, &write.raw)?;
+        }
+        write_directory_version_metadata(host, formats, dir_path, extension, target_version)?;
+    }
     Ok(output)
+}
+
+pub fn dry_run_migrations(
+    host: &dyn StorageHost,
+    formats: &FormatRegistry,
+    inputs: &[DryRunInput],
+) -> Result<DryRunResult, EngineError> {
+    let mut collections = Vec::new();
+
+    for input in inputs {
+        match input {
+            DryRunInput::SingleFile {
+                file_path,
+                collection,
+            } => {
+                let file_exists = host.exists(file_path)?;
+                let file_version = if file_exists {
+                    let ext = resolve_extension(file_path, None)?;
+                    let parsed = formats
+                        .deserialize(&host.read(file_path)?, &ext)
+                        .map_err(format_error)?;
+                    match parsed {
+                        Value::Object(map) => {
+                            map.get("_version").and_then(Value::as_u64).unwrap_or(0) as u32
+                        }
+                        _ => 0,
+                    }
+                } else {
+                    0
+                };
+                collections.push(dry_run_collection(
+                    file_path,
+                    file_exists,
+                    file_version,
+                    collection,
+                )?);
+            }
+            DryRunInput::Directory {
+                dir_path,
+                extension,
+                collection,
+            } => {
+                let metadata_path = directory_version_metadata_path(dir_path, extension);
+                let file_version =
+                    read_directory_version_metadata(host, formats, dir_path, extension)?
+                        .unwrap_or(0);
+                let paths = host
+                    .list_recursive(dir_path)?
+                    .into_iter()
+                    .filter(|path| {
+                        path != &metadata_path
+                            && get_file_extension(path) == extension.as_str()
+                            && !is_version_sidecar_path(path, extension)
+                    })
+                    .collect::<Vec<_>>();
+                if paths.is_empty() {
+                    collections.push(dry_run_collection(
+                        &format!("{}/<{}>", normalize_path(dir_path), extension),
+                        false,
+                        file_version,
+                        collection,
+                    )?);
+                } else {
+                    for path in paths {
+                        collections.push(dry_run_collection(
+                            &path,
+                            true,
+                            file_version,
+                            collection,
+                        )?);
+                    }
+                }
+            }
+            DryRunInput::MultiCollectionFile {
+                file_path,
+                collections: input_collections,
+            } => {
+                let ext = resolve_extension(file_path, None)?;
+                let file_exists = host.exists(file_path)?;
+                let root = if file_exists {
+                    match formats
+                        .deserialize(&host.read(file_path)?, &ext)
+                        .map_err(format_error)?
+                    {
+                        Value::Object(map) => map,
+                        _ => Map::new(),
+                    }
+                } else {
+                    Map::new()
+                };
+                for collection in input_collections {
+                    let file_version = root
+                        .get(&collection.name)
+                        .and_then(Value::as_object)
+                        .and_then(|map| map.get("_version"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as u32;
+                    collections.push(dry_run_collection(
+                        file_path,
+                        file_exists,
+                        file_version,
+                        collection,
+                    )?);
+                }
+            }
+        }
+    }
+
+    Ok(DryRunResult { collections })
 }

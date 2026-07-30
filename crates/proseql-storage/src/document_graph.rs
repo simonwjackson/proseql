@@ -12,8 +12,8 @@ use serde_json::Value;
 use crate::host::StorageHost;
 use crate::path::{get_file_extension, relative_to_root};
 use crate::persistence::{
-    assert_no_physical_derived_id, hydrate_derived_id, require_hydratable_payload, run_migrations,
-    MigrationHost,
+    assert_no_physical_derived_id, hydrate_derived_id, is_version_sidecar_path,
+    require_hydratable_payload, run_migrations, MigrationHost,
 };
 use crate::source_config::{
     matches_any_glob, DocumentGraphFragmentErrorPolicy, NormalizedDatabaseSourceConfig,
@@ -264,6 +264,7 @@ pub fn load_document_graph_sources(
                     let relative = relative_to_root(&root.root, path);
                     matches_any_glob(&relative, &root.include)
                         && !matches_any_glob(&relative, &root.exclude)
+                        && !is_version_sidecar_path(path, &get_file_extension(path))
                 })
                 .collect::<Vec<_>>();
             matched.sort_by(|a, b| {
@@ -524,42 +525,71 @@ pub fn load_document_graph_sources(
                             }
                             continue;
                         }
-                        if file_version < target_version && !collection_config.migrations.is_empty()
-                        {
-                            section = match run_migrations(
-                                section,
-                                file_version,
+                        if file_version < target_version {
+                            if let Err(error) = crate::persistence::validate_migration_registry(
+                                &collection_name,
                                 target_version,
                                 &collection_config.migrations,
-                                &collection_name,
-                                migration_host,
                             ) {
-                                Ok(section) => section,
-                                Err(error) => {
-                                    let error = DocumentGraphSourceError {
-                                        source_id: source.id.clone(),
-                                        path: path.clone(),
-                                        message: format!(
-                                            "Document graph migration failed for '{path}'"
-                                        ),
-                                        kind: DocumentGraphErrorKind::Migration,
-                                        collection: Some(collection_name.clone()),
-                                        record_id: None,
-                                        contributing_paths: None,
-                                        cause: Some(Value::String(error.to_string())),
-                                    };
-                                    skip_root = handle_fragment_error(
-                                        source,
-                                        &mut diagnostics,
-                                        &root.id,
-                                        &error,
-                                    )?;
-                                    if skip_root {
-                                        break;
-                                    }
-                                    continue;
+                                let error = DocumentGraphSourceError {
+                                    source_id: source.id.clone(),
+                                    path: path.clone(),
+                                    message: format!(
+                                        "Document graph migration failed for '{path}'"
+                                    ),
+                                    kind: DocumentGraphErrorKind::Migration,
+                                    collection: Some(collection_name.clone()),
+                                    record_id: None,
+                                    contributing_paths: None,
+                                    cause: Some(Value::String(error.to_string())),
+                                };
+                                skip_root = handle_fragment_error(
+                                    source,
+                                    &mut diagnostics,
+                                    &root.id,
+                                    &error,
+                                )?;
+                                if skip_root {
+                                    break;
                                 }
-                            };
+                                continue;
+                            }
+                            if !collection_config.migrations.is_empty() {
+                                section = match run_migrations(
+                                    section,
+                                    file_version,
+                                    target_version,
+                                    &collection_config.migrations,
+                                    &collection_name,
+                                    migration_host,
+                                ) {
+                                    Ok(section) => section,
+                                    Err(error) => {
+                                        let error = DocumentGraphSourceError {
+                                            source_id: source.id.clone(),
+                                            path: path.clone(),
+                                            message: format!(
+                                                "Document graph migration failed for '{path}'"
+                                            ),
+                                            kind: DocumentGraphErrorKind::Migration,
+                                            collection: Some(collection_name.clone()),
+                                            record_id: None,
+                                            contributing_paths: None,
+                                            cause: Some(Value::String(error.to_string())),
+                                        };
+                                        skip_root = handle_fragment_error(
+                                            source,
+                                            &mut diagnostics,
+                                            &root.id,
+                                            &error,
+                                        )?;
+                                        if skip_root {
+                                            break;
+                                        }
+                                        continue;
+                                    }
+                                };
+                            }
                         }
                     }
                     for (id, value) in section {
