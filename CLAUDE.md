@@ -85,8 +85,79 @@ Tests:
 
 Enter dev shell: `nix develop`
 
-Available commands in shell: `bun`, `biome`, `just`, `bun2nix`, `git`
+Available commands in shell: `bun`, `biome`, `just`, `bun2nix`, `git`, `rustc`, `cargo`, `rustfmt`, `clippy`
 
 Build packages: `nix build .#core`, `nix build .#node`, etc.
 
 Run checks: `nix flake check`
+
+---
+
+## Rust Engine Workspace
+
+A Rust workspace lives at `crates/` alongside `packages/`. It is the
+implementation layer for the proseQL engine rewrite (see
+`work/items/active/01KYR2GFF49SRGMH4Q9MV1F2TS-rust-engine-conversion/plan.md`).
+
+### Layout
+
+```
+crates/
+├── Cargo.toml                    # workspace root
+├── proseql-engine/               # platform-blind core: descriptor, value, errors, validator
+├── proseql-formats/              # codec crates (JSON/YAML/TOML/etc.) — added in U5
+├── proseql-storage/              # storage-host trait + native fs/notify — added in U5
+└── proseql-wasm/                 # wasm-bindgen boundary crate — added in U8
+```
+
+### Key design rules for the Rust codebase
+
+**TS types are the contract; Rust implements the semantics.**
+The TypeScript type layer in `packages/core/src/types/` is the compile-time
+contract for all consumers.  The Rust engine's observable behaviour must match
+that contract, as verified by the conformance test corpus (U9 parity gate).
+Any divergence is a bug in the Rust implementation, not a re-definition of the
+type surface.
+
+- **No platform I/O in `proseql-engine`** — all I/O goes through the
+  storage-host trait in `proseql-storage`.  `proseql-engine` must compile on
+  any target (Linux, Android arm64, WASM) without changes.
+- **Error tags must match TS `_tag` fields exactly** — `EngineError::tag()`
+  returns the TS `_tag` string; the binding adapter uses it to reconstruct
+  `TaggedError` classes for `Effect.catchTag`.
+- **SchemaNode covers only the audited Effect Schema subset** — combinators
+  beyond `Struct`, `String`, `Number`, `Boolean`, `Array`, `optional`,
+  `optionalWith { default }`, `NullOr`, `NumberFromString`, `Record`, `mutable`,
+  `Unknown` are represented as `SchemaNode::Unsupported { reason }` and rejected
+  loudly at runtime.
+- **`optional` ≠ `null`** — `Schema.optional(T)` expands to `T | undefined`
+  (source: `effect/packages/effect/src/Schema.ts`, `optional()` function);
+  JSON `null` is NOT equivalent to absent.  The engine rejects `null` for
+  `Optional(T)` fields unless `T` itself is `NullOr(...)`.
+- **`cause` fields use `Option<serde_json::Value>`** — mirrors TS `cause?: unknown`;
+  using `Value` (not `String`) preserves structured error payloads without
+  string coercion across the boundary.
+- **EngineError serde wire format** — serialized `EngineError` uses `_tag` (not
+  `tag`) and camelCase payload field names to match the TS `Data.TaggedError`
+  class fields exactly.  `EngineError::tag()` and the `#[serde(rename)]` on
+  each variant must stay in sync.
+- **Legacy collection persistence fields are NOT in the descriptor** — the TS
+  `CollectionConfig` fields `file`, `directory`, `format`, and `path` are
+  normalised into `SourceDescriptor` entries by the boundary compiler (U8).
+  `CollectionDescriptor` is storage-agnostic; storage is wired at the source
+  level.  Native Rust consumers (korrid) configure storage via the storage-host
+  trait directly.
+- **Value semantics must match JS** — `serde_json::Value` is the canonical
+  boundary value type; JS number semantics (IEEE 754 f64) apply throughout.
+
+### Rust build & test commands
+
+```bash
+just rust-check    # cargo check
+just rust-test     # cargo test (includes conformance fixtures)
+just rust-lint     # cargo clippy -D warnings
+just rust-format   # cargo fmt
+just rust-build    # cargo build --release
+```
+
+Or run cargo directly: `cargo test --manifest-path crates/Cargo.toml`

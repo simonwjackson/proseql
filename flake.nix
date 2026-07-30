@@ -61,6 +61,11 @@
               pkgs.git
               pkgs.gh
               pkgs.lefthook
+              # Rust toolchain for the proseql-engine crate workspace (crates/)
+              pkgs.rustc
+              pkgs.cargo
+              pkgs.rustfmt
+              pkgs.clippy
             ];
 
             shellHook = ''

@@ -84,3 +84,25 @@ clean:
 # Release a new version (auto-detects bump type, or pass patch/minor/major)
 release *bump:
     bun run scripts/release.ts {{bump}}
+
+# ── Rust engine (crates/) ────────────────────────────────────────────────────
+
+# Type-check the Rust engine workspace
+rust-check:
+    cargo check --manifest-path crates/Cargo.toml
+
+# Run the Rust engine test suite (includes conformance fixtures)
+rust-test *args:
+    cargo test --manifest-path crates/Cargo.toml {{args}}
+
+# Lint the Rust engine workspace (Clippy)
+rust-lint:
+    cargo clippy --manifest-path crates/Cargo.toml -- -D warnings
+
+# Format the Rust engine workspace
+rust-format:
+    cargo fmt --manifest-path crates/Cargo.toml
+
+# Build a release artifact for the Rust engine
+rust-build:
+    cargo build --release --manifest-path crates/Cargo.toml

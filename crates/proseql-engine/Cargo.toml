@@ -1,0 +1,13 @@
+[package]
+name = "proseql-engine"
+version = "0.1.0"
+edition = "2021"
+description = "proseQL platform-blind engine: config descriptor, boundary value model, error taxonomy, and conformance harness"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
