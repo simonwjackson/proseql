@@ -388,9 +388,9 @@ pub enum EngineError {
     #[serde(rename = "NotFoundError")]
     NotFound(NotFoundError),
     #[serde(rename = "DuplicateKeyError")]
-    DuplicateKey(DuplicateKeyError),
+    DuplicateKey(Box<DuplicateKeyError>),
     #[serde(rename = "ForeignKeyError")]
-    ForeignKey(ForeignKeyError),
+    ForeignKey(Box<ForeignKeyError>),
     #[serde(rename = "ValidationError")]
     Validation(ValidationError),
     #[serde(rename = "UniqueConstraintError")]
@@ -409,33 +409,33 @@ pub enum EngineError {
     #[serde(rename = "CollectionNotFoundError")]
     CollectionNotFound(CollectionNotFoundError),
     #[serde(rename = "PopulationError")]
-    Population(PopulationError),
+    Population(Box<PopulationError>),
     // Storage
     #[serde(rename = "StorageError")]
-    Storage(StorageError),
+    Storage(Box<StorageError>),
     #[serde(rename = "SerializationError")]
-    Serialization(SerializationError),
+    Serialization(Box<SerializationError>),
     #[serde(rename = "UnsupportedFormatError")]
-    UnsupportedFormat(UnsupportedFormatError),
+    UnsupportedFormat(Box<UnsupportedFormatError>),
     // Source
     #[serde(rename = "SourceConfigError")]
-    SourceConfig(SourceConfigError),
+    SourceConfig(Box<SourceConfigError>),
     #[serde(rename = "UnknownCollectionError")]
-    UnknownCollection(UnknownCollectionError),
+    UnknownCollection(Box<UnknownCollectionError>),
     #[serde(rename = "DuplicateRecordError")]
     DuplicateRecord(Box<DuplicateRecordError>),
     #[serde(rename = "DuplicatePhysicalFileError")]
-    DuplicatePhysicalFile(DuplicatePhysicalFileError),
+    DuplicatePhysicalFile(Box<DuplicatePhysicalFileError>),
     #[serde(rename = "InvalidDocumentSourceError")]
-    InvalidDocumentSource(InvalidDocumentSourceError),
+    InvalidDocumentSource(Box<InvalidDocumentSourceError>),
     #[serde(rename = "DocumentGraphSourceError")]
     DocumentGraphSource(Box<DocumentGraphSourceError>),
     // Migration
     #[serde(rename = "MigrationError")]
-    Migration(MigrationError),
+    Migration(Box<MigrationError>),
     // Plugin
     #[serde(rename = "PluginError")]
-    Plugin(PluginError),
+    Plugin(Box<PluginError>),
 }
 
 impl std::fmt::Display for EngineError {

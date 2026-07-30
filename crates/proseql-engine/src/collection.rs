@@ -312,13 +312,13 @@ impl Collection {
 
         // Duplicate id check
         if self.state.contains_key(&id) {
-            return Err(EngineError::DuplicateKey(DuplicateKeyError {
+            return Err(EngineError::DuplicateKey(Box::new(DuplicateKeyError {
                 collection: self.name.clone(),
                 field: "id".to_string(),
                 value: id.clone(),
                 existing_id: id,
                 message: format!("Duplicate value for field 'id': \"{}\"", entity["id"]),
-            }));
+            })));
         }
 
         // Unique constraint checks
@@ -444,13 +444,13 @@ impl Collection {
             // TS reason: `Duplicate ID: ${id}`
             // TS skip data: { ...sanitizedInput, id } = skip_data
             if self.state.contains_key(&id) {
-                let e = EngineError::DuplicateKey(DuplicateKeyError {
+                let e = EngineError::DuplicateKey(Box::new(DuplicateKeyError {
                     collection: self.name.clone(),
                     field: "id".to_string(),
                     value: id.clone(),
                     existing_id: id.clone(),
                     message: format!("Duplicate value for field 'id': \"{id}\""),
-                });
+                }));
                 if skip_duplicates {
                     skipped.push(SkippedEntry {
                         data: skip_data,
@@ -464,13 +464,13 @@ impl Collection {
                 .iter()
                 .any(|e| e["id"].as_str() == Some(&id))
             {
-                let e = EngineError::DuplicateKey(DuplicateKeyError {
+                let e = EngineError::DuplicateKey(Box::new(DuplicateKeyError {
                     collection: self.name.clone(),
                     field: "id".to_string(),
                     value: id.clone(),
                     existing_id: id.clone(),
                     message: format!("Duplicate value for field 'id': \"{id}\" (in batch)"),
-                });
+                }));
                 if skip_duplicates {
                     skipped.push(SkippedEntry {
                         data: skip_data,
@@ -1011,23 +1011,23 @@ impl Collection {
                 let id = entity["id"].as_str().unwrap_or_default();
                 // Conflict with existing state
                 if self.state.contains_key(id) {
-                    return Err(EngineError::DuplicateKey(DuplicateKeyError {
+                    return Err(EngineError::DuplicateKey(Box::new(DuplicateKeyError {
                         collection: self.name.clone(),
                         field: "id".to_string(),
                         value: id.to_string(),
                         existing_id: id.to_string(),
                         message: format!("Duplicate value for field 'id': \"{id}\""),
-                    }));
+                    })));
                 }
                 // Conflict within the batch
                 if !seen_ids.insert(id.to_string()) {
-                    return Err(EngineError::DuplicateKey(DuplicateKeyError {
+                    return Err(EngineError::DuplicateKey(Box::new(DuplicateKeyError {
                         collection: self.name.clone(),
                         field: "id".to_string(),
                         value: id.to_string(),
                         existing_id: id.to_string(),
                         message: format!("Duplicate value for field 'id': \"{id}\" (in batch)"),
-                    }));
+                    })));
                 }
             }
         }

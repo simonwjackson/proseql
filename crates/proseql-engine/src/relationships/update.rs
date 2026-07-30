@@ -108,13 +108,13 @@ impl Database {
                                 pending_parent_fk.insert(fk_field, Value::String(tid));
                             }
                             Err(e) => {
-                                return Err(EngineError::ForeignKey(ForeignKeyError {
+                                return Err(EngineError::ForeignKey(Box::new(ForeignKeyError {
                                     collection: collection.to_string(),
                                     field: fk_field,
                                     value: connect_fk_error_value(&value),
                                     target_collection: target_col,
                                     message: e,
-                                }));
+                                })));
                             }
                         }
                         continue;
@@ -134,13 +134,13 @@ impl Database {
                             }
                             Err(e) => {
                                 // error.field = FK field name, NOT the connect value
-                                return Err(EngineError::ForeignKey(ForeignKeyError {
+                                return Err(EngineError::ForeignKey(Box::new(ForeignKeyError {
                                     collection: collection.to_string(),
                                     field: fk_field.clone(),
                                     value: connect_fk_error_value(cv),
                                     target_collection: target_col.clone(),
                                     message: e,
-                                }));
+                                })));
                             }
                         }
                     }
@@ -179,13 +179,15 @@ impl Database {
                                 match resolve_connect(item, &target_col, &self.collections) {
                                     Ok(tid) => new_ids.push(tid),
                                     Err(e) => {
-                                        return Err(EngineError::ForeignKey(ForeignKeyError {
-                                            collection: collection.to_string(),
-                                            field: fk_field.clone(),
-                                            value: connect_fk_error_value(item),
-                                            target_collection: target_col.clone(),
-                                            message: e,
-                                        }));
+                                        return Err(EngineError::ForeignKey(Box::new(
+                                            ForeignKeyError {
+                                                collection: collection.to_string(),
+                                                field: fk_field.clone(),
+                                                value: connect_fk_error_value(item),
+                                                target_collection: target_col.clone(),
+                                                message: e,
+                                            },
+                                        )));
                                     }
                                 }
                             }
@@ -278,13 +280,15 @@ impl Database {
                                     });
                                 }
                                 Err(e) => {
-                                    return Err(EngineError::ForeignKey(ForeignKeyError {
-                                        collection: collection.to_string(),
-                                        field: fk_field.clone(),
-                                        value: connect_fk_error_value(cv),
-                                        target_collection: target_col.clone(),
-                                        message: e,
-                                    }));
+                                    return Err(EngineError::ForeignKey(Box::new(
+                                        ForeignKeyError {
+                                            collection: collection.to_string(),
+                                            field: fk_field.clone(),
+                                            value: connect_fk_error_value(cv),
+                                            target_collection: target_col.clone(),
+                                            message: e,
+                                        },
+                                    )));
                                 }
                             }
                         }

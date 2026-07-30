@@ -1871,13 +1871,13 @@ fn all_crud_error_tags_match_ts_tag_strings() {
         ),
         (
             "DuplicateKeyError",
-            EngineError::DuplicateKey(DuplicateKeyError {
+            EngineError::DuplicateKey(Box::new(DuplicateKeyError {
                 collection: "c".into(),
                 field: "id".into(),
                 value: "v".into(),
                 existing_id: "v".into(),
                 message: "m".into(),
-            }),
+            })),
         ),
         (
             "ValidationError",

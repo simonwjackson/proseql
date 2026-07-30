@@ -1049,26 +1049,26 @@ fn engine_error_serializes_with_underscore_tag_and_camel_case_fields() {
     assert!(v.get("tag").is_none(), "must NOT have plain 'tag' field");
 
     // DuplicateKeyError — existingId (snake: existing_id)
-    let err = EngineError::DuplicateKey(DuplicateKeyError {
+    let err = EngineError::DuplicateKey(Box::new(DuplicateKeyError {
         collection: "users".into(),
         field: "email".into(),
         value: "a@b.com".into(),
         existing_id: "u2".into(),
         message: "dup".into(),
-    });
+    }));
     let v = serde_json::to_value(&err).expect("serialize DuplicateKeyError");
     assert_eq!(v["_tag"], "DuplicateKeyError");
     assert_eq!(v["existingId"], "u2", "existingId must be camelCase");
     assert!(v.get("existing_id").is_none(), "snake_case must NOT appear");
 
     // ForeignKeyError — targetCollection (snake: target_collection)
-    let err = EngineError::ForeignKey(ForeignKeyError {
+    let err = EngineError::ForeignKey(Box::new(ForeignKeyError {
         collection: "posts".into(),
         field: "authorId".into(),
         value: "missing".into(),
         target_collection: "users".into(),
         message: "fk".into(),
-    });
+    }));
     let v = serde_json::to_value(&err).expect("serialize ForeignKeyError");
     assert_eq!(v["_tag"], "ForeignKeyError");
     assert_eq!(
@@ -1107,14 +1107,14 @@ fn engine_error_serializes_with_underscore_tag_and_camel_case_fields() {
     assert!(v.get("existing_id").is_none(), "snake_case must NOT appear");
 
     // MigrationError — fromVersion / toVersion
-    let err = EngineError::Migration(MigrationError {
+    let err = EngineError::Migration(Box::new(MigrationError {
         collection: "users".into(),
         from_version: 1,
         to_version: 2,
         step: 0,
         reason: "transform failed".into(),
         message: "migration".into(),
-    });
+    }));
     let v = serde_json::to_value(&err).expect("serialize MigrationError");
     assert_eq!(v["_tag"], "MigrationError");
     assert_eq!(v["fromVersion"], 1, "fromVersion must be camelCase");
@@ -1148,23 +1148,23 @@ fn engine_error_serializes_with_underscore_tag_and_camel_case_fields() {
     );
 
     // SourceConfigError — sourceId
-    let err = EngineError::SourceConfig(SourceConfigError {
+    let err = EngineError::SourceConfig(Box::new(SourceConfigError {
         message: "bad config".into(),
         source_id: Some("s2".into()),
         collection: None,
         path: None,
-    });
+    }));
     let v = serde_json::to_value(&err).expect("serialize SourceConfigError");
     assert_eq!(v["_tag"], "SourceConfigError");
     assert_eq!(v["sourceId"], "s2", "sourceId must be camelCase");
     assert!(v.get("source_id").is_none(), "snake_case must NOT appear");
 
     // DuplicatePhysicalFileError — sourceId
-    let err = EngineError::DuplicatePhysicalFile(DuplicatePhysicalFileError {
+    let err = EngineError::DuplicatePhysicalFile(Box::new(DuplicatePhysicalFileError {
         source_id: "s3".into(),
         path: "/p.yaml".into(),
         message: "dup".into(),
-    });
+    }));
     let v = serde_json::to_value(&err).expect("serialize DuplicatePhysicalFileError");
     assert_eq!(v["_tag"], "DuplicatePhysicalFileError");
     assert_eq!(v["sourceId"], "s3");
@@ -1176,14 +1176,14 @@ fn engine_error_serialization_round_trips() {
     use proseql_engine::errors::*;
 
     // Verify that deserializing from the serialized form produces the original value.
-    let original = EngineError::Migration(MigrationError {
+    let original = EngineError::Migration(Box::new(MigrationError {
         collection: "users".into(),
         from_version: 1,
         to_version: 2,
         step: 0,
         reason: "transform failed".into(),
         message: "migration".into(),
-    });
+    }));
     let json = serde_json::to_string(&original).expect("serialize");
     let back: EngineError = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(original, back, "EngineError must survive JSON round-trip");
@@ -1199,12 +1199,12 @@ fn engine_error_cause_is_lossless_json_value() {
 
     // StorageError with a structured cause object
     let cause_val = serde_json::json!({"code": 404, "detail": "file not found"});
-    let err = EngineError::Storage(StorageError {
+    let err = EngineError::Storage(Box::new(StorageError {
         path: "/db.yaml".into(),
         operation: StorageOperation::Read,
         message: "io error".into(),
         cause: Some(cause_val.clone()),
-    });
+    }));
     let v = serde_json::to_value(&err).expect("serialize StorageError");
     assert_eq!(
         v["cause"], cause_val,
@@ -1212,12 +1212,12 @@ fn engine_error_cause_is_lossless_json_value() {
     );
 
     // PopulationError with a string cause (also valid as Value::String)
-    let err = EngineError::Population(PopulationError {
+    let err = EngineError::Population(Box::new(PopulationError {
         collection: "users".into(),
         relationship: "company".into(),
         message: "population failed".into(),
         cause: Some(serde_json::json!("inner error text")),
-    });
+    }));
     let v = serde_json::to_value(&err).expect("serialize PopulationError");
     assert_eq!(v["cause"], serde_json::json!("inner error text"));
 
@@ -1236,12 +1236,12 @@ fn engine_error_cause_is_lossless_json_value() {
     assert_eq!(v["cause"]["stack"], "Error: at transform.ts:42");
 
     // When cause is None, the field must be omitted (skip_serializing_if)
-    let err_no_cause = EngineError::Storage(StorageError {
+    let err_no_cause = EngineError::Storage(Box::new(StorageError {
         path: "/db.yaml".into(),
         operation: StorageOperation::Write,
         message: "write failed".into(),
         cause: None,
-    });
+    }));
     let v_no_cause = serde_json::to_value(&err_no_cause).expect("serialize no-cause StorageError");
     assert!(
         v_no_cause.get("cause").is_none(),
@@ -1272,24 +1272,26 @@ fn engine_error_tags_match_ts_tag_names() {
         id: "x".into(),
         message: "not found".into(),
     }));
-    check(EngineError::DuplicateKey(DuplicateKeyError {
+    check(EngineError::DuplicateKey(Box::new(DuplicateKeyError {
         collection: "users".into(),
         field: "email".into(),
         value: "a@b.com".into(),
         existing_id: "1".into(),
         message: "duplicate".into(),
-    }));
+    })));
+
     check(EngineError::Validation(ValidationError {
         message: "bad".into(),
         issues: vec![],
     }));
-    check(EngineError::ForeignKey(ForeignKeyError {
+    check(EngineError::ForeignKey(Box::new(ForeignKeyError {
         collection: "posts".into(),
         field: "authorId".into(),
         value: "missing".into(),
         target_collection: "users".into(),
         message: "fk".into(),
-    }));
+    })));
+
     check(EngineError::UniqueConstraint(Box::new(
         UniqueConstraintError {
             collection: "users".into(),
@@ -1332,39 +1334,44 @@ fn engine_error_tags_match_ts_tag_names() {
         collection: "missing".into(),
         message: "not found".into(),
     }));
-    check(EngineError::Population(PopulationError {
+    check(EngineError::Population(Box::new(PopulationError {
         collection: "users".into(),
         relationship: "company".into(),
         message: "pop".into(),
         cause: None,
-    }));
-    check(EngineError::Storage(StorageError {
+    })));
+    check(EngineError::Storage(Box::new(StorageError {
         path: "/tmp/db.yaml".into(),
         operation: StorageOperation::Read,
         message: "io".into(),
         cause: None,
-    }));
-    check(EngineError::Serialization(SerializationError {
+    })));
+    check(EngineError::Serialization(Box::new(SerializationError {
         format: "yaml".into(),
         message: "parse".into(),
         cause: None,
-    }));
-    check(EngineError::UnsupportedFormat(UnsupportedFormatError {
-        format: "pdf".into(),
-        message: "not supported".into(),
-    }));
-    check(EngineError::SourceConfig(SourceConfigError {
+    })));
+    check(EngineError::UnsupportedFormat(Box::new(
+        UnsupportedFormatError {
+            format: "pdf".into(),
+            message: "not supported".into(),
+        },
+    )));
+    check(EngineError::SourceConfig(Box::new(SourceConfigError {
         message: "bad config".into(),
         source_id: None,
         collection: None,
         path: None,
-    }));
-    check(EngineError::UnknownCollection(UnknownCollectionError {
-        source_id: "s1".into(),
-        path: "/p".into(),
-        collection: "unknown".into(),
-        message: "no such collection".into(),
-    }));
+    })));
+    check(EngineError::UnknownCollection(Box::new(
+        UnknownCollectionError {
+            source_id: "s1".into(),
+            path: "/p".into(),
+            collection: "unknown".into(),
+            message: "no such collection".into(),
+        },
+    )));
+
     check(EngineError::DuplicateRecord(Box::new(
         DuplicateRecordError {
             collection: "users".into(),
@@ -1384,14 +1391,14 @@ fn engine_error_tags_match_ts_tag_names() {
             message: "dup".into(),
         },
     )));
-    check(EngineError::DuplicatePhysicalFile(
+    check(EngineError::DuplicatePhysicalFile(Box::new(
         DuplicatePhysicalFileError {
             source_id: "s1".into(),
             path: "/p.yaml".into(),
             message: "dup".into(),
         },
-    ));
-    check(EngineError::InvalidDocumentSource(
+    )));
+    check(EngineError::InvalidDocumentSource(Box::new(
         InvalidDocumentSourceError {
             source_id: "s1".into(),
             path: "/p.yaml".into(),
@@ -1399,7 +1406,7 @@ fn engine_error_tags_match_ts_tag_names() {
             collection: None,
             id: None,
         },
-    ));
+    )));
     check(EngineError::DocumentGraphSource(Box::new(
         DocumentGraphSourceError {
             source_id: "s1".into(),
@@ -1412,17 +1419,17 @@ fn engine_error_tags_match_ts_tag_names() {
             cause: None,
         },
     )));
-    check(EngineError::Migration(MigrationError {
+    check(EngineError::Migration(Box::new(MigrationError {
         collection: "users".into(),
         from_version: 1,
         to_version: 2,
         step: 0,
         reason: "transform failed".into(),
         message: "migration".into(),
-    }));
-    check(EngineError::Plugin(PluginError {
+    })));
+    check(EngineError::Plugin(Box::new(PluginError {
         plugin: "snowflake".into(),
         reason: "bad config".into(),
         message: "plugin".into(),
-    }));
+    })));
 }

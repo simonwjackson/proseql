@@ -1,0 +1,22 @@
+[package]
+name = "proseql-storage"
+version = "0.1.0"
+edition = "2021"
+description = "proseQL storage hosts, persistence helpers, document sources, and document graph loader"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+indexmap = { workspace = true }
+globset = { workspace = true }
+proseql-engine = { path = "../proseql-engine" }
+proseql-formats = { path = "../proseql-formats" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+walkdir = { workspace = true }
+notify = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tempfile = { workspace = true }

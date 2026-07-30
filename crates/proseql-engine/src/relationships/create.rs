@@ -247,7 +247,7 @@ impl Database {
                     base_data.insert(fk_field.clone(), Value::String(tid));
                 }
                 Err(e) => {
-                    return Err(EngineError::ForeignKey(ForeignKeyError {
+                    return Err(EngineError::ForeignKey(Box::new(ForeignKeyError {
                         collection: collection.to_string(),
                         field: fk_field.clone(),
                         value: connect_fk_error_value(connect),
@@ -256,7 +256,7 @@ impl Database {
                             "$connect: could not resolve target in '{}': {}",
                             target_col, e
                         ),
-                    }));
+                    })));
                 }
             }
         }
@@ -277,7 +277,7 @@ impl Database {
                         target_id,
                     )),
                     Err(reason) => {
-                        return Err(EngineError::ForeignKey(ForeignKeyError {
+                        return Err(EngineError::ForeignKey(Box::new(ForeignKeyError {
                             collection: collection.to_string(),
                             field: fk_field.clone(),
                             value: connect_fk_error_value(connect),
@@ -286,7 +286,7 @@ impl Database {
                                 "inverse $connect: could not resolve target in '{}': {}",
                                 target_col, reason
                             ),
-                        }));
+                        })));
                     }
                 }
             }

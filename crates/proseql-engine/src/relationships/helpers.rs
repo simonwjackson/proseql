@@ -239,7 +239,7 @@ pub(super) fn validate_fk(
             .map(|tc| tc.get(&tid).is_some())
             .unwrap_or(false);
         if !exists {
-            return Err(EngineError::ForeignKey(ForeignKeyError {
+            return Err(EngineError::ForeignKey(Box::new(ForeignKeyError {
                 collection: collection_name.to_string(),
                 field: fk_field.clone(),
                 value: tid.clone(),
@@ -248,7 +248,7 @@ pub(super) fn validate_fk(
                     "FK constraint: '{}' references non-existent '{}' ({}={})",
                     collection_name, rel_desc.target, fk_field, tid
                 ),
-            }));
+            })));
         }
     }
 

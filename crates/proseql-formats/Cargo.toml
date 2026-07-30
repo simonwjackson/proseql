@@ -1,0 +1,22 @@
+[package]
+name = "proseql-formats"
+version = "0.1.0"
+edition = "2021"
+description = "proseQL platform-blind serialization codecs and registry"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+indexmap = { workspace = true }
+proseql-engine = { path = "../proseql-engine" }
+toml = { workspace = true }
+serde_yaml = { workspace = true }
+json5 = { workspace = true }
+jsonc-parser = { workspace = true }
+serde-hjson = { workspace = true }
+toon-format = { workspace = true }
+unicode-ident = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
