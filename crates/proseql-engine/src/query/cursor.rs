@@ -31,6 +31,7 @@
 //! - `after` and `before` both set → `ValidationError`
 //! - `limit <= 0` → `ValidationError`
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::errors::{EngineError, ValidationError, ValidationIssue};
@@ -39,14 +40,16 @@ use super::filter::get_nested_value;
 use super::sort::value_to_js_string;
 
 /// Result of cursor pagination.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CursorPageResult {
     pub items: Vec<Value>,
     pub page_info: CursorPageInfo,
 }
 
 /// Cursor pagination metadata.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CursorPageInfo {
     /// Cursor of the first item on the page, or `None` if empty.
     pub start_cursor: Option<String>,

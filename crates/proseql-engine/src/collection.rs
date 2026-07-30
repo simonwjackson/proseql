@@ -1087,7 +1087,143 @@ impl Collection {
         })
     }
 
-    // ── Internal helpers ──────────────────────────────────────────────────────
+    // ── Package-internal seams ─────────────────────────────────────────────────
+
+    /// Return the current timestamp from this collection's clock.
+    ///
+    /// Used by `Database` cascade operations to obtain a consistent timestamp
+    /// without exposing the private `clock` field.
+    pub(crate) fn now_iso(&self) -> String {
+        self.clock.now_iso()
+    }
+
+    /// Generate (and consume) the next ID from this collection's id generator,
+    /// WITHOUT creating any entity.  Used by `create_with_relationships` to
+    /// obtain the parent entity's ID before inverse child entities are created,
+    /// so children can hold a FK pointing to the not-yet-created parent.
+    pub(crate) fn reserve_id(&mut self) -> String {
+        self.id_gen.generate()
+    }
+
+    /// Return a snapshot of the entity with `id`, or `None` if absent.
+    ///
+    /// Used by `Database::update` and `update_with_relationships` to take a
+    /// point-in-time snapshot of an entity before mutating it, so it can be
+    /// restored if a subsequent FK validation fails.
+    pub(crate) fn snapshot_entity(&self, id: &str) -> Option<Value> {
+        self.state.get(id).cloned()
+    }
+
+    /// Directly replace the entity with `id` with `snapshot`, bypassing
+    /// all validation.  If `snapshot` is `None`, the entity is removed.
+    ///
+    /// Used to roll back parent mutations when FK validation fails AFTER the
+    /// schema-level update has already been applied.  Rebuilds indexes.
+    pub(crate) fn restore_entity_snapshot(&mut self, id: &str, snapshot: Option<Value>) {
+        match snapshot {
+            Some(v) => {
+                self.state.insert(id.to_string(), v);
+            }
+            None => {
+                self.state.shift_remove(id);
+            }
+        }
+        self.rebuild_indexes();
+    }
+
+    /// Remove an entity from state WITHOUT any guards (append-only, soft-delete,
+    /// schema validation).
+    ///
+    /// Used by hard-cascade to delete child entities even when the target
+    /// collection is append-only (mirrors TS `map.delete(id)` direct approach).
+    ///
+    /// Rebuilds indexes after the removal.  Returns `Some(entity)` when the
+    /// entity was present and removed, `None` when the entity was not found
+    /// (no-op, no index rebuild).
+    pub(crate) fn delete_raw(&mut self, id: &str) -> Option<Value> {
+        let removed = self.state.shift_remove(id)?;
+        self.rebuild_indexes();
+        Some(removed)
+    }
+
+    /// Directly merge `patches` into entity `id` without schema validation,
+    /// uniqueness checks, or immutability guards.
+    ///
+    /// This is the "trusted patch" seam used by cascade-soft-delete to set
+    /// `deletedAt`/`updatedAt` on related entities regardless of whether the
+    /// schema declares those fields (mirrors the TS `Ref.update` direct-patch
+    /// approach in `cascadeDeleteEntities`).
+    ///
+    /// Rebuilds indexes after the patch so queries stay consistent.
+    /// Returns `true` if the entity existed, `false` otherwise (no-op).
+    pub(crate) fn patch_raw(&mut self, id: &str, patches: Map<String, Value>) -> bool {
+        if let Some(entity) = self.state.get(id) {
+            let mut merged = entity.as_object().cloned().unwrap_or_default();
+            for (k, v) in patches {
+                merged.insert(k, v);
+            }
+            self.state.insert(id.to_string(), Value::Object(merged));
+            self.rebuild_indexes();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Shallow-merge `updates` into entity `id` using TS `Object.assign` semantics.
+    ///
+    /// Mirrors the TS relationship-aware CRUD step-10 (`Object.assign(updatedEntity, baseUpdate)`)
+    /// and the `$update` target-entity path in `updateWithRelationships`:
+    ///
+    /// - **No operator processing** — `$increment`, `$append`, etc. are treated as
+    ///   literal field values, not as update operators.
+    /// - **Shallow merge** — update keys directly overwrite entity keys; no recursion.
+    /// - **`updatedAt` forced** — set to `now()` unless the caller already includes it.
+    /// - **Computed fields stripped** from `updates` before merge.
+    /// - **Schema validated** — `decode_value` is run on the merged entity;
+    ///   excess properties are stripped and transform schemas are applied.
+    ///   Returns `ValidationError` on schema failure.
+    /// - **No unique-constraint check**, no immutable-field check, no append-only guard.
+    /// - **State replaced** and indexes rebuilt on success.
+    ///
+    /// Returns `NotFoundError` if the entity with `id` does not exist.
+    pub(crate) fn update_relationship_shallow(
+        &mut self,
+        id: &str,
+        updates: &Map<String, Value>,
+    ) -> Result<Value, EngineError> {
+        let existing = self
+            .state
+            .get(id)
+            .ok_or_else(|| not_found(&self.name, id))?
+            .clone();
+
+        // Shallow merge: start with current entity, overwrite with update fields.
+        // Strip computed fields from the incoming updates (they are derived, not stored).
+        let mut merged = existing.as_object().cloned().unwrap_or_default();
+        for (k, v) in updates {
+            if !self.computed_field_names.contains(k) {
+                merged.insert(k.clone(), v.clone());
+            }
+        }
+
+        // Force updatedAt = now (mirror TS: `existing.updatedAt = now`).
+        // Only skipped if the caller explicitly includes updatedAt in updates.
+        if !updates.contains_key("updatedAt") {
+            merged.insert("updatedAt".to_string(), Value::String(self.clock.now_iso()));
+        }
+
+        // Schema validate and decode (strips excess fields, applies transforms).
+        let validated = self.validate_entity(Value::Object(merged), id)?;
+
+        // Replace state — no unique/immutable/append-only guard.
+        self.state.insert(id.to_string(), validated.clone());
+        self.rebuild_indexes();
+
+        Ok(validated)
+    }
+
+    // ── Internal helpers ─────────────────────────────────────────────────
 
     /// Resolve the id for a new entity from the input object and `id_strategy`.
     fn resolve_id(&mut self, obj: &Map<String, Value>) -> Result<String, EngineError> {
