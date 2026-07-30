@@ -5,11 +5,20 @@ use std::thread;
 use std::time::Duration;
 
 use indexmap::IndexMap;
-use proseql_engine::descriptor::{IdStrategy, SchemaNode, StructField};
+use proseql_engine::callbacks::CallbackRegistry;
+use proseql_engine::clock::FixedClock;
+use proseql_engine::collection::Collection;
+use proseql_engine::descriptor::{
+    CollectionDescriptor, IdStrategy, SchemaNode, StructField, ValidationMode,
+};
 use proseql_engine::errors::{EngineError, StorageError, StorageOperation};
+use proseql_engine::id_gen::SequentialGenerator;
+use proseql_engine::reactive::{ManualReactiveScheduler, ReactiveScheduler, WatchQueryConfig};
+use proseql_engine::relationships::Database;
 use proseql_formats::FormatRegistry;
 #[cfg(not(target_arch = "wasm32"))]
 use proseql_storage::document_graph::load_document_graph_sources;
+use proseql_storage::document_source::load_document_sources;
 #[cfg(not(target_arch = "wasm32"))]
 use proseql_storage::fs::FsStorageHost;
 use proseql_storage::host::StorageHost;
@@ -338,6 +347,82 @@ fn keyed_debounced_writer_flush_preserves_insertion_order_and_stops_on_first_err
     );
 }
 
+fn books_source_config(root: &str) -> proseql_storage::source_config::NormalizedSourceConfig {
+    normalize_source_config(SourceConfigInput {
+        collections: IndexMap::from([(
+            "books".to_owned(),
+            proseql_storage::persistence::CollectionStorageConfig {
+                name: "books".to_owned(),
+                schema: SchemaNode::Struct {
+                    fields: vec![
+                        StructField {
+                            name: "title".to_owned(),
+                            schema: SchemaNode::Str,
+                        },
+                        StructField {
+                            name: "year".to_owned(),
+                            schema: SchemaNode::Num,
+                        },
+                    ],
+                },
+                id_strategy: IdStrategy::DerivedFromKey,
+                version: None,
+                migrations: vec![],
+            },
+        )]),
+        sources: vec![DatabaseSourceConfig::Documents(
+            proseql_storage::source_config::DocumentSourceConfig {
+                id: "books-source".to_owned(),
+                root: root.to_owned(),
+                include: Some(vec!["**/*.yaml".to_owned()]),
+                exclude: vec![],
+                format: Some("yaml".to_owned()),
+                collections: Some(SourceCollectionSelection::All),
+                unknown_collections: proseql_storage::source_config::UnknownCollectionPolicy::Error,
+                outbox: "generated.yaml".to_owned(),
+                optional: false,
+            },
+        )],
+    })
+    .unwrap()
+}
+
+fn books_collection_descriptor() -> CollectionDescriptor {
+    CollectionDescriptor {
+        name: "books".to_owned(),
+        schema: SchemaNode::Struct {
+            fields: vec![
+                StructField {
+                    name: "title".to_owned(),
+                    schema: SchemaNode::Str,
+                },
+                StructField {
+                    name: "year".to_owned(),
+                    schema: SchemaNode::Num,
+                },
+            ],
+        },
+        id_strategy: IdStrategy::DerivedFromKey,
+        relationships: vec![],
+        indexes: vec![],
+        unique_fields: vec![],
+        before_create_hooks: vec![],
+        after_create_hooks: vec![],
+        before_update_hooks: vec![],
+        after_update_hooks: vec![],
+        before_delete_hooks: vec![],
+        after_delete_hooks: vec![],
+        on_change_hooks: vec![],
+        computed_fields: vec![],
+        search_index: vec![],
+        id_generator: None,
+        version: None,
+        migrations: vec![],
+        append_only: false,
+        validation_mode: ValidationMode::Strict,
+    }
+}
+
 fn graph_reload_config(root: &str) -> proseql_storage::source_config::NormalizedSourceConfig {
     normalize_source_config(SourceConfigInput {
         collections: IndexMap::from([(
@@ -493,4 +578,152 @@ fn fs_watch_dir_reload_coordinator_updates_on_valid_edit_and_keeps_last_known_go
     handle.stop().unwrap();
     drop(handle);
     reloader.join().unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn fs_watch_dir_document_source_reload_updates_database_watch_and_invalid_edits_preserve_last_known_good(
+) {
+    let dir = tempdir().unwrap();
+    let nested = dir.path().join("nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    let file = nested.join("books.yaml");
+    std::fs::write(
+        &file,
+        "books:\n  dune:\n    title: Dune\n    year: 1965\n  hobbit:\n    title: The Hobbit\n    year: 1937\n",
+    )
+    .unwrap();
+
+    let host = FsStorageHost::new_polling(Duration::from_millis(50)).unwrap();
+    let formats = FormatRegistry::with_builtins();
+    let config = books_source_config(dir.path().to_str().unwrap());
+    let initial = load_document_sources(&host, &formats, &config, None).unwrap();
+    let lkg = LastKnownGood::new(initial.clone());
+    let coordinator = ReloadCoordinator::new(lkg.clone());
+
+    let scheduler = Arc::new(ManualReactiveScheduler::default());
+    let registry = Arc::new(CallbackRegistry::new());
+    let books = Collection::new_with_clock(
+        "books",
+        books_collection_descriptor(),
+        Arc::clone(&registry),
+        Box::new(SequentialGenerator::new("book")),
+        Box::new(FixedClock::new("2024-01-01T00:00:00.000Z")),
+    );
+    let mut collections = IndexMap::new();
+    collections.insert("books".to_owned(), books);
+    let mut db = Database::new_with_reactive_scheduler(
+        collections,
+        registry,
+        Arc::clone(&scheduler) as Arc<dyn ReactiveScheduler>,
+    );
+    db.reload_collection(
+        "books",
+        initial.collections["books"].values().cloned().collect(),
+    )
+    .unwrap();
+    let watch = db
+        .watch(
+            "books",
+            WatchQueryConfig {
+                sort: vec![("title".to_owned(), proseql_engine::query::SortOrder::Asc)],
+                ..WatchQueryConfig::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(watch.try_recv().unwrap().as_array().unwrap().len(), 2);
+    let db = Arc::new(Mutex::new(db));
+
+    let (reload_tx, reload_rx) = mpsc::channel();
+    let host_for_watch = host.clone();
+    let config_for_watch = config.clone();
+    let coordinator_for_watch = coordinator.clone();
+    let db_for_watch = Arc::clone(&db);
+    let handle = host
+        .watch_dir(
+            dir.path().to_str().unwrap(),
+            Box::new(move |event| {
+                if event.filename.as_deref() != Some("books.yaml") {
+                    return;
+                }
+                let result = match load_document_sources(
+                    &host_for_watch,
+                    &FormatRegistry::with_builtins(),
+                    &config_for_watch,
+                    None,
+                ) {
+                    Ok(loaded) => match coordinator_for_watch.reload(|| Ok(loaded.clone())) {
+                        Ok(()) => db_for_watch.lock().unwrap().reload_collection(
+                            "books",
+                            loaded.collections["books"].values().cloned().collect(),
+                        ),
+                        Err(error) => Err(error),
+                    },
+                    Err(error) => {
+                        let _ = coordinator_for_watch.reload(|| Err(error.clone()));
+                        Err(error)
+                    }
+                };
+                reload_tx
+                    .send(result.map_err(|error| error.tag().to_owned()))
+                    .unwrap();
+            }),
+        )
+        .unwrap();
+
+    let mut saw_valid_reload = false;
+    for attempt in 0..10 {
+        std::fs::write(
+            &file,
+            format!(
+                "books:\n  dune:\n    title: Dune Messiah\n    year: {}\n  hobbit:\n    title: The Hobbit\n    year: 1937\n",
+                1969 + attempt
+            ),
+        )
+        .unwrap();
+        if let Ok(Ok(())) = reload_rx.recv_timeout(Duration::from_millis(700)) {
+            saw_valid_reload = true;
+            break;
+        }
+    }
+    assert!(
+        saw_valid_reload,
+        "expected document-source reload after valid edit"
+    );
+    scheduler.advance(10);
+    let updated = watch.try_recv().unwrap();
+    assert_eq!(
+        updated.as_array().unwrap()[0]["title"],
+        json!("Dune Messiah")
+    );
+    assert_eq!(
+        lkg.current().collections["books"]["dune"]["title"],
+        json!("Dune Messiah")
+    );
+
+    let mut saw_invalid_reload = false;
+    for _ in 0..10 {
+        std::fs::write(&file, "books: [\n").unwrap();
+        if let Ok(Err(tag)) = reload_rx.recv_timeout(Duration::from_millis(700)) {
+            assert_eq!(tag, "SerializationError");
+            saw_invalid_reload = true;
+            break;
+        }
+    }
+    assert!(
+        saw_invalid_reload,
+        "expected reload error after invalid edit"
+    );
+    scheduler.advance(10);
+    assert!(watch.try_recv().is_err());
+    assert_eq!(
+        coordinator.last_error().map(|error| error.tag()),
+        Some("SerializationError")
+    );
+    assert_eq!(
+        lkg.current().collections["books"]["dune"]["title"],
+        json!("Dune Messiah")
+    );
+
+    handle.stop().unwrap();
 }

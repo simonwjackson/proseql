@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 use crate::collection::Collection;
 use crate::descriptor::{RelationshipDescriptor, RelationshipKind};
 use crate::errors::{EngineError, ValidationError, ValidationIssue};
+use crate::reactive::ChangeOperation;
 
 use super::helpers::{col_nf, ent_nf, related_entity_ids, resolve_inv_fk_crud};
 use super::{
@@ -192,6 +193,7 @@ impl Database {
                 .map(|i| i.message.as_str())
                 .collect::<Vec<_>>()
                 .join("; ");
+            self.sync_reactive_snapshots();
             return Err(EngineError::Validation(ValidationError {
                 message,
                 issues: violations,
@@ -231,6 +233,8 @@ impl Database {
                 .ok_or_else(|| ent_nf(collection, id))?
         };
 
+        self.sync_reactive_snapshots();
+        self.emit_owner_change_event(collection, ChangeOperation::Delete);
         Ok(DeleteWithRelResult {
             deleted,
             cascaded: if cascaded_map.is_empty() {
@@ -452,6 +456,10 @@ impl Database {
             deleted_entities.push(deleted);
         }
 
+        self.sync_reactive_snapshots();
+        if !deleted_entities.is_empty() {
+            self.emit_owner_change_event(collection, ChangeOperation::Delete);
+        }
         Ok(DeleteManyWithRelResult {
             count: deleted_entities.len(),
             deleted: deleted_entities,

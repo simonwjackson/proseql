@@ -30,6 +30,7 @@
 //! If all compared fields are equal, original insertion order is preserved
 //! (stable sort — Rust `sort_by` is stable).
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::callbacks::CallbackRegistry;
@@ -37,7 +38,8 @@ use crate::callbacks::CallbackRegistry;
 use super::filter::get_nested_value;
 
 /// Sort direction.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SortOrder {
     Asc,
     Desc,

@@ -1,5 +1,7 @@
 //! Shared relationship resolution, validation, and error helpers.
 
+use std::collections::HashSet;
+
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
@@ -211,11 +213,54 @@ pub(super) fn ref_fk(rel_name: &str, foreign_key: &Option<String>) -> String {
 ///   object, and array FK values — exactly as TS does with `targetMap.has(String(value))`.
 /// - Missing target collection: returns `ForeignKeyError` (not `CollectionNotFound`),
 ///   same as TS when the collection ref is unknown.
-pub(super) fn validate_fk(
+pub(crate) fn validate_fk(
     collection_name: &str,
     relationships: &[(String, RelationshipDescriptor)],
     data: &Value,
     all_collections: &IndexMap<String, Collection>,
+) -> Result<(), EngineError> {
+    validate_fk_with_exists(
+        collection_name,
+        relationships,
+        data,
+        |target_collection, target_id| {
+            all_collections
+                .get(target_collection)
+                .map(|collection| collection.get(target_id).is_some())
+                .unwrap_or(false)
+        },
+    )
+}
+
+pub(crate) fn validate_fk_with_owner_snapshot(
+    collection_name: &str,
+    relationships: &[(String, RelationshipDescriptor)],
+    data: &Value,
+    owner_snapshot: &IndexMap<String, Value>,
+    all_collections: &IndexMap<String, Collection>,
+) -> Result<(), EngineError> {
+    validate_fk_with_exists(
+        collection_name,
+        relationships,
+        data,
+        |target_collection, target_id| {
+            if target_collection == collection_name {
+                owner_snapshot.contains_key(target_id)
+            } else {
+                all_collections
+                    .get(target_collection)
+                    .map(|collection| collection.get(target_id).is_some())
+                    .unwrap_or(false)
+            }
+        },
+    )
+}
+
+fn validate_fk_with_exists(
+    collection_name: &str,
+    relationships: &[(String, RelationshipDescriptor)],
+    data: &Value,
+    exists: impl Fn(&str, &str) -> bool,
 ) -> Result<(), EngineError> {
     let obj = match data.as_object() {
         Some(o) => o,
@@ -228,17 +273,11 @@ pub(super) fn validate_fk(
         }
         let fk_field = ref_fk(rel_name, &rel_desc.foreign_key);
         let fk_val = match obj.get(&fk_field) {
-            None | Some(Value::Null) => continue, // absent / null → skip
+            None | Some(Value::Null) => continue,
             Some(v) => v,
         };
-        // Coerce via JS String() semantics (mirrors TS `String(value)`)
         let tid = value_to_js_string(fk_val);
-        // missing target collection → ForeignKeyError (not CollectionNotFound)
-        let exists = all_collections
-            .get(rel_desc.target.as_str())
-            .map(|tc| tc.get(&tid).is_some())
-            .unwrap_or(false);
-        if !exists {
+        if !exists(rel_desc.target.as_str(), &tid) {
             return Err(EngineError::ForeignKey(Box::new(ForeignKeyError {
                 collection: collection_name.to_string(),
                 field: fk_field.clone(),
@@ -255,16 +294,33 @@ pub(super) fn validate_fk(
     Ok(())
 }
 
+pub(crate) fn fk_field_names(
+    relationships: &[(String, RelationshipDescriptor)],
+) -> HashSet<String> {
+    relationships
+        .iter()
+        .filter(|(_, desc)| desc.kind == RelationshipKind::Ref)
+        .map(|(name, desc)| ref_fk(name, &desc.foreign_key))
+        .collect()
+}
+
+pub(crate) fn payload_touches_fk_field(value: &Value, fk_fields: &HashSet<String>) -> bool {
+    value
+        .as_object()
+        .map(|object| object.keys().any(|key| fk_fields.contains(key)))
+        .unwrap_or(false)
+}
+
 // ── Error helpers ─────────────────────────────────────────────────────────────
 
-pub(super) fn col_nf(name: &str) -> EngineError {
+pub(crate) fn col_nf(name: &str) -> EngineError {
     EngineError::CollectionNotFound(CollectionNotFoundError {
         collection: name.to_string(),
         message: format!("Collection '{}' not found", name),
     })
 }
 
-pub(super) fn ent_nf(collection: &str, id: &str) -> EngineError {
+pub(crate) fn ent_nf(collection: &str, id: &str) -> EngineError {
     EngineError::NotFound(NotFoundError {
         collection: collection.to_string(),
         id: id.to_string(),
@@ -272,7 +328,7 @@ pub(super) fn ent_nf(collection: &str, id: &str) -> EngineError {
     })
 }
 
-pub(super) fn op_err(operation: &str, reason: &str) -> EngineError {
+pub(crate) fn op_err(operation: &str, reason: &str) -> EngineError {
     EngineError::Operation(OperationError {
         operation: operation.to_string(),
         reason: reason.to_string(),

@@ -5,6 +5,7 @@ use serde_json::{Map, Value};
 use crate::descriptor::{RelationshipDescriptor, RelationshipKind};
 use crate::errors::{EngineError, ForeignKeyError, ValidationError, ValidationIssue};
 use crate::query::matches_where;
+use crate::reactive::ChangeOperation;
 
 use super::helpers::{
     col_nf, connect_fk_error_value, op_err, ref_fk, require_obj, resolve_connect,
@@ -58,6 +59,7 @@ impl Database {
         // (fk_field, target_col, connect_input) for inverse connects.
         // Inputs are resolved before the parent is written, then patched afterward.
         let mut inv_connect_ops: Vec<(String, String, Value)> = vec![];
+        let mut partial_side_effects = false;
 
         for (key, value) in data_obj {
             if rel_set.contains(key.as_str()) {
@@ -162,7 +164,16 @@ impl Database {
                 continue;
             };
             if let Some(create_data) = op_obj.get("$create") {
-                let nested = create_nested(self, target_col, create_data.clone())?;
+                let nested = match create_nested(self, target_col, create_data.clone()) {
+                    Ok(nested) => nested,
+                    Err(error) => {
+                        if partial_side_effects {
+                            self.sync_reactive_snapshots();
+                        }
+                        return Err(error);
+                    }
+                };
+                partial_side_effects = true;
                 let nid = nested["id"]
                     .as_str()
                     .ok_or_else(|| {
@@ -193,7 +204,16 @@ impl Database {
                 let connected_id = if let Some(id) = found_id {
                     id
                 } else {
-                    let nested = create_nested(self, target_col, create_data.clone())?;
+                    let nested = match create_nested(self, target_col, create_data.clone()) {
+                        Ok(nested) => nested,
+                        Err(error) => {
+                            if partial_side_effects {
+                                self.sync_reactive_snapshots();
+                            }
+                            return Err(error);
+                        }
+                    };
+                    partial_side_effects = true;
                     nested["id"]
                         .as_str()
                         .ok_or_else(|| {
@@ -216,7 +236,15 @@ impl Database {
                 if let (Some(fk_field), Some(obj)) = (&maybe_fk, item.as_object_mut()) {
                     obj.insert(fk_field.clone(), Value::String(parent_id.clone()));
                 }
-                create_nested(self, &target_col, item)?;
+                match create_nested(self, &target_col, item) {
+                    Ok(_) => partial_side_effects = true,
+                    Err(error) => {
+                        if partial_side_effects {
+                            self.sync_reactive_snapshots();
+                        }
+                        return Err(error);
+                    }
+                }
             }
         }
 
@@ -237,7 +265,15 @@ impl Database {
                 if let Some(fk_field) = &maybe_fk {
                     child_data.insert(fk_field.clone(), Value::String(parent_id.clone()));
                 }
-                create_nested(self, &target_col, Value::Object(child_data))?;
+                match create_nested(self, &target_col, Value::Object(child_data)) {
+                    Ok(_) => partial_side_effects = true,
+                    Err(error) => {
+                        if partial_side_effects {
+                            self.sync_reactive_snapshots();
+                        }
+                        return Err(error);
+                    }
+                }
             }
         }
         // ── Step 5a: Ref connects → resolve + inject FK ───────────────────────
@@ -247,6 +283,9 @@ impl Database {
                     base_data.insert(fk_field.clone(), Value::String(tid));
                 }
                 Err(e) => {
+                    if partial_side_effects {
+                        self.sync_reactive_snapshots();
+                    }
                     return Err(EngineError::ForeignKey(Box::new(ForeignKeyError {
                         collection: collection.to_string(),
                         field: fk_field.clone(),
@@ -277,6 +316,9 @@ impl Database {
                         target_id,
                     )),
                     Err(reason) => {
+                        if partial_side_effects {
+                            self.sync_reactive_snapshots();
+                        }
                         return Err(EngineError::ForeignKey(Box::new(ForeignKeyError {
                             collection: collection.to_string(),
                             field: fk_field.clone(),
@@ -301,6 +343,9 @@ impl Database {
         let parent = match create_result {
             Ok(parent) => parent,
             Err(EngineError::DuplicateKey(error)) => {
+                if partial_side_effects {
+                    self.sync_reactive_snapshots();
+                }
                 return Err(EngineError::Validation(ValidationError {
                     message: format!(
                         "Entity with ID '{}' already exists in '{}'",
@@ -315,7 +360,12 @@ impl Database {
                     }],
                 }));
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                if partial_side_effects {
+                    self.sync_reactive_snapshots();
+                }
+                return Err(error);
+            }
         };
 
         // FK validation must inspect the decoded entity so default-produced FKs
@@ -323,6 +373,9 @@ impl Database {
         if let Err(error) = validate_fk(collection, &rels, &parent, &self.collections) {
             if let Some(parent_collection) = self.collections.get_mut(collection) {
                 parent_collection.delete_raw(&parent_id);
+            }
+            if partial_side_effects {
+                self.sync_reactive_snapshots();
             }
             return Err(error);
         }
@@ -342,6 +395,8 @@ impl Database {
             }
         }
 
+        self.sync_reactive_snapshots();
+        self.emit_owner_change_event(collection, ChangeOperation::Create);
         Ok(parent)
     }
 }

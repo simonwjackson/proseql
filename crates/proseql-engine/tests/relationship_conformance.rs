@@ -2985,7 +2985,7 @@ fn fk_bool_fk_fails_when_no_entity_with_coerced_id() {
 /// TS: `if (!targetEntity) continue` (execute-phase entity check).
 /// Currently `col.update(&tid, ...)` returns NotFoundError → propagates. RED.
 #[test]
-fn ref_update_missing_target_entity_silently_skipped() {
+fn ref_update_missing_target_entity_still_validates_parent_fk_at_step_ten() {
     let (mut db, _reg) = make_db();
     db.create("companies", json!({ "id": "comp1", "name": "TechCorp" }))
         .unwrap();
@@ -3011,8 +3011,8 @@ fn ref_update_missing_target_entity_silently_skipped() {
     );
 
     assert!(
-        result.is_ok(),
-        "missing target entity in $update must be silently skipped, got: {:?}",
+        matches!(result, Err(EngineError::ForeignKey(_))),
+        "step 10 must still validate the parent FK after a skipped ref $update, got: {:?}",
         result
     );
 }

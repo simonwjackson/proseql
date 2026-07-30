@@ -82,6 +82,8 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use self::helpers::{col_nf, fk_field_names, payload_touches_fk_field, validate_fk};
+use self::populate::apply_populate;
 use crate::callbacks::CallbackRegistry;
 use crate::collection::Collection;
 use crate::errors::EngineError;
@@ -89,9 +91,11 @@ use crate::query::{
     apply_selection, execute_cursor_query, execute_query, CursorConfig, CursorPageResult,
     QueryInput,
 };
-
-use self::helpers::{col_nf, validate_fk};
-use self::populate::apply_populate;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::reactive::ThreadReactiveScheduler;
+#[cfg(target_arch = "wasm32")]
+use crate::reactive::UnsupportedReactiveScheduler;
+use crate::reactive::{ChangeOperation, ReactiveHub, ReactiveScheduler};
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -171,16 +175,29 @@ pub struct DeleteRelationshipsOptions {
 /// Multi-collection database with relationship-aware CRUD and population.
 pub struct Database {
     pub(super) collections: IndexMap<String, Collection>,
-    registry: Arc<CallbackRegistry>,
+    pub(super) registry: Arc<CallbackRegistry>,
+    pub(super) reactive: ReactiveHub,
 }
 
 impl Database {
     /// Create a new `Database` from a named, ordered collection map.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(collections: IndexMap<String, Collection>, registry: Arc<CallbackRegistry>) -> Self {
-        Self {
+        Self::new_with_reactive_scheduler(
             collections,
             registry,
-        }
+            Arc::new(ThreadReactiveScheduler::default()) as Arc<dyn ReactiveScheduler>,
+        )
+    }
+
+    /// Create a new `Database` from a named, ordered collection map.
+    #[cfg(target_arch = "wasm32")]
+    pub fn new(collections: IndexMap<String, Collection>, registry: Arc<CallbackRegistry>) -> Self {
+        Self::new_with_reactive_scheduler(
+            collections,
+            registry,
+            Arc::new(UnsupportedReactiveScheduler) as Arc<dyn ReactiveScheduler>,
+        )
     }
 
     /// Read-only reference to a named collection, or `None` if absent.
@@ -238,6 +255,9 @@ impl Database {
             return Err(fk_err);
         }
 
+        self.sync_reactive_snapshots();
+        self.emit_owner_change_event(collection, ChangeOperation::Create);
+
         Ok(entity)
     }
 
@@ -260,13 +280,6 @@ impl Database {
             .ok_or_else(|| col_nf(collection))?
             .snapshot_entity(id);
 
-        let result = self
-            .collections
-            .get_mut(collection)
-            .ok_or_else(|| col_nf(collection))?
-            .update(id, updates)?;
-
-        // FK validate the resulting entity state.
         let rels = self
             .collections
             .get(collection)
@@ -274,24 +287,44 @@ impl Database {
             .descriptor
             .relationships
             .clone();
+        let fk_fields = fk_field_names(&rels);
+        let touches_fk = payload_touches_fk_field(&updates, &fk_fields);
 
-        if let Err(fk_err) = validate_fk(collection, &rels, &result, &self.collections) {
-            // Restore the entity to its pre-update state.
-            if let Some(col) = self.collections.get_mut(collection) {
-                col.restore_entity_snapshot(id, snapshot);
+        let result = self
+            .collections
+            .get_mut(collection)
+            .ok_or_else(|| col_nf(collection))?
+            .update(id, updates)?;
+
+        // TS `update.ts` only validates foreign keys when the update payload
+        // touches relationship/FK fields, so unrelated updates must not fail on
+        // pre-existing dangling references.
+        if touches_fk {
+            if let Err(fk_err) = validate_fk(collection, &rels, &result, &self.collections) {
+                // Restore the entity to its pre-update state.
+                if let Some(col) = self.collections.get_mut(collection) {
+                    col.restore_entity_snapshot(id, snapshot);
+                }
+                return Err(fk_err);
             }
-            return Err(fk_err);
         }
+
+        self.sync_reactive_snapshots();
+        self.emit_owner_change_event(collection, ChangeOperation::Update);
 
         Ok(result)
     }
 
     /// Hard-delete an entity by id (no cascade).
     pub fn delete(&mut self, collection: &str, id: &str) -> Result<Value, EngineError> {
-        self.collections
+        let deleted = self
+            .collections
             .get_mut(collection)
             .ok_or_else(|| col_nf(collection))?
-            .delete(id)
+            .delete(id)?;
+        self.sync_reactive_snapshots();
+        self.emit_owner_change_event(collection, ChangeOperation::Delete);
+        Ok(deleted)
     }
 
     /// Query with optional population.
@@ -370,6 +403,6 @@ impl Database {
 
 mod create;
 mod delete;
-mod helpers;
+pub(crate) mod helpers;
 mod populate;
 mod update;

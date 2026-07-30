@@ -1114,6 +1114,97 @@ impl Collection {
         self.state.get(id).cloned()
     }
 
+    /// Snapshot the full collection state in insertion order.
+    pub(crate) fn snapshot_state(&self) -> IndexMap<String, Value> {
+        self.state.clone()
+    }
+
+    /// Replace the full collection state and rebuild indexes.
+    pub(crate) fn restore_state(&mut self, snapshot: IndexMap<String, Value>) {
+        self.state = snapshot;
+        self.rebuild_indexes();
+    }
+
+    /// Replace the entire collection state from already-loaded records.
+    ///
+    /// Unlike `create_many`, this preserves the incoming payloads exactly:
+    /// no timestamp overwrite, no id generation, and no default injection.
+    /// Each record is still schema-decoded, duplicate ids are rejected, unique
+    /// constraints are enforced across the replacement set, and indexes are
+    /// rebuilt atomically on success.
+    pub(crate) fn replace_loaded_records(
+        &mut self,
+        records: Vec<Value>,
+    ) -> Result<(), EngineError> {
+        let original_state = self.state.clone();
+
+        let mut validated_records = Vec::with_capacity(records.len());
+        for record in records {
+            let obj = require_object(record, "reload record")?;
+            let id = obj
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| {
+                    EngineError::Validation(ValidationError {
+                        message: "Reloaded record is missing required field 'id'".to_string(),
+                        issues: vec![ValidationIssue {
+                            field: "id".to_string(),
+                            message: "Expected string, got absent".to_string(),
+                            value: None,
+                            expected: Some("string".to_string()),
+                            received: Some("absent".to_string()),
+                        }],
+                    })
+                })?
+                .to_string();
+            let validated = self.validate_entity(Value::Object(obj), &id)?;
+            validated_records.push(validated);
+        }
+
+        self.state = IndexMap::new();
+        let result = (|| {
+            let mut new_state = IndexMap::new();
+            let mut seen_ids = HashSet::new();
+            let mut batch_index: Map<String, Value> = Map::new();
+
+            for entity in validated_records {
+                let id = entity
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                if !seen_ids.insert(id.clone()) {
+                    return Err(EngineError::DuplicateKey(Box::new(DuplicateKeyError {
+                        collection: self.name.clone(),
+                        field: "id".to_string(),
+                        value: id.clone(),
+                        existing_id: id.clone(),
+                        message: format!("Duplicate value for field 'id': \"{id}\" (in batch)"),
+                    })));
+                }
+                self.check_unique_constraints_with_batch(&entity, None, &batch_index)?;
+                self.add_to_batch_constraint_index(&entity, &mut batch_index);
+                new_state.insert(id, entity);
+            }
+
+            Ok(new_state)
+        })();
+
+        match result {
+            Ok(new_state) => {
+                self.state = new_state;
+                self.rebuild_indexes();
+                Ok(())
+            }
+            Err(error) => {
+                self.state = original_state;
+                self.rebuild_indexes();
+                Err(error)
+            }
+        }
+    }
+
     /// Directly replace the entity with `id` with `snapshot`, bypassing
     /// all validation.  If `snapshot` is `None`, the entity is removed.
     ///

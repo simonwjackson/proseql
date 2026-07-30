@@ -49,3 +49,6 @@ pub mod query;
 
 // U4
 pub mod relationships;
+
+// U6
+pub mod reactive;
