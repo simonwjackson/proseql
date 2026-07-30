@@ -6,6 +6,7 @@
 //! |-------------------|--------------------------|---------------------------------|
 //! | `DefaultCallback` | `OptionalWithDefault`    | `() -> Value`                   |
 //! | `PredicateCallback` | `$removeBy` operator   | `(&Value) -> bool`              |
+//! | `StringCollator`  | sort string comparison   | `(&str, &str) -> Ordering`      |
 //!
 //! ## Design decision: sync native execution
 //!
@@ -18,6 +19,7 @@
 //! ## TS references
 //! - `Schema.optional(T, { default: () => V })` / `Schema.optionalWith` — default seam
 //! - `$remove: (item) => boolean` update operator — predicate seam
+//! - `computed: { fieldName: (entity) => value }` — computed field derivation (U3)
 
 use std::collections::HashMap;
 
@@ -37,6 +39,30 @@ pub type DefaultCallback = Box<dyn Fn() -> Value + Send + Sync>;
 /// Mirrors TS `$remove: (item: U) => boolean`.
 pub type PredicateCallback = Box<dyn Fn(&Value) -> bool + Send + Sync>;
 
+/// A sync computed-field derivation callback.
+///
+/// Takes the full entity `Value` (with all stored fields resolved, and possibly
+/// populated relationships) and returns the derived field value.
+///
+/// Mirrors `ComputedFieldDefinition<T, R>` from
+/// `packages/core/src/types/computed-types.ts`:
+/// ```ts
+/// type ComputedFieldDefinition<T, R> = (entity: T) => R;
+/// ```
+pub type ComputedCallback = Box<dyn Fn(&Value) -> Value + Send + Sync>;
+
+/// A string-comparison callback for locale-aware sort.
+///
+/// When registered, replaces the bytewise fallback in the sort pipeline for
+/// all string comparisons (both string-vs-string and mixed-type coerced
+/// comparisons).
+///
+/// The U8 WASM boundary registers JS `localeCompare` here.  Native consumers
+/// (korrid) register their chosen ICU or system collator.  If none is
+/// registered, the sort engine falls back to bytewise ASCII ordering — this is
+/// documented as a fallback, not parity with JS.
+pub type StringCollatorFn = Box<dyn Fn(&str, &str) -> std::cmp::Ordering + Send + Sync>;
+
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 /// A registry mapping string callback IDs to their implementations.
@@ -51,6 +77,10 @@ pub type PredicateCallback = Box<dyn Fn(&Value) -> bool + Send + Sync>;
 pub struct CallbackRegistry {
     defaults: HashMap<String, DefaultCallback>,
     predicates: HashMap<String, PredicateCallback>,
+    computed: HashMap<String, ComputedCallback>,
+    /// Optional locale-aware string collator.  When `Some`, replaces the
+    /// bytewise ASCII fallback in the sort pipeline.
+    collator: Option<StringCollatorFn>,
 }
 
 impl CallbackRegistry {
@@ -104,6 +134,46 @@ impl CallbackRegistry {
     /// Check whether a predicate callback is registered under the given id.
     pub fn has_predicate(&self, id: &str) -> bool {
         self.predicates.contains_key(id)
+    }
+
+    // ── String collation ───────────────────────────────────────────────────────
+
+    /// Register a string collation callback.
+    ///
+    /// Once registered, the sort pipeline calls `f(a, b)` instead of the
+    /// bytewise fallback for all string comparisons.
+    ///
+    /// Replacing an existing collator is allowed.
+    pub fn register_collator(&mut self, f: StringCollatorFn) {
+        self.collator = Some(f);
+    }
+
+    /// Invoke the registered string collator for `a` vs `b`.
+    ///
+    /// Returns `Some(Ordering)` when a collator is registered, `None` when the
+    /// caller should fall back to bytewise ordering.
+    pub fn collate_strings(&self, a: &str, b: &str) -> Option<std::cmp::Ordering> {
+        self.collator.as_ref().map(|f| f(a, b))
+    }
+
+    // ── Computed field callbacks ──────────────────────────────────────────────
+
+    /// Register a computed-field derivation callback.
+    ///
+    /// `id` must match the `ComputedFieldDescriptor.callback_id` from the
+    /// collection descriptor.  If a callback with the same id already exists
+    /// it is replaced.
+    pub fn register_computed(&mut self, id: impl Into<String>, f: ComputedCallback) {
+        self.computed.insert(id.into(), f);
+    }
+
+    /// Invoke a computed-field callback for `entity`.
+    ///
+    /// Returns `Some(value)` if the callback is registered, `None` if not.
+    /// Callers that treat a missing callback as a loud error should convert
+    /// `None` to an appropriate `EngineError`.
+    pub fn invoke_computed(&self, id: &str, entity: &Value) -> Option<Value> {
+        self.computed.get(id).map(|f| f(entity))
     }
 }
 

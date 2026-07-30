@@ -56,6 +56,7 @@ use crate::id_gen::IdGenerator;
 use crate::operators::{
     deep_merge_updates, update_touches_unique_fields, validate_immutable_fields,
 };
+use crate::query::indexes::QueryIndexes;
 use crate::validator::{decode_value, js_eq};
 
 // ── Result types ──────────────────────────────────────────────────────────────
@@ -142,6 +143,10 @@ pub struct Collection {
     supports_soft_delete: bool,
     /// Set of computed field names to strip from create/update/upsert inputs.
     computed_field_names: HashSet<String>,
+    /// Query-time acceleration indexes (equality + full-text search).
+    /// Rebuilt from scratch after every atomic mutation.
+    /// Private: callers use [`Collection::narrow_candidates`] instead.
+    query_indexes: QueryIndexes,
 }
 
 impl Collection {
@@ -192,7 +197,52 @@ impl Collection {
             clock,
             supports_soft_delete,
             computed_field_names,
+            query_indexes: QueryIndexes::new(),
         }
+    }
+
+    /// Rebuild all query indexes from the current entity snapshot.
+    ///
+    /// Called internally after every successful atomic mutation so indexes
+    /// stay consistent.  O(n) per call; acceptable at U3 scope.
+    fn rebuild_indexes(&mut self) {
+        let entity_refs: Vec<(String, &Value)> =
+            self.state.iter().map(|(id, v)| (id.clone(), v)).collect();
+        self.query_indexes.rebuild(
+            &entity_refs,
+            &self.descriptor.indexes,
+            &self.descriptor.search_index,
+        );
+    }
+
+    /// Return the insertion-ordered list of all entity ids.
+    ///
+    /// Used internally by `narrow_candidates` for index-based candidate narrowing.
+    fn insertion_order(&self) -> Vec<String> {
+        self.state.keys().cloned().collect()
+    }
+
+    /// Try to narrow the candidate entity set for `where_clause` using
+    /// acceleration indexes.
+    ///
+    /// Tries equality index first, then search index.  Returns `Some(ids)` in
+    /// insertion order when an index can narrow the set, `None` when no index
+    /// applies (caller should fall back to a full scan).
+    ///
+    /// The full where-clause filter is NOT applied here — narrowing guarantees
+    /// no false negatives, and the caller must still run the predicate on the
+    /// returned candidates.
+    ///
+    /// This is the only public entry point into the index layer; callers do not
+    /// access `query_indexes` directly.
+    pub fn narrow_candidates(&self, where_clause: &Value) -> Option<Vec<String>> {
+        let insertion_order = self.insertion_order();
+        self.query_indexes
+            .narrow_by_equality(where_clause, &insertion_order)
+            .or_else(|| {
+                self.query_indexes
+                    .narrow_by_search(where_clause, &insertion_order)
+            })
     }
 
     // ── Public read API ───────────────────────────────────────────────────────
@@ -277,6 +327,9 @@ impl Collection {
         // Insert (appended at end in IndexMap)
         let stored_id = entity["id"].as_str().unwrap_or_default().to_string();
         self.state.insert(stored_id, entity.clone());
+
+        // Rebuild query indexes after successful mutation
+        self.rebuild_indexes();
 
         Ok(entity)
     }
@@ -462,6 +515,9 @@ impl Collection {
             self.state.insert(id, entity);
         }
 
+        // Rebuild query indexes after successful batch mutation
+        self.rebuild_indexes();
+
         Ok(CreateManyResult { created, skipped })
     }
 
@@ -521,6 +577,9 @@ impl Collection {
 
         // Replace in state (IndexMap preserves insertion position on update)
         self.state.insert(id.to_string(), validated.clone());
+
+        // Rebuild query indexes after successful mutation
+        self.rebuild_indexes();
 
         Ok(validated)
     }
@@ -607,6 +666,9 @@ impl Collection {
             updated.push(validated);
         }
 
+        // Rebuild query indexes after successful batch mutation
+        self.rebuild_indexes();
+
         let count = updated.len();
         Ok(UpdateManyResult { count, updated })
     }
@@ -660,10 +722,13 @@ impl Collection {
             let soft_deleted_value = Value::Object(soft_deleted);
             self.state
                 .insert(id.to_string(), soft_deleted_value.clone());
+            self.rebuild_indexes();
             Ok(soft_deleted_value)
         } else {
             // Hard delete: shift_remove preserves insertion order of remaining entries
-            Ok(self.state.shift_remove(id).unwrap())
+            let removed = self.state.shift_remove(id).unwrap();
+            self.rebuild_indexes();
+            Ok(removed)
         }
     }
 
@@ -745,6 +810,9 @@ impl Collection {
                 }
             }
         }
+
+        // Rebuild indexes after successful batch delete
+        self.rebuild_indexes();
 
         let count = deleted.len();
         Ok(DeleteManyResult { count, deleted })
@@ -1008,6 +1076,9 @@ impl Collection {
         for (id, validated) in candidates_update {
             self.state.insert(id, validated);
         }
+
+        // Rebuild query indexes after successful batch mutation
+        self.rebuild_indexes();
 
         Ok(UpsertManyResult {
             created,

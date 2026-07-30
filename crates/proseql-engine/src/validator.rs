@@ -68,7 +68,13 @@ pub fn js_eq(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Null, Value::Null) => true,
         (Value::Bool(x), Value::Bool(y)) => x == y,
-        (Value::Number(x), Value::Number(y)) => x == y,
+        (Value::Number(x), Value::Number(y)) => {
+            // JSON `1` and `1.0` are the same JS Number and must compare equal.
+            // serde_json stores integers and floats in distinct internal variants,
+            // so `Number` PartialEq would return false for 1 vs 1.0.  Use f64
+            // comparison instead — matches JS `1 === 1.0` (true).
+            x.as_f64() == y.as_f64()
+        }
         (Value::String(x), Value::String(y)) => x == y,
         // Objects and arrays: reference identity cannot be established across
         // a JSON serialisation boundary — model as always inequal.

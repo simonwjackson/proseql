@@ -43,3 +43,6 @@ pub mod collection;
 pub mod id_gen;
 pub mod operators;
 pub mod timestamp;
+
+// U3
+pub mod query;
