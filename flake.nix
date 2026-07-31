@@ -46,6 +46,11 @@
           rest = pkgs.callPackage ./packages/rest/default.nix { inherit mkBunDerivation; };
           rpc = pkgs.callPackage ./packages/rpc/default.nix { inherit mkBunDerivation; };
           default = pkgs.callPackage ./packages/core/default.nix { inherit mkBunDerivation; };
+
+          # The engine workspace, built and tested the same way the TypeScript
+          # packages are. proseql-wasm is left out: it targets wasm32 and has
+          # nothing to say when built for the host.
+          rust = pkgs.callPackage ./crates/package.nix { };
         }
       );
 
@@ -85,6 +90,10 @@
           mkBunDerivation = bun2nix.lib.${system}.mkBunDerivation;
         in
         {
+          # Building the crates runs their tests, so this gates the Rust side
+          # of `nix flake check` alongside the TypeScript suite.
+          rust = pkgs.callPackage ./crates/package.nix { };
+
           default = mkBunDerivation {
             pname = "proseql-checks";
             version = "0.1.0";
