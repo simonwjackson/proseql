@@ -10,13 +10,14 @@ type PackageJson = {
 	types?: string;
 	bin?: string | Record<string, string>;
 	files?: string[];
+	exports?: unknown;
 };
 
 type PackFile = { path: string };
 type PackResult = { files: PackFile[] };
 
 const root = join(import.meta.dirname, "..");
-const packageNames = ["core", "engine", "effect", "node", "rest", "cli"];
+const packageNames = ["core", "engine", "effect", "browser", "node", "rest", "cli"];
 
 let failed = false;
 
@@ -90,6 +91,9 @@ function requiredPackageArtifacts(packageJson: PackageJson): string[] {
 	if (packageJson.files?.includes("dist")) {
 		if (packageJson.main) required.add(packageJson.main);
 		if (packageJson.types) required.add(packageJson.types);
+		for (const exportPath of collectExportArtifacts(packageJson.exports)) {
+			required.add(exportPath);
+		}
 	}
 
 	for (const binTarget of normalizeBinTargets(packageJson.bin)) {
@@ -97,6 +101,24 @@ function requiredPackageArtifacts(packageJson: PackageJson): string[] {
 	}
 
 	return [...required];
+}
+
+function collectExportArtifacts(exportsField: unknown): string[] {
+	const results = new Set<string>();
+	const visit = (value: unknown) => {
+		if (typeof value === "string") {
+			results.add(value);
+			return;
+		}
+		if (!value || typeof value !== "object") return;
+		for (const nested of Object.values(value as Record<string, unknown>)) {
+			visit(nested);
+		}
+	};
+	visit(exportsField);
+	return [...results]
+		.filter((path) => !path.endsWith("/package.json"))
+		.map((path) => path.replace(/^\.\//, ""));
 }
 
 function normalizeBinTargets(bin: PackageJson["bin"]): string[] {

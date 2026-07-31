@@ -1,12 +1,30 @@
 /**
- * @proseql/browser - Browser storage adapters for ProseQL
+ * @proseql/browser - Browser-facing proseQL package
  *
- * Re-exports everything from @proseql/core plus browser storage adapters
- * (localStorage, sessionStorage, IndexedDB).
+ * Re-exports the Effect-first runtime from @proseql/effect, the Promise-first
+ * browser-safe engine facade from @proseql/engine/browser, and browser storage
+ * compatibility adapters for localStorage, sessionStorage, and IndexedDB.
  */
 
-// Re-export everything from core
-export * from "@proseql/core";
+export * from "@proseql/effect/browser";
+export {
+	createEngineDatabase,
+	createPersistentEngineDatabase,
+	createIndexedDBEngineStorageHost,
+	createLocalStorageEngineStorageHost,
+	createSessionStorageEngineStorageHost,
+	createWebStorageEngineStorageHost,
+	createEngineStorageAdapter,
+	makeEngineStorageLayer,
+	type BrowserEngineStorageHost,
+	type BrowserStorageHostConfig,
+	type EngineStorageHost,
+	type EngineStorageWatchEvent,
+	type IndexedDBEngineHostConfig,
+	type LocalStorageEngineStorageHostConfig,
+	type SessionStorageEngineStorageHostConfig,
+	type WebStorageEngineHostConfig,
+} from "@proseql/engine/browser";
 // Browser storage adapter layers, factories, and config types
 export {
 	// Default browser layer alias

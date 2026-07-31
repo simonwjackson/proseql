@@ -1,5 +1,3 @@
-import { AsyncLocalStorage } from "node:async_hooks";
-import { dirname, resolve } from "node:path";
 import {
 	CollectionNotFoundError,
 	StorageAdapterService as StorageAdapter,
@@ -49,11 +47,14 @@ import { loadWasmBindings, type WasmRuntimeBinding } from "./loader.js";
 import { buildPluginRegistry } from "./plugin-registry.js";
 import { compileDatabaseDescriptor, type CallbackRegistrar } from "./schema-compiler.js";
 import {
-	createNodeEngineStorageHost,
+	dirnameComparable,
+	isWithinComparableDirectory,
+	matchesComparableFile,
+} from "./path-utils.js";
+import {
 	makeEngineStorageLayer,
-	makeNodeEngineStorageLayer,
-	type NodeEngineStorageHost,
-} from "./storage-host.js";
+	type EngineStorageHost,
+} from "./storage-host-shared.js";
 import type {
 	EngineCollection,
 	EngineDatabaseOptions,
@@ -146,25 +147,42 @@ type SourcePersistenceState = {
 
 type LoadedCollectionsResult = {
 	readonly collections: Record<string, ReadonlyArray<Record<string, unknown>>>;
+	readonly baselines: Record<string, ReadonlyArray<Record<string, unknown>>>;
 	readonly sourceState?: SourcePersistenceState;
 };
 
+type PersistenceLifecycle = {
+	status: "open" | "closing" | "closed";
+	closePromise?: Promise<void>;
+};
+
 type PersistenceState = {
-	host: NodeEngineStorageHost;
+	host: EngineStorageHost;
 	readonly layer: Layer.Layer<any>;
 	readonly collections: ReadonlyArray<CollectionRuntimeConfig>;
 	readonly sharedFiles: ReadonlyArray<SharedFileGroup>;
 	readonly directoryIds: Map<string, Set<string>>;
 	readonly writeKeyByCollection: Map<string, string>;
+	readonly collectionBaselines: Map<string, ReadonlyMap<string, Record<string, unknown>>>;
+	readonly dirtyCollections: Set<string>;
+	readonly collectionsAwaitingExternalMerge: Set<string>;
 	readonly saver: DebouncedSaver;
 	readonly sourceState?: SourcePersistenceState;
 	readonly watcherStops: Array<() => void>;
+	readonly backgroundReloads: Set<Promise<void>>;
+	readonly lifecycle: PersistenceLifecycle;
 	backgroundError?: unknown;
+};
+
+type TransactionContext = {
+	getStore(): true | undefined;
+	run<T>(value: true, fn: () => Promise<T>): Promise<T>;
 };
 
 type TransactionGate = {
 	active: boolean;
-	readonly context: AsyncLocalStorage<true>;
+	depth: number;
+	readonly context?: TransactionContext;
 };
 
 type SaveLane = {
@@ -564,6 +582,21 @@ class EngineRuntime {
 	}
 }
 
+const createTransactionContext = (): TransactionContext | undefined => {
+	const processRef = (globalThis as { process?: { getBuiltinModule?: (name: string) => unknown } }).process;
+	const asyncHooks = processRef?.getBuiltinModule?.("node:async_hooks") as
+		| { AsyncLocalStorage?: new <T>() => TransactionContext }
+		| undefined;
+	return asyncHooks?.AsyncLocalStorage ? new asyncHooks.AsyncLocalStorage<true>() : undefined;
+};
+
+const importDefaultNodeStorageHost = async (): Promise<EngineStorageHost> => {
+	const module = (await import(
+		/* @vite-ignore */ ("./storage-host.js" as string)
+	)) as typeof import("./storage-host.js");
+	return module.createNodeEngineStorageHost();
+};
+
 export const createEngineDatabase = async <Config extends DatabaseConfig>(
 	config: Config,
 	initialData?: EngineInitialData<Config>,
@@ -588,7 +621,9 @@ export const createPersistentEngineDatabase = async <Config extends DatabaseConf
 	persistenceOptions?: EnginePersistenceOptions,
 	options?: EngineDatabaseOptions,
 ): Promise<GenerateEngineDatabaseWithPersistence<Config>> => {
-	const host = persistenceOptions?.storageHost ?? createNodeEngineStorageHost();
+	const host =
+		persistenceOptions?.storageHost ??
+		(await importDefaultNodeStorageHost());
 	const storageLayer = persistenceOptions?.storageLayer ?? makeEngineStorageLayer(host);
 	const pluginRegistry = await buildPluginRegistry(options?.plugins);
 	for (const [name, collection] of Object.entries(getCollectionConfigs(config))) {
@@ -624,11 +659,13 @@ export const createPersistentEngineDatabase = async <Config extends DatabaseConf
 		host,
 		layer,
 		persistenceOptions?.writeDebounce ?? DEFAULT_WRITE_DEBOUNCE,
+		loaded.baselines,
 		loaded.sourceState,
 	);
 	if (!persistenceOptions?._suppressInitialWrites) {
 		for (const [collectionName, value] of Object.entries(initialData ?? {})) {
 			if (value === undefined) continue;
+			markCollectionDirty(persistence, collectionName);
 			const key = persistence.writeKeyByCollection.get(collectionName);
 			if (key) persistence.saver.schedule(key);
 		}
@@ -645,7 +682,8 @@ function buildDatabaseFacade(
 ) {
 	const transactionGate: TransactionGate = {
 		active: false,
-		context: new AsyncLocalStorage<true>(),
+		depth: 0,
+		context: createTransactionContext(),
 	};
 	const db: Record<string, unknown> = {};
 	for (const collection of collections) {
@@ -656,23 +694,39 @@ function buildDatabaseFacade(
 			persistence?.sourceState?.graphState.provenance.get(`${collection}\u0000${id}`),
 		getDiagnostics: async () => persistence?.sourceState?.graphState.diagnostics ?? [],
 	};
+	let transientClosePromise: Promise<void> | undefined;
 	const transactional = {
 		$transaction: <A>(fn: (ctx: EngineTransactionDatabase<any>) => Promise<A>) =>
 			runTransaction(runtime, collections, persistence, fn, transactionGate),
 		close: async () => {
 			if (persistence) {
-				await stopWatchers(persistence);
-				try {
-					await persistence.saver.flush();
-					if (persistence.backgroundError !== undefined) {
-						throw persistence.backgroundError;
-					}
-				} finally {
-					await runtime.drop();
+				if (persistence.lifecycle.closePromise) {
+					return persistence.lifecycle.closePromise;
 				}
-				return;
+				persistence.lifecycle.status = "closing";
+				const closePromise = promiseCall(async () => {
+					await stopWatchers(persistence);
+					await waitForBackgroundReloads(persistence);
+					try {
+						await persistence.saver.flush();
+						await waitForBackgroundReloads(persistence);
+						if (persistence.backgroundError !== undefined) {
+							throw persistence.backgroundError;
+						}
+					} finally {
+						try {
+							await runtime.drop();
+						} finally {
+							persistence.lifecycle.status = "closed";
+						}
+					}
+				});
+				persistence.lifecycle.closePromise = closePromise;
+				return closePromise;
 			}
-			await runtime.drop();
+			if (transientClosePromise) return transientClosePromise;
+			transientClosePromise = runtime.drop();
+			return transientClosePromise;
 		},
 	};
 	if (!persistence) {
@@ -797,6 +851,7 @@ function buildCollectionFacade(
 		}
 	};
 	const scheduleWrite = () => {
+		markCollectionDirty(persistence, collection.name);
 		if (writeKey) persistence?.saver.schedule(writeKey);
 	};
 	return {
@@ -980,10 +1035,11 @@ function buildCollectionFacade(
 async function loadLegacyCollections(
 	collections: ReadonlyArray<CollectionRuntimeConfig>,
 	initialData: EngineInitialData<DatabaseConfig> | undefined,
-	host: NodeEngineStorageHost,
+	host: EngineStorageHost,
 	layer: Layer.Layer<any>,
 ): Promise<LoadedCollectionsResult> {
 	const result: Record<string, ReadonlyArray<Record<string, unknown>>> = {};
+	const baselines: Record<string, ReadonlyArray<Record<string, unknown>>> = {};
 	const sharedGroups = buildSharedFileGroups(collections);
 	for (const group of sharedGroups) {
 		const fileExists = await host.exists(group.file);
@@ -1004,6 +1060,8 @@ async function loadLegacyCollections(
 				)
 			: undefined;
 		for (const collection of group.collections) {
+			const baselineRows = [...(loaded?.[collection.name]?.values() ?? [])];
+			baselines[collection.name] = baselineRows;
 			result[collection.name] = mergeLoadedWithInitial(
 				loaded?.[collection.name],
 				initialData?.[collection.name as never],
@@ -1032,6 +1090,7 @@ async function loadLegacyCollections(
 						),
 					)
 				: undefined;
+			baselines[collection.name] = [...(loaded?.values() ?? [])];
 			result[collection.name] = mergeLoadedWithInitial(
 				loaded,
 				initialData?.[collection.name as never],
@@ -1056,22 +1115,24 @@ async function loadLegacyCollections(
 						),
 					)
 				: undefined;
+			baselines[collection.name] = [...(loaded?.values() ?? [])];
 			result[collection.name] = mergeLoadedWithInitial(
 				loaded,
 				initialData?.[collection.name as never],
 			);
 			continue;
 		}
+		baselines[collection.name] = [];
 		result[collection.name] = normalizeInitialCollection(initialData?.[collection.name as never]);
 	}
-	return { collections: result };
+	return { collections: result, baselines };
 }
 
 async function loadSourceOrientedCollections(
 	config: Extract<DatabaseConfig, { readonly collections: Record<string, CollectionConfig> }>,
 	collections: ReadonlyArray<CollectionRuntimeConfig>,
 	initialData: EngineInitialData<DatabaseConfig> | undefined,
-	host: NodeEngineStorageHost,
+	host: EngineStorageHost,
 	layer: Layer.Layer<any>,
 ): Promise<LoadedCollectionsResult> {
 	void host;
@@ -1103,11 +1164,13 @@ async function loadSourceOrientedCollections(
 		}
 	}
 	const result: Record<string, ReadonlyArray<Record<string, unknown>>> = {};
+	const baselines: Record<string, ReadonlyArray<Record<string, unknown>>> = {};
 	for (const collection of collections) {
 		const loaded =
 			loadedGraph?.collections[collection.name] ??
 			loadedDocuments?.collections[collection.name] ??
 			new Map<string, Record<string, unknown>>();
+		baselines[collection.name] = [...loaded.values()];
 		result[collection.name] = mergeLoadedWithInitial(
 			loaded,
 			initialData?.[collection.name as never],
@@ -1115,6 +1178,7 @@ async function loadSourceOrientedCollections(
 	}
 	return {
 		collections: result,
+		baselines,
 		sourceState: {
 			normalizedConfig,
 			writableSourceByCollection,
@@ -1134,14 +1198,16 @@ async function loadSourceOrientedCollections(
 function createPersistenceState(
 	runtime: EngineRuntime,
 	collections: ReadonlyArray<CollectionRuntimeConfig>,
-	host: NodeEngineStorageHost,
+	host: EngineStorageHost,
 	layer: Layer.Layer<any>,
 	writeDebounce: number,
+	initialBaselines?: Record<string, ReadonlyArray<Record<string, unknown>>>,
 	sourceState?: SourcePersistenceState,
 ): PersistenceState {
 	const sharedFiles = buildSharedFileGroups(collections);
 	const directoryIds = initializeDirectoryIds(runtime, collections);
 	const writeKeyByCollection = buildWriteKeyByCollection(collections, sharedFiles, sourceState);
+	const collectionBaselines = initializeCollectionBaselines(runtime, collections, initialBaselines);
 	const state: PersistenceState = {
 		host,
 		layer,
@@ -1149,8 +1215,13 @@ function createPersistenceState(
 		sharedFiles,
 		directoryIds,
 		writeKeyByCollection,
+		collectionBaselines,
+		dirtyCollections: new Set<string>(),
+		collectionsAwaitingExternalMerge: new Set<string>(),
 		sourceState,
 		watcherStops: [],
+		backgroundReloads: new Set<Promise<void>>(),
+		lifecycle: { status: "open" },
 		backgroundError: undefined,
 		saver: new DebouncedSaver(writeDebounce, async (key) => {
 			await persistCollectionState(state, runtime, key);
@@ -1168,20 +1239,35 @@ async function persistCollectionState(
 	key: string,
 ): Promise<void> {
 	if (state.sourceState && key.startsWith("source:")) {
-		await persistDocumentSourceState(state, runtime, key.slice("source:".length));
+		const sourceId = key.slice("source:".length);
+		await persistDocumentSourceState(state, runtime, sourceId);
+		for (const collection of state.collections) {
+			if (state.sourceState.writableSourceByCollection.get(collection.name) !== sourceId) continue;
+			const rows = await runtime.invoke<Record<string, unknown>[]>("dumpCollection", { collection: collection.name });
+			markCollectionPersisted(state, collection, rows);
+		}
 		return;
 	}
 	const sharedFile = state.sharedFiles.find((group) => `file:${group.file}` === key);
 	if (sharedFile) {
+		const rowsByCollection = new Map<string, ReadonlyArray<Record<string, unknown>>>();
 		const data = await Promise.all(
-			sharedFile.collections.map(async (collection) => ({
-				name: collection.name,
-				schema: collection.schema as never,
-				data: toEntityMap(await runtime.invoke<Record<string, unknown>[]>("dumpCollection", { collection: collection.name })),
-				...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
-			})),
+			sharedFile.collections.map(async (collection) => {
+				const rows = await runtime.invoke<Record<string, unknown>[]>("dumpCollection", { collection: collection.name });
+				rowsByCollection.set(collection.name, rows);
+				return {
+					name: collection.name,
+					schema: collection.schema as never,
+					data: toEntityMap(rows),
+					...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
+				};
+			}),
 		);
 		await Effect.runPromise(Effect.provide(saveCollectionsToFile(sharedFile.file, data as never), state.layer));
+		for (const collection of sharedFile.collections) {
+			const rows = rowsByCollection.get(collection.name) ?? [];
+			markCollectionPersisted(state, collection, rows);
+		}
 		return;
 	}
 	const fileCollections = state.collections.filter(
@@ -1202,6 +1288,7 @@ async function persistCollectionState(
 					state.layer,
 				),
 			);
+			markCollectionPersisted(state, collection, entities);
 		}
 		return;
 	}
@@ -1212,8 +1299,23 @@ async function persistCollectionState(
 			message: `Collection '${key}' not found`,
 		});
 	}
-	const entities = await runtime.invoke<Record<string, unknown>[]>("dumpCollection", { collection: collection.name });
-	const map = toEntityMap(entities);
+	let entities = await runtime.invoke<Record<string, unknown>[]>("dumpCollection", { collection: collection.name });
+	let map = toEntityMap(entities);
+	if (
+		isBrowserStorageHost(state.host) &&
+		state.dirtyCollections.has(collection.name) &&
+		(collection.raw.directory || collection.raw.file)
+	) {
+		const baseline = state.collectionBaselines.get(collection.name) ?? new Map<string, Record<string, unknown>>();
+		const baselineRows = [...baseline.values()];
+		const externalRows = await loadLegacyCollectionRows(collection, state.host, state.layer);
+		if (rowsFingerprint(baselineRows) !== rowsFingerprint(externalRows)) {
+			const mergedRows = mergeExternalRowsWithLocalDelta(baseline, externalRows, entities);
+			await reloadCollectionIfChanged(runtime, collection.name, mergedRows);
+			entities = mergedRows;
+			map = toEntityMap(entities);
+		}
+	}
 	if (collection.raw.directory) {
 		const currentIds = new Set(map.keys());
 		const previousIds = state.directoryIds.get(collection.name) ?? new Set<string>();
@@ -1241,6 +1343,7 @@ async function persistCollectionState(
 			);
 		}
 		state.directoryIds.set(collection.name, currentIds);
+		markCollectionPersisted(state, collection, entities);
 		return;
 	}
 	if (collection.raw.file) {
@@ -1255,6 +1358,7 @@ async function persistCollectionState(
 				state.layer,
 			),
 		);
+		markCollectionPersisted(state, collection, entities);
 	}
 }
 
@@ -1307,6 +1411,21 @@ function initializeDirectoryIds(
 	return ids;
 }
 
+function initializeCollectionBaselines(
+	runtime: EngineRuntime,
+	collections: ReadonlyArray<CollectionRuntimeConfig>,
+	initialBaselines?: Record<string, ReadonlyArray<Record<string, unknown>>>,
+) {
+	const baselines = new Map<string, ReadonlyMap<string, Record<string, unknown>>>();
+	for (const collection of collections) {
+		const rows = initialBaselines?.[collection.name] ?? runtime.dispatch<Record<string, unknown>[]>("dumpCollection", {
+			collection: collection.name,
+		});
+		baselines.set(collection.name, toEntityMap(rows));
+	}
+	return baselines;
+}
+
 function buildWriteKeyByCollection(
 	collections: ReadonlyArray<CollectionRuntimeConfig>,
 	sharedFiles: ReadonlyArray<SharedFileGroup>,
@@ -1356,12 +1475,102 @@ function hostFromPersistence(persistence: PersistenceState) {
 	return persistence.host;
 }
 
+function isBrowserStorageHost(host: EngineStorageHost | undefined): host is EngineStorageHost & { readonly __proseqlBrowserStorageHost: true } {
+	return host?.__proseqlBrowserStorageHost === true;
+}
+
+function markCollectionDirty(persistence: PersistenceState | undefined, collection: string) {
+	if (!persistence || !isBrowserStorageHost(persistence.host)) return;
+	persistence.dirtyCollections.add(collection);
+}
+
+function updateCollectionBaseline(
+	persistence: PersistenceState,
+	collection: string,
+	rows: ReadonlyArray<Record<string, unknown>>,
+) {
+	persistence.collectionBaselines.set(collection, toEntityMap(rows));
+	persistence.dirtyCollections.delete(collection);
+}
+
+function markCollectionPersisted(
+	persistence: PersistenceState,
+	collection: CollectionRuntimeConfig,
+	rows: ReadonlyArray<Record<string, unknown>>,
+) {
+	updateDirectoryBaseline(persistence, collection, rows);
+	updateCollectionBaseline(persistence, collection.name, rows);
+	if (isBrowserStorageHost(persistence.host) && (collection.raw.directory || collection.raw.file)) {
+		persistence.collectionsAwaitingExternalMerge.add(collection.name);
+	}
+}
+
+function mergeExternalRowsWithLocalDelta(
+	baseline: ReadonlyMap<string, Record<string, unknown>>,
+	externalRows: ReadonlyArray<Record<string, unknown>>,
+	localRows: ReadonlyArray<Record<string, unknown>>,
+) {
+	const external = new Map(toEntityMap(externalRows));
+	const local = toEntityMap(localRows);
+	const merged = new Map(external);
+	for (const [id, row] of local) {
+		const baselineRow = baseline.get(id);
+		if (baselineRow === undefined || rowsFingerprint([baselineRow]) !== rowsFingerprint([row])) {
+			merged.set(id, row);
+		}
+	}
+	for (const [id] of baseline) {
+		if (!local.has(id)) {
+			merged.delete(id);
+		}
+	}
+	return [...merged.values()];
+}
+
+function mergeExternalRowsWithPersistedBaseline(
+	baseline: ReadonlyMap<string, Record<string, unknown>>,
+	externalRows: ReadonlyArray<Record<string, unknown>>,
+) {
+	const external = new Map(toEntityMap(externalRows));
+	const missingBaselineRows = [...baseline.entries()].filter(([id]) => !external.has(id));
+	const hasExternalAddition = [...external.keys()].some((id) => !baseline.has(id));
+	const hasExternalMutation = [...external.entries()].some(([id, row]) => {
+		const baselineRow = baseline.get(id);
+		return baselineRow !== undefined && rowsFingerprint([baselineRow]) !== rowsFingerprint([row]);
+	});
+	if (missingBaselineRows.length === 0 || (!hasExternalAddition && !hasExternalMutation)) {
+		return externalRows;
+	}
+	const merged = new Map(external);
+	for (const [id, row] of missingBaselineRows) {
+		merged.set(id, row);
+	}
+	return [...merged.values()];
+}
+
 function clearBackgroundError(persistence: PersistenceState) {
 	persistence.backgroundError = undefined;
 }
 
 function reportBackgroundReloadError(error: unknown) {
 	console.error("[proseql/engine] external reload failed", error);
+}
+
+function isPersistenceOpen(persistence: PersistenceState) {
+	return persistence.lifecycle.status === "open";
+}
+
+function trackBackgroundReload(persistence: PersistenceState, task: Promise<void>) {
+	persistence.backgroundReloads.add(task);
+	void task.finally(() => {
+		persistence.backgroundReloads.delete(task);
+	});
+}
+
+async function waitForBackgroundReloads(persistence: PersistenceState) {
+	while (persistence.backgroundReloads.size > 0) {
+		await Promise.allSettled([...persistence.backgroundReloads]);
+	}
 }
 
 function trackWatcherStop(persistence: PersistenceState, stop: () => void) {
@@ -1427,6 +1636,90 @@ async function reloadCollectionsAtomicallyIfChanged(
 	}
 }
 
+async function persistCollectionRowsDirect(
+	persistence: PersistenceState,
+	collection: CollectionRuntimeConfig,
+	rows: ReadonlyArray<Record<string, unknown>>,
+) {
+	const map = toEntityMap(rows);
+	if (collection.raw.directory) {
+		const currentIds = new Set(map.keys());
+		const previousIds = persistence.directoryIds.get(collection.name) ?? new Set<string>();
+		for (const id of previousIds) {
+			if (!currentIds.has(id)) {
+				await Effect.runPromise(
+					Effect.provide(
+						removeEntityFromDirectory(collection.raw.directory, id, collection.raw.format ?? "json"),
+						persistence.layer,
+					),
+				);
+			}
+		}
+		for (const entity of rows) {
+			await Effect.runPromise(
+				Effect.provide(
+					saveEntityToDirectory(
+						collection.raw.directory,
+						entity as never,
+						collection.schema as never,
+						collection.raw.format ?? "json",
+					),
+					persistence.layer,
+				),
+			);
+		}
+		persistence.directoryIds.set(collection.name, currentIds);
+		markCollectionPersisted(persistence, collection, rows);
+		return;
+	}
+	if (collection.raw.file) {
+		await Effect.runPromise(
+			Effect.provide(
+				saveData(collection.raw.file, collection.schema as never, map as never, {
+					...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
+					...(collection.raw.format ? { format: collection.raw.format } : {}),
+					...(collection.raw.path ? { path: collection.raw.path } : {}),
+					...(collection.raw.id ? { derivedId: collection.raw.id } : {}),
+				}),
+				persistence.layer,
+			),
+		);
+		markCollectionPersisted(persistence, collection, rows);
+	}
+}
+
+async function reconcileCollectionWithExternalRows(
+	persistence: PersistenceState,
+	runtime: EngineRuntime,
+	collection: CollectionRuntimeConfig,
+	externalRows: ReadonlyArray<Record<string, unknown>>,
+) {
+	const baseline = persistence.collectionBaselines.get(collection.name) ?? new Map<string, Record<string, unknown>>();
+	if (persistence.dirtyCollections.has(collection.name)) {
+		const localRows = await currentCollectionRows(runtime, collection.name);
+		const mergedRows = mergeExternalRowsWithLocalDelta(baseline, externalRows, localRows);
+		await reloadCollectionIfChanged(runtime, collection.name, mergedRows);
+		await persistCollectionRowsDirect(persistence, collection, mergedRows);
+		persistence.collectionsAwaitingExternalMerge.delete(collection.name);
+		return;
+	}
+	if (persistence.collectionsAwaitingExternalMerge.has(collection.name)) {
+		const mergedRows = mergeExternalRowsWithPersistedBaseline(baseline, externalRows);
+		if (rowsFingerprint(mergedRows) !== rowsFingerprint(externalRows)) {
+			await reloadCollectionIfChanged(runtime, collection.name, mergedRows);
+			await persistCollectionRowsDirect(persistence, collection, mergedRows);
+			persistence.collectionsAwaitingExternalMerge.delete(collection.name);
+			return;
+		}
+		persistence.collectionsAwaitingExternalMerge.delete(collection.name);
+	}
+	if (await reloadCollectionIfChanged(runtime, collection.name, externalRows)) {
+		updateDirectoryBaseline(persistence, collection, externalRows);
+	}
+	persistence.collectionsAwaitingExternalMerge.delete(collection.name);
+	updateCollectionBaseline(persistence, collection.name, externalRows);
+}
+
 function updateDirectoryBaseline(
 	persistence: PersistenceState,
 	collection: CollectionRuntimeConfig,
@@ -1444,25 +1737,27 @@ function updateDirectoryBaseline(
 }
 
 function matchesWatchedFile(filename: string | null, file: string) {
-	return filename === null || resolve(filename) === resolve(file);
+	return matchesComparableFile(filename, file);
 }
 
 function touchesWatchedDirectory(filename: string | null, directory: string) {
-	if (filename === null) return true;
-	const eventPath = resolve(filename);
-	const target = resolve(directory);
-	return eventPath === target || eventPath.startsWith(`${target}/`);
+	return isWithinComparableDirectory(filename, directory);
 }
 
 function runBackgroundReload(
 	persistence: PersistenceState,
 	task: () => Promise<void>,
+	options?: { readonly skipFlush?: boolean },
 ) {
-	void promiseCall(async () => {
-		try {
-			await persistence.saver.flush();
-		} catch {
-			return;
+	if (!isPersistenceOpen(persistence)) return;
+	const reloadTask = promiseCall(async () => {
+		if (!isPersistenceOpen(persistence)) return;
+		if (!options?.skipFlush) {
+			try {
+				await persistence.saver.flush();
+			} catch {
+				return;
+			}
 		}
 		try {
 			await task();
@@ -1473,11 +1768,12 @@ function runBackgroundReload(
 	}).catch((error) => {
 		reportBackgroundReloadError(error);
 	});
+	trackBackgroundReload(persistence, reloadTask);
 }
 
 async function loadLegacyCollectionRows(
 	collection: CollectionRuntimeConfig,
-	host: NodeEngineStorageHost,
+	host: EngineStorageHost,
 	layer: Layer.Layer<any>,
 ): Promise<ReadonlyArray<Record<string, unknown>>> {
 	if (collection.raw.directory) {
@@ -1528,7 +1824,7 @@ async function loadLegacyCollectionRows(
 
 async function loadLegacyFileCollections(
 	group: SharedFileGroup,
-	host: NodeEngineStorageHost,
+	host: EngineStorageHost,
 	layer: Layer.Layer<any>,
 ) {
 	if (group.collections.length > 1 && group.collections.every((collection) => !collection.raw.path)) {
@@ -1579,56 +1875,87 @@ async function registerLegacyWatchers(runtime: EngineRuntime, persistence: Persi
 	}
 
 	for (const [file, collections] of fileGroups) {
+		const supportsDirtyMerge =
+			isBrowserStorageHost(persistence.host) && collections.length === 1 && !collections[0]?.raw.path;
 		const reload = () => {
-			runBackgroundReload(persistence, async () => {
-				const rowsByCollection = await loadLegacyFileCollections(
-					{ file, collections },
-					persistence.host,
-					persistence.layer,
-				);
-				for (const collection of collections) {
-					await reloadCollectionIfChanged(
-						runtime,
-						collection.name,
-						rowsByCollection[collection.name] ?? [],
+			runBackgroundReload(
+				persistence,
+				async () => {
+					const rowsByCollection = await loadLegacyFileCollections(
+						{ file, collections },
+						persistence.host,
+						persistence.layer,
 					);
-				}
-			});
+					for (const collection of collections) {
+						const rows = rowsByCollection[collection.name] ?? [];
+						if (supportsDirtyMerge) {
+							await reconcileCollectionWithExternalRows(
+								persistence,
+								runtime,
+								collection,
+								rows,
+							);
+							continue;
+						}
+						await reloadCollectionIfChanged(runtime, collection.name, rows);
+						persistence.collectionsAwaitingExternalMerge.delete(collection.name);
+						updateCollectionBaseline(persistence, collection.name, rows);
+					}
+				},
+				{ skipFlush: supportsDirtyMerge },
+			);
 		};
 		if (await persistence.host.exists(file)) {
 			const stop = await persistence.host.watch(file, reload);
 			trackWatcherStop(persistence, stop);
 			continue;
 		}
-		const watchRoot = dirname(file);
-		if (!(await persistence.host.exists(watchRoot))) continue;
-		const stop = await persistence.host.watchDir(watchRoot, (event) => {
-			if (!matchesWatchedFile(event.filename, file)) return;
-			reload();
-		});
-		trackWatcherStop(persistence, stop);
+		const watchRoot = dirnameComparable(file);
+		if (!supportsDirtyMerge && !(await persistence.host.exists(watchRoot))) continue;
+		try {
+			const stop = await persistence.host.watchDir(watchRoot, (event) => {
+				if (!matchesWatchedFile(event.filename, file)) return;
+				reload();
+			});
+			trackWatcherStop(persistence, stop);
+		} catch {
+			continue;
+		}
 	}
 
 	for (const collection of persistence.collections) {
 		if (!collection.raw.directory) continue;
+		const supportsDirtyMerge = isBrowserStorageHost(persistence.host);
 		const watchRoot = (await persistence.host.exists(collection.raw.directory))
 			? collection.raw.directory
-			: dirname(collection.raw.directory);
-		if (!(await persistence.host.exists(watchRoot))) continue;
-		const stop = await persistence.host.watchDir(watchRoot, (event) => {
-			if (!touchesWatchedDirectory(event.filename, collection.raw.directory!)) return;
-			runBackgroundReload(persistence, async () => {
-				const rows = await loadLegacyCollectionRows(
-					collection,
-					persistence.host,
-					persistence.layer,
+			: dirnameComparable(collection.raw.directory);
+		if (!supportsDirtyMerge && !(await persistence.host.exists(watchRoot))) continue;
+		try {
+			const stop = await persistence.host.watchDir(watchRoot, (event) => {
+				if (!touchesWatchedDirectory(event.filename, collection.raw.directory!)) return;
+				runBackgroundReload(
+					persistence,
+					async () => {
+						const rows = await loadLegacyCollectionRows(
+							collection,
+							persistence.host,
+							persistence.layer,
+						);
+						if (supportsDirtyMerge) {
+							await reconcileCollectionWithExternalRows(persistence, runtime, collection, rows);
+							return;
+						}
+						if (await reloadCollectionIfChanged(runtime, collection.name, rows)) {
+							updateDirectoryBaseline(persistence, collection, rows);
+						}
+					},
+					{ skipFlush: supportsDirtyMerge },
 				);
-				if (await reloadCollectionIfChanged(runtime, collection.name, rows)) {
-					updateDirectoryBaseline(persistence, collection, rows);
-				}
 			});
-		});
-		trackWatcherStop(persistence, stop);
+			trackWatcherStop(persistence, stop);
+		} catch {
+			continue;
+		}
 	}
 }
 
@@ -1659,7 +1986,7 @@ async function registerSourceWatchers(runtime: EngineRuntime, persistence: Persi
 			continue;
 		}
 		for (const root of source.roots) {
-			const watchRoot = (await persistence.host.exists(root.root)) ? root.root : dirname(root.root);
+			const watchRoot = (await persistence.host.exists(root.root)) ? root.root : dirnameComparable(root.root);
 			if (!(await persistence.host.exists(watchRoot))) continue;
 			const stop = await persistence.host.watchDir(watchRoot, () => {
 				runBackgroundReload(persistence, async () => {
@@ -1717,34 +2044,40 @@ async function runTransaction<A>(
 ): Promise<A> {
 	if (transactionGate.active) {
 		throw transactionBeginError(
-			transactionGate.context.getStore() === true
+			transactionGate.context?.getStore() === true || (!transactionGate.context && transactionGate.depth > 0)
 				? "nested transactions not supported"
 				: "another transaction is already active",
 		);
 	}
 	transactionGate.active = true;
+	transactionGate.depth += 1;
 	let txRuntime: EngineRuntime | undefined;
+	const execute = async () => {
+		txRuntime = await runtime.createTemporaryTransactionRuntime();
+		const operations: Array<Record<string, unknown>> = [];
+		const rollbackError = explicitRollbackError();
+		const txFacade = buildTransactionDatabaseFacade(txRuntime, collections, persistence, operations, rollbackError);
+		const result = await fn(txFacade as EngineTransactionDatabase<any>);
+		const snapshot = await txRuntime.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>(
+			"dumpAll",
+		);
+		const committed = await runtime.invoke<{ changedCollections: ReadonlyArray<string> }>(
+			"commitSnapshotTransaction",
+			{ collections: snapshot },
+		);
+		for (const collection of committed.changedCollections) {
+			markCollectionDirty(persistence, collection);
+			const key = persistence?.writeKeyByCollection.get(collection);
+			if (key) persistence?.saver.schedule(key);
+		}
+		return result;
+	};
 	try {
-		return await transactionGate.context.run(true, async () => {
-			txRuntime = await runtime.createTemporaryTransactionRuntime();
-			const operations: Array<Record<string, unknown>> = [];
-			const rollbackError = explicitRollbackError();
-			const txFacade = buildTransactionDatabaseFacade(txRuntime, collections, persistence, operations, rollbackError);
-			const result = await fn(txFacade as EngineTransactionDatabase<any>);
-			const snapshot = await txRuntime.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>(
-				"dumpAll",
-			);
-			const committed = await runtime.invoke<{ changedCollections: ReadonlyArray<string> }>(
-				"commitSnapshotTransaction",
-				{ collections: snapshot },
-			);
-			for (const collection of committed.changedCollections) {
-				const key = persistence?.writeKeyByCollection.get(collection);
-				if (key) persistence?.saver.schedule(key);
-			}
-			return result;
-		});
+		return transactionGate.context
+			? await transactionGate.context.run(true, execute)
+			: await execute();
 	} finally {
+		transactionGate.depth = Math.max(0, transactionGate.depth - 1);
 		try {
 			await txRuntime?.drop();
 		} catch {
@@ -1941,7 +2274,7 @@ function buildTransactionCollectionFacade(
 
 async function runDryRunMigrations(
 	config: DatabaseConfig,
-	_host: NodeEngineStorageHost,
+	_host: EngineStorageHost,
 	layer: Layer.Layer<any>,
 ): Promise<DryRunResult> {
 	return Effect.runPromise(

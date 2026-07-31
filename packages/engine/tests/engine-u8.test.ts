@@ -86,6 +86,12 @@ type ControlledHost = NodeEngineStorageHost & {
 	readonly setWriteDelay: (path: string, delayMs: number) => void;
 };
 
+type TriggerableFileWatchHost = ControlledHost & {
+	readonly watchCallbackFor: (path: string) => (() => void) | undefined;
+	readonly blockNextRead: (path: string) => { readonly started: Promise<void>; readonly release: () => void };
+	readonly readCountFor: (path: string) => number;
+};
+
 function createControlledHost(root: string): ControlledHost {
 	const base = createNodeEngineStorageHost();
 	const writes: Array<{ path: string; data: string }> = [];
@@ -126,6 +132,56 @@ function createControlledHost(root: string): ControlledHost {
 		setWriteDelay: (path, delayMs) => {
 			delays.set(path, delayMs);
 		},
+	};
+}
+
+function createTriggerableFileWatchHost(root: string): TriggerableFileWatchHost {
+	const base = createControlledHost(root);
+	const watchCallbacks = new Map<string, () => void>();
+	const readCounts = new Map<string, number>();
+	const blockedReads = new Map<
+		string,
+		{
+			readonly started: Promise<void>;
+			readonly release: () => void;
+			resolveStarted: () => void;
+			waitForRelease: Promise<void>;
+		}
+	>();
+	return {
+		...base,
+		read: async (path) => {
+			readCounts.set(path, (readCounts.get(path) ?? 0) + 1);
+			const blocked = blockedReads.get(path);
+			if (blocked) {
+				blocked.resolveStarted();
+				blockedReads.delete(path);
+				await blocked.waitForRelease;
+			}
+			return base.read(path);
+		},
+		watch: async (path, onChange) => {
+			watchCallbacks.set(path, onChange);
+			return () => {
+				if (watchCallbacks.get(path) === onChange) {
+					watchCallbacks.delete(path);
+				}
+			};
+		},
+		watchCallbackFor: (path) => watchCallbacks.get(path),
+		blockNextRead: (path) => {
+			let resolveStarted!: () => void;
+			const started = new Promise<void>((resolve) => {
+				resolveStarted = resolve;
+			});
+			let release!: () => void;
+			const waitForRelease = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			blockedReads.set(path, { started, release, resolveStarted, waitForRelease });
+			return { started, release };
+		},
+		readCountFor: (path) => readCounts.get(path) ?? 0,
 	};
 }
 
@@ -179,6 +235,7 @@ describe("@proseql/engine U8 fixes", () => {
 			expect(await db.users.findById("u2")).toEqual({ id: "u2", name: "new-user" });
 			expect(await db.teams.findById("t1")).toEqual({ id: "t1", name: "seed-team" });
 			expect(await db.settings.findById("s1")).toEqual({ id: "s1", value: "seed-setting" });
+			await db.close();
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
@@ -203,6 +260,7 @@ describe("@proseql/engine U8 fixes", () => {
 			expect(await createNodeEngineStorageHost().exists(join(root, "teams", "t1.json"))).toBe(true);
 			await db.teams.delete("t1");
 			await db.flush();
+			await db.close();
 			const reloaded = await createPersistentEngineDatabase(
 				{
 					teams: {
@@ -214,6 +272,7 @@ describe("@proseql/engine U8 fixes", () => {
 				} as const,
 			);
 			expect(await reloaded.teams.query()).toEqual([]);
+			await reloaded.close();
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
@@ -297,6 +356,7 @@ describe("@proseql/engine U8 fixes", () => {
 			expect(host.maxConcurrentWrites()).toBe(1);
 			expect(stored.authors.a1.name).toBe("Frank Herbert");
 			expect(stored.books.b1.year).toBe(1966);
+			await db.close();
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
@@ -328,6 +388,7 @@ describe("@proseql/engine U8 fixes", () => {
 			await expect(db.flush()).rejects.toBeInstanceOf(StorageError);
 			await db.flush();
 			expect(JSON.parse(await readFile(file, "utf8")).u1.name).toBe("Updated");
+			await db.close();
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
@@ -518,6 +579,7 @@ describe("@proseql/engine U8 fixes", () => {
 					},
 				],
 			});
+			await db.close();
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
@@ -705,6 +767,50 @@ describe("@proseql/engine U8 fixes", () => {
 		}
 	});
 
+	it("awaits in-flight external reloads during close and ignores stale watcher callbacks after shutdown", async () => {
+		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u8-close-drain-"));
+		try {
+			const file = join(root, "users.json");
+			await writeFile(file, JSON.stringify({ u1: { id: "u1", name: "Alice" } }));
+			const host = createTriggerableFileWatchHost(root);
+			const db = await createPersistentEngineDatabase(
+				{
+					users: {
+						schema: UserSchema,
+						file,
+						relationships: {},
+					},
+				} as const,
+				undefined,
+				{
+					writeDebounce: 5,
+					storageHost: host,
+					storageLayer: makeEngineStorageLayer(host),
+				},
+			);
+			const watchCallback = host.watchCallbackFor(file);
+			expect(watchCallback).toBeTypeOf("function");
+			const gate = host.blockNextRead(file);
+			watchCallback?.();
+			await gate.started;
+			let closed = false;
+			const closePromise = db.close().then(() => {
+				closed = true;
+			});
+			await sleep(25);
+			expect(closed).toBe(false);
+			gate.release();
+			await closePromise;
+			const readsAfterClose = host.readCountFor(file);
+			watchCallback?.();
+			await sleep(25);
+			expect(host.readCountFor(file)).toBe(readsAfterClose);
+			await rm(root, { recursive: true, force: true });
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
 	it("supports document sources writeback/outbox and documentGraph read-only metadata", async () => {
 		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u8-sources-"));
 		try {
@@ -769,6 +875,7 @@ describe("@proseql/engine U8 fixes", () => {
 			await expect(db.books.create({ id: "b2", title: "Nope", year: 2000 })).rejects.toBeInstanceOf(
 				OperationError,
 			);
+			await db.close();
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
@@ -886,6 +993,8 @@ describe("@proseql/engine U8 fixes", () => {
 			expect(
 				await literalDb.users.create({ id: "u4", name: "Carol", role: "admin", marker: null }),
 			).toEqual({ id: "u4", name: "Carol", role: "admin", marker: null });
+			await literalDb.close();
+			await db.close();
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}

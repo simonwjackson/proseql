@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>proseql plain module smoke</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "@proseql/browser": "/packages/browser/dist/index.js",
+          "@proseql/browser/path-to-key": "/packages/browser/dist/path-to-key.js",
+          "@proseql/effect": "/packages/effect/dist/index.js",
+          "@proseql/effect/browser": "/packages/effect/dist/browser.js",
+          "@proseql/engine/browser": "/packages/engine/dist/browser.js",
+          "@proseql/core": "/packages/core/dist/index.js",
+          "effect": "/node_modules/effect/dist/index.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app">plain module smoke</div>
+    <script type="module">
+      import { DEFAULT_STORAGE_KEY_PREFIX, pathToKey } from "@proseql/browser/path-to-key";
+
+      window.__PROSEQL_PLAIN_MODULE_RESULT__ = {
+        key: pathToKey("./books.json", "plain-module:"),
+        defaultKey: pathToKey("./books.json", DEFAULT_STORAGE_KEY_PREFIX),
+      };
+    </script>
+  </body>
+</html>

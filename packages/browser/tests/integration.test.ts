@@ -5,7 +5,7 @@ import {
 	StorageAdapterService as StorageAdapter,
 	yamlCodec,
 } from "@proseql/core";
-import { Chunk, Effect, Layer, Schema, Stream } from "effect";
+import { Effect, Layer, Schema, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	makeIndexedDBAdapter,
@@ -446,7 +446,7 @@ describe("Browser Storage Integration", () => {
 
 						// Verify we have 2 books
 						const allBooks = yield* Stream.runCollect(db.books.query());
-						expect(Chunk.toArray(allBooks)).toHaveLength(2);
+						expect(Array.from(allBooks)).toHaveLength(2);
 					}),
 				),
 			);
@@ -474,7 +474,7 @@ describe("Browser Storage Integration", () => {
 
 						// Data should be loaded from storage
 						const allBooks = yield* Stream.runCollect(db.books.query());
-						const books = Chunk.toArray(allBooks);
+						const books = Array.from(allBooks);
 						expect(books).toHaveLength(2);
 
 						// Verify specific records
@@ -703,7 +703,7 @@ describe("Browser Storage Integration", () => {
 
 						// Verify count
 						const allBooks = yield* Stream.runCollect(db.books.query());
-						expect(Chunk.toArray(allBooks)).toHaveLength(102);
+						expect(Array.from(allBooks)).toHaveLength(102);
 					}),
 				),
 			);
@@ -724,13 +724,13 @@ describe("Browser Storage Integration", () => {
 						);
 
 						const allBooks = yield* Stream.runCollect(db.books.query());
-						expect(Chunk.toArray(allBooks)).toHaveLength(102);
+						expect(Array.from(allBooks)).toHaveLength(102);
 
 						// Query with filter
 						const sciFiBooks = yield* Stream.runCollect(
 							db.books.query({ where: { genre: "sci-fi" } }),
 						);
-						expect(Chunk.toArray(sciFiBooks).length).toBeGreaterThan(0);
+						expect(Array.from(sciFiBooks).length).toBeGreaterThan(0);
 					}),
 				),
 			);
@@ -794,7 +794,7 @@ describe("Browser Storage Integration", () => {
 
 						// Verify deletion
 						const allBooks = yield* Stream.runCollect(db.books.query());
-						expect(Chunk.toArray(allBooks)).toHaveLength(0);
+						expect(Array.from(allBooks)).toHaveLength(0);
 
 						yield* Effect.promise(() => db.flush());
 					}),
@@ -887,7 +887,7 @@ describe("Browser Storage Integration", () => {
 						yield* Effect.promise(() => db.flush());
 
 						const allBooks = yield* Stream.runCollect(db.books.query());
-						expect(Chunk.toArray(allBooks)).toHaveLength(2);
+						expect(Array.from(allBooks)).toHaveLength(2);
 					}),
 				),
 			);
@@ -918,7 +918,7 @@ describe("Browser Storage Integration", () => {
 						);
 
 						const allBooks = yield* Stream.runCollect(db.books.query());
-						const books = Chunk.toArray(allBooks) as Array<
+						const books = Array.from(allBooks) as Array<
 							Record<string, unknown>
 						>;
 						expect(books).toHaveLength(2);
@@ -968,7 +968,7 @@ describe("Browser Storage Integration", () => {
 						yield* Effect.promise(() => db.flush());
 
 						const allBooks = yield* Stream.runCollect(db.books.query());
-						const books = Chunk.toArray(allBooks) as Array<
+						const books = Array.from(allBooks) as Array<
 							Record<string, unknown>
 						>;
 						expect(books).toHaveLength(2);
@@ -999,7 +999,7 @@ describe("Browser Storage Integration", () => {
 						);
 
 						const allBooks = yield* Stream.runCollect(db.books.query());
-						const books = Chunk.toArray(allBooks) as Array<
+						const books = Array.from(allBooks) as Array<
 							Record<string, unknown>
 						>;
 						expect(books).toHaveLength(2);

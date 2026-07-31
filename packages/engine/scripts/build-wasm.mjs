@@ -9,7 +9,8 @@ const packageDir = resolve(here, "..");
 const repoRoot = resolve(packageDir, "..", "..");
 const cratesDir = join(repoRoot, "crates");
 const wasmCrate = join(cratesDir, "proseql-wasm", "Cargo.toml");
-const outDir = join(packageDir, "dist", "wasm");
+const nodeOutDir = join(packageDir, "dist", "wasm");
+const browserOutDir = join(packageDir, "dist", "browser-wasm");
 const bindgenRoot = join(packageDir, ".wasm-bindgen-cli");
 const bindgenBin = join(bindgenRoot, "bin", "wasm-bindgen");
 const wasmBindgenVersion = "0.2.126";
@@ -21,7 +22,8 @@ const targetWasm = join(
   "proseql_wasm.wasm",
 );
 
-mkdirSync(outDir, { recursive: true });
+mkdirSync(nodeOutDir, { recursive: true });
+mkdirSync(browserOutDir, { recursive: true });
 
 const cargoArgs = [
   "build",
@@ -33,11 +35,18 @@ const cargoArgs = [
   "wasm32-unknown-unknown",
   "--release",
 ];
-const bindgenArgs = [
+const nodeBindgenArgs = [
   "--target",
   "experimental-nodejs-module",
   "--out-dir",
-  outDir,
+  nodeOutDir,
+  targetWasm,
+];
+const browserBindgenArgs = [
+  "--target",
+  "web",
+  "--out-dir",
+  browserOutDir,
   targetWasm,
 ];
 
@@ -60,7 +69,8 @@ if (!existsSync(targetWasm)) {
 }
 
 ensureMatchingBindgen();
-run(bindgenBin, bindgenArgs);
+run(bindgenBin, nodeBindgenArgs);
+run(bindgenBin, browserBindgenArgs);
 
 function hasExecutable(name) {
   try {

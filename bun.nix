@@ -231,6 +231,18 @@
     url = "https://registry.npmjs.org/yaml/-/yaml-2.8.4.tgz";
     hash = "sha512-ml/JPOj9fOQK8RNnWojA67GbZ0ApXAUlN2UQclwv2eVgTgn7O9gg9o7paZWKMp4g0H3nTLtS9LVzhkpOFIKzog==";
   };
+  "@proseql/effect" = {
+    out_path = "@proseql/effect";
+    name = "@proseql/effect@workspace:packages/effect";
+    url = "https://registry.npmjs.org/@proseql/effect/-/effect-workspace:packages/effect.tgz";
+    hash = "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+  };
+  "@proseql/engine" = {
+    out_path = "@proseql/engine";
+    name = "@proseql/engine@workspace:packages/engine";
+    url = "https://registry.npmjs.org/@proseql/engine/-/engine-workspace:packages/engine.tgz";
+    hash = "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+  };
   "@proseql/node" = {
     out_path = "@proseql/node";
     name = "@proseql/node@workspace:packages/node";
@@ -638,9 +650,9 @@
   };
   "fsevents" = {
     out_path = "fsevents";
-    name = "fsevents@2.3.3";
-    url = "https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz";
-    hash = "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==";
+    name = "fsevents@2.3.2";
+    url = "https://registry.npmjs.org/fsevents/-/fsevents-2.3.2.tgz";
+    hash = "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==";
   };
   "get-func-name" = {
     out_path = "get-func-name";
@@ -869,6 +881,24 @@
     url = "https://registry.npmjs.org/pathe/-/pathe-2.0.3.tgz";
     hash = "sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==";
   };
+  "playwright" = {
+    out_path = "playwright";
+    binaries = {
+      "playwright" = "../playwright/cli.js";
+    };
+    name = "playwright@1.62.1";
+    url = "https://registry.npmjs.org/playwright/-/playwright-1.62.1.tgz";
+    hash = "sha512-0M+L3LAD8/nm554LOla9Ayx0j0tmFZ0FBcoQ7F1VuVHpM/XpiC8RcDzBQB8W5+hA8L22THxELzeF+2WcUzvcLg==";
+  };
+  "playwright-core" = {
+    out_path = "playwright-core";
+    binaries = {
+      "playwright-core" = "../playwright-core/cli.js";
+    };
+    name = "playwright-core@1.62.1";
+    url = "https://registry.npmjs.org/playwright-core/-/playwright-core-1.62.1.tgz";
+    hash = "sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw==";
+  };
   "postcss" = {
     out_path = "postcss";
     name = "postcss@8.5.6";
@@ -901,6 +931,12 @@
     name = "rollup@4.57.1";
     url = "https://registry.npmjs.org/rollup/-/rollup-4.57.1.tgz";
     hash = "sha512-oQL6lgK3e2QZeQ7gcgIkS2YZPg5slw37hYufJ3edKlfQSGGm8ICoxswK15ntSzF/a8+h7ekRy7k7oWc3BQ7y8A==";
+  };
+  "rollup/fsevents" = {
+    out_path = "rollup/node_modules/fsevents";
+    name = "fsevents@2.3.3";
+    url = "https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz";
+    hash = "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==";
   };
   "shebang-command" = {
     out_path = "shebang-command";
@@ -1030,6 +1066,12 @@
     name = "vite-node@1.6.1";
     url = "https://registry.npmjs.org/vite-node/-/vite-node-1.6.1.tgz";
     hash = "sha512-YAXkfvGtuTzwWbDSACdJSg4A4DZiAqckWe90Zapc/sEX3XvHcw1NdurM/6od8J207tSDqNbSsgdCacBgvJKFuA==";
+  };
+  "vite/fsevents" = {
+    out_path = "vite/node_modules/fsevents";
+    name = "fsevents@2.3.3";
+    url = "https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz";
+    hash = "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==";
   };
   "vitest" = {
     out_path = "vitest";

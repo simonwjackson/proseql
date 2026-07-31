@@ -116,7 +116,15 @@ class MockIDBObjectStore implements IDBObjectStore {
 		throw new Error("Not implemented");
 	}
 	getAllKeys(): IDBRequest<IDBValidKey[]> {
-		throw new Error("Not implemented");
+		const request = new MockIDBRequest<IDBValidKey[]>();
+		queueMicrotask(() => {
+			request.result = Array.from(this.store.keys());
+			request.readyState = "done";
+			if (request.onsuccess) {
+				request.onsuccess.call(request, new Event("success"));
+			}
+		});
+		return request;
 	}
 	createIndex(): IDBIndex {
 		throw new Error("Not implemented");
@@ -258,15 +266,39 @@ class MockIDBOpenDBRequest implements IDBOpenDBRequest {
 class MockIDBFactory implements IDBFactory {
 	private _databases: Map<string, MockIDBDatabase> = new Map();
 	private globalStore: Map<string, string>;
+	private failNextOpenCount = 0;
+	private blockNextOpenCount = 0;
 
 	constructor(store: Map<string, string>) {
 		this.globalStore = store;
+	}
+
+	failNextOpen(count = 1): void {
+		this.failNextOpenCount = count;
+	}
+
+	blockNextOpen(count = 1): void {
+		this.blockNextOpenCount = count;
 	}
 
 	open(name: string, _version?: number): IDBOpenDBRequest {
 		const request = new MockIDBOpenDBRequest();
 
 		queueMicrotask(() => {
+			if (this.failNextOpenCount > 0) {
+				this.failNextOpenCount -= 1;
+				request.error = new DOMException("open failed", "AbortError");
+				request.readyState = "done";
+				request.onerror?.call(request, new Event("error"));
+				return;
+			}
+			if (this.blockNextOpenCount > 0) {
+				this.blockNextOpenCount -= 1;
+				request.readyState = "done";
+				request.onblocked?.call(request, new Event("blocked"));
+				return;
+			}
+
 			let db = this._databases.get(name);
 			const isNew = !db;
 
@@ -470,6 +502,33 @@ describe("IndexedDBAdapter", () => {
 			expect(result.before).toBe(false);
 			expect(result.after).toBe(true);
 		});
+
+		it("returns false for missing extensionless paths without exact keys or children", async () => {
+			const { run } = createTestAdapter();
+
+			const before = await run(
+				Effect.gen(function* () {
+					const adapter = yield* StorageAdapter;
+					return yield* adapter.exists("./docs");
+				}),
+			);
+			expect(before).toBe(false);
+
+			await run(
+				Effect.gen(function* () {
+					const adapter = yield* StorageAdapter;
+					yield* adapter.write("./docs/file.json", "value");
+				}),
+			);
+
+			const after = await run(
+				Effect.gen(function* () {
+					const adapter = yield* StorageAdapter;
+					return yield* adapter.exists("./docs");
+				}),
+			);
+			expect(after).toBe(true);
+		});
 	});
 
 	// ========================================================================
@@ -538,6 +597,61 @@ describe("IndexedDBAdapter", () => {
 	// 13.6: Test database and object store are created on first access
 	// ========================================================================
 	describe("database creation", () => {
+		it("isolates cached opens by injected IndexedDB factory identity", async () => {
+			const storeA = new Map<string, string>();
+			const storeB = new Map<string, string>();
+			const factoryA = new MockIDBFactory(storeA);
+			const factoryB = new MockIDBFactory(storeB);
+			const adapterA = makeIndexedDBAdapter({
+				databaseName: "shared-db",
+				storeName: "collections",
+				indexedDB: factoryA,
+			});
+			const adapterB = makeIndexedDBAdapter({
+				databaseName: "shared-db",
+				storeName: "collections",
+				indexedDB: factoryB,
+			});
+
+			await Effect.runPromise(adapterA.write("./alpha.json", "A"));
+			expect(storeA.get("proseql:alpha.json")).toBe("A");
+			expect(storeB.has("proseql:alpha.json")).toBe(false);
+
+			await Effect.runPromise(adapterB.write("./beta.json", "B"));
+			expect(storeB.get("proseql:beta.json")).toBe("B");
+			expect(storeA.has("proseql:beta.json")).toBe(false);
+		});
+
+		it("evicts rejected opens from the cache so retries can succeed", async () => {
+			const factory = new MockIDBFactory(mockStore);
+			factory.failNextOpen();
+			const adapter = makeIndexedDBAdapter({
+				databaseName: "retry-db",
+				indexedDB: factory,
+			});
+
+			await expect(Effect.runPromise(adapter.write("./retry.json", "first"))).rejects.toMatchObject({
+				_tag: "StorageError",
+			});
+			await expect(Effect.runPromise(adapter.write("./retry.json", "second"))).resolves.toBeUndefined();
+			expect(mockStore.get("proseql:retry.json")).toBe("second");
+		});
+
+		it("evicts blocked opens from the cache so retries can succeed", async () => {
+			const factory = new MockIDBFactory(mockStore);
+			factory.blockNextOpen();
+			const adapter = makeIndexedDBAdapter({
+				databaseName: "blocked-db",
+				indexedDB: factory,
+			});
+
+			await expect(Effect.runPromise(adapter.write("./blocked.json", "first"))).rejects.toMatchObject({
+				_tag: "StorageError",
+			});
+			await expect(Effect.runPromise(adapter.write("./blocked.json", "second"))).resolves.toBeUndefined();
+			expect(mockStore.get("proseql:blocked.json")).toBe("second");
+		});
+
 		it("creates database and object store on first access", async () => {
 			const { run } = createTestAdapter({
 				databaseName: "testdb",

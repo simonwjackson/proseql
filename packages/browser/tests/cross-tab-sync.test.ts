@@ -2,6 +2,7 @@ import { StorageAdapterService as StorageAdapter } from "@proseql/core";
 import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeLocalStorageAdapter } from "../src/adapters/local-storage-adapter.js";
+import { makeWebStorageAdapter } from "../src/adapters/web-storage-adapter.js";
 
 // ============================================================================
 // Mock Storage Implementation
@@ -327,6 +328,51 @@ describe("Cross-Tab Sync", () => {
 			unsubscribe();
 
 			expect(mockWindow.state.listeners.length).toBe(0);
+		});
+	});
+
+	describe("storage identity isolation", () => {
+		it("does not cross-talk between different injected storage objects with the same prefix", async () => {
+			const storageA = new MockStorage();
+			const storageB = new MockStorage();
+			const onChange = vi.fn();
+			const watcher = makeWebStorageAdapter(storageA, { keyPrefix: "shared:" });
+			const writer = makeWebStorageAdapter(storageB, { keyPrefix: "shared:" });
+			const layer = Layer.succeed(StorageAdapter, watcher);
+			const unsubscribe = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const adapter = yield* StorageAdapter;
+						return yield* adapter.watch("./data/books.yaml", onChange);
+					}),
+					layer,
+				),
+			);
+
+			await Effect.runPromise(writer.write("./data/books.yaml", "value"));
+			expect(onChange).not.toHaveBeenCalled();
+			unsubscribe();
+		});
+
+		it("still shares notifications for distinct adapters over the same backing storage object", async () => {
+			const sharedStorage = new MockStorage();
+			const onChange = vi.fn();
+			const watcher = makeWebStorageAdapter(sharedStorage, { keyPrefix: "shared:" });
+			const writer = makeWebStorageAdapter(sharedStorage, { keyPrefix: "shared:" });
+			const layer = Layer.succeed(StorageAdapter, watcher);
+			const unsubscribe = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const adapter = yield* StorageAdapter;
+						return yield* adapter.watch("./data/books.yaml", onChange);
+					}),
+					layer,
+				),
+			);
+
+			await Effect.runPromise(writer.write("./data/books.yaml", "value"));
+			expect(onChange).toHaveBeenCalledTimes(1);
+			unsubscribe();
 		});
 	});
 

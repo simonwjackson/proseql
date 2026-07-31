@@ -2,9 +2,28 @@
   "name": "@proseql/browser",
   "version": "0.15.0",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bunx tsc --build",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "smoke:browser": "nix shell nixpkgs#nodejs nixpkgs#chromium -c sh -lc 'CHROMIUM_EXECUTABLE_PATH=$(command -v chromium) node ./tests/browser-smoke.mjs'"
+  },
   "dependencies": {
-    "@proseql/core": "workspace:*"
+    "@proseql/core": "workspace:*",
+    "@proseql/effect": "workspace:*",
+    "@proseql/engine": "workspace:*"
   },
   "peerDependencies": {
     "effect": "4.0.0-beta.60"

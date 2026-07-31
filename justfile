@@ -59,9 +59,13 @@ coverage-node:
 typecheck:
     bunx tsc --build
 
-# Verify npm packages include required built artifacts
+# Verify npm packages include required built artifacts and browser smoke coverage
 verify-packages:
-    bun run scripts/verify-package-artifacts.ts
+    bun run verify:packages
+
+# Run the real-browser smoke suite against the built browser packages
+browser-smoke:
+    bun run verify:browser
 
 # Run the first U9 parity corpus slice and emit a machine-readable report
 parity-corpus:

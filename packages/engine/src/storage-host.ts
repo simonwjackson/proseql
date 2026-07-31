@@ -2,11 +2,9 @@ import { randomBytes } from "node:crypto";
 import { promises as fs, watch as fsWatch } from "node:fs";
 import { dirname, join } from "node:path";
 import {
-	StorageAdapterService as StorageAdapter,
-	StorageError,
-	type StorageAdapterShape,
-} from "@proseql/core";
-import { Effect, Layer } from "effect";
+	makeEngineStorageLayer,
+	type EngineStorageHost,
+} from "./storage-host-shared.js";
 
 export interface NodeEngineStorageHostConfig {
 	readonly createMissingDirectories?: boolean;
@@ -20,39 +18,7 @@ const defaultConfig: Required<NodeEngineStorageHostConfig> = {
 	dirMode: 0o755,
 };
 
-export const toEngineStorageError = (
-	path: string,
-	operation: StorageError["operation"],
-	error: unknown,
-): StorageError =>
-	new StorageError({
-		path,
-		operation,
-		message: error instanceof Error ? error.message : `Unknown ${operation} error`,
-		cause: error,
-	});
-
-export interface NodeEngineStorageHost {
-	readonly read: (path: string) => Promise<string>;
-	readonly write: (path: string, data: string) => Promise<void>;
-	readonly append: (path: string, data: string) => Promise<void>;
-	readonly exists: (path: string) => Promise<boolean>;
-	readonly remove: (path: string) => Promise<void>;
-	readonly ensureDir: (path: string) => Promise<void>;
-	readonly listDirectory: (dirPath: string) => Promise<ReadonlyArray<string>>;
-	readonly listRecursive: (rootPath: string) => Promise<ReadonlyArray<string>>;
-	readonly watch: (
-		path: string,
-		onChange: () => void,
-	) => Promise<() => void>;
-	readonly watchDir: (
-		dirPath: string,
-		onChange: (event: {
-			readonly filename: string | null;
-			readonly type: "add" | "change" | "remove";
-		}) => void,
-	) => Promise<() => void>;
-}
+export type NodeEngineStorageHost = EngineStorageHost;
 
 export const createNodeEngineStorageHost = (
 	config: NodeEngineStorageHostConfig = {},
@@ -114,7 +80,7 @@ export const createNodeEngineStorageHost = (
 		listRecursive: async (rootPath) => {
 			const files: string[] = [];
 			const visit = async (dirPath: string) => {
-				let entries: any[];
+				let entries: Array<{ isDirectory(): boolean; isFile(): boolean; name: string }>;
 				try {
 					entries = await fs.readdir(dirPath, { withFileTypes: true });
 				} catch (error) {
@@ -140,34 +106,30 @@ export const createNodeEngineStorageHost = (
 			const watchers = new Map<string, ReturnType<typeof fsWatch>>();
 			const watchDirectory = async (watchedDir: string): Promise<void> => {
 				if (watchers.has(watchedDir)) return;
-				let entries: any[];
+				let entries: Array<{ isDirectory(): boolean; name: string }>;
 				try {
 					entries = await fs.readdir(watchedDir, { withFileTypes: true });
 				} catch (error) {
 					if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
 					throw error;
 				}
-				const watcher = fsWatch(
-					watchedDir,
-					{ persistent: false },
-					(eventType, filename) => {
-						const childPath = typeof filename === "string" ? join(watchedDir, filename) : null;
-						onChange({
-							filename: childPath,
-							type: eventType === "rename" ? "add" : "change",
-						});
-						if (childPath) {
-							void (async () => {
-								try {
-									const stat = await fs.stat(childPath);
-									if (stat.isDirectory()) await watchDirectory(childPath);
-								} catch {
-									// ignore races where the entry disappears before inspection
-								}
-							})();
-						}
-					},
-				);
+				const watcher = fsWatch(watchedDir, { persistent: false }, (eventType, filename) => {
+					const childPath = typeof filename === "string" ? join(watchedDir, filename) : null;
+					onChange({
+						filename: childPath,
+						type: eventType === "rename" ? "add" : "change",
+					});
+					if (childPath) {
+						void (async () => {
+							try {
+								const stat = await fs.stat(childPath);
+								if (stat.isDirectory()) await watchDirectory(childPath);
+							} catch {
+								// ignore races where the entry disappears before inspection
+							}
+						})();
+					}
+				});
 				watchers.set(watchedDir, watcher);
 				for (const entry of entries) {
 					if (entry.isDirectory()) await watchDirectory(join(watchedDir, entry.name));
@@ -182,70 +144,9 @@ export const createNodeEngineStorageHost = (
 	};
 };
 
-export const makeEngineStorageLayer = (
-	host: NodeEngineStorageHost,
-): Layer.Layer<any> => {
-	const adapter: StorageAdapterShape = {
-		read: (path: string) =>
-			Effect.tryPromise({
-				try: () => host.read(path),
-				catch: (error) => toEngineStorageError(path, "read", error),
-			}),
-		write: (path: string, data: string) =>
-			Effect.tryPromise({
-				try: () => host.write(path, data),
-				catch: (error) => toEngineStorageError(path, "write", error),
-			}),
-		append: (path: string, data: string) =>
-			Effect.tryPromise({
-				try: () => host.append(path, data),
-				catch: (error) => toEngineStorageError(path, "write", error),
-			}),
-		exists: (path: string) =>
-			Effect.tryPromise({
-				try: () => host.exists(path),
-				catch: (error) => toEngineStorageError(path, "read", error),
-			}),
-		remove: (path: string) =>
-			Effect.tryPromise({
-				try: () => host.remove(path),
-				catch: (error) => toEngineStorageError(path, "delete", error),
-			}),
-		ensureDir: (path: string) =>
-			Effect.tryPromise({
-				try: () => host.ensureDir(path),
-				catch: (error) => toEngineStorageError(path, "write", error),
-			}),
-		watch: (path: string, onChange: () => void) =>
-			Effect.tryPromise({
-				try: () => host.watch(path, onChange),
-				catch: (error) => toEngineStorageError(path, "watch", error),
-			}),
-		listDirectory: (dirPath: string) =>
-			Effect.tryPromise({
-				try: () => host.listDirectory(dirPath),
-				catch: (error) => toEngineStorageError(dirPath, "list", error),
-			}),
-		listRecursive: (rootPath: string) =>
-			Effect.tryPromise({
-				try: () => host.listRecursive(rootPath),
-				catch: (error) => toEngineStorageError(rootPath, "list", error),
-			}),
-		watchDir: (
-			dirPath: string,
-			onChange: (event: {
-				readonly filename: string | null;
-				readonly type: "add" | "change" | "remove";
-			}) => void,
-		) =>
-			Effect.tryPromise({
-				try: () => host.watchDir(dirPath, onChange),
-				catch: (error) => toEngineStorageError(dirPath, "watch", error),
-			}),
-	};
-	return Layer.succeed(StorageAdapter, adapter);
-};
+export { makeEngineStorageLayer } from "./storage-host-shared.js";
 
 export const makeNodeEngineStorageLayer = (
 	config: NodeEngineStorageHostConfig = {},
-): Layer.Layer<any> => makeEngineStorageLayer(createNodeEngineStorageHost(config));
+): import("effect").Layer.Layer<any> =>
+	makeEngineStorageLayer(createNodeEngineStorageHost(config));

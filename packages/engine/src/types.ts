@@ -218,7 +218,7 @@ export type EngineDatabaseOptions = {
 
 export type EnginePersistenceOptions = {
 	readonly writeDebounce?: number;
-	readonly storageHost?: import("./storage-host.js").NodeEngineStorageHost;
+	readonly storageHost?: import("./storage-host-shared.js").EngineStorageHost;
 	readonly storageLayer?: import("effect").Layer.Layer<any>;
 	readonly serializerRegistry?: import("@proseql/core").SerializerRegistryShape;
 	readonly _suppressInitialWrites?: boolean;

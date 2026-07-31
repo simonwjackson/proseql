@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
 	DuplicateKeyError,
 	FormatCodec,
@@ -545,6 +546,66 @@ describe("@proseql/effect", () => {
 		expect(fileWatchStops + dirWatchStops).toBe(fileWatchCalls + dirWatchCalls);
 		await expect(Effect.runPromise(leakedDb!.users.findById("u1"))).rejects.toBeInstanceOf(OperationError);
 		await expect(Effect.runPromise(leakedDb!.users.findById("u1"))).rejects.toMatchObject({ reason: "unknown-handle" });
+	});
+
+	it("defaults persistent root imports to the real Node storage host", async () => {
+		const tmp = await mkdtemp(join(tmpdir(), "proseql-effect-node-default-"));
+		const file = join(tmp, "users.json");
+		const PersistentUserSchema = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+			age: Schema.Number,
+			createdAt: Schema.optional(Schema.String),
+			updatedAt: Schema.optional(Schema.String)
+		});
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* createPersistentEffectDatabase(
+							{
+								users: {
+									schema: PersistentUserSchema,
+									file,
+									relationships: {}
+								}
+							} as const,
+							{ users: [] },
+							{ writeDebounce: 5 }
+						);
+						yield* db.users.create({ id: "u1", name: "Alice", age: 30 } as any);
+						yield* Effect.tryPromise(() => db.flush());
+					})
+				)
+			);
+			expect(existsSync(file)).toBe(true);
+			expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({
+				u1: expect.objectContaining({ id: "u1", name: "Alice", age: 30 }),
+			});
+			const reopened = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* createPersistentEffectDatabase(
+							{
+								users: {
+									schema: PersistentUserSchema,
+									file,
+									relationships: {}
+								}
+							} as const,
+							undefined,
+							{ writeDebounce: 5 }
+						);
+						return yield* Stream.runCollect(db.users.query({ sort: { id: "asc" } }));
+					})
+				)
+			);
+			expect([...reopened]).toEqual([
+				expect.objectContaining({ id: "u1", name: "Alice", age: 30 }),
+			]);
+		} finally {
+			await rm(tmp, { recursive: true, force: true });
+		}
 	});
 
 	it("supports persistence flush, dry-run, and close over provided core storage services", async () => {

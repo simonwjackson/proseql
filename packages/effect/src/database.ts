@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import {
 	CollectionNotFoundError,
 	type CollectionConfig,
@@ -39,16 +38,13 @@ import {
 	type UpdateManyResult,
 	ValidationError
 } from "@proseql/core";
-import {
-	createEngineDatabase,
-	createPersistentEngineDatabase,
-	type EngineCollection,
-	type EngineDatabaseOptions,
-	type EngineInitialData,
-	type EnginePersistenceOptions,
-	type GenerateEngineDatabase,
-	type GenerateEngineDatabaseWithPersistence,
-	WasmEngineDefectError
+import type {
+	EngineCollection,
+	EngineDatabaseOptions,
+	EngineInitialData,
+	EnginePersistenceOptions,
+	GenerateEngineDatabase,
+	GenerateEngineDatabaseWithPersistence,
 } from "@proseql/engine";
 import { Effect, Layer, Queue, Stream } from "effect";
 
@@ -59,6 +55,21 @@ export type RunnableEffect<A, E> = Effect.Effect<A, E, never> & {
 export type RunnableStream<A, E> = Stream.Stream<A, E, never> & {
 	readonly runPromise: Promise<ReadonlyArray<A>>;
 };
+
+type EffectEngineModule = {
+	readonly createEngineDatabase: typeof import("@proseql/engine").createEngineDatabase;
+	readonly createPersistentEngineDatabase: typeof import("@proseql/engine").createPersistentEngineDatabase;
+	readonly WasmEngineDefectError: typeof import("@proseql/engine").WasmEngineDefectError;
+};
+
+let nodeEngineModulePromise: Promise<EffectEngineModule> | undefined;
+let browserEngineModulePromise: Promise<EffectEngineModule> | undefined;
+
+const loadNodeEngineModule = (): Promise<EffectEngineModule> =>
+	nodeEngineModulePromise ??= import("@proseql/engine") as Promise<EffectEngineModule>;
+
+const loadBrowserEngineModule = (): Promise<EffectEngineModule> =>
+	browserEngineModulePromise ??= import("@proseql/engine/browser") as Promise<EffectEngineModule>;
 
 type KnownCoreError =
 	| NotFoundError
@@ -107,6 +118,12 @@ const knownErrorConstructors = [
 	PluginError
 ] as const;
 
+const joinComparablePath = (left: string, right: string): string => {
+	const normalizedLeft = left.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
+	const normalizedRight = right.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\//, "");
+	return normalizedLeft.length === 0 ? normalizedRight : `${normalizedLeft}/${normalizedRight}`;
+};
+
 const withRunPromise = <A, E>(effect: Effect.Effect<A, E, never>): RunnableEffect<A, E> => {
 	let cached: Promise<A> | undefined;
 	Object.defineProperty(effect, "runPromise", {
@@ -143,6 +160,9 @@ const isTaggedObject = (value: unknown): value is { _tag: string } =>
 const isKnownCoreError = (value: unknown): value is KnownCoreError =>
 	knownErrorConstructors.some((Ctor) => value instanceof Ctor);
 
+const isWasmEngineDefectError = (error: unknown): error is Error =>
+	error instanceof Error && error.name === "WasmEngineDefectError";
+
 const normalizeRejection = (error: unknown): Error => {
 	if (error instanceof Error) {
 		return error;
@@ -159,7 +179,8 @@ const normalizeRejection = (error: unknown): Error => {
 };
 
 const liftPromise = <A, E extends Error = Error>(
-	thunk: () => Promise<A>
+	thunk: () => Promise<A>,
+	isDefect: (error: Error) => boolean = () => false,
 ): Effect.Effect<A, E, never> =>
 	Effect.tryPromise({
 		try: () => thunk(),
@@ -167,7 +188,7 @@ const liftPromise = <A, E extends Error = Error>(
 	}).pipe(
 		Effect.catch((error) => {
 			const normalized = normalizeRejection(error);
-			if (normalized instanceof WasmEngineDefectError) {
+			if (isDefect(normalized) || isWasmEngineDefectError(normalized)) {
 				return Effect.die(normalized);
 			}
 			return Effect.fail(normalized as unknown as E);
@@ -294,7 +315,7 @@ const makePersistenceOptions = (
 							...event,
 							filename:
 								typeof event.filename === "string" && !event.filename.startsWith("/")
-									? join(dirPath, event.filename)
+									? joinComparablePath(dirPath, event.filename)
 									: event.filename
 						})
 					)
@@ -698,7 +719,7 @@ const adaptDatabase = <Config extends DatabaseConfig>(
 							return Effect.die(error.defect);
 						}
 						const normalized = normalizeRejection(error);
-						if (normalized instanceof WasmEngineDefectError) {
+						if (isWasmEngineDefectError(normalized)) {
 							return Effect.die(normalized);
 						}
 						return Effect.fail(normalized as unknown as E | TransactionError);
@@ -736,27 +757,37 @@ type CreateEffectDatabaseError =
 	| UniqueConstraintError
 	| CollectionNotFoundError;
 
-export const createEffectDatabase = <Config extends DatabaseConfig>(
+const createEffectDatabaseWithLoader = (
+	loadEngineModule: () => Promise<EffectEngineModule>,
+) => <Config extends DatabaseConfig>(
 	config: Config,
 	initialData?: { readonly [K in keyof ConfiguredCollections<Config>]?: ReadonlyArray<Record<string, unknown>> },
-	options?: EffectDatabaseOptions
+	options?: EffectDatabaseOptions,
 ): Effect.Effect<GenerateDatabase<Config>, CreateEffectDatabaseError> => {
 	const collectionNames = collectionNamesFromConfig(config);
-	return liftPromise<GenerateDatabase<Config>, CreateEffectDatabaseError>(async () => {
-		const db = await createEngineDatabase(
-			config,
-			initialData as EngineInitialData<Config> | undefined,
-			engineOptionsFrom(options)
-		);
-		return adaptDatabase(db, collectionNames);
-	});
+	let defectConstructor: EffectEngineModule["WasmEngineDefectError"] | undefined;
+	return liftPromise<GenerateDatabase<Config>, CreateEffectDatabaseError>(
+		async () => {
+			const engine = await loadEngineModule();
+			defectConstructor = engine.WasmEngineDefectError;
+			const db = await engine.createEngineDatabase(
+				config,
+				initialData as EngineInitialData<Config> | undefined,
+				engineOptionsFrom(options),
+			);
+			return adaptDatabase(db, collectionNames);
+		},
+		(error) => defectConstructor !== undefined && error instanceof defectConstructor,
+	);
 };
 
-export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
+const createPersistentEffectDatabaseWithLoader = (
+	loadEngineModule: () => Promise<EffectEngineModule>,
+) => <Config extends DatabaseConfig>(
 	config: Config,
 	initialData?: { readonly [K in keyof ConfiguredCollections<Config>]?: ReadonlyArray<Record<string, unknown>> },
 	persistenceConfig?: EffectDatabasePersistenceConfig,
-	options?: EffectDatabaseOptions
+	options?: EffectDatabaseOptions,
 ): Effect.Effect<
 	GenerateDatabaseWithPersistence<Config>,
 	| MigrationError
@@ -774,27 +805,34 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 	typeof StorageAdapter | typeof SerializerRegistryService
 > => {
 	const collectionNames = collectionNamesFromConfig(config);
+	let defectConstructor: EffectEngineModule["WasmEngineDefectError"] | undefined;
 	return Effect.gen(function* () {
 		const adapterOption = yield* Effect.serviceOption(StorageAdapter);
 		const serializerRegistryOption = yield* Effect.serviceOption(SerializerRegistryService);
 		const enginePersistence = makePersistenceOptions(
 			adapterOption._tag === "Some" ? adapterOption.value : undefined,
 			serializerRegistryOption._tag === "Some" ? serializerRegistryOption.value : undefined,
-			persistenceConfig
+			persistenceConfig,
 		);
-		const baseDb = yield* liftPromise(() =>
-			createPersistentEngineDatabase(
-				config,
-				initialData as EngineInitialData<Config> | undefined,
-				enginePersistence,
-				engineOptionsFrom(options)
-			).then((db) => adaptPersistentDatabase(db, collectionNames))
+		const baseDb = yield* liftPromise(
+			async () => {
+				const engine = await loadEngineModule();
+				defectConstructor = engine.WasmEngineDefectError;
+				const db = await engine.createPersistentEngineDatabase(
+					config,
+					initialData as EngineInitialData<Config> | undefined,
+					enginePersistence,
+					engineOptionsFrom(options),
+				);
+				return adaptPersistentDatabase(db, collectionNames);
+			},
+			(error) => defectConstructor !== undefined && error instanceof defectConstructor,
 		);
 		const baseClose = baseDb.close.bind(baseDb);
 		const close = makePersistentCloseOnce(
 			() => baseDb.flush(),
 			() => baseClose(),
-			options?.plugins
+			options?.plugins,
 		);
 		const db = Object.assign(baseDb, { close });
 		yield* Effect.addFinalizer(() => Effect.promise(() => close()).pipe(Effect.orDie));
@@ -816,6 +854,11 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		typeof StorageAdapter | typeof SerializerRegistryService
 	>;
 };
+
+export const createEffectDatabase = createEffectDatabaseWithLoader(loadNodeEngineModule);
+export const createPersistentEffectDatabase = createPersistentEffectDatabaseWithLoader(loadNodeEngineModule);
+export const createBrowserEffectDatabase = createEffectDatabaseWithLoader(loadBrowserEngineModule);
+export const createBrowserPersistentEffectDatabase = createPersistentEffectDatabaseWithLoader(loadBrowserEngineModule);
 
 export const unsafeLiftPromiseForTests = liftPromise;
 export const unsafeSubscriptionEffectToStreamForTests = subscriptionEffectToStream;

@@ -91,10 +91,13 @@ impl FsStorageHost {
                 let kind = Self::map_event_kind(&event.kind);
                 let filename = event
                     .paths
-                    .first()
-                    .and_then(|path| path.file_name())
-                    .and_then(|name| name.to_str())
-                    .map(str::to_owned)
+                    .iter()
+                    .rev()
+                    .find_map(|path| {
+                        path.file_name()
+                            .and_then(|name| name.to_str())
+                            .map(str::to_owned)
+                    })
                     .or_else(|| {
                         watch_root_for_handler
                             .file_name()

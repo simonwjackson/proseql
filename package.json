@@ -10,7 +10,8 @@
     "build:clean": "bun run clean && bun run build",
     "clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo *.tsbuildinfo dist/**/*.tsbuildinfo",
     "copy-license": "for dir in packages/*/; do cp LICENSE \"$dir\"; done",
-    "verify:packages": "bun run scripts/verify-package-artifacts.ts"
+    "verify:browser": "bun run --cwd packages/browser smoke:browser",
+    "verify:packages": "bun run scripts/verify-package-artifacts.ts && bun run verify:browser"
   },
   "dependencies": {
     "effect": "4.0.0-beta.60",
@@ -31,6 +32,8 @@
     "@types/node": "^25.6.0",
     "fast-check": "^3.23.2",
     "tinybench": "^3.0.8",
-    "vitest": "^1.1.1"
+    "vite": "^5.4.20",
+    "vitest": "^1.1.1",
+    "playwright": "^1.55.0"
   }
 }

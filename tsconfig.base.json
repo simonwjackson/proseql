@@ -15,9 +15,13 @@
       "@proseql/core": ["./packages/core/src/index.ts"],
       "@proseql/core/*": ["./packages/core/src/*"],
       "@proseql/engine": ["./packages/engine/src/index.ts"],
+      "@proseql/engine/browser": ["./packages/engine/src/browser.ts"],
       "@proseql/engine/*": ["./packages/engine/src/*"],
       "@proseql/effect": ["./packages/effect/src/index.ts"],
-      "@proseql/effect/*": ["./packages/effect/src/*"]
+      "@proseql/effect/browser": ["./packages/effect/src/browser.ts"],
+      "@proseql/effect/*": ["./packages/effect/src/*"],
+      "@proseql/browser": ["./packages/browser/src/index.ts"],
+      "@proseql/browser/*": ["./packages/browser/src/*"]
     }
   }
 }
