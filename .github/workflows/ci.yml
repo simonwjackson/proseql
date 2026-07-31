@@ -51,9 +51,12 @@ jobs:
             packages/effect/reports/corpus-report.json
             packages/effect/reports/examples-report.json
 
+  # Disabled by default until the Rust-engine package set and release order are
+  # finalized. scripts/release.ts currently publishes to npm, so all three jobs
+  # require the explicit NPM_PUBLISHING_ENABLED repository variable opt-in.
   release:
     needs: [test, typecheck, lint, parity-gate]
-    if: "${{ github.event_name != 'pull_request' && !startsWith(github.event.head_commit.message, 'chore: release') }}"
+    if: "${{ vars.NPM_PUBLISHING_ENABLED == 'true' && github.event_name != 'pull_request' && !startsWith(github.event.head_commit.message, 'chore: release') }}"
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -80,6 +83,7 @@ jobs:
 
   publish-npm:
     needs: [release]
+    if: "${{ vars.NPM_PUBLISHING_ENABLED == 'true' }}"
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -123,7 +127,7 @@ jobs:
 
   publish-gpr:
     needs: [release]
-    if: "${{ vars.PUBLISH_GPR == 'true' }}"
+    if: "${{ vars.NPM_PUBLISHING_ENABLED == 'true' && vars.PUBLISH_GPR == 'true' }}"
     runs-on: ubuntu-latest
     permissions:
       contents: read
