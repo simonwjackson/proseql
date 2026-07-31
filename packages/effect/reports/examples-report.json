@@ -1,0 +1,316 @@
+{
+  "phase": "phase-2-slice",
+  "generatedAt": "2026-07-31T00:49:22.731Z",
+  "summary": {
+    "totalExamples": 16,
+    "executedExamples": 12,
+    "runnableExamples": 9,
+    "skippedExamples": 4,
+    "xfailedExamples": 3,
+    "xpassedExamples": 0,
+    "passedExamples": 9,
+    "failedExamples": 0,
+    "coverageRate": 0.75,
+    "slicePassRate": 1
+  },
+  "results": [
+    {
+      "test": "01-basic-crud",
+      "expectation": "pass",
+      "status": "passed",
+      "category": "parity-mismatch",
+      "owner": "effect-adapter",
+      "core": {
+        "exitCode": 0,
+        "stdout": "Created: Alice <generated-id>\nBatch created 2 users\nFound by ID: Alice\nTotal users: 3\nUsers >= 30: 2\nUpdated age: 31\nUpserted: Diana created\nUpdated 2 users at TechCorp\nUpserted 1 users\nDeleted 1 young users\nDeleted: Alice\nNot found: users/nonexistent\nCaught with catchTag: {\n  fallback: true,\n  message: \"Entity with id \\\"nonexistent\\\" not found in collection \\\"users\\\"\",\n}",
+        "stderr": ""
+      },
+      "effect": {
+        "exitCode": 0,
+        "stdout": "Created: Alice <generated-id>\nBatch created 2 users\nFound by ID: Alice\nTotal users: 3\nUsers >= 30: 2\nUpdated age: 31\nUpserted: Diana created\nUpdated 2 users at TechCorp\nUpserted 1 users\nDeleted 1 young users\nDeleted: Alice\nNot found: users/nonexistent\nCaught with catchTag: {\n  fallback: true,\n  message: \"Entity with id \\\"nonexistent\\\" not found in collection \\\"users\\\"\",\n}",
+        "stderr": ""
+      },
+      "outputsMatch": true
+    },
+    {
+      "test": "02-filtering-and-selection",
+      "expectation": "pass",
+      "status": "passed",
+      "category": "parity-mismatch",
+      "owner": "effect-adapter",
+      "core": {
+        "exitCode": 0,
+        "stdout": "=== Comparison Operators ===\ncategory = \"electronics\": 4 results\ncategory != \"electronics\": 3 results\nprice >= 50 and < 200: 4 results\n\n=== String Operators ===\nname starts with \"W\": 2 results\nname ends with \"Arm\": 1 results\nname contains \"Desk\": 2 results\n\n=== Set Operators ===\ncategory in [electronics, accessories]: 5 results\ncategory not in [furniture]: 5 results\n\n=== Array Operators ===\ntags contains \"ergonomic\": 4 results\ntags has all [ergonomic, adjustable]: 2 results\ntags size = 2: 6 results\n\n=== Logical Operators ===\nprice < 50 OR furniture: 4 results\nprice >= 100 AND in stock: 2 results\nNOT accessories: 6 results\n(electronics OR furniture) AND in stock: 4 results\n\n=== Field Selection ===\nSelected fields: {\"name\":\"Mechanical Keyboard\",\"price\":149}\n\n=== Multi-Field Sorting ===\nSorted by category asc, price desc:\n  accessories — $25 — Desk Pad\n  electronics — $149 — Mechanical Keyboard\n  electronics — $79 — Webcam\n  electronics — $59 — Wireless Mouse\n  electronics — $39 — USB-C Hub\n  furniture — $599 — Standing Desk\n  furniture — $89 — Monitor Arm",
+        "stderr": ""
+      },
+      "effect": {
+        "exitCode": 0,
+        "stdout": "=== Comparison Operators ===\ncategory = \"electronics\": 4 results\ncategory != \"electronics\": 3 results\nprice >= 50 and < 200: 4 results\n\n=== String Operators ===\nname starts with \"W\": 2 results\nname ends with \"Arm\": 1 results\nname contains \"Desk\": 2 results\n\n=== Set Operators ===\ncategory in [electronics, accessories]: 5 results\ncategory not in [furniture]: 5 results\n\n=== Array Operators ===\ntags contains \"ergonomic\": 4 results\ntags has all [ergonomic, adjustable]: 2 results\ntags size = 2: 6 results\n\n=== Logical Operators ===\nprice < 50 OR furniture: 4 results\nprice >= 100 AND in stock: 2 results\nNOT accessories: 6 results\n(electronics OR furniture) AND in stock: 4 results\n\n=== Field Selection ===\nSelected fields: {\"name\":\"Mechanical Keyboard\",\"price\":149}\n\n=== Multi-Field Sorting ===\nSorted by category asc, price desc:\n  accessories — $25 — Desk Pad\n  electronics — $149 — Mechanical Keyboard\n  electronics — $79 — Webcam\n  electronics — $59 — Wireless Mouse\n  electronics — $39 — USB-C Hub\n  furniture — $599 — Standing Desk\n  furniture — $89 — Monitor Arm",
+        "stderr": ""
+      },
+      "outputsMatch": true
+    },
+    {
+      "test": "03-update-operators",
+      "expectation": "pass",
+      "status": "passed",
+      "category": "parity-mismatch",
+      "owner": "effect-adapter",
+      "core": {
+        "exitCode": 0,
+        "stdout": "=== Number Operators ===\n$increment quantity by 10: 60\n$decrement quantity by 5: 55\n$multiply price by 2: 298\n\n=== String Operators ===\n$append to name: \"Mechanical Keyboard (RGB)\"\n$prepend to description: \"Premium Cherry MX switches\"\n\n=== Array Operators ===\n$append to tags: [electronics, typing, mechanical]\n$prepend to tags: [featured, electronics, typing, mechanical]\n$remove \"typing\" from tags: [featured, electronics, mechanical]\n\n=== Boolean Operators ===\n$toggle featured: true\n$toggle again: false\n\n=== Explicit $set ===\n$set name: \"Premium Keyboard\"\n\n=== Combining Multiple Operators ===\nCombined update:\n  price: 248\n  quantity: 155\n  featured: true\n  tags: [featured, electronics, mechanical, sale]",
+        "stderr": ""
+      },
+      "effect": {
+        "exitCode": 0,
+        "stdout": "=== Number Operators ===\n$increment quantity by 10: 60\n$decrement quantity by 5: 55\n$multiply price by 2: 298\n\n=== String Operators ===\n$append to name: \"Mechanical Keyboard (RGB)\"\n$prepend to description: \"Premium Cherry MX switches\"\n\n=== Array Operators ===\n$append to tags: [electronics, typing, mechanical]\n$prepend to tags: [featured, electronics, typing, mechanical]\n$remove \"typing\" from tags: [featured, electronics, mechanical]\n\n=== Boolean Operators ===\n$toggle featured: true\n$toggle again: false\n\n=== Explicit $set ===\n$set name: \"Premium Keyboard\"\n\n=== Combining Multiple Operators ===\nCombined update:\n  price: 248\n  quantity: 155\n  featured: true\n  tags: [featured, electronics, mechanical, sale]",
+        "stderr": ""
+      },
+      "outputsMatch": true
+    },
+    {
+      "test": "04-nested-data",
+      "expectation": "pass",
+      "status": "passed",
+      "category": "parity-mismatch",
+      "owner": "effect-adapter",
+      "core": {
+        "exitCode": 0,
+        "stdout": "=== Nested Filtering ===\nrating = 5 (shape-mirroring): 3 books\nrating = 5 (dot-notation): 3 books\nviews > 700: 3 books\nauthor.country = \"USA\": 3 books\n\n=== Sorting on Nested Fields ===\nSorted by views (desc):\n  1500 views — The Hitchhiker's Guide\n  1200 views — Dune\n  800 views — Neuromancer\n  600 views — The Left Hand of Darkness\n  400 views — Solaris\n\n=== Deep Merge Updates ===\nUpdated views: 1500\nRating preserved: 5\nDescription preserved: Spice and sandworms\n\n=== Nested Operators ===\n$increment views by 100: 900\nMulti-path update — views: 800, rating: 5, country: US\n\n=== Aggregation on Nested Fields ===\nTotal books: 5\nTotal views: 5100\nAvg rating: 4.6\n\nBooks by country:\n  USA: 2\n  US: 1\n  Poland: 1\n  UK: 1",
+        "stderr": ""
+      },
+      "effect": {
+        "exitCode": 0,
+        "stdout": "=== Nested Filtering ===\nrating = 5 (shape-mirroring): 3 books\nrating = 5 (dot-notation): 3 books\nviews > 700: 3 books\nauthor.country = \"USA\": 3 books\n\n=== Sorting on Nested Fields ===\nSorted by views (desc):\n  1500 views — The Hitchhiker's Guide\n  1200 views — Dune\n  800 views — Neuromancer\n  600 views — The Left Hand of Darkness\n  400 views — Solaris\n\n=== Deep Merge Updates ===\nUpdated views: 1500\nRating preserved: 5\nDescription preserved: Spice and sandworms\n\n=== Nested Operators ===\n$increment views by 100: 900\nMulti-path update — views: 800, rating: 5, country: US\n\n=== Aggregation on Nested Fields ===\nTotal books: 5\nTotal views: 5100\nAvg rating: 4.6\n\nBooks by country:\n  USA: 2\n  US: 1\n  Poland: 1\n  UK: 1",
+        "stderr": ""
+      },
+      "outputsMatch": true
+    },
+    {
+      "test": "05-cursor-pagination",
+      "expectation": "pass",
+      "status": "passed",
+      "category": "parity-mismatch",
+      "owner": "effect-adapter",
+      "core": {
+        "exitCode": 0,
+        "stdout": "=== Offset-Based Pagination ===\nPage 1: Alpha, Bravo, Charlie\nPage 2: Delta, Echo, Foxtrot\n\n=== Cursor-Based Pagination ===\nPage 1: Alpha, Bravo, Charlie\n  endCursor: Charlie\n  hasNextPage: true\n\nPage 2: Delta, Echo, Foxtrot\n  endCursor: Foxtrot\n  hasNextPage: true\n\nPage 3: Golf, Hotel, India\n  endCursor: India\n  hasNextPage: true\n\nPage 4: Juliet\n  hasNextPage: false\n\n=== Cursor with Filter ===\nCategory \"a\" page 1: Alpha, Charlie, Echo\n  hasNextPage: true",
+        "stderr": ""
+      },
+      "effect": {
+        "exitCode": 0,
+        "stdout": "=== Offset-Based Pagination ===\nPage 1: Alpha, Bravo, Charlie\nPage 2: Delta, Echo, Foxtrot\n\n=== Cursor-Based Pagination ===\nPage 1: Alpha, Bravo, Charlie\n  endCursor: Charlie\n  hasNextPage: true\n\nPage 2: Delta, Echo, Foxtrot\n  endCursor: Foxtrot\n  hasNextPage: true\n\nPage 3: Golf, Hotel, India\n  endCursor: India\n  hasNextPage: true\n\nPage 4: Juliet\n  hasNextPage: false\n\n=== Cursor with Filter ===\nCategory \"a\" page 1: Alpha, Charlie, Echo\n  hasNextPage: true",
+        "stderr": ""
+      },
+      "outputsMatch": true
+    },
+    {
+      "test": "06-aggregation",
+      "expectation": "pass",
+      "status": "passed",
+      "category": "parity-mismatch",
+      "owner": "effect-adapter",
+      "core": {
+        "exitCode": 0,
+        "stdout": "=== Scalar Aggregation ===\nTotal orders: 7\nSum of prices: $1823\nMin price: $59\nMax price: $599\nAvg price: $260.42857142857144\n\n=== Filtered Aggregation ===\nDelivered orders: 3\nDelivered total: $1087\n\n=== GroupBy Category ===\n  electronics: 4 orders\n  furniture: 3 orders\n\n=== GroupBy Status with Sum ===\n  shipped: 3 orders, total $657, avg qty 2.6666666666666665\n  delivered: 3 orders, total $1087, avg qty 2\n  pending: 1 orders, total $79, avg qty 4",
+        "stderr": ""
+      },
+      "effect": {
+        "exitCode": 0,
+        "stdout": "=== Scalar Aggregation ===\nTotal orders: 7\nSum of prices: $1823\nMin price: $59\nMax price: $599\nAvg price: $260.42857142857144\n\n=== Filtered Aggregation ===\nDelivered orders: 3\nDelivered total: $1087\n\n=== GroupBy Category ===\n  electronics: 4 orders\n  furniture: 3 orders\n\n=== GroupBy Status with Sum ===\n  shipped: 3 orders, total $657, avg qty 2.6666666666666665\n  delivered: 3 orders, total $1087, avg qty 2\n  pending: 1 orders, total $79, avg qty 4",
+        "stderr": ""
+      },
+      "outputsMatch": true
+    },
+    {
+      "test": "07-computed-fields",
+      "expectation": "pass",
+      "status": "passed",
+      "category": "parity-mismatch",
+      "owner": "effect-adapter",
+      "core": {
+        "exitCode": 0,
+        "stdout": "=== Computed Fields in Results ===\n  Dune (1965) — classic: true, length: long\n  Neuromancer (1984) — classic: false, length: medium\n  The Left Hand of Darkness (1969) — classic: true, length: medium\n  Project Hail Mary (2021) — classic: false, length: long\n  The Hobbit (1937) — classic: true, length: medium\n\n=== Filter on Computed Fields ===\nClassics (year < 1980): 3 books\n  Dune (1965)\n  The Left Hand of Darkness (1969)\n  The Hobbit (1937)\nLong books (400+ pages): 2 books\n\n=== Sort by Computed Fields ===\nSorted by displayName (asc):\n  Dune (1965)\n  Neuromancer (1984)\n  Project Hail Mary (2021)\n  The Hobbit (1937)\n  The Left Hand of Darkness (1969)\n\n=== Select Computed Fields ===\nSelected displayName + isClassic:\n  {\"displayName\":\"Dune (1965)\",\"isClassic\":true}\n  {\"displayName\":\"Neuromancer (1984)\",\"isClassic\":false}\n  {\"displayName\":\"The Left Hand of Darkness (1969)\",\"isClassic\":true}\n  {\"displayName\":\"Project Hail Mary (2021)\",\"isClassic\":false}\n  {\"displayName\":\"The Hobbit (1937)\",\"isClassic\":true}",
+        "stderr": ""
+      },
+      "effect": {
+        "exitCode": 0,
+        "stdout": "=== Computed Fields in Results ===\n  Dune (1965) — classic: true, length: long\n  Neuromancer (1984) — classic: false, length: medium\n  The Left Hand of Darkness (1969) — classic: true, length: medium\n  Project Hail Mary (2021) — classic: false, length: long\n  The Hobbit (1937) — classic: true, length: medium\n\n=== Filter on Computed Fields ===\nClassics (year < 1980): 3 books\n  Dune (1965)\n  The Left Hand of Darkness (1969)\n  The Hobbit (1937)\nLong books (400+ pages): 2 books\n\n=== Sort by Computed Fields ===\nSorted by displayName (asc):\n  Dune (1965)\n  Neuromancer (1984)\n  Project Hail Mary (2021)\n  The Hobbit (1937)\n  The Left Hand of Darkness (1969)\n\n=== Select Computed Fields ===\nSelected displayName + isClassic:\n  {\"displayName\":\"Dune (1965)\",\"isClassic\":true}\n  {\"displayName\":\"Neuromancer (1984)\",\"isClassic\":false}\n  {\"displayName\":\"The Left Hand of Darkness (1969)\",\"isClassic\":true}\n  {\"displayName\":\"Project Hail Mary (2021)\",\"isClassic\":false}\n  {\"displayName\":\"The Hobbit (1937)\",\"isClassic\":true}",
+        "stderr": ""
+      },
+      "outputsMatch": true
+    },
+    {
+      "test": "08-full-text-search",
+      "expectation": "pass",
+      "status": "passed",
+      "category": "parity-mismatch",
+      "owner": "effect-adapter",
+      "core": {
+        "exitCode": 0,
+        "stdout": "=== Field-Level Search ===\ntitle $search \"dune\": 1 result — Dune\ntitle $search \"left hand darkness\": 1 result — The Left Hand of Darkness\n\n=== Multi-Field Search ===\n$search \"herbert dune\" across [title, author]: 1 result — Dune\n\n=== All-Fields Search (no fields specified) ===\n$search \"cyberpunk\" (all fields): 1 result — Snow Crash\n$search \"desert planet\" (all fields): 1 result — Dune\n\n=== With Search Index ===\nIndexed search \"foundation\": 1 result — Foundation\nIndexed multi-field \"gibson neuromancer\": 1 result — Neuromancer",
+        "stderr": ""
+      },
+      "effect": {
+        "exitCode": 0,
+        "stdout": "=== Field-Level Search ===\ntitle $search \"dune\": 1 result — Dune\ntitle $search \"left hand darkness\": 1 result — The Left Hand of Darkness\n\n=== Multi-Field Search ===\n$search \"herbert dune\" across [title, author]: 1 result — Dune\n\n=== All-Fields Search (no fields specified) ===\n$search \"cyberpunk\" (all fields): 1 result — Snow Crash\n$search \"desert planet\" (all fields): 1 result — Dune\n\n=== With Search Index ===\nIndexed search \"foundation\": 1 result — Foundation\nIndexed multi-field \"gibson neuromancer\": 1 result — Neuromancer",
+        "stderr": ""
+      },
+      "outputsMatch": true
+    },
+    {
+      "test": "09-query-with-population",
+      "expectation": "xfail",
+      "status": "xfailed",
+      "category": "upstream-example-bug",
+      "owner": "core",
+      "reason": "Fails unchanged under @proseql/core because the example misuses Stream.runCollect on an Effect-returning query. Keep excluded from the runnable slice until upstream is fixed.",
+      "core": {
+        "exitCode": 0,
+        "stdout": "=== Engineers sorted by name ===\n  Alice\n  Diana\n\n=== Posts page 1 (limit 2) ===\n  Design Systems\n  Effect Streams\n=== Posts page 2 (limit 2) ===\n  Intro to TypeScript\n\n=== Posts with populated author ===\n  \"Intro to TypeScript\" by Alice\n  \"Effect Streams\" by Alice\n  \"Design Systems\" by Charlie\n\n=== Companies with employees ===\n  TechCorp: Alice, Bob\n  DesignLab: Charlie, Diana\n\n=== Posts with author and their company ===\n  \"Intro to TypeScript\" by Alice @ TechCorp\n  \"Effect Streams\" by Alice @ TechCorp\n  \"Design Systems\" by Charlie @ DesignLab\n\n=== Users with selected fields ===\n  {\"email\":\"alice@tech.com\",\"id\":\"u1\",\"name\":\"Alice\"}\n  {\"email\":\"bob@tech.com\",\"id\":\"u2\",\"name\":\"Bob\"}\n  {\"email\":\"charlie@design.com\",\"id\":\"u3\",\"name\":\"Charlie\"}\n  {\"email\":\"diana@design.com\",\"id\":\"u4\",\"name\":\"Diana\"}\n\n=== Using Effect directly with Stream.runCollect ===",
+        "stderr": "TypeError: undefined is not an object (evaluating 'self.backing._tag')"
+      },
+      "effect": {
+        "exitCode": 1,
+        "stdout": "=== Engineers sorted by name ===\n  Alice\n  Diana\n\n=== Posts page 1 (limit 2) ===\n  Design Systems\n  Effect Streams\n=== Posts page 2 (limit 2) ===\n  Intro to TypeScript\n\n=== Posts with populated author ===\n  \"Intro to TypeScript\" by Alice\n  \"Effect Streams\" by Alice\n  \"Design Systems\" by Charlie\n\n=== Companies with employees ===\n  TechCorp: Alice, Bob\n  DesignLab: Charlie, Diana\n\n=== Posts with author and their company ===\n  \"Intro to TypeScript\" by Alice @ TechCorp\n  \"Effect Streams\" by Alice @ TechCorp\n  \"Design Systems\" by Charlie @ DesignLab\n\n=== Users with selected fields ===\n  {\"email\":\"alice@tech.com\",\"id\":\"u1\",\"name\":\"Alice\"}\n  {\"email\":\"bob@tech.com\",\"id\":\"u2\",\"name\":\"Bob\"}\n  {\"email\":\"charlie@design.com\",\"id\":\"u3\",\"name\":\"Charlie\"}\n  {\"email\":\"diana@design.com\",\"id\":\"u4\",\"name\":\"Diana\"}\n\n=== Using Effect directly with Stream.runCollect ===",
+        "stderr": "TypeError: undefined is not an object (evaluating 'self.backing._tag')"
+      },
+      "outputsMatch": true
+    },
+    {
+      "test": "10-lifecycle-hooks",
+      "expectation": "pass",
+      "status": "passed",
+      "category": "parity-mismatch",
+      "owner": "effect-adapter",
+      "core": {
+        "exitCode": 0,
+        "stdout": "=== Create with beforeCreate hook ===\n  [afterCreate] New user: \"Alice\" (<generated-id>)\n  [onChange] create on users\n  Name trimmed: \"Alice\"\n  Email lowered: \"alice@example.com\"\n  createdAt set: <iso-timestamp>\n\n=== Update with beforeUpdate hook ===\n  [afterUpdate] \"Alice\" → \"Alice Smith\"\n  [onChange] update on users\n  updatedAt set: <iso-timestamp>\n\n=== Delete with afterDelete hook ===\n  [afterDelete] Removed \"Alice Smith\"\n  [onChange] delete on users\n\n=== Hook Rejection ===\n  Rejected: Must be 18 or older\n  Hook: beforeCreate, Operation: create",
+        "stderr": ""
+      },
+      "effect": {
+        "exitCode": 0,
+        "stdout": "=== Create with beforeCreate hook ===\n  [afterCreate] New user: \"Alice\" (<generated-id>)\n  [onChange] create on users\n  Name trimmed: \"Alice\"\n  Email lowered: \"alice@example.com\"\n  createdAt set: <iso-timestamp>\n\n=== Update with beforeUpdate hook ===\n  [afterUpdate] \"Alice\" → \"Alice Smith\"\n  [onChange] update on users\n  updatedAt set: <iso-timestamp>\n\n=== Delete with afterDelete hook ===\n  [afterDelete] Removed \"Alice Smith\"\n  [onChange] delete on users\n\n=== Hook Rejection ===\n  Rejected: Must be 18 or older\n  Hook: beforeCreate, Operation: create",
+        "stderr": ""
+      },
+      "outputsMatch": true
+    },
+    {
+      "test": "11-persistence-setup",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets @proseql/node convenience APIs rather than the U9 Effect adapter surface."
+    },
+    {
+      "test": "12-file-persistence",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets @proseql/node convenience APIs rather than the U9 Effect adapter surface."
+    },
+    {
+      "test": "13-prose-format",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets @proseql/node convenience APIs rather than the U9 Effect adapter surface."
+    },
+    {
+      "test": "14-append-only-jsonl",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets @proseql/node convenience APIs rather than the U9 Effect adapter surface."
+    },
+    {
+      "test": "15-reactive-queries",
+      "expectation": "xfail",
+      "status": "xfailed",
+      "category": "upstream-example-bug",
+      "owner": "core",
+      "reason": "Fails unchanged under @proseql/core because the example still uses Effect 4-incompatible Effect.fork pipe syntax. Keep excluded until the upstream example is repaired.",
+      "core": {
+        "exitCode": 0,
+        "stdout": "=== watch() with filter ===",
+        "stderr": "TypeError: args[1] is not a function. (In 'args[1](args[0](self))', 'args[1]' is undefined)"
+      },
+      "effect": {
+        "exitCode": 1,
+        "stdout": "=== watch() with filter ===",
+        "stderr": "TypeError: args[1] is not a function. (In 'args[1](args[0](self))', 'args[1]' is undefined)"
+      },
+      "outputsMatch": true
+    },
+    {
+      "test": "16-advanced-features",
+      "expectation": "xfail",
+      "status": "xfailed",
+      "category": "upstream-example-bug",
+      "owner": "core",
+      "reason": "Fails unchanged under @proseql/core because the example still uses Effect 4-incompatible Effect.catchAll. Keep excluded until the upstream example is repaired.",
+      "core": {
+        "exitCode": 0,
+        "stdout": "=== ID Generation ===\n  UUID:        <generated-id>\n  NanoId:      <generated-id>\n  ULID:        <generated-id>\n  Timestamp:   <generated-id>\n  Prefixed:    <generated-id>\n  Typed:       <generated-id>\n\n=== Indexing ===\n  Indexed query (genre = \"sci-fi\"): 2 results\n  Compound index (genre + year): 1 result — Neuromancer\n  Nested index (metadata.rating = 5): 2 results\n\n=== Unique Constraints ===\n  Created \"Dune\" with ISBN 978-0441172719\n  UniqueConstraintError: Unique constraint violation on books: unique_isbn (isbn) = {\"isbn\":\"978-0441172719\"} already exists (id: <generated-id>)\n  Created review (u1, b1)\n  Compound UniqueConstraintError: Unique constraint violation on reviews: unique_userId_bookId (userId, bookId) = {\"bookId\":\"b1\",\"userId\":\"u1\"} already exists (id: <generated-id>)\n\n=== Transactions ===\n  After commit: 1 user, 1 post",
+        "stderr": "TypeError: Effect.catchAll is not a function. (In 'Effect.catchAll(() => Effect.succeed(\"rolled back\"))', 'Effect.catchAll' is undefined)"
+      },
+      "effect": {
+        "exitCode": 1,
+        "stdout": "=== ID Generation ===\n  UUID:        <generated-id>\n  NanoId:      <generated-id>\n  ULID:        <generated-id>\n  Timestamp:   <generated-id>\n  Prefixed:    <generated-id>\n  Typed:       <generated-id>\n\n=== Indexing ===\n  Indexed query (genre = \"sci-fi\"): 2 results\n  Compound index (genre + year): 1 result — Neuromancer\n  Nested index (metadata.rating = 5): 2 results\n\n=== Unique Constraints ===\n  Created \"Dune\" with ISBN 978-0441172719\n  UniqueConstraintError: Unique constraint violation on books: unique_isbn (isbn) = {\"isbn\":\"978-0441172719\"} already exists (id: <generated-id>)\n  Created review (u1, b1)\n  Compound UniqueConstraintError: Unique constraint violation on reviews: unique_userId_bookId (userId, bookId) = {\"bookId\":\"b1\",\"userId\":\"u1\"} already exists (id: <generated-id>)\n\n=== Transactions ===\n  After commit: 1 user, 1 post",
+        "stderr": "TypeError: Effect.catchAll is not a function. (In 'Effect.catchAll(() => Effect.succeed(\"rolled back\"))', 'Effect.catchAll' is undefined)"
+      },
+      "outputsMatch": true
+    }
+  ],
+  "failures": [],
+  "xfails": [
+    {
+      "test": "09-query-with-population",
+      "category": "upstream-example-bug",
+      "reason": "Fails unchanged under @proseql/core because the example misuses Stream.runCollect on an Effect-returning query. Keep excluded from the runnable slice until upstream is fixed.",
+      "status": "xfailed"
+    },
+    {
+      "test": "15-reactive-queries",
+      "category": "upstream-example-bug",
+      "reason": "Fails unchanged under @proseql/core because the example still uses Effect 4-incompatible Effect.fork pipe syntax. Keep excluded until the upstream example is repaired.",
+      "status": "xfailed"
+    },
+    {
+      "test": "16-advanced-features",
+      "category": "upstream-example-bug",
+      "reason": "Fails unchanged under @proseql/core because the example still uses Effect 4-incompatible Effect.catchAll. Keep excluded until the upstream example is repaired.",
+      "status": "xfailed"
+    }
+  ],
+  "skipList": [
+    {
+      "test": "11-persistence-setup",
+      "category": "non-applicable",
+      "reason": "Targets @proseql/node convenience APIs rather than the U9 Effect adapter surface.",
+      "owner": "effect-adapter"
+    },
+    {
+      "test": "12-file-persistence",
+      "category": "non-applicable",
+      "reason": "Targets @proseql/node convenience APIs rather than the U9 Effect adapter surface.",
+      "owner": "effect-adapter"
+    },
+    {
+      "test": "13-prose-format",
+      "category": "non-applicable",
+      "reason": "Targets @proseql/node convenience APIs rather than the U9 Effect adapter surface.",
+      "owner": "effect-adapter"
+    },
+    {
+      "test": "14-append-only-jsonl",
+      "category": "non-applicable",
+      "reason": "Targets @proseql/node convenience APIs rather than the U9 Effect adapter surface.",
+      "owner": "effect-adapter"
+    }
+  ]
+}

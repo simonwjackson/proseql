@@ -32,8 +32,27 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - run: nix develop --command bash -c "bun install && just lint"
 
+  parity-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates -> crates/target
+      - run: nix develop --command bash -c "bun install && just parity-gate"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parity-reports
+          path: |
+            packages/effect/reports/corpus-report.json
+            packages/effect/reports/examples-report.json
+
   release:
-    needs: [test, typecheck, lint]
+    needs: [test, typecheck, lint, parity-gate]
     if: "${{ github.event_name != 'pull_request' && !startsWith(github.event.head_commit.message, 'chore: release') }}"
     runs-on: ubuntu-latest
     permissions:

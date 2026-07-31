@@ -39,6 +39,10 @@ test-core:
 test-node:
     bun test packages/node/tests/
 
+# Test effect adapter package only
+test-effect:
+    bun test packages/effect/tests/
+
 # Test with coverage for all packages
 coverage:
     bun test --coverage packages/*/tests/
@@ -58,6 +62,23 @@ typecheck:
 # Verify npm packages include required built artifacts
 verify-packages:
     bun run scripts/verify-package-artifacts.ts
+
+# Run the first U9 parity corpus slice and emit a machine-readable report
+parity-corpus:
+    bun run packages/effect/scripts/run-corpus.mjs
+
+# Run examples 01-16 where compatible and emit a machine-readable report
+parity-examples:
+    bun run packages/effect/scripts/run-examples.mjs
+
+# Run the U9 parity gate end-to-end
+parity-gate:
+    bunx tsc --build
+    (cd packages/effect && bun run typecheck:tests)
+    bun test packages/effect/tests/
+    bun run packages/effect/scripts/run-corpus.mjs
+    bun run packages/effect/scripts/run-examples.mjs
+    bun run packages/effect/scripts/validate-parity-reports.mjs
 
 # Lint Korri-ready foundation paths
 lint:

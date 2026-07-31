@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/core" },
     { "path": "./packages/engine" },
+    { "path": "./packages/effect" },
     { "path": "./packages/node" },
     { "path": "./packages/rest" },
     { "path": "./packages/cli" }

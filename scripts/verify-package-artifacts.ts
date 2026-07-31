@@ -16,7 +16,7 @@ type PackFile = { path: string };
 type PackResult = { files: PackFile[] };
 
 const root = join(import.meta.dirname, "..");
-const packageNames = ["core", "engine", "node", "rest", "cli"];
+const packageNames = ["core", "engine", "effect", "node", "rest", "cli"];
 
 let failed = false;
 
@@ -106,11 +106,8 @@ function normalizeBinTargets(bin: PackageJson["bin"]): string[] {
 }
 
 function dryRunPack(packageDir: string): PackResult {
-	const output = execFileSync("npm", ["pack", "--dry-run", "--json"], {
-		cwd: packageDir,
-		encoding: "utf-8",
-		stdio: ["ignore", "pipe", "pipe"],
-	});
+	const output = runPackCommand(packageDir);
+
 
 	const parsed = JSON.parse(output) as PackResult[];
 	const result = parsed[0];
@@ -121,4 +118,34 @@ function dryRunPack(packageDir: string): PackResult {
 	}
 
 	return result;
+}
+
+function runPackCommand(packageDir: string): string {
+	try {
+		return execFileSync("npm", ["pack", "--dry-run", "--json"], {
+			cwd: packageDir,
+			encoding: "utf-8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+	} catch (error) {
+		if (!isMissingExecutable(error)) throw error;
+		return execFileSync(
+			"nix",
+			["shell", "nixpkgs#nodejs", "-c", "npm", "pack", "--dry-run", "--json"],
+			{
+				cwd: packageDir,
+				encoding: "utf-8",
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		);
+	}
+}
+
+function isMissingExecutable(error: unknown): boolean {
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		"code" in error &&
+		(error as { code?: unknown }).code === "ENOENT"
+	);
 }

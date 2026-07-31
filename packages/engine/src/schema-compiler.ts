@@ -294,9 +294,10 @@ function compileSchemaNode(
 		case "Arrays":
 		case "TupleType": {
 			if (ast.elements.length === 0 && ast.rest?.length === 1) {
+				const restEntry = ast.rest[0];
 				return {
 					kind: "array",
-					item: compileSchemaNode({ ast: ast.rest[0].type }, `${path}[]`, registrar),
+					item: compileSchemaNode({ ast: restEntry.type ?? restEntry }, `${path}[]`, registrar),
 				};
 			}
 			throw new Error(`Unsupported tuple schema at '${path}': only homogeneous arrays are supported`);

@@ -181,7 +181,9 @@ type EngineCollectionMap<Config, DB> = {
 export type EngineTransactionDatabase<Config> = EngineCollectionMap<
 	Config,
 	CoreGenerateDatabase<Config>
->;
+> & {
+	readonly rollback: () => Promise<never>;
+};
 
 export type GenerateEngineDatabase<Config> = EngineCollectionMap<
 	Config,
@@ -218,4 +220,6 @@ export type EnginePersistenceOptions = {
 	readonly writeDebounce?: number;
 	readonly storageHost?: import("./storage-host.js").NodeEngineStorageHost;
 	readonly storageLayer?: import("effect").Layer.Layer<any>;
+	readonly serializerRegistry?: import("@proseql/core").SerializerRegistryShape;
+	readonly _suppressInitialWrites?: boolean;
 };

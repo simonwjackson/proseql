@@ -1,0 +1,1364 @@
+{
+  "phase": "phase-2-slice",
+  "generatedAt": "2026-07-31T00:49:18.582Z",
+  "summary": {
+    "totalFiles": 97,
+    "executedFiles": 10,
+    "runnableFiles": 10,
+    "skippedFiles": 87,
+    "xfailedFiles": 0,
+    "xpassedFiles": 0,
+    "passedFiles": 10,
+    "failedFiles": 0,
+    "coverageRate": 0.10309278350515463,
+    "executedFraction": 0.10309278350515463,
+    "slicePassRate": 1,
+    "totalAssertions": 478,
+    "passedAssertions": 478,
+    "failedAssertions": 0
+  },
+  "results": [
+    {
+      "test": "aggregation.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "append-only.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "array-operators.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "codecs.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "computed-fields-zero-overhead.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "computed-fields.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "computed-types.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "compile-time-only",
+      "owner": "effect-adapter",
+      "reason": "Type-only or compile-time assertion suite; covered separately by the adapter's dedicated typecheck gate."
+    },
+    {
+      "test": "conditional-logic.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-computed-field-sanitization.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-create-effect.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-create-with-relationships-effect.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-delete-effect.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-delete-with-relationships-effect.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-methods-types.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "compile-time-only",
+      "owner": "effect-adapter",
+      "reason": "Type-only or compile-time assertion suite; covered separately by the adapter's dedicated typecheck gate."
+    },
+    {
+      "test": "crud-update-effect.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-update-with-relationships-effect.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-upsert-effect.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "cursor-pagination.test.ts",
+      "expectation": "pass",
+      "status": "passed",
+      "owner": "effect-adapter",
+      "exitCode": 0,
+      "tests": 60,
+      "passedTests": 60,
+      "failedTests": 0,
+      "stdout": "bun test v1.3.9 (cf6cdbbb)",
+      "stderr": "packages/effect/.tmp/corpus/cursor-pagination.test.ts:\n(pass) Cursor Pagination > test helpers > generateItems should create sequentially-IDed items\n(pass) Cursor Pagination > test helpers > generateItems IDs should sort correctly as strings [4.00ms]\n(pass) Cursor Pagination > test helpers > runCursorQuery should return a CursorPageResult [21.00ms]\n(pass) Cursor Pagination > test helpers > createTestDatabase should return a usable database [1.00ms]\n(pass) Cursor Pagination > forward pagination > first page returns correct items and hasNextPage = true [1.00ms]\n(pass) Cursor Pagination > forward pagination > second page via after: endCursor returns next items [2.00ms]\n(pass) Cursor Pagination > forward pagination > final page has hasNextPage = false [4.00ms]\n(pass) Cursor Pagination > forward pagination > can paginate through all items forward [3.00ms]\n(pass) Cursor Pagination > backward pagination > page via before cursor returns previous items\n(pass) Cursor Pagination > backward pagination > first page (before earliest) has hasPreviousPage = false\n(pass) Cursor Pagination > backward pagination > can paginate backward through items [1.00ms]\n(pass) Cursor Pagination > backward pagination > returns fewer items when near the beginning [1.00ms]\n(pass) Cursor Pagination > empty results > query matching no items returns empty items, null cursors, both has-flags false\n(pass) Cursor Pagination > empty results > forward pagination after last item returns empty result\n(pass) Cursor Pagination > empty results > backward pagination before first item returns empty result\n(pass) Cursor Pagination > empty results > forward pagination with non-existent after cursor returns empty result [1.00ms]\n(pass) Cursor Pagination > empty results > backward pagination with non-existent before cursor before all items returns empty result\n(pass) Cursor Pagination > stability > insert between page fetches does not cause duplicates or skips [1.00ms]\n(pass) Cursor Pagination > stability > insert after cursor position appears in next page correctly\n(pass) Cursor Pagination > stability > delete between page fetches maintains correct cursor position [1.00ms]\n(pass) Cursor Pagination > combined with populate > populated fields present in cursor page items via ref relationship [1.00ms]\n(pass) Cursor Pagination > combined with populate > populated fields present in cursor page items via inverse relationship\n(pass) Cursor Pagination > combined with populate > cursor pagination works with forward navigation on populated items [1.00ms]\n(pass) Cursor Pagination > combined with populate > cursor pagination works with backward navigation on populated items\n(pass) Cursor Pagination > combined with where > cursor applies after filtering, correct subset paginated [1.00ms]\n(pass) Cursor Pagination > combined with where > cursor backward pagination works with where filter [1.00ms]\n(pass) Cursor Pagination > combined with where > where filter that matches no items returns empty cursor result\n(pass) Cursor Pagination > combined with select > selected fields applied to page items with cursor metadata correct\n(pass) Cursor Pagination > combined with select > select with cursor key excluded still works for cursor extraction\n(pass) Cursor Pagination > combined with select > forward pagination with select works across multiple pages\n(pass) Cursor Pagination > combined with select > backward pagination with select works correctly [1.00ms]\n(pass) Cursor Pagination > combined with select > select with array notation works with cursor pagination\n(pass) Cursor Pagination > combined with select > select combined with where and cursor works correctly\n(pass) Cursor Pagination > combined with explicit sort > cursor key matches primary sort field with ascending order [1.00ms]\n(pass) Cursor Pagination > combined with explicit sort > forward pagination works with explicit ascending sort\n(pass) Cursor Pagination > combined with explicit sort > backward pagination works with explicit ascending sort [1.00ms]\n(pass) Cursor Pagination > combined with explicit sort > sort on non-id field with matching cursor key\n(pass) Cursor Pagination > combined with explicit sort > forward pagination on price field\n(pass) Cursor Pagination > combined with explicit sort > multi-field sort with cursor key matching primary sort field [1.00ms]\n(pass) Cursor Pagination > combined with explicit sort > explicit sort combined with where filter\n(pass) Cursor Pagination > combined with explicit sort > empty sort object injects implicit ascending sort on cursor key\n(pass) Cursor Pagination > combined with explicit sort > can paginate through all items with explicit ascending sort [1.00ms]\n(pass) Cursor Pagination > implicit sort > omitting sort with cursor key uses ascending order on cursor key\n(pass) Cursor Pagination > implicit sort > implicit sort produces same results as explicit ascending sort [1.00ms]\n(pass) Cursor Pagination > implicit sort > implicit sort on non-id field uses ascending order\n(pass) Cursor Pagination > implicit sort > forward pagination works with implicit sort [1.00ms]\n(pass) Cursor Pagination > implicit sort > backward pagination works with implicit sort\n(pass) Cursor Pagination > implicit sort > can paginate through all items with implicit sort [2.00ms]\n(pass) Cursor Pagination > implicit sort > implicit sort combined with where filter\n(pass) Cursor Pagination > implicit sort > implicit sort combined with select [1.00ms]\n(pass) Cursor Pagination > validation errors > both after and before set produces ValidationError [1.00ms]\n(pass) Cursor Pagination > validation errors > limit <= 0 produces ValidationError (zero)\n(pass) Cursor Pagination > validation errors > limit <= 0 produces ValidationError (negative)\n(pass) Cursor Pagination > validation errors > invalid cursor key that does not exist on entity produces ValidationError\n(pass) Cursor Pagination > validation errors > invalid nested cursor key produces ValidationError [1.00ms]\n(pass) Cursor Pagination > validation errors > cursor key mismatch with explicit sort field produces ValidationError\n(pass) Cursor Pagination > validation errors > cursor key mismatch with first field in multi-field sort produces ValidationError\n(pass) Cursor Pagination > validation errors > cursor key matching primary sort field does not produce error [1.00ms]\n(pass) Cursor Pagination > validation errors > cursor key matching primary field in multi-field sort does not produce error\n(pass) Cursor Pagination > validation errors > validation error includes proper error structure\n\n 60 pass\n 0 fail\n 424 expect() calls\nRan 60 tests across 1 file. [212.00ms]"
+    },
+    {
+      "test": "cursor-stream.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "database-document-graph.test.ts",
+      "expectation": "pass",
+      "status": "passed",
+      "owner": "effect-adapter",
+      "exitCode": 0,
+      "tests": 13,
+      "passedTests": 13,
+      "failedTests": 0,
+      "stdout": "bun test v1.3.9 (cf6cdbbb)",
+      "stderr": "packages/effect/.tmp/corpus/database-document-graph.test.ts:\n(pass) documentGraph database integration > loads merged graph data and exposes it through normal read APIs [44.00ms]\n(pass) documentGraph database integration > exposes documentGraph record provenance through a database helper [3.00ms]\n(pass) documentGraph database integration > exposes documentGraph skip diagnostics through a database helper [2.00ms]\n(pass) documentGraph database integration > rejects every mutation on a graph-owned collection without changing state [5.00ms]\n(pass) documentGraph database integration > rejects mutation of a graph-owned collection inside $transaction [4.00ms]\n(pass) documentGraph database integration > does not write any file when a mutation is attempted or flushed [2.00ms]\n(pass) documentGraph database integration > fails database creation when initialData targets a graph-owned collection [1.00ms]\n(pass) documentGraph database integration > fails database creation when the initial graph is invalid [1.00ms]\n(pass) documentGraph watcher reloads > reflects new data after a valid fragment change [206.00ms]\n(pass) documentGraph watcher reloads > updates documentGraph provenance after a valid reload [208.00ms]\n(pass) documentGraph watcher reloads > updates documentGraph diagnostics after a skip-policy reload [207.00ms]\n(pass) documentGraph watcher reloads > keeps last-known-good on an invalid reload, then recovers when fixed [412.00ms]\n(pass) documentGraph watcher reloads > does not detect an optional root that was absent at startup [208.00ms]\n\n 13 pass\n 0 fail\n 49 expect() calls\nRan 13 tests across 1 file. [1449.00ms]"
+    },
+    {
+      "test": "database-effect.test.ts",
+      "expectation": "pass",
+      "status": "passed",
+      "owner": "effect-adapter",
+      "exitCode": 0,
+      "tests": 59,
+      "passedTests": 59,
+      "failedTests": 0,
+      "stdout": "bun test v1.3.9 (cf6cdbbb)",
+      "stderr": "packages/effect/.tmp/corpus/database-effect.test.ts:\n(pass) createEffectDatabase > database creation > should create a database with all collections [19.00ms]\n(pass) createEffectDatabase > database creation > should create a database with empty initial data [1.00ms]\n(pass) createEffectDatabase > database creation > should have all CRUD methods on each collection [1.00ms]\n(pass) createEffectDatabase > query pipeline > should return all entities with no options [2.00ms]\n(pass) createEffectDatabase > query pipeline > should filter with where clause [2.00ms]\n(pass) createEffectDatabase > query pipeline > should filter with exact match\n(pass) createEffectDatabase > query pipeline > should sort results [1.00ms]\n(pass) createEffectDatabase > query pipeline > should paginate with offset and limit [1.00ms]\n(pass) createEffectDatabase > query pipeline > should select specific fields (array form)\n(pass) createEffectDatabase > query pipeline > should select specific fields (object form) [2.00ms]\n(pass) createEffectDatabase > query pipeline > should combine filter, sort, and pagination\n(pass) createEffectDatabase > query pipeline > should populate ref relationships [1.00ms]\n(pass) createEffectDatabase > query pipeline > should populate inverse relationships [1.00ms]\n(pass) createEffectDatabase > findById > should find an existing entity by id (O(1) lookup)\n(pass) createEffectDatabase > findById > should fail with NotFoundError for nonexistent id [1.00ms]\n(pass) createEffectDatabase > findById > should reflect mutations (find after create) [1.00ms]\n(pass) createEffectDatabase > findById > should fail after entity is deleted [1.00ms]\n(pass) createEffectDatabase > findById > should work with runPromise convenience API\n(pass) createEffectDatabase > findById > runPromise should reject for nonexistent id [2.00ms]\n(pass) createEffectDatabase > CRUD operations > should create an entity\n(pass) createEffectDatabase > CRUD operations > should create and then query the created entity [1.00ms]\n(pass) createEffectDatabase > CRUD operations > should update an entity\n(pass) createEffectDatabase > CRUD operations > should update with operators [1.00ms]\n(pass) createEffectDatabase > CRUD operations > should delete an entity\n(pass) createEffectDatabase > CRUD operations > should upsert: create when not found [1.00ms]\n(pass) createEffectDatabase > CRUD operations > should upsert: update when found [1.00ms]\n(pass) createEffectDatabase > CRUD operations > should createMany\n(pass) createEffectDatabase > cross-collection consistency > should share state across collections for foreign key validation [1.00ms]\n(pass) createEffectDatabase > cross-collection consistency > should fail on invalid foreign key\n(pass) createEffectDatabase > cross-collection consistency > mutations in one collection should be visible to queries in others\n(pass) createEffectDatabase > error handling > should fail with NotFoundError on update of nonexistent entity [1.00ms]\n(pass) createEffectDatabase > error handling > should fail with DuplicateKeyError on duplicate ID\n(pass) createEffectDatabase > error handling > should fail with NotFoundError on delete of nonexistent entity [1.00ms]\n(pass) createEffectDatabase > runPromise convenience API > query().runPromise should return an array of entities\n(pass) createEffectDatabase > runPromise convenience API > query().runPromise with filter should return filtered array [1.00ms]\n(pass) createEffectDatabase > runPromise convenience API > query().runPromise with sort/limit should return sorted subset\n(pass) createEffectDatabase > runPromise convenience API > create().runPromise should return the created entity [1.00ms]\n(pass) createEffectDatabase > runPromise convenience API > update().runPromise should return the updated entity\n(pass) createEffectDatabase > runPromise convenience API > delete().runPromise should return the deleted entity\n(pass) createEffectDatabase > runPromise convenience API > upsert().runPromise should return the upserted entity [1.00ms]\n(pass) createEffectDatabase > runPromise convenience API > create().runPromise should reject on error\n(pass) createEffectDatabase > runPromise convenience API > runPromise on query should be cached (same promise instance)\n(pass) createEffectDatabase > runPromise convenience API > runPromise on effect should be cached (same promise instance) [1.00ms]\n(pass) createEffectDatabase > runPromise convenience API > query result should still work as a Stream with Effect.gen\n(pass) createEffectDatabase > runPromise convenience API > CRUD result should still work as an Effect with pipe\n(pass) createPersistentEffectDatabase > persistence hooks > should create a database with flush and pendingCount [5.00ms]\n(pass) createPersistentEffectDatabase > persistence hooks > create should trigger a debounced save for persistent collections [5.00ms]\n(pass) createPersistentEffectDatabase > persistence hooks > update should trigger a debounced save [1.00ms]\n(pass) createPersistentEffectDatabase > persistence hooks > delete should trigger a debounced save [1.00ms]\n(pass) createPersistentEffectDatabase > persistence hooks > upsert should trigger a debounced save [1.00ms]\n(pass) createPersistentEffectDatabase > persistence hooks > mutations on non-persistent collections should NOT trigger saves [1.00ms]\n(pass) createPersistentEffectDatabase > persistence hooks > rapid mutations should coalesce into fewer writes [1.00ms]\n(pass) createPersistentEffectDatabase > persistence hooks > pendingCount should reflect pending writes [1.00ms]\n(pass) createPersistentEffectDatabase > persistence hooks > flush should execute all pending writes immediately [1.00ms]\n(pass) createPersistentEffectDatabase > persistence hooks > save captures latest state at write time (not mutation time) [1.00ms]\n(pass) createPersistentEffectDatabase > persistence hooks > existing non-persistent createEffectDatabase still works unchanged [1.00ms]\n(pass) createPersistentEffectDatabase > scoped lifecycle (acquireRelease cleanup) > scope close should flush pending writes automatically [1.00ms]\n(pass) createPersistentEffectDatabase > scoped lifecycle (acquireRelease cleanup) > scope close should clear pending timers after flush [1.00ms]\n(pass) createPersistentEffectDatabase > scoped lifecycle (acquireRelease cleanup) > scope close with no pending writes should be a no-op\n\n 59 pass\n 0 fail\n 153 expect() calls\nRan 59 tests across 1 file. [229.00ms]"
+    },
+    {
+      "test": "database-source-config.test.ts",
+      "expectation": "pass",
+      "status": "passed",
+      "owner": "effect-adapter",
+      "exitCode": 0,
+      "tests": 14,
+      "passedTests": 14,
+      "failedTests": 0,
+      "stdout": "bun test v1.3.9 (cf6cdbbb)",
+      "stderr": "packages/effect/.tmp/corpus/database-source-config.test.ts:\n(pass) source-oriented database config > uses config.collections as runtime collections and does not expose sources metadata [18.00ms]\n(pass) source-oriented database config > loads merged records from document sources through normal collections [17.00ms]\n(pass) source-oriented database config > writes newly-created records to the document source outbox on flush [11.00ms]\n(pass) source-oriented database config > updates existing records in their origin document [3.00ms]\n(pass) source-oriented database config > deletes existing records from their origin document and leaves the file [5.00ms]\n(pass) source-oriented database config > preserves unknown top-level sections when configured [3.00ms]\n(pass) source-oriented database config > stamps migrated versioned document-source sections before saving [3.00ms]\n(pass) source-oriented database config > surfaces document-source persistence errors through flush [3.00ms]\n(pass) source-oriented database config > document-source watcher reloads > updates a collection when a matched YAML file changes [152.00ms]\n(pass) source-oriented database config > document-source watcher reloads > loads a newly-added matched YAML file after debounce [157.00ms]\n(pass) source-oriented database config > document-source watcher reloads > removes origin records when a matched YAML file is removed [165.00ms]\n(pass) source-oriented database config > document-source watcher reloads > keeps previous good data when a reload introduces a duplicate record [156.00ms]\n(pass) source-oriented database config > document-source watcher reloads > keeps previous good data when a reload introduces an unknown collection [158.00ms]\n(pass) source-oriented database config > document-source watcher reloads > publishes reload events to watchById subscribers [194.00ms]\n\n 14 pass\n 0 fail\n 36 expect() calls\nRan 14 tests across 1 file. [1210.00ms]"
+    },
+    {
+      "test": "debounced-writer.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "deep-merge.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "derived-id.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "document-graph-config.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "document-graph-source.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "document-source.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "error-model.test.ts",
+      "expectation": "pass",
+      "status": "passed",
+      "owner": "effect-adapter",
+      "exitCode": 0,
+      "tests": 24,
+      "passedTests": 24,
+      "failedTests": 0,
+      "stdout": "bun test v1.3.9 (cf6cdbbb)",
+      "stderr": "packages/effect/.tmp/corpus/error-model.test.ts:\n(pass) CRUD error creation and _tag discrimination > NotFoundError has correct _tag and fields\n(pass) CRUD error creation and _tag discrimination > DuplicateKeyError has correct _tag and fields\n(pass) CRUD error creation and _tag discrimination > ForeignKeyError has correct _tag and fields\n(pass) CRUD error creation and _tag discrimination > ValidationError has correct _tag and issues [3.00ms]\n(pass) CRUD error creation and _tag discrimination > UniqueConstraintError has correct _tag and fields\n(pass) CRUD error creation and _tag discrimination > ConcurrencyError has correct _tag and fields\n(pass) CRUD error creation and _tag discrimination > OperationError has correct _tag and fields\n(pass) CRUD error creation and _tag discrimination > TransactionError has correct _tag and fields\n(pass) Query error creation and _tag discrimination > DanglingReferenceError has correct _tag and fields\n(pass) Query error creation and _tag discrimination > CollectionNotFoundError has correct _tag and fields\n(pass) Query error creation and _tag discrimination > PopulationError has correct _tag and fields\n(pass) Storage error creation and _tag discrimination > StorageError has correct _tag and fields [1.00ms]\n(pass) Storage error creation and _tag discrimination > SerializationError has correct _tag and fields\n(pass) Storage error creation and _tag discrimination > UnsupportedFormatError has correct _tag and fields\n(pass) _tag discrimination in union types > discriminates CRUD errors by _tag\n(pass) _tag discrimination in union types > discriminates across all error categories\n(pass) Effect.catchTag pattern matching > catches NotFoundError\n(pass) Effect.catchTag pattern matching > catches DuplicateKeyError and lets other errors through [1.00ms]\n(pass) Effect.catchTag pattern matching > catches ValidationError in a pipeline\n(pass) Effect.catchTag pattern matching > catches StorageError\n(pass) Effect.catchTag pattern matching > catches DanglingReferenceError\n(pass) Effect.catchTag pattern matching > chains multiple catchTag for different error types\n(pass) errors are instances of Error > TaggedErrors extend Error\n(pass) errors are instances of Error > TaggedErrors have a stack trace\n\n 24 pass\n 0 fail\n 51 expect() calls\nRan 24 tests across 1 file. [159.00ms]"
+    },
+    {
+      "test": "evaluate-query.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "fast-check-import.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "field-selection.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "file-watcher.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "filter-computed-fields.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "filter-stream.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "filter.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "filtering.test.ts",
+      "expectation": "pass",
+      "status": "passed",
+      "owner": "effect-adapter",
+      "exitCode": 0,
+      "tests": 55,
+      "passedTests": 55,
+      "failedTests": 0,
+      "stdout": "bun test v1.3.9 (cf6cdbbb)",
+      "stderr": "packages/effect/.tmp/corpus/filtering.test.ts:\n(pass) Comprehensive Filtering (Stream-based) > Basic Filtering > should filter by exact match (implicit $eq) [4.00ms]\n(pass) Comprehensive Filtering (Stream-based) > Basic Filtering > should filter by boolean fields\n(pass) Comprehensive Filtering (Stream-based) > Basic Filtering > should filter by multiple fields (AND logic)\n(pass) Comprehensive Filtering (Stream-based) > Basic Filtering > should handle empty where clause\n(pass) Comprehensive Filtering (Stream-based) > Basic Filtering > should handle undefined where clause\n(pass) Comprehensive Filtering (Stream-based) > Equality Operators > should filter with exact match (implicit $eq)\n(pass) Comprehensive Filtering (Stream-based) > Equality Operators > should filter with explicit $eq operator\n(pass) Comprehensive Filtering (Stream-based) > Equality Operators > should filter with $ne operator [1.00ms]\n(pass) Comprehensive Filtering (Stream-based) > Equality Operators > should handle $eq with undefined values\n(pass) Comprehensive Filtering (Stream-based) > Equality Operators > should handle $ne with undefined values\n(pass) Comprehensive Filtering (Stream-based) > Comparison Operators > should filter with $gt operator\n(pass) Comprehensive Filtering (Stream-based) > Comparison Operators > should filter with $gte operator\n(pass) Comprehensive Filtering (Stream-based) > Comparison Operators > should filter with $lt operator\n(pass) Comprehensive Filtering (Stream-based) > Comparison Operators > should filter with $lte operator\n(pass) Comprehensive Filtering (Stream-based) > Comparison Operators > should handle multiple comparison operators on same field [1.00ms]\n(pass) Comprehensive Filtering (Stream-based) > Comparison Operators > should filter with comparison operators on rating field\n(pass) Comprehensive Filtering (Stream-based) > String Operators > should filter with $startsWith operator\n(pass) Comprehensive Filtering (Stream-based) > String Operators > should filter with $endsWith operator\n(pass) Comprehensive Filtering (Stream-based) > String Operators > should filter with $contains operator\n(pass) Comprehensive Filtering (Stream-based) > String Operators > should handle case-sensitive string operations\n(pass) Comprehensive Filtering (Stream-based) > String Operators > should handle empty string in string operators [1.00ms]\n(pass) Comprehensive Filtering (Stream-based) > Array Operators > should filter with $in operator\n(pass) Comprehensive Filtering (Stream-based) > Array Operators > should filter with $nin operator\n(pass) Comprehensive Filtering (Stream-based) > Array Operators > should handle empty arrays in $in operator\n(pass) Comprehensive Filtering (Stream-based) > Array Operators > should handle empty arrays in $nin operator\n(pass) Comprehensive Filtering (Stream-based) > Array Operators > should work with $in on numeric fields\n(pass) Comprehensive Filtering (Stream-based) > Combined Operators > should combine multiple operators on different fields\n(pass) Comprehensive Filtering (Stream-based) > Combined Operators > should combine string and comparison operators\n(pass) Comprehensive Filtering (Stream-based) > Combined Operators > should handle complex queries with multiple operator types\n(pass) Comprehensive Filtering (Stream-based) > Combined Operators > should handle all operators on a single field [1.00ms]\n(pass) Comprehensive Filtering (Stream-based) > Edge Cases > should handle undefined values in data\n(pass) Comprehensive Filtering (Stream-based) > Edge Cases > should handle queries with no matches\n(pass) Comprehensive Filtering (Stream-based) > Edge Cases > should handle queries with empty where clause\n(pass) Comprehensive Filtering (Stream-based) > Edge Cases > should handle queries with undefined where clause\n(pass) Comprehensive Filtering (Stream-based) > Edge Cases > should handle fields that don't exist\n(pass) Comprehensive Filtering (Stream-based) > Edge Cases > should handle empty strings\n(pass) Comprehensive Filtering (Stream-based) > Edge Cases > should handle boolean field filtering with operators\n(pass) Comprehensive Filtering (Stream-based) > Edge Cases > should handle boolean field filtering correctly [1.00ms]\n(pass) String Operators Deep Dive (Stream-based) > $startsWith operator > should filter strings that start with a value\n(pass) String Operators Deep Dive (Stream-based) > $startsWith operator > should filter emails by domain\n(pass) String Operators Deep Dive (Stream-based) > $startsWith operator > should be case sensitive\n(pass) String Operators Deep Dive (Stream-based) > $startsWith operator > should work with product SKUs\n(pass) String Operators Deep Dive (Stream-based) > $endsWith operator > should filter strings that end with a value\n(pass) String Operators Deep Dive (Stream-based) > $endsWith operator > should filter usernames by suffix\n(pass) String Operators Deep Dive (Stream-based) > $endsWith operator > should work with product names\n(pass) String Operators Deep Dive (Stream-based) > $contains operator > should filter strings containing a value\n(pass) String Operators Deep Dive (Stream-based) > $contains operator > should find products by description content [1.00ms]\n(pass) String Operators Deep Dive (Stream-based) > $contains operator > should work with URLs\n(pass) String Operators Deep Dive (Stream-based) > $contains operator > should handle special characters\n(pass) String Operators Deep Dive (Stream-based) > Combined string operators > should combine multiple string operators\n(pass) String Operators Deep Dive (Stream-based) > Combined string operators > should combine string operators with equality\n(pass) String Operators Deep Dive (Stream-based) > Combined string operators > should combine different field operators\n(pass) String Operators Deep Dive (Stream-based) > String operator edge cases > should handle empty search strings\n(pass) String Operators Deep Dive (Stream-based) > String operator edge cases > should return no results for non-matching patterns\n(pass) String Operators Deep Dive (Stream-based) > String operator edge cases > should work with exact matches using string operators\n\n 55 pass\n 0 fail\n 98 expect() calls\nRan 55 tests across 1 file. [100.00ms]"
+    },
+    {
+      "test": "format-codec.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "full-text-search.test.ts",
+      "expectation": "pass",
+      "status": "passed",
+      "owner": "effect-adapter",
+      "exitCode": 0,
+      "tests": 173,
+      "passedTests": 173,
+      "failedTests": 0,
+      "stdout": "bun test v1.3.9 (cf6cdbbb)",
+      "stderr": "packages/effect/.tmp/corpus/full-text-search.test.ts:\n(pass) Full-text search: Basic Search (task 9) > 9.1: Test setup verification > should create database with books collection [21.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.1: Test setup verification > should have all test books loaded [2.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.1: Test setup verification > should have correct book fields [1.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.2: Field-level $search basic match > should match 'Dune' when searching for 'dune' [1.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.2: Field-level $search basic match > should return the full book object when matched [1.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.3: Case insensitivity > should match 'Dune' when searching for 'DUNE' (uppercase)\n(pass) Full-text search: Basic Search (task 9) > 9.3: Case insensitivity > should match 'Dune' when searching for 'DuNe' (mixed case) [1.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.3: Case insensitivity > should match 'Neuromancer' when searching for 'NEUROMANCER' [1.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.3: Case insensitivity > should match author case-insensitively\n(pass) Full-text search: Basic Search (task 9) > 9.4: Multi-term search > should match 'The Left Hand of Darkness' when searching for 'left hand darkness' [2.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.4: Multi-term search > should match when search terms are in different order than in title [1.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.4: Multi-term search > should not match if any search term is missing from the field\n(pass) Full-text search: Basic Search (task 9) > 9.4: Multi-term search > should match 'Foundation' when searching for 'foundation'\n(pass) Full-text search: Basic Search (task 9) > 9.4: Multi-term search > should match 'Snow Crash' when searching for 'snow crash' [1.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.5: Prefix matching > should match 'Neuromancer' when searching for prefix 'neuro'\n(pass) Full-text search: Basic Search (task 9) > 9.5: Prefix matching > should match 'Foundation' when searching for prefix 'found'\n(pass) Full-text search: Basic Search (task 9) > 9.5: Prefix matching > should match 'Dune' when searching for prefix 'du' [1.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.5: Prefix matching > should match 'Snow Crash' when searching for prefix 'cra'\n(pass) Full-text search: Basic Search (task 9) > 9.5: Prefix matching > should match with multi-term prefix search [1.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.5: Prefix matching > should match author with prefix search\n(pass) Full-text search: Basic Search (task 9) > 9.5: Prefix matching > should match description with prefix search\n(pass) Full-text search: Basic Search (task 9) > 9.6: No match > should return no results when searching for 'xyz123' in title [1.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.6: No match > should return no results when searching for nonexistent term in author\n(pass) Full-text search: Basic Search (task 9) > 9.6: No match > should return no results when searching for nonexistent term in description\n(pass) Full-text search: Basic Search (task 9) > 9.6: No match > should return no results when no tokens match any field [1.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.6: No match > should return no results for partial mismatch where only some tokens match\n(pass) Full-text search: Basic Search (task 9) > 9.7: Empty search string > should return all results when searching with empty string in title\n(pass) Full-text search: Basic Search (task 9) > 9.7: Empty search string > should return all results when searching with empty string in author\n(pass) Full-text search: Basic Search (task 9) > 9.7: Empty search string > should return all results when searching with empty string in description [1.00ms]\n(pass) Full-text search: Basic Search (task 9) > 9.7: Empty search string > should apply other filters when $search is empty\n(pass) Full-text search: Basic Search (task 9) > 9.7: Empty search string > should return same results as query without $search filter [1.00ms]\n(pass) Full-text search: Multi-Field Search (task 10) > 10.1: Top-level multi-field search > should match when terms span across specified fields\n(pass) Full-text search: Multi-Field Search (task 10) > 10.1: Top-level multi-field search > should match when all terms are in a single field\n(pass) Full-text search: Multi-Field Search (task 10) > 10.1: Top-level multi-field search > should return multiple matches when terms span different entities [1.00ms]\n(pass) Full-text search: Multi-Field Search (task 10) > 10.1: Top-level multi-field search > should not match when a term is missing from all specified fields\n(pass) Full-text search: Multi-Field Search (task 10) > 10.1: Top-level multi-field search > should support case-insensitive matching across fields [1.00ms]\n(pass) Full-text search: Multi-Field Search (task 10) > 10.1: Top-level multi-field search > should support prefix matching across fields\n(pass) Full-text search: Multi-Field Search (task 10) > 10.1: Top-level multi-field search > should match multiple books when terms are shared\n(pass) Full-text search: Multi-Field Search (task 10) > 10.2: Default all string fields search > should search all string fields when fields is omitted - author match [1.00ms]\n(pass) Full-text search: Multi-Field Search (task 10) > 10.2: Default all string fields search > should search all string fields when fields is omitted - title match\n(pass) Full-text search: Multi-Field Search (task 10) > 10.2: Default all string fields search > should search all string fields when fields is omitted - description match\n(pass) Full-text search: Multi-Field Search (task 10) > 10.2: Default all string fields search > should match when terms span across different string fields without specifying fields [1.00ms]\n(pass) Full-text search: Multi-Field Search (task 10) > 10.2: Default all string fields search > should search multiple string fields and find matches across entities\n(pass) Full-text search: Multi-Field Search (task 10) > 10.2: Default all string fields search > should not search non-string fields like year\n(pass) Full-text search: Multi-Field Search (task 10) > 10.2: Default all string fields search > should return multiple matches when query matches different entities [1.00ms]\n(pass) Full-text search: Multi-Field Search (task 10) > 10.2: Default all string fields search > should support prefix matching across all string fields\n(pass) Full-text search: Multi-Field Search (task 10) > 10.3: Single-field explicit search > should only search the specified field - title match\n(pass) Full-text search: Multi-Field Search (task 10) > 10.3: Single-field explicit search > should not match when term is in a non-specified field\n(pass) Full-text search: Multi-Field Search (task 10) > 10.3: Single-field explicit search > should not match when term is in description but only title is specified\n(pass) Full-text search: Multi-Field Search (task 10) > 10.3: Single-field explicit search > should only search author field when specified\n(pass) Full-text search: Multi-Field Search (task 10) > 10.3: Single-field explicit search > should not match title terms when only author is specified\n(pass) Full-text search: Multi-Field Search (task 10) > 10.3: Single-field explicit search > should only search description field when specified [1.00ms]\n(pass) Full-text search: Multi-Field Search (task 10) > 10.3: Single-field explicit search > should support prefix matching in single specified field\n(pass) Full-text search: Multi-Field Search (task 10) > 10.3: Single-field explicit search > should support multi-term search in single specified field\n(pass) Full-text search: Multi-Field Search (task 10) > 10.3: Single-field explicit search > should fail multi-term search when terms span excluded fields [1.00ms]\n(pass) Full-text search: Multi-Field Search (task 10) > 10.3: Single-field explicit search > should be case-insensitive in single-field search\n(pass) Full-text search: Relevance Scoring (task 11) > 11.1: Relevance ordering > should rank entity with higher relevance score first when multiple entities match\n(pass) Full-text search: Relevance Scoring (task 11) > 11.1: Relevance ordering > should rank entities with more term matches higher [1.00ms]\n(pass) Full-text search: Relevance Scoring (task 11) > 11.1: Relevance ordering > should order by relevance when multiple entities match the same query\n(pass) Full-text search: Relevance Scoring (task 11) > 11.2: Explicit sort overrides relevance > should sort by explicit sort option instead of relevance\n(pass) Full-text search: Relevance Scoring (task 11) > 11.2: Explicit sort overrides relevance > should sort by year descending when specified [1.00ms]\n(pass) Full-text search: Relevance Scoring (task 11) > 11.2: Explicit sort overrides relevance > should sort by title when specified, ignoring relevance [1.00ms]\n(pass) Full-text search: Relevance Scoring (task 11) > 11.2: Explicit sort overrides relevance > should apply explicit sort with field-level $search\n(pass) Full-text search: Relevance Scoring (task 11) > 11.2: Explicit sort overrides relevance > should apply explicit sort with top-level $search without fields\n(pass) Full-text search: Relevance Scoring (task 11) > 11.3: Exact match scores higher than prefix match > should rank exact 'Dune' above 'Duneland' when searching for 'dune'\n(pass) Full-text search: Relevance Scoring (task 11) > 11.3: Exact match scores higher than prefix match > should rank exact match higher even when prefix match is in a longer title [1.00ms]\n(pass) Full-text search: Relevance Scoring (task 11) > 11.3: Exact match scores higher than prefix match > should rank exact match higher with top-level $search (all string fields)\n(pass) Full-text search: Relevance Scoring (task 11) > 11.3: Exact match scores higher than prefix match > should correctly rank when multiple terms have different match types\n(pass) Full-text search: Relevance Scoring (task 11) > 11.3: Exact match scores higher than prefix match > should verify scoring difference between exact and prefix matches\n(pass) Full-text search: Search Index (task 12) > 12.1: Indexed search returns same results as unindexed search > should return same results for field-level $search with and without index [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.1: Indexed search returns same results as unindexed search > should return same results for top-level $search with explicit fields [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.1: Indexed search returns same results as unindexed search > should return same results for top-level $search without fields (all string fields)\n(pass) Full-text search: Search Index (task 12) > 12.1: Indexed search returns same results as unindexed search > should return same results for prefix matching [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.1: Indexed search returns same results as unindexed search > should return same results for multi-term search\n(pass) Full-text search: Search Index (task 12) > 12.1: Indexed search returns same results as unindexed search > should return same empty results when no match [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.1: Indexed search returns same results as unindexed search > should return same results for search across description field [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.1: Indexed search returns same results as unindexed search > should return same results with case-insensitive search\n(pass) Full-text search: Search Index (task 12) > 12.1: Indexed search returns same results as unindexed search > should preserve relevance ordering for indexed search [2.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.2: Index maintenance on create > should find a newly created entity via search [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.2: Index maintenance on create > should find a newly created entity via author search\n(pass) Full-text search: Search Index (task 12) > 12.2: Index maintenance on create > should find a newly created entity via description search [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.2: Index maintenance on create > should find a newly created entity via top-level multi-field search\n(pass) Full-text search: Search Index (task 12) > 12.2: Index maintenance on create > should find a newly created entity via prefix search [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.2: Index maintenance on create > should find multiple newly created entities\n(pass) Full-text search: Search Index (task 12) > 12.2: Index maintenance on create > should find entity created with createMany via search [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.2: Index maintenance on create > should still find original entities after creating new ones\n(pass) Full-text search: Search Index (task 12) > 12.3: Index maintenance on update > should find entity by new title after update [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.3: Index maintenance on update > should no longer find entity by old title after update\n(pass) Full-text search: Search Index (task 12) > 12.3: Index maintenance on update > should update author field and find by new author [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.3: Index maintenance on update > should no longer find entity by old author after update\n(pass) Full-text search: Search Index (task 12) > 12.3: Index maintenance on update > should update description field and find by new description\n(pass) Full-text search: Search Index (task 12) > 12.3: Index maintenance on update > should no longer find entity by old description content after update [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.3: Index maintenance on update > should handle update of multiple indexed fields at once\n(pass) Full-text search: Search Index (task 12) > 12.3: Index maintenance on update > should still find other entities after updating one [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.3: Index maintenance on update > should work with top-level $search after update [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.3: Index maintenance on update > should update index correctly when only partial field content changes [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.3: Index maintenance on update > should handle update of non-indexed field without affecting search\n(pass) Full-text search: Search Index (task 12) > 12.3: Index maintenance on update > should find entity by prefix after update\n(pass) Full-text search: Search Index (task 12) > 12.4: Index maintenance on delete > should no longer find entity by title after delete [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.4: Index maintenance on delete > should no longer find entity by author after delete\n(pass) Full-text search: Search Index (task 12) > 12.4: Index maintenance on delete > should no longer find entity by description after delete [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.4: Index maintenance on delete > should no longer find entity via top-level $search after delete\n(pass) Full-text search: Search Index (task 12) > 12.4: Index maintenance on delete > should no longer find entity via prefix search after delete [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.4: Index maintenance on delete > should still find other entities after deleting one\n(pass) Full-text search: Search Index (task 12) > 12.4: Index maintenance on delete > should handle deleteMany and remove all deleted entities from search [2.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.4: Index maintenance on delete > should handle delete of entity that was just created\n(pass) Full-text search: Search Index (task 12) > 12.4: Index maintenance on delete > should handle delete of entity that was just updated [1.00ms]\n(pass) Full-text search: Search Index (task 12) > 12.4: Index maintenance on delete > should clean up all tokens associated with deleted entity\n(pass) Full-text search: Search Index (task 12) > 12.4: Index maintenance on delete > should not affect tokens shared with other entities\n(pass) Full-text search: Combined Filters (task 13) > 13.2: $search inside $or > should match when either $search condition is true\n(pass) Full-text search: Combined Filters (task 13) > 13.2: $search inside $or > should match when first $search condition is true [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.2: $search inside $or > should match when second $search condition is true\n(pass) Full-text search: Combined Filters (task 13) > 13.2: $search inside $or > should return empty when neither $search condition matches\n(pass) Full-text search: Combined Filters (task 13) > 13.2: $search inside $or > should work with top-level $search inside $or\n(pass) Full-text search: Combined Filters (task 13) > 13.2: $search inside $or > should work with $search combined with other operators inside $or [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.2: $search inside $or > should match same entity multiple times if it matches multiple $or branches\n(pass) Full-text search: Combined Filters (task 13) > 13.2: $search inside $or > should work with $or containing three $search conditions\n(pass) Full-text search: Combined Filters (task 13) > 13.2: $search inside $or > should work with nested $or containing $search\n(pass) Full-text search: Combined Filters (task 13) > 13.2: $search inside $or > should work with prefix search inside $or [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.2: $search inside $or > should respect case-insensitivity inside $or\n(pass) Full-text search: Combined Filters (task 13) > 13.2: $search inside $or > should work with multi-term $search inside $or\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should match only when both $search conditions are true\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should return empty when first $search condition fails [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should return empty when second $search condition fails\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should return empty when neither $search condition matches\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should work with top-level $search inside $and [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should work with $search combined with other operators inside $and\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should return empty when $search matches but other operator excludes in $and\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should work with $and containing three $search conditions [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should return empty when any one of multiple $and conditions fails\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should work with nested $and containing $search\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should work with prefix search inside $and [4.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should respect case-insensitivity inside $and\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should work with multi-term $search inside $and\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should combine $and and $or with $search [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should work with $or inside $and where $or fails\n(pass) Full-text search: Combined Filters (task 13) > 13.3: $search inside $and > should work with empty $and array (match all)\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should filter by both $search and $gt operator\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should filter by both $search and $lt operator [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should return empty when $search matches but other operator excludes\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should filter by $search and $eq operator\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should filter by $search and $ne operator [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should filter by $search and $in operator\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should filter by $search and $nin operator\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should filter by $search and $gte/$lte range\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should filter by $search and $contains on strings [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should filter by $search and $startsWith\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should filter by $search and $endsWith\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should filter by multiple $search operators on different fields\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should return empty when $search matches one field but not the other\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should filter by top-level $search combined with field-level operators [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should filter by top-level $search with explicit fields combined with other operators\n(pass) Full-text search: Combined Filters (task 13) > 13.1: $search with other field operators > should combine $search with complex filter chain\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > offset-based pagination with $search > should paginate search results with limit only [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > offset-based pagination with $search > should paginate search results with offset only\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > offset-based pagination with $search > should paginate search results with limit and offset\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > offset-based pagination with $search > should maintain relevance order when paginating [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > offset-based pagination with $search > should return empty when offset exceeds search result count\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > offset-based pagination with $search > should return fewer items when limit exceeds remaining after offset\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > offset-based pagination with $search > should paginate with explicit sort (overriding relevance)\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > offset-based pagination with $search > should paginate with top-level $search [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > offset-based pagination with $search > should paginate with $search combined with other filters\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > offset-based pagination with $search > should paginate search results with indexed database\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > cursor-based pagination with $search > should cursor-paginate search results forward [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > cursor-based pagination with $search > should cursor-paginate search results backward [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > cursor-based pagination with $search > should cursor-paginate with explicit sort on search results\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > cursor-based pagination with $search > should cursor-paginate with top-level $search\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > cursor-based pagination with $search > should cursor-paginate search results with combined filters\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > cursor-based pagination with $search > should cursor-paginate search results with indexed database [1.00ms]\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > pagination edge cases with $search > should return empty results with pagination when no search matches\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > pagination edge cases with $search > should handle limit=0 with search results\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > pagination edge cases with $search > should handle pagination with single search match\n(pass) Full-text search: Combined Filters (task 13) > 13.4: $search combined with pagination > pagination edge cases with $search > should correctly paginate through all search results [1.00ms]\n\n 173 pass\n 0 fail\n 398 expect() calls\nRan 173 tests across 1 file. [244.00ms]"
+    },
+    {
+      "test": "glob-match.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "in-memory-storage.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "indexing.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "infer-codecs.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "json-serializer.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "jsonc-comments.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "lenient-validation.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "lifecycle-hooks.test.ts",
+      "expectation": "pass",
+      "status": "passed",
+      "owner": "effect-adapter",
+      "exitCode": 0,
+      "tests": 29,
+      "passedTests": 29,
+      "failedTests": 0,
+      "stdout": "bun test v1.3.9 (cf6cdbbb)",
+      "stderr": "packages/effect/.tmp/corpus/lifecycle-hooks.test.ts:\n(pass) lifecycle-hooks > test helpers > should create a database with hooked collection [16.00ms]\n(pass) lifecycle-hooks > test helpers > should create a database with empty hooks (no-op) [2.00ms]\n(pass) lifecycle-hooks > test helpers > should apply hooks configuration to collection [1.00ms]\n(pass) lifecycle-hooks > test helpers > should support multiple hooks of the same type [1.00ms]\n(pass) lifecycle-hooks > test helpers > should support all hook types simultaneously [1.00ms]\n(pass) lifecycle-hooks > before hooks > beforeCreate transforms data → inserted entity reflects transformation [1.00ms]\n(pass) lifecycle-hooks > before hooks > beforeCreate rejects → create fails with HookError, no state change [2.00ms]\n(pass) lifecycle-hooks > before hooks > multiple beforeCreate hooks chain in order [1.00ms]\n(pass) lifecycle-hooks > before hooks > beforeUpdate modifies update payload [1.00ms]\n(pass) lifecycle-hooks > before hooks > beforeUpdate rejects → update fails, entity unchanged [2.00ms]\n(pass) lifecycle-hooks > before hooks > beforeDelete rejects → delete fails, entity still exists [2.00ms]\n(pass) lifecycle-hooks > before hooks > hook receives correct context (collection, operation, data) [1.00ms]\n(pass) lifecycle-hooks > after hooks > afterCreate receives created entity [1.00ms]\n(pass) lifecycle-hooks > after hooks > afterUpdate receives previous and current state [1.00ms]\n(pass) lifecycle-hooks > after hooks > afterDelete receives deleted entity\n(pass) lifecycle-hooks > after hooks > after-hook error does not fail the CRUD operation [2.00ms]\n(pass) lifecycle-hooks > after hooks > multiple after-hooks run in order [1.00ms]\n(pass) lifecycle-hooks > after hooks > after-hooks run after state mutation is complete [2.00ms]\n(pass) lifecycle-hooks > onChange hooks > onChange fires on create with type: 'create'\n(pass) lifecycle-hooks > onChange hooks > onChange fires on update with type: 'update', previous/current [1.00ms]\n(pass) lifecycle-hooks > onChange hooks > onChange fires on delete with type: 'delete'\n(pass) lifecycle-hooks > onChange hooks > onChange fires after specific after-hooks [1.00ms]\n(pass) lifecycle-hooks > onChange hooks > onChange works alongside specific hooks (both fire) [1.00ms]\n(pass) lifecycle-hooks > onChange hooks > onChange error does not fail the operation [1.00ms]\n(pass) lifecycle-hooks > batch and upsert > createMany: hooks run per entity [1.00ms]\n(pass) lifecycle-hooks > batch and upsert > updateMany: hooks run per entity [2.00ms]\n(pass) lifecycle-hooks > batch and upsert > deleteMany: hooks run per entity [2.00ms]\n(pass) lifecycle-hooks > batch and upsert > upsert create path: triggers beforeCreate/afterCreate/onChange('create') [1.00ms]\n(pass) lifecycle-hooks > batch and upsert > upsert update path: triggers beforeUpdate/afterUpdate/onChange('update') [1.00ms]\n\n 29 pass\n 0 fail\n 290 expect() calls\nRan 29 tests across 1 file. [200.00ms]"
+    },
+    {
+      "test": "multi-field-search.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "nested-path.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "nested-schema.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "nested-type-safety.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "compile-time-only",
+      "owner": "effect-adapter",
+      "reason": "Type-only or compile-time assertion suite; covered separately by the adapter's dedicated typecheck gate."
+    },
+    {
+      "test": "object-select.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "paginate-stream.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "pagination.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "persistence-computed-exclusion.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "persistence-effect.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "persistence-format-override.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "persistence.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "plugin-system.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "populate-stream.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "populate.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "preset-layers.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "prose-directive-scanner.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-headline-decoding.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-headline-encoding.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-integration.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-overflow-decoding.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-overflow-encoding.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-round-trip.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-template-compilation.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-value-serialization.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "query-config-types.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "compile-time-only",
+      "owner": "effect-adapter",
+      "reason": "Type-only or compile-time assertion suite; covered separately by the adapter's dedicated typecheck gate."
+    },
+    {
+      "test": "reactive-queries.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "core",
+      "reason": "The current worktree copy is syntactically malformed (`[0] _as ...`) before adapter swapping. Keep explicitly skipped until the upstream test file is repaired."
+    },
+    {
+      "test": "relevance-sort.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "schema-migrations.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "schema-validation.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "search-index.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "select-computed-fields.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "select-integration.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "select-stream.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "select.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "serializer-service.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "sort-computed-fields.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "sort-stream.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "sorting.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "source-config.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "state.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "storage-services.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "toml-nulls.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "transactions.test.ts",
+      "expectation": "pass",
+      "status": "passed",
+      "owner": "effect-adapter",
+      "exitCode": 0,
+      "tests": 39,
+      "passedTests": 39,
+      "failedTests": 0,
+      "stdout": "bun test v1.3.9 (cf6cdbbb)",
+      "stderr": "packages/effect/.tmp/corpus/transactions.test.ts:\n(pass) $transaction > successful transactions > should have $transaction method on the database [20.00ms]\n(pass) $transaction > successful transactions > should create user and post in transaction, both visible after commit [7.00ms]\n(pass) $transaction > explicit rollback > should revert all changes when ctx.rollback() is called mid-transaction [3.00ms]\n(pass) $transaction > failed transactions > should revert user creation when transaction fails with Effect.fail [2.00ms]\n(pass) $transaction > failed transactions > should preserve original CRUD error type accessible via catchTag after rollback [1.00ms]\n(pass) $transaction > failed transactions > should preserve custom business error type accessible via catchTag after rollback [2.00ms]\n(pass) $transaction > nested transactions > should reject nested $transaction with TransactionError [1.00ms]\n(pass) $transaction > nested transactions > should allow new transaction after previous completes [1.00ms]\n(pass) createTransaction (Manual) > manual rollback > should revert changes when rollback() is called after operations [2.00ms]\n(pass) createTransaction (Manual) > manual commit > should persist changes when commit() is called after operations [1.00ms]\n(pass) createTransaction (Manual) > manual commit > should fail with TransactionError when commit() is called twice\n(pass) createTransaction (Manual) > commit after rollback > should fail with TransactionError when commit() is called after rollback()\n(pass) createTransaction (Manual) > mutatedCollections tracking > should track correct collection names after mutations\n(pass) createTransaction (Manual) > mutatedCollections tracking > should track mutations from update operations [1.00ms]\n(pass) createTransaction (Manual) > mutatedCollections tracking > should track mutations from delete operations\n(pass) createTransaction (Manual) > isActive state > should be true immediately after createTransaction returns\n(pass) createTransaction (Manual) > isActive state > should become false after commit()\n(pass) createTransaction (Manual) > isActive state > should become false after rollback()\n(pass) createTransaction (Manual) > isActive state > should reflect correct state through full lifecycle [1.00ms]\n(pass) createTransaction (Manual) > double rollback > should fail with TransactionError when rollback() is called twice\n(pass) Snapshot Isolation > read-own-writes > should see created entity immediately via query within transaction [2.00ms]\n(pass) Snapshot Isolation > snapshot immutability > should restore exact pre-transaction state including entities deleted during transaction on rollback [2.00ms]\n(pass) Snapshot Isolation > snapshot immutability > should restore deleted entities when transaction fails with error [1.00ms]\n(pass) Snapshot Isolation > lock release on commit > should allow new transaction to begin after previous commits\n(pass) Snapshot Isolation > lock release on error > should allow new transaction to begin after $transaction fails with error [2.00ms]\n(pass) Snapshot Isolation > concurrent transaction rejection > should reject second createTransaction while first is active with TransactionError\n(pass) Snapshot Isolation > concurrent transaction rejection > should reject multiple concurrent createTransaction attempts while first is active\n(pass) Snapshot Isolation > lock release on rollback > should allow new transaction to begin after previous rolls back\n(pass) Persistence Integration > no persistence during active transaction > should not trigger persistence schedule during active transaction [1.00ms]\n(pass) Persistence Integration > no persistence during active transaction > should not trigger persistence schedule when using $transaction callback [1.00ms]\n(pass) Persistence Integration > no persistence during active transaction > should track mutations in mutatedCollections without triggering persistence\n(pass) Persistence Integration > batch persistence on commit > should trigger single save per mutated collection on commit, regardless of mutation count\n(pass) Persistence Integration > batch persistence on commit > should trigger exactly one save per unique mutated collection\n(pass) Persistence Integration > batch persistence on commit > should trigger persistence only for collections that were actually mutated [1.00ms]\n(pass) Persistence Integration > batch persistence on commit > should not trigger any persistence when transaction has no mutations\n(pass) Persistence Integration > no persistence on rollback > should not trigger persistence when transaction is manually rolled back\n(pass) Persistence Integration > no persistence on rollback > should not trigger persistence when $transaction fails with error and auto-rollbacks\n(pass) Persistence Integration > no persistence on rollback > should not trigger persistence when $transaction explicitly calls rollback\n(pass) Persistence Integration > no persistence on rollback > should contrast rollback (no persistence) vs commit (persistence triggered)\n\n 39 pass\n 0 fail\n 327 expect() calls\nRan 39 tests across 1 file. [199.00ms]"
+    },
+    {
+      "test": "transforms.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "unique-constraints.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "upsert-validation.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "watch-by-id.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "watch-deduplication.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "watch-query-pipeline.test.ts",
+      "expectation": "pass",
+      "status": "passed",
+      "owner": "effect-adapter",
+      "exitCode": 0,
+      "tests": 12,
+      "passedTests": 12,
+      "failedTests": 0,
+      "stdout": "bun test v1.3.9 (cf6cdbbb)",
+      "stderr": "packages/effect/.tmp/corpus/watch-query-pipeline.test.ts:\n(pass) watch() query pipeline on re-evaluation > applies filter on initial emission [7.00ms]\n(pass) watch() query pipeline on re-evaluation > applies sort on initial emission [1.00ms]\n(pass) watch() query pipeline on re-evaluation > applies pagination on initial emission\n(pass) watch() query pipeline on re-evaluation > applies select on initial emission [1.00ms]\n(pass) watch() query pipeline on re-evaluation > applies full pipeline (filter + sort + paginate + select) on initial emission [1.00ms]\n(pass) watch() query pipeline on re-evaluation > applies filter on re-evaluation after change event [24.00ms]\n(pass) watch() query pipeline on re-evaluation > applies sort on re-evaluation after change event [23.00ms]\n(pass) watch() query pipeline on re-evaluation > applies pagination on re-evaluation after change event [24.00ms]\n(pass) watch() query pipeline on re-evaluation > applies select on re-evaluation after change event [25.00ms]\n(pass) watch() query pipeline on re-evaluation > applies full pipeline on re-evaluation after change event [28.00ms]\n(pass) watch() query pipeline on re-evaluation > ignores events for other collections [106.00ms]\n(pass) watch() query pipeline on re-evaluation > coalesces multiple rapid events for the same collection into a single re-evaluation [117.00ms]\n\n 12 pass\n 0 fail\n 46 expect() calls\nRan 12 tests across 1 file. [448.00ms]"
+    },
+    {
+      "test": "yaml-serializer.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    }
+  ],
+  "failures": [],
+  "xfails": [],
+  "skipList": [
+    {
+      "test": "aggregation.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "append-only.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "array-operators.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "codecs.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "computed-fields-zero-overhead.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "computed-fields.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "computed-types.test.ts",
+      "category": "compile-time-only",
+      "owner": "effect-adapter",
+      "reason": "Type-only or compile-time assertion suite; covered separately by the adapter's dedicated typecheck gate."
+    },
+    {
+      "test": "conditional-logic.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-computed-field-sanitization.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-create-effect.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-create-with-relationships-effect.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-delete-effect.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-delete-with-relationships-effect.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-methods-types.test.ts",
+      "category": "compile-time-only",
+      "owner": "effect-adapter",
+      "reason": "Type-only or compile-time assertion suite; covered separately by the adapter's dedicated typecheck gate."
+    },
+    {
+      "test": "crud-update-effect.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-update-with-relationships-effect.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "crud-upsert-effect.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "cursor-stream.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "debounced-writer.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "deep-merge.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "derived-id.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "document-graph-config.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "document-graph-source.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "document-source.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "evaluate-query.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "fast-check-import.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "field-selection.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "file-watcher.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "filter-computed-fields.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "filter-stream.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "filter.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "format-codec.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "glob-match.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "in-memory-storage.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "indexing.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "infer-codecs.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "json-serializer.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "jsonc-comments.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "lenient-validation.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "multi-field-search.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "nested-path.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "nested-schema.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "nested-type-safety.test.ts",
+      "category": "compile-time-only",
+      "owner": "effect-adapter",
+      "reason": "Type-only or compile-time assertion suite; covered separately by the adapter's dedicated typecheck gate."
+    },
+    {
+      "test": "object-select.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "paginate-stream.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "pagination.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "persistence-computed-exclusion.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "persistence-effect.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "persistence-format-override.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "persistence.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "plugin-system.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "populate-stream.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "populate.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "preset-layers.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "prose-directive-scanner.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-headline-decoding.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-headline-encoding.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-integration.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-overflow-decoding.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-overflow-encoding.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-round-trip.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-template-compilation.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "prose-value-serialization.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "query-config-types.test.ts",
+      "category": "compile-time-only",
+      "owner": "effect-adapter",
+      "reason": "Type-only or compile-time assertion suite; covered separately by the adapter's dedicated typecheck gate."
+    },
+    {
+      "test": "reactive-queries.test.ts",
+      "category": "non-applicable",
+      "owner": "core",
+      "reason": "The current worktree copy is syntactically malformed (`[0] _as ...`) before adapter swapping. Keep explicitly skipped until the upstream test file is repaired."
+    },
+    {
+      "test": "relevance-sort.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "schema-migrations.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "schema-validation.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "search-index.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "select-computed-fields.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "select-integration.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "select-stream.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "select.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "serializer-service.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "sort-computed-fields.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "sort-stream.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "sorting.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "source-config.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "state.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "storage-services.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "toml-nulls.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "transforms.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "unique-constraints.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "upsert-validation.test.ts",
+      "category": "slice-not-yet-adapted",
+      "owner": "effect-adapter",
+      "reason": "Adapter-facing suite not yet transformed into this phase-2 slice inventory. Keep explicitly tracked until the parity slice expands further."
+    },
+    {
+      "test": "watch-by-id.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "watch-deduplication.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "yaml-serializer.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    }
+  ]
+}

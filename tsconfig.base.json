@@ -13,7 +13,11 @@
     "types": ["bun", "node"],
     "paths": {
       "@proseql/core": ["./packages/core/src/index.ts"],
-      "@proseql/core/*": ["./packages/core/src/*"]
+      "@proseql/core/*": ["./packages/core/src/*"],
+      "@proseql/engine": ["./packages/engine/src/index.ts"],
+      "@proseql/engine/*": ["./packages/engine/src/*"],
+      "@proseql/effect": ["./packages/effect/src/index.ts"],
+      "@proseql/effect/*": ["./packages/effect/src/*"]
     }
   }
 }

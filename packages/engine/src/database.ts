@@ -7,6 +7,7 @@ import {
 	NotFoundError,
 	OperationError,
 	TransactionError,
+	ValidationError,
 	dryRunMigrations,
 	inferCodecsFromConfig,
 	getCollectionConfigs,
@@ -17,7 +18,9 @@ import {
 	loadDocumentGraphSources,
 	loadDocumentSources,
 	makeSerializerLayer,
+	mergeSerializerWithPluginCodecs,
 	normalizeSourceConfig,
+	SerializerRegistryService,
 	removeEntityFromDirectory,
 	saveCollectionsToFile,
 	saveData,
@@ -528,7 +531,15 @@ export const createPersistentEngineDatabase = async <Config extends DatabaseConf
 	const host = persistenceOptions?.storageHost ?? createNodeEngineStorageHost();
 	const storageLayer = persistenceOptions?.storageLayer ?? makeEngineStorageLayer(host);
 	const pluginRegistry = await buildPluginRegistry(options?.plugins);
-	const serializerLayer = makeSerializerLayer(inferCodecsFromConfig(config), pluginRegistry.codecs);
+	const serializerLayer = persistenceOptions?.serializerRegistry
+		? Layer.succeed(
+				SerializerRegistryService,
+				mergeSerializerWithPluginCodecs(
+					persistenceOptions.serializerRegistry,
+					pluginRegistry.codecs,
+				),
+			)
+		: makeSerializerLayer(inferCodecsFromConfig(config), pluginRegistry.codecs);
 	const layer = Layer.merge(storageLayer, serializerLayer) as any;
 	const collections = Object.entries(getCollectionConfigs(config)).map(([name, raw]) => ({
 		name,
@@ -552,10 +563,12 @@ export const createPersistentEngineDatabase = async <Config extends DatabaseConf
 		persistenceOptions?.writeDebounce ?? DEFAULT_WRITE_DEBOUNCE,
 		loaded.sourceState,
 	);
-	for (const [collectionName, value] of Object.entries(initialData ?? {})) {
-		if (value === undefined) continue;
-		const key = persistence.writeKeyByCollection.get(collectionName);
-		if (key) persistence.saver.schedule(key);
+	if (!persistenceOptions?._suppressInitialWrites) {
+		for (const [collectionName, value] of Object.entries(initialData ?? {})) {
+			if (value === undefined) continue;
+			const key = persistence.writeKeyByCollection.get(collectionName);
+			if (key) persistence.saver.schedule(key);
+		}
 	}
 	await registerExternalReloadWatchers(runtime, persistence);
 	return buildDatabaseFacade(runtime, collections, persistence, config) as unknown as GenerateEngineDatabaseWithPersistence<Config>;
@@ -617,6 +630,20 @@ function buildDatabaseFacade(
 	};
 }
 
+function validateCursorConfig(cursor: { readonly limit: number }) {
+	if (!Number.isInteger(cursor.limit) || cursor.limit <= 0) {
+		throw new ValidationError({
+			message: "Invalid cursor configuration",
+			issues: [
+				{
+					field: "cursor.limit",
+					message: "limit must be a positive integer",
+				},
+			],
+		});
+	}
+}
+
 function buildCollectionFacade(
 	runtime: EngineRuntime,
 	collection: CollectionRuntimeConfig,
@@ -638,6 +665,7 @@ function buildCollectionFacade(
 	return {
 		query: ((config?: any) => {
 			if (config?.cursor) {
+				validateCursorConfig(config.cursor);
 				return runtime.invoke("queryCursor", {
 					collection: collection.name,
 					query: {
@@ -669,10 +697,10 @@ function buildCollectionFacade(
 				where: config.where,
 				config: {
 					count: config.count ?? false,
-					sum: config.sum ?? [],
-					avg: config.avg ?? [],
-					min: config.min ?? [],
-					max: config.max ?? [],
+					sum: normalizeAggregateFields(config.sum),
+					avg: normalizeAggregateFields(config.avg),
+					min: normalizeAggregateFields(config.min),
+					max: normalizeAggregateFields(config.max),
 					groupBy: config.groupBy,
 				},
 			}),
@@ -685,7 +713,7 @@ function buildCollectionFacade(
 				throw new NotFoundError({
 					collection: collection.name,
 					id,
-					message: `Entity '${id}' not found in collection '${collection.name}'`,
+					message: `Entity with id "${id}" not found in collection "${collection.name}"`,
 				});
 			}
 			return results[0];
@@ -738,7 +766,7 @@ function buildCollectionFacade(
 					throw new NotFoundError({
 						collection: collection.name,
 						id,
-						message: `Entity '${id}' not found in collection '${collection.name}'`,
+						message: `Entity with id "${id}" not found in collection "${collection.name}"`,
 					});
 				}
 				scheduleWrite();
@@ -1497,6 +1525,14 @@ function transactionBeginError(reason: "nested transactions not supported" | "an
 	});
 }
 
+function explicitRollbackError() {
+	return new TransactionError({
+		operation: "rollback",
+		reason: "explicit rollback",
+		message: "Transaction rolled back explicitly",
+	});
+}
+
 async function runTransaction<A>(
 	runtime: EngineRuntime,
 	collections: ReadonlyArray<CollectionRuntimeConfig>,
@@ -1517,7 +1553,8 @@ async function runTransaction<A>(
 		return await transactionGate.context.run(true, async () => {
 			txRuntime = await runtime.createTemporaryTransactionRuntime();
 			const operations: Array<Record<string, unknown>> = [];
-			const txFacade = buildTransactionDatabaseFacade(txRuntime, collections, persistence, operations);
+			const rollbackError = explicitRollbackError();
+			const txFacade = buildTransactionDatabaseFacade(txRuntime, collections, persistence, operations, rollbackError);
 			const result = await fn(txFacade as EngineTransactionDatabase<any>);
 			const snapshot = await txRuntime.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>(
 				"dumpAll",
@@ -1548,12 +1585,17 @@ function buildTransactionDatabaseFacade(
 	collections: ReadonlyArray<CollectionRuntimeConfig>,
 	persistence: PersistenceState | undefined,
 	operations: Array<Record<string, unknown>>,
+	rollbackError: TransactionError,
 ) {
 	const db: Record<string, unknown> = {};
 	for (const collection of collections) {
 		db[collection.name] = buildTransactionCollectionFacade(runtime, collection, persistence, operations);
 	}
-	return db;
+	return Object.assign(db, {
+		rollback: async () => {
+			throw rollbackError;
+		},
+	});
 }
 
 function buildTransactionCollectionFacade(
@@ -1575,7 +1617,7 @@ function buildTransactionCollectionFacade(
 	return {
 		query: (config?: any) =>
 			config?.cursor
-				? runtime.invoke("queryCursor", {
+				? (validateCursorConfig(config.cursor), runtime.invoke("queryCursor", {
 						collection: collection.name,
 						query: {
 							where: config.where,
@@ -1586,7 +1628,7 @@ function buildTransactionCollectionFacade(
 						},
 						cursor: config.cursor,
 						populate: config.populate,
-					})
+					}))
 				: runtime.invoke("query", {
 						collection: collection.name,
 						query: {
@@ -1602,7 +1644,14 @@ function buildTransactionCollectionFacade(
 			runtime.invoke("aggregate", {
 				collection: collection.name,
 				where: config.where,
-				config,
+				config: {
+					count: config.count ?? false,
+					sum: normalizeAggregateFields(config.sum),
+					avg: normalizeAggregateFields(config.avg),
+					min: normalizeAggregateFields(config.min),
+					max: normalizeAggregateFields(config.max),
+					groupBy: config.groupBy,
+				},
 			}),
 		findById: async (id: string) => {
 			const rows = await runtime.invoke<any[]>("query", {
@@ -1613,7 +1662,7 @@ function buildTransactionCollectionFacade(
 				throw new NotFoundError({
 					collection: collection.name,
 					id,
-					message: `Entity '${id}' not found in collection '${collection.name}'`,
+					message: `Entity with id "${id}" not found in collection "${collection.name}"`,
 				});
 			}
 			return rows[0];
@@ -1660,7 +1709,7 @@ function buildTransactionCollectionFacade(
 					limit: 1,
 				});
 				if (!value.deleted?.[0]) {
-					throw new NotFoundError({ collection: collection.name, id, message: `Entity '${id}' not found in collection '${collection.name}'` });
+					throw new NotFoundError({ collection: collection.name, id, message: `Entity with id "${id}" not found in collection "${collection.name}"` });
 				}
 				push({ kind: "deleteMany", collection: collection.name, where: { id }, soft: true, limit: 1 });
 				return value.deleted[0];
@@ -1757,6 +1806,12 @@ function toEntityMap(values: ReadonlyArray<Record<string, unknown>>) {
 function normalizeInitialCollection(value: unknown): ReadonlyArray<Record<string, unknown>> {
 	if (!Array.isArray(value)) return [];
 	return value.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null);
+}
+
+function normalizeAggregateFields(value: unknown): ReadonlyArray<string> {
+	if (value === undefined) return [];
+	if (Array.isArray(value)) return value.filter((field): field is string => typeof field === "string");
+	return typeof value === "string" ? [value] : [];
 }
 
 function wrapCallbackResult(fn: () => unknown): string {
