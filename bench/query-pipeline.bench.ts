@@ -50,11 +50,11 @@ const UserSchema = Schema.Struct({
 	name: Schema.String,
 	email: Schema.String,
 	age: Schema.Number,
-	role: Schema.Union(
+	role: Schema.Union([
 		Schema.Literal("admin"),
 		Schema.Literal("moderator"),
 		Schema.Literal("user"),
-	),
+	]),
 	createdAt: Schema.String,
 });
 
@@ -66,14 +66,14 @@ const ProductSchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
 	price: Schema.Number,
-	category: Schema.Union(
+	category: Schema.Union([
 		Schema.Literal("electronics"),
 		Schema.Literal("clothing"),
 		Schema.Literal("books"),
 		Schema.Literal("home"),
 		Schema.Literal("sports"),
 		Schema.Literal("toys"),
-	),
+	]),
 	stock: Schema.Number,
 	supplierId: Schema.String,
 });
@@ -88,11 +88,11 @@ const OrderSchema = Schema.Struct({
 	productId: Schema.String,
 	quantity: Schema.Number,
 	total: Schema.Number,
-	status: Schema.Union(
+	status: Schema.Union([
 		Schema.Literal("pending"),
 		Schema.Literal("completed"),
 		Schema.Literal("cancelled"),
-	),
+	]),
 	createdAt: Schema.String,
 });
 

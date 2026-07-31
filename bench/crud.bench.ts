@@ -45,11 +45,11 @@ const UserSchema = Schema.Struct({
 	name: Schema.String,
 	email: Schema.String,
 	age: Schema.Number,
-	role: Schema.Union(
+	role: Schema.Union([
 		Schema.Literal("admin"),
 		Schema.Literal("moderator"),
 		Schema.Literal("user"),
-	),
+	]),
 	createdAt: Schema.String,
 });
 

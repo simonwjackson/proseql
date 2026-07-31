@@ -193,7 +193,11 @@ export async function createSuite(): Promise<Bench> {
 			name: Schema.String,
 			email: Schema.String,
 			age: Schema.Number,
-			role: Schema.Literal("admin", "moderator", "user"),
+			role: Schema.Union([
+				Schema.Literal("admin"),
+				Schema.Literal("moderator"),
+				Schema.Literal("user"),
+			]),
 			createdAt: Schema.String,
 		});
 
