@@ -7,4 +7,4 @@ jobs:
   note:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "npm publishing is disabled until the Rust-engine package set and release order are finalized."
+      - run: echo "Package registry publication is disabled until the Rust-engine package set and release order are finalized."
