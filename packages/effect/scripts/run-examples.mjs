@@ -169,7 +169,7 @@ const failedResults = runnableResults.filter((result) => result.status === "fail
 const xpassedResults = xfailResults.filter((result) => result.status === "xpassed");
 
 const report = {
-	phase: "phase-2-slice",
+	phase: "phase-2-gate",
 	generatedAt: new Date().toISOString(),
 	summary: {
 		totalExamples: inventory.length,
@@ -205,7 +205,7 @@ const report = {
 
 writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 console.log(
-	`Examples phase-2 slice: ${passedResults.length}/${runnableResults.length} runnable passed (${(
+	`Examples phase-2 gate: ${passedResults.length}/${runnableResults.length} runnable passed (${(
 		report.summary.slicePassRate * 100
 	).toFixed(2)}%), coverage ${(report.summary.coverageRate * 100).toFixed(2)}%`,
 );

@@ -1,6 +1,6 @@
 {
-  "phase": "phase-2-slice",
-  "generatedAt": "2026-07-31T04:02:06.314Z",
+  "phase": "phase-2-gate",
+  "generatedAt": "2026-07-31T04:08:14.174Z",
   "summary": {
     "totalExamples": 16,
     "executedExamples": 12,

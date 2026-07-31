@@ -29,11 +29,15 @@ function validateCorpusReport(report) {
 	const unexpectedXpass = report.results.filter((result) =>
 		result.expectation === "xfail" && result.status === "xpassed"
 	);
+	const sliceSkips = report.results.filter((result) => result.category === "slice-not-yet-adapted");
 	if (failing.length > 0) {
 		throw new Error(`Corpus report contains runnable failures: ${failing.map((result) => result.test).join(", ")}`);
 	}
 	if (unexpectedXpass.length > 0) {
 		throw new Error(`Corpus report contains unexpected xpasses: ${unexpectedXpass.map((result) => result.test).join(", ")}`);
+	}
+	if (sliceSkips.length > 0) {
+		throw new Error(`Corpus report still contains slice-not-yet-adapted entries: ${sliceSkips.map((result) => result.test).join(", ")}`);
 	}
 }
 

@@ -27,6 +27,13 @@ const runnableFiles = new Set([
 	"computed-fields-zero-overhead.test.ts",
 	"conditional-logic.test.ts",
 	"crud-computed-field-sanitization.test.ts",
+	"crud-create-effect.test.ts",
+	"crud-create-with-relationships-effect.test.ts",
+	"crud-delete-effect.test.ts",
+	"crud-delete-with-relationships-effect.test.ts",
+	"crud-update-effect.test.ts",
+	"crud-update-with-relationships-effect.test.ts",
+	"crud-upsert-effect.test.ts",
 	"cursor-pagination.test.ts",
 	"database-document-graph.test.ts",
 	"database-effect.test.ts",
@@ -37,8 +44,11 @@ const runnableFiles = new Set([
 	"document-graph-source.test.ts",
 	"document-source.test.ts",
 	"error-model.test.ts",
+	"fast-check-import.test.ts",
 	"field-selection.test.ts",
 	"file-watcher.test.ts",
+	"filter-computed-fields.test.ts",
+	"filter.test.ts",
 	"filtering.test.ts",
 	"format-codec.test.ts",
 	"full-text-search.test.ts",
@@ -52,6 +62,7 @@ const runnableFiles = new Set([
 	"multi-field-search.test.ts",
 	"nested-schema.test.ts",
 	"object-select.test.ts",
+	"pagination.test.ts",
 	"persistence-computed-exclusion.test.ts",
 	"persistence-effect.test.ts",
 	"persistence-format-override.test.ts",
@@ -71,12 +82,21 @@ const runnableFiles = new Set([
 	"reactive-queries.test.ts",
 	"relevance-sort.test.ts",
 	"schema-migrations.test.ts",
+	"schema-validation.test.ts",
 	"search-index.test.ts",
+	"select-computed-fields.test.ts",
+	"select-integration.test.ts",
+	"select.test.ts",
 	"serializer-service.test.ts",
+	"sort-computed-fields.test.ts",
+	"sorting.test.ts",
 	"source-config.test.ts",
+	"state.test.ts",
 	"storage-services.test.ts",
 	"toml-nulls.test.ts",
 	"transactions.test.ts",
+	"unique-constraints.test.ts",
+	"upsert-validation.test.ts",
 	"watch-query-pipeline.test.ts",
 	"yaml-serializer.test.ts",
 ]);
@@ -130,7 +150,7 @@ const xpassedResults = xfailResults.filter((result) => result.status === "xpasse
 const xfailedResults = xfailResults.filter((result) => result.status === "xfailed");
 
 const report = {
-	phase: "phase-2-slice",
+	phase: "phase-2-gate",
 	generatedAt: new Date().toISOString(),
 	summary: {
 		totalFiles: allFiles.length,
@@ -171,7 +191,7 @@ const report = {
 
 writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 console.log(
-	`Corpus phase-2 slice: ${passedResults.length}/${runnableResults.length} runnable files passed (${(
+	`Corpus phase-2 gate: ${passedResults.length}/${runnableResults.length} runnable files passed (${(
 		report.summary.slicePassRate * 100
 	).toFixed(2)}%), coverage ${(report.summary.coverageRate * 100).toFixed(2)}%`,
 );
