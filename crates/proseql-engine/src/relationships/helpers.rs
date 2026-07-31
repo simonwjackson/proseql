@@ -324,7 +324,10 @@ pub(crate) fn ent_nf(collection: &str, id: &str) -> EngineError {
     EngineError::NotFound(NotFoundError {
         collection: collection.to_string(),
         id: id.to_string(),
-        message: format!("Entity '{}' not found in collection '{}'", id, collection),
+        message: format!(
+            "Entity with id \"{}\" not found in collection \"{}\"",
+            id, collection
+        ),
     })
 }
 

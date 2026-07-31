@@ -5,9 +5,9 @@ import { join } from "node:path";
 import {
 	DuplicateKeyError,
 	HookError,
-	makeSerializerLayer,
 	createPersistentEffectDatabase,
 	inferCodecsFromConfig,
+	makeSerializerLayer,
 } from "@proseql/core";
 import { createNodeDatabase } from "@proseql/node";
 import { Effect, Layer } from "effect";
@@ -15,8 +15,8 @@ import * as Schema from "effect/Schema";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
 	createEngineDatabase,
-	createPersistentEngineDatabase,
 	createNodeEngineStorageHost,
+	createPersistentEngineDatabase,
 	makeNodeEngineStorageLayer,
 } from "../src/index.js";
 
@@ -37,6 +37,27 @@ const BookSchema = Schema.Struct({
 const AuthorSchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
+});
+
+const BoundaryUndefinedShapeSchema = Schema.Struct({
+	__proseqlUndefined__: Schema.Number,
+});
+
+const BoundaryEscapedShapeSchema = Schema.Struct({
+	__proseqlEscaped__: Schema.String,
+});
+
+const BoundaryRecordSchema = Schema.Struct({
+	id: Schema.String,
+	sentinel: BoundaryUndefinedShapeSchema,
+	escaped: BoundaryEscapedShapeSchema,
+	nested: Schema.Struct({
+		sentinel: BoundaryUndefinedShapeSchema,
+		escaped: BoundaryEscapedShapeSchema,
+	}),
+	sentinelArray: Schema.Array(BoundaryUndefinedShapeSchema),
+	escapedArray: Schema.Array(BoundaryEscapedShapeSchema),
+	optional: Schema.optional(Schema.String),
 });
 
 beforeAll(() => {
@@ -80,21 +101,36 @@ describe("@proseql/engine", () => {
 				},
 			} as const;
 
-			const engineDb = await createPersistentEngineDatabase(engineConfig, undefined, {
-				writeDebounce: 5,
-			});
 			const referenceLayer = Layer.merge(
 				makeNodeEngineStorageLayer(),
 				makeSerializerLayer(inferCodecsFromConfig(referenceConfig)),
 			);
-			const referenceDb = await Effect.runPromise(
+			const referenceFiles = await Effect.runPromise(
 				Effect.scoped(
-					createPersistentEffectDatabase(referenceConfig, undefined, {
-						writeDebounce: 5,
-					}).pipe(Effect.provide(referenceLayer)),
-				),
+					Effect.gen(function* () {
+						const referenceDb = yield* createPersistentEffectDatabase(referenceConfig, undefined, {
+							writeDebounce: 5,
+						});
+						yield* referenceDb.authors.create({ id: "a1", name: "Frank Herbert" });
+						yield* referenceDb.books.create({
+							id: "b1",
+							title: "Dune",
+							year: 1965,
+							authorId: "a1",
+						});
+						yield* referenceDb.books.update("b1", { year: { $increment: 1 } });
+						yield* Effect.tryPromise(() => referenceDb.flush());
+						return yield* Effect.all({
+							authors: Effect.tryPromise(() => readFile(join(referenceDir, "authors.yaml"), "utf8")),
+							books: Effect.tryPromise(() => readFile(join(referenceDir, "books.json"), "utf8")),
+						});
+					}),
+				).pipe(Effect.provide(referenceLayer)),
 			);
 
+			const engineDb = await createPersistentEngineDatabase(engineConfig, undefined, {
+				writeDebounce: 5,
+			});
 			await engineDb.authors.create({ id: "a1", name: "Frank Herbert" });
 			await engineDb.books.create({
 				id: "b1",
@@ -109,25 +145,117 @@ describe("@proseql/engine", () => {
 			});
 			expect(engineQuery).toEqual([{ title: "Dune", author: { name: "Frank Herbert" } }]);
 			await engineDb.flush();
+			expect(await readFile(join(engineDir, "authors.yaml"), "utf8")).toBe(referenceFiles.authors);
+			expect(await readFile(join(engineDir, "books.json"), "utf8")).toBe(referenceFiles.books);
+			await engineDb.close();
+		} finally {
+			await rm(engineDir, { recursive: true, force: true });
+			await rm(referenceDir, { recursive: true, force: true });
+		}
+	});
 
-			await Effect.runPromise(referenceDb.authors.create({ id: "a1", name: "Frank Herbert" }));
-			await Effect.runPromise(
-				referenceDb.books.create({
-					id: "b1",
-					title: "Dune",
-					year: 1965,
-					authorId: "a1",
-				}),
-			);
-			await Effect.runPromise(referenceDb.books.update("b1", { year: { $increment: 1 } }));
-			await referenceDb.flush();
+	it("round-trips reserved boundary sentinel shapes through create/query/update/persistence and preserves undefined where semantics", async () => {
+		const engineDir = await mkdtemp(join(tmpdir(), "proseql-engine-boundary-"));
+		const referenceDir = await mkdtemp(join(tmpdir(), "proseql-engine-boundary-ref-"));
+		const created = {
+			id: "r1",
+			sentinel: { __proseqlUndefined__: 1 },
+			escaped: { __proseqlEscaped__: "create" },
+			nested: {
+				sentinel: { __proseqlUndefined__: 2 },
+				escaped: { __proseqlEscaped__: "nested-create" },
+			},
+			sentinelArray: [{ __proseqlUndefined__: 3 }],
+			escapedArray: [{ __proseqlEscaped__: "alpha" }],
+		} as const;
+		const updated = {
+			id: "r1",
+			sentinel: { __proseqlUndefined__: 11 },
+			escaped: { __proseqlEscaped__: "update" },
+			nested: {
+				sentinel: { __proseqlUndefined__: 12 },
+				escaped: { __proseqlEscaped__: "nested-update" },
+			},
+			sentinelArray: [{ __proseqlUndefined__: 13 }, { __proseqlUndefined__: 14 }],
+			escapedArray: [{ __proseqlEscaped__: "beta" }, { __proseqlEscaped__: "gamma" }],
+		} as const;
+		const presentOptional = {
+			id: "r2",
+			sentinel: { __proseqlUndefined__: 21 },
+			escaped: { __proseqlEscaped__: "other" },
+			nested: {
+				sentinel: { __proseqlUndefined__: 22 },
+				escaped: { __proseqlEscaped__: "nested-other" },
+			},
+			sentinelArray: [{ __proseqlUndefined__: 23 }],
+			escapedArray: [{ __proseqlEscaped__: "delta" }],
+			optional: "present",
+		} as const;
+		try {
+			const engineConfig = {
+				records: {
+					schema: BoundaryRecordSchema,
+					file: join(engineDir, "records.json"),
+					relationships: {},
+				},
+			} as const;
+			const referenceConfig = {
+				records: {
+					schema: BoundaryRecordSchema,
+					file: join(referenceDir, "records.json"),
+					relationships: {},
+				},
+			} as const;
 
-			expect(await readFile(join(engineDir, "authors.yaml"), "utf8")).toBe(
-				await readFile(join(referenceDir, "authors.yaml"), "utf8"),
+			const engineDb = await createPersistentEngineDatabase(engineConfig, undefined, { writeDebounce: 5 });
+			await engineDb.records.create(created);
+			await engineDb.records.create(presentOptional);
+			expect(await engineDb.records.query({ where: { optional: { $eq: undefined } }, sort: { id: "asc" } })).toEqual([
+				created,
+			]);
+			await engineDb.records.update("r1", {
+				sentinel: { $set: updated.sentinel },
+				escaped: { $set: updated.escaped },
+				nested: { $set: updated.nested },
+				sentinelArray: { $set: updated.sentinelArray },
+				escapedArray: { $set: updated.escapedArray },
+			});
+			expect(await engineDb.records.findById("r1")).toEqual(updated);
+			await engineDb.flush();
+			await engineDb.close();
+
+			const reopened = await createPersistentEngineDatabase(engineConfig, undefined, { writeDebounce: 5 });
+			expect(await reopened.records.findById("r1")).toEqual(updated);
+			expect(await reopened.records.query({ where: { optional: { $eq: undefined } }, sort: { id: "asc" } })).toEqual([
+				updated,
+			]);
+			await reopened.close();
+
+			const referenceLayer = Layer.merge(
+				makeNodeEngineStorageLayer(),
+				makeSerializerLayer(inferCodecsFromConfig(referenceConfig)),
 			);
-			expect(await readFile(join(engineDir, "books.json"), "utf8")).toBe(
-				await readFile(join(referenceDir, "books.json"), "utf8"),
+			const referenceBytes = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const referenceDb = yield* createPersistentEffectDatabase(referenceConfig, undefined, {
+							writeDebounce: 5,
+						});
+						yield* referenceDb.records.create(created);
+						yield* referenceDb.records.create(presentOptional);
+						yield* referenceDb.records.update("r1", {
+							sentinel: { $set: updated.sentinel },
+							escaped: { $set: updated.escaped },
+							nested: { $set: updated.nested },
+							sentinelArray: { $set: updated.sentinelArray },
+							escapedArray: { $set: updated.escapedArray },
+						});
+						yield* Effect.tryPromise(() => referenceDb.flush());
+						return yield* Effect.tryPromise(() => readFile(join(referenceDir, "records.json"), "utf8"));
+					}),
+				).pipe(Effect.provide(referenceLayer)),
 			);
+			expect(await readFile(join(engineDir, "records.json"), "utf8")).toBe(referenceBytes);
 		} finally {
 			await rm(engineDir, { recursive: true, force: true });
 			await rm(referenceDir, { recursive: true, force: true });
@@ -170,7 +298,7 @@ describe("@proseql/engine", () => {
 												reason: "underage",
 												message: "Too young",
 											}),
-										)
+									  )
 									: Effect.succeed({ ...ctx.data, role: ctx.data.role.toUpperCase() }),
 						],
 					},

@@ -6,6 +6,7 @@ import {
 	SourceConfigError,
 	NotFoundError,
 	OperationError,
+	PluginError,
 	TransactionError,
 	ValidationError,
 	dryRunMigrations,
@@ -35,7 +36,14 @@ import {
 	type NormalizedSourceConfig,
 	type PluginRegistry,
 } from "@proseql/core";
-import { Effect, Layer, type Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
+import {
+	decodeBoundaryValueForHost,
+	encodeBoundaryValueForWire,
+	parseBoundaryJson,
+	serializeBoundaryValue,
+	serializeComputedBoundaryValue,
+} from "./boundary-values.js";
 import { reconstructBoundaryError, WasmEngineDefectError } from "./errors.js";
 import { loadWasmBindings, type WasmRuntimeBinding } from "./loader.js";
 import { buildPluginRegistry } from "./plugin-registry.js";
@@ -59,6 +67,7 @@ import type {
 } from "./types.js";
 
 const DEFAULT_WRITE_DEBOUNCE = 100;
+const OBJECT_KEYED_ONLY_FORMATS = new Set(["json", "yaml", "yml", "toml", "json5", "jsonc", "hjson", "toon"]);
 
 type BridgeOk<T> = { kind: "ok"; value: T };
 type BridgeError = { kind: "error"; error: unknown };
@@ -75,6 +84,51 @@ type SharedFileGroup = {
 	readonly file: string;
 	readonly collections: ReadonlyArray<CollectionRuntimeConfig>;
 };
+
+function inferCollectionFormat(collection: CollectionConfig): string | undefined {
+	const explicit = collection.format?.replace(/^\./, "").toLowerCase();
+	if (explicit) return explicit;
+	const file = collection.file ?? collection.directory;
+	if (!file) return undefined;
+	const match = /\.([^.\/]+)$/.exec(file);
+	return match?.[1]?.toLowerCase();
+}
+
+function validateCollectionRuntimeConfig(name: string, collection: CollectionConfig, pluginRegistry?: PluginRegistry) {
+	if (collection.id?.kind === "derivedFromKey") {
+		if (collection.id.field !== "id") {
+			throw new ValidationError({
+				message: `Collection '${name}' derived id field must be 'id'`,
+				issues: [
+					{
+						field: `${name}.id.field`,
+						message: "derived id field must be 'id'",
+					},
+				],
+			});
+		}
+		const format = inferCollectionFormat(collection);
+		if (format !== undefined && !OBJECT_KEYED_ONLY_FORMATS.has(format)) {
+			throw new ValidationError({
+				message: `Collection '${name}' uses derived ids and therefore requires an object-keyed format; '${format}' is array-backed`,
+				issues: [
+					{
+						field: `${name}.file`,
+						message: "derived ids require an object-keyed format",
+					},
+				],
+			});
+		}
+	}
+	if (collection.idGenerator && pluginRegistry && !pluginRegistry.idGenerators.has(collection.idGenerator)) {
+		throw new PluginError({
+			plugin: collection.idGenerator,
+			reason: "missing_id_generator",
+			message: `Collection '${name}' references idGenerator '${collection.idGenerator}' but it is not registered`,
+		});
+	}
+}
+
 
 type SourcePersistenceState = {
 	readonly normalizedConfig: NormalizedSourceConfig;
@@ -234,15 +288,15 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 
 	registerDefault(callback: () => unknown, prefix: string): string {
 		const id = this.makeId(prefix);
-		this.runtime.register_default(id, () => JSON.stringify(callback()));
+		this.runtime.register_default(id, () => serializeBoundaryValue(callback()));
 		return id;
 	}
 
 	registerComputed(callback: (entity: unknown) => unknown, prefix: string): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_computed(id, (payloadJson) => {
-			const payload = JSON.parse(payloadJson);
-			return JSON.stringify(callback(payload));
+			const payload = parseBoundaryJson(payloadJson);
+			return serializeComputedBoundaryValue(callback(payload));
 		});
 		return id;
 	}
@@ -250,7 +304,7 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	registerBeforeCreateHook(callback: (ctx: unknown) => unknown, prefix: string): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_before_create_hook(id, (payloadJson) =>
-			wrapCallbackResult(() => callback(JSON.parse(payloadJson))),
+			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
 		);
 		return id;
 	}
@@ -258,7 +312,7 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	registerBeforeUpdateHook(callback: (ctx: unknown) => unknown, prefix: string): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_before_update_hook(id, (payloadJson) =>
-			wrapCallbackResult(() => callback(JSON.parse(payloadJson))),
+			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
 		);
 		return id;
 	}
@@ -266,7 +320,7 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	registerBeforeDeleteHook(callback: (ctx: unknown) => unknown, prefix: string): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_before_delete_hook(id, (payloadJson) =>
-			wrapCallbackResult(() => callback(JSON.parse(payloadJson))),
+			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
 		);
 		return id;
 	}
@@ -274,7 +328,7 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	registerAfterCreateHook(callback: (ctx: unknown) => unknown, prefix: string): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_after_create_hook(id, (payloadJson) =>
-			wrapCallbackResult(() => callback(JSON.parse(payloadJson))),
+			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
 		);
 		return id;
 	}
@@ -282,7 +336,7 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	registerAfterUpdateHook(callback: (ctx: unknown) => unknown, prefix: string): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_after_update_hook(id, (payloadJson) =>
-			wrapCallbackResult(() => callback(JSON.parse(payloadJson))),
+			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
 		);
 		return id;
 	}
@@ -290,7 +344,7 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	registerAfterDeleteHook(callback: (ctx: unknown) => unknown, prefix: string): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_after_delete_hook(id, (payloadJson) =>
-			wrapCallbackResult(() => callback(JSON.parse(payloadJson))),
+			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
 		);
 		return id;
 	}
@@ -298,7 +352,7 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	registerOnChangeHook(callback: (ctx: unknown) => unknown, prefix: string): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_on_change_hook(id, (payloadJson) =>
-			wrapCallbackResult(() => callback(JSON.parse(payloadJson))),
+			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
 		);
 		return id;
 	}
@@ -309,8 +363,8 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_migration(id, (payloadJson) => {
-			const payload = JSON.parse(payloadJson) as Record<string, unknown>;
-			return JSON.stringify(callback(payload));
+			const payload = parseBoundaryJson(payloadJson) as Record<string, unknown>;
+			return serializeBoundaryValue(callback(payload));
 		});
 		return id;
 	}
@@ -327,7 +381,8 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 		const response = this.runtime.register_custom_operator(
 			name,
 			JSON.stringify([...supportedTypes]),
-			(fieldJson, operandJson) => evaluate(JSON.parse(fieldJson), JSON.parse(operandJson)),
+			(fieldJson, operandJson) =>
+				evaluate(parseBoundaryJson(fieldJson), parseBoundaryJson(operandJson)),
 		);
 		parseBridgeResponse(response);
 	}
@@ -429,10 +484,10 @@ class EngineRuntime {
 		}));
 		const createPayload = {
 			descriptor: compiled.descriptor as Record<string, unknown>,
-			initialCollections: (initialData ?? {}) as Record<
+			initialCollections: encodeBoundaryValueForWire((initialData ?? {}) as Record<
 				string,
 				ReadonlyArray<Record<string, unknown>>
-			>,
+			>) as Record<string, ReadonlyArray<Record<string, unknown>>>,
 		};
 		const handle = parseBridgeResponse<number>(runtime.create_database(JSON.stringify(createPayload)));
 		return { runtime: new EngineRuntime(runtime, handle, createPayload), registry, collections };
@@ -443,7 +498,7 @@ class EngineRuntime {
 			this.runtime.dispatch(
 				this.handle,
 				method,
-				payload === undefined ? undefined : JSON.stringify(payload),
+				payload === undefined ? undefined : JSON.stringify(prepareCommandPayload(method, payload)),
 			),
 		);
 	}
@@ -458,7 +513,7 @@ class EngineRuntime {
 		);
 		const createPayload = {
 			descriptor: this.createInput.descriptor,
-			initialCollections: snapshot,
+			initialCollections: encodeBoundaryValueForWire(snapshot) as Record<string, ReadonlyArray<Record<string, unknown>>>,
 		};
 		const handle = parseBridgeResponse<number>(
 			this.runtime.create_database(JSON.stringify(createPayload)),
@@ -483,8 +538,8 @@ class EngineRuntime {
 		subscriptionId = parseBridgeResponse<number>(
 			this.runtime.subscribe_watch(
 				this.handle,
-				JSON.stringify({ collection, config }),
-				(payloadJson) => queue.push(JSON.parse(payloadJson) as ReadonlyArray<T>),
+				JSON.stringify(prepareCommandPayload("subscribeWatch", { collection, config })),
+				(payloadJson) => queue.push(parseBoundaryJson(payloadJson) as ReadonlyArray<T>),
 			),
 		);
 		return queue;
@@ -502,7 +557,7 @@ class EngineRuntime {
 			this.runtime.subscribe_watch_by_id(
 				this.handle,
 				JSON.stringify({ collection, id, debounceMs }),
-				(payloadJson) => queue.push(JSON.parse(payloadJson) as T | null),
+				(payloadJson) => queue.push(parseBoundaryJson(payloadJson) as T | null),
 			),
 		);
 		return queue;
@@ -514,10 +569,15 @@ export const createEngineDatabase = async <Config extends DatabaseConfig>(
 	initialData?: EngineInitialData<Config>,
 	options?: EngineDatabaseOptions,
 ): Promise<GenerateEngineDatabase<Config>> => {
+	const pluginRegistry = await buildPluginRegistry(options?.plugins);
+	for (const [name, collection] of Object.entries(getCollectionConfigs(config))) {
+		validateCollectionRuntimeConfig(name, collection, pluginRegistry);
+	}
 	const { runtime, collections } = await EngineRuntime.create(
 		config,
 		initialData as EngineInitialData<DatabaseConfig> | undefined,
 		options,
+		pluginRegistry,
 	);
 	return buildDatabaseFacade(runtime, collections, undefined, config) as unknown as GenerateEngineDatabase<Config>;
 };
@@ -531,6 +591,9 @@ export const createPersistentEngineDatabase = async <Config extends DatabaseConf
 	const host = persistenceOptions?.storageHost ?? createNodeEngineStorageHost();
 	const storageLayer = persistenceOptions?.storageLayer ?? makeEngineStorageLayer(host);
 	const pluginRegistry = await buildPluginRegistry(options?.plugins);
+	for (const [name, collection] of Object.entries(getCollectionConfigs(config))) {
+		validateCollectionRuntimeConfig(name, collection, pluginRegistry);
+	}
 	const serializerLayer = persistenceOptions?.serializerRegistry
 		? Layer.succeed(
 				SerializerRegistryService,
@@ -644,6 +707,80 @@ function validateCursorConfig(cursor: { readonly limit: number }) {
 	}
 }
 
+function applySelectionOrder<T>(value: T, select: unknown): T {
+	if (select === undefined || select === null) return value;
+	if (Array.isArray(select)) {
+		if (!Array.isArray(value) || select.length === 0) return value;
+		return value.map((item) => reorderSelectedValue(item, select)) as T;
+	}
+	if (typeof select === "object" && select !== null) {
+		const keys = Object.keys(select as Record<string, unknown>);
+		if (keys.length === 0 || !Array.isArray(value)) return value;
+		return value.map((item) => reorderSelectedValue(item, select as Record<string, unknown>)) as T;
+	}
+	return value;
+}
+
+function reorderSelectedValue(value: unknown, select: ReadonlyArray<unknown> | Record<string, unknown>): unknown {
+	if (Array.isArray(select)) {
+		if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+		const record = value as Record<string, unknown>;
+		const ordered: Record<string, unknown> = {};
+		for (const key of select) {
+			if (typeof key === "string" && key in record) ordered[key] = record[key];
+		}
+		return ordered;
+	}
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+	const record = value as Record<string, unknown>;
+	const ordered: Record<string, unknown> = {};
+	for (const [key, nestedSelect] of Object.entries(select)) {
+		if (!(key in record)) continue;
+		const current = record[key];
+		if (nestedSelect && typeof nestedSelect === "object") {
+			if (Array.isArray(current)) {
+				ordered[key] = current.map((item) => reorderSelectedValue(item, nestedSelect as Record<string, unknown>));
+			} else {
+				ordered[key] = reorderSelectedValue(current, nestedSelect as Record<string, unknown>);
+			}
+		} else if (nestedSelect === true) {
+			ordered[key] = current;
+		}
+	}
+	return ordered;
+}
+
+function isAppendOnlyJsonLinesCollection(collection: CollectionRuntimeConfig) {
+	if (!collection.raw.appendOnly || !collection.raw.file) return false;
+	const format = inferCollectionFormat(collection.raw);
+	return format === "jsonl" || format === "ndjson";
+}
+
+async function appendAppendOnlyEntities(
+	persistence: PersistenceState | undefined,
+	collection: CollectionRuntimeConfig,
+	entities: ReadonlyArray<Record<string, unknown>>,
+) {
+	if (!persistence || entities.length === 0 || !isAppendOnlyJsonLinesCollection(collection) || !collection.raw.file) {
+		return;
+	}
+	try {
+		const encode = Schema.encodeEffect(collection.schema as Schema.Codec<Record<string, unknown>, unknown>);
+		let payload = "";
+		for (const entity of entities) {
+			const encoded = await Effect.runPromise(
+				encode(entity).pipe(Effect.catch(() => Effect.succeed(entity))),
+			);
+			payload += `${JSON.stringify(encoded)}\n`;
+		}
+		await persistence.host.ensureDir(collection.raw.file);
+		await persistence.host.append(collection.raw.file, payload);
+	} catch {
+		// TS append-only persistence swallows immediate append failures and relies on the
+		// debounced canonical saver for eventual durability.
+	}
+}
+
 function buildCollectionFacade(
 	runtime: EngineRuntime,
 	collection: CollectionRuntimeConfig,
@@ -666,7 +803,7 @@ function buildCollectionFacade(
 		query: ((config?: any) => {
 			if (config?.cursor) {
 				validateCursorConfig(config.cursor);
-				return runtime.invoke("queryCursor", {
+				return runtime.invoke<any>("queryCursor", {
 					collection: collection.name,
 					query: {
 						where: config.where,
@@ -677,9 +814,12 @@ function buildCollectionFacade(
 					},
 					cursor: config.cursor,
 					populate: config.populate,
-				});
+				}).then((page) => ({
+					...page,
+					items: applySelectionOrder(page.items, config.select),
+				}));
 			}
-			return runtime.invoke("query", {
+			return runtime.invoke<any[]>("query", {
 				collection: collection.name,
 				query: {
 					where: config?.where,
@@ -689,7 +829,7 @@ function buildCollectionFacade(
 					select: config?.select,
 				},
 				populate: config?.populate,
-			});
+			}).then((rows) => applySelectionOrder(rows, config?.select));
 		}) as any,
 		aggregate: (config: any) =>
 			runtime.invoke("aggregate", {
@@ -704,20 +844,11 @@ function buildCollectionFacade(
 					groupBy: config.groupBy,
 				},
 			}),
-		findById: async (id: string) => {
-			const results = await runtime.invoke<any[]>("query", {
+		findById: async (id: string) =>
+			runtime.invoke<any>("findById", {
 				collection: collection.name,
-				query: { where: { id }, limit: 1 },
-			});
-			if (results.length === 0) {
-				throw new NotFoundError({
-					collection: collection.name,
-					id,
-					message: `Entity with id "${id}" not found in collection "${collection.name}"`,
-				});
-			}
-			return results[0];
-		},
+				id,
+			}),
 		exists: async (id: string) => {
 			const results = await runtime.invoke<any[]>("query", {
 				collection: collection.name,
@@ -728,6 +859,7 @@ function buildCollectionFacade(
 		create: async (input: any) => {
 			ensureWritable("create");
 			const value = await runtime.invoke<any>("create", { collection: collection.name, data: input });
+			await appendAppendOnlyEntities(persistence, collection, [value]);
 			scheduleWrite();
 			return value;
 		},
@@ -738,6 +870,7 @@ function buildCollectionFacade(
 				items: [...inputs],
 				skipDuplicates: options?.skipDuplicates ?? false,
 			});
+			await appendAppendOnlyEntities(persistence, collection, value.created ?? []);
 			if ((value.created ?? []).length > 0) scheduleWrite();
 			return value;
 		},
@@ -1223,12 +1356,12 @@ function hostFromPersistence(persistence: PersistenceState) {
 	return persistence.host;
 }
 
-function recordBackgroundError(persistence: PersistenceState, error: unknown) {
-	persistence.backgroundError = error;
-}
-
 function clearBackgroundError(persistence: PersistenceState) {
 	persistence.backgroundError = undefined;
+}
+
+function reportBackgroundReloadError(error: unknown) {
+	console.error("[proseql/engine] external reload failed", error);
 }
 
 function trackWatcherStop(persistence: PersistenceState, stop: () => void) {
@@ -1260,10 +1393,38 @@ async function reloadCollectionIfChanged(
 	collection: string,
 	rows: ReadonlyArray<Record<string, unknown>>,
 ) {
-	const current = await currentCollectionRows(runtime, collection);
-	if (rowsFingerprint(current) === rowsFingerprint(rows)) return false;
-	await runtime.invoke("reloadCollection", { collection, records: rows });
-	return true;
+	const changedCollections = await reloadCollectionsAtomicallyIfChanged(runtime, {
+		[collection]: rows,
+	});
+	return changedCollections.includes(collection);
+}
+
+async function reloadCollectionsAtomicallyIfChanged(
+	runtime: EngineRuntime,
+	rowsByCollection: Record<string, ReadonlyArray<Record<string, unknown>>>,
+) {
+	const changedEntries: Array<readonly [string, ReadonlyArray<Record<string, unknown>>]> = [];
+	for (const [collection, rows] of Object.entries(rowsByCollection)) {
+		const current = await currentCollectionRows(runtime, collection);
+		if (rowsFingerprint(current) !== rowsFingerprint(rows)) {
+			changedEntries.push([collection, rows]);
+		}
+	}
+	if (changedEntries.length === 0) return [] as ReadonlyArray<string>;
+	const txRuntime = await runtime.createTemporaryTransactionRuntime();
+	try {
+		for (const [collection, rows] of changedEntries) {
+			await txRuntime.invoke("reloadCollection", { collection, records: rows });
+		}
+		const snapshot = await txRuntime.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>("dumpAll");
+		const committed = await runtime.invoke<{ changedCollections: ReadonlyArray<string> }>(
+			"commitSnapshotTransaction",
+			{ collections: snapshot },
+		);
+		return committed.changedCollections;
+	} finally {
+		await txRuntime.drop().catch(() => undefined);
+	}
 }
 
 function updateDirectoryBaseline(
@@ -1307,10 +1468,10 @@ function runBackgroundReload(
 			await task();
 			clearBackgroundError(persistence);
 		} catch (error) {
-			recordBackgroundError(persistence, error);
+			reportBackgroundReloadError(error);
 		}
 	}).catch((error) => {
-		recordBackgroundError(persistence, error);
+		reportBackgroundReloadError(error);
 	});
 }
 
@@ -1418,10 +1579,7 @@ async function registerLegacyWatchers(runtime: EngineRuntime, persistence: Persi
 	}
 
 	for (const [file, collections] of fileGroups) {
-		const watchRoot = dirname(file);
-		if (!(await persistence.host.exists(watchRoot))) continue;
-		const stop = await persistence.host.watchDir(watchRoot, (event) => {
-			if (!matchesWatchedFile(event.filename, file)) return;
+		const reload = () => {
 			runBackgroundReload(persistence, async () => {
 				const rowsByCollection = await loadLegacyFileCollections(
 					{ file, collections },
@@ -1436,6 +1594,17 @@ async function registerLegacyWatchers(runtime: EngineRuntime, persistence: Persi
 					);
 				}
 			});
+		};
+		if (await persistence.host.exists(file)) {
+			const stop = await persistence.host.watch(file, reload);
+			trackWatcherStop(persistence, stop);
+			continue;
+		}
+		const watchRoot = dirname(file);
+		if (!(await persistence.host.exists(watchRoot))) continue;
+		const stop = await persistence.host.watchDir(watchRoot, (event) => {
+			if (!matchesWatchedFile(event.filename, file)) return;
+			reload();
 		});
 		trackWatcherStop(persistence, stop);
 	}
@@ -1473,14 +1642,17 @@ async function registerSourceWatchers(runtime: EngineRuntime, persistence: Persi
 					const loaded = await Effect.runPromise(
 						Effect.provide(loadDocumentSources(sourceState.normalizedConfig), persistence.layer),
 					);
+					const rowsByCollection = Object.fromEntries(
+						source.collections.map((collection) => [
+							collection,
+							[
+								...(loaded.collections[collection]?.values() ?? []),
+							] as ReadonlyArray<Record<string, unknown>>,
+						]),
+					) as Record<string, ReadonlyArray<Record<string, unknown>>>;
+					await reloadCollectionsAtomicallyIfChanged(runtime, rowsByCollection);
 					sourceState.documentsState.origins = loaded.origins;
 					sourceState.documentsState.documents = loaded.documents;
-					for (const collection of source.collections) {
-						const rows = [
-							...(loaded.collections[collection]?.values() ?? []),
-						] as ReadonlyArray<Record<string, unknown>>;
-						await reloadCollectionIfChanged(runtime, collection, rows);
-					}
 				});
 			});
 			trackWatcherStop(persistence, stop);
@@ -1494,14 +1666,17 @@ async function registerSourceWatchers(runtime: EngineRuntime, persistence: Persi
 					const loaded = await Effect.runPromise(
 						Effect.provide(loadDocumentGraphSources(sourceState.normalizedConfig), persistence.layer),
 					);
+					const rowsByCollection = Object.fromEntries(
+						source.collections.map((collection) => [
+							collection,
+							[
+								...(loaded.collections[collection]?.values() ?? []),
+							] as ReadonlyArray<Record<string, unknown>>,
+						]),
+					) as Record<string, ReadonlyArray<Record<string, unknown>>>;
+					await reloadCollectionsAtomicallyIfChanged(runtime, rowsByCollection);
 					sourceState.graphState.provenance = loaded.provenance;
 					sourceState.graphState.diagnostics = loaded.diagnostics;
-					for (const collection of source.collections) {
-						const rows = [
-							...(loaded.collections[collection]?.values() ?? []),
-						] as ReadonlyArray<Record<string, unknown>>;
-						await reloadCollectionIfChanged(runtime, collection, rows);
-					}
 				});
 			});
 			trackWatcherStop(persistence, stop);
@@ -1617,7 +1792,7 @@ function buildTransactionCollectionFacade(
 	return {
 		query: (config?: any) =>
 			config?.cursor
-				? (validateCursorConfig(config.cursor), runtime.invoke("queryCursor", {
+				? (validateCursorConfig(config.cursor), runtime.invoke<any>("queryCursor", {
 						collection: collection.name,
 						query: {
 							where: config.where,
@@ -1628,8 +1803,11 @@ function buildTransactionCollectionFacade(
 						},
 						cursor: config.cursor,
 						populate: config.populate,
-					}))
-				: runtime.invoke("query", {
+					}).then((page) => ({
+						...page,
+						items: applySelectionOrder(page.items, config.select),
+					})))
+				: runtime.invoke<any[]>("query", {
 						collection: collection.name,
 						query: {
 							where: config?.where,
@@ -1639,7 +1817,7 @@ function buildTransactionCollectionFacade(
 							select: config?.select,
 						},
 						populate: config?.populate,
-					}),
+					}).then((rows) => applySelectionOrder(rows, config?.select)),
 		aggregate: (config: any) =>
 			runtime.invoke("aggregate", {
 				collection: collection.name,
@@ -1653,20 +1831,11 @@ function buildTransactionCollectionFacade(
 					groupBy: config.groupBy,
 				},
 			}),
-		findById: async (id: string) => {
-			const rows = await runtime.invoke<any[]>("query", {
+		findById: async (id: string) =>
+			runtime.invoke<any>("findById", {
 				collection: collection.name,
-				query: { where: { id }, limit: 1 },
-			});
-			if (rows.length === 0) {
-				throw new NotFoundError({
-					collection: collection.name,
-					id,
-					message: `Entity with id "${id}" not found in collection "${collection.name}"`,
-				});
-			}
-			return rows[0];
-		},
+				id,
+			}),
 		exists: async (id: string) => {
 			const rows = await runtime.invoke<any[]>("query", {
 				collection: collection.name,
@@ -1828,7 +1997,7 @@ function wrapCallbackResult(fn: () => unknown): string {
 				}),
 			});
 		}
-		return JSON.stringify({ kind: "ok", value });
+		return JSON.stringify({ kind: "ok", value: JSON.parse(serializeBoundaryValue(value)) });
 	} catch (error) {
 		if (isAsyncCallbackUnsupportedError(error)) {
 			return JSON.stringify({
@@ -1862,6 +2031,161 @@ function isAsyncCallbackUnsupportedError(error: unknown) {
 	return message.includes("Async Effect callbacks are not supported by @proseql/engine");
 }
 
+
+function encodeDataForCommand(data: unknown) {
+	return encodeBoundaryValueForWire(data);
+}
+
+function encodeWhereForCommand(where: unknown) {
+	return where === undefined ? undefined : encodeBoundaryValueForWire(where);
+}
+
+function prepareQueryConfigForCommand(config: unknown) {
+	if (typeof config !== "object" || config === null) return config;
+	const queryConfig = config as Record<string, unknown>;
+	return {
+		...queryConfig,
+		where: encodeWhereForCommand(queryConfig.where),
+	};
+}
+
+function prepareTransactionOperationForCommand(operation: unknown): unknown {
+	if (typeof operation !== "object" || operation === null) return operation;
+	const input = operation as Record<string, unknown>;
+	switch (input.kind) {
+		case "create":
+		case "update":
+		case "createWithRelationships":
+		case "updateWithRelationships":
+			return { ...input, data: encodeDataForCommand(input.data) };
+		case "createMany":
+			return {
+				...input,
+				items: Array.isArray(input.items) ? input.items.map((item) => encodeDataForCommand(item)) : input.items,
+			};
+		case "updateMany":
+			return {
+				...input,
+				where: encodeWhereForCommand(input.where),
+				data: encodeDataForCommand(input.data),
+			};
+		case "deleteMany":
+		case "deleteManyWithRelationships":
+		case "upsert":
+			return {
+				...input,
+				where: encodeWhereForCommand(input.where),
+				...(input.create !== undefined ? { create: encodeDataForCommand(input.create) } : {}),
+				...(input.update !== undefined ? { update: encodeDataForCommand(input.update) } : {}),
+			};
+		case "upsertMany":
+			return {
+				...input,
+				items: Array.isArray(input.items)
+					? input.items.map((item) =>
+							typeof item === "object" && item !== null
+								? {
+									...(item as Record<string, unknown>),
+									where: encodeWhereForCommand((item as Record<string, unknown>).where),
+									create: encodeDataForCommand((item as Record<string, unknown>).create),
+									update: encodeDataForCommand((item as Record<string, unknown>).update),
+								}
+								: item,
+						)
+					: input.items,
+			};
+		default:
+			return input;
+	}
+}
+
+function prepareCommandPayload(method: string, payload: unknown): unknown {
+	if (typeof payload !== "object" || payload === null) return payload;
+	const command = payload as Record<string, unknown>;
+	switch (method) {
+		case "query":
+		case "queryCursor":
+			return {
+				...command,
+				query: prepareQueryConfigForCommand(command.query),
+			};
+		case "aggregate":
+		case "groupAggregate":
+		case "deleteMany":
+		case "deleteManyWithRelationships":
+			return {
+				...command,
+				where: encodeWhereForCommand(command.where),
+			};
+		case "create":
+		case "update":
+		case "createWithRelationships":
+		case "updateWithRelationships":
+			return {
+				...command,
+				data: encodeDataForCommand(command.data),
+			};
+		case "createMany":
+			return {
+				...command,
+				items: Array.isArray(command.items) ? command.items.map((item) => encodeDataForCommand(item)) : command.items,
+			};
+		case "updateMany":
+			return {
+				...command,
+				where: encodeWhereForCommand(command.where),
+				data: encodeDataForCommand(command.data),
+			};
+		case "upsert":
+			return {
+				...command,
+				where: encodeWhereForCommand(command.where),
+				create: encodeDataForCommand(command.create),
+				update: encodeDataForCommand(command.update),
+			};
+		case "upsertMany":
+			return {
+				...command,
+				items: Array.isArray(command.items)
+					? command.items.map((item) =>
+							typeof item === "object" && item !== null
+								? {
+									...(item as Record<string, unknown>),
+									where: encodeWhereForCommand((item as Record<string, unknown>).where),
+									create: encodeDataForCommand((item as Record<string, unknown>).create),
+									update: encodeDataForCommand((item as Record<string, unknown>).update),
+								}
+								: item,
+						)
+					: command.items,
+			};
+		case "reloadCollection":
+			return {
+				...command,
+				records: Array.isArray(command.records) ? command.records.map((record) => encodeDataForCommand(record)) : command.records,
+			};
+		case "commitSnapshotTransaction":
+			return {
+				...command,
+				collections: encodeDataForCommand(command.collections),
+			};
+		case "transaction":
+			return {
+				...command,
+				operations: Array.isArray(command.operations)
+					? command.operations.map((operation) => prepareTransactionOperationForCommand(operation))
+					: command.operations,
+			};
+		case "subscribeWatch":
+			return {
+				...command,
+				config: prepareQueryConfigForCommand(command.config),
+			};
+		default:
+			return command;
+	}
+}
+
 function promiseCall<T>(fn: () => Promise<T>): Promise<T> {
 	return Promise.resolve().then(fn);
 }
@@ -1870,9 +2194,9 @@ function parseBridgeResponse<T>(raw: string): T {
 	const parsed = JSON.parse(raw) as BridgeResponse<T>;
 	switch (parsed.kind) {
 		case "ok":
-			return parsed.value;
+			return decodeBoundaryValueForHost(parsed.value);
 		case "error":
-			throw reconstructBoundaryError(parsed.error);
+			throw reconstructBoundaryError(decodeBoundaryValueForHost(parsed.error));
 		case "defect":
 			throw new WasmEngineDefectError(parsed.message);
 		default:

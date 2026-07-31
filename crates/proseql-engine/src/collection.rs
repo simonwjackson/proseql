@@ -985,6 +985,58 @@ impl Collection {
         }
     }
 
+    /// Replace the entire collection state from trusted bootstrap data.
+    ///
+    /// Mirrors TS `createEffectDatabase(..., initialData)` semantics: records are
+    /// inserted directly into the backing map without schema validation,
+    /// relationship validation, default injection, timestamp overwrite, or
+    /// unique-constraint checks. Only the `id` field is required so the data can
+    /// be keyed in-memory.
+    pub(crate) fn replace_trusted_loaded_records(
+        &mut self,
+        records: Vec<Value>,
+    ) -> Result<(), EngineError> {
+        let original_state = self.state.clone();
+        let result = (|| {
+            let mut new_state = IndexMap::new();
+            for record in records {
+                let obj = require_object(record, "initial record")?;
+                let id = obj
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| {
+                        EngineError::Validation(ValidationError {
+                            message: "Initial record is missing required field 'id'".to_string(),
+                            issues: vec![ValidationIssue {
+                                field: "id".to_string(),
+                                message: "Expected string, got absent".to_string(),
+                                value: None,
+                                expected: Some("string".to_string()),
+                                received: Some("absent".to_string()),
+                            }],
+                        })
+                    })?
+                    .to_string();
+                new_state.insert(id, Value::Object(obj));
+            }
+            Ok(new_state)
+        })();
+
+        match result {
+            Ok(new_state) => {
+                self.state = new_state;
+                self.rebuild_indexes();
+                Ok(())
+            }
+            Err(error) => {
+                self.state = original_state;
+                self.rebuild_indexes();
+                Err(error)
+            }
+        }
+    }
+
     /// Directly replace the entity with `id` with `snapshot`, bypassing
     /// all validation.  If `snapshot` is `None`, the entity is removed.
     ///
@@ -2234,7 +2286,10 @@ fn not_found(collection: &str, id: &str) -> EngineError {
     EngineError::NotFound(NotFoundError {
         collection: collection.to_string(),
         id: id.to_string(),
-        message: format!("Entity '{}' not found in collection '{}'", id, collection),
+        message: format!(
+            "Entity with id \"{}\" not found in collection \"{}\"",
+            id, collection
+        ),
     })
 }
 

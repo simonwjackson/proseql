@@ -1366,6 +1366,41 @@ impl Database {
         self.reactive.publish(event);
     }
 
+    pub fn load_initial_collections_trusted(
+        &mut self,
+        collections: IndexMap<String, Vec<Value>>,
+    ) -> Result<(), EngineError> {
+        let snapshots = self.snapshot_all_collection_states();
+        let loaded = (|| {
+            for name in collections.keys() {
+                if !self.collections.contains_key(name) {
+                    return Err(missing_collection_error(name));
+                }
+            }
+
+            for (name, records) in collections {
+                self.collections
+                    .get_mut(&name)
+                    .ok_or_else(|| missing_collection_error(&name))?
+                    .replace_trusted_loaded_records(records)?;
+            }
+
+            Ok(())
+        })();
+
+        match loaded {
+            Ok(()) => {
+                self.sync_reactive_snapshots();
+                Ok(())
+            }
+            Err(error) => {
+                self.restore_all_collection_states(&snapshots);
+                self.sync_reactive_snapshots();
+                Err(error)
+            }
+        }
+    }
+
     fn replace_collections_atomically_and_validate(
         &mut self,
         collections: IndexMap<String, Vec<Value>>,

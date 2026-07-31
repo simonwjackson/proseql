@@ -120,7 +120,7 @@ impl RuntimeCore {
             for (collection, records) in input.initial_collections {
                 initial_collections.insert(collection, records);
             }
-            db.commit_snapshot_transaction(initial_collections)?;
+            db.load_initial_collections_trusted(initial_collections)?;
         }
 
         let handle = self.next_handle.max(1);

@@ -75,6 +75,14 @@ pub(crate) fn dispatch(
                 )?))
             }
         }
+        "findById" => {
+            let command: DeleteCommand = parse_json(payload_json, "findById")?;
+            let collection = context
+                .db
+                .collection(&command.collection)
+                .ok_or_else(|| collection_not_found(&command.collection))?;
+            collection.get_or_fail(&command.id).cloned()
+        }
         "groupAggregate" => {
             let command: AggregateCommand = parse_json(payload_json, "groupAggregate")?;
             let collection = context

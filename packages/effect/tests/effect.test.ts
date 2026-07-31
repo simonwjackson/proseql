@@ -5,6 +5,9 @@ import { join } from "node:path";
 import {
 	DuplicateKeyError,
 	FormatCodec,
+	OperationError,
+	StorageAdapterService as StorageAdapter,
+	StorageError,
 	TransactionError,
 	ValidationError,
 	jsonCodec,
@@ -92,16 +95,23 @@ describe("@proseql/effect", () => {
 		const watch = unsafeSubscriptionEffectToStreamForTests<number>(() => {
 			activeSubscriptions += 1;
 			let closed = false;
+			let resolveNext: ((value: IteratorResult<number>) => void) | undefined;
 			return {
 				[Symbol.asyncIterator]() {
 					return this;
 				},
-				next: async () => ({ value: 1, done: false } as const),
+				next: async () => {
+					if (closed) return { value: undefined, done: true } as const;
+					return await new Promise<IteratorResult<number>>((resolve) => {
+						resolveNext = resolve;
+					});
+				},
 				unsubscribe: async () => {
 					if (!closed) {
 						closed = true;
 						activeSubscriptions -= 1;
 						unsubscribeCalls += 1;
+						resolveNext?.({ value: undefined, done: true });
 					}
 				}
 			};
@@ -127,16 +137,23 @@ describe("@proseql/effect", () => {
 		const watchById = unsafeSubscriptionEffectToStreamForTests<string | null>(() => {
 			activeSubscriptions += 1;
 			let closed = false;
+			let resolveNext: ((value: IteratorResult<string | null>) => void) | undefined;
 			return {
 				[Symbol.asyncIterator]() {
 					return this;
 				},
-				next: async () => ({ value: null, done: false } as const),
+				next: async () => {
+					if (closed) return { value: undefined, done: true } as const;
+					return await new Promise<IteratorResult<string | null>>((resolve) => {
+						resolveNext = resolve;
+					});
+				},
 				unsubscribe: async () => {
 					if (!closed) {
 						closed = true;
 						activeSubscriptions -= 1;
 						unsubscribeCalls += 1;
+						resolveNext?.({ value: undefined, done: true });
 					}
 				}
 			};
@@ -156,16 +173,22 @@ describe("@proseql/effect", () => {
 		expect(unsubscribeCalls).toBe(1);
 	});
 
-	it("surfaces create-time ValidationError from invalid initial data", async () => {
+	it("trusts initial data during bootstrap but still validates normal writes", async () => {
+		const db = await Effect.runPromise(
+			createEffectDatabase(config, {
+				users: [{ id: "u1", name: "Alice", age: "thirty", companyId: "c1" } as any],
+				companies: [{ id: "c1", name: "Acme" }],
+				books: []
+			})
+		);
+		expect(await db.users.findById("u1").runPromise).toEqual({
+			id: "u1",
+			name: "Alice",
+			age: "thirty",
+			companyId: "c1"
+		});
 		const failure = await Effect.runPromise(
-			createEffectDatabase(
-				config,
-				{
-					users: [{ id: "u1", name: "Alice", age: "thirty", companyId: "c1" } as any],
-					companies: [{ id: "c1", name: "Acme" }],
-					books: []
-				},
-			).pipe(Effect.flip)
+			db.users.create({ id: "u2", name: "Bob", age: "forty", companyId: "c1" } as any).pipe(Effect.flip)
 		);
 		expect(failure).toBeInstanceOf(ValidationError);
 	});
@@ -406,6 +429,122 @@ describe("@proseql/effect", () => {
 			u1: { id: "u1", name: "Alice", age: 30 },
 			u2: expect.objectContaining({ id: "u2", name: "Bob", age: 25 })
 		});
+	});
+
+	it("closes scoped persistent databases exactly once, stopping storage watchers and dropping engine handles", async () => {
+		const file = "/virtual/users.json";
+		const store = new Map<string, string>([[file, "{}"]]);
+		let fileWatchCalls = 0;
+		let fileWatchStops = 0;
+		let dirWatchCalls = 0;
+		let dirWatchStops = 0;
+		let initializeCount = 0;
+		let shutdownCount = 0;
+		let leakedDb: any;
+		const adapter = {
+			read: (path: string) =>
+				Effect.suspend(() => {
+					const value = store.get(path);
+					return value === undefined
+						? Effect.fail(
+								new StorageError({
+									path,
+									operation: "read",
+									message: `File not found: ${path}`,
+								}),
+							)
+						: Effect.succeed(value);
+				}),
+			write: (path: string, data: string) =>
+				Effect.sync(() => {
+					store.set(path, data);
+				}),
+			append: (path: string, data: string) =>
+				Effect.sync(() => {
+					store.set(path, `${store.get(path) ?? ""}${data}`);
+				}),
+			exists: (path: string) => Effect.sync(() => store.has(path)),
+			remove: (path: string) =>
+				Effect.sync(() => {
+					store.delete(path);
+				}),
+			ensureDir: () => Effect.void,
+			watch: (_path: string, _onChange: () => void) =>
+				Effect.sync(() => {
+					fileWatchCalls += 1;
+					let stopped = false;
+					return () => {
+						if (!stopped) {
+							stopped = true;
+							fileWatchStops += 1;
+						}
+					};
+				}),
+			listDirectory: () => Effect.succeed([] as ReadonlyArray<string>),
+			listRecursive: () => Effect.succeed([] as ReadonlyArray<string>),
+			watchDir: (_path: string, _onChange: (event: { readonly filename: string | null; readonly type: "add" | "change" | "remove" }) => void) =>
+				Effect.sync(() => {
+					dirWatchCalls += 1;
+					let stopped = false;
+					return () => {
+						if (!stopped) {
+							stopped = true;
+							dirWatchStops += 1;
+						}
+					};
+				}),
+		};
+		const layer = Layer.merge(Layer.succeed(StorageAdapter, adapter), makeSerializerLayer([jsonCodec()]));
+		const plugin = {
+			name: "scope-close-plugin",
+			initialize: () =>
+				Effect.sync(() => {
+					initializeCount += 1;
+				}),
+			shutdown: () =>
+				Effect.sync(() => {
+					shutdownCount += 1;
+				}),
+		} as const;
+
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const db = yield* createPersistentEffectDatabase(
+						{
+							users: {
+								schema: Schema.Struct({
+									id: Schema.String,
+									name: Schema.String,
+									age: Schema.Number,
+									createdAt: Schema.optional(Schema.String),
+									updatedAt: Schema.optional(Schema.String),
+								}),
+								file,
+								relationships: {},
+							},
+						} as const,
+						undefined,
+						{ writeDebounce: 5 },
+						{ plugins: [plugin] }
+					);
+					leakedDb = db;
+					yield* db.users.create({ id: "u1", name: "Alice", age: 30 } as any);
+					expect(fileWatchCalls + dirWatchCalls).toBeGreaterThan(0);
+				}),
+			).pipe(Effect.provide(layer)),
+		);
+
+		expect(initializeCount).toBe(1);
+		expect(shutdownCount).toBe(1);
+		expect(fileWatchStops + dirWatchStops).toBe(fileWatchCalls + dirWatchCalls);
+
+		const closable = leakedDb as typeof leakedDb & { close: () => Promise<void> };
+		await expect(closable.close()).resolves.toBeUndefined();
+		expect(shutdownCount).toBe(1);
+		expect(fileWatchStops + dirWatchStops).toBe(fileWatchCalls + dirWatchCalls);
+		await expect(Effect.runPromise(leakedDb!.users.findById("u1"))).rejects.toBeInstanceOf(OperationError);
+		await expect(Effect.runPromise(leakedDb!.users.findById("u1"))).rejects.toMatchObject({ reason: "unknown-handle" });
 	});
 
 	it("supports persistence flush, dry-run, and close over provided core storage services", async () => {

@@ -53,6 +53,7 @@ use serde_json::Value;
 
 use crate::callbacks::CallbackRegistry;
 use crate::collection::Collection;
+use crate::descriptor::ComputedFieldDescriptor;
 use crate::errors::{EngineError, OperationError, ValidationError, ValidationIssue};
 
 use super::aggregate::{
@@ -113,38 +114,12 @@ pub fn execute_query(
         }));
     }
 
-    // 1. Collect candidates — try index narrowing first
-    let candidates = collect_candidates(collection, &input.r#where);
-
-    // 2. Resolve computed fields
-    let with_computed = resolve_computed_for_all(
-        &candidates,
+    execute_query_over_entities(
+        collect_candidates(collection, &input.r#where),
+        input,
         &collection.descriptor.computed_fields,
         registry,
-    )?;
-
-    // 3. Filter
-    let filtered: Vec<Value> = match &input.r#where {
-        None => with_computed,
-        Some(w) => with_computed
-            .into_iter()
-            .filter(|e| matches_where_with_registry(e, w, Some(registry.as_ref())))
-            .collect(),
-    };
-
-    // 4. Search scoring + sort (registry used for registered string collation)
-    let sorted = sort_with_scoring(filtered, &input.r#where, &input.sort, Some(registry));
-
-    // 5. Paginate (offset/limit)
-    let paginated = paginate(&sorted, input.offset, input.limit);
-
-    // 6. Select
-    let result: Vec<Value> = paginated
-        .iter()
-        .map(|e| apply_selection(e, input.select.as_ref()))
-        .collect();
-
-    Ok(result)
+    )
 }
 
 /// Execute a cursor-paginated query over a `Collection`.
@@ -170,12 +145,47 @@ pub fn execute_cursor_query(
     cursor_cfg: &CursorConfig,
     registry: &Arc<CallbackRegistry>,
 ) -> Result<CursorPageResult, EngineError> {
-    // Determine effective sort — validate if caller provided one
+    execute_cursor_query_over_entities(
+        collect_candidates(collection, &input.r#where),
+        input,
+        cursor_cfg,
+        &collection.descriptor.computed_fields,
+        registry,
+    )
+}
+
+pub fn execute_query_over_entities(
+    entities: Vec<Value>,
+    input: &QueryInput,
+    computed_fields: &[ComputedFieldDescriptor],
+    registry: &Arc<CallbackRegistry>,
+) -> Result<Vec<Value>, EngineError> {
+    let with_computed = resolve_computed_for_all(&entities, computed_fields, registry)?;
+    let filtered: Vec<Value> = match &input.r#where {
+        None => with_computed,
+        Some(w) => with_computed
+            .into_iter()
+            .filter(|e| matches_where_with_registry(e, w, Some(registry.as_ref())))
+            .collect(),
+    };
+    let sorted = sort_with_scoring(filtered, &input.r#where, &input.sort, Some(registry));
+    let paginated = paginate(&sorted, input.offset, input.limit);
+    Ok(paginated
+        .iter()
+        .map(|e| apply_selection(e, input.select.as_ref()))
+        .collect())
+}
+
+pub fn execute_cursor_query_over_entities(
+    entities: Vec<Value>,
+    input: &QueryInput,
+    cursor_cfg: &CursorConfig,
+    computed_fields: &[ComputedFieldDescriptor],
+    registry: &Arc<CallbackRegistry>,
+) -> Result<CursorPageResult, EngineError> {
     let effective_sort: Vec<SortEntry> = if input.sort.is_empty() {
-        // Default: ascending by cursor key (mirrors TS `effectiveSort = { [cursorKey]: "asc" }`)
         vec![(cursor_cfg.key.clone(), SortOrder::Asc)]
     } else {
-        // Validate primary sort key matches cursor key
         let primary = &input.sort[0].0;
         if primary != &cursor_cfg.key {
             return Err(EngineError::Validation(ValidationError {
@@ -195,17 +205,7 @@ pub fn execute_cursor_query(
         input.sort.clone()
     };
 
-    // 1. Collect candidates
-    let candidates = collect_candidates(collection, &input.r#where);
-
-    // 2. Resolve computed fields
-    let with_computed = resolve_computed_for_all(
-        &candidates,
-        &collection.descriptor.computed_fields,
-        registry,
-    )?;
-
-    // 3. Filter
+    let with_computed = resolve_computed_for_all(&entities, computed_fields, registry)?;
     let filtered: Vec<Value> = match &input.r#where {
         None => with_computed,
         Some(w) => with_computed
@@ -213,27 +213,15 @@ pub fn execute_cursor_query(
             .filter(|e| matches_where_with_registry(e, w, Some(registry.as_ref())))
             .collect(),
     };
-
-    // 4. Attach search scores (mirrors TS cursor branch: attachSearchScores before sort)
-    //    When top-level $search is present, scores are annotated before sort so that
-    //    they are available as metadata on result items (even if the cursor's explicit
-    //    sort takes precedence over relevance ordering).
     let filtered_with_scores = attach_search_scores(filtered, &input.r#where);
-
-    // 5. Sort by effective_sort (cursor uses explicit sort or default asc-by-key)
     let mut sorted = filtered_with_scores;
     sort_entities_with_registry(&mut sorted, &effective_sort, Some(registry));
-
-    // 5b. Cursor pagination
     let mut cursor_result = apply_cursor(&sorted, cursor_cfg)?;
-
-    // 6. Select
     cursor_result.items = cursor_result
         .items
         .iter()
         .map(|e| apply_selection(e, input.select.as_ref()))
         .collect();
-
     Ok(cursor_result)
 }
 
@@ -245,14 +233,9 @@ pub fn execute_aggregate(
     registry: &Arc<CallbackRegistry>,
 ) -> Result<AggregateResult, EngineError> {
     let candidates = collect_candidates(collection, &where_clause.cloned());
-    let with_computed = resolve_computed_for_all(
-        &candidates,
-        &collection.descriptor.computed_fields,
-        registry,
-    )?;
     let filtered: Vec<Value> = match where_clause {
-        None => with_computed,
-        Some(w) => with_computed
+        None => candidates,
+        Some(w) => candidates
             .into_iter()
             .filter(|e| matches_where_with_registry(e, w, Some(registry.as_ref())))
             .collect(),
@@ -269,14 +252,9 @@ pub fn execute_grouped_aggregate(
     registry: &Arc<CallbackRegistry>,
 ) -> Result<Vec<GroupResult>, EngineError> {
     let candidates = collect_candidates(collection, &where_clause.cloned());
-    let with_computed = resolve_computed_for_all(
-        &candidates,
-        &collection.descriptor.computed_fields,
-        registry,
-    )?;
     let filtered: Vec<Value> = match where_clause {
-        None => with_computed,
-        Some(w) => with_computed
+        None => candidates,
+        Some(w) => candidates
             .into_iter()
             .filter(|e| matches_where_with_registry(e, w, Some(registry.as_ref())))
             .collect(),

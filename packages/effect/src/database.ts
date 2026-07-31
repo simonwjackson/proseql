@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import {
 	CollectionNotFoundError,
 	type CollectionConfig,
@@ -49,7 +50,7 @@ import {
 	type GenerateEngineDatabaseWithPersistence,
 	WasmEngineDefectError
 } from "@proseql/engine";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Queue, Stream } from "effect";
 
 export type RunnableEffect<A, E> = Effect.Effect<A, E, never> & {
 	readonly runPromise: Promise<A>;
@@ -179,16 +180,77 @@ const ignoreCloseError = (close: () => Promise<void>) =>
 		catch: () => undefined
 	}).pipe(Effect.ignore);
 
+const makePersistentCloseOnce = (
+	flush: () => Promise<void>,
+	close: () => Promise<void>,
+	plugins: ReadonlyArray<{ readonly shutdown?: () => Effect.Effect<unknown, unknown, never> }> | undefined
+) => {
+	let closePromise: Promise<void> | undefined;
+	return () => {
+		if (closePromise) return closePromise;
+		closePromise = (async () => {
+			let firstError: Error | undefined;
+			const capture = (error: unknown) => {
+				if (firstError === undefined) {
+					firstError = normalizeRejection(error);
+				}
+			};
+			try {
+				await flush();
+			} catch (error) {
+				capture(error);
+			}
+			for (const plugin of [...(plugins ?? [])].reverse()) {
+				if (plugin.shutdown === undefined) continue;
+				try {
+					await Effect.runPromise(plugin.shutdown());
+				} catch (error) {
+					console.error("[proseql/effect] plugin shutdown failed", error);
+				}
+			}
+			try {
+				await close();
+			} catch (error) {
+				capture(error);
+			}
+			if (firstError !== undefined) {
+				throw firstError;
+			}
+		})();
+		return closePromise;
+	};
+};
+
 const subscriptionEffectToStream = <A>(
-	acquire: () => AsyncIterable<A> & { unsubscribe(): Promise<void> }
+	acquire: () => AsyncIterableIterator<A> & { unsubscribe(): Promise<void> }
 ): Effect.Effect<Stream.Stream<A, never, never>, never, import("effect").Scope.Scope> =>
 	Effect.suspend(() =>
-		Effect.acquireRelease(Effect.sync(acquire), (sub) => ignoreCloseError(() => sub.unsubscribe())).pipe(
-			Effect.map((sub) =>
-				Stream.fromAsyncIterable(sub, (error) => normalizeRejection(error)).pipe(Stream.orDie)
-			)
+		Effect.acquireRelease(
+			Effect.gen(function* () {
+				const sub = acquire();
+				const queue = yield* Queue.unbounded<A>();
+				void (async () => {
+					try {
+						while (true) {
+							const next = await sub.next();
+							if (next.done) break;
+							Queue.offerUnsafe(queue, next.value);
+						}
+					} finally {
+						await Effect.runPromise(Queue.shutdown(queue));
+					}
+				})();
+				return { sub, queue };
+			}),
+			({ sub, queue }) =>
+				Effect.gen(function* () {
+					yield* ignoreCloseError(() => sub.unsubscribe());
+					yield* Queue.shutdown(queue).pipe(Effect.ignore);
+				})
+		).pipe(
+			Effect.map(({ queue }) => Stream.fromQueue(queue).pipe(Stream.orDie) as Stream.Stream<A, never, never>)
 		)
-	);
+	) as Effect.Effect<Stream.Stream<A, never, never>, never, import("effect").Scope.Scope>;
 
 const engineOptionsFrom = (options: EffectDatabaseOptions | undefined): EngineDatabaseOptions | undefined =>
 	options ? { plugins: options.plugins } : undefined;
@@ -225,7 +287,18 @@ const makePersistenceOptions = (
 			watchDir: (
 				dirPath: string,
 				onChange: (event: { readonly filename: string | null; readonly type: "add" | "change" | "remove" }) => void
-			) => Effect.runPromise(adapter.watchDir(dirPath, onChange))
+			) =>
+				Effect.runPromise(
+					adapter.watchDir(dirPath, (event) =>
+						onChange({
+							...event,
+							filename:
+								typeof event.filename === "string" && !event.filename.startsWith("/")
+									? join(dirPath, event.filename)
+									: event.filename
+						})
+					)
+				)
 		},
 		storageLayer: Layer.succeed(StorageAdapter, adapter)
 	};
@@ -669,13 +742,14 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 	options?: EffectDatabaseOptions
 ): Effect.Effect<GenerateDatabase<Config>, CreateEffectDatabaseError> => {
 	const collectionNames = collectionNamesFromConfig(config);
-	return liftPromise<GenerateDatabase<Config>, CreateEffectDatabaseError>(() =>
-		createEngineDatabase(
+	return liftPromise<GenerateDatabase<Config>, CreateEffectDatabaseError>(async () => {
+		const db = await createEngineDatabase(
 			config,
 			initialData as EngineInitialData<Config> | undefined,
 			engineOptionsFrom(options)
-		).then((db) => adaptDatabase(db, collectionNames))
-	);
+		);
+		return adaptDatabase(db, collectionNames);
+	});
 };
 
 export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
@@ -697,29 +771,35 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 	| InvalidDocumentSourceError
 	| DocumentGraphSourceError
 	| PluginError,
-	typeof StorageAdapter | typeof SerializerRegistryService | import("effect").Scope.Scope
+	typeof StorageAdapter | typeof SerializerRegistryService
 > => {
 	const collectionNames = collectionNamesFromConfig(config);
-	return Effect.acquireRelease(
-		Effect.gen(function* () {
-			const adapterOption = yield* Effect.serviceOption(StorageAdapter);
-			const serializerRegistryOption = yield* Effect.serviceOption(SerializerRegistryService);
-			const enginePersistence = makePersistenceOptions(
-				adapterOption._tag === "Some" ? adapterOption.value : undefined,
-				serializerRegistryOption._tag === "Some" ? serializerRegistryOption.value : undefined,
-				persistenceConfig
-			);
-			return yield* liftPromise(() =>
-				createPersistentEngineDatabase(
-					config,
-					initialData as EngineInitialData<Config> | undefined,
-					enginePersistence,
-					engineOptionsFrom(options)
-				).then((db) => adaptPersistentDatabase(db, collectionNames))
-			);
-		}),
-		(db) => ignoreCloseError(() => db.close())
-	) as unknown as Effect.Effect<
+	return Effect.gen(function* () {
+		const adapterOption = yield* Effect.serviceOption(StorageAdapter);
+		const serializerRegistryOption = yield* Effect.serviceOption(SerializerRegistryService);
+		const enginePersistence = makePersistenceOptions(
+			adapterOption._tag === "Some" ? adapterOption.value : undefined,
+			serializerRegistryOption._tag === "Some" ? serializerRegistryOption.value : undefined,
+			persistenceConfig
+		);
+		const baseDb = yield* liftPromise(() =>
+			createPersistentEngineDatabase(
+				config,
+				initialData as EngineInitialData<Config> | undefined,
+				enginePersistence,
+				engineOptionsFrom(options)
+			).then((db) => adaptPersistentDatabase(db, collectionNames))
+		);
+		const baseClose = baseDb.close.bind(baseDb);
+		const close = makePersistentCloseOnce(
+			() => baseDb.flush(),
+			() => baseClose(),
+			options?.plugins
+		);
+		const db = Object.assign(baseDb, { close });
+		yield* Effect.addFinalizer(() => Effect.promise(() => close()).pipe(Effect.orDie));
+		return db;
+	}) as unknown as Effect.Effect<
 		GenerateDatabaseWithPersistence<Config>,
 		| MigrationError
 		| StorageError
@@ -733,7 +813,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		| InvalidDocumentSourceError
 		| DocumentGraphSourceError
 		| PluginError,
-		typeof StorageAdapter | typeof SerializerRegistryService | import("effect").Scope.Scope
+		typeof StorageAdapter | typeof SerializerRegistryService
 	>;
 };
 

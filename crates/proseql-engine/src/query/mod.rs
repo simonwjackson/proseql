@@ -43,7 +43,8 @@ pub use cursor::{apply_cursor, CursorConfig, CursorPageInfo, CursorPageResult};
 pub use filter::{matches_where, matches_where_with_registry};
 pub use paginate::paginate;
 pub use pipeline::{
-    execute_aggregate, execute_cursor_query, execute_grouped_aggregate, execute_query, query_input,
+    execute_aggregate, execute_cursor_query, execute_cursor_query_over_entities,
+    execute_grouped_aggregate, execute_query, execute_query_over_entities, query_input,
     search_score, QueryInput,
 };
 pub use search::{compute_search_score, extract_search_config, tokenize, SearchConfig};

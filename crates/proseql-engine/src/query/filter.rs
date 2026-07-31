@@ -36,6 +36,7 @@ use serde_json::Value;
 use super::search::tokenize;
 use crate::callbacks::{CallbackRegistry, CustomOperatorEvaluation};
 use crate::validator::js_eq;
+use crate::value::is_boundary_undefined;
 
 // ── Dot-notation helpers ─────────────────────────────────────────────────────────────
 
@@ -272,22 +273,20 @@ pub fn matches_where_with_registry(
 /// // Direct value === undefined → match; anything else → no match
 /// ```
 fn missing_field_matches(filter: &Value) -> bool {
+    if is_boundary_undefined(filter) {
+        return true;
+    }
     match filter {
         Value::Null => false, // null ≠ undefined in JS
         Value::Object(ops) => {
-            // $eq: undefined → matches (field missing = undefined)
-            // Direct None representation: JSON can't express undefined, but we
-            // treat absent $eq key differently.
-            // In practice, $eq: null does NOT match a missing field (null ≠ undefined).
-            // Only $eq with explicit undefined (which can't be JSON-serialized) would.
-            // The TS check is: `ops.$eq === undefined` meaning the key exists but has undefined.
-            // In JSON/Rust, we can't distinguish "key absent" from "$eq: null" at this level.
-            // Conservative: any operator object on a missing field → no match.
-            let _ = ops;
+            if ops.get("$eq").is_some_and(is_boundary_undefined) {
+                return true;
+            }
+            if ops.get("$ne").is_some_and(is_boundary_undefined) {
+                return false;
+            }
             false
         }
-        // Direct value equality check on a missing field.
-        // In TS: `if (value !== undefined) { shouldInclude = false; }` — undefined can't be JSON.
         _ => false,
     }
 }

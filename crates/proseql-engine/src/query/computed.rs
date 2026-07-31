@@ -186,4 +186,16 @@ mod tests {
         assert_eq!(result["displayName"], json!("Dune (1965)"));
         assert_eq!(result["isClassic"], json!(true));
     }
+
+    #[test]
+    fn preserves_boundary_undefined_marker_for_bridge_encoding() {
+        let e = json!({"id": "1", "title": "Dune"});
+        let reg = make_registry("maybe_rating", |_| json!({"__proseqlUndefined__": 1}));
+        let desc = ComputedFieldDescriptor {
+            name: "ratingCategory".to_string(),
+            callback_id: "maybe_rating".to_string(),
+        };
+        let result = resolve_computed(&e, &[desc], &reg).unwrap();
+        assert_eq!(result["ratingCategory"], json!({"__proseqlUndefined__": 1}));
+    }
 }

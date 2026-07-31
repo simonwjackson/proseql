@@ -1,6 +1,6 @@
 use std::panic::{self, AssertUnwindSafe};
 
-use proseql_engine::errors::EngineError;
+use proseql_engine::{errors::EngineError, value::encode_boundary_output_value};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -19,6 +19,9 @@ fn response_ok<T>(value: T) -> String
 where
     T: Serialize,
 {
+    let value = serde_json::to_value(value)
+        .map(encode_boundary_output_value)
+        .unwrap_or(Value::Null);
     serde_json::to_string(&BridgeResponse::Ok { value }).unwrap_or_else(|_| {
         "{\"kind\":\"defect\",\"message\":\"failed to serialize ok response\"}".to_owned()
     })

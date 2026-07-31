@@ -680,11 +680,18 @@ describe("@proseql/engine U8 fixes", () => {
 			await writeFile(join(teamsDir, "t1.json"), "{ bad json");
 			await sleep(250);
 			expect(await db.teams.findById("t1")).toEqual({ id: "t1", name: "Beta" });
-			await expect(db.flush()).rejects.toBeInstanceOf(SerializationError);
+			let invalidReloadDelivered = false;
+			const nextEmission = watch.next().then((value) => {
+				invalidReloadDelivered = true;
+				return value;
+			});
+			await sleep(100);
+			expect(invalidReloadDelivered).toBe(false);
+			await expect(db.flush()).resolves.toBeUndefined();
 			await writeFile(join(teamsDir, "t1.json"), JSON.stringify({ id: "t1", name: "Gamma" }));
 			await sleep(250);
 			expect(await db.teams.findById("t1")).toEqual({ id: "t1", name: "Gamma" });
-			expect((await watch.next()).value?.[0]?.name).toBe("Gamma");
+			expect((await nextEmission).value?.[0]?.name).toBe("Gamma");
 			await db.close();
 			await writeFile(join(teamsDir, "t1.json"), JSON.stringify({ id: "t1", name: "Delta" }));
 			await sleep(250);

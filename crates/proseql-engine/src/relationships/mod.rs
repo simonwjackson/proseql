@@ -88,8 +88,8 @@ use crate::callbacks::CallbackRegistry;
 use crate::collection::Collection;
 use crate::errors::EngineError;
 use crate::query::{
-    apply_selection, execute_cursor_query, execute_query, CursorConfig, CursorPageResult,
-    QueryInput,
+    execute_cursor_query_over_entities, execute_query_over_entities, CursorConfig,
+    CursorPageResult, QueryInput,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::reactive::ThreadReactiveScheduler;
@@ -340,40 +340,33 @@ impl Database {
 
     /// Query with optional population.
     ///
-    /// Pipeline order: filter/sort/paginate → populate → select.
+    /// Pipeline order: populate → computed/filter/sort/paginate → select.
     pub fn query(
         &self,
         collection: &str,
         input: QueryInput,
         populate: Option<Value>,
     ) -> Result<Vec<Value>, EngineError> {
-        // Step 1 — pipeline without selection
-        let results = {
-            let col = self
-                .collections
-                .get(collection)
-                .ok_or_else(|| col_nf(collection))?;
-            let mut q = input.clone();
-            q.select = None;
-            execute_query(col, &q, &self.registry)?
-        };
-
-        // Step 2 — population (read-only across all collections)
+        let col = self
+            .collections
+            .get(collection)
+            .ok_or_else(|| col_nf(collection))?;
+        let base_entities = col.list().into_iter().cloned().collect::<Vec<_>>();
         let populated = match populate {
-            Some(ref cfg) => apply_populate(results, cfg, collection, &self.collections, 0)?,
-            None => results,
+            Some(ref cfg) => apply_populate(base_entities, cfg, collection, &self.collections, 0)?,
+            None => base_entities,
         };
-
-        // Step 3 — selection from original QueryInput
-        Ok(populated
-            .iter()
-            .map(|e| apply_selection(e, input.select.as_ref()))
-            .collect())
+        execute_query_over_entities(
+            populated,
+            &input,
+            &col.descriptor.computed_fields,
+            &self.registry,
+        )
     }
 
     /// Cursor-paginated query with optional population and selection.
     ///
-    /// Pipeline order: cursor-paginate → populate → select → return CursorPageResult.
+    /// Pipeline order: populate → computed/filter/cursor-sort → select.
     /// `page_info` is preserved from the cursor stage.
     pub fn query_cursor(
         &self,
@@ -382,33 +375,22 @@ impl Database {
         cursor_cfg: &CursorConfig,
         populate: Option<Value>,
     ) -> Result<CursorPageResult, EngineError> {
-        // Step 1 — cursor pipeline without selection
-        let raw_page = {
-            let col = self
-                .collections
-                .get(collection)
-                .ok_or_else(|| col_nf(collection))?;
-            let mut q = input.clone();
-            q.select = None;
-            execute_cursor_query(col, &q, cursor_cfg, &self.registry)?
+        let col = self
+            .collections
+            .get(collection)
+            .ok_or_else(|| col_nf(collection))?;
+        let base_entities = col.list().into_iter().cloned().collect::<Vec<_>>();
+        let populated = match populate {
+            Some(ref cfg) => apply_populate(base_entities, cfg, collection, &self.collections, 0)?,
+            None => base_entities,
         };
-
-        // Step 2 — population (read-only across all collections)
-        let populated_items = match populate {
-            Some(ref cfg) => apply_populate(raw_page.items, cfg, collection, &self.collections, 0)?,
-            None => raw_page.items,
-        };
-
-        // Step 3 — apply selection
-        let selected_items = populated_items
-            .iter()
-            .map(|e| apply_selection(e, input.select.as_ref()))
-            .collect();
-
-        Ok(CursorPageResult {
-            items: selected_items,
-            page_info: raw_page.page_info,
-        })
+        execute_cursor_query_over_entities(
+            populated,
+            input,
+            cursor_cfg,
+            &col.descriptor.computed_fields,
+            &self.registry,
+        )
     }
 }
 

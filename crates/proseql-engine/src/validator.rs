@@ -44,7 +44,7 @@ use serde_json::Map as JsonMap;
 use crate::{
     descriptor::SchemaNode,
     errors::{EngineError, ValidationError, ValidationIssue},
-    value::Value,
+    value::{is_boundary_undefined, Value},
 };
 
 // ── JS strict-equality semantics ─────────────────────────────────────────────
@@ -65,6 +65,9 @@ use crate::{
 /// `if (existingRecord[field] !== constraintValues[field]) { … }`
 /// and in `packages/core/src/operations/crud/upsert.ts` `findByWhere`.
 pub fn js_eq(a: &Value, b: &Value) -> bool {
+    if is_boundary_undefined(a) || is_boundary_undefined(b) {
+        return is_boundary_undefined(a) && is_boundary_undefined(b);
+    }
     match (a, b) {
         (Value::Null, Value::Null) => true,
         (Value::Bool(x), Value::Bool(y)) => x == y,

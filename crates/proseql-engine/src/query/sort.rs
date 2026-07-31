@@ -34,6 +34,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::callbacks::CallbackRegistry;
+use crate::value::is_boundary_undefined;
 
 use super::filter::get_nested_value;
 
@@ -180,7 +181,10 @@ fn compare_strings_via_registry(
 
 /// Is the value null/absent?
 fn is_null_or_absent(v: Option<&Value>) -> bool {
-    matches!(v, None | Some(Value::Null))
+    match v {
+        None | Some(Value::Null) => true,
+        Some(value) => is_boundary_undefined(value),
+    }
 }
 
 /// Convert a value to its JavaScript `String(value)` representation.
@@ -199,6 +203,7 @@ pub fn value_to_js_string(v: &Value) -> String {
         Value::Number(n) => n.to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Null => "null".to_string(),
+        value if is_boundary_undefined(value) => "undefined".to_string(),
         Value::Array(arr) => {
             // JS: String([1,2]) === "1,2"
             // Null and absent (undefined) slots produce empty string in JS.

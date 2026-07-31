@@ -1,17 +1,19 @@
 use std::collections::HashMap;
 
-use proseql_engine::collection::{
-    CreateManyResult, DeleteManyResult, SkippedEntry, UpdateManyResult, UpsertAction,
-    UpsertManyResult, UpsertOutcome,
-};
-use proseql_engine::descriptor::{DatabaseDescriptor, MigrationDescriptor};
-use proseql_engine::errors::{EngineError, OperationError};
-use proseql_engine::migrations::DryRunStatus;
-use proseql_engine::query::{
-    AggregateConfig, CursorConfig, CursorPageResult, GroupResult, QueryInput, SortEntry, SortOrder,
-};
-use proseql_engine::relationships::{
-    DeleteManyWithRelResult, DeleteRelationshipsOptions, DeleteWithRelResult,
+use proseql_engine::{
+    collection::{
+        CreateManyResult, DeleteManyResult, SkippedEntry, UpdateManyResult, UpsertAction,
+        UpsertManyResult, UpsertOutcome,
+    },
+    descriptor::{DatabaseDescriptor, MigrationDescriptor},
+    errors::{EngineError, OperationError},
+    migrations::DryRunStatus,
+    query::{
+        AggregateConfig, CursorConfig, CursorPageResult, GroupResult, QueryInput, SortEntry,
+        SortOrder,
+    },
+    relationships::{DeleteManyWithRelResult, DeleteRelationshipsOptions, DeleteWithRelResult},
+    value::decode_boundary_input_value,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -386,7 +388,10 @@ pub(crate) fn parse_json<T: for<'de> Deserialize<'de>>(
     raw: &str,
     operation: &str,
 ) -> Result<T, EngineError> {
-    serde_json::from_str(raw).map_err(|error| invalid_json_error(operation, error.to_string()))
+    let value: Value = serde_json::from_str(raw)
+        .map_err(|error| invalid_json_error(operation, error.to_string()))?;
+    serde_json::from_value(decode_boundary_input_value(value))
+        .map_err(|error| invalid_json_error(operation, error.to_string()))
 }
 
 pub(crate) fn parse_sort(sort: Option<Value>) -> Vec<SortEntry> {

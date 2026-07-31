@@ -227,6 +227,24 @@ function compileTypeLiteralFields(
 	};
 }
 
+function compileTypeLiteralAstFields(
+	propertySignatures: ReadonlyArray<{ readonly name: unknown; readonly type: unknown; readonly isOptional?: boolean }>,
+	path: string,
+	registrar: CallbackRegistrar,
+): Record<string, unknown> {
+	return {
+		kind: "struct",
+		fields: propertySignatures.map((propertySignature) => {
+			const name = String(propertySignature.name);
+			const compiled = compileSchemaNode({ ast: propertySignature.type }, `${path}.${name}`, registrar);
+			return {
+				name,
+				schema: propertySignature.isOptional ? { kind: "optional", inner: compiled } : compiled,
+			};
+		}),
+	};
+}
+
 function compileFieldSchema(
 	schema: any,
 	path: string,
@@ -306,6 +324,9 @@ function compileSchemaNode(
 		case "TypeLiteral": {
 			if (schema.fields) {
 				return compileTypeLiteralFields(schema.fields, path, registrar);
+			}
+			if (ast.propertySignatures.length > 0 && ast.indexSignatures.length === 0) {
+				return compileTypeLiteralAstFields(ast.propertySignatures, path, registrar);
 			}
 			if (ast.propertySignatures.length === 0 && ast.indexSignatures.length === 1) {
 				const indexSignature = ast.indexSignatures[0];
