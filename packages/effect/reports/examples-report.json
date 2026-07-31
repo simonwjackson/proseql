@@ -1,6 +1,5 @@
 {
   "phase": "phase-2-gate",
-  "generatedAt": "2026-07-31T04:08:14.174Z",
   "summary": {
     "totalExamples": 16,
     "executedExamples": 12,
@@ -18,7 +17,6 @@
       "test": "01-basic-crud",
       "expectation": "pass",
       "status": "passed",
-      "category": "parity-mismatch",
       "owner": "effect-adapter",
       "core": {
         "exitCode": 0,
@@ -36,7 +34,6 @@
       "test": "02-filtering-and-selection",
       "expectation": "pass",
       "status": "passed",
-      "category": "parity-mismatch",
       "owner": "effect-adapter",
       "core": {
         "exitCode": 0,
@@ -54,7 +51,6 @@
       "test": "03-update-operators",
       "expectation": "pass",
       "status": "passed",
-      "category": "parity-mismatch",
       "owner": "effect-adapter",
       "core": {
         "exitCode": 0,
@@ -72,7 +68,6 @@
       "test": "04-nested-data",
       "expectation": "pass",
       "status": "passed",
-      "category": "parity-mismatch",
       "owner": "effect-adapter",
       "core": {
         "exitCode": 0,
@@ -90,7 +85,6 @@
       "test": "05-cursor-pagination",
       "expectation": "pass",
       "status": "passed",
-      "category": "parity-mismatch",
       "owner": "effect-adapter",
       "core": {
         "exitCode": 0,
@@ -108,7 +102,6 @@
       "test": "06-aggregation",
       "expectation": "pass",
       "status": "passed",
-      "category": "parity-mismatch",
       "owner": "effect-adapter",
       "core": {
         "exitCode": 0,
@@ -126,7 +119,6 @@
       "test": "07-computed-fields",
       "expectation": "pass",
       "status": "passed",
-      "category": "parity-mismatch",
       "owner": "effect-adapter",
       "core": {
         "exitCode": 0,
@@ -144,7 +136,6 @@
       "test": "08-full-text-search",
       "expectation": "pass",
       "status": "passed",
-      "category": "parity-mismatch",
       "owner": "effect-adapter",
       "core": {
         "exitCode": 0,
@@ -181,7 +172,6 @@
       "test": "10-lifecycle-hooks",
       "expectation": "pass",
       "status": "passed",
-      "category": "parity-mismatch",
       "owner": "effect-adapter",
       "core": {
         "exitCode": 0,

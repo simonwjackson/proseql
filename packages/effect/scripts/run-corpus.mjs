@@ -151,7 +151,6 @@ const xfailedResults = xfailResults.filter((result) => result.status === "xfaile
 
 const report = {
 	phase: "phase-2-gate",
-	generatedAt: new Date().toISOString(),
 	summary: {
 		totalFiles: allFiles.length,
 		executedFiles: runnableResults.length + xfailResults.length,
@@ -249,8 +248,12 @@ async function runRunnableFile(file, expectation, expected = undefined) {
 			tests: counts.tests,
 			passedTests,
 			failedTests,
-			stdout: output.stdout,
-			stderr: output.stderr,
+			...(passed
+				? {}
+				: {
+						stdout: output.stdout,
+						stderr: output.stderr,
+					}),
 		};
 }
 

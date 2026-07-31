@@ -142,8 +142,9 @@ try {
 			test: entry.test,
 			expectation: entry.expectation,
 			status: passed ? "passed" : "failed",
-			category:
-				coreRun.status !== 0
+			category: passed
+				? undefined
+				: coreRun.status !== 0
 					? "upstream-example-bug"
 					: effectRun.status !== 0
 						? "engine-bug"
@@ -170,7 +171,6 @@ const xpassedResults = xfailResults.filter((result) => result.status === "xpasse
 
 const report = {
 	phase: "phase-2-gate",
-	generatedAt: new Date().toISOString(),
 	summary: {
 		totalExamples: inventory.length,
 		executedExamples: runnableResults.length + xfailResults.length,
