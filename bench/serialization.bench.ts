@@ -1,318 +1,803 @@
-/**
- * Serialization Format Comparison Benchmarks
- *
- * Measures serialization and deserialization performance for all supported formats:
- * - JSON (.json)
- * - YAML (.yaml)
- * - TOML (.toml)
- * - JSON5 (.json5)
- * - JSONC (.jsonc)
- * - TOON (.toon)
- * - Hjson (.hjson)
- *
- * Also includes debounced write coalescing measurement.
- * Uses a 1K-entity dataset for consistent measurements.
- */
-
+import { Effect, Exit, Layer, Schema, Scope } from "effect";
+import { Bench } from "tinybench";
 import {
-	createPersistentEffectDatabase,
-	hjsonCodec,
-	json5Codec,
+	createPersistentEffectDatabase as createCorePersistentEffectDatabase,
 	jsonCodec,
-	jsoncCodec,
 	makeSerializerLayer,
 	StorageAdapterService,
+	type CollectionConfig,
+	type ProseQLPlugin,
 	type StorageAdapterShape,
-	tomlCodec,
-	toonCodec,
-	yamlCodec,
-} from "@proseql/core";
-import { Effect, Layer, Schema } from "effect";
-import { Bench } from "tinybench";
-import { generateUsers } from "./generators.js";
-import { defaultBenchOptions, formatResultsTable } from "./utils.js";
+} from "../packages/core/src/index.js";
+import { createPersistentEffectDatabase as createWasmPersistentEffectDatabase } from "../packages/effect/src/index.js";
+import {
+	attachTaskMetadata,
+	checksumBenchmarkValue,
+	createEngineTaskName,
+	type BenchmarkCaseType,
+	type BenchmarkCategory,
+} from "./comparison.js";
+import { generateUsers, type User } from "./generators.js";
+import {
+	buildBenchOptions,
+	closeAll,
+	createTaskInstrumentation,
+	formatResultsTable,
+	measureAsync,
+	withFrozenDate,
+} from "./utils.js";
 
-// ============================================================================
-// Constants
-// ============================================================================
+const BASELINE_SIZE = 10_000;
+const MUTATION_BATCH_SIZE = 100;
+const FIXED_CREATED_AT = "2026-01-01T00:00:00.000Z";
+const CHECKSUM_CLOCK_ISO = "2026-01-02T03:04:05.000Z";
+const USERS_FILE = "./data/users.json";
 
-/**
- * Dataset size for serialization benchmarks.
- * 1K entities provides a meaningful workload while keeping benchmark time reasonable.
- */
-const DATASET_SIZE = 1_000;
+const UserSchema = Schema.Struct({
+	id: Schema.String,
+	name: Schema.String,
+	email: Schema.String,
+	age: Schema.Number,
+	role: Schema.Union([
+		Schema.Literal("admin"),
+		Schema.Literal("moderator"),
+		Schema.Literal("user"),
+	]),
+	createdAt: Schema.String,
+});
 
-// ============================================================================
-// Codec Instances
-// ============================================================================
+const basicConfig = {
+	users: {
+		schema: UserSchema,
+		file: USERS_FILE,
+		relationships: {},
+	},
+} as const satisfies Record<string, CollectionConfig>;
 
-/**
- * All 7 format codecs to benchmark.
- * Each codec provides encode/decode functions for its format.
- */
-const CODECS = [
-	{ name: "JSON", codec: jsonCodec() },
-	{ name: "YAML", codec: yamlCodec() },
-	{ name: "TOML", codec: tomlCodec() },
-	{ name: "JSON5", codec: json5Codec() },
-	{ name: "JSONC", codec: jsoncCodec() },
-	{ name: "TOON", codec: toonCodec() },
-	{ name: "Hjson", codec: hjsonCodec() },
-] as const;
+const computedConfig = {
+	users: {
+		schema: UserSchema,
+		file: USERS_FILE,
+		relationships: {},
+		computed: {
+			displayName: (user: User) => `${user.name}:${user.role}`,
+		},
+	},
+} as const satisfies Record<string, CollectionConfig>;
 
-// ============================================================================
-// Benchmark Suite Export
-// ============================================================================
+const localeCollatorConfig = {
+	users: {
+		schema: UserSchema,
+		file: USERS_FILE,
+		relationships: {},
+	},
+} as const satisfies Record<string, CollectionConfig>;
 
-/**
- * Benchmark suite name for identification in runner output.
- */
+const createHooksConfig = (events: Array<string>) =>
+	({
+		users: {
+			schema: UserSchema,
+			file: USERS_FILE,
+			relationships: {},
+			hooks: {
+				beforeCreate: [
+					(ctx) =>
+						Effect.sync(() => {
+							events.push(`beforeCreate:${ctx.data.id}`);
+							return {
+								...ctx.data,
+								email: ctx.data.email.toLowerCase(),
+							};
+						}),
+				],
+				afterCreate: [
+					(ctx) =>
+						Effect.sync(() => {
+							events.push(`afterCreate:${ctx.entity.id}`);
+							return undefined;
+						}),
+				],
+				beforeUpdate: [
+					(ctx) =>
+						Effect.sync(() => {
+							events.push(`beforeUpdate:${ctx.id}`);
+							return ctx.update;
+						}),
+				],
+				afterUpdate: [
+					(ctx) =>
+						Effect.sync(() => {
+							events.push(`afterUpdate:${ctx.id}`);
+							return undefined;
+						}),
+				],
+				beforeDelete: [
+					(ctx) =>
+						Effect.sync(() => {
+							events.push(`beforeDelete:${ctx.id}`);
+							return undefined;
+						}),
+				],
+				afterDelete: [
+					(ctx) =>
+						Effect.sync(() => {
+							events.push(`afterDelete:${ctx.id}`);
+							return undefined;
+						}),
+				],
+			},
+		},
+	}) as const satisfies Record<string, CollectionConfig>;
+
+const prefixPlugin = {
+	name: "serialization-prefix-plugin",
+	operators: [
+		{
+			name: "$prefix",
+			types: ["string"] as const,
+			evaluate: (fieldValue: unknown, operand: unknown) =>
+				typeof fieldValue === "string" &&
+				typeof operand === "string" &&
+				fieldValue.startsWith(operand),
+		},
+	],
+} as const satisfies ProseQLPlugin;
+
+interface CountingStorage {
+	readonly layer: Layer.Layer<typeof StorageAdapterService>;
+	readonly store: Map<string, string>;
+	readonly writeCount: { value: number };
+	resetWrites(): void;
+}
+
+const createCountingStorage = (): CountingStorage => {
+	const store = new Map<string, string>();
+	const writeCount = { value: 0 };
+	const adapter: StorageAdapterShape = {
+		read: (path: string) => Effect.sync(() => store.get(path) ?? "{}"),
+		write: (path: string, data: string) =>
+			Effect.sync(() => {
+				store.set(path, data);
+				writeCount.value += 1;
+			}),
+		append: (path: string, data: string) =>
+			Effect.sync(() => {
+				store.set(path, `${store.get(path) ?? ""}${data}`);
+				writeCount.value += 1;
+			}),
+		exists: (path: string) => Effect.sync(() => store.has(path)),
+		remove: (path: string) =>
+			Effect.sync(() => {
+				store.delete(path);
+			}),
+		ensureDir: (_path: string) => Effect.void,
+		watch: (_path: string, _onChange: () => void) => Effect.succeed(() => {}),
+	};
+
+	return {
+		layer: Layer.succeed(StorageAdapterService, adapter),
+		store,
+		writeCount,
+		resetWrites: () => {
+			writeCount.value = 0;
+		},
+	};
+};
+
+const serializerLayer = makeSerializerLayer([jsonCodec()]);
+
+interface PersistentCollection<Row> {
+	readonly query: (query?: Record<string, unknown>) => {
+		readonly runPromise: Promise<ReadonlyArray<Row>>;
+	};
+	readonly findById: (id: string) => {
+		readonly runPromise: Promise<Row | undefined>;
+	};
+	readonly exists: (id: string) => { readonly runPromise: Promise<boolean> };
+	readonly create: (row: Row) => { readonly runPromise: Promise<Row> };
+	readonly createMany: (rows: ReadonlyArray<Row>) => {
+		readonly runPromise: Promise<unknown>;
+	};
+	readonly update: (
+		id: string,
+		updates: Record<string, unknown>,
+	) => { readonly runPromise: Promise<Row> };
+	readonly updateMany: (
+		selector: ((row: Row) => boolean) | Record<string, unknown>,
+		updates: Record<string, unknown>,
+	) => { readonly runPromise: Promise<unknown> };
+	readonly delete: (id: string) => { readonly runPromise: Promise<Row> };
+	readonly deleteMany: (
+		selector: ((row: Row) => boolean) | Record<string, unknown>,
+	) => { readonly runPromise: Promise<unknown> };
+}
+
+interface PersistentDb<Row> {
+	readonly users: PersistentCollection<Row>;
+	readonly flush: () => Promise<void>;
+	readonly pendingCount: () => number;
+	readonly close: () => Promise<void>;
+	readonly $transaction: <A>(
+		fn: (ctx: {
+			readonly users: {
+				readonly create: (row: Row) => Effect.Effect<Row>;
+				readonly update: (
+					id: string,
+					updates: Record<string, unknown>,
+				) => Effect.Effect<Row>;
+				readonly delete: (id: string) => Effect.Effect<Row>;
+			};
+		}) => Effect.Effect<A>,
+	) => Effect.Effect<A>;
+}
+
+interface PersistentBenchHandle<Row> {
+	readonly db: PersistentDb<Row>;
+	readonly close: () => Promise<void>;
+}
+
+interface PersistentBenchEngine {
+	readonly id: "typescript" | "wasm";
+	createDatabase: <Config extends Record<string, CollectionConfig>>(
+		config: Config,
+		initialData: Record<string, ReadonlyArray<Record<string, unknown>>>,
+		storage: CountingStorage,
+		plugins?: ReadonlyArray<ProseQLPlugin>,
+	) => Promise<PersistentBenchHandle<User>>;
+}
+
+const createPersistentHandle = async (
+	factory: typeof createCorePersistentEffectDatabase,
+	config: Record<string, CollectionConfig>,
+	initialData: Record<string, ReadonlyArray<Record<string, unknown>>>,
+	storage: CountingStorage,
+	plugins?: ReadonlyArray<ProseQLPlugin>,
+): Promise<PersistentBenchHandle<User>> => {
+	const layer = Layer.merge(storage.layer, serializerLayer);
+	const scope = await Effect.runPromise(Scope.make());
+	const db = await Effect.runPromise(
+		Scope.provide(scope)(
+			factory(
+				config,
+				initialData,
+				{ writeDebounce: 10 },
+				plugins ? { plugins } : undefined,
+			).pipe(Effect.provide(layer)),
+		),
+	);
+	return {
+		db: db as unknown as PersistentDb<User>,
+		close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
+	};
+};
+
+const persistentBenchEngines = [
+	{
+		id: "typescript",
+		createDatabase: (config, initialData, storage, plugins) =>
+			createPersistentHandle(
+				createCorePersistentEffectDatabase,
+				config,
+				initialData,
+				storage,
+				plugins,
+			),
+	},
+	{
+		id: "wasm",
+		createDatabase: (config, initialData, storage, plugins) =>
+			createPersistentHandle(
+				createWasmPersistentEffectDatabase,
+				config,
+				initialData,
+				storage,
+				plugins,
+			),
+	},
+] as const satisfies ReadonlyArray<PersistentBenchEngine>;
+
+const createBatchUsers = (prefix: string, count = MUTATION_BATCH_SIZE) =>
+	Array.from({ length: count }, (_, index) => ({
+		id: `${prefix}_${index}`,
+		name: `Batch User ${index}`,
+		email: `${prefix}_${index}@example.com`,
+		age: 20 + (index % 10),
+		role: "user" as const,
+		createdAt: FIXED_CREATED_AT,
+	}));
+
+const createLocaleUsers = (): ReadonlyArray<User> => [
+	{
+		id: "locale-1",
+		name: "Ångström",
+		email: "angstrom@example.com",
+		age: 31,
+		role: "user",
+		createdAt: FIXED_CREATED_AT,
+	},
+	{
+		id: "locale-2",
+		name: "Apple",
+		email: "apple@example.com",
+		age: 32,
+		role: "user",
+		createdAt: FIXED_CREATED_AT,
+	},
+	{
+		id: "locale-3",
+		name: "Äther",
+		email: "aether@example.com",
+		age: 33,
+		role: "user",
+		createdAt: FIXED_CREATED_AT,
+	},
+	{
+		id: "locale-4",
+		name: "Zebra",
+		email: "zebra@example.com",
+		age: 34,
+		role: "user",
+		createdAt: FIXED_CREATED_AT,
+	},
+];
+
+const computeCaseType = (value: BenchmarkCaseType) => value;
+
+const registerTaskMetadata = (options: {
+	readonly bench: Bench;
+	readonly benchmarkName: string;
+	readonly engineId: "typescript" | "wasm";
+	readonly category: BenchmarkCategory;
+	readonly caseType: BenchmarkCaseType;
+	readonly normalInteraction: boolean;
+	readonly checksum: string;
+	readonly initializationMs: number;
+	readonly commandPayload?: unknown;
+	readonly resultPayload?: unknown;
+}) => {
+	const task = options.bench.tasks[options.bench.tasks.length - 1];
+	if (!task) {
+		throw new Error(`Missing benchmark task for ${options.benchmarkName}`);
+	}
+	attachTaskMetadata(task, {
+		benchmarkName: options.benchmarkName,
+		engineId: options.engineId,
+		category: options.category,
+		caseType: options.caseType,
+		datasetSize: BASELINE_SIZE,
+		normalInteraction: options.normalInteraction,
+		checksum: options.checksum,
+		instrumentation: createTaskInstrumentation({
+			initializationMs: options.initializationMs,
+			commandPayload: options.commandPayload,
+			resultPayload: options.resultPayload,
+		}),
+	});
+};
+
 export const suiteName = "serialization";
 
-/**
- * Creates and configures the serialization benchmark suite.
- *
- * This function pre-generates test data and sets up benchmarks for
- * each format's serialize and deserialize operations.
- * Individual benchmarks are added in subsequent tasks (6.2-6.4).
- */
-export async function createSuite(): Promise<Bench> {
-	const bench = new Bench(defaultBenchOptions);
+export async function createSuite(options?: {
+	readonly includeStress?: boolean;
+	readonly benchOptions?: Parameters<typeof buildBenchOptions>[0];
+	readonly engines?: ReadonlyArray<"typescript" | "wasm">;
+}): Promise<{
+	readonly bench: Bench;
+	readonly teardown: () => Promise<void>;
+}> {
+	const bench = new Bench(buildBenchOptions(options?.benchOptions));
+	const baselineUsers = [...generateUsers(BASELINE_SIZE)];
+	const closers: Array<() => Promise<void>> = [];
 
-	// Pre-generate dataset for serialization benchmarks
-	const dataset = generateUsers(DATASET_SIZE);
-
-	// -------------------------------------------------------------------------
-	// 6.2: Serialization benchmarks for each format
-	// -------------------------------------------------------------------------
-
-	// For JSON-compatible formats (JSON, YAML, JSON5, JSONC, TOON, Hjson),
-	// we serialize the array directly as most formats support top-level arrays.
-	// For TOML, we wrap in an object since TOML requires a table at the top level.
-
-	// Helper to get the data in the appropriate shape for each format
-	const getDataForCodec = (codecName: string): unknown => {
-		// TOML requires top-level to be a table (object), not an array
-		// Use { users: [...] } wrapper for TOML
-		if (codecName === "TOML") {
-			return { users: dataset };
-		}
-		// All other formats can handle top-level arrays directly
-		return dataset;
-	};
-
-	// Add serialization benchmarks for each codec
-	for (const { name, codec } of CODECS) {
-		const data = getDataForCodec(name);
-
-		bench.add(`serialize ${name}`, () => {
-			codec.encode(data);
-		});
-	}
-
-	// -------------------------------------------------------------------------
-	// 6.3: Deserialization benchmarks for each format
-	// -------------------------------------------------------------------------
-
-	// Pre-serialize data for each format to benchmark decoding
-	const serializedData = new Map<string, string>();
-	for (const { name, codec } of CODECS) {
-		const data = getDataForCodec(name);
-		serializedData.set(name, codec.encode(data));
-	}
-
-	// Add deserialization benchmarks for each codec
-	for (const { name, codec } of CODECS) {
-		const encoded = serializedData.get(name);
-		if (encoded === undefined) {
-			throw new Error(`Missing serialized data for codec: ${name}`);
-		}
-
-		bench.add(`deserialize ${name}`, () => {
-			codec.decode(encoded);
-		});
-	}
-
-	// -------------------------------------------------------------------------
-	// 6.4: Debounced write coalescing benchmark
-	// -------------------------------------------------------------------------
-
-	// Note: This benchmark doesn't fit the typical ops/sec pattern.
-	// It measures coalescing behavior rather than throughput.
-	// We include it as a single-iteration "benchmark" that reports the ratio.
-
-	// Track coalescing statistics across iterations for reporting
-	const coalescingStats = {
-		totalMutations: 0,
-		totalWrites: 0,
-		iterations: 0,
-	};
-
-	bench.add("debounced write coalescing (100 mutations)", async () => {
-		// Create a counting storage adapter to track actual writes
-		let writeCount = 0;
-		const store = new Map<string, string>();
-
-		const countingAdapter: StorageAdapterShape = {
-			read: (path: string) =>
-				Effect.suspend(() => {
-					const content = store.get(path);
-					if (content === undefined) {
-						// Return empty collection format for new files
-						return Effect.succeed("{}");
+	try {
+		for (const engine of persistentBenchEngines.filter((engine) =>
+			options?.engines === undefined
+				? true
+				: options.engines.includes(engine.id),
+		)) {
+			const coalescingStorage = createCountingStorage();
+			const coalescingChecksumBatch = createBatchUsers("checksum_coalescing");
+			const { value: coalescingChecksumHandle } = await measureAsync(() =>
+				engine.createDatabase(basicConfig, { users: [] }, coalescingStorage),
+			);
+			const coalescingResultPayload = await withFrozenDate(
+				CHECKSUM_CLOCK_ISO,
+				async () => {
+					await coalescingChecksumHandle.db.users.createMany(
+						coalescingChecksumBatch,
+					).runPromise;
+					await coalescingChecksumHandle.db.flush();
+					const coalescingChecksumReload = await engine.createDatabase(
+						basicConfig,
+						{},
+						coalescingStorage,
+					);
+					try {
+						return {
+							writeCount: coalescingStorage.writeCount.value,
+							reloaded: await coalescingChecksumReload.db.users.query({
+								sort: { id: "asc" },
+							}).runPromise,
+						};
+					} finally {
+						await coalescingChecksumReload.close();
 					}
-					return Effect.succeed(content);
-				}),
-			write: (path: string, data: string) =>
-				Effect.sync(() => {
-					store.set(path, data);
-					writeCount++;
-				}),
-			append: (path: string, data: string) =>
-				Effect.sync(() => {
-					const existing = store.get(path) ?? "";
-					store.set(path, existing + data);
-					writeCount++;
-				}),
-			exists: (path: string) => Effect.sync(() => store.has(path)),
-			remove: (_path: string) => Effect.void,
-			ensureDir: (_path: string) => Effect.void,
-			watch: (_path: string, _onChange: () => void) => Effect.succeed(() => {}),
-		};
-
-		const CountingStorageLayer = Layer.succeed(
-			StorageAdapterService,
-			countingAdapter,
-		);
-		const SerializerLayer = makeSerializerLayer([jsonCodec()]);
-		const PersistenceLayer = Layer.merge(CountingStorageLayer, SerializerLayer);
-
-		// Schema for benchmark users
-		const BenchUserSchema = Schema.Struct({
-			id: Schema.String,
-			name: Schema.String,
-			email: Schema.String,
-			age: Schema.Number,
-			role: Schema.Union([
-				Schema.Literal("admin"),
-				Schema.Literal("moderator"),
-				Schema.Literal("user"),
-			]),
-			createdAt: Schema.String,
-		});
-
-		const config = {
-			users: {
-				schema: BenchUserSchema,
-				file: "./data/users.json",
-				relationships: {},
-			},
-		} as const;
-
-		// Create database with short debounce for testing
-		const program = Effect.gen(function* () {
-			const db = yield* createPersistentEffectDatabase(
-				config,
-				{ users: [] },
-				{ writeDebounce: 10 }, // Short debounce for testing
+				},
 			);
-
-			// Perform 100 rapid mutations
-			for (let i = 0; i < 100; i++) {
-				yield* db.users.create({
-					id: `bench_user_${i}`,
-					name: `User ${i}`,
-					email: `user${i}@example.com`,
-					age: 25 + (i % 50),
-					role: "user",
-					createdAt: new Date().toISOString(),
-				});
-			}
-
-			// Flush to ensure all writes complete
-			yield* Effect.promise(() => db.flush());
-
-			return writeCount;
-		});
-
-		// Run the program
-		const actualWrites = await Effect.runPromise(
-			program.pipe(Effect.provide(PersistenceLayer), Effect.scoped),
-		);
-
-		// Track statistics for reporting
-		coalescingStats.totalMutations += 100;
-		coalescingStats.totalWrites += actualWrites;
-		coalescingStats.iterations++;
-
-		// The coalescing ratio indicates how effective debouncing is
-		// 100 mutations should result in far fewer than 100 writes
-		// Ideal: 1-5 writes for 100 mutations
-		const coalescingRatio = 100 / actualWrites;
-
-		// If coalescing isn't working well, throw to make it visible
-		if (actualWrites > 0 && coalescingRatio < 2) {
-			throw new Error(
-				`Poor coalescing: ${actualWrites} writes for 100 mutations (ratio: ${coalescingRatio.toFixed(2)})`,
+			const coalescingChecksum = checksumBenchmarkValue(
+				coalescingResultPayload,
 			);
-		}
-	});
+			await coalescingChecksumHandle.close();
 
-	// Store the stats reference on the bench object for later retrieval
-	(
-		bench as unknown as { coalescingStats: typeof coalescingStats }
-	).coalescingStats = coalescingStats;
+			const coalescingStorageForBench = createCountingStorage();
+			const {
+				value: coalescingHandle,
+				durationMs: coalescingInitializationMs,
+			} = await measureAsync(() =>
+				engine.createDatabase(
+					basicConfig,
+					{ users: [] },
+					coalescingStorageForBench,
+				),
+			);
+			closers.push(coalescingHandle.close);
+			let coalescingCounter = 0;
+			let lastCoalescingIds: ReadonlyArray<string> = [];
+			bench.add(
+				createEngineTaskName(
+					engine.id,
+					"persistence: debounced coalescing (100 mutations)",
+				),
+				async () => {
+					coalescingStorageForBench.resetWrites();
+					const batch = createBatchUsers(
+						`bench_coalescing_${coalescingCounter++}`,
+					);
+					lastCoalescingIds = batch.map((user) => user.id);
+					for (const user of batch) {
+						await coalescingHandle.db.users.create(user).runPromise;
+					}
+					await coalescingHandle.db.flush();
+				},
+				{
+					afterEach: async () => {
+						if (lastCoalescingIds.length === 0) {
+							return;
+						}
+						await coalescingHandle.db.users.deleteMany((user) =>
+							lastCoalescingIds.includes(user.id),
+						).runPromise;
+						await coalescingHandle.db.flush();
+						lastCoalescingIds = [];
+						coalescingStorageForBench.resetWrites();
+					},
+				},
+			);
+			registerTaskMetadata({
+				bench,
+				benchmarkName: "persistence: debounced coalescing (100 mutations)",
+				engineId: engine.id,
+				category: "write-transaction",
+				caseType: computeCaseType("required"),
+				normalInteraction: false,
+				checksum: coalescingChecksum,
+				initializationMs: coalescingInitializationMs,
+				commandPayload: createBatchUsers("bench_coalescing_payload"),
+				resultPayload: coalescingResultPayload,
+			});
 
-	return bench;
-}
-
-/**
- * Run the benchmark suite and print results.
- * This is called when the file is executed directly.
- */
-export async function run(): Promise<void> {
-	console.log("Running Serialization Format Comparison Benchmarks\n");
-
-	const bench = await createSuite();
-
-	if (bench.tasks.length === 0) {
-		console.log(
-			"No benchmarks configured yet. Benchmarks will be added in tasks 6.2-6.4.",
-		);
-		return;
-	}
-
-	await bench.run();
-
-	console.log("\nResults:\n");
-	console.log(formatResultsTable(bench.tasks));
-
-	// Report coalescing statistics if available
-	const stats = (
-		bench as unknown as {
-			coalescingStats?: {
-				totalMutations: number;
-				totalWrites: number;
-				iterations: number;
+			const explicitFlushStorage = createCountingStorage();
+			const { value: explicitFlushChecksumHandle } = await measureAsync(() =>
+				engine.createDatabase(basicConfig, { users: [] }, explicitFlushStorage),
+			);
+			const explicitFlushUser = {
+				id: "checksum_explicit_flush",
+				name: "Checksum Flush",
+				email: "checksum-flush@example.com",
+				age: 28,
+				role: "user" as const,
+				createdAt: FIXED_CREATED_AT,
 			};
-		}
-	).coalescingStats;
+			const explicitFlushResultPayload = await withFrozenDate(
+				CHECKSUM_CLOCK_ISO,
+				async () => {
+					await explicitFlushChecksumHandle.db.users.create(explicitFlushUser)
+						.runPromise;
+					await explicitFlushChecksumHandle.db.flush();
+					const explicitFlushReload = await engine.createDatabase(
+						basicConfig,
+						{},
+						explicitFlushStorage,
+					);
+					try {
+						return {
+							writeCount: explicitFlushStorage.writeCount.value,
+							reloaded: await explicitFlushReload.db.users.findById(
+								explicitFlushUser.id,
+							).runPromise,
+						};
+					} finally {
+						await explicitFlushReload.close();
+					}
+				},
+			);
+			const explicitFlushChecksum = checksumBenchmarkValue(
+				explicitFlushResultPayload,
+			);
+			await explicitFlushChecksumHandle.close();
 
-	if (stats && stats.iterations > 0) {
-		const avgWrites = stats.totalWrites / stats.iterations;
-		const coalescingRatio = stats.totalMutations / stats.totalWrites;
-		console.log("\n--- Debounced Write Coalescing Report ---");
-		console.log(`Total iterations: ${stats.iterations}`);
-		console.log(`Mutations per iteration: 100`);
-		console.log(`Average writes per iteration: ${avgWrites.toFixed(2)}`);
-		console.log(`Coalescing ratio: ${coalescingRatio.toFixed(2)}x`);
-		console.log(
-			`(${stats.totalMutations} mutations coalesced into ${stats.totalWrites} writes)`,
-		);
+			const explicitFlushStorageForBench = createCountingStorage();
+			const {
+				value: explicitFlushHandle,
+				durationMs: explicitFlushInitializationMs,
+			} = await measureAsync(() =>
+				engine.createDatabase(
+					basicConfig,
+					{ users: [] },
+					explicitFlushStorageForBench,
+				),
+			);
+			closers.push(explicitFlushHandle.close);
+			let explicitFlushCounter = 0;
+			let lastExplicitFlushId: string | undefined;
+			bench.add(
+				createEngineTaskName(engine.id, "persistence: explicit flush"),
+				async () => {
+					explicitFlushStorageForBench.resetWrites();
+					lastExplicitFlushId = `bench_explicit_flush_${explicitFlushCounter++}`;
+					await explicitFlushHandle.db.users.create({
+						id: lastExplicitFlushId,
+						name: "Benchmark Flush",
+						email: `${lastExplicitFlushId}@example.com`,
+						age: 29,
+						role: "user",
+						createdAt: FIXED_CREATED_AT,
+					}).runPromise;
+					await explicitFlushHandle.db.flush();
+				},
+				{
+					afterEach: async () => {
+						if (!lastExplicitFlushId) {
+							return;
+						}
+						await explicitFlushHandle.db.users.delete(lastExplicitFlushId)
+							.runPromise;
+						await explicitFlushHandle.db.flush();
+						lastExplicitFlushId = undefined;
+						explicitFlushStorageForBench.resetWrites();
+					},
+				},
+			);
+			registerTaskMetadata({
+				bench,
+				benchmarkName: "persistence: explicit flush",
+				engineId: engine.id,
+				category: "write-transaction",
+				caseType: computeCaseType("required"),
+				normalInteraction: false,
+				checksum: explicitFlushChecksum,
+				initializationMs: explicitFlushInitializationMs,
+				commandPayload: explicitFlushUser,
+				resultPayload: explicitFlushResultPayload,
+			});
+
+			const computedStorage = createCountingStorage();
+			const { value: computedHandle, durationMs: computedInitializationMs } =
+				await measureAsync(() =>
+					engine.createDatabase(
+						computedConfig,
+						{ users: baselineUsers },
+						computedStorage,
+					),
+				);
+			closers.push(computedHandle.close);
+			const computedQuery = {
+				where: { displayName: { $contains: "User 1" } },
+				select: ["id", "displayName"],
+				sort: { id: "asc" },
+				limit: 25,
+			};
+			const computedResultPayload =
+				await computedHandle.db.users.query(computedQuery).runPromise;
+			const computedChecksum = checksumBenchmarkValue(computedResultPayload);
+			bench.add(
+				createEngineTaskName(engine.id, "callback: computed field"),
+				async () => {
+					await computedHandle.db.users.query(computedQuery).runPromise;
+				},
+			);
+			registerTaskMetadata({
+				bench,
+				benchmarkName: "callback: computed field",
+				engineId: engine.id,
+				category: "read-query",
+				caseType: computeCaseType("characterization"),
+				normalInteraction: false,
+				checksum: computedChecksum,
+				initializationMs: computedInitializationMs,
+				commandPayload: computedQuery,
+				resultPayload: computedResultPayload,
+			});
+
+			const operatorStorage = createCountingStorage();
+			const { value: operatorHandle, durationMs: operatorInitializationMs } =
+				await measureAsync(() =>
+					engine.createDatabase(
+						basicConfig,
+						{ users: baselineUsers },
+						operatorStorage,
+						[prefixPlugin],
+					),
+				);
+			closers.push(operatorHandle.close);
+			const operatorQuery = {
+				where: { name: { $prefix: "User 1" } },
+				select: ["id", "name"],
+				sort: { id: "asc" },
+				limit: 25,
+			};
+			const operatorResultPayload =
+				await operatorHandle.db.users.query(operatorQuery).runPromise;
+			const operatorChecksum = checksumBenchmarkValue(operatorResultPayload);
+			bench.add(
+				createEngineTaskName(engine.id, "callback: custom operator"),
+				async () => {
+					await operatorHandle.db.users.query(operatorQuery).runPromise;
+				},
+			);
+			registerTaskMetadata({
+				bench,
+				benchmarkName: "callback: custom operator",
+				engineId: engine.id,
+				category: "read-query",
+				caseType: computeCaseType("characterization"),
+				normalInteraction: false,
+				checksum: operatorChecksum,
+				initializationMs: operatorInitializationMs,
+				commandPayload: operatorQuery,
+				resultPayload: operatorResultPayload,
+			});
+
+			const localeStorage = createCountingStorage();
+			const localeUsers = createLocaleUsers();
+			const { value: localeHandle, durationMs: localeInitializationMs } =
+				await measureAsync(() =>
+					engine.createDatabase(
+						localeCollatorConfig,
+						{ users: [...localeUsers] },
+						localeStorage,
+					),
+				);
+			closers.push(localeHandle.close);
+			const localeQuery = { sort: { name: "asc" }, select: ["id", "name"] };
+			const localeResultPayload =
+				await localeHandle.db.users.query(localeQuery).runPromise;
+			const localeChecksum = checksumBenchmarkValue(localeResultPayload);
+			bench.add(
+				createEngineTaskName(engine.id, "callback: locale collator"),
+				async () => {
+					await localeHandle.db.users.query(localeQuery).runPromise;
+				},
+			);
+			registerTaskMetadata({
+				bench,
+				benchmarkName: "callback: locale collator",
+				engineId: engine.id,
+				category: "read-query",
+				caseType: computeCaseType("characterization"),
+				normalInteraction: false,
+				checksum: localeChecksum,
+				initializationMs: localeInitializationMs,
+				commandPayload: localeQuery,
+				resultPayload: localeResultPayload,
+			});
+
+			const hookEventsForChecksum: Array<string> = [];
+			const hookStorage = createCountingStorage();
+			const { value: hookChecksumHandle } = await measureAsync(() =>
+				engine.createDatabase(
+					createHooksConfig(hookEventsForChecksum),
+					{ users: [] },
+					hookStorage,
+				),
+			);
+			const hookUserId = "checksum_hooks";
+			await hookChecksumHandle.db.users.create({
+				id: hookUserId,
+				name: "Hook User",
+				email: "HOOK@EXAMPLE.COM",
+				age: 35,
+				role: "user",
+				createdAt: FIXED_CREATED_AT,
+			}).runPromise;
+			await hookChecksumHandle.db.users.update(hookUserId, {
+				name: "Hook User Updated",
+			}).runPromise;
+			await hookChecksumHandle.db.users.delete(hookUserId).runPromise;
+			const hookResultPayload = {
+				events: [...hookEventsForChecksum],
+				existsAfterDelete:
+					await hookChecksumHandle.db.users.exists(hookUserId).runPromise,
+			};
+			const hookChecksum = checksumBenchmarkValue(hookResultPayload);
+			await hookChecksumHandle.close();
+
+			const hookEvents: Array<string> = [];
+			const hookStorageForBench = createCountingStorage();
+			const { value: hookHandle, durationMs: hookInitializationMs } =
+				await measureAsync(() =>
+					engine.createDatabase(
+						createHooksConfig(hookEvents),
+						{ users: [] },
+						hookStorageForBench,
+					),
+				);
+			closers.push(hookHandle.close);
+			let hookCounter = 0;
+			bench.add(
+				createEngineTaskName(engine.id, "callback: before/after hooks"),
+				async () => {
+					hookEvents.length = 0;
+					const id = `bench_hooks_${hookCounter++}`;
+					await hookHandle.db.users.create({
+						id,
+						name: "Hook Bench User",
+						email: "HOOK-BENCH@EXAMPLE.COM",
+						age: 36,
+						role: "user",
+						createdAt: FIXED_CREATED_AT,
+					}).runPromise;
+					await hookHandle.db.users.update(id, {
+						name: "Hook Bench User Updated",
+					}).runPromise;
+					await hookHandle.db.users.delete(id).runPromise;
+				},
+			);
+			registerTaskMetadata({
+				bench,
+				benchmarkName: "callback: before/after hooks",
+				engineId: engine.id,
+				category: "write-transaction",
+				caseType: computeCaseType("characterization"),
+				normalInteraction: false,
+				checksum: hookChecksum,
+				initializationMs: hookInitializationMs,
+				commandPayload: {
+					create: {
+						name: "Hook Bench User",
+						email: "HOOK-BENCH@EXAMPLE.COM",
+					},
+					update: { name: "Hook Bench User Updated" },
+				},
+				resultPayload: hookResultPayload,
+			});
+		}
+
+		return {
+			bench,
+			teardown: async () => {
+				await closeAll(closers);
+			},
+		};
+	} catch (error) {
+		await closeAll(closers);
+		throw error;
 	}
 }
 
-// Run when executed directly
+export async function run(): Promise<void> {
+	console.log("Running Persistence and Callback Benchmarks\n");
+
+	const { bench, teardown } = await createSuite();
+	try {
+		await bench.run();
+		console.log("\nResults:\n");
+		console.log(formatResultsTable(bench.tasks));
+	} finally {
+		await teardown();
+	}
+}
+
 if (import.meta.main) {
 	run();
 }

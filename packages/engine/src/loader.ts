@@ -1,5 +1,6 @@
 export type WasmBindingsModule = {
 	default?: (input?: RequestInfo | URL | Response | BufferSource | WebAssembly.Module) => Promise<unknown>;
+	__proseql_wasm_memory?: () => WebAssembly.Memory | undefined;
 	WasmRuntime: new (
 		setTimeoutFn: typeof globalThis.setTimeout,
 		clearTimeoutFn: typeof globalThis.clearTimeout,
@@ -43,6 +44,14 @@ export interface WasmRuntimeBinding {
 }
 
 let initPromise: Promise<WasmBindingsModule> | undefined;
+
+export const getLoadedWasmMemoryByteLength = async (): Promise<number | undefined> => {
+	if (!initPromise) {
+		return undefined;
+	}
+	const module = await initPromise;
+	return module.__proseql_wasm_memory?.()?.buffer.byteLength;
+};
 
 export const loadWasmBindings = async (): Promise<WasmBindingsModule> => {
 	if (!initPromise) {

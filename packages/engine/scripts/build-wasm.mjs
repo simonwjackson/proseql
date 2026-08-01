@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -71,6 +71,8 @@ if (!existsSync(targetWasm)) {
 ensureMatchingBindgen();
 run(bindgenBin, nodeBindgenArgs);
 run(bindgenBin, browserBindgenArgs);
+patchGeneratedBindings(join(nodeOutDir, "proseql_wasm.js"));
+patchGeneratedBindings(join(browserOutDir, "proseql_wasm.js"));
 
 function hasExecutable(name) {
   try {
@@ -122,6 +124,17 @@ function ensureMatchingBindgen() {
 
 function shellEscape(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function patchGeneratedBindings(path) {
+  const source = readFileSync(path, "utf8");
+  if (source.includes("export function __proseql_wasm_memory()")) {
+    return;
+  }
+  writeFileSync(
+    path,
+    `${source}\nexport function __proseql_wasm_memory() {\n    return wasm?.memory;\n}\n`,
+  );
 }
 
 function run(command, args) {

@@ -11,31 +11,24 @@
 
 import { Effect, Schema } from "effect";
 import { Bench } from "tinybench";
+import {
+	attachTaskMetadata,
+	checksumBenchmarkValue,
+	createEngineTaskName,
+} from "./comparison.js";
+import { selectBenchEngines, type BenchEngine } from "./engines.js";
 import { generateUsers } from "./generators.js";
 import {
-	createBenchDatabase,
-	defaultBenchOptions,
+	type BenchSchemaConfig,
+	buildBenchOptions,
+	closeAll,
+	createTaskInstrumentation,
 	formatResultsTable,
+	measureAsync,
 } from "./utils.js";
 
-// ============================================================================
-// Constants
-// ============================================================================
-
-/**
- * Baseline collection size for transaction benchmarks.
- * 10K entities provides a realistic working set while keeping benchmark time reasonable.
- */
 const BASELINE_SIZE = 10_000;
 
-// ============================================================================
-// Schemas
-// ============================================================================
-
-/**
- * User schema for benchmarking.
- * Matches the User type from generators.
- */
 const UserSchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
@@ -49,168 +42,277 @@ const UserSchema = Schema.Struct({
 	createdAt: Schema.String,
 });
 
-// ============================================================================
-// Database Configuration
-// ============================================================================
-
-/**
- * Database configuration for transaction benchmarks.
- */
 const dbConfig = {
 	users: {
 		schema: UserSchema,
 		relationships: {},
 	},
-} as const;
+} as const satisfies BenchSchemaConfig;
 
-// ============================================================================
-// Benchmark Suite Export
-// ============================================================================
-
-/**
- * Benchmark suite name for identification in runner output.
- */
 export const suiteName = "transactions";
 
-/**
- * Creates and configures the transaction benchmark suite.
- *
- * This function pre-generates test data and sets up the baseline collection.
- * Benchmarks compare direct execution vs transactional execution of the same
- * operation sequences.
- */
-export async function createSuite(): Promise<Bench> {
-	const bench = new Bench(defaultBenchOptions);
+const computeTransactionChecksum = async (
+	engine: BenchEngine,
+	caseName:
+		| "direct (create + update + delete)"
+		| "transactional (create + update + delete)",
+	users: ReturnType<typeof generateUsers>,
+): Promise<string> => {
+	const handle = await engine.createDatabase(dbConfig, {
+		users: [...users],
+	});
+	try {
+		const id = `checksum_${caseName.startsWith("direct") ? "direct" : "tx"}`;
+		if (caseName === "direct (create + update + delete)") {
+			const created = await handle.db.users.create({
+				id,
+				name: "Checksum Direct",
+				email: "checksum-direct@example.com",
+				age: 31,
+				role: "user",
+				createdAt: "2026-01-01T00:00:00.000Z",
+			}).runPromise;
+			await handle.db.users.update(created.id, {
+				name: "Checksum Direct Updated",
+				age: 41,
+			}).runPromise;
+			await handle.db.users.delete(created.id).runPromise;
+		} else {
+			await Effect.runPromise(
+				handle.db.$transaction((ctx) =>
+					Effect.gen(function* () {
+						const created = yield* ctx.users.create({
+							id,
+							name: "Checksum Tx",
+							email: "checksum-tx@example.com",
+							age: 31,
+							role: "user",
+							createdAt: "2026-01-01T00:00:00.000Z",
+						});
+						yield* ctx.users.update(created.id, {
+							name: "Checksum Tx Updated",
+							age: 41,
+						});
+						yield* ctx.users.delete(created.id);
+					}),
+				),
+			);
+		}
+		return checksumBenchmarkValue({
+			exists: await handle.db.users.exists(id).runPromise,
+			count: (await handle.db.users.query().runPromise).length,
+		});
+	} finally {
+		await handle.close();
+	}
+};
 
-	// Pre-generate baseline data
+export async function createSuite(options?: {
+	readonly includeStress?: boolean;
+	readonly benchOptions?: Parameters<typeof buildBenchOptions>[0];
+	readonly engines?: ReadonlyArray<BenchEngine["id"]>;
+}): Promise<{
+	readonly bench: Bench;
+	readonly teardown: () => Promise<void>;
+}> {
+	const bench = new Bench(buildBenchOptions(options?.benchOptions));
 	const baselineUsers = generateUsers(BASELINE_SIZE);
 	const usersArray = [...baselineUsers];
+	const closers: Array<() => Promise<void>> = [];
 
-	// -------------------------------------------------------------------------
-	// 7.2: Direct multi-operation benchmark (no transaction wrapper)
-	// -------------------------------------------------------------------------
-
-	// For direct execution, we run a sequence of create, update, delete operations
-	// directly against the database without any transaction wrapper.
-	// This measures the baseline throughput without transaction overhead.
-	const directDb = await createBenchDatabase(dbConfig, { users: usersArray });
-	let directCounter = 0;
-
-	bench.add("direct (create + update + delete)", async () => {
-		// Use a counter to generate unique IDs for each iteration
-		const uniqueId = `direct_bench_${Date.now()}_${directCounter++}`;
-
-		// 1. Create a new user
-		const created = await directDb.users.create({
-			id: uniqueId,
-			name: `Direct User ${directCounter}`,
-			email: `direct${directCounter}@test.com`,
-			age: 25 + (directCounter % 50),
-			role: "user" as const,
-			createdAt: new Date().toISOString(),
-		}).runPromise;
-
-		// 2. Update the user we just created
-		await directDb.users.update(created.id, {
-			name: `Updated Direct User ${directCounter}`,
-			age: 30 + (directCounter % 40),
-		}).runPromise;
-
-		// 3. Delete the user to keep collection size stable
-		await directDb.users.delete(created.id).runPromise;
-	});
-
-	// -------------------------------------------------------------------------
-	// 7.3: Transactional multi-operation benchmark (with $transaction wrapper)
-	// -------------------------------------------------------------------------
-
-	// For transactional execution, we run the same sequence of create, update, delete
-	// operations inside a $transaction wrapper. This measures the overhead of
-	// transaction semantics: snapshot creation, mutation tracking, and commit.
-	const txDb = await createBenchDatabase(dbConfig, { users: usersArray });
-	let txCounter = 0;
-
-	bench.add("transactional (create + update + delete)", async () => {
-		// Use a counter to generate unique IDs for each iteration
-		const uniqueId = `tx_bench_${Date.now()}_${txCounter++}`;
-
-		// Run the same operations inside a transaction
-		await Effect.runPromise(
-			txDb.$transaction((ctx) =>
-				Effect.gen(function* () {
-					// 1. Create a new user
-					const created = yield* ctx.users.create({
+	try {
+		for (const engine of selectBenchEngines(options?.engines)) {
+			const directChecksum = await computeTransactionChecksum(
+				engine,
+				"direct (create + update + delete)",
+				usersArray,
+			);
+			const { value: directHandle, durationMs: directInitializationMs } =
+				await measureAsync(() =>
+					engine.createDatabase(dbConfig, {
+						users: usersArray,
+					}),
+				);
+			closers.push(directHandle.close);
+			let directCounter = 0;
+			bench.add(
+				createEngineTaskName(engine.id, "direct (create + update + delete)"),
+				async () => {
+					const uniqueId = `direct_bench_${directCounter++}`;
+					const created = await directHandle.db.users.create({
 						id: uniqueId,
-						name: `Tx User ${txCounter}`,
-						email: `tx${txCounter}@test.com`,
-						age: 25 + (txCounter % 50),
+						name: `Direct User ${directCounter}`,
+						email: `direct${directCounter}@test.com`,
+						age: 25 + (directCounter % 50),
 						role: "user" as const,
-						createdAt: new Date().toISOString(),
+						createdAt: "2026-01-01T00:00:00.000Z",
+					}).runPromise;
+
+					await directHandle.db.users.update(created.id, {
+						name: `Updated Direct User ${directCounter}`,
+						age: 30 + (directCounter % 40),
+					}).runPromise;
+
+					await directHandle.db.users.delete(created.id).runPromise;
+				},
+			);
+			attachTaskMetadata(bench.tasks[bench.tasks.length - 1]!, {
+				benchmarkName: "direct (create + update + delete)",
+				engineId: engine.id,
+				category: "write-transaction",
+				caseType: "required",
+				datasetSize: BASELINE_SIZE,
+				normalInteraction: false,
+				checksum: directChecksum,
+				checksumProbe: async () => {
+					const id = "checksum_probe_direct";
+					const created = await directHandle.db.users.create({
+						id,
+						name: "Checksum Direct",
+						email: "checksum-direct@example.com",
+						age: 31,
+						role: "user",
+						createdAt: "2026-01-01T00:00:00.000Z",
+					}).runPromise;
+					await directHandle.db.users.update(created.id, {
+						name: "Checksum Direct Updated",
+						age: 41,
+					}).runPromise;
+					await directHandle.db.users.delete(created.id).runPromise;
+					return checksumBenchmarkValue({
+						exists: await directHandle.db.users.exists(id).runPromise,
+						count: (await directHandle.db.users.query().runPromise).length,
 					});
-
-					// 2. Update the user we just created
-					yield* ctx.users.update(created.id, {
-						name: `Updated Tx User ${txCounter}`,
-						age: 30 + (txCounter % 40),
-					});
-
-					// 3. Delete the user to keep collection size stable
-					yield* ctx.users.delete(created.id);
-
-					return created;
+				},
+				instrumentation: createTaskInstrumentation({
+					initializationMs: directInitializationMs,
+					commandPayload: {
+						transaction: false,
+						operations: ["create", "update", "delete"],
+					},
+					resultPayload: { checksum: directChecksum },
 				}),
-			),
-		);
-	});
+			});
 
-	// Task 7.4: Overhead delta reporting
+			const transactionalChecksum = await computeTransactionChecksum(
+				engine,
+				"transactional (create + update + delete)",
+				usersArray,
+			);
+			const { value: txHandle, durationMs: txInitializationMs } =
+				await measureAsync(() =>
+					engine.createDatabase(dbConfig, {
+						users: usersArray,
+					}),
+				);
+			closers.push(txHandle.close);
+			let txCounter = 0;
+			bench.add(
+				createEngineTaskName(
+					engine.id,
+					"transactional (create + update + delete)",
+				),
+				async () => {
+					const uniqueId = `tx_bench_${txCounter++}`;
+					await Effect.runPromise(
+						txHandle.db.$transaction((ctx) =>
+							Effect.gen(function* () {
+								const created = yield* ctx.users.create({
+									id: uniqueId,
+									name: `Tx User ${txCounter}`,
+									email: `tx${txCounter}@test.com`,
+									age: 25 + (txCounter % 50),
+									role: "user" as const,
+									createdAt: "2026-01-01T00:00:00.000Z",
+								});
 
-	return bench;
+								yield* ctx.users.update(created.id, {
+									name: `Updated Tx User ${txCounter}`,
+									age: 30 + (txCounter % 40),
+								});
+
+								yield* ctx.users.delete(created.id);
+							}),
+						),
+					);
+				},
+			);
+			attachTaskMetadata(bench.tasks[bench.tasks.length - 1]!, {
+				benchmarkName: "transactional (create + update + delete)",
+				engineId: engine.id,
+				category: "write-transaction",
+				caseType: "required",
+				datasetSize: BASELINE_SIZE,
+				normalInteraction: true,
+				checksum: transactionalChecksum,
+				checksumProbe: async () => {
+					const id = "checksum_probe_tx";
+					await Effect.runPromise(
+						txHandle.db.$transaction((ctx) =>
+							Effect.gen(function* () {
+								const created = yield* ctx.users.create({
+									id,
+									name: "Checksum Tx",
+									email: "checksum-tx@example.com",
+									age: 31,
+									role: "user",
+									createdAt: "2026-01-01T00:00:00.000Z",
+								});
+								yield* ctx.users.update(created.id, {
+									name: "Checksum Tx Updated",
+									age: 41,
+								});
+								yield* ctx.users.delete(created.id);
+							}),
+						),
+					);
+					return checksumBenchmarkValue({
+						exists: await txHandle.db.users.exists(id).runPromise,
+						count: (await txHandle.db.users.query().runPromise).length,
+					});
+				},
+				instrumentation: createTaskInstrumentation({
+					initializationMs: txInitializationMs,
+					commandPayload: {
+						transaction: true,
+						operations: ["create", "update", "delete"],
+					},
+					resultPayload: { checksum: transactionalChecksum },
+				}),
+			});
+		}
+
+		return {
+			bench,
+			teardown: async () => {
+				await closeAll(closers);
+			},
+		};
+	} catch (error) {
+		await closeAll(closers);
+		throw error;
+	}
 }
 
-// ============================================================================
-// Overhead Delta Calculation (Task 7.4)
-// ============================================================================
-
-/**
- * Overhead delta result structure for JSON output.
- */
 export interface TransactionOverheadDelta {
-	readonly throughputOverhead: number; // Percentage decrease in ops/sec
-	readonly latencyOverhead: number; // Percentage increase in mean latency
-	readonly absoluteLatencyDelta: number; // Absolute difference in ms
+	readonly throughputOverhead: number;
+	readonly latencyOverhead: number;
+	readonly absoluteLatencyDelta: number;
 	readonly directOpsPerSec: number;
 	readonly directMeanMs: number;
 	readonly txOpsPerSec: number;
 	readonly txMeanMs: number;
 }
 
-/**
- * Calculate and format the overhead delta between transactional and direct execution.
- *
- * This compares:
- * - ops/sec: Higher is better (direct should be higher)
- * - mean latency: Lower is better (direct should be lower)
- *
- * Reports the transaction overhead as a percentage increase in latency
- * and percentage decrease in throughput.
- */
 export function calculateOverheadDelta(
 	directOpsPerSec: number,
 	directMeanMs: number,
 	txOpsPerSec: number,
 	txMeanMs: number,
 ): TransactionOverheadDelta {
-	// Throughput overhead: how much slower is transactional?
-	// (direct - tx) / direct * 100 = percentage decrease
 	const throughputOverhead =
 		((directOpsPerSec - txOpsPerSec) / directOpsPerSec) * 100;
-
-	// Latency overhead: how much longer does transactional take?
-	// (tx - direct) / direct * 100 = percentage increase
 	const latencyOverhead = ((txMeanMs - directMeanMs) / directMeanMs) * 100;
-
-	// Absolute latency delta
 	const absoluteLatencyDelta = txMeanMs - directMeanMs;
 
 	return {
@@ -224,18 +326,15 @@ export function calculateOverheadDelta(
 	};
 }
 
-/**
- * Extract overhead delta from benchmark results.
- * Returns null if the required tasks are not found or haven't run.
- *
- * @param bench - The completed benchmark suite
- * @returns Overhead delta data or null if not available
- */
 export function getOverheadDelta(
 	bench: Bench,
 ): TransactionOverheadDelta | null {
-	const directTask = bench.tasks.find((t) => t.name.startsWith("direct"));
-	const txTask = bench.tasks.find((t) => t.name.startsWith("transactional"));
+	const directTask = bench.tasks.find((t) =>
+		t.name.includes("direct (create + update + delete)"),
+	);
+	const txTask = bench.tasks.find((t) =>
+		t.name.includes("transactional (create + update + delete)"),
+	);
 
 	if (!directTask?.result || !txTask?.result) {
 		return null;
@@ -249,17 +348,11 @@ export function getOverheadDelta(
 	);
 }
 
-/**
- * Format a number as a percentage with sign.
- */
 function formatPercent(value: number): string {
 	const sign = value >= 0 ? "+" : "";
 	return `${sign}${value.toFixed(2)}%`;
 }
 
-/**
- * Format the overhead delta report for terminal output.
- */
 function formatOverheadReport(
 	directOpsPerSec: number,
 	directMeanMs: number,
@@ -286,7 +379,6 @@ function formatOverheadReport(
 		"",
 	];
 
-	// Add interpretation
 	if (delta.latencyOverhead > 0) {
 		lines.push(
 			`Interpretation: Transactions add ~${delta.latencyOverhead.toFixed(1)}% overhead`,
@@ -302,45 +394,38 @@ function formatOverheadReport(
 	return lines.join("\n");
 }
 
-/**
- * Run the benchmark suite and print results.
- * This is called when the file is executed directly.
- */
 export async function run(): Promise<void> {
 	console.log("Running Transaction Overhead Benchmarks\n");
 
-	const bench = await createSuite();
+	const { bench, teardown } = await createSuite();
+	try {
+		await bench.run();
+		console.log("\nResults:\n");
+		console.log(formatResultsTable(bench.tasks));
 
-	if (bench.tasks.length === 0) {
-		console.log(
-			"No benchmarks configured yet. Benchmarks will be added in tasks 7.2-7.4.",
+		const directTask = bench.tasks.find((t) =>
+			t.name.includes("direct (create + update + delete)"),
 		);
-		return;
-	}
-
-	await bench.run();
-
-	console.log("\nResults:\n");
-	console.log(formatResultsTable(bench.tasks));
-
-	// Task 7.4: Report overhead delta between transactional and direct execution
-	const directTask = bench.tasks.find((t) => t.name.startsWith("direct"));
-	const txTask = bench.tasks.find((t) => t.name.startsWith("transactional"));
-
-	if (directTask?.result && txTask?.result) {
-		console.log("\n");
-		console.log(
-			formatOverheadReport(
-				directTask.result.throughput.mean,
-				directTask.result.latency.mean,
-				txTask.result.throughput.mean,
-				txTask.result.latency.mean,
-			),
+		const txTask = bench.tasks.find((t) =>
+			t.name.includes("transactional (create + update + delete)"),
 		);
+
+		if (directTask?.result && txTask?.result) {
+			console.log("\n");
+			console.log(
+				formatOverheadReport(
+					directTask.result.throughput.mean,
+					directTask.result.latency.mean,
+					txTask.result.throughput.mean,
+					txTask.result.latency.mean,
+				),
+			);
+		}
+	} finally {
+		await teardown();
 	}
 }
 
-// Run when executed directly
 if (import.meta.main) {
 	run();
 }

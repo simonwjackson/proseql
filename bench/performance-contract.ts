@@ -1,0 +1,298 @@
+import type { PairedComparison } from "./comparison.js";
+import type { BrowserPerformanceReport } from "./browser-runner.js";
+import {
+	BROWSER_WORKLOAD_EXPECTATIONS,
+	BROWSER_WORKLOAD_INTERACTION_NAMES,
+	WORKLOAD_MANIFEST,
+	type WorkloadManifestEntry,
+} from "./workloads.js";
+
+export interface SuiteComparisonReport {
+	readonly suite: string;
+	readonly comparisons: ReadonlyArray<PairedComparison>;
+}
+
+export interface FullReportComparisonReport {
+	readonly suites: ReadonlyArray<SuiteComparisonReport>;
+	readonly includeStress: boolean;
+}
+
+export interface PerformanceContractFailure {
+	readonly suite: string;
+	readonly caseName: string;
+	readonly message: string;
+}
+
+export interface PerformanceContractValidation {
+	readonly passed: boolean;
+	readonly failures: ReadonlyArray<PerformanceContractFailure>;
+}
+
+const REQUIRED_READ_RATIO = 0.5;
+const REQUIRED_WRITE_RATIO = 0.2;
+const MIN_SAMPLES_PER_ENGINE = 30;
+const NORMAL_INTERACTION_P95_BUDGET_MS = 50;
+const STRESS_REPEATED_GROWTH_LIMIT = 0.05;
+
+const MANIFEST_BY_NAME = new Map(
+	WORKLOAD_MANIFEST.map((entry) => [entry.name, entry] as const),
+);
+
+const validateStressGrowth = (
+	report: SuiteComparisonReport,
+	comparison: PairedComparison,
+	engineName: "typescript" | "wasm",
+	engineResult: NonNullable<PairedComparison["engines"]["typescript"]>,
+): ReadonlyArray<PerformanceContractFailure> => {
+	const growthMetric =
+		engineResult.instrumentation.repeatedHighWaterGrowthBytes.status ===
+		"available"
+			? engineResult.instrumentation.repeatedHighWaterGrowthBytes
+			: undefined;
+	const highWaterMetric =
+		engineName === "wasm"
+			? engineResult.instrumentation.wasmLinearMemoryHighWaterBytes.status ===
+				"available"
+				? engineResult.instrumentation.wasmLinearMemoryHighWaterBytes
+				: undefined
+			: engineResult.instrumentation.jsHeapBytes.status === "available"
+				? engineResult.instrumentation.jsHeapBytes
+				: undefined;
+
+	if (engineName === "wasm" && !highWaterMetric) {
+		return [
+			{
+				suite: report.suite,
+				caseName: comparison.name,
+				message: `${comparison.name} must report WASM linear memory for stress case ${engineName}`,
+			},
+		];
+	}
+
+	if (!growthMetric || !highWaterMetric || highWaterMetric.value === 0) {
+		return [];
+	}
+
+	const growthRatio = growthMetric.value / highWaterMetric.value;
+	if (growthRatio <= STRESS_REPEATED_GROWTH_LIMIT) {
+		return [];
+	}
+
+	return [
+		{
+			suite: report.suite,
+			caseName: comparison.name,
+			message: `${comparison.name} repeated high-water growth for ${engineName} exceeded ${(STRESS_REPEATED_GROWTH_LIMIT * 100).toFixed(0)}% (${(growthRatio * 100).toFixed(2)}%)`,
+		},
+	];
+};
+
+const validateComparisonAgainstManifest = (
+	report: SuiteComparisonReport,
+	comparison: PairedComparison,
+	manifestEntry: WorkloadManifestEntry,
+): ReadonlyArray<PerformanceContractFailure> => {
+	const failures: PerformanceContractFailure[] = [];
+
+	for (const [engineName, engineResult] of Object.entries(
+		comparison.engines,
+	) as ReadonlyArray<
+		readonly ["typescript" | "wasm", typeof comparison.engines.typescript]
+	>) {
+		if (!engineResult) {
+			failures.push({
+				suite: report.suite,
+				caseName: comparison.name,
+				message: `${comparison.name} is missing engine result for ${engineName}`,
+			});
+			continue;
+		}
+		if (engineResult.samples < MIN_SAMPLES_PER_ENGINE) {
+			failures.push({
+				suite: report.suite,
+				caseName: comparison.name,
+				message: `${comparison.name} collected ${engineResult.samples} samples for ${engineName}; expected at least ${MIN_SAMPLES_PER_ENGINE}`,
+			});
+		}
+		if (engineResult.checksum === undefined) {
+			failures.push({
+				suite: report.suite,
+				caseName: comparison.name,
+				message: `${comparison.name} is missing a decoded-value checksum for ${engineName}`,
+			});
+		}
+		if (manifestEntry.caseType === "stress") {
+			failures.push(
+				...validateStressGrowth(report, comparison, engineName, engineResult),
+			);
+		}
+	}
+
+	if (!comparison.checksumMatch) {
+		failures.push({
+			suite: report.suite,
+			caseName: comparison.name,
+			message: `${comparison.name} produced a checksum mismatch between paired engines`,
+		});
+	}
+
+	if (manifestEntry.caseType !== "required") {
+		return failures;
+	}
+
+	if (comparison.throughputRatio === undefined) {
+		failures.push({
+			suite: report.suite,
+			caseName: comparison.name,
+			message: `${comparison.name} is missing a paired throughput ratio`,
+		});
+		return failures;
+	}
+
+	const threshold =
+		manifestEntry.category === "read-query"
+			? REQUIRED_READ_RATIO
+			: REQUIRED_WRITE_RATIO;
+	if (comparison.throughputRatio < threshold) {
+		failures.push({
+			suite: report.suite,
+			caseName: comparison.name,
+			message: `${comparison.name} throughput ratio ${comparison.throughputRatio.toFixed(2)} is below the required ${threshold.toFixed(2)}`,
+		});
+	}
+
+	return failures;
+};
+
+export const validatePerformanceContract = (
+	report: SuiteComparisonReport,
+): PerformanceContractValidation => {
+	const failures: PerformanceContractFailure[] = [];
+
+	for (const comparison of report.comparisons) {
+		const manifestEntry = MANIFEST_BY_NAME.get(comparison.name);
+		if (!manifestEntry) {
+			failures.push({
+				suite: report.suite,
+				caseName: comparison.name,
+				message: `${comparison.name} is not present in the fixed workload manifest`,
+			});
+			continue;
+		}
+		if (manifestEntry.suite !== report.suite) {
+			failures.push({
+				suite: report.suite,
+				caseName: comparison.name,
+				message: `${comparison.name} belongs to suite ${manifestEntry.suite}, not ${report.suite}`,
+			});
+			continue;
+		}
+		failures.push(
+			...validateComparisonAgainstManifest(report, comparison, manifestEntry),
+		);
+	}
+
+	return {
+		passed: failures.length === 0,
+		failures,
+	};
+};
+
+export const validateBrowserPerformanceContract = (
+	report: BrowserPerformanceReport,
+): PerformanceContractValidation => {
+	const failures: PerformanceContractFailure[] = [];
+	const interactionsByName = new Map(
+		report.interactions.map(
+			(interaction) => [interaction.name, interaction] as const,
+		),
+	);
+
+	for (const name of BROWSER_WORKLOAD_INTERACTION_NAMES) {
+		const interaction = interactionsByName.get(name);
+		if (!interaction) {
+			failures.push({
+				suite: "browser",
+				caseName: name,
+				message: `${name} is missing from the browser performance report`,
+			});
+			continue;
+		}
+		if (interaction.samples.length < MIN_SAMPLES_PER_ENGINE) {
+			failures.push({
+				suite: "browser",
+				caseName: name,
+				message: `${name} collected ${interaction.samples.length} browser samples; expected at least ${MIN_SAMPLES_PER_ENGINE}`,
+			});
+		}
+		if (interaction.p95Ms === undefined) {
+			failures.push({
+				suite: "browser",
+				caseName: name,
+				message: `${name} must report a Chromium p95 latency`,
+			});
+			continue;
+		}
+		if (interaction.p95Ms > NORMAL_INTERACTION_P95_BUDGET_MS) {
+			failures.push({
+				suite: "browser",
+				caseName: name,
+				message: `${name} exceeded the ${NORMAL_INTERACTION_P95_BUDGET_MS}ms Chromium p95 budget (${interaction.p95Ms.toFixed(2)}ms)`,
+			});
+		}
+		const expected = BROWSER_WORKLOAD_EXPECTATIONS[name];
+		if (interaction.observedCleanupCount !== expected.cleanupCount) {
+			failures.push({
+				suite: "browser",
+				caseName: name,
+				message: `${name} observed cleanup count ${String(interaction.observedCleanupCount)}; expected ${expected.cleanupCount}`,
+			});
+		}
+	}
+
+	if (report.wasmLinearMemoryBytes.status !== "available") {
+		failures.push({
+			suite: "browser",
+			caseName: "wasmLinearMemoryBytes",
+			message: `browser report must include a real WASM linear-memory metric (${report.wasmLinearMemoryBytes.reason})`,
+		});
+	}
+
+	return {
+		passed: failures.length === 0,
+		failures,
+	};
+};
+
+export const validateFullReportContract = (
+	report: FullReportComparisonReport,
+): PerformanceContractValidation => {
+	const failures: PerformanceContractFailure[] = [];
+	const seenCaseNames = new Set<string>();
+
+	for (const suite of report.suites) {
+		const suiteValidation = validatePerformanceContract(suite);
+		failures.push(...suiteValidation.failures);
+		for (const comparison of suite.comparisons) {
+			seenCaseNames.add(comparison.name);
+		}
+	}
+
+	for (const manifestEntry of WORKLOAD_MANIFEST) {
+		if (manifestEntry.caseType === "stress" && !report.includeStress) {
+			continue;
+		}
+		if (!seenCaseNames.has(manifestEntry.name)) {
+			failures.push({
+				suite: manifestEntry.suite,
+				caseName: manifestEntry.name,
+				message: `${manifestEntry.name} is missing from the full benchmark report`,
+			});
+		}
+	}
+
+	return {
+		passed: failures.length === 0,
+		failures,
+	};
+};

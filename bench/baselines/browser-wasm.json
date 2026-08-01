@@ -1,0 +1,2019 @@
+{
+  "schemaVersion": "bench.baseline.v1alpha4",
+  "capturedAt": "2026-08-01T05:06:07.289Z",
+  "runtime": "bun",
+  "coverage": {
+    "kind": "full",
+    "includeStress": false
+  },
+  "generatedBy": {
+    "command": "bun run bench/runner.ts --json",
+    "harness": "bench/runner.ts",
+    "rawReportPath": "bench/generated/browser-wasm.raw.json"
+  },
+  "browser": {
+    "status": "unavailable",
+    "reason": "Run `bun run bench:browser-report` to capture the real Chromium contract report."
+  },
+  "artifact": {
+    "status": "available",
+    "path": "packages/engine/dist/browser-wasm/proseql_wasm_bg.wasm",
+    "rawBytes": 1894326,
+    "gzipBytes": 540028
+  },
+  "suites": [
+    {
+      "suite": "crud",
+      "cases": [
+        {
+          "name": "create (single)",
+          "throughputRatio": 0.0647151617421612,
+          "latencyRatio": 15.331092408192715,
+          "checksum": "checksum:260233fecb3678b9",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 2492.052581656256,
+              "p95Ms": 0.5068780000001425,
+              "checksum": "checksum:260233fecb3678b9",
+              "instrumentation": {
+                "initializationMs": 1.507474000000002,
+                "encodedCommandBytes": 57,
+                "encodedResultBytes": 40
+              }
+            },
+            "wasm": {
+              "opsPerSec": 161.273585891855,
+              "p95Ms": 6.551227999996627,
+              "checksum": "checksum:260233fecb3678b9",
+              "instrumentation": {
+                "initializationMs": 36.887410999999986,
+                "encodedCommandBytes": 57,
+                "encodedResultBytes": 40
+              }
+            }
+          },
+          "contractFailures": [
+            "create (single) throughput ratio 0.06 is below the required 0.20"
+          ]
+        },
+        {
+          "name": "createMany (batch of 100)",
+          "throughputRatio": 0.23554140056689482,
+          "latencyRatio": 4.238393408644725,
+          "checksum": "checksum:adbdf0149e40e844",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 507.5193450570721,
+              "p95Ms": 2.101365000002261,
+              "checksum": "checksum:adbdf0149e40e844",
+              "instrumentation": {
+                "initializationMs": 1.000475999999992,
+                "encodedCommandBytes": 17,
+                "encodedResultBytes": 40
+              }
+            },
+            "wasm": {
+              "opsPerSec": 119.54181734953593,
+              "p95Ms": 8.787617000001774,
+              "checksum": "checksum:adbdf0149e40e844",
+              "instrumentation": {
+                "initializationMs": 36.697092000000055,
+                "encodedCommandBytes": 17,
+                "encodedResultBytes": 40
+              }
+            }
+          },
+          "contractFailures": []
+        },
+        {
+          "name": "delete (single)",
+          "throughputRatio": 0.035367664549779486,
+          "latencyRatio": 27.99236799006091,
+          "checksum": "checksum:153464b876e2ffd3",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 6584.891495216415,
+              "p95Ms": 0.17969799999991665,
+              "checksum": "checksum:153464b876e2ffd3",
+              "instrumentation": {
+                "initializationMs": 1.6043540000000007,
+                "encodedCommandBytes": 20,
+                "encodedResultBytes": 40
+              }
+            },
+            "wasm": {
+              "opsPerSec": 232.89223349951,
+              "p95Ms": 4.605632999999216,
+              "checksum": "checksum:153464b876e2ffd3",
+              "instrumentation": {
+                "initializationMs": 40.51897599999984,
+                "encodedCommandBytes": 20,
+                "encodedResultBytes": 40
+              }
+            }
+          },
+          "contractFailures": [
+            "delete (single) throughput ratio 0.04 is below the required 0.20"
+          ]
+        },
+        {
+          "name": "deleteMany (declarative batch ~100)",
+          "throughputRatio": 0.0032989048230196135,
+          "latencyRatio": 295.7068180005117,
+          "checksum": "checksum:09356b59e821a169",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 1627.275053652254,
+              "p95Ms": 0.9079369999999471,
+              "checksum": "checksum:09356b59e821a169",
+              "instrumentation": {
+                "initializationMs": 3.3863500000000215,
+                "encodedCommandBytes": 63,
+                "encodedResultBytes": 40
+              }
+            },
+            "wasm": {
+              "opsPerSec": 5.368225522872921,
+              "p95Ms": 196.01363299999502,
+              "checksum": "checksum:09356b59e821a169",
+              "instrumentation": {
+                "initializationMs": 38.34891799999991,
+                "encodedCommandBytes": 63,
+                "encodedResultBytes": 40
+              }
+            }
+          },
+          "contractFailures": [
+            "deleteMany (declarative batch ~100) throughput ratio 0.00 is below the required 0.20"
+          ]
+        },
+        {
+          "name": "deleteMany (predicate batch ~100)",
+          "throughputRatio": 0.0011778390630546919,
+          "latencyRatio": 844.9787924409943,
+          "checksum": "checksum:09356b59e821a169",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 1415.590567166228,
+              "p95Ms": 0.8455270000013115,
+              "checksum": "checksum:09356b59e821a169",
+              "instrumentation": {
+                "initializationMs": 1.081150999999977,
+                "encodedCommandBytes": 74,
+                "encodedResultBytes": 40
+              }
+            },
+            "wasm": {
+              "opsPerSec": 1.6673378673001298,
+              "p95Ms": 629.7654210000037,
+              "checksum": "checksum:09356b59e821a169",
+              "instrumentation": {
+                "initializationMs": 37.58190099999956,
+                "encodedCommandBytes": 74,
+                "encodedResultBytes": 40
+              }
+            }
+          },
+          "contractFailures": [
+            "deleteMany (predicate batch ~100) throughput ratio 0.00 is below the required 0.20"
+          ]
+        },
+        {
+          "name": "update (single)",
+          "throughputRatio": 0.1202997775005121,
+          "latencyRatio": 8.217256978473737,
+          "checksum": "checksum:27752914e07908d1",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 2483.7669146277362,
+              "p95Ms": 0.5254549999990559,
+              "checksum": "checksum:27752914e07908d1",
+              "instrumentation": {
+                "initializationMs": 0.9430969999999945,
+                "encodedCommandBytes": 63,
+                "encodedResultBytes": 40
+              }
+            },
+            "wasm": {
+              "opsPerSec": 298.7966071928501,
+              "p95Ms": 3.5708809999996447,
+              "checksum": "checksum:27752914e07908d1",
+              "instrumentation": {
+                "initializationMs": 39.584816000000046,
+                "encodedCommandBytes": 63,
+                "encodedResultBytes": 40
+              }
+            }
+          },
+          "contractFailures": [
+            "update (single) throughput ratio 0.12 is below the required 0.20"
+          ]
+        },
+        {
+          "name": "updateMany (declarative batch ~100)",
+          "throughputRatio": 0.004583258005840416,
+          "latencyRatio": 203.9102681934311,
+          "checksum": "checksum:b36f0ef0e179bd11",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 1175.5501232946576,
+              "p95Ms": 1.5405400000017835,
+              "checksum": "checksum:b36f0ef0e179bd11",
+              "instrumentation": {
+                "initializationMs": 1.1887250000000051,
+                "encodedCommandBytes": 102,
+                "encodedResultBytes": 40
+              }
+            },
+            "wasm": {
+              "opsPerSec": 5.387849513856927,
+              "p95Ms": 193.30227900000318,
+              "checksum": "checksum:b36f0ef0e179bd11",
+              "instrumentation": {
+                "initializationMs": 35.93121299999996,
+                "encodedCommandBytes": 102,
+                "encodedResultBytes": 40
+              }
+            }
+          },
+          "contractFailures": [
+            "updateMany (declarative batch ~100) throughput ratio 0.00 is below the required 0.20"
+          ]
+        },
+        {
+          "name": "updateMany (predicate batch ~100)",
+          "throughputRatio": 0.0010350718310551622,
+          "latencyRatio": 949.6645429142643,
+          "checksum": "checksum:6ce9cece66edd3c5",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 1640.6139928592538,
+              "p95Ms": 0.7200049999992189,
+              "checksum": "checksum:6ce9cece66edd3c5",
+              "instrumentation": {
+                "initializationMs": 1.0822320000000047,
+                "encodedCommandBytes": 111,
+                "encodedResultBytes": 40
+              }
+            },
+            "wasm": {
+              "opsPerSec": 1.6981533296435487,
+              "p95Ms": 604.5948990000034,
+              "checksum": "checksum:6ce9cece66edd3c5",
+              "instrumentation": {
+                "initializationMs": 40.055192000000034,
+                "encodedCommandBytes": 111,
+                "encodedResultBytes": 40
+              }
+            }
+          },
+          "contractFailures": [
+            "updateMany (predicate batch ~100) throughput ratio 0.00 is below the required 0.20"
+          ]
+        },
+        {
+          "name": "upsert (create path)",
+          "throughputRatio": 0.050629794607750994,
+          "latencyRatio": 18.795543043592403,
+          "checksum": "checksum:59090f617d36d005",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 2362.410395485043,
+              "p95Ms": 0.5964910000002419,
+              "checksum": "checksum:59090f617d36d005",
+              "instrumentation": {
+                "initializationMs": 1.5812779999999975,
+                "encodedCommandBytes": 32,
+                "encodedResultBytes": 40
+              }
+            },
+            "wasm": {
+              "opsPerSec": 119.60835310262352,
+              "p95Ms": 8.643297000002349,
+              "checksum": "checksum:59090f617d36d005",
+              "instrumentation": {
+                "initializationMs": 36.89228200000025,
+                "encodedCommandBytes": 32,
+                "encodedResultBytes": 40
+              }
+            }
+          },
+          "contractFailures": [
+            "upsert (create path) throughput ratio 0.05 is below the required 0.20"
+          ]
+        },
+        {
+          "name": "upsert (update path)",
+          "throughputRatio": 0.022708091442878206,
+          "latencyRatio": 43.94008961562848,
+          "checksum": "checksum:161aa2cf16df71d0",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 6285.50799632574,
+              "p95Ms": 0.17913899999985006,
+              "checksum": "checksum:161aa2cf16df71d0",
+              "instrumentation": {
+                "initializationMs": 1.4724620000000073,
+                "encodedCommandBytes": 30,
+                "encodedResultBytes": 40
+              }
+            },
+            "wasm": {
+              "opsPerSec": 142.73189034550708,
+              "p95Ms": 7.758593999998993,
+              "checksum": "checksum:161aa2cf16df71d0",
+              "instrumentation": {
+                "initializationMs": 38.90113199999996,
+                "encodedCommandBytes": 30,
+                "encodedResultBytes": 40
+              }
+            }
+          },
+          "contractFailures": [
+            "upsert (update path) throughput ratio 0.02 is below the required 0.20"
+          ]
+        }
+      ]
+    },
+    {
+      "suite": "query-pipeline",
+      "cases": [
+        {
+          "name": "combined: complex filter + multi-populate + sort + select + paginate",
+          "throughputRatio": 0.8544587375698244,
+          "latencyRatio": 1.1463818139417923,
+          "checksum": "checksum:3f6906377c16053c",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 20.849529194854522,
+              "p95Ms": 59.65781100001186,
+              "checksum": "checksum:3f6906377c16053c",
+              "instrumentation": {
+                "initializationMs": 6.935723999995389,
+                "encodedCommandBytes": 292,
+                "encodedResultBytes": 2198
+              }
+            },
+            "wasm": {
+              "opsPerSec": 17.81506239476059,
+              "p95Ms": 59.463701999979094,
+              "checksum": "checksum:3f6906377c16053c",
+              "instrumentation": {
+                "initializationMs": 184.99998300000152,
+                "encodedCommandBytes": 292,
+                "encodedResultBytes": 2198
+              }
+            }
+          },
+          "contractFailures": []
+        },
+        {
+          "name": "combined: filter + nested populate + sort + paginate",
+          "throughputRatio": 0.8825983950295697,
+          "latencyRatio": 1.1272251722363222,
+          "checksum": "checksum:0ccdb4a14937d3c5",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 28.091673535370752,
+              "p95Ms": 43.00008399999933,
+              "checksum": "checksum:0ccdb4a14937d3c5",
+              "instrumentation": {
+                "initializationMs": 6.935723999995389,
+                "encodedCommandBytes": 120,
+                "encodedResultBytes": 5657
+              }
+            },
+            "wasm": {
+              "opsPerSec": 24.793665976012864,
+              "p95Ms": 44.4787639999995,
+              "checksum": "checksum:0ccdb4a14937d3c5",
+              "instrumentation": {
+                "initializationMs": 184.99998300000152,
+                "encodedCommandBytes": 120,
+                "encodedResultBytes": 5657
+              }
+            }
+          },
+          "contractFailures": []
+        },
+        {
+          "name": "combined: filter + sort + populate + select + paginate",
+          "throughputRatio": 0.7921598651217737,
+          "latencyRatio": 1.2522501385654778,
+          "checksum": "checksum:7f7a2718db7a2f17",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 30.12607333064832,
+              "p95Ms": 40.56238299998222,
+              "checksum": "checksum:7f7a2718db7a2f17",
+              "instrumentation": {
+                "initializationMs": 6.935723999995389,
+                "encodedCommandBytes": 223,
+                "encodedResultBytes": 1827
+              }
+            },
+            "wasm": {
+              "opsPerSec": 23.86466618625504,
+              "p95Ms": 43.852673000015784,
+              "checksum": "checksum:7f7a2718db7a2f17",
+              "instrumentation": {
+                "initializationMs": 184.99998300000152,
+                "encodedCommandBytes": 223,
+                "encodedResultBytes": 1827
+              }
+            }
+          },
+          "contractFailures": []
+        },
+        {
+          "name": "combined: filter + sort + select + paginate (no populate)",
+          "throughputRatio": 0.225313330816843,
+          "latencyRatio": 4.426485173278408,
+          "checksum": "checksum:e9ffe78ca9a28a5d",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 178.74922036480865,
+              "p95Ms": 6.165067999972962,
+              "checksum": "checksum:e9ffe78ca9a28a5d",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 173,
+                "encodedResultBytes": 1903
+              }
+            },
+            "wasm": {
+              "opsPerSec": 40.2745822213089,
+              "p95Ms": 25.653515000012703,
+              "checksum": "checksum:e9ffe78ca9a28a5d",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 173,
+                "encodedResultBytes": 1903
+              }
+            }
+          },
+          "contractFailures": [
+            "combined: filter + sort + select + paginate (no populate) throughput ratio 0.23 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "filter: compound ($and with 3 conditions)",
+          "throughputRatio": 0.47461407395344235,
+          "latencyRatio": 2.1065887730393116,
+          "checksum": "checksum:7a6bd4dbcaba7269",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 111.6454881252027,
+              "p95Ms": 9.792170000000624,
+              "checksum": "checksum:7a6bd4dbcaba7269",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 116,
+                "encodedResultBytes": 429921
+              }
+            },
+            "wasm": {
+              "opsPerSec": 52.988519957623126,
+              "p95Ms": 19.605784999992466,
+              "checksum": "checksum:7a6bd4dbcaba7269",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 116,
+                "encodedResultBytes": 429921
+              }
+            }
+          },
+          "contractFailures": [
+            "filter: compound ($and with 3 conditions) throughput ratio 0.47 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "filter: equality (role = 'admin')",
+          "throughputRatio": 0.057874120660286764,
+          "latencyRatio": 15.967444549074619,
+          "checksum": "checksum:0868be2b0054ff18",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 1330.9487379941966,
+              "p95Ms": 1.2490110000071581,
+              "checksum": "checksum:0868be2b0054ff18",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 26,
+                "encodedResultBytes": 452801
+              }
+            },
+            "wasm": {
+              "opsPerSec": 77.02748785533252,
+              "p95Ms": 13.191030999994837,
+              "checksum": "checksum:0868be2b0054ff18",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 26,
+                "encodedResultBytes": 452801
+              }
+            }
+          },
+          "contractFailures": [
+            "filter: equality (role = 'admin') throughput ratio 0.06 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "filter: range (age > 30 AND age < 50)",
+          "throughputRatio": 0.20685792887575263,
+          "latencyRatio": 4.826013309831939,
+          "checksum": "checksum:3ce3627bba89fd04",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 272.95183379013895,
+              "p95Ms": 3.9022209999966435,
+              "checksum": "checksum:3ce3627bba89fd04",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 37,
+                "encodedResultBytes": 420116
+              }
+            },
+            "wasm": {
+              "opsPerSec": 56.46225102066682,
+              "p95Ms": 18.190555000008317,
+              "checksum": "checksum:3ce3627bba89fd04",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 37,
+                "encodedResultBytes": 420116
+              }
+            }
+          },
+          "contractFailures": [
+            "filter: range (age > 30 AND age < 50) throughput ratio 0.21 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "paginate: limit 10 from beginning",
+          "throughputRatio": 0.024646027511494358,
+          "latencyRatio": 37.489777323888326,
+          "checksum": "checksum:b8a51d9a397bf5a2",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 6663.770714432072,
+              "p95Ms": 0.35364600003231317,
+              "checksum": "checksum:b8a51d9a397bf5a2",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 12,
+                "encodedResultBytes": 1409
+              }
+            },
+            "wasm": {
+              "opsPerSec": 164.23547635818326,
+              "p95Ms": 6.7083130000391975,
+              "checksum": "checksum:b8a51d9a397bf5a2",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 12,
+                "encodedResultBytes": 1409
+              }
+            }
+          },
+          "contractFailures": [
+            "paginate: limit 10 from beginning throughput ratio 0.02 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "paginate: limit 10, offset 1000 with sort",
+          "throughputRatio": 0.47628875402198184,
+          "latencyRatio": 2.100815307083186,
+          "checksum": "checksum:cfee2dfbf56dc532",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 243.86469628313577,
+              "p95Ms": 4.3559470000327565,
+              "checksum": "checksum:cfee2dfbf56dc532",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 48,
+                "encodedResultBytes": 1400
+              }
+            },
+            "wasm": {
+              "opsPerSec": 116.15001234264376,
+              "p95Ms": 9.182482000032905,
+              "checksum": "checksum:cfee2dfbf56dc532",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 48,
+                "encodedResultBytes": 1400
+              }
+            }
+          },
+          "contractFailures": [
+            "paginate: limit 10, offset 1000 with sort throughput ratio 0.48 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "paginate: limit 10, offset 500 with filter",
+          "throughputRatio": 0.25935277556518843,
+          "latencyRatio": 3.739298547719452,
+          "checksum": "checksum:7e3eaec7847a87de",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 1421.2862557141084,
+              "p95Ms": 0.9615890000131913,
+              "checksum": "checksum:7e3eaec7847a87de",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 50,
+                "encodedResultBytes": 1416
+              }
+            },
+            "wasm": {
+              "opsPerSec": 368.61453529210814,
+              "p95Ms": 3.0388619999866933,
+              "checksum": "checksum:7e3eaec7847a87de",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 50,
+                "encodedResultBytes": 1416
+              }
+            }
+          },
+          "contractFailures": [
+            "paginate: limit 10, offset 500 with filter throughput ratio 0.26 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "paginate: limit 10, offset 5000 (middle)",
+          "throughputRatio": 0.02785528501776259,
+          "latencyRatio": 34.52952281745051,
+          "checksum": "checksum:bf0d97b6a7e77fdc",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 5939.585197990856,
+              "p95Ms": 0.23742000001948327,
+              "checksum": "checksum:bf0d97b6a7e77fdc",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 26,
+                "encodedResultBytes": 1410
+              }
+            },
+            "wasm": {
+              "opsPerSec": 165.44883857731912,
+              "p95Ms": 6.716211000049952,
+              "checksum": "checksum:bf0d97b6a7e77fdc",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 26,
+                "encodedResultBytes": 1410
+              }
+            }
+          },
+          "contractFailures": [
+            "paginate: limit 10, offset 5000 (middle) throughput ratio 0.03 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "paginate: limit 10, offset 9990 (end)",
+          "throughputRatio": 0.024575539047086398,
+          "latencyRatio": 38.44068922269667,
+          "checksum": "checksum:502a9308ab741e2c",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 6723.3907684402475,
+              "p95Ms": 0.33250899997074157,
+              "checksum": "checksum:502a9308ab741e2c",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 26,
+                "encodedResultBytes": 1421
+              }
+            },
+            "wasm": {
+              "opsPerSec": 165.2309523586235,
+              "p95Ms": 6.74962100002449,
+              "checksum": "checksum:502a9308ab741e2c",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 26,
+                "encodedResultBytes": 1421
+              }
+            }
+          },
+          "contractFailures": [
+            "paginate: limit 10, offset 9990 (end) throughput ratio 0.02 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "paginate: limit 100, offset 500",
+          "throughputRatio": 0.026699730820587537,
+          "latencyRatio": 36.573253568405875,
+          "checksum": "checksum:023da5935e2422a9",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 5852.988878861737,
+              "p95Ms": 0.21466300002066419,
+              "checksum": "checksum:023da5935e2422a9",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 26,
+                "encodedResultBytes": 14045
+              }
+            },
+            "wasm": {
+              "opsPerSec": 156.27322756150082,
+              "p95Ms": 6.789543999999296,
+              "checksum": "checksum:023da5935e2422a9",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 26,
+                "encodedResultBytes": 14045
+              }
+            }
+          },
+          "contractFailures": [
+            "paginate: limit 100, offset 500 throughput ratio 0.03 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "populate: inverse (user → orders)",
+          "throughputRatio": 0.0478782934300963,
+          "latencyRatio": 20.868288212191825,
+          "checksum": "checksum:48d2afe1795480d6",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 4.638544164711053,
+              "p95Ms": 228.7506290000165,
+              "checksum": "checksum:48d2afe1795480d6",
+              "instrumentation": {
+                "initializationMs": 6.935723999995389,
+                "encodedCommandBytes": 53,
+                "encodedResultBytes": 1012615
+              }
+            },
+            "wasm": {
+              "opsPerSec": 0.22208557860649675,
+              "p95Ms": 4569.384067999985,
+              "checksum": "checksum:48d2afe1795480d6",
+              "instrumentation": {
+                "initializationMs": 184.99998300000152,
+                "encodedCommandBytes": 53,
+                "encodedResultBytes": 1012615
+              }
+            }
+          },
+          "contractFailures": [
+            "populate: inverse (user → orders) throughput ratio 0.05 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "populate: multiple refs (order → user, product)",
+          "throughputRatio": 0.300354592660235,
+          "latencyRatio": 3.2872875755557653,
+          "checksum": "checksum:0deb757536b1f4f3",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 42.593245390413635,
+              "p95Ms": 28.17048500000965,
+              "checksum": "checksum:0deb757536b1f4f3",
+              "instrumentation": {
+                "initializationMs": 6.935723999995389,
+                "encodedCommandBytes": 72,
+                "encodedResultBytes": 1483874
+              }
+            },
+            "wasm": {
+              "opsPerSec": 12.79307686931512,
+              "p95Ms": 86.2312619999866,
+              "checksum": "checksum:0deb757536b1f4f3",
+              "instrumentation": {
+                "initializationMs": 184.99998300000152,
+                "encodedCommandBytes": 72,
+                "encodedResultBytes": 1483874
+              }
+            }
+          },
+          "contractFailures": [
+            "populate: multiple refs (order → user, product) throughput ratio 0.30 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "populate: nested 2-level (order → user → orders)",
+          "throughputRatio": 0.15292904517455166,
+          "latencyRatio": 6.538382186536685,
+          "checksum": "checksum:ca2be0f0e53e5653",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 1.3736098007947055,
+              "p95Ms": 777.765933000017,
+              "checksum": "checksum:ca2be0f0e53e5653",
+              "instrumentation": {
+                "initializationMs": 6.935723999995389,
+                "encodedCommandBytes": 68,
+                "encodedResultBytes": 1618123
+              }
+            },
+            "wasm": {
+              "opsPerSec": 0.21006483527794043,
+              "p95Ms": 4965.8273939999635,
+              "checksum": "checksum:ca2be0f0e53e5653",
+              "instrumentation": {
+                "initializationMs": 184.99998300000152,
+                "encodedCommandBytes": 68,
+                "encodedResultBytes": 1618123
+              }
+            }
+          },
+          "contractFailures": [
+            "populate: nested 2-level (order → user → orders) throughput ratio 0.15 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "populate: nested 3-level (order → product → supplier)",
+          "throughputRatio": 0.41454600976573364,
+          "latencyRatio": 2.394423145579013,
+          "checksum": "checksum:17086fd09a7e8c8e",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 30.784196719357965,
+              "p95Ms": 42.55380900000455,
+              "checksum": "checksum:17086fd09a7e8c8e",
+              "instrumentation": {
+                "initializationMs": 6.935723999995389,
+                "encodedCommandBytes": 71,
+                "encodedResultBytes": 1224495
+              }
+            },
+            "wasm": {
+              "opsPerSec": 12.761465913853232,
+              "p95Ms": 82.81927400000859,
+              "checksum": "checksum:17086fd09a7e8c8e",
+              "instrumentation": {
+                "initializationMs": 184.99998300000152,
+                "encodedCommandBytes": 71,
+                "encodedResultBytes": 1224495
+              }
+            }
+          },
+          "contractFailures": [
+            "populate: nested 3-level (order → product → supplier) throughput ratio 0.41 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "populate: single ref (order → user)",
+          "throughputRatio": 0.37652587716375757,
+          "latencyRatio": 2.58741044802414,
+          "checksum": "checksum:49844ecdcc0f2041",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 60.193043460648234,
+              "p95Ms": 28.384502000000793,
+              "checksum": "checksum:49844ecdcc0f2041",
+              "instrumentation": {
+                "initializationMs": 6.935723999995389,
+                "encodedCommandBytes": 57,
+                "encodedResultBytes": 1037736
+              }
+            },
+            "wasm": {
+              "opsPerSec": 22.664238488176757,
+              "p95Ms": 44.87424000000465,
+              "checksum": "checksum:49844ecdcc0f2041",
+              "instrumentation": {
+                "initializationMs": 184.99998300000152,
+                "encodedCommandBytes": 57,
+                "encodedResultBytes": 1037736
+              }
+            }
+          },
+          "contractFailures": [
+            "populate: single ref (order → user) throughput ratio 0.38 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "select: most fields (id, name, email, age, role)",
+          "throughputRatio": 0.1781693067883596,
+          "latencyRatio": 5.555860918542194,
+          "checksum": "checksum:95123acb04061c74",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 154.14490556996503,
+              "p95Ms": 8.074565000017174,
+              "checksum": "checksum:95123acb04061c74",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 45,
+                "encodedResultBytes": 1022638
+              }
+            },
+            "wasm": {
+              "opsPerSec": 27.46389097035782,
+              "p95Ms": 38.0275140000158,
+              "checksum": "checksum:95123acb04061c74",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 45,
+                "encodedResultBytes": 1022638
+              }
+            }
+          },
+          "contractFailures": [
+            "select: most fields (id, name, email, age, role) throughput ratio 0.18 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "select: no projection (all fields)",
+          "throughputRatio": 0.005292702882204743,
+          "latencyRatio": 179.99315082285415,
+          "checksum": "checksum:cdd63a997879f1f6",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 5073.852110148631,
+              "p95Ms": 0.4046690000104718,
+              "checksum": "checksum:cdd63a997879f1f6",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 2,
+                "encodedResultBytes": 1412638
+              }
+            },
+            "wasm": {
+              "opsPerSec": 26.85439168726428,
+              "p95Ms": 39.6117020000238,
+              "checksum": "checksum:cdd63a997879f1f6",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 2,
+                "encodedResultBytes": 1412638
+              }
+            }
+          },
+          "contractFailures": [
+            "select: no projection (all fields) throughput ratio 0.01 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "select: single field (name)",
+          "throughputRatio": 0.11498862276286254,
+          "latencyRatio": 8.656421824257341,
+          "checksum": "checksum:3ee7bd5520d7023b",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 429.66042882935653,
+              "p95Ms": 2.70417699997779,
+              "checksum": "checksum:3ee7bd5520d7023b",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 19,
+                "encodedResultBytes": 228715
+              }
+            },
+            "wasm": {
+              "opsPerSec": 49.40606096678862,
+              "p95Ms": 24.44328200002201,
+              "checksum": "checksum:3ee7bd5520d7023b",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 19,
+                "encodedResultBytes": 228715
+              }
+            }
+          },
+          "contractFailures": [
+            "select: single field (name) throughput ratio 0.11 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "select: three fields (id, name, email)",
+          "throughputRatio": 0.14699012733743058,
+          "latencyRatio": 6.788610987706335,
+          "checksum": "checksum:e82b28b58a138748",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 242.32707390720353,
+              "p95Ms": 4.414925999997649,
+              "checksum": "checksum:e82b28b58a138748",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 32,
+                "encodedResultBytes": 772334
+              }
+            },
+            "wasm": {
+              "opsPerSec": 35.6196874509268,
+              "p95Ms": 28.777412999945227,
+              "checksum": "checksum:e82b28b58a138748",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 32,
+                "encodedResultBytes": 772334
+              }
+            }
+          },
+          "contractFailures": [
+            "select: three fields (id, name, email) throughput ratio 0.15 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "select: two fields (id, name)",
+          "throughputRatio": 0.17408567065186215,
+          "latencyRatio": 5.594800064879454,
+          "checksum": "checksum:709718a86ecff8aa",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 245.05629258437872,
+              "p95Ms": 5.121431000006851,
+              "checksum": "checksum:709718a86ecff8aa",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 24,
+                "encodedResultBytes": 418715
+              }
+            },
+            "wasm": {
+              "opsPerSec": 42.66078904201052,
+              "p95Ms": 24.11778700002469,
+              "checksum": "checksum:709718a86ecff8aa",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 24,
+                "encodedResultBytes": 418715
+              }
+            }
+          },
+          "contractFailures": [
+            "select: two fields (id, name) throughput ratio 0.17 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "select: with filter (name, email WHERE role='admin')",
+          "throughputRatio": 0.2148472379837164,
+          "latencyRatio": 4.533513767877962,
+          "checksum": "checksum:836f74425b784d92",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 562.6292272286827,
+              "p95Ms": 2.827476000005845,
+              "checksum": "checksum:836f74425b784d92",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 52,
+                "encodedResultBytes": 188023
+              }
+            },
+            "wasm": {
+              "opsPerSec": 120.87933547899524,
+              "p95Ms": 8.73591899999883,
+              "checksum": "checksum:836f74425b784d92",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 52,
+                "encodedResultBytes": 188023
+              }
+            }
+          },
+          "contractFailures": [
+            "select: with filter (name, email WHERE role='admin') throughput ratio 0.21 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "sort: multi-field (role asc, age desc, name asc)",
+          "throughputRatio": 0.04832335590008105,
+          "latencyRatio": 20.73872107420886,
+          "checksum": "checksum:5054914964fb0753",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 152.75795279610676,
+              "p95Ms": 6.827362999989418,
+              "checksum": "checksum:5054914964fb0753",
+              "instrumentation": {
+                "initializationMs": 4.285866000005626,
+                "encodedCommandBytes": 49,
+                "encodedResultBytes": 1698105
+              }
+            },
+            "wasm": {
+              "opsPerSec": 7.381776919534048,
+              "p95Ms": 154.48868399998173,
+              "checksum": "checksum:5054914964fb0753",
+              "instrumentation": {
+                "initializationMs": 41.1834230000095,
+                "encodedCommandBytes": 49,
+                "encodedResultBytes": 1698105
+              }
+            }
+          },
+          "contractFailures": [
+            "sort: multi-field (role asc, age desc, name asc) throughput ratio 0.05 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "sort: multi-field (role asc, age desc)",
+          "throughputRatio": 0.04457353134514873,
+          "latencyRatio": 22.436036448195882,
+          "checksum": "checksum:41e6af30be52f5c8",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 201.76333652616566,
+              "p95Ms": 5.111197999998694,
+              "checksum": "checksum:41e6af30be52f5c8",
+              "instrumentation": {
+                "initializationMs": 4.353559999988647,
+                "encodedCommandBytes": 36,
+                "encodedResultBytes": 1587791
+              }
+            },
+            "wasm": {
+              "opsPerSec": 8.993304404950836,
+              "p95Ms": 119.30598400000599,
+              "checksum": "checksum:41e6af30be52f5c8",
+              "instrumentation": {
+                "initializationMs": 41.55359399999725,
+                "encodedCommandBytes": 36,
+                "encodedResultBytes": 1587791
+              }
+            }
+          },
+          "contractFailures": [
+            "sort: multi-field (role asc, age desc) throughput ratio 0.04 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "sort: single-field (age asc)",
+          "throughputRatio": 0.10360788534044495,
+          "latencyRatio": 9.657021020278501,
+          "checksum": "checksum:5f49e2394bd66e9c",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 258.88013342241123,
+              "p95Ms": 4.0138390000211075,
+              "checksum": "checksum:5f49e2394bd66e9c",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 22,
+                "encodedResultBytes": 1412638
+              }
+            },
+            "wasm": {
+              "opsPerSec": 26.82202318054827,
+              "p95Ms": 40.712937000003876,
+              "checksum": "checksum:5f49e2394bd66e9c",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 22,
+                "encodedResultBytes": 1412638
+              }
+            }
+          },
+          "contractFailures": [
+            "sort: single-field (age asc) throughput ratio 0.10 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "sort: single-field (age desc)",
+          "throughputRatio": 0.1048884317163637,
+          "latencyRatio": 9.532862356793983,
+          "checksum": "checksum:d9ad3a2f439a0004",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 253.78146232588563,
+              "p95Ms": 4.070605000015348,
+              "checksum": "checksum:d9ad3a2f439a0004",
+              "instrumentation": {
+                "initializationMs": 5.35972400000901,
+                "encodedCommandBytes": 23,
+                "encodedResultBytes": 1412638
+              }
+            },
+            "wasm": {
+              "opsPerSec": 26.61873958204758,
+              "p95Ms": 38.10979099999531,
+              "checksum": "checksum:d9ad3a2f439a0004",
+              "instrumentation": {
+                "initializationMs": 44.42324300001201,
+                "encodedCommandBytes": 23,
+                "encodedResultBytes": 1412638
+              }
+            }
+          },
+          "contractFailures": [
+            "sort: single-field (age desc) throughput ratio 0.10 is below the required 0.50"
+          ]
+        }
+      ]
+    },
+    {
+      "suite": "scaling",
+      "cases": [
+        {
+          "name": "findById @ 100",
+          "throughputRatio": 0.35934590329065497,
+          "latencyRatio": 2.6147149398345437,
+          "checksum": "checksum:e2308b67d8e6dbb7",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 256927.66362246152,
+              "p95Ms": 0.012722000014036894,
+              "checksum": "checksum:e2308b67d8e6dbb7",
+              "instrumentation": {
+                "initializationMs": 0.3815510000567883,
+                "encodedCommandBytes": 20,
+                "encodedResultBytes": 138
+              }
+            },
+            "wasm": {
+              "opsPerSec": 92325.90336477099,
+              "p95Ms": 0.025553999934345484,
+              "checksum": "checksum:e2308b67d8e6dbb7",
+              "instrumentation": {
+                "initializationMs": 0.8401730000041425,
+                "encodedCommandBytes": 20,
+                "encodedResultBytes": 138
+              }
+            }
+          },
+          "contractFailures": [
+            "findById @ 100 throughput ratio 0.36 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "findById @ 10K",
+          "throughputRatio": 0.2520390661672286,
+          "latencyRatio": 3.2038383909458603,
+          "checksum": "checksum:e2308b67d8e6dbb7",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 398789.8286123847,
+              "p95Ms": 0.008005999960005283,
+              "checksum": "checksum:e2308b67d8e6dbb7",
+              "instrumentation": {
+                "initializationMs": 1.5780719999456778,
+                "encodedCommandBytes": 20,
+                "encodedResultBytes": 138
+              }
+            },
+            "wasm": {
+              "opsPerSec": 100510.61600045457,
+              "p95Ms": 0.01825199997983873,
+              "checksum": "checksum:e2308b67d8e6dbb7",
+              "instrumentation": {
+                "initializationMs": 41.42564999999013,
+                "encodedCommandBytes": 20,
+                "encodedResultBytes": 138
+              }
+            }
+          },
+          "contractFailures": [
+            "findById @ 10K throughput ratio 0.25 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "findById @ 1K",
+          "throughputRatio": 0.2851942191470377,
+          "latencyRatio": 2.574699887761392,
+          "checksum": "checksum:e2308b67d8e6dbb7",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 344863.1822285971,
+              "p95Ms": 0.018362000002525747,
+              "checksum": "checksum:e2308b67d8e6dbb7",
+              "instrumentation": {
+                "initializationMs": 0.2340170000679791,
+                "encodedCommandBytes": 20,
+                "encodedResultBytes": 138
+              }
+            },
+            "wasm": {
+              "opsPerSec": 98352.98596824732,
+              "p95Ms": 0.016430000076070428,
+              "checksum": "checksum:e2308b67d8e6dbb7",
+              "instrumentation": {
+                "initializationMs": 4.2348880000645295,
+                "encodedCommandBytes": 20,
+                "encodedResultBytes": 138
+              }
+            }
+          },
+          "contractFailures": [
+            "findById @ 1K throughput ratio 0.29 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "indexed filter @ 100",
+          "throughputRatio": 0.13791894538037974,
+          "latencyRatio": 7.144044820401077,
+          "checksum": "checksum:3c15d56d7a2c438b",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 43156.81491401909,
+              "p95Ms": 0.03129299997817725,
+              "checksum": "checksum:3c15d56d7a2c438b",
+              "instrumentation": {
+                "initializationMs": 0.13369699998293072,
+                "encodedCommandBytes": 26,
+                "encodedResultBytes": 4624
+              }
+            },
+            "wasm": {
+              "opsPerSec": 5952.1423989177565,
+              "p95Ms": 0.211602000053972,
+              "checksum": "checksum:3c15d56d7a2c438b",
+              "instrumentation": {
+                "initializationMs": 0.5765510000055656,
+                "encodedCommandBytes": 26,
+                "encodedResultBytes": 4624
+              }
+            }
+          },
+          "contractFailures": [
+            "indexed filter @ 100 throughput ratio 0.14 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "indexed filter @ 10K",
+          "throughputRatio": 0.06231093586254029,
+          "latencyRatio": 16.001189918121007,
+          "checksum": "checksum:0868be2b0054ff18",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 1185.3036008635816,
+              "p95Ms": 1.0908129999879748,
+              "checksum": "checksum:0868be2b0054ff18",
+              "instrumentation": {
+                "initializationMs": 3.4888710000086576,
+                "encodedCommandBytes": 26,
+                "encodedResultBytes": 452801
+              }
+            },
+            "wasm": {
+              "opsPerSec": 73.85737665104868,
+              "p95Ms": 16.057482999982312,
+              "checksum": "checksum:0868be2b0054ff18",
+              "instrumentation": {
+                "initializationMs": 44.83888399996795,
+                "encodedCommandBytes": 26,
+                "encodedResultBytes": 452801
+              }
+            }
+          },
+          "contractFailures": [
+            "indexed filter @ 10K throughput ratio 0.06 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "indexed filter @ 1K",
+          "throughputRatio": 0.07950831598775003,
+          "latencyRatio": 12.443681026524462,
+          "checksum": "checksum:f3ae0ef68ec1c955",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 9307.157681987348,
+              "p95Ms": 0.13369699998293072,
+              "checksum": "checksum:f3ae0ef68ec1c955",
+              "instrumentation": {
+                "initializationMs": 0.23925999994389713,
+                "encodedCommandBytes": 26,
+                "encodedResultBytes": 44440
+              }
+            },
+            "wasm": {
+              "opsPerSec": 739.9964339272651,
+              "p95Ms": 1.4288439999800175,
+              "checksum": "checksum:f3ae0ef68ec1c955",
+              "instrumentation": {
+                "initializationMs": 4.811822999967262,
+                "encodedCommandBytes": 26,
+                "encodedResultBytes": 44440
+              }
+            }
+          },
+          "contractFailures": [
+            "indexed filter @ 1K throughput ratio 0.08 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "unindexed filter @ 100",
+          "throughputRatio": 0.33503042247428455,
+          "latencyRatio": 2.908814570347542,
+          "checksum": "checksum:fad2ed6f831311d4",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 17855.935176283736,
+              "p95Ms": 0.0716360000660643,
+              "checksum": "checksum:fad2ed6f831311d4",
+              "instrumentation": {
+                "initializationMs": 0.14411600003950298,
+                "encodedCommandBytes": 39,
+                "encodedResultBytes": 2987
+              }
+            },
+            "wasm": {
+              "opsPerSec": 5982.281505783779,
+              "p95Ms": 0.20062299992423505,
+              "checksum": "checksum:fad2ed6f831311d4",
+              "instrumentation": {
+                "initializationMs": 0.5963869999395683,
+                "encodedCommandBytes": 39,
+                "encodedResultBytes": 2987
+              }
+            }
+          },
+          "contractFailures": [
+            "unindexed filter @ 100 throughput ratio 0.34 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "unindexed filter @ 10K",
+          "throughputRatio": 0.2676190387141653,
+          "latencyRatio": 3.733943280395067,
+          "checksum": "checksum:f9eff01e0c988b21",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 262.83467183597105,
+              "p95Ms": 4.189387000049464,
+              "checksum": "checksum:f9eff01e0c988b21",
+              "instrumentation": {
+                "initializationMs": 0.8156370000215247,
+                "encodedCommandBytes": 39,
+                "encodedResultBytes": 254431
+              }
+            },
+            "wasm": {
+              "opsPerSec": 70.33956221749567,
+              "p95Ms": 15.388130999985151,
+              "checksum": "checksum:f9eff01e0c988b21",
+              "instrumentation": {
+                "initializationMs": 43.6319370000856,
+                "encodedCommandBytes": 39,
+                "encodedResultBytes": 254431
+              }
+            }
+          },
+          "contractFailures": [
+            "unindexed filter @ 10K throughput ratio 0.27 is below the required 0.50"
+          ]
+        },
+        {
+          "name": "unindexed filter @ 1K",
+          "throughputRatio": 0.3074909026571592,
+          "latencyRatio": 3.217635483385249,
+          "checksum": "checksum:c6295d052572444d",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 2388.1763699283847,
+              "p95Ms": 0.5893060000380501,
+              "checksum": "checksum:c6295d052572444d",
+              "instrumentation": {
+                "initializationMs": 0.09054699994158,
+                "encodedCommandBytes": 39,
+                "encodedResultBytes": 23523
+              }
+            },
+            "wasm": {
+              "opsPerSec": 734.3425076937768,
+              "p95Ms": 1.4068289999850094,
+              "checksum": "checksum:c6295d052572444d",
+              "instrumentation": {
+                "initializationMs": 4.122801000019535,
+                "encodedCommandBytes": 39,
+                "encodedResultBytes": 23523
+              }
+            }
+          },
+          "contractFailures": [
+            "unindexed filter @ 1K throughput ratio 0.31 is below the required 0.50"
+          ]
+        }
+      ]
+    },
+    {
+      "suite": "serialization",
+      "cases": [
+        {
+          "name": "callback: before/after hooks",
+          "throughputRatio": 0.539024049017106,
+          "latencyRatio": 1.8313159217143755,
+          "checksum": "checksum:9c23961307182aa8",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 14245.798457044153,
+              "p95Ms": 0.21888999990187585,
+              "checksum": "checksum:9c23961307182aa8",
+              "instrumentation": {
+                "initializationMs": 0.3006949999835342,
+                "encodedCommandBytes": 114,
+                "encodedResultBytes": 215
+              }
+            },
+            "wasm": {
+              "opsPerSec": 7678.827965797581,
+              "p95Ms": 0.4000490000471473,
+              "checksum": "checksum:9c23961307182aa8",
+              "instrumentation": {
+                "initializationMs": 0.36541500000748783,
+                "encodedCommandBytes": 114,
+                "encodedResultBytes": 215
+              }
+            }
+          },
+          "contractFailures": []
+        },
+        {
+          "name": "callback: computed field",
+          "throughputRatio": 0.09354537862699482,
+          "latencyRatio": 10.576191542458089,
+          "checksum": "checksum:2a43711bbd6200a0",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 253.46412200313426,
+              "p95Ms": 5.328878000029363,
+              "checksum": "checksum:2a43711bbd6200a0",
+              "instrumentation": {
+                "initializationMs": 2.0098169998964295,
+                "encodedCommandBytes": 109,
+                "encodedResultBytes": 2
+              }
+            },
+            "wasm": {
+              "opsPerSec": 23.710397261142003,
+              "p95Ms": 44.70541299995966,
+              "checksum": "checksum:2a43711bbd6200a0",
+              "instrumentation": {
+                "initializationMs": 45.86456200003158,
+                "encodedCommandBytes": 109,
+                "encodedResultBytes": 2
+              }
+            }
+          },
+          "contractFailures": []
+        },
+        {
+          "name": "callback: custom operator",
+          "throughputRatio": 0.3390710081867291,
+          "latencyRatio": 2.8972743630768574,
+          "checksum": "checksum:2a43711bbd6200a0",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 178.55881451010688,
+              "p95Ms": 6.595766999991611,
+              "checksum": "checksum:2a43711bbd6200a0",
+              "instrumentation": {
+                "initializationMs": 2.36288999998942,
+                "encodedCommandBytes": 93,
+                "encodedResultBytes": 2
+              }
+            },
+            "wasm": {
+              "opsPerSec": 60.54411725656909,
+              "p95Ms": 17.454988999990746,
+              "checksum": "checksum:2a43711bbd6200a0",
+              "instrumentation": {
+                "initializationMs": 41.141714000026695,
+                "encodedCommandBytes": 93,
+                "encodedResultBytes": 2
+              }
+            }
+          },
+          "contractFailures": []
+        },
+        {
+          "name": "callback: locale collator",
+          "throughputRatio": 0.6362972251517524,
+          "latencyRatio": 1.692639819417938,
+          "checksum": "checksum:071cbe70c9621dbf",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 36494.60010683839,
+              "p95Ms": 0.041886000079102814,
+              "checksum": "checksum:071cbe70c9621dbf",
+              "instrumentation": {
+                "initializationMs": 0.44113100005779415,
+                "encodedCommandBytes": 46,
+                "encodedResultBytes": 139
+              }
+            },
+            "wasm": {
+              "opsPerSec": 23221.412781004114,
+              "p95Ms": 0.07894899998791516,
+              "checksum": "checksum:071cbe70c9621dbf",
+              "instrumentation": {
+                "initializationMs": 0.7157449999358505,
+                "encodedCommandBytes": 46,
+                "encodedResultBytes": 139
+              }
+            }
+          },
+          "contractFailures": []
+        },
+        {
+          "name": "persistence: debounced coalescing (100 mutations)",
+          "throughputRatio": 0.22641690178969362,
+          "latencyRatio": 4.342926318519372,
+          "checksum": "checksum:4bea690d50da7a7f",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 671.3149201525165,
+              "p95Ms": 2.0641309999627993,
+              "checksum": "checksum:4bea690d50da7a7f",
+              "instrumentation": {
+                "initializationMs": 0.4740639999508858,
+                "encodedCommandBytes": 17171,
+                "encodedResultBytes": 16199
+              }
+            },
+            "wasm": {
+              "opsPerSec": 151.99704434612835,
+              "p95Ms": 7.350209000054747,
+              "checksum": "checksum:4bea690d50da7a7f",
+              "instrumentation": {
+                "initializationMs": 0.3207379999803379,
+                "encodedCommandBytes": 17171,
+                "encodedResultBytes": 16199
+              }
+            }
+          },
+          "contractFailures": []
+        },
+        {
+          "name": "persistence: explicit flush",
+          "throughputRatio": 0.4895218195267129,
+          "latencyRatio": 2.0141746345400824,
+          "checksum": "checksum:9ea5cee7e144aca0",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 21719.456299672336,
+              "p95Ms": 0.0701059999410063,
+              "checksum": "checksum:9ea5cee7e144aca0",
+              "instrumentation": {
+                "initializationMs": 0.20149399992078543,
+                "encodedCommandBytes": 155,
+                "encodedResultBytes": 183
+              }
+            },
+            "wasm": {
+              "opsPerSec": 10632.14776694653,
+              "p95Ms": 0.11502799997106194,
+              "checksum": "checksum:9ea5cee7e144aca0",
+              "instrumentation": {
+                "initializationMs": 0.2224730000598356,
+                "encodedCommandBytes": 155,
+                "encodedResultBytes": 183
+              }
+            }
+          },
+          "contractFailures": []
+        }
+      ]
+    },
+    {
+      "suite": "transactions",
+      "cases": [
+        {
+          "name": "direct (create + update + delete)",
+          "throughputRatio": 0.09810531675779757,
+          "latencyRatio": 10.004359733678424,
+          "checksum": "checksum:add4d2111254770a",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 778.5819636834395,
+              "p95Ms": 1.5487169999396428,
+              "checksum": "checksum:add4d2111254770a",
+              "instrumentation": {
+                "initializationMs": 0.9806899999966845,
+                "encodedCommandBytes": 63,
+                "encodedResultBytes": 40
+              }
+            },
+            "wasm": {
+              "opsPerSec": 76.38303016907189,
+              "p95Ms": 13.837655999930575,
+              "checksum": "checksum:add4d2111254770a",
+              "instrumentation": {
+                "initializationMs": 38.87786799995229,
+                "encodedCommandBytes": 63,
+                "encodedResultBytes": 40
+              }
+            }
+          },
+          "contractFailures": [
+            "direct (create + update + delete) throughput ratio 0.10 is below the required 0.20"
+          ]
+        },
+        {
+          "name": "transactional (create + update + delete)",
+          "throughputRatio": 0.0066298860763862495,
+          "latencyRatio": 149.7619910876483,
+          "checksum": "checksum:add4d2111254770a",
+          "checksumMatch": true,
+          "engines": {
+            "typescript": {
+              "opsPerSec": 767.3377566086451,
+              "p95Ms": 1.5298049999400973,
+              "checksum": "checksum:add4d2111254770a",
+              "instrumentation": {
+                "initializationMs": 0.8948329999111593,
+                "encodedCommandBytes": 62,
+                "encodedResultBytes": 40
+              }
+            },
+            "wasm": {
+              "opsPerSec": 5.087361908425117,
+              "p95Ms": 203.37696900009178,
+              "checksum": "checksum:add4d2111254770a",
+              "instrumentation": {
+                "initializationMs": 44.78993900003843,
+                "encodedCommandBytes": 62,
+                "encodedResultBytes": 40
+              }
+            }
+          },
+          "contractFailures": [
+            "transactional (create + update + delete) throughput ratio 0.01 is below the required 0.20"
+          ]
+        }
+      ]
+    }
+  ],
+  "contractFailures": [
+    {
+      "suite": "crud",
+      "caseName": "create (single)",
+      "message": "create (single) throughput ratio 0.06 is below the required 0.20"
+    },
+    {
+      "suite": "crud",
+      "caseName": "delete (single)",
+      "message": "delete (single) throughput ratio 0.04 is below the required 0.20"
+    },
+    {
+      "suite": "crud",
+      "caseName": "deleteMany (declarative batch ~100)",
+      "message": "deleteMany (declarative batch ~100) throughput ratio 0.00 is below the required 0.20"
+    },
+    {
+      "suite": "crud",
+      "caseName": "deleteMany (predicate batch ~100)",
+      "message": "deleteMany (predicate batch ~100) throughput ratio 0.00 is below the required 0.20"
+    },
+    {
+      "suite": "crud",
+      "caseName": "update (single)",
+      "message": "update (single) throughput ratio 0.12 is below the required 0.20"
+    },
+    {
+      "suite": "crud",
+      "caseName": "updateMany (declarative batch ~100)",
+      "message": "updateMany (declarative batch ~100) throughput ratio 0.00 is below the required 0.20"
+    },
+    {
+      "suite": "crud",
+      "caseName": "updateMany (predicate batch ~100)",
+      "message": "updateMany (predicate batch ~100) throughput ratio 0.00 is below the required 0.20"
+    },
+    {
+      "suite": "crud",
+      "caseName": "upsert (create path)",
+      "message": "upsert (create path) throughput ratio 0.05 is below the required 0.20"
+    },
+    {
+      "suite": "crud",
+      "caseName": "upsert (update path)",
+      "message": "upsert (update path) throughput ratio 0.02 is below the required 0.20"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "combined: filter + sort + select + paginate (no populate)",
+      "message": "combined: filter + sort + select + paginate (no populate) throughput ratio 0.23 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "filter: compound ($and with 3 conditions)",
+      "message": "filter: compound ($and with 3 conditions) throughput ratio 0.47 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "filter: equality (role = 'admin')",
+      "message": "filter: equality (role = 'admin') throughput ratio 0.06 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "filter: range (age > 30 AND age < 50)",
+      "message": "filter: range (age > 30 AND age < 50) throughput ratio 0.21 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "paginate: limit 10 from beginning",
+      "message": "paginate: limit 10 from beginning throughput ratio 0.02 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "paginate: limit 10, offset 1000 with sort",
+      "message": "paginate: limit 10, offset 1000 with sort throughput ratio 0.48 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "paginate: limit 10, offset 500 with filter",
+      "message": "paginate: limit 10, offset 500 with filter throughput ratio 0.26 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "paginate: limit 10, offset 5000 (middle)",
+      "message": "paginate: limit 10, offset 5000 (middle) throughput ratio 0.03 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "paginate: limit 10, offset 9990 (end)",
+      "message": "paginate: limit 10, offset 9990 (end) throughput ratio 0.02 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "paginate: limit 100, offset 500",
+      "message": "paginate: limit 100, offset 500 throughput ratio 0.03 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "populate: inverse (user → orders)",
+      "message": "populate: inverse (user → orders) throughput ratio 0.05 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "populate: multiple refs (order → user, product)",
+      "message": "populate: multiple refs (order → user, product) throughput ratio 0.30 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "populate: nested 2-level (order → user → orders)",
+      "message": "populate: nested 2-level (order → user → orders) throughput ratio 0.15 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "populate: nested 3-level (order → product → supplier)",
+      "message": "populate: nested 3-level (order → product → supplier) throughput ratio 0.41 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "populate: single ref (order → user)",
+      "message": "populate: single ref (order → user) throughput ratio 0.38 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "select: most fields (id, name, email, age, role)",
+      "message": "select: most fields (id, name, email, age, role) throughput ratio 0.18 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "select: no projection (all fields)",
+      "message": "select: no projection (all fields) throughput ratio 0.01 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "select: single field (name)",
+      "message": "select: single field (name) throughput ratio 0.11 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "select: three fields (id, name, email)",
+      "message": "select: three fields (id, name, email) throughput ratio 0.15 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "select: two fields (id, name)",
+      "message": "select: two fields (id, name) throughput ratio 0.17 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "select: with filter (name, email WHERE role='admin')",
+      "message": "select: with filter (name, email WHERE role='admin') throughput ratio 0.21 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "sort: multi-field (role asc, age desc, name asc)",
+      "message": "sort: multi-field (role asc, age desc, name asc) throughput ratio 0.05 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "sort: multi-field (role asc, age desc)",
+      "message": "sort: multi-field (role asc, age desc) throughput ratio 0.04 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "sort: single-field (age asc)",
+      "message": "sort: single-field (age asc) throughput ratio 0.10 is below the required 0.50"
+    },
+    {
+      "suite": "query-pipeline",
+      "caseName": "sort: single-field (age desc)",
+      "message": "sort: single-field (age desc) throughput ratio 0.10 is below the required 0.50"
+    },
+    {
+      "suite": "scaling",
+      "caseName": "findById @ 100",
+      "message": "findById @ 100 throughput ratio 0.36 is below the required 0.50"
+    },
+    {
+      "suite": "scaling",
+      "caseName": "findById @ 10K",
+      "message": "findById @ 10K throughput ratio 0.25 is below the required 0.50"
+    },
+    {
+      "suite": "scaling",
+      "caseName": "findById @ 1K",
+      "message": "findById @ 1K throughput ratio 0.29 is below the required 0.50"
+    },
+    {
+      "suite": "scaling",
+      "caseName": "indexed filter @ 100",
+      "message": "indexed filter @ 100 throughput ratio 0.14 is below the required 0.50"
+    },
+    {
+      "suite": "scaling",
+      "caseName": "indexed filter @ 10K",
+      "message": "indexed filter @ 10K throughput ratio 0.06 is below the required 0.50"
+    },
+    {
+      "suite": "scaling",
+      "caseName": "indexed filter @ 1K",
+      "message": "indexed filter @ 1K throughput ratio 0.08 is below the required 0.50"
+    },
+    {
+      "suite": "scaling",
+      "caseName": "unindexed filter @ 100",
+      "message": "unindexed filter @ 100 throughput ratio 0.34 is below the required 0.50"
+    },
+    {
+      "suite": "scaling",
+      "caseName": "unindexed filter @ 10K",
+      "message": "unindexed filter @ 10K throughput ratio 0.27 is below the required 0.50"
+    },
+    {
+      "suite": "scaling",
+      "caseName": "unindexed filter @ 1K",
+      "message": "unindexed filter @ 1K throughput ratio 0.31 is below the required 0.50"
+    },
+    {
+      "suite": "transactions",
+      "caseName": "direct (create + update + delete)",
+      "message": "direct (create + update + delete) throughput ratio 0.10 is below the required 0.20"
+    },
+    {
+      "suite": "transactions",
+      "caseName": "transactional (create + update + delete)",
+      "message": "transactional (create + update + delete) throughput ratio 0.01 is below the required 0.20"
+    }
+  ],
+  "executionFailures": []
+}

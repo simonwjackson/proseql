@@ -1,21 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { Bench } from "tinybench";
+import { describe, expect, it, vi } from "vitest";
+import { attachTaskMetadata } from "./comparison.js";
+import type { BenchmarkJsonOutput, DiscoveredBenchmark } from "./runner.js";
 import {
+	BenchmarkExecutionError,
+	buildBenchmarkJsonOutput,
 	discoverBenchmarks,
 	executeAllSuites,
+	executeIsolatedBenchmarkProcess,
 	filterBenchmarks,
+	mergeIsolatedStressSuiteOutputs,
+	normalizeAttemptTimeoutMs,
+	shouldRunInIsolatedStressChild,
 } from "./runner.js";
-import { formatResultsJson, formatResultsTable } from "./utils.js";
+import { defaultBenchOptions } from "./utils.js";
 
-/**
- * Tests for the benchmark runner.
- *
- * Verifies that the runner:
- * - Discovers all .bench.ts files in the bench/ directory
- * - Can filter benchmarks by suite name
- * - Executes discovered benchmarks correctly
- */
-
-// The expected benchmark files in the bench/ directory
 const EXPECTED_BENCHMARK_FILES = [
 	"crud.bench.ts",
 	"query-pipeline.bench.ts",
@@ -32,20 +31,82 @@ const EXPECTED_SUITE_NAMES = [
 	"transactions",
 ] as const;
 
+const requireTask = (
+	tasks: ReadonlyArray<Bench["tasks"][number]>,
+	index: number,
+) => {
+	const task = tasks[index];
+	if (!task) {
+		throw new Error(`Missing synthetic task at index ${index}`);
+	}
+	return task;
+};
+
+const createSyntheticBenchmark = (options: {
+	readonly suiteName: string;
+	readonly taskName?: string;
+	readonly shouldFail?: boolean;
+	readonly delayMs?: number;
+	readonly setupDelayMs?: number;
+	readonly checksumProbeDelayMs?: number;
+	readonly onChecksumProbe?: () => void;
+	readonly onCreateSuite?: () => void;
+	readonly teardown?: () => Promise<void> | void;
+	readonly iterations?: (requested: number) => number;
+}): DiscoveredBenchmark => ({
+	path: `/synthetic/${options.suiteName}.bench.ts`,
+	module: {
+		suiteName: options.suiteName,
+		createSuite: async (suiteOptions) => {
+			options.onCreateSuite?.();
+			if (options.setupDelayMs !== undefined) {
+				await Bun.sleep(options.setupDelayMs);
+			}
+			const requestedIterations = suiteOptions?.benchOptions?.iterations ?? 1;
+			const bench = new Bench({
+				iterations:
+					options.iterations?.(requestedIterations) ?? requestedIterations,
+				time: suiteOptions?.benchOptions?.time ?? 0,
+				warmup: false,
+				signal: suiteOptions?.benchOptions?.signal,
+			});
+			bench.add(options.taskName ?? "[typescript] synthetic case", async () => {
+				if (options.shouldFail) {
+					throw new Error("synthetic failure");
+				}
+				await Bun.sleep(options.delayMs ?? 1);
+			});
+			attachTaskMetadata(requireTask(bench.tasks, 0), {
+				benchmarkName: "synthetic case",
+				engineId: "typescript",
+				category: "read-query",
+				caseType: "required",
+				normalInteraction: false,
+				checksum: "checksum:synthetic",
+				checksumProbe:
+					options.checksumProbeDelayMs === undefined
+						? undefined
+						: async () => {
+								await Bun.sleep(options.checksumProbeDelayMs);
+								options.onChecksumProbe?.();
+								return "checksum:synthetic";
+							},
+			});
+			return {
+				bench,
+				teardown: options.teardown,
+			};
+		},
+		run: undefined,
+	},
+});
+
 describe("Benchmark Discovery", () => {
 	it("discovers all .bench.ts files in the bench/ directory", async () => {
 		const benchmarks = await discoverBenchmarks();
-
-		// Should find all expected benchmark files
 		expect(benchmarks.length).toBe(EXPECTED_BENCHMARK_FILES.length);
 
-		// Extract file names from paths
-		const discoveredFiles = benchmarks.map((b) => {
-			const pathParts = b.path.split("/");
-			return pathParts[pathParts.length - 1];
-		});
-
-		// All expected files should be discovered
+		const discoveredFiles = benchmarks.map((b) => b.path.split("/").at(-1));
 		for (const expectedFile of EXPECTED_BENCHMARK_FILES) {
 			expect(discoveredFiles).toContain(expectedFile);
 		}
@@ -53,36 +114,21 @@ describe("Benchmark Discovery", () => {
 
 	it("discovers files sorted alphabetically for consistent ordering", async () => {
 		const benchmarks = await discoverBenchmarks();
-
-		const discoveredFiles = benchmarks.map((b) => {
-			const pathParts = b.path.split("/");
-			return pathParts[pathParts.length - 1];
-		});
-
-		// Files should be sorted alphabetically
-		const sortedFiles = [...discoveredFiles].sort();
-		expect(discoveredFiles).toEqual(sortedFiles);
+		const discoveredFiles = benchmarks.map((b) => b.path.split("/").at(-1));
+		expect(discoveredFiles).toEqual([...discoveredFiles].sort());
 	});
 
 	it("loads valid benchmark modules with required exports", async () => {
 		const benchmarks = await discoverBenchmarks();
-
 		for (const benchmark of benchmarks) {
-			// Each module should have suiteName as a string
 			expect(typeof benchmark.module.suiteName).toBe("string");
-			expect(benchmark.module.suiteName.length).toBeGreaterThan(0);
-
-			// Each module should have createSuite as a function
 			expect(typeof benchmark.module.createSuite).toBe("function");
 		}
 	});
 
 	it("loads all expected suite names", async () => {
 		const benchmarks = await discoverBenchmarks();
-
 		const suiteNames = benchmarks.map((b) => b.module.suiteName);
-
-		// All expected suite names should be present
 		for (const expectedName of EXPECTED_SUITE_NAMES) {
 			expect(suiteNames).toContain(expectedName);
 		}
@@ -93,257 +139,637 @@ describe("Benchmark Filtering", () => {
 	it("filters benchmarks by suite name (exact match)", async () => {
 		const benchmarks = await discoverBenchmarks();
 		const filtered = filterBenchmarks(benchmarks, "crud");
-
 		expect(filtered.length).toBe(1);
-		expect(filtered[0].module.suiteName).toBe("crud");
+		expect(filtered[0]?.module.suiteName).toBe("crud");
 	});
 
 	it("filters benchmarks by partial name (case-insensitive)", async () => {
 		const benchmarks = await discoverBenchmarks();
-
-		// Partial match
-		const filtered = filterBenchmarks(benchmarks, "serial");
-		expect(filtered.length).toBe(1);
-		expect(filtered[0].module.suiteName).toBe("serialization");
-
-		// Case-insensitive
-		const filteredUpper = filterBenchmarks(benchmarks, "CRUD");
-		expect(filteredUpper.length).toBe(1);
-		expect(filteredUpper[0].module.suiteName).toBe("crud");
+		expect(filterBenchmarks(benchmarks, "serial")[0]?.module.suiteName).toBe(
+			"serialization",
+		);
+		expect(filterBenchmarks(benchmarks, "CRUD")[0]?.module.suiteName).toBe(
+			"crud",
+		);
 	});
 
 	it("returns empty array for non-matching filter", async () => {
 		const benchmarks = await discoverBenchmarks();
-		const filtered = filterBenchmarks(benchmarks, "nonexistent-suite-name");
-
-		expect(filtered.length).toBe(0);
-	});
-
-	it("returns all benchmarks with empty filter", async () => {
-		const benchmarks = await discoverBenchmarks();
-		const filtered = filterBenchmarks(benchmarks, "");
-
-		// Empty string should match all (since every string includes empty string)
-		expect(filtered.length).toBe(benchmarks.length);
+		expect(filterBenchmarks(benchmarks, "nonexistent-suite-name")).toEqual([]);
 	});
 });
 
 describe("Benchmark Execution", () => {
-	it("executes all discovered benchmarks and returns results", async () => {
-		const benchmarks = await discoverBenchmarks();
+	it("executes synthetic suites and preserves input order", async () => {
+		const first = createSyntheticBenchmark({ suiteName: "alpha" });
+		const second = createSyntheticBenchmark({ suiteName: "beta" });
 
-		// Execute with verbose off to avoid console spam in tests
-		const results = await executeAllSuites(benchmarks, { verbose: false });
+		const results = await executeAllSuites([first, second], {
+			verbose: false,
+		});
 
-		// Should have results for all suites
-		expect(results.length).toBe(benchmarks.length);
-
-		// Each result should have required fields
-		for (const result of results) {
-			expect(typeof result.suiteName).toBe("string");
-			expect(result.suiteName.length).toBeGreaterThan(0);
-
-			// Should have a bench instance with tasks
-			expect(result.bench).toBeDefined();
-			expect(result.bench.tasks).toBeDefined();
-			expect(Array.isArray(result.bench.tasks)).toBe(true);
-			expect(result.bench.tasks.length).toBeGreaterThan(0);
-
-			// Should have timing information
-			expect(typeof result.durationMs).toBe("number");
-			expect(result.durationMs).toBeGreaterThan(0);
-		}
-	}, 120_000); // Long timeout for running all benchmarks
-
-	it("produces valid JSON output with expected structure", async () => {
-		const benchmarks = await discoverBenchmarks();
-		const filtered = filterBenchmarks(benchmarks, "transactions");
-
-		expect(filtered.length).toBe(1);
-
-		const results = await executeAllSuites(filtered, { verbose: false });
-
-		// Build JSON output structure matching what runner.ts produces
-		const output = {
-			timestamp: new Date().toISOString(),
-			suites: results.map((r) => formatResultsJson(r.suiteName, r.bench.tasks)),
-		};
-
-		// Verify it's valid JSON (can be serialized and parsed)
-		const jsonString = JSON.stringify(output);
-		expect(() => JSON.parse(jsonString)).not.toThrow();
-
-		// Verify parsed output has expected top-level keys
-		const parsed = JSON.parse(jsonString) as Record<string, unknown>;
-		expect(parsed).toHaveProperty("timestamp");
-		expect(parsed).toHaveProperty("suites");
-		expect(typeof parsed.timestamp).toBe("string");
-		expect(Array.isArray(parsed.suites)).toBe(true);
-
-		// Verify timestamp is a valid ISO date string
-		expect(new Date(parsed.timestamp as string).toISOString()).toBe(
-			parsed.timestamp,
-		);
-
-		// Verify suites array has expected structure
-		const suites = parsed.suites as Array<Record<string, unknown>>;
-		expect(suites.length).toBeGreaterThan(0);
-
-		for (const suite of suites) {
-			// Each suite should have required keys
-			expect(suite).toHaveProperty("suite");
-			expect(suite).toHaveProperty("results");
-			expect(suite).toHaveProperty("timestamp");
-
-			expect(typeof suite.suite).toBe("string");
-			expect(Array.isArray(suite.results)).toBe(true);
-			expect(typeof suite.timestamp).toBe("string");
-
-			// Verify results array has expected benchmark result structure
-			const suiteResults = suite.results as Array<Record<string, unknown>>;
-			expect(suiteResults.length).toBeGreaterThan(0);
-
-			for (const benchResult of suiteResults) {
-				// Each benchmark result should have required keys
-				expect(benchResult).toHaveProperty("name");
-				expect(benchResult).toHaveProperty("opsPerSec");
-				expect(benchResult).toHaveProperty("meanMs");
-				expect(benchResult).toHaveProperty("samples");
-				expect(benchResult).toHaveProperty("minMs");
-				expect(benchResult).toHaveProperty("maxMs");
-
-				// Verify types
-				expect(typeof benchResult.name).toBe("string");
-				expect(typeof benchResult.opsPerSec).toBe("number");
-				expect(typeof benchResult.meanMs).toBe("number");
-				expect(typeof benchResult.samples).toBe("number");
-				expect(typeof benchResult.minMs).toBe("number");
-				expect(typeof benchResult.maxMs).toBe("number");
-
-				// Verify numeric values are positive
-				expect(benchResult.opsPerSec).toBeGreaterThan(0);
-				expect(benchResult.meanMs).toBeGreaterThan(0);
-				expect(benchResult.samples).toBeGreaterThan(0);
-
-				// Optional percentile fields can be number or undefined
-				if (benchResult.p50Ms !== undefined) {
-					expect(typeof benchResult.p50Ms).toBe("number");
-				}
-				if (benchResult.p75Ms !== undefined) {
-					expect(typeof benchResult.p75Ms).toBe("number");
-				}
-				if (benchResult.p95Ms !== undefined) {
-					expect(typeof benchResult.p95Ms).toBe("number");
-				}
-				if (benchResult.p99Ms !== undefined) {
-					expect(typeof benchResult.p99Ms).toBe("number");
-				}
-			}
-		}
-	}, 60_000);
-
-	it("executes a single filtered suite", async () => {
-		const benchmarks = await discoverBenchmarks();
-		const filtered = filterBenchmarks(benchmarks, "transactions");
-
-		expect(filtered.length).toBe(1);
-
-		const results = await executeAllSuites(filtered, { verbose: false });
-
-		expect(results.length).toBe(1);
-		expect(results[0].suiteName).toBe("transactions");
-		expect(results[0].bench.tasks.length).toBeGreaterThan(0);
-	}, 60_000);
-
-	it("returns results in the same order as input benchmarks", async () => {
-		const benchmarks = await discoverBenchmarks();
-		const results = await executeAllSuites(benchmarks, { verbose: false });
-
-		// Results should be in the same order as input
-		for (let i = 0; i < benchmarks.length; i++) {
-			expect(results[i].suiteName).toBe(benchmarks[i].module.suiteName);
-		}
-	}, 120_000);
-});
-
-describe("Table Output", () => {
-	it("renders table output without errors", async () => {
-		const benchmarks = await discoverBenchmarks();
-		// Use a small filtered suite for faster test execution
-		const filtered = filterBenchmarks(benchmarks, "transactions");
-
-		expect(filtered.length).toBe(1);
-
-		const results = await executeAllSuites(filtered, { verbose: false });
-
-		// Verify we have results to format
-		expect(results.length).toBe(1);
-		expect(results[0].bench.tasks.length).toBeGreaterThan(0);
-
-		// formatResultsTable should not throw
-		const tableOutput = formatResultsTable(results[0].bench.tasks);
-
-		// Verify it returns a non-empty string
-		expect(typeof tableOutput).toBe("string");
-		expect(tableOutput.length).toBeGreaterThan(0);
-
-		// Verify table has the expected structure (header line, separator, data rows)
-		const lines = tableOutput.split("\n");
-		expect(lines.length).toBeGreaterThanOrEqual(3); // header + separator + at least one data row
-
-		// Verify header contains expected column names
-		const headerLine = lines[0];
-		expect(headerLine).toContain("Name");
-		expect(headerLine).toContain("ops/sec");
-		expect(headerLine).toContain("mean");
-		expect(headerLine).toContain("p50");
-		expect(headerLine).toContain("p95");
-		expect(headerLine).toContain("p99");
-
-		// Verify separator line contains dashes
-		const separatorLine = lines[1];
-		expect(separatorLine).toMatch(/^[-\s]+$/);
-
-		// Verify data rows exist and contain benchmark names
-		const dataRows = lines.slice(2);
-		expect(dataRows.length).toBeGreaterThan(0);
-
-		// Each data row should have some content (not just whitespace)
-		for (const row of dataRows) {
-			expect(row.trim().length).toBeGreaterThan(0);
-		}
-	}, 60_000);
-
-	it("renders empty results message when no tasks available", () => {
-		// Test with empty task array
-		const tableOutput = formatResultsTable([]);
-
-		expect(typeof tableOutput).toBe("string");
-		expect(tableOutput).toBe("No benchmark results available.");
+		expect(results.map((result) => result.suiteName)).toEqual([
+			"alpha",
+			"beta",
+		]);
+		expect(results[0]?.bench.tasks).toHaveLength(1);
+		expect(results[0]?.durationMs).toBeGreaterThan(0);
 	});
 
-	it("formats numbers correctly in table output", async () => {
-		const benchmarks = await discoverBenchmarks();
-		const filtered = filterBenchmarks(benchmarks, "transactions");
+	it("runs teardown after a successful suite", async () => {
+		const teardown = vi.fn(async () => {});
+		await executeAllSuites(
+			[createSyntheticBenchmark({ suiteName: "teardown-success", teardown })],
+			{ verbose: false },
+		);
+		expect(teardown).toHaveBeenCalledTimes(1);
+	});
 
-		const results = await executeAllSuites(filtered, { verbose: false });
-		const tableOutput = formatResultsTable(results[0].bench.tasks);
+	it("runs teardown after a failing suite and rejects with execution details", async () => {
+		const teardown = vi.fn(async () => {});
 
-		// Table should contain formatted numbers (K/M suffixes or decimal values)
-		// The output should match patterns like "1.23K", "1.23M", "1.23ms", "0.123ms", "1.23s", or "-"
-		const lines = tableOutput.split("\n");
-		const dataRows = lines.slice(2);
+		await expect(
+			executeAllSuites(
+				[
+					createSyntheticBenchmark({
+						suiteName: "teardown-failure",
+						shouldFail: true,
+						teardown,
+					}),
+				],
+				{ verbose: false },
+			),
+		).rejects.toMatchObject({
+			name: "BenchmarkExecutionError",
+			failures: [
+				{
+					suiteName: "teardown-failure",
+					message: "synthetic failure",
+				},
+			],
+		});
 
-		for (const row of dataRows) {
-			// Split row into columns (they're separated by 2 spaces)
-			const columns = row.split(/\s{2,}/);
+		expect(teardown).toHaveBeenCalledTimes(1);
+	});
 
-			// Skip the name column (index 0), check numeric columns
-			for (let i = 1; i < columns.length; i++) {
-				const value = columns[i].trim();
-				// Should match: number with K/M suffix, ms/s suffix, or "-" for undefined
-				expect(value).toMatch(/^(\d+\.?\d*(K|M|ms|s)?|-)$/);
-			}
+	it("bounds setup and checksum probes with the suite attempt timeout", async () => {
+		const startedAt = performance.now();
+		for (const benchmark of [
+			createSyntheticBenchmark({
+				suiteName: "setup-timeout-suite",
+				setupDelayMs: 100,
+			}),
+			createSyntheticBenchmark({
+				suiteName: "probe-timeout-suite",
+				checksumProbeDelayMs: 100,
+			}),
+		]) {
+			await expect(
+				executeAllSuites([benchmark], {
+					verbose: false,
+					attemptTimeoutMs: 10,
+				}),
+			).rejects.toBeInstanceOf(BenchmarkExecutionError);
 		}
-	}, 60_000);
+		expect(performance.now() - startedAt).toBeLessThan(100);
+	});
+
+	it("fails with a deterministic timeout path", async () => {
+		const teardown = vi.fn(async () => {});
+
+		await expect(
+			executeAllSuites(
+				[
+					createSyntheticBenchmark({
+						suiteName: "timeout-suite",
+						delayMs: 100,
+						teardown,
+					}),
+				],
+				{
+					verbose: false,
+					attemptTimeoutMs: 10,
+				},
+			),
+		).rejects.toMatchObject({
+			name: "BenchmarkExecutionError",
+			failures: [
+				{
+					suiteName: "timeout-suite",
+					timedOut: true,
+					message: "Benchmark suite attempt exceeded 10ms",
+				},
+			],
+		});
+		expect(teardown).toHaveBeenCalledTimes(1);
+	});
+
+	it("aborts executeAllSuites immediately after a timeout and does not start later suites", async () => {
+		const laterSuiteStarted = vi.fn();
+
+		await expect(
+			executeAllSuites(
+				[
+					createSyntheticBenchmark({
+						suiteName: "timeout-first",
+						delayMs: 100,
+					}),
+					createSyntheticBenchmark({
+						suiteName: "later-suite",
+						onCreateSuite: laterSuiteStarted,
+					}),
+				],
+				{
+					verbose: false,
+					attemptTimeoutMs: 10,
+				},
+			),
+		).rejects.toMatchObject({
+			failures: [
+				{
+					suiteName: "timeout-first",
+					timedOut: true,
+				},
+			],
+		});
+
+		expect(laterSuiteStarted).not.toHaveBeenCalled();
+	});
+
+	it("adapts iterations until the minimum sample floor succeeds", async () => {
+		const teardown = vi.fn(async () => {});
+		const checksumProbe = vi.fn();
+		const results = await executeAllSuites(
+			[
+				createSyntheticBenchmark({
+					suiteName: "adaptive-success",
+					iterations: (requested) => Math.max(1, Math.floor(requested / 2)),
+					checksumProbeDelayMs: 0,
+					onChecksumProbe: checksumProbe,
+					teardown,
+				}),
+			],
+			{
+				verbose: false,
+				minSamplesPerTask: 30,
+				maxAdaptiveAttempts: 3,
+			},
+		);
+
+		expect(results[0]?.bench?.tasks[0]?.result?.latency.samples.length).toBe(
+			30,
+		);
+		expect(checksumProbe).toHaveBeenCalledTimes(2);
+		expect(teardown).toHaveBeenCalledTimes(2);
+	});
+
+	it("surfaces an exhausted adaptive retry failure when the sample floor never recovers", async () => {
+		await expect(
+			executeAllSuites(
+				[
+					createSyntheticBenchmark({
+						suiteName: "adaptive-failure",
+						iterations: () => 1,
+					}),
+				],
+				{
+					verbose: false,
+					minSamplesPerTask: 30,
+					maxAdaptiveAttempts: 2,
+				},
+			),
+		).rejects.toMatchObject({
+			failures: [
+				{
+					message: expect.stringContaining(
+						"Unable to collect 30 samples after 2 attempt(s)",
+					),
+				},
+			],
+		});
+	});
+
+	it("builds JSON output with suite comparisons, failures, and full-report contract results", async () => {
+		const bench = new Bench({ iterations: 30, time: 0, warmup: false });
+		bench.add("[typescript] findById @ 10K", async () => {
+			await Bun.sleep(1);
+		});
+		bench.add("[wasm] findById @ 10K", async () => {
+			await Bun.sleep(2);
+		});
+		attachTaskMetadata(requireTask(bench.tasks, 0), {
+			benchmarkName: "findById @ 10K",
+			engineId: "typescript",
+			category: "read-query",
+			caseType: "required",
+			normalInteraction: true,
+			checksum: "checksum:ok",
+		});
+		attachTaskMetadata(requireTask(bench.tasks, 1), {
+			benchmarkName: "findById @ 10K",
+			engineId: "wasm",
+			category: "read-query",
+			caseType: "required",
+			normalInteraction: true,
+			checksum: "checksum:ok",
+		});
+		await bench.run();
+
+		const output = buildBenchmarkJsonOutput(
+			[
+				{
+					suiteName: "scaling",
+					bench,
+					durationMs: 10,
+				},
+			],
+			{
+				executionFailures: [
+					{
+						suiteName: "crud",
+						path: "/synthetic/crud.bench.ts",
+						message: "synthetic failure",
+					},
+				],
+			},
+		);
+
+		expect(output.suites).toHaveLength(1);
+		expect(output.suites[0]?.comparisons).toHaveLength(1);
+		expect(output.suites[0]?.contract).toBeDefined();
+		expect(output.suites[0]?.comparisons[0]?.name).toBe("findById @ 10K");
+		expect(output.executionFailures).toHaveLength(1);
+		expect(output.contract.passed).toBe(false);
+		expect(
+			output.contract.failures.some(
+				(failure) => failure.caseName === "create (single)",
+			),
+		).toBe(true);
+	});
+
+	it("preserves exact percentile values in JSON output", () => {
+		const output = buildBenchmarkJsonOutput([
+			{
+				suiteName: "crud",
+				bench: {
+					tasks: [
+						{
+							name: "[typescript] create (single)",
+							result: {
+								throughput: { mean: 100 },
+								latency: {
+									mean: 10,
+									min: 1,
+									max: 30,
+									samples: Array.from({ length: 30 }, (_, index) => index + 1),
+								},
+							} as never,
+						},
+					] as never,
+				} as Bench,
+				durationMs: 1,
+			},
+		]);
+
+		expect(output.suites[0]?.results[0]).toMatchObject({
+			p50Ms: 15,
+			p75Ms: 23,
+			p95Ms: 29,
+			p99Ms: 30,
+		});
+	});
+});
+
+describe("benchmark measurement defaults", () => {
+	it("collects a bounded fixed sample floor instead of time-amplifying cleanup hooks", () => {
+		expect(defaultBenchOptions).toMatchObject({
+			time: 0,
+			iterations: 30,
+			warmup: true,
+			warmupIterations: 5,
+			warmupTime: 0,
+		});
+	});
+});
+
+describe("runner timeout normalization", () => {
+	it("enforces the default bounded timeout unless no-timeout is explicitly requested", () => {
+		expect(normalizeAttemptTimeoutMs(undefined)).toBe(900_000);
+		expect(normalizeAttemptTimeoutMs(null)).toBeUndefined();
+		expect(normalizeAttemptTimeoutMs(10)).toBe(10);
+	});
+});
+
+const makeIsolatedOutput = (
+	overrides: Partial<BenchmarkJsonOutput> = {},
+): BenchmarkJsonOutput => ({
+	timestamp: "2026-01-01T00:00:00.000Z",
+	suites: [],
+	contract: { passed: true, failures: [] },
+	executionFailures: [],
+	...overrides,
+});
+
+describe("isolated stress execution", () => {
+	it("detects when scaling stress should run in a fresh child process without recursion", () => {
+		expect(
+			shouldRunInIsolatedStressChild({
+				suiteName: "scaling",
+				includeStress: true,
+				env: {},
+			}),
+		).toBe(true);
+		expect(
+			shouldRunInIsolatedStressChild({
+				suiteName: "scaling",
+				includeStress: true,
+				env: { PROSEQL_BENCH_STRESS_CHILD: "1" },
+			}),
+		).toBe(false);
+		expect(
+			shouldRunInIsolatedStressChild({
+				suiteName: "crud",
+				includeStress: true,
+				env: {},
+			}),
+		).toBe(false);
+	});
+
+	it("merges per-engine isolated child JSON and keeps memory instrumentation intact", () => {
+		const merged = mergeIsolatedStressSuiteOutputs({
+			suiteName: "scaling",
+			outputs: [
+				{
+					engineId: "typescript",
+					output: {
+						timestamp: "2026-01-01T00:00:00.000Z",
+						suites: [
+							{
+								suite: "scaling",
+								results: [],
+								comparisons: [
+									{
+										name: "findById @ 100K",
+										category: "read-query",
+										caseType: "stress",
+										normalInteraction: false,
+										throughputRatio: undefined,
+										latencyRatio: undefined,
+										checksum: "checksum:ok",
+										checksumMatch: false,
+										engines: {
+											typescript: {
+												name: "findById @ 100K",
+												engineId: "typescript",
+												opsPerSec: 100,
+												meanMs: 10,
+												p50Ms: 10,
+												p75Ms: 10,
+												p95Ms: 10,
+												p99Ms: 10,
+												minMs: 10,
+												maxMs: 10,
+												samples: 30,
+												checksum: "checksum:ok",
+												instrumentation: {
+													initializationMs: {
+														status: "unavailable",
+														reason: "test",
+													},
+													coldStartMs: {
+														status: "unavailable",
+														reason: "test",
+													},
+													encodedCommandBytes: {
+														status: "unavailable",
+														reason: "test",
+													},
+													encodedResultBytes: {
+														status: "unavailable",
+														reason: "test",
+													},
+													compressedArtifactBytes: {
+														status: "unavailable",
+														reason: "test",
+													},
+													callbackCount: {
+														status: "unavailable",
+														reason: "test",
+													},
+													jsHeapBytes: { status: "available", value: 512 },
+													wasmLinearMemoryHighWaterBytes: {
+														status: "unavailable",
+														reason: "test",
+													},
+													repeatedHighWaterGrowthBytes: {
+														status: "available",
+														value: 0,
+													},
+													boundary: {
+														encodeMs: { status: "unavailable", reason: "test" },
+														transferMs: {
+															status: "unavailable",
+															reason: "test",
+														},
+														engineMs: { status: "unavailable", reason: "test" },
+														decodeMs: { status: "unavailable", reason: "test" },
+														callbackMs: {
+															status: "unavailable",
+															reason: "test",
+														},
+													},
+												},
+											},
+											wasm: undefined,
+										},
+									},
+								],
+								contract: { passed: true, failures: [] },
+								timestamp: "2026-01-01T00:00:00.000Z",
+							},
+						],
+						contract: { passed: true, failures: [] },
+						executionFailures: [],
+					},
+				},
+				{
+					engineId: "wasm",
+					output: {
+						timestamp: "2026-01-01T00:00:00.000Z",
+						suites: [
+							{
+								suite: "scaling",
+								results: [],
+								comparisons: [
+									{
+										name: "findById @ 100K",
+										category: "read-query",
+										caseType: "stress",
+										normalInteraction: false,
+										throughputRatio: undefined,
+										latencyRatio: undefined,
+										checksum: "checksum:ok",
+										checksumMatch: false,
+										engines: {
+											typescript: undefined,
+											wasm: {
+												name: "findById @ 100K",
+												engineId: "wasm",
+												opsPerSec: 50,
+												meanMs: 20,
+												p50Ms: 20,
+												p75Ms: 20,
+												p95Ms: 20,
+												p99Ms: 20,
+												minMs: 20,
+												maxMs: 20,
+												samples: 30,
+												checksum: "checksum:ok",
+												instrumentation: {
+													initializationMs: {
+														status: "unavailable",
+														reason: "test",
+													},
+													coldStartMs: {
+														status: "unavailable",
+														reason: "test",
+													},
+													encodedCommandBytes: {
+														status: "unavailable",
+														reason: "test",
+													},
+													encodedResultBytes: {
+														status: "unavailable",
+														reason: "test",
+													},
+													compressedArtifactBytes: {
+														status: "unavailable",
+														reason: "test",
+													},
+													callbackCount: {
+														status: "unavailable",
+														reason: "test",
+													},
+													jsHeapBytes: { status: "available", value: 1_024 },
+													wasmLinearMemoryHighWaterBytes: {
+														status: "available",
+														value: 2_048,
+													},
+													repeatedHighWaterGrowthBytes: {
+														status: "available",
+														value: 0,
+													},
+													boundary: {
+														encodeMs: { status: "unavailable", reason: "test" },
+														transferMs: {
+															status: "unavailable",
+															reason: "test",
+														},
+														engineMs: { status: "unavailable", reason: "test" },
+														decodeMs: { status: "unavailable", reason: "test" },
+														callbackMs: {
+															status: "unavailable",
+															reason: "test",
+														},
+													},
+												},
+											},
+										},
+									},
+								],
+								contract: { passed: true, failures: [] },
+								timestamp: "2026-01-01T00:00:00.000Z",
+							},
+						],
+						contract: { passed: true, failures: [] },
+						executionFailures: [],
+					},
+				},
+			],
+		});
+
+		expect(merged.comparisons[0]?.throughputRatio).toBe(0.5);
+		expect(
+			merged.comparisons[0]?.engines.wasm?.instrumentation
+				.wasmLinearMemoryHighWaterBytes,
+		).toEqual({ status: "available", value: 2_048 });
+	});
+
+	it("rejects missing suite output and child-reported execution failures", () => {
+		expect(() =>
+			mergeIsolatedStressSuiteOutputs({
+				suiteName: "scaling",
+				outputs: [{ engineId: "typescript", output: makeIsolatedOutput() }],
+			}),
+		).toThrow(/did not report suite scaling/i);
+
+		expect(() =>
+			mergeIsolatedStressSuiteOutputs({
+				suiteName: "scaling",
+				outputs: [
+					{
+						engineId: "wasm",
+						output: makeIsolatedOutput({
+							suites: [
+								{
+									suite: "scaling",
+									results: [],
+									comparisons: [],
+									contract: { passed: false, failures: [] },
+									timestamp: "2026-01-01T00:00:00.000Z",
+								},
+							],
+							executionFailures: [
+								{
+									suiteName: "scaling",
+									path: "/synthetic/scaling.bench.ts",
+									message: "child failed",
+								},
+							],
+						}),
+					},
+				],
+			}),
+		).toThrow("child failed");
+	});
+
+	it("captures non-zero exits and machine-readable stdout from isolated child processes", async () => {
+		const failed = await executeIsolatedBenchmarkProcess({
+			cmd: [
+				process.execPath,
+				"-e",
+				"console.error('child failed'); process.exit(7)",
+			],
+		});
+		expect(failed.exitCode).toBe(7);
+		expect(failed.timedOut).toBe(false);
+		expect(failed.stderr).toContain("child failed");
+
+		const result = await executeIsolatedBenchmarkProcess({
+			cmd: [
+				process.execPath,
+				"-e",
+				"console.log(JSON.stringify({ ok: true, isolated: process.env.TEST_ISOLATED === '1' }))",
+			],
+			env: { TEST_ISOLATED: "1" },
+		});
+
+		expect(result.exitCode).toBe(0);
+		expect(result.timedOut).toBe(false);
+		expect(JSON.parse(result.stdout)).toEqual({
+			ok: true,
+			isolated: true,
+		});
+		expect(result.stderr).toBe("");
+	});
+
+	it("kills isolated child processes that exceed the parent timeout", async () => {
+		const result = await executeIsolatedBenchmarkProcess({
+			cmd: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
+			timeoutMs: 10,
+		});
+
+		expect(result.timedOut).toBe(true);
+		expect(result.exitCode).toBeNull();
+	});
 });

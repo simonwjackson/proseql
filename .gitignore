@@ -12,3 +12,4 @@ coverage/
 .direnv/
 .worktrees
 crates/target/
+bench/generated/

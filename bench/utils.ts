@@ -4,37 +4,22 @@
  * Provides database factory wrapper, result formatting, and percentile extraction.
  */
 
+import type { EffectDatabase } from "@proseql/core";
+import type { BenchOptions, Task, TaskResult } from "tinybench";
 import {
-	type CollectionConfig,
-	createEffectDatabase,
-	type EffectDatabase,
-} from "@proseql/core";
-import { Effect, type Schema } from "effect";
-import type { Task, TaskResult } from "tinybench";
+	createAvailableMetric,
+	createUnavailableInstrumentation,
+	createUnavailableMetric,
+	exactPercentile,
+	type BenchmarkInstrumentation,
+} from "./comparison.js";
+import { type BenchSchemaConfig, typescriptBenchEngine } from "./engines.js";
+
+export type { BenchSchemaConfig } from "./engines.js";
 
 // ============================================================================
 // Types
 // ============================================================================
-
-/**
- * Simplified schema configuration for benchmark database creation.
- * Maps collection names to their Effect Schema.
- */
-export type BenchSchemaConfig = Record<
-	string,
-	{
-		readonly schema: Schema.Schema<{ readonly id: string }, unknown>;
-		readonly indexes?: ReadonlyArray<string | ReadonlyArray<string>>;
-		readonly relationships?: Record<
-			string,
-			{
-				readonly type: "ref" | "inverse";
-				readonly target: string;
-				readonly foreignKey?: string;
-			}
-		>;
-	}
->;
 
 /**
  * Benchmark result row for table output.
@@ -100,24 +85,11 @@ export async function createBenchDatabase<T extends BenchSchemaConfig>(
 		readonly [K in keyof T]?: ReadonlyArray<Record<string, unknown>>;
 	},
 ): Promise<EffectDatabase<ConvertToDbConfig<T>>> {
-	// Convert simplified config to full DatabaseConfig
-	const dbConfig: Record<string, CollectionConfig> = {};
-	for (const [name, config] of Object.entries(schemaConfig)) {
-		dbConfig[name] = {
-			schema: config.schema,
-			indexes: config.indexes,
-			relationships: config.relationships ?? {},
-		};
-	}
-
-	const db = await Effect.runPromise(
-		createEffectDatabase(
-			dbConfig as ConvertToDbConfig<T>,
-			initialData as Record<string, ReadonlyArray<Record<string, unknown>>>,
-		),
+	const handle = await typescriptBenchEngine.createDatabase(
+		schemaConfig,
+		initialData,
 	);
-
-	return db;
+	return handle.db as EffectDatabase<ConvertToDbConfig<T>>;
 }
 
 /**
@@ -153,32 +125,13 @@ export function extractPercentiles(result: TaskResult): {
 	readonly p95: number | undefined;
 	readonly p99: number | undefined;
 } {
-	const latency = result.latency;
+	const samples = result.latency.samples as ReadonlyArray<number>;
 	return {
-		p50: latency.p50,
-		p75: latency.p75,
-		// tinybench doesn't provide p95 directly, estimate from p99 and p75
-		// or use undefined if not available
-		p95: estimateP95(latency.p75, latency.p99),
-		p99: latency.p99,
+		p50: exactPercentile(samples, 50),
+		p75: exactPercentile(samples, 75),
+		p95: exactPercentile(samples, 95),
+		p99: exactPercentile(samples, 99),
 	};
-}
-
-/**
- * Estimate p95 from p75 and p99 using linear interpolation.
- * Returns undefined if either input is undefined.
- * @internal
- */
-function estimateP95(
-	p75: number | undefined,
-	p99: number | undefined,
-): number | undefined {
-	if (p75 === undefined || p99 === undefined) {
-		return undefined;
-	}
-	// Linear interpolation: p95 is 5/6 of the way from p75 to p99
-	// (95 - 75) / (99 - 75) = 20/24 = 5/6
-	return p75 + ((p99 - p75) * 5) / 6;
 }
 
 /**
@@ -370,8 +323,111 @@ export function formatResultsJson(
  * Default benchmark options for consistent timing across suites.
  */
 export const defaultBenchOptions = {
-	time: 1000, // 1 second per benchmark
+	// Fixed iteration floors keep untimed reset/verification hooks bounded. CI
+	// reduces noise with interleaved trials rather than unbounded per-task loops.
+	time: 0,
+	iterations: 30,
 	warmup: true,
 	warmupIterations: 5,
-	warmupTime: 250, // 250ms warmup
-} as const;
+	warmupTime: 0,
+} as const satisfies BenchOptions;
+
+export const buildBenchOptions = (
+	overrides: Partial<BenchOptions> | undefined,
+): BenchOptions => ({
+	...defaultBenchOptions,
+	...overrides,
+});
+
+export const closeAll = async (
+	closers: ReadonlyArray<() => Promise<void>>,
+): Promise<void> => {
+	for (const close of [...closers].reverse()) {
+		await close();
+	}
+};
+
+const textEncoder = new TextEncoder();
+
+export const jsonByteMetric = (value: unknown) => {
+	try {
+		const json = JSON.stringify(value);
+		if (json === undefined) {
+			return createUnavailableMetric("value is not JSON-serializable");
+		}
+		return createAvailableMetric(textEncoder.encode(json).byteLength);
+	} catch (error) {
+		return createUnavailableMetric(
+			error instanceof Error ? error.message : "unable to serialize metric",
+		);
+	}
+};
+
+export const createTaskInstrumentation = (options: {
+	readonly initializationMs: number;
+	readonly commandPayload?: unknown;
+	readonly resultPayload?: unknown;
+}): BenchmarkInstrumentation => ({
+	...createUnavailableInstrumentation("not reported by this workload"),
+	initializationMs: createAvailableMetric(options.initializationMs),
+	encodedCommandBytes:
+		options.commandPayload === undefined
+			? createUnavailableMetric("command payload not reported")
+			: jsonByteMetric(options.commandPayload),
+	encodedResultBytes:
+		options.resultPayload === undefined
+			? createUnavailableMetric("result payload not reported")
+			: jsonByteMetric(options.resultPayload),
+});
+
+export const measureAsync = async <T>(
+	operation: () => Promise<T>,
+): Promise<{ readonly value: T; readonly durationMs: number }> => {
+	const startedAt = performance.now();
+	const value = await operation();
+	return {
+		value,
+		durationMs: performance.now() - startedAt,
+	};
+};
+
+export const withFrozenDate = async <T>(
+	isoTimestamp: string,
+	operation: () => Promise<T>,
+): Promise<T> => {
+	const RealDate = Date;
+	const fixedMs = new RealDate(isoTimestamp).getTime();
+	const FrozenDate = function (
+		this: Date,
+		...args: ReadonlyArray<unknown>
+	): Date | string {
+		if (new.target === undefined) {
+			return new RealDate(fixedMs).toString();
+		}
+		const constructorArgs = args.length === 0 ? [fixedMs] : args;
+		return Reflect.construct(RealDate, constructorArgs, new.target) as Date;
+	} as unknown as DateConstructor;
+
+	Object.defineProperties(FrozenDate, {
+		now: {
+			value: () => fixedMs,
+		},
+		parse: {
+			value: RealDate.parse,
+		},
+		UTC: {
+			value: RealDate.UTC,
+		},
+		prototype: {
+			value: RealDate.prototype,
+		},
+	});
+	Object.setPrototypeOf(FrozenDate, RealDate);
+
+	globalThis.Date = FrozenDate;
+	try {
+		return await operation();
+	} finally {
+		globalThis.Date = RealDate;
+	}
+};

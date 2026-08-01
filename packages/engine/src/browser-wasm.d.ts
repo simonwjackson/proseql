@@ -3,6 +3,8 @@ declare module "./browser-wasm/proseql_wasm.js" {
 		input?: RequestInfo | URL | Response | BufferSource | WebAssembly.Module,
 	): Promise<unknown>;
 
+	export function __proseql_wasm_memory(): WebAssembly.Memory | undefined;
+
 	export class WasmRuntime {
 		constructor(
 			setTimeoutFn: typeof globalThis.setTimeout,
