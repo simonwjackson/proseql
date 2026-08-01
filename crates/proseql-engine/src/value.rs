@@ -32,6 +32,7 @@ pub use serde_json::Value;
 pub const BOUNDARY_UNDEFINED_SENTINEL_KEY: &str = "__proseqlUndefined__";
 pub const BOUNDARY_INTERNAL_UNDEFINED_SENTINEL_KEY: &str = "__proseqlInternalUndefined__";
 pub const BOUNDARY_ESCAPED_SENTINEL_KEY: &str = "__proseqlEscaped__";
+pub const BOUNDARY_FLOAT64_SENTINEL_KEY: &str = "__proseqlFloat64__";
 
 pub fn is_boundary_undefined(value: &Value) -> bool {
     value
@@ -76,6 +77,30 @@ fn is_boundary_escaped_entries(value: &Value) -> bool {
 fn has_reserved_boundary_key(object: &Map<String, Value>) -> bool {
     object.contains_key(BOUNDARY_UNDEFINED_SENTINEL_KEY)
         || object.contains_key(BOUNDARY_ESCAPED_SENTINEL_KEY)
+        || object.contains_key(BOUNDARY_FLOAT64_SENTINEL_KEY)
+}
+
+fn decode_boundary_float64(value: &Value) -> Option<Value> {
+    let object = value.as_object()?;
+    if object.len() != 1 {
+        return None;
+    }
+    let hex = object.get(BOUNDARY_FLOAT64_SENTINEL_KEY)?.as_str()?;
+    if hex.len() != 16 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let bits = u64::from_str_radix(hex, 16).ok()?;
+    let number = f64::from_bits(bits);
+    let json_number = if number.is_finite()
+        && number.fract() == 0.0
+        && !number.is_sign_negative()
+        && number.abs() < (i64::MAX as f64)
+    {
+        serde_json::Number::from(number as i64)
+    } else {
+        serde_json::Number::from_f64(number)?
+    };
+    Some(Value::Number(json_number))
 }
 
 pub fn decode_boundary_input_value(value: Value) -> Value {
@@ -104,12 +129,18 @@ pub fn decode_boundary_input_value(value: Value) -> Value {
             }
             Value::Object(decoded)
         }
-        Value::Object(object) => Value::Object(
-            object
-                .into_iter()
-                .map(|(key, item)| (key, decode_boundary_input_value(item)))
-                .collect(),
-        ),
+        Value::Object(object) => {
+            if let Some(number) = decode_boundary_float64(&Value::Object(object.clone())) {
+                number
+            } else {
+                Value::Object(
+                    object
+                        .into_iter()
+                        .map(|(key, item)| (key, decode_boundary_input_value(item)))
+                        .collect(),
+                )
+            }
+        }
         other => other,
     }
 }

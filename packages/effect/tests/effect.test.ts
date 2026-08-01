@@ -194,6 +194,169 @@ describe("@proseql/effect", () => {
 		expect(failure).toBeInstanceOf(ValidationError);
 	});
 
+	it("preserves non-integer initialData numbers across the WASM boundary", async () => {
+		const OrderSchema = Schema.Struct({
+			id: Schema.String,
+			total: Schema.Number,
+		});
+		const db = await Effect.runPromise(
+			createEffectDatabase(
+				{
+					orders: {
+						schema: OrderSchema,
+						relationships: {},
+					},
+				} as const,
+				{
+					orders: [{ id: "o1", total: 1326.6499999999999 }],
+				},
+			),
+		);
+
+		const order = await db.orders.findById("o1").runPromise;
+		expect(JSON.stringify(order.total)).toBe("1326.6499999999999");
+	});
+
+	it("round-trips boundary float sentinels, nested arrays, and escaped __proseqlFloat64__ objects through write/query/reload", async () => {
+		const tmp = await mkdtemp(join(tmpdir(), "proseql-effect-boundary-"));
+		const file = join(tmp, "records.json");
+		const BoundarySchema = Schema.Struct({
+			id: Schema.String,
+			negativeZero: Schema.Number,
+			unsafeInteger: Schema.Number,
+			nestedNumbers: Schema.Array(Schema.Array(Schema.Number)),
+			escapedFloat64Object: Schema.Struct({
+				__proseqlFloat64__: Schema.String,
+				label: Schema.String,
+			}),
+		});
+		const record = {
+			id: "r1",
+			negativeZero: -0,
+			unsafeInteger: 9007199254740992,
+			nestedNumbers: [[-0, 1.5], [1326.6499999999999]],
+			escapedFloat64Object: {
+				__proseqlFloat64__: "user-payload",
+				label: "escaped",
+			},
+		} as const;
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* createPersistentEffectDatabase(
+							{
+								records: {
+									schema: BoundarySchema,
+									file,
+									relationships: {},
+								},
+							} as const,
+							{ records: [] },
+							{ writeDebounce: 5 },
+						);
+						yield* db.records.create(record);
+						const queried = yield* db.records.findById(record.id);
+						expect(Object.is(queried.negativeZero, -0)).toBe(true);
+						expect(queried.unsafeInteger).toBe(9007199254740992);
+						expect(Object.is(queried.nestedNumbers[0]?.[0], -0)).toBe(true);
+						expect(queried.escapedFloat64Object).toEqual(record.escapedFloat64Object);
+						yield* Effect.tryPromise(() => db.flush());
+					}),
+				),
+			);
+			const reopened = await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* createPersistentEffectDatabase(
+							{
+								records: {
+									schema: BoundarySchema,
+									file,
+									relationships: {},
+								},
+							} as const,
+							undefined,
+							{ writeDebounce: 5 },
+						);
+						return yield* db.records.findById(record.id);
+					}),
+				),
+			);
+			// JSON persistence intentionally follows JSON.stringify semantics, which
+			// normalize negative zero even though the in-memory WASM boundary does not.
+			expect(Object.is(reopened.negativeZero, 0)).toBe(true);
+			expect(Object.is(reopened.nestedNumbers[0]?.[0], 0)).toBe(true);
+			expect(reopened.unsafeInteger).toBe(9007199254740992);
+			expect(reopened.nestedNumbers[1]).toEqual(record.nestedNumbers[1]);
+			expect(reopened.escapedFloat64Object).toEqual(record.escapedFloat64Object);
+		} finally {
+			await rm(tmp, { recursive: true, force: true });
+		}
+	});
+
+	it("preserves declared multi-field sort precedence across the WASM boundary", async () => {
+		const SortUserSchema = Schema.Struct({
+			id: Schema.String,
+			role: Schema.String,
+			age: Schema.Number,
+		});
+		const db = await Effect.runPromise(
+			createEffectDatabase(
+				{
+					users: {
+						schema: SortUserSchema,
+						relationships: {},
+					},
+				} as const,
+				{
+					users: [
+						{ id: "u1", role: "user", age: 80 },
+						{ id: "u2", role: "admin", age: 79 },
+						{ id: "u3", role: "admin", age: 80 },
+					],
+				},
+			),
+		);
+
+		const rows = await db.users.query({
+			sort: { role: "asc", age: "desc", id: "asc" },
+		}).runPromise;
+		expect(rows.map((row) => row.id)).toEqual(["u3", "u2", "u1"]);
+	});
+
+	it("preserves indexed $in candidate order through the database query path", async () => {
+		const IndexedUserSchema = Schema.Struct({
+			id: Schema.String,
+			role: Schema.String,
+			age: Schema.Number,
+			name: Schema.String,
+		});
+		const db = await Effect.runPromise(
+			createEffectDatabase(
+				{
+					users: {
+						schema: IndexedUserSchema,
+						indexes: ["role", "age"],
+						relationships: {},
+					},
+				} as const,
+				{
+					users: [
+						{ id: "moderator", role: "moderator", age: 55, name: "Yara" },
+						{ id: "admin", role: "admin", age: 55, name: "Yara" },
+					],
+				},
+			),
+		);
+
+		const rows = await db.users.query({
+			where: { role: { $in: ["admin", "moderator"] } },
+			sort: { age: "desc", name: "asc" },
+		}).runPromise;
+		expect(rows.map((row) => row.id)).toEqual(["admin", "moderator"]);
+	});
+
 	it("supports Effect.gen/yield* and catchTag on reconstructed DuplicateKeyError", async () => {
 		const result = await Effect.runPromise(
 			Effect.gen(function* () {

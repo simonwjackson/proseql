@@ -2373,12 +2373,20 @@ function encodeWhereForCommand(where: unknown) {
 	return where === undefined ? undefined : encodeBoundaryValueForWire(where);
 }
 
+function encodeSortForCommand(sort: unknown): unknown {
+	if (typeof sort !== "object" || sort === null || Array.isArray(sort)) {
+		return sort;
+	}
+	return Object.entries(sort as Record<string, unknown>).map(([field, order]) => ({ field, order }));
+}
+
 function prepareQueryConfigForCommand(config: unknown) {
 	if (typeof config !== "object" || config === null) return config;
 	const queryConfig = config as Record<string, unknown>;
 	return {
 		...queryConfig,
 		where: encodeWhereForCommand(queryConfig.where),
+		sort: encodeSortForCommand(queryConfig.sort),
 	};
 }
 

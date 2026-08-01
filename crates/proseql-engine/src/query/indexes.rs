@@ -141,60 +141,74 @@ impl QueryIndexes {
     /// fields with equality conditions.  Returns `None` when no index is
     /// applicable (caller falls through to full scan).
     ///
-    /// When multiple indexes are applicable, the most selective one (smallest
-    /// candidate set) is used.
-    ///
-    /// Mirrors `resolveWithIndex` from
-    /// `packages/core/src/factories/database-effect.ts`.
+    /// When multiple indexes are applicable, the index covering the most fields
+    /// is used. `$in` candidates preserve condition-value order and then the
+    /// insertion order within each index bucket, matching JavaScript `Set` union
+    /// semantics in `packages/core/src/indexes/index-lookup.ts`.
     pub fn narrow_by_equality(
         &self,
         where_clause: &Value,
-        insertion_order: &[String],
+        _insertion_order: &[String],
     ) -> Option<Vec<String>> {
         let where_obj = where_clause.as_object()?;
-        let mut best: Option<Vec<String>> = None;
+        if where_obj.contains_key("$or")
+            || where_obj.contains_key("$and")
+            || where_obj.contains_key("$not")
+        {
+            return None;
+        }
 
+        let mut best: Option<(usize, Vec<String>)> = None;
         for idx in &self.equality {
-            // All fields in this index must have an equality condition in where
-            let mut val_parts: Vec<String> = Vec::with_capacity(idx.fields.len());
-            let mut all_covered = true;
-            for field in &idx.fields {
-                if let Some(v) = extract_equality_value(where_obj, field) {
-                    // Use the same canonicalization as the index build step so
-                    // numeric lookups match regardless of integer/float serde form.
-                    val_parts.push(canonical_index_part(v));
-                } else {
-                    all_covered = false;
-                    break;
-                }
-            }
-            if !all_covered {
+            let conditions: Option<Vec<Vec<&Value>>> = idx
+                .fields
+                .iter()
+                .map(|field| extract_equality_values(where_obj, field))
+                .collect();
+            let Some(conditions) = conditions else {
+                continue;
+            };
+
+            if best
+                .as_ref()
+                .is_some_and(|(field_count, _)| *field_count >= idx.fields.len())
+            {
                 continue;
             }
 
-            let lookup_key = val_parts.join("\x00");
-            let candidate_ids: &[String] = idx.map.get(&lookup_key).map_or(&[], |v| v.as_slice());
-
-            // Keep insertion order by filtering the ordered list
-            let candidates: Vec<String> = if candidate_ids.is_empty() {
-                vec![]
-            } else {
-                let id_set: HashSet<&str> = candidate_ids.iter().map(|s| s.as_str()).collect();
-                insertion_order
-                    .iter()
-                    .filter(|id| id_set.contains(id.as_str()))
-                    .cloned()
-                    .collect()
-            };
-
-            // Prefer the most selective (smallest) candidate set
-            let better = best.as_ref().is_none_or(|b| candidates.len() < b.len());
-            if better {
-                best = Some(candidates);
+            let mut combinations: Vec<Vec<&Value>> = vec![Vec::new()];
+            for values in conditions {
+                let mut next = Vec::new();
+                for combination in &combinations {
+                    for value in &values {
+                        let mut extended = combination.clone();
+                        extended.push(*value);
+                        next.push(extended);
+                    }
+                }
+                combinations = next;
             }
+
+            let mut candidates = Vec::new();
+            let mut seen = HashSet::new();
+            for combination in combinations {
+                let lookup_key = combination
+                    .into_iter()
+                    .map(canonical_index_part)
+                    .collect::<Vec<_>>()
+                    .join("\x00");
+                if let Some(ids) = idx.map.get(&lookup_key) {
+                    for id in ids {
+                        if seen.insert(id.clone()) {
+                            candidates.push(id.clone());
+                        }
+                    }
+                }
+            }
+            best = Some((idx.fields.len(), candidates));
         }
 
-        best
+        best.map(|(_, candidates)| candidates)
     }
 
     /// Try to narrow entity ids using the full-text search index.
@@ -295,35 +309,29 @@ fn canonical_index_part(v: &Value) -> String {
     serde_json::to_string(v).unwrap_or_default()
 }
 
-/// Extract an equality value from a where-clause object for a given field.
-///
-/// Accepts:
-/// - `{field: <value>}` (direct equality, non-operator object)
-/// - `{field: {"$eq": <value>}}`
-///
-/// Returns `None` if the field is not in the where clause or has a non-equality
-/// operator.
-fn extract_equality_value<'a>(
+/// Extract direct, `$eq`, or `$in` values from a where-clause field.
+fn extract_equality_values<'a>(
     where_obj: &'a serde_json::Map<String, Value>,
     field: &str,
-) -> Option<&'a Value> {
-    let v = where_obj.get(field)?;
-    match v {
-        // Operator object: only handle $eq
-        Value::Object(ops) => {
-            if ops.keys().any(|k| k.starts_with('$')) {
-                // Only $eq is an equality condition
-                if let Some(eq_val) = ops.get("$eq") {
-                    return Some(eq_val);
-                }
-                return None; // other operators → not an equality condition
-            }
-            // Plain object with no operators → direct equality against the object
-            Some(v)
-        }
-        // Primitive or array → direct equality
-        _ => Some(v),
+) -> Option<Vec<&'a Value>> {
+    let value = where_obj.get(field)?;
+    let Value::Object(operators) = value else {
+        return Some(vec![value]);
+    };
+
+    if !operators.keys().any(|key| key.starts_with('$')) {
+        return Some(vec![value]);
     }
+    if operators.len() != 1 {
+        return None;
+    }
+    if let Some(equal) = operators.get("$eq") {
+        return Some(vec![equal]);
+    }
+    operators
+        .get("$in")?
+        .as_array()
+        .map(|values| values.iter().collect())
 }
 
 /// Extract a `(query_string, fields)` pair from a where clause if it contains
@@ -406,6 +414,32 @@ mod tests {
             .narrow_by_equality(&json!({"genre": "sci-fi"}), &insertion_order)
             .unwrap();
         assert_eq!(candidates, vec!["e1", "e3"]);
+    }
+
+    #[test]
+    fn in_narrow_preserves_condition_then_index_insertion_order() {
+        let data: Vec<(String, Value)> = vec![
+            ("moderator-1".to_string(), json!({"role":"moderator"})),
+            ("admin-1".to_string(), json!({"role":"admin"})),
+            ("moderator-2".to_string(), json!({"role":"moderator"})),
+        ];
+        let descs = vec![IndexDescriptor::Single("role".to_string())];
+        let idx = {
+            let mut i = QueryIndexes::new();
+            let refs: Vec<(String, &Value)> = data.iter().map(|(id, v)| (id.clone(), v)).collect();
+            i.rebuild(&refs, &descs, &[]);
+            i
+        };
+        let insertion_order: Vec<String> = data.iter().map(|(id, _)| id.clone()).collect();
+
+        let candidates = idx
+            .narrow_by_equality(
+                &json!({"role": {"$in": ["admin", "moderator"]}}),
+                &insertion_order,
+            )
+            .unwrap();
+
+        assert_eq!(candidates, vec!["admin-1", "moderator-1", "moderator-2"]);
     }
 
     #[test]

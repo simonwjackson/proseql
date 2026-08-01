@@ -1,6 +1,7 @@
 const UNDEFINED_SENTINEL_KEY = "__proseqlUndefined__";
 const INTERNAL_UNDEFINED_SENTINEL_KEY = "__proseqlInternalUndefined__";
 const ESCAPED_SENTINEL_KEY = "__proseqlEscaped__";
+const FLOAT64_SENTINEL_KEY = "__proseqlFloat64__";
 
 type BoundaryObject = Record<string, unknown>;
 
@@ -13,17 +14,26 @@ const isObject = (value: unknown): value is BoundaryObject =>
 
 const hasReservedBoundaryKey = (value: BoundaryObject) =>
 	Object.prototype.hasOwnProperty.call(value, UNDEFINED_SENTINEL_KEY) ||
-	Object.prototype.hasOwnProperty.call(value, ESCAPED_SENTINEL_KEY);
+	Object.prototype.hasOwnProperty.call(value, ESCAPED_SENTINEL_KEY) ||
+	Object.prototype.hasOwnProperty.call(value, FLOAT64_SENTINEL_KEY);
 
 const encodeObjectEntries = (value: BoundaryObject) =>
-	Object.entries(value).map(([key, item]) => [key, encodeBoundaryValueForWire(item)] as const);
+	Object.entries(value).map(
+		([key, item]) => [key, encodeBoundaryValueForWire(item)] as const,
+	);
 
 const isEncodedUndefinedSentinel = (value: BoundaryObject) => {
 	const keys = Object.keys(value);
-	return keys.length === 1 && keys[0] === UNDEFINED_SENTINEL_KEY && value[UNDEFINED_SENTINEL_KEY] === 1;
+	return (
+		keys.length === 1 &&
+		keys[0] === UNDEFINED_SENTINEL_KEY &&
+		value[UNDEFINED_SENTINEL_KEY] === 1
+	);
 };
 
-const isEncodedEscapedEntries = (value: BoundaryObject): value is EncodedEscapedEntries => {
+const isEncodedEscapedEntries = (
+	value: BoundaryObject,
+): value is EncodedEscapedEntries => {
 	const keys = Object.keys(value);
 	if (keys.length !== 1 || keys[0] !== ESCAPED_SENTINEL_KEY) return false;
 	const entries = value[ESCAPED_SENTINEL_KEY];
@@ -38,9 +48,48 @@ const isEncodedEscapedEntries = (value: BoundaryObject): value is EncodedEscaped
 	);
 };
 
+const shouldEncodeExactFloat64 = (value: number) =>
+	Number.isFinite(value) &&
+	(Object.is(value, -0) || !Number.isSafeInteger(value));
+
+const encodeFloat64 = (value: number): BoundaryObject => {
+	const buffer = new ArrayBuffer(8);
+	const view = new DataView(buffer);
+	view.setFloat64(0, value, false);
+	const bytes = new Uint8Array(buffer);
+	return {
+		[FLOAT64_SENTINEL_KEY]: Array.from(bytes, (byte) =>
+			byte.toString(16).padStart(2, "0"),
+		).join(""),
+	};
+};
+
+const isEncodedFloat64 = (value: BoundaryObject) => {
+	const keys = Object.keys(value);
+	return (
+		keys.length === 1 &&
+		keys[0] === FLOAT64_SENTINEL_KEY &&
+		typeof value[FLOAT64_SENTINEL_KEY] === "string" &&
+		/^[0-9a-f]{16}$/iu.test(value[FLOAT64_SENTINEL_KEY] as string)
+	);
+};
+
+const decodeFloat64 = (value: BoundaryObject): number => {
+	const buffer = new ArrayBuffer(8);
+	const bytes = new Uint8Array(buffer);
+	const hex = value[FLOAT64_SENTINEL_KEY] as string;
+	for (let index = 0; index < bytes.length; index++) {
+		bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+	}
+	return new DataView(buffer).getFloat64(0, false);
+};
+
 export const encodeBoundaryValueForWire = (value: unknown): unknown => {
 	if (value === undefined) {
 		return { [UNDEFINED_SENTINEL_KEY]: 1 };
+	}
+	if (typeof value === "number" && shouldEncodeExactFloat64(value)) {
+		return encodeFloat64(value);
 	}
 	if (Array.isArray(value)) {
 		return value.map((item) => encodeBoundaryValueForWire(item));
@@ -50,7 +99,11 @@ export const encodeBoundaryValueForWire = (value: unknown): unknown => {
 	}
 	const encodedEntries = encodeObjectEntries(value);
 	const encodedObject = Object.fromEntries(encodedEntries);
-	if (hasReservedBoundaryKey(value) || isEncodedUndefinedSentinel(encodedObject) || isEncodedEscapedEntries(encodedObject)) {
+	if (
+		hasReservedBoundaryKey(value) ||
+		isEncodedUndefinedSentinel(encodedObject) ||
+		isEncodedEscapedEntries(encodedObject)
+	) {
 		return { [ESCAPED_SENTINEL_KEY]: encodedEntries };
 	}
 	return encodedObject;
@@ -66,13 +119,22 @@ const decodeBoundaryValue = (value: unknown): unknown => {
 	if (isEncodedUndefinedSentinel(value)) {
 		return undefined;
 	}
+	if (isEncodedFloat64(value)) {
+		return decodeFloat64(value);
+	}
 	if (isEncodedEscapedEntries(value)) {
 		return Object.fromEntries(
-			value[ESCAPED_SENTINEL_KEY].map(([key, item]) => [key, decodeBoundaryValue(item)]),
+			value[ESCAPED_SENTINEL_KEY].map(([key, item]) => [
+				key,
+				decodeBoundaryValue(item),
+			]),
 		);
 	}
 	return Object.fromEntries(
-		Object.entries(value).map(([key, item]) => [key, decodeBoundaryValue(item)]),
+		Object.entries(value).map(([key, item]) => [
+			key,
+			decodeBoundaryValue(item),
+		]),
 	);
 };
 

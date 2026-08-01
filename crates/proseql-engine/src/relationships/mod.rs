@@ -88,8 +88,8 @@ use crate::callbacks::CallbackRegistry;
 use crate::collection::Collection;
 use crate::errors::EngineError;
 use crate::query::{
-    execute_cursor_query_over_entities, execute_query_over_entities, CursorConfig,
-    CursorPageResult, QueryInput,
+    execute_cursor_query, execute_cursor_query_over_entities, execute_query,
+    execute_query_over_entities, CursorConfig, CursorPageResult, QueryInput,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::reactive::ThreadReactiveScheduler;
@@ -351,11 +351,17 @@ impl Database {
             .collections
             .get(collection)
             .ok_or_else(|| col_nf(collection))?;
-        let base_entities = col.list().into_iter().cloned().collect::<Vec<_>>();
-        let populated = match populate {
-            Some(ref cfg) => apply_populate(base_entities, cfg, collection, &self.collections, 0)?,
-            None => base_entities,
+        let Some(populate_config) = populate else {
+            return execute_query(col, &input, &self.registry);
         };
+        let base_entities = col.list().into_iter().cloned().collect::<Vec<_>>();
+        let populated = apply_populate(
+            base_entities,
+            &populate_config,
+            collection,
+            &self.collections,
+            0,
+        )?;
         execute_query_over_entities(
             populated,
             &input,
@@ -379,11 +385,17 @@ impl Database {
             .collections
             .get(collection)
             .ok_or_else(|| col_nf(collection))?;
-        let base_entities = col.list().into_iter().cloned().collect::<Vec<_>>();
-        let populated = match populate {
-            Some(ref cfg) => apply_populate(base_entities, cfg, collection, &self.collections, 0)?,
-            None => base_entities,
+        let Some(populate_config) = populate else {
+            return execute_cursor_query(col, input, cursor_cfg, &self.registry);
         };
+        let base_entities = col.list().into_iter().cloned().collect::<Vec<_>>();
+        let populated = apply_populate(
+            base_entities,
+            &populate_config,
+            collection,
+            &self.collections,
+            0,
+        )?;
         execute_cursor_query_over_entities(
             populated,
             input,
