@@ -44,6 +44,7 @@ use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
 use crate::callbacks::CallbackRegistry;
+use crate::change_set::{ChangeSet, EntityChange};
 use crate::clock::Clock;
 use crate::descriptor::{
     CollectionDescriptor, IdStrategy, SchemaNode, StructField, UniqueConstraintDescriptor,
@@ -128,6 +129,12 @@ pub struct SkippedEntry {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct EntitySnapshot {
+    pub value: Value,
+    pub position: usize,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct InternalUpdateOutcome {
     pub previous: Value,
     pub current: Value,
@@ -193,9 +200,13 @@ pub struct Collection {
     /// Set of computed field names to strip from create/update/upsert inputs.
     computed_field_names: HashSet<String>,
     /// Query-time acceleration indexes (equality + full-text search).
-    /// Rebuilt from scratch after every atomic mutation.
-    /// Private: callers use [`Collection::narrow_candidates`] instead.
+    /// Ordinary mutations update postings incrementally; trusted whole-state
+    /// replacements retain the canonical rebuild path.
     query_indexes: QueryIndexes,
+    /// Net entity changes not yet drained by the database/WASM host.
+    pending_changes: ChangeSet,
+    /// Monotonic state revision used by synchronized host projections.
+    revision: u64,
 }
 
 impl Collection {
@@ -257,6 +268,8 @@ impl Collection {
         } else {
             (id_gen, None)
         };
+        let mut query_indexes = QueryIndexes::new();
+        query_indexes.configure(&descriptor.indexes, &descriptor.search_index);
         Self {
             name: name.into(),
             descriptor,
@@ -267,14 +280,16 @@ impl Collection {
             clock,
             supports_soft_delete,
             computed_field_names,
-            query_indexes: QueryIndexes::new(),
+            query_indexes,
+            pending_changes: ChangeSet::default(),
+            revision: 0,
         }
     }
 
     /// Rebuild all query indexes from the current entity snapshot.
     ///
-    /// Called internally after every successful atomic mutation so indexes
-    /// stay consistent.  O(n) per call; acceptable at U3 scope.
+    /// Reserved for trusted whole-state loads, recovery, and legacy snapshot
+    /// restoration. Ordinary writes use entity-granular index deltas.
     fn rebuild_indexes(&mut self) {
         let entity_refs: Vec<(String, &Value)> =
             self.state.iter().map(|(id, v)| (id.clone(), v)).collect();
@@ -283,6 +298,114 @@ impl Collection {
             &self.descriptor.indexes,
             &self.descriptor.search_index,
         );
+    }
+
+    fn insert_state(&mut self, id: String, entity: Value) -> Option<Value> {
+        let before_position = self.state.get_index_of(&id);
+        let before = self.state.insert(id.clone(), entity.clone());
+        let after_position = self.state.get_index_of(&id);
+        match &before {
+            Some(previous) => self.query_indexes.replace(&id, previous, &entity),
+            None => self.query_indexes.insert(&id, &entity),
+        }
+        self.pending_changes.record(EntityChange {
+            collection: self.name.clone(),
+            id,
+            before: before.clone(),
+            after: Some(entity),
+            before_position,
+            after_position,
+        });
+        self.revision = self.revision.saturating_add(1);
+        before
+    }
+
+    fn remove_state(&mut self, id: &str) -> Option<Value> {
+        let before_position = self.state.get_index_of(id);
+        let removed = self.state.shift_remove(id)?;
+        self.query_indexes.remove(id, &removed);
+        self.pending_changes.record(EntityChange {
+            collection: self.name.clone(),
+            id: id.to_owned(),
+            before: Some(removed.clone()),
+            after: None,
+            before_position,
+            after_position: None,
+        });
+        self.revision = self.revision.saturating_add(1);
+        Some(removed)
+    }
+
+    fn insert_state_at(&mut self, id: String, entity: Value, position: usize) {
+        let before_position = self.state.get_index_of(&id);
+        let before = self.state.shift_remove(&id);
+        let after_position = position.min(self.state.len());
+        self.state
+            .shift_insert(after_position, id.clone(), entity.clone());
+        // This primitive is reserved for rollback/restoration. Moving an entity
+        // shifts unrelated insertion ordinals, so rebuild the derived indexes to
+        // make equality bucket order exactly match the backing state.
+        self.rebuild_indexes();
+        self.pending_changes.record(EntityChange {
+            collection: self.name.clone(),
+            id,
+            before,
+            after: Some(entity),
+            before_position,
+            after_position: Some(after_position),
+        });
+        self.revision = self.revision.saturating_add(1);
+    }
+
+    fn replace_entire_state(&mut self, replacement: IndexMap<String, Value>) {
+        let previous = std::mem::replace(&mut self.state, replacement);
+        for (position, (id, before)) in previous.iter().enumerate() {
+            let after = self.state.get(id).cloned();
+            let after_position = self.state.get_index_of(id);
+            self.pending_changes.record(EntityChange {
+                collection: self.name.clone(),
+                id: id.clone(),
+                before: Some(before.clone()),
+                after,
+                before_position: Some(position),
+                after_position,
+            });
+        }
+        for (position, (id, after)) in self.state.iter().enumerate() {
+            if !previous.contains_key(id) {
+                self.pending_changes.record(EntityChange {
+                    collection: self.name.clone(),
+                    id: id.clone(),
+                    before: None,
+                    after: Some(after.clone()),
+                    before_position: None,
+                    after_position: Some(position),
+                });
+            }
+        }
+        if previous != self.state {
+            self.revision = self.revision.saturating_add(1);
+        }
+        self.rebuild_indexes();
+    }
+
+    /// Drain committed entity-granular changes since the previous call.
+    pub fn take_changes(&mut self) -> ChangeSet {
+        // Earlier inserts/removals in an accumulated transaction can shift an
+        // entity after its own change was recorded. Publish canonical final
+        // positions rather than operation-local intermediate positions.
+        for change in self.pending_changes.entities_mut() {
+            change.after_position = change
+                .after
+                .as_ref()
+                .and_then(|_| self.state.get_index_of(&change.id));
+        }
+        std::mem::take(&mut self.pending_changes)
+    }
+
+    /// Current monotonic collection revision.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Return the insertion-ordered list of all entity ids.
@@ -500,8 +623,7 @@ impl Collection {
         self.check_unique_constraints(&entity, None)?;
         self.validate_post_hook_registrations(HookOperation::Create)?;
 
-        self.state.insert(id.clone(), entity.clone());
-        self.rebuild_indexes();
+        self.insert_state(id, entity.clone());
         Ok(entity)
     }
 
@@ -531,8 +653,7 @@ impl Collection {
         }
 
         self.check_unique_constraints(&entity, None)?;
-        self.state.insert(id.clone(), entity.clone());
-        self.rebuild_indexes();
+        self.insert_state(id, entity.clone());
         Ok(entity)
     }
 
@@ -672,14 +793,10 @@ impl Collection {
             }
 
             let soft_deleted_value = Value::Object(soft_deleted);
-            self.state
-                .insert(id.to_string(), soft_deleted_value.clone());
-            self.rebuild_indexes();
+            self.insert_state(id.to_string(), soft_deleted_value.clone());
             soft_deleted_value
         } else {
-            let removed = self.state.shift_remove(id).unwrap();
-            self.rebuild_indexes();
-            removed
+            self.remove_state(id).unwrap_or(Value::Null)
         };
 
         self.run_after_delete_entity(id, deleted.clone());
@@ -774,19 +891,16 @@ impl Collection {
                 }
 
                 let result = Value::Object(soft_deleted);
-                self.state.insert(id.clone(), result.clone());
+                self.insert_state(id.clone(), result.clone());
                 deleted.push(result);
             }
         } else {
             for id in &matching_ids {
-                if let Some(entity) = self.state.shift_remove(id.as_str()) {
+                if let Some(entity) = self.remove_state(id) {
                     deleted.push(entity);
                 }
             }
         }
-
-        // Rebuild indexes after successful batch delete
-        self.rebuild_indexes();
 
         for entity in &deleted {
             let id = entity
@@ -889,8 +1003,11 @@ impl Collection {
     /// Used by `Database::update` and `update_with_relationships` to take a
     /// point-in-time snapshot of an entity before mutating it, so it can be
     /// restored if a subsequent FK validation fails.
-    pub(crate) fn snapshot_entity(&self, id: &str) -> Option<Value> {
-        self.state.get(id).cloned()
+    pub(crate) fn snapshot_entity(&self, id: &str) -> Option<EntitySnapshot> {
+        Some(EntitySnapshot {
+            value: self.state.get(id)?.clone(),
+            position: self.state.get_index_of(id)?,
+        })
     }
 
     /// Snapshot the full collection state in insertion order.
@@ -898,10 +1015,44 @@ impl Collection {
         self.state.clone()
     }
 
+    pub(crate) fn entity_ids(&self) -> HashSet<String> {
+        self.state.keys().cloned().collect()
+    }
+
+    pub(crate) fn entity_position(&self, id: &str) -> Option<usize> {
+        self.state.get_index_of(id)
+    }
+
+    pub(crate) fn upsert_will_create(&self, where_clause: &Value) -> bool {
+        where_clause
+            .as_object()
+            .is_none_or(|where_obj| self.find_by_where(where_obj).is_none())
+    }
+
+    /// Undo only the entity created by the immediately preceding operation.
+    ///
+    /// This deliberately ignores the accumulated change-set before-image. If a
+    /// transaction deleted the same id earlier, removing this failed create must
+    /// retain that earlier delete rather than resurrecting the old entity.
+    pub(crate) fn rollback_created_entity(&mut self, created: &Value) -> bool {
+        let storage_id = self
+            .state
+            .iter()
+            .rev()
+            .find_map(|(id, entity)| (entity == created).then(|| id.clone()));
+        storage_id
+            .as_deref()
+            .is_some_and(|id| self.remove_state(id).is_some())
+    }
+
+    pub(crate) fn restore_entity_value(&mut self, id: &str, value: Value) {
+        let position = self.state.get_index_of(id).unwrap_or(self.state.len());
+        self.insert_state_at(id.to_owned(), value, position);
+    }
+
     /// Replace the full collection state and rebuild indexes.
     pub(crate) fn restore_state(&mut self, snapshot: IndexMap<String, Value>) {
-        self.state = snapshot;
-        self.rebuild_indexes();
+        self.replace_entire_state(snapshot);
     }
 
     /// Replace the entire collection state from already-loaded records.
@@ -973,8 +1124,8 @@ impl Collection {
 
         match result {
             Ok(new_state) => {
-                self.state = new_state;
-                self.rebuild_indexes();
+                self.state = original_state;
+                self.replace_entire_state(new_state);
                 Ok(())
             }
             Err(error) => {
@@ -1025,8 +1176,7 @@ impl Collection {
 
         match result {
             Ok(new_state) => {
-                self.state = new_state;
-                self.rebuild_indexes();
+                self.replace_entire_state(new_state);
                 Ok(())
             }
             Err(error) => {
@@ -1041,17 +1191,16 @@ impl Collection {
     /// all validation.  If `snapshot` is `None`, the entity is removed.
     ///
     /// Used to roll back parent mutations when FK validation fails AFTER the
-    /// schema-level update has already been applied.  Rebuilds indexes.
-    pub(crate) fn restore_entity_snapshot(&mut self, id: &str, snapshot: Option<Value>) {
+    /// schema-level update has already been applied. Indexes are restored by delta.
+    pub(crate) fn restore_entity_snapshot(&mut self, id: &str, snapshot: Option<EntitySnapshot>) {
         match snapshot {
-            Some(v) => {
-                self.state.insert(id.to_string(), v);
+            Some(snapshot) => {
+                self.insert_state_at(id.to_string(), snapshot.value, snapshot.position)
             }
             None => {
-                self.state.shift_remove(id);
+                self.remove_state(id);
             }
         }
-        self.rebuild_indexes();
     }
 
     /// Remove an entity from state WITHOUT any guards (append-only, soft-delete,
@@ -1060,13 +1209,10 @@ impl Collection {
     /// Used by hard-cascade to delete child entities even when the target
     /// collection is append-only (mirrors TS `map.delete(id)` direct approach).
     ///
-    /// Rebuilds indexes after the removal.  Returns `Some(entity)` when the
-    /// entity was present and removed, `None` when the entity was not found
-    /// (no-op, no index rebuild).
+    /// Removes index postings incrementally. Returns `Some(entity)` when the
+    /// entity was present and removed, `None` when the entity was not found.
     pub(crate) fn delete_raw(&mut self, id: &str) -> Option<Value> {
-        let removed = self.state.shift_remove(id)?;
-        self.rebuild_indexes();
-        Some(removed)
+        self.remove_state(id)
     }
 
     /// Directly merge `patches` into entity `id` without schema validation,
@@ -1077,7 +1223,7 @@ impl Collection {
     /// schema declares those fields (mirrors the TS `Ref.update` direct-patch
     /// approach in `cascadeDeleteEntities`).
     ///
-    /// Rebuilds indexes after the patch so queries stay consistent.
+    /// Replaces affected index postings incrementally.
     /// Returns `true` if the entity existed, `false` otherwise (no-op).
     pub(crate) fn patch_raw(&mut self, id: &str, patches: Map<String, Value>) -> bool {
         if let Some(entity) = self.state.get(id) {
@@ -1085,8 +1231,7 @@ impl Collection {
             for (k, v) in patches {
                 merged.insert(k, v);
             }
-            self.state.insert(id.to_string(), Value::Object(merged));
-            self.rebuild_indexes();
+            self.insert_state(id.to_string(), Value::Object(merged));
             true
         } else {
             false
@@ -1140,8 +1285,7 @@ impl Collection {
         let validated = self.validate_entity(Value::Object(merged), id)?;
 
         // Replace state — no unique/immutable/append-only guard.
-        self.state.insert(id.to_string(), validated.clone());
-        self.rebuild_indexes();
+        self.insert_state(id.to_string(), validated.clone());
 
         Ok(validated)
     }
@@ -1295,8 +1439,7 @@ impl Collection {
         }
         self.validate_post_hook_registrations(HookOperation::Update)?;
 
-        self.state.insert(id.to_string(), validated.clone());
-        self.rebuild_indexes();
+        self.insert_state(id.to_string(), validated.clone());
         Ok(InternalUpdateOutcome {
             previous: existing,
             current: validated,
@@ -1461,9 +1604,8 @@ impl Collection {
         }
         for entity in validated_entities {
             let id = entity["id"].as_str().unwrap_or_default().to_string();
-            self.state.insert(id, entity);
+            self.insert_state(id, entity);
         }
-        self.rebuild_indexes();
         Ok(InternalCreateManyOutcome {
             result: CreateManyResult { created, skipped },
         })
@@ -1542,10 +1684,9 @@ impl Collection {
         let mut updated = Vec::with_capacity(validated_pairs.len());
         self.validate_post_hook_registrations(HookOperation::Update)?;
         for (id, _, validated, _) in &validated_pairs {
-            self.state.insert(id.clone(), validated.clone());
+            self.insert_state(id.clone(), validated.clone());
             updated.push(validated.clone());
         }
-        self.rebuild_indexes();
         let count = updated.len();
         Ok(InternalUpdateManyOutcome {
             result: UpdateManyResult { count, updated },
@@ -1758,12 +1899,11 @@ impl Collection {
         }
         for entity in candidates_create {
             let id = entity["id"].as_str().unwrap_or_default().to_string();
-            self.state.insert(id, entity);
+            self.insert_state(id, entity);
         }
         for (id, _, validated, _) in &candidates_update {
-            self.state.insert(id.clone(), validated.clone());
+            self.insert_state(id.clone(), validated.clone());
         }
-        self.rebuild_indexes();
         Ok(InternalUpsertManyOutcome {
             result: UpsertManyResult {
                 created: created.clone(),

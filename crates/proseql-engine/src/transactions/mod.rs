@@ -151,13 +151,21 @@ impl<'a> TransactionContext<'a> {
         }
     }
 
-    fn track_mutations_from(&mut self, before: &IndexMap<String, IndexMap<String, Value>>) {
-        for (collection, snapshot) in before {
-            let changed = self
-                .db
-                .collections
+    fn track_mutations_from(
+        &mut self,
+        revisions: &IndexMap<String, u64>,
+        legacy_before: &IndexMap<String, IndexMap<String, Value>>,
+    ) {
+        for (collection, revision) in revisions {
+            let Some(current) = self.db.collections.get(collection) else {
+                continue;
+            };
+            if current.revision() == *revision {
+                continue;
+            }
+            let changed = legacy_before
                 .get(collection)
-                .map(|current| current.snapshot_state() != *snapshot)
+                .map(|snapshot| current.snapshot_state() != *snapshot)
                 .unwrap_or(false);
             if changed {
                 self.mutated_collections.insert(collection.clone());
@@ -170,9 +178,17 @@ impl<'a> TransactionContext<'a> {
         f: impl FnOnce(&mut Database) -> Result<R, EngineError>,
     ) -> Result<R, EngineError> {
         self.ensure_active("perform operation")?;
-        let before = self.db.snapshot_all_collection_states();
+        // Keep the legacy per-step snapshot path until U6 replaces transaction
+        // rollback with the shared change journal.
+        let legacy_before = self.db.snapshot_all_collection_states();
+        let before = self
+            .db
+            .collections
+            .iter()
+            .map(|(name, collection)| (name.clone(), collection.revision()))
+            .collect();
         let result = self.db.with_reactive_events_suppressed(f);
-        self.track_mutations_from(&before);
+        self.track_mutations_from(&before, &legacy_before);
         result
     }
 

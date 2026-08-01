@@ -8,7 +8,7 @@
 //! `IndexDescriptor::Compound(fields)`, an inverted map:
 //!
 //! ```text
-//! index_key_str → Vec<entity_id>   (insertion-ordered per group)
+//! index_key_str → HashSet<entity_id>   (ordered only when queried)
 //! ```
 //!
 //! Candidate narrowing extracts equality conditions from the where clause
@@ -31,9 +31,9 @@
 //!
 //! ## Maintenance
 //!
-//! Indexes are rebuilt from scratch after every successful atomic mutation.
-//! This is O(n) per mutation and correct for all collection sizes at U3 scope.
-//! A per-mutation incremental approach (O(delta)) can replace this later.
+//! Ordinary insert, replacement, and removal paths update only affected postings.
+//! Canonical full rebuilds remain available for trusted loads, recovery, and
+//! legacy snapshot restoration.
 //!
 //! ## TS references
 //! - `packages/core/src/indexes/index-manager.ts` — equality index shape
@@ -54,25 +54,29 @@ use super::search::tokenize;
 
 /// Acceleration indexes for query candidate narrowing.
 ///
-/// Rebuilt after every atomic mutation via [`QueryIndexes::rebuild`].
+/// Updated incrementally for ordinary mutations and rebuilt for whole-state replacement.
 #[derive(Debug, Default)]
 pub struct QueryIndexes {
     /// Equality index entries, one per `IndexDescriptor`.
     ///
-    /// Each entry: `(fields_key, { serialized_value_key → Vec<entity_id> })`.
+    /// Each entry: `(fields_key, { serialized_value_key → Set<entity_id> })`.
     /// `fields_key` = field names joined by `"\0"` (unique per descriptor entry).
     equality: Vec<EqualityIndex>,
     /// Full-text inverted index: token → set of entity ids.
     search: HashMap<String, HashSet<String>>,
     /// Fields covered by the search index.
     search_fields: Vec<String>,
+    /// Stable collection insertion ordinal for each live entity.
+    entity_order: HashMap<String, u64>,
+    next_order: u64,
 }
 
 struct EqualityIndex {
     /// Single-element for `Single`, multiple for `Compound`.
     fields: Vec<String>,
-    /// Serialized value key → entity ids (in insertion order).
-    map: HashMap<String, Vec<String>>,
+    /// Serialized value key → entity ids. Ordering is applied at query time so
+    /// ordinary posting insertion/removal remains O(1)-ish even for low-cardinality fields.
+    map: HashMap<String, HashSet<String>>,
 }
 
 impl std::fmt::Debug for EqualityIndex {
@@ -92,6 +96,99 @@ impl QueryIndexes {
         Self::default()
     }
 
+    /// Configure empty index structures for a collection descriptor.
+    pub(crate) fn configure(
+        &mut self,
+        index_descriptors: &[IndexDescriptor],
+        search_fields: &[String],
+    ) {
+        self.equality = index_descriptors
+            .iter()
+            .map(|descriptor| EqualityIndex {
+                fields: match descriptor {
+                    IndexDescriptor::Single(field) => vec![field.clone()],
+                    IndexDescriptor::Compound(fields) => fields.clone(),
+                },
+                map: HashMap::new(),
+            })
+            .collect();
+        self.search_fields = search_fields.to_vec();
+        self.search.clear();
+        self.entity_order.clear();
+        self.next_order = 0;
+    }
+
+    /// Add one entity to every configured index.
+    pub(crate) fn insert(&mut self, id: &str, entity: &Value) {
+        if !self.entity_order.contains_key(id) {
+            self.entity_order.insert(id.to_owned(), self.next_order);
+            self.next_order = self.next_order.saturating_add(1);
+        }
+        self.insert_postings(id, entity);
+    }
+
+    fn insert_postings(&mut self, id: &str, entity: &Value) {
+        for index in &mut self.equality {
+            if let Some(key) = equality_key(entity, &index.fields) {
+                index.map.entry(key).or_default().insert(id.to_owned());
+            }
+        }
+        for field in &self.search_fields {
+            if let Some(Value::String(value)) = get_nested_value(entity, field) {
+                for token in tokenize(value) {
+                    self.search.entry(token).or_default().insert(id.to_owned());
+                }
+            }
+        }
+    }
+
+    /// Remove one entity from every configured index.
+    pub(crate) fn remove(&mut self, id: &str, entity: &Value) {
+        self.remove_postings(id, entity);
+        self.entity_order.remove(id);
+    }
+
+    fn remove_postings(&mut self, id: &str, entity: &Value) {
+        for index in &mut self.equality {
+            let Some(key) = equality_key(entity, &index.fields) else {
+                continue;
+            };
+            let should_remove_key = if let Some(ids) = index.map.get_mut(&key) {
+                ids.remove(id);
+                ids.is_empty()
+            } else {
+                false
+            };
+            if should_remove_key {
+                index.map.remove(&key);
+            }
+        }
+        for field in &self.search_fields {
+            if let Some(Value::String(value)) = get_nested_value(entity, field) {
+                for token in tokenize(value) {
+                    let should_remove_token = if let Some(ids) = self.search.get_mut(&token) {
+                        ids.remove(id);
+                        ids.is_empty()
+                    } else {
+                        false
+                    };
+                    if should_remove_token {
+                        self.search.remove(&token);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Replace one entity's postings without touching unrelated entries.
+    pub(crate) fn replace(&mut self, id: &str, before: &Value, after: &Value) {
+        if before == after {
+            return;
+        }
+        self.remove_postings(id, before);
+        self.insert_postings(id, after);
+    }
+
     /// Rebuild all indexes from the current entity snapshot.
     ///
     /// `entities` is an ordered slice of `(id, entity_ref)` pairs in insertion order.
@@ -101,37 +198,9 @@ impl QueryIndexes {
         index_descriptors: &[IndexDescriptor],
         search_fields: &[String],
     ) {
-        // ── Equality indexes ──────────────────────────────────────────────────
-        self.equality = index_descriptors
-            .iter()
-            .map(|desc| {
-                let fields = match desc {
-                    IndexDescriptor::Single(f) => vec![f.clone()],
-                    IndexDescriptor::Compound(fs) => fs.clone(),
-                };
-                let mut map: HashMap<String, Vec<String>> = HashMap::new();
-                for (id, entity) in entities {
-                    if let Some(key) = equality_key(entity, &fields) {
-                        map.entry(key).or_default().push(id.clone());
-                    }
-                }
-                EqualityIndex { fields, map }
-            })
-            .collect();
-
-        // ── Search index ──────────────────────────────────────────────────────
-        self.search_fields = search_fields.to_vec();
-        self.search.clear();
-        if !search_fields.is_empty() {
-            for (id, entity) in entities {
-                for field in search_fields {
-                    if let Some(Value::String(s)) = get_nested_value(entity, field) {
-                        for token in tokenize(s) {
-                            self.search.entry(token).or_default().insert(id.clone());
-                        }
-                    }
-                }
-            }
+        self.configure(index_descriptors, search_fields);
+        for (id, entity) in entities {
+            self.insert(id, entity);
         }
     }
 
@@ -198,7 +267,11 @@ impl QueryIndexes {
                     .collect::<Vec<_>>()
                     .join("\x00");
                 if let Some(ids) = idx.map.get(&lookup_key) {
-                    for id in ids {
+                    let mut ordered = ids.iter().collect::<Vec<_>>();
+                    ordered.sort_unstable_by_key(|id| {
+                        self.entity_order.get(*id).copied().unwrap_or(u64::MAX)
+                    });
+                    for id in ordered {
                         if seen.insert(id.clone()) {
                             candidates.push(id.clone());
                         }
@@ -665,5 +738,58 @@ mod tests {
             .narrow_by_equality(&json!({"score": 42}), &insertion_order)
             .unwrap();
         assert_eq!(candidates, vec!["e1"]);
+    }
+
+    #[test]
+    fn incremental_replace_and_remove_match_a_canonical_rebuild() {
+        let descriptors = vec![IndexDescriptor::Single("role".to_string())];
+        let before = json!({"role":"member","bio":"writes rust"});
+        let after = json!({"role":"admin","bio":"writes wasm"});
+        let other = json!({"role":"admin","bio":"rust wasm"});
+        let mut incremental = QueryIndexes::new();
+        incremental.configure(&descriptors, &["bio".to_string()]);
+        incremental.insert("first", &before);
+        incremental.insert("second", &other);
+        incremental.replace("first", &before, &after);
+
+        let state = [
+            ("first".to_string(), after.clone()),
+            ("second".to_string(), other.clone()),
+        ];
+        let refs = state
+            .iter()
+            .map(|(id, value)| (id.clone(), value))
+            .collect::<Vec<_>>();
+        let mut rebuilt = QueryIndexes::new();
+        rebuilt.rebuild(&refs, &descriptors, &["bio".to_string()]);
+        let order = vec!["first".to_string(), "second".to_string()];
+
+        assert_eq!(
+            incremental.narrow_by_equality(&json!({"role":"admin"}), &order),
+            rebuilt.narrow_by_equality(&json!({"role":"admin"}), &order)
+        );
+        assert_eq!(
+            incremental.narrow_by_search(
+                &json!({"$search":{"query":"wasm","fields":["bio"]}}),
+                &order
+            ),
+            rebuilt.narrow_by_search(
+                &json!({"$search":{"query":"wasm","fields":["bio"]}}),
+                &order
+            )
+        );
+
+        incremental.remove("second", &other);
+        assert_eq!(
+            incremental.narrow_by_equality(&json!({"role":"admin"}), &["first".to_string()]),
+            Some(vec!["first".to_string()])
+        );
+        assert_eq!(
+            incremental.narrow_by_search(
+                &json!({"$search":{"query":"rust","fields":["bio"]}}),
+                &["first".to_string()]
+            ),
+            Some(Vec::new())
+        );
     }
 }

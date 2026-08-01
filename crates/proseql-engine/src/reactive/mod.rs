@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::{
     mpsc::{self, Receiver, RecvError, Sender, TryRecvError},
@@ -17,6 +18,7 @@ use serde::{de::MapAccess, ser::SerializeMap, Deserialize, Deserializer, Seriali
 use serde_json::Value;
 
 use crate::callbacks::CallbackRegistry;
+use crate::change_set::ChangeSet;
 use crate::collection::{
     Collection, CreateManyResult, DeleteManyResult, SkippedEntry, UpdateManyResult, UpsertAction,
     UpsertManyResult, UpsertOutcome,
@@ -28,8 +30,7 @@ use crate::query::{
 };
 use crate::relationships::{
     helpers::{
-        col_nf, fk_field_names, payload_touches_fk_field, validate_fk,
-        validate_fk_with_owner_snapshot,
+        col_nf, fk_field_names, payload_touches_fk_field, validate_fk, validate_fk_with_owner_ids,
     },
     Database,
 };
@@ -581,6 +582,15 @@ impl Drop for SubscriptionHandle {
                             if let Some(handle) = subscriber.pending_task.take() {
                                 handle.cancel();
                             }
+                            let collection = subscriber.collection;
+                            if !state
+                                .watch_subscribers
+                                .values()
+                                .any(|remaining| remaining.collection == collection)
+                            {
+                                state.snapshots.shift_remove(&collection);
+                                state.snapshot_positions.remove(&collection);
+                            }
                         }
                     }
                 }
@@ -697,6 +707,7 @@ struct WatchSubscriber {
 struct ReactiveState {
     next_subscription_id: u64,
     snapshots: IndexMap<String, Vec<Value>>,
+    snapshot_positions: HashMap<String, HashMap<String, usize>>,
     event_subscribers: IndexMap<u64, EventSink>,
     watch_subscribers: IndexMap<u64, WatchSubscriber>,
 }
@@ -713,14 +724,12 @@ impl ReactiveHub {
         registry: Arc<CallbackRegistry>,
         scheduler: Arc<dyn ReactiveScheduler>,
     ) -> Self {
-        let snapshots = collections
-            .iter()
-            .map(|(name, collection)| (name.clone(), snapshot_collection(collection)))
-            .collect();
+        let _ = collections;
         Self {
             state: Arc::new(Mutex::new(ReactiveState {
                 next_subscription_id: 1,
-                snapshots,
+                snapshots: IndexMap::new(),
+                snapshot_positions: HashMap::new(),
                 event_subscribers: IndexMap::new(),
                 watch_subscribers: IndexMap::new(),
             })),
@@ -729,13 +738,111 @@ impl ReactiveHub {
         }
     }
 
-    pub(crate) fn sync_all_snapshots(&self, collections: &IndexMap<String, Collection>) {
-        if let Ok(mut state) = self.state.lock() {
-            state.snapshots = collections
-                .iter()
-                .map(|(name, collection)| (name.clone(), snapshot_collection(collection)))
-                .collect();
+    pub(crate) fn apply_changes(&self, changes: &ChangeSet) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        let mut by_collection = HashMap::<&str, Vec<_>>::new();
+        for change in changes.entities() {
+            by_collection
+                .entry(change.collection.as_str())
+                .or_default()
+                .push(change);
         }
+
+        for (collection, collection_changes) in by_collection {
+            let pure_replacements = collection_changes.iter().all(|change| {
+                change.before.is_some()
+                    && change.after.is_some()
+                    && change.before_position == change.after_position
+            });
+            if pure_replacements {
+                let positions = state.snapshot_positions.get(collection);
+                let replacements = collection_changes
+                    .iter()
+                    .filter_map(|change| {
+                        Some((
+                            positions?.get(&change.id).copied()?,
+                            change.after.as_ref()?.clone(),
+                        ))
+                    })
+                    .collect::<Vec<_>>();
+                if replacements.len() == collection_changes.len() {
+                    if let Some(snapshot) = state.snapshots.get_mut(collection) {
+                        for (position, after) in replacements {
+                            snapshot[position] = after;
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            let Some(snapshot) = state.snapshots.get_mut(collection) else {
+                continue;
+            };
+            let changed_ids = collection_changes
+                .iter()
+                .map(|change| change.id.as_str())
+                .collect::<HashSet<_>>();
+            let unchanged = std::mem::take(snapshot)
+                .into_iter()
+                .filter(|entity| {
+                    entity
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .is_none_or(|id| !changed_ids.contains(id))
+                })
+                .collect::<Vec<_>>();
+            let afters = collection_changes
+                .into_iter()
+                .filter_map(|change| {
+                    change
+                        .after
+                        .as_ref()
+                        .map(|after| (change.after_position, after.clone()))
+                })
+                .collect::<Vec<_>>();
+            let final_len = unchanged.len() + afters.len();
+            let mut merged = vec![None; final_len];
+            let mut unpositioned = Vec::new();
+            for (position, after) in afters {
+                if let Some(slot) = position.and_then(|position| merged.get_mut(position)) {
+                    if slot.is_none() {
+                        *slot = Some(after);
+                        continue;
+                    }
+                }
+                unpositioned.push(after);
+            }
+            let mut remaining = unchanged.into_iter().chain(unpositioned);
+            for slot in &mut merged {
+                if slot.is_none() {
+                    *slot = remaining.next();
+                }
+            }
+            debug_assert!(remaining.next().is_none());
+            *snapshot = merged.into_iter().flatten().collect();
+            let positions = snapshot
+                .iter()
+                .enumerate()
+                .filter_map(|(position, entity)| {
+                    entity
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(|id| (id.to_owned(), position))
+                })
+                .collect();
+            state
+                .snapshot_positions
+                .insert(collection.to_owned(), positions);
+        }
+    }
+
+    pub(crate) fn snapshot_count(&self) -> usize {
+        self.state
+            .lock()
+            .map(|state| state.snapshots.len())
+            .unwrap_or(0)
     }
 
     pub(crate) fn event_subscription_count(&self) -> usize {
@@ -789,19 +896,23 @@ impl ReactiveHub {
     pub(crate) fn subscribe_watch(
         &self,
         collection: &str,
+        current: &Collection,
         config: WatchQueryConfig,
     ) -> Result<ValueSubscription, EngineError> {
         self.ensure_watch_supported("watch")?;
+        self.set_collection_snapshot(collection, current);
         self.subscribe_watch_internal(collection, config, WatchMode::Query)
     }
 
     pub(crate) fn subscribe_watch_by_id(
         &self,
         collection: &str,
+        current: &Collection,
         id: &str,
         debounce_ms: Option<i64>,
     ) -> Result<ValueSubscription, EngineError> {
         self.ensure_watch_supported("watchById")?;
+        self.set_collection_snapshot(collection, current);
         self.subscribe_watch_internal(
             collection,
             WatchQueryConfig {
@@ -815,21 +926,25 @@ impl ReactiveHub {
     pub(crate) fn subscribe_watch_with_callback(
         &self,
         collection: &str,
+        current: &Collection,
         config: WatchQueryConfig,
         callback: Box<dyn Fn(Value) + Send + Sync>,
     ) -> Result<CallbackSubscription, EngineError> {
         self.ensure_watch_supported("watch")?;
+        self.set_collection_snapshot(collection, current);
         self.subscribe_watch_with_callback_internal(collection, config, WatchMode::Query, callback)
     }
 
     pub(crate) fn subscribe_watch_by_id_with_callback(
         &self,
         collection: &str,
+        current: &Collection,
         id: &str,
         debounce_ms: Option<i64>,
         callback: Box<dyn Fn(Value) + Send + Sync>,
     ) -> Result<CallbackSubscription, EngineError> {
         self.ensure_watch_supported("watchById")?;
+        self.set_collection_snapshot(collection, current);
         self.subscribe_watch_with_callback_internal(
             collection,
             WatchQueryConfig {
@@ -841,7 +956,25 @@ impl ReactiveHub {
         )
     }
 
-    fn ensure_watch_supported(&self, operation: &str) -> Result<(), EngineError> {
+    fn set_collection_snapshot(&self, name: &str, collection: &Collection) {
+        if let Ok(mut state) = self.state.lock() {
+            let snapshot = snapshot_collection(collection);
+            let positions = snapshot
+                .iter()
+                .enumerate()
+                .filter_map(|(position, entity)| {
+                    entity
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(|id| (id.to_owned(), position))
+                })
+                .collect();
+            state.snapshots.insert(name.to_owned(), snapshot);
+            state.snapshot_positions.insert(name.to_owned(), positions);
+        }
+    }
+
+    pub(crate) fn ensure_watch_supported(&self, operation: &str) -> Result<(), EngineError> {
         if self.scheduler.availability() == ReactiveSchedulerAvailability::Available {
             Ok(())
         } else {
@@ -1280,6 +1413,24 @@ fn missing_collection_error(collection: &str) -> EngineError {
     })
 }
 
+fn owner_ids_for_fk(
+    collection: &str,
+    relationships: &[(String, crate::descriptor::RelationshipDescriptor)],
+    collections: &IndexMap<String, Collection>,
+) -> HashSet<String> {
+    if relationships
+        .iter()
+        .any(|(_, relationship)| relationship.target == collection)
+    {
+        collections
+            .get(collection)
+            .map(Collection::entity_ids)
+            .unwrap_or_default()
+    } else {
+        HashSet::new()
+    }
+}
+
 fn fk_skip_reason(error: &EngineError) -> String {
     match error {
         EngineError::ForeignKey(error) => format!("Foreign key violation: {}", error.message),
@@ -1289,10 +1440,13 @@ fn fk_skip_reason(error: &EngineError) -> String {
 
 impl Database {
     pub fn new_with_reactive_scheduler(
-        collections: IndexMap<String, Collection>,
+        mut collections: IndexMap<String, Collection>,
         registry: Arc<CallbackRegistry>,
         scheduler: Arc<dyn ReactiveScheduler>,
     ) -> Self {
+        for collection in collections.values_mut() {
+            collection.take_changes();
+        }
         let reactive = ReactiveHub::new(&collections, Arc::clone(&registry), scheduler);
         Self {
             collections,
@@ -1300,6 +1454,7 @@ impl Database {
             reactive,
             active_transaction_kind: crate::transactions::ActiveTransactionKind::None,
             reactive_event_suppression_depth: 0,
+            committed_changes: ChangeSet::default(),
         }
     }
 
@@ -1320,7 +1475,12 @@ impl Database {
         collection: &str,
         config: WatchQueryConfig,
     ) -> Result<ValueSubscription, EngineError> {
-        self.reactive.subscribe_watch(collection, config)
+        self.reactive.ensure_watch_supported("watch")?;
+        let current = self
+            .collections
+            .get(collection)
+            .ok_or_else(|| missing_collection_error(collection))?;
+        self.reactive.subscribe_watch(collection, current, config)
     }
 
     pub fn watch_with_callback(
@@ -1329,8 +1489,13 @@ impl Database {
         config: WatchQueryConfig,
         callback: Box<dyn Fn(Value) + Send + Sync>,
     ) -> Result<CallbackSubscription, EngineError> {
+        self.reactive.ensure_watch_supported("watch")?;
+        let current = self
+            .collections
+            .get(collection)
+            .ok_or_else(|| missing_collection_error(collection))?;
         self.reactive
-            .subscribe_watch_with_callback(collection, config, callback)
+            .subscribe_watch_with_callback(collection, current, config, callback)
     }
 
     pub fn watch_by_id(
@@ -1339,8 +1504,13 @@ impl Database {
         id: &str,
         debounce_ms: Option<i64>,
     ) -> Result<ValueSubscription, EngineError> {
+        self.reactive.ensure_watch_supported("watchById")?;
+        let current = self
+            .collections
+            .get(collection)
+            .ok_or_else(|| missing_collection_error(collection))?;
         self.reactive
-            .subscribe_watch_by_id(collection, id, debounce_ms)
+            .subscribe_watch_by_id(collection, current, id, debounce_ms)
     }
 
     pub fn watch_by_id_with_callback(
@@ -1350,8 +1520,18 @@ impl Database {
         debounce_ms: Option<i64>,
         callback: Box<dyn Fn(Value) + Send + Sync>,
     ) -> Result<CallbackSubscription, EngineError> {
-        self.reactive
-            .subscribe_watch_by_id_with_callback(collection, id, debounce_ms, callback)
+        self.reactive.ensure_watch_supported("watchById")?;
+        let current = self
+            .collections
+            .get(collection)
+            .ok_or_else(|| missing_collection_error(collection))?;
+        self.reactive.subscribe_watch_by_id_with_callback(
+            collection,
+            current,
+            id,
+            debounce_ms,
+            callback,
+        )
     }
 
     pub fn event_subscription_count(&self) -> usize {
@@ -1360,6 +1540,11 @@ impl Database {
 
     pub fn watch_subscription_count(&self) -> usize {
         self.reactive.watch_subscription_count()
+    }
+
+    /// Number of collection snapshots retained for active watches.
+    pub fn reactive_snapshot_count(&self) -> usize {
+        self.reactive.snapshot_count()
     }
 
     pub fn publish_change_event(&self, event: ChangeEvent) {
@@ -1492,11 +1677,7 @@ impl Database {
             .descriptor
             .relationships
             .clone();
-        let snapshot = self
-            .collections
-            .get(collection)
-            .ok_or_else(|| col_nf(collection))?
-            .snapshot_state();
+        let owner_ids = owner_ids_for_fk(collection, &relationships, &self.collections);
 
         let internal = self
             .collections
@@ -1507,20 +1688,18 @@ impl Database {
 
         if skip_duplicates {
             let mut valid_created: Vec<Value> = Vec::new();
-            let mut invalid_ids: Vec<String> = Vec::new();
+            let mut invalid_entities: Vec<Value> = Vec::new();
             for entity in result.created {
-                match validate_fk_with_owner_snapshot(
+                match validate_fk_with_owner_ids(
                     collection,
                     &relationships,
                     &entity,
-                    &snapshot,
+                    &owner_ids,
                     &self.collections,
                 ) {
                     Ok(()) => valid_created.push(entity),
                     Err(error) => {
-                        if let Some(id) = entity.get("id").and_then(Value::as_str) {
-                            invalid_ids.push(id.to_owned());
-                        }
+                        invalid_entities.push(entity.clone());
                         result.skipped.push(SkippedEntry {
                             data: entity,
                             reason: fk_skip_reason(&error),
@@ -1529,23 +1708,25 @@ impl Database {
                 }
             }
             if let Some(owner) = self.collections.get_mut(collection) {
-                for id in invalid_ids {
-                    owner.delete_raw(&id);
+                for entity in invalid_entities.into_iter().rev() {
+                    owner.rollback_created_entity(&entity);
                 }
             }
             result.created = valid_created;
         } else if let Some(error) = result.created.iter().find_map(|entity| {
-            validate_fk_with_owner_snapshot(
+            validate_fk_with_owner_ids(
                 collection,
                 &relationships,
                 entity,
-                &snapshot,
+                &owner_ids,
                 &self.collections,
             )
             .err()
         }) {
             if let Some(owner) = self.collections.get_mut(collection) {
-                owner.restore_state(snapshot);
+                for entity in result.created.iter().rev() {
+                    owner.rollback_created_entity(entity);
+                }
             }
             return Err(error);
         }
@@ -1575,11 +1756,6 @@ impl Database {
             .descriptor
             .relationships
             .clone();
-        let snapshot = self
-            .collections
-            .get(collection)
-            .ok_or_else(|| col_nf(collection))?
-            .snapshot_state();
         let internal = self
             .collections
             .get_mut(collection)
@@ -1599,18 +1775,21 @@ impl Database {
                 payload_touches_fk_field(transformed_updates, &fk_field_names(&relationships))
             })
         {
+            let owner_ids = owner_ids_for_fk(collection, &relationships, &self.collections);
             if let Some(error) = result.updated.iter().find_map(|entity| {
-                validate_fk_with_owner_snapshot(
+                validate_fk_with_owner_ids(
                     collection,
                     &relationships,
                     entity,
-                    &snapshot,
+                    &owner_ids,
                     &self.collections,
                 )
                 .err()
             }) {
                 if let Some(owner) = self.collections.get_mut(collection) {
-                    owner.restore_state(snapshot);
+                    for (id, previous, _, _) in internal.contexts.iter().rev() {
+                        owner.restore_entity_value(id, previous.clone());
+                    }
                 }
                 return Err(error);
             }
@@ -1673,11 +1852,20 @@ impl Database {
             .descriptor
             .relationships
             .clone();
-        let snapshot = self
-            .collections
-            .get(collection)
-            .ok_or_else(|| col_nf(collection))?
-            .snapshot_state();
+        // Only a create path needs the pre-operation owner set. An update keeps
+        // the same ids, so defer materialization until transformed updates prove
+        // that FK validation is required.
+        let has_self_fk = relationships
+            .iter()
+            .any(|(_, relationship)| relationship.target == collection);
+        let will_create = has_self_fk
+            && self
+                .collections
+                .get(collection)
+                .ok_or_else(|| col_nf(collection))?
+                .upsert_will_create(&where_clause);
+        let owner_ids_before_create =
+            will_create.then(|| owner_ids_for_fk(collection, &relationships, &self.collections));
         let internal = self
             .collections
             .get_mut(collection)
@@ -1694,15 +1882,24 @@ impl Database {
         };
 
         if should_validate {
-            if let Err(error) = validate_fk_with_owner_snapshot(
+            let owner_ids = owner_ids_before_create
+                .unwrap_or_else(|| owner_ids_for_fk(collection, &relationships, &self.collections));
+            if let Err(error) = validate_fk_with_owner_ids(
                 collection,
                 &relationships,
                 &result.entity,
-                &snapshot,
+                &owner_ids,
                 &self.collections,
             ) {
                 if let Some(owner) = self.collections.get_mut(collection) {
-                    owner.restore_state(snapshot);
+                    match &internal.post {
+                        crate::collection::InternalUpsertPost::Created(entity) => {
+                            owner.rollback_created_entity(entity);
+                        }
+                        crate::collection::InternalUpsertPost::Updated { id, previous, .. } => {
+                            owner.restore_entity_value(id, previous.clone());
+                        }
+                    }
                 }
                 return Err(error);
             }
@@ -1749,41 +1946,75 @@ impl Database {
             .descriptor
             .relationships
             .clone();
-        let snapshot = self
-            .collections
-            .get(collection)
-            .ok_or_else(|| col_nf(collection))?
-            .snapshot_state();
+        // TypeScript validates every upsertMany result. Capture pre-batch ids
+        // only when a create path is possible; all-update batches preserve ids
+        // and can materialize them after mutation.
+        let has_self_fk = relationships
+            .iter()
+            .any(|(_, relationship)| relationship.target == collection);
+        let will_create = if has_self_fk {
+            let owner = self
+                .collections
+                .get(collection)
+                .ok_or_else(|| col_nf(collection))?;
+            inputs
+                .iter()
+                .any(|(where_clause, _, _)| owner.upsert_will_create(where_clause))
+        } else {
+            false
+        };
+        let owner_ids_before_create =
+            will_create.then(|| owner_ids_for_fk(collection, &relationships, &self.collections));
         let internal = self
             .collections
             .get_mut(collection)
             .ok_or_else(|| col_nf(collection))?
             .upsert_many_internal(inputs)?;
         let result = internal.result;
-
+        // Preserve the TypeScript upsertMany contract: unlike singular upsert
+        // and updateMany, every updated result is FK-validated.
+        let should_validate_updated = !result.updated.is_empty();
+        let should_validate = !result.created.is_empty() || should_validate_updated;
+        let owner_ids = should_validate.then(|| {
+            owner_ids_before_create
+                .unwrap_or_else(|| owner_ids_for_fk(collection, &relationships, &self.collections))
+        });
         let created_error = result.created.iter().find_map(|entity| {
-            validate_fk_with_owner_snapshot(
+            validate_fk_with_owner_ids(
                 collection,
                 &relationships,
                 entity,
-                &snapshot,
+                owner_ids
+                    .as_ref()
+                    .expect("created upsert results require FK validation"),
                 &self.collections,
             )
             .err()
         });
-        let updated_error = result.updated.iter().find_map(|entity| {
-            validate_fk_with_owner_snapshot(
-                collection,
-                &relationships,
-                entity,
-                &snapshot,
-                &self.collections,
-            )
-            .err()
-        });
+        let updated_error = should_validate_updated
+            .then(|| {
+                result.updated.iter().find_map(|entity| {
+                    validate_fk_with_owner_ids(
+                        collection,
+                        &relationships,
+                        entity,
+                        owner_ids
+                            .as_ref()
+                            .expect("updated upsert results require FK validation"),
+                        &self.collections,
+                    )
+                    .err()
+                })
+            })
+            .flatten();
         if let Some(error) = created_error.or(updated_error) {
             if let Some(owner) = self.collections.get_mut(collection) {
-                owner.restore_state(snapshot);
+                for (id, previous, _, _) in internal.updated_contexts.iter().rev() {
+                    owner.restore_entity_value(id, previous.clone());
+                }
+                for entity in internal.created_contexts.iter().rev() {
+                    owner.rollback_created_entity(entity);
+                }
             }
             return Err(error);
         }
@@ -1811,8 +2042,29 @@ impl Database {
         Ok(result)
     }
 
-    pub(crate) fn sync_reactive_snapshots(&self) {
-        self.reactive.sync_all_snapshots(&self.collections);
+    pub(crate) fn sync_reactive_snapshots(&mut self) {
+        let mut changes = ChangeSet::default();
+        for collection in self.collections.values_mut() {
+            changes.extend(collection.take_changes());
+        }
+        if changes.is_empty() {
+            return;
+        }
+        self.reactive.apply_changes(&changes);
+        self.committed_changes.extend(changes);
+    }
+
+    /// Drain net committed normal-mutation deltas for the host projection.
+    pub fn take_committed_changes(&mut self) -> ChangeSet {
+        self.sync_reactive_snapshots();
+        for change in self.committed_changes.entities_mut() {
+            change.after_position = change.after.as_ref().and_then(|_| {
+                self.collections
+                    .get(&change.collection)
+                    .and_then(|collection| collection.entity_position(&change.id))
+            });
+        }
+        std::mem::take(&mut self.committed_changes)
     }
 
     pub(crate) fn emit_owner_change_event(&self, collection: &str, operation: ChangeOperation) {

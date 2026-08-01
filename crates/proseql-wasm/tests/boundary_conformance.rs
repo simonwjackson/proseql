@@ -1139,6 +1139,66 @@ fn panic_in_callback_returns_defect_response() {
 }
 
 #[test]
+fn successful_mutation_publishes_exact_authoritative_delta() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(&mut runtime, vec![users_descriptor()], json!({}));
+
+    expect_ok(
+        &runtime.dispatch_json(
+            handle,
+            "create",
+            Some(
+                json!({"collection":"users","data":{"id":"u1","name":"Alice"}})
+                    .to_string()
+                    .as_str(),
+            ),
+        ),
+    );
+
+    let changes = runtime.last_changes(handle).unwrap();
+    let changes = changes.entities().collect::<Vec<_>>();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].collection, "users");
+    assert_eq!(changes[0].id, "u1");
+    assert_eq!(changes[0].before, None);
+    assert_eq!(changes[0].after.as_ref().unwrap()["name"], json!("Alice"));
+    assert_eq!(changes[0].before_position, None);
+    assert_eq!(changes[0].after_position, Some(0));
+}
+
+#[test]
+fn panic_after_mutation_does_not_publish_a_safe_delta() {
+    let (mut runtime, _) = make_runtime();
+    runtime
+        .callbacks_mut()
+        .register_after_create_hook("panic-after-create", |_| panic!("after create panic"));
+    let mut descriptor = users_descriptor();
+    descriptor.after_create_hooks = vec!["panic-after-create".into()];
+    let handle = create_database(&mut runtime, vec![descriptor], json!({}));
+
+    let defect = expect_defect(
+        &runtime.dispatch_json(
+            handle,
+            "create",
+            Some(
+                json!({"collection":"users","data":{"id":"u1","name":"Alice"}})
+                    .to_string()
+                    .as_str(),
+            ),
+        ),
+    );
+    assert!(defect["message"]
+        .as_str()
+        .unwrap()
+        .contains("unexpected defect"));
+    assert!(runtime.last_changes(handle).unwrap().is_empty());
+
+    // The mutation itself happened; only its delta is unsafe after a defect.
+    let dumped = dispatch_no_payload(&mut runtime, handle, "dumpAll");
+    assert_eq!(dumped["users"][0]["id"], json!("u1"));
+}
+
+#[test]
 fn initial_records_preserve_existing_timestamps_and_absence() {
     let (mut runtime, _) = make_runtime();
     let handle = create_database(

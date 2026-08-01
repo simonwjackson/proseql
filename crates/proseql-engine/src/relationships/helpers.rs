@@ -232,11 +232,11 @@ pub(crate) fn validate_fk(
     )
 }
 
-pub(crate) fn validate_fk_with_owner_snapshot(
+pub(crate) fn validate_fk_with_owner_ids(
     collection_name: &str,
     relationships: &[(String, RelationshipDescriptor)],
     data: &Value,
-    owner_snapshot: &IndexMap<String, Value>,
+    owner_ids: &HashSet<String>,
     all_collections: &IndexMap<String, Collection>,
 ) -> Result<(), EngineError> {
     validate_fk_with_exists(
@@ -245,7 +245,7 @@ pub(crate) fn validate_fk_with_owner_snapshot(
         data,
         |target_collection, target_id| {
             if target_collection == collection_name {
-                owner_snapshot.contains_key(target_id)
+                owner_ids.contains(target_id)
             } else {
                 all_collections
                     .get(target_collection)

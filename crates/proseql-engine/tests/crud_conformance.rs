@@ -24,8 +24,8 @@ use proseql_engine::{
     clock::FixedClock,
     collection::{Collection, UpsertAction},
     descriptor::{
-        CollectionDescriptor, ComputedFieldDescriptor, IdStrategy, SchemaNode, StructField,
-        UniqueConstraintDescriptor, ValidationMode,
+        CollectionDescriptor, ComputedFieldDescriptor, IdStrategy, IndexDescriptor, SchemaNode,
+        StructField, UniqueConstraintDescriptor, ValidationMode,
     },
     errors::EngineError,
     id_gen::{IdGenerator, SequentialGenerator},
@@ -2584,4 +2584,187 @@ fn upsert_where_matching_primitive_values_correct() {
         "string where-clause must find existing entity"
     );
     assert_eq!(result.entity["name"], json!("Alice Updated"));
+}
+
+#[test]
+fn public_batch_mutations_keep_all_indexes_equal_to_canonical_rebuilds() {
+    fn indexed_collection() -> Collection {
+        let mut descriptor = descriptor_with_schema(user_schema());
+        descriptor.indexes = vec![
+            IndexDescriptor::Single("companyId".into()),
+            IndexDescriptor::Compound(vec!["companyId".into(), "age".into()]),
+        ];
+        descriptor.search_index = vec!["name".into(), "email".into()];
+        Collection::new_with_clock(
+            "test",
+            descriptor,
+            Arc::new(CallbackRegistry::new()),
+            Box::new(SequentialGenerator::new("u")),
+            Box::new(FixedClock::new("2024-01-01T00:00:00.000Z")),
+        )
+    }
+
+    fn assert_matches_rebuild(actual: &Collection) {
+        let mut rebuilt = indexed_collection();
+        for entity in actual.list() {
+            rebuilt.create((*entity).clone()).unwrap();
+        }
+        for query in [
+            json!({"companyId":"c1"}),
+            json!({"companyId":{"$in":["c2","c1"]}}),
+            json!({"companyId":"c1","age":31}),
+            json!({"$search":{"query":"alice","fields":["name","email"]}}),
+            json!({"name":{"$search":"builder"}}),
+        ] {
+            assert_eq!(
+                actual.narrow_candidates(&query),
+                rebuilt.narrow_candidates(&query)
+            );
+        }
+    }
+
+    let mut collection = indexed_collection();
+    collection
+        .create_many(
+            vec![
+                json!({"id":"u1","name":"Alice Builder","email":"alice@x.com","age":30,"companyId":"c1"}),
+                json!({"id":"u2","name":"Bob Builder","email":"bob@x.com","age":31,"companyId":"c1"}),
+                json!({"id":"u3","name":"Carol Jones","email":"carol@x.com","age":31,"companyId":"c2"}),
+            ],
+            false,
+        )
+        .unwrap();
+    assert_matches_rebuild(&collection);
+
+    collection
+        .update_many(
+            |entity| entity["companyId"] == json!("c1"),
+            json!({"age":31}),
+        )
+        .unwrap();
+    assert_matches_rebuild(&collection);
+
+    collection
+        .delete_many(|entity| entity["id"] == json!("u2"), false, None)
+        .unwrap();
+    assert_matches_rebuild(&collection);
+
+    collection
+        .upsert(
+            json!({"id":"u1"}),
+            json!({"name":"unused","email":"unused@x.com","age":0,"companyId":"c0"}),
+            json!({"companyId":"c2"}),
+        )
+        .unwrap();
+    collection
+        .upsert_many(vec![(
+            json!({"id":"u4"}),
+            json!({"name":"Alice Four","email":"four@x.com","age":31,"companyId":"c1"}),
+            json!({"name":"unused"}),
+        )])
+        .unwrap();
+    assert_matches_rebuild(&collection);
+}
+
+#[test]
+fn indexed_validation_and_unique_failures_leave_all_postings_unchanged() {
+    let mut descriptor = descriptor_with_schema(user_schema());
+    descriptor.indexes = vec![
+        IndexDescriptor::Single("companyId".into()),
+        IndexDescriptor::Compound(vec!["companyId".into(), "age".into()]),
+    ];
+    descriptor.search_index = vec!["name".into()];
+    descriptor.unique_fields = vec![UniqueConstraintDescriptor::Single("email".into())];
+    let mut collection = Collection::new_with_clock(
+        "test",
+        descriptor,
+        Arc::new(CallbackRegistry::new()),
+        Box::new(SequentialGenerator::new("u")),
+        Box::new(FixedClock::new("2024-01-01T00:00:00.000Z")),
+    );
+    collection
+        .create_many(
+            vec![
+                json!({"id":"u1","name":"Alice","email":"a@x.com","age":30,"companyId":"c1"}),
+                json!({"id":"u2","name":"Bob","email":"b@x.com","age":31,"companyId":"c1"}),
+            ],
+            false,
+        )
+        .unwrap();
+    let queries = [
+        json!({"companyId":"c1"}),
+        json!({"companyId":"c1","age":30}),
+        json!({"$search":{"query":"alice","fields":["name"]}}),
+    ];
+    let before = queries
+        .iter()
+        .map(|query| collection.narrow_candidates(query))
+        .collect::<Vec<_>>();
+
+    assert!(matches!(
+        collection.update_many(|_| true, json!({"age":"invalid"})),
+        Err(EngineError::Validation(_))
+    ));
+    assert_eq!(
+        queries
+            .iter()
+            .map(|query| collection.narrow_candidates(query))
+            .collect::<Vec<_>>(),
+        before
+    );
+
+    let unique_error = collection
+        .update_many(|_| true, json!({"email":"same@x.com"}))
+        .unwrap_err();
+    assert_eq!(unique_error.tag(), "UniqueConstraintError");
+    assert_eq!(
+        queries
+            .iter()
+            .map(|query| collection.narrow_candidates(query))
+            .collect::<Vec<_>>(),
+        before
+    );
+}
+
+#[test]
+fn committed_entity_deltas_preserve_before_images_and_insertion_positions() {
+    let mut col = collection(user_schema(), SequentialGenerator::new("u"));
+    col.create(json!({
+        "id": "u1", "name": "Alice", "email": "a@x.com", "age": 30, "companyId": "c1"
+    }))
+    .unwrap();
+    col.create(json!({
+        "id": "u2", "name": "Bob", "email": "b@x.com", "age": 31, "companyId": "c1"
+    }))
+    .unwrap();
+    let created = col.take_changes();
+    let created = created.entities().collect::<Vec<_>>();
+    assert_eq!(created.len(), 2);
+    assert_eq!(created[0].before, None);
+    assert_eq!(created[0].before_position, None);
+    assert_eq!(created[0].after_position, Some(0));
+
+    let revision_before_update = col.revision();
+    col.update("u1", json!({ "name": "Alicia" })).unwrap();
+    let updated = col.take_changes();
+    let updated = updated.entities().collect::<Vec<_>>();
+    assert_eq!(updated.len(), 1);
+    assert_eq!(updated[0].before.as_ref().unwrap()["name"], "Alice");
+    assert_eq!(updated[0].after.as_ref().unwrap()["name"], "Alicia");
+    assert_eq!(updated[0].before_position, Some(0));
+    assert_eq!(updated[0].after_position, Some(0));
+    assert!(col.revision() > revision_before_update);
+
+    col.delete("u1").unwrap();
+    col.create(json!({
+        "id": "u1", "name": "Recreated", "email": "new@x.com", "age": 32, "companyId": "c1"
+    }))
+    .unwrap();
+    let recreated = col.take_changes();
+    let recreated = recreated.entities().collect::<Vec<_>>();
+    assert_eq!(recreated.len(), 1);
+    assert_eq!(recreated[0].before.as_ref().unwrap()["name"], "Alicia");
+    assert_eq!(recreated[0].after.as_ref().unwrap()["name"], "Recreated");
+    assert_eq!(recreated[0].before_position, Some(0));
+    assert_eq!(recreated[0].after_position, Some(1));
 }

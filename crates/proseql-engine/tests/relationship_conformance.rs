@@ -52,8 +52,8 @@ use proseql_engine::{
     clock::FixedClock,
     collection::Collection,
     descriptor::{
-        CollectionDescriptor, IdStrategy, RelationshipDescriptor, RelationshipKind, SchemaNode,
-        StructField, UniqueConstraintDescriptor, ValidationMode,
+        CollectionDescriptor, IdStrategy, IndexDescriptor, RelationshipDescriptor,
+        RelationshipKind, SchemaNode, StructField, UniqueConstraintDescriptor, ValidationMode,
     },
     errors::EngineError,
     id_gen::SequentialGenerator,
@@ -282,7 +282,7 @@ fn posts_descriptor() -> CollectionDescriptor {
                 },
             ),
         ],
-        indexes: vec![],
+        indexes: vec![IndexDescriptor::Single("authorId".into())],
         unique_fields: vec![],
         before_create_hooks: vec![],
         after_create_hooks: vec![],
@@ -292,7 +292,7 @@ fn posts_descriptor() -> CollectionDescriptor {
         after_delete_hooks: vec![],
         on_change_hooks: vec![],
         computed_fields: vec![],
-        search_index: vec![],
+        search_index: vec!["title".into()],
         id_generator: None,
         version: None,
         migrations: vec![],
@@ -1422,6 +1422,21 @@ fn delete_cascade_hard_removes_related_entities() {
         db.collection("posts").unwrap().get("post3").is_some(),
         "post3 unaffected"
     );
+    let posts = db.collection("posts").unwrap();
+    assert_eq!(
+        posts.narrow_candidates(&json!({"authorId":"user1"})),
+        Some(Vec::new()),
+        "raw cascade deletion must remove equality postings"
+    );
+    assert_eq!(
+        posts.narrow_candidates(&json!({"authorId":"user2"})),
+        Some(vec!["post3".to_string()])
+    );
+    assert_eq!(
+        posts.narrow_candidates(&json!({"$search":{"query":"alpha","fields":["title"]}})),
+        Some(Vec::new()),
+        "raw cascade deletion must remove search postings"
+    );
 
     // cascaded metadata
     let cascaded = result.cascaded.expect("cascaded should be Some");
@@ -1468,6 +1483,15 @@ fn delete_set_null_nullifies_fk_on_related_entities() {
         .get("post2")
         .expect("post2 still exists");
     assert_eq!(post2["authorId"], Value::Null);
+    let posts = db.collection("posts").unwrap();
+    assert_eq!(
+        posts.narrow_candidates(&json!({"authorId":"user1"})),
+        Some(Vec::new())
+    );
+    assert_eq!(
+        posts.narrow_candidates(&json!({"authorId":null})),
+        Some(vec!["post1".to_string(), "post2".to_string()])
+    );
 }
 
 /// `cascade_soft` marks related entities with `deletedAt` instead of hard-deleting.

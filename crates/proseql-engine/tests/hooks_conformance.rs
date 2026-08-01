@@ -6,8 +6,8 @@ use proseql_engine::{
     clock::FixedClock,
     collection::Collection,
     descriptor::{
-        CollectionDescriptor, IdStrategy, RelationshipDescriptor, RelationshipKind, SchemaNode,
-        StructField, ValidationMode,
+        CollectionDescriptor, IdStrategy, IndexDescriptor, RelationshipDescriptor,
+        RelationshipKind, SchemaNode, StructField, ValidationMode,
     },
     errors::{EngineError, HookError, HookOperation},
     id_gen::SequentialGenerator,
@@ -280,7 +280,7 @@ fn before_create_rejection_returns_hook_error_and_preserves_state() {
 }
 
 #[test]
-fn create_fk_failure_after_before_create_id_rewrite_restores_full_collection_snapshot() {
+fn create_fk_failure_after_before_create_id_rewrite_restores_storage_key_by_delta() {
     let mut registry = CallbackRegistry::new();
     registry.register_before_create_hook(
         "rewrite-id",
@@ -292,6 +292,8 @@ fn create_fk_failure_after_before_create_id_rewrite_restores_full_collection_sna
     );
     let mut users_descriptor = users_with_company_descriptor();
     users_descriptor.before_create_hooks = vec!["rewrite-id".into()];
+    users_descriptor.indexes = vec![IndexDescriptor::Single("companyId".into())];
+    users_descriptor.search_index = vec!["name".into()];
     let registry = Arc::new(registry);
     let mut db = make_company_db(Arc::clone(&registry), users_descriptor, vec![]);
 
@@ -307,6 +309,14 @@ fn create_fk_failure_after_before_create_id_rewrite_restores_full_collection_sna
     assert_eq!(users.len(), 0);
     assert!(users.get("u1").is_none());
     assert!(users.get("hooked-id").is_none());
+    assert!(users
+        .narrow_candidates(&json!({"companyId":"missing"}))
+        .unwrap_or_default()
+        .is_empty());
+    assert!(users
+        .narrow_candidates(&json!({"$search":{"query":"alice","fields":["name"]}}))
+        .unwrap_or_default()
+        .is_empty());
 }
 
 #[test]

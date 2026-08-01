@@ -85,6 +85,7 @@ use serde_json::Value;
 use self::helpers::{col_nf, fk_field_names, payload_touches_fk_field, validate_fk};
 use self::populate::apply_populate;
 use crate::callbacks::CallbackRegistry;
+use crate::change_set::ChangeSet;
 use crate::collection::Collection;
 use crate::errors::EngineError;
 use crate::query::{
@@ -180,6 +181,7 @@ pub struct Database {
     pub(crate) reactive: ReactiveHub,
     pub(crate) active_transaction_kind: ActiveTransactionKind,
     pub(crate) reactive_event_suppression_depth: usize,
+    pub(crate) committed_changes: ChangeSet,
 }
 
 impl Database {
@@ -229,12 +231,6 @@ impl Database {
     ///  3. FK-validate the DECODED entity.
     ///  4. If FK fails → `delete_raw` the just-created entity, return `ForeignKeyError`.
     pub fn create(&mut self, collection: &str, data: Value) -> Result<Value, EngineError> {
-        let snapshot = self
-            .collections
-            .get(collection)
-            .ok_or_else(|| col_nf(collection))?
-            .snapshot_state();
-
         // Step 1 & 2: schema / defaults / decode.  Entity is created in state on success.
         let entity = self
             .collections
@@ -253,7 +249,7 @@ impl Database {
         };
         if let Err(fk_err) = validate_fk(collection, &rels, &entity, &self.collections) {
             if let Some(col) = self.collections.get_mut(collection) {
-                col.restore_state(snapshot);
+                col.rollback_created_entity(&entity);
             }
             return Err(fk_err);
         }

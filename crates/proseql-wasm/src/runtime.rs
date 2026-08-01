@@ -5,6 +5,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use indexmap::IndexMap;
 use proseql_engine::callbacks::CallbackRegistry;
+use proseql_engine::change_set::ChangeSet;
 use proseql_engine::clock::{Clock, FixedClock};
 use proseql_engine::collection::Collection;
 use proseql_engine::descriptor::CollectionDescriptor;
@@ -49,6 +50,8 @@ pub(crate) struct DatabaseContext {
     pub collection_names: Vec<String>,
     pub next_subscription_id: u32,
     pub subscriptions: std::collections::HashMap<u32, CallbackSubscription>,
+    /// Bounded deltas from the most recently completed dispatch, ready for U10 transport.
+    pub last_changes: ChangeSet,
 }
 
 impl DatabaseContext {
@@ -123,6 +126,10 @@ impl RuntimeCore {
             db.load_initial_collections_trusted(initial_collections)?;
         }
 
+        // Bootstrap is represented canonically by the initial projection, not as
+        // an ordinary mutation delta retained for the lifetime of the handle.
+        db.take_committed_changes();
+
         let handle = self.next_handle.max(1);
         self.next_handle = handle.saturating_add(1);
         self.databases.insert(
@@ -133,6 +140,7 @@ impl RuntimeCore {
                 collection_names,
                 next_subscription_id: 1,
                 subscriptions: std::collections::HashMap::new(),
+                last_changes: ChangeSet::default(),
             },
         );
         Ok(handle)
@@ -210,7 +218,27 @@ impl Runtime {
         method: &str,
         payload_json: Option<&str>,
     ) -> String {
-        bridge::handle(|| command::dispatch(&mut self.inner, handle, method, payload_json))
+        let response =
+            bridge::handle(|| command::dispatch(&mut self.inner, handle, method, payload_json));
+        if let Some(context) = self.inner.databases.get_mut(&handle) {
+            let changes = context.db.take_committed_changes();
+            // A panic may occur after arbitrary user callback side effects. The
+            // response itself tells U10 to invalidate its projection; never also
+            // expose the partially observed changes as a safe normal delta.
+            context.last_changes = if response.starts_with("{\"kind\":\"defect\"") {
+                ChangeSet::default()
+            } else {
+                changes
+            };
+        }
+        response
+    }
+
+    pub fn last_changes(&self, handle: u32) -> Option<&ChangeSet> {
+        self.inner
+            .databases
+            .get(&handle)
+            .map(|context| &context.last_changes)
     }
 
     pub fn dry_run_migrations_json(&mut self, input_json: &str) -> String {

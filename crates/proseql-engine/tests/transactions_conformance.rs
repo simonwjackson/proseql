@@ -7,12 +7,12 @@ use proseql_engine::{
     clock::FixedClock,
     collection::Collection,
     descriptor::{
-        CollectionDescriptor, IdStrategy, RelationshipDescriptor, RelationshipKind, SchemaNode,
-        StructField, ValidationMode,
+        CollectionDescriptor, IdStrategy, IndexDescriptor, RelationshipDescriptor,
+        RelationshipKind, SchemaNode, StructField, ValidationMode,
     },
     errors::EngineError,
     id_gen::SequentialGenerator,
-    reactive::ChangeOperation,
+    reactive::{ChangeOperation, WatchQueryConfig},
     relationships::{CascadeOption, Database, DeleteRelationshipsOptions},
     transactions::TransactionPersistenceHook,
 };
@@ -144,6 +144,8 @@ fn users_descriptor() -> CollectionDescriptor {
             },
         ),
     ];
+    descriptor.indexes = vec![IndexDescriptor::Single("companyId".into())];
+    descriptor.search_index = vec!["name".into()];
     descriptor
 }
 
@@ -157,6 +159,8 @@ fn posts_descriptor() -> CollectionDescriptor {
             foreign_key: Some("authorId".into()),
         },
     )];
+    descriptor.indexes = vec![IndexDescriptor::Single("authorId".into())];
+    descriptor.search_index = vec!["title".into()];
     descriptor
 }
 
@@ -269,6 +273,241 @@ fn rollback_restores_state_and_returns_transaction_error() {
         other => panic!("unexpected error: {other:?}"),
     }
     assert!(db.collection("users").unwrap().get("u2").is_none());
+    assert!(db.take_committed_changes().is_empty());
+}
+
+#[test]
+fn indexed_fk_rollback_restores_earlier_insertion_order_and_recreate_moves_to_end() {
+    let mut db = make_db();
+    db.create("users", json!({"id":"u2","name":"Bob","companyId":"c1"}))
+        .unwrap();
+    db.create("users", json!({"id":"u3","name":"Carol","companyId":"c1"}))
+        .unwrap();
+    assert!(matches!(
+        db.update("users", "u1", json!({"companyId":"missing"})),
+        Err(EngineError::ForeignKey(_))
+    ));
+    assert_eq!(
+        db.collection("users")
+            .unwrap()
+            .narrow_candidates(&json!({"companyId":{"$in":["c1"]}})),
+        Some(vec!["u1".into(), "u2".into(), "u3".into()])
+    );
+
+    db.delete("users", "u1").unwrap();
+    db.create(
+        "users",
+        json!({"id":"u1","name":"Alice New","companyId":"c1"}),
+    )
+    .unwrap();
+    assert_eq!(
+        db.collection("users")
+            .unwrap()
+            .narrow_candidates(&json!({"companyId":"c1"})),
+        Some(vec!["u2".into(), "u3".into(), "u1".into()])
+    );
+}
+
+#[test]
+fn caught_invalid_recreate_after_delete_does_not_resurrect_prior_entity() {
+    let mut db = make_db();
+    let mut tx = db.begin_transaction(None).unwrap();
+    tx.delete("users", "u1").unwrap();
+    let error = tx
+        .create(
+            "users",
+            json!({"id":"u1","name":"Replacement","companyId":"missing"}),
+        )
+        .unwrap_err();
+    assert!(matches!(error, EngineError::ForeignKey(_)));
+    assert!(tx.find_by_id("users", "u1").unwrap().is_none());
+    tx.commit().unwrap();
+
+    assert!(db.collection("users").unwrap().get("u1").is_none());
+    let changes = db.take_committed_changes();
+    let changes = changes.entities().collect::<Vec<_>>();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].collection, "users");
+    assert_eq!(changes[0].id, "u1");
+    assert_eq!(changes[0].before.as_ref().unwrap()["name"], json!("Alice"));
+    assert_eq!(changes[0].after, None);
+    assert_eq!(changes[0].before_position, Some(0));
+    assert_eq!(changes[0].after_position, None);
+}
+
+#[test]
+fn caught_invalid_batch_recreate_after_delete_does_not_resurrect_prior_entity() {
+    let mut db = make_db();
+    let mut tx = db.begin_transaction(None).unwrap();
+    tx.delete("users", "u1").unwrap();
+    assert!(matches!(
+        tx.create_many(
+            "users",
+            vec![json!({"id":"u1","name":"Replacement","companyId":"missing"})],
+            false,
+        ),
+        Err(EngineError::ForeignKey(_))
+    ));
+    tx.commit().unwrap();
+    assert!(db.collection("users").unwrap().get("u1").is_none());
+}
+
+#[test]
+fn caught_invalid_upsert_recreate_after_delete_does_not_resurrect_prior_entity() {
+    let mut db = make_db();
+    let mut tx = db.begin_transaction(None).unwrap();
+    tx.delete("users", "u1").unwrap();
+    assert!(matches!(
+        tx.upsert(
+            "users",
+            json!({"id":"u1"}),
+            json!({"name":"Replacement","companyId":"missing"}),
+            json!({"name":"unused"}),
+        ),
+        Err(EngineError::ForeignKey(_))
+    ));
+    tx.commit().unwrap();
+    assert!(db.collection("users").unwrap().get("u1").is_none());
+}
+
+#[test]
+fn committed_transaction_deltas_report_final_positions_after_earlier_deletes() {
+    let mut db = make_db();
+    db.create("users", json!({"id":"u2","name":"Bob","companyId":"c1"}))
+        .unwrap();
+    db.create("users", json!({"id":"u3","name":"Carol","companyId":"c1"}))
+        .unwrap();
+    db.take_committed_changes();
+
+    let mut tx = db.begin_transaction(None).unwrap();
+    tx.update("users", "u2", json!({"name":"Bob Updated"}))
+        .unwrap();
+    tx.delete("users", "u1").unwrap();
+    tx.commit().unwrap();
+
+    let changes = db.take_committed_changes();
+    let updated = changes
+        .entities()
+        .find(|change| change.id == "u2")
+        .expect("updated entity delta");
+    assert_eq!(updated.after_position, Some(0));
+    assert_eq!(
+        db.collection("users")
+            .unwrap()
+            .list()
+            .into_iter()
+            .map(|entity| entity["id"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>(),
+        vec!["u2", "u3"]
+    );
+}
+
+#[test]
+fn transaction_commit_publishes_final_order_to_active_watch() {
+    let mut db = make_db();
+    db.create("users", json!({"id":"u2","name":"Bob","companyId":"c1"}))
+        .unwrap();
+    db.create("users", json!({"id":"u3","name":"Carol","companyId":"c1"}))
+        .unwrap();
+    let watch = db.watch("users", WatchQueryConfig::default()).unwrap();
+    watch.recv().unwrap();
+
+    let mut tx = db.begin_transaction(None).unwrap();
+    tx.update("users", "u2", json!({"name":"Bob Updated"}))
+        .unwrap();
+    tx.delete("users", "u1").unwrap();
+    tx.create("users", json!({"id":"u4","name":"Dana","companyId":"c1"}))
+        .unwrap();
+    tx.commit().unwrap();
+
+    let watched = watch.recv().unwrap();
+    assert_eq!(
+        watched
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entity| entity["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["u2", "u3", "u4"]
+    );
+    assert_eq!(watched[0]["name"], json!("Bob Updated"));
+}
+
+#[test]
+fn batch_fk_failures_restore_indexed_and_search_postings() {
+    let mut db = make_db();
+    db.create("users", json!({"id":"u2","name":"Bob","companyId":"c1"}))
+        .unwrap();
+
+    assert!(matches!(
+        db.update_many(
+            "users",
+            json!({}),
+            json!({"name":"Rejected Update","companyId":"missing"}),
+        ),
+        Err(EngineError::ForeignKey(_))
+    ));
+    let users = db.collection("users").unwrap();
+    assert_eq!(
+        users.narrow_candidates(&json!({"companyId":"c1"})),
+        Some(vec!["u1".into(), "u2".into()])
+    );
+    assert_eq!(
+        users.narrow_candidates(&json!({"companyId":"missing"})),
+        Some(Vec::new())
+    );
+    assert_eq!(
+        users.narrow_candidates(&json!({"$search":{"query":"rejected","fields":["name"]}})),
+        Some(Vec::new())
+    );
+
+    assert!(matches!(
+        db.upsert_many(
+            "users",
+            vec![(
+                json!({"id":"u1"}),
+                json!({"name":"unused","companyId":"c1"}),
+                json!({"name":"Rejected Upsert","companyId":"missing"}),
+            )],
+        ),
+        Err(EngineError::ForeignKey(_))
+    ));
+    let users = db.collection("users").unwrap();
+    assert_eq!(
+        users.narrow_candidates(&json!({"companyId":"c1"})),
+        Some(vec!["u1".into(), "u2".into()])
+    );
+    assert_eq!(
+        users.narrow_candidates(&json!({"companyId":"missing"})),
+        Some(Vec::new())
+    );
+    assert_eq!(
+        users.narrow_candidates(&json!({"$search":{"query":"rejected","fields":["name"]}})),
+        Some(Vec::new())
+    );
+}
+
+#[test]
+fn indexed_and_search_state_matches_backing_state_after_transaction_rollback() {
+    let mut db = make_db();
+    let mut tx = db.begin_transaction(None).unwrap();
+    tx.update("posts", "p1", json!({"title":"Changed","authorId":null}))
+        .unwrap();
+    let _ = tx.rollback();
+
+    let posts = db.collection("posts").unwrap();
+    assert_eq!(
+        posts.narrow_candidates(&json!({"authorId":"u1"})),
+        Some(vec!["p1".into()])
+    );
+    assert_eq!(
+        posts.narrow_candidates(&json!({"$search":{"query":"hello","fields":["title"]}})),
+        Some(vec!["p1".into()])
+    );
+    assert_eq!(
+        posts.narrow_candidates(&json!({"$search":{"query":"changed","fields":["title"]}})),
+        Some(Vec::new())
+    );
 }
 
 #[test]
@@ -499,6 +738,15 @@ fn commit_after_caught_relationship_error_persists_partial_side_effect_collectio
     assert_eq!(event.operation, ChangeOperation::Update);
     assert!(sub.try_recv().is_err());
     assert!(db.collection("posts").unwrap().get("post-1").is_some());
+    let posts = db.collection("posts").unwrap();
+    assert_eq!(
+        posts.narrow_candidates(&json!({"authorId":"u2"})),
+        Some(vec!["post-1".into()])
+    );
+    assert_eq!(
+        posts.narrow_candidates(&json!({"$search":{"query":"nested","fields":["title"]}})),
+        Some(vec!["post-1".into()])
+    );
     assert!(db.collection("users").unwrap().get("u2").is_none());
 }
 

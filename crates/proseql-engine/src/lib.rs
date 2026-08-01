@@ -38,6 +38,7 @@ pub mod value;
 
 // U2
 pub mod callbacks;
+pub mod change_set;
 pub mod clock;
 pub mod collection;
 pub mod id_gen;

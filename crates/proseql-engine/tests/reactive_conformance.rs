@@ -292,6 +292,71 @@ fn make_books_db_with_scheduler(books: Vec<Value>) -> (Database, Arc<ManualReact
     )
 }
 
+#[test]
+fn reactive_snapshots_are_lazy_and_released_with_the_last_watch() {
+    let (mut db, _scheduler) = make_books_db_with_scheduler(vec![
+        json!({"id":"b1","title":"Dune","author":"Frank Herbert","year":1965,"genre":"sci-fi"}),
+    ]);
+    assert_eq!(db.reactive_snapshot_count(), 0);
+
+    db.create(
+        "books",
+        json!({"id":"b2","title":"Messiah","author":"Frank Herbert","year":1969,"genre":"sci-fi"}),
+    )
+    .unwrap();
+    assert_eq!(db.reactive_snapshot_count(), 0);
+    let committed = db.take_committed_changes();
+    let committed = committed.entities().collect::<Vec<_>>();
+    assert_eq!(committed.len(), 1);
+    assert_eq!(committed[0].collection, "books");
+    assert_eq!(committed[0].id, "b2");
+    assert_eq!(committed[0].before, None);
+    assert_eq!(committed[0].after.as_ref().unwrap()["title"], "Messiah");
+
+    let watch = db.watch("books", WatchQueryConfig::default()).unwrap();
+    assert_eq!(db.reactive_snapshot_count(), 1);
+    assert_eq!(watch.recv().unwrap().as_array().unwrap().len(), 2);
+    drop(watch);
+    assert_eq!(db.reactive_snapshot_count(), 0);
+}
+
+#[test]
+fn two_watches_share_batch_updated_snapshot_until_final_drop() {
+    let (mut db, scheduler) = make_books_db_with_scheduler(vec![
+        json!({"id":"b1","title":"Dune","author":"Frank Herbert","year":1965,"genre":"sci-fi"}),
+        json!({"id":"b2","title":"Messiah","author":"Frank Herbert","year":1969,"genre":"sci-fi"}),
+        json!({"id":"b3","title":"Foundation","author":"Isaac Asimov","year":1951,"genre":"sci-fi"}),
+    ]);
+    let first = db.watch("books", WatchQueryConfig::default()).unwrap();
+    let survivor = db.watch("books", WatchQueryConfig::default()).unwrap();
+    first.recv().unwrap();
+    survivor.recv().unwrap();
+    assert_eq!(db.reactive_snapshot_count(), 1);
+
+    drop(first);
+    assert_eq!(db.reactive_snapshot_count(), 1);
+    db.update_many("books", json!({}), json!({"genre":"classic"}))
+        .unwrap();
+    scheduler.advance(10);
+    let updated = survivor.recv().unwrap();
+    assert_eq!(updated.as_array().unwrap().len(), 3);
+    assert!(updated
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|book| book["genre"] == json!("classic")));
+
+    db.delete_many("books", json!({"author":"Frank Herbert"}), false, None)
+        .unwrap();
+    scheduler.advance(10);
+    let remaining = survivor.recv().unwrap();
+    assert_eq!(remaining.as_array().unwrap().len(), 1);
+    assert_eq!(remaining[0]["id"], json!("b3"));
+
+    drop(survivor);
+    assert_eq!(db.reactive_snapshot_count(), 0);
+}
+
 fn make_books_db_with_registry_and_scheduler(
     books: Vec<Value>,
     registry: Arc<CallbackRegistry>,
@@ -921,6 +986,24 @@ fn failed_relationship_mutations_sync_partial_side_effects_without_publishing_ev
         }),
     );
     assert!(matches!(create_failure, Err(EngineError::ForeignKey(_))));
+    let create_failure_changes = db.take_committed_changes();
+    let create_failure_changes = create_failure_changes.entities().collect::<Vec<_>>();
+    assert_eq!(create_failure_changes.len(), 1);
+    let created_post = create_failure_changes[0];
+    assert_eq!(created_post.collection, "posts");
+    assert_eq!(created_post.id, "post-1");
+    assert_eq!(created_post.before, None);
+    assert_eq!(created_post.before_position, None);
+    assert_eq!(created_post.after_position, Some(1));
+    assert_eq!(created_post.after.as_ref().unwrap()["id"], json!("post-1"));
+    assert_eq!(
+        created_post.after.as_ref().unwrap()["title"],
+        json!("Nested side effect")
+    );
+    assert_eq!(
+        created_post.after.as_ref().unwrap()["authorId"],
+        json!("u2")
+    );
     scheduler.advance(10);
     assert!(events.try_recv().is_err());
     assert!(posts_watch.try_recv().is_err());
@@ -953,6 +1036,22 @@ fn failed_relationship_mutations_sync_partial_side_effects_without_publishing_ev
         }),
     );
     assert!(matches!(update_failure, Err(EngineError::Validation(_))));
+    let update_failure_changes = db.take_committed_changes();
+    let update_failure_changes = update_failure_changes.entities().collect::<Vec<_>>();
+    assert_eq!(update_failure_changes.len(), 1);
+    let disconnected_post = update_failure_changes[0];
+    assert_eq!(disconnected_post.collection, "posts");
+    assert_eq!(disconnected_post.id, "p1");
+    assert_eq!(disconnected_post.before_position, Some(0));
+    assert_eq!(disconnected_post.after_position, Some(0));
+    assert_eq!(
+        disconnected_post.before.as_ref().unwrap()["authorId"],
+        json!("u1")
+    );
+    assert_eq!(
+        disconnected_post.after.as_ref().unwrap()["authorId"],
+        Value::Null
+    );
     scheduler.advance(10);
     assert!(events.try_recv().is_err());
     assert!(posts_watch.try_recv().is_err());
