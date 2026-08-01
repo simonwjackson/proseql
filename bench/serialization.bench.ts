@@ -1,21 +1,21 @@
 import { Effect, Exit, Layer, Schema, Scope } from "effect";
 import { Bench } from "tinybench";
 import {
+	type CollectionConfig,
 	createPersistentEffectDatabase as createCorePersistentEffectDatabase,
 	jsonCodec,
 	makeSerializerLayer,
-	StorageAdapterService,
-	type CollectionConfig,
 	type ProseQLPlugin,
+	StorageAdapterService,
 	type StorageAdapterShape,
 } from "../packages/core/src/index.js";
 import { createPersistentEffectDatabase as createWasmPersistentEffectDatabase } from "../packages/effect/src/index.js";
 import {
 	attachTaskMetadata,
-	checksumBenchmarkValue,
-	createEngineTaskName,
 	type BenchmarkCaseType,
 	type BenchmarkCategory,
+	checksumBenchmarkValue,
+	createEngineTaskName,
 } from "./comparison.js";
 import { generateUsers, type User } from "./generators.js";
 import {
@@ -349,6 +349,7 @@ const registerTaskMetadata = (options: {
 	readonly engineId: "typescript" | "wasm";
 	readonly category: BenchmarkCategory;
 	readonly caseType: BenchmarkCaseType;
+	readonly operationCount: number;
 	readonly normalInteraction: boolean;
 	readonly checksum: string;
 	readonly initializationMs: number;
@@ -365,6 +366,7 @@ const registerTaskMetadata = (options: {
 		category: options.category,
 		caseType: options.caseType,
 		datasetSize: BASELINE_SIZE,
+		operationCount: options.operationCount,
 		normalInteraction: options.normalInteraction,
 		checksum: options.checksum,
 		instrumentation: createTaskInstrumentation({
@@ -479,6 +481,7 @@ export async function createSuite(options?: {
 				engineId: engine.id,
 				category: "write-transaction",
 				caseType: computeCaseType("required"),
+				operationCount: 100,
 				normalInteraction: false,
 				checksum: coalescingChecksum,
 				initializationMs: coalescingInitializationMs,
@@ -574,6 +577,7 @@ export async function createSuite(options?: {
 				engineId: engine.id,
 				category: "write-transaction",
 				caseType: computeCaseType("required"),
+				operationCount: 1,
 				normalInteraction: false,
 				checksum: explicitFlushChecksum,
 				initializationMs: explicitFlushInitializationMs,
@@ -612,6 +616,7 @@ export async function createSuite(options?: {
 				engineId: engine.id,
 				category: "read-query",
 				caseType: computeCaseType("characterization"),
+				operationCount: 1,
 				normalInteraction: false,
 				checksum: computedChecksum,
 				initializationMs: computedInitializationMs,
@@ -651,6 +656,7 @@ export async function createSuite(options?: {
 				engineId: engine.id,
 				category: "read-query",
 				caseType: computeCaseType("characterization"),
+				operationCount: 1,
 				normalInteraction: false,
 				checksum: operatorChecksum,
 				initializationMs: operatorInitializationMs,
@@ -685,6 +691,7 @@ export async function createSuite(options?: {
 				engineId: engine.id,
 				category: "read-query",
 				caseType: computeCaseType("characterization"),
+				operationCount: 1,
 				normalInteraction: false,
 				checksum: localeChecksum,
 				initializationMs: localeInitializationMs,
@@ -759,6 +766,7 @@ export async function createSuite(options?: {
 				engineId: engine.id,
 				category: "write-transaction",
 				caseType: computeCaseType("characterization"),
+				operationCount: 3,
 				normalInteraction: false,
 				checksum: hookChecksum,
 				initializationMs: hookInitializationMs,

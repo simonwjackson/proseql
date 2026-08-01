@@ -5,6 +5,8 @@ export interface WorkloadManifestEntry {
 	readonly name: string;
 	readonly category: BenchmarkCategory;
 	readonly caseType: BenchmarkCaseType;
+	readonly datasetSize: number;
+	readonly operationCount: number;
 	readonly normalInteraction: boolean;
 }
 
@@ -14,11 +16,15 @@ const createManifestEntry = (
 	category: BenchmarkCategory,
 	caseType: BenchmarkCaseType,
 	normalInteraction: boolean,
+	datasetSize = 10_000,
+	operationCount = 1,
 ): WorkloadManifestEntry => ({
 	suite,
 	name,
 	category,
 	caseType,
+	datasetSize,
+	operationCount,
 	normalInteraction,
 });
 
@@ -121,6 +127,8 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"write-transaction",
 		"required",
 		false,
+		10_000,
+		100,
 	),
 	createManifestEntry(
 		"crud",
@@ -135,6 +143,8 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"write-transaction",
 		"required",
 		true,
+		10_000,
+		100,
 	),
 	createManifestEntry(
 		"crud",
@@ -142,6 +152,8 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"write-transaction",
 		"required",
 		true,
+		10_000,
+		100,
 	),
 	createManifestEntry(
 		"crud",
@@ -156,6 +168,8 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"write-transaction",
 		"required",
 		true,
+		10_000,
+		100,
 	),
 	createManifestEntry(
 		"crud",
@@ -163,6 +177,8 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"write-transaction",
 		"required",
 		true,
+		10_000,
+		100,
 	),
 	createManifestEntry(
 		"crud",
@@ -380,6 +396,7 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"read-query",
 		"required",
 		false,
+		100,
 	),
 	createManifestEntry(
 		"scaling",
@@ -387,6 +404,7 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"read-query",
 		"required",
 		false,
+		1_000,
 	),
 	createManifestEntry(
 		"scaling",
@@ -394,6 +412,7 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"read-query",
 		"required",
 		true,
+		10_000,
 	),
 	createManifestEntry(
 		"scaling",
@@ -401,6 +420,7 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"read-query",
 		"required",
 		false,
+		100,
 	),
 	createManifestEntry(
 		"scaling",
@@ -408,6 +428,7 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"read-query",
 		"required",
 		false,
+		1_000,
 	),
 	createManifestEntry(
 		"scaling",
@@ -415,6 +436,7 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"read-query",
 		"required",
 		false,
+		10_000,
 	),
 	createManifestEntry(
 		"scaling",
@@ -422,6 +444,7 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"read-query",
 		"required",
 		false,
+		100,
 	),
 	createManifestEntry(
 		"scaling",
@@ -429,6 +452,7 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"read-query",
 		"required",
 		false,
+		1_000,
 	),
 	createManifestEntry(
 		"scaling",
@@ -436,6 +460,7 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"read-query",
 		"required",
 		false,
+		10_000,
 	),
 	createManifestEntry(
 		"scaling",
@@ -443,6 +468,7 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"read-query",
 		"stress",
 		false,
+		100_000,
 	),
 	createManifestEntry(
 		"scaling",
@@ -450,6 +476,7 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"read-query",
 		"stress",
 		false,
+		100_000,
 	),
 	createManifestEntry(
 		"scaling",
@@ -457,6 +484,7 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"read-query",
 		"stress",
 		false,
+		100_000,
 	),
 	createManifestEntry(
 		"scaling",
@@ -464,6 +492,7 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"write-transaction",
 		"stress",
 		false,
+		100_000,
 	),
 	createManifestEntry(
 		"scaling",
@@ -471,6 +500,8 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"write-transaction",
 		"stress",
 		false,
+		100_000,
+		3,
 	),
 	createManifestEntry(
 		"transactions",
@@ -478,6 +509,8 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"write-transaction",
 		"required",
 		false,
+		10_000,
+		3,
 	),
 	createManifestEntry(
 		"transactions",
@@ -485,6 +518,8 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"write-transaction",
 		"required",
 		true,
+		10_000,
+		3,
 	),
 	createManifestEntry(
 		"serialization",
@@ -492,6 +527,8 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"write-transaction",
 		"required",
 		false,
+		10_000,
+		100,
 	),
 	createManifestEntry(
 		"serialization",
@@ -527,5 +564,7 @@ export const WORKLOAD_MANIFEST: ReadonlyArray<WorkloadManifestEntry> = [
 		"write-transaction",
 		"characterization",
 		false,
+		10_000,
+		3,
 	),
 ] as const;

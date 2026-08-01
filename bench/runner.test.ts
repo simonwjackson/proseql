@@ -1,6 +1,6 @@
 import { Bench } from "tinybench";
 import { describe, expect, it, vi } from "vitest";
-import { attachTaskMetadata } from "./comparison.js";
+import { attachTaskMetadata, buildComparisons } from "./comparison.js";
 import type { BenchmarkJsonOutput, DiscoveredBenchmark } from "./runner.js";
 import {
 	BenchmarkExecutionError,
@@ -81,6 +81,7 @@ const createSyntheticBenchmark = (options: {
 				engineId: "typescript",
 				category: "read-query",
 				caseType: "required",
+				operationCount: 1,
 				normalInteraction: false,
 				checksum: "checksum:synthetic",
 				checksumProbe:
@@ -160,6 +161,28 @@ describe("Benchmark Filtering", () => {
 });
 
 describe("Benchmark Execution", () => {
+	it("rejects duplicate tasks for the same engine and manifest case", async () => {
+		const bench = new Bench({ iterations: 1, time: 0, warmup: false });
+		for (let index = 0; index < 2; index++) {
+			bench.add(`[typescript] create (single) duplicate ${index}`, () => {});
+			attachTaskMetadata(requireTask(bench.tasks, index), {
+				benchmarkName: "create (single)",
+				engineId: "typescript",
+				category: "write-transaction",
+				caseType: "required",
+				datasetSize: 10_000,
+				operationCount: 1,
+				normalInteraction: true,
+				checksum: "checksum:duplicate",
+			});
+		}
+		await bench.run();
+
+		expect(() => buildComparisons(bench.tasks)).toThrow(
+			"Duplicate benchmark task for typescript create (single)",
+		);
+	});
+
 	it("executes synthetic suites and preserves input order", async () => {
 		const first = createSyntheticBenchmark({ suiteName: "alpha" });
 		const second = createSyntheticBenchmark({ suiteName: "beta" });
@@ -362,6 +385,7 @@ describe("Benchmark Execution", () => {
 			engineId: "typescript",
 			category: "read-query",
 			caseType: "required",
+			operationCount: 1,
 			normalInteraction: true,
 			checksum: "checksum:ok",
 		});
@@ -370,6 +394,7 @@ describe("Benchmark Execution", () => {
 			engineId: "wasm",
 			category: "read-query",
 			caseType: "required",
+			operationCount: 1,
 			normalInteraction: true,
 			checksum: "checksum:ok",
 		});
@@ -512,6 +537,8 @@ describe("isolated stress execution", () => {
 										name: "findById @ 100K",
 										category: "read-query",
 										caseType: "stress",
+										datasetSize: 100_000,
+										operationCount: 1,
 										normalInteraction: false,
 										throughputRatio: undefined,
 										latencyRatio: undefined,
@@ -605,6 +632,8 @@ describe("isolated stress execution", () => {
 										name: "findById @ 100K",
 										category: "read-query",
 										caseType: "stress",
+										datasetSize: 100_000,
+										operationCount: 1,
 										normalInteraction: false,
 										throughputRatio: undefined,
 										latencyRatio: undefined,
@@ -689,6 +718,8 @@ describe("isolated stress execution", () => {
 		});
 
 		expect(merged.comparisons[0]?.throughputRatio).toBe(0.5);
+		expect(merged.comparisons[0]?.operationCount).toBe(1);
+		expect(merged.contract.passed).toBe(true);
 		expect(
 			merged.comparisons[0]?.engines.wasm?.instrumentation
 				.wasmLinearMemoryHighWaterBytes,

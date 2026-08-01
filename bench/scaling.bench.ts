@@ -11,6 +11,7 @@
 
 import { Effect, Schema } from "effect";
 import { Bench } from "tinybench";
+import { getLoadedWasmMemoryByteLength } from "../packages/engine/src/loader.js";
 import {
 	attachTaskMetadata,
 	checksumBenchmarkValue,
@@ -19,7 +20,6 @@ import {
 	createUnavailableMetric,
 } from "./comparison.js";
 import { selectBenchEngines } from "./engines.js";
-import { getLoadedWasmMemoryByteLength } from "../packages/engine/src/loader.js";
 import { generateUsers, STANDARD_SIZES } from "./generators.js";
 import {
 	type BenchSchemaConfig,
@@ -259,6 +259,7 @@ export async function createSuite(options?: {
 						category: "read-query",
 						caseType,
 						datasetSize: size,
+						operationCount: 1,
 						normalInteraction: size === 10_000,
 						checksum: findByIdChecksum,
 						checksumProbe: async () =>
@@ -321,6 +322,7 @@ export async function createSuite(options?: {
 						category: "read-query",
 						caseType,
 						datasetSize: size,
+						operationCount: 1,
 						normalInteraction: false,
 						checksum: unindexedChecksum,
 						checksumProbe: async () =>
@@ -381,6 +383,7 @@ export async function createSuite(options?: {
 						category: "read-query",
 						caseType,
 						datasetSize: size,
+						operationCount: 1,
 						normalInteraction: false,
 						checksum: indexedChecksum,
 						checksumProbe: async () =>
@@ -470,6 +473,7 @@ export async function createSuite(options?: {
 							category: "write-transaction",
 							caseType: "stress",
 							datasetSize: size,
+							operationCount: 1,
 							normalInteraction: false,
 							checksum: createChecksum,
 							instrumentation: createInstrumentation,
@@ -563,6 +567,7 @@ export async function createSuite(options?: {
 							category: "write-transaction",
 							caseType: "stress",
 							datasetSize: size,
+							operationCount: 3,
 							normalInteraction: false,
 							checksum: txChecksum,
 							instrumentation: txInstrumentation,

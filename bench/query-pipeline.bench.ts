@@ -346,6 +346,7 @@ export async function createSuite(options?: {
 					category: "read-query",
 					caseType: "required",
 					datasetSize: taskOptions.datasetSize,
+					operationCount: 1,
 					normalInteraction: taskOptions.normalInteraction,
 					checksum,
 					checksumProbe: async () =>

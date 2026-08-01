@@ -12,7 +12,7 @@ import {
 	checksumBenchmarkValue,
 	createEngineTaskName,
 } from "./comparison.js";
-import { selectBenchEngines, type BenchEngine } from "./engines.js";
+import { type BenchEngine, selectBenchEngines } from "./engines.js";
 import { generateUsers, type User } from "./generators.js";
 import {
 	type BenchSchemaConfig,
@@ -316,6 +316,7 @@ export async function createSuite(options?: {
 				category: "write-transaction",
 				caseType: "required",
 				datasetSize: BASELINE_SIZE,
+				operationCount: 1,
 				normalInteraction: true,
 				checksum: createSingleChecksum,
 				checksumProbe: () =>
@@ -398,6 +399,7 @@ export async function createSuite(options?: {
 				category: "write-transaction",
 				caseType: "required",
 				datasetSize: BASELINE_SIZE,
+				operationCount: 100,
 				normalInteraction: false,
 				checksum: createManyChecksum,
 				checksumProbe: () =>
@@ -475,6 +477,7 @@ export async function createSuite(options?: {
 				category: "write-transaction",
 				caseType: "required",
 				datasetSize: BASELINE_SIZE,
+				operationCount: 1,
 				normalInteraction: true,
 				checksum: updateSingleChecksum,
 				checksumProbe: async () => {
@@ -556,6 +559,7 @@ export async function createSuite(options?: {
 				category: "write-transaction",
 				caseType: "required",
 				datasetSize: BASELINE_SIZE,
+				operationCount: 100,
 				normalInteraction: true,
 				checksum: updateManyDeclarativeChecksum,
 				checksumProbe: async () => {
@@ -637,6 +641,7 @@ export async function createSuite(options?: {
 				category: "write-transaction",
 				caseType: "required",
 				datasetSize: BASELINE_SIZE,
+				operationCount: 100,
 				normalInteraction: true,
 				checksum: updateManyPredicateChecksum,
 				checksumProbe: async () => {
@@ -704,6 +709,7 @@ export async function createSuite(options?: {
 				category: "write-transaction",
 				caseType: "required",
 				datasetSize: BASELINE_SIZE,
+				operationCount: 1,
 				normalInteraction: true,
 				checksum: deleteSingleChecksum,
 				checksumProbe: async () => {
@@ -771,6 +777,7 @@ export async function createSuite(options?: {
 				category: "write-transaction",
 				caseType: "required",
 				datasetSize: BASELINE_SIZE,
+				operationCount: 100,
 				normalInteraction: true,
 				checksum: deleteManyDeclarativeChecksum,
 				checksumProbe: async () => {
@@ -844,6 +851,7 @@ export async function createSuite(options?: {
 				category: "write-transaction",
 				caseType: "required",
 				datasetSize: BASELINE_SIZE,
+				operationCount: 100,
 				normalInteraction: true,
 				checksum: deleteManyPredicateChecksum,
 				checksumProbe: async () => {
@@ -923,6 +931,7 @@ export async function createSuite(options?: {
 				category: "write-transaction",
 				caseType: "required",
 				datasetSize: BASELINE_SIZE,
+				operationCount: 1,
 				normalInteraction: false,
 				checksum: upsertCreateChecksum,
 				checksumProbe: () =>
@@ -1005,6 +1014,7 @@ export async function createSuite(options?: {
 				category: "write-transaction",
 				caseType: "required",
 				datasetSize: BASELINE_SIZE,
+				operationCount: 1,
 				normalInteraction: false,
 				checksum: upsertUpdateChecksum,
 				checksumProbe: async () => {

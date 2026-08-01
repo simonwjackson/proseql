@@ -44,6 +44,7 @@ export interface BenchTaskMetadata {
 	readonly category: BenchmarkCategory;
 	readonly caseType: BenchmarkCaseType;
 	readonly datasetSize?: number;
+	readonly operationCount: number;
 	readonly normalInteraction: boolean;
 	readonly checksum?: string;
 	readonly checksumProbe?: () => Promise<string>;
@@ -61,6 +62,7 @@ export interface PairedComparison {
 	readonly category: BenchmarkCategory;
 	readonly caseType: BenchmarkCaseType;
 	readonly datasetSize?: number;
+	readonly operationCount: number;
 	readonly normalInteraction: boolean;
 	readonly throughputRatio: number | undefined;
 	readonly latencyRatio: number | undefined;
@@ -206,9 +208,30 @@ export const buildComparisons = (
 		}
 		const metadata = getTaskMetadata(task);
 		const current = byBenchmark.get(result.name) ?? { metadata };
+		if (current.metadata && metadata) {
+			const metadataMatches =
+				current.metadata.category === metadata.category &&
+				current.metadata.caseType === metadata.caseType &&
+				current.metadata.datasetSize === metadata.datasetSize &&
+				current.metadata.operationCount === metadata.operationCount &&
+				current.metadata.normalInteraction === metadata.normalInteraction;
+			if (!metadataMatches) {
+				throw new Error(
+					`Mismatched benchmark metadata for ${result.name} between paired engine tasks`,
+				);
+			}
+		}
 		if (result.engineId === "typescript") {
+			if (current.typescript) {
+				throw new Error(
+					`Duplicate benchmark task for typescript ${result.name}`,
+				);
+			}
 			current.typescript = result;
 		} else {
+			if (current.wasm) {
+				throw new Error(`Duplicate benchmark task for wasm ${result.name}`);
+			}
 			current.wasm = result;
 		}
 		byBenchmark.set(result.name, current);
@@ -228,6 +251,7 @@ export const buildComparisons = (
 				category: metadata?.category ?? "read-query",
 				caseType: metadata?.caseType ?? "required",
 				datasetSize: metadata?.datasetSize,
+				operationCount: metadata?.operationCount ?? 0,
 				normalInteraction: metadata?.normalInteraction ?? false,
 				throughputRatio:
 					entry.typescript && entry.wasm

@@ -1,29 +1,124 @@
-import { gzipSync } from "node:zlib";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import type { BenchmarkInstrumentation, NumericMetric } from "./comparison.js";
 import type { BenchmarkJsonOutput } from "./runner.js";
+import { WORKLOAD_MANIFEST } from "./workloads.js";
 
-const repoRoot = resolve(import.meta.dir, "..");
+const moduleDir = fileURLToPath(new URL(".", import.meta.url));
+const repoRoot = resolve(moduleDir, "..");
 const outputPath = resolve(repoRoot, "bench/baselines/browser-wasm.json");
 const rawOutputPath = resolve(
 	repoRoot,
 	"bench/generated/browser-wasm.raw.json",
 );
 
+const STRICT_PARITY_FAILURE =
+	/^.+ throughput ratio \S+ is below the required 1\.000000$/;
+
 export const isBaselineBlockingFailure = (message: string) =>
-	message.includes("execution failure") ||
-	message.includes("missing from the full benchmark report") ||
-	message.includes("missing engine result") ||
-	message.includes("missing a decoded-value checksum") ||
-	message.includes("produced a checksum mismatch between paired engines") ||
-	message.includes("not present in the fixed workload manifest") ||
-	message.includes("belongs to suite");
+	!STRICT_PARITY_FAILURE.test(message);
 
 export const getBaselineBlockingFailures = (report: BenchmarkJsonOutput) =>
 	report.contract.failures.filter((failure) =>
 		isBaselineBlockingFailure(failure.message),
 	);
+
+export interface BaselineParityFailure {
+	readonly suite: string;
+	readonly caseName: string;
+	readonly throughputRatio: number;
+	readonly message: string;
+}
+
+const requireRecord = (
+	value: unknown,
+	label: string,
+): Record<string, unknown> => {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		throw new Error(`${label} must be an object`);
+	}
+	return value as Record<string, unknown>;
+};
+
+export const collectBaselineParityFailures = (
+	baseline: unknown,
+): ReadonlyArray<BaselineParityFailure> => {
+	const baselineRecord = requireRecord(baseline, "baseline");
+	if (!Array.isArray(baselineRecord.suites)) {
+		throw new Error("baseline suites must be an array");
+	}
+
+	const ratiosByCase = new Map<string, number>();
+	const manifestByName = new Map(
+		WORKLOAD_MANIFEST.map((entry) => [entry.name, entry] as const),
+	);
+	for (const [suiteIndex, suiteValue] of baselineRecord.suites.entries()) {
+		const suite = requireRecord(suiteValue, `baseline suite ${suiteIndex}`);
+		if (typeof suite.suite !== "string") {
+			throw new Error(`baseline suite ${suiteIndex} must include a suite name`);
+		}
+		if (!Array.isArray(suite.cases)) {
+			throw new Error(`baseline suite ${suiteIndex} cases must be an array`);
+		}
+		for (const [caseIndex, caseValue] of suite.cases.entries()) {
+			const baselineCase = requireRecord(
+				caseValue,
+				`baseline suite ${suiteIndex} case ${caseIndex}`,
+			);
+			if (
+				typeof baselineCase.name !== "string" ||
+				typeof baselineCase.throughputRatio !== "number" ||
+				!Number.isFinite(baselineCase.throughputRatio)
+			) {
+				throw new Error(
+					`baseline suite ${suiteIndex} case ${caseIndex} must include a name and finite throughputRatio`,
+				);
+			}
+			const manifestEntry = manifestByName.get(baselineCase.name);
+			if (!manifestEntry) {
+				throw new Error(
+					`${baselineCase.name} is not present in the fixed workload manifest`,
+				);
+			}
+			if (manifestEntry.suite !== suite.suite) {
+				throw new Error(
+					`${baselineCase.name} belongs to suite ${manifestEntry.suite}, not ${suite.suite}`,
+				);
+			}
+			if (ratiosByCase.has(baselineCase.name)) {
+				throw new Error(
+					`${baselineCase.name} appears more than once in the checked-in complete baseline`,
+				);
+			}
+			ratiosByCase.set(baselineCase.name, baselineCase.throughputRatio);
+		}
+	}
+
+	return WORKLOAD_MANIFEST.flatMap((entry) => {
+		if (entry.caseType !== "required") {
+			return [];
+		}
+		const throughputRatio = ratiosByCase.get(entry.name);
+		if (throughputRatio === undefined) {
+			throw new Error(
+				`${entry.name} is missing from the checked-in complete baseline`,
+			);
+		}
+		if (throughputRatio >= 1) {
+			return [];
+		}
+		return [
+			{
+				suite: entry.suite,
+				caseName: entry.name,
+				throughputRatio,
+				message: `${entry.name} throughput ratio ${String(throughputRatio)} is below the required 1.000000`,
+			},
+		];
+	});
+};
 
 export const assertBaselineReportIsCapturable = (
 	report: BenchmarkJsonOutput,
@@ -102,7 +197,7 @@ const measureWasmArtifact = async () => {
 };
 
 const summarizeBaselineReport = async (report: BenchmarkJsonOutput) => ({
-	schemaVersion: "bench.baseline.v1alpha4",
+	schemaVersion: "bench.baseline.v1alpha5",
 	capturedAt: report.timestamp,
 	runtime: "bun",
 	coverage: {
@@ -124,6 +219,11 @@ const summarizeBaselineReport = async (report: BenchmarkJsonOutput) => ({
 		suite: suite.suite,
 		cases: suite.comparisons.map((comparison) => ({
 			name: comparison.name,
+			category: comparison.category,
+			caseType: comparison.caseType,
+			datasetSize: comparison.datasetSize,
+			operationCount: comparison.operationCount,
+			normalInteraction: comparison.normalInteraction,
 			throughputRatio: comparison.throughputRatio,
 			latencyRatio: comparison.latencyRatio,
 			checksum: comparison.checksum,

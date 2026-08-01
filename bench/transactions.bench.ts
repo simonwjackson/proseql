@@ -16,7 +16,7 @@ import {
 	checksumBenchmarkValue,
 	createEngineTaskName,
 } from "./comparison.js";
-import { selectBenchEngines, type BenchEngine } from "./engines.js";
+import { type BenchEngine, selectBenchEngines } from "./engines.js";
 import { generateUsers } from "./generators.js";
 import {
 	type BenchSchemaConfig,
@@ -162,6 +162,7 @@ export async function createSuite(options?: {
 				category: "write-transaction",
 				caseType: "required",
 				datasetSize: BASELINE_SIZE,
+				operationCount: 3,
 				normalInteraction: false,
 				checksum: directChecksum,
 				checksumProbe: async () => {
@@ -243,6 +244,7 @@ export async function createSuite(options?: {
 				category: "write-transaction",
 				caseType: "required",
 				datasetSize: BASELINE_SIZE,
+				operationCount: 3,
 				normalInteraction: true,
 				checksum: transactionalChecksum,
 				checksumProbe: async () => {

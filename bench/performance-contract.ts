@@ -72,8 +72,8 @@ export interface BrowserBudgetEvaluation {
 	};
 }
 
-const REQUIRED_READ_RATIO = 0.5;
-const REQUIRED_WRITE_RATIO = 0.2;
+const REQUIRED_THROUGHPUT_RATIO = 1;
+const formatThroughputRatio = (ratio: number) => String(ratio);
 const MIN_SAMPLES_PER_ENGINE = 30;
 const NORMAL_INTERACTION_P95_BUDGET_MS = 50;
 const STRESS_REPEATED_GROWTH_LIMIT = 0.05;
@@ -137,6 +137,37 @@ const validateComparisonAgainstManifest = (
 	manifestEntry: WorkloadManifestEntry,
 ): ReadonlyArray<PerformanceContractFailure> => {
 	const failures: PerformanceContractFailure[] = [];
+	const metadataChecks = [
+		{
+			matches: comparison.category === manifestEntry.category,
+			message: `${comparison.name} must use category ${manifestEntry.category}; received ${comparison.category}`,
+		},
+		{
+			matches: comparison.caseType === manifestEntry.caseType,
+			message: `${comparison.name} must use case type ${manifestEntry.caseType}; received ${comparison.caseType}`,
+		},
+		{
+			matches: comparison.datasetSize === manifestEntry.datasetSize,
+			message: `${comparison.name} must use dataset size ${manifestEntry.datasetSize}; received ${comparison.datasetSize}`,
+		},
+		{
+			matches: comparison.operationCount === manifestEntry.operationCount,
+			message: `${comparison.name} must use operation count ${manifestEntry.operationCount}; received ${comparison.operationCount}`,
+		},
+		{
+			matches: comparison.normalInteraction === manifestEntry.normalInteraction,
+			message: `${comparison.name} must use normalInteraction ${String(manifestEntry.normalInteraction)}; received ${String(comparison.normalInteraction)}`,
+		},
+	];
+	for (const check of metadataChecks) {
+		if (!check.matches) {
+			failures.push({
+				suite: report.suite,
+				caseName: comparison.name,
+				message: check.message,
+			});
+		}
+	}
 
 	for (const [engineName, engineResult] of Object.entries(
 		comparison.engines,
@@ -150,6 +181,20 @@ const validateComparisonAgainstManifest = (
 				message: `${comparison.name} is missing engine result for ${engineName}`,
 			});
 			continue;
+		}
+		if (engineResult.engineId !== engineName) {
+			failures.push({
+				suite: report.suite,
+				caseName: comparison.name,
+				message: `${comparison.name} must report engineId ${engineName}; received ${engineResult.engineId}`,
+			});
+		}
+		if (engineResult.name !== comparison.name) {
+			failures.push({
+				suite: report.suite,
+				caseName: comparison.name,
+				message: `${comparison.name} engine result for ${engineName} must use the same case name; received ${engineResult.name}`,
+			});
 		}
 		if (engineResult.samples < MIN_SAMPLES_PER_ENGINE) {
 			failures.push({
@@ -184,24 +229,50 @@ const validateComparisonAgainstManifest = (
 		return failures;
 	}
 
-	if (comparison.throughputRatio === undefined) {
+	if (
+		comparison.throughputRatio === undefined ||
+		!Number.isFinite(comparison.throughputRatio)
+	) {
 		failures.push({
 			suite: report.suite,
 			caseName: comparison.name,
-			message: `${comparison.name} is missing a paired throughput ratio`,
+			message: `${comparison.name} must report a finite paired throughput ratio`,
 		});
 		return failures;
 	}
 
-	const threshold =
-		manifestEntry.category === "read-query"
-			? REQUIRED_READ_RATIO
-			: REQUIRED_WRITE_RATIO;
-	if (comparison.throughputRatio < threshold) {
+	const typescriptOpsPerSec = comparison.engines.typescript?.opsPerSec;
+	const wasmOpsPerSec = comparison.engines.wasm?.opsPerSec;
+	if (
+		typescriptOpsPerSec === undefined ||
+		wasmOpsPerSec === undefined ||
+		!Number.isFinite(typescriptOpsPerSec) ||
+		!Number.isFinite(wasmOpsPerSec) ||
+		typescriptOpsPerSec <= 0 ||
+		wasmOpsPerSec <= 0
+	) {
 		failures.push({
 			suite: report.suite,
 			caseName: comparison.name,
-			message: `${comparison.name} throughput ratio ${comparison.throughputRatio.toFixed(2)} is below the required ${threshold.toFixed(2)}`,
+			message: `${comparison.name} must report finite positive throughput for both paired engines`,
+		});
+		return failures;
+	}
+
+	const pairedThroughputRatio = wasmOpsPerSec / typescriptOpsPerSec;
+	if (comparison.throughputRatio !== pairedThroughputRatio) {
+		failures.push({
+			suite: report.suite,
+			caseName: comparison.name,
+			message: `${comparison.name} supplied throughput ratio ${formatThroughputRatio(comparison.throughputRatio)} does not match paired engine throughput ${formatThroughputRatio(pairedThroughputRatio)}`,
+		});
+	}
+
+	if (pairedThroughputRatio < REQUIRED_THROUGHPUT_RATIO) {
+		failures.push({
+			suite: report.suite,
+			caseName: comparison.name,
+			message: `${comparison.name} throughput ratio ${formatThroughputRatio(pairedThroughputRatio)} is below the required ${REQUIRED_THROUGHPUT_RATIO.toFixed(6)}`,
 		});
 	}
 
@@ -212,8 +283,18 @@ export const validatePerformanceContract = (
 	report: SuiteComparisonReport,
 ): PerformanceContractValidation => {
 	const failures: PerformanceContractFailure[] = [];
+	const seenCaseNames = new Set<string>();
 
 	for (const comparison of report.comparisons) {
+		if (seenCaseNames.has(comparison.name)) {
+			failures.push({
+				suite: report.suite,
+				caseName: comparison.name,
+				message: `${comparison.name} appears more than once in suite ${report.suite}`,
+			});
+		} else {
+			seenCaseNames.add(comparison.name);
+		}
 		const manifestEntry = MANIFEST_BY_NAME.get(comparison.name);
 		if (!manifestEntry) {
 			failures.push({
@@ -397,7 +478,15 @@ export const validateFullReportContract = (
 		const suiteValidation = validatePerformanceContract(suite);
 		failures.push(...suiteValidation.failures);
 		for (const comparison of suite.comparisons) {
-			seenCaseNames.add(comparison.name);
+			if (seenCaseNames.has(comparison.name)) {
+				failures.push({
+					suite: suite.suite,
+					caseName: comparison.name,
+					message: `${comparison.name} appears more than once in the full benchmark report`,
+				});
+			} else {
+				seenCaseNames.add(comparison.name);
+			}
 		}
 	}
 

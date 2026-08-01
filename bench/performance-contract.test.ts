@@ -18,6 +18,7 @@ const makeComparison = (
 	category: "write-transaction",
 	caseType: "required",
 	datasetSize: 10_000,
+	operationCount: 1,
 	normalInteraction: true,
 	throughputRatio: 0.25,
 	latencyRatio: 1.1,
@@ -105,14 +106,15 @@ const makeComparison = (
 });
 
 describe("validatePerformanceContract", () => {
-	it("passes when a suite reports only its own manifest cases and they meet thresholds", () => {
+	it("passes when a suite reports only its own manifest cases at or above TypeScript parity", () => {
 		const report = {
 			suite: "scaling",
 			comparisons: [
 				makeComparison({
 					name: "findById @ 10K",
 					category: "read-query",
-					throughputRatio: 0.5,
+					datasetSize: 10_000,
+					throughputRatio: 1,
 					engines: {
 						typescript: {
 							...makeComparison().engines.typescript,
@@ -122,7 +124,7 @@ describe("validatePerformanceContract", () => {
 						wasm: {
 							...makeComparison().engines.wasm,
 							name: "findById @ 10K",
-							opsPerSec: 50,
+							opsPerSec: 100,
 							p95Ms: 8,
 						},
 					},
@@ -153,21 +155,220 @@ describe("validatePerformanceContract", () => {
 		);
 	});
 
-	it("fails when a required case is slower than its category threshold", () => {
+	it("rejects a supplied ratio that does not match the paired engine throughput", () => {
+		const validation = validatePerformanceContract({
+			suite: "crud",
+			comparisons: [makeComparison({ throughputRatio: 1 })],
+		});
+
+		expect(validation.passed).toBe(false);
+		expect(validation.failures[0]?.message).toContain(
+			"does not match paired engine throughput 0.25",
+		);
+	});
+
+	it("fails without rounding when a required case is even slightly slower than TypeScript", () => {
 		const validation = validatePerformanceContract({
 			suite: "query-pipeline",
 			comparisons: [
 				makeComparison({
 					name: "filter: equality (role = 'admin')",
 					category: "read-query",
-					throughputRatio: 0.49,
+					throughputRatio: 99.99999 / 100,
+					engines: {
+						typescript: {
+							...makeComparison().engines.typescript,
+							name: "filter: equality (role = 'admin')",
+						},
+						wasm: {
+							...makeComparison().engines.wasm,
+							name: "filter: equality (role = 'admin')",
+							opsPerSec: 99.99999,
+						},
+					},
 				}),
 			],
 		});
 
 		expect(validation.passed).toBe(false);
-		expect(validation.failures[0]?.message).toContain("0.49");
-		expect(validation.failures[0]?.message).toContain("0.50");
+		const throughputFailure = validation.failures.find((failure) =>
+			failure.message.includes("below the required"),
+		);
+		expect(throughputFailure?.message).toContain("0.999999");
+		expect(throughputFailure?.message).not.toContain(
+			"throughput ratio 1.000000",
+		);
+		expect(throughputFailure?.message).toContain("required 1.000000");
+	});
+
+	it("rejects duplicate manifest cases in one suite report", () => {
+		const parityComparison = makeComparison({
+			throughputRatio: 1,
+			engines: {
+				typescript: makeComparison().engines.typescript,
+				wasm: {
+					...makeComparison().engines.wasm,
+					opsPerSec: 100,
+				},
+			},
+		});
+		const validation = validatePerformanceContract({
+			suite: "crud",
+			comparisons: [parityComparison, parityComparison],
+		});
+
+		expect(validation.passed).toBe(false);
+		expect(validation.failures[0]?.message).toContain("appears more than once");
+	});
+
+	it("rejects missing or non-finite required throughput ratios", () => {
+		for (const throughputRatio of [
+			undefined,
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+		]) {
+			const validation = validatePerformanceContract({
+				suite: "crud",
+				comparisons: [makeComparison({ throughputRatio })],
+			});
+
+			expect(validation.passed).toBe(false);
+			expect(validation.failures[0]?.message).toContain(
+				"finite paired throughput ratio",
+			);
+		}
+
+		const invalidEngineThroughput = validatePerformanceContract({
+			suite: "crud",
+			comparisons: [
+				makeComparison({
+					throughputRatio: 1,
+					engines: {
+						typescript: {
+							...makeComparison().engines.typescript,
+							opsPerSec: 0,
+						},
+						wasm: makeComparison().engines.wasm,
+					},
+				}),
+			],
+		});
+		expect(invalidEngineThroughput.passed).toBe(false);
+		expect(invalidEngineThroughput.failures[0]?.message).toContain(
+			"finite positive throughput",
+		);
+	});
+
+	it("rejects required-case metadata that differs from the fixed manifest", () => {
+		const wrongOperationCount = {
+			...makeComparison({
+				throughputRatio: 1,
+				engines: {
+					typescript: makeComparison().engines.typescript,
+					wasm: {
+						...makeComparison().engines.wasm,
+						opsPerSec: 100,
+					},
+				},
+			}),
+			operationCount: 100,
+		} as PairedComparison;
+		const wrongOperationValidation = validatePerformanceContract({
+			suite: "crud",
+			comparisons: [wrongOperationCount],
+		});
+		expect(wrongOperationValidation.passed).toBe(false);
+		expect(wrongOperationValidation.failures[0]?.message).toContain(
+			"operation count 1",
+		);
+
+		const wrongSize = validatePerformanceContract({
+			suite: "scaling",
+			comparisons: [
+				makeComparison({
+					name: "findById @ 100",
+					category: "read-query",
+					datasetSize: 1_000,
+					throughputRatio: 1,
+				}),
+			],
+		});
+		expect(wrongSize.passed).toBe(false);
+		expect(wrongSize.failures[0]?.message).toContain("dataset size 100");
+
+		const correctOneThousand = validatePerformanceContract({
+			suite: "scaling",
+			comparisons: [
+				makeComparison({
+					name: "findById @ 1K",
+					category: "read-query",
+					datasetSize: 1_000,
+					normalInteraction: false,
+					throughputRatio: 1,
+					engines: {
+						typescript: {
+							...makeComparison().engines.typescript,
+							name: "findById @ 1K",
+						},
+						wasm: {
+							...makeComparison().engines.wasm,
+							name: "findById @ 1K",
+							opsPerSec: 100,
+						},
+					},
+				}),
+			],
+		});
+		expect(correctOneThousand.passed).toBe(true);
+
+		const reclassified = validatePerformanceContract({
+			suite: "crud",
+			comparisons: [
+				makeComparison({
+					caseType: "characterization",
+					throughputRatio: 1,
+				}),
+			],
+		});
+		expect(reclassified.passed).toBe(false);
+		expect(reclassified.failures[0]?.message).toContain("case type required");
+
+		const wrongEnginePair = validatePerformanceContract({
+			suite: "crud",
+			comparisons: [
+				makeComparison({
+					throughputRatio: 1,
+					engines: {
+						typescript: makeComparison().engines.typescript,
+						wasm: {
+							...makeComparison().engines.wasm,
+							engineId: "typescript",
+						},
+					},
+				}),
+			],
+		});
+		expect(wrongEnginePair.passed).toBe(false);
+		expect(wrongEnginePair.failures[0]?.message).toContain("engineId wasm");
+
+		const wrongCaseName = validatePerformanceContract({
+			suite: "crud",
+			comparisons: [
+				makeComparison({
+					throughputRatio: 1,
+					engines: {
+						typescript: makeComparison().engines.typescript,
+						wasm: {
+							...makeComparison().engines.wasm,
+							name: "update (single)",
+							opsPerSec: 100,
+						},
+					},
+				}),
+			],
+		});
+		expect(wrongCaseName.passed).toBe(false);
+		expect(wrongCaseName.failures[0]?.message).toContain("same case name");
 	});
 
 	it("fails when an engine result is missing, undersampled, or missing a checksum", () => {
@@ -232,6 +433,7 @@ describe("validatePerformanceContract", () => {
 			suite: "crud",
 			comparisons: [
 				makeComparison({
+					throughputRatio: 1,
 					engines: {
 						typescript: {
 							...makeComparison().engines.typescript,
@@ -239,6 +441,7 @@ describe("validatePerformanceContract", () => {
 						},
 						wasm: {
 							...makeComparison().engines.wasm,
+							opsPerSec: 100,
 							p95Ms: 51,
 						},
 					},
@@ -569,6 +772,34 @@ describe("evaluateBrowserBudget", () => {
 });
 
 describe("validateFullReportContract", () => {
+	it("rejects a manifest case repeated across suite outputs", () => {
+		const parityComparison = makeComparison({
+			throughputRatio: 1,
+			engines: {
+				typescript: makeComparison().engines.typescript,
+				wasm: {
+					...makeComparison().engines.wasm,
+					opsPerSec: 100,
+				},
+			},
+		});
+		const validation = validateFullReportContract({
+			suites: [
+				{ suite: "crud", comparisons: [parityComparison] },
+				{ suite: "crud", comparisons: [parityComparison] },
+			],
+			includeStress: false,
+		});
+
+		expect(
+			validation.failures.some((failure) =>
+				failure.message.includes(
+					"appears more than once in the full benchmark report",
+				),
+			),
+		).toBe(true);
+	});
+
 	it("fails when manifest entries are absent from the full report", () => {
 		const validation = validateFullReportContract({
 			suites: [
@@ -599,6 +830,7 @@ describe("checksumBenchmarkValue", () => {
 		const missing = checksumBenchmarkValue({});
 		const explicitUndefined = checksumBenchmarkValue({ value: undefined });
 		const explicitNull = checksumBenchmarkValue({ value: null });
+		// biome-ignore lint/suspicious/noSparseArray: The checksum contract distinguishes holes from explicit undefined.
 		const arrayWithHole = checksumBenchmarkValue([, 1]);
 		const arrayWithUndefined = checksumBenchmarkValue([undefined, 1]);
 		const sentinelShape = checksumBenchmarkValue({

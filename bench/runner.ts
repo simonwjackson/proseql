@@ -1,10 +1,10 @@
-import { Glob } from "bun";
 import { fileURLToPath } from "node:url";
+import { Glob } from "bun";
 import type { Bench, BenchOptions } from "tinybench";
 import {
 	buildComparisons,
-	getTaskMetadata,
 	type EngineId,
+	getTaskMetadata,
 	type PairedComparison,
 	updateTaskMetadata,
 } from "./comparison.js";
@@ -13,12 +13,12 @@ import {
 	validateFullReportContract,
 	validatePerformanceContract,
 } from "./performance-contract.js";
-import { WORKLOAD_MANIFEST } from "./workloads.js";
 import {
 	type FormattedBenchmarkResult,
 	formatResultsJson,
 	formatResultsTable,
 } from "./utils.js";
+import { WORKLOAD_MANIFEST } from "./workloads.js";
 
 const DEFAULT_MIN_SAMPLES_PER_TASK = 30;
 const DEFAULT_MAX_ADAPTIVE_ATTEMPTS = 3;
@@ -504,6 +504,7 @@ export const mergeIsolatedStressSuiteOutputs = (options: {
 				category: comparison.category,
 				caseType: comparison.caseType,
 				datasetSize: comparison.datasetSize,
+				operationCount: comparison.operationCount,
 				normalInteraction: comparison.normalInteraction,
 				throughputRatio:
 					typescript && wasm
