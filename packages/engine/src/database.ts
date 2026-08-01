@@ -522,7 +522,7 @@ class EngineRuntime {
 	}
 
 	invoke<T>(method: string, payload?: unknown): Promise<T> {
-		return Promise.resolve().then(() => this.dispatch<T>(method, payload));
+		return settledPromise(() => this.dispatch<T>(method, payload));
 	}
 
 	async createTemporaryTransactionRuntime(): Promise<EngineRuntime> {
@@ -857,18 +857,20 @@ function buildCollectionFacade(
 	return {
 		query: ((config?: any) => {
 			if (config?.cursor) {
-				validateCursorConfig(config.cursor);
-				return runtime.invoke<any>("queryCursor", {
-					collection: collection.name,
-					query: {
-						where: config.where,
-						sort: config.sort,
-						offset: config.offset,
-						limit: config.limit,
-						select: config.select,
-					},
-					cursor: config.cursor,
-					populate: config.populate,
+				return settledPromise(() => {
+					validateCursorConfig(config.cursor);
+					return runtime.invoke<any>("queryCursor", {
+						collection: collection.name,
+						query: {
+							where: config.where,
+							sort: config.sort,
+							offset: config.offset,
+							limit: config.limit,
+							select: config.select,
+						},
+						cursor: config.cursor,
+						populate: config.populate,
+					});
 				}).then((page) => ({
 					...page,
 					items: applySelectionOrder(page.items, config.select),
@@ -2125,21 +2127,24 @@ function buildTransactionCollectionFacade(
 	return {
 		query: (config?: any) =>
 			config?.cursor
-				? (validateCursorConfig(config.cursor), runtime.invoke<any>("queryCursor", {
-						collection: collection.name,
-						query: {
-							where: config.where,
-							sort: config.sort,
-							offset: config.offset,
-							limit: config.limit,
-							select: config.select,
-						},
-						cursor: config.cursor,
-						populate: config.populate,
+				? settledPromise(() => {
+						validateCursorConfig(config.cursor);
+						return runtime.invoke<any>("queryCursor", {
+							collection: collection.name,
+							query: {
+								where: config.where,
+								sort: config.sort,
+								offset: config.offset,
+								limit: config.limit,
+								select: config.select,
+							},
+							cursor: config.cursor,
+							populate: config.populate,
+						});
 					}).then((page) => ({
 						...page,
 						items: applySelectionOrder(page.items, config.select),
-					})))
+					}))
 				: runtime.invoke<any[]>("query", {
 						collection: collection.name,
 						query: {
@@ -2529,6 +2534,14 @@ function prepareCommandPayload(method: string, payload: unknown): unknown {
 
 function promiseCall<T>(fn: () => Promise<T>): Promise<T> {
 	return Promise.resolve().then(fn);
+}
+
+function settledPromise<T>(fn: () => T): Promise<Awaited<T>> {
+	try {
+		return Promise.resolve(fn()) as Promise<Awaited<T>>;
+	} catch (error) {
+		return Promise.reject(error);
+	}
 }
 
 function parseBridgeResponse<T>(raw: string): T {

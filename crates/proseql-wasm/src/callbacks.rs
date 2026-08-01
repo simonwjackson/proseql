@@ -317,6 +317,17 @@ fn js_value_to_string(value: &wasm_bindgen::JsValue) -> String {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn call_callback_value(
+    function: &js_sys::Function,
+    args: &js_sys::Array,
+    operation: &str,
+) -> Result<wasm_bindgen::JsValue, EngineError> {
+    function
+        .apply(&wasm_bindgen::JsValue::NULL, args)
+        .map_err(|error| callback_error(operation, "js-exception", js_value_to_string(&error)))
+}
+
+#[cfg(target_arch = "wasm32")]
 fn call_json_callback(
     function: &js_sys::Function,
     payload_json: Option<&str>,
@@ -326,10 +337,18 @@ fn call_json_callback(
     if let Some(payload_json) = payload_json {
         args.push(&wasm_bindgen::JsValue::from_str(payload_json));
     }
-    function
-        .apply(&wasm_bindgen::JsValue::NULL, &args)
-        .map(|value| value.as_string().unwrap_or_default())
-        .map_err(|error| callback_error(operation, "js-exception", js_value_to_string(&error)))
+    call_callback_value(function, &args, operation).and_then(|value| {
+        value.as_string().ok_or_else(|| {
+            callback_error(
+                operation,
+                "invalid-callback-return-type",
+                format!(
+                    "Expected a string bridge response, received {}",
+                    js_value_to_string(&value)
+                ),
+            )
+        })
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -372,21 +391,35 @@ fn call_json_void(
     let payload_json = serde_json::to_string(payload)
         .map_err(|error| callback_error(operation, "serialize-payload", error.to_string()))?;
     let raw = call_json_callback(function, Some(payload_json.as_str()), operation)?;
-    if let Ok(response) = serde_json::from_str::<InboundBridgeResponse<serde_json::Value>>(&raw) {
-        return match response {
-            InboundBridgeResponse::Ok { .. } => Ok(()),
-            InboundBridgeResponse::Error { error } => Err(error),
-            InboundBridgeResponse::Defect { message } => {
-                Err(callback_error(operation, "callback-defect", message))
-            }
-        };
+    match serde_json::from_str::<InboundBridgeResponse<serde_json::Value>>(&raw).map_err(
+        |error| callback_error(operation, "invalid-callback-response", error.to_string()),
+    )? {
+        InboundBridgeResponse::Ok { .. } => Ok(()),
+        InboundBridgeResponse::Error { error } => Err(error),
+        InboundBridgeResponse::Defect { message } => {
+            Err(callback_error(operation, "callback-defect", message))
+        }
     }
-    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
 fn call_no_arg_string(function: &js_sys::Function, operation: &str) -> Result<String, EngineError> {
     call_json_callback(function, None, operation)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn callback_defect_message(operation: &str, error: &EngineError) -> String {
+    match error {
+        EngineError::Operation(operation_error) => {
+            format!("{operation}: {}", operation_error.message)
+        }
+        _ => format!("{operation}: {error}"),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn panic_callback_defect(operation: &str, error: EngineError) -> ! {
+    panic!("{}", callback_defect_message(operation, &error))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -482,25 +515,52 @@ fn on_change_payload(ctx: &OnChangeContext) -> Value {
 impl CallbackTable {
     pub fn register_default_js(&mut self, id: String, callback: js_sys::Function) {
         self.register_default(id, move || {
-            let raw = call_no_arg_string(&callback, "defaultCallback")
-                .unwrap_or_else(|_| "null".to_owned());
-            serde_json::from_str(&raw).unwrap_or(Value::Null)
+            match call_no_arg_string(&callback, "defaultCallback") {
+                Ok(raw) => serde_json::from_str(&raw).unwrap_or_else(|error| {
+                    panic_callback_defect(
+                        "defaultCallback",
+                        callback_error(
+                            "defaultCallback",
+                            "invalid-callback-response",
+                            error.to_string(),
+                        ),
+                    )
+                }),
+                Err(error) => panic_callback_defect("defaultCallback", error),
+            }
         });
     }
 
     pub fn register_predicate_js(&mut self, id: String, callback: js_sys::Function) {
         self.register_predicate(id, move |value| {
-            let payload = serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned());
-            call_json_callback(&callback, Some(payload.as_str()), "predicateCallback")
-                .ok()
-                .and_then(|raw| serde_json::from_str::<bool>(&raw).ok())
-                .unwrap_or(false)
+            let payload = serde_json::to_string(value).unwrap_or_else(|error| {
+                panic_callback_defect(
+                    "predicateCallback",
+                    callback_error("predicateCallback", "serialize-payload", error.to_string()),
+                )
+            });
+            match call_json_callback(&callback, Some(payload.as_str()), "predicateCallback") {
+                Ok(raw) => serde_json::from_str::<bool>(&raw).unwrap_or_else(|error| {
+                    panic_callback_defect(
+                        "predicateCallback",
+                        callback_error(
+                            "predicateCallback",
+                            "invalid-callback-response",
+                            error.to_string(),
+                        ),
+                    )
+                }),
+                Err(error) => panic_callback_defect("predicateCallback", error),
+            }
         });
     }
 
     pub fn register_computed_js(&mut self, id: String, callback: js_sys::Function) {
         self.register_computed(id, move |value| {
-            call_json_result(&callback, value, "computedCallback").unwrap_or(Value::Null)
+            match call_json_result(&callback, value, "computedCallback") {
+                Ok(result) => result,
+                Err(error) => panic_callback_defect("computedCallback", error),
+            }
         });
     }
 
@@ -509,12 +569,35 @@ impl CallbackTable {
             let args = js_sys::Array::new();
             args.push(&wasm_bindgen::JsValue::from_str(a));
             args.push(&wasm_bindgen::JsValue::from_str(b));
-            let value = callback
-                .apply(&wasm_bindgen::JsValue::NULL, &args)
-                .ok()
-                .and_then(|value| value.as_f64())
-                .unwrap_or(0.0);
-            value.partial_cmp(&0.0).unwrap_or(Ordering::Equal)
+            let value = match call_callback_value(&callback, &args, "collatorCallback") {
+                Ok(value) => value
+                    .as_f64()
+                    .filter(|number| number.is_finite())
+                    .unwrap_or_else(|| {
+                        panic_callback_defect(
+                            "collatorCallback",
+                            callback_error(
+                                "collatorCallback",
+                                "invalid-callback-return-type",
+                                format!(
+                                    "Expected a finite numeric collator result, received {}",
+                                    js_value_to_string(&value)
+                                ),
+                            ),
+                        )
+                    }),
+                Err(error) => panic_callback_defect("collatorCallback", error),
+            };
+            value.partial_cmp(&0.0).unwrap_or_else(|| {
+                panic_callback_defect(
+                    "collatorCallback",
+                    callback_error(
+                        "collatorCallback",
+                        "invalid-callback-return-type",
+                        format!("Expected an orderable finite collator result, received {value}"),
+                    ),
+                )
+            })
         });
     }
 
@@ -532,7 +615,10 @@ impl CallbackTable {
             }
             impl IdGenerator for JsGenerator {
                 fn generate(&mut self) -> String {
-                    call_no_arg_string(&self.callback, "idGeneratorCallback").unwrap_or_default()
+                    match call_no_arg_string(&self.callback, "idGeneratorCallback") {
+                        Ok(id) => id,
+                        Err(error) => panic_callback_defect("idGeneratorCallback", error),
+                    }
                 }
             }
             Box::new(JsGenerator { callback }) as Box<dyn IdGenerator>
@@ -619,17 +705,45 @@ impl CallbackTable {
                 )
             })?;
         self.register_custom_operator(name, supported_types, move |field_value, operand| {
-            let field_json =
-                serde_json::to_string(field_value).unwrap_or_else(|_| "null".to_owned());
-            let operand_json = serde_json::to_string(operand).unwrap_or_else(|_| "null".to_owned());
+            let field_json = serde_json::to_string(field_value).unwrap_or_else(|error| {
+                panic_callback_defect(
+                    "customOperatorCallback",
+                    callback_error(
+                        "customOperatorCallback",
+                        "serialize-payload",
+                        error.to_string(),
+                    ),
+                )
+            });
+            let operand_json = serde_json::to_string(operand).unwrap_or_else(|error| {
+                panic_callback_defect(
+                    "customOperatorCallback",
+                    callback_error(
+                        "customOperatorCallback",
+                        "serialize-payload",
+                        error.to_string(),
+                    ),
+                )
+            });
             let args = js_sys::Array::new();
             args.push(&wasm_bindgen::JsValue::from_str(field_json.as_str()));
             args.push(&wasm_bindgen::JsValue::from_str(operand_json.as_str()));
-            callback
-                .apply(&wasm_bindgen::JsValue::NULL, &args)
-                .ok()
-                .and_then(|value| value.as_bool())
-                .unwrap_or(false)
+            match call_callback_value(&callback, &args, "customOperatorCallback") {
+                Ok(value) => value.as_bool().unwrap_or_else(|| {
+                    panic_callback_defect(
+                        "customOperatorCallback",
+                        callback_error(
+                            "customOperatorCallback",
+                            "invalid-callback-return-type",
+                            format!(
+                                "Expected a boolean custom operator result, received {}",
+                                js_value_to_string(&value)
+                            ),
+                        ),
+                    )
+                }),
+                Err(error) => panic_callback_defect("customOperatorCallback", error),
+            }
         });
         Ok(())
     }

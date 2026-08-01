@@ -5,6 +5,7 @@ import {
 	type PairedComparison,
 } from "./comparison.js";
 import {
+	evaluateBrowserBudget,
 	validateBrowserPerformanceContract,
 	validateFullReportContract,
 	validatePerformanceContract,
@@ -464,6 +465,106 @@ describe("validateBrowserPerformanceContract", () => {
 				failure.message.includes("WASM linear-memory metric"),
 			),
 		).toBe(true);
+	});
+});
+
+describe("evaluateBrowserBudget", () => {
+	it("separates artifact and regression budgets from the absolute p95 interaction budget", () => {
+		const evaluation = evaluateBrowserBudget({
+			contract: {
+				schemaVersion: "proseql.wasm-build-contract.v1",
+				artifactBudgets: {
+					browserProductionWasmGzipBaselineBytes: 540_028,
+					browserProductionWasmGzipMaxGrowthRatio: 1.05,
+				},
+				browserBudgets: {
+					baseline: {
+						coldStartupMs: 1_000,
+						jsHeapBytes: 10_000,
+						wasmLinearMemoryBytes: 20_000,
+					},
+					coldStartupMaxGrowthRatio: 1.1,
+					jsHeapMaxGrowthRatio: 1.05,
+					wasmLinearMemoryMaxGrowthRatio: 1.05,
+				},
+			},
+			currentArtifactGzipBytes: 540_028,
+			report: {
+				coldStartupMs: 1_100,
+				interactions: [
+					{
+						name: "findById @ 10K",
+						samples: Array.from({ length: 30 }, () => 10),
+						p50Ms: 10,
+						p95Ms: 10,
+						p99Ms: 20,
+						meanMs: 10,
+						observedCleanupCount: 10_000,
+					},
+					{
+						name: "updateMany (predicate batch ~100)",
+						samples: Array.from({ length: 30 }, () => 75),
+						p50Ms: 75,
+						p95Ms: 75,
+						p99Ms: 80,
+						meanMs: 75,
+						observedCleanupCount: 10_000,
+					},
+				],
+				jsHeapBytes: { status: "available", value: 11_000 },
+				wasmLinearMemoryBytes: { status: "available", value: 24_000 },
+			},
+		});
+
+		expect(evaluation.summary.artifactAndRegressionBudgetsPassed).toBe(false);
+		expect(evaluation.coldStartup.passed).toBe(true);
+		expect(evaluation.jsHeap.passed).toBe(false);
+		expect(evaluation.wasmLinearMemory.passed).toBe(false);
+		expect(evaluation.summary.allInteractionP95Within50Ms).toBe(false);
+		expect(evaluation.artifact.maxAllowed).toBeCloseTo(567_029.4);
+		expect(evaluation.interactions[0]).toMatchObject({
+			name: "findById @ 10K",
+			currentP95Ms: 10,
+			withinAbsoluteP95Budget: true,
+		});
+		expect(evaluation.interactions[1]).toMatchObject({
+			name: "updateMany (predicate batch ~100)",
+			withinAbsoluteP95Budget: false,
+		});
+	});
+
+	it("fails a regression gate when the current metric is unavailable", () => {
+		const evaluation = evaluateBrowserBudget({
+			contract: {
+				schemaVersion: "proseql.wasm-build-contract.v1",
+				artifactBudgets: {
+					browserProductionWasmGzipBaselineBytes: 540_028,
+					browserProductionWasmGzipMaxGrowthRatio: 1.05,
+				},
+				browserBudgets: {
+					baseline: {
+						coldStartupMs: 1_000,
+						jsHeapBytes: 10_000,
+						wasmLinearMemoryBytes: 20_000,
+					},
+					coldStartupMaxGrowthRatio: 1.1,
+					jsHeapMaxGrowthRatio: 1.05,
+					wasmLinearMemoryMaxGrowthRatio: 1.05,
+				},
+			},
+			currentArtifactGzipBytes: 600_000,
+			report: {
+				coldStartupMs: 1_500,
+				interactions: [],
+				jsHeapBytes: createUnavailableMetric("missing"),
+				wasmLinearMemoryBytes: { status: "available", value: 30_000 },
+			},
+		});
+
+		expect(evaluation.summary.artifactAndRegressionBudgetsPassed).toBe(false);
+		expect(evaluation.artifact.passed).toBe(false);
+		expect(evaluation.jsHeap.passed).toBe(false);
+		expect(evaluation.jsHeap.reason).toBe("missing current metric");
 	});
 });
 

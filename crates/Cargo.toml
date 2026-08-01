@@ -23,3 +23,20 @@ walkdir = "2"
 tempfile = "3"
 notify = "6"
 unicode-ident = "1"
+
+[profile.wasm-production]
+inherits = "release"
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+incremental = false
+
+[profile.wasm-profile]
+inherits = "release"
+opt-level = 2
+debug = 2
+lto = "off"
+codegen-units = 16
+panic = "unwind"
+incremental = false

@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { OperationError } from "@proseql/core";
 import { Effect, Schema, Stream } from "effect";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -34,7 +35,9 @@ class MockStorage implements Storage {
 	}
 }
 
-const WORKTREE_ROOT = "/home/simonwjackson/code/github/simonwjackson/proseql/.worktrees/refactor-rust-engine-conversion";
+const WORKTREE_ROOT = resolve(
+	fileURLToPath(new URL("../../..", import.meta.url)),
+);
 
 const BookSchema = Schema.Struct({
 	id: Schema.String,
@@ -126,6 +129,15 @@ describe("@proseql/browser persistent effect factory", () => {
 		const effectBrowser = readFileSync(resolve(WORKTREE_ROOT, "packages/effect/dist/browser.js"), "utf8");
 		expect(effectBrowser).toContain("@proseql/engine/browser");
 		expect(effectBrowser).not.toContain("node:");
+
+		const engineLoader = readFileSync(
+			resolve(WORKTREE_ROOT, "packages/engine/dist/loader.js"),
+			"utf8",
+		);
+		expect(engineLoader).toContain("./browser-wasm/proseql_wasm.js");
+		expect(engineLoader).toContain("./browser-wasm/proseql_wasm_bg.wasm");
+		expect(engineLoader).not.toContain("browser-wasm-profile");
+		expect(engineLoader).not.toContain("wasm-profile");
 
 		const browserBuilt = readFileSync(resolve(WORKTREE_ROOT, "packages/browser/dist/index.js"), "utf8");
 		expect(browserBuilt).toContain("@proseql/effect/browser");

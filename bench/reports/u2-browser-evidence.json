@@ -1,0 +1,131 @@
+{
+  "schemaVersion": "proseql.u2-browser-evidence.v2",
+  "sources": {
+    "contract": {
+      "path": "packages/engine/package.json",
+      "jsonPointer": "/proseqlWasmContract"
+    },
+    "buildReport": {
+      "path": "packages/engine/build/wasm-build-report.json",
+      "command": "bun run --cwd packages/engine build:wasm"
+    },
+    "currentBrowserReport": {
+      "path": "bench/reports/u2-browser-current.json",
+      "command": "bun run bench:browser-report > bench/reports/u2-browser-current.json"
+    },
+    "evidence": {
+      "path": "bench/reports/u2-browser-evidence.json",
+      "command": "bun run generate:u2-browser-evidence"
+    }
+  },
+  "browserProductionArtifact": {
+    "wasmPath": "dist/browser-wasm/proseql_wasm_bg.wasm",
+    "gzipBytes": 469429
+  },
+  "currentBrowserContract": {
+    "passed": false,
+    "failures": [
+      {
+        "suite": "browser",
+        "caseName": "updateMany (declarative batch ~100)",
+        "message": "updateMany (declarative batch ~100) exceeded the 50ms Chromium p95 budget (202.30ms)"
+      },
+      {
+        "suite": "browser",
+        "caseName": "updateMany (predicate batch ~100)",
+        "message": "updateMany (predicate batch ~100) exceeded the 50ms Chromium p95 budget (603.90ms)"
+      },
+      {
+        "suite": "browser",
+        "caseName": "transactional (create + update + delete)",
+        "message": "transactional (create + update + delete) exceeded the 50ms Chromium p95 budget (204.80ms)"
+      }
+    ]
+  },
+  "artifact": {
+    "baseline": 540028,
+    "current": 469429,
+    "maxAllowed": 567029.4,
+    "passed": true,
+    "deltaBytes": -70599,
+    "deltaRatio": -0.1307321101868792
+  },
+  "coldStartupMs": {
+    "baseline": 1024.016123,
+    "current": 987.524694,
+    "maxAllowed": 1126.4177353000002,
+    "passed": true,
+    "deltaMs": -36.49142900000015,
+    "deltaRatio": -0.03563560004611387
+  },
+  "jsHeapBytes": {
+    "baseline": 11739108,
+    "current": 11570096,
+    "maxAllowed": 12326063.4,
+    "passed": true,
+    "deltaBytes": -169012,
+    "deltaRatio": -0.014397346033446494
+  },
+  "wasmLinearMemoryBytes": {
+    "baseline": 54525952,
+    "current": 54525952,
+    "maxAllowed": 57252249.6,
+    "passed": true,
+    "deltaBytes": 0,
+    "deltaRatio": 0
+  },
+  "interactions": [
+    {
+      "name": "findById @ 10K",
+      "currentP95Ms": 0.19999998807907104,
+      "withinAbsoluteP95Budget": true,
+      "absoluteP95BudgetMs": 50
+    },
+    {
+      "name": "paginate: limit 100, offset 500",
+      "currentP95Ms": 8.800000011920929,
+      "withinAbsoluteP95Budget": true,
+      "absoluteP95BudgetMs": 50
+    },
+    {
+      "name": "create (single)",
+      "currentP95Ms": 8.699999988079071,
+      "withinAbsoluteP95Budget": true,
+      "absoluteP95BudgetMs": 50
+    },
+    {
+      "name": "update (single)",
+      "currentP95Ms": 4.399999976158142,
+      "withinAbsoluteP95Budget": true,
+      "absoluteP95BudgetMs": 50
+    },
+    {
+      "name": "delete (single)",
+      "currentP95Ms": 4.400000035762787,
+      "withinAbsoluteP95Budget": true,
+      "absoluteP95BudgetMs": 50
+    },
+    {
+      "name": "updateMany (declarative batch ~100)",
+      "currentP95Ms": 202.30000001192093,
+      "withinAbsoluteP95Budget": false,
+      "absoluteP95BudgetMs": 50
+    },
+    {
+      "name": "updateMany (predicate batch ~100)",
+      "currentP95Ms": 603.9000000357628,
+      "withinAbsoluteP95Budget": false,
+      "absoluteP95BudgetMs": 50
+    },
+    {
+      "name": "transactional (create + update + delete)",
+      "currentP95Ms": 204.80000001192093,
+      "withinAbsoluteP95Budget": false,
+      "absoluteP95BudgetMs": 50
+    }
+  ],
+  "summary": {
+    "artifactAndRegressionBudgetsPassed": true,
+    "allInteractionP95Within50Ms": false
+  }
+}

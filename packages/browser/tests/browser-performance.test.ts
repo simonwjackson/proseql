@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
 	BROWSER_WORKLOAD_INTERACTION_NAMES,
@@ -8,6 +12,19 @@ import {
 	launchBenchmarkBrowser,
 	measureBrowserInteractionSamples,
 } from "../../../bench/browser-runner.js";
+import { evaluateBrowserBudget } from "../../../bench/performance-contract.js";
+
+const WORKTREE_ROOT = resolve(
+	fileURLToPath(new URL("../../..", import.meta.url)),
+);
+const ENGINE_PACKAGE_JSON_PATH = resolve(
+	WORKTREE_ROOT,
+	"packages/engine/package.json",
+);
+const BROWSER_WASM_PATH = resolve(
+	WORKTREE_ROOT,
+	"packages/engine/dist/browser-wasm/proseql_wasm_bg.wasm",
+);
 
 let browser: Awaited<ReturnType<typeof launchBenchmarkBrowser>> | undefined;
 let chromiumAvailable = false;
@@ -36,10 +53,25 @@ describe("browser performance runner", () => {
 	});
 
 	it.skipIf(!chromiumAvailable)(
-		"collects the real Chromium workload report for all named browser interactions",
+		"collects the real Chromium workload report and holds startup/memory budgets against the checked-in pre-U2 baseline",
 		async () => {
 			browser = await launchBenchmarkBrowser();
 			const report = await collectBrowserWorkloadReport(browser);
+			const contract = (
+				JSON.parse(readFileSync(ENGINE_PACKAGE_JSON_PATH, "utf8")) as {
+					readonly proseqlWasmContract: Parameters<
+						typeof evaluateBrowserBudget
+					>[0]["contract"];
+				}
+			).proseqlWasmContract;
+			const budget = evaluateBrowserBudget({
+				contract,
+				report,
+				currentArtifactGzipBytes: gzipSync(readFileSync(BROWSER_WASM_PATH), {
+					level: 9,
+					mtime: 0,
+				}).byteLength,
+			});
 
 			expect(report.coldStartupMs).toBeGreaterThanOrEqual(0);
 			expect(
@@ -50,8 +82,13 @@ describe("browser performance runner", () => {
 				expect(interaction.p95Ms).toBeDefined();
 				expect(interaction.observedCleanupCount).toBe(10_000);
 			}
-			expect(report.jsHeapBytes.status).toBeDefined();
-			expect(report.wasmLinearMemoryBytes.status).toBeDefined();
+			expect(budget.artifact.passed).toBe(true);
+			expect(budget.coldStartup.passed).toBe(true);
+			expect(budget.jsHeap.passed).toBe(true);
+			expect(budget.wasmLinearMemory.passed).toBe(true);
+			expect(
+				budget.interactions.map((interaction) => interaction.name),
+			).toEqual([...BROWSER_WORKLOAD_INTERACTION_NAMES]);
 		},
 		60_000,
 	);

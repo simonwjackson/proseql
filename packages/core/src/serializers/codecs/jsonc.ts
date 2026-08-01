@@ -1,6 +1,4 @@
-import pkg from "jsonc-parser";
-
-const { parse } = pkg;
+import { parse } from "jsonc-parser";
 
 import type { FormatCodec, FormatOptions } from "../format-codec.js";
 

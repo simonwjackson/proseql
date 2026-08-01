@@ -56,6 +56,32 @@ const constructors = {
 
 type KnownTag = keyof typeof constructors;
 
+type CallbackDefectPayload = {
+	readonly _tag: "OperationError" | "HookError";
+	readonly reason?: string;
+	readonly message?: string;
+};
+
+const hasCallbackDefectReason = (reason: unknown): boolean =>
+	typeof reason === "string" &&
+	(reason === "callback-defect" ||
+		reason === "js-exception" ||
+		reason.includes('reason: "callback-defect"') ||
+		reason.includes('reason: "js-exception"'));
+
+const isCallbackDefectPayload = (
+	value: unknown,
+): value is CallbackDefectPayload =>
+	typeof value === "object" &&
+	value !== null &&
+	("_tag" in value
+		? (value as { readonly _tag?: unknown })._tag === "OperationError" ||
+			(value as { readonly _tag?: unknown })._tag === "HookError"
+		: false) &&
+	("reason" in value
+		? hasCallbackDefectReason((value as { readonly reason?: unknown }).reason)
+		: false);
+
 export const reconstructBoundaryError = (value: unknown): Error => {
 	if (
 		typeof value !== "object" ||
@@ -64,6 +90,11 @@ export const reconstructBoundaryError = (value: unknown): Error => {
 		typeof value._tag !== "string"
 	) {
 		return new Error(`Unknown engine error payload: ${JSON.stringify(value)}`);
+	}
+	if (isCallbackDefectPayload(value)) {
+		return new WasmEngineDefectError(
+			value.message ?? `Unexpected callback defect: ${JSON.stringify(value)}`,
+		);
 	}
 	const tag = value._tag as KnownTag;
 	const Ctor = constructors[tag];

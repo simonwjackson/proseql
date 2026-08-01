@@ -1,12 +1,15 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { OperationError } from "@proseql/core";
 import * as Schema from "effect/Schema";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createPersistentEngineDatabase } from "../src/browser.js";
 
-const WORKTREE_ROOT = "/home/simonwjackson/code/github/simonwjackson/proseql/.worktrees/refactor-rust-engine-conversion";
+const WORKTREE_ROOT = resolve(
+	fileURLToPath(new URL("../../..", import.meta.url)),
+);
 
 class MockStorage implements Storage {
 	private store = new Map<string, string>();

@@ -6,7 +6,7 @@
   "scripts": {
     "build:wasm": "bun ./scripts/build-wasm.mjs",
     "build": "bun run build:wasm && bunx tsc --build",
-    "clean": "rm -rf dist *.tsbuildinfo",
+    "clean": "rm -rf build dist *.tsbuildinfo",
     "prepublishOnly": "bun run build && bun test",
     "test:node": "nix shell nixpkgs#nodejs -c node ./tests/node-smoke.mjs",
     "typecheck:tests": "bunx tsc --build ../core ."
@@ -48,6 +48,36 @@
   ],
   "engines": {
     "node": ">=18"
+  },
+  "proseqlWasmContract": {
+    "schemaVersion": "proseql.wasm-build-contract.v1",
+    "toolchain": {
+      "rustTarget": "wasm32-unknown-unknown",
+      "productionCargoProfile": "wasm-production",
+      "profileCargoProfile": "wasm-profile",
+      "wasmBindgenVersion": "0.2.126",
+      "wasmOptVersion": "125",
+      "wasmOptArgs": [
+        "-O2",
+        "--strip-debug",
+        "--strip-dwarf",
+        "--strip-producers"
+      ]
+    },
+    "artifactBudgets": {
+      "browserProductionWasmGzipBaselineBytes": 540028,
+      "browserProductionWasmGzipMaxGrowthRatio": 1.05
+    },
+    "browserBudgets": {
+      "baseline": {
+        "coldStartupMs": 1024.016123,
+        "jsHeapBytes": 11739108,
+        "wasmLinearMemoryBytes": 54525952
+      },
+      "coldStartupMaxGrowthRatio": 1.1,
+      "jsHeapMaxGrowthRatio": 1.05,
+      "wasmLinearMemoryMaxGrowthRatio": 1.05
+    }
   },
   "sideEffects": false,
   "dependencies": {

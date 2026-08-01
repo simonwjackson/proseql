@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	DuplicateKeyError,
 	HookError,
@@ -60,9 +61,13 @@ const BoundaryRecordSchema = Schema.Struct({
 	optional: Schema.optional(Schema.String),
 });
 
+const WORKTREE_ROOT = resolve(
+	fileURLToPath(new URL("../../..", import.meta.url)),
+);
+
 beforeAll(() => {
 	execFileSync("bun", ["packages/engine/scripts/build-wasm.mjs"], {
-		cwd: "/home/simonwjackson/code/github/simonwjackson/proseql/.worktrees/refactor-rust-engine-conversion",
+		cwd: WORKTREE_ROOT,
 		stdio: "inherit",
 	});
 }, 60_000);

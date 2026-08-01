@@ -21,7 +21,9 @@
       "@proseql/effect/browser": ["./packages/effect/src/browser.ts"],
       "@proseql/effect/*": ["./packages/effect/src/*"],
       "@proseql/browser": ["./packages/browser/src/index.ts"],
-      "@proseql/browser/*": ["./packages/browser/src/*"]
+      "@proseql/browser/*": ["./packages/browser/src/*"],
+      "@proseql/node": ["./packages/node/src/index.ts"],
+      "@proseql/node/*": ["./packages/node/src/*"]
     }
   }
 }

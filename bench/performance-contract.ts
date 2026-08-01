@@ -1,5 +1,5 @@
-import type { PairedComparison } from "./comparison.js";
 import type { BrowserPerformanceReport } from "./browser-runner.js";
+import type { PairedComparison } from "./comparison.js";
 import {
 	BROWSER_WORKLOAD_EXPECTATIONS,
 	BROWSER_WORKLOAD_INTERACTION_NAMES,
@@ -26,6 +26,50 @@ export interface PerformanceContractFailure {
 export interface PerformanceContractValidation {
 	readonly passed: boolean;
 	readonly failures: ReadonlyArray<PerformanceContractFailure>;
+}
+
+export interface WasmBuildBrowserBudgetContract {
+	readonly schemaVersion: string;
+	readonly artifactBudgets: {
+		readonly browserProductionWasmGzipBaselineBytes: number;
+		readonly browserProductionWasmGzipMaxGrowthRatio: number;
+	};
+	readonly browserBudgets: {
+		readonly baseline: {
+			readonly coldStartupMs: number;
+			readonly jsHeapBytes: number;
+			readonly wasmLinearMemoryBytes: number;
+		};
+		readonly coldStartupMaxGrowthRatio: number;
+		readonly jsHeapMaxGrowthRatio: number;
+		readonly wasmLinearMemoryMaxGrowthRatio: number;
+	};
+}
+
+export interface BrowserBudgetMetricGate {
+	readonly baseline: number;
+	readonly current: number | undefined;
+	readonly maxAllowed: number;
+	readonly passed: boolean;
+	readonly reason?: string;
+}
+
+export interface BrowserBudgetInteractionDelta {
+	readonly name: string;
+	readonly currentP95Ms: number | undefined;
+	readonly withinAbsoluteP95Budget: boolean;
+}
+
+export interface BrowserBudgetEvaluation {
+	readonly artifact: BrowserBudgetMetricGate;
+	readonly coldStartup: BrowserBudgetMetricGate;
+	readonly jsHeap: BrowserBudgetMetricGate;
+	readonly wasmLinearMemory: BrowserBudgetMetricGate;
+	readonly interactions: ReadonlyArray<BrowserBudgetInteractionDelta>;
+	readonly summary: {
+		readonly artifactAndRegressionBudgetsPassed: boolean;
+		readonly allInteractionP95Within50Ms: boolean;
+	};
 }
 
 const REQUIRED_READ_RATIO = 0.5;
@@ -261,6 +305,85 @@ export const validateBrowserPerformanceContract = (
 	return {
 		passed: failures.length === 0,
 		failures,
+	};
+};
+
+const evaluateBudgetGate = (
+	baseline: number,
+	current: number | undefined,
+	maxGrowthRatio: number,
+): BrowserBudgetMetricGate => {
+	const maxAllowed = baseline * maxGrowthRatio;
+	if (current === undefined) {
+		return {
+			baseline,
+			current,
+			maxAllowed,
+			passed: false,
+			reason: "missing current metric",
+		};
+	}
+	return {
+		baseline,
+		current,
+		maxAllowed,
+		passed: current <= maxAllowed,
+	};
+};
+
+export const evaluateBrowserBudget = (options: {
+	readonly contract: WasmBuildBrowserBudgetContract;
+	readonly report: BrowserPerformanceReport;
+	readonly currentArtifactGzipBytes: number;
+}): BrowserBudgetEvaluation => {
+	const { contract, report, currentArtifactGzipBytes } = options;
+	const artifact = evaluateBudgetGate(
+		contract.artifactBudgets.browserProductionWasmGzipBaselineBytes,
+		currentArtifactGzipBytes,
+		contract.artifactBudgets.browserProductionWasmGzipMaxGrowthRatio,
+	);
+	const coldStartup = evaluateBudgetGate(
+		contract.browserBudgets.baseline.coldStartupMs,
+		report.coldStartupMs,
+		contract.browserBudgets.coldStartupMaxGrowthRatio,
+	);
+	const jsHeap = evaluateBudgetGate(
+		contract.browserBudgets.baseline.jsHeapBytes,
+		report.jsHeapBytes.status === "available"
+			? report.jsHeapBytes.value
+			: undefined,
+		contract.browserBudgets.jsHeapMaxGrowthRatio,
+	);
+	const wasmLinearMemory = evaluateBudgetGate(
+		contract.browserBudgets.baseline.wasmLinearMemoryBytes,
+		report.wasmLinearMemoryBytes.status === "available"
+			? report.wasmLinearMemoryBytes.value
+			: undefined,
+		contract.browserBudgets.wasmLinearMemoryMaxGrowthRatio,
+	);
+	const interactions = report.interactions.map((interaction) => ({
+		name: interaction.name,
+		currentP95Ms: interaction.p95Ms,
+		withinAbsoluteP95Budget:
+			typeof interaction.p95Ms === "number" &&
+			interaction.p95Ms <= NORMAL_INTERACTION_P95_BUDGET_MS,
+	}));
+	return {
+		artifact,
+		coldStartup,
+		jsHeap,
+		wasmLinearMemory,
+		interactions,
+		summary: {
+			artifactAndRegressionBudgetsPassed:
+				artifact.passed &&
+				coldStartup.passed &&
+				jsHeap.passed &&
+				wasmLinearMemory.passed,
+			allInteractionP95Within50Ms: interactions.every(
+				(interaction) => interaction.withinAbsoluteP95Budget,
+			),
+		},
 	};
 };
 

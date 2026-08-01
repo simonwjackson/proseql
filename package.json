@@ -7,13 +7,15 @@
     "postinstall": "bun2nix -o bun.nix",
     "bench": "bun run bench/runner.ts",
     "bench:report": "bun run bench/runner.ts --json",
-    "bench:browser-report": "nix shell nixpkgs#nodejs nixpkgs#chromium -c sh -lc 'CHROMIUM_EXECUTABLE_PATH=$(command -v chromium) bun run bench/browser-runner.ts'",
+    "bench:browser-report": "nix develop .#tooling --command bun run bench/browser-runner.ts",
     "bench:baseline": "bun run bench/baseline.ts",
+    "generate:u2-browser-evidence": "bun run scripts/verify-package-artifacts.ts --u2-browser-evidence-write",
+    "verify:u2-browser-evidence": "bun run scripts/verify-package-artifacts.ts --u2-browser-evidence-check",
     "build": "bun run copy-license && bunx tsc --build && chmod +x packages/cli/dist/main.js",
     "build:clean": "bun run clean && bun run build",
     "clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo *.tsbuildinfo dist/**/*.tsbuildinfo",
     "copy-license": "for dir in packages/*/; do cp LICENSE \"$dir\"; done",
-    "verify:browser": "bun run --cwd packages/browser smoke:browser",
+    "verify:browser": "node scripts/verify-browser.mjs",
     "verify:packages": "bun run scripts/verify-package-artifacts.ts && bun run verify:browser"
   },
   "dependencies": {
@@ -26,6 +28,8 @@
     "hjson": "^3.2.2",
     "@proseql/core": "workspace:*",
     "@proseql/node": "workspace:*",
+    "@proseql/engine": "workspace:*",
+    "@proseql/effect": "workspace:*",
     "@proseql/browser": "workspace:*",
     "@proseql/cli": "workspace:*"
   },

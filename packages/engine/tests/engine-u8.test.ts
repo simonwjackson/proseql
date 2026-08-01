@@ -1,7 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
 	DuplicateKeyError,
 	HookError,
@@ -14,19 +22,28 @@ import {
 import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import { beforeAll, describe, expect, it } from "vitest";
+import { decodeBoundaryValueForHost } from "../src/boundary-values.js";
+import { reconstructBoundaryError } from "../src/errors.js";
 import {
 	createEngineDatabase,
 	createNodeEngineStorageHost,
 	createPersistentEngineDatabase,
 	makeEngineStorageLayer,
 	type NodeEngineStorageHost,
+	WasmEngineDefectError,
 } from "../src/index.js";
 
-const WORKTREE_ROOT = "/home/simonwjackson/code/github/simonwjackson/proseql/.worktrees/refactor-rust-engine-conversion";
+const WORKTREE_ROOT = resolve(
+	fileURLToPath(new URL("../../..", import.meta.url)),
+);
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function waitFor(check: () => Promise<void> | void, timeoutMs = 1000, stepMs = 25) {
+async function waitFor(
+	check: () => Promise<void> | void,
+	timeoutMs = 1000,
+	stepMs = 25,
+) {
 	const deadline = Date.now() + timeoutMs;
 	let lastError: unknown;
 	while (Date.now() <= deadline) {
@@ -72,6 +89,180 @@ const AutoUserSchema = Schema.Struct({
 	name: Schema.String,
 });
 
+const createPromiseWrapperDatabase = async () => {
+	let customOperatorCalls = 0;
+	let computedCalls = 0;
+	const db = await createEngineDatabase(
+		{
+			users: {
+				schema: UserSchema,
+				relationships: {},
+				computed: {
+					displayName: (user: unknown) => {
+						computedCalls += 1;
+						if (
+							typeof user === "object" &&
+							user !== null &&
+							"name" in user &&
+							typeof (user as { readonly name?: unknown }).name === "string"
+						) {
+							return `${(user as { readonly name: string }).name}!`;
+						}
+						return "unknown!";
+					},
+				},
+			},
+		} as const,
+		{ users: [{ id: "u1", name: "Alice" }] },
+		{
+			plugins: [
+				{
+					name: "promise-wrapper-plugin",
+					operators: [
+						{
+							name: "$wrapperStartsWith",
+							types: ["string"] as const,
+							evaluate: (fieldValue: unknown, operand: unknown) => {
+								customOperatorCalls += 1;
+								return (
+									typeof fieldValue === "string" &&
+									typeof operand === "string" &&
+									fieldValue.startsWith(operand)
+								);
+							},
+						},
+					],
+				},
+			],
+		},
+	);
+	return {
+		db,
+		getCounts: () => ({ customOperatorCalls, computedCalls }),
+	};
+};
+
+type PublicWasmRuntime = {
+	register_default(id: string, callback: () => unknown): void;
+	register_predicate(
+		id: string,
+		callback: (payloadJson: string) => unknown,
+	): void;
+	register_computed(
+		id: string,
+		callback: (payloadJson: string) => unknown,
+	): void;
+	register_collator(callback: (left: string, right: string) => unknown): void;
+	register_id_generator(name: string, callback: () => unknown): void;
+	register_custom_operator(
+		name: string,
+		supportedTypesJson: string,
+		callback: (fieldJson: string, operandJson: string) => unknown,
+	): string;
+	create_database(inputJson: string): string;
+	dispatch(handle: number, method: string, payloadJson?: string): string;
+};
+
+type PublicWasmRuntimeModule = {
+	readonly WasmRuntime: new (
+		setTimeoutFn: typeof globalThis.setTimeout,
+		clearTimeoutFn: typeof globalThis.clearTimeout,
+	) => PublicWasmRuntime;
+};
+
+type RawBridgeOk<T> = { readonly kind: "ok"; readonly value: T };
+
+type RawBridgeError = { readonly kind: "error"; readonly error: unknown };
+
+type RawBridgeDefect = { readonly kind: "defect"; readonly message: string };
+
+type RawBridgeResponse<T> = RawBridgeOk<T> | RawBridgeError | RawBridgeDefect;
+
+const loadPublicWasmRuntimeModule =
+	async (): Promise<PublicWasmRuntimeModule> =>
+		(await import(
+			`${pathToFileURL(resolve(WORKTREE_ROOT, "packages/engine/dist/wasm/proseql_wasm.js")).href}?t=${Date.now()}`
+		)) as PublicWasmRuntimeModule;
+
+const parsePublicWasmResponse = <T>(raw: string): T => {
+	const parsed = JSON.parse(raw) as RawBridgeResponse<T>;
+	switch (parsed.kind) {
+		case "ok":
+			return decodeBoundaryValueForHost(parsed.value);
+		case "error":
+			throw reconstructBoundaryError(decodeBoundaryValueForHost(parsed.error));
+		case "defect":
+			throw new WasmEngineDefectError(parsed.message);
+		default:
+			throw new Error(`Unknown public WASM bridge response: ${raw}`);
+	}
+};
+
+const runPublicWasm = <T>(fn: () => string): Promise<T> =>
+	Promise.resolve().then(() => parsePublicWasmResponse<T>(fn()));
+
+const createPublicWasmRuntime = async () => {
+	const wasmModule = await loadPublicWasmRuntimeModule();
+	return new wasmModule.WasmRuntime(
+		globalThis.setTimeout,
+		globalThis.clearTimeout,
+	);
+};
+
+const createRawCollectionDescriptor = (options: {
+	readonly schema: Record<string, unknown>;
+	readonly idStrategy?:
+		| { readonly kind: "provided" }
+		| { readonly kind: "namedGenerator"; readonly name: string };
+	readonly computedFields?: ReadonlyArray<{
+		readonly name: string;
+		readonly callback_id: string;
+	}>;
+}) => ({
+	name: "users",
+	schema: options.schema,
+	id_strategy: options.idStrategy ?? { kind: "provided" },
+	relationships: [],
+	indexes: [],
+	unique_fields: [],
+	before_create_hooks: [],
+	after_create_hooks: [],
+	before_update_hooks: [],
+	after_update_hooks: [],
+	before_delete_hooks: [],
+	after_delete_hooks: [],
+	on_change_hooks: [],
+	computed_fields: options.computedFields ?? [],
+	search_index: [],
+	migrations: [],
+	append_only: false,
+	validation_mode: "strict",
+});
+
+const createRawDatabase = (
+	runtime: PublicWasmRuntime,
+	collection: ReturnType<typeof createRawCollectionDescriptor>,
+	initialCollections: Record<string, unknown> = {},
+): Promise<number> =>
+	runPublicWasm(() =>
+		runtime.create_database(
+			JSON.stringify({
+				descriptor: { collections: [collection], sources: [] },
+				initialCollections,
+			}),
+		),
+	);
+
+const dispatchRaw = <T>(
+	runtime: PublicWasmRuntime,
+	handle: number,
+	method: string,
+	payload: Record<string, unknown>,
+): Promise<T> =>
+	runPublicWasm(() =>
+		runtime.dispatch(handle, method, JSON.stringify(payload)),
+	);
+
 beforeAll(() => {
 	execFileSync("bun", ["packages/engine/scripts/build-wasm.mjs"], {
 		cwd: WORKTREE_ROOT,
@@ -88,7 +279,10 @@ type ControlledHost = NodeEngineStorageHost & {
 
 type TriggerableFileWatchHost = ControlledHost & {
 	readonly watchCallbackFor: (path: string) => (() => void) | undefined;
-	readonly blockNextRead: (path: string) => { readonly started: Promise<void>; readonly release: () => void };
+	readonly blockNextRead: (path: string) => {
+		readonly started: Promise<void>;
+		readonly release: () => void;
+	};
 	readonly readCountFor: (path: string) => number;
 };
 
@@ -99,7 +293,11 @@ function createControlledHost(root: string): ControlledHost {
 	const delays = new Map<string, number>();
 	let activeWrites = 0;
 	let maxConcurrentWrites = 0;
-	const wrapWrite = async (path: string, data: string, mode: "write" | "append") => {
+	const wrapWrite = async (
+		path: string,
+		data: string,
+		mode: "write" | "append",
+	) => {
 		activeWrites += 1;
 		maxConcurrentWrites = Math.max(maxConcurrentWrites, activeWrites);
 		try {
@@ -135,7 +333,9 @@ function createControlledHost(root: string): ControlledHost {
 	};
 }
 
-function createTriggerableFileWatchHost(root: string): TriggerableFileWatchHost {
+function createTriggerableFileWatchHost(
+	root: string,
+): TriggerableFileWatchHost {
 	const base = createControlledHost(root);
 	const watchCallbacks = new Map<string, () => void>();
 	const readCounts = new Map<string, number>();
@@ -178,7 +378,12 @@ function createTriggerableFileWatchHost(root: string): TriggerableFileWatchHost 
 			const waitForRelease = new Promise<void>((resolve) => {
 				release = resolve;
 			});
-			blockedReads.set(path, { started, release, resolveStarted, waitForRelease });
+			blockedReads.set(path, {
+				started,
+				release,
+				resolveStarted,
+				waitForRelease,
+			});
 			return { started, release };
 		},
 		readCountFor: (path) => readCounts.get(path) ?? 0,
@@ -200,7 +405,9 @@ describe("@proseql/engine U8 fixes", () => {
 			);
 			await writeFile(
 				join(root, "config.json"),
-				JSON.stringify({ nested: { settings: { s1: { id: "s1", value: "disk-setting" } } } }),
+				JSON.stringify({
+					nested: { settings: { s1: { id: "s1", value: "disk-setting" } } },
+				}),
 			);
 			const db = await createPersistentEngineDatabase(
 				{
@@ -231,10 +438,22 @@ describe("@proseql/engine U8 fixes", () => {
 					settings: [{ id: "s1", value: "seed-setting" }],
 				},
 			);
-			expect(await db.users.findById("u1")).toEqual({ id: "u1", name: "seed-user" });
-			expect(await db.users.findById("u2")).toEqual({ id: "u2", name: "new-user" });
-			expect(await db.teams.findById("t1")).toEqual({ id: "t1", name: "seed-team" });
-			expect(await db.settings.findById("s1")).toEqual({ id: "s1", value: "seed-setting" });
+			expect(await db.users.findById("u1")).toEqual({
+				id: "u1",
+				name: "seed-user",
+			});
+			expect(await db.users.findById("u2")).toEqual({
+				id: "u2",
+				name: "new-user",
+			});
+			expect(await db.teams.findById("t1")).toEqual({
+				id: "t1",
+				name: "seed-team",
+			});
+			expect(await db.settings.findById("s1")).toEqual({
+				id: "s1",
+				value: "seed-setting",
+			});
 			await db.close();
 		} finally {
 			await rm(root, { recursive: true, force: true });
@@ -257,20 +476,22 @@ describe("@proseql/engine U8 fixes", () => {
 				{ writeDebounce: 5 },
 			);
 			await db.flush();
-			expect(await createNodeEngineStorageHost().exists(join(root, "teams", "t1.json"))).toBe(true);
+			expect(
+				await createNodeEngineStorageHost().exists(
+					join(root, "teams", "t1.json"),
+				),
+			).toBe(true);
 			await db.teams.delete("t1");
 			await db.flush();
 			await db.close();
-			const reloaded = await createPersistentEngineDatabase(
-				{
-					teams: {
-						schema: TeamSchema,
-						directory: join(root, "teams"),
-						format: "json",
-						relationships: {},
-					},
-				} as const,
-			);
+			const reloaded = await createPersistentEngineDatabase({
+				teams: {
+					schema: TeamSchema,
+					directory: join(root, "teams"),
+					format: "json",
+					relationships: {},
+				},
+			} as const);
 			expect(await reloaded.teams.query()).toEqual([]);
 			await reloaded.close();
 		} finally {
@@ -279,11 +500,16 @@ describe("@proseql/engine U8 fixes", () => {
 	});
 
 	it("updates watched directory delete baselines after external adds so API deletes remove added files", async () => {
-		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u8-dir-baseline-"));
+		const root = await mkdtemp(
+			join(tmpdir(), "proseql-engine-u8-dir-baseline-"),
+		);
 		try {
 			const teamsDir = join(root, "teams");
 			await mkdir(teamsDir, { recursive: true });
-			await writeFile(join(teamsDir, "t1.json"), JSON.stringify({ id: "t1", name: "Alpha" }));
+			await writeFile(
+				join(teamsDir, "t1.json"),
+				JSON.stringify({ id: "t1", name: "Alpha" }),
+			);
 			const db = await createPersistentEngineDatabase(
 				{
 					teams: {
@@ -296,25 +522,33 @@ describe("@proseql/engine U8 fixes", () => {
 				undefined,
 				{ writeDebounce: 5 },
 			);
-			await writeFile(join(teamsDir, "t2.json"), JSON.stringify({ id: "t2", name: "Beta" }));
+			await writeFile(
+				join(teamsDir, "t2.json"),
+				JSON.stringify({ id: "t2", name: "Beta" }),
+			);
 			await waitFor(async () => {
-				expect(await db.teams.findById("t2")).toEqual({ id: "t2", name: "Beta" });
+				expect(await db.teams.findById("t2")).toEqual({
+					id: "t2",
+					name: "Beta",
+				});
 			});
 			await db.teams.delete("t2");
 			await db.flush();
-			await expect(createNodeEngineStorageHost().read(join(teamsDir, "t2.json"))).rejects.toBeInstanceOf(Error);
+			await expect(
+				createNodeEngineStorageHost().read(join(teamsDir, "t2.json")),
+			).rejects.toBeInstanceOf(Error);
 			await db.close();
-			const reopened = await createPersistentEngineDatabase(
-				{
-					teams: {
-						schema: TeamSchema,
-						directory: teamsDir,
-						format: "json",
-						relationships: {},
-					},
-				} as const,
-			);
-			expect(await reopened.teams.query()).toEqual([{ id: "t1", name: "Alpha" }]);
+			const reopened = await createPersistentEngineDatabase({
+				teams: {
+					schema: TeamSchema,
+					directory: teamsDir,
+					format: "json",
+					relationships: {},
+				},
+			} as const);
+			expect(await reopened.teams.query()).toEqual([
+				{ id: "t1", name: "Alpha" },
+			]);
 			await reopened.close();
 		} finally {
 			await rm(root, { recursive: true, force: true });
@@ -352,7 +586,10 @@ describe("@proseql/engine U8 fixes", () => {
 			await sleep(10);
 			await db.books.update("b1", { year: { $increment: 1 } });
 			await sleep(160);
-			const stored = JSON.parse(await readFile(sharedPath, "utf8")) as Record<string, any>;
+			const stored = JSON.parse(await readFile(sharedPath, "utf8")) as Record<
+				string,
+				any
+			>;
 			expect(host.maxConcurrentWrites()).toBe(1);
 			expect(stored.authors.a1.name).toBe("Frank Herbert");
 			expect(stored.books.b1.year).toBe(1966);
@@ -479,7 +716,10 @@ describe("@proseql/engine U8 fixes", () => {
 			return tx.users.findById("u1");
 		});
 		await waitFor(async () => {
-			expect(await db.users.findById("u1")).toEqual({ id: "u1", name: "Alice" });
+			expect(await db.users.findById("u1")).toEqual({
+				id: "u1",
+				name: "Alice",
+			});
 		});
 		const second = db.$transaction(async (tx) => {
 			await tx.users.update("u1", { name: { $set: "Second" } });
@@ -505,7 +745,9 @@ describe("@proseql/engine U8 fixes", () => {
 		await expect(
 			db.$transaction(async (tx) => {
 				await tx.users.create({ id: "u2", name: "Bob" });
-				await db.$transaction(async (inner) => inner.users.create({ id: "u3", name: "Charlie" }));
+				await db.$transaction(async (inner) =>
+					inner.users.create({ id: "u3", name: "Charlie" }),
+				);
 			}),
 		).rejects.toMatchObject({
 			_tag: "TransactionError",
@@ -514,9 +756,489 @@ describe("@proseql/engine U8 fixes", () => {
 		});
 		await expect(db.users.findById("u2")).rejects.toBeInstanceOf(Error);
 		await expect(db.users.findById("u3")).rejects.toBeInstanceOf(Error);
-		const created = await db.$transaction(async (tx) => tx.users.create({ id: "u4", name: "Dana" }));
+		const created = await db.$transaction(async (tx) =>
+			tx.users.create({ id: "u4", name: "Dana" }),
+		);
 		expect(created).toEqual({ id: "u4", name: "Dana" });
 		expect(await db.users.findById("u4")).toEqual(created);
+	});
+
+	it("dispatches computed and custom-operator callbacks immediately while still returning a Promise", async () => {
+		const { db, getCounts } = await createPromiseWrapperDatabase();
+		try {
+			const promise = db.users.query({
+				where: { name: { $wrapperStartsWith: "Al" } },
+				select: { id: true, displayName: true },
+			} as const);
+			expect(promise).toBeInstanceOf(Promise);
+			expect(getCounts()).toEqual({ customOperatorCalls: 1, computedCalls: 1 });
+			let settled = false;
+			void promise.then(() => {
+				settled = true;
+			});
+			expect(settled).toBe(false);
+			await expect(promise).resolves.toEqual([
+				{ id: "u1", displayName: "Alice!" },
+			]);
+			expect(settled).toBe(true);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("surfaces malformed cursor input as rejected Promises for normal and transaction queries", async () => {
+		const { db } = await createPromiseWrapperDatabase();
+		try {
+			let queryPromise: ReturnType<typeof db.users.query> | undefined;
+			expect(() => {
+				queryPromise = db.users.query({
+					cursor: { key: "id", limit: 0 },
+					sort: { id: "asc" },
+				} as never);
+			}).not.toThrow();
+			await expect(queryPromise).rejects.toBeInstanceOf(ValidationError);
+			await expect(
+				db.$transaction(async (tx) => {
+					let txQueryPromise: ReturnType<typeof tx.users.query> | undefined;
+					expect(() => {
+						txQueryPromise = tx.users.query({
+							cursor: { key: "id", limit: 0 },
+							sort: { id: "asc" },
+						} as never);
+					}).not.toThrow();
+					await expect(txQueryPromise).rejects.toBeInstanceOf(ValidationError);
+				}),
+			).resolves.toBeUndefined();
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("keeps real tagged engine errors tagged and callback defects in the defect channel", async () => {
+		const { db } = await createPromiseWrapperDatabase();
+		try {
+			await expect(
+				db.users.create({ id: "u1", name: "Again" }),
+			).rejects.toBeInstanceOf(DuplicateKeyError);
+			await expect(
+				db.users.create({ id: "u1", name: "Again" }),
+			).rejects.toMatchObject({
+				_tag: "DuplicateKeyError",
+				existingId: "u1",
+			});
+		} finally {
+			await db.close();
+		}
+
+		const defectDb = await createEngineDatabase(
+			{
+				users: {
+					schema: UserSchema,
+					relationships: {},
+					hooks: {
+						beforeCreate: [
+							() => {
+								throw new Error("hook defect: boom");
+							},
+						],
+						beforeDelete: [
+							() => {
+								throw new Error("delete hook defect: boom");
+							},
+						],
+					},
+				},
+			} as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		try {
+			await expect(
+				defectDb.users.create({ id: "u2", name: "Bob" }),
+			).rejects.toBeInstanceOf(WasmEngineDefectError);
+			await expect(
+				defectDb.users.create({ id: "u2", name: "Bob" }),
+			).rejects.toMatchObject({
+				name: "WasmEngineDefectError",
+				message: expect.stringContaining("hook defect: boom"),
+			});
+			await expect(defectDb.users.delete("u1")).rejects.toMatchObject({
+				name: "WasmEngineDefectError",
+				message: expect.stringContaining("delete hook defect: boom"),
+			});
+			await expect(defectDb.users.findById("u1")).resolves.toMatchObject({
+				id: "u1",
+			});
+		} finally {
+			await defectDb.close();
+		}
+	});
+
+	it("preserves legitimate null defaults across the public WASM callback boundary", async () => {
+		const runtime = await createPublicWasmRuntime();
+		runtime.register_default("users.nickname.default", () => "null");
+		const handle = await createRawDatabase(
+			runtime,
+			createRawCollectionDescriptor({
+				schema: {
+					kind: "struct",
+					fields: [
+						{ name: "id", schema: { kind: "str" } },
+						{
+							name: "nickname",
+							schema: {
+								kind: "optionalWithDefault",
+								inner: { kind: "nullOr", inner: { kind: "str" } },
+								defaultCallbackId: "users.nickname.default",
+							},
+						},
+					],
+				},
+			}),
+		);
+		await expect(
+			dispatchRaw<Record<string, unknown>>(runtime, handle, "create", {
+				collection: "users",
+				data: { id: "u1" },
+			}),
+		).resolves.toEqual({ id: "u1", nickname: null });
+	});
+
+	it("rejects invalid default and id-generator callback returns via WasmEngineDefectError", async () => {
+		const defaultRuntime = await createPublicWasmRuntime();
+		defaultRuntime.register_default("users.nickname.default", () => 42);
+		const defaultHandle = await createRawDatabase(
+			defaultRuntime,
+			createRawCollectionDescriptor({
+				schema: {
+					kind: "struct",
+					fields: [
+						{ name: "id", schema: { kind: "str" } },
+						{
+							name: "nickname",
+							schema: {
+								kind: "optionalWithDefault",
+								inner: { kind: "str" },
+								defaultCallbackId: "users.nickname.default",
+							},
+						},
+					],
+				},
+			}),
+		);
+		await expect(
+			dispatchRaw<Record<string, unknown>>(
+				defaultRuntime,
+				defaultHandle,
+				"create",
+				{
+					collection: "users",
+					data: { id: "u1" },
+				},
+			),
+		).rejects.toBeInstanceOf(WasmEngineDefectError);
+
+		const idRuntime = await createPublicWasmRuntime();
+		idRuntime.register_id_generator("generated", () => 42);
+		const idHandle = await createRawDatabase(
+			idRuntime,
+			createRawCollectionDescriptor({
+				schema: {
+					kind: "struct",
+					fields: [
+						{ name: "id", schema: { kind: "str" } },
+						{ name: "name", schema: { kind: "str" } },
+					],
+				},
+				idStrategy: { kind: "namedGenerator", name: "generated" },
+			}),
+		);
+		await expect(
+			dispatchRaw<Record<string, unknown>>(idRuntime, idHandle, "create", {
+				collection: "users",
+				data: { name: "Alice" },
+			}),
+		).rejects.toBeInstanceOf(WasmEngineDefectError);
+	});
+
+	it("preserves legitimate false predicate and custom-operator results across the public WASM boundary", async () => {
+		const predicateRuntime = await createPublicWasmRuntime();
+		predicateRuntime.register_predicate("remove-none", () => "false");
+		const predicateHandle = await createRawDatabase(
+			predicateRuntime,
+			createRawCollectionDescriptor({
+				schema: {
+					kind: "struct",
+					fields: [
+						{ name: "id", schema: { kind: "str" } },
+						{
+							name: "scores",
+							schema: { kind: "array", item: { kind: "num" } },
+						},
+					],
+				},
+			}),
+			{ users: [{ id: "u1", scores: [1, 2, 3] }] },
+		);
+		await expect(
+			dispatchRaw(predicateRuntime, predicateHandle, "updateMany", {
+				collection: "users",
+				where: {},
+				data: { scores: { $removeBy: "remove-none" } },
+			}),
+		).resolves.toMatchObject({ count: 1 });
+		await expect(
+			dispatchRaw<ReadonlyArray<{ readonly scores: ReadonlyArray<number> }>>(
+				predicateRuntime,
+				predicateHandle,
+				"dumpCollection",
+				{ collection: "users" },
+			),
+		).resolves.toEqual([{ id: "u1", scores: [1, 2, 3] }]);
+
+		const operatorRuntime = await createPublicWasmRuntime();
+		await expect(
+			runPublicWasm(() =>
+				operatorRuntime.register_custom_operator(
+					"$never",
+					JSON.stringify(["string"]),
+					() => false,
+				),
+			),
+		).resolves.toEqual(true);
+		const operatorHandle = await createRawDatabase(
+			operatorRuntime,
+			createRawCollectionDescriptor({
+				schema: {
+					kind: "struct",
+					fields: [
+						{ name: "id", schema: { kind: "str" } },
+						{ name: "name", schema: { kind: "str" } },
+					],
+				},
+			}),
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		await expect(
+			dispatchRaw<ReadonlyArray<unknown>>(
+				operatorRuntime,
+				operatorHandle,
+				"query",
+				{
+					collection: "users",
+					query: { where: { name: { $never: "Al" } } },
+				},
+			),
+		).resolves.toEqual([]);
+	});
+
+	it("rejects invalid predicate and custom-operator callback returns via WasmEngineDefectError", async () => {
+		const predicateRuntime = await createPublicWasmRuntime();
+		predicateRuntime.register_predicate("broken-predicate", () => "nope");
+		const predicateHandle = await createRawDatabase(
+			predicateRuntime,
+			createRawCollectionDescriptor({
+				schema: {
+					kind: "struct",
+					fields: [
+						{ name: "id", schema: { kind: "str" } },
+						{
+							name: "scores",
+							schema: { kind: "array", item: { kind: "num" } },
+						},
+					],
+				},
+			}),
+			{ users: [{ id: "u1", scores: [1, 2, 3] }] },
+		);
+		await expect(
+			dispatchRaw(predicateRuntime, predicateHandle, "updateMany", {
+				collection: "users",
+				where: {},
+				data: { scores: { $removeBy: "broken-predicate" } },
+			}),
+		).rejects.toBeInstanceOf(WasmEngineDefectError);
+
+		const operatorRuntime = await createPublicWasmRuntime();
+		await expect(
+			runPublicWasm(() =>
+				operatorRuntime.register_custom_operator(
+					"$broken",
+					JSON.stringify(["string"]),
+					() => "false",
+				),
+			),
+		).resolves.toEqual(true);
+		const operatorHandle = await createRawDatabase(
+			operatorRuntime,
+			createRawCollectionDescriptor({
+				schema: {
+					kind: "struct",
+					fields: [
+						{ name: "id", schema: { kind: "str" } },
+						{ name: "name", schema: { kind: "str" } },
+					],
+				},
+			}),
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		await expect(
+			dispatchRaw<ReadonlyArray<unknown>>(
+				operatorRuntime,
+				operatorHandle,
+				"query",
+				{
+					collection: "users",
+					query: { where: { name: { $broken: "Al" } } },
+				},
+			),
+		).rejects.toBeInstanceOf(WasmEngineDefectError);
+	});
+
+	it("preserves legitimate empty computed results and equal collator results across the public WASM boundary", async () => {
+		const computedRuntime = await createPublicWasmRuntime();
+		computedRuntime.register_computed("users.tags", () => "[]");
+		const computedHandle = await createRawDatabase(
+			computedRuntime,
+			createRawCollectionDescriptor({
+				schema: {
+					kind: "struct",
+					fields: [
+						{ name: "id", schema: { kind: "str" } },
+						{ name: "name", schema: { kind: "str" } },
+					],
+				},
+				computedFields: [{ name: "tags", callback_id: "users.tags" }],
+			}),
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		await expect(
+			dispatchRaw<ReadonlyArray<Record<string, unknown>>>(
+				computedRuntime,
+				computedHandle,
+				"query",
+				{
+					collection: "users",
+					query: {},
+				},
+			),
+		).resolves.toEqual([{ id: "u1", name: "Alice", tags: [] }]);
+
+		const collatorRuntime = await createPublicWasmRuntime();
+		collatorRuntime.register_collator(() => 0);
+		const collatorHandle = await createRawDatabase(
+			collatorRuntime,
+			createRawCollectionDescriptor({
+				schema: {
+					kind: "struct",
+					fields: [
+						{ name: "id", schema: { kind: "str" } },
+						{ name: "name", schema: { kind: "str" } },
+					],
+				},
+			}),
+			{
+				users: [
+					{ id: "u2", name: "Beta" },
+					{ id: "u1", name: "Alpha" },
+				],
+			},
+		);
+		await expect(
+			dispatchRaw<ReadonlyArray<Record<string, unknown>>>(
+				collatorRuntime,
+				collatorHandle,
+				"query",
+				{
+					collection: "users",
+					query: { sort: { name: "asc" } },
+				},
+			),
+		).resolves.toEqual([
+			{ id: "u2", name: "Beta" },
+			{ id: "u1", name: "Alpha" },
+		]);
+	});
+
+	it("rejects invalid computed and collator callback returns via WasmEngineDefectError", async () => {
+		const computedRuntime = await createPublicWasmRuntime();
+		computedRuntime.register_computed("users.tags", () => "not-json");
+		const computedHandle = await createRawDatabase(
+			computedRuntime,
+			createRawCollectionDescriptor({
+				schema: {
+					kind: "struct",
+					fields: [
+						{ name: "id", schema: { kind: "str" } },
+						{ name: "name", schema: { kind: "str" } },
+					],
+				},
+				computedFields: [{ name: "tags", callback_id: "users.tags" }],
+			}),
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		await expect(
+			dispatchRaw<ReadonlyArray<Record<string, unknown>>>(
+				computedRuntime,
+				computedHandle,
+				"query",
+				{
+					collection: "users",
+					query: {},
+				},
+			),
+		).rejects.toBeInstanceOf(WasmEngineDefectError);
+
+		const collatorRuntime = await createPublicWasmRuntime();
+		collatorRuntime.register_collator(() => "equal");
+		const collatorHandle = await createRawDatabase(
+			collatorRuntime,
+			createRawCollectionDescriptor({
+				schema: {
+					kind: "struct",
+					fields: [
+						{ name: "id", schema: { kind: "str" } },
+						{ name: "name", schema: { kind: "str" } },
+					],
+				},
+			}),
+			{
+				users: [
+					{ id: "u2", name: "Beta" },
+					{ id: "u1", name: "Alpha" },
+				],
+			},
+		);
+		await expect(
+			dispatchRaw<ReadonlyArray<Record<string, unknown>>>(
+				collatorRuntime,
+				collatorHandle,
+				"query",
+				{
+					collection: "users",
+					query: { sort: { name: "asc" } },
+				},
+			),
+		).rejects.toBeInstanceOf(WasmEngineDefectError);
+	});
+
+	it("returns a defect response when a production-profile WASM artifact hits a Rust panic", async () => {
+		const productionModule = (await import(
+			`${pathToFileURL(resolve(WORKTREE_ROOT, "packages/engine/dist/wasm/proseql_wasm.js")).href}?t=${Date.now()}`
+		)) as Record<string, unknown>;
+		expect(productionModule).not.toHaveProperty("__proseql_test_panic_bridge");
+
+		const panicTestModule = (await import(
+			`${pathToFileURL(resolve(WORKTREE_ROOT, "packages/engine/build/wasm-panic-test/proseql_wasm.js")).href}?t=${Date.now()}`
+		)) as {
+			readonly __proseql_test_panic_bridge: () => string;
+		};
+		expect(typeof panicTestModule.__proseql_test_panic_bridge).toBe("function");
+		expect(
+			JSON.parse(panicTestModule.__proseql_test_panic_bridge()),
+		).toMatchObject({
+			kind: "defect",
+			message: expect.stringContaining("proseql wasm panic integration"),
+		});
 	});
 
 	it("surfaces invalid query failures as Promise rejections instead of synchronous throws", async () => {
@@ -525,9 +1247,14 @@ describe("@proseql/engine U8 fixes", () => {
 			{ users: [{ id: "u1", name: "Alice" }] },
 		);
 		await expect(
-			db.users.query({ cursor: { key: "id", limit: 1 }, sort: { name: "asc" } } as any),
+			db.users.query({
+				cursor: { key: "id", limit: 1 },
+				sort: { name: "asc" },
+			} as any),
 		).rejects.toBeInstanceOf(ValidationError);
-		await expect(db.users.aggregate({ groupBy: ["missing"] } as any)).resolves.toBeTruthy();
+		await expect(
+			db.users.aggregate({ groupBy: ["missing"] } as any),
+		).resolves.toBeTruthy();
 	});
 
 	it("reports real dry-run migration status for persistent files", async () => {
@@ -535,30 +1262,41 @@ describe("@proseql/engine U8 fixes", () => {
 		try {
 			const currentFile = join(root, "users.json");
 			const missingFile = join(root, "teams.json");
-			await writeFile(currentFile, JSON.stringify({ _version: 1, u1: { id: "u1", name: "Alice" } }));
-			const db = await createPersistentEngineDatabase(
-				{
-					users: {
-						schema: UserSchema,
-						file: currentFile,
-						version: 1,
-						migrations: [
-							{ from: 0, to: 1, description: "noop", transform: (data) => data },
-						],
-						relationships: {},
-					},
-					teams: {
-						schema: TeamSchema,
-						file: missingFile,
-						version: 2,
-						migrations: [
-							{ from: 0, to: 1, description: "step-1", transform: (data) => data },
-							{ from: 1, to: 2, description: "step-2", transform: (data) => data },
-						],
-						relationships: {},
-					},
-				} as const,
+			await writeFile(
+				currentFile,
+				JSON.stringify({ _version: 1, u1: { id: "u1", name: "Alice" } }),
 			);
+			const db = await createPersistentEngineDatabase({
+				users: {
+					schema: UserSchema,
+					file: currentFile,
+					version: 1,
+					migrations: [
+						{ from: 0, to: 1, description: "noop", transform: (data) => data },
+					],
+					relationships: {},
+				},
+				teams: {
+					schema: TeamSchema,
+					file: missingFile,
+					version: 2,
+					migrations: [
+						{
+							from: 0,
+							to: 1,
+							description: "step-1",
+							transform: (data) => data,
+						},
+						{
+							from: 1,
+							to: 2,
+							description: "step-2",
+							transform: (data) => data,
+						},
+					],
+					relationships: {},
+				},
+			} as const);
 			expect(await db.$dryRunMigrations()).toEqual({
 				collections: [
 					{
@@ -586,7 +1324,9 @@ describe("@proseql/engine U8 fixes", () => {
 	});
 
 	it("aborts source reload when the pre-reload flush fails and keeps the active runtime state", async () => {
-		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u8-source-flush-"));
+		const root = await mkdtemp(
+			join(tmpdir(), "proseql-engine-u8-source-flush-"),
+		);
 		try {
 			const docsRoot = join(root, "docs");
 			const basePath = join(docsRoot, "base.yaml");
@@ -619,9 +1359,15 @@ describe("@proseql/engine U8 fixes", () => {
 			);
 			host.failNextWrite(basePath, 2);
 			await db.users.update("u1", { name: { $set: "Local" } });
-			await writeFile(basePath, "users:\n  u1:\n    id: u1\n    name: External\n");
+			await writeFile(
+				basePath,
+				"users:\n  u1:\n    id: u1\n    name: External\n",
+			);
 			await sleep(250);
-			expect(await db.users.findById("u1")).toEqual({ id: "u1", name: "Local" });
+			expect(await db.users.findById("u1")).toEqual({
+				id: "u1",
+				name: "Local",
+			});
 			await expect(db.flush()).rejects.toBeInstanceOf(StorageError);
 			await db.close();
 		} finally {
@@ -656,8 +1402,13 @@ describe("@proseql/engine U8 fixes", () => {
 			await db.users.update("u1", { name: { $set: "Updated" } });
 			await db.flush();
 			await sleep(250);
-			expect(host.writes.filter((entry) => entry.path === file)).toHaveLength(1);
-			expect(await db.users.findById("u1")).toEqual({ id: "u1", name: "Updated" });
+			expect(host.writes.filter((entry) => entry.path === file)).toHaveLength(
+				1,
+			);
+			expect(await db.users.findById("u1")).toEqual({
+				id: "u1",
+				name: "Updated",
+			});
 			await watch.unsubscribe();
 			await db.close();
 		} finally {
@@ -666,11 +1417,16 @@ describe("@proseql/engine U8 fixes", () => {
 	});
 
 	it("reloads legacy file and shared-file collections on external edits and emits watch updates", async () => {
-		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u8-legacy-files-"));
+		const root = await mkdtemp(
+			join(tmpdir(), "proseql-engine-u8-legacy-files-"),
+		);
 		try {
 			const usersFile = join(root, "users.json");
 			const sharedFile = join(root, "shared.json");
-			await writeFile(usersFile, JSON.stringify({ u1: { id: "u1", name: "Alice" } }));
+			await writeFile(
+				usersFile,
+				JSON.stringify({ u1: { id: "u1", name: "Alice" } }),
+			);
 			await writeFile(
 				sharedFile,
 				JSON.stringify({
@@ -681,7 +1437,11 @@ describe("@proseql/engine U8 fixes", () => {
 			const db = await createPersistentEngineDatabase(
 				{
 					users: { schema: UserSchema, file: usersFile, relationships: {} },
-					authors: { schema: AuthorSchema, file: sharedFile, relationships: {} },
+					authors: {
+						schema: AuthorSchema,
+						file: sharedFile,
+						relationships: {},
+					},
 					books: { schema: BookSchema, file: sharedFile, relationships: {} },
 				} as const,
 				undefined,
@@ -691,9 +1451,15 @@ describe("@proseql/engine U8 fixes", () => {
 			const bookWatch = db.books.watch();
 			await userWatch.next();
 			await bookWatch.next();
-			await writeFile(usersFile, JSON.stringify({ u1: { id: "u1", name: "Updated" } }));
+			await writeFile(
+				usersFile,
+				JSON.stringify({ u1: { id: "u1", name: "Updated" } }),
+			);
 			await waitFor(async () => {
-				expect(await db.users.findById("u1")).toEqual({ id: "u1", name: "Updated" });
+				expect(await db.users.findById("u1")).toEqual({
+					id: "u1",
+					name: "Updated",
+				});
 			});
 			expect((await userWatch.next()).value?.[0]?.name).toBe("Updated");
 			await writeFile(
@@ -704,7 +1470,11 @@ describe("@proseql/engine U8 fixes", () => {
 				}),
 			);
 			await waitFor(async () => {
-				expect(await db.books.findById("b1")).toEqual({ id: "b1", title: "Dune Messiah", year: 1969 });
+				expect(await db.books.findById("b1")).toEqual({
+					id: "b1",
+					title: "Dune Messiah",
+					year: 1969,
+				});
 			});
 			expect((await bookWatch.next()).value?.[0]?.title).toBe("Dune Messiah");
 			await userWatch.unsubscribe();
@@ -720,7 +1490,10 @@ describe("@proseql/engine U8 fixes", () => {
 		try {
 			const teamsDir = join(root, "teams");
 			await mkdir(teamsDir, { recursive: true });
-			await writeFile(join(teamsDir, "t1.json"), JSON.stringify({ id: "t1", name: "Alpha" }));
+			await writeFile(
+				join(teamsDir, "t1.json"),
+				JSON.stringify({ id: "t1", name: "Alpha" }),
+			);
 			const db = await createPersistentEngineDatabase(
 				{
 					teams: {
@@ -735,7 +1508,10 @@ describe("@proseql/engine U8 fixes", () => {
 			);
 			const watch = db.teams.watch();
 			await watch.next();
-			await writeFile(join(teamsDir, "t1.json"), JSON.stringify({ id: "t1", name: "Beta" }));
+			await writeFile(
+				join(teamsDir, "t1.json"),
+				JSON.stringify({ id: "t1", name: "Beta" }),
+			);
 			await sleep(250);
 			expect(await db.teams.findById("t1")).toEqual({ id: "t1", name: "Beta" });
 			expect((await watch.next()).value?.[0]?.name).toBe("Beta");
@@ -750,16 +1526,30 @@ describe("@proseql/engine U8 fixes", () => {
 			await sleep(100);
 			expect(invalidReloadDelivered).toBe(false);
 			await expect(db.flush()).resolves.toBeUndefined();
-			await writeFile(join(teamsDir, "t1.json"), JSON.stringify({ id: "t1", name: "Gamma" }));
+			await writeFile(
+				join(teamsDir, "t1.json"),
+				JSON.stringify({ id: "t1", name: "Gamma" }),
+			);
 			await sleep(250);
-			expect(await db.teams.findById("t1")).toEqual({ id: "t1", name: "Gamma" });
+			expect(await db.teams.findById("t1")).toEqual({
+				id: "t1",
+				name: "Gamma",
+			});
 			expect((await nextEmission).value?.[0]?.name).toBe("Gamma");
 			await db.close();
-			await writeFile(join(teamsDir, "t1.json"), JSON.stringify({ id: "t1", name: "Delta" }));
+			await writeFile(
+				join(teamsDir, "t1.json"),
+				JSON.stringify({ id: "t1", name: "Delta" }),
+			);
 			await sleep(250);
 			const raced = await Promise.race([
 				watch.next(),
-				sleep(100).then(() => ({ done: true } as IteratorResult<ReadonlyArray<{ id: string; name: string }>>)),
+				sleep(100).then(
+					() =>
+						({ done: true }) as IteratorResult<
+							ReadonlyArray<{ id: string; name: string }>
+						>,
+				),
 			]);
 			expect(raced.done).toBe(true);
 		} finally {
@@ -768,10 +1558,15 @@ describe("@proseql/engine U8 fixes", () => {
 	});
 
 	it("awaits in-flight external reloads during close and ignores stale watcher callbacks after shutdown", async () => {
-		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u8-close-drain-"));
+		const root = await mkdtemp(
+			join(tmpdir(), "proseql-engine-u8-close-drain-"),
+		);
 		try {
 			const file = join(root, "users.json");
-			await writeFile(file, JSON.stringify({ u1: { id: "u1", name: "Alice" } }));
+			await writeFile(
+				file,
+				JSON.stringify({ u1: { id: "u1", name: "Alice" } }),
+			);
 			const host = createTriggerableFileWatchHost(root);
 			const db = await createPersistentEngineDatabase(
 				{
@@ -837,7 +1632,10 @@ describe("@proseql/engine U8 fixes", () => {
 					collections: {
 						users: { schema: UserSchema, relationships: {} },
 						posts: {
-							schema: Schema.Struct({ id: Schema.String, title: Schema.String }),
+							schema: Schema.Struct({
+								id: Schema.String,
+								title: Schema.String,
+							}),
 							relationships: {},
 						},
 						books: { schema: BookSchema, relationships: {} },
@@ -867,14 +1665,26 @@ describe("@proseql/engine U8 fixes", () => {
 			await db.users.update("u1", { name: { $set: "Updated" } });
 			await db.posts.create({ id: "p1", title: "Post" });
 			await db.flush();
-			expect(await readFile(join(docsRoot, "base.yaml"), "utf8")).toContain("name: Updated");
-			expect(await readFile(join(docsRoot, "generated.yaml"), "utf8")).toContain("posts:");
-			expect(await readFile(join(docsRoot, "generated.yaml"), "utf8")).toContain("p1:");
-			expect(await db.books.findById("b1")).toEqual({ id: "b1", title: "Overlay", year: 1966 });
-			expect(await db.$documentGraph.getRecordProvenance("books", "b1")).toBeTruthy();
-			await expect(db.books.create({ id: "b2", title: "Nope", year: 2000 })).rejects.toBeInstanceOf(
-				OperationError,
+			expect(await readFile(join(docsRoot, "base.yaml"), "utf8")).toContain(
+				"name: Updated",
 			);
+			expect(
+				await readFile(join(docsRoot, "generated.yaml"), "utf8"),
+			).toContain("posts:");
+			expect(
+				await readFile(join(docsRoot, "generated.yaml"), "utf8"),
+			).toContain("p1:");
+			expect(await db.books.findById("b1")).toEqual({
+				id: "b1",
+				title: "Overlay",
+				year: 1966,
+			});
+			expect(
+				await db.$documentGraph.getRecordProvenance("books", "b1"),
+			).toBeTruthy();
+			await expect(
+				db.books.create({ id: "b2", title: "Nope", year: 2000 }),
+			).rejects.toBeInstanceOf(OperationError);
 			await db.close();
 		} finally {
 			await rm(root, { recursive: true, force: true });
@@ -882,17 +1692,34 @@ describe("@proseql/engine U8 fixes", () => {
 	});
 
 	it("publishes declarations through core root exports and compiles in an exports-aware consumer", async () => {
-		execFileSync("bunx", ["tsc", "--build", "packages/core", "packages/engine"], {
-			cwd: WORKTREE_ROOT,
-			stdio: "inherit",
-		});
-		const distTypes = await readFile(join(WORKTREE_ROOT, "packages/engine/dist/types.d.ts"), "utf8");
+		execFileSync(
+			"bunx",
+			["tsc", "--build", "packages/core", "packages/engine"],
+			{
+				cwd: WORKTREE_ROOT,
+				stdio: "inherit",
+			},
+		);
+		const distTypes = await readFile(
+			join(WORKTREE_ROOT, "packages/engine/dist/types.d.ts"),
+			"utf8",
+		);
 		expect(distTypes.includes("@proseql/core/")).toBe(false);
-		const consumerRoot = await mkdtemp(join(WORKTREE_ROOT, ".tmp-engine-consumer-"));
+		const consumerRoot = await mkdtemp(
+			join(WORKTREE_ROOT, ".tmp-engine-consumer-"),
+		);
 		try {
-			await mkdir(join(consumerRoot, "node_modules", "@proseql"), { recursive: true });
-			await symlink(join(WORKTREE_ROOT, "packages/core"), join(consumerRoot, "node_modules", "@proseql", "core"));
-			await symlink(join(WORKTREE_ROOT, "packages/engine"), join(consumerRoot, "node_modules", "@proseql", "engine"));
+			await mkdir(join(consumerRoot, "node_modules", "@proseql"), {
+				recursive: true,
+			});
+			await symlink(
+				join(WORKTREE_ROOT, "packages/core"),
+				join(consumerRoot, "node_modules", "@proseql", "core"),
+			);
+			await symlink(
+				join(WORKTREE_ROOT, "packages/engine"),
+				join(consumerRoot, "node_modules", "@proseql", "engine"),
+			);
 			await writeFile(
 				join(consumerRoot, "tsconfig.json"),
 				JSON.stringify(
@@ -935,9 +1762,10 @@ describe("@proseql/engine U8 fixes", () => {
 		let initializeCount = 0;
 		const plugin = {
 			name: "count-init",
-			initialize: () => Effect.sync(() => {
-				initializeCount += 1;
-			}),
+			initialize: () =>
+				Effect.sync(() => {
+					initializeCount += 1;
+				}),
 		} as const;
 		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u8-plugin-"));
 		try {
@@ -971,13 +1799,28 @@ describe("@proseql/engine U8 fixes", () => {
 			await db.flush();
 			expect(initializeCount).toBe(1);
 			await expect(
-				db.users.create({ id: "u1", name: "Alice", role: "guest", marker: null } as any),
+				db.users.create({
+					id: "u1",
+					name: "Alice",
+					role: "guest",
+					marker: null,
+				} as any),
 			).rejects.toBeInstanceOf(ValidationError);
 			await expect(
-				db.users.create({ id: "u2", name: "Alice", role: "admin", marker: "x" } as any),
+				db.users.create({
+					id: "u2",
+					name: "Alice",
+					role: "admin",
+					marker: "x",
+				} as any),
 			).rejects.toBeInstanceOf(ValidationError);
 			await expect(
-				db.users.create({ id: "u3", name: "Alice", role: "admin", marker: null }),
+				db.users.create({
+					id: "u3",
+					name: "Alice",
+					role: "admin",
+					marker: null,
+				}),
 			).rejects.toBeInstanceOf(HookError);
 			const literalDb = await createEngineDatabase({
 				users: {
@@ -991,7 +1834,12 @@ describe("@proseql/engine U8 fixes", () => {
 				},
 			} as const);
 			expect(
-				await literalDb.users.create({ id: "u4", name: "Carol", role: "admin", marker: null }),
+				await literalDb.users.create({
+					id: "u4",
+					name: "Carol",
+					role: "admin",
+					marker: null,
+				}),
 			).toEqual({ id: "u4", name: "Carol", role: "admin", marker: null });
 			await literalDb.close();
 			await db.close();
