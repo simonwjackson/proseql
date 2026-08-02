@@ -11,18 +11,48 @@ declare module "./browser-wasm/proseql_wasm.js" {
 			clearTimeoutFn: typeof globalThis.clearTimeout,
 		);
 		register_default(id: string, callback: () => string): void;
-		register_predicate(id: string, callback: (payloadJson: string) => string): void;
-		register_computed(id: string, callback: (payloadJson: string) => string): void;
+		register_predicate(
+			id: string,
+			callback: (payloadJson: string) => string,
+		): void;
+		register_computed(
+			id: string,
+			callback: (payloadJson: string) => string,
+		): void;
 		register_collator(callback: (a: string, b: string) => number): void;
-		register_migration(id: string, callback: (payloadJson: string) => string): void;
+		register_migration(
+			id: string,
+			callback: (payloadJson: string) => string,
+		): void;
 		register_id_generator(name: string, callback: () => string): void;
-		register_before_create_hook(id: string, callback: (payloadJson: string) => string): void;
-		register_before_update_hook(id: string, callback: (payloadJson: string) => string): void;
-		register_before_delete_hook(id: string, callback: (payloadJson: string) => string): void;
-		register_after_create_hook(id: string, callback: (payloadJson: string) => string): void;
-		register_after_update_hook(id: string, callback: (payloadJson: string) => string): void;
-		register_after_delete_hook(id: string, callback: (payloadJson: string) => string): void;
-		register_on_change_hook(id: string, callback: (payloadJson: string) => string): void;
+		register_before_create_hook(
+			id: string,
+			callback: (payloadJson: string) => string,
+		): void;
+		register_before_update_hook(
+			id: string,
+			callback: (payloadJson: string) => string,
+		): void;
+		register_before_delete_hook(
+			id: string,
+			callback: (payloadJson: string) => string,
+		): void;
+		register_after_create_hook(
+			id: string,
+			callback: (payloadJson: string) => string,
+		): void;
+		register_after_update_hook(
+			id: string,
+			callback: (payloadJson: string) => string,
+		): void;
+		register_after_delete_hook(
+			id: string,
+			callback: (payloadJson: string) => string,
+		): void;
+		register_on_change_hook(
+			id: string,
+			callback: (payloadJson: string) => string,
+		): void;
 		register_custom_operator(
 			name: string,
 			supportedTypesJson: string,
@@ -31,10 +61,21 @@ declare module "./browser-wasm/proseql_wasm.js" {
 		create_database(inputJson: string): string;
 		drop_database(handle: number): string;
 		dispatch(handle: number, method: string, payloadJson?: string): string;
-		dispatch_projected(handle: number, method: string, payloadJson?: string): string;
+		dispatch_projected(
+			handle: number,
+			method: string,
+			payloadJson?: string,
+		): string;
 		begin_transaction(handle: number): string;
-		transaction_step(sessionHandle: number, method: string, payloadJson?: string): string;
-		synchronize_transaction_projection(sessionHandle: number, rowsJson: string): string;
+		transaction_step(
+			sessionHandle: number,
+			method: string,
+			payloadJson?: string,
+		): string;
+		synchronize_transaction_projection(
+			sessionHandle: number,
+			rowsJson: string,
+		): string;
 		transaction_projection_handles(sessionHandle: number): string;
 		commit_transaction(sessionHandle: number): string;
 		rollback_transaction(sessionHandle: number): string;
@@ -46,6 +87,28 @@ declare module "./browser-wasm/proseql_wasm.js" {
 			expectedGeneration: number,
 			expectedRevision: number,
 		): number;
+		fast_query_range(
+			handle: number,
+			collectionIndex: number,
+			expectedRevision: number,
+			offset: number,
+			len: number,
+		): number;
+		fast_projected_query_slots(
+			handle: number,
+			commandJson: string,
+			collectionIndex: number,
+			field: string,
+			value: string,
+			offset: number,
+			limit: number,
+		): unknown;
+		fast_index_query_revision(
+			handle: number,
+			collectionIndex: number,
+			expectedRevision: number,
+		): number;
+		fast_selected_primitive_query(handle: number, commandJson: string): unknown;
 		projection_handles(handle: number): string;
 		synchronize_projection(handle: number, rowsJson: string): string;
 		subscribe_watch(

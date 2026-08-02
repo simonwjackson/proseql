@@ -428,14 +428,20 @@ impl Collection {
     ///
     /// This is the only public entry point into the index layer; callers do not
     /// access `query_indexes` directly.
+    pub fn exact_equality_candidate_ids<'a>(
+        &'a self,
+        where_clause: &Value,
+    ) -> Option<(Vec<&'a str>, bool)> {
+        self.query_indexes.exact_equality_posting(where_clause)
+    }
+
     pub fn narrow_candidates(&self, where_clause: &Value) -> Option<Vec<String>> {
+        if let Some(candidates) = self.query_indexes.narrow_by_equality(where_clause, &[]) {
+            return Some(candidates);
+        }
         let insertion_order = self.insertion_order();
         self.query_indexes
-            .narrow_by_equality(where_clause, &insertion_order)
-            .or_else(|| {
-                self.query_indexes
-                    .narrow_by_search(where_clause, &insertion_order)
-            })
+            .narrow_by_search(where_clause, &insertion_order)
     }
 
     // ── Public read API ───────────────────────────────────────────────────────
@@ -453,6 +459,21 @@ impl Collection {
     /// Return all entities in insertion order.
     pub fn list(&self) -> Vec<&Value> {
         self.state.values().collect()
+    }
+
+    /// Iterate stable storage ids and entities in insertion order without cloning.
+    pub fn entries(&self) -> impl Iterator<Item = (&str, &Value)> {
+        self.state.iter().map(|(id, value)| (id.as_str(), value))
+    }
+
+    pub fn position_of(&self, id: &str) -> Option<usize> {
+        self.state.get_index_of(id)
+    }
+
+    pub fn entry_at(&self, position: usize) -> Option<(&str, &Value)> {
+        self.state
+            .get_index(position)
+            .map(|(id, value)| (id.as_str(), value))
     }
 
     /// Resolve the stable storage key for a canonical row only when the value

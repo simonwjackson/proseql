@@ -364,6 +364,28 @@ export const jsonByteMetric = (value: unknown) => {
 	}
 };
 
+export const createCounterDeltaTracker = <T extends object>(
+	read: (() => T | undefined) | undefined,
+) => {
+	let before: T | undefined;
+	const totals: Record<string, number> = {};
+	return {
+		beforeEach: () => {
+			before = read?.();
+		},
+		afterEach: () => {
+			const after = read?.();
+			if (before === undefined || after === undefined) return;
+			for (const [key, value] of Object.entries(after)) {
+				if (typeof value !== "number") continue;
+				const prior = (before as Record<string, number>)[key] ?? 0;
+				totals[key] = (totals[key] ?? 0) + Math.max(0, value - prior);
+			}
+		},
+		snapshot: () => ({ ...totals }) as T,
+	};
+};
+
 export const createTaskInstrumentation = (options: {
 	readonly initializationMs: number;
 	readonly commandPayload?: unknown;

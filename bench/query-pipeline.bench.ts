@@ -22,6 +22,7 @@ import {
 	type BenchSchemaConfig,
 	buildBenchOptions,
 	closeAll,
+	createCounterDeltaTracker,
 	createTaskInstrumentation,
 	formatResultsTable,
 	measureAsync,
@@ -332,12 +333,19 @@ export async function createSuite(options?: {
 					taskOptions.collection
 				]!.query(taskOptions.query).runPromise;
 				const checksum = checksumBenchmarkValue(resultPayload);
+				const projectionDeltas = createCounterDeltaTracker(
+					handle.projectionMaterialization,
+				);
 				bench.add(
 					createEngineTaskName(engine.id, taskOptions.name),
 					async () => {
 						await (handle.db as unknown as QueryableDb)[
 							taskOptions.collection
 						]!.query(taskOptions.query).runPromise;
+					},
+					{
+						beforeEach: projectionDeltas.beforeEach,
+						afterEach: projectionDeltas.afterEach,
 					},
 				);
 				attachTaskMetadata(bench.tasks[bench.tasks.length - 1]!, {
@@ -359,7 +367,7 @@ export async function createSuite(options?: {
 						initializationMs,
 						commandPayload: taskOptions.query,
 						resultPayload,
-						projectionMaterialization: handle.projectionMaterialization,
+						projectionMaterialization: projectionDeltas.snapshot,
 					}),
 				});
 			}

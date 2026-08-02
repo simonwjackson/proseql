@@ -25,6 +25,7 @@ import {
 	type BenchSchemaConfig,
 	buildBenchOptions,
 	closeAll,
+	createCounterDeltaTracker,
 	createTaskInstrumentation,
 	formatResultsTable,
 	measureAsync,
@@ -292,33 +293,40 @@ export async function createSuite(options?: {
 					const unindexedResult =
 						await unindexedHandle.db.users.query(unindexedQuery).runPromise;
 					const unindexedChecksum = checksumBenchmarkValue(unindexedResult);
+					const unindexedDeltas = createCounterDeltaTracker(
+						unindexedHandle.projectionMaterialization,
+					);
 					const unindexedInstrumentation = {
 						...createTaskInstrumentation({
 							initializationMs: unindexedInitializationMs,
 							commandPayload: unindexedQuery,
 							resultPayload: unindexedResult,
-							projectionMaterialization:
-								unindexedHandle.projectionMaterialization,
 						}),
 					};
+					Object.defineProperty(
+						unindexedInstrumentation,
+						"projectionMaterialization",
+						{ enumerable: true, get: unindexedDeltas.snapshot },
+					);
 					bench.add(
 						createEngineTaskName(engine.id, unindexedBenchmarkName),
 						async () => {
 							await unindexedHandle.db.users.query(unindexedQuery).runPromise;
 						},
-						unindexedTracker
-							? {
-									afterEach: async () => {
-										await unindexedTracker.record("afterIteration");
-										const metrics = unindexedTracker.toMetrics();
-										unindexedInstrumentation.jsHeapBytes = metrics.jsHeapBytes;
-										unindexedInstrumentation.wasmLinearMemoryHighWaterBytes =
-											metrics.wasmLinearMemoryBytes;
-										unindexedInstrumentation.repeatedHighWaterGrowthBytes =
-											metrics.repeatedGrowthBytes;
-									},
-								}
-							: undefined,
+						{
+							beforeEach: unindexedDeltas.beforeEach,
+							afterEach: async () => {
+								unindexedDeltas.afterEach();
+								if (unindexedTracker === undefined) return;
+								await unindexedTracker.record("afterIteration");
+								const metrics = unindexedTracker.toMetrics();
+								unindexedInstrumentation.jsHeapBytes = metrics.jsHeapBytes;
+								unindexedInstrumentation.wasmLinearMemoryHighWaterBytes =
+									metrics.wasmLinearMemoryBytes;
+								unindexedInstrumentation.repeatedHighWaterGrowthBytes =
+									metrics.repeatedGrowthBytes;
+							},
+						},
 					);
 					attachTaskMetadata(requireLastTask(bench), {
 						benchmarkName: unindexedBenchmarkName,
@@ -355,33 +363,40 @@ export async function createSuite(options?: {
 					const indexedResult =
 						await indexedHandle.db.users.query(indexedQuery).runPromise;
 					const indexedChecksum = checksumBenchmarkValue(indexedResult);
+					const indexedDeltas = createCounterDeltaTracker(
+						indexedHandle.projectionMaterialization,
+					);
 					const indexedInstrumentation = {
 						...createTaskInstrumentation({
 							initializationMs: indexedInitializationMs,
 							commandPayload: indexedQuery,
 							resultPayload: indexedResult,
-							projectionMaterialization:
-								indexedHandle.projectionMaterialization,
 						}),
 					};
+					Object.defineProperty(
+						indexedInstrumentation,
+						"projectionMaterialization",
+						{ enumerable: true, get: indexedDeltas.snapshot },
+					);
 					bench.add(
 						createEngineTaskName(engine.id, indexedBenchmarkName),
 						async () => {
 							await indexedHandle.db.users.query(indexedQuery).runPromise;
 						},
-						indexedTracker
-							? {
-									afterEach: async () => {
-										await indexedTracker.record("afterIteration");
-										const metrics = indexedTracker.toMetrics();
-										indexedInstrumentation.jsHeapBytes = metrics.jsHeapBytes;
-										indexedInstrumentation.wasmLinearMemoryHighWaterBytes =
-											metrics.wasmLinearMemoryBytes;
-										indexedInstrumentation.repeatedHighWaterGrowthBytes =
-											metrics.repeatedGrowthBytes;
-									},
-								}
-							: undefined,
+						{
+							beforeEach: indexedDeltas.beforeEach,
+							afterEach: async () => {
+								indexedDeltas.afterEach();
+								if (indexedTracker === undefined) return;
+								await indexedTracker.record("afterIteration");
+								const metrics = indexedTracker.toMetrics();
+								indexedInstrumentation.jsHeapBytes = metrics.jsHeapBytes;
+								indexedInstrumentation.wasmLinearMemoryHighWaterBytes =
+									metrics.wasmLinearMemoryBytes;
+								indexedInstrumentation.repeatedHighWaterGrowthBytes =
+									metrics.repeatedGrowthBytes;
+							},
+						},
 					);
 					attachTaskMetadata(requireLastTask(bench), {
 						benchmarkName: indexedBenchmarkName,

@@ -382,6 +382,74 @@ impl Database {
         )
     }
 
+    pub fn canonical_query_positions(
+        &self,
+        collection: &str,
+        input: &QueryInput,
+        populate: Option<&Value>,
+        trust_exact_index: bool,
+    ) -> Result<Option<Vec<usize>>, EngineError> {
+        if populate.is_some() {
+            return Ok(None);
+        }
+        let rows = self
+            .collections
+            .get(collection)
+            .ok_or_else(|| col_nf(collection))?;
+        crate::query::pipeline::execute_canonical_query_positions(
+            rows,
+            input,
+            &self.registry,
+            trust_exact_index,
+        )
+    }
+
+    pub fn borrowed_compact_selection_query<'a>(
+        &'a self,
+        collection: &str,
+        input: &QueryInput,
+        populate: Option<&Value>,
+    ) -> Result<Option<crate::query::pipeline::BorrowedCompactSelection<'a>>, EngineError> {
+        if populate.is_some() {
+            return Ok(None);
+        }
+        let rows = self
+            .collections
+            .get(collection)
+            .ok_or_else(|| col_nf(collection))?;
+        crate::query::pipeline::execute_borrowed_compact_selection(rows, input, &self.registry)
+    }
+
+    /// Authorize the contiguous insertion-order representation of a canonical
+    /// query. Returning `None` forces the full query pipeline; callers must not
+    /// infer a range for filtered, sorted, selected, populated, or computed rows.
+    pub fn canonical_query_range(
+        &self,
+        collection: &str,
+        input: &QueryInput,
+        populate: Option<&Value>,
+    ) -> Result<Option<(usize, usize)>, EngineError> {
+        let rows = self
+            .collections
+            .get(collection)
+            .ok_or_else(|| col_nf(collection))?;
+        if populate.is_some()
+            || input.cursor.is_some()
+            || input.r#where.is_some()
+            || !input.sort.is_empty()
+            || input.select.is_some()
+            || !rows.descriptor.computed_fields.is_empty()
+        {
+            return Ok(None);
+        }
+        let offset = input.offset.unwrap_or(0).min(rows.len());
+        let available = rows.len().saturating_sub(offset);
+        Ok(Some((
+            offset,
+            input.limit.unwrap_or(available).min(available),
+        )))
+    }
+
     /// Cursor-paginated query with optional population and selection.
     ///
     /// Pipeline order: populate → computed/filter/cursor-sort → select.

@@ -41,7 +41,7 @@
 //! - `packages/core/src/factories/database-effect.ts` — candidate narrowing
 //!   (`resolveWithIndex`, `resolveWithSearchIndex`)
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use serde_json::Value;
 
@@ -71,12 +71,14 @@ pub struct QueryIndexes {
     next_order: u64,
 }
 
+type EqualityPosting<'a> = (usize, &'a [String], &'a BTreeSet<(u64, String)>);
+
 struct EqualityIndex {
     /// Single-element for `Single`, multiple for `Compound`.
     fields: Vec<String>,
     /// Serialized value key → entity ids. Ordering is applied at query time so
     /// ordinary posting insertion/removal remains O(1)-ish even for low-cardinality fields.
-    map: HashMap<String, HashSet<String>>,
+    map: HashMap<String, BTreeSet<(u64, String)>>,
 }
 
 impl std::fmt::Debug for EqualityIndex {
@@ -128,9 +130,14 @@ impl QueryIndexes {
     }
 
     fn insert_postings(&mut self, id: &str, entity: &Value) {
+        let order = self.entity_order.get(id).copied().unwrap_or(u64::MAX);
         for index in &mut self.equality {
             if let Some(key) = equality_key(entity, &index.fields) {
-                index.map.entry(key).or_default().insert(id.to_owned());
+                index
+                    .map
+                    .entry(key)
+                    .or_default()
+                    .insert((order, id.to_owned()));
             }
         }
         for field in &self.search_fields {
@@ -149,12 +156,13 @@ impl QueryIndexes {
     }
 
     fn remove_postings(&mut self, id: &str, entity: &Value) {
+        let order = self.entity_order.get(id).copied().unwrap_or(u64::MAX);
         for index in &mut self.equality {
             let Some(key) = equality_key(entity, &index.fields) else {
                 continue;
             };
             let should_remove_key = if let Some(ids) = index.map.get_mut(&key) {
-                ids.remove(id);
+                ids.remove(&(order, id.to_owned()));
                 ids.is_empty()
             } else {
                 false
@@ -202,6 +210,55 @@ impl QueryIndexes {
         for (id, entity) in entities {
             self.insert(id, entity);
         }
+    }
+
+    /// Borrow an already insertion-ordered posting for one exact equality key.
+    /// More complex `$in` unions continue through `narrow_by_equality` so their
+    /// condition-value union order remains authoritative.
+    pub fn exact_equality_posting<'a>(
+        &'a self,
+        where_clause: &Value,
+    ) -> Option<(Vec<&'a str>, bool)> {
+        let where_obj = where_clause.as_object()?;
+        if where_obj.keys().any(|key| key.starts_with('$')) {
+            return None;
+        }
+        let mut best: Option<EqualityPosting<'_>> = None;
+        for index in &self.equality {
+            let Some(values) = index
+                .fields
+                .iter()
+                .map(|field| extract_equality_values(where_obj, field))
+                .collect::<Option<Vec<_>>>()
+            else {
+                continue;
+            };
+            if values.iter().any(|values| values.len() != 1) {
+                continue;
+            }
+            let key = values
+                .into_iter()
+                .map(|values| canonical_index_part(values[0]))
+                .collect::<Vec<_>>()
+                .join("\x00");
+            let Some(posting) = index.map.get(&key) else {
+                let covers_where = exact_index_covers_where(where_obj, &index.fields);
+                return Some((Vec::new(), covers_where));
+            };
+            if best
+                .as_ref()
+                .is_none_or(|(field_count, _, _)| *field_count < index.fields.len())
+            {
+                best = Some((index.fields.len(), &index.fields, posting));
+            }
+        }
+        best.map(|(_, fields, posting)| {
+            let covers_where = exact_index_covers_where(where_obj, fields);
+            (
+                posting.iter().map(|(_, id)| id.as_str()).collect(),
+                covers_where,
+            )
+        })
     }
 
     /// Try to narrow entity ids using equality conditions from the where clause.
@@ -267,11 +324,7 @@ impl QueryIndexes {
                     .collect::<Vec<_>>()
                     .join("\x00");
                 if let Some(ids) = idx.map.get(&lookup_key) {
-                    let mut ordered = ids.iter().collect::<Vec<_>>();
-                    ordered.sort_unstable_by_key(|id| {
-                        self.entity_order.get(*id).copied().unwrap_or(u64::MAX)
-                    });
-                    for id in ordered {
+                    for (_, id) in ids {
                         if seen.insert(id.clone()) {
                             candidates.push(id.clone());
                         }
@@ -380,6 +433,24 @@ fn canonical_index_part(v: &Value) -> String {
         return format!("{}", n);
     }
     serde_json::to_string(v).unwrap_or_default()
+}
+
+fn exact_index_covers_where(where_obj: &serde_json::Map<String, Value>, fields: &[String]) -> bool {
+    where_obj.len() == fields.len()
+        && fields.iter().all(|field| {
+            let Some(condition) = where_obj.get(field) else {
+                return false;
+            };
+            match condition {
+                Value::Object(operators) if operators.keys().any(|key| key.starts_with('$')) => {
+                    let Some(equal) = operators.get("$eq") else {
+                        return false;
+                    };
+                    operators.len() == 1 && !equal.is_array() && !equal.is_object()
+                }
+                _ => !condition.is_array() && !condition.is_object(),
+            }
+        })
 }
 
 /// Extract direct, `$eq`, or `$in` values from a where-clause field.
@@ -790,6 +861,67 @@ mod tests {
                 &["first".to_string()]
             ),
             Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn exact_equality_posting_borrows_ids_in_insertion_order() {
+        let values = [
+            ("u2".to_string(), json!({"role":"admin"})),
+            ("u1".to_string(), json!({"role":"user"})),
+            ("u3".to_string(), json!({"role":"admin"})),
+        ];
+        let refs = values
+            .iter()
+            .map(|(id, value)| (id.clone(), value))
+            .collect::<Vec<_>>();
+        let mut indexes = QueryIndexes::new();
+        indexes.rebuild(&refs, &[IndexDescriptor::Single("role".into())], &[]);
+
+        assert_eq!(
+            indexes.exact_equality_posting(&json!({"role":"admin"})),
+            Some((vec!["u2", "u3"], true))
+        );
+        assert_eq!(
+            indexes.exact_equality_posting(&json!({"role":"admin","score":{"$gt":1}})),
+            Some((vec!["u2", "u3"], false))
+        );
+        assert_eq!(
+            indexes.exact_equality_posting(&json!({"role":{"nested":true}})),
+            Some((Vec::new(), false))
+        );
+        assert!(indexes
+            .exact_equality_posting(&json!({"role":{"$in":["admin","user"]}}))
+            .is_none());
+    }
+
+    #[test]
+    fn exact_compound_posting_is_trusted_only_when_it_covers_the_whole_predicate() {
+        let values = [
+            ("u1".to_string(), json!({"role":"admin","team":"a"})),
+            ("u2".to_string(), json!({"role":"admin","team":"b"})),
+        ];
+        let refs = values
+            .iter()
+            .map(|(id, value)| (id.clone(), value))
+            .collect::<Vec<_>>();
+        let mut indexes = QueryIndexes::new();
+        indexes.rebuild(
+            &refs,
+            &[IndexDescriptor::Compound(vec![
+                "role".into(),
+                "team".into(),
+            ])],
+            &[],
+        );
+
+        assert_eq!(
+            indexes.exact_equality_posting(&json!({"role":"admin","team":"a"})),
+            Some((vec!["u1"], true))
+        );
+        assert_eq!(
+            indexes.exact_equality_posting(&json!({"role":"admin","team":"a","active":true})),
+            Some((vec!["u1"], false))
         );
     }
 }

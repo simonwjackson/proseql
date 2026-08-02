@@ -19,9 +19,10 @@ import {
 	TransactionError,
 	ValidationError,
 } from "@proseql/core";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import * as Schema from "effect/Schema";
 import { beforeAll, describe, expect, it } from "vitest";
+import { applyPagination } from "../../core/src/operations/query/paginate-stream.js";
 import { decodeBoundaryValueForHost } from "../src/boundary-values.js";
 import { reconstructBoundaryError } from "../src/errors.js";
 import {
@@ -268,7 +269,7 @@ beforeAll(() => {
 		cwd: WORKTREE_ROOT,
 		stdio: "inherit",
 	});
-}, 60_000);
+}, 120_000);
 
 type ControlledHost = NodeEngineStorageHost & {
 	readonly writes: Array<{ readonly path: string; readonly data: string }>;
@@ -445,6 +446,314 @@ describe("@proseql/engine U8 fixes", () => {
 			expect(Object.keys(db)).not.toContain(
 				"__proseqlMaterializationDiagnostics",
 			);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("authorizes contiguous queries while preserving fresh arrays and stable row identity", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{
+				users: [
+					{ id: "u1", name: "Alice" },
+					{ id: "u2", name: "Bob" },
+				],
+			},
+		);
+		try {
+			const first = await db.users.query();
+			const second = await db.users.query();
+			expect(second).not.toBe(first);
+			expect(second[0]).toBe(first[0]);
+			first.pop();
+			expect((await db.users.query()).map((row) => row.id)).toEqual([
+				"u1",
+				"u2",
+			]);
+
+			(first[0] as { name: string }).name = "Caller";
+			expect((await db.users.query({ offset: 0, limit: 1 }))[0]).toBe(first[0]);
+			await db.users.create({ id: "u3", name: "Cara" });
+			expect((await db.users.query()).map((row) => row.id)).toEqual([
+				"u1",
+				"u2",
+				"u3",
+			]);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("packs primitive selections and keeps stale-index mutable-reference semantics", async () => {
+		const IndexedUserSchema = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+			age: Schema.Number,
+			role: Schema.String,
+			note: Schema.optional(Schema.NullOr(Schema.String)),
+		});
+		const db = await createEngineDatabase(
+			{
+				users: {
+					schema: IndexedUserSchema,
+					indexes: ["role"],
+					relationships: {},
+				},
+			} as const,
+			{
+				users: [
+					{ id: "u1", name: "雪🚀", age: -0, role: "admin" },
+					{ id: "u2", name: "Bob", age: 2, role: "user", note: null },
+				],
+			},
+		);
+		try {
+			// The first read materializes the sparse row; the second establishes
+			// the same-turn authorized indexed-result cache.
+			await db.users.query({ where: { role: "admin" } });
+			const firstAdminRows = await db.users.query({ where: { role: "admin" } });
+			firstAdminRows.push({
+				id: "poison",
+				name: "Poison",
+				age: 99,
+				role: "admin",
+			});
+			firstAdminRows.splice(0, 1);
+			firstAdminRows.reverse();
+			firstAdminRows.length = 0;
+			const secondAdminRows = await db.users.query({
+				where: { role: "admin" },
+			});
+			expect(secondAdminRows).not.toBe(firstAdminRows);
+			expect(secondAdminRows.map((row) => row.id)).toEqual(["u1"]);
+
+			const selected = await db.users.query({ select: ["id", "name", "age"] });
+			const firstSelected = selected[0];
+			expect(firstSelected).toBeDefined();
+			if (firstSelected === undefined) throw new Error("missing selected row");
+			expect(Object.keys(firstSelected)).toEqual(["id", "name", "age"]);
+			expect(firstSelected.name).toBe("雪🚀");
+			expect(Object.is(firstSelected.age, -0)).toBe(true);
+			const optional = await db.users.query({ select: ["id", "note"] });
+			expect(optional).toEqual([{ id: "u1" }, { id: "u2", note: null }]);
+
+			const admin = await db.users.query({ where: { role: "admin" } });
+			(admin[0] as { role: string }).role = "user";
+			expect(await db.users.query({ where: { role: "admin" } })).toEqual([]);
+			expect(
+				(await db.users.query({ where: { role: "user" } })).map(
+					(row) => row.id,
+				),
+			).toEqual(["u2"]);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("decodes homogeneous boolean primitive columns and falls back for mixed optional values", async () => {
+		const BooleanSchema = Schema.Struct({
+			id: Schema.String,
+			enabled: Schema.Boolean,
+			mixed: Schema.optional(Schema.NullOr(Schema.Boolean)),
+		});
+		const db = await createEngineDatabase(
+			{ flags: { schema: BooleanSchema, relationships: {} } } as const,
+			{
+				flags: [
+					{ id: "f1", enabled: false, mixed: true },
+					{ id: "f2", enabled: true, mixed: null },
+					{ id: "f3", enabled: false },
+					{ id: "f4", enabled: true, mixed: undefined },
+				],
+			},
+		);
+		try {
+			expect(await db.flags.query({ select: ["id", "enabled"] })).toEqual([
+				{ id: "f1", enabled: false },
+				{ id: "f2", enabled: true },
+				{ id: "f3", enabled: false },
+				{ id: "f4", enabled: true },
+			]);
+			expect(await db.flags.query({ select: ["id", "mixed"] })).toEqual([
+				{ id: "f1", mixed: true },
+				{ id: "f2", mixed: null },
+				{ id: "f3" },
+				{ id: "f4", mixed: undefined },
+			]);
+			expect(
+				await db.flags.query({ select: { enabled: true } } as never),
+			).toEqual([
+				{ enabled: false },
+				{ enabled: true },
+				{ enabled: false },
+				{ enabled: true },
+			]);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("filters every condition not covered by an exact equality posting", async () => {
+		const IndexedSchema = Schema.Struct({
+			id: Schema.String,
+			role: Schema.String,
+			team: Schema.String,
+			score: Schema.Number,
+		});
+		const db = await createEngineDatabase(
+			{
+				users: {
+					schema: IndexedSchema,
+					indexes: ["role", ["role", "team"]],
+					relationships: {},
+				},
+			} as const,
+			{
+				users: [
+					{ id: "u1", role: "admin", team: "a", score: 1 },
+					{ id: "u2", role: "admin", team: "b", score: 5 },
+					{ id: "u3", role: "user", team: "a", score: 9 },
+				],
+			},
+		);
+		try {
+			expect(
+				(
+					await db.users.query({
+						where: { role: "admin", score: { $gt: 2 } },
+					})
+				).map((row) => row.id),
+			).toEqual(["u2"]);
+			expect(
+				(
+					await db.users.query({
+						where: { role: "admin", team: "a" },
+					})
+				).map((row) => row.id),
+			).toEqual(["u1"]);
+			expect(
+				(
+					await db.users.query({
+						where: { role: "admin", team: "a", score: { $gt: 2 } },
+					})
+				).map((row) => row.id),
+			).toEqual([]);
+
+			const escaped = await db.users.findById("u1");
+			if (escaped === null) throw new Error("missing indexed row");
+			(escaped as { role: string }).role = "user";
+			expect(
+				(await db.users.query({ where: { role: "admin" } })).map(
+					(row) => row.id,
+				),
+			).toEqual(["u2"]);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("normalizes offset and limit exactly like the direct TypeScript stream", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{
+				users: [
+					{ id: "u0", name: "Zero" },
+					{ id: "u1", name: "One" },
+					{ id: "u2", name: "Two" },
+					{ id: "u3", name: "Three" },
+				],
+			},
+		);
+		const ids = async (offset: unknown, limit: unknown, slowPath = false) =>
+			(
+				await db.users.query({
+					offset,
+					limit,
+					...(slowPath ? { sort: { id: "asc" } } : {}),
+				} as never)
+			).map((row) => row.id);
+		const scenarios: ReadonlyArray<readonly [unknown, unknown]> = [
+			[-2, undefined],
+			[1.8, 1.8],
+			[Number.NaN, Number.NaN],
+			[Number.POSITIVE_INFINITY, undefined],
+			[0, Number.POSITIVE_INFINITY],
+			["2", "2"],
+			["bad", "bad"],
+			[null, null],
+		];
+		try {
+			for (const [offset, limit] of scenarios) {
+				const direct = Array.from(
+					await Effect.runPromise(
+						Stream.runCollect(
+							applyPagination(
+								offset as number,
+								limit as number,
+							)(Stream.fromIterable(["u0", "u1", "u2", "u3"])),
+						),
+					),
+				);
+				expect(await ids(offset, limit)).toEqual(direct);
+				expect(await ids(offset, limit, true)).toEqual(direct);
+			}
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("uses canonical boundary encoding before native query exports", async () => {
+		const BoundarySchema = Schema.Struct({
+			id: Schema.String,
+			value: Schema.Number,
+			role: Schema.optional(Schema.String),
+			sentinel: Schema.Struct({ __proseqlArrayHole__: Schema.Number }),
+		});
+		const db = await createEngineDatabase(
+			{ rows: { schema: BoundarySchema, relationships: {} } } as const,
+			{
+				rows: [
+					{
+						id: "r1",
+						value: -0,
+						role: undefined,
+						sentinel: { __proseqlArrayHole__: 1 },
+					},
+					{
+						id: "r2",
+						value: 1,
+						role: "admin",
+						sentinel: { __proseqlArrayHole__: 2 },
+					},
+				],
+			},
+		);
+		try {
+			expect(
+				(await db.rows.query({ where: { value: -0 } })).map((row) => row.id),
+			).toEqual(["r1"]);
+			expect(
+				(
+					await db.rows.query({
+						where: { sentinel: { __proseqlArrayHole__: 1 } },
+					} as never)
+				).map((row) => row.id),
+			).toEqual(["r1"]);
+			expect(
+				(await db.rows.query({ where: { role: undefined } } as never)).map(
+					(row) => row.id,
+				),
+			).toEqual(["r1"]);
+			const sparse = new Array<unknown>(2);
+			sparse[1] = "admin";
+			expect(
+				(
+					await db.rows.query({
+						where: { role: { $in: sparse } },
+					} as never)
+				).map((row) => row.id),
+			).toEqual(["r2"]);
 		} finally {
 			await db.close();
 		}

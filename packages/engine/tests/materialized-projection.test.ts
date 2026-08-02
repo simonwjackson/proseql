@@ -42,6 +42,49 @@ describe("materialized projection", () => {
 		expect(projection.stats.fullValueBytesAvoided).toBeGreaterThan(0);
 	});
 
+	it("materializes contiguous descriptors as fresh arrays without poisoning structural caches", () => {
+		const projection = new MaterializedProjection({
+			collections: {
+				users: [
+					{ id: "u1", handle: "0:1:1" },
+					{ id: "u2", handle: "1:1:1" },
+				],
+			},
+		});
+		const first = projection.materializeCompact<ReadonlyArray<{ id: string }>>(
+			"users",
+			{
+				k: "c",
+				o: 0,
+				l: 2,
+				t: 2,
+				v: 1,
+				a: [
+					[0, [0, "u1", { id: "u1" }]],
+					[1, [1, "u2", { id: "u2" }]],
+				],
+			},
+			100,
+		);
+		const second = projection.materializeCompact<ReadonlyArray<{ id: string }>>(
+			"users",
+			{ k: "c", o: 0, l: 2, t: 2, v: 1 },
+			20,
+		);
+		expect(second).not.toBe(first);
+		expect(second[0]).toBe(first[0]);
+		(first as Array<{ id: string }>).pop();
+		expect(
+			projection
+				.materializeCompact<ReadonlyArray<{ id: string }>>(
+					"users",
+					{ k: "c", o: 0, l: 2, t: 2, v: 1 },
+					20,
+				)
+				.map((row) => row.id),
+		).toEqual(["u1", "u2"]);
+	});
+
 	it("keeps a 10K bootstrap free of values and proxies", () => {
 		const projection = new MaterializedProjection({
 			collections: {
@@ -181,6 +224,45 @@ describe("materialized projection", () => {
 		});
 		old.name = "Detached";
 		expect(projection.dirtyRows).toEqual([]);
+	});
+
+	it("detaches stale caller objects after a full projection resynchronization", () => {
+		const projection = new MaterializedProjection({
+			collections: { users: [{ id: "u1", handle: "0:1:1" }] },
+		});
+		const stale = projection.materialize<{ id: string; name: string }>(
+			"users",
+			{
+				kind: "materializedOne",
+				row: {
+					id: "u1",
+					handle: "0:1:1",
+					value: { id: "u1", name: "Alice" },
+				},
+			},
+			1,
+		);
+		projection.resynchronize({
+			collections: { users: [{ id: "u1", handle: "0:2:2" }] },
+		});
+		const current = projection.materialize<{ id: string; name: string }>(
+			"users",
+			{
+				kind: "materializedOne",
+				row: {
+					id: "u1",
+					handle: "0:2:2",
+					value: { id: "u1", name: "Current" },
+				},
+			},
+			1,
+		);
+
+		stale.name = "Stale mutation";
+		expect(projection.dirtyRows).toEqual([]);
+		current.name = "Current mutation";
+		expect(projection.dirtyRows).toHaveLength(1);
+		expect(projection.dirtyRows[0]?.value).toBe(current);
 	});
 
 	it("keeps unobserved mutation deltas metadata-only", () => {

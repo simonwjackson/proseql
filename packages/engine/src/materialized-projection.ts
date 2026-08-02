@@ -21,7 +21,15 @@ type CompactMaterializedRow =
 
 export type CompactMaterializedResultDescriptor =
 	| { readonly k: "f"; readonly r: CompactMaterializedRow }
-	| { readonly k: "q"; readonly r: ReadonlyArray<CompactMaterializedRow> };
+	| { readonly k: "q"; readonly r: ReadonlyArray<CompactMaterializedRow> }
+	| {
+			readonly k: "c";
+			readonly o: number;
+			readonly l: number;
+			readonly t: number;
+			readonly v: number;
+			readonly a?: ReadonlyArray<readonly [number, CompactMaterializedRow]>;
+	  };
 
 export type ProjectionHandles = {
 	readonly collections: Readonly<
@@ -188,7 +196,12 @@ const trackDeep = (
 export class MaterializedProjection {
 	private slots: Array<Slot | undefined> = [];
 	private readonly slotById = new Map<string, number>();
-	private readonly slotByRustSlot = new Map<number, number>();
+	private slotByRustSlot = new Int32Array(0);
+	private readonly rustSlotByCollectionPosition = new Map<string, Int32Array>();
+	private readonly canonicalRowsByCollection = new Map<
+		string,
+		{ readonly revision: number; readonly rows: ReadonlyArray<unknown> }
+	>();
 	private readonly freeSlots: number[] = [];
 	private readonly dirtyKeys = new Set<string>();
 	private readonly fastFindPins: FastFindPin[] = [];
@@ -258,6 +271,33 @@ export class MaterializedProjection {
 					]
 				: [];
 		});
+	}
+
+	fastCanonicalRangeCandidate<T>(
+		collection: string,
+		offset: number,
+		limit?: number,
+	):
+		| { readonly revision: number; readonly rows: ReadonlyArray<T> }
+		| undefined {
+		const cached = this.canonicalRowsByCollection.get(collection);
+		if (cached === undefined) return undefined;
+		const end = Math.min(
+			cached.rows.length,
+			offset + (limit ?? cached.rows.length),
+		);
+		return {
+			revision: cached.revision,
+			rows: cached.rows.slice(
+				Math.min(offset, cached.rows.length),
+				end,
+			) as ReadonlyArray<T>,
+		};
+	}
+
+	acceptAuthorizedFastRange<T>(rows: ReadonlyArray<T>): ReadonlyArray<T> {
+		this.mutableStats.cacheHits += rows.length;
+		return rows;
 	}
 
 	fastFindCandidate<T>(
@@ -348,7 +388,9 @@ export class MaterializedProjection {
 	clear() {
 		this.slots.length = 0;
 		this.slotById.clear();
-		this.slotByRustSlot.clear();
+		this.clearRustSlotIndexes();
+		this.rustSlotByCollectionPosition.clear();
+		this.canonicalRowsByCollection.clear();
 		this.freeSlots.length = 0;
 		this.dirtyKeys.clear();
 		this.clearFastFindPins();
@@ -361,6 +403,25 @@ export class MaterializedProjection {
 		if (sync.invalidated) {
 			this.invalidate();
 			return;
+		}
+		const structurallyChanged = new Set(
+			sync.changes
+				.filter(
+					(change) =>
+						change.deleted ||
+						("position" in change &&
+							typeof (change as { readonly position?: unknown }).position ===
+								"number"),
+				)
+				.map((change) => change.collection),
+		);
+		for (const collection of new Set(
+			sync.changes.map((change) => change.collection),
+		)) {
+			this.canonicalRowsByCollection.delete(collection);
+		}
+		for (const collection of structurallyChanged) {
+			this.rustSlotByCollectionPosition.delete(collection);
 		}
 		for (const change of sync.changes) {
 			if (!change.deleted) continue;
@@ -433,7 +494,7 @@ export class MaterializedProjection {
 	}
 
 	materializeFastFindRustSlot<T>(collection: string, rustSlot: number): T {
-		const slot = this.slotByRustSlot.get(rustSlot);
+		const slot = this.rustSlotIndex(rustSlot);
 		const row = slot === undefined ? undefined : this.slots[slot];
 		const candidate =
 			row === undefined
@@ -450,8 +511,23 @@ export class MaterializedProjection {
 		return this.acceptAuthorizedFastFind(candidate);
 	}
 
+	materializeRustSlots<T>(
+		collection: string,
+		rustSlots: Uint32Array,
+	): ReadonlyArray<T> {
+		const values = new Array<T>(rustSlots.length);
+		for (let index = 0; index < rustSlots.length; index += 1) {
+			const rustSlot = rustSlots[index];
+			if (rustSlot === undefined) {
+				throw new StaleMaterializedHandleError(`slot:${index}`);
+			}
+			values[index] = this.materializeRustSlot(collection, rustSlot);
+		}
+		return values;
+	}
+
 	materializeRustSlot<T>(collection: string, rustSlot: number): T {
-		const slot = this.slotByRustSlot.get(rustSlot);
+		const slot = this.rustSlotIndex(rustSlot);
 		const row = slot === undefined ? undefined : this.slots[slot];
 		const value = slot === undefined ? undefined : this.resolveValue(slot);
 		if (row?.collection === collection && value !== undefined) {
@@ -481,18 +557,17 @@ export class MaterializedProjection {
 				return row[1];
 			}
 			const [rustSlot, id, value] = row;
-			let slot = this.slotByRustSlot.get(rustSlot);
+			let slot = this.rustSlotIndex(rustSlot);
 			let metadata = slot === undefined ? undefined : this.slots[slot];
 			if (metadata === undefined) {
-				const fallbackSlot =
-					this.metadataFallback?.slotByRustSlot.get(rustSlot);
+				const fallbackSlot = this.metadataFallback?.rustSlotIndex(rustSlot);
 				const fallback =
 					fallbackSlot === undefined
 						? undefined
 						: this.metadataFallback?.slots[fallbackSlot];
 				if (fallback?.collection === collection && fallback.id === id) {
 					this.put(collection, { id, handle: fallback.handle });
-					slot = this.slotByRustSlot.get(rustSlot);
+					slot = this.rustSlotIndex(rustSlot);
 					metadata = slot === undefined ? undefined : this.slots[slot];
 				}
 			}
@@ -508,7 +583,7 @@ export class MaterializedProjection {
 				valueBytes: JSON.stringify(value)?.length ?? 0,
 			});
 			this.mutableStats.cacheMisses += 1;
-			const activeSlot = this.slotByRustSlot.get(rustSlot);
+			const activeSlot = this.rustSlotIndex(rustSlot);
 			const materialized =
 				activeSlot === undefined ? undefined : this.resolveValue(activeSlot);
 			if (materialized === undefined) {
@@ -517,10 +592,63 @@ export class MaterializedProjection {
 			}
 			return materialized;
 		};
-		const value =
-			descriptor.k === "f"
-				? materialize(descriptor.r)
-				: descriptor.r.map(materialize);
+		let value: unknown;
+		if (descriptor.k === "f") {
+			value = materialize(descriptor.r);
+		} else if (descriptor.k === "q") {
+			value = descriptor.r.map(materialize);
+		} else {
+			const cachedCanonical =
+				descriptor.o === 0 && descriptor.l === descriptor.t
+					? this.canonicalRowsByCollection.get(collection)
+					: undefined;
+			if (
+				cachedCanonical?.revision === descriptor.v &&
+				descriptor.a === undefined
+			) {
+				value = cachedCanonical.rows.slice();
+				this.mutableStats.cacheHits += cachedCanonical.rows.length;
+				this.mutableStats.materializationMilliseconds +=
+					performance.now() - started;
+				return value as T;
+			}
+			let positions = this.rustSlotByCollectionPosition.get(collection);
+			if (positions === undefined) {
+				positions = new Int32Array(descriptor.t);
+				positions.fill(-1);
+				this.rustSlotByCollectionPosition.set(collection, positions);
+			}
+			for (const [position, row] of descriptor.a ?? []) {
+				materialize(row);
+				if (typeof row === "number") positions[position] = row;
+				else if (row[0] !== null) positions[position] = row[0];
+			}
+			const rows: unknown[] = [];
+			for (let index = 0; index < descriptor.l; index += 1) {
+				const position = descriptor.o + index;
+				const rustSlot = positions[position];
+				if (rustSlot === undefined || rustSlot < 0) {
+					this.mutableStats.cacheMisses += 1;
+					this.invalidate();
+					throw new StaleMaterializedHandleError(`position:${position}`);
+				}
+				rows.push(this.materializeRustSlot(collection, rustSlot));
+			}
+			if (descriptor.o === 0 && descriptor.l === descriptor.t) {
+				const cached = {
+					revision: descriptor.v,
+					rows: rows.slice(),
+				};
+				this.canonicalRowsByCollection.set(collection, cached);
+				setTimeout(() => {
+					if (this.canonicalRowsByCollection.get(collection) === cached) {
+						this.canonicalRowsByCollection.delete(collection);
+						this.rustSlotByCollectionPosition.delete(collection);
+					}
+				}, 0);
+			}
+			value = rows;
+		}
 		this.mutableStats.materializationMilliseconds +=
 			performance.now() - started;
 		return value as T;
@@ -569,7 +697,9 @@ export class MaterializedProjection {
 	private replaceAll(snapshot: ProjectionSnapshot, resynchronization: boolean) {
 		this.slots = [];
 		this.slotById.clear();
-		this.slotByRustSlot.clear();
+		this.clearRustSlotIndexes();
+		this.rustSlotByCollectionPosition.clear();
+		this.canonicalRowsByCollection.clear();
 		this.freeSlots.length = 0;
 		this.dirtyKeys.clear();
 		this.clearFastFindPins();
@@ -600,6 +730,38 @@ export class MaterializedProjection {
 		);
 		row.proxyCount = 0;
 		return undefined;
+	}
+
+	private rustSlotIndex(rustSlot: number): number | undefined {
+		if (rustSlot < 0 || rustSlot >= this.slotByRustSlot.length)
+			return undefined;
+		const slot = this.slotByRustSlot[rustSlot];
+		return slot === undefined || slot < 0 ? undefined : slot;
+	}
+
+	private setRustSlotIndex(rustSlot: number, slot: number) {
+		if (rustSlot >= this.slotByRustSlot.length) {
+			const capacity = Math.max(
+				16,
+				rustSlot + 1,
+				this.slotByRustSlot.length * 2,
+			);
+			const expanded = new Int32Array(capacity);
+			expanded.fill(-1);
+			expanded.set(this.slotByRustSlot);
+			this.slotByRustSlot = expanded;
+		}
+		this.slotByRustSlot[rustSlot] = slot;
+	}
+
+	private deleteRustSlotIndex(rustSlot: number) {
+		if (rustSlot >= 0 && rustSlot < this.slotByRustSlot.length) {
+			this.slotByRustSlot[rustSlot] = -1;
+		}
+	}
+
+	private clearRustSlotIndexes() {
+		this.slotByRustSlot = new Int32Array(0);
 	}
 
 	private put(collection: string, row: ProjectionRow) {
@@ -650,11 +812,8 @@ export class MaterializedProjection {
 			);
 			valueBytes = row.valueBytes ?? 0;
 		}
-		if (
-			prior !== undefined &&
-			this.slotByRustSlot.get(prior.rustSlot) === target
-		) {
-			this.slotByRustSlot.delete(prior.rustSlot);
+		if (prior !== undefined && this.rustSlotIndex(prior.rustSlot) === target) {
+			this.deleteRustSlotIndex(prior.rustSlot);
 		}
 		if (prior !== undefined) this.unpinFastFindHandle(prior.handle);
 		if (prior?.hasValue) {
@@ -687,7 +846,7 @@ export class MaterializedProjection {
 		};
 		installed = true;
 		this.slotById.set(key, target);
-		this.slotByRustSlot.set(handleToken.rustSlot, target);
+		this.setRustSlotIndex(handleToken.rustSlot, target);
 		this.dirtyKeys.delete(key);
 		if (incomingHasValue) {
 			this.mutableStats.materializedRows += 1;
@@ -709,7 +868,7 @@ export class MaterializedProjection {
 		row.weakValue = undefined;
 		this.fastFindPinnedHandles.add(row.handle);
 		this.fastFindPins.push({ rustSlot: row.rustSlot, handle: row.handle });
-		const slot = this.slotByRustSlot.get(row.rustSlot);
+		const slot = this.rustSlotIndex(row.rustSlot);
 		if (slot !== undefined) {
 			const candidate: FastFindCandidate = {
 				collection: row.collection,
@@ -738,7 +897,7 @@ export class MaterializedProjection {
 				continue;
 			}
 			this.removeFastFindCandidate(evicted.handle);
-			const slot = this.slotByRustSlot.get(evicted.rustSlot);
+			const slot = this.rustSlotIndex(evicted.rustSlot);
 			const current = slot === undefined ? undefined : this.slots[slot];
 			if (
 				current?.handle === evicted.handle &&
@@ -792,11 +951,8 @@ export class MaterializedProjection {
 		}
 		this.slots[slot] = undefined;
 		this.slotById.delete(key);
-		if (
-			prior !== undefined &&
-			this.slotByRustSlot.get(prior.rustSlot) === slot
-		) {
-			this.slotByRustSlot.delete(prior.rustSlot);
+		if (prior !== undefined && this.rustSlotIndex(prior.rustSlot) === slot) {
+			this.deleteRustSlotIndex(prior.rustSlot);
 		}
 		if (prior !== undefined) this.unpinFastFindHandle(prior.handle);
 		this.dirtyKeys.delete(key);
@@ -831,5 +987,5 @@ export const isCompactMaterializedResultDescriptor = (
 		return false;
 	}
 	const kind = (value as { readonly k?: unknown }).k;
-	return kind === "f" || kind === "q";
+	return kind === "f" || kind === "q" || kind === "c";
 };

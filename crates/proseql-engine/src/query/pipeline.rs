@@ -75,6 +75,11 @@ const SEARCH_SCORE_KEY: &str = "_searchScore";
 
 // ── Query input ───────────────────────────────────────────────────────────────
 
+pub struct BorrowedCompactSelection<'a> {
+    pub fields: Vec<String>,
+    pub columns: Vec<Vec<Option<&'a Value>>>,
+}
+
 /// Full query configuration (mirrors TS `db.collection.query(options)`).
 #[derive(Debug, Default, Clone)]
 pub struct QueryInput {
@@ -114,6 +119,18 @@ pub fn execute_query(
         }));
     }
 
+    // The common unsorted path does not need owned intermediate rows. Keeping
+    // candidates borrowed until after filtering and pagination avoids cloning
+    // every entity merely to return a small page or selected projection. Query
+    // authority remains here: indexes only narrow candidates and the complete
+    // predicate still runs before offset/limit.
+    if input.sort.is_empty()
+        && extract_search_config(&input.r#where).is_none()
+        && !should_resolve_computed(&input.select, &collection.descriptor.computed_fields)
+    {
+        return execute_borrowed_query(collection, input, registry.as_ref());
+    }
+
     execute_query_over_entities(
         collect_candidates(collection, &input.r#where),
         input,
@@ -139,6 +156,135 @@ pub fn execute_query(
 ///   });
 /// }
 /// ```
+pub fn execute_canonical_query_positions(
+    collection: &Collection,
+    input: &QueryInput,
+    registry: &Arc<CallbackRegistry>,
+    trust_exact_index: bool,
+) -> Result<Option<Vec<usize>>, EngineError> {
+    if input.cursor.is_some()
+        || !input.sort.is_empty()
+        || input.select.is_some()
+        || extract_search_config(&input.r#where).is_some()
+        || !collection.descriptor.computed_fields.is_empty()
+    {
+        return Ok(None);
+    }
+    let offset = input.offset.unwrap_or(0);
+    let limit = input.limit.unwrap_or(usize::MAX);
+    let positions = if let Some(where_clause) = input.r#where.as_ref() {
+        if let Some((ids, posting_covers_where)) =
+            collection.exact_equality_candidate_ids(where_clause)
+        {
+            ids.into_iter()
+                .filter(|id| {
+                    (trust_exact_index && posting_covers_where)
+                        || collection.get(id).is_some_and(|entity| {
+                            matches_where_with_registry(
+                                entity,
+                                where_clause,
+                                Some(registry.as_ref()),
+                            )
+                        })
+                })
+                .filter_map(|id| collection.position_of(id))
+                .skip(offset)
+                .take(limit)
+                .collect()
+        } else if let Some(ids) = collection.narrow_candidates(where_clause) {
+            ids.into_iter()
+                .filter(|id| {
+                    collection.get(id).is_some_and(|entity| {
+                        matches_where_with_registry(entity, where_clause, Some(registry.as_ref()))
+                    })
+                })
+                .filter_map(|id| collection.position_of(&id))
+                .skip(offset)
+                .take(limit)
+                .collect()
+        } else {
+            collection
+                .entries()
+                .enumerate()
+                .filter(|(_, (_, entity))| {
+                    matches_where_with_registry(entity, where_clause, Some(registry.as_ref()))
+                })
+                .map(|(position, _)| position)
+                .skip(offset)
+                .take(limit)
+                .collect()
+        }
+    } else {
+        (offset.min(collection.len())..(offset.saturating_add(limit)).min(collection.len()))
+            .collect()
+    };
+    Ok(Some(positions))
+}
+
+pub fn execute_borrowed_compact_selection<'a>(
+    collection: &'a Collection,
+    input: &QueryInput,
+    registry: &Arc<CallbackRegistry>,
+) -> Result<Option<BorrowedCompactSelection<'a>>, EngineError> {
+    if input.cursor.is_some()
+        || !input.sort.is_empty()
+        || extract_search_config(&input.r#where).is_some()
+        || should_resolve_computed(&input.select, &collection.descriptor.computed_fields)
+    {
+        return Ok(None);
+    }
+    let Some(Value::Array(selected)) = input.select.as_ref() else {
+        return Ok(None);
+    };
+    if selected.is_empty() || selected.iter().any(|field| !field.is_string()) {
+        return Ok(None);
+    }
+    let mut fields = Vec::with_capacity(selected.len());
+    for field in selected.iter().filter_map(Value::as_str) {
+        if !fields.iter().any(|existing| existing == field) {
+            fields.push(field.to_owned());
+        }
+    }
+    let offset = input.offset.unwrap_or(0);
+    let limit = input.limit.unwrap_or(usize::MAX);
+    let capacity = limit.min(collection.len().saturating_sub(offset));
+    let mut columns = fields
+        .iter()
+        .map(|_| Vec::with_capacity(capacity))
+        .collect::<Vec<_>>();
+    let mut push_entity = |entity: &'a Value| {
+        for (field, column) in fields.iter().zip(&mut columns) {
+            column.push(if field.contains('.') {
+                super::filter::get_nested_value(entity, field)
+            } else {
+                entity.get(field)
+            });
+        }
+    };
+    if let Some(where_clause) = input.r#where.as_ref() {
+        for entity in borrowed_candidates(collection, Some(where_clause))
+            .into_iter()
+            .filter(|entity| {
+                matches_where_with_registry(entity, where_clause, Some(registry.as_ref()))
+            })
+            .skip(offset)
+            .take(limit)
+        {
+            push_entity(entity);
+        }
+    } else {
+        for entity in collection
+            .entries()
+            .map(|(_, entity)| entity)
+            .skip(offset)
+            .take(limit)
+        {
+            push_entity(entity);
+        }
+    }
+    Ok(Some(BorrowedCompactSelection { fields, columns }))
+}
+
 pub fn execute_cursor_query(
     collection: &Collection,
     input: &QueryInput,
@@ -294,6 +440,45 @@ pub fn query_input(
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+fn borrowed_candidates<'a>(
+    collection: &'a Collection,
+    where_clause: Option<&Value>,
+) -> Vec<&'a Value> {
+    if let Some(where_clause) = where_clause {
+        collection
+            .narrow_candidates(where_clause)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|id| collection.get(id))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| collection.list())
+    } else {
+        collection.list()
+    }
+}
+
+fn execute_borrowed_query(
+    collection: &Collection,
+    input: &QueryInput,
+    registry: &CallbackRegistry,
+) -> Result<Vec<Value>, EngineError> {
+    let candidates = borrowed_candidates(collection, input.r#where.as_ref());
+
+    let offset = input.offset.unwrap_or(0);
+    let limit = input.limit.unwrap_or(usize::MAX);
+    let matches = candidates.into_iter().filter(|entity| {
+        input.r#where.as_ref().is_none_or(|where_clause| {
+            matches_where_with_registry(entity, where_clause, Some(registry))
+        })
+    });
+    Ok(matches
+        .skip(offset)
+        .take(limit)
+        .map(|entity| apply_selection(entity, input.select.as_ref()))
+        .collect())
+}
 
 /// Collect entities from the collection, optionally narrowing via query indexes.
 ///

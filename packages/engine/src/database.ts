@@ -1,38 +1,38 @@
 import {
+	type CollectionConfig,
 	CollectionNotFoundError,
-	StorageAdapterService as StorageAdapter,
-	SourceConfigError,
-	NotFoundError,
-	OperationError,
-	PluginError,
-	TransactionError,
-	ValidationError,
+	type DatabaseConfig,
+	type DocumentGraphDiagnostic,
+	type DocumentGraphRecordProvenance,
+	type DryRunResult,
 	dryRunMigrations,
-	inferCodecsFromConfig,
 	getCollectionConfigs,
+	inferCodecsFromConfig,
 	isSourceOrientedDatabaseConfig,
 	loadCollectionsFromFile,
 	loadData,
 	loadDataFromDirectory,
 	loadDocumentGraphSources,
 	loadDocumentSources,
+	type Migration,
 	makeSerializerLayer,
 	mergeSerializerWithPluginCodecs,
+	type NormalizedSourceConfig,
+	NotFoundError,
 	normalizeSourceConfig,
-	SerializerRegistryService,
+	OperationError,
+	PluginError,
+	type PluginRegistry,
 	removeEntityFromDirectory,
+	SerializerRegistryService,
+	SourceConfigError,
+	StorageAdapterService as StorageAdapter,
 	saveCollectionsToFile,
 	saveData,
 	saveDocumentSource,
 	saveEntityToDirectory,
-	type CollectionConfig,
-	type DatabaseConfig,
-	type DocumentGraphDiagnostic,
-	type DocumentGraphRecordProvenance,
-	type DryRunResult,
-	type Migration,
-	type NormalizedSourceConfig,
-	type PluginRegistry,
+	TransactionError,
+	ValidationError,
 } from "@proseql/core";
 import { Effect, Layer, Schema } from "effect";
 import {
@@ -47,34 +47,47 @@ import {
 	isCompactMaterializedResultDescriptor,
 	isMaterializedResultDescriptor,
 	MaterializedProjection,
-	projectionSnapshotFromHandles,
-	StaleMaterializedHandleError,
 	type ProjectionHandles,
 	type ProjectionSync,
+	projectionSnapshotFromHandles,
+	StaleMaterializedHandleError,
 } from "./materialized-projection.js";
-import { buildPluginRegistry } from "./plugin-registry.js";
-import { compileDatabaseDescriptor, type CallbackRegistrar,
-} from "./schema-compiler.js";
-import { dirnameComparable, isWithinComparableDirectory, matchesComparableFile,
+import {
+	dirnameComparable,
+	isWithinComparableDirectory,
+	matchesComparableFile,
 } from "./path-utils.js";
-import { makeEngineStorageLayer, type EngineStorageHost,
+import { buildPluginRegistry } from "./plugin-registry.js";
+import {
+	type CallbackRegistrar,
+	compileDatabaseDescriptor,
+} from "./schema-compiler.js";
+import {
+	type EngineStorageHost,
+	makeEngineStorageLayer,
 } from "./storage-host-shared.js";
 import type {
 	EngineCollection,
 	EngineDatabaseOptions,
 	EngineInitialData,
 	EnginePersistenceOptions,
+	EngineTransactionDatabase,
 	EngineWatchConfig,
 	GenerateEngineDatabase,
 	GenerateEngineDatabaseWithPersistence,
 	WatchSubscription,
-	EngineTransactionDatabase,
 } from "./types.js";
 
 const DEFAULT_WRITE_DEBOUNCE = 100;
 const OBJECT_KEYED_ONLY_FORMATS = new Set([
 	"json",
-	"yaml", "yml", "toml", "json5", "jsonc", "hjson", "toon",
+	"yaml",
+	"yml",
+	"toml",
+	"json5",
+	"jsonc",
+	"hjson",
+	"toon",
 ]);
 
 type BridgeOk<T> = { kind: "ok"; value: T };
@@ -102,12 +115,14 @@ function inferCollectionFormat(
 	if (explicit) return explicit;
 	const file = collection.file ?? collection.directory;
 	if (!file) return undefined;
-	const match = /\.([^.\/]+)$/.exec(file);
+	const match = /\.([^./]+)$/.exec(file);
 	return match?.[1]?.toLowerCase();
 }
 
 function validateCollectionRuntimeConfig(
-	name: string, collection: CollectionConfig, pluginRegistry?: PluginRegistry,
+	name: string,
+	collection: CollectionConfig,
+	pluginRegistry?: PluginRegistry,
 ) {
 	if (collection.id?.kind === "derivedFromKey") {
 		if (collection.id.field !== "id") {
@@ -135,7 +150,9 @@ function validateCollectionRuntimeConfig(
 		}
 	}
 	if (
-		collection.idGenerator && pluginRegistry && !pluginRegistry.idGenerators.has(collection.idGenerator)
+		collection.idGenerator &&
+		pluginRegistry &&
+		!pluginRegistry.idGenerators.has(collection.idGenerator)
 	) {
 		throw new PluginError({
 			plugin: collection.idGenerator,
@@ -243,7 +260,8 @@ class DebouncedSaver {
 	async flush() {
 		const keys = [...this.lanes.entries()]
 			.filter(
-				([, lane]) => lane.timer || lane.dirty || lane.inflight || lane.error !== undefined,
+				([, lane]) =>
+					lane.timer || lane.dirty || lane.inflight || lane.error !== undefined,
 			)
 			.map(([key]) => key);
 		for (const key of keys) {
@@ -280,7 +298,9 @@ class DebouncedSaver {
 	}
 
 	private async startSave(
-		key: string, lane: SaveLane, immediateRetry: boolean,
+		key: string,
+		lane: SaveLane,
+		immediateRetry: boolean,
 	): Promise<void> {
 		if (lane.inflight) {
 			lane.queuedAfterInflight = true;
@@ -305,7 +325,9 @@ class DebouncedSaver {
 					lane.timer = undefined;
 				}
 				if (
-					(lane.dirty || lane.queuedAfterInflight) && !immediateRetry && lane.error === undefined
+					(lane.dirty || lane.queuedAfterInflight) &&
+					!immediateRetry &&
+					lane.error === undefined
 				) {
 					lane.timer = setTimeout(() => {
 						lane.timer = undefined;
@@ -343,7 +365,8 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	}
 
 	registerBeforeCreateHook(
-		callback: (ctx: unknown) => unknown, prefix: string,
+		callback: (ctx: unknown) => unknown,
+		prefix: string,
 	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_before_create_hook(id, (payloadJson) =>
@@ -353,7 +376,8 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	}
 
 	registerBeforeUpdateHook(
-		callback: (ctx: unknown) => unknown, prefix: string,
+		callback: (ctx: unknown) => unknown,
+		prefix: string,
 	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_before_update_hook(id, (payloadJson) =>
@@ -363,7 +387,8 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	}
 
 	registerBeforeDeleteHook(
-		callback: (ctx: unknown) => unknown, prefix: string,
+		callback: (ctx: unknown) => unknown,
+		prefix: string,
 	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_before_delete_hook(id, (payloadJson) =>
@@ -373,7 +398,8 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	}
 
 	registerAfterCreateHook(
-		callback: (ctx: unknown) => unknown, prefix: string,
+		callback: (ctx: unknown) => unknown,
+		prefix: string,
 	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_after_create_hook(id, (payloadJson) =>
@@ -383,7 +409,8 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	}
 
 	registerAfterUpdateHook(
-		callback: (ctx: unknown) => unknown, prefix: string,
+		callback: (ctx: unknown) => unknown,
+		prefix: string,
 	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_after_update_hook(id, (payloadJson) =>
@@ -393,7 +420,8 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	}
 
 	registerAfterDeleteHook(
-		callback: (ctx: unknown) => unknown, prefix: string,
+		callback: (ctx: unknown) => unknown,
+		prefix: string,
 	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_after_delete_hook(id, (payloadJson) =>
@@ -403,7 +431,8 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	}
 
 	registerOnChangeHook(
-		callback: (ctx: unknown) => unknown, prefix: string,
+		callback: (ctx: unknown) => unknown,
+		prefix: string,
 	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_on_change_hook(id, (payloadJson) =>
@@ -413,7 +442,8 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	}
 
 	registerMigration(
-		callback: (data: Record<string, unknown>) => Record<string, unknown>, prefix: string,
+		callback: (data: Record<string, unknown>) => Record<string, unknown>,
+		prefix: string,
 	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_migration(id, (payloadJson) => {
@@ -435,7 +465,8 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 		const response = this.runtime.register_custom_operator(
 			name,
 			JSON.stringify([...supportedTypes]),
-			(fieldJson, operandJson) => evaluate(parseBoundaryJson(fieldJson), parseBoundaryJson(operandJson)),
+			(fieldJson, operandJson) =>
+				evaluate(parseBoundaryJson(fieldJson), parseBoundaryJson(operandJson)),
 		);
 		parseBridgeResponse(response);
 	}
@@ -557,15 +588,21 @@ class AsyncQueue<T> implements WatchSubscription<T> {
 
 const shouldProjectRead = (method: string, prepared: unknown) => {
 	if (method === "findById") return true;
-	if (method !== "query" || typeof prepared !== "object" || prepared === null) return false;
+	if (method !== "query" || typeof prepared !== "object" || prepared === null)
+		return false;
 	const command = prepared as {
 		readonly query?: { readonly select?: unknown; readonly where?: unknown };
 		readonly populate?: unknown;
 	};
 	const where = command.query?.where;
-	const hasTopLevelSearch = typeof where === "object" && where !== null && Object.hasOwn(where, "$search");
+	const hasTopLevelSearch =
+		typeof where === "object" &&
+		where !== null &&
+		Object.hasOwn(where, "$search");
 	return (
-		command.query?.select === undefined && command.populate === undefined && !hasTopLevelSearch
+		command.query?.select === undefined &&
+		command.populate === undefined &&
+		!hasTopLevelSearch
 	);
 };
 const matchesDeletionResultMethod = (method: string) =>
@@ -600,7 +637,11 @@ type RuntimeTransactionSession = {
 type EngineRuntimeDiagnostics = {
 	bulkMutationDispatches: number;
 	queryDispatches: number;
-transactionBegins: number;
+	queryWasmCrossingMilliseconds: number;
+	queryMaterializationMilliseconds: number;
+	queryCommandProxyBytes: number;
+	queryResponseProxyBytes: number;
+	transactionBegins: number;
 	transactionSteps: number;
 	transactionCommits: number;
 	transactionRollbacks: number;
@@ -608,6 +649,24 @@ transactionBegins: number;
 	transactionJournalBytes: number;
 	transactionSnapshotTransfers: number;
 	temporaryTransactionRuntimes: number;
+};
+
+const transferProxyBytes = (value: unknown): number => {
+	if (typeof value === "string") return value.length * 2;
+	if (ArrayBuffer.isView(value)) return value.byteLength;
+	if (Array.isArray(value)) {
+		let bytes = 0;
+		for (const item of value) bytes += transferProxyBytes(item);
+		return bytes;
+	}
+	if (typeof value === "object" && value !== null) {
+		let bytes = 0;
+		for (const [key, item] of Object.entries(value)) {
+			bytes += key.length * 2 + transferProxyBytes(item);
+		}
+		return bytes;
+	}
+	return value === undefined ? 0 : 8;
 };
 
 class EngineRuntime {
@@ -619,6 +678,18 @@ class EngineRuntime {
 	private readonly canonicalQueryCollections: ReadonlySet<string>;
 	private readonly diagnostics: EngineRuntimeDiagnostics;
 
+	private hotIndexedQuery:
+		| {
+				readonly collectionIndex: number;
+				readonly field: string;
+				readonly value: string;
+				readonly offset: number;
+				readonly limit: number;
+				readonly revision: number;
+				readonly commandBytes: number;
+				readonly rows: ReadonlyArray<unknown>;
+		  }
+		| undefined;
 	private transactionBarrier: Promise<void> | undefined;
 	private releaseTransactionBarrier: (() => void) | undefined;
 	private transactionContext: TransactionContext | undefined;
@@ -631,7 +702,11 @@ class EngineRuntime {
 		diagnostics: EngineRuntimeDiagnostics = {
 			bulkMutationDispatches: 0,
 			queryDispatches: 0,
-		transactionBegins: 0,
+			queryWasmCrossingMilliseconds: 0,
+			queryMaterializationMilliseconds: 0,
+			queryCommandProxyBytes: 0,
+			queryResponseProxyBytes: 0,
+			transactionBegins: 0,
 			transactionSteps: 0,
 			transactionCommits: 0,
 			transactionRollbacks: 0,
@@ -646,7 +721,9 @@ class EngineRuntime {
 		this.createInput = createInput;
 		this.projection = projection;
 		this.diagnostics = diagnostics;
-		const descriptors = Array.isArray(createInput.descriptor.collections) ? createInput.descriptor.collections : [];
+		const descriptors = Array.isArray(createInput.descriptor.collections)
+			? createInput.descriptor.collections
+			: [];
 		this.collectionIndexes = new Map(
 			descriptors.flatMap((descriptor, index) => {
 				if (typeof descriptor !== "object" || descriptor === null) return [];
@@ -661,11 +738,65 @@ class EngineRuntime {
 					readonly name?: unknown;
 					readonly computed_fields?: unknown;
 				};
-				return typeof row.name === "string" && Array.isArray(row.computed_fields) && row.computed_fields.length === 0
+				return typeof row.name === "string" &&
+					Array.isArray(row.computed_fields) &&
+					row.computed_fields.length === 0
 					? [row.name]
 					: [];
 			}),
 		);
+	}
+
+	private measureQueryCrossing<T>(command: unknown, operation: () => T): T {
+		const started = performance.now();
+		const value = operation();
+		this.diagnostics.queryWasmCrossingMilliseconds +=
+			performance.now() - started;
+		this.diagnostics.queryCommandProxyBytes += transferProxyBytes(command);
+		this.diagnostics.queryResponseProxyBytes += transferProxyBytes(value);
+		return value;
+	}
+
+	private clearHotIndexedQuery() {
+		this.hotIndexedQuery = undefined;
+	}
+
+	private invalidateProjection() {
+		this.clearHotIndexedQuery();
+		this.projection.invalidate();
+	}
+
+	private authorizeCachedQuery(commandBytes: number, operation: () => number) {
+		const started = performance.now();
+		const value = operation();
+		this.diagnostics.queryWasmCrossingMilliseconds +=
+			performance.now() - started;
+		this.diagnostics.queryCommandProxyBytes += commandBytes;
+		this.diagnostics.queryResponseProxyBytes += 8;
+		return value;
+	}
+
+	private measureQueryMaterialization<T>(operation: () => T): T {
+		const started = performance.now();
+		const value = operation();
+		this.diagnostics.queryMaterializationMilliseconds +=
+			performance.now() - started;
+		return value;
+	}
+
+	private materializeFastSlots<T>(
+		collection: string,
+		slots: Uint32Array,
+	): ReadonlyArray<T> | undefined {
+		try {
+			return this.measureQueryMaterialization(() =>
+				this.projection.materializeRustSlots<T>(collection, slots),
+			);
+		} catch (error) {
+			if (!(error instanceof StaleMaterializedHandleError)) throw error;
+			this.resynchronizeProjection();
+			return undefined;
+		}
 	}
 
 	static async create(
@@ -678,7 +809,8 @@ class EngineRuntime {
 		registry: PluginRegistry;
 		collections: ReadonlyArray<CollectionRuntimeConfig>;
 	}> {
-		const registry = registryOverride ?? (await buildPluginRegistry(options?.plugins));
+		const registry =
+			registryOverride ?? (await buildPluginRegistry(options?.plugins));
 		const bindings = await loadWasmBindings();
 		const runtime = new bindings.WasmRuntime(
 			globalThis.setTimeout,
@@ -687,7 +819,8 @@ class EngineRuntime {
 		const registrar = new RuntimeCallbackRegistrar(runtime);
 		const compiled = await compileDatabaseDescriptor(
 			config,
-			registry, registrar,
+			registry,
+			registrar,
 		);
 		const collections = Object.entries(
 			(config as any).collections ?? config,
@@ -723,11 +856,19 @@ class EngineRuntime {
 	dispatch<T>(method: string, payload?: unknown): T {
 		if (this.projection.needsResynchronization) this.resynchronizeProjection();
 		if (this.projection.hasDirtyRows) this.synchronizeDirtyProjection();
+		if (MUTATION_METHODS.has(method)) this.clearHotIndexedQuery();
+		const prepared =
+			payload === undefined
+				? undefined
+				: prepareCommandPayload(method, payload);
 		if (
-			method === "findById" && typeof payload === "object" && payload !== null
+			method === "findById" &&
+			typeof prepared === "object" &&
+			prepared !== null
 		) {
-			const collection = "collection" in payload ? payload.collection : undefined;
-			const id = "id" in payload ? payload.id : undefined;
+			const collection =
+				"collection" in prepared ? prepared.collection : undefined;
+			const id = "id" in prepared ? prepared.id : undefined;
 			if (typeof collection === "string" && typeof id === "string") {
 				const collectionIndex = this.collectionIndexes.get(collection);
 				const candidate = this.projection.fastFindCandidate<T>(collection, id);
@@ -753,8 +894,287 @@ class EngineRuntime {
 				this.projection.recordFastFindFallback();
 			}
 		}
-		const prepared = payload === undefined ? undefined : prepareCommandPayload(method, payload);
-		const payloadJson = prepared === undefined ? undefined : JSON.stringify(prepared);
+		if (
+			method === "query" &&
+			typeof prepared === "object" &&
+			prepared !== null
+		) {
+			const command = prepared as {
+				readonly collection?: unknown;
+				readonly query?: Record<string, unknown>;
+				readonly populate?: unknown;
+			};
+			const query = command.query ?? {};
+			const rawSelect = query.select;
+			const selectedFields = Array.isArray(rawSelect)
+				? [
+						...new Set(
+							rawSelect.filter(
+								(field): field is string => typeof field === "string",
+							),
+						),
+					]
+				: undefined;
+			if (
+				selectedFields !== undefined &&
+				selectedFields.length > 0 &&
+				Array.isArray(rawSelect) &&
+				selectedFields.length === rawSelect.length &&
+				command.populate === undefined &&
+				query.where === undefined &&
+				query.sort === undefined &&
+				query.cursor === undefined
+			) {
+				const primitiveRows = this.measureQueryCrossing(prepared, () =>
+					this.runtime.fast_selected_primitive_query(
+						this.handle,
+						JSON.stringify(prepared),
+					),
+				);
+				if (
+					Array.isArray(primitiveRows) &&
+					primitiveRows.length === selectedFields.length &&
+					primitiveRows.every(Array.isArray)
+				) {
+					const columns = primitiveRows.map((descriptor) => {
+						if (descriptor[0] === "s") {
+							const joined = descriptor[1] as string;
+							const offsets = descriptor[2] as Uint32Array;
+							const values = new Array<string>(offsets.length - 1);
+							for (let index = 0; index < values.length; index += 1) {
+								values[index] = joined.slice(
+									offsets[index],
+									offsets[index + 1],
+								);
+							}
+							return values;
+						}
+						if (descriptor[0] === "b") {
+							const bytes = descriptor[1] as Uint8Array;
+							const values = new Array<boolean>(bytes.length);
+							for (let index = 0; index < bytes.length; index += 1) {
+								values[index] = bytes[index] !== 0;
+							}
+							return values;
+						}
+						return descriptor[1] as ArrayLike<unknown>;
+					});
+					const rowCount = columns[0]?.length ?? 0;
+					const rows = new Array<Record<string, unknown>>(rowCount);
+					const [field0, field1, field2, field3, field4] = selectedFields;
+					const [column0, column1, column2, column3, column4] = columns;
+					for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+						switch (selectedFields.length) {
+							case 1:
+								rows[rowIndex] = { [field0!]: column0![rowIndex] };
+								break;
+							case 2:
+								rows[rowIndex] = {
+									[field0!]: column0![rowIndex],
+									[field1!]: column1![rowIndex],
+								};
+								break;
+							case 3:
+								rows[rowIndex] = {
+									[field0!]: column0![rowIndex],
+									[field1!]: column1![rowIndex],
+									[field2!]: column2![rowIndex],
+								};
+								break;
+							case 4:
+								rows[rowIndex] = {
+									[field0!]: column0![rowIndex],
+									[field1!]: column1![rowIndex],
+									[field2!]: column2![rowIndex],
+									[field3!]: column3![rowIndex],
+								};
+								break;
+							case 5:
+								rows[rowIndex] = {
+									[field0!]: column0![rowIndex],
+									[field1!]: column1![rowIndex],
+									[field2!]: column2![rowIndex],
+									[field3!]: column3![rowIndex],
+									[field4!]: column4![rowIndex],
+								};
+								break;
+							default: {
+								const row: Record<string, unknown> = {};
+								for (
+									let fieldIndex = 0;
+									fieldIndex < selectedFields.length;
+									fieldIndex += 1
+								)
+									row[selectedFields[fieldIndex]!] =
+										columns[fieldIndex]![rowIndex];
+								rows[rowIndex] = row;
+							}
+						}
+					}
+					selectionOrderApplied.add(rows);
+					return rows as T;
+				}
+			}
+			const scalarWhere =
+				typeof query.where === "object" && query.where !== null
+					? (query.where as Record<string, unknown>)
+					: undefined;
+			const scalarFields =
+				scalarWhere === undefined ? [] : Object.keys(scalarWhere);
+			if (
+				scalarFields.length === 1 &&
+				typeof scalarWhere![scalarFields[0]!] === "string" &&
+				query.select === undefined &&
+				query.sort === undefined &&
+				query.cursor === undefined &&
+				command.populate === undefined &&
+				typeof command.collection === "string"
+			) {
+				const collectionIndex = this.collectionIndexes.get(command.collection);
+				const offset =
+					typeof query.offset === "number" && query.offset >= 0
+						? Math.trunc(query.offset)
+						: 0;
+				const limit =
+					typeof query.limit === "number" && query.limit >= 0
+						? Math.min(Math.trunc(query.limit), 0xffff_ffff)
+						: 0xffff_ffff;
+				if (collectionIndex !== undefined) {
+					const field = scalarFields[0]!;
+					const value = scalarWhere![field] as string;
+					const cached = this.hotIndexedQuery;
+					if (
+						cached !== undefined &&
+						cached.collectionIndex === collectionIndex &&
+						cached.field === field &&
+						cached.value === value &&
+						cached.offset === offset &&
+						cached.limit === limit &&
+						this.authorizeCachedQuery(cached.commandBytes, () =>
+							this.runtime.fast_index_query_revision(
+								this.handle,
+								collectionIndex,
+								cached.revision,
+							),
+						) === 1
+					) {
+						return cached.rows.slice() as T;
+					}
+					const projected = this.measureQueryCrossing(prepared, () =>
+						this.runtime.fast_projected_query_slots(
+							this.handle,
+							"",
+							collectionIndex,
+							field,
+							value,
+							offset,
+							limit,
+						),
+					);
+					if (
+						Array.isArray(projected) &&
+						typeof projected[0] === "number" &&
+						projected[1] instanceof Uint32Array
+					) {
+						const rows = this.materializeFastSlots<unknown>(
+							command.collection as string,
+							projected[1],
+						);
+						if (rows !== undefined) {
+							// The cached array is private structural metadata. Callers receive a
+							// fresh shell every time while row identities remain shared.
+							const cachedRows = rows.slice();
+							const entry = {
+								collectionIndex,
+								field,
+								value,
+								offset,
+								limit,
+								revision: projected[0],
+								commandBytes: transferProxyBytes(prepared),
+								rows: cachedRows,
+							};
+							this.hotIndexedQuery = entry;
+							setTimeout(() => {
+								if (this.hotIndexedQuery === entry)
+									this.hotIndexedQuery = undefined;
+							}, 0);
+							return cachedRows.slice() as T;
+						}
+					}
+				}
+			}
+			if (
+				query.where !== undefined &&
+				query.select === undefined &&
+				query.sort === undefined &&
+				query.cursor === undefined &&
+				command.populate === undefined &&
+				typeof command.collection === "string"
+			) {
+				const projectedSlots = this.measureQueryCrossing(prepared, () =>
+					this.runtime.fast_projected_query_slots(
+						this.handle,
+						JSON.stringify(prepared),
+						0xffff_ffff,
+						"",
+						"",
+						0,
+						0xffff_ffff,
+					),
+				);
+				if (projectedSlots instanceof Uint32Array) {
+					const rows = this.materializeFastSlots<T>(
+						command.collection as string,
+						projectedSlots,
+					);
+					if (rows !== undefined) return rows as T;
+				}
+			}
+			const canonical =
+				command.populate === undefined &&
+				query.where === undefined &&
+				query.sort === undefined &&
+				query.select === undefined &&
+				query.cursor === undefined;
+			if (canonical && typeof command.collection === "string") {
+				const offset =
+					typeof query.offset === "number" && query.offset >= 0
+						? Math.trunc(query.offset)
+						: 0;
+				const limit =
+					typeof query.limit === "number" && query.limit >= 0
+						? Math.trunc(query.limit)
+						: undefined;
+				const collectionIndex = this.collectionIndexes.get(command.collection);
+				const candidate = this.projection.fastCanonicalRangeCandidate<T>(
+					command.collection,
+					offset,
+					limit,
+				);
+				const authorized =
+					collectionIndex !== undefined &&
+					candidate !== undefined &&
+					candidate.revision <= 0xffff_ffff
+						? this.measureQueryCrossing(prepared, () =>
+								this.runtime.fast_query_range(
+									this.handle,
+									collectionIndex,
+									candidate.revision,
+									offset,
+									candidate.rows.length,
+								),
+							)
+						: 0;
+				if (authorized === 1 && candidate !== undefined) {
+					return this.measureQueryMaterialization(() =>
+						this.projection.acceptAuthorizedFastRange(candidate.rows),
+					) as T;
+				}
+			}
+		}
+		const payloadJson =
+			prepared === undefined ? undefined : JSON.stringify(prepared);
 		return this.dispatchPrepared<T>(method, prepared, payloadJson, true);
 	}
 
@@ -768,12 +1188,15 @@ class EngineRuntime {
 			typeof prepared === "object" &&
 			prepared !== null &&
 			"collection" in prepared &&
-			typeof (prepared as { readonly collection?: unknown }).collection === "string"
+			typeof (prepared as { readonly collection?: unknown }).collection ===
+				"string"
 				? (prepared as { readonly collection: string }).collection
 				: undefined;
 		const projected =
 			shouldProjectRead(method, prepared) &&
-			(method !== "query" || (collection !== undefined && this.canonicalQueryCollections.has(collection)));
+			(method !== "query" ||
+				(collection !== undefined &&
+					this.canonicalQueryCollections.has(collection)));
 		const deletionNeedsPriorIdentity = matchesDeletionResultMethod(method);
 		const priorMaterialized = new Map<string, unknown>();
 		if (method === "updateMany" || method === "deleteMany") {
@@ -781,14 +1204,19 @@ class EngineRuntime {
 		} else if (method === "query" || method === "queryCursor") {
 			this.diagnostics.queryDispatches += 1;
 		}
-		const raw = projected
-			? this.runtime.dispatch_projected(this.handle, method, payloadJson)
-			: this.runtime.dispatch(this.handle, method, payloadJson);
+		const dispatch = () =>
+			projected
+				? this.runtime.dispatch_projected(this.handle, method, payloadJson)
+				: this.runtime.dispatch(this.handle, method, payloadJson);
+		const raw =
+			method === "query"
+				? this.measureQueryCrossing(payloadJson, dispatch)
+				: dispatch();
 		const parsed = JSON.parse(raw) as BridgeResponse<unknown>;
 		let mutationSync: ProjectionSync | undefined;
 		if (MUTATION_METHODS.has(method)) {
 			if (parsed.projection === undefined) {
-				this.projection.invalidate();
+				this.invalidateProjection();
 				throw new Error(`Mutation response omitted projection sync: ${method}`);
 			}
 			mutationSync = decodeBoundaryValueForHost(parsed.projection);
@@ -806,13 +1234,17 @@ class EngineRuntime {
 			}
 			this.projection.apply(mutationSync);
 		} else if (parsed.kind === "defect") {
-			this.projection.invalidate();
+			this.invalidateProjection();
 		}
 		const value = parseBridgeResponseValue(parsed, raw);
 		if (collection !== undefined && mutationSync !== undefined) {
 			return this.materializeMutationResult<T>(
 				method,
-				collection, prepared, value, mutationSync, priorMaterialized,
+				collection,
+				prepared,
+				value,
+				mutationSync,
+				priorMaterialized,
 			);
 		}
 		if (!projected || collection === undefined) return value as T;
@@ -820,13 +1252,15 @@ class EngineRuntime {
 			if (isCompactMaterializedResultDescriptor(value)) {
 				return this.projection.materializeCompact<T>(
 					collection,
-					value, raw.length,
+					value,
+					raw.length,
 				);
 			}
 			if (!isMaterializedResultDescriptor(value)) return value as T;
 			return this.projection.materialize<T>(collection, value, raw.length);
 		} catch (error) {
-			if (!(error instanceof StaleMaterializedHandleError) || !allowRetry) throw error;
+			if (!(error instanceof StaleMaterializedHandleError) || !allowRetry)
+				throw error;
 			this.resynchronizeProjection();
 			return this.dispatchPrepared<T>(method, prepared, payloadJson, false);
 		}
@@ -839,7 +1273,7 @@ class EngineRuntime {
 		value: unknown,
 		sync: ProjectionSync,
 		priorMaterialized: ReadonlyMap<string, unknown>,
-	projection: MaterializedProjection = this.projection,
+		projection: MaterializedProjection = this.projection,
 	): T {
 		if (method === "upsert") return value as T;
 		const ownerChanges = sync.changes.filter(
@@ -859,7 +1293,8 @@ class EngineRuntime {
 			[false, { indices: [], cursor: 0 }],
 			[true, { indices: [], cursor: 0 }],
 		]);
-		const queueKey = (deleted: boolean, id: string) => `${deleted ? "deleted" : "stored"}\u0000${id}`;
+		const queueKey = (deleted: boolean, id: string) =>
+			`${deleted ? "deleted" : "stored"}\u0000${id}`;
 		const addExact = (key: string, index: number) => {
 			const queue = exactQueues.get(key);
 			if (queue) queue.indices.push(index);
@@ -870,7 +1305,9 @@ class EngineRuntime {
 			fallbackQueues.get(deleted)?.indices.push(index);
 			addExact(queueKey(deleted, change.id), index);
 			if (
-				!deleted && change.resultId !== undefined && change.resultId !== change.id
+				!deleted &&
+				change.resultId !== undefined &&
+				change.resultId !== change.id
 			) {
 				addExact(queueKey(false, change.resultId), index);
 			}
@@ -885,14 +1322,18 @@ class EngineRuntime {
 		};
 		const claimChange = (row: unknown, deleted: boolean) => {
 			const resultId = rowId(row);
-			const exact = resultId === undefined ? undefined : consumeQueue(exactQueues.get(queueKey(deleted, resultId)));
+			const exact =
+				resultId === undefined
+					? undefined
+					: consumeQueue(exactQueues.get(queueKey(deleted, resultId)));
 			const index = exact ?? consumeQueue(fallbackQueues.get(deleted));
 			if (index === undefined) return undefined;
 			claimedChanges.add(index);
 			return ownerChanges[index];
 		};
 		const materializeStoredRow = (
-			row: unknown, change = claimChange(row, false),
+			row: unknown,
+			change = claimChange(row, false),
 		): unknown => {
 			const id = change?.id ?? rowId(row);
 			if (id === undefined) return row;
@@ -910,11 +1351,15 @@ class EngineRuntime {
 			return materializeStoredRow(row);
 		};
 		const mapField = (
-			result: Record<string, unknown>, field: "created" | "updated" | "unchanged" | "deleted",
+			result: Record<string, unknown>,
+			field: "created" | "updated" | "unchanged" | "deleted",
 		) => {
 			const rows = result[field];
 			if (!Array.isArray(rows)) return;
-			result[field] = rows.map((row) => field === "deleted" ? materializeDeletedRow(row) : materializeStoredRow(row),
+			result[field] = rows.map((row) =>
+				field === "deleted"
+					? materializeDeletedRow(row)
+					: materializeStoredRow(row),
 			);
 		};
 
@@ -934,7 +1379,9 @@ class EngineRuntime {
 					: undefined;
 			const change =
 				ownerChanges.find(
-					(candidate) => !candidate.deleted && (preparedId === undefined || candidate.id === preparedId),
+					(candidate) =>
+						!candidate.deleted &&
+						(preparedId === undefined || candidate.id === preparedId),
 				) ?? ownerChanges.find((candidate) => !candidate.deleted);
 			result = materializeStoredRow(value, change);
 		} else if (method === "delete") {
@@ -945,7 +1392,10 @@ class EngineRuntime {
 				typeof (prepared as { readonly id?: unknown }).id === "string"
 					? (prepared as { readonly id: string }).id
 					: undefined;
-			result = (preparedId === undefined ? undefined : priorMaterialized.get(preparedId)) ?? value;
+			result =
+				(preparedId === undefined
+					? undefined
+					: priorMaterialized.get(preparedId)) ?? value;
 		} else if (
 			typeof value === "object" &&
 			value !== null &&
@@ -958,13 +1408,17 @@ class EngineRuntime {
 			const record = value as Record<string, unknown>;
 			for (const field of [
 				"created",
-				"updated", "unchanged", "deleted",
+				"updated",
+				"unchanged",
+				"deleted",
 			] as const) {
 				mapField(record, field);
 			}
 			result = record;
 		} else if (
-			method === "deleteWithRelationships" && typeof value === "object" && value !== null
+			method === "deleteWithRelationships" &&
+			typeof value === "object" &&
+			value !== null
 		) {
 			const record = value as Record<string, unknown>;
 			if (Object.hasOwn(record, "deleted")) {
@@ -995,12 +1449,13 @@ class EngineRuntime {
 			);
 			this.projection.markSynchronized(rows);
 		} catch (error) {
-			this.projection.invalidate();
+			this.invalidateProjection();
 			throw error;
 		}
 	}
 
 	private resynchronizeProjection() {
+		this.clearHotIndexedQuery();
 		const handles = parseBridgeResponse<ProjectionHandles>(
 			this.runtime.projection_handles(this.handle),
 		);
@@ -1032,7 +1487,7 @@ class EngineRuntime {
 			return Promise.reject(error);
 		}
 		const run = () => settledPromise(() => this.dispatch<T>(method, payload));
-	return this.transactionBarrier ? this.transactionBarrier.then(run) : run();
+		return this.transactionBarrier ? this.transactionBarrier.then(run) : run();
 	}
 
 	beginTransactionSession(): RuntimeTransactionSession {
@@ -1191,14 +1646,15 @@ class EngineRuntime {
 		session: RuntimeTransactionSession,
 	): ReadonlyArray<string> {
 		this.synchronizeTransactionProjection(session);
+		this.clearHotIndexedQuery();
 		const raw = this.runtime.commit_transaction(session.handle);
 		const parsed = JSON.parse(raw) as BridgeResponse<unknown>;
 		if (parsed.kind === "defect") {
-			this.projection.invalidate();
+			this.invalidateProjection();
 			parseBridgeResponseValue(parsed, raw);
 		}
 		if (parsed.projection === undefined) {
-			this.projection.invalidate();
+			this.invalidateProjection();
 			parseBridgeResponseValue(parsed, raw);
 			throw new Error("Transaction commit response omitted projection sync");
 		}
@@ -1241,7 +1697,8 @@ class EngineRuntime {
 	async createTemporaryTransactionRuntime(): Promise<EngineRuntime> {
 		this.diagnostics.temporaryTransactionRuntimes += 1;
 		this.diagnostics.transactionSnapshotTransfers += 1;
-		const snapshot = await this.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>(
+		const snapshot =
+			await this.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>(
 				"dumpAll",
 			);
 		const createPayload = {
@@ -1283,6 +1740,7 @@ class EngineRuntime {
 			return Promise.reject(error);
 		}
 		return this.waitForTransaction().then(() => {
+			this.clearHotIndexedQuery();
 			this.projection.clear();
 			parseBridgeResponse(this.runtime.drop_database(this.handle));
 		});
@@ -1382,7 +1840,9 @@ const createTransactionContext = (): TransactionContext | undefined => {
 	const asyncHooks = processRef?.getBuiltinModule?.("node:async_hooks") as
 		| { AsyncLocalStorage?: new <T>() => TransactionContext }
 		| undefined;
-	return asyncHooks?.AsyncLocalStorage ? new asyncHooks.AsyncLocalStorage<true>() : undefined;
+	return asyncHooks?.AsyncLocalStorage
+		? new asyncHooks.AsyncLocalStorage<true>()
+		: undefined;
 };
 
 const importDefaultNodeStorageHost = async (): Promise<EngineStorageHost> => {
@@ -1411,7 +1871,9 @@ export const createEngineDatabase = async <Config extends DatabaseConfig>(
 	);
 	return buildDatabaseFacade(
 		runtime,
-		collections, undefined, config,
+		collections,
+		undefined,
+		config,
 	) as unknown as GenerateEngineDatabase<Config>;
 };
 
@@ -1423,8 +1885,10 @@ export const createPersistentEngineDatabase = async <
 	persistenceOptions?: EnginePersistenceOptions,
 	options?: EngineDatabaseOptions,
 ): Promise<GenerateEngineDatabaseWithPersistence<Config>> => {
-	const host = persistenceOptions?.storageHost ?? (await importDefaultNodeStorageHost());
-	const storageLayer = persistenceOptions?.storageLayer ?? makeEngineStorageLayer(host);
+	const host =
+		persistenceOptions?.storageHost ?? (await importDefaultNodeStorageHost());
+	const storageLayer =
+		persistenceOptions?.storageLayer ?? makeEngineStorageLayer(host);
 	const pluginRegistry = await buildPluginRegistry(options?.plugins);
 	for (const [name, collection] of Object.entries(
 		getCollectionConfigs(config),
@@ -1443,15 +1907,18 @@ export const createPersistentEngineDatabase = async <
 	const layer = Layer.merge(storageLayer, serializerLayer) as any;
 	const collections = Object.entries(getCollectionConfigs(config)).map(
 		([name, raw]) => ({
-		name,
-		schema: raw.schema,
-		raw,
-	}),
+			name,
+			schema: raw.schema,
+			raw,
+		}),
 	);
 	const loaded = isSourceOrientedDatabaseConfig(config)
 		? await loadSourceOrientedCollections(
 				config,
-				collections, initialData, host, layer,
+				collections,
+				initialData,
+				host,
+				layer,
 			)
 		: await loadLegacyCollections(collections, initialData, host, layer);
 	const { runtime } = await EngineRuntime.create(
@@ -1502,7 +1969,8 @@ function buildDatabaseFacade(
 	for (const collection of collections) {
 		db[collection.name] = buildCollectionFacade(
 			runtime,
-			collection, persistence,
+			collection,
+			persistence,
 		) as EngineCollection<any>;
 	}
 	const documentGraph = {
@@ -1510,14 +1978,14 @@ function buildDatabaseFacade(
 			persistence?.sourceState?.graphState.provenance.get(
 				`${collection}\u0000${id}`,
 			),
-		getDiagnostics: async () => persistence?.sourceState?.graphState.diagnostics ?? [],
+		getDiagnostics: async () =>
+			persistence?.sourceState?.graphState.diagnostics ?? [],
 	};
 	let transientClosePromise: Promise<void> | undefined;
 	const transactional = {
 		$transaction: <A>(
 			fn: (ctx: EngineTransactionDatabase<any>) => Promise<A>,
-		) =>
-			runTransaction(runtime, collections, persistence, fn, transactionGate),
+		) => runTransaction(runtime, collections, persistence, fn, transactionGate),
 		close: async () => {
 			runtime.assertTransactionWaitAllowed();
 			if (persistence) {
@@ -1576,9 +2044,11 @@ function buildDatabaseFacade(
 			}
 		},
 		pendingCount: () => persistence.saver.pendingCount(),
-		$dryRunMigrations: () => runDryRunMigrations(
+		$dryRunMigrations: () =>
+			runDryRunMigrations(
 				config,
-				hostFromPersistence(persistence), persistence.layer,
+				hostFromPersistence(persistence),
+				persistence.layer,
 			),
 	});
 }
@@ -1597,7 +2067,16 @@ function validateCursorConfig(cursor: { readonly limit: number }) {
 	}
 }
 
+const selectionOrderApplied = new WeakSet<object>();
+
 function applySelectionOrder<T>(value: T, select: unknown): T {
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		selectionOrderApplied.delete(value)
+	) {
+		return value;
+	}
 	if (select === undefined || select === null) return value;
 	if (Array.isArray(select)) {
 		if (!Array.isArray(value) || select.length === 0) return value;
@@ -1606,17 +2085,20 @@ function applySelectionOrder<T>(value: T, select: unknown): T {
 	if (typeof select === "object" && select !== null) {
 		const keys = Object.keys(select as Record<string, unknown>);
 		if (keys.length === 0 || !Array.isArray(value)) return value;
-		return value.map((item) => reorderSelectedValue(item, select as Record<string, unknown>),
+		return value.map((item) =>
+			reorderSelectedValue(item, select as Record<string, unknown>),
 		) as T;
 	}
 	return value;
 }
 
 function reorderSelectedValue(
-	value: unknown, select: ReadonlyArray<unknown> | Record<string, unknown>,
+	value: unknown,
+	select: ReadonlyArray<unknown> | Record<string, unknown>,
 ): unknown {
 	if (Array.isArray(select)) {
-		if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+		if (typeof value !== "object" || value === null || Array.isArray(value))
+			return value;
 		const record = value as Record<string, unknown>;
 		const ordered: Record<string, unknown> = {};
 		for (const key of select) {
@@ -1624,7 +2106,8 @@ function reorderSelectedValue(
 		}
 		return ordered;
 	}
-	if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+	if (typeof value !== "object" || value === null || Array.isArray(value))
+		return value;
 	const record = value as Record<string, unknown>;
 	const ordered: Record<string, unknown> = {};
 	for (const [key, nestedSelect] of Object.entries(select)) {
@@ -1632,7 +2115,8 @@ function reorderSelectedValue(
 		const current = record[key];
 		if (nestedSelect && typeof nestedSelect === "object") {
 			if (Array.isArray(current)) {
-				ordered[key] = current.map((item) => reorderSelectedValue(item, nestedSelect as Record<string, unknown>),
+				ordered[key] = current.map((item) =>
+					reorderSelectedValue(item, nestedSelect as Record<string, unknown>),
 				);
 			} else {
 				ordered[key] = reorderSelectedValue(
@@ -1659,7 +2143,10 @@ async function appendAppendOnlyEntities(
 	entities: ReadonlyArray<Record<string, unknown>>,
 ) {
 	if (
-		!persistence || entities.length === 0 || !isAppendOnlyJsonLinesCollection(collection) || !collection.raw.file
+		!persistence ||
+		entities.length === 0 ||
+		!isAppendOnlyJsonLinesCollection(collection) ||
+		!collection.raw.file
 	) {
 		return;
 	}
@@ -1781,7 +2268,8 @@ function buildCollectionFacade(
 			});
 			await appendAppendOnlyEntities(
 				persistence,
-				collection, value.created ?? [],
+				collection,
+				value.created ?? [],
 			);
 			if ((value.created ?? []).length > 0) scheduleWrite();
 			return value;
@@ -1860,7 +2348,8 @@ function buildCollectionFacade(
 				collection: collection.name,
 				items: [...inputs],
 			});
-			if ((value.created?.length ?? 0) + (value.updated?.length ?? 0) > 0) scheduleWrite();
+			if ((value.created?.length ?? 0) + (value.updated?.length ?? 0) > 0)
+				scheduleWrite();
 			return value;
 		},
 		createWithRelationships: async (input: any) => {
@@ -1903,7 +2392,8 @@ function buildCollectionFacade(
 			return value;
 		},
 		watch: (config?: any) => runtime.watch(collection.name, config),
-		watchById: (id: string, options?: any) => runtime.watchById(collection.name, id, options?.debounceMs),
+		watchById: (id: string, options?: any) =>
+			runtime.watchById(collection.name, id, options?.debounceMs),
 	};
 }
 
@@ -1926,7 +2416,9 @@ async function loadLegacyCollections(
 							group.collections.map((collection) => ({
 								name: collection.name,
 								schema: collection.schema as never,
-								...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
+								...(collection.raw.version !== undefined
+									? { version: collection.raw.version }
+									: {}),
 								...(collection.raw.migrations
 									? {
 											migrations: collection.raw
@@ -1961,7 +2453,9 @@ async function loadLegacyCollections(
 								collection.schema as never,
 								collection.raw.format ?? "json",
 								{
-									...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
+									...(collection.raw.version !== undefined
+										? { version: collection.raw.version }
+										: {}),
 									...(collection.raw.migrations
 										? {
 												migrations: collection.raw
@@ -1988,7 +2482,9 @@ async function loadLegacyCollections(
 				? await Effect.runPromise(
 						Effect.provide(
 							loadData(collection.raw.file, collection.schema as never, {
-								...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
+								...(collection.raw.version !== undefined
+									? { version: collection.raw.version }
+									: {}),
 								...(collection.raw.migrations
 									? {
 											migrations: collection.raw
@@ -1996,10 +2492,14 @@ async function loadLegacyCollections(
 										}
 									: {}),
 								collectionName: collection.name,
-								...(collection.raw.format ? { format: collection.raw.format } : {}),
+								...(collection.raw.format
+									? { format: collection.raw.format }
+									: {}),
 								...(collection.raw.path ? { path: collection.raw.path } : {}),
 								...(collection.raw.id ? { derivedId: collection.raw.id } : {}),
-								...(collection.raw.validation ? { validation: collection.raw.validation } : {}),
+								...(collection.raw.validation
+									? { validation: collection.raw.validation }
+									: {}),
 							}),
 							layer,
 						),
@@ -2044,7 +2544,8 @@ async function loadSourceOrientedCollections(
 	);
 	for (const collectionName of graphOwnedCollections) {
 		if (
-			(initialData as Record<string, unknown> | undefined)?.[collectionName] !== undefined
+			(initialData as Record<string, unknown> | undefined)?.[collectionName] !==
+			undefined
 		) {
 			throw new SourceConfigError({
 				message: `Collection '${collectionName}' is backed by a read-only documentGraph source and cannot accept initialData`,
@@ -2109,11 +2610,13 @@ function createPersistenceState(
 	const directoryIds = initializeDirectoryIds(runtime, collections);
 	const writeKeyByCollection = buildWriteKeyByCollection(
 		collections,
-		sharedFiles, sourceState,
+		sharedFiles,
+		sourceState,
 	);
 	const collectionBaselines = initializeCollectionBaselines(
 		runtime,
-		collections, initialBaselines,
+		collections,
+		initialBaselines,
 	);
 	const state: PersistenceState = {
 		host,
@@ -2141,14 +2644,17 @@ function createPersistenceState(
 }
 
 async function persistCollectionState(
-	state: PersistenceState, runtime: EngineRuntime, key: string,
+	state: PersistenceState,
+	runtime: EngineRuntime,
+	key: string,
 ): Promise<void> {
 	if (state.sourceState && key.startsWith("source:")) {
 		const sourceId = key.slice("source:".length);
 		await persistDocumentSourceState(state, runtime, sourceId);
 		for (const collection of state.collections) {
 			if (
-				state.sourceState.writableSourceByCollection.get(collection.name) !== sourceId
+				state.sourceState.writableSourceByCollection.get(collection.name) !==
+				sourceId
 			)
 				continue;
 			const rows = await runtime.invoke<Record<string, unknown>[]>(
@@ -2178,13 +2684,16 @@ async function persistCollectionState(
 					name: collection.name,
 					schema: collection.schema as never,
 					data: toEntityMap(rows),
-					...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
+					...(collection.raw.version !== undefined
+						? { version: collection.raw.version }
+						: {}),
 				};
 			}),
 		);
 		await Effect.runPromise(
 			Effect.provide(
-				saveCollectionsToFile(sharedFile.file, data as never), state.layer,
+				saveCollectionsToFile(sharedFile.file, data as never),
+				state.layer,
 			),
 		);
 		for (const collection of sharedFile.collections) {
@@ -2197,26 +2706,33 @@ async function persistCollectionState(
 		(candidate) => candidate.raw.file && `file:${candidate.raw.file}` === key,
 	);
 	if (
-		fileCollections.length > 0 && (fileCollections.length > 1 || fileCollections[0]?.raw.path)
+		fileCollections.length > 0 &&
+		(fileCollections.length > 1 || fileCollections[0]?.raw.path)
 	) {
 		for (const collection of fileCollections) {
 			const entities = await runtime.invoke<Record<string, unknown>[]>(
 				"dumpCollection",
 				{
-				collection: collection.name,
-			},
+					collection: collection.name,
+				},
 			);
 			const map = toEntityMap(entities);
 			await Effect.runPromise(
 				Effect.provide(
 					saveData(
 						collection.raw.file!,
-						collection.schema as never, map as never, {
-						...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
-						...(collection.raw.format ? { format: collection.raw.format } : {}),
-						...(collection.raw.path ? { path: collection.raw.path } : {}),
-						...(collection.raw.id ? { derivedId: collection.raw.id } : {}),
-					},
+						collection.schema as never,
+						map as never,
+						{
+							...(collection.raw.version !== undefined
+								? { version: collection.raw.version }
+								: {}),
+							...(collection.raw.format
+								? { format: collection.raw.format }
+								: {}),
+							...(collection.raw.path ? { path: collection.raw.path } : {}),
+							...(collection.raw.id ? { derivedId: collection.raw.id } : {}),
+						},
 					),
 					state.layer,
 				),
@@ -2244,16 +2760,20 @@ async function persistCollectionState(
 		state.dirtyCollections.has(collection.name) &&
 		(collection.raw.directory || collection.raw.file)
 	) {
-		const baseline = state.collectionBaselines.get(collection.name) ?? new Map<string, Record<string, unknown>>();
+		const baseline =
+			state.collectionBaselines.get(collection.name) ??
+			new Map<string, Record<string, unknown>>();
 		const baselineRows = [...baseline.values()];
 		const externalRows = await loadLegacyCollectionRows(
 			collection,
-			state.host, state.layer,
+			state.host,
+			state.layer,
 		);
 		if (rowsFingerprint(baselineRows) !== rowsFingerprint(externalRows)) {
 			const mergedRows = mergeExternalRowsWithLocalDelta(
 				baseline,
-				externalRows, entities,
+				externalRows,
+				entities,
 			);
 			await reloadCollectionIfChanged(runtime, collection.name, mergedRows);
 			entities = mergedRows;
@@ -2262,14 +2782,16 @@ async function persistCollectionState(
 	}
 	if (collection.raw.directory) {
 		const currentIds = new Set(map.keys());
-		const previousIds = state.directoryIds.get(collection.name) ?? new Set<string>();
+		const previousIds =
+			state.directoryIds.get(collection.name) ?? new Set<string>();
 		for (const id of previousIds) {
 			if (!currentIds.has(id)) {
 				await Effect.runPromise(
 					Effect.provide(
 						removeEntityFromDirectory(
 							collection.raw.directory,
-							id, collection.raw.format ?? "json",
+							id,
+							collection.raw.format ?? "json",
 						),
 						state.layer,
 					),
@@ -2298,12 +2820,16 @@ async function persistCollectionState(
 			Effect.provide(
 				saveData(
 					collection.raw.file,
-					collection.schema as never, map as never, {
-					...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
-					...(collection.raw.format ? { format: collection.raw.format } : {}),
-					...(collection.raw.path ? { path: collection.raw.path } : {}),
-					...(collection.raw.id ? { derivedId: collection.raw.id } : {}),
-				},
+					collection.schema as never,
+					map as never,
+					{
+						...(collection.raw.version !== undefined
+							? { version: collection.raw.version }
+							: {}),
+						...(collection.raw.format ? { format: collection.raw.format } : {}),
+						...(collection.raw.path ? { path: collection.raw.path } : {}),
+						...(collection.raw.id ? { derivedId: collection.raw.id } : {}),
+					},
 				),
 				state.layer,
 			),
@@ -2319,7 +2845,8 @@ async function persistDocumentSourceState(
 ): Promise<void> {
 	const sourceState = state.sourceState;
 	if (!sourceState) return;
-	const snapshot = await runtime.invoke<
+	const snapshot =
+		await runtime.invoke<
 			Record<string, ReadonlyArray<Record<string, unknown>>>
 		>("dumpAll");
 	const collections = Object.fromEntries(
@@ -2345,7 +2872,8 @@ async function persistDocumentSourceState(
 }
 
 function initializeDirectoryIds(
-	runtime: EngineRuntime, collections: ReadonlyArray<CollectionRuntimeConfig>,
+	runtime: EngineRuntime,
+	collections: ReadonlyArray<CollectionRuntimeConfig>,
 ) {
 	const ids = new Map<string, Set<string>>();
 	for (const collection of collections) {
@@ -2418,7 +2946,10 @@ function buildWriteKeyByCollection(
 }
 
 function mergeLoadedWithInitial(
-	loaded: | ReadonlyMap<string, Record<string, unknown>> | Map<string, Record<string, unknown>> | undefined,
+	loaded:
+		| ReadonlyMap<string, Record<string, unknown>>
+		| Map<string, Record<string, unknown>>
+		| undefined,
 	initial: unknown,
 ) {
 	const merged = new Map<string, Record<string, unknown>>(loaded ?? []);
@@ -2440,7 +2971,8 @@ function isBrowserStorageHost(
 }
 
 function markCollectionDirty(
-	persistence: PersistenceState | undefined, collection: string,
+	persistence: PersistenceState | undefined,
+	collection: string,
 ) {
 	if (!persistence || !isBrowserStorageHost(persistence.host)) return;
 	persistence.dirtyCollections.add(collection);
@@ -2463,7 +2995,8 @@ function markCollectionPersisted(
 	updateDirectoryBaseline(persistence, collection, rows);
 	updateCollectionBaseline(persistence, collection.name, rows);
 	if (
-		isBrowserStorageHost(persistence.host) && (collection.raw.directory || collection.raw.file)
+		isBrowserStorageHost(persistence.host) &&
+		(collection.raw.directory || collection.raw.file)
 	) {
 		persistence.collectionsAwaitingExternalMerge.add(collection.name);
 	}
@@ -2480,7 +3013,8 @@ function mergeExternalRowsWithLocalDelta(
 	for (const [id, row] of local) {
 		const baselineRow = baseline.get(id);
 		if (
-			baselineRow === undefined || rowsFingerprint([baselineRow]) !== rowsFingerprint([row])
+			baselineRow === undefined ||
+			rowsFingerprint([baselineRow]) !== rowsFingerprint([row])
 		) {
 			merged.set(id, row);
 		}
@@ -2507,11 +3041,13 @@ function mergeExternalRowsWithPersistedBaseline(
 	const hasExternalMutation = [...external.entries()].some(([id, row]) => {
 		const baselineRow = baseline.get(id);
 		return (
-			baselineRow !== undefined && rowsFingerprint([baselineRow]) !== rowsFingerprint([row])
+			baselineRow !== undefined &&
+			rowsFingerprint([baselineRow]) !== rowsFingerprint([row])
 		);
 	});
 	if (
-		missingBaselineRows.length === 0 || (!hasExternalAddition && !hasExternalMutation)
+		missingBaselineRows.length === 0 ||
+		(!hasExternalAddition && !hasExternalMutation)
 	) {
 		return externalRows;
 	}
@@ -2535,7 +3071,8 @@ function isPersistenceOpen(persistence: PersistenceState) {
 }
 
 function trackBackgroundReload(
-	persistence: PersistenceState, task: Promise<void>,
+	persistence: PersistenceState,
+	task: Promise<void>,
 ) {
 	persistence.backgroundReloads.add(task);
 	void task.finally(() => {
@@ -2570,7 +3107,8 @@ function rowsFingerprint(rows: ReadonlyArray<Record<string, unknown>>) {
 }
 
 async function currentCollectionRows(
-	runtime: EngineRuntime, collection: string,
+	runtime: EngineRuntime,
+	collection: string,
 ) {
 	return runtime.invoke<Record<string, unknown>[]>("dumpCollection", {
 		collection,
@@ -2585,8 +3123,8 @@ async function reloadCollectionIfChanged(
 	const changedCollections = await reloadCollectionsAtomicallyIfChanged(
 		runtime,
 		{
-		[collection]: rows,
-	},
+			[collection]: rows,
+		},
 	);
 	return changedCollections.includes(collection);
 }
@@ -2610,7 +3148,8 @@ async function reloadCollectionsAtomicallyIfChanged(
 		for (const [collection, rows] of changedEntries) {
 			await txRuntime.invoke("reloadCollection", { collection, records: rows });
 		}
-		const snapshot = await txRuntime.invoke<
+		const snapshot =
+			await txRuntime.invoke<
 				Record<string, ReadonlyArray<Record<string, unknown>>>
 			>("dumpAll");
 		const committed = await runtime.invoke<{
@@ -2630,14 +3169,16 @@ async function persistCollectionRowsDirect(
 	const map = toEntityMap(rows);
 	if (collection.raw.directory) {
 		const currentIds = new Set(map.keys());
-		const previousIds = persistence.directoryIds.get(collection.name) ?? new Set<string>();
+		const previousIds =
+			persistence.directoryIds.get(collection.name) ?? new Set<string>();
 		for (const id of previousIds) {
 			if (!currentIds.has(id)) {
 				await Effect.runPromise(
 					Effect.provide(
 						removeEntityFromDirectory(
 							collection.raw.directory,
-							id, collection.raw.format ?? "json",
+							id,
+							collection.raw.format ?? "json",
 						),
 						persistence.layer,
 					),
@@ -2666,12 +3207,16 @@ async function persistCollectionRowsDirect(
 			Effect.provide(
 				saveData(
 					collection.raw.file,
-					collection.schema as never, map as never, {
-					...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
-					...(collection.raw.format ? { format: collection.raw.format } : {}),
-					...(collection.raw.path ? { path: collection.raw.path } : {}),
-					...(collection.raw.id ? { derivedId: collection.raw.id } : {}),
-				},
+					collection.schema as never,
+					map as never,
+					{
+						...(collection.raw.version !== undefined
+							? { version: collection.raw.version }
+							: {}),
+						...(collection.raw.format ? { format: collection.raw.format } : {}),
+						...(collection.raw.path ? { path: collection.raw.path } : {}),
+						...(collection.raw.id ? { derivedId: collection.raw.id } : {}),
+					},
 				),
 				persistence.layer,
 			),
@@ -2686,12 +3231,15 @@ async function reconcileCollectionWithExternalRows(
 	collection: CollectionRuntimeConfig,
 	externalRows: ReadonlyArray<Record<string, unknown>>,
 ) {
-	const baseline = persistence.collectionBaselines.get(collection.name) ?? new Map<string, Record<string, unknown>>();
+	const baseline =
+		persistence.collectionBaselines.get(collection.name) ??
+		new Map<string, Record<string, unknown>>();
 	if (persistence.dirtyCollections.has(collection.name)) {
 		const localRows = await currentCollectionRows(runtime, collection.name);
 		const mergedRows = mergeExternalRowsWithLocalDelta(
 			baseline,
-			externalRows, localRows,
+			externalRows,
+			localRows,
 		);
 		await reloadCollectionIfChanged(runtime, collection.name, mergedRows);
 		await persistCollectionRowsDirect(persistence, collection, mergedRows);
@@ -2781,16 +3329,20 @@ async function loadLegacyCollectionRows(
 			Effect.provide(
 				loadDataFromDirectory(
 					collection.raw.directory,
-					collection.schema as never, collection.raw.format ?? "json", {
-					...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
-					...(collection.raw.migrations
-						? {
-								migrations: collection.raw
+					collection.schema as never,
+					collection.raw.format ?? "json",
+					{
+						...(collection.raw.version !== undefined
+							? { version: collection.raw.version }
+							: {}),
+						...(collection.raw.migrations
+							? {
+									migrations: collection.raw
 										.migrations as ReadonlyArray<Migration>,
-							}
-						: {}),
-					collectionName: collection.name,
-				},
+								}
+							: {}),
+						collectionName: collection.name,
+					},
 				),
 				layer,
 			),
@@ -2803,7 +3355,9 @@ async function loadLegacyCollectionRows(
 		const loaded = await Effect.runPromise(
 			Effect.provide(
 				loadData(collection.raw.file, collection.schema as never, {
-					...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
+					...(collection.raw.version !== undefined
+						? { version: collection.raw.version }
+						: {}),
 					...(collection.raw.migrations
 						? {
 								migrations: collection.raw
@@ -2814,7 +3368,9 @@ async function loadLegacyCollectionRows(
 					...(collection.raw.format ? { format: collection.raw.format } : {}),
 					...(collection.raw.path ? { path: collection.raw.path } : {}),
 					...(collection.raw.id ? { derivedId: collection.raw.id } : {}),
-					...(collection.raw.validation ? { validation: collection.raw.validation } : {}),
+					...(collection.raw.validation
+						? { validation: collection.raw.validation }
+						: {}),
 				}),
 				layer,
 			),
@@ -2825,10 +3381,13 @@ async function loadLegacyCollectionRows(
 }
 
 async function loadLegacyFileCollections(
-	group: SharedFileGroup, host: EngineStorageHost, layer: Layer.Layer<any>,
+	group: SharedFileGroup,
+	host: EngineStorageHost,
+	layer: Layer.Layer<any>,
 ) {
 	if (
-		group.collections.length > 1 && group.collections.every((collection) => !collection.raw.path)
+		group.collections.length > 1 &&
+		group.collections.every((collection) => !collection.raw.path)
 	) {
 		const fileExists = await host.exists(group.file);
 		if (!fileExists) {
@@ -2843,7 +3402,9 @@ async function loadLegacyFileCollections(
 					group.collections.map((collection) => ({
 						name: collection.name,
 						schema: collection.schema as never,
-						...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
+						...(collection.raw.version !== undefined
+							? { version: collection.raw.version }
+							: {}),
 						...(collection.raw.migrations
 							? {
 									migrations: collection.raw
@@ -2867,14 +3428,16 @@ async function loadLegacyFileCollections(
 	for (const collection of group.collections) {
 		result[collection.name] = await loadLegacyCollectionRows(
 			collection,
-			host, layer,
+			host,
+			layer,
 		);
 	}
 	return result;
 }
 
 async function registerLegacyWatchers(
-	runtime: EngineRuntime, persistence: PersistenceState,
+	runtime: EngineRuntime,
+	persistence: PersistenceState,
 ) {
 	const fileGroups = new Map<string, CollectionRuntimeConfig[]>();
 	for (const collection of persistence.collections) {
@@ -2886,7 +3449,9 @@ async function registerLegacyWatchers(
 
 	for (const [file, collections] of fileGroups) {
 		const supportsDirtyMerge =
-			isBrowserStorageHost(persistence.host) && collections.length === 1 && !collections[0]?.raw.path;
+			isBrowserStorageHost(persistence.host) &&
+			collections.length === 1 &&
+			!collections[0]?.raw.path;
 		const reload = () => {
 			runBackgroundReload(
 				persistence,
@@ -2901,7 +3466,9 @@ async function registerLegacyWatchers(
 						if (supportsDirtyMerge) {
 							await reconcileCollectionWithExternalRows(
 								persistence,
-								runtime, collection, rows,
+								runtime,
+								collection,
+								rows,
 							);
 							continue;
 						}
@@ -2921,16 +3488,15 @@ async function registerLegacyWatchers(
 			continue;
 		}
 		const watchRoot = dirnameComparable(file);
-		if (!supportsDirtyMerge && !(await persistence.host.exists(watchRoot))) continue;
+		if (!supportsDirtyMerge && !(await persistence.host.exists(watchRoot)))
+			continue;
 		try {
 			const stop = await persistence.host.watchDir(watchRoot, (event) => {
 				if (!matchesWatchedFile(event.filename, file)) return;
 				reload();
 			});
 			trackWatcherStop(persistence, stop);
-		} catch {
-			continue;
-		}
+		} catch {}
 	}
 
 	for (const collection of persistence.collections) {
@@ -2939,21 +3505,26 @@ async function registerLegacyWatchers(
 		const watchRoot = (await persistence.host.exists(collection.raw.directory))
 			? collection.raw.directory
 			: dirnameComparable(collection.raw.directory);
-		if (!supportsDirtyMerge && !(await persistence.host.exists(watchRoot))) continue;
+		if (!supportsDirtyMerge && !(await persistence.host.exists(watchRoot)))
+			continue;
 		try {
 			const stop = await persistence.host.watchDir(watchRoot, (event) => {
-				if (!touchesWatchedDirectory(event.filename, collection.raw.directory!)) return;
+				if (!touchesWatchedDirectory(event.filename, collection.raw.directory!))
+					return;
 				runBackgroundReload(
 					persistence,
 					async () => {
 						const rows = await loadLegacyCollectionRows(
 							collection,
-							persistence.host, persistence.layer,
+							persistence.host,
+							persistence.layer,
 						);
 						if (supportsDirtyMerge) {
 							await reconcileCollectionWithExternalRows(
 								persistence,
-								runtime, collection, rows,
+								runtime,
+								collection,
+								rows,
 							);
 							return;
 						}
@@ -2967,14 +3538,13 @@ async function registerLegacyWatchers(
 				);
 			});
 			trackWatcherStop(persistence, stop);
-		} catch {
-			continue;
-		}
+		} catch {}
 	}
 }
 
 async function registerSourceWatchers(
-	runtime: EngineRuntime, persistence: PersistenceState,
+	runtime: EngineRuntime,
+	persistence: PersistenceState,
 ) {
 	const sourceState = persistence.sourceState;
 	if (!sourceState) return;
@@ -3005,7 +3575,9 @@ async function registerSourceWatchers(
 			continue;
 		}
 		for (const root of source.roots) {
-			const watchRoot = (await persistence.host.exists(root.root)) ? root.root : dirnameComparable(root.root);
+			const watchRoot = (await persistence.host.exists(root.root))
+				? root.root
+				: dirnameComparable(root.root);
 			if (!(await persistence.host.exists(watchRoot))) continue;
 			const stop = await persistence.host.watchDir(watchRoot, () => {
 				runBackgroundReload(persistence, async () => {
@@ -3034,7 +3606,8 @@ async function registerSourceWatchers(
 }
 
 async function registerExternalReloadWatchers(
-	runtime: EngineRuntime, persistence: PersistenceState,
+	runtime: EngineRuntime,
+	persistence: PersistenceState,
 ) {
 	await registerLegacyWatchers(runtime, persistence);
 	await registerSourceWatchers(runtime, persistence);
@@ -3042,7 +3615,8 @@ async function registerExternalReloadWatchers(
 
 function transactionBeginError(
 	reason:
-		| "nested transactions not supported" | "another transaction is already active"
+		| "nested transactions not supported"
+		| "another transaction is already active"
 		| "transaction is active; use transaction context",
 ) {
 	return new TransactionError({
@@ -3069,7 +3643,8 @@ async function runTransaction<A>(
 ): Promise<A> {
 	if (transactionGate.active) {
 		throw transactionBeginError(
-			transactionGate.context?.getStore() === true || (!transactionGate.context && transactionGate.depth > 0)
+			transactionGate.context?.getStore() === true ||
+				(!transactionGate.context && transactionGate.depth > 0)
 				? "nested transactions not supported"
 				: "another transaction is already active",
 		);
@@ -3087,19 +3662,21 @@ async function runTransaction<A>(
 		const rollbackError = explicitRollbackError();
 		const txFacade = buildTransactionDatabaseFacade(
 			sessionRuntime,
-			collections, persistence, rollbackError,
+			collections,
+			persistence,
+			rollbackError,
 		);
 		try {
 			const result = await fn(txFacade as EngineTransactionDatabase<any>);
-		const changedCollections = runtime.commitTransactionSession(session);
+			const changedCollections = runtime.commitTransactionSession(session);
 			finalized = true;
 			for (const collection of changedCollections) {
-			markCollectionDirty(persistence, collection);
-			const key = persistence?.writeKeyByCollection.get(collection);
-			if (key) persistence?.saver.schedule(key);
-		}
-		return result;
-	} catch (error) {
+				markCollectionDirty(persistence, collection);
+				const key = persistence?.writeKeyByCollection.get(collection);
+				if (key) persistence?.saver.schedule(key);
+			}
+			return result;
+		} catch (error) {
 			if (!finalized) {
 				try {
 					runtime.rollbackTransactionSession(session);
@@ -3112,13 +3689,15 @@ async function runTransaction<A>(
 		}
 	};
 	try {
-		return transactionGate.context ? await transactionGate.context.run(true, execute) : await execute();
+		return transactionGate.context
+			? await transactionGate.context.run(true, execute)
+			: await execute();
 	} finally {
 		transactionGate.depth = Math.max(0, transactionGate.depth - 1);
 		if (session !== undefined) runtime.finishTransactionSession();
 		transactionGate.active = false;
-		}
 	}
+}
 type TransactionStepRuntime = {
 	invoke<T>(method: string, payload?: unknown): Promise<T>;
 };
@@ -3133,7 +3712,9 @@ function buildTransactionDatabaseFacade(
 	for (const collection of collections) {
 		db[collection.name] = buildTransactionCollectionFacade(
 			runtime,
-			collection, persistence, );
+			collection,
+			persistence,
+		);
 	}
 	return Object.assign(db, {
 		rollback: async () => {
@@ -3146,7 +3727,7 @@ function buildTransactionCollectionFacade(
 	runtime: TransactionStepRuntime,
 	collection: CollectionRuntimeConfig,
 	persistence: PersistenceState | undefined,
-	) {
+) {
 	const ensureWritable = (operation: string) => {
 		if (persistence?.sourceState?.readOnlyCollections.has(collection.name)) {
 			throw new OperationError({
@@ -3452,13 +4033,15 @@ function normalizeInitialCollection(
 ): ReadonlyArray<Record<string, unknown>> {
 	if (!Array.isArray(value)) return [];
 	return value.filter(
-		(item): item is Record<string, unknown> => typeof item === "object" && item !== null,
+		(item): item is Record<string, unknown> =>
+			typeof item === "object" && item !== null,
 	);
 }
 
 function normalizeAggregateFields(value: unknown): ReadonlyArray<string> {
 	if (value === undefined) return [];
-	if (Array.isArray(value)) return value.filter((field): field is string => typeof field === "string");
+	if (Array.isArray(value))
+		return value.filter((field): field is string => typeof field === "string");
 	return typeof value === "string" ? [value] : [];
 }
 
@@ -3544,6 +4127,20 @@ function encodeSortForCommand(sort: unknown): unknown {
 	);
 }
 
+function normalizeQueryOffset(value: unknown): number | undefined {
+	if (value === undefined) return undefined;
+	const normalized = Math.max(0, Math.floor(value as number));
+	if (Number.isNaN(normalized)) return 0;
+	return Math.min(normalized, 0xffff_ffff);
+}
+
+function normalizeQueryLimit(value: unknown): number | undefined {
+	if (value === undefined) return undefined;
+	const normalized = Math.max(0, Math.floor(value as number));
+	if (!Number.isFinite(normalized)) return undefined;
+	return Math.min(normalized, 0xffff_ffff);
+}
+
 function prepareQueryConfigForCommand(config: unknown) {
 	if (typeof config !== "object" || config === null) return config;
 	const queryConfig = config as Record<string, unknown>;
@@ -3551,6 +4148,8 @@ function prepareQueryConfigForCommand(config: unknown) {
 		...queryConfig,
 		where: encodeWhereForCommand(queryConfig.where),
 		sort: encodeSortForCommand(queryConfig.sort),
+		offset: normalizeQueryOffset(queryConfig.offset),
+		limit: normalizeQueryLimit(queryConfig.limit),
 	};
 }
 
@@ -3566,7 +4165,9 @@ function prepareTransactionOperationForCommand(operation: unknown): unknown {
 		case "createMany":
 			return {
 				...input,
-				items: Array.isArray(input.items) ? input.items.map((item) => encodeDataForCommand(item)) : input.items,
+				items: Array.isArray(input.items)
+					? input.items.map((item) => encodeDataForCommand(item))
+					: input.items,
 			};
 		case "updateMany":
 			return {
@@ -3580,8 +4181,12 @@ function prepareTransactionOperationForCommand(operation: unknown): unknown {
 			return {
 				...input,
 				where: encodeWhereForCommand(input.where),
-				...(input.create !== undefined ? { create: encodeDataForCommand(input.create) } : {}),
-				...(input.update !== undefined ? { update: encodeDataForCommand(input.update) } : {}),
+				...(input.create !== undefined
+					? { create: encodeDataForCommand(input.create) }
+					: {}),
+				...(input.update !== undefined
+					? { update: encodeDataForCommand(input.update) }
+					: {}),
 			};
 		case "upsertMany":
 			return {
@@ -3639,7 +4244,9 @@ function prepareCommandPayload(method: string, payload: unknown): unknown {
 		case "createMany":
 			return {
 				...command,
-				items: Array.isArray(command.items) ? command.items.map((item) => encodeDataForCommand(item)) : command.items,
+				items: Array.isArray(command.items)
+					? command.items.map((item) => encodeDataForCommand(item))
+					: command.items,
 			};
 		case "updateMany":
 			return {
@@ -3692,7 +4299,8 @@ function prepareCommandPayload(method: string, payload: unknown): unknown {
 			return {
 				...command,
 				operations: Array.isArray(command.operations)
-					? command.operations.map((operation) => prepareTransactionOperationForCommand(operation),
+					? command.operations.map((operation) =>
+							prepareTransactionOperationForCommand(operation),
 						)
 					: command.operations,
 			};
@@ -3719,7 +4327,8 @@ function settledPromise<T>(fn: () => T): Promise<Awaited<T>> {
 }
 
 function parseBridgeResponseValue<T>(
-	parsed: BridgeResponse<T>, raw: string,
+	parsed: BridgeResponse<T>,
+	raw: string,
 ): T {
 	switch (parsed.kind) {
 		case "ok":

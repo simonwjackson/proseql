@@ -11,6 +11,8 @@ use proseql_engine::collection::Collection;
 use proseql_engine::descriptor::CollectionDescriptor;
 use proseql_engine::errors::{EngineError, OperationError};
 use proseql_engine::id_gen::{IdGenerator, SequentialGenerator};
+#[cfg(target_arch = "wasm32")]
+use proseql_engine::query::QueryInput;
 use proseql_engine::reactive::{CallbackSubscription, WatchDelivery};
 use proseql_engine::relationships::Database;
 use proseql_engine::transactions::OwnedTransactionSession;
@@ -22,7 +24,36 @@ use crate::callbacks::CallbackTable;
 use crate::command;
 use crate::projection::MaterializedProjection;
 use crate::reactive::{unsupported_scheduler_factory, ReactiveSchedulerFactory};
-use crate::types::{parse_json, CreateDatabaseInput};
+use crate::types::{parse_json, to_query_input, CreateDatabaseInput, QueryCommand};
+
+#[cfg(target_arch = "wasm32")]
+fn fast_where_supported(value: &Value) -> bool {
+    match value {
+        Value::Array(values) => values.iter().all(fast_where_supported),
+        Value::Object(values) => values.iter().all(|(key, value)| {
+            (!key.starts_with('$')
+                || matches!(
+                    key.as_str(),
+                    "$eq"
+                        | "$ne"
+                        | "$gt"
+                        | "$gte"
+                        | "$lt"
+                        | "$lte"
+                        | "$in"
+                        | "$nin"
+                        | "$contains"
+                        | "$startsWith"
+                        | "$endsWith"
+                        | "$and"
+                        | "$or"
+                        | "$not"
+                ))
+                && fast_where_supported(value)
+        }),
+        _ => true,
+    }
+}
 
 pub type ClockFactory = Arc<dyn Fn() -> Box<dyn Clock> + Send + Sync + 'static>;
 pub type FallbackIdGeneratorFactory = Arc<dyn Fn() -> Box<dyn IdGenerator> + Send + Sync + 'static>;
@@ -56,6 +87,7 @@ pub(crate) struct DatabaseContext {
     /// Bounded deltas from the most recently completed dispatch.
     pub last_changes: ChangeSet,
     pub(crate) projection: MaterializedProjection,
+    pub(crate) projection_values_bypass_indexes: bool,
 }
 
 impl DatabaseContext {
@@ -159,6 +191,7 @@ impl RuntimeCore {
                 subscriptions: std::collections::HashMap::new(),
                 last_changes: ChangeSet::default(),
                 projection,
+                projection_values_bypass_indexes: false,
             },
         );
         Ok(handle)
@@ -336,6 +369,32 @@ impl Runtime {
         ))
     }
 
+    pub fn fast_query_range(
+        &self,
+        handle: u32,
+        collection_index: u32,
+        expected_revision: u32,
+        offset: u32,
+        len: u32,
+    ) -> i32 {
+        let Some(context) = self.inner.databases.get(&handle) else {
+            return 0;
+        };
+        let Some(collection_name) = context.collection_names.get(collection_index as usize) else {
+            return 0;
+        };
+        let Some(collection) = context.db.collection(collection_name) else {
+            return 0;
+        };
+        let offset = offset as usize;
+        let len = len as usize;
+        i32::from(
+            collection.revision() == u64::from(expected_revision)
+                && offset <= collection.len()
+                && len <= collection.len().saturating_sub(offset),
+        )
+    }
+
     pub fn dispatch_projected_json(
         &mut self,
         handle: u32,
@@ -355,6 +414,24 @@ impl Runtime {
             .and_then(Value::as_str)
             .map(str::to_owned);
         let response = bridge::handle(|| {
+            if method == "query" {
+                let payload = payload_json.unwrap_or("{}");
+                let query: QueryCommand = parse_json(payload, "query")?;
+                let input = to_query_input(query.query);
+                let context = self.inner.database_mut(handle)?;
+                if let Some((offset, len)) = context.db.canonical_query_range(
+                    &query.collection,
+                    &input,
+                    query.populate.as_ref(),
+                )? {
+                    return Ok(context.projection.describe_contiguous_query(
+                        &context.db,
+                        &query.collection,
+                        offset,
+                        len,
+                    ));
+                }
+            }
             let result = command::dispatch(&mut self.inner, handle, method, payload_json)?;
             let Some(collection) = collection.as_deref() else {
                 return Ok(result);
@@ -526,6 +603,9 @@ impl Runtime {
                         message: format!("Stale materialized handle for '{collection}/{id}'"),
                     }));
                 }
+            }
+            if !rows.is_empty() {
+                context.projection_values_bypass_indexes = true;
             }
             for row in rows {
                 let collection = row["collection"].as_str().unwrap_or_default();
@@ -1203,6 +1283,234 @@ impl WasmRuntime {
                 expected_revision,
             )
         })
+    }
+
+    pub fn fast_query_range(
+        &self,
+        handle: u32,
+        collection_index: u32,
+        expected_revision: u32,
+        offset: u32,
+        len: u32,
+    ) -> i32 {
+        self.inner.try_borrow().map_or(0, |runtime| {
+            runtime.fast_query_range(handle, collection_index, expected_revision, offset, len)
+        })
+    }
+
+    pub fn fast_projected_query_slots(
+        &self,
+        handle: u32,
+        command_json: String,
+        collection_index: u32,
+        field: String,
+        value: String,
+        offset: u32,
+        limit: u32,
+    ) -> wasm_bindgen::JsValue {
+        let scalar = collection_index != u32::MAX;
+        let parsed = if scalar {
+            None
+        } else {
+            let Ok(command) = parse_json::<QueryCommand>(&command_json, "query") else {
+                return wasm_bindgen::JsValue::UNDEFINED;
+            };
+            if command
+                .query
+                .r#where
+                .as_ref()
+                .is_some_and(|where_clause| !fast_where_supported(where_clause))
+            {
+                return wasm_bindgen::JsValue::UNDEFINED;
+            }
+            Some(command)
+        };
+        let Ok(mut runtime) = self.inner.try_borrow_mut() else {
+            return wasm_bindgen::JsValue::UNDEFINED;
+        };
+        let collection = if let Some(command) = parsed.as_ref() {
+            command.collection.clone()
+        } else {
+            let Some(collection) = runtime
+                .inner
+                .databases
+                .get(&handle)
+                .and_then(|context| context.collection_names.get(collection_index as usize))
+                .cloned()
+            else {
+                return wasm_bindgen::JsValue::UNDEFINED;
+            };
+            collection
+        };
+        let input = if let Some(command) = parsed.as_ref() {
+            to_query_input(command.query.clone())
+        } else {
+            QueryInput {
+                r#where: Some(json!({field: value})),
+                offset: Some(offset as usize),
+                limit: (limit != u32::MAX).then_some(limit as usize),
+                ..QueryInput::default()
+            }
+        };
+        let Ok(context) = runtime.inner.database_mut(handle) else {
+            return wasm_bindgen::JsValue::UNDEFINED;
+        };
+        let Ok(Some(positions)) = context.db.canonical_query_positions(
+            &collection,
+            &input,
+            parsed
+                .as_ref()
+                .and_then(|command| command.populate.as_ref()),
+            !context.projection_values_bypass_indexes,
+        ) else {
+            return wasm_bindgen::JsValue::UNDEFINED;
+        };
+        let revision = context
+            .db
+            .collection(&collection)
+            .map(Collection::revision)
+            .unwrap_or(u64::MAX);
+        let Some(slots) = context.projection.materialized_slots_for_positions(
+            &context.db,
+            &collection,
+            &positions,
+        ) else {
+            return wasm_bindgen::JsValue::UNDEFINED;
+        };
+        let slots = js_sys::Uint32Array::from(slots.as_slice());
+        if scalar && revision <= u64::from(u32::MAX) {
+            let descriptor = js_sys::Array::new();
+            descriptor.push(&wasm_bindgen::JsValue::from_f64(revision as f64));
+            descriptor.push(&slots);
+            descriptor.into()
+        } else {
+            slots.into()
+        }
+    }
+
+    pub fn fast_index_query_revision(
+        &self,
+        handle: u32,
+        collection_index: u32,
+        expected_revision: u32,
+    ) -> i32 {
+        self.inner.try_borrow().map_or(0, |runtime| {
+            let Some(context) = runtime.inner.databases.get(&handle) else {
+                return 0;
+            };
+            if context.projection_values_bypass_indexes {
+                return 0;
+            }
+            let Some(collection_name) = context.collection_names.get(collection_index as usize)
+            else {
+                return 0;
+            };
+            let Some(collection) = context.db.collection(collection_name) else {
+                return 0;
+            };
+            i32::from(collection.revision() == u64::from(expected_revision))
+        })
+    }
+
+    pub fn fast_selected_primitive_query(
+        &self,
+        handle: u32,
+        command_json: String,
+    ) -> wasm_bindgen::JsValue {
+        let Ok(command) = parse_json::<QueryCommand>(&command_json, "query") else {
+            return wasm_bindgen::JsValue::UNDEFINED;
+        };
+        let input = to_query_input(command.query);
+        if input.r#where.is_some() || !input.sort.is_empty() || input.cursor.is_some() {
+            return wasm_bindgen::JsValue::UNDEFINED;
+        }
+        let Ok(mut runtime) = self.inner.try_borrow_mut() else {
+            return wasm_bindgen::JsValue::UNDEFINED;
+        };
+        let Ok(context) = runtime.inner.database_mut(handle) else {
+            return wasm_bindgen::JsValue::UNDEFINED;
+        };
+        let Ok(Some(selection)) = context.db.borrowed_compact_selection_query(
+            &command.collection,
+            &input,
+            command.populate.as_ref(),
+        ) else {
+            return wasm_bindgen::JsValue::UNDEFINED;
+        };
+        if selection.columns.iter().flatten().any(Option::is_none)
+            || selection.columns.iter().flatten().flatten().any(|value| {
+                !matches!(
+                    *value,
+                    Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)
+                )
+            })
+        {
+            return wasm_bindgen::JsValue::UNDEFINED;
+        }
+        let output = js_sys::Array::new();
+        for column in selection.columns {
+            let descriptor = js_sys::Array::new();
+            match column.first().and_then(|value| *value) {
+                Some(Value::String(_))
+                    if column
+                        .iter()
+                        .all(|value| matches!(value, Some(Value::String(_)))) =>
+                {
+                    let mut joined = String::new();
+                    let offsets = js_sys::Uint32Array::new_with_length(
+                        u32::try_from(column.len() + 1).unwrap_or(u32::MAX),
+                    );
+                    let mut utf16_offset = 0_u32;
+                    for (index, value) in column.into_iter().enumerate() {
+                        offsets.set_index(index as u32, utf16_offset);
+                        let Some(Value::String(value)) = value else {
+                            unreachable!("homogeneous string column checked above")
+                        };
+                        utf16_offset = utf16_offset.saturating_add(
+                            u32::try_from(value.encode_utf16().count()).unwrap_or(u32::MAX),
+                        );
+                        joined.push_str(value);
+                    }
+                    offsets.set_index(offsets.length() - 1, utf16_offset);
+                    descriptor.push(&wasm_bindgen::JsValue::from_str("s"));
+                    descriptor.push(&wasm_bindgen::JsValue::from_str(&joined));
+                    descriptor.push(&offsets);
+                }
+                Some(Value::Number(_))
+                    if column
+                        .iter()
+                        .all(|value| matches!(value, Some(Value::Number(_)))) =>
+                {
+                    let values = js_sys::Float64Array::new_with_length(column.len() as u32);
+                    for (index, value) in column.into_iter().enumerate() {
+                        let Some(Value::Number(value)) = value else {
+                            unreachable!("homogeneous numeric column checked above")
+                        };
+                        values.set_index(index as u32, value.as_f64().unwrap_or(f64::NAN));
+                    }
+                    descriptor.push(&wasm_bindgen::JsValue::from_str("n"));
+                    descriptor.push(&values);
+                }
+                Some(Value::Bool(_))
+                    if column
+                        .iter()
+                        .all(|value| matches!(value, Some(Value::Bool(_)))) =>
+                {
+                    let values = js_sys::Uint8Array::new_with_length(column.len() as u32);
+                    for (index, value) in column.into_iter().enumerate() {
+                        let Some(Value::Bool(value)) = value else {
+                            unreachable!("homogeneous boolean column checked above")
+                        };
+                        values.set_index(index as u32, u8::from(*value));
+                    }
+                    descriptor.push(&wasm_bindgen::JsValue::from_str("b"));
+                    descriptor.push(&values);
+                }
+                _ => return wasm_bindgen::JsValue::UNDEFINED,
+            }
+            output.push(&descriptor);
+        }
+        output.into()
     }
 
     pub fn projection_handles(&self, handle: u32) -> String {

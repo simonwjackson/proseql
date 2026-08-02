@@ -1,5 +1,7 @@
 export type WasmBindingsModule = {
-	default?: (input?: RequestInfo | URL | Response | BufferSource | WebAssembly.Module) => Promise<unknown>;
+	default?: (
+		input?: RequestInfo | URL | Response | BufferSource | WebAssembly.Module,
+	) => Promise<unknown>;
 	__proseql_wasm_memory?: () => WebAssembly.Memory | undefined;
 	WasmRuntime: new (
 		setTimeoutFn: typeof globalThis.setTimeout,
@@ -9,18 +11,48 @@ export type WasmBindingsModule = {
 
 export interface WasmRuntimeBinding {
 	register_default(id: string, callback: () => string): void;
-	register_predicate(id: string, callback: (payloadJson: string) => string): void;
-	register_computed(id: string, callback: (payloadJson: string) => string): void;
+	register_predicate(
+		id: string,
+		callback: (payloadJson: string) => string,
+	): void;
+	register_computed(
+		id: string,
+		callback: (payloadJson: string) => string,
+	): void;
 	register_collator(callback: (a: string, b: string) => number): void;
-	register_migration(id: string, callback: (payloadJson: string) => string): void;
+	register_migration(
+		id: string,
+		callback: (payloadJson: string) => string,
+	): void;
 	register_id_generator(name: string, callback: () => string): void;
-	register_before_create_hook(id: string, callback: (payloadJson: string) => string): void;
-	register_before_update_hook(id: string, callback: (payloadJson: string) => string): void;
-	register_before_delete_hook(id: string, callback: (payloadJson: string) => string): void;
-	register_after_create_hook(id: string, callback: (payloadJson: string) => string): void;
-	register_after_update_hook(id: string, callback: (payloadJson: string) => string): void;
-	register_after_delete_hook(id: string, callback: (payloadJson: string) => string): void;
-	register_on_change_hook(id: string, callback: (payloadJson: string) => string): void;
+	register_before_create_hook(
+		id: string,
+		callback: (payloadJson: string) => string,
+	): void;
+	register_before_update_hook(
+		id: string,
+		callback: (payloadJson: string) => string,
+	): void;
+	register_before_delete_hook(
+		id: string,
+		callback: (payloadJson: string) => string,
+	): void;
+	register_after_create_hook(
+		id: string,
+		callback: (payloadJson: string) => string,
+	): void;
+	register_after_update_hook(
+		id: string,
+		callback: (payloadJson: string) => string,
+	): void;
+	register_after_delete_hook(
+		id: string,
+		callback: (payloadJson: string) => string,
+	): void;
+	register_on_change_hook(
+		id: string,
+		callback: (payloadJson: string) => string,
+	): void;
 	register_custom_operator(
 		name: string,
 		supportedTypesJson: string,
@@ -29,10 +61,21 @@ export interface WasmRuntimeBinding {
 	create_database(inputJson: string): string;
 	drop_database(handle: number): string;
 	dispatch(handle: number, method: string, payloadJson?: string): string;
-	dispatch_projected(handle: number, method: string, payloadJson?: string): string;
+	dispatch_projected(
+		handle: number,
+		method: string,
+		payloadJson?: string,
+	): string;
 	begin_transaction(handle: number): string;
-	transaction_step(sessionHandle: number, method: string, payloadJson?: string): string;
-	synchronize_transaction_projection(sessionHandle: number, rowsJson: string): string;
+	transaction_step(
+		sessionHandle: number,
+		method: string,
+		payloadJson?: string,
+	): string;
+	synchronize_transaction_projection(
+		sessionHandle: number,
+		rowsJson: string,
+	): string;
 	transaction_projection_handles(sessionHandle: number): string;
 	commit_transaction(sessionHandle: number): string;
 	rollback_transaction(sessionHandle: number): string;
@@ -44,6 +87,28 @@ export interface WasmRuntimeBinding {
 		expectedGeneration: number,
 		expectedRevision: number,
 	): number;
+	fast_query_range(
+		handle: number,
+		collectionIndex: number,
+		expectedRevision: number,
+		offset: number,
+		len: number,
+	): number;
+	fast_projected_query_slots(
+		handle: number,
+		commandJson: string,
+		collectionIndex: number,
+		field: string,
+		value: string,
+		offset: number,
+		limit: number,
+	): unknown;
+	fast_index_query_revision(
+		handle: number,
+		collectionIndex: number,
+		expectedRevision: number,
+	): number;
+	fast_selected_primitive_query(handle: number, commandJson: string): unknown;
 	projection_handles(handle: number): string;
 	synchronize_projection(handle: number, rowsJson: string): string;
 	subscribe_watch(
@@ -62,7 +127,9 @@ export interface WasmRuntimeBinding {
 
 let initPromise: Promise<WasmBindingsModule> | undefined;
 
-export const getLoadedWasmMemoryByteLength = async (): Promise<number | undefined> => {
+export const getLoadedWasmMemoryByteLength = async (): Promise<
+	number | undefined
+> => {
 	if (!initPromise) {
 		return undefined;
 	}
@@ -72,7 +139,9 @@ export const getLoadedWasmMemoryByteLength = async (): Promise<number | undefine
 
 export const loadWasmBindings = async (): Promise<WasmBindingsModule> => {
 	if (!initPromise) {
-		initPromise = isBrowserRuntime() ? loadBrowserBindings() : loadNodeBindings();
+		initPromise = isBrowserRuntime()
+			? loadBrowserBindings()
+			: loadNodeBindings();
 	}
 	return initPromise;
 };
@@ -81,10 +150,14 @@ const isBrowserRuntime = (): boolean =>
 	typeof window !== "undefined" && typeof window.document !== "undefined";
 
 const loadBrowserBindings = async (): Promise<WasmBindingsModule> => {
-	// @ts-expect-error generated at build time by packages/engine/scripts/build-wasm.mjs
-	const wasmModule = (await import("./browser-wasm/proseql_wasm.js")) as WasmBindingsModule;
+	const wasmModule = (await import(
+		// @ts-expect-error generated at build time by packages/engine/scripts/build-wasm.mjs
+		"./browser-wasm/proseql_wasm.js"
+	)) as WasmBindingsModule;
 	if (typeof wasmModule.default === "function") {
-		await wasmModule.default(new URL("./browser-wasm/proseql_wasm_bg.wasm", import.meta.url));
+		await wasmModule.default(
+			new URL("./browser-wasm/proseql_wasm_bg.wasm", import.meta.url),
+		);
 	}
 	return wasmModule;
 };
@@ -98,17 +171,19 @@ const loadNodeBindings = async (): Promise<WasmBindingsModule> => {
 	const { dirname, join, resolve } = pathModule;
 	const { pathToFileURL, fileURLToPath } = urlModule;
 	const currentDir = dirname(fileURLToPath(import.meta.url));
-	const candidates = [join(currentDir, "wasm"), resolve(currentDir, "..", "dist", "wasm")];
+	const candidates = [
+		join(currentDir, "wasm"),
+		resolve(currentDir, "..", "dist", "wasm"),
+	];
 	for (const candidate of candidates) {
 		try {
 			await access(join(candidate, "proseql_wasm.js"));
 			await access(join(candidate, "proseql_wasm_bg.wasm"));
 			return (await import(
-				/* @vite-ignore */ pathToFileURL(join(candidate, "proseql_wasm.js")).href
+				/* @vite-ignore */ pathToFileURL(join(candidate, "proseql_wasm.js"))
+					.href
 			)) as WasmBindingsModule;
-		} catch {
-			continue;
-		}
+		} catch {}
 	}
 	throw new Error(
 		"Missing proseql-wasm artifacts. Run `bun run --cwd packages/engine build:wasm` first.",
@@ -116,4 +191,4 @@ const loadNodeBindings = async (): Promise<WasmBindingsModule> => {
 };
 
 const importNode = async (specifier: string): Promise<unknown> =>
-	import(/* @vite-ignore */ (`node:${specifier}` as string));
+	import(/* @vite-ignore */ `node:${specifier}` as string);

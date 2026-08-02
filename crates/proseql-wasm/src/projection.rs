@@ -8,6 +8,7 @@ struct RowSlot {
     generation: u32,
     revision: u32,
     materialized: bool,
+    positioned: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -49,6 +50,7 @@ impl MaterializedProjection {
             let row_slot = &mut self.slots[slot as usize];
             row_slot.revision = 1;
             row_slot.materialized = false;
+            row_slot.positioned = false;
             slot
         } else {
             let slot = u32::try_from(self.slots.len()).expect("projection slot capacity exceeded");
@@ -56,6 +58,7 @@ impl MaterializedProjection {
                 generation: 1,
                 revision: 1,
                 materialized: false,
+                positioned: false,
             });
             slot
         };
@@ -72,6 +75,7 @@ impl MaterializedProjection {
         metadata.generation = metadata.generation.saturating_add(1);
         metadata.revision = 0;
         metadata.materialized = false;
+        metadata.positioned = false;
         self.free.push(slot);
         Some(slot as usize)
     }
@@ -126,6 +130,40 @@ impl MaterializedProjection {
         }
     }
 
+    pub fn describe_contiguous_query(
+        &mut self,
+        db: &Database,
+        collection: &str,
+        offset: usize,
+        len: usize,
+    ) -> Value {
+        let Some(rows) = db.collection(collection) else {
+            return json!({"k": "c", "o": offset, "l": 0});
+        };
+        let mut additions = Vec::new();
+        for (position, (storage_id, value)) in rows.entries().enumerate().skip(offset).take(len) {
+            let Some(slot) = self.find(collection, storage_id) else {
+                continue;
+            };
+            if !self.slots[slot].positioned || !self.slots[slot].materialized {
+                let row = self.descriptor_for_storage_id(db, collection, storage_id, value.clone());
+                self.slots[slot].positioned = true;
+                additions.push(json!([position, row]));
+            }
+        }
+        let mut descriptor = json!({
+            "k": "c",
+            "o": offset,
+            "l": len,
+            "t": rows.len(),
+            "v": rows.revision(),
+        });
+        if !additions.is_empty() {
+            descriptor["a"] = Value::Array(additions);
+        }
+        descriptor
+    }
+
     pub fn describe_result(
         &mut self,
         db: &Database,
@@ -149,6 +187,24 @@ impl MaterializedProjection {
             }),
             (_, value) => value,
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn materialized_slots_for_positions(
+        &self,
+        db: &Database,
+        collection: &str,
+        positions: &[usize],
+    ) -> Option<Vec<u32>> {
+        let rows = db.collection(collection)?;
+        positions
+            .iter()
+            .map(|position| {
+                let (id, _) = rows.entry_at(*position)?;
+                let slot = self.find(collection, id)?;
+                self.slots.get(slot)?.materialized.then_some(slot as u32)
+            })
+            .collect()
     }
 
     pub fn fast_find_authorized(
@@ -188,6 +244,7 @@ impl MaterializedProjection {
     pub fn reset_materializations(&mut self) {
         for slot in &mut self.slots {
             slot.materialized = false;
+            slot.positioned = false;
         }
     }
 
@@ -212,6 +269,17 @@ impl MaterializedProjection {
     }
 
     pub fn apply_changes(&mut self, changes: &ChangeSet, observed_owner_collection: Option<&str>) {
+        let structurally_changed = changes
+            .entities()
+            .map(|change| change.collection.clone())
+            .collect::<std::collections::HashSet<_>>();
+        for collection in &structurally_changed {
+            if let Some(slots) = self.by_collection.get(collection) {
+                for slot in slots.values() {
+                    self.slots[*slot as usize].positioned = false;
+                }
+            }
+        }
         let mut wire = Vec::with_capacity(changes.len());
         for change in changes.entities() {
             match (&change.before, &change.after) {

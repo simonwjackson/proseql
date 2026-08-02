@@ -1712,7 +1712,7 @@ fn failed_upsert_many_does_not_mark_an_unobserved_projection_handle() {
 }
 
 #[test]
-fn ambiguous_equal_unchanged_rows_do_not_authorize_a_projection_handle() {
+fn contiguous_query_positions_authorize_distinct_equal_storage_rows() {
     let (mut runtime, _) = make_runtime();
     let handle = create_database(
         &mut runtime,
@@ -1759,10 +1759,13 @@ fn ambiguous_equal_unchanged_rows_do_not_authorize_a_projection_handle() {
             ),
         ),
     );
-    let rows = response["r"].as_array().unwrap();
-    assert_eq!(rows.len(), 2);
-    assert!(rows.iter().all(|row| row[0].is_null()));
-    assert!(rows.iter().all(|row| row[1]["id"] == json!("shared")));
+    assert_eq!(response["k"], json!("c"));
+    let additions = response["a"].as_array().unwrap();
+    assert_eq!(additions.len(), 2);
+    assert_eq!(additions[0][0], json!(0));
+    assert_eq!(additions[1][0], json!(1));
+    assert_eq!(additions[0][1], json!(0));
+    assert_eq!(additions[1][1], json!(1));
 }
 
 #[test]
