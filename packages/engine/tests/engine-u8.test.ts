@@ -391,6 +391,457 @@ function createTriggerableFileWatchHost(
 }
 
 describe("@proseql/engine U8 fixes", () => {
+	it("materializes every read from Rust-authored handles with stable revision-safe identity", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{
+				users: [
+					{ id: "u1", name: "Alice" },
+					{ id: "u2", name: "Bob" },
+				],
+			},
+		);
+		try {
+			const first = await db.users.findById("u1");
+			const repeated = await db.users.findById("u1");
+			const ordered = await db.users.query({ sort: { id: "desc" } });
+			expect(repeated).toBe(first);
+			expect(ordered.map((row) => row.id)).toEqual(["u2", "u1"]);
+			expect(ordered[1]).toBe(first);
+			(first as { name: string }).name = "Caller mutation";
+			expect((await db.users.findById("u1")).name).toBe("Caller mutation");
+
+			const updated = await db.users.update("u1", { name: "Updated" });
+			const afterUpdate = await db.users.findById("u1");
+			expect(afterUpdate).not.toBe(first);
+			expect(afterUpdate).toBe(updated);
+
+			await db.users.delete("u1");
+			await db.users.create({ id: "u1", name: "Recreated" });
+			const recreated = await db.users.findById("u1");
+			expect(recreated).not.toBe(first);
+			expect(recreated).not.toBe(afterUpdate);
+			expect(recreated.name).toBe("Recreated");
+			const diagnostics = (
+				db as unknown as {
+					__proseqlMaterializationDiagnostics: () => {
+						cacheHits: number;
+						descriptorBytes: number;
+					};
+				}
+			).__proseqlMaterializationDiagnostics();
+			expect(diagnostics.cacheHits).toBeGreaterThan(0);
+			expect(diagnostics.descriptorBytes).toBeGreaterThan(0);
+			expect(Object.keys(db)).not.toContain(
+				"__proseqlMaterializationDiagnostics",
+			);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("materializes returned batch mutation rows without projecting unreturned rows", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		try {
+			const created = await db.users.createMany([
+				{ id: "u2", name: "Bob" },
+				{ id: "u3", name: "Cara" },
+			]);
+			expect(await db.users.findById("u2")).toBe(created.created[0]);
+			const updated = await db.users.updateMany(
+				{ name: "Bob" },
+				{ name: "Updated" },
+			);
+			expect(await db.users.findById("u2")).toBe(updated.updated[0]);
+			const diagnostics = (
+				db as unknown as {
+					__proseqlMaterializationDiagnostics: () => {
+						peakMaterializedRows: number;
+					};
+				}
+			).__proseqlMaterializationDiagnostics();
+			expect(diagnostics.peakMaterializedRows).toBeLessThanOrEqual(3);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("keeps transformed create results identical to their stable storage-key lookup", async () => {
+		const db = await createEngineDatabase({
+			users: {
+				schema: UserSchema,
+				relationships: {},
+				hooks: {
+					beforeCreate: [
+						(ctx: { data: { id: string; name: string } }) =>
+							Effect.succeed({ ...ctx.data, id: "visible-id" }),
+					],
+				},
+			},
+		} as const);
+		try {
+			const created = await db.users.create({
+				id: "storage-id",
+				name: "Alice",
+			});
+			const found = await db.users.findById("storage-id");
+			expect(created.id).toBe("visible-id");
+			expect(found).toBe(created);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("keeps caller-mutated storage identity, stale indexes, and hook context aligned with direct mutable rows", async () => {
+		let hookPrevious: unknown;
+		let hookCurrent: unknown;
+		const db = await createEngineDatabase(
+			{
+				users: {
+					schema: UserSchema,
+					relationships: {},
+					indexes: ["name"],
+					hooks: {
+						beforeUpdate: [
+							(ctx: { update: unknown }) => Effect.succeed(ctx.update),
+						],
+						afterUpdate: [
+							(ctx: { previous: unknown; current: unknown }) => {
+								hookPrevious = ctx.previous;
+								hookCurrent = ctx.current;
+								return Effect.void;
+							},
+						],
+					},
+				},
+			} as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		try {
+			const row = await db.users.findById("u1");
+			(row as { id: string; name: string }).id = "caller-id";
+			(row as { id: string; name: string }).name = "Caller mutation";
+			expect(await db.users.findById("u1")).toBe(row);
+			expect(await db.users.query({ where: { name: "Alice" } })).toEqual([]);
+			expect(
+				await db.users.query({ where: { name: "Caller mutation" } }),
+			).toEqual([]);
+			await db.users.update("u1", { name: "Formal" });
+			expect(hookPrevious).toMatchObject({
+				id: "caller-id",
+				name: "Caller mutation",
+			});
+			expect(hookCurrent).toMatchObject({
+				id: "caller-id",
+				name: "Formal",
+			});
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("preserves exact boundary values through dirty projection synchronization", async () => {
+		const PayloadSchema = Schema.Struct({
+			id: Schema.String,
+			missing: Schema.optional(Schema.String),
+			nullable: Schema.NullOr(Schema.String),
+			negativeZero: Schema.Number,
+			unicode: Schema.String,
+			values: Schema.Array(Schema.NullOr(Schema.String)),
+			sentinel: Schema.Struct({ __proseqlArrayHole__: Schema.Number }),
+		});
+		const db = await createEngineDatabase(
+			{ payloads: { schema: PayloadSchema, relationships: {} } } as const,
+			{
+				payloads: [
+					{
+						id: "p1",
+						nullable: null,
+						negativeZero: 0,
+						unicode: "雪🚀",
+						values: ["a", "b", "c"],
+						sentinel: { __proseqlArrayHole__: 1 },
+					},
+				],
+			},
+		);
+		try {
+			const row = await db.payloads.findById("p1");
+			const mutable = row as unknown as {
+				missing?: string;
+				nullable: string | null;
+				negativeZero: number;
+				unicode: string;
+				values: Array<string | null | undefined>;
+				sentinel: { __proseqlArrayHole__: number };
+			};
+			mutable.missing = undefined;
+			mutable.nullable = null;
+			mutable.negativeZero = -0;
+			mutable.unicode = "漢字✨";
+			delete mutable.values[0];
+			mutable.values[1] = undefined;
+			mutable.values[2] = null;
+			mutable.sentinel = { __proseqlArrayHole__: 1 };
+			const found = (await db.payloads.findById(
+				"p1",
+			)) as unknown as typeof mutable;
+			expect(found).toBe(row);
+			expect(Object.hasOwn(found, "missing")).toBe(true);
+			expect(found.missing).toBeUndefined();
+			expect(found.nullable).toBeNull();
+			expect(Object.is(found.negativeZero, -0)).toBe(true);
+			expect(found.unicode).toBe("漢字✨");
+			expect(0 in found.values).toBe(false);
+			expect(1 in found.values).toBe(true);
+			expect(found.values[1]).toBeUndefined();
+			expect(found.values[2]).toBeNull();
+			expect(found.sentinel).toEqual({ __proseqlArrayHole__: 1 });
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("materializes unchanged upsertMany rows for identity and caller mutation sync", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		try {
+			const result = await db.users.upsertMany([
+				{
+					where: { id: "u1" },
+					create: { name: "unused" },
+					update: { name: "Alice" },
+				},
+			]);
+			const unchanged = result.unchanged[0];
+			expect(unchanged).toBeDefined();
+			expect(await db.users.findById("u1")).toBe(unchanged);
+			(unchanged as { name: string }).name = "Caller mutation";
+			expect((await db.users.findById("u1")).name).toBe("Caller mutation");
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("replaces materialized identity after same-id transaction snapshots", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		try {
+			const before = await db.users.findById("u1");
+			await db.$transaction(async (tx) => {
+				await tx.users.update("u1", { name: "Committed" });
+			});
+			const after = await db.users.findById("u1");
+			expect(after).not.toBe(before);
+			expect(after.name).toBe("Committed");
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("materializes every applicable mutation result with direct TypeScript identity semantics", async () => {
+		const DeletableUserSchema = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+			deletedAt: Schema.optional(Schema.NullOr(Schema.String)),
+			updatedAt: Schema.optional(Schema.String),
+		});
+		const db = await createEngineDatabase(
+			{ users: { schema: DeletableUserSchema, relationships: {} } } as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		try {
+			const createdWithRelationships = await db.users.createWithRelationships({
+				id: "u2",
+				name: "Bob",
+			});
+			expect(await db.users.findById("u2")).toBe(createdWithRelationships);
+			(createdWithRelationships as { name: string }).name = "Caller Bob";
+			expect((await db.users.findById("u2")).name).toBe("Caller Bob");
+
+			const updatedWithRelationships = await db.users.updateWithRelationships(
+				"u2",
+				{ name: "Updated Bob" },
+			);
+			expect(await db.users.findById("u2")).toBe(updatedWithRelationships);
+
+			const upsertOutcome = await db.users.upsert({
+				where: { id: "u2" },
+				create: { name: "Unused" },
+				update: { name: "Upserted Bob" },
+			});
+			// Direct TypeScript spreads __action onto a result clone rather than
+			// adding metadata to the canonical stored entity.
+			expect(await db.users.findById("u2")).not.toBe(upsertOutcome);
+			expect(upsertOutcome.__action).toBe("updated");
+
+			const upsertMany = await db.users.upsertMany([
+				{
+					where: { id: "u2" },
+					create: { name: "Unused" },
+					update: { name: "Batch Bob" },
+				},
+				{
+					where: { id: "u3" },
+					create: { name: "Cara" },
+					update: { name: "Unused" },
+				},
+			]);
+			expect(await db.users.findById("u2")).toBe(upsertMany.updated[0]);
+			expect(await db.users.findById("u3")).toBe(upsertMany.created[0]);
+
+			const softDeleted = await db.users.delete("u2", { soft: true });
+			expect(await db.users.findById("u2")).toBe(softDeleted);
+
+			const beforeHardDelete = await db.users.findById("u3");
+			const hardDeleted = await db.users.delete("u3");
+			expect(hardDeleted).toBe(beforeHardDelete);
+
+			await db.users.create({ id: "u4", name: "Dora" });
+			const beforeRelationshipDelete = await db.users.findById("u4");
+			const relationshipDelete = await db.users.deleteWithRelationships("u4");
+			expect(relationshipDelete.deleted).toBe(beforeRelationshipDelete);
+
+			const softRelationshipRow = await db.users.create({
+				id: "u7",
+				name: "Gia",
+			});
+			const softRelationshipDelete = await db.users.deleteWithRelationships(
+				"u7",
+				{
+					soft: true,
+				},
+			);
+			expect(softRelationshipDelete.deleted).not.toBe(softRelationshipRow);
+			expect(await db.users.findById("u7")).toBe(
+				softRelationshipDelete.deleted,
+			);
+
+			await db.users.createMany([
+				{ id: "u5", name: "Eve" },
+				{ id: "u6", name: "Finn" },
+			]);
+			const beforeBatchDelete = await db.users.findById("u5");
+			const deletedMany = await db.users.deleteMany({ id: "u5" });
+			expect(deletedMany.deleted[0]).toBe(beforeBatchDelete);
+
+			const beforeRelationshipBatchDelete = await db.users.findById("u6");
+			const deletedManyWithRelationships =
+				await db.users.deleteManyWithRelationships({ id: "u6" });
+			expect(deletedManyWithRelationships.deleted[0]).toBe(
+				beforeRelationshipBatchDelete,
+			);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("keeps duplicate caller-mutated values on distinct Rust storage handles", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{
+				users: [
+					{ id: "u1", name: "Alice" },
+					{ id: "u2", name: "Bob" },
+				],
+			},
+		);
+		try {
+			const first = await db.users.findById("u1");
+			const second = await db.users.findById("u2");
+			Object.assign(first as { id: string; name: string }, {
+				id: "visible-id",
+				name: "Same",
+			});
+			Object.assign(second as { id: string; name: string }, {
+				id: "visible-id",
+				name: "Same",
+			});
+			const rows = await db.users.query({ sort: { id: "asc" } });
+			expect(rows).toHaveLength(2);
+			expect(rows[0]).not.toBe(rows[1]);
+			expect(rows).toEqual([
+				{ id: "visible-id", name: "Same" },
+				{ id: "visible-id", name: "Same" },
+			]);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("keeps a 10K projection sparse until a row is actually read", async () => {
+		const users = Array.from({ length: 10_000 }, (_, index) => ({
+			id: `u${index.toString().padStart(5, "0")}`,
+			name: `User ${index}`,
+		}));
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{ users },
+		);
+		try {
+			const diagnostics = () =>
+				(
+					db as unknown as {
+						__proseqlMaterializationDiagnostics: () => {
+							materializedRows: number;
+							trackedProxies: number;
+						};
+					}
+				).__proseqlMaterializationDiagnostics();
+			expect(diagnostics()).toMatchObject({
+				materializedRows: 0,
+				trackedProxies: 0,
+			});
+			await db.users.findById("u05000");
+			expect(diagnostics()).toMatchObject({
+				materializedRows: 1,
+				trackedProxies: 1,
+			});
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("decodes exact boundary values embedded in typed validation errors", async () => {
+		const db = await createEngineDatabase({
+			users: { schema: UserSchema, relationships: {} },
+		} as const);
+		try {
+			const sparse = ["first", "second"] as Array<unknown>;
+			delete sparse[0];
+			const invalidName = {
+				explicitUndefined: undefined,
+				negativeZero: -0,
+				sparse,
+				reserved: { __proseqlArrayHole__: 1 },
+			};
+			let caught: unknown;
+			try {
+				await db.users.create({ id: "u1", name: invalidName as never });
+			} catch (error) {
+				caught = error;
+			}
+			expect(caught).toBeInstanceOf(ValidationError);
+			const issueValue = (caught as ValidationError).issues[0]
+				?.value as typeof invalidName;
+			expect(Object.hasOwn(issueValue, "explicitUndefined")).toBe(true);
+			expect(issueValue.explicitUndefined).toBeUndefined();
+			expect(Object.is(issueValue.negativeZero, -0)).toBe(true);
+			expect(0 in issueValue.sparse).toBe(false);
+			expect(issueValue.sparse[1]).toBe("second");
+			expect(issueValue.reserved).toEqual({ __proseqlArrayHole__: 1 });
+		} finally {
+			await db.close();
+		}
+	});
+
 	it("merges existing storage with initialData and lets initialData win for file, directory, and shared path", async () => {
 		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u8-merge-"));
 		try {
@@ -1451,6 +1902,7 @@ describe("@proseql/engine U8 fixes", () => {
 			const bookWatch = db.books.watch();
 			await userWatch.next();
 			await bookWatch.next();
+			const beforeReload = await db.users.findById("u1");
 			await writeFile(
 				usersFile,
 				JSON.stringify({ u1: { id: "u1", name: "Updated" } }),
@@ -1461,6 +1913,8 @@ describe("@proseql/engine U8 fixes", () => {
 					name: "Updated",
 				});
 			});
+			const afterReload = await db.users.findById("u1");
+			expect(afterReload).not.toBe(beforeReload);
 			expect((await userWatch.next()).value?.[0]?.name).toBe("Updated");
 			await writeFile(
 				sharedFile,

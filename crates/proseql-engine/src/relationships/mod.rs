@@ -210,6 +210,22 @@ impl Database {
         self.collections.get(name)
     }
 
+    /// Synchronize a host materialization that was mutated by its caller.
+    /// This is not a formal database mutation and therefore emits no hooks,
+    /// reactive events, or committed change delta.
+    pub fn synchronize_materialized_value(
+        &mut self,
+        collection: &str,
+        id: &str,
+        value: Value,
+    ) -> Result<bool, EngineError> {
+        let collection = self
+            .collections
+            .get_mut(collection)
+            .ok_or_else(|| col_nf(collection))?;
+        Ok(collection.synchronize_materialized_value(id, value))
+    }
+
     // ── Plain CRUD (with FK validation on create/update) ─────────────────────
 
     /// Create an entity, validating Ref FK fields after schema decoding.

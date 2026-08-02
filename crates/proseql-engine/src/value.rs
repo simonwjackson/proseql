@@ -33,6 +33,8 @@ pub const BOUNDARY_UNDEFINED_SENTINEL_KEY: &str = "__proseqlUndefined__";
 pub const BOUNDARY_INTERNAL_UNDEFINED_SENTINEL_KEY: &str = "__proseqlInternalUndefined__";
 pub const BOUNDARY_ESCAPED_SENTINEL_KEY: &str = "__proseqlEscaped__";
 pub const BOUNDARY_FLOAT64_SENTINEL_KEY: &str = "__proseqlFloat64__";
+pub const BOUNDARY_ARRAY_HOLE_SENTINEL_KEY: &str = "__proseqlArrayHole__";
+const BOUNDARY_INTERNAL_ARRAY_HOLE_SENTINEL_KEY: &str = "__proseqlInternalArrayHole__";
 
 pub fn is_boundary_undefined(value: &Value) -> bool {
     value
@@ -78,6 +80,34 @@ fn has_reserved_boundary_key(object: &Map<String, Value>) -> bool {
     object.contains_key(BOUNDARY_UNDEFINED_SENTINEL_KEY)
         || object.contains_key(BOUNDARY_ESCAPED_SENTINEL_KEY)
         || object.contains_key(BOUNDARY_FLOAT64_SENTINEL_KEY)
+        || object.contains_key(BOUNDARY_ARRAY_HOLE_SENTINEL_KEY)
+}
+
+fn is_public_boundary_undefined(value: &Value) -> bool {
+    value
+        .as_object()
+        .filter(|object| object.len() == 1)
+        .and_then(|object| object.get(BOUNDARY_UNDEFINED_SENTINEL_KEY))
+        .and_then(Value::as_i64)
+        == Some(1)
+}
+
+fn is_boundary_array_hole(value: &Value) -> bool {
+    value
+        .as_object()
+        .filter(|object| object.len() == 1)
+        .and_then(|object| object.get(BOUNDARY_ARRAY_HOLE_SENTINEL_KEY))
+        .and_then(Value::as_i64)
+        == Some(1)
+}
+
+fn is_internal_boundary_array_hole(value: &Value) -> bool {
+    value
+        .as_object()
+        .filter(|object| object.len() == 1)
+        .and_then(|object| object.get(BOUNDARY_INTERNAL_ARRAY_HOLE_SENTINEL_KEY))
+        .and_then(Value::as_i64)
+        == Some(1)
 }
 
 fn decode_boundary_float64(value: &Value) -> Option<Value> {
@@ -108,7 +138,16 @@ pub fn decode_boundary_input_value(value: Value) -> Value {
         Value::Array(values) => Value::Array(
             values
                 .into_iter()
-                .map(decode_boundary_input_value)
+                .map(|value| {
+                    if is_boundary_array_hole(&value) {
+                        Value::Object(Map::from_iter([(
+                            BOUNDARY_INTERNAL_ARRAY_HOLE_SENTINEL_KEY.to_owned(),
+                            Value::from(1),
+                        )]))
+                    } else {
+                        decode_boundary_input_value(value)
+                    }
+                })
                 .collect(),
         ),
         Value::Object(object) if is_boundary_escaped_entries(&Value::Object(object.clone())) => {
@@ -130,7 +169,12 @@ pub fn decode_boundary_input_value(value: Value) -> Value {
             Value::Object(decoded)
         }
         Value::Object(object) => {
-            if let Some(number) = decode_boundary_float64(&Value::Object(object.clone())) {
+            if is_public_boundary_undefined(&Value::Object(object.clone())) {
+                Value::Object(Map::from_iter([(
+                    BOUNDARY_INTERNAL_UNDEFINED_SENTINEL_KEY.to_owned(),
+                    Value::from(1),
+                )]))
+            } else if let Some(number) = decode_boundary_float64(&Value::Object(object.clone())) {
                 number
             } else {
                 Value::Object(
@@ -154,6 +198,12 @@ pub fn encode_boundary_output_value(value: Value) -> Value {
                 .collect(),
         ),
         Value::Object(object) => {
+            if is_internal_boundary_array_hole(&Value::Object(object.clone())) {
+                return Value::Object(Map::from_iter([(
+                    BOUNDARY_ARRAY_HOLE_SENTINEL_KEY.to_owned(),
+                    Value::from(1),
+                )]));
+            }
             if is_internal_boundary_undefined(&Value::Object(object.clone())) {
                 return Value::Object(Map::from_iter([(
                     BOUNDARY_UNDEFINED_SENTINEL_KEY.to_owned(),

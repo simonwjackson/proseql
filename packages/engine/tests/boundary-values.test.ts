@@ -30,4 +30,20 @@ describe("boundary value encoding", () => {
 		expect(reparsed.nestedNumbers).toEqual(value.nestedNumbers);
 		expect(reparsed.escapedFloat64Object).toEqual(value.escapedFloat64Object);
 	});
+
+	it("round-trips sparse holes distinctly from undefined, null, and sentinel-shaped objects", () => {
+		const sparse = ["first", undefined, null, "last"] as unknown[];
+		delete sparse[3];
+		sparse.push({ __proseqlArrayHole__: 1 });
+		const reparsed = parseBoundaryJson(
+			serializeBoundaryValue(sparse),
+		) as unknown[];
+		expect(reparsed).toHaveLength(5);
+		expect(0 in reparsed).toBe(true);
+		expect(1 in reparsed).toBe(true);
+		expect(reparsed[1]).toBeUndefined();
+		expect(reparsed[2]).toBeNull();
+		expect(3 in reparsed).toBe(false);
+		expect(reparsed[4]).toEqual({ __proseqlArrayHole__: 1 });
+	});
 });

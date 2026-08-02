@@ -455,6 +455,19 @@ impl Collection {
         self.state.values().collect()
     }
 
+    /// Resolve the stable storage key for a canonical row only when the value
+    /// identifies exactly one row. Caller mutations can make multiple storage
+    /// entries deeply equal; those values must be inlined rather than collapsed
+    /// onto whichever matching handle happens to appear first.
+    pub fn storage_id_for_value(&self, value: &Value) -> Option<&str> {
+        let mut matches = self
+            .state
+            .iter()
+            .filter_map(|(id, candidate)| (candidate == value).then_some(id.as_str()));
+        let first = matches.next()?;
+        matches.next().is_none().then_some(first)
+    }
+
     pub(crate) fn merged_hook_ids(&self, global: &[String], local: &[String]) -> Vec<String> {
         global
             .iter()
@@ -1048,6 +1061,18 @@ impl Collection {
     pub(crate) fn restore_entity_value(&mut self, id: &str, value: Value) {
         let position = self.state.get_index_of(id).unwrap_or(self.state.len());
         self.insert_state_at(id.to_owned(), value, position);
+    }
+
+    /// Synchronize a caller-mutated materialized row without creating a formal
+    /// mutation. This deliberately bypasses validation, hooks, revisions,
+    /// reactive events, committed changes, and derived-index maintenance. The
+    /// latter preserves the stale-index behavior of direct mutable TS rows.
+    pub fn synchronize_materialized_value(&mut self, id: &str, value: Value) -> bool {
+        let Some(current) = self.state.get_mut(id) else {
+            return false;
+        };
+        *current = value;
+        true
     }
 
     /// Replace the full collection state and rebuild indexes.

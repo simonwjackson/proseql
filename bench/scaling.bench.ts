@@ -232,6 +232,8 @@ export async function createSuite(options?: {
 							initializationMs: findByIdInitializationMs,
 							commandPayload: { id: testIds[0] },
 							resultPayload: findByIdResult,
+							projectionMaterialization:
+								findByIdHandle.projectionMaterialization,
 						}),
 					};
 					bench.add(
@@ -295,6 +297,8 @@ export async function createSuite(options?: {
 							initializationMs: unindexedInitializationMs,
 							commandPayload: unindexedQuery,
 							resultPayload: unindexedResult,
+							projectionMaterialization:
+								unindexedHandle.projectionMaterialization,
 						}),
 					};
 					bench.add(
@@ -356,6 +360,8 @@ export async function createSuite(options?: {
 							initializationMs: indexedInitializationMs,
 							commandPayload: indexedQuery,
 							resultPayload: indexedResult,
+							projectionMaterialization:
+								indexedHandle.projectionMaterialization,
 						}),
 					};
 					bench.add(

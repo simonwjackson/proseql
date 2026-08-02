@@ -7,11 +7,12 @@
 import type { EffectDatabase } from "@proseql/core";
 import type { BenchOptions, Task, TaskResult } from "tinybench";
 import {
+	type BenchmarkInstrumentation,
 	createAvailableMetric,
 	createUnavailableInstrumentation,
 	createUnavailableMetric,
 	exactPercentile,
-	type BenchmarkInstrumentation,
+	type ProjectionMaterializationInstrumentation,
 } from "./comparison.js";
 import { type BenchSchemaConfig, typescriptBenchEngine } from "./engines.js";
 
@@ -367,18 +368,30 @@ export const createTaskInstrumentation = (options: {
 	readonly initializationMs: number;
 	readonly commandPayload?: unknown;
 	readonly resultPayload?: unknown;
-}): BenchmarkInstrumentation => ({
-	...createUnavailableInstrumentation("not reported by this workload"),
-	initializationMs: createAvailableMetric(options.initializationMs),
-	encodedCommandBytes:
-		options.commandPayload === undefined
-			? createUnavailableMetric("command payload not reported")
-			: jsonByteMetric(options.commandPayload),
-	encodedResultBytes:
-		options.resultPayload === undefined
-			? createUnavailableMetric("result payload not reported")
-			: jsonByteMetric(options.resultPayload),
-});
+	readonly projectionMaterialization?: () =>
+		| ProjectionMaterializationInstrumentation
+		| undefined;
+}): BenchmarkInstrumentation => {
+	const instrumentation: BenchmarkInstrumentation = {
+		...createUnavailableInstrumentation("not reported by this workload"),
+		initializationMs: createAvailableMetric(options.initializationMs),
+		encodedCommandBytes:
+			options.commandPayload === undefined
+				? createUnavailableMetric("command payload not reported")
+				: jsonByteMetric(options.commandPayload),
+		encodedResultBytes:
+			options.resultPayload === undefined
+				? createUnavailableMetric("result payload not reported")
+				: jsonByteMetric(options.resultPayload),
+	};
+	if (options.projectionMaterialization) {
+		Object.defineProperty(instrumentation, "projectionMaterialization", {
+			enumerable: true,
+			get: options.projectionMaterialization,
+		});
+	}
+	return instrumentation;
+};
 
 export const measureAsync = async <T>(
 	operation: () => Promise<T>,

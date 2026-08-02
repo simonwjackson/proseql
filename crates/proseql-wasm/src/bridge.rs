@@ -11,7 +11,7 @@ where
     T: Serialize,
 {
     Ok { value: T },
-    Error { error: EngineError },
+    Error { error: Value },
     Defect { message: String },
 }
 
@@ -28,6 +28,9 @@ where
 }
 
 fn response_error(error: EngineError) -> String {
+    let error = serde_json::to_value(error)
+        .map(encode_boundary_output_value)
+        .unwrap_or(Value::Null);
     serde_json::to_string(&BridgeResponse::<Value>::Error { error }).unwrap_or_else(|_| {
         "{\"kind\":\"defect\",\"message\":\"failed to serialize engine error\"}".to_owned()
     })
@@ -56,5 +59,47 @@ where
         } else {
             "unexpected defect".to_owned()
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use proseql_engine::errors::{EngineError, ValidationError, ValidationIssue};
+    use serde_json::{json, Value};
+
+    use super::response_error;
+
+    #[test]
+    fn typed_error_values_use_the_exact_boundary_codec() {
+        let error = EngineError::Validation(ValidationError {
+            message: "invalid boundary value".to_owned(),
+            issues: vec![ValidationIssue {
+                field: "payload".to_owned(),
+                message: "invalid".to_owned(),
+                value: Some(json!({
+                    "explicitUndefined": {"__proseqlInternalUndefined__": 1},
+                    "negativeZero": Value::from(-0.0),
+                    "sparse": [
+                        {"__proseqlInternalArrayHole__": 1},
+                        "second"
+                    ],
+                    "reserved": {"__proseqlArrayHole__": 1}
+                })),
+                expected: None,
+                received: None,
+            }],
+        });
+
+        let response: Value = serde_json::from_str(&response_error(error)).unwrap();
+        let value = &response["error"]["issues"][0]["value"];
+        assert_eq!(
+            value["explicitUndefined"],
+            json!({"__proseqlUndefined__": 1})
+        );
+        assert!(value["negativeZero"]
+            .as_f64()
+            .is_some_and(f64::is_sign_negative));
+        assert_eq!(value["sparse"][0], json!({"__proseqlArrayHole__": 1}));
+        assert!(value["reserved"].get("__proseqlEscaped__").is_some());
     }
 }

@@ -635,7 +635,7 @@ const adaptDatabase = <Config extends DatabaseConfig>(
 		);
 	}
 
-	return Object.assign(collections, {
+	const adapted = Object.assign(collections, {
 		$transaction: <A, E>(fn: (ctx: TransactionContext<GenerateDatabase<Config>>) => Effect.Effect<A, E>) =>
 			withRunPromise(
 				Effect.tryPromise({
@@ -733,6 +733,13 @@ const adaptDatabase = <Config extends DatabaseConfig>(
 		},
 		close: () => engineDb.close()
 	}) as unknown as GenerateDatabase<Config> & { close: () => Promise<void> };
+	Object.defineProperty(adapted, "__proseqlMaterializationDiagnostics", {
+		value: () =>
+			(engineDb as unknown as { __proseqlMaterializationDiagnostics?: () => unknown })
+				.__proseqlMaterializationDiagnostics?.(),
+		enumerable: false
+	});
+	return adapted;
 };
 
 const adaptPersistentDatabase = <Config extends DatabaseConfig>(

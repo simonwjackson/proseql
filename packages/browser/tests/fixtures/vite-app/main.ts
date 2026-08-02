@@ -5,7 +5,6 @@ import {
 } from "@proseql/browser";
 import { createEffectDatabase } from "@proseql/effect/browser";
 import { Effect, Schema } from "effect";
-import initBrowserWasm from "../../../../engine/dist/browser-wasm/proseql_wasm.js";
 import {
 	BROWSER_WORKLOAD_BASELINE_COUNT,
 	BROWSER_WORKLOAD_EXPECTATIONS,
@@ -13,6 +12,7 @@ import {
 	type BrowserPerformanceWorkloadState,
 	type BrowserWorkloadName,
 } from "../../../../../bench/workloads.js";
+import initBrowserWasm from "../../../../engine/dist/browser-wasm/proseql_wasm.js";
 
 const BookSchema = Schema.Struct({
 	id: Schema.String,
@@ -465,7 +465,7 @@ const PERF_BULK_PREDICATE_NAME = "Browser Predicate Fixture";
 const PERF_BULK_DECLARATIVE_UPDATED_NAME = "Browser Declarative Updated";
 const PERF_BULK_PREDICATE_UPDATED_NAME = "Browser Predicate Updated";
 
-const perfUsers = buildPerfUsers().map((user, index, users) => {
+let perfUsers = buildPerfUsers().map((user, index, users) => {
 	if (index >= users.length - PERF_BULK_COHORT_SIZE) {
 		return {
 			...user,
@@ -488,7 +488,9 @@ const perfUsers = buildPerfUsers().map((user, index, users) => {
 	}
 	return user;
 });
-const perfTargetId = perfUsers[5_000]?.id ?? "perf-user-05001";
+const perfFindTarget = perfUsers[5_000];
+if (!perfFindTarget) throw new Error("Missing fixed 10K browser find target");
+const perfTargetId = perfFindTarget.id;
 const perfUpdateTarget = perfUsers[0]!;
 const perfDeleteTarget = perfUsers[1_234] ?? perfUsers[0]!;
 let perfDeleteTargetState = perfDeleteTarget;
@@ -574,11 +576,18 @@ const ensureBrowserWasmLoaded = () => {
 
 const createPerfDb = async (): Promise<PerfDb> => {
 	await ensureBrowserWasmLoaded();
-	return Effect.runPromise(
-		createEffectDatabase(perfConfig, {
-			users: perfUsers,
-		}),
-	);
+	const initialUsers = perfUsers;
+	try {
+		return await Effect.runPromise(
+			createEffectDatabase(perfConfig, {
+				users: initialUsers,
+			}),
+		);
+	} finally {
+		// The materialized projection owns the canonical host rows after bootstrap.
+		// Do not retain the 10K source fixture as a second full-row collection.
+		perfUsers = [];
+	}
 };
 
 const getPerfDbState = () => {
@@ -661,9 +670,7 @@ const verifyPerfWorkloadCleanup = async (
 
 const runPerfWorkload = async (
 	workload: BrowserWorkloadName,
-	run: (
-		db: PerfDb,
-	) => Promise<{
+	run: (db: PerfDb) => Promise<{
 		readonly durationMs: number;
 		readonly resultCount: number;
 		readonly targetExistsAfterCleanup?: boolean;
@@ -710,7 +717,7 @@ const browserPerfHarness = {
 			const { value, durationMs } = await measurePerf(() =>
 				findPerfUser(db, perfTargetId),
 			);
-			assertPerfUserMatches(value, perfUsers[5_000]!, "findById verification");
+			assertPerfUserMatches(value, perfFindTarget, "findById verification");
 			return {
 				durationMs,
 				resultCount: value ? 1 : 0,

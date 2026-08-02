@@ -1,0 +1,500 @@
+export type MaterializedRowDescriptor = {
+	readonly id?: string;
+	readonly handle?: string;
+	readonly value?: unknown;
+};
+
+export type MaterializedResultDescriptor =
+	| {
+			readonly kind: "materializedOne";
+			readonly row: MaterializedRowDescriptor;
+	  }
+	| {
+			readonly kind: "materializedMany";
+			readonly rows: ReadonlyArray<MaterializedRowDescriptor>;
+	  };
+
+export type ProjectionHandles = {
+	readonly collections: Readonly<
+		Record<
+			string,
+			ReadonlyArray<{ readonly id: string; readonly handle: string }>
+		>
+	>;
+};
+
+export type ProjectionSnapshot = ProjectionHandles;
+
+type ProjectionRow = {
+	readonly id: string;
+	readonly handle: string;
+	readonly resultId?: string;
+	readonly value?: unknown;
+	readonly valueBytes?: number;
+};
+
+type ProjectionChange =
+	| {
+			readonly collection: string;
+			readonly id: string;
+			readonly handle: string;
+			readonly deleted: true;
+	  }
+	| (ProjectionRow & {
+			readonly collection: string;
+			readonly deleted?: false;
+	  });
+
+export type ProjectionSync = {
+	readonly changes: ReadonlyArray<ProjectionChange>;
+	readonly resetCollections?: Readonly<
+		Record<string, ReadonlyArray<ProjectionRow>>
+	>;
+	readonly invalidated?: boolean;
+};
+
+type Slot = {
+	readonly collection: string;
+	readonly id: string;
+	readonly handle: string;
+	hasValue: boolean;
+	value?: unknown;
+	weakValue?: WeakRef<object>;
+	readonly valueBytes: number;
+	proxyCount: number;
+	readonly token?: object;
+};
+
+export type DirtyProjectionRow = {
+	readonly collection: string;
+	readonly id: string;
+	readonly handle: string;
+	readonly value: unknown;
+};
+
+export type MaterializationStats = {
+	readonly descriptors: number;
+	readonly descriptorBytes: number;
+	readonly cacheHits: number;
+	readonly cacheMisses: number;
+	readonly resynchronizations: number;
+	readonly fullValueBytesAvoided: number;
+	readonly materializationMilliseconds: number;
+	readonly materializedRows: number;
+	readonly trackedProxies: number;
+	readonly peakMaterializedRows: number;
+	readonly peakTrackedProxies: number;
+};
+
+const keyOf = (collection: string, id: string) => `${collection}\u0000${id}`;
+const ownsValue = (value: object) => Object.hasOwn(value, "value");
+
+const trackDeep = (
+	value: unknown,
+	markDirty: () => void,
+	cache: WeakMap<object, unknown>,
+	countProxy: () => void,
+): unknown => {
+	if (typeof value !== "object" || value === null) return value;
+	const cached = cache.get(value);
+	if (cached !== undefined) return cached;
+	const proxy = new Proxy(value, {
+		get(target, property, receiver) {
+			return trackDeep(
+				Reflect.get(target, property, receiver),
+				markDirty,
+				cache,
+				countProxy,
+			);
+		},
+		set(target, property, next, receiver) {
+			const changed = !Object.is(Reflect.get(target, property, receiver), next);
+			const applied = Reflect.set(target, property, next, receiver);
+			if (applied && changed) markDirty();
+			return applied;
+		},
+		deleteProperty(target, property) {
+			const existed = Reflect.has(target, property);
+			const applied = Reflect.deleteProperty(target, property);
+			if (applied && existed) markDirty();
+			return applied;
+		},
+		defineProperty(target, property, descriptor) {
+			const applied = Reflect.defineProperty(target, property, descriptor);
+			if (applied) markDirty();
+			return applied;
+		},
+	});
+	cache.set(value, proxy);
+	countProxy();
+	return proxy;
+};
+
+export class MaterializedProjection {
+	private slots: Array<Slot | undefined> = [];
+	private readonly slotById = new Map<string, number>();
+	private readonly freeSlots: number[] = [];
+	private readonly materializedKeys = new Set<string>();
+	private readonly dirtyKeys = new Set<string>();
+	private invalid = false;
+	private mutableStats = {
+		descriptors: 0,
+		descriptorBytes: 0,
+		cacheHits: 0,
+		cacheMisses: 0,
+		resynchronizations: 0,
+		fullValueBytesAvoided: 0,
+		materializationMilliseconds: 0,
+		materializedRows: 0,
+		trackedProxies: 0,
+		peakMaterializedRows: 0,
+		peakTrackedProxies: 0,
+	};
+
+	constructor(snapshot: ProjectionSnapshot) {
+		this.replaceAll(snapshot, false);
+	}
+
+	get needsResynchronization() {
+		return this.invalid;
+	}
+
+	get stats(): MaterializationStats {
+		return this.mutableStats;
+	}
+
+	get dirtyRows(): ReadonlyArray<DirtyProjectionRow> {
+		return [...this.dirtyKeys].flatMap((key) => {
+			const slot = this.slotById.get(key);
+			const row = slot === undefined ? undefined : this.slots[slot];
+			const value = row?.value;
+			return row?.hasValue && value !== undefined
+				? [
+						{
+							collection: row.collection,
+							id: row.id,
+							handle: row.handle,
+							value,
+						},
+					]
+				: [];
+		});
+	}
+
+	materializedValue(collection: string, id: string): unknown {
+		const slot = this.slotById.get(keyOf(collection, id));
+		if (slot === undefined) return undefined;
+		return this.resolveValue(slot);
+	}
+
+	materializedEntries(collection: string): ReadonlyMap<string, unknown> {
+		const entries = new Map<string, unknown>();
+		const prefix = `${collection}\u0000`;
+		for (const key of this.materializedKeys) {
+			if (!key.startsWith(prefix)) continue;
+			const slot = this.slotById.get(key);
+			const row = slot === undefined ? undefined : this.slots[slot];
+			const value = slot === undefined ? undefined : this.resolveValue(slot);
+			if (row !== undefined && value !== undefined) entries.set(row.id, value);
+		}
+		return entries;
+	}
+
+	cacheAuthoritativeValue(collection: string, id: string, value: unknown) {
+		const slot = this.slotById.get(keyOf(collection, id));
+		const row = slot === undefined ? undefined : this.slots[slot];
+		if (row === undefined) return undefined;
+		this.put(collection, { id, handle: row.handle, value });
+		const cachedSlot = this.slotById.get(keyOf(collection, id));
+		const cached =
+			cachedSlot === undefined ? undefined : this.resolveValue(cachedSlot);
+		return cached === undefined
+			? undefined
+			: { value: cached, handle: row.handle };
+	}
+
+	markSynchronized(rows: ReadonlyArray<DirtyProjectionRow>) {
+		for (const row of rows) {
+			const key = keyOf(row.collection, row.id);
+			const slot = this.slotById.get(key);
+			const current = slot === undefined ? undefined : this.slots[slot];
+			if (current?.handle === row.handle) {
+				this.dirtyKeys.delete(key);
+				if (typeof current.value === "object" && current.value !== null) {
+					current.weakValue = new WeakRef(current.value);
+					current.value = undefined;
+				}
+			}
+		}
+	}
+
+	resynchronize(snapshot: ProjectionSnapshot) {
+		this.replaceAll(snapshot, true);
+	}
+
+	invalidate() {
+		this.invalid = true;
+	}
+
+	clear() {
+		this.slots.length = 0;
+		this.slotById.clear();
+		this.freeSlots.length = 0;
+		this.materializedKeys.clear();
+		this.dirtyKeys.clear();
+		this.mutableStats.materializedRows = 0;
+		this.mutableStats.trackedProxies = 0;
+		this.invalid = true;
+	}
+
+	apply(sync: ProjectionSync) {
+		if (sync.invalidated) {
+			this.invalidate();
+			return;
+		}
+		for (const change of sync.changes) {
+			if (!change.deleted) continue;
+			const existing = this.slotById.get(keyOf(change.collection, change.id));
+			if (
+				existing === undefined ||
+				this.slots[existing]?.handle !== change.handle
+			) {
+				this.invalidate();
+				return;
+			}
+		}
+		for (const [collection, rows] of Object.entries(
+			sync.resetCollections ?? {},
+		)) {
+			for (const [key, slot] of this.slotById) {
+				if (key.startsWith(`${collection}\u0000`)) this.remove(key, slot);
+			}
+			for (const row of rows) this.put(collection, row);
+		}
+		for (const change of sync.changes) {
+			const key = keyOf(change.collection, change.id);
+			if (change.deleted) {
+				const existing = this.slotById.get(key);
+				if (existing === undefined) {
+					this.invalidate();
+					return;
+				}
+				this.remove(key, existing);
+			} else {
+				this.put(change.collection, change);
+			}
+		}
+	}
+
+	materialize<T>(
+		collection: string,
+		descriptor: MaterializedResultDescriptor,
+		descriptorBytes: number,
+	): T {
+		const started = performance.now();
+		this.mutableStats.descriptors += 1;
+		this.mutableStats.descriptorBytes += descriptorBytes;
+		const value =
+			descriptor.kind === "materializedOne"
+				? this.materializeRow(collection, descriptor.row)
+				: descriptor.rows.map((row) => this.materializeRow(collection, row));
+		this.mutableStats.materializationMilliseconds +=
+			performance.now() - started;
+		return value as T;
+	}
+
+	private materializeRow(
+		collection: string,
+		descriptor: MaterializedRowDescriptor,
+	): unknown {
+		if (descriptor.handle !== undefined && descriptor.id !== undefined) {
+			const key = keyOf(collection, descriptor.id);
+			const slot = this.slotById.get(key);
+			const row = slot === undefined ? undefined : this.slots[slot];
+			if (row?.handle !== descriptor.handle) {
+				this.mutableStats.cacheMisses += 1;
+				this.invalidate();
+				throw new StaleMaterializedHandleError(descriptor.handle);
+			}
+			if (ownsValue(descriptor)) {
+				this.put(collection, {
+					id: descriptor.id,
+					handle: descriptor.handle,
+					value: descriptor.value,
+					valueBytes: JSON.stringify(descriptor.value)?.length ?? 0,
+				});
+				this.mutableStats.cacheMisses += 1;
+			}
+			const activeSlot = this.slotById.get(key);
+			const value =
+				activeSlot === undefined ? undefined : this.resolveValue(activeSlot);
+			if (value !== undefined) {
+				if (!ownsValue(descriptor)) {
+					this.mutableStats.cacheHits += 1;
+					this.mutableStats.fullValueBytesAvoided += row.valueBytes;
+				}
+				return value;
+			}
+			this.mutableStats.cacheMisses += 1;
+			this.invalidate();
+			throw new StaleMaterializedHandleError(descriptor.handle);
+		}
+		this.mutableStats.cacheMisses += 1;
+		return descriptor.value;
+	}
+
+	private replaceAll(snapshot: ProjectionSnapshot, resynchronization: boolean) {
+		this.slots = [];
+		this.slotById.clear();
+		this.freeSlots.length = 0;
+		this.materializedKeys.clear();
+		this.dirtyKeys.clear();
+		this.mutableStats.materializedRows = 0;
+		this.mutableStats.trackedProxies = 0;
+		for (const [collection, rows] of Object.entries(snapshot.collections)) {
+			for (const row of rows) this.put(collection, row);
+		}
+		this.invalid = false;
+		if (resynchronization) this.mutableStats.resynchronizations += 1;
+	}
+
+	private resolveValue(slot: number): unknown {
+		const row = this.slots[slot];
+		if (!row?.hasValue) return undefined;
+		if (row.value !== undefined) return row.value;
+		const value = row.weakValue?.deref();
+		if (value !== undefined) return value;
+		row.hasValue = false;
+		row.weakValue = undefined;
+		this.materializedKeys.delete(keyOf(row.collection, row.id));
+		this.mutableStats.materializedRows = Math.max(
+			0,
+			this.mutableStats.materializedRows - 1,
+		);
+		this.mutableStats.trackedProxies = Math.max(
+			0,
+			this.mutableStats.trackedProxies - row.proxyCount,
+		);
+		row.proxyCount = 0;
+		return undefined;
+	}
+
+	private put(collection: string, row: ProjectionRow) {
+		const key = keyOf(collection, row.id);
+		const existing = this.slotById.get(key);
+		const target = existing ?? this.freeSlots.pop() ?? this.slots.length;
+		const prior = this.slots[target];
+		const incomingHasValue = ownsValue(row);
+		if (!incomingHasValue && prior?.handle === row.handle) return;
+		let trackedValue: unknown;
+		let valueBytes = 0;
+		let proxyCount = 0;
+		let token: object | undefined;
+		let installed = false;
+		if (incomingHasValue) {
+			const proxyCache = new WeakMap<object, unknown>();
+			token = {};
+			const activeToken = token;
+			trackedValue = trackDeep(
+				row.value,
+				() => {
+					const active = this.slots[target];
+					if (active?.token === activeToken) {
+						this.dirtyKeys.add(key);
+						active.value = trackedValue;
+						active.weakValue = undefined;
+					}
+				},
+				proxyCache,
+				() => {
+					proxyCount += 1;
+					const active = this.slots[target];
+					if (installed && active?.token === activeToken) {
+						active.proxyCount += 1;
+						this.mutableStats.trackedProxies += 1;
+						this.mutableStats.peakTrackedProxies = Math.max(
+							this.mutableStats.peakTrackedProxies,
+							this.mutableStats.trackedProxies,
+						);
+					}
+				},
+			);
+			valueBytes = row.valueBytes ?? 0;
+		}
+		if (prior?.hasValue) {
+			this.materializedKeys.delete(key);
+			this.mutableStats.materializedRows = Math.max(
+				0,
+				this.mutableStats.materializedRows - 1,
+			);
+			this.mutableStats.trackedProxies = Math.max(
+				0,
+				this.mutableStats.trackedProxies - prior.proxyCount,
+			);
+		}
+		const weakValue =
+			typeof trackedValue === "object" && trackedValue !== null
+				? new WeakRef(trackedValue)
+				: undefined;
+		this.slots[target] = {
+			collection,
+			id: row.id,
+			handle: row.handle,
+			hasValue: incomingHasValue,
+			value: weakValue === undefined ? trackedValue : undefined,
+			weakValue,
+			valueBytes,
+			proxyCount,
+			token,
+		};
+		installed = true;
+		this.slotById.set(key, target);
+		this.dirtyKeys.delete(key);
+		if (incomingHasValue) {
+			this.materializedKeys.add(key);
+			this.mutableStats.materializedRows += 1;
+			this.mutableStats.trackedProxies += proxyCount;
+			this.mutableStats.peakMaterializedRows = Math.max(
+				this.mutableStats.peakMaterializedRows,
+				this.mutableStats.materializedRows,
+			);
+			this.mutableStats.peakTrackedProxies = Math.max(
+				this.mutableStats.peakTrackedProxies,
+				this.mutableStats.trackedProxies,
+			);
+		}
+	}
+
+	private remove(key: string, slot: number) {
+		const prior = this.slots[slot];
+		if (prior?.hasValue) {
+			this.mutableStats.materializedRows -= 1;
+			this.mutableStats.trackedProxies -= prior.proxyCount;
+		}
+		this.slots[slot] = undefined;
+		this.slotById.delete(key);
+		this.materializedKeys.delete(key);
+		this.dirtyKeys.delete(key);
+		this.freeSlots.push(slot);
+	}
+}
+
+export class StaleMaterializedHandleError extends Error {
+	constructor(readonly handle: string) {
+		super(`Stale materialized row handle '${handle}'`);
+		this.name = "StaleMaterializedHandleError";
+	}
+}
+
+export const projectionSnapshotFromHandles = (
+	handles: ProjectionHandles,
+): ProjectionSnapshot => handles;
+
+export const isMaterializedResultDescriptor = (
+	value: unknown,
+): value is MaterializedResultDescriptor => {
+	if (typeof value !== "object" || value === null || !("kind" in value))
+		return false;
+	const kind = (value as { readonly kind?: unknown }).kind;
+	return kind === "materializedOne" || kind === "materializedMany";
+};

@@ -1,11 +1,11 @@
 import { Effect, type Schema } from "effect";
-import type { EngineId } from "./comparison.js";
 import {
 	type CollectionConfig,
 	createEffectDatabase as createCoreEffectDatabase,
 	type EffectDatabase,
 } from "../packages/core/src/index.js";
 import { createEffectDatabase as createWasmEffectDatabase } from "../packages/effect/src/index.js";
+import type { EngineId } from "./comparison.js";
 
 export type BenchSchemaConfig = Record<
 	string,
@@ -62,6 +62,21 @@ export interface BenchCollectionMutationAdapter<Row> {
 export interface BenchDatabaseHandle<T> {
 	readonly db: T;
 	readonly close: () => Promise<void>;
+	readonly projectionMaterialization?: () =>
+		| {
+				readonly descriptors: number;
+				readonly descriptorBytes: number;
+				readonly cacheHits: number;
+				readonly cacheMisses: number;
+				readonly resynchronizations: number;
+				readonly fullValueBytesAvoided: number;
+				readonly materializationMilliseconds: number;
+				readonly materializedRows: number;
+				readonly trackedProxies: number;
+				readonly peakMaterializedRows: number;
+				readonly peakTrackedProxies: number;
+		  }
+		| undefined;
 	readonly collectionMutationAdapter: BenchCollectionMutationAdapter<
 		Record<string, unknown>
 	>;
@@ -154,9 +169,17 @@ const createWasmDatabase = async <T extends BenchSchemaConfig>(
 				| undefined,
 		),
 	);
+	const diagnostics = (
+		db as unknown as {
+			__proseqlMaterializationDiagnostics?: () => ReturnType<
+				NonNullable<BenchDatabaseHandle<unknown>["projectionMaterialization"]>
+			>;
+		}
+	).__proseqlMaterializationDiagnostics;
 	return {
 		db: db as EffectDatabase<ConvertToDbConfig<T>>,
 		close: () => closeBenchDatabase(db),
+		projectionMaterialization: diagnostics,
 		collectionMutationAdapter: createCollectionMutationAdapter("wasm"),
 	};
 };

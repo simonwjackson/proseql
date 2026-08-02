@@ -31,6 +31,9 @@ declare module "./browser-wasm/proseql_wasm.js" {
 		create_database(inputJson: string): string;
 		drop_database(handle: number): string;
 		dispatch(handle: number, method: string, payloadJson?: string): string;
+		dispatch_projected(handle: number, method: string, payloadJson?: string): string;
+		projection_handles(handle: number): string;
+		synchronize_projection(handle: number, rowsJson: string): string;
 		subscribe_watch(
 			handle: number,
 			commandJson: string,

@@ -359,6 +359,7 @@ export async function createSuite(options?: {
 						initializationMs,
 						commandPayload: taskOptions.query,
 						resultPayload,
+						projectionMaterialization: handle.projectionMaterialization,
 					}),
 				});
 			}

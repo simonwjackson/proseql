@@ -595,6 +595,47 @@ fn relationship_create_connects_foreign_key() {
 }
 
 #[test]
+fn typed_partial_relationship_effect_carries_projection_sync_on_the_error_response() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![users_descriptor(), companies_descriptor()],
+        json!({}),
+    );
+    let response = parse_response(
+        &runtime.dispatch_json(
+            handle,
+            "createWithRelationships",
+            Some(
+                json!({
+                    "collection": "users",
+                    "data": {
+                        "id": "u1",
+                        "company": {"$create": {"id": "c1", "name": "Created first"}}
+                    }
+                })
+                .to_string()
+                .as_str(),
+            ),
+        ),
+    );
+    assert_eq!(response["kind"], json!("error"));
+    assert_eq!(response["error"]["_tag"], json!("ValidationError"));
+    assert_eq!(
+        response["projection"]["changes"][0]["collection"],
+        json!("companies")
+    );
+    assert_eq!(
+        response["projection"]["changes"][0]["id"],
+        json!("fallback-1")
+    );
+    assert!(response["projection"]["changes"][0].get("value").is_none());
+    let dumped = dispatch_no_payload(&mut runtime, handle, "dumpAll");
+    assert_eq!(dumped["companies"][0]["name"], json!("Created first"));
+    assert!(dumped["users"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn relationship_update_changes_foreign_key() {
     let (mut runtime, _) = make_runtime();
     let handle = create_database(
@@ -612,6 +653,55 @@ fn relationship_update_changes_foreign_key() {
         json!({"collection": "users", "id": "u1", "data": {"company": {"$connect": {"id": "c2"}}}}),
     );
     assert_eq!(updated["companyId"], json!("c2"));
+}
+
+#[test]
+fn relationship_side_effect_carries_value_for_a_materialized_non_owner_row() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![users_descriptor(), companies_descriptor()],
+        json!({
+            "companies": [{"id": "c1", "name": "Before"}],
+            "users": [{"id": "u1", "name": "Alice", "companyId": "c1"}]
+        }),
+    );
+    let projected = expect_ok(
+        &runtime.dispatch_projected_json(
+            handle,
+            "findById",
+            Some(
+                json!({"collection": "companies", "id": "c1"})
+                    .to_string()
+                    .as_str(),
+            ),
+        ),
+    );
+    assert_eq!(projected["row"]["value"]["name"], json!("Before"));
+
+    let response = parse_response(
+        &runtime.dispatch_json(
+            handle,
+            "updateWithRelationships",
+            Some(
+                json!({
+                    "collection": "users",
+                    "id": "u1",
+                    "data": {"company": {"$update": {"name": "After"}}}
+                })
+                .to_string()
+                .as_str(),
+            ),
+        ),
+    );
+    assert_eq!(response["kind"], json!("ok"));
+    let related = response["projection"]["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|change| change["collection"] == json!("companies"))
+        .unwrap();
+    assert_eq!(related["value"]["name"], json!("After"));
 }
 
 #[test]
@@ -701,14 +791,25 @@ fn reload_collection_replaces_existing_state() {
         vec![users_descriptor()],
         json!({"users": [{"id": "u1", "name": "Alice"}]}),
     );
+    let before = expect_ok(&runtime.projection_handles_json(handle))["collections"]["users"][0]
+        ["handle"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     dispatch(
         &mut runtime,
         handle,
         "reloadCollection",
-        json!({"collection": "users", "records": [{"id": "u2", "name": "Bob"}]}),
+        json!({"collection": "users", "records": [{"id": "u1", "name": "Bob"}]}),
     );
+    let reset = expect_ok(&runtime.projection_changes_json(handle));
     let dumped = dispatch_no_payload(&mut runtime, handle, "dumpAll");
-    assert_eq!(dumped["users"], json!([{"id": "u2", "name": "Bob"}]));
+    assert_eq!(dumped["users"], json!([{"id": "u1", "name": "Bob"}]));
+    let after = reset["resetCollections"]["users"][0]["handle"]
+        .as_str()
+        .unwrap();
+    assert_ne!(after, before);
+    assert!(reset["resetCollections"]["users"][0].get("value").is_none());
 }
 
 #[test]
@@ -722,21 +823,31 @@ fn commit_snapshot_transaction_swaps_atomically_and_rolls_back_on_error() {
             "companies": [{"id": "c1", "name": "Acme"}]
         }),
     );
+    let before = expect_ok(&runtime.projection_handles_json(handle))["collections"]["users"][0]
+        ["handle"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let committed = dispatch(
         &mut runtime,
         handle,
         "commitSnapshotTransaction",
         json!({
             "collections": {
-                "users": [{"id": "u2", "name": "Bob"}],
+                "users": [{"id": "u1", "name": "Bob"}],
                 "companies": [{"id": "c1", "name": "Acme"}]
             }
         }),
     );
     assert_eq!(committed["changedCollections"], json!(["users"]));
+    let reset = expect_ok(&runtime.projection_changes_json(handle));
     assert_eq!(
         dispatch_no_payload(&mut runtime, handle, "dumpAll")["users"],
-        json!([{"id": "u2", "name": "Bob"}])
+        json!([{"id": "u1", "name": "Bob"}])
+    );
+    assert_ne!(
+        reset["resetCollections"]["users"][0]["handle"],
+        json!(before)
     );
 
     let response = runtime.dispatch_json(
@@ -755,7 +866,7 @@ fn commit_snapshot_transaction_swaps_atomically_and_rolls_back_on_error() {
     );
     expect_error_tag(&response, "ValidationError");
     let dumped = dispatch_no_payload(&mut runtime, handle, "dumpAll");
-    assert_eq!(dumped["users"], json!([{"id": "u2", "name": "Bob"}]));
+    assert_eq!(dumped["users"], json!([{"id": "u1", "name": "Bob"}]));
     assert_eq!(dumped["companies"], json!([{"id": "c1", "name": "Acme"}]));
 }
 
@@ -1139,6 +1250,324 @@ fn panic_in_callback_returns_defect_response() {
 }
 
 #[test]
+fn projected_reads_use_stable_revision_safe_handles_and_ordered_descriptors() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![users_descriptor()],
+        json!({"users":[{"id":"u1","name":"Alice"},{"id":"u2","name":"Bob"}]}),
+    );
+
+    let handles = expect_ok(&runtime.projection_handles_json(handle));
+    let first_row = handles["collections"]["users"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == json!("u1"))
+        .unwrap();
+    let first_handle = first_row["handle"].as_str().unwrap().to_owned();
+
+    let descriptor = expect_ok(
+        &runtime.dispatch_projected_json(
+            handle,
+            "query",
+            Some(
+                json!({"collection":"users","query":{"sort":{"id":"desc"}}})
+                    .to_string()
+                    .as_str(),
+            ),
+        ),
+    );
+    assert_eq!(descriptor["kind"], json!("materializedMany"));
+    assert_eq!(descriptor["rows"][0]["id"], json!("u2"));
+    assert_eq!(descriptor["rows"][1]["handle"], json!(first_handle));
+    assert_eq!(descriptor["rows"][1]["value"]["name"], json!("Alice"));
+    let repeated = expect_ok(&runtime.dispatch_projected_json(
+        handle,
+        "findById",
+        Some(json!({"collection":"users","id":"u1"}).to_string().as_str()),
+    ));
+    assert!(repeated["row"].get("value").is_none());
+
+    let deleted_response = parse_response(&runtime.dispatch_json(
+        handle,
+        "delete",
+        Some(json!({"collection":"users","id":"u1"}).to_string().as_str()),
+    ));
+    assert_eq!(
+        deleted_response["projection"]["changes"][0]["handle"],
+        json!(first_handle)
+    );
+    assert_eq!(
+        deleted_response["projection"]["changes"][0]["deleted"],
+        json!(true)
+    );
+
+    let recreated_response = parse_response(
+        &runtime.dispatch_json(
+            handle,
+            "create",
+            Some(
+                json!({"collection":"users","data":{"id":"u1","name":"Recreated"}})
+                    .to_string()
+                    .as_str(),
+            ),
+        ),
+    );
+    assert_eq!(recreated_response["value"]["name"], json!("Recreated"));
+    let recreated = &recreated_response["projection"];
+    let recreated_handle = recreated["changes"][0]["handle"].as_str().unwrap();
+    assert_ne!(recreated_handle, first_handle);
+    assert!(recreated["changes"][0].get("value").is_none());
+}
+
+#[test]
+fn unchanged_upsert_many_rows_publish_observed_materialization_metadata() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![users_descriptor()],
+        json!({"users":[{"id":"u1","name":"Alice"}]}),
+    );
+    expect_ok(&runtime.projection_handles_json(handle));
+
+    let response = parse_response(
+        &runtime.dispatch_json(
+            handle,
+            "upsertMany",
+            Some(
+                json!({
+                    "collection":"users",
+                    "items":[{
+                        "where":{"id":"u1"},
+                        "create":{"name":"unused"},
+                        "update":{"name":"Alice"}
+                    }]
+                })
+                .to_string()
+                .as_str(),
+            ),
+        ),
+    );
+    assert_eq!(response["value"]["unchanged"][0]["id"], json!("u1"));
+    let observed = &response["projection"]["changes"][0];
+    assert_eq!(observed["id"], json!("u1"));
+    assert!(observed["handle"].as_str().is_some());
+    assert!(observed.get("value").is_none());
+
+    expect_ok(
+        &runtime.synchronize_projection_json(
+            handle,
+            &json!([{
+                "collection":"users",
+                "id":"u1",
+                "handle":observed["handle"],
+                "value":{"id":"u1","name":"Caller mutation"}
+            }])
+            .to_string(),
+        ),
+    );
+    assert_eq!(
+        dispatch(
+            &mut runtime,
+            handle,
+            "findById",
+            json!({"collection":"users","id":"u1"}),
+        )["name"],
+        json!("Caller mutation")
+    );
+}
+
+#[test]
+fn failed_upsert_many_does_not_mark_an_unobserved_projection_handle() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![users_descriptor()],
+        json!({"users":[{"id":"u1","name":"Alice"}]}),
+    );
+    expect_ok(&runtime.projection_handles_json(handle));
+
+    let response = parse_response(
+        &runtime.dispatch_json(
+            handle,
+            "upsertMany",
+            Some(
+                json!({
+                    "collection":"users",
+                    "items":[{
+                        "where":{"id":"u1"},
+                        "create":{"name":"unused"},
+                        "update":{"name":42}
+                    }]
+                })
+                .to_string()
+                .as_str(),
+            ),
+        ),
+    );
+    assert_eq!(response["kind"], json!("error"));
+    assert_eq!(response["projection"]["changes"], json!([]));
+    let projected = expect_ok(&runtime.dispatch_projected_json(
+        handle,
+        "findById",
+        Some(json!({"collection":"users","id":"u1"}).to_string().as_str()),
+    ));
+    assert_eq!(projected["row"]["value"]["name"], json!("Alice"));
+}
+
+#[test]
+fn ambiguous_equal_unchanged_rows_do_not_authorize_a_projection_handle() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![users_descriptor()],
+        json!({"users":[{"id":"u1","name":"Alice"},{"id":"u2","name":"Bob"}]}),
+    );
+    expect_ok(&runtime.projection_handles_json(handle));
+    for id in ["u1", "u2"] {
+        let projected = expect_ok(&runtime.dispatch_projected_json(
+            handle,
+            "findById",
+            Some(json!({"collection":"users","id":id}).to_string().as_str()),
+        ));
+        let row_handle = projected["row"]["handle"].as_str().unwrap();
+        expect_ok(
+            &runtime.synchronize_projection_json(
+                handle,
+                &json!([{
+                    "collection":"users",
+                    "id":id,
+                    "handle":row_handle,
+                    "value":{"id":"shared","name":"Same"}
+                }])
+                .to_string(),
+            ),
+        );
+    }
+
+    let response = expect_ok(
+        &runtime.dispatch_projected_json(
+            handle,
+            "query",
+            Some(
+                json!({"collection":"users","query":{}})
+                    .to_string()
+                    .as_str(),
+            ),
+        ),
+    );
+    let rows = response["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|row| row.get("handle").is_none()));
+    assert!(rows.iter().all(|row| row["value"]["id"] == json!("shared")));
+}
+
+#[test]
+fn caller_mutated_projection_sync_is_authorized_and_not_a_formal_mutation() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![users_descriptor()],
+        json!({"users":[{"id":"u1","name":"Alice"}]}),
+    );
+    let projected = expect_ok(&runtime.dispatch_projected_json(
+        handle,
+        "findById",
+        Some(json!({"collection":"users","id":"u1"}).to_string().as_str()),
+    ));
+    let row_handle = projected["row"]["handle"].as_str().unwrap();
+    expect_ok(
+        &runtime.synchronize_projection_json(
+            handle,
+            &json!([{
+                "collection":"users",
+                "id":"u1",
+                "handle":row_handle,
+                "value":{"id":"u1","name":"Caller mutation"}
+            }])
+            .to_string(),
+        ),
+    );
+    assert!(runtime.last_changes(handle).unwrap().is_empty());
+    let found = dispatch(
+        &mut runtime,
+        handle,
+        "findById",
+        json!({"collection":"users","id":"u1"}),
+    );
+    assert_eq!(found["name"], json!("Caller mutation"));
+
+    let stale = runtime.synchronize_projection_json(
+        handle,
+        &json!([{
+            "collection":"users",
+            "id":"u1",
+            "handle":"stale",
+            "value":{"id":"u1","name":"Rejected"}
+        }])
+        .to_string(),
+    );
+    assert_eq!(
+        expect_error_tag(&stale, "OperationError")["reason"],
+        json!("stale-materialized-handle")
+    );
+}
+
+#[test]
+fn projected_reads_inline_only_rust_authored_overlays() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![users_descriptor()],
+        json!({"users":[{"id":"u1","name":"Alice"}]}),
+    );
+    let descriptor = expect_ok(
+        &runtime.dispatch_projected_json(
+            handle,
+            "query",
+            Some(
+                json!({"collection":"users","query":{"select":{"name":true}}})
+                    .to_string()
+                    .as_str(),
+            ),
+        ),
+    );
+    assert_eq!(descriptor["kind"], json!("materializedMany"));
+    assert!(descriptor["rows"][0].get("handle").is_none());
+    assert_eq!(descriptor["rows"][0]["value"], json!({"name":"Alice"}));
+}
+
+#[test]
+fn unobserved_bulk_mutations_publish_metadata_without_materializing_values() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![users_descriptor()],
+        json!({"users":[{"id":"u1","name":"Alice"},{"id":"u2","name":"Bob"}]}),
+    );
+    let response = parse_response(
+        &runtime.dispatch_json(
+            handle,
+            "updateMany",
+            Some(
+                json!({"collection":"users","where":{},"data":{"name":"Updated"}})
+                    .to_string()
+                    .as_str(),
+            ),
+        ),
+    );
+    assert_eq!(response["kind"], json!("ok"));
+    let sync = &response["projection"];
+    assert_eq!(sync["changes"].as_array().unwrap().len(), 2);
+    assert!(sync["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|change| change.get("value").is_none()));
+}
+
+#[test]
 fn successful_mutation_publishes_exact_authoritative_delta() {
     let (mut runtime, _) = make_runtime();
     let handle = create_database(&mut runtime, vec![users_descriptor()], json!({}));
@@ -1191,11 +1620,20 @@ fn panic_after_mutation_does_not_publish_a_safe_delta() {
         .as_str()
         .unwrap()
         .contains("unexpected defect"));
+    assert_eq!(defect["projection"]["invalidated"], json!(true));
     assert!(runtime.last_changes(handle).unwrap().is_empty());
 
     // The mutation itself happened; only its delta is unsafe after a defect.
     let dumped = dispatch_no_payload(&mut runtime, handle, "dumpAll");
     assert_eq!(dumped["users"][0]["id"], json!("u1"));
+    let projected = expect_ok(&runtime.dispatch_projected_json(
+        handle,
+        "findById",
+        Some(json!({"collection":"users","id":"u1"}).to_string().as_str()),
+    ));
+    assert_eq!(projected["kind"], json!("materializedOne"));
+    assert!(projected["row"]["handle"].as_str().is_some());
+    assert_eq!(projected["row"]["value"]["name"], json!("Alice"));
 }
 
 #[test]

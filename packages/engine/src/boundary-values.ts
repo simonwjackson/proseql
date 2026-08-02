@@ -2,6 +2,7 @@ const UNDEFINED_SENTINEL_KEY = "__proseqlUndefined__";
 const INTERNAL_UNDEFINED_SENTINEL_KEY = "__proseqlInternalUndefined__";
 const ESCAPED_SENTINEL_KEY = "__proseqlEscaped__";
 const FLOAT64_SENTINEL_KEY = "__proseqlFloat64__";
+const ARRAY_HOLE_SENTINEL_KEY = "__proseqlArrayHole__";
 
 type BoundaryObject = Record<string, unknown>;
 
@@ -13,9 +14,10 @@ const isObject = (value: unknown): value is BoundaryObject =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
 const hasReservedBoundaryKey = (value: BoundaryObject) =>
-	Object.prototype.hasOwnProperty.call(value, UNDEFINED_SENTINEL_KEY) ||
-	Object.prototype.hasOwnProperty.call(value, ESCAPED_SENTINEL_KEY) ||
-	Object.prototype.hasOwnProperty.call(value, FLOAT64_SENTINEL_KEY);
+	Object.hasOwn(value, UNDEFINED_SENTINEL_KEY) ||
+	Object.hasOwn(value, ESCAPED_SENTINEL_KEY) ||
+	Object.hasOwn(value, FLOAT64_SENTINEL_KEY) ||
+	Object.hasOwn(value, ARRAY_HOLE_SENTINEL_KEY);
 
 const encodeObjectEntries = (value: BoundaryObject) =>
 	Object.entries(value).map(
@@ -47,6 +49,11 @@ const isEncodedEscapedEntries = (
 		)
 	);
 };
+
+const isEncodedArrayHole = (value: unknown) =>
+	isObject(value) &&
+	Object.keys(value).length === 1 &&
+	value[ARRAY_HOLE_SENTINEL_KEY] === 1;
 
 const shouldEncodeExactFloat64 = (value: number) =>
 	Number.isFinite(value) &&
@@ -92,7 +99,11 @@ export const encodeBoundaryValueForWire = (value: unknown): unknown => {
 		return encodeFloat64(value);
 	}
 	if (Array.isArray(value)) {
-		return value.map((item) => encodeBoundaryValueForWire(item));
+		return Array.from({ length: value.length }, (_, index) =>
+			index in value
+				? encodeBoundaryValueForWire(value[index])
+				: { [ARRAY_HOLE_SENTINEL_KEY]: 1 },
+		);
 	}
 	if (!isObject(value)) {
 		return value;
@@ -111,7 +122,13 @@ export const encodeBoundaryValueForWire = (value: unknown): unknown => {
 
 const decodeBoundaryValue = (value: unknown): unknown => {
 	if (Array.isArray(value)) {
-		return value.map((item) => decodeBoundaryValue(item));
+		const decoded = new Array(value.length);
+		for (let index = 0; index < value.length; index++) {
+			if (!isEncodedArrayHole(value[index])) {
+				decoded[index] = decodeBoundaryValue(value[index]);
+			}
+		}
+		return decoded;
 	}
 	if (!isObject(value)) {
 		return value;

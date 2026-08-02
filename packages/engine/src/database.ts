@@ -44,17 +44,18 @@ import {
 } from "./boundary-values.js";
 import { reconstructBoundaryError, WasmEngineDefectError } from "./errors.js";
 import { loadWasmBindings, type WasmRuntimeBinding } from "./loader.js";
+import {
+	isMaterializedResultDescriptor,
+	MaterializedProjection,
+	projectionSnapshotFromHandles,
+	StaleMaterializedHandleError,
+	type ProjectionHandles,
+	type ProjectionSync,
+} from "./materialized-projection.js";
 import { buildPluginRegistry } from "./plugin-registry.js";
 import { compileDatabaseDescriptor, type CallbackRegistrar } from "./schema-compiler.js";
-import {
-	dirnameComparable,
-	isWithinComparableDirectory,
-	matchesComparableFile,
-} from "./path-utils.js";
-import {
-	makeEngineStorageLayer,
-	type EngineStorageHost,
-} from "./storage-host-shared.js";
+import { dirnameComparable, isWithinComparableDirectory, matchesComparableFile } from "./path-utils.js";
+import { makeEngineStorageLayer, type EngineStorageHost } from "./storage-host-shared.js";
 import type {
 	EngineCollection,
 	EngineDatabaseOptions,
@@ -73,7 +74,9 @@ const OBJECT_KEYED_ONLY_FORMATS = new Set(["json", "yaml", "yml", "toml", "json5
 type BridgeOk<T> = { kind: "ok"; value: T };
 type BridgeError = { kind: "error"; error: unknown };
 type BridgeDefect = { kind: "defect"; message: string };
-type BridgeResponse<T> = BridgeOk<T> | BridgeError | BridgeDefect;
+type BridgeResponse<T> = (BridgeOk<T> | BridgeError | BridgeDefect) & {
+	readonly projection?: ProjectionSync;
+};
 
 type CollectionRuntimeConfig = {
 	readonly name: string;
@@ -129,7 +132,6 @@ function validateCollectionRuntimeConfig(name: string, collection: CollectionCon
 		});
 	}
 }
-
 
 type SourcePersistenceState = {
 	readonly normalizedConfig: NormalizedSourceConfig;
@@ -281,11 +283,7 @@ class DebouncedSaver {
 					clearTimeout(lane.timer);
 					lane.timer = undefined;
 				}
-				if (
-					(lane.dirty || lane.queuedAfterInflight) &&
-					!immediateRetry &&
-					lane.error === undefined
-				) {
+				if ((lane.dirty || lane.queuedAfterInflight) && !immediateRetry && lane.error === undefined) {
 					lane.timer = setTimeout(() => {
 						lane.timer = undefined;
 						void this.startSave(key, lane, false);
@@ -375,10 +373,7 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 		return id;
 	}
 
-	registerMigration(
-		callback: (data: Record<string, unknown>) => Record<string, unknown>,
-		prefix: string,
-	): string {
+	registerMigration(callback: (data: Record<string, unknown>) => Record<string, unknown>, prefix: string): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_migration(id, (payloadJson) => {
 			const payload = parseBoundaryJson(payloadJson) as Record<string, unknown>;
@@ -399,8 +394,7 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 		const response = this.runtime.register_custom_operator(
 			name,
 			JSON.stringify([...supportedTypes]),
-			(fieldJson, operandJson) =>
-				evaluate(parseBoundaryJson(fieldJson), parseBoundaryJson(operandJson)),
+			(fieldJson, operandJson) => evaluate(parseBoundaryJson(fieldJson), parseBoundaryJson(operandJson)),
 		);
 		parseBridgeResponse(response);
 	}
@@ -463,25 +457,71 @@ class AsyncQueue<T> implements WatchSubscription<T> {
 	}
 }
 
+const shouldProjectRead = (method: string, prepared: unknown) => {
+	if (method === "findById") return true;
+	if (method !== "query" || typeof prepared !== "object" || prepared === null) return false;
+	const command = prepared as {
+		readonly query?: { readonly select?: unknown; readonly where?: unknown };
+		readonly populate?: unknown;
+	};
+	const where = command.query?.where;
+	const hasTopLevelSearch = typeof where === "object" && where !== null && Object.hasOwn(where, "$search");
+	return command.query?.select === undefined && command.populate === undefined && !hasTopLevelSearch;
+};
+const matchesDeletionResultMethod = (method: string) =>
+	method === "delete" ||
+	method === "deleteMany" ||
+	method === "deleteWithRelationships" ||
+	method === "deleteManyWithRelationships";
+
+const MUTATION_METHODS = new Set([
+	"create",
+	"createMany",
+	"update",
+	"updateMany",
+	"delete",
+	"deleteMany",
+	"upsert",
+	"upsertMany",
+	"createWithRelationships",
+	"updateWithRelationships",
+	"deleteWithRelationships",
+	"deleteManyWithRelationships",
+	"transaction",
+	"reloadCollection",
+	"commitSnapshotTransaction",
+]);
+
 class EngineRuntime {
 	readonly runtime: WasmRuntimeBinding;
 	readonly handle: number;
-	readonly createInput: {
-		descriptor: Record<string, unknown>;
-		initialCollections: Record<string, ReadonlyArray<Record<string, unknown>>>;
-	};
+	readonly createInput: { descriptor: Record<string, unknown> };
+	private readonly projection: MaterializedProjection;
+	private readonly canonicalQueryCollections: ReadonlySet<string>;
 
 	private constructor(
 		runtime: WasmRuntimeBinding,
 		handle: number,
-		createInput: {
-			descriptor: Record<string, unknown>;
-			initialCollections: Record<string, ReadonlyArray<Record<string, unknown>>>;
-		},
+		createInput: { descriptor: Record<string, unknown> },
+		projection: MaterializedProjection,
 	) {
 		this.runtime = runtime;
 		this.handle = handle;
 		this.createInput = createInput;
+		this.projection = projection;
+		const descriptors = Array.isArray(createInput.descriptor.collections) ? createInput.descriptor.collections : [];
+		this.canonicalQueryCollections = new Set(
+			descriptors.flatMap((descriptor) => {
+				if (typeof descriptor !== "object" || descriptor === null) return [];
+				const row = descriptor as {
+					readonly name?: unknown;
+					readonly computed_fields?: unknown;
+				};
+				return typeof row.name === "string" && Array.isArray(row.computed_fields) && row.computed_fields.length === 0
+					? [row.name]
+					: [];
+			}),
+		);
 	}
 
 	static async create(
@@ -489,7 +529,11 @@ class EngineRuntime {
 		initialData: EngineInitialData<DatabaseConfig> | undefined,
 		options: EngineDatabaseOptions | undefined,
 		registryOverride?: PluginRegistry,
-	): Promise<{ runtime: EngineRuntime; registry: PluginRegistry; collections: ReadonlyArray<CollectionRuntimeConfig> }> {
+	): Promise<{
+		runtime: EngineRuntime;
+		registry: PluginRegistry;
+		collections: ReadonlyArray<CollectionRuntimeConfig>;
+	}> {
 		const registry = registryOverride ?? (await buildPluginRegistry(options?.plugins));
 		const bindings = await loadWasmBindings();
 		const runtime = new bindings.WasmRuntime(globalThis.setTimeout, globalThis.clearTimeout);
@@ -502,23 +546,230 @@ class EngineRuntime {
 		}));
 		const createPayload = {
 			descriptor: compiled.descriptor as Record<string, unknown>,
-			initialCollections: encodeBoundaryValueForWire((initialData ?? {}) as Record<
-				string,
-				ReadonlyArray<Record<string, unknown>>
-			>) as Record<string, ReadonlyArray<Record<string, unknown>>>,
+			initialCollections: encodeBoundaryValueForWire(
+				(initialData ?? {}) as Record<string, ReadonlyArray<Record<string, unknown>>>,
+			) as Record<string, ReadonlyArray<Record<string, unknown>>>,
 		};
 		const handle = parseBridgeResponse<number>(runtime.create_database(JSON.stringify(createPayload)));
-		return { runtime: new EngineRuntime(runtime, handle, createPayload), registry, collections };
+		const handles = parseBridgeResponse<ProjectionHandles>(runtime.projection_handles(handle));
+		const engineRuntime = new EngineRuntime(
+			runtime,
+			handle,
+			{ descriptor: createPayload.descriptor },
+			new MaterializedProjection(projectionSnapshotFromHandles(handles)),
+		);
+		return { runtime: engineRuntime, registry, collections };
 	}
 
 	dispatch<T>(method: string, payload?: unknown): T {
-		return parseBridgeResponse(
-			this.runtime.dispatch(
-				this.handle,
-				method,
-				payload === undefined ? undefined : JSON.stringify(prepareCommandPayload(method, payload)),
-			),
-		);
+		if (this.projection.needsResynchronization) this.resynchronizeProjection();
+		this.synchronizeDirtyProjection();
+		const prepared = payload === undefined ? undefined : prepareCommandPayload(method, payload);
+		const payloadJson = prepared === undefined ? undefined : JSON.stringify(prepared);
+		return this.dispatchPrepared<T>(method, prepared, payloadJson, true);
+	}
+
+	private dispatchPrepared<T>(
+		method: string,
+		prepared: unknown,
+		payloadJson: string | undefined,
+		allowRetry: boolean,
+	): T {
+		const collection =
+			typeof prepared === "object" &&
+			prepared !== null &&
+			"collection" in prepared &&
+			typeof (prepared as { readonly collection?: unknown }).collection === "string"
+				? (prepared as { readonly collection: string }).collection
+				: undefined;
+		const projected =
+			shouldProjectRead(method, prepared) &&
+			(method !== "query" || (collection !== undefined && this.canonicalQueryCollections.has(collection)));
+		const deletionNeedsPriorIdentity = matchesDeletionResultMethod(method);
+		const priorMaterialized =
+			collection !== undefined && deletionNeedsPriorIdentity
+				? this.projection.materializedEntries(collection)
+				: new Map<string, unknown>();
+		const raw = projected
+			? this.runtime.dispatch_projected(this.handle, method, payloadJson)
+			: this.runtime.dispatch(this.handle, method, payloadJson);
+		const parsed = JSON.parse(raw) as BridgeResponse<unknown>;
+		let mutationSync: ProjectionSync | undefined;
+		if (MUTATION_METHODS.has(method)) {
+			if (parsed.projection === undefined) {
+				this.projection.invalidate();
+				throw new Error(`Mutation response omitted projection sync: ${method}`);
+			}
+			mutationSync = decodeBoundaryValueForHost(parsed.projection);
+			this.projection.apply(mutationSync);
+		} else if (parsed.kind === "defect") {
+			this.projection.invalidate();
+		}
+		const value = parseBridgeResponseValue(parsed, raw);
+		if (collection !== undefined && mutationSync !== undefined) {
+			return this.materializeMutationResult<T>(method, collection, prepared, value, mutationSync, priorMaterialized);
+		}
+		if (!projected || !isMaterializedResultDescriptor(value)) return value as T;
+		if (collection === undefined) return value as T;
+		try {
+			return this.projection.materialize<T>(collection, value, raw.length);
+		} catch (error) {
+			if (!(error instanceof StaleMaterializedHandleError) || !allowRetry) throw error;
+			this.resynchronizeProjection();
+			return this.dispatchPrepared<T>(method, prepared, payloadJson, false);
+		}
+	}
+
+	private materializeMutationResult<T>(
+		method: string,
+		collection: string,
+		prepared: unknown,
+		value: unknown,
+		sync: ProjectionSync,
+		priorMaterialized: ReadonlyMap<string, unknown>,
+	): T {
+		if (method === "upsert") return value as T;
+		const ownerChanges = sync.changes.filter((change) => change.collection === collection);
+		const claimedChanges = new Set<number>();
+		const rowId = (row: unknown) =>
+			typeof row === "object" &&
+			row !== null &&
+			"id" in row &&
+			typeof (row as { readonly id?: unknown }).id === "string"
+				? (row as { readonly id: string }).id
+				: undefined;
+		type ChangeQueue = { readonly indices: number[]; cursor: number };
+		const exactQueues = new Map<string, ChangeQueue>();
+		const fallbackQueues = new Map<boolean, ChangeQueue>([
+			[false, { indices: [], cursor: 0 }],
+			[true, { indices: [], cursor: 0 }],
+		]);
+		const queueKey = (deleted: boolean, id: string) => `${deleted ? "deleted" : "stored"}\u0000${id}`;
+		const addExact = (key: string, index: number) => {
+			const queue = exactQueues.get(key);
+			if (queue) queue.indices.push(index);
+			else exactQueues.set(key, { indices: [index], cursor: 0 });
+		};
+		ownerChanges.forEach((change, index) => {
+			const deleted = change.deleted === true;
+			fallbackQueues.get(deleted)?.indices.push(index);
+			addExact(queueKey(deleted, change.id), index);
+			if (!deleted && change.resultId !== undefined && change.resultId !== change.id) {
+				addExact(queueKey(false, change.resultId), index);
+			}
+		});
+		const consumeQueue = (queue: ChangeQueue | undefined) => {
+			if (!queue) return undefined;
+			while (queue.cursor < queue.indices.length) {
+				const index = queue.indices[queue.cursor++];
+				if (index !== undefined && !claimedChanges.has(index)) return index;
+			}
+			return undefined;
+		};
+		const claimChange = (row: unknown, deleted: boolean) => {
+			const resultId = rowId(row);
+			const exact = resultId === undefined ? undefined : consumeQueue(exactQueues.get(queueKey(deleted, resultId)));
+			const index = exact ?? consumeQueue(fallbackQueues.get(deleted));
+			if (index === undefined) return undefined;
+			claimedChanges.add(index);
+			return ownerChanges[index];
+		};
+		const materializeStoredRow = (row: unknown, change = claimChange(row, false)): unknown => {
+			const id = change?.id ?? rowId(row);
+			if (id === undefined) return row;
+			const current = this.projection.materializedValue(collection, id);
+			if (current !== undefined) return current;
+			const cached = this.projection.cacheAuthoritativeValue(collection, id, row);
+			if (cached === undefined) return row;
+			return cached.value;
+		};
+		const materializeDeletedRow = (row: unknown): unknown => {
+			const deletedChange = claimChange(row, true);
+			if (deletedChange !== undefined) {
+				return priorMaterialized.get(deletedChange.id) ?? row;
+			}
+			return materializeStoredRow(row);
+		};
+		const mapField = (result: Record<string, unknown>, field: "created" | "updated" | "unchanged" | "deleted") => {
+			const rows = result[field];
+			if (!Array.isArray(rows)) return;
+			result[field] = rows.map((row) => (field === "deleted" ? materializeDeletedRow(row) : materializeStoredRow(row)));
+		};
+
+		let result = value;
+		if (
+			method === "create" ||
+			method === "update" ||
+			method === "createWithRelationships" ||
+			method === "updateWithRelationships"
+		) {
+			const preparedId =
+				typeof prepared === "object" &&
+				prepared !== null &&
+				"id" in prepared &&
+				typeof (prepared as { readonly id?: unknown }).id === "string"
+					? (prepared as { readonly id: string }).id
+					: undefined;
+			const change =
+				ownerChanges.find(
+					(candidate) => !candidate.deleted && (preparedId === undefined || candidate.id === preparedId),
+				) ?? ownerChanges.find((candidate) => !candidate.deleted);
+			result = materializeStoredRow(value, change);
+		} else if (method === "delete") {
+			const preparedId =
+				typeof prepared === "object" &&
+				prepared !== null &&
+				"id" in prepared &&
+				typeof (prepared as { readonly id?: unknown }).id === "string"
+					? (prepared as { readonly id: string }).id
+					: undefined;
+			result = (preparedId === undefined ? undefined : priorMaterialized.get(preparedId)) ?? value;
+		} else if (
+			typeof value === "object" &&
+			value !== null &&
+			(method === "createMany" ||
+				method === "updateMany" ||
+				method === "deleteMany" ||
+				method === "upsertMany" ||
+				method === "deleteManyWithRelationships")
+		) {
+			const record = value as Record<string, unknown>;
+			for (const field of ["created", "updated", "unchanged", "deleted"] as const) {
+				mapField(record, field);
+			}
+			result = record;
+		} else if (method === "deleteWithRelationships" && typeof value === "object" && value !== null) {
+			const record = value as Record<string, unknown>;
+			if (Object.hasOwn(record, "deleted")) {
+				record.deleted = materializeDeletedRow(record.deleted);
+			}
+			result = record;
+		}
+
+		return result as T;
+	}
+
+	private synchronizeDirtyProjection() {
+		const rows = this.projection.dirtyRows;
+		if (rows.length === 0) return;
+		const payload = rows.map((row) => ({
+			collection: row.collection,
+			id: row.id,
+			handle: row.handle,
+			value: encodeBoundaryValueForWire(row.value),
+		}));
+		try {
+			parseBridgeResponse(this.runtime.synchronize_projection(this.handle, JSON.stringify(payload)));
+			this.projection.markSynchronized(rows);
+		} catch (error) {
+			this.projection.invalidate();
+			throw error;
+		}
+	}
+
+	private resynchronizeProjection() {
+		const handles = parseBridgeResponse<ProjectionHandles>(this.runtime.projection_handles(this.handle));
+		this.projection.resynchronize(projectionSnapshotFromHandles(handles));
 	}
 
 	invoke<T>(method: string, payload?: unknown): Promise<T> {
@@ -526,26 +777,37 @@ class EngineRuntime {
 	}
 
 	async createTemporaryTransactionRuntime(): Promise<EngineRuntime> {
-		const snapshot = await this.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>(
-			"dumpAll",
-		);
+		const snapshot = await this.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>("dumpAll");
 		const createPayload = {
 			descriptor: this.createInput.descriptor,
-			initialCollections: encodeBoundaryValueForWire(snapshot) as Record<string, ReadonlyArray<Record<string, unknown>>>,
+			initialCollections: encodeBoundaryValueForWire(snapshot) as Record<
+				string,
+				ReadonlyArray<Record<string, unknown>>
+			>,
 		};
-		const handle = parseBridgeResponse<number>(
-			this.runtime.create_database(JSON.stringify(createPayload)),
-		);
-		return new EngineRuntime(this.runtime, handle, createPayload);
+		const handle = parseBridgeResponse<number>(this.runtime.create_database(JSON.stringify(createPayload)));
+		const handles = parseBridgeResponse<ProjectionHandles>(this.runtime.projection_handles(handle));
+		const projection = new MaterializedProjection(projectionSnapshotFromHandles(handles));
+		return new EngineRuntime(this.runtime, handle, { descriptor: createPayload.descriptor }, projection);
+	}
+
+	materializationDiagnostics() {
+		return this.projection.stats;
 	}
 
 	drop(): Promise<void> {
 		return Promise.resolve().then(() => {
+			this.projection.clear();
 			parseBridgeResponse(this.runtime.drop_database(this.handle));
 		});
 	}
 
-	watch<T>(collection: string, config: EngineWatchConfig<T, unknown, unknown> | undefined): WatchSubscription<ReadonlyArray<T>> {
+	watch<T>(
+		collection: string,
+		config: EngineWatchConfig<T, unknown, unknown> | undefined,
+	): WatchSubscription<ReadonlyArray<T>> {
+		if (this.projection.needsResynchronization) this.resynchronizeProjection();
+		this.synchronizeDirtyProjection();
 		const queue = new AsyncQueue<ReadonlyArray<T>>(() =>
 			Promise.resolve().then(() => {
 				if (subscriptionId === undefined) return;
@@ -564,6 +826,8 @@ class EngineRuntime {
 	}
 
 	watchById<T>(collection: string, id: string, debounceMs?: number): WatchSubscription<T | null> {
+		if (this.projection.needsResynchronization) this.resynchronizeProjection();
+		this.synchronizeDirtyProjection();
 		const queue = new AsyncQueue<T | null>(() =>
 			Promise.resolve().then(() => {
 				if (subscriptionId === undefined) return;
@@ -572,10 +836,8 @@ class EngineRuntime {
 		);
 		let subscriptionId: number | undefined;
 		subscriptionId = parseBridgeResponse<number>(
-			this.runtime.subscribe_watch_by_id(
-				this.handle,
-				JSON.stringify({ collection, id, debounceMs }),
-				(payloadJson) => queue.push(parseBoundaryJson(payloadJson) as T | null),
+			this.runtime.subscribe_watch_by_id(this.handle, JSON.stringify({ collection, id, debounceMs }), (payloadJson) =>
+				queue.push(parseBoundaryJson(payloadJson) as T | null),
 			),
 		);
 		return queue;
@@ -591,9 +853,7 @@ const createTransactionContext = (): TransactionContext | undefined => {
 };
 
 const importDefaultNodeStorageHost = async (): Promise<EngineStorageHost> => {
-	const module = (await import(
-		/* @vite-ignore */ ("./storage-host.js" as string)
-	)) as typeof import("./storage-host.js");
+	const module = (await import(/* @vite-ignore */ "./storage-host.js" as string)) as typeof import("./storage-host.js");
 	return module.createNodeEngineStorageHost();
 };
 
@@ -621,9 +881,7 @@ export const createPersistentEngineDatabase = async <Config extends DatabaseConf
 	persistenceOptions?: EnginePersistenceOptions,
 	options?: EngineDatabaseOptions,
 ): Promise<GenerateEngineDatabaseWithPersistence<Config>> => {
-	const host =
-		persistenceOptions?.storageHost ??
-		(await importDefaultNodeStorageHost());
+	const host = persistenceOptions?.storageHost ?? (await importDefaultNodeStorageHost());
 	const storageLayer = persistenceOptions?.storageLayer ?? makeEngineStorageLayer(host);
 	const pluginRegistry = await buildPluginRegistry(options?.plugins);
 	for (const [name, collection] of Object.entries(getCollectionConfigs(config))) {
@@ -632,10 +890,7 @@ export const createPersistentEngineDatabase = async <Config extends DatabaseConf
 	const serializerLayer = persistenceOptions?.serializerRegistry
 		? Layer.succeed(
 				SerializerRegistryService,
-				mergeSerializerWithPluginCodecs(
-					persistenceOptions.serializerRegistry,
-					pluginRegistry.codecs,
-				),
+				mergeSerializerWithPluginCodecs(persistenceOptions.serializerRegistry, pluginRegistry.codecs),
 			)
 		: makeSerializerLayer(inferCodecsFromConfig(config), pluginRegistry.codecs);
 	const layer = Layer.merge(storageLayer, serializerLayer) as any;
@@ -671,7 +926,12 @@ export const createPersistentEngineDatabase = async <Config extends DatabaseConf
 		}
 	}
 	await registerExternalReloadWatchers(runtime, persistence);
-	return buildDatabaseFacade(runtime, collections, persistence, config) as unknown as GenerateEngineDatabaseWithPersistence<Config>;
+	return buildDatabaseFacade(
+		runtime,
+		collections,
+		persistence,
+		config,
+	) as unknown as GenerateEngineDatabaseWithPersistence<Config>;
 };
 
 function buildDatabaseFacade(
@@ -729,10 +989,21 @@ function buildDatabaseFacade(
 			return transientClosePromise;
 		},
 	};
+	const withDiagnostics = <T extends object>(facade: T): T => {
+		Object.defineProperty(facade, "__proseqlMaterializationDiagnostics", {
+			value: () => runtime.materializationDiagnostics(),
+			enumerable: false,
+		});
+		return facade;
+	};
 	if (!persistence) {
-		return { ...db, ...transactional, $documentGraph: documentGraph };
+		return withDiagnostics({
+			...db,
+			...transactional,
+			$documentGraph: documentGraph,
+		});
 	}
-	return {
+	return withDiagnostics({
 		...db,
 		...transactional,
 		$documentGraph: documentGraph,
@@ -744,7 +1015,7 @@ function buildDatabaseFacade(
 		},
 		pendingCount: () => persistence.saver.pendingCount(),
 		$dryRunMigrations: () => runDryRunMigrations(config, hostFromPersistence(persistence), persistence.layer),
-	};
+	});
 }
 
 function validateCursorConfig(cursor: { readonly limit: number }) {
@@ -822,9 +1093,7 @@ async function appendAppendOnlyEntities(
 		const encode = Schema.encodeEffect(collection.schema as Schema.Codec<Record<string, unknown>, unknown>);
 		let payload = "";
 		for (const entity of entities) {
-			const encoded = await Effect.runPromise(
-				encode(entity).pipe(Effect.catch(() => Effect.succeed(entity))),
-			);
+			const encoded = await Effect.runPromise(encode(entity).pipe(Effect.catch(() => Effect.succeed(entity))));
 			payload += `${JSON.stringify(encoded)}\n`;
 		}
 		await persistence.host.ensureDir(collection.raw.file);
@@ -876,17 +1145,19 @@ function buildCollectionFacade(
 					items: applySelectionOrder(page.items, config.select),
 				}));
 			}
-			return runtime.invoke<any[]>("query", {
-				collection: collection.name,
-				query: {
-					where: config?.where,
-					sort: config?.sort,
-					offset: config?.offset,
-					limit: config?.limit,
-					select: config?.select,
-				},
-				populate: config?.populate,
-			}).then((rows) => applySelectionOrder(rows, config?.select));
+			return runtime
+				.invoke<any[]>("query", {
+					collection: collection.name,
+					query: {
+						where: config?.where,
+						sort: config?.sort,
+						offset: config?.offset,
+						limit: config?.limit,
+						select: config?.select,
+					},
+					populate: config?.populate,
+				})
+				.then((rows) => applySelectionOrder(rows, config?.select));
 		}) as any,
 		aggregate: (config: any) =>
 			runtime.invoke("aggregate", {
@@ -915,7 +1186,10 @@ function buildCollectionFacade(
 		},
 		create: async (input: any) => {
 			ensureWritable("create");
-			const value = await runtime.invoke<any>("create", { collection: collection.name, data: input });
+			const value = await runtime.invoke<any>("create", {
+				collection: collection.name,
+				data: input,
+			});
 			await appendAppendOnlyEntities(persistence, collection, [value]);
 			scheduleWrite();
 			return value;
@@ -933,13 +1207,21 @@ function buildCollectionFacade(
 		},
 		update: async (id: string, updates: any) => {
 			ensureWritable("update");
-			const value = await runtime.invoke<any>("update", { collection: collection.name, id, data: updates });
+			const value = await runtime.invoke<any>("update", {
+				collection: collection.name,
+				id,
+				data: updates,
+			});
 			scheduleWrite();
 			return value;
 		},
 		updateMany: async (where: any, updates: any) => {
 			ensureWritable("updateMany");
-			const value = await runtime.invoke<any>("updateMany", { collection: collection.name, where, data: updates });
+			const value = await runtime.invoke<any>("updateMany", {
+				collection: collection.name,
+				where,
+				data: updates,
+			});
 			if ((value.count ?? 0) > 0) scheduleWrite();
 			return value;
 		},
@@ -962,7 +1244,10 @@ function buildCollectionFacade(
 				scheduleWrite();
 				return value.deleted[0];
 			}
-			const value = await runtime.invoke<any>("delete", { collection: collection.name, id });
+			const value = await runtime.invoke<any>("delete", {
+				collection: collection.name,
+				id,
+			});
 			scheduleWrite();
 			return value;
 		},
@@ -999,13 +1284,20 @@ function buildCollectionFacade(
 		},
 		createWithRelationships: async (input: any) => {
 			ensureWritable("createWithRelationships");
-			const value = await runtime.invoke<any>("createWithRelationships", { collection: collection.name, data: input });
+			const value = await runtime.invoke<any>("createWithRelationships", {
+				collection: collection.name,
+				data: input,
+			});
 			scheduleWrite();
 			return value;
 		},
 		updateWithRelationships: async (id: string, input: any) => {
 			ensureWritable("updateWithRelationships");
-			const value = await runtime.invoke<any>("updateWithRelationships", { collection: collection.name, id, data: input });
+			const value = await runtime.invoke<any>("updateWithRelationships", {
+				collection: collection.name,
+				id,
+				data: input,
+			});
 			scheduleWrite();
 			return value;
 		},
@@ -1054,7 +1346,11 @@ async function loadLegacyCollections(
 								name: collection.name,
 								schema: collection.schema as never,
 								...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
-								...(collection.raw.migrations ? { migrations: collection.raw.migrations as ReadonlyArray<Migration> } : {}),
+								...(collection.raw.migrations
+									? {
+											migrations: collection.raw.migrations as ReadonlyArray<Migration>,
+										}
+									: {}),
 							})),
 						),
 						layer,
@@ -1084,7 +1380,11 @@ async function loadLegacyCollections(
 								collection.raw.format ?? "json",
 								{
 									...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
-									...(collection.raw.migrations ? { migrations: collection.raw.migrations as ReadonlyArray<Migration> } : {}),
+									...(collection.raw.migrations
+										? {
+												migrations: collection.raw.migrations as ReadonlyArray<Migration>,
+											}
+										: {}),
 									collectionName: collection.name,
 								},
 							),
@@ -1093,10 +1393,7 @@ async function loadLegacyCollections(
 					)
 				: undefined;
 			baselines[collection.name] = [...(loaded?.values() ?? [])];
-			result[collection.name] = mergeLoadedWithInitial(
-				loaded,
-				initialData?.[collection.name as never],
-			);
+			result[collection.name] = mergeLoadedWithInitial(loaded, initialData?.[collection.name as never]);
 			continue;
 		}
 		if (collection.raw.file) {
@@ -1106,7 +1403,11 @@ async function loadLegacyCollections(
 						Effect.provide(
 							loadData(collection.raw.file, collection.schema as never, {
 								...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
-								...(collection.raw.migrations ? { migrations: collection.raw.migrations as ReadonlyArray<Migration> } : {}),
+								...(collection.raw.migrations
+									? {
+											migrations: collection.raw.migrations as ReadonlyArray<Migration>,
+										}
+									: {}),
 								collectionName: collection.name,
 								...(collection.raw.format ? { format: collection.raw.format } : {}),
 								...(collection.raw.path ? { path: collection.raw.path } : {}),
@@ -1118,10 +1419,7 @@ async function loadLegacyCollections(
 					)
 				: undefined;
 			baselines[collection.name] = [...(loaded?.values() ?? [])];
-			result[collection.name] = mergeLoadedWithInitial(
-				loaded,
-				initialData?.[collection.name as never],
-			);
+			result[collection.name] = mergeLoadedWithInitial(loaded, initialData?.[collection.name as never]);
 			continue;
 		}
 		baselines[collection.name] = [];
@@ -1173,10 +1471,7 @@ async function loadSourceOrientedCollections(
 			loadedDocuments?.collections[collection.name] ??
 			new Map<string, Record<string, unknown>>();
 		baselines[collection.name] = [...loaded.values()];
-		result[collection.name] = mergeLoadedWithInitial(
-			loaded,
-			initialData?.[collection.name as never],
-		);
+		result[collection.name] = mergeLoadedWithInitial(loaded, initialData?.[collection.name as never]);
 	}
 	return {
 		collections: result,
@@ -1235,11 +1530,7 @@ function createPersistenceState(
 	return state;
 }
 
-async function persistCollectionState(
-	state: PersistenceState,
-	runtime: EngineRuntime,
-	key: string,
-): Promise<void> {
+async function persistCollectionState(state: PersistenceState, runtime: EngineRuntime, key: string): Promise<void> {
 	if (state.sourceState && key.startsWith("source:")) {
 		const sourceId = key.slice("source:".length);
 		await persistDocumentSourceState(state, runtime, sourceId);
@@ -1277,7 +1568,9 @@ async function persistCollectionState(
 	);
 	if (fileCollections.length > 0 && (fileCollections.length > 1 || fileCollections[0]?.raw.path)) {
 		for (const collection of fileCollections) {
-			const entities = await runtime.invoke<Record<string, unknown>[]>("dumpCollection", { collection: collection.name });
+			const entities = await runtime.invoke<Record<string, unknown>[]>("dumpCollection", {
+				collection: collection.name,
+			});
 			const map = toEntityMap(entities);
 			await Effect.runPromise(
 				Effect.provide(
@@ -1391,24 +1684,14 @@ async function persistDocumentSourceState(
 	sourceState.documentsState.documents = saved.documents;
 }
 
-function initializeDirectoryIds(
-	runtime: EngineRuntime,
-	collections: ReadonlyArray<CollectionRuntimeConfig>,
-) {
+function initializeDirectoryIds(runtime: EngineRuntime, collections: ReadonlyArray<CollectionRuntimeConfig>) {
 	const ids = new Map<string, Set<string>>();
 	for (const collection of collections) {
 		if (!collection.raw.directory) continue;
 		const rows = runtime.dispatch<Record<string, unknown>[]>("dumpCollection", {
 			collection: collection.name,
 		});
-		ids.set(
-			collection.name,
-			new Set(
-				rows
-					.map((row) => row.id)
-					.filter((id): id is string => typeof id === "string"),
-			),
-		);
+		ids.set(collection.name, new Set(rows.map((row) => row.id).filter((id): id is string => typeof id === "string")));
 	}
 	return ids;
 }
@@ -1420,9 +1703,11 @@ function initializeCollectionBaselines(
 ) {
 	const baselines = new Map<string, ReadonlyMap<string, Record<string, unknown>>>();
 	for (const collection of collections) {
-		const rows = initialBaselines?.[collection.name] ?? runtime.dispatch<Record<string, unknown>[]>("dumpCollection", {
-			collection: collection.name,
-		});
+		const rows =
+			initialBaselines?.[collection.name] ??
+			runtime.dispatch<Record<string, unknown>[]>("dumpCollection", {
+				collection: collection.name,
+			});
 		baselines.set(collection.name, toEntityMap(rows));
 	}
 	return baselines;
@@ -1459,11 +1744,8 @@ function buildWriteKeyByCollection(
 }
 
 function mergeLoadedWithInitial(
-	loaded:
-		| ReadonlyMap<string, Record<string, unknown>>
-		| Map<string, Record<string, unknown>>
-		| undefined,
-		initial: unknown,
+	loaded: ReadonlyMap<string, Record<string, unknown>> | Map<string, Record<string, unknown>> | undefined,
+	initial: unknown,
 ) {
 	const merged = new Map<string, Record<string, unknown>>(loaded ?? []);
 	for (const item of normalizeInitialCollection(initial)) {
@@ -1477,7 +1759,9 @@ function hostFromPersistence(persistence: PersistenceState) {
 	return persistence.host;
 }
 
-function isBrowserStorageHost(host: EngineStorageHost | undefined): host is EngineStorageHost & { readonly __proseqlBrowserStorageHost: true } {
+function isBrowserStorageHost(
+	host: EngineStorageHost | undefined,
+): host is EngineStorageHost & { readonly __proseqlBrowserStorageHost: true } {
 	return host?.__proseqlBrowserStorageHost === true;
 }
 
@@ -1596,7 +1880,9 @@ function rowsFingerprint(rows: ReadonlyArray<Record<string, unknown>>) {
 }
 
 async function currentCollectionRows(runtime: EngineRuntime, collection: string) {
-	return runtime.invoke<Record<string, unknown>[]>("dumpCollection", { collection });
+	return runtime.invoke<Record<string, unknown>[]>("dumpCollection", {
+		collection,
+	});
 }
 
 async function reloadCollectionIfChanged(
@@ -1628,10 +1914,9 @@ async function reloadCollectionsAtomicallyIfChanged(
 			await txRuntime.invoke("reloadCollection", { collection, records: rows });
 		}
 		const snapshot = await txRuntime.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>("dumpAll");
-		const committed = await runtime.invoke<{ changedCollections: ReadonlyArray<string> }>(
-			"commitSnapshotTransaction",
-			{ collections: snapshot },
-		);
+		const committed = await runtime.invoke<{
+			changedCollections: ReadonlyArray<string>;
+		}>("commitSnapshotTransaction", { collections: snapshot });
 		return committed.changedCollections;
 	} finally {
 		await txRuntime.drop().catch(() => undefined);
@@ -1730,11 +2015,7 @@ function updateDirectoryBaseline(
 	if (!collection.raw.directory) return;
 	persistence.directoryIds.set(
 		collection.name,
-		new Set(
-			rows
-				.map((row) => row.id)
-				.filter((id): id is string => typeof id === "string"),
-		),
+		new Set(rows.map((row) => row.id).filter((id): id is string => typeof id === "string")),
 	);
 }
 
@@ -1783,18 +2064,15 @@ async function loadLegacyCollectionRows(
 		if (!dirExists) return [];
 		const loaded = await Effect.runPromise(
 			Effect.provide(
-				loadDataFromDirectory(
-					collection.raw.directory,
-					collection.schema as never,
-					collection.raw.format ?? "json",
-					{
-						...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
-						...(collection.raw.migrations
-							? { migrations: collection.raw.migrations as ReadonlyArray<Migration> }
-							: {}),
-						collectionName: collection.name,
-					},
-				),
+				loadDataFromDirectory(collection.raw.directory, collection.schema as never, collection.raw.format ?? "json", {
+					...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
+					...(collection.raw.migrations
+						? {
+								migrations: collection.raw.migrations as ReadonlyArray<Migration>,
+							}
+						: {}),
+					collectionName: collection.name,
+				}),
 				layer,
 			),
 		);
@@ -1808,7 +2086,9 @@ async function loadLegacyCollectionRows(
 				loadData(collection.raw.file, collection.schema as never, {
 					...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
 					...(collection.raw.migrations
-						? { migrations: collection.raw.migrations as ReadonlyArray<Migration> }
+						? {
+								migrations: collection.raw.migrations as ReadonlyArray<Migration>,
+							}
 						: {}),
 					collectionName: collection.name,
 					...(collection.raw.format ? { format: collection.raw.format } : {}),
@@ -1824,17 +2104,14 @@ async function loadLegacyCollectionRows(
 	return [];
 }
 
-async function loadLegacyFileCollections(
-	group: SharedFileGroup,
-	host: EngineStorageHost,
-	layer: Layer.Layer<any>,
-) {
+async function loadLegacyFileCollections(group: SharedFileGroup, host: EngineStorageHost, layer: Layer.Layer<any>) {
 	if (group.collections.length > 1 && group.collections.every((collection) => !collection.raw.path)) {
 		const fileExists = await host.exists(group.file);
 		if (!fileExists) {
-			return Object.fromEntries(
-				group.collections.map((collection) => [collection.name, []]),
-			) as Record<string, ReadonlyArray<Record<string, unknown>>>;
+			return Object.fromEntries(group.collections.map((collection) => [collection.name, []])) as Record<
+				string,
+				ReadonlyArray<Record<string, unknown>>
+			>;
 		}
 		const loaded = await Effect.runPromise(
 			Effect.provide(
@@ -1845,7 +2122,9 @@ async function loadLegacyFileCollections(
 						schema: collection.schema as never,
 						...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
 						...(collection.raw.migrations
-							? { migrations: collection.raw.migrations as ReadonlyArray<Migration> }
+							? {
+									migrations: collection.raw.migrations as ReadonlyArray<Migration>,
+								}
 							: {}),
 					})),
 				),
@@ -1853,10 +2132,7 @@ async function loadLegacyFileCollections(
 			),
 		);
 		return Object.fromEntries(
-			group.collections.map((collection) => [
-				collection.name,
-				[...(loaded?.[collection.name]?.values() ?? [])],
-			]),
+			group.collections.map((collection) => [collection.name, [...(loaded?.[collection.name]?.values() ?? [])]]),
 		) as Record<string, ReadonlyArray<Record<string, unknown>>>;
 	}
 
@@ -1891,12 +2167,7 @@ async function registerLegacyWatchers(runtime: EngineRuntime, persistence: Persi
 					for (const collection of collections) {
 						const rows = rowsByCollection[collection.name] ?? [];
 						if (supportsDirtyMerge) {
-							await reconcileCollectionWithExternalRows(
-								persistence,
-								runtime,
-								collection,
-								rows,
-							);
+							await reconcileCollectionWithExternalRows(persistence, runtime, collection, rows);
 							continue;
 						}
 						await reloadCollectionIfChanged(runtime, collection.name, rows);
@@ -1938,11 +2209,7 @@ async function registerLegacyWatchers(runtime: EngineRuntime, persistence: Persi
 				runBackgroundReload(
 					persistence,
 					async () => {
-						const rows = await loadLegacyCollectionRows(
-							collection,
-							persistence.host,
-							persistence.layer,
-						);
+						const rows = await loadLegacyCollectionRows(collection, persistence.host, persistence.layer);
 						if (supportsDirtyMerge) {
 							await reconcileCollectionWithExternalRows(persistence, runtime, collection, rows);
 							return;
@@ -1974,9 +2241,7 @@ async function registerSourceWatchers(runtime: EngineRuntime, persistence: Persi
 					const rowsByCollection = Object.fromEntries(
 						source.collections.map((collection) => [
 							collection,
-							[
-								...(loaded.collections[collection]?.values() ?? []),
-							] as ReadonlyArray<Record<string, unknown>>,
+							[...(loaded.collections[collection]?.values() ?? [])] as ReadonlyArray<Record<string, unknown>>,
 						]),
 					) as Record<string, ReadonlyArray<Record<string, unknown>>>;
 					await reloadCollectionsAtomicallyIfChanged(runtime, rowsByCollection);
@@ -1998,9 +2263,7 @@ async function registerSourceWatchers(runtime: EngineRuntime, persistence: Persi
 					const rowsByCollection = Object.fromEntries(
 						source.collections.map((collection) => [
 							collection,
-							[
-								...(loaded.collections[collection]?.values() ?? []),
-							] as ReadonlyArray<Record<string, unknown>>,
+							[...(loaded.collections[collection]?.values() ?? [])] as ReadonlyArray<Record<string, unknown>>,
 						]),
 					) as Record<string, ReadonlyArray<Record<string, unknown>>>;
 					await reloadCollectionsAtomicallyIfChanged(runtime, rowsByCollection);
@@ -2013,10 +2276,7 @@ async function registerSourceWatchers(runtime: EngineRuntime, persistence: Persi
 	}
 }
 
-async function registerExternalReloadWatchers(
-	runtime: EngineRuntime,
-	persistence: PersistenceState,
-) {
+async function registerExternalReloadWatchers(runtime: EngineRuntime, persistence: PersistenceState) {
 	await registerLegacyWatchers(runtime, persistence);
 	await registerSourceWatchers(runtime, persistence);
 }
@@ -2060,13 +2320,10 @@ async function runTransaction<A>(
 		const rollbackError = explicitRollbackError();
 		const txFacade = buildTransactionDatabaseFacade(txRuntime, collections, persistence, operations, rollbackError);
 		const result = await fn(txFacade as EngineTransactionDatabase<any>);
-		const snapshot = await txRuntime.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>(
-			"dumpAll",
-		);
-		const committed = await runtime.invoke<{ changedCollections: ReadonlyArray<string> }>(
-			"commitSnapshotTransaction",
-			{ collections: snapshot },
-		);
+		const snapshot = await txRuntime.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>("dumpAll");
+		const committed = await runtime.invoke<{
+			changedCollections: ReadonlyArray<string>;
+		}>("commitSnapshotTransaction", { collections: snapshot });
 		for (const collection of committed.changedCollections) {
 			markCollectionDirty(persistence, collection);
 			const key = persistence?.writeKeyByCollection.get(collection);
@@ -2075,9 +2332,7 @@ async function runTransaction<A>(
 		return result;
 	};
 	try {
-		return transactionGate.context
-			? await transactionGate.context.run(true, execute)
-			: await execute();
+		return transactionGate.context ? await transactionGate.context.run(true, execute) : await execute();
 	} finally {
 		transactionGate.depth = Math.max(0, transactionGate.depth - 1);
 		try {
@@ -2145,17 +2400,19 @@ function buildTransactionCollectionFacade(
 						...page,
 						items: applySelectionOrder(page.items, config.select),
 					}))
-				: runtime.invoke<any[]>("query", {
-						collection: collection.name,
-						query: {
-							where: config?.where,
-							sort: config?.sort,
-							offset: config?.offset,
-							limit: config?.limit,
-							select: config?.select,
-						},
-						populate: config?.populate,
-					}).then((rows) => applySelectionOrder(rows, config?.select)),
+				: runtime
+						.invoke<any[]>("query", {
+							collection: collection.name,
+							query: {
+								where: config?.where,
+								sort: config?.sort,
+								offset: config?.offset,
+								limit: config?.limit,
+								select: config?.select,
+							},
+							populate: config?.populate,
+						})
+						.then((rows) => applySelectionOrder(rows, config?.select)),
 		aggregate: (config: any) =>
 			runtime.invoke("aggregate", {
 				collection: collection.name,
@@ -2183,26 +2440,46 @@ function buildTransactionCollectionFacade(
 		},
 		create: async (input: any) => {
 			ensureWritable("create");
-			const value = await runtime.invoke<any>("create", { collection: collection.name, data: input });
+			const value = await runtime.invoke<any>("create", {
+				collection: collection.name,
+				data: input,
+			});
 			push({ kind: "create", collection: collection.name, data: input });
 			return value;
 		},
 		createMany: async (inputs: ReadonlyArray<any>, options?: any) => {
 			ensureWritable("createMany");
 			const items = [...inputs];
-			const value = await runtime.invoke<any>("createMany", { collection: collection.name, items, skipDuplicates: options?.skipDuplicates ?? false });
-			push({ kind: "createMany", collection: collection.name, items, skipDuplicates: options?.skipDuplicates ?? false });
+			const value = await runtime.invoke<any>("createMany", {
+				collection: collection.name,
+				items,
+				skipDuplicates: options?.skipDuplicates ?? false,
+			});
+			push({
+				kind: "createMany",
+				collection: collection.name,
+				items,
+				skipDuplicates: options?.skipDuplicates ?? false,
+			});
 			return value;
 		},
 		update: async (id: string, data: any) => {
 			ensureWritable("update");
-			const value = await runtime.invoke<any>("update", { collection: collection.name, id, data });
+			const value = await runtime.invoke<any>("update", {
+				collection: collection.name,
+				id,
+				data,
+			});
 			push({ kind: "update", collection: collection.name, id, data });
 			return value;
 		},
 		updateMany: async (where: any, data: any) => {
 			ensureWritable("updateMany");
-			const value = await runtime.invoke<any>("updateMany", { collection: collection.name, where, data });
+			const value = await runtime.invoke<any>("updateMany", {
+				collection: collection.name,
+				where,
+				data,
+			});
 			push({ kind: "updateMany", collection: collection.name, where, data });
 			return value;
 		},
@@ -2216,63 +2493,143 @@ function buildTransactionCollectionFacade(
 					limit: 1,
 				});
 				if (!value.deleted?.[0]) {
-					throw new NotFoundError({ collection: collection.name, id, message: `Entity with id "${id}" not found in collection "${collection.name}"` });
+					throw new NotFoundError({
+						collection: collection.name,
+						id,
+						message: `Entity with id "${id}" not found in collection "${collection.name}"`,
+					});
 				}
-				push({ kind: "deleteMany", collection: collection.name, where: { id }, soft: true, limit: 1 });
+				push({
+					kind: "deleteMany",
+					collection: collection.name,
+					where: { id },
+					soft: true,
+					limit: 1,
+				});
 				return value.deleted[0];
 			}
-			const value = await runtime.invoke<any>("delete", { collection: collection.name, id });
+			const value = await runtime.invoke<any>("delete", {
+				collection: collection.name,
+				id,
+			});
 			push({ kind: "delete", collection: collection.name, id });
 			return value;
 		},
 		deleteMany: async (where: any, options?: any) => {
 			ensureWritable("deleteMany");
-			const value = await runtime.invoke<any>("deleteMany", { collection: collection.name, where, soft: options?.soft ?? false, limit: options?.limit });
-			push({ kind: "deleteMany", collection: collection.name, where, soft: options?.soft ?? false, limit: options?.limit });
+			const value = await runtime.invoke<any>("deleteMany", {
+				collection: collection.name,
+				where,
+				soft: options?.soft ?? false,
+				limit: options?.limit,
+			});
+			push({
+				kind: "deleteMany",
+				collection: collection.name,
+				where,
+				soft: options?.soft ?? false,
+				limit: options?.limit,
+			});
 			return value;
 		},
 		upsert: async (input: any) => {
 			ensureWritable("upsert");
-			const value = await runtime.invoke<any>("upsert", { collection: collection.name, where: input.where, create: input.create, update: input.update });
-			push({ kind: "upsert", collection: collection.name, where: input.where, create: input.create, update: input.update });
+			const value = await runtime.invoke<any>("upsert", {
+				collection: collection.name,
+				where: input.where,
+				create: input.create,
+				update: input.update,
+			});
+			push({
+				kind: "upsert",
+				collection: collection.name,
+				where: input.where,
+				create: input.create,
+				update: input.update,
+			});
 			return value;
 		},
 		upsertMany: async (inputs: ReadonlyArray<any>) => {
 			ensureWritable("upsertMany");
 			const items = [...inputs];
-			const value = await runtime.invoke<any>("upsertMany", { collection: collection.name, items });
+			const value = await runtime.invoke<any>("upsertMany", {
+				collection: collection.name,
+				items,
+			});
 			push({ kind: "upsertMany", collection: collection.name, items });
 			return value;
 		},
 		createWithRelationships: async (data: any) => {
 			ensureWritable("createWithRelationships");
-			const value = await runtime.invoke<any>("createWithRelationships", { collection: collection.name, data });
-			push({ kind: "createWithRelationships", collection: collection.name, data });
+			const value = await runtime.invoke<any>("createWithRelationships", {
+				collection: collection.name,
+				data,
+			});
+			push({
+				kind: "createWithRelationships",
+				collection: collection.name,
+				data,
+			});
 			return value;
 		},
 		updateWithRelationships: async (id: string, data: any) => {
 			ensureWritable("updateWithRelationships");
-			const value = await runtime.invoke<any>("updateWithRelationships", { collection: collection.name, id, data });
-			push({ kind: "updateWithRelationships", collection: collection.name, id, data });
+			const value = await runtime.invoke<any>("updateWithRelationships", {
+				collection: collection.name,
+				id,
+				data,
+			});
+			push({
+				kind: "updateWithRelationships",
+				collection: collection.name,
+				id,
+				data,
+			});
 			return value;
 		},
 		deleteWithRelationships: async (id: string, options?: any) => {
 			ensureWritable("deleteWithRelationships");
-			const value = await runtime.invoke<any>("deleteWithRelationships", { collection: collection.name, id, options });
-			push({ kind: "deleteWithRelationships", collection: collection.name, id, options });
+			const value = await runtime.invoke<any>("deleteWithRelationships", {
+				collection: collection.name,
+				id,
+				options,
+			});
+			push({
+				kind: "deleteWithRelationships",
+				collection: collection.name,
+				id,
+				options,
+			});
 			return value;
 		},
 		deleteManyWithRelationships: async (where: any, options?: any) => {
 			ensureWritable("deleteManyWithRelationships");
-			const value = await runtime.invoke<any>("deleteManyWithRelationships", { collection: collection.name, where, options });
-			push({ kind: "deleteManyWithRelationships", collection: collection.name, where, options });
+			const value = await runtime.invoke<any>("deleteManyWithRelationships", {
+				collection: collection.name,
+				where,
+				options,
+			});
+			push({
+				kind: "deleteManyWithRelationships",
+				collection: collection.name,
+				where,
+				options,
+			});
 			return value;
 		},
 		watch: (_config?: any) => {
-			throw new OperationError({ operation: "watch", reason: "unsupported-in-transaction", message: "watch() is not supported inside $transaction callbacks" });
+			throw new OperationError({
+				operation: "watch",
+				reason: "unsupported-in-transaction",
+				message: "watch() is not supported inside $transaction callbacks",
+			});
 		},
 		watchById: (_id: string) => {
-			throw new OperationError({ operation: "watchById", reason: "unsupported-in-transaction", message: "watchById() is not supported inside $transaction callbacks" });
+			throw new OperationError({
+				operation: "watchById",
+				reason: "unsupported-in-transaction",
+				message: "watchById() is not supported inside $transaction callbacks",
+			});
 		},
 	};
 }
@@ -2282,9 +2639,7 @@ async function runDryRunMigrations(
 	_host: EngineStorageHost,
 	layer: Layer.Layer<any>,
 ): Promise<DryRunResult> {
-	return Effect.runPromise(
-		Effect.provide(dryRunMigrations(config, {} as never), layer),
-	);
+	return Effect.runPromise(Effect.provide(dryRunMigrations(config, {} as never), layer));
 }
 
 function buildSharedFileGroups(collections: ReadonlyArray<CollectionRuntimeConfig>) {
@@ -2335,7 +2690,10 @@ function wrapCallbackResult(fn: () => unknown): string {
 				}),
 			});
 		}
-		return JSON.stringify({ kind: "ok", value: JSON.parse(serializeBoundaryValue(value)) });
+		return JSON.stringify({
+			kind: "ok",
+			value: JSON.parse(serializeBoundaryValue(value)),
+		});
 	} catch (error) {
 		if (isAsyncCallbackUnsupportedError(error)) {
 			return JSON.stringify({
@@ -2357,18 +2715,27 @@ function wrapCallbackResult(fn: () => unknown): string {
 }
 
 function isTaggedError(error: unknown): error is { readonly _tag: string } & Record<string, unknown> {
-	return typeof error === "object" && error !== null && "_tag" in error && typeof (error as { _tag: unknown })._tag === "string";
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		"_tag" in error &&
+		typeof (error as { _tag: unknown })._tag === "string"
+	);
 }
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
-	return typeof value === "object" && value !== null && "then" in value && typeof (value as { then?: unknown }).then === "function";
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"then" in value &&
+		typeof (value as { then?: unknown }).then === "function"
+	);
 }
 
 function isAsyncCallbackUnsupportedError(error: unknown) {
 	const message = error instanceof Error ? error.message : String(error);
 	return message.includes("Async Effect callbacks are not supported by @proseql/engine");
 }
-
 
 function encodeDataForCommand(data: unknown) {
 	return encodeBoundaryValueForWire(data);
@@ -2431,11 +2798,11 @@ function prepareTransactionOperationForCommand(operation: unknown): unknown {
 					? input.items.map((item) =>
 							typeof item === "object" && item !== null
 								? {
-									...(item as Record<string, unknown>),
-									where: encodeWhereForCommand((item as Record<string, unknown>).where),
-									create: encodeDataForCommand((item as Record<string, unknown>).create),
-									update: encodeDataForCommand((item as Record<string, unknown>).update),
-								}
+										...(item as Record<string, unknown>),
+										where: encodeWhereForCommand((item as Record<string, unknown>).where),
+										create: encodeDataForCommand((item as Record<string, unknown>).create),
+										update: encodeDataForCommand((item as Record<string, unknown>).update),
+									}
 								: item,
 						)
 					: input.items,
@@ -2496,11 +2863,11 @@ function prepareCommandPayload(method: string, payload: unknown): unknown {
 					? command.items.map((item) =>
 							typeof item === "object" && item !== null
 								? {
-									...(item as Record<string, unknown>),
-									where: encodeWhereForCommand((item as Record<string, unknown>).where),
-									create: encodeDataForCommand((item as Record<string, unknown>).create),
-									update: encodeDataForCommand((item as Record<string, unknown>).update),
-								}
+										...(item as Record<string, unknown>),
+										where: encodeWhereForCommand((item as Record<string, unknown>).where),
+										create: encodeDataForCommand((item as Record<string, unknown>).create),
+										update: encodeDataForCommand((item as Record<string, unknown>).update),
+									}
 								: item,
 						)
 					: command.items,
@@ -2508,7 +2875,9 @@ function prepareCommandPayload(method: string, payload: unknown): unknown {
 		case "reloadCollection":
 			return {
 				...command,
-				records: Array.isArray(command.records) ? command.records.map((record) => encodeDataForCommand(record)) : command.records,
+				records: Array.isArray(command.records)
+					? command.records.map((record) => encodeDataForCommand(record))
+					: command.records,
 			};
 		case "commitSnapshotTransaction":
 			return {
@@ -2544,8 +2913,7 @@ function settledPromise<T>(fn: () => T): Promise<Awaited<T>> {
 	}
 }
 
-function parseBridgeResponse<T>(raw: string): T {
-	const parsed = JSON.parse(raw) as BridgeResponse<T>;
+function parseBridgeResponseValue<T>(parsed: BridgeResponse<T>, raw: string): T {
 	switch (parsed.kind) {
 		case "ok":
 			return decodeBoundaryValueForHost(parsed.value);
@@ -2556,4 +2924,8 @@ function parseBridgeResponse<T>(raw: string): T {
 		default:
 			throw new Error(`Unknown bridge response: ${raw}`);
 	}
+}
+
+function parseBridgeResponse<T>(raw: string): T {
+	return parseBridgeResponseValue(JSON.parse(raw) as BridgeResponse<T>, raw);
 }

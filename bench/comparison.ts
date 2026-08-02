@@ -25,6 +25,20 @@ export interface BenchmarkBoundaryStageMetrics {
 	readonly callbackMs: NumericMetric;
 }
 
+export interface ProjectionMaterializationInstrumentation {
+	readonly descriptors: number;
+	readonly descriptorBytes: number;
+	readonly cacheHits: number;
+	readonly cacheMisses: number;
+	readonly resynchronizations: number;
+	readonly fullValueBytesAvoided: number;
+	readonly materializationMilliseconds: number;
+	readonly materializedRows: number;
+	readonly trackedProxies: number;
+	readonly peakMaterializedRows: number;
+	readonly peakTrackedProxies: number;
+}
+
 export interface BenchmarkInstrumentation {
 	readonly initializationMs: NumericMetric;
 	readonly coldStartMs: NumericMetric;
@@ -35,6 +49,7 @@ export interface BenchmarkInstrumentation {
 	readonly jsHeapBytes: NumericMetric;
 	readonly wasmLinearMemoryHighWaterBytes: NumericMetric;
 	readonly repeatedHighWaterGrowthBytes: NumericMetric;
+	readonly projectionMaterialization?: ProjectionMaterializationInstrumentation;
 	readonly boundary: BenchmarkBoundaryStageMetrics;
 }
 
