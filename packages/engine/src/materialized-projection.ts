@@ -19,9 +19,32 @@ type CompactMaterializedRow =
 	| readonly [number, string, unknown]
 	| readonly [null, unknown];
 
+type CompactPopulatePlan = readonly [
+	name: string,
+	collection: string,
+	kind: 0 | 1 | 2 | 3,
+	nested?: ReadonlyArray<CompactPopulatePlan>,
+];
+
+type CompactPopulatedRelation =
+	| null
+	| CompactMaterializedRow
+	| CompactPopulatedNode
+	| ReadonlyArray<CompactMaterializedRow | CompactPopulatedNode>;
+
+type CompactPopulatedNode = readonly [
+	CompactMaterializedRow,
+	ReadonlyArray<CompactPopulatedRelation>,
+];
+
 export type CompactMaterializedResultDescriptor =
 	| { readonly k: "f"; readonly r: CompactMaterializedRow }
 	| { readonly k: "q"; readonly r: ReadonlyArray<CompactMaterializedRow> }
+	| {
+			readonly k: "p";
+			readonly p: ReadonlyArray<CompactPopulatePlan>;
+			readonly r: ReadonlyArray<CompactPopulatedNode>;
+	  }
 	| {
 			readonly k: "c";
 			readonly o: number;
@@ -364,10 +387,7 @@ export class MaterializedProjection {
 		const slot = this.slotById.get(keyOf(collection, id));
 		const row = slot === undefined ? undefined : this.slots[slot];
 		if (row === undefined) return undefined;
-		this.put(collection, { id, handle: row.handle, value });
-		const cachedSlot = this.slotById.get(keyOf(collection, id));
-		const cached =
-			cachedSlot === undefined ? undefined : this.resolveValue(cachedSlot);
+		const cached = this.put(collection, { id, handle: row.handle, value });
 		return cached === undefined
 			? undefined
 			: { value: cached, handle: row.handle };
@@ -419,35 +439,34 @@ export class MaterializedProjection {
 			this.invalidate();
 			return;
 		}
-		const structurallyChanged = new Set(
-			sync.changes
-				.filter(
-					(change) =>
-						change.deleted ||
-						("position" in change &&
-							typeof (change as { readonly position?: unknown }).position ===
-								"number"),
-				)
-				.map((change) => change.collection),
-		);
-		for (const collection of new Set(
-			sync.changes.map((change) => change.collection),
-		)) {
+		const structurallyChanged = new Set<string>();
+		const changedCollections = new Set<string>();
+		for (const change of sync.changes) {
+			changedCollections.add(change.collection);
+			if (change.deleted) {
+				const existing = this.slotById.get(keyOf(change.collection, change.id));
+				if (
+					existing === undefined ||
+					this.slots[existing]?.handle !== change.handle
+				) {
+					this.invalidate();
+					return;
+				}
+			}
+			if (
+				change.deleted ||
+				("position" in change &&
+					typeof (change as { readonly position?: unknown }).position ===
+						"number")
+			) {
+				structurallyChanged.add(change.collection);
+			}
+		}
+		for (const collection of changedCollections) {
 			this.canonicalRowsByCollection.delete(collection);
 		}
 		for (const collection of structurallyChanged) {
 			this.rustSlotByCollectionPosition.delete(collection);
-		}
-		for (const change of sync.changes) {
-			if (!change.deleted) continue;
-			const existing = this.slotById.get(keyOf(change.collection, change.id));
-			if (
-				existing === undefined ||
-				this.slots[existing]?.handle !== change.handle
-			) {
-				this.invalidate();
-				return;
-			}
 		}
 		for (const [collection, rows] of Object.entries(
 			sync.resetCollections ?? {},
@@ -563,9 +582,12 @@ export class MaterializedProjection {
 		this.mutableStats.descriptors += 1;
 		this.mutableStats.compactDescriptors += 1;
 		this.mutableStats.descriptorBytes += descriptorBytes;
-		const materialize = (row: CompactMaterializedRow): unknown => {
+		const materialize = (
+			rowCollection: string,
+			row: CompactMaterializedRow,
+		): unknown => {
 			if (typeof row === "number") {
-				return this.materializeRustSlot(collection, row);
+				return this.materializeRustSlot(rowCollection, row);
 			}
 			if (row[0] === null) {
 				this.mutableStats.cacheMisses += 1;
@@ -580,18 +602,18 @@ export class MaterializedProjection {
 					fallbackSlot === undefined
 						? undefined
 						: this.metadataFallback?.slots[fallbackSlot];
-				if (fallback?.collection === collection && fallback.id === id) {
-					this.put(collection, { id, handle: fallback.handle });
+				if (fallback?.collection === rowCollection && fallback.id === id) {
+					this.put(rowCollection, { id, handle: fallback.handle });
 					slot = this.rustSlotIndex(rustSlot);
 					metadata = slot === undefined ? undefined : this.slots[slot];
 				}
 			}
-			if (metadata?.collection !== collection || metadata.id !== id) {
+			if (metadata?.collection !== rowCollection || metadata.id !== id) {
 				this.mutableStats.cacheMisses += 1;
 				this.invalidate();
 				throw new StaleMaterializedHandleError(`slot:${rustSlot}`);
 			}
-			this.put(collection, {
+			this.put(rowCollection, {
 				id,
 				handle: metadata.handle,
 				value,
@@ -609,9 +631,62 @@ export class MaterializedProjection {
 		};
 		let value: unknown;
 		if (descriptor.k === "f") {
-			value = materialize(descriptor.r);
+			value = materialize(collection, descriptor.r);
 		} else if (descriptor.k === "q") {
-			value = descriptor.r.map(materialize);
+			value = descriptor.r.map((row) => materialize(collection, row));
+		} else if (descriptor.k === "p") {
+			const materializeNode = (
+				nodeCollection: string,
+				plan: ReadonlyArray<CompactPopulatePlan>,
+				node: CompactPopulatedNode,
+			): unknown => {
+				const source = materialize(nodeCollection, node[0]);
+				if (typeof source !== "object" || source === null) return source;
+				const output = { ...(source as Record<string, unknown>) };
+				for (let index = 0; index < plan.length; index += 1) {
+					const entry = plan[index];
+					if (entry === undefined) continue;
+					const [name, target, kind, nested = []] = entry;
+					const relation = node[1][index];
+					const inverse = (kind & 2) !== 0;
+					const nestedPopulate = (kind & 1) !== 0;
+					let relationValue: unknown;
+					if (inverse) {
+						relationValue = (
+							relation as ReadonlyArray<
+								CompactMaterializedRow | CompactPopulatedNode
+							>
+						).map((row) =>
+							nestedPopulate
+								? materializeNode(target, nested, row as CompactPopulatedNode)
+								: materialize(target, row as CompactMaterializedRow),
+						);
+					} else if (relation === null || relation === undefined) {
+						relationValue = undefined;
+					} else if (!nestedPopulate) {
+						relationValue = materialize(
+							target,
+							relation as CompactMaterializedRow,
+						);
+					} else {
+						relationValue = materializeNode(
+							target,
+							nested,
+							relation as CompactPopulatedNode,
+						);
+					}
+					Object.defineProperty(output, name, {
+						value: relationValue,
+						enumerable: true,
+						writable: true,
+						configurable: true,
+					});
+				}
+				return output;
+			};
+			value = descriptor.r.map((node) =>
+				materializeNode(collection, descriptor.p, node),
+			);
 		} else {
 			const cachedCanonical =
 				descriptor.o === 0 && descriptor.l === descriptor.t
@@ -634,7 +709,7 @@ export class MaterializedProjection {
 				this.rustSlotByCollectionPosition.set(collection, positions);
 			}
 			for (const [position, row] of descriptor.a ?? []) {
-				materialize(row);
+				materialize(collection, row);
 				if (typeof row === "number") positions[position] = row;
 				else if (row[0] !== null) positions[position] = row[0];
 			}
@@ -650,10 +725,7 @@ export class MaterializedProjection {
 				rows.push(this.materializeRustSlot(collection, rustSlot));
 			}
 			if (descriptor.o === 0 && descriptor.l === descriptor.t) {
-				const cached = {
-					revision: descriptor.v,
-					rows: rows.slice(),
-				};
+				const cached = { revision: descriptor.v, rows: rows.slice() };
 				this.canonicalRowsByCollection.set(collection, cached);
 				setTimeout(() => {
 					if (this.canonicalRowsByCollection.get(collection) === cached) {
@@ -784,13 +856,66 @@ export class MaterializedProjection {
 		const existing = this.slotById.get(key);
 		const target = existing ?? this.freeSlots.pop() ?? this.slots.length;
 		const prior = this.slots[target];
+		const incomingHasValue = ownsValue(row);
+		if (!incomingHasValue && prior?.handle === row.handle) return undefined;
+		if (incomingHasValue && prior?.handle === row.handle && !prior.hasValue) {
+			const token = this.nextProxyToken++;
+			const activeToken = token;
+			let installed = false;
+			let proxyCount = 0;
+			let trackedValue: unknown;
+			trackedValue = trackDeep(
+				row.value,
+				() => {
+					const active = this.slots[target];
+					if (active?.token === activeToken) {
+						this.dirtyKeys.add(key);
+						active.value = trackedValue;
+						active.weakValue = undefined;
+					}
+				},
+				new WeakMap<object, unknown>(),
+				() => {
+					proxyCount += 1;
+					const active = this.slots[target];
+					if (installed && active?.token === activeToken) {
+						active.proxyCount += 1;
+						this.mutableStats.trackedProxies += 1;
+					}
+				},
+			);
+			const weakValue =
+				typeof trackedValue === "object" && trackedValue !== null
+					? new WeakRef(trackedValue)
+					: undefined;
+			this.slots[target] = {
+				...prior,
+				hasValue: true,
+				value: weakValue === undefined ? trackedValue : undefined,
+				weakValue,
+				valueBytes: row.valueBytes ?? 0,
+				proxyCount,
+				token,
+			};
+			installed = true;
+			this.dirtyKeys.delete(key);
+			this.mutableStats.materializedRows += 1;
+			this.mutableStats.trackedProxies += proxyCount;
+			this.mutableStats.peakMaterializedRows = Math.max(
+				this.mutableStats.peakMaterializedRows,
+				this.mutableStats.materializedRows,
+			);
+			this.mutableStats.peakTrackedProxies = Math.max(
+				this.mutableStats.peakTrackedProxies,
+				this.mutableStats.trackedProxies,
+			);
+			return trackedValue;
+		}
 		const handleToken = projectionHandleToken(row.handle);
 		if (handleToken === undefined) {
 			this.invalidate();
 			throw new StaleMaterializedHandleError(row.handle);
 		}
-		const incomingHasValue = ownsValue(row);
-		if (!incomingHasValue && prior?.handle === row.handle) return;
 		let trackedValue: unknown;
 		let valueBytes = 0;
 		let proxyCount = 0;
@@ -875,6 +1000,7 @@ export class MaterializedProjection {
 				this.mutableStats.trackedProxies,
 			);
 		}
+		return incomingHasValue ? trackedValue : undefined;
 	}
 
 	private pinFastFindValue(row: Slot, value: object) {
@@ -1006,5 +1132,5 @@ export const isCompactMaterializedResultDescriptor = (
 		return false;
 	}
 	const kind = (value as { readonly k?: unknown }).k;
-	return kind === "f" || kind === "q" || kind === "c";
+	return kind === "f" || kind === "q" || kind === "p" || kind === "c";
 };

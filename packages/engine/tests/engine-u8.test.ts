@@ -19,11 +19,12 @@ import {
 	TransactionError,
 	ValidationError,
 } from "@proseql/core";
-import { Effect, Stream } from "effect";
+import { Effect, Ref, Stream } from "effect";
 import * as Schema from "effect/Schema";
 import { beforeAll, describe, expect, it } from "vitest";
 import { applyPagination } from "../../core/src/operations/query/paginate-stream.js";
 import { sortData } from "../../core/src/operations/query/sort.js";
+import { applyPopulate } from "../../core/src/operations/relationships/populate-stream.js";
 import { decodeBoundaryValueForHost } from "../src/boundary-values.js";
 import { reconstructBoundaryError } from "../src/errors.js";
 import {
@@ -2192,6 +2193,454 @@ describe("@proseql/engine U8 fixes", () => {
 				{ id: "u1", displayName: "Alice!" },
 			]);
 			expect(settled).toBe(true);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("materializes Rust-authored populated graphs with TypeScript reference identity", async () => {
+		const LinkedBookSchema = Schema.Struct({
+			id: Schema.String,
+			title: Schema.String,
+			authorId: Schema.String,
+		});
+		const db = await createEngineDatabase(
+			{
+				authors: { schema: AuthorSchema, relationships: {} },
+				books: {
+					schema: LinkedBookSchema,
+					relationships: {
+						author: {
+							type: "ref" as const,
+							target: "authors",
+							foreignKey: "authorId",
+						},
+						creditedAuthor: {
+							type: "ref" as const,
+							target: "authors",
+							foreignKey: "authorId",
+						},
+					},
+				},
+			} as const,
+			{
+				authors: [{ id: "__proto__", name: "Original" }],
+				books: [{ id: "book/😀", title: "Boundary", authorId: "__proto__" }],
+			},
+		);
+		try {
+			const author = await db.authors.findById("__proto__");
+			const canonicalBook = await db.books.findById("book/😀");
+			const first = (await db.books.query({
+				populate: { author: true, creditedAuthor: true },
+			} as never)) as unknown as Array<Record<string, unknown>>;
+			const second = (await db.books.query({
+				populate: { author: true, creditedAuthor: true },
+			} as never)) as unknown as Array<Record<string, unknown>>;
+			expect(first[0]).not.toBe(second[0]);
+			expect(first[0]).not.toBe(canonicalBook);
+			expect(first[0]?.author).toBe(author);
+			expect(first[0]?.creditedAuthor).toBe(author);
+			const firstBook = first[0];
+			expect(firstBook).toBeDefined();
+			if (firstBook === undefined) throw new Error("expected populated book");
+			firstBook.title = "shell-only";
+			expect((await db.books.findById("book/😀"))?.title).toBe("Boundary");
+			(author as { name: string }).name = "Mutated through target";
+			const afterMutation = (await db.books.query({
+				populate: { author: true },
+			} as never)) as unknown as Array<Record<string, unknown>>;
+			expect(afterMutation[0]?.author).toBe(author);
+			expect((afterMutation[0]?.author as { name: string }).name).toBe(
+				"Mutated through target",
+			);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("uses stable storage keys and shared live references for compact population", async () => {
+		const LinkedBookSchema = Schema.Struct({
+			id: Schema.String,
+			title: Schema.String,
+			authorId: Schema.String,
+		});
+		const db = await createEngineDatabase(
+			{
+				authors: { schema: AuthorSchema, relationships: {} },
+				books: {
+					schema: LinkedBookSchema,
+					relationships: {
+						author: {
+							type: "ref" as const,
+							target: "authors",
+							foreignKey: "authorId",
+						},
+					},
+				},
+			} as const,
+			{
+				authors: [
+					{ id: "u1", name: "First" },
+					{ id: "u2", name: "Second" },
+				],
+				books: [
+					{ id: "b1", title: "One", authorId: "u1" },
+					{ id: "b2", title: "Two", authorId: "u1" },
+				],
+			},
+		);
+		try {
+			const first = await db.authors.findById("u1");
+			const second = await db.authors.findById("u2");
+			(first as { id: string }).id = "u2";
+			const firstBook = await db.books.findById("b1");
+			(firstBook as { id: string }).id = "b2";
+			const rows = (await db.books.query({
+				populate: { author: true },
+			} as never)) as unknown as Array<Record<string, unknown>>;
+			expect(rows.map((row) => row.title)).toEqual(["One", "Two"]);
+			expect(rows[0]?.author).toBe(first);
+			expect(rows[1]?.author).toBe(first);
+			expect(rows[0]?.author).not.toBe(second);
+			(rows[0]?.author as { name: string }).name = "Shared";
+			expect((rows[1]?.author as { name: string }).name).toBe("Shared");
+			expect((await db.authors.findById("u1"))?.name).toBe("Shared");
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("materializes inverse arrays as shared canonical rows and explicit undefined refs", async () => {
+		const ParentSchema = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+		});
+		const ChildSchema = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+			parentId: Schema.optional(Schema.NullOr(Schema.String)),
+		});
+		const db = await createEngineDatabase(
+			{
+				parents: {
+					schema: ParentSchema,
+					relationships: {
+						children: {
+							type: "inverse" as const,
+							target: "children",
+							foreignKey: "parentId",
+						},
+					},
+				},
+				children: {
+					schema: ChildSchema,
+					relationships: {
+						parent: {
+							type: "ref" as const,
+							target: "parents",
+							foreignKey: "parentId",
+						},
+					},
+				},
+			} as const,
+			{
+				parents: [{ id: "p1", name: "Parent" }],
+				children: [
+					{ id: "c1", name: "One", parentId: "p1" },
+					{ id: "c2", name: "Two", parentId: "p1" },
+					{ id: "c-null", name: "Null", parentId: null },
+					{ id: "c-missing", name: "Missing" },
+				],
+			},
+		);
+		try {
+			const canonicalOne = await db.children.findById("c1");
+			const parents = (await db.parents.query({
+				populate: { children: true },
+			} as never)) as unknown as Array<{ children: Array<{ name: string }> }>;
+			expect(parents[0]?.children.map((child: any) => child.id)).toEqual([
+				"c1",
+				"c2",
+			]);
+			expect(parents[0]?.children[0]).toBe(canonicalOne);
+			parents[0]!.children[0]!.name = "Shared inverse";
+			expect((await db.children.findById("c1"))?.name).toBe("Shared inverse");
+
+			const unowned = (await db.children.query({
+				where: { id: { $in: ["c-null", "c-missing"] } },
+				populate: { parent: true },
+			} as never)) as unknown as Array<Record<string, unknown>>;
+			for (const row of unowned) {
+				expect(Object.hasOwn(row, "parent")).toBe(true);
+				expect(row.parent).toBeUndefined();
+				expect(Object.keys(row).at(-1)).toBe("parent");
+			}
+			const selected = (await db.children.query({
+				where: { id: "c1" },
+				populate: { parent: true },
+				select: { parent: { name: true }, name: true },
+			} as never)) as unknown as Array<Record<string, unknown>>;
+			expect(Object.keys(selected[0] ?? {})).toEqual(["parent", "name"]);
+			expect(Object.keys((selected[0]?.parent as object) ?? {})).toEqual([
+				"name",
+			]);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("applies ordered nested selection after forward, inverse, and nested population", async () => {
+		const CompanySchema = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+			["__proto__"]: Schema.String,
+		});
+		const NestedAuthorSchema = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+			companyId: Schema.String,
+		});
+		const NestedBookSchema = Schema.Struct({
+			id: Schema.String,
+			title: Schema.String,
+			authorId: Schema.String,
+		});
+		const company = Object.fromEntries([
+			["id", "co1"],
+			["name", "Company"],
+			["__proto__", "ordinary-data"],
+		]);
+		const db = await createEngineDatabase(
+			{
+				companies: {
+					schema: CompanySchema,
+					relationships: {
+						authors: {
+							type: "inverse" as const,
+							target: "authors",
+							foreignKey: "companyId",
+						},
+					},
+				},
+				authors: {
+					schema: NestedAuthorSchema,
+					relationships: {
+						company: {
+							type: "ref" as const,
+							target: "companies",
+							foreignKey: "companyId",
+						},
+						books: {
+							type: "inverse" as const,
+							target: "books",
+							foreignKey: "authorId",
+						},
+					},
+				},
+				books: {
+					schema: NestedBookSchema,
+					relationships: {
+						author: {
+							type: "ref" as const,
+							target: "authors",
+							foreignKey: "authorId",
+						},
+					},
+				},
+			} as const,
+			{
+				companies: [company as { id: string; name: string; __proto__: string }],
+				authors: [{ id: "a1", name: "Author", companyId: "co1" }],
+				books: [{ id: "b1", title: "Book", authorId: "a1" }],
+			},
+		);
+		try {
+			const canonicalAuthor = await db.authors.findById("a1");
+			const canonicalBook = await db.books.findById("b1");
+			const select = Object.fromEntries([
+				[
+					"authors",
+					Object.fromEntries([
+						["books", { title: true }],
+						["name", true],
+					]),
+				],
+				["__proto__", true],
+				["name", true],
+			]);
+			const rows = (await db.companies.query({
+				populate: { authors: { books: true } },
+				select,
+			} as never)) as unknown as Array<Record<string, unknown>>;
+			const selectedCompany = rows[0];
+			if (selectedCompany === undefined) throw new Error("expected company");
+			const selectedAuthor = (
+				selectedCompany.authors as Array<Record<string, unknown>>
+			)[0];
+			if (selectedAuthor === undefined) throw new Error("expected author");
+			const selectedBook = (
+				selectedAuthor.books as Array<Record<string, unknown>>
+			)[0];
+			if (selectedBook === undefined) throw new Error("expected book");
+			expect(Object.keys(selectedCompany)).toEqual([
+				"authors",
+				"__proto__",
+				"name",
+			]);
+			expect(Object.keys(selectedAuthor)).toEqual(["books", "name"]);
+			expect(Object.keys(selectedBook)).toEqual(["title"]);
+			expect(selectedCompany).toEqual({
+				authors: [{ books: [{ title: "Book" }], name: "Author" }],
+				["__proto__"]: "ordinary-data",
+				name: "Company",
+			});
+			expect(selectedCompany.id).toBeUndefined();
+			expect(selectedAuthor.id).toBeUndefined();
+			expect(selectedBook.id).toBeUndefined();
+			expect(selectedAuthor).not.toBe(canonicalAuthor);
+			expect(selectedBook).not.toBe(canonicalBook);
+
+			const nestedRelationSelect = (await db.books.query({
+				populate: { author: { company: { select: ["id"] } } },
+			} as never)) as unknown as Array<Record<string, unknown>>;
+			expect(
+				(nestedRelationSelect[0]?.author as Record<string, unknown>).company,
+			).toEqual(company);
+
+			const forward = (await db.books.query({
+				populate: { author: { company: true } },
+				select: { author: { company: { name: true }, name: true } },
+			} as never)) as unknown as Array<Record<string, unknown>>;
+			expect(forward).toEqual([
+				{ author: { company: { name: "Company" }, name: "Author" } },
+			]);
+
+			const empty = (await db.companies.query({
+				populate: { authors: { books: true } },
+				select: {},
+			} as never)) as unknown as Array<Record<string, unknown>>;
+			expect(
+				(empty[0]?.authors as Array<Record<string, unknown>>)[0]?.books,
+			).toEqual([expect.objectContaining({ id: "b1", title: "Book" })]);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("ignores relation-local select exactly like the direct TypeScript population stream", async () => {
+		const LinkedBookSchema = Schema.Struct({
+			id: Schema.String,
+			title: Schema.String,
+			authorId: Schema.String,
+		});
+		const config = {
+			authors: { schema: AuthorSchema, relationships: {} },
+			books: {
+				schema: LinkedBookSchema,
+				relationships: {
+					author: {
+						type: "ref" as const,
+						target: "authors",
+						foreignKey: "authorId",
+					},
+				},
+			},
+		} as const;
+		const initialData = {
+			authors: [{ id: "a1", name: "Alice" }],
+			books: [{ id: "b1", title: "Book", authorId: "a1" }],
+		};
+		const db = await createEngineDatabase(config, initialData);
+		try {
+			for (const select of [["id"], { id: true }] as const) {
+				const direct = Array.from(
+					await Effect.runPromise(
+						Effect.gen(function* () {
+							const authors = yield* Ref.make(
+								new Map(initialData.authors.map((row) => [row.id, row])),
+							);
+							const books = yield* Ref.make(
+								new Map(initialData.books.map((row) => [row.id, row])),
+							);
+							return yield* Stream.runCollect(
+								Stream.fromIterable(initialData.books).pipe(
+									applyPopulate(
+										{ author: { select } } as never,
+										{ authors, books },
+										config as never,
+										"books",
+									),
+								),
+							);
+						}),
+					),
+				);
+				const wasm = (await db.books.query({
+					populate: { author: { select } },
+				} as never)) as unknown as Array<Record<string, unknown>>;
+				expect(wasm).toEqual(direct);
+				expect(wasm[0]?.author).toEqual({ id: "a1", name: "Alice" });
+			}
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("keeps populated targets transaction-local and synchronizes them on commit", async () => {
+		const LinkedBookSchema = Schema.Struct({
+			id: Schema.String,
+			title: Schema.String,
+			authorId: Schema.String,
+		});
+		const db = await createEngineDatabase(
+			{
+				authors: { schema: AuthorSchema, relationships: {} },
+				books: {
+					schema: LinkedBookSchema,
+					relationships: {
+						author: {
+							type: "ref" as const,
+							target: "authors",
+							foreignKey: "authorId",
+						},
+					},
+				},
+			} as const,
+			{
+				authors: [{ id: "u1", name: "Before" }],
+				books: [{ id: "b1", title: "One", authorId: "u1" }],
+			},
+		);
+		try {
+			await db.$transaction(async (tx) => {
+				const rows = (await tx.books.query({
+					populate: { author: true },
+				} as never)) as unknown as Array<Record<string, unknown>>;
+				const author = rows[0]?.author as { name: string };
+				expect(author).toBe(await tx.authors.findById("u1"));
+				author.name = "Committed";
+				expect(
+					(
+						(await tx.books.query({
+							populate: { author: true },
+						} as never)) as unknown as Array<Record<string, unknown>>
+					)[0]?.author,
+				).toBe(author);
+			});
+			expect((await db.authors.findById("u1"))?.name).toBe("Committed");
+
+			const failure = new Error("rollback populate");
+			await expect(
+				db.$transaction(async (tx) => {
+					const rows = (await tx.books.query({
+						populate: { author: true },
+					} as never)) as unknown as Array<Record<string, unknown>>;
+					(rows[0]?.author as { name: string }).name = "Rolled back";
+					throw failure;
+				}),
+			).rejects.toBe(failure);
+			expect((await db.authors.findById("u1"))?.name).toBe("Committed");
 		} finally {
 			await db.close();
 		}

@@ -26,7 +26,7 @@ unicode-ident = "1"
 
 [profile.wasm-production]
 inherits = "release"
-opt-level = 3
+opt-level = 2
 lto = "fat"
 codegen-units = 1
 panic = "unwind"

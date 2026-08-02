@@ -329,6 +329,145 @@ pub fn decode_value(schema: &SchemaNode, value: &Value) -> Result<Value, EngineE
     decode_at(schema, value, "(root)")
 }
 
+/// Decode an owned boundary value while reusing its strings, arrays and object
+/// fields. Batch creation has no caller-visible copy of the decoded input, so
+/// moving the payload avoids a complete clone per entity without changing
+/// schema decode semantics.
+pub fn decode_owned_value(schema: &SchemaNode, value: Value) -> Result<Value, EngineError> {
+    decode_owned_at(schema, value, "(root)")
+}
+
+fn decode_owned_at(schema: &SchemaNode, value: Value, path: &str) -> Result<Value, EngineError> {
+    match schema {
+        SchemaNode::Struct { fields } => {
+            let Value::Object(mut object) = value else {
+                return Err(type_mismatch(path, "object", &value));
+            };
+            let mut decoded = JsonMap::with_capacity(fields.len());
+            let mut issues = Vec::new();
+            for field in fields {
+                let nested_field_path =
+                    (path != "(root)").then(|| format!("{path}.{}", field.name));
+                let field_path = nested_field_path.as_deref().unwrap_or(field.name.as_str());
+                let optional = matches!(
+                    field.schema,
+                    SchemaNode::Optional(_) | SchemaNode::OptionalWithDefault { .. }
+                );
+                let Some(field_value) = object.remove(&field.name) else {
+                    if !optional {
+                        issues.push(ValidationIssue {
+                            field: field_path.to_owned(),
+                            message: format!("Missing key or index \"{}\"", field.name),
+                            value: None,
+                            expected: None,
+                            received: Some("missing".into()),
+                        });
+                    }
+                    continue;
+                };
+                let field_schema = match &field.schema {
+                    SchemaNode::Optional(inner) | SchemaNode::OptionalWithDefault { inner, .. } => {
+                        inner.as_ref()
+                    }
+                    other => other,
+                };
+                match decode_owned_at(field_schema, field_value, field_path) {
+                    Ok(value) => {
+                        decoded.insert(field.name.clone(), value);
+                    }
+                    Err(EngineError::Validation(error)) => issues.extend(error.issues),
+                    Err(error) => return Err(error),
+                }
+            }
+            if issues.is_empty() {
+                Ok(Value::Object(decoded))
+            } else {
+                Err(EngineError::Validation(ValidationError {
+                    message: format!("{} decoding issue(s)", issues.len()),
+                    issues,
+                }))
+            }
+        }
+        SchemaNode::Array { item } => {
+            let Value::Array(values) = value else {
+                return Err(type_mismatch(path, "array", &value));
+            };
+            let mut decoded = Vec::with_capacity(values.len());
+            let mut issues = Vec::new();
+            for (index, value) in values.into_iter().enumerate() {
+                match decode_owned_at(item, value, &format!("{path}[{index}]")) {
+                    Ok(value) => decoded.push(value),
+                    Err(EngineError::Validation(error)) => issues.extend(error.issues),
+                    Err(error) => return Err(error),
+                }
+            }
+            if issues.is_empty() {
+                Ok(Value::Array(decoded))
+            } else {
+                Err(EngineError::Validation(ValidationError {
+                    message: format!("{} array element(s) failed decoding", issues.len()),
+                    issues,
+                }))
+            }
+        }
+        SchemaNode::Record { value: schema, .. } => {
+            let Value::Object(values) = value else {
+                return Err(type_mismatch(path, "object", &value));
+            };
+            let mut decoded = JsonMap::with_capacity(values.len());
+            let mut issues = Vec::new();
+            for (key, value) in values {
+                match decode_owned_at(schema, value, &format!("{path}.{key}")) {
+                    Ok(value) => {
+                        decoded.insert(key, value);
+                    }
+                    Err(EngineError::Validation(error)) => issues.extend(error.issues),
+                    Err(error) => return Err(error),
+                }
+            }
+            if issues.is_empty() {
+                Ok(Value::Object(decoded))
+            } else {
+                Err(EngineError::Validation(ValidationError {
+                    message: format!("{} record value(s) failed decoding", issues.len()),
+                    issues,
+                }))
+            }
+        }
+        SchemaNode::NumFromStr => match value {
+            Value::String(string) => string.parse::<f64>().map(num_from_f64).map_err(|_| {
+                EngineError::Validation(ValidationError {
+                    message: format!("Expected a numeric string at \"{path}\""),
+                    issues: vec![ValidationIssue {
+                        field: path.into(),
+                        message: format!(
+                            "Expected a string containing a number, received \"{string}\""
+                        ),
+                        value: Some(Value::String(string)),
+                        expected: Some("numeric string (encoded form for NumberFromString)".into()),
+                        received: Some("non-numeric string".into()),
+                    }],
+                })
+            }),
+            other => Err(type_mismatch(
+                path,
+                "string (encoded form for NumberFromString)",
+                &other,
+            )),
+        },
+        SchemaNode::Optional(inner) | SchemaNode::OptionalWithDefault { inner, .. } => {
+            decode_owned_at(inner, value, path)
+        }
+        SchemaNode::NullOr(inner) if value.is_null() => Ok(value),
+        SchemaNode::NullOr(inner) => decode_owned_at(inner, value, path),
+        SchemaNode::Unsupported { .. } => decode_at(schema, &value, path),
+        _ => {
+            validate_at(schema, &value, path)?;
+            Ok(value)
+        }
+    }
+}
+
 fn decode_at(schema: &SchemaNode, value: &Value, path: &str) -> Result<Value, EngineError> {
     match schema {
         SchemaNode::Unsupported { reason } => Err(EngineError::Validation(ValidationError {
@@ -627,5 +766,41 @@ fn value_kind_name(value: &Value) -> &'static str {
         Value::String(_) => "string",
         Value::Array(_) => "array",
         Value::Object(_) => "object",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::descriptor::StructField;
+
+    #[test]
+    fn owned_struct_decode_preserves_borrowed_tagged_validation_error() {
+        let schema = SchemaNode::Struct {
+            fields: vec![
+                StructField {
+                    name: "id".into(),
+                    schema: SchemaNode::Str,
+                },
+                StructField {
+                    name: "count".into(),
+                    schema: SchemaNode::Num,
+                },
+            ],
+        };
+        let input = json!({"id": 42, "count": "nope"});
+        let borrowed = decode_value(&schema, &input).expect_err("borrowed decode must fail");
+        let owned = decode_owned_value(&schema, input).expect_err("owned decode must fail");
+
+        assert_eq!(
+            serde_json::to_value(&owned).unwrap(),
+            serde_json::to_value(&borrowed).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&owned).unwrap()["message"],
+            "2 decoding issue(s)"
+        );
     }
 }

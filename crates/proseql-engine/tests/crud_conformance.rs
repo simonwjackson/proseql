@@ -886,6 +886,30 @@ fn create_many_creates_all_entities_atomically() {
 }
 
 #[test]
+fn create_many_owned_decode_preserves_single_create_tagged_validation_error() {
+    let invalid = json!({
+        "id": "u1",
+        "name": 42,
+        "email": "a@x.com",
+        "age": "nope",
+        "companyId": "c"
+    });
+    let mut single = collection(user_schema(), SequentialGenerator::new("u"));
+    let single_error = single
+        .create(invalid.clone())
+        .expect_err("single create must fail");
+    let mut batch = collection(user_schema(), SequentialGenerator::new("u"));
+    let batch_error = batch
+        .create_many(vec![invalid], false)
+        .expect_err("createMany must fail");
+
+    assert_eq!(
+        serde_json::to_value(&batch_error).unwrap(),
+        serde_json::to_value(&single_error).unwrap()
+    );
+}
+
+#[test]
 fn create_many_without_skip_duplicates_fails_atomically() {
     let mut col = collection(user_schema(), SequentialGenerator::new("u"));
     col.create(json!({"id":"u1","name":"Existing","email":"e@x.com","age":1,"companyId":"c"}))

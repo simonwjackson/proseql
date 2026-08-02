@@ -64,7 +64,7 @@ use crate::operators::{
     deep_merge_updates, update_touches_unique_fields, validate_immutable_fields,
 };
 use crate::query::indexes::QueryIndexes;
-use crate::validator::{decode_value, js_eq, validate_value};
+use crate::validator::{decode_owned_value, decode_value, js_eq, validate_value};
 
 // ── Result types ──────────────────────────────────────────────────────────────
 
@@ -612,7 +612,7 @@ impl Collection {
     /// 9. Insert into state
     pub fn create(&mut self, input: Value) -> Result<Value, EngineError> {
         let entity = self.create_no_post_hooks(input)?;
-        self.run_after_create_entity(entity.clone());
+        self.run_after_create_entity(&entity);
         Ok(entity)
     }
 
@@ -706,9 +706,7 @@ impl Collection {
         skip_duplicates: bool,
     ) -> Result<CreateManyResult, EngineError> {
         let outcome = self.create_many_internal(inputs, skip_duplicates)?;
-        for entity in &outcome.result.created {
-            self.run_after_create_entity(entity.clone());
-        }
+        self.run_after_create_entities(&outcome.result.created);
         Ok(outcome.result)
     }
 
@@ -973,7 +971,7 @@ impl Collection {
     ) -> Result<UpsertOutcome, EngineError> {
         let outcome = self.upsert_internal(where_clause, create_data, update_data)?;
         match &outcome.post {
-            InternalUpsertPost::Created(entity) => self.run_after_create_entity(entity.clone()),
+            InternalUpsertPost::Created(entity) => self.run_after_create_entity(entity),
             InternalUpsertPost::Updated {
                 id,
                 previous,
@@ -1009,7 +1007,7 @@ impl Collection {
     ) -> Result<UpsertManyResult, EngineError> {
         let outcome = self.upsert_many_internal(inputs)?;
         for entity in &outcome.created_contexts {
-            self.run_after_create_entity(entity.clone());
+            self.run_after_create_entity(entity);
         }
         for (id, previous, validated, updates) in &outcome.updated_contexts {
             self.run_after_update_context(id, previous.clone(), validated.clone(), updates.clone());
@@ -1365,7 +1363,11 @@ impl Collection {
 
     // ── Internal helpers ─────────────────────────────────────────────────
 
-    pub(crate) fn run_after_create_entity(&self, entity: Value) {
+    pub(crate) fn run_after_create_entity(&self, entity: &Value) {
+        self.run_after_create_entities(std::slice::from_ref(entity));
+    }
+
+    pub(crate) fn run_after_create_entities(&self, entities: &[Value]) {
         let after_hook_ids = self.merged_hook_ids(
             self.callbacks.global_after_create_hooks(),
             &self.descriptor.after_create_hooks,
@@ -1374,23 +1376,28 @@ impl Collection {
             self.callbacks.global_on_change_hooks(),
             &self.descriptor.on_change_hooks,
         );
-        run_after_create_hooks(
-            &self.callbacks,
-            &after_hook_ids,
-            &AfterCreateContext {
-                operation: HookOperation::Create,
-                collection: self.name.clone(),
-                entity: entity.clone(),
-            },
-        );
-        run_on_change_hooks(
-            &self.callbacks,
-            &on_change_hook_ids,
-            &OnChangeContext::Create {
-                collection: self.name.clone(),
-                entity,
-            },
-        );
+        if after_hook_ids.is_empty() && on_change_hook_ids.is_empty() {
+            return;
+        }
+        for entity in entities {
+            run_after_create_hooks(
+                &self.callbacks,
+                &after_hook_ids,
+                &AfterCreateContext {
+                    operation: HookOperation::Create,
+                    collection: self.name.clone(),
+                    entity: entity.clone(),
+                },
+            );
+            run_on_change_hooks(
+                &self.callbacks,
+                &on_change_hook_ids,
+                &OnChangeContext::Create {
+                    collection: self.name.clone(),
+                    entity: entity.clone(),
+                },
+            );
+        }
     }
 
     pub(crate) fn run_after_delete_entity(&self, id: &str, entity: Value) {
@@ -1527,114 +1534,117 @@ impl Collection {
     ) -> Result<InternalCreateManyOutcome, EngineError> {
         let now = self.clock.now_iso();
         let mut validated_entities: Vec<Value> = Vec::with_capacity(inputs.len());
+        let mut validated_ids = HashSet::with_capacity(inputs.len());
         let mut skipped: Vec<SkippedEntry> = vec![];
         let mut batch_constraint_index: Map<String, Value> = Map::new();
+        let schema = self.descriptor.schema.clone();
+        let before_hook_ids = self.merged_hook_ids(
+            self.callbacks.global_before_create_hooks(),
+            &self.descriptor.before_create_hooks,
+        );
 
         for input in inputs {
-            let mut obj = match require_object(input.clone(), "createMany input") {
-                Ok(o) => o,
-                Err(e) => {
+            let mut obj = match input {
+                Value::Object(obj) => obj,
+                other => {
+                    let error = require_object(other.clone(), "createMany input").unwrap_err();
                     if skip_duplicates {
                         skipped.push(SkippedEntry {
-                            data: input,
-                            reason: e.to_string(),
-                        });
-                        continue;
-                    }
-                    return Err(e);
-                }
-            };
-            for name in &self.computed_field_names {
-                obj.remove(name);
-            }
-            let id = match self.resolve_id(&obj) {
-                Ok(i) => i,
-                Err(e) => {
-                    if skip_duplicates {
-                        skipped.push(SkippedEntry {
-                            data: Value::Object(obj),
-                            reason: e.to_string(),
-                        });
-                        continue;
-                    }
-                    return Err(e);
-                }
-            };
-            obj.insert("id".to_string(), Value::String(id.clone()));
-            let skip_data = Value::Object(obj.clone());
-            obj.insert("createdAt".to_string(), Value::String(now.clone()));
-            obj.insert("updatedAt".to_string(), Value::String(now.clone()));
-            let schema = self.descriptor.schema.clone();
-            if let Err(e) = self.apply_defaults(&mut obj, &schema) {
-                if skip_duplicates {
-                    skipped.push(SkippedEntry {
-                        data: skip_data,
-                        reason: e.to_string(),
-                    });
-                    continue;
-                }
-                return Err(e);
-            }
-            let entity = match self.validate_entity(Value::Object(obj.clone()), &id) {
-                Ok(e) => e,
-                Err(e) => {
-                    if skip_duplicates {
-                        let reason = match &e {
-                            EngineError::Validation(v) => {
-                                let first_msg = v
-                                    .issues
-                                    .first()
-                                    .map(|i| i.message.clone())
-                                    .unwrap_or_else(|| v.message.clone());
-                                format!("Validation failed: {first_msg}")
-                            }
-                            other => format!("Validation failed: {other}"),
-                        };
-                        skipped.push(SkippedEntry {
-                            data: skip_data,
-                            reason,
-                        });
-                        continue;
-                    }
-                    return Err(e);
-                }
-            };
-            let before_hook_ids = self.merged_hook_ids(
-                self.callbacks.global_before_create_hooks(),
-                &self.descriptor.before_create_hooks,
-            );
-            let entity = match run_before_create_hooks(
-                &self.callbacks,
-                &before_hook_ids,
-                BeforeCreateContext {
-                    operation: HookOperation::Create,
-                    collection: self.name.clone(),
-                    data: entity,
-                },
-            ) {
-                Ok(entity) => entity,
-                Err(error) => {
-                    if skip_duplicates {
-                        skipped.push(SkippedEntry {
-                            data: skip_data,
-                            reason: format!("Hook rejected: {error}"),
+                            data: other,
+                            reason: error.to_string(),
                         });
                         continue;
                     }
                     return Err(error);
                 }
             };
-            if self.state.contains_key(&id)
-                || validated_entities
-                    .iter()
-                    .any(|e| e["id"].as_str() == Some(&id))
-            {
+            for name in &self.computed_field_names {
+                obj.remove(name);
+            }
+            let id = match self.resolve_id(&obj) {
+                Ok(id) => id,
+                Err(error) => {
+                    if skip_duplicates {
+                        skipped.push(SkippedEntry {
+                            data: Value::Object(obj),
+                            reason: error.to_string(),
+                        });
+                        continue;
+                    }
+                    return Err(error);
+                }
+            };
+            obj.insert("id".to_string(), Value::String(id.clone()));
+            let skip_data = skip_duplicates.then(|| Value::Object(obj.clone()));
+            obj.insert("createdAt".to_string(), Value::String(now.clone()));
+            obj.insert("updatedAt".to_string(), Value::String(now.clone()));
+            if let Err(error) = self.apply_defaults(&mut obj, &schema) {
+                if skip_duplicates {
+                    skipped.push(SkippedEntry {
+                        data: skip_data.expect("skip data exists"),
+                        reason: error.to_string(),
+                    });
+                    continue;
+                }
+                return Err(error);
+            }
+            let entity = match self.validate_entity_owned(Value::Object(obj), &id) {
+                Ok(entity) => entity,
+                Err(error) => {
+                    if skip_duplicates {
+                        let reason = match &error {
+                            EngineError::Validation(validation) => {
+                                let first_message = validation
+                                    .issues
+                                    .first()
+                                    .map(|issue| issue.message.clone())
+                                    .unwrap_or_else(|| validation.message.clone());
+                                format!("Validation failed: {first_message}")
+                            }
+                            other => format!("Validation failed: {other}"),
+                        };
+                        skipped.push(SkippedEntry {
+                            data: skip_data.expect("skip data exists"),
+                            reason,
+                        });
+                        continue;
+                    }
+                    return Err(error);
+                }
+            };
+            let entity = if before_hook_ids.is_empty() {
+                entity
+            } else {
+                match run_before_create_hooks(
+                    &self.callbacks,
+                    &before_hook_ids,
+                    BeforeCreateContext {
+                        operation: HookOperation::Create,
+                        collection: self.name.clone(),
+                        data: entity,
+                    },
+                ) {
+                    Ok(entity) => entity,
+                    Err(error) => {
+                        if skip_duplicates {
+                            skipped.push(SkippedEntry {
+                                data: skip_data.expect("skip data exists"),
+                                reason: format!("Hook rejected: {error}"),
+                            });
+                            continue;
+                        }
+                        return Err(error);
+                    }
+                }
+            };
+            let state_contains_id = self.state.contains_key(&id);
+            if state_contains_id || validated_ids.contains(&id) {
                 let error = EngineError::DuplicateKey(Box::new(DuplicateKeyError {
                     collection: self.name.clone(),
                     field: "id".to_string(),
                     value: id.clone(),
                     existing_id: id.clone(),
-                    message: if self.state.contains_key(&id) {
+                    message: if state_contains_id {
                         format!("Duplicate value for field 'id': \"{id}\"")
                     } else {
                         format!("Duplicate value for field 'id': \"{id}\" (in batch)")
@@ -1642,42 +1652,45 @@ impl Collection {
                 }));
                 if skip_duplicates {
                     skipped.push(SkippedEntry {
-                        data: skip_data,
+                        data: skip_data.expect("skip data exists"),
                         reason: format!("Duplicate ID: {id}"),
                     });
                     continue;
                 }
                 return Err(error);
             }
-            if let Err(e) =
-                self.check_unique_constraints_with_batch(&entity, None, &batch_constraint_index)
-            {
-                if skip_duplicates {
-                    let reason = match &e {
-                        EngineError::UniqueConstraint(uc) => {
-                            format!("Unique constraint violation: {}", uc.message)
-                        }
-                        other => format!("Unique constraint violation: {other}"),
-                    };
-                    skipped.push(SkippedEntry {
-                        data: entity,
-                        reason,
-                    });
-                    continue;
+            if !self.descriptor.unique_fields.is_empty() {
+                if let Err(error) =
+                    self.check_unique_constraints_with_batch(&entity, None, &batch_constraint_index)
+                {
+                    if skip_duplicates {
+                        let reason = match &error {
+                            EngineError::UniqueConstraint(unique) => {
+                                format!("Unique constraint violation: {}", unique.message)
+                            }
+                            other => format!("Unique constraint violation: {other}"),
+                        };
+                        skipped.push(SkippedEntry {
+                            data: entity,
+                            reason,
+                        });
+                        continue;
+                    }
+                    return Err(error);
                 }
-                return Err(e);
+                self.add_to_batch_constraint_index(&entity, &mut batch_constraint_index);
             }
-            self.add_to_batch_constraint_index(&entity, &mut batch_constraint_index);
+            validated_ids.insert(id);
             validated_entities.push(entity);
         }
 
-        let created: Vec<Value> = validated_entities.clone();
+        let created = validated_entities;
         if !created.is_empty() {
             self.validate_post_hook_registrations(HookOperation::Create)?;
         }
-        for entity in validated_entities {
+        for entity in &created {
             let id = entity["id"].as_str().unwrap_or_default().to_string();
-            self.insert_state(id, entity);
+            self.insert_state(id, entity.clone());
         }
         Ok(InternalCreateManyOutcome {
             result: CreateManyResult { created, skipped },
@@ -2116,6 +2129,17 @@ impl Collection {
             Ok(Value::Object(obj))
         } else {
             decode_value(&self.descriptor.schema, &entity)
+        }
+    }
+
+    fn validate_entity_owned(&self, entity: Value, id: &str) -> Result<Value, EngineError> {
+        if matches!(self.descriptor.id_strategy, IdStrategy::DerivedFromKey) {
+            let decoded = decode_owned_value(&self.descriptor.schema, strip_id_field(entity))?;
+            let mut object = decoded.as_object().cloned().unwrap_or_default();
+            object.insert("id".to_owned(), Value::String(id.to_owned()));
+            Ok(Value::Object(object))
+        } else {
+            decode_owned_value(&self.descriptor.schema, entity)
         }
     }
 

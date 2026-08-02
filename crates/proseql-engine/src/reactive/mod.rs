@@ -1849,7 +1849,7 @@ impl Database {
             .create_many_internal(inputs, skip_duplicates)?;
         let mut result = internal.result;
 
-        if skip_duplicates {
+        if skip_duplicates && !relationships.is_empty() {
             let mut valid_created: Vec<Value> = Vec::new();
             let mut invalid_entities: Vec<Value> = Vec::new();
             for entity in result.created {
@@ -1876,28 +1876,28 @@ impl Database {
                 }
             }
             result.created = valid_created;
-        } else if let Some(error) = result.created.iter().find_map(|entity| {
-            validate_fk_with_owner_ids(
-                collection,
-                &relationships,
-                entity,
-                &owner_ids,
-                &self.collections,
-            )
-            .err()
-        }) {
-            if let Some(owner) = self.collections.get_mut(collection) {
-                for entity in result.created.iter().rev() {
-                    owner.rollback_created_entity(entity);
+        } else if !relationships.is_empty() {
+            if let Some(error) = result.created.iter().find_map(|entity| {
+                validate_fk_with_owner_ids(
+                    collection,
+                    &relationships,
+                    entity,
+                    &owner_ids,
+                    &self.collections,
+                )
+                .err()
+            }) {
+                if let Some(owner) = self.collections.get_mut(collection) {
+                    for entity in result.created.iter().rev() {
+                        owner.rollback_created_entity(entity);
+                    }
                 }
+                return Err(error);
             }
-            return Err(error);
         }
 
         if let Some(owner) = self.collections.get(collection) {
-            for entity in &result.created {
-                owner.run_after_create_entity(entity.clone());
-            }
+            owner.run_after_create_entities(&result.created);
         }
         self.sync_reactive_snapshots();
         if !result.created.is_empty() {
@@ -2071,7 +2071,7 @@ impl Database {
         if let Some(owner) = self.collections.get(collection) {
             match &internal.post {
                 crate::collection::InternalUpsertPost::Created(entity) => {
-                    owner.run_after_create_entity(entity.clone())
+                    owner.run_after_create_entity(entity)
                 }
                 crate::collection::InternalUpsertPost::Updated {
                     id,
@@ -2184,7 +2184,7 @@ impl Database {
 
         if let Some(owner) = self.collections.get(collection) {
             for entity in &internal.created_contexts {
-                owner.run_after_create_entity(entity.clone());
+                owner.run_after_create_entity(entity);
             }
             for (id, previous, current, updates) in &internal.updated_contexts {
                 owner.run_after_update_context(

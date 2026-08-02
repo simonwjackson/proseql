@@ -599,11 +599,7 @@ const shouldProjectRead = (method: string, prepared: unknown) => {
 		typeof where === "object" &&
 		where !== null &&
 		Object.hasOwn(where, "$search");
-	return (
-		command.query?.select === undefined &&
-		command.populate === undefined &&
-		!hasTopLevelSearch
-	);
+	return command.query?.select === undefined && !hasTopLevelSearch;
 };
 const matchesDeletionResultMethod = (method: string) =>
 	method === "delete" ||
@@ -1441,6 +1437,28 @@ class EngineRuntime {
 		const ownerChanges = sync.changes.filter(
 			(change) => change.collection === collection,
 		);
+		if (
+			method === "createMany" &&
+			typeof value === "object" &&
+			value !== null &&
+			Array.isArray((value as { readonly created?: unknown }).created) &&
+			(value as { readonly created: ReadonlyArray<unknown> }).created.length ===
+				ownerChanges.length &&
+			ownerChanges.every((change) => !change.deleted)
+		) {
+			const record = value as {
+				created: ReadonlyArray<unknown>;
+				skipped?: ReadonlyArray<unknown>;
+			};
+			const created = record.created.map((row, index) => {
+				const change = ownerChanges[index]!;
+				return (
+					projection.cacheAuthoritativeValue(collection, change.id, row)?.value ??
+					row
+				);
+			});
+			return { ...record, created } as T;
+		}
 		const claimedChanges = new Set<number>();
 		const rowId = (row: unknown) =>
 			typeof row === "object" &&
@@ -1559,15 +1577,15 @@ class EngineRuntime {
 					? undefined
 					: priorMaterialized.get(preparedId)) ?? value;
 		} else if (
-			typeof value === "object" &&
-			value !== null &&
+			typeof result === "object" &&
+			result !== null &&
 			(method === "createMany" ||
 				method === "updateMany" ||
 				method === "deleteMany" ||
 				method === "upsertMany" ||
 				method === "deleteManyWithRelationships")
 		) {
-			const record = value as Record<string, unknown>;
+			const record = result as Record<string, unknown>;
 			for (const field of [
 				"created",
 				"updated",
@@ -2333,7 +2351,13 @@ function reorderSelectedValue(
 		const record = value as Record<string, unknown>;
 		const ordered: Record<string, unknown> = {};
 		for (const key of select) {
-			if (typeof key === "string" && key in record) ordered[key] = record[key];
+			if (typeof key !== "string" || !Object.hasOwn(record, key)) continue;
+			Object.defineProperty(ordered, key, {
+				value: record[key],
+				enumerable: true,
+				writable: true,
+				configurable: true,
+			});
 		}
 		return ordered;
 	}
@@ -2342,22 +2366,32 @@ function reorderSelectedValue(
 	const record = value as Record<string, unknown>;
 	const ordered: Record<string, unknown> = {};
 	for (const [key, nestedSelect] of Object.entries(select)) {
-		if (!(key in record)) continue;
+		if (!Object.hasOwn(record, key)) continue;
 		const current = record[key];
+		let selected: unknown;
 		if (nestedSelect && typeof nestedSelect === "object") {
-			if (Array.isArray(current)) {
-				ordered[key] = current.map((item) =>
-					reorderSelectedValue(item, nestedSelect as Record<string, unknown>),
-				);
-			} else {
-				ordered[key] = reorderSelectedValue(
-					current,
-					nestedSelect as Record<string, unknown>,
-				);
-			}
+			selected = Array.isArray(current)
+				? current.map((item) =>
+						reorderSelectedValue(
+							item,
+							nestedSelect as Record<string, unknown>,
+						),
+					)
+				: reorderSelectedValue(
+						current,
+						nestedSelect as Record<string, unknown>,
+					);
 		} else if (nestedSelect === true) {
-			ordered[key] = current;
+			selected = current;
+		} else {
+			continue;
 		}
+		Object.defineProperty(ordered, key, {
+			value: selected,
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
 	}
 	return ordered;
 }

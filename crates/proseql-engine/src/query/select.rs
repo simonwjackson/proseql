@@ -110,10 +110,12 @@ fn apply_object_selection(entity: &Value, sel: &Map<String, Value>) -> Value {
                 if let Some(field_value) = obj.get(key) {
                     match field_value {
                         Value::Array(arr) => {
-                            // Apply nested selection to each array element
+                            // TypeScript filters non-record array members before nested
+                            // selection (`nestedData.filter(isRecord).map(...)`).
                             let selected: Vec<Value> = arr
                                 .iter()
-                                .map(|elem| apply_object_selection(elem, nested_sel))
+                                .filter(|element| element.is_object())
+                                .map(|element| apply_object_selection(element, nested_sel))
                                 .collect();
                             result.insert(key.clone(), Value::Array(selected));
                         }

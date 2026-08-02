@@ -593,13 +593,12 @@ fn populate_ref_absent_when_not_requested() {
     assert_eq!(post1["authorId"], "user1");
 }
 
-/// When the FK is null, the populated relationship field must also be null
-/// (absent / JSON null) — NOT a ForeignKeyError.
+/// When the FK is null, population assigns an explicit own `undefined`
+/// relationship field — NOT a ForeignKeyError.
 ///
 /// TS: `findRelatedItem` returns undefined → `Object.assign(populated, { [key]: undefined })`.
-/// In JSON serialization `undefined` fields are omitted, so the key is absent.
 #[test]
-fn populate_ref_null_fk_gives_absent_populated_field() {
+fn populate_ref_null_fk_gives_explicit_undefined_populated_field() {
     let mut db = seeded_db();
 
     db.create(
@@ -620,11 +619,12 @@ fn populate_ref_null_fk_gives_absent_populated_field() {
         .expect("query");
 
     let post = results.first().expect("one result");
-    // When FK is null, populated key is either absent or null — NOT an entity object
-    let author_field = post.get("author");
+    let author_field = post
+        .get("author")
+        .expect("Object.assign creates an own relationship field");
     assert!(
-        matches!(author_field, None | Some(Value::Null)),
-        "expected absent or null, got: {author_field:?}"
+        proseql_engine::value::is_boundary_undefined(author_field),
+        "expected boundary undefined, got: {author_field:?}"
     );
 }
 
@@ -697,6 +697,125 @@ fn populate_dangling_ref_is_dangling_reference_error() {
         }
         other => panic!("expected DanglingReferenceError, got {other:?}"),
     }
+}
+
+#[test]
+fn relation_local_populate_selection_is_ignored_like_typescript() {
+    let db = seeded_db();
+    for select in [json!(["id"]), json!({"id": true})] {
+        let rows = db
+            .query(
+                "posts",
+                QueryInput {
+                    r#where: Some(json!({ "id": "post1" })),
+                    ..QueryInput::default()
+                },
+                Some(json!({ "author": { "select": select } })),
+            )
+            .expect("relation-local selection query");
+        assert_eq!(
+            rows[0]["author"],
+            json!({
+                "id": "user1",
+                "name": "Alice",
+                "email": "alice@example.com",
+                "companyId": "comp1",
+                "createdAt": "2024-01-01T00:00:00.000Z",
+                "updatedAt": "2024-01-01T00:00:00.000Z"
+            })
+        );
+    }
+}
+
+#[test]
+fn populate_with_empty_selection_keeps_populated_fields() {
+    let db = seeded_db();
+    for select in [json!([]), json!({})] {
+        let rows = db
+            .query(
+                "posts",
+                QueryInput {
+                    r#where: Some(json!({ "id": "post1" })),
+                    select: Some(select),
+                    ..QueryInput::default()
+                },
+                Some(json!({ "author": true })),
+            )
+            .expect("empty selection means all fields");
+        assert_eq!(rows[0]["author"]["id"], json!("user1"));
+    }
+}
+
+#[test]
+fn populate_validates_filtered_out_rows_before_query_pipeline() {
+    let mut db = seeded_db();
+    db.delete("users", "user1").expect("delete user1");
+
+    let error = db
+        .query(
+            "posts",
+            QueryInput {
+                r#where: Some(json!({ "id": "post3" })),
+                ..QueryInput::default()
+            },
+            Some(json!({ "author": true })),
+        )
+        .expect_err("population must inspect dangling rows before filtering");
+
+    assert!(matches!(error, EngineError::DanglingReference(_)));
+}
+
+#[test]
+fn populated_fields_drive_where_sort_search_and_nested_dependencies() {
+    let db = seeded_db();
+    let populate = Some(json!({ "author": { "company": true } }));
+
+    let filtered = db
+        .query(
+            "posts",
+            QueryInput {
+                r#where: Some(json!({ "author.company.name": "TechCorp" })),
+                ..QueryInput::default()
+            },
+            populate.clone(),
+        )
+        .expect("nested populated where");
+    assert_eq!(filtered.len(), 3);
+
+    let sorted = db
+        .query(
+            "posts",
+            QueryInput {
+                sort: vec![(
+                    "author.name".to_owned(),
+                    proseql_engine::query::SortOrder::Desc,
+                )],
+                ..QueryInput::default()
+            },
+            populate.clone(),
+        )
+        .expect("populated sort");
+    assert_eq!(sorted[0]["author"]["name"], json!("Bob"));
+
+    let searched = db
+        .query(
+            "posts",
+            QueryInput {
+                r#where: Some(json!({
+                    "$search": { "query": "Alice", "fields": ["author.name"] }
+                })),
+                ..QueryInput::default()
+            },
+            populate,
+        )
+        .expect("populated search");
+    assert_eq!(
+        searched
+            .iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["post1", "post2"]
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -829,6 +948,51 @@ fn populate_inverse_then_select_projects_each_item() {
             post.get("authorId").is_none(),
             "authorId was not selected: {post}"
         );
+    }
+}
+
+#[test]
+fn nested_population_selection_projects_inverse_arrays_and_omits_ids() {
+    let db = seeded_db();
+    let nested_employee_select = serde_json::Map::from_iter([
+        ("posts".to_owned(), json!({ "title": true })),
+        ("name".to_owned(), Value::Bool(true)),
+    ]);
+    let select = Value::Object(serde_json::Map::from_iter([
+        (
+            "employees".to_owned(),
+            Value::Object(nested_employee_select),
+        ),
+        ("name".to_owned(), Value::Bool(true)),
+    ]));
+    let rows = db
+        .query(
+            "companies",
+            QueryInput {
+                r#where: Some(json!({ "id": "comp1" })),
+                select: Some(select),
+                ..QueryInput::default()
+            },
+            Some(json!({ "employees": { "posts": true } })),
+        )
+        .expect("nested population then selection");
+
+    let company = rows.first().expect("company");
+    assert_eq!(
+        company.as_object().unwrap().keys().collect::<Vec<_>>(),
+        vec!["employees", "name"]
+    );
+    let employee = company["employees"].as_array().unwrap().first().unwrap();
+    assert_eq!(employee.as_object().unwrap().len(), 2);
+    assert!(employee.get("name").is_some());
+    assert!(employee.get("posts").is_some());
+    assert!(employee.get("id").is_none());
+    for post in employee["posts"].as_array().unwrap() {
+        assert_eq!(
+            post.as_object().unwrap().keys().collect::<Vec<_>>(),
+            vec!["title"]
+        );
+        assert!(post.get("id").is_none());
     }
 }
 

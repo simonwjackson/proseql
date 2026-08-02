@@ -99,25 +99,57 @@ export const encodeBoundaryValueForWire = (value: unknown): unknown => {
 		return encodeFloat64(value);
 	}
 	if (Array.isArray(value)) {
-		return Array.from({ length: value.length }, (_, index) =>
-			index in value
-				? encodeBoundaryValueForWire(value[index])
-				: { [ARRAY_HOLE_SENTINEL_KEY]: 1 },
-		);
+		let encoded: unknown[] | undefined;
+		for (let index = 0; index < value.length; index += 1) {
+			const item =
+				index in value
+					? encodeBoundaryValueForWire(value[index])
+					: { [ARRAY_HOLE_SENTINEL_KEY]: 1 };
+			if (encoded !== undefined) {
+				encoded.push(item);
+			} else if (!(index in value) || item !== value[index]) {
+				encoded = value.slice(0, index);
+				encoded.push(item);
+			}
+		}
+		return encoded ?? value;
 	}
 	if (!isObject(value)) {
 		return value;
 	}
-	const encodedEntries = encodeObjectEntries(value);
-	const encodedObject = Object.fromEntries(encodedEntries);
-	if (
-		hasReservedBoundaryKey(value) ||
-		isEncodedUndefinedSentinel(encodedObject) ||
-		isEncodedEscapedEntries(encodedObject)
-	) {
-		return { [ESCAPED_SENTINEL_KEY]: encodedEntries };
+	if (hasReservedBoundaryKey(value)) {
+		return { [ESCAPED_SENTINEL_KEY]: encodeObjectEntries(value) };
 	}
-	return encodedObject;
+	let encoded: BoundaryObject | undefined;
+	for (const [key, original] of Object.entries(value)) {
+		const item = encodeBoundaryValueForWire(original);
+		if (encoded !== undefined) {
+			Object.defineProperty(encoded, key, {
+				value: item,
+				enumerable: true,
+				writable: true,
+				configurable: true,
+			});
+		} else if (item !== original) {
+			encoded = {};
+			for (const priorKey of Object.keys(value)) {
+				if (priorKey === key) break;
+				Object.defineProperty(encoded, priorKey, {
+					value: value[priorKey],
+					enumerable: true,
+					writable: true,
+					configurable: true,
+				});
+			}
+			Object.defineProperty(encoded, key, {
+				value: item,
+				enumerable: true,
+				writable: true,
+				configurable: true,
+			});
+		}
+	}
+	return encoded ?? value;
 };
 
 const decodeBoundaryValue = (value: unknown): unknown => {

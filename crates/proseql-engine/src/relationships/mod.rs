@@ -82,8 +82,11 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use self::helpers::{col_nf, fk_field_names, payload_touches_fk_field, validate_fk};
-use self::populate::apply_populate;
+use self::helpers::{
+    col_nf, fk_field_names, payload_touches_fk_field, ref_fk, resolve_inv_fk_population,
+    validate_fk,
+};
+use self::populate::{apply_populate_borrowed, validate_populate_borrowed};
 use crate::callbacks::CallbackRegistry;
 use crate::change_set::ChangeSet;
 use crate::collection::Collection;
@@ -170,6 +173,101 @@ pub struct DeleteRelationshipsOptions {
     /// Per-relationship cascade behaviour.
     /// Relationships absent from this map default to [`CascadeOption::Preserve`].
     pub include: HashMap<String, CascadeOption>,
+}
+
+fn populated_relationship_names(collection: &Collection, populate: &Value) -> Vec<String> {
+    let Some(config) = populate.as_object() else {
+        return Vec::new();
+    };
+    collection
+        .descriptor
+        .relationships
+        .iter()
+        .filter(|(name, _)| config.contains_key(name))
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
+fn query_uses_populated_fields(input: &QueryInput, names: &[String]) -> bool {
+    input
+        .r#where
+        .as_ref()
+        .is_some_and(|where_clause| where_uses_populated_fields(where_clause, names))
+        || input.sort.iter().any(|(field, _)| {
+            field
+                .split('.')
+                .next()
+                .is_some_and(|field| names.iter().any(|name| name == field))
+        })
+        || input.cursor.as_ref().is_some_and(|cursor| {
+            cursor
+                .key
+                .split('.')
+                .next()
+                .is_some_and(|field| names.iter().any(|name| name == field))
+        })
+}
+
+fn path_uses_populated_field(path: &str, names: &[String]) -> bool {
+    path.split('.')
+        .next()
+        .is_some_and(|field| names.iter().any(|name| name == field))
+}
+
+fn search_uses_populated_fields(value: &Value, names: &[String]) -> bool {
+    let Some(search) = value.as_object() else {
+        return false;
+    };
+    match search.get("fields") {
+        Some(Value::Array(fields)) => fields
+            .iter()
+            .filter_map(Value::as_str)
+            .any(|field| path_uses_populated_field(field, names)),
+        // Default search inspects every top-level string after population. A
+        // relationship can overwrite a stored scalar with an object/array, so
+        // deferring population would change both matching and score metadata.
+        None => true,
+        Some(_) => true,
+    }
+}
+
+fn where_uses_populated_fields(value: &Value, names: &[String]) -> bool {
+    match value {
+        Value::Array(values) => values
+            .iter()
+            .any(|value| where_uses_populated_fields(value, names)),
+        Value::Object(fields) => fields.iter().any(|(field, value)| {
+            if field == "$search" {
+                search_uses_populated_fields(value, names)
+            } else if field.starts_with('$') {
+                where_uses_populated_fields(value, names)
+            } else {
+                path_uses_populated_field(field, names) || where_uses_populated_fields(value, names)
+            }
+        }),
+        _ => false,
+    }
+}
+
+fn selection_uses_populated_fields(select: &Value, names: &[String]) -> bool {
+    match select {
+        Value::String(_) | Value::Null | Value::Bool(_) | Value::Number(_) => true,
+        Value::Array(fields) => {
+            fields.is_empty()
+                || fields
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .filter_map(|field| field.split('.').next())
+                    .any(|field| names.iter().any(|name| name == field))
+        }
+        Value::Object(fields) => {
+            fields.is_empty()
+                || fields
+                    .keys()
+                    .filter_map(|field| field.split('.').next())
+                    .any(|field| names.iter().any(|name| name == field))
+        }
+    }
 }
 
 // ── Database ──────────────────────────────────────────────────────────────────
@@ -271,7 +369,7 @@ impl Database {
         }
 
         if let Some(owner) = self.collections.get(collection) {
-            owner.run_after_create_entity(entity.clone());
+            owner.run_after_create_entity(&entity);
         }
 
         self.sync_reactive_snapshots();
@@ -366,9 +464,48 @@ impl Database {
         let Some(populate_config) = populate else {
             return execute_query(col, &input, &self.registry);
         };
-        let base_entities = col.list().into_iter().cloned().collect::<Vec<_>>();
-        let populated = apply_populate(
-            base_entities,
+        let relationship_names = populated_relationship_names(col, &populate_config);
+        if !relationship_names.is_empty()
+            && col.descriptor.computed_fields.is_empty()
+            && !query_uses_populated_fields(&input, &relationship_names)
+        {
+            // TypeScript populates before the query pipeline, so validate the
+            // complete source collection first (including filtered-out rows).
+            // With no pipeline dependency on populated fields, filtering,
+            // sorting and pagination can then select the small output page
+            // before owner shells are allocated.
+            validate_populate_borrowed(
+                col.list().into_iter().collect(),
+                &populate_config,
+                collection,
+                &self.collections,
+                0,
+            )?;
+            if input
+                .select
+                .as_ref()
+                .is_some_and(|select| !selection_uses_populated_fields(select, &relationship_names))
+            {
+                return execute_query(col, &input, &self.registry);
+            }
+            let mut base_input = input.clone();
+            base_input.select = None;
+            let base = execute_query(col, &base_input, &self.registry)?;
+            let populated = apply_populate_borrowed(
+                base.iter().collect(),
+                &populate_config,
+                collection,
+                &self.collections,
+                0,
+            )?;
+            let selection_input = QueryInput {
+                select: input.select.clone(),
+                ..QueryInput::default()
+            };
+            return execute_query_over_entities(populated, &selection_input, &[], &self.registry);
+        }
+        let populated = apply_populate_borrowed(
+            col.list().into_iter().collect(),
             &populate_config,
             collection,
             &self.collections,
@@ -379,6 +516,64 @@ impl Database {
             &input,
             &col.descriptor.computed_fields,
             &self.registry,
+        )
+    }
+
+    /// Resolve the exact foreign-key field used by population. Inverse
+    /// relationships intentionally use the population-specific resolver rather
+    /// than the CRUD fallback.
+    pub fn population_foreign_key(&self, collection: &str, relationship: &str) -> Option<String> {
+        let source = self.collections.get(collection)?;
+        let descriptor = source
+            .descriptor
+            .relationships
+            .iter()
+            .find(|(name, _)| name == relationship)?
+            .1
+            .clone();
+        Some(match descriptor.kind {
+            crate::descriptor::RelationshipKind::Ref => {
+                ref_fk(relationship, &descriptor.foreign_key)
+            }
+            crate::descriptor::RelationshipKind::Inverse => {
+                resolve_inv_fk_population(&descriptor, collection, &self.collections)
+            }
+        })
+    }
+
+    /// Validate population in TypeScript order, then execute a query whose
+    /// pipeline does not inspect populated fields over canonical source rows.
+    /// WASM uses this to author compact relationship descriptors without first
+    /// cloning the populated object graph.
+    pub fn query_positions_after_population_validation(
+        &self,
+        collection: &str,
+        input: &QueryInput,
+        populate: &Value,
+    ) -> Result<Option<Vec<usize>>, EngineError> {
+        let rows = self
+            .collections
+            .get(collection)
+            .ok_or_else(|| col_nf(collection))?;
+        let names = populated_relationship_names(rows, populate);
+        if names.is_empty()
+            || !rows.descriptor.computed_fields.is_empty()
+            || query_uses_populated_fields(input, &names)
+        {
+            return Ok(None);
+        }
+        validate_populate_borrowed(
+            rows.list().into_iter().collect(),
+            populate,
+            collection,
+            &self.collections,
+            0,
+        )?;
+        crate::query::pipeline::execute_canonical_query_positions(
+            rows,
+            input,
+            &self.registry,
+            false,
         )
     }
 
@@ -468,9 +663,8 @@ impl Database {
         let Some(populate_config) = populate else {
             return execute_cursor_query(col, input, cursor_cfg, &self.registry);
         };
-        let base_entities = col.list().into_iter().cloned().collect::<Vec<_>>();
-        let populated = apply_populate(
-            base_entities,
+        let populated = apply_populate_borrowed(
+            col.list().into_iter().collect(),
             &populate_config,
             collection,
             &self.collections,

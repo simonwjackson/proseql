@@ -1,7 +1,20 @@
 use std::collections::HashMap;
 
-use proseql_engine::{change_set::ChangeSet, relationships::Database};
+use proseql_engine::{
+    change_set::ChangeSet, descriptor::RelationshipKind, relationships::Database,
+};
 use serde_json::{json, Map, Value};
+
+type InversePostings = HashMap<(String, String), HashMap<String, Vec<String>>>;
+
+#[derive(Clone)]
+struct PopulatePlan {
+    name: String,
+    target: String,
+    foreign_key: String,
+    inverse: bool,
+    nested: Vec<PopulatePlan>,
+}
 
 #[derive(Debug, Clone)]
 struct RowSlot {
@@ -10,6 +23,84 @@ struct RowSlot {
     collection_index: u32,
     materialized: bool,
     positioned: bool,
+}
+
+fn build_populate_plan(
+    db: &Database,
+    collection: &str,
+    populate: &Value,
+    depth: usize,
+) -> Option<Vec<PopulatePlan>> {
+    let config = populate.as_object()?;
+    let descriptor = &db.collection(collection)?.descriptor;
+    let mut plan = Vec::new();
+    for (name, nested_config) in config {
+        let Some((_, relationship)) = descriptor
+            .relationships
+            .iter()
+            .find(|(relationship_name, _)| relationship_name == name)
+        else {
+            continue;
+        };
+        let nested = if depth < 5 && nested_config.is_object() {
+            build_populate_plan(db, &relationship.target, nested_config, depth + 1)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        plan.push(PopulatePlan {
+            name: name.clone(),
+            target: relationship.target.clone(),
+            foreign_key: db.population_foreign_key(collection, name)?,
+            inverse: matches!(relationship.kind, RelationshipKind::Inverse),
+            nested,
+        });
+    }
+    Some(plan)
+}
+
+fn collect_inverse_postings(
+    db: &Database,
+    plan: &[PopulatePlan],
+    postings: &mut InversePostings,
+) -> Option<()> {
+    for entry in plan {
+        if entry.inverse {
+            let key = (entry.target.clone(), entry.foreign_key.clone());
+            if let std::collections::hash_map::Entry::Vacant(posting) = postings.entry(key) {
+                let target = db.collection(&entry.target)?;
+                let mut values: HashMap<String, Vec<String>> = HashMap::new();
+                for (storage_id, row) in target.entries() {
+                    if let Some(owner_id) = row.get(&entry.foreign_key).and_then(Value::as_str) {
+                        values
+                            .entry(owner_id.to_owned())
+                            .or_default()
+                            .push(storage_id.to_owned());
+                    }
+                }
+                posting.insert(values);
+            }
+        }
+        collect_inverse_postings(db, &entry.nested, postings)?;
+    }
+    Some(())
+}
+
+fn populate_plan_value(plan: &PopulatePlan) -> Value {
+    let kind = usize::from(!plan.nested.is_empty()) | (usize::from(plan.inverse) << 1);
+    if plan.nested.is_empty() {
+        json!([plan.name, plan.target, kind])
+    } else {
+        json!([
+            plan.name,
+            plan.target,
+            kind,
+            plan.nested
+                .iter()
+                .map(populate_plan_value)
+                .collect::<Vec<_>>()
+        ])
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -123,6 +214,21 @@ impl MaterializedProjection {
         }
     }
 
+    fn descriptor_for_canonical_storage_id(
+        &mut self,
+        db: &Database,
+        collection: &str,
+        storage_id: &str,
+    ) -> Option<Value> {
+        let slot = self.find(collection, storage_id)?;
+        if self.slots[slot].materialized {
+            return Some(json!(slot));
+        }
+        let value = db.collection(collection)?.get(storage_id)?.clone();
+        self.slots[slot].materialized = true;
+        Some(json!([slot, storage_id, value]))
+    }
+
     fn descriptor_for_query_value(
         &mut self,
         db: &Database,
@@ -176,6 +282,106 @@ impl MaterializedProjection {
             descriptor["a"] = Value::Array(additions);
         }
         descriptor
+    }
+
+    pub fn describe_populated_positions(
+        &mut self,
+        db: &Database,
+        collection: &str,
+        populate: &Value,
+        positions: &[usize],
+    ) -> Option<Value> {
+        let source = db.collection(collection)?;
+        let plan = build_populate_plan(db, collection, populate, 0)?;
+        if plan.is_empty() {
+            return None;
+        }
+        let mut inverse_postings = InversePostings::new();
+        collect_inverse_postings(db, &plan, &mut inverse_postings)?;
+        let values = positions
+            .iter()
+            .map(|position| {
+                let (storage_id, _) = source.entry_at(*position)?;
+                self.describe_populated_node(db, collection, storage_id, &plan, &inverse_postings)
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(json!({
+            "k": "p",
+            "p": plan.iter().map(populate_plan_value).collect::<Vec<_>>(),
+            "r": values,
+        }))
+    }
+
+    fn describe_populated_node(
+        &mut self,
+        db: &Database,
+        collection: &str,
+        storage_id: &str,
+        plan: &[PopulatePlan],
+        inverse_postings: &InversePostings,
+    ) -> Option<Value> {
+        let rows = db.collection(collection)?;
+        let canonical = rows.get(storage_id)?;
+        // Emit the owner descriptor before walking relationships. Recursive
+        // inverse graphs can point back to this exact row; marking it first
+        // guarantees every numeric reuse has an earlier inline definition in
+        // descriptor traversal order.
+        let base = self.descriptor_for_canonical_storage_id(db, collection, storage_id)?;
+        let relationships = plan
+            .iter()
+            .map(|entry| {
+                if entry.inverse {
+                    let owner_id = canonical
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let key = (entry.target.clone(), entry.foreign_key.clone());
+                    let target_ids = inverse_postings
+                        .get(&key)
+                        .and_then(|values| values.get(owner_id))
+                        .map(Vec::as_slice)
+                        .unwrap_or_default();
+                    return target_ids
+                        .iter()
+                        .map(|target_storage_id| {
+                            if entry.nested.is_empty() {
+                                self.descriptor_for_canonical_storage_id(
+                                    db,
+                                    &entry.target,
+                                    target_storage_id,
+                                )
+                            } else {
+                                self.describe_populated_node(
+                                    db,
+                                    &entry.target,
+                                    target_storage_id,
+                                    &entry.nested,
+                                    inverse_postings,
+                                )
+                            }
+                        })
+                        .collect::<Option<Vec<_>>>()
+                        .map(Value::Array);
+                }
+                let Some(target_id) = canonical.get(&entry.foreign_key).and_then(Value::as_str)
+                else {
+                    return Some(Value::Null);
+                };
+                db.collection(&entry.target)?.get(target_id)?;
+                if entry.nested.is_empty() {
+                    self.descriptor_for_canonical_storage_id(db, &entry.target, target_id)
+                } else {
+                    self.describe_populated_node(
+                        db,
+                        &entry.target,
+                        target_id,
+                        &entry.nested,
+                        inverse_postings,
+                    )
+                }
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(json!([base, relationships]))
     }
 
     pub fn describe_result(

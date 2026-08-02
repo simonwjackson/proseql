@@ -837,6 +837,35 @@ describe("@proseql/effect", () => {
 		expect(result.books.map((book) => book.id)).toEqual(["b1"]);
 	});
 
+	it("keeps populated transaction targets canonical through the Effect adapter", async () => {
+		const db = await Effect.runPromise(
+			createEffectDatabase(config, {
+				users: [{ id: "u1", name: "Alice", age: 30, companyId: "c1" }],
+				companies: [{ id: "c1", name: "Before" }],
+				books: [],
+			}),
+		);
+		await Effect.runPromise(
+			db.$transaction((tx) =>
+				Effect.gen(function* () {
+					const rows = Array.from(
+						yield* Stream.runCollect(
+							tx.users.query({ populate: { company: true } } as never),
+						),
+					);
+					const company = (rows[0] as unknown as { company: { name: string } })
+						.company;
+					const direct = yield* tx.companies.findById("c1");
+					expect(company).toBe(direct);
+					company.name = "Committed";
+				}),
+			),
+		);
+		expect(
+			(await Effect.runPromise(db.companies.findById("c1"))).name,
+		).toBe("Committed");
+	});
+
 	it("preserves arbitrary callback errors through $transaction and rolls back", async () => {
 		const customTagged = { _tag: "CustomTransactionFailure", detail: "rollback-tag" } as const;
 		const program = Effect.gen(function* () {

@@ -17,6 +17,7 @@ use proseql_engine::reactive::{CallbackSubscription, WatchDelivery};
 use proseql_engine::relationships::Database;
 use proseql_engine::transactions::OwnedTransactionSession;
 use proseql_engine::value::{decode_boundary_input_value, encode_boundary_output_value};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::bridge;
@@ -25,6 +26,21 @@ use crate::command;
 use crate::projection::MaterializedProjection;
 use crate::reactive::{unsupported_scheduler_factory, ReactiveSchedulerFactory};
 use crate::types::{parse_json, to_query_input, CreateDatabaseInput, QueryCommand};
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct DispatchMetadata {
+    collection: Option<String>,
+    id: Option<String>,
+    #[serde(rename = "__proseqlProjectResult")]
+    project_result: Option<bool>,
+}
+
+fn dispatch_metadata(payload_json: Option<&str>) -> DispatchMetadata {
+    payload_json
+        .and_then(|payload| serde_json::from_str(payload).ok())
+        .unwrap_or_default()
+}
 
 #[cfg(target_arch = "wasm32")]
 fn fast_where_supported(value: &Value) -> bool {
@@ -340,7 +356,15 @@ impl Runtime {
         }
         let response =
             bridge::handle(|| command::dispatch(&mut self.inner, handle, method, payload_json));
-        self.finish_dispatch(handle, method, payload_json, &response);
+        let payload_collection = if matches!(
+            method,
+            "create" | "createMany" | "update" | "updateMany" | "delete" | "deleteMany"
+        ) {
+            None
+        } else {
+            dispatch_metadata(payload_json).collection
+        };
+        self.finish_dispatch(handle, method, payload_collection, &response);
         if is_mutation_method(method) {
             self.attach_projection_sync(handle, response)
         } else {
@@ -422,22 +446,14 @@ impl Runtime {
         method: &str,
         payload_json: Option<&str>,
     ) -> String {
-        let parsed_payload =
-            payload_json.and_then(|payload| serde_json::from_str::<Value>(payload).ok());
-        let collection = parsed_payload
-            .as_ref()
-            .and_then(|payload| payload.get("collection"))
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let requested_id = parsed_payload
-            .as_ref()
-            .and_then(|payload| payload.get("id"))
-            .and_then(Value::as_str)
-            .map(str::to_owned);
+        let metadata = dispatch_metadata(payload_json);
+        let collection = metadata.collection;
+        let requested_id = metadata.id;
         let response = bridge::handle(|| {
             if method == "query" {
                 let payload = payload_json.unwrap_or("{}");
                 let query: QueryCommand = parse_json(payload, "query")?;
+                let has_select = query.query.select.is_some();
                 let input = to_query_input(query.query);
                 let context = self.inner.database_mut(handle)?;
                 if let Some((offset, len)) = context.db.canonical_query_range(
@@ -451,6 +467,28 @@ impl Runtime {
                         offset,
                         len,
                     ));
+                }
+                if !has_select {
+                    if let Some(populate) = query.populate.as_ref() {
+                        if let Some(positions) =
+                            context.db.query_positions_after_population_validation(
+                                &query.collection,
+                                &input,
+                                populate,
+                            )?
+                        {
+                            if let Some(descriptor) =
+                                context.projection.describe_populated_positions(
+                                    &context.db,
+                                    &query.collection,
+                                    populate,
+                                    &positions,
+                                )
+                            {
+                                return Ok(descriptor);
+                            }
+                        }
+                    }
                 }
             }
             let result = command::dispatch(&mut self.inner, handle, method, payload_json)?;
@@ -466,7 +504,7 @@ impl Runtime {
                 result,
             ))
         });
-        self.finish_dispatch(handle, method, payload_json, &response);
+        self.finish_dispatch(handle, method, collection, &response);
         response
     }
 
@@ -474,19 +512,17 @@ impl Runtime {
         &mut self,
         handle: u32,
         method: &str,
-        payload_json: Option<&str>,
+        payload_collection: Option<String>,
         response: &str,
     ) {
         if let Some(context) = self.inner.databases.get_mut(&handle) {
             let changes = context.db.take_committed_changes();
-            let payload_collection = payload_json
-                .and_then(|payload| serde_json::from_str::<Value>(payload).ok())
-                .and_then(|payload| {
-                    payload
-                        .get("collection")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                });
+            let payload_collection = payload_collection.or_else(|| {
+                changes
+                    .entities()
+                    .next()
+                    .map(|change| change.collection.clone())
+            });
             if response.starts_with("{\"kind\":\"defect\"") {
                 context.last_changes = ChangeSet::default();
                 context
@@ -496,17 +532,9 @@ impl Runtime {
                 return;
             }
             if response.starts_with("{\"kind\":\"ok\"") && method == "reloadCollection" {
-                let collection = payload_json
-                    .and_then(|payload| serde_json::from_str::<Value>(payload).ok())
-                    .and_then(|payload| {
-                        payload
-                            .get("collection")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned)
-                    });
                 context
                     .projection
-                    .replace_collections(&context.db, collection);
+                    .replace_collections(&context.db, payload_collection.clone());
             } else if response.starts_with("{\"kind\":\"ok\"")
                 && method == "commitSnapshotTransaction"
             {
@@ -699,25 +727,40 @@ impl Runtime {
         }
 
         let database_handle = session.database_handle;
-        let parsed_payload =
-            payload_json.and_then(|payload| serde_json::from_str::<Value>(payload).ok());
-        let collection = parsed_payload
-            .as_ref()
-            .and_then(|payload| payload.get("collection"))
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let requested_id = parsed_payload
-            .as_ref()
-            .and_then(|payload| payload.get("id"))
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let projected = matches!(method, "findById" | "query")
-            && parsed_payload
-                .as_ref()
-                .and_then(|payload| payload.get("__proseqlProjectResult"))
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
+        let metadata = dispatch_metadata(payload_json);
+        let collection = metadata.collection;
+        let requested_id = metadata.id;
+        let projected =
+            matches!(method, "findById" | "query") && metadata.project_result.unwrap_or(false);
         let response = bridge::handle(|| {
+            if projected && method == "query" {
+                let query: QueryCommand = parse_json(payload_json.unwrap_or("{}"), "query")?;
+                let has_select = query.query.select.is_some();
+                let input = to_query_input(query.query);
+                if !has_select {
+                    if let Some(populate) = query.populate.as_ref() {
+                        let context = self.inner.database_mut(database_handle)?;
+                        if let Some(positions) =
+                            context.db.query_positions_after_population_validation(
+                                &query.collection,
+                                &input,
+                                populate,
+                            )?
+                        {
+                            if let Some(descriptor) =
+                                session.projection.describe_populated_positions(
+                                    &context.db,
+                                    &query.collection,
+                                    populate,
+                                    &positions,
+                                )
+                            {
+                                return Ok(descriptor);
+                            }
+                        }
+                    }
+                }
+            }
             let result = command::dispatch(&mut self.inner, database_handle, method, payload_json)?;
             let Some(collection) = collection.as_deref().filter(|_| projected) else {
                 return Ok(result);
