@@ -7,6 +7,7 @@ use serde_json::{json, Map, Value};
 struct RowSlot {
     generation: u32,
     revision: u32,
+    collection_index: u32,
     materialized: bool,
     positioned: bool,
 }
@@ -15,6 +16,7 @@ struct RowSlot {
 pub(crate) struct MaterializedProjection {
     slots: Vec<RowSlot>,
     by_collection: HashMap<String, HashMap<String, u32>>,
+    collection_indices: HashMap<String, u32>,
     free: Vec<u32>,
     last_sync: Value,
 }
@@ -25,6 +27,11 @@ impl MaterializedProjection {
             last_sync: json!({"changes": []}),
             ..Self::default()
         };
+        projection.collection_indices = collections
+            .iter()
+            .enumerate()
+            .map(|(index, collection)| (collection.clone(), index as u32))
+            .collect();
         for collection in collections {
             if let Some(rows) = db.collection(collection) {
                 for row in rows.list() {
@@ -46,9 +53,15 @@ impl MaterializedProjection {
     }
 
     fn allocate(&mut self, collection: &str, id: &str) -> usize {
+        let collection_index = self
+            .collection_indices
+            .get(collection)
+            .copied()
+            .unwrap_or(u32::MAX);
         let slot = if let Some(slot) = self.free.pop() {
             let row_slot = &mut self.slots[slot as usize];
             row_slot.revision = 1;
+            row_slot.collection_index = collection_index;
             row_slot.materialized = false;
             row_slot.positioned = false;
             slot
@@ -57,6 +70,7 @@ impl MaterializedProjection {
             self.slots.push(RowSlot {
                 generation: 1,
                 revision: 1,
+                collection_index,
                 materialized: false,
                 positioned: false,
             });
@@ -207,33 +221,28 @@ impl MaterializedProjection {
             .collect()
     }
 
-    pub fn fast_find_authorized(
-        &self,
-        db: &Database,
-        collection: &str,
-        id: &str,
-        expected_slot: u32,
-        expected_generation: u32,
-        expected_revision: u32,
-    ) -> bool {
-        if db
-            .collection(collection)
-            .and_then(|rows| rows.get(id))
-            .is_none()
+    pub fn fast_find_authorized(&self, expected_slot: u32, authorization_token: f64) -> bool {
+        const TOKEN_RADIX: u64 = 1 << 21;
+        if !authorization_token.is_finite()
+            || authorization_token < 0.0
+            || authorization_token.fract() != 0.0
+            || authorization_token > (1u64 << 52) as f64
         {
             return false;
         }
-        let Some(slot) = self.find(collection, id) else {
-            return false;
-        };
-        if slot != expected_slot as usize {
-            return false;
-        }
-        self.slots.get(slot).is_some_and(|metadata| {
-            metadata.materialized
-                && metadata.generation == expected_generation
-                && metadata.revision == expected_revision
-        })
+        let packed = authorization_token as u64;
+        let expected_revision = (packed % TOKEN_RADIX) as u32;
+        let collection_and_generation = packed / TOKEN_RADIX;
+        let expected_generation = (collection_and_generation % TOKEN_RADIX) as u32;
+        let collection_index = (collection_and_generation / TOKEN_RADIX) as u32;
+        self.slots
+            .get(expected_slot as usize)
+            .is_some_and(|metadata| {
+                metadata.materialized
+                    && metadata.collection_index == collection_index
+                    && metadata.generation == expected_generation
+                    && metadata.revision == expected_revision
+            })
     }
 
     pub fn authorizes(&self, collection: &str, id: &str, handle: &str) -> bool {

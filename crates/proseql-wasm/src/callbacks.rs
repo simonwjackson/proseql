@@ -11,6 +11,7 @@ use proseql_engine::hooks::{
     BeforeDeleteContext, BeforeUpdateContext, OnChangeContext,
 };
 use proseql_engine::id_gen::IdGenerator;
+use proseql_engine::query::SortEntry;
 #[cfg(target_arch = "wasm32")]
 use proseql_engine::value::{decode_boundary_input_value, encode_boundary_output_value};
 #[cfg(target_arch = "wasm32")]
@@ -23,6 +24,8 @@ pub type DefaultCallback = Arc<dyn Fn() -> Value + Send + Sync>;
 pub type PredicateCallback = Arc<dyn Fn(&Value) -> bool + Send + Sync>;
 pub type ComputedCallback = Arc<dyn Fn(&Value) -> Value + Send + Sync>;
 pub type StringCollatorCallback = Arc<dyn Fn(&str, &str) -> Ordering + Send + Sync>;
+pub type HostSortCallback =
+    Arc<dyn Fn(&[&Value], &[SortEntry]) -> Option<Vec<usize>> + Send + Sync>;
 pub type MigrationCallback =
     Arc<dyn Fn(&Map<String, Value>) -> Result<Map<String, Value>, EngineError> + Send + Sync>;
 pub type IdGeneratorFactory = Arc<dyn Fn() -> Box<dyn IdGenerator> + Send + Sync>;
@@ -51,6 +54,7 @@ pub struct CallbackTable {
     predicates: HashMap<String, PredicateCallback>,
     computed: HashMap<String, ComputedCallback>,
     collator: Option<StringCollatorCallback>,
+    host_sort: Option<HostSortCallback>,
     migrations: HashMap<String, MigrationCallback>,
     before_create_hooks: HashMap<String, BeforeCreateHook>,
     before_update_hooks: HashMap<String, BeforeUpdateHook>,
@@ -235,6 +239,10 @@ impl CallbackTable {
         if let Some(collator) = &self.collator {
             let collator = Arc::clone(collator);
             registry.register_collator(Box::new(move |a, b| collator(a, b)));
+        }
+        if let Some(host_sort) = &self.host_sort {
+            let host_sort = Arc::clone(host_sort);
+            registry.register_host_sort(Box::new(move |rows, sort| host_sort(rows, sort)));
         }
         for (id, callback) in &self.migrations {
             let callback = Arc::clone(callback);
@@ -501,6 +509,11 @@ fn record_callback_defect(operation: &str, error: &EngineError) {
     });
 }
 
+pub(crate) fn clear_host_sort_cache() {
+    #[cfg(target_arch = "wasm32")]
+    HOST_SORT_COLUMNS.with(|cache| cache.borrow_mut().take());
+}
+
 pub(crate) fn clear_pending_callback_defect() {
     #[cfg(target_arch = "wasm32")]
     PENDING_CALLBACK_DEFECT.with(|pending| pending.borrow_mut().take());
@@ -610,6 +623,121 @@ fn on_change_payload(ctx: &OnChangeContext) -> Value {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn sort_key_to_js(value: Option<&Value>) -> wasm_bindgen::JsValue {
+    let Some(value) = value else {
+        return wasm_bindgen::JsValue::UNDEFINED;
+    };
+    if proseql_engine::value::is_boundary_undefined(value) {
+        return wasm_bindgen::JsValue::UNDEFINED;
+    }
+    match value {
+        Value::Null => wasm_bindgen::JsValue::NULL,
+        Value::Bool(value) => wasm_bindgen::JsValue::from_bool(*value),
+        Value::Number(value) => wasm_bindgen::JsValue::from_f64(value.as_f64().unwrap_or(f64::NAN)),
+        Value::String(value) => wasm_bindgen::JsValue::from_str(value),
+        Value::Array(values) => {
+            let output = js_sys::Array::new_with_length(values.len() as u32);
+            for (index, value) in values.iter().enumerate() {
+                output.set(index as u32, sort_key_to_js(Some(value)));
+            }
+            output.into()
+        }
+        Value::Object(_) => js_sys::Object::new().into(),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static HOST_SORT_COLUMNS: std::cell::RefCell<Option<(Vec<SortEntry>, Vec<usize>, js_sys::Array, js_sys::Function)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(target_arch = "wasm32")]
+fn host_sort_rows(
+    callback: &js_sys::Function,
+    rows: &[&Value],
+    sort: &[SortEntry],
+) -> Option<Vec<usize>> {
+    thread_local! {
+        static BUILD: js_sys::Function = js_sys::Function::new_with_args(
+            "orders,collate",
+            "let s='';for(let i=0;i<orders.length;i++){const n=i+1,o=orders[i];s+=`{const av=a[${n}],bv=b[${n}];if(av==null){if(bv!=null)return 1}else if(bv==null)return -1;else{let x=0;if(typeof av==='string'&&typeof bv==='string'){x=collate(av,bv);if(typeof x!=='number'||!Number.isFinite(x))throw new TypeError('collator')}else if(typeof av==='number'&&typeof bv==='number')x=av-bv;else if(typeof av==='boolean'&&typeof bv==='boolean')x=(av?1:0)-(bv?1:0);else{x=collate(String(av),String(bv));if(typeof x!=='number'||!Number.isFinite(x))throw new TypeError('collator')}if(x!==0)return ${o?'-x':'x'}}}`};return Function('collate',`return(a,b)=>{${s}return 0}`)(collate)"
+        );
+        static SORT: js_sys::Function = js_sys::Function::new_with_args(
+            "rows,compare",
+            "rows.sort(compare);return Uint32Array.from(rows,row=>row[0])"
+        );
+    }
+    let row_key = rows
+        .iter()
+        .map(|row| std::ptr::from_ref(*row) as usize)
+        .collect::<Vec<_>>();
+    let cached_columns = HOST_SORT_COLUMNS.with(|cache| {
+        let cache = cache.borrow();
+        let (cached_sort, cached_rows, columns, compare) = cache.as_ref()?;
+        (cached_sort == sort && cached_rows == &row_key).then(|| (columns.clone(), compare.clone()))
+    });
+    let (columns, compare) = if let Some(cached) = cached_columns {
+        cached
+    } else {
+        let columns = js_sys::Array::new_with_length(rows.len() as u32);
+        for (index, row) in rows.iter().enumerate() {
+            let entry = js_sys::Array::new_with_length((sort.len() + 1) as u32);
+            entry.set(0, wasm_bindgen::JsValue::from_f64(index as f64));
+            for (field_index, (field, _)) in sort.iter().enumerate() {
+                entry.set(
+                    (field_index + 1) as u32,
+                    sort_key_to_js(proseql_engine::query::filter::get_nested_value(row, field)),
+                );
+            }
+            columns.set(index as u32, entry.into());
+        }
+        let orders = js_sys::Array::new_with_length(sort.len() as u32);
+        for (index, (_, order)) in sort.iter().enumerate() {
+            orders.set(
+                index as u32,
+                wasm_bindgen::JsValue::from_bool(matches!(
+                    order,
+                    proseql_engine::query::SortOrder::Desc
+                )),
+            );
+        }
+        let compare = BUILD.with(|function| {
+            function
+                .call2(&wasm_bindgen::JsValue::NULL, &orders, callback)
+                .ok()
+                .map(js_sys::Function::from)
+        })?;
+        HOST_SORT_COLUMNS.with(|cache| {
+            *cache.borrow_mut() = Some((sort.to_vec(), row_key, columns.clone(), compare.clone()));
+        });
+        (columns, compare)
+    };
+    // Array.sort mutates its receiver. Keep the cached canonical order pristine.
+    let sortable_columns = js_sys::Array::from(&columns);
+    let result = SORT
+        .with(|function| function.call2(&wasm_bindgen::JsValue::NULL, &sortable_columns, &compare));
+    let result = match result {
+        Ok(result) => js_sys::Uint32Array::new(&result),
+        Err(error) => {
+            let error = callback_error(
+                "collatorCallback",
+                "js-exception",
+                js_value_to_string(&error),
+            );
+            record_callback_defect("collatorCallback", &error);
+            return None;
+        }
+    };
+    let mut order = vec![0; result.length() as usize];
+    // SAFETY: `usize` and `u32` have identical layouts on wasm32.
+    let target =
+        unsafe { std::slice::from_raw_parts_mut(order.as_mut_ptr().cast::<u32>(), order.len()) };
+    result.copy_to(target);
+    Some(order)
+}
+
+#[cfg(target_arch = "wasm32")]
 impl CallbackTable {
     pub fn register_default_js(&mut self, id: String, callback: js_sys::Function) {
         self.register_default(id, move || {
@@ -670,43 +798,12 @@ impl CallbackTable {
     }
 
     pub fn register_collator_js(&mut self, callback: js_sys::Function) {
-        self.register_collator(move |a, b| {
+        self.host_sort = Some(Arc::new(move |rows, sort| {
             if callback_defect_pending() {
-                return Ordering::Equal;
+                return None;
             }
-            let args = js_sys::Array::new();
-            args.push(&wasm_bindgen::JsValue::from_str(a));
-            args.push(&wasm_bindgen::JsValue::from_str(b));
-            let value = match call_callback_value(&callback, &args, "collatorCallback") {
-                Ok(value) => value
-                    .as_f64()
-                    .filter(|number| number.is_finite())
-                    .unwrap_or_else(|| {
-                        panic_callback_defect(
-                            "collatorCallback",
-                            callback_error(
-                                "collatorCallback",
-                                "invalid-callback-return-type",
-                                format!(
-                                    "Expected a finite numeric collator result, received {}",
-                                    js_value_to_string(&value)
-                                ),
-                            ),
-                        )
-                    }),
-                Err(error) => panic_callback_defect("collatorCallback", error),
-            };
-            value.partial_cmp(&0.0).unwrap_or_else(|| {
-                panic_callback_defect(
-                    "collatorCallback",
-                    callback_error(
-                        "collatorCallback",
-                        "invalid-callback-return-type",
-                        format!("Expected an orderable finite collator result, received {value}"),
-                    ),
-                )
-            })
-        });
+            host_sort_rows(&callback, rows, sort)
+        }));
     }
 
     pub fn register_migration_js(&mut self, id: String, callback: js_sys::Function) {

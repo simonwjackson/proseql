@@ -206,6 +206,8 @@ export const selectBenchEngines = (
 ): ReadonlyArray<BenchEngine> =>
 	engines === undefined
 		? defaultBenchEngines
-		: defaultBenchEngines.filter((engine) => engines.includes(engine.id));
+		: engines.flatMap((id) =>
+				defaultBenchEngines.filter((engine) => engine.id === id),
+			);
 
 export const compileEqualityCriterionForTests = compileScalarEqualityPredicate;

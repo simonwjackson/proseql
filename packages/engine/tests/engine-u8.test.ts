@@ -23,6 +23,7 @@ import { Effect, Stream } from "effect";
 import * as Schema from "effect/Schema";
 import { beforeAll, describe, expect, it } from "vitest";
 import { applyPagination } from "../../core/src/operations/query/paginate-stream.js";
+import { sortData } from "../../core/src/operations/query/sort.js";
 import { decodeBoundaryValueForHost } from "../src/boundary-values.js";
 import { reconstructBoundaryError } from "../src/errors.js";
 import {
@@ -485,6 +486,249 @@ describe("@proseql/engine U8 fixes", () => {
 		}
 	});
 
+	it("materializes nested dangerous JSON keys as ordinary own data properties", async () => {
+		const DangerousSchema = Schema.Struct({
+			id: Schema.String,
+			payload: Schema.Unknown,
+		});
+		const payload = JSON.parse(
+			'{"__proto__":{"constructor":{"prototype":{"polluted":true}}},"constructor":"own-constructor","prototype":{"__proto__":"nested"}}',
+		) as Record<string, unknown>;
+		const db = await createEngineDatabase(
+			{ rows: { schema: DangerousSchema, relationships: {} } } as const,
+			{ rows: [{ id: "r1", payload }] },
+		);
+		try {
+			const row = await db.rows.findById("r1");
+			const actual = row.payload as Record<string, unknown>;
+			for (const key of ["__proto__", "constructor", "prototype"]) {
+				expect(Object.hasOwn(actual, key)).toBe(true);
+				const descriptor = Object.getOwnPropertyDescriptor(actual, key);
+				expect(descriptor).toMatchObject({
+					enumerable: true,
+					writable: true,
+					configurable: true,
+				});
+			}
+			const nested = actual.__proto__ as Record<string, unknown>;
+			expect(Object.hasOwn(nested, "constructor")).toBe(true);
+			const constructorValue = nested.constructor as Record<string, unknown>;
+			expect(Object.hasOwn(constructorValue, "prototype")).toBe(true);
+			expect(
+				(constructorValue.prototype as Record<string, unknown>).polluted,
+			).toBe(true);
+			expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("preserves scalar locale comparator traces and the first throwing comparison", async () => {
+		const LocaleTraceSchema = Schema.Struct({
+			id: Schema.String,
+			label: Schema.String,
+			group: Schema.Number,
+		});
+		const rows = [
+			{ id: "r1", label: "b", group: 1 },
+			{ id: "r2", label: "a", group: 1 },
+			{ id: "r3", label: "c", group: 1 },
+			{ id: "r4", label: "A", group: 2 },
+			{ id: "r5", label: "ä", group: 2 },
+			{ id: "r6", label: "aa", group: 2 },
+			{ id: "r7", label: "a", group: 3 },
+		];
+		const originalLocaleCompare = String.prototype.localeCompare;
+		let trace: string[] = [];
+		let call = 0;
+		let throwPair: string | undefined;
+		Object.defineProperty(String.prototype, "localeCompare", {
+			configurable: true,
+			writable: true,
+			value(this: string, other: string) {
+				call += 1;
+				const pair = `${this}:${other}`;
+				trace.push(pair);
+				if (pair === throwPair) throw new Error(`locale-pair-${pair}`);
+				const ordinary = originalLocaleCompare.call(this, other);
+				return call % 2 === 0 ? ordinary : -ordinary;
+			},
+		});
+		try {
+			for (const size of [2, 3, rows.length]) {
+				const input = rows.slice(0, size);
+				const db = await createEngineDatabase(
+					{ rows: { schema: LocaleTraceSchema, relationships: {} } } as const,
+					{ rows: input },
+				);
+				try {
+					let expectedTrace: string[] = [];
+					for (let attempt = 0; attempt < 4; attempt += 1) {
+						trace = [];
+						call = 0;
+						const expected = sortData([...input], { label: "asc" });
+						expectedTrace = [...trace];
+						trace = [];
+						call = 0;
+						const actual = await db.rows.query({ sort: { label: "asc" } });
+						expect(trace, `comparison trace attempt ${attempt + 1}`).toEqual(
+							expectedTrace,
+						);
+						expect(actual.map((row) => row.id)).toEqual(
+							expected.map((row) => row.id),
+						);
+					}
+
+					// Throw by comparison identity, not call number, after repeated sorts.
+					throwPair = expectedTrace[Math.min(1, expectedTrace.length - 1)];
+					trace = [];
+					call = 0;
+					expect(() => sortData([...input], { label: "asc" })).toThrow(
+						`locale-pair-${throwPair}`,
+					);
+					const repeatedFailureTrace = [...trace];
+					trace = [];
+					call = 0;
+					await expect(
+						db.rows.query({ sort: { label: "asc" } }),
+					).rejects.toBeInstanceOf(WasmEngineDefectError);
+					expect(trace).toEqual(repeatedFailureTrace);
+					throwPair = undefined;
+				} finally {
+					await db.close();
+				}
+			}
+
+			const db = await createEngineDatabase(
+				{ rows: { schema: LocaleTraceSchema, relationships: {} } } as const,
+				{ rows },
+			);
+			try {
+				trace = [];
+				call = 0;
+				[...rows].sort((left, right) => left.label.localeCompare(right.label));
+				throwPair = trace[1] ?? trace[0];
+				trace = [];
+				call = 0;
+				expect(() =>
+					[...rows].sort((left, right) =>
+						left.label.localeCompare(right.label),
+					),
+				).toThrow(`locale-pair-${throwPair}`);
+				const expectedTrace = [...trace];
+				trace = [];
+				call = 0;
+				await expect(
+					db.rows.query({
+						sort: { label: "asc" },
+						select: ["id", "label"],
+					}),
+				).rejects.toBeInstanceOf(WasmEngineDefectError);
+				expect(trace).toEqual(expectedTrace);
+				throwPair = undefined;
+			} finally {
+				await db.close();
+			}
+		} finally {
+			Object.defineProperty(String.prototype, "localeCompare", {
+				configurable: true,
+				writable: true,
+				value: originalLocaleCompare,
+			});
+		}
+	});
+
+	it("keeps mixed-field sorted full and selected projections in canonical order", async () => {
+		const MixedSortSchema = Schema.Struct({
+			id: Schema.String,
+			label: Schema.optional(Schema.Unknown),
+			age: Schema.Number,
+		});
+		const input = [
+			{ id: "r1", label: "2", age: 3 },
+			{ id: "r2", label: 10, age: 1 },
+			{ id: "r3", label: "2", age: 1 },
+			{ id: "r4", label: 2, age: 2 },
+			{ id: "r5", label: null, age: 9 },
+			{ id: "r6", age: 8 },
+			{ id: "r7", label: true, age: 4 },
+			{ id: "r8", label: [2], age: 5 },
+		];
+		const db = await createEngineDatabase(
+			{ rows: { schema: MixedSortSchema, relationships: {} } } as const,
+			{ rows: input },
+		);
+		try {
+			const sort = { label: "asc", age: "desc" } as const;
+			const expected = sortData([...input], sort).map((row) => row.id);
+			const full = await db.rows.query({ sort });
+			const selected = await db.rows.query({ sort, select: ["id", "label"] });
+			expect(full.map((row) => row.id)).toEqual(expected);
+			expect(selected.map((row) => row.id)).toEqual(full.map((row) => row.id));
+			expect(selected).toEqual(
+				full.map((row) =>
+					"label" in row ? { id: row.id, label: row.label } : { id: row.id },
+				),
+			);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("caches locale ordering while keeping query shells, row identity, and invalidation exact", async () => {
+		const LocaleRowSchema = Schema.Struct({
+			id: Schema.String,
+			label: Schema.optional(Schema.NullOr(Schema.String)),
+			age: Schema.Number,
+		});
+		const initial = [
+			{ id: "r1", label: "ä", age: 2 },
+			{ id: "r2", label: "a", age: 1 },
+			{ id: "r3", label: "A", age: 3 },
+			{ id: "r4", label: null, age: 4 },
+			{ id: "r5", age: 5 },
+		];
+		const db = await createEngineDatabase(
+			{ rows: { schema: LocaleRowSchema, relationships: {} } } as const,
+			{ rows: initial },
+		);
+		try {
+			const expected = [...initial]
+				.sort((left, right) => {
+					if (left.label == null && right.label == null) return 0;
+					if (left.label == null) return 1;
+					if (right.label == null) return -1;
+					return left.label.localeCompare(right.label);
+				})
+				.map((row) => row.id);
+			const first = await db.rows.query({ sort: { label: "asc" } });
+			const second = await db.rows.query({ sort: { label: "asc" } });
+			expect(first.map((row) => row.id)).toEqual(expected);
+			expect(second).not.toBe(first);
+			expect(second.every((row, index) => row === first[index])).toBe(true);
+			first.reverse();
+			expect(
+				(await db.rows.query({ sort: { label: "asc" } })).map((row) => row.id),
+			).toEqual(expected);
+
+			const mutable = second.find((row) => row.id === "r2");
+			if (mutable === undefined) throw new Error("missing locale row");
+			mutable.label = "zzzz";
+			expect((await db.rows.query({ sort: { label: "asc" } })).at(-3)).toBe(
+				mutable,
+			);
+
+			await db.$transaction(async (tx) => {
+				await tx.rows.update("r3", { label: "000" });
+			});
+			expect((await db.rows.query({ sort: { label: "asc" } }))[0]?.id).toBe(
+				"r3",
+			);
+		} finally {
+			await db.close();
+		}
+	});
+
 	it("packs primitive selections and keeps stale-index mutable-reference semantics", async () => {
 		const IndexedUserSchema = Schema.Struct({
 			id: Schema.String,
@@ -535,6 +779,13 @@ describe("@proseql/engine U8 fixes", () => {
 			expect(Object.keys(firstSelected)).toEqual(["id", "name", "age"]);
 			expect(firstSelected.name).toBe("雪🚀");
 			expect(Object.is(firstSelected.age, -0)).toBe(true);
+			firstSelected.name = "caller-poison";
+			const selectedAgain = await db.users.query({
+				select: ["id", "name", "age"],
+			});
+			expect(selectedAgain).not.toBe(selected);
+			expect(selectedAgain[0]).not.toBe(firstSelected);
+			expect(selectedAgain[0]?.name).toBe("雪🚀");
 			const optional = await db.users.query({ select: ["id", "note"] });
 			expect(optional).toEqual([{ id: "u1" }, { id: "u2", note: null }]);
 

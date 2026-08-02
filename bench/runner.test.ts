@@ -1,6 +1,7 @@
 import { Bench } from "tinybench";
 import { describe, expect, it, vi } from "vitest";
 import { attachTaskMetadata, buildComparisons } from "./comparison.js";
+import { createSuite as createQueryPipelineSuite } from "./query-pipeline.bench.js";
 import type { BenchmarkJsonOutput, DiscoveredBenchmark } from "./runner.js";
 import {
 	BenchmarkExecutionError,
@@ -137,6 +138,14 @@ describe("Benchmark Discovery", () => {
 });
 
 describe("Benchmark Filtering", () => {
+	it("fails clearly when a query-pipeline case filter matches no task", async () => {
+		await expect(
+			createQueryPipelineSuite({ caseName: "unknown query case" }),
+		).rejects.toThrow(
+			"No query-pipeline benchmark matches case filter: unknown query case",
+		);
+	});
+
 	it("filters benchmarks by suite name (exact match)", async () => {
 		const benchmarks = await discoverBenchmarks();
 		const filtered = filterBenchmarks(benchmarks, "crud");

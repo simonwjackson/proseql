@@ -1430,7 +1430,7 @@ fn panic_in_callback_returns_defect_response() {
 }
 
 #[test]
-fn fast_find_by_id_authorizes_exact_collection_id_slot_and_token() {
+fn fast_find_by_id_authorizes_exact_collection_slot_and_token() {
     let (mut runtime, _) = make_runtime();
     let handle = create_database(
         &mut runtime,
@@ -1449,9 +1449,13 @@ fn fast_find_by_id_authorizes_exact_collection_id_slot_and_token() {
         .map(|part| part.parse::<u32>().unwrap())
         .collect::<Vec<_>>();
     let (slot, generation, revision) = (token[0], token[1], token[2]);
+    let authorization_token = |collection: u32, generation: u32, revision: u32| {
+        ((u64::from(collection) * (1 << 21) + u64::from(generation)) * (1 << 21)
+            + u64::from(revision)) as f64
+    };
 
     assert_eq!(
-        runtime.fast_find_by_id(handle, 0, "u1", slot, generation, revision),
+        runtime.fast_find_by_id(handle, slot, authorization_token(0, generation, revision)),
         0
     );
     expect_ok(&runtime.dispatch_projected_json(
@@ -1460,36 +1464,43 @@ fn fast_find_by_id_authorizes_exact_collection_id_slot_and_token() {
         Some(json!({"collection":"users","id":"u1"}).to_string().as_str()),
     ));
     assert_eq!(
-        runtime.fast_find_by_id(handle, 0, "u1", slot, generation, revision),
+        runtime.fast_find_by_id(handle, slot, authorization_token(0, generation, revision)),
         1
     );
     assert_eq!(
-        runtime.fast_find_by_id(handle, 1, "u1", slot, generation, revision),
+        runtime.fast_find_by_id(handle, slot, authorization_token(1, generation, revision)),
         0,
         "wrong collection index"
     );
     assert_eq!(
-        runtime.fast_find_by_id(handle, 0, "missing", slot, generation, revision),
-        0,
-        "wrong requested id"
-    );
-    assert_eq!(
-        runtime.fast_find_by_id(handle, 0, "u1", slot + 1, generation, revision),
+        runtime.fast_find_by_id(
+            handle,
+            slot + 1,
+            authorization_token(0, generation, revision)
+        ),
         0,
         "wrong slot"
     );
     assert_eq!(
-        runtime.fast_find_by_id(handle, 0, "u1", slot, generation + 1, revision),
+        runtime.fast_find_by_id(
+            handle,
+            slot,
+            authorization_token(0, generation + 1, revision)
+        ),
         0,
         "wrong generation"
     );
     assert_eq!(
-        runtime.fast_find_by_id(handle, 0, "u1", slot, generation, revision + 1),
+        runtime.fast_find_by_id(
+            handle,
+            slot,
+            authorization_token(0, generation, revision + 1)
+        ),
         0,
         "wrong revision"
     );
     assert_eq!(
-        runtime.fast_find_by_id(handle, 99, "u1", slot, generation, revision),
+        runtime.fast_find_by_id(handle, slot, authorization_token(99, generation, revision)),
         0,
         "out-of-range collection index"
     );
@@ -1511,7 +1522,7 @@ fn fast_find_by_id_authorizes_exact_collection_id_slot_and_token() {
         ),
     );
     assert_eq!(
-        runtime.fast_find_by_id(handle, 0, "u2", slot, generation, revision),
+        runtime.fast_find_by_id(handle, slot, authorization_token(0, generation, revision)),
         0,
         "reused slot rejects the deleted row token"
     );
@@ -1531,7 +1542,11 @@ fn fast_find_by_id_authorizes_exact_collection_id_slot_and_token() {
         Some(json!({"collection":"users","id":"u2"}).to_string().as_str()),
     ));
     assert_eq!(
-        runtime.fast_find_by_id(handle, 0, "u2", reused[0], reused[1], reused[2]),
+        runtime.fast_find_by_id(
+            handle,
+            reused[0],
+            authorization_token(0, reused[1], reused[2])
+        ),
         1,
         "the reused slot accepts only its current materialized token"
     );

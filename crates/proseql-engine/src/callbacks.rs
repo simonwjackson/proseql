@@ -13,12 +13,14 @@ use crate::hooks::{
     BeforeDeleteContext, BeforeUpdateContext, OnChangeContext,
 };
 use crate::id_gen::IdGenerator;
+use crate::query::SortEntry;
 use crate::value::Value as BoundaryValue;
 
 pub type DefaultCallback = Box<dyn Fn() -> Value + Send + Sync>;
 pub type PredicateCallback = Box<dyn Fn(&Value) -> bool + Send + Sync>;
 pub type ComputedCallback = Box<dyn Fn(&Value) -> Value + Send + Sync>;
 pub type StringCollatorFn = Box<dyn Fn(&str, &str) -> std::cmp::Ordering + Send + Sync>;
+pub type HostSortFn = Box<dyn Fn(&[&Value], &[SortEntry]) -> Option<Vec<usize>> + Send + Sync>;
 pub type MigrationCallback =
     Box<dyn Fn(&Map<String, Value>) -> Result<Map<String, Value>, EngineError> + Send + Sync>;
 pub type IdGeneratorFactory = Box<dyn Fn() -> Box<dyn IdGenerator> + Send + Sync>;
@@ -63,6 +65,7 @@ pub struct CallbackRegistry {
     predicates: HashMap<String, PredicateCallback>,
     computed: HashMap<String, ComputedCallback>,
     collator: Option<StringCollatorFn>,
+    host_sort: Option<HostSortFn>,
     migrations: HashMap<String, MigrationCallback>,
     before_create_hooks: HashMap<String, BeforeCreateHookCallback>,
     before_update_hooks: HashMap<String, BeforeUpdateHookCallback>,
@@ -121,6 +124,20 @@ impl CallbackRegistry {
 
     pub fn collate_strings(&self, a: &str, b: &str) -> Option<std::cmp::Ordering> {
         self.collator.as_ref().map(|f| f(a, b))
+    }
+
+    pub fn register_host_sort(&mut self, f: HostSortFn) {
+        self.host_sort = Some(f);
+    }
+
+    pub fn host_sort(&self, rows: &[&Value], sort: &[SortEntry]) -> Option<Vec<usize>> {
+        self.host_sort
+            .as_ref()
+            .and_then(|host_sort| host_sort(rows, sort))
+    }
+
+    pub fn has_host_sort(&self) -> bool {
+        self.host_sort.is_some()
     }
 
     pub fn register_computed(&mut self, id: impl Into<String>, f: ComputedCallback) {

@@ -241,6 +241,7 @@ export async function createSuite(options?: {
 	readonly includeStress?: boolean;
 	readonly benchOptions?: Parameters<typeof buildBenchOptions>[0];
 	readonly engines?: ReadonlyArray<"typescript" | "wasm">;
+	readonly caseName?: string;
 }): Promise<{
 	readonly bench: Bench;
 	readonly teardown: () => Promise<void>;
@@ -265,6 +266,7 @@ export async function createSuite(options?: {
 		orders: [...orders],
 	} as const;
 	const closers: Array<() => Promise<void>> = [];
+	let matchedCase = options?.caseName === undefined;
 	const databaseHandles = new Map<
 		string,
 		{
@@ -310,6 +312,12 @@ export async function createSuite(options?: {
 			readonly datasetSize: number;
 			readonly normalInteraction: boolean;
 		}) => {
+			if (
+				options?.caseName !== undefined &&
+				options.caseName !== taskOptions.name
+			)
+				return;
+			matchedCase = true;
 			for (const engine of selectBenchEngines(options?.engines)) {
 				const key = databaseKey(
 					engine.id,
@@ -687,6 +695,12 @@ export async function createSuite(options?: {
 			datasetSize: relationshipUsers.length,
 			normalInteraction: true,
 		});
+
+		if (!matchedCase) {
+			throw new Error(
+				`No query-pipeline benchmark matches case filter: ${options?.caseName}`,
+			);
+		}
 
 		return {
 			bench,

@@ -316,6 +316,7 @@ impl Runtime {
     }
 
     pub fn create_database_json(&mut self, input_json: &str) -> String {
+        crate::callbacks::clear_host_sort_cache();
         bridge::handle(|| {
             let input: CreateDatabaseInput = parse_json(input_json, "createDatabase")?;
             self.inner
@@ -334,6 +335,9 @@ impl Runtime {
         method: &str,
         payload_json: Option<&str>,
     ) -> String {
+        if is_mutation_method(method) {
+            crate::callbacks::clear_host_sort_cache();
+        }
         let response =
             bridge::handle(|| command::dispatch(&mut self.inner, handle, method, payload_json));
         self.finish_dispatch(handle, method, payload_json, &response);
@@ -347,26 +351,43 @@ impl Runtime {
     pub fn fast_find_by_id(
         &self,
         handle: u32,
-        collection_index: u32,
-        id: &str,
         expected_slot: u32,
-        expected_generation: u32,
-        expected_revision: u32,
+        authorization_token: f64,
     ) -> i32 {
         let Some(context) = self.inner.databases.get(&handle) else {
             return 0;
         };
-        let Some(collection) = context.collection_names.get(collection_index as usize) else {
-            return 0;
-        };
-        i32::from(context.projection.fast_find_authorized(
+        i32::from(
+            context
+                .projection
+                .fast_find_authorized(expected_slot, authorization_token),
+        )
+    }
+
+    pub fn fast_find_by_id_descriptor(
+        &mut self,
+        handle: u32,
+        collection_index: u32,
+        id: &str,
+    ) -> Option<Value> {
+        let context = self.inner.databases.get_mut(&handle)?;
+        let collection = context
+            .collection_names
+            .get(collection_index as usize)?
+            .clone();
+        let value = context
+            .db
+            .collection(&collection)
+            .and_then(|rows| rows.get(id))
+            .cloned()?;
+        let descriptor = context.projection.describe_result(
             &context.db,
-            collection,
-            id,
-            expected_slot,
-            expected_generation,
-            expected_revision,
-        ))
+            "findById",
+            &collection,
+            Some(id),
+            value,
+        );
+        Some(encode_boundary_output_value(descriptor))
     }
 
     pub fn fast_query_range(
@@ -582,6 +603,7 @@ impl Runtime {
     }
 
     pub fn synchronize_projection_json(&mut self, handle: u32, rows_json: &str) -> String {
+        crate::callbacks::clear_host_sort_cache();
         bridge::handle(|| {
             let rows: Value = parse_json(rows_json, "synchronizeProjection")?;
             let rows = rows.as_array().ok_or_else(|| {
@@ -657,6 +679,7 @@ impl Runtime {
         method: &str,
         payload_json: Option<&str>,
     ) -> String {
+        crate::callbacks::clear_host_sort_cache();
         let Some(mut session) = self.inner.transaction_sessions.remove(&session_handle) else {
             return transaction_session_error(
                 "transactionStep",
@@ -786,6 +809,7 @@ impl Runtime {
         session_handle: u32,
         rows_json: &str,
     ) -> String {
+        crate::callbacks::clear_host_sort_cache();
         bridge::handle(|| {
             let rows: Value = parse_json(rows_json, "synchronizeTransactionProjection")?;
             let rows = rows.as_array().ok_or_else(|| {
@@ -1267,22 +1291,29 @@ impl WasmRuntime {
     pub fn fast_find_by_id(
         &self,
         handle: u32,
-        collection_index: u32,
-        id: String,
         expected_slot: u32,
-        expected_generation: u32,
-        expected_revision: u32,
+        authorization_token: f64,
     ) -> i32 {
         self.inner.try_borrow().map_or(0, |runtime| {
-            runtime.fast_find_by_id(
-                handle,
-                collection_index,
-                &id,
-                expected_slot,
-                expected_generation,
-                expected_revision,
-            )
+            runtime.fast_find_by_id(handle, expected_slot, authorization_token)
         })
+    }
+
+    pub fn fast_find_by_id_descriptor(
+        &self,
+        handle: u32,
+        collection_index: u32,
+        id: String,
+    ) -> wasm_bindgen::JsValue {
+        self.inner
+            .try_borrow_mut()
+            .ok()
+            .and_then(|mut runtime| {
+                runtime.fast_find_by_id_descriptor(handle, collection_index, &id)
+            })
+            .map_or(wasm_bindgen::JsValue::UNDEFINED, |value| {
+                json_value_to_js(&value)
+            })
     }
 
     pub fn fast_query_range(
@@ -1308,6 +1339,7 @@ impl WasmRuntime {
         offset: u32,
         limit: u32,
     ) -> wasm_bindgen::JsValue {
+        crate::callbacks::clear_pending_callback_defect();
         let scalar = collection_index != u32::MAX;
         let parsed = if scalar {
             None
@@ -1378,14 +1410,18 @@ impl WasmRuntime {
             return wasm_bindgen::JsValue::UNDEFINED;
         };
         let slots = js_sys::Uint32Array::from(slots.as_slice());
-        if scalar && revision <= u64::from(u32::MAX) {
+        if revision <= u64::from(u32::MAX) {
             let descriptor = js_sys::Array::new();
             descriptor.push(&wasm_bindgen::JsValue::from_f64(revision as f64));
             descriptor.push(&slots);
             descriptor.into()
         } else {
-            slots.into()
+            wasm_bindgen::JsValue::UNDEFINED
         }
+    }
+
+    pub fn take_callback_defect(&self) -> Option<String> {
+        crate::callbacks::take_pending_callback_defect()
     }
 
     pub fn fast_index_query_revision(
@@ -1417,11 +1453,17 @@ impl WasmRuntime {
         handle: u32,
         command_json: String,
     ) -> wasm_bindgen::JsValue {
+        crate::callbacks::clear_pending_callback_defect();
         let Ok(command) = parse_json::<QueryCommand>(&command_json, "query") else {
             return wasm_bindgen::JsValue::UNDEFINED;
         };
         let input = to_query_input(command.query);
-        if input.r#where.is_some() || !input.sort.is_empty() || input.cursor.is_some() {
+        if input
+            .r#where
+            .as_ref()
+            .is_some_and(|where_clause| !fast_where_supported(where_clause))
+            || input.cursor.is_some()
+        {
             return wasm_bindgen::JsValue::UNDEFINED;
         }
         let Ok(mut runtime) = self.inner.try_borrow_mut() else {
@@ -1430,6 +1472,14 @@ impl WasmRuntime {
         let Ok(context) = runtime.inner.database_mut(handle) else {
             return wasm_bindgen::JsValue::UNDEFINED;
         };
+        let revision = context
+            .db
+            .collection(&command.collection)
+            .map(Collection::revision)
+            .unwrap_or(u64::MAX);
+        if revision > u64::from(u32::MAX) {
+            return wasm_bindgen::JsValue::UNDEFINED;
+        }
         let Ok(Some(selection)) = context.db.borrowed_compact_selection_query(
             &command.collection,
             &input,
@@ -1448,6 +1498,7 @@ impl WasmRuntime {
             return wasm_bindgen::JsValue::UNDEFINED;
         }
         let output = js_sys::Array::new();
+        output.push(&wasm_bindgen::JsValue::from_f64(revision as f64));
         for column in selection.columns {
             let descriptor = js_sys::Array::new();
             match column.first().and_then(|value| *value) {
@@ -1571,6 +1622,36 @@ impl WasmRuntime {
         self.inner
             .borrow_mut()
             .unsubscribe_json(handle, subscription_id)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn json_value_to_js(value: &Value) -> wasm_bindgen::JsValue {
+    match value {
+        Value::Null => wasm_bindgen::JsValue::NULL,
+        Value::Bool(value) => wasm_bindgen::JsValue::from_bool(*value),
+        Value::Number(value) => wasm_bindgen::JsValue::from_f64(value.as_f64().unwrap_or(0.0)),
+        Value::String(value) => wasm_bindgen::JsValue::from_str(value),
+        Value::Array(values) => {
+            let output = js_sys::Array::new_with_length(values.len() as u32);
+            for (index, value) in values.iter().enumerate() {
+                output.set(index as u32, json_value_to_js(value));
+            }
+            output.into()
+        }
+        Value::Object(values) => {
+            use wasm_bindgen::JsCast as _;
+            let null = wasm_bindgen::JsValue::NULL.unchecked_into::<js_sys::Object>();
+            let output = js_sys::Object::create(&null);
+            for (key, value) in values {
+                let _ = js_sys::Reflect::set(
+                    &output,
+                    &wasm_bindgen::JsValue::from_str(key),
+                    &json_value_to_js(value),
+                );
+            }
+            output.into()
+        }
     }
 }
 

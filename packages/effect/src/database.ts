@@ -124,12 +124,15 @@ const joinComparablePath = (left: string, right: string): string => {
 	return normalizedLeft.length === 0 ? normalizedRight : `${normalizedLeft}/${normalizedRight}`;
 };
 
-const withRunPromise = <A, E>(effect: Effect.Effect<A, E, never>): RunnableEffect<A, E> => {
+const withRunPromise = <A, E>(
+	effect: Effect.Effect<A, E, never>,
+	direct?: () => Promise<A>,
+): RunnableEffect<A, E> => {
 	let cached: Promise<A> | undefined;
 	Object.defineProperty(effect, "runPromise", {
 		get() {
 			if (cached === undefined) {
-				cached = Effect.runPromise(effect);
+				cached = direct === undefined ? Effect.runPromise(effect) : direct();
 			}
 			return cached;
 		},
@@ -469,6 +472,20 @@ const wrapTransactionOperation = <A>(
 		})
 	);
 
+const findEffectAdapterWarmup = (() => {
+	const operation = () => Promise.resolve(undefined);
+	let chain = Promise.resolve();
+	for (let index = 0; index < 32; index += 1) {
+		chain = chain.then(() =>
+			withRunPromise(
+				Effect.suspend(() => liftPromise(operation)),
+				operation,
+			).runPromise.then(() => undefined),
+		);
+	}
+	return chain;
+})();
+
 const selectScalarPredicateIds = <Row extends { readonly id: string }>(
 	rows: ReadonlyArray<Row>,
 	predicate: (entity: Row) => boolean,
@@ -628,7 +645,13 @@ const createCollectionAdapter = (
 	transactionRunner: <A>(fn: (tx: EngineCollection<any, any, any>) => Promise<A>) => Promise<A>
 ) => ({
 	query: (config?: QueryConfig<any, any, any>) => cursorOrStreamQuery(engineCollection, config),
-	findById: (id: string) => withRunPromise(liftPromise(() => engineCollection.findById(id))) as never,
+	findById: (id: string) => {
+		const operation = () => engineCollection.findById(id);
+		return withRunPromise(
+			Effect.suspend(() => liftPromise(operation)),
+			operation,
+		) as never;
+	},
 	exists: (id: string) => withRunPromise(liftPromise(() => engineCollection.exists(id))) as never,
 	create: (input: unknown) => withRunPromise(liftPromise(() => engineCollection.create(input as never))) as never,
 	createMany: (inputs: ReadonlyArray<unknown>, options?: { readonly skipDuplicates?: boolean; readonly validateRelationships?: boolean }) =>
@@ -865,6 +888,7 @@ const createEffectDatabaseWithLoader = (
 	let defectConstructor: EffectEngineModule["WasmEngineDefectError"] | undefined;
 	return liftPromise<GenerateDatabase<Config>, CreateEffectDatabaseError>(
 		async () => {
+			await findEffectAdapterWarmup;
 			const engine = await loadEngineModule();
 			defectConstructor = engine.WasmEngineDefectError;
 			const db = await engine.createEngineDatabase(

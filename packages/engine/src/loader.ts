@@ -81,12 +81,14 @@ export interface WasmRuntimeBinding {
 	rollback_transaction(sessionHandle: number): string;
 	fast_find_by_id(
 		handle: number,
+		expectedSlot: number,
+		authorizationToken: number,
+	): number;
+	fast_find_by_id_descriptor(
+		handle: number,
 		collectionIndex: number,
 		id: string,
-		expectedSlot: number,
-		expectedGeneration: number,
-		expectedRevision: number,
-	): number;
+	): unknown;
 	fast_query_range(
 		handle: number,
 		collectionIndex: number,
@@ -103,6 +105,7 @@ export interface WasmRuntimeBinding {
 		offset: number,
 		limit: number,
 	): unknown;
+	take_callback_defect(): string | undefined;
 	fast_index_query_revision(
 		handle: number,
 		collectionIndex: number,

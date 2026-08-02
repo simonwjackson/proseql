@@ -126,6 +126,7 @@ export type FastFindCandidate<T = unknown> = {
 	readonly rustSlot: number;
 	readonly generation: number;
 	readonly revision: number;
+	readonly authorizationBase: number;
 	readonly handle: string;
 	readonly value: T;
 };
@@ -247,6 +248,16 @@ export class MaterializedProjection {
 		return this.invalid;
 	}
 
+	isCollectionFullyMaterialized(collection: string): boolean {
+		let found = false;
+		for (const slot of this.slots) {
+			if (slot?.collection !== collection) continue;
+			found = true;
+			if (!slot.hasValue) return false;
+		}
+		return found;
+	}
+
 	get hasDirtyRows() {
 		return this.dirtyKeys.size > 0;
 	}
@@ -318,6 +329,10 @@ export class MaterializedProjection {
 					rustSlot: row.rustSlot,
 					generation: row.generation,
 					revision: row.revision,
+					authorizationBase:
+						row.generation < 2 ** 21 && row.revision < 2 ** 21
+							? row.generation * 2 ** 21 + row.revision
+							: -1,
 					handle: row.handle,
 					value: value as T,
 				}
@@ -877,6 +892,10 @@ export class MaterializedProjection {
 				rustSlot: row.rustSlot,
 				generation: row.generation,
 				revision: row.revision,
+				authorizationBase:
+					row.generation < 2 ** 21 && row.revision < 2 ** 21
+						? row.generation * 2 ** 21 + row.revision
+						: -1,
 				handle: row.handle,
 				value,
 			};

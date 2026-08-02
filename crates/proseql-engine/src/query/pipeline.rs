@@ -163,7 +163,6 @@ pub fn execute_canonical_query_positions(
     trust_exact_index: bool,
 ) -> Result<Option<Vec<usize>>, EngineError> {
     if input.cursor.is_some()
-        || !input.sort.is_empty()
         || input.select.is_some()
         || extract_search_config(&input.r#where).is_some()
         || !collection.descriptor.computed_fields.is_empty()
@@ -172,7 +171,7 @@ pub fn execute_canonical_query_positions(
     }
     let offset = input.offset.unwrap_or(0);
     let limit = input.limit.unwrap_or(usize::MAX);
-    let positions = if let Some(where_clause) = input.r#where.as_ref() {
+    let mut positions: Vec<usize> = if let Some(where_clause) = input.r#where.as_ref() {
         if let Some((ids, posting_covers_where)) =
             collection.exact_equality_candidate_ids(where_clause)
         {
@@ -188,8 +187,6 @@ pub fn execute_canonical_query_positions(
                         })
                 })
                 .filter_map(|id| collection.position_of(id))
-                .skip(offset)
-                .take(limit)
                 .collect()
         } else if let Some(ids) = collection.narrow_candidates(where_clause) {
             ids.into_iter()
@@ -199,8 +196,6 @@ pub fn execute_canonical_query_positions(
                     })
                 })
                 .filter_map(|id| collection.position_of(&id))
-                .skip(offset)
-                .take(limit)
                 .collect()
         } else {
             collection
@@ -210,15 +205,67 @@ pub fn execute_canonical_query_positions(
                     matches_where_with_registry(entity, where_clause, Some(registry.as_ref()))
                 })
                 .map(|(position, _)| position)
-                .skip(offset)
-                .take(limit)
                 .collect()
         }
     } else {
-        (offset.min(collection.len())..(offset.saturating_add(limit)).min(collection.len()))
-            .collect()
+        (0..collection.len()).collect()
     };
-    Ok(Some(positions))
+    if !input.sort.is_empty()
+        && !sort_positions_with_scalar_collation(
+            collection,
+            &mut positions,
+            &input.sort,
+            registry.as_ref(),
+        )
+    {
+        return Ok(None);
+    }
+    Ok(Some(
+        positions.into_iter().skip(offset).take(limit).collect(),
+    ))
+}
+
+/// Sort borrowed collection positions with the same stable Rust comparator used
+/// by the canonical owned pipeline. Every string comparison goes through the
+/// scalar host collator, preserving comparator count, order, and first defect.
+fn sort_positions_with_scalar_collation(
+    collection: &Collection,
+    positions: &mut [usize],
+    sort: &[SortEntry],
+    registry: &CallbackRegistry,
+) -> bool {
+    if registry.has_host_sort() {
+        let rows = positions
+            .iter()
+            .map(|position| collection.entry_at(*position).map(|(_, row)| row))
+            .collect::<Option<Vec<_>>>();
+        let Some(rows) = rows else {
+            return false;
+        };
+        let Some(order) = registry.host_sort(&rows, sort) else {
+            return false;
+        };
+        let original = positions.to_vec();
+        for (target, source) in order.into_iter().enumerate() {
+            positions[target] = original[source];
+        }
+        return true;
+    }
+
+    let mut valid = true;
+    let mut compare = |left_position: usize, right_position: usize| {
+        let Some((_, left)) = collection.entry_at(left_position) else {
+            valid = false;
+            return std::cmp::Ordering::Equal;
+        };
+        let Some((_, right)) = collection.entry_at(right_position) else {
+            valid = false;
+            return std::cmp::Ordering::Equal;
+        };
+        super::sort::compare_entities(left, right, sort, Some(registry))
+    };
+    positions.sort_by(|left_position, right_position| compare(*left_position, *right_position));
+    valid
 }
 
 pub fn execute_borrowed_compact_selection<'a>(
@@ -227,7 +274,6 @@ pub fn execute_borrowed_compact_selection<'a>(
     registry: &Arc<CallbackRegistry>,
 ) -> Result<Option<BorrowedCompactSelection<'a>>, EngineError> {
     if input.cursor.is_some()
-        || !input.sort.is_empty()
         || extract_search_config(&input.r#where).is_some()
         || should_resolve_computed(&input.select, &collection.descriptor.computed_fields)
     {
@@ -261,6 +307,22 @@ pub fn execute_borrowed_compact_selection<'a>(
             });
         }
     };
+    let mut canonical_input = input.clone();
+    canonical_input.select = None;
+    if let Some(positions) =
+        execute_canonical_query_positions(collection, &canonical_input, registry, false)?
+    {
+        for position in positions {
+            let Some((_, entity)) = collection.entry_at(position) else {
+                return Ok(None);
+            };
+            push_entity(entity);
+        }
+        return Ok(Some(BorrowedCompactSelection { fields, columns }));
+    }
+    if !input.sort.is_empty() {
+        return Ok(None);
+    }
     if let Some(where_clause) = input.r#where.as_ref() {
         for entity in borrowed_candidates(collection, Some(where_clause))
             .into_iter()

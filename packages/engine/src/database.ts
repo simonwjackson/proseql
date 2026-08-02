@@ -611,6 +611,16 @@ const matchesDeletionResultMethod = (method: string) =>
 	method === "deleteWithRelationships" ||
 	method === "deleteManyWithRelationships";
 
+const FAST_FIND_TOKEN_RADIX = 2 ** 21;
+const fastFindAuthorizationToken = (
+	collectionIndex: number,
+	authorizationBase: number,
+): number =>
+	collectionIndex < 1024 && authorizationBase >= 0
+		? collectionIndex * FAST_FIND_TOKEN_RADIX * FAST_FIND_TOKEN_RADIX +
+			authorizationBase
+		: -1;
+
 const MUTATION_METHODS = new Set([
 	"create",
 	"createMany",
@@ -676,20 +686,23 @@ class EngineRuntime {
 	private readonly projection: MaterializedProjection;
 	private readonly collectionIndexes: ReadonlyMap<string, number>;
 	private readonly canonicalQueryCollections: ReadonlySet<string>;
+	private readonly callbackFreeSortFields: ReadonlyMap<
+		string,
+		ReadonlySet<string>
+	>;
 	private readonly diagnostics: EngineRuntimeDiagnostics;
 
 	private hotIndexedQuery:
 		| {
 				readonly collectionIndex: number;
-				readonly field: string;
-				readonly value: string;
-				readonly offset: number;
-				readonly limit: number;
+				readonly key: string;
 				readonly revision: number;
 				readonly commandBytes: number;
+				readonly projected: boolean | "sort" | "selected-sort";
 				readonly rows: ReadonlyArray<unknown>;
 		  }
 		| undefined;
+	private fastFindAuthorizationWarmed = false;
 	private transactionBarrier: Promise<void> | undefined;
 	private releaseTransactionBarrier: (() => void) | undefined;
 	private transactionContext: TransactionContext | undefined;
@@ -731,6 +744,29 @@ class EngineRuntime {
 				return typeof name === "string" ? [[name, index] as const] : [];
 			}),
 		);
+		this.callbackFreeSortFields = new Map(
+			descriptors.flatMap((descriptor) => {
+				if (typeof descriptor !== "object" || descriptor === null) return [];
+				const row = descriptor as {
+					readonly name?: unknown;
+					readonly schema?: { readonly fields?: unknown };
+				};
+				if (typeof row.name !== "string" || !Array.isArray(row.schema?.fields))
+					return [];
+				const fields = row.schema.fields.flatMap((field) => {
+					if (typeof field !== "object" || field === null) return [];
+					const value = field as {
+						readonly name?: unknown;
+						readonly schema?: { readonly kind?: unknown };
+					};
+					return typeof value.name === "string" &&
+						(value.schema?.kind === "num" || value.schema?.kind === "bool")
+						? [value.name]
+						: [];
+				});
+				return [[row.name, new Set(fields)] as const];
+			}),
+		);
 		this.canonicalQueryCollections = new Set(
 			descriptors.flatMap((descriptor) => {
 				if (typeof descriptor !== "object" || descriptor === null) return [];
@@ -745,6 +781,41 @@ class EngineRuntime {
 					: [];
 			}),
 		);
+	}
+
+	private authorizeFastFind(
+		collectionIndex: number,
+		candidate: {
+			readonly rustSlot: number;
+			readonly authorizationBase: number;
+		},
+	): number {
+		return this.runtime.fast_find_by_id(
+			this.handle,
+			candidate.rustSlot,
+			fastFindAuthorizationToken(collectionIndex, candidate.authorizationBase),
+		);
+	}
+
+	private warmFastFindAuthorization(
+		collectionIndex: number,
+		candidate: {
+			readonly rustSlot: number;
+			readonly authorizationBase: number;
+		},
+	): void {
+		if (this.fastFindAuthorizationWarmed) return;
+		this.fastFindAuthorizationWarmed = true;
+		for (let index = 0; index < 256; index += 1) {
+			this.authorizeFastFind(collectionIndex, candidate);
+		}
+	}
+
+	private throwPendingFastCallbackDefect(): void {
+		const message = this.runtime.take_callback_defect();
+		if (message !== undefined) {
+			throw new WasmEngineDefectError(`unexpected defect: ${message}`);
+		}
 	}
 
 	private measureQueryCrossing<T>(command: unknown, operation: () => T): T {
@@ -875,14 +946,7 @@ class EngineRuntime {
 				let authorized = 0;
 				if (collectionIndex !== undefined && candidate !== undefined) {
 					try {
-						authorized = this.runtime.fast_find_by_id(
-							this.handle,
-							collectionIndex,
-							id,
-							candidate.rustSlot,
-							candidate.generation,
-							candidate.revision,
-						);
+						authorized = this.authorizeFastFind(collectionIndex, candidate);
 					} catch {
 						// The canonical bridge below owns exact error and defect classification.
 						authorized = 0;
@@ -905,6 +969,20 @@ class EngineRuntime {
 				readonly populate?: unknown;
 			};
 			const query = command.query ?? {};
+			const sortEntries = Array.isArray(query.sort) ? query.sort : [];
+			const hasObservableSort = sortEntries.length > 0;
+			const callbackFreeSort =
+				hasObservableSort &&
+				typeof command.collection === "string" &&
+				sortEntries.every(
+					(entry) =>
+						typeof entry === "object" &&
+						entry !== null &&
+						typeof (entry as { readonly field?: unknown }).field === "string" &&
+						this.callbackFreeSortFields
+							.get(command.collection as string)
+							?.has((entry as { readonly field: string }).field) === true,
+				);
 			const rawSelect = query.select;
 			const selectedFields = Array.isArray(rawSelect)
 				? [
@@ -921,22 +999,47 @@ class EngineRuntime {
 				Array.isArray(rawSelect) &&
 				selectedFields.length === rawSelect.length &&
 				command.populate === undefined &&
-				query.where === undefined &&
-				query.sort === undefined &&
-				query.cursor === undefined
+				query.cursor === undefined &&
+				typeof command.collection === "string"
 			) {
+				const collectionIndex = this.collectionIndexes.get(command.collection);
+				const key = JSON.stringify(prepared);
+				const cached = this.hotIndexedQuery;
+				if (
+					(!hasObservableSort || callbackFreeSort) &&
+					collectionIndex !== undefined &&
+					cached !== undefined &&
+					(cached.projected === true || cached.projected === "selected-sort") &&
+					cached.collectionIndex === collectionIndex &&
+					cached.key === key &&
+					this.authorizeCachedQuery(cached.commandBytes, () =>
+						this.runtime.fast_index_query_revision(
+							this.handle,
+							collectionIndex,
+							cached.revision,
+						),
+					) === 1
+				) {
+					return cached.rows.map((row) => ({
+						...(row as Record<string, unknown>),
+					})) as T;
+				}
 				const primitiveRows = this.measureQueryCrossing(prepared, () =>
 					this.runtime.fast_selected_primitive_query(
 						this.handle,
 						JSON.stringify(prepared),
 					),
 				);
+				this.throwPendingFastCallbackDefect();
 				if (
+					collectionIndex !== undefined &&
 					Array.isArray(primitiveRows) &&
-					primitiveRows.length === selectedFields.length &&
-					primitiveRows.every(Array.isArray)
+					typeof primitiveRows[0] === "number" &&
+					primitiveRows.length === selectedFields.length + 1 &&
+					primitiveRows.slice(1).every(Array.isArray)
 				) {
-					const columns = primitiveRows.map((descriptor) => {
+					const revision = primitiveRows[0] as number;
+					const columns = primitiveRows.slice(1).map((descriptor) => {
 						if (descriptor[0] === "s") {
 							const joined = descriptor[1] as string;
 							const offsets = descriptor[2] as Uint32Array;
@@ -1012,6 +1115,22 @@ class EngineRuntime {
 						}
 					}
 					selectionOrderApplied.add(rows);
+					if (!hasObservableSort || callbackFreeSort) {
+						const entry = {
+							collectionIndex,
+							key,
+							revision,
+							commandBytes: transferProxyBytes(prepared),
+							projected: hasObservableSort ? ("selected-sort" as const) : true,
+							rows,
+						};
+						this.hotIndexedQuery = entry;
+						setTimeout(() => {
+							if (this.hotIndexedQuery === entry)
+								this.hotIndexedQuery = undefined;
+						}, 0);
+						return rows.map((row) => ({ ...row })) as T;
+					}
 					return rows as T;
 				}
 			}
@@ -1042,14 +1161,12 @@ class EngineRuntime {
 				if (collectionIndex !== undefined) {
 					const field = scalarFields[0]!;
 					const value = scalarWhere![field] as string;
+					const key = JSON.stringify(prepared);
 					const cached = this.hotIndexedQuery;
 					if (
 						cached !== undefined &&
 						cached.collectionIndex === collectionIndex &&
-						cached.field === field &&
-						cached.value === value &&
-						cached.offset === offset &&
-						cached.limit === limit &&
+						cached.key === key &&
 						this.authorizeCachedQuery(cached.commandBytes, () =>
 							this.runtime.fast_index_query_revision(
 								this.handle,
@@ -1086,12 +1203,10 @@ class EngineRuntime {
 							const cachedRows = rows.slice();
 							const entry = {
 								collectionIndex,
-								field,
-								value,
-								offset,
-								limit,
+								key,
 								revision: projected[0],
 								commandBytes: transferProxyBytes(prepared),
+								projected: false,
 								rows: cachedRows,
 							};
 							this.hotIndexedQuery = entry;
@@ -1105,30 +1220,77 @@ class EngineRuntime {
 				}
 			}
 			if (
-				query.where !== undefined &&
 				query.select === undefined &&
-				query.sort === undefined &&
+				(!hasObservableSort ||
+					this.projection.isCollectionFullyMaterialized(
+						command.collection as string,
+					)) &&
 				query.cursor === undefined &&
 				command.populate === undefined &&
-				typeof command.collection === "string"
+				typeof command.collection === "string" &&
+				(query.where !== undefined || query.sort !== undefined)
 			) {
-				const projectedSlots = this.measureQueryCrossing(prepared, () =>
-					this.runtime.fast_projected_query_slots(
-						this.handle,
-						JSON.stringify(prepared),
-						0xffff_ffff,
-						"",
-						"",
-						0,
-						0xffff_ffff,
-					),
-				);
-				if (projectedSlots instanceof Uint32Array) {
-					const rows = this.materializeFastSlots<T>(
-						command.collection as string,
-						projectedSlots,
+				const collectionIndex = this.collectionIndexes.get(command.collection);
+				if (collectionIndex !== undefined) {
+					const key = JSON.stringify(prepared);
+					const cached = this.hotIndexedQuery;
+					if (
+						(!hasObservableSort || callbackFreeSort) &&
+						cached !== undefined &&
+						cached.collectionIndex === collectionIndex &&
+						cached.key === key &&
+						this.authorizeCachedQuery(cached.commandBytes, () =>
+							this.runtime.fast_index_query_revision(
+								this.handle,
+								collectionIndex,
+								cached.revision,
+							),
+						) === 1
+					) {
+						return cached.rows.slice() as T;
+					}
+					const projected = this.measureQueryCrossing(prepared, () =>
+						this.runtime.fast_projected_query_slots(
+							this.handle,
+							key,
+							0xffff_ffff,
+							"",
+							"",
+							0,
+							0xffff_ffff,
+						),
 					);
-					if (rows !== undefined) return rows as T;
+					this.throwPendingFastCallbackDefect();
+					if (
+						Array.isArray(projected) &&
+						typeof projected[0] === "number" &&
+						projected[1] instanceof Uint32Array
+					) {
+						const rows = this.materializeFastSlots<T>(
+							command.collection,
+							projected[1],
+						);
+						if (rows !== undefined) {
+							if (!hasObservableSort || callbackFreeSort) {
+								const cachedRows = rows.slice();
+								const entry = {
+									collectionIndex,
+									key,
+									revision: projected[0],
+									commandBytes: transferProxyBytes(prepared),
+									projected: hasObservableSort ? ("sort" as const) : false,
+									rows: cachedRows,
+								};
+								this.hotIndexedQuery = entry;
+								setTimeout(() => {
+									if (this.hotIndexedQuery === entry)
+										this.hotIndexedQuery = undefined;
+								}, 0);
+								return cachedRows.slice() as T;
+							}
+							return rows as T;
+						}
+					}
 				}
 			}
 			const canonical =
@@ -1480,6 +1642,73 @@ class EngineRuntime {
 		}
 	}
 
+	private dispatchFindById<T>(collection: string, id: string, allowRetry = true): T {
+		if (this.projection.needsResynchronization) this.resynchronizeProjection();
+		if (this.projection.hasDirtyRows) this.synchronizeDirtyProjection();
+		const collectionIndex = this.collectionIndexes.get(collection);
+		const candidate = this.projection.fastFindCandidate<T>(collection, id);
+		if (collectionIndex !== undefined) {
+			if (candidate !== undefined) {
+				const authorized = this.authorizeFastFind(collectionIndex, candidate);
+				if (authorized === 1) {
+					return this.projection.acceptAuthorizedFastFind(candidate);
+				}
+			} else {
+				const encoded = this.runtime.fast_find_by_id_descriptor(
+					this.handle,
+					collectionIndex,
+					id,
+				);
+				if (encoded !== undefined) {
+					const descriptor = decodeBoundaryValueForHost(encoded);
+					if (!isCompactMaterializedResultDescriptor(descriptor)) {
+						throw new Error("Fast findById returned an invalid descriptor");
+					}
+					try {
+						const value = this.projection.materializeCompact<T>(
+							collection,
+							descriptor,
+							transferProxyBytes(encoded),
+						);
+						const materialized = this.projection.fastFindCandidate<T>(
+							collection,
+							id,
+						);
+						if (materialized !== undefined) {
+							this.warmFastFindAuthorization(collectionIndex, materialized);
+						}
+						return value;
+					} catch (error) {
+						if (!(error instanceof StaleMaterializedHandleError) || !allowRetry)
+							throw error;
+						this.resynchronizeProjection();
+						return this.dispatchFindById<T>(collection, id, false);
+					}
+				}
+			}
+		}
+		this.projection.recordFastFindFallback();
+		return this.dispatch<T>("findById", { collection, id });
+	}
+
+	invokeFindById<T>(collection: string, id: string): Promise<T> {
+		if (this.transactionBarrier) {
+			try {
+				this.assertTransactionWaitAllowed();
+			} catch (error) {
+				return Promise.reject(error);
+			}
+			return this.transactionBarrier.then(() =>
+				this.dispatchFindById<T>(collection, id),
+			);
+		}
+		try {
+			return Promise.resolve(this.dispatchFindById<T>(collection, id));
+		} catch (error) {
+			return Promise.reject(error);
+		}
+	}
+
 	invoke<T>(method: string, payload?: unknown): Promise<T> {
 		try {
 			this.assertTransactionWaitAllowed();
@@ -1496,6 +1725,7 @@ class EngineRuntime {
 		}
 		if (this.projection.needsResynchronization) this.resynchronizeProjection();
 		if (this.projection.hasDirtyRows) this.synchronizeDirtyProjection();
+		this.clearHotIndexedQuery();
 		this.transactionBarrier = new Promise<void>((resolve) => {
 			this.releaseTransactionBarrier = resolve;
 		});
@@ -1674,6 +1904,7 @@ class EngineRuntime {
 	}
 
 	rollbackTransactionSession(session: RuntimeTransactionSession): void {
+		this.clearHotIndexedQuery();
 		parseBridgeResponse(this.runtime.rollback_transaction(session.handle));
 		this.diagnostics.transactionRollbacks += 1;
 	}
@@ -2237,11 +2468,7 @@ function buildCollectionFacade(
 					groupBy: config.groupBy,
 				},
 			}),
-		findById: async (id: string) =>
-			runtime.invoke<any>("findById", {
-				collection: collection.name,
-				id,
-			}),
+		findById: (id: string) => runtime.invokeFindById<any>(collection.name, id),
 		exists: async (id: string) => {
 			const results = await runtime.invoke<any[]>("query", {
 				collection: collection.name,
@@ -3785,7 +4012,7 @@ function buildTransactionCollectionFacade(
 					groupBy: config.groupBy,
 				},
 			}),
-		findById: async (id: string) =>
+		findById: (id: string) =>
 			runtime.invoke<any>("findById", {
 				collection: collection.name,
 				id,

@@ -83,6 +83,17 @@ pub fn sort_entities_with_registry(
     if sort_fields.is_empty() {
         return;
     }
+    if let Some(registry) = registry.filter(|registry| registry.has_host_sort()) {
+        let rows = entities.iter().collect::<Vec<_>>();
+        let Some(order) = registry.host_sort(&rows, sort_fields) else {
+            return;
+        };
+        let original = entities.to_vec();
+        for (target, source) in order.into_iter().enumerate() {
+            entities[target] = original[source].clone();
+        }
+        return;
+    }
     entities.sort_by(|a, b| compare_entities(a, b, sort_fields, registry));
 }
 
@@ -90,7 +101,7 @@ pub fn sort_entities_with_registry(
 ///
 /// TS source (`sort.ts`) returns hard-coded `1` / `-1` for null/absent without
 /// applying the direction — nulls always sort to the **end** regardless of `asc`/`desc`.
-fn compare_entities(
+pub(crate) fn compare_entities(
     a: &Value,
     b: &Value,
     sort_fields: &[SortEntry],
