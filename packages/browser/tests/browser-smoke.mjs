@@ -137,6 +137,20 @@ try {
 	assert(localRace.emissionsA.at(-1)?.length === 2, "LocalStorage watch A should converge");
 	assert(localRace.emissionsB.at(-1)?.length === 2, "LocalStorage watch B should converge");
 
+	const browserFifo = await appPage.evaluate(async () =>
+		window.__PROSEQL_BROWSER_HARNESS__.browserOutsideTransactionFifo(
+			"vite-browser-transaction-fifo:",
+		),
+	);
+	assert(
+		browserFifo.queuedBeforeRelease,
+		"Browser root reads from outside the callback should remain FIFO queued",
+	);
+	assert(
+		browserFifo.title === "Committed",
+		"Browser FIFO read should observe committed transaction state",
+	);
+
 	const indexedRace = await appPage.evaluate(async () =>
 		window.__PROSEQL_BROWSER_HARNESS__.indexedDbConcurrentRace(
 			"vite-indexeddb-race",

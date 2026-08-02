@@ -10,7 +10,7 @@ struct RowSlot {
     materialized: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct MaterializedProjection {
     slots: Vec<RowSlot>,
     by_collection: HashMap<String, HashMap<String, u32>>,

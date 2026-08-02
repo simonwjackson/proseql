@@ -202,6 +202,7 @@ export class MaterializedProjection {
 		FastFindCandidate
 	>();
 	private invalid = false;
+	private readonly metadataFallback?: MaterializedProjection;
 	private nextProxyToken = 1;
 	private mutableStats = {
 		descriptors: 0,
@@ -221,7 +222,11 @@ export class MaterializedProjection {
 		peakTrackedProxies: 0,
 	};
 
-	constructor(snapshot: ProjectionSnapshot) {
+	constructor(
+		snapshot: ProjectionSnapshot,
+		metadataFallback?: MaterializedProjection,
+	) {
+		this.metadataFallback = metadataFallback;
 		this.replaceAll(snapshot, false);
 	}
 
@@ -476,8 +481,21 @@ export class MaterializedProjection {
 				return row[1];
 			}
 			const [rustSlot, id, value] = row;
-			const slot = this.slotByRustSlot.get(rustSlot);
-			const metadata = slot === undefined ? undefined : this.slots[slot];
+			let slot = this.slotByRustSlot.get(rustSlot);
+			let metadata = slot === undefined ? undefined : this.slots[slot];
+			if (metadata === undefined) {
+				const fallbackSlot =
+					this.metadataFallback?.slotByRustSlot.get(rustSlot);
+				const fallback =
+					fallbackSlot === undefined
+						? undefined
+						: this.metadataFallback?.slots[fallbackSlot];
+				if (fallback?.collection === collection && fallback.id === id) {
+					this.put(collection, { id, handle: fallback.handle });
+					slot = this.slotByRustSlot.get(rustSlot);
+					metadata = slot === undefined ? undefined : this.slots[slot];
+				}
+			}
 			if (metadata?.collection !== collection || metadata.id !== id) {
 				this.mutableStats.cacheMisses += 1;
 				this.invalidate();

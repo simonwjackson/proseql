@@ -283,6 +283,145 @@ fn create_and_drop_handle_round_trip() {
 }
 
 #[test]
+fn owned_transaction_session_spans_steps_and_rolls_back_without_snapshot_commands() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![users_descriptor()],
+        json!({"users":[{"id":"u1","name":"Alice"}]}),
+    );
+    let session = expect_ok(&runtime.begin_transaction_json(handle))["sessionHandle"]
+        .as_u64()
+        .unwrap() as u32;
+    let created = expect_ok(
+        &runtime.transaction_step_json(
+            session,
+            "create",
+            Some(
+                json!({"collection":"users","data":{"id":"u2","name":"Bob"}})
+                    .to_string()
+                    .as_str(),
+            ),
+        ),
+    );
+    assert_eq!(created["id"], json!("u2"));
+    let own_write = expect_ok(
+        &runtime.transaction_step_json(
+            session,
+            "findById",
+            Some(
+                json!({"collection":"users","id":"u2","__proseqlProjectResult":true})
+                    .to_string()
+                    .as_str(),
+            ),
+        ),
+    );
+    assert_eq!(own_write["k"], json!("f"));
+    assert!(own_write["r"].is_number(), "{own_write}");
+    expect_ok(&runtime.rollback_transaction_json(session));
+    let error = expect_error_tag(
+        &runtime.dispatch_json(
+            handle,
+            "findById",
+            Some(json!({"collection":"users","id":"u2"}).to_string().as_str()),
+        ),
+        "NotFoundError",
+    );
+    assert_eq!(error["id"], json!("u2"));
+}
+
+#[test]
+fn transaction_defect_poisons_session_and_forces_rollback() {
+    let (mut runtime, _) = make_runtime();
+    runtime
+        .callbacks_mut()
+        .register_before_create_hook("panic-create", |_ctx| -> Result<Value, EngineError> {
+            panic!("transaction callback defect")
+        });
+    let mut descriptor = users_descriptor();
+    descriptor.before_create_hooks = vec!["panic-create".into()];
+    let handle = create_database(
+        &mut runtime,
+        vec![descriptor],
+        json!({"users":[{"id":"u1","name":"Alice"}]}),
+    );
+    let session = expect_ok(&runtime.begin_transaction_json(handle))["sessionHandle"]
+        .as_u64()
+        .unwrap() as u32;
+    expect_defect(
+        &runtime.transaction_step_json(
+            session,
+            "create",
+            Some(
+                json!({"collection":"users","data":{"id":"u2","name":"Bob"}})
+                    .to_string()
+                    .as_str(),
+            ),
+        ),
+    );
+    let step = expect_error_tag(
+        &runtime.transaction_step_json(
+            session,
+            "findById",
+            Some(json!({"collection":"users","id":"u1"}).to_string().as_str()),
+        ),
+        "OperationError",
+    );
+    assert_eq!(step["reason"], json!("session-poisoned"));
+    let commit = expect_error_tag(&runtime.commit_transaction_json(session), "OperationError");
+    assert_eq!(commit["reason"], json!("session-poisoned"));
+    assert_eq!(
+        dispatch(
+            &mut runtime,
+            handle,
+            "findById",
+            json!({"collection":"users","id":"u1"})
+        )["name"],
+        json!("Alice")
+    );
+}
+
+#[test]
+fn owned_transaction_commit_returns_one_journal_and_projection_delta() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![users_descriptor()],
+        json!({"users":[{"id":"u1","name":"Alice"}]}),
+    );
+    let session = expect_ok(&runtime.begin_transaction_json(handle))["sessionHandle"]
+        .as_u64()
+        .unwrap() as u32;
+    expect_ok(
+        &runtime.transaction_step_json(
+            session,
+            "update",
+            Some(
+                json!({"collection":"users","id":"u1","data":{"name":"Updated"}})
+                    .to_string()
+                    .as_str(),
+            ),
+        ),
+    );
+    let raw = runtime.commit_transaction_json(session);
+    let response = parse_response(&raw);
+    assert_eq!(response["kind"], json!("ok"), "{response}");
+    assert_eq!(response["value"]["changedCollections"], json!(["users"]));
+    assert_eq!(response["value"]["journalEntries"], json!(1));
+    assert!(response["value"]["journalBytes"].as_u64().unwrap() > 0);
+    assert!(response.get("projection").is_some());
+    assert_eq!(
+        dispatch(
+            &mut runtime,
+            handle,
+            "findById",
+            json!({"collection":"users","id":"u1"}),
+        )["name"],
+        json!("Updated")
+    );
+}
+
+#[test]
 fn create_database_invalid_json_returns_operation_error() {
     let (mut runtime, _) = make_runtime();
     let error = expect_error_tag(&runtime.create_database_json("{"), "OperationError");
@@ -630,6 +769,47 @@ fn typed_partial_relationship_effect_carries_projection_sync_on_the_error_respon
         json!("fallback-1")
     );
     assert!(response["projection"]["changes"][0].get("value").is_none());
+    let dumped = dispatch_no_payload(&mut runtime, handle, "dumpAll");
+    assert_eq!(dumped["companies"][0]["name"], json!("Created first"));
+    assert!(dumped["users"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn transaction_typed_partial_effect_can_be_caught_and_committed_with_projection_sync() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![users_descriptor(), companies_descriptor()],
+        json!({}),
+    );
+    let session = expect_ok(&runtime.begin_transaction_json(handle))["sessionHandle"]
+        .as_u64()
+        .unwrap() as u32;
+    let response = parse_response(
+        &runtime.transaction_step_json(
+            session,
+            "createWithRelationships",
+            Some(
+                json!({
+                    "collection": "users",
+                    "data": {
+                        "id": "u1",
+                        "company": {"$create": {"id": "c1", "name": "Created first"}}
+                    }
+                })
+                .to_string()
+                .as_str(),
+            ),
+        ),
+    );
+    assert_eq!(response["kind"], json!("error"));
+    assert_eq!(response["error"]["_tag"], json!("ValidationError"));
+    assert_eq!(
+        response["projection"]["changes"][0]["collection"],
+        json!("companies")
+    );
+    let committed = expect_ok(&runtime.commit_transaction_json(session));
+    assert_eq!(committed["changedCollections"], json!(["companies"]));
     let dumped = dispatch_no_payload(&mut runtime, handle, "dumpAll");
     assert_eq!(dumped["companies"][0]["name"], json!("Created first"));
     assert!(dumped["users"].as_array().unwrap().is_empty());

@@ -314,6 +314,40 @@ const runConcurrentRace = async (
 	};
 };
 
+const browserOutsideTransactionFifo = async (prefix: string) => {
+	clearLocalStoragePrefix(prefix);
+	const db = await withLocalDb(prefix);
+	await db.books.create({
+		id: "fifo-book",
+		title: "Before",
+		author: "Browser",
+		year: 2026,
+	});
+	let release!: () => void;
+	const blocked = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const transaction = db.$transaction(async (tx) => {
+		await tx.books.update("fifo-book", { title: "Committed" });
+		await blocked;
+	});
+	let outsideSettled = false;
+	const outside = db.books.findById("fifo-book").then((row) => {
+		outsideSettled = true;
+		return row;
+	});
+	await Promise.resolve();
+	const queuedBeforeRelease = !outsideSettled;
+	release();
+	await transaction;
+	const row = await outside;
+	await db.close();
+	return {
+		queuedBeforeRelease,
+		title: row.title,
+	};
+};
+
 const harness = {
 	localRoundTrip(prefix: string) {
 		return roundTrip("local", prefix);
@@ -359,6 +393,9 @@ const harness = {
 	},
 	localConcurrentRace(prefix: string) {
 		return runConcurrentRace("local", prefix);
+	},
+	browserOutsideTransactionFifo(prefix: string) {
+		return browserOutsideTransactionFifo(prefix);
 	},
 	indexedDbConcurrentRace(databaseName: string, prefix: string) {
 		return runConcurrentRace("indexeddb", prefix, databaseName);

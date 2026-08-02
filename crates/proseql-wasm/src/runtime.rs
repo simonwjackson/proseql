@@ -5,7 +5,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use indexmap::IndexMap;
 use proseql_engine::callbacks::CallbackRegistry;
-use proseql_engine::change_set::ChangeSet;
+use proseql_engine::change_set::{ChangeSet, EntityChange};
 use proseql_engine::clock::{Clock, FixedClock};
 use proseql_engine::collection::Collection;
 use proseql_engine::descriptor::CollectionDescriptor;
@@ -13,6 +13,7 @@ use proseql_engine::errors::{EngineError, OperationError};
 use proseql_engine::id_gen::{IdGenerator, SequentialGenerator};
 use proseql_engine::reactive::CallbackSubscription;
 use proseql_engine::relationships::Database;
+use proseql_engine::transactions::OwnedTransactionSession;
 use proseql_engine::value::{decode_boundary_input_value, encode_boundary_output_value};
 use serde_json::{json, Value};
 
@@ -76,11 +77,21 @@ impl DatabaseContext {
     }
 }
 
+pub(crate) struct RuntimeTransactionSession {
+    pub database_handle: u32,
+    pub state: OwnedTransactionSession,
+    pub projection: MaterializedProjection,
+    pub step_crossings: u64,
+    pub poisoned: bool,
+}
+
 pub(crate) struct RuntimeCore {
     pub callbacks: CallbackTable,
     pub config: RuntimeConfig,
     pub next_handle: u32,
+    pub next_session_handle: u32,
     pub databases: std::collections::HashMap<u32, DatabaseContext>,
+    pub transaction_sessions: std::collections::HashMap<u32, RuntimeTransactionSession>,
 }
 
 impl RuntimeCore {
@@ -89,7 +100,9 @@ impl RuntimeCore {
             callbacks: CallbackTable::default(),
             config,
             next_handle: 1,
+            next_session_handle: 1,
             databases: std::collections::HashMap::new(),
+            transaction_sessions: std::collections::HashMap::new(),
         }
     }
 
@@ -152,6 +165,27 @@ impl RuntimeCore {
     }
 
     pub fn drop_database(&mut self, handle: u32) -> bool {
+        let sessions = self
+            .transaction_sessions
+            .iter()
+            .filter_map(|(session_handle, session)| {
+                (session.database_handle == handle).then_some(*session_handle)
+            })
+            .collect::<Vec<_>>();
+        for session_handle in sessions {
+            if let (Some(session), Some(context)) = (
+                self.transaction_sessions.remove(&session_handle),
+                self.databases.get_mut(&handle),
+            ) {
+                if context
+                    .db
+                    .rollback_owned_transaction(session.state)
+                    .is_err()
+                {
+                    context.db.abandon_owned_transaction_guard();
+                }
+            }
+        }
         self.databases.remove(&handle).is_some()
     }
 
@@ -198,6 +232,16 @@ fn is_mutation_method(method: &str) -> bool {
             | "reloadCollection"
             | "commitSnapshotTransaction"
     )
+}
+
+fn transaction_session_error(operation: &str, reason: &str, message: impl Into<String>) -> String {
+    bridge::handle(|| -> Result<Value, EngineError> {
+        Err(EngineError::Operation(OperationError {
+            operation: operation.to_owned(),
+            reason: reason.to_owned(),
+            message: message.into(),
+        }))
+    })
 }
 
 fn mutation_result_carries_owner_rows(method: &str) -> bool {
@@ -439,11 +483,15 @@ impl Runtime {
         })
     }
 
-    fn attach_projection_sync(&self, handle: u32, mut response: String) -> String {
+    fn attach_projection_sync(&self, handle: u32, response: String) -> String {
         let Some(context) = self.inner.databases.get(&handle) else {
             return response;
         };
-        let encoded = encode_boundary_output_value(context.projection.last_sync().clone());
+        Self::attach_projection_value(response, context.projection.last_sync())
+    }
+
+    fn attach_projection_value(mut response: String, sync: &Value) -> String {
+        let encoded = encode_boundary_output_value(sync.clone());
         let Ok(sync_json) = serde_json::to_string(&encoded) else {
             return "{\"kind\":\"defect\",\"message\":\"failed to serialize projection sync\",\"projection\":{\"changes\":[],\"invalidated\":true}}".to_owned();
         };
@@ -496,6 +544,378 @@ impl Runtime {
             }
             Ok(Value::Null)
         })
+    }
+
+    pub fn begin_transaction_json(&mut self, handle: u32) -> String {
+        bridge::handle(|| {
+            let session_handle = self.inner.next_session_handle.max(1);
+            self.inner.next_session_handle = session_handle.saturating_add(1);
+            let context = self.inner.database_mut(handle)?;
+            let state = context.db.begin_owned_transaction()?;
+            let mut projection = context.projection.clone();
+            // The JavaScript transaction projection starts metadata-only. Reset
+            // the Rust authorization bits so its first read always carries the
+            // canonical value rather than referring to main-projection objects.
+            projection.reset_materializations();
+            self.inner.transaction_sessions.insert(
+                session_handle,
+                RuntimeTransactionSession {
+                    database_handle: handle,
+                    state,
+                    projection,
+                    step_crossings: 0,
+                    poisoned: false,
+                },
+            );
+            Ok(json!({"sessionHandle": session_handle}))
+        })
+    }
+
+    pub fn transaction_step_json(
+        &mut self,
+        session_handle: u32,
+        method: &str,
+        payload_json: Option<&str>,
+    ) -> String {
+        let Some(mut session) = self.inner.transaction_sessions.remove(&session_handle) else {
+            return transaction_session_error(
+                "transactionStep",
+                "unknown-session",
+                format!("Unknown transaction session {session_handle}"),
+            );
+        };
+        if session.poisoned {
+            self.inner
+                .transaction_sessions
+                .insert(session_handle, session);
+            return transaction_session_error(
+                "transactionStep",
+                "session-poisoned",
+                "Transaction session was invalidated by an engine defect",
+            );
+        }
+
+        let database_handle = session.database_handle;
+        let parsed_payload =
+            payload_json.and_then(|payload| serde_json::from_str::<Value>(payload).ok());
+        let collection = parsed_payload
+            .as_ref()
+            .and_then(|payload| payload.get("collection"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let requested_id = parsed_payload
+            .as_ref()
+            .and_then(|payload| payload.get("id"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let projected = matches!(method, "findById" | "query")
+            && parsed_payload
+                .as_ref()
+                .and_then(|payload| payload.get("__proseqlProjectResult"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+        let response = bridge::handle(|| {
+            let result = command::dispatch(&mut self.inner, database_handle, method, payload_json)?;
+            let Some(collection) = collection.as_deref().filter(|_| projected) else {
+                return Ok(result);
+            };
+            let context = self.inner.database_mut(database_handle)?;
+            Ok(session.projection.describe_result(
+                &context.db,
+                method,
+                collection,
+                requested_id.as_deref(),
+                result,
+            ))
+        });
+        let changes = self
+            .inner
+            .databases
+            .get_mut(&database_handle)
+            .map(|context| context.db.take_committed_changes())
+            .unwrap_or_default();
+        session.step_crossings = session.step_crossings.saturating_add(1);
+
+        let response_kind = serde_json::from_str::<Value>(&response)
+            .ok()
+            .and_then(|value| value.get("kind").and_then(Value::as_str).map(str::to_owned));
+        let is_defect = response_kind.as_deref() == Some("defect")
+            || serde_json::from_str::<Value>(&response)
+                .ok()
+                .and_then(|value| value.get("error").cloned())
+                .is_some_and(|error| {
+                    matches!(
+                        error.get("_tag").and_then(Value::as_str),
+                        Some("OperationError" | "HookError")
+                    ) && error
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .is_some_and(|reason| {
+                            reason == "callback-defect"
+                                || reason == "js-exception"
+                                || reason.contains("callback-defect")
+                                || reason.contains("js-exception")
+                        })
+                });
+        if is_mutation_method(method) {
+            let owner = (response_kind.as_deref() == Some("ok")
+                && mutation_result_carries_owner_rows(method))
+            .then_some(collection.as_deref())
+            .flatten();
+            session.projection.apply_changes(&changes, owner);
+            if response_kind.as_deref() == Some("ok") && method == "upsertMany" {
+                let unchanged = serde_json::from_str::<Value>(&response)
+                    .ok()
+                    .and_then(|response| response.get("value").cloned())
+                    .and_then(|value| value.get("unchanged").cloned())
+                    .and_then(|values| values.as_array().cloned())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(decode_boundary_input_value)
+                    .collect::<Vec<_>>();
+                if let (Some(context), Some(collection)) = (
+                    self.inner.databases.get(&database_handle),
+                    collection.as_deref(),
+                ) {
+                    session.projection.observe_unchanged_values(
+                        &context.db,
+                        collection,
+                        &unchanged,
+                    );
+                }
+            }
+        }
+        session.state.absorb_changes(changes);
+        if is_defect {
+            session.poisoned = true;
+            session.projection.invalidate();
+        }
+        let response = if is_mutation_method(method) || is_defect {
+            Self::attach_projection_value(response, session.projection.last_sync())
+        } else {
+            response
+        };
+        self.inner
+            .transaction_sessions
+            .insert(session_handle, session);
+        response
+    }
+
+    pub fn synchronize_transaction_projection_json(
+        &mut self,
+        session_handle: u32,
+        rows_json: &str,
+    ) -> String {
+        bridge::handle(|| {
+            let rows: Value = parse_json(rows_json, "synchronizeTransactionProjection")?;
+            let rows = rows.as_array().ok_or_else(|| {
+                EngineError::Operation(OperationError {
+                    operation: "synchronizeTransactionProjection".to_owned(),
+                    reason: "invalid-payload".to_owned(),
+                    message: "Expected an array of projected rows".to_owned(),
+                })
+            })?;
+            let mut session = self
+                .inner
+                .transaction_sessions
+                .remove(&session_handle)
+                .ok_or_else(|| {
+                    EngineError::Operation(OperationError {
+                        operation: "synchronizeTransactionProjection".to_owned(),
+                        reason: "unknown-session".to_owned(),
+                        message: format!("Unknown transaction session {session_handle}"),
+                    })
+                })?;
+            let result = (|| {
+                if session.poisoned {
+                    return Err(EngineError::Operation(OperationError {
+                        operation: "synchronizeTransactionProjection".to_owned(),
+                        reason: "session-poisoned".to_owned(),
+                        message: "Transaction session was invalidated by an engine defect"
+                            .to_owned(),
+                    }));
+                }
+                for row in rows {
+                    let collection = row.get("collection").and_then(Value::as_str).unwrap_or("");
+                    let id = row.get("id").and_then(Value::as_str).unwrap_or("");
+                    let handle = row.get("handle").and_then(Value::as_str).unwrap_or("");
+                    if !session.projection.authorizes(collection, id, handle) {
+                        return Err(EngineError::Operation(OperationError {
+                            operation: "synchronizeTransactionProjection".to_owned(),
+                            reason: "stale-materialized-handle".to_owned(),
+                            message: format!("Stale materialized handle for '{collection}/{id}'"),
+                        }));
+                    }
+                }
+                let context = self.inner.database_mut(session.database_handle)?;
+                let mut changes = ChangeSet::default();
+                for row in rows {
+                    let collection = row["collection"].as_str().unwrap_or_default();
+                    let id = row["id"].as_str().unwrap_or_default();
+                    let value = row.get("value").cloned().unwrap_or(Value::Null);
+                    let rows = context.db.collection(collection).ok_or_else(|| {
+                        EngineError::Operation(OperationError {
+                            operation: "synchronizeTransactionProjection".to_owned(),
+                            reason: "stale-materialized-handle".to_owned(),
+                            message: format!("Missing materialized collection '{collection}'"),
+                        })
+                    })?;
+                    let before = rows.get(id).cloned().ok_or_else(|| {
+                        EngineError::Operation(OperationError {
+                            operation: "synchronizeTransactionProjection".to_owned(),
+                            reason: "stale-materialized-handle".to_owned(),
+                            message: format!("Missing materialized row '{collection}/{id}'"),
+                        })
+                    })?;
+                    let position = rows.list().iter().position(|candidate| {
+                        std::ptr::eq(*candidate, rows.get(id).expect("row exists"))
+                    });
+                    context
+                        .db
+                        .synchronize_materialized_value(collection, id, value.clone())?;
+                    changes.record(EntityChange {
+                        collection: collection.to_owned(),
+                        id: id.to_owned(),
+                        before: Some(before),
+                        after: Some(value),
+                        before_position: position,
+                        after_position: position,
+                    });
+                }
+                session.state.absorb_changes(changes);
+                Ok(Value::Null)
+            })();
+            self.inner
+                .transaction_sessions
+                .insert(session_handle, session);
+            result
+        })
+    }
+
+    pub fn transaction_projection_handles_json(&mut self, session_handle: u32) -> String {
+        bridge::handle(|| {
+            let session = self
+                .inner
+                .transaction_sessions
+                .get_mut(&session_handle)
+                .ok_or_else(|| {
+                    EngineError::Operation(OperationError {
+                        operation: "transactionProjectionHandles".to_owned(),
+                        reason: "unknown-session".to_owned(),
+                        message: format!("Unknown transaction session {session_handle}"),
+                    })
+                })?;
+            if session.poisoned {
+                return Err(EngineError::Operation(OperationError {
+                    operation: "transactionProjectionHandles".to_owned(),
+                    reason: "session-poisoned".to_owned(),
+                    message: "Transaction session was invalidated by an engine defect".to_owned(),
+                }));
+            }
+            session.projection.reset_materializations();
+            let collections = self
+                .inner
+                .databases
+                .get(&session.database_handle)
+                .map(|context| context.collection_names.clone())
+                .unwrap_or_default();
+            Ok(session.projection.handles(&collections))
+        })
+    }
+
+    pub fn commit_transaction_json(&mut self, session_handle: u32) -> String {
+        let database_handle = self
+            .inner
+            .transaction_sessions
+            .get(&session_handle)
+            .map(|session| session.database_handle);
+        let response = bridge::handle(|| {
+            let session = self
+                .inner
+                .transaction_sessions
+                .remove(&session_handle)
+                .ok_or_else(|| {
+                    EngineError::Operation(OperationError {
+                        operation: "commitTransaction".to_owned(),
+                        reason: "unknown-session".to_owned(),
+                        message: format!("Unknown transaction session {session_handle}"),
+                    })
+                })?;
+            let context = self.inner.database_mut(session.database_handle)?;
+            if session.poisoned {
+                context.db.rollback_owned_transaction(session.state)?;
+                return Err(EngineError::Operation(OperationError {
+                    operation: "commitTransaction".to_owned(),
+                    reason: "session-poisoned".to_owned(),
+                    message: "Cannot commit a transaction invalidated by an engine defect"
+                        .to_owned(),
+                }));
+            }
+            let committed = context.db.commit_owned_transaction(session.state)?;
+            let committed_stream = context.db.take_committed_changes();
+            context.projection.apply_changes(&committed_stream, None);
+            context.last_changes = committed_stream;
+            Ok(json!({
+                "changedCollections": committed.touched_collections,
+                "journalEntries": committed.journal_entries,
+                "journalBytes": committed.journal_bytes,
+                "stepCrossings": session.step_crossings,
+            }))
+        });
+        if response.starts_with("{\"kind\":\"defect\"") {
+            if let Some(context) =
+                database_handle.and_then(|handle| self.inner.databases.get_mut(&handle))
+            {
+                context.db.abandon_owned_transaction_guard();
+                context
+                    .projection
+                    .replace_collections(&context.db, context.collection_names.iter().cloned());
+                context.projection.invalidate();
+            }
+        }
+        database_handle.map_or(response.clone(), |handle| {
+            self.attach_projection_sync(handle, response)
+        })
+    }
+
+    pub fn rollback_transaction_json(&mut self, session_handle: u32) -> String {
+        let database_handle = self
+            .inner
+            .transaction_sessions
+            .get(&session_handle)
+            .map(|session| session.database_handle);
+        let response = bridge::handle(|| {
+            let session = self
+                .inner
+                .transaction_sessions
+                .remove(&session_handle)
+                .ok_or_else(|| {
+                    EngineError::Operation(OperationError {
+                        operation: "rollbackTransaction".to_owned(),
+                        reason: "unknown-session".to_owned(),
+                        message: format!("Unknown transaction session {session_handle}"),
+                    })
+                })?;
+            let context = self.inner.database_mut(session.database_handle)?;
+            context.db.rollback_owned_transaction(session.state)?;
+            let _ = context.db.take_committed_changes();
+            Ok(json!({
+                "rolledBack": true,
+                "stepCrossings": session.step_crossings,
+            }))
+        });
+        if response.starts_with("{\"kind\":\"defect\"") {
+            if let Some(context) =
+                database_handle.and_then(|handle| self.inner.databases.get_mut(&handle))
+            {
+                context.db.abandon_owned_transaction_guard();
+                context
+                    .projection
+                    .replace_collections(&context.db, context.collection_names.iter().cloned());
+                context.projection.invalidate();
+            }
+        }
+        response
     }
 
     pub fn last_changes(&self, handle: u32) -> Option<&ChangeSet> {
@@ -717,6 +1137,51 @@ impl WasmRuntime {
             method.as_str(),
             payload_json.as_deref(),
         )
+    }
+
+    pub fn begin_transaction(&self, handle: u32) -> String {
+        self.inner.borrow_mut().begin_transaction_json(handle)
+    }
+
+    pub fn transaction_step(
+        &self,
+        session_handle: u32,
+        method: String,
+        payload_json: Option<String>,
+    ) -> String {
+        self.inner.borrow_mut().transaction_step_json(
+            session_handle,
+            method.as_str(),
+            payload_json.as_deref(),
+        )
+    }
+
+    pub fn synchronize_transaction_projection(
+        &self,
+        session_handle: u32,
+        rows_json: String,
+    ) -> String {
+        self.inner
+            .borrow_mut()
+            .synchronize_transaction_projection_json(session_handle, &rows_json)
+    }
+
+    pub fn transaction_projection_handles(&self, session_handle: u32) -> String {
+        self.inner
+            .borrow_mut()
+            .transaction_projection_handles_json(session_handle)
+    }
+
+    pub fn commit_transaction(&self, session_handle: u32) -> String {
+        self.inner
+            .borrow_mut()
+            .commit_transaction_json(session_handle)
+    }
+
+    pub fn rollback_transaction(&self, session_handle: u32) -> String {
+        self.inner
+            .borrow_mut()
+            .rollback_transaction_json(session_handle)
     }
 
     pub fn fast_find_by_id(

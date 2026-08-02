@@ -670,6 +670,40 @@ describe("@proseql/effect", () => {
 		).toEqual(rows.map((book) => book.genre));
 	});
 
+	it("interrupts an active transaction by rolling back and releasing queued operations", async () => {
+		const db = await Effect.runPromise(
+			createEffectDatabase(config, {
+				users: [{ id: "u1", name: "Alice", age: 30, companyId: "c1" }],
+				companies: [{ id: "c1", name: "Acme" }],
+				books: [],
+			}),
+		);
+		let started!: () => void;
+		const active = new Promise<void>((resolve) => {
+			started = resolve;
+		});
+		const fiber = Effect.runFork(
+			db.$transaction((tx) =>
+				Effect.gen(function* () {
+					yield* tx.users.create({
+						id: "u2",
+						name: "Bob",
+						age: 31,
+						companyId: "c1",
+					});
+					yield* Effect.sync(started);
+					yield* Effect.never;
+				}),
+			),
+		);
+		await active;
+		await Effect.runPromise(Fiber.interrupt(fiber));
+		await expect(db.users.findById("u2").runPromise).rejects.toMatchObject({
+			_tag: "NotFoundError",
+		});
+		await db.close();
+	});
+
 	it("supplies the full TransactionContext surface with manual commit/rollback, inactive guards, and mutation tracking", async () => {
 		const result = await Effect.runPromise(
 			Effect.gen(function* () {
@@ -690,6 +724,13 @@ describe("@proseql/effect", () => {
 						yield* tx.books.create({ id: "b1", title: "Dune", year: 1965, genre: "sci-fi" });
 						expect([...tx.mutatedCollections]).toEqual(["users", "books"]);
 
+						const streamConstructedWhileActive = tx.users.query({
+							sort: { id: "asc" },
+						});
+						const cursorConstructedWhileActive = tx.users.query({
+							cursor: { key: "id", limit: 1 },
+							sort: { id: "asc" },
+						});
 						yield* tx.commit();
 						expect(tx.isActive).toBe(false);
 						expect([...tx.mutatedCollections]).toEqual(["users", "books"]);
@@ -701,6 +742,36 @@ describe("@proseql/effect", () => {
 						if (inactiveCreate instanceof TransactionError) {
 							expect(inactiveCreate.reason).toBe("transaction is no longer active");
 						}
+
+						const inactiveStreamQuery = yield* Stream.runCollect(
+							streamConstructedWhileActive,
+						).pipe(Effect.flip);
+						expect(inactiveStreamQuery).toMatchObject({
+							_tag: "TransactionError",
+							operation: "begin",
+							reason: "transaction is no longer active",
+							message: "Cannot perform operation: transaction is no longer active",
+						});
+						const inactiveCursorQuery = yield* cursorConstructedWhileActive.pipe(
+							Effect.flip,
+						);
+						expect(inactiveCursorQuery).toMatchObject({
+							_tag: "TransactionError",
+							operation: "begin",
+							reason: "transaction is no longer active",
+						});
+						const inactiveFind = yield* tx.users.findById("u1").pipe(Effect.flip);
+						expect(inactiveFind).toMatchObject({
+							_tag: "TransactionError",
+							reason: "transaction is no longer active",
+						});
+						const inactiveAggregate = yield* tx.users
+							.aggregate({ count: true })
+							.pipe(Effect.flip);
+						expect(inactiveAggregate).toMatchObject({
+							_tag: "TransactionError",
+							reason: "transaction is no longer active",
+						});
 
 						const secondCommit = yield* tx.commit().pipe(Effect.flip);
 						expect(secondCommit).toBeInstanceOf(TransactionError);
@@ -725,7 +796,28 @@ describe("@proseql/effect", () => {
 						expect(tx.isActive).toBe(true);
 						yield* tx.users.create({ id: "u4", name: "Dana", age: 33, companyId: "c1" });
 						expect([...tx.mutatedCollections]).toEqual(["users"]);
-						return yield* tx.rollback();
+						const streamConstructedWhileActive = tx.users.query();
+						const cursorConstructedWhileActive = tx.users.query({
+							cursor: { key: "id", limit: 1 },
+						});
+						const explicitRollback = yield* tx.rollback().pipe(Effect.flip);
+						const inactiveStreamQuery = yield* Stream.runCollect(
+							streamConstructedWhileActive,
+						).pipe(Effect.flip);
+						expect(inactiveStreamQuery).toMatchObject({
+							_tag: "TransactionError",
+							operation: "begin",
+							reason: "transaction is no longer active",
+						});
+						const inactiveCursorQuery = yield* cursorConstructedWhileActive.pipe(
+							Effect.flip,
+						);
+						expect(inactiveCursorQuery).toMatchObject({
+							_tag: "TransactionError",
+							operation: "begin",
+							reason: "transaction is no longer active",
+						});
+						return yield* Effect.fail(explicitRollback);
 					})
 				).pipe(Effect.flip);
 

@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
@@ -48,14 +49,24 @@ impl Serialize for ChangeSet {
     where
         S: Serializer,
     {
-        #[derive(Serialize)]
-        struct Wire<'a> {
-            entities: Vec<&'a EntityChange>,
+        struct LiveEntities<'a>(&'a ChangeSet);
+
+        impl Serialize for LiveEntities<'_> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+                for entity in self.0.entities() {
+                    sequence.serialize_element(entity)?;
+                }
+                sequence.end()
+            }
         }
-        Wire {
-            entities: self.entities().collect(),
-        }
-        .serialize(serializer)
+
+        let mut wire = serializer.serialize_struct("ChangeSet", 1)?;
+        wire.serialize_field("entities", &LiveEntities(self))?;
+        wire.end()
     }
 }
 
@@ -211,5 +222,12 @@ mod tests {
                 .len(),
             2
         );
+        assert_eq!(
+            serde_json::to_string(&changes).unwrap(),
+            r#"{"entities":[{"collection":"users","id":"kept-a","after":{"id":"kept-a"}},{"collection":"users","id":"kept-b","after":{"id":"kept-b"}}]}"#
+        );
+        let decoded: ChangeSet =
+            serde_json::from_str(&serde_json::to_string(&changes).unwrap()).unwrap();
+        assert_eq!(decoded, changes);
     }
 }

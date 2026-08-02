@@ -54,9 +54,12 @@ import {
 	type ProjectionSync,
 } from "./materialized-projection.js";
 import { buildPluginRegistry } from "./plugin-registry.js";
-import { compileDatabaseDescriptor, type CallbackRegistrar } from "./schema-compiler.js";
-import { dirnameComparable, isWithinComparableDirectory, matchesComparableFile } from "./path-utils.js";
-import { makeEngineStorageLayer, type EngineStorageHost } from "./storage-host-shared.js";
+import { compileDatabaseDescriptor, type CallbackRegistrar,
+} from "./schema-compiler.js";
+import { dirnameComparable, isWithinComparableDirectory, matchesComparableFile,
+} from "./path-utils.js";
+import { makeEngineStorageLayer, type EngineStorageHost,
+} from "./storage-host-shared.js";
 import type {
 	EngineCollection,
 	EngineDatabaseOptions,
@@ -70,7 +73,10 @@ import type {
 } from "./types.js";
 
 const DEFAULT_WRITE_DEBOUNCE = 100;
-const OBJECT_KEYED_ONLY_FORMATS = new Set(["json", "yaml", "yml", "toml", "json5", "jsonc", "hjson", "toon"]);
+const OBJECT_KEYED_ONLY_FORMATS = new Set([
+	"json",
+	"yaml", "yml", "toml", "json5", "jsonc", "hjson", "toon",
+]);
 
 type BridgeOk<T> = { kind: "ok"; value: T };
 type BridgeError = { kind: "error"; error: unknown };
@@ -90,7 +96,9 @@ type SharedFileGroup = {
 	readonly collections: ReadonlyArray<CollectionRuntimeConfig>;
 };
 
-function inferCollectionFormat(collection: CollectionConfig): string | undefined {
+function inferCollectionFormat(
+	collection: CollectionConfig,
+): string | undefined {
 	const explicit = collection.format?.replace(/^\./, "").toLowerCase();
 	if (explicit) return explicit;
 	const file = collection.file ?? collection.directory;
@@ -99,7 +107,9 @@ function inferCollectionFormat(collection: CollectionConfig): string | undefined
 	return match?.[1]?.toLowerCase();
 }
 
-function validateCollectionRuntimeConfig(name: string, collection: CollectionConfig, pluginRegistry?: PluginRegistry) {
+function validateCollectionRuntimeConfig(
+	name: string, collection: CollectionConfig, pluginRegistry?: PluginRegistry,
+) {
 	if (collection.id?.kind === "derivedFromKey") {
 		if (collection.id.field !== "id") {
 			throw new ValidationError({
@@ -125,7 +135,9 @@ function validateCollectionRuntimeConfig(name: string, collection: CollectionCon
 			});
 		}
 	}
-	if (collection.idGenerator && pluginRegistry && !pluginRegistry.idGenerators.has(collection.idGenerator)) {
+	if (
+		collection.idGenerator && pluginRegistry && !pluginRegistry.idGenerators.has(collection.idGenerator)
+	) {
 		throw new PluginError({
 			plugin: collection.idGenerator,
 			reason: "missing_id_generator",
@@ -166,7 +178,10 @@ type PersistenceState = {
 	readonly sharedFiles: ReadonlyArray<SharedFileGroup>;
 	readonly directoryIds: Map<string, Set<string>>;
 	readonly writeKeyByCollection: Map<string, string>;
-	readonly collectionBaselines: Map<string, ReadonlyMap<string, Record<string, unknown>>>;
+	readonly collectionBaselines: Map<
+		string,
+		ReadonlyMap<string, Record<string, unknown>>
+	>;
 	readonly dirtyCollections: Set<string>;
 	readonly collectionsAwaitingExternalMerge: Set<string>;
 	readonly saver: DebouncedSaver;
@@ -228,7 +243,9 @@ class DebouncedSaver {
 
 	async flush() {
 		const keys = [...this.lanes.entries()]
-			.filter(([, lane]) => lane.timer || lane.dirty || lane.inflight || lane.error !== undefined)
+			.filter(
+				([, lane]) => lane.timer || lane.dirty || lane.inflight || lane.error !== undefined,
+			)
 			.map(([key]) => key);
 		for (const key of keys) {
 			const lane = this.lanes.get(key);
@@ -238,7 +255,9 @@ class DebouncedSaver {
 			}
 		}
 		await Promise.all(keys.map((key) => this.flushLane(key)));
-		const firstError = [...this.lanes.values()].find((lane) => lane.error !== undefined)?.error;
+		const firstError = [...this.lanes.values()].find(
+			(lane) => lane.error !== undefined,
+		)?.error;
 		if (firstError !== undefined) throw firstError;
 	}
 
@@ -261,7 +280,9 @@ class DebouncedSaver {
 		if (lane.error !== undefined) throw lane.error;
 	}
 
-	private async startSave(key: string, lane: SaveLane, immediateRetry: boolean): Promise<void> {
+	private async startSave(
+		key: string, lane: SaveLane, immediateRetry: boolean,
+	): Promise<void> {
 		if (lane.inflight) {
 			lane.queuedAfterInflight = true;
 			await lane.inflight;
@@ -284,7 +305,9 @@ class DebouncedSaver {
 					clearTimeout(lane.timer);
 					lane.timer = undefined;
 				}
-				if ((lane.dirty || lane.queuedAfterInflight) && !immediateRetry && lane.error === undefined) {
+				if (
+					(lane.dirty || lane.queuedAfterInflight) && !immediateRetry && lane.error === undefined
+				) {
 					lane.timer = setTimeout(() => {
 						lane.timer = undefined;
 						void this.startSave(key, lane, false);
@@ -309,7 +332,9 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 		return id;
 	}
 
-	registerComputed(callback: (entity: unknown) => unknown, prefix: string): string {
+	registerComputed(
+		callback: (entity: unknown) => unknown, prefix: string,
+	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_computed(id, (payloadJson) => {
 			const payload = parseBoundaryJson(payloadJson);
@@ -318,7 +343,9 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 		return id;
 	}
 
-	registerBeforeCreateHook(callback: (ctx: unknown) => unknown, prefix: string): string {
+	registerBeforeCreateHook(
+		callback: (ctx: unknown) => unknown, prefix: string,
+	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_before_create_hook(id, (payloadJson) =>
 			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
@@ -326,7 +353,9 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 		return id;
 	}
 
-	registerBeforeUpdateHook(callback: (ctx: unknown) => unknown, prefix: string): string {
+	registerBeforeUpdateHook(
+		callback: (ctx: unknown) => unknown, prefix: string,
+	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_before_update_hook(id, (payloadJson) =>
 			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
@@ -334,7 +363,9 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 		return id;
 	}
 
-	registerBeforeDeleteHook(callback: (ctx: unknown) => unknown, prefix: string): string {
+	registerBeforeDeleteHook(
+		callback: (ctx: unknown) => unknown, prefix: string,
+	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_before_delete_hook(id, (payloadJson) =>
 			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
@@ -342,7 +373,9 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 		return id;
 	}
 
-	registerAfterCreateHook(callback: (ctx: unknown) => unknown, prefix: string): string {
+	registerAfterCreateHook(
+		callback: (ctx: unknown) => unknown, prefix: string,
+	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_after_create_hook(id, (payloadJson) =>
 			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
@@ -350,7 +383,9 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 		return id;
 	}
 
-	registerAfterUpdateHook(callback: (ctx: unknown) => unknown, prefix: string): string {
+	registerAfterUpdateHook(
+		callback: (ctx: unknown) => unknown, prefix: string,
+	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_after_update_hook(id, (payloadJson) =>
 			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
@@ -358,7 +393,9 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 		return id;
 	}
 
-	registerAfterDeleteHook(callback: (ctx: unknown) => unknown, prefix: string): string {
+	registerAfterDeleteHook(
+		callback: (ctx: unknown) => unknown, prefix: string,
+	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_after_delete_hook(id, (payloadJson) =>
 			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
@@ -366,7 +403,9 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 		return id;
 	}
 
-	registerOnChangeHook(callback: (ctx: unknown) => unknown, prefix: string): string {
+	registerOnChangeHook(
+		callback: (ctx: unknown) => unknown, prefix: string,
+	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_on_change_hook(id, (payloadJson) =>
 			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
@@ -374,7 +413,9 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 		return id;
 	}
 
-	registerMigration(callback: (data: Record<string, unknown>) => Record<string, unknown>, prefix: string): string {
+	registerMigration(
+		callback: (data: Record<string, unknown>) => Record<string, unknown>, prefix: string,
+	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_migration(id, (payloadJson) => {
 			const payload = parseBoundaryJson(payloadJson) as Record<string, unknown>;
@@ -467,7 +508,9 @@ const shouldProjectRead = (method: string, prepared: unknown) => {
 	};
 	const where = command.query?.where;
 	const hasTopLevelSearch = typeof where === "object" && where !== null && Object.hasOwn(where, "$search");
-	return command.query?.select === undefined && command.populate === undefined && !hasTopLevelSearch;
+	return (
+		command.query?.select === undefined && command.populate === undefined && !hasTopLevelSearch
+	);
 };
 const matchesDeletionResultMethod = (method: string) =>
 	method === "delete" ||
@@ -493,9 +536,22 @@ const MUTATION_METHODS = new Set([
 	"commitSnapshotTransaction",
 ]);
 
+type RuntimeTransactionSession = {
+	readonly handle: number;
+	readonly projection: MaterializedProjection;
+};
+
 type EngineRuntimeDiagnostics = {
 	bulkMutationDispatches: number;
 	queryDispatches: number;
+transactionBegins: number;
+	transactionSteps: number;
+	transactionCommits: number;
+	transactionRollbacks: number;
+	transactionJournalEntries: number;
+	transactionJournalBytes: number;
+	transactionSnapshotTransfers: number;
+	temporaryTransactionRuntimes: number;
 };
 
 class EngineRuntime {
@@ -507,6 +563,10 @@ class EngineRuntime {
 	private readonly canonicalQueryCollections: ReadonlySet<string>;
 	private readonly diagnostics: EngineRuntimeDiagnostics;
 
+	private transactionBarrier: Promise<void> | undefined;
+	private releaseTransactionBarrier: (() => void) | undefined;
+	private transactionContext: TransactionContext | undefined;
+
 	private constructor(
 		runtime: WasmRuntimeBinding,
 		handle: number,
@@ -515,6 +575,14 @@ class EngineRuntime {
 		diagnostics: EngineRuntimeDiagnostics = {
 			bulkMutationDispatches: 0,
 			queryDispatches: 0,
+		transactionBegins: 0,
+			transactionSteps: 0,
+			transactionCommits: 0,
+			transactionRollbacks: 0,
+			transactionJournalEntries: 0,
+			transactionJournalBytes: 0,
+			transactionSnapshotTransfers: 0,
+			temporaryTransactionRuntimes: 0,
 		},
 	) {
 		this.runtime = runtime;
@@ -556,10 +624,18 @@ class EngineRuntime {
 	}> {
 		const registry = registryOverride ?? (await buildPluginRegistry(options?.plugins));
 		const bindings = await loadWasmBindings();
-		const runtime = new bindings.WasmRuntime(globalThis.setTimeout, globalThis.clearTimeout);
+		const runtime = new bindings.WasmRuntime(
+			globalThis.setTimeout,
+			globalThis.clearTimeout,
+		);
 		const registrar = new RuntimeCallbackRegistrar(runtime);
-		const compiled = await compileDatabaseDescriptor(config, registry, registrar);
-		const collections = Object.entries((config as any).collections ?? config).map(([name, raw]) => ({
+		const compiled = await compileDatabaseDescriptor(
+			config,
+			registry, registrar,
+		);
+		const collections = Object.entries(
+			(config as any).collections ?? config,
+		).map(([name, raw]) => ({
 			name,
 			schema: (raw as CollectionConfig).schema,
 			raw: raw as CollectionConfig,
@@ -567,11 +643,18 @@ class EngineRuntime {
 		const createPayload = {
 			descriptor: compiled.descriptor as Record<string, unknown>,
 			initialCollections: encodeBoundaryValueForWire(
-				(initialData ?? {}) as Record<string, ReadonlyArray<Record<string, unknown>>>,
+				(initialData ?? {}) as Record<
+					string,
+					ReadonlyArray<Record<string, unknown>>
+				>,
 			) as Record<string, ReadonlyArray<Record<string, unknown>>>,
 		};
-		const handle = parseBridgeResponse<number>(runtime.create_database(JSON.stringify(createPayload)));
-		const handles = parseBridgeResponse<ProjectionHandles>(runtime.projection_handles(handle));
+		const handle = parseBridgeResponse<number>(
+			runtime.create_database(JSON.stringify(createPayload)),
+		);
+		const handles = parseBridgeResponse<ProjectionHandles>(
+			runtime.projection_handles(handle),
+		);
 		const engineRuntime = new EngineRuntime(
 			runtime,
 			handle,
@@ -584,7 +667,9 @@ class EngineRuntime {
 	dispatch<T>(method: string, payload?: unknown): T {
 		if (this.projection.needsResynchronization) this.resynchronizeProjection();
 		if (this.projection.hasDirtyRows) this.synchronizeDirtyProjection();
-		if (method === "findById" && typeof payload === "object" && payload !== null) {
+		if (
+			method === "findById" && typeof payload === "object" && payload !== null
+		) {
 			const collection = "collection" in payload ? payload.collection : undefined;
 			const id = "id" in payload ? payload.id : undefined;
 			if (typeof collection === "string" && typeof id === "string") {
@@ -669,12 +754,18 @@ class EngineRuntime {
 		}
 		const value = parseBridgeResponseValue(parsed, raw);
 		if (collection !== undefined && mutationSync !== undefined) {
-			return this.materializeMutationResult<T>(method, collection, prepared, value, mutationSync, priorMaterialized);
+			return this.materializeMutationResult<T>(
+				method,
+				collection, prepared, value, mutationSync, priorMaterialized,
+			);
 		}
 		if (!projected || collection === undefined) return value as T;
 		try {
 			if (isCompactMaterializedResultDescriptor(value)) {
-				return this.projection.materializeCompact<T>(collection, value, raw.length);
+				return this.projection.materializeCompact<T>(
+					collection,
+					value, raw.length,
+				);
 			}
 			if (!isMaterializedResultDescriptor(value)) return value as T;
 			return this.projection.materialize<T>(collection, value, raw.length);
@@ -692,9 +783,12 @@ class EngineRuntime {
 		value: unknown,
 		sync: ProjectionSync,
 		priorMaterialized: ReadonlyMap<string, unknown>,
+	projection: MaterializedProjection = this.projection,
 	): T {
 		if (method === "upsert") return value as T;
-		const ownerChanges = sync.changes.filter((change) => change.collection === collection);
+		const ownerChanges = sync.changes.filter(
+			(change) => change.collection === collection,
+		);
 		const claimedChanges = new Set<number>();
 		const rowId = (row: unknown) =>
 			typeof row === "object" &&
@@ -719,7 +813,9 @@ class EngineRuntime {
 			const deleted = change.deleted === true;
 			fallbackQueues.get(deleted)?.indices.push(index);
 			addExact(queueKey(deleted, change.id), index);
-			if (!deleted && change.resultId !== undefined && change.resultId !== change.id) {
+			if (
+				!deleted && change.resultId !== undefined && change.resultId !== change.id
+			) {
 				addExact(queueKey(false, change.resultId), index);
 			}
 		});
@@ -739,12 +835,14 @@ class EngineRuntime {
 			claimedChanges.add(index);
 			return ownerChanges[index];
 		};
-		const materializeStoredRow = (row: unknown, change = claimChange(row, false)): unknown => {
+		const materializeStoredRow = (
+			row: unknown, change = claimChange(row, false),
+		): unknown => {
 			const id = change?.id ?? rowId(row);
 			if (id === undefined) return row;
-			const current = this.projection.materializedValue(collection, id);
+			const current = projection.materializedValue(collection, id);
 			if (current !== undefined) return current;
-			const cached = this.projection.cacheAuthoritativeValue(collection, id, row);
+			const cached = projection.cacheAuthoritativeValue(collection, id, row);
 			if (cached === undefined) return row;
 			return cached.value;
 		};
@@ -755,10 +853,13 @@ class EngineRuntime {
 			}
 			return materializeStoredRow(row);
 		};
-		const mapField = (result: Record<string, unknown>, field: "created" | "updated" | "unchanged" | "deleted") => {
+		const mapField = (
+			result: Record<string, unknown>, field: "created" | "updated" | "unchanged" | "deleted",
+		) => {
 			const rows = result[field];
 			if (!Array.isArray(rows)) return;
-			result[field] = rows.map((row) => (field === "deleted" ? materializeDeletedRow(row) : materializeStoredRow(row)));
+			result[field] = rows.map((row) => field === "deleted" ? materializeDeletedRow(row) : materializeStoredRow(row),
+			);
 		};
 
 		let result = value;
@@ -799,11 +900,16 @@ class EngineRuntime {
 				method === "deleteManyWithRelationships")
 		) {
 			const record = value as Record<string, unknown>;
-			for (const field of ["created", "updated", "unchanged", "deleted"] as const) {
+			for (const field of [
+				"created",
+				"updated", "unchanged", "deleted",
+			] as const) {
 				mapField(record, field);
 			}
 			result = record;
-		} else if (method === "deleteWithRelationships" && typeof value === "object" && value !== null) {
+		} else if (
+			method === "deleteWithRelationships" && typeof value === "object" && value !== null
+		) {
 			const record = value as Record<string, unknown>;
 			if (Object.hasOwn(record, "deleted")) {
 				record.deleted = materializeDeletedRow(record.deleted);
@@ -825,7 +931,12 @@ class EngineRuntime {
 			value: encodeBoundaryValueForWire(row.value),
 		}));
 		try {
-			parseBridgeResponse(this.runtime.synchronize_projection(this.handle, JSON.stringify(payload)));
+			parseBridgeResponse(
+				this.runtime.synchronize_projection(
+					this.handle,
+					JSON.stringify(payload),
+				),
+			);
 			this.projection.markSynchronized(rows);
 		} catch (error) {
 			this.projection.invalidate();
@@ -834,16 +945,249 @@ class EngineRuntime {
 	}
 
 	private resynchronizeProjection() {
-		const handles = parseBridgeResponse<ProjectionHandles>(this.runtime.projection_handles(this.handle));
+		const handles = parseBridgeResponse<ProjectionHandles>(
+			this.runtime.projection_handles(this.handle),
+		);
 		this.projection.resynchronize(projectionSnapshotFromHandles(handles));
 	}
 
+	setTransactionContext(context: TransactionContext | undefined) {
+		this.transactionContext = context;
+	}
+
+	assertTransactionWaitAllowed(): void {
+		// Node/Bun AsyncLocalStorage can distinguish a self-wait from a legitimate
+		// outside caller. Browsers currently lack that origin signal, so they keep
+		// required outside FIFO queuing rather than rejecting every root call.
+		if (
+			this.transactionBarrier &&
+			this.transactionContext?.getStore() === true
+		) {
+			throw transactionBeginError(
+				"transaction is active; use transaction context",
+			);
+		}
+	}
+
 	invoke<T>(method: string, payload?: unknown): Promise<T> {
-		return settledPromise(() => this.dispatch<T>(method, payload));
+		try {
+			this.assertTransactionWaitAllowed();
+		} catch (error) {
+			return Promise.reject(error);
+		}
+		const run = () => settledPromise(() => this.dispatch<T>(method, payload));
+	return this.transactionBarrier ? this.transactionBarrier.then(run) : run();
+	}
+
+	beginTransactionSession(): RuntimeTransactionSession {
+		if (this.transactionBarrier) {
+			throw transactionBeginError("another transaction is already active");
+		}
+		if (this.projection.needsResynchronization) this.resynchronizeProjection();
+		if (this.projection.hasDirtyRows) this.synchronizeDirtyProjection();
+		this.transactionBarrier = new Promise<void>((resolve) => {
+			this.releaseTransactionBarrier = resolve;
+		});
+		try {
+			const begun = parseBridgeResponse<{ readonly sessionHandle: number }>(
+				this.runtime.begin_transaction(this.handle),
+			);
+			this.diagnostics.transactionBegins += 1;
+			return {
+				handle: begun.sessionHandle,
+				projection: new MaterializedProjection(
+					{ collections: {} },
+					this.projection,
+				),
+			};
+		} catch (error) {
+			this.finishTransactionSession();
+			throw error;
+		}
+	}
+
+	private synchronizeTransactionProjection(session: RuntimeTransactionSession) {
+		if (!session.projection.hasDirtyRows) return;
+		const rows = session.projection.dirtyRows;
+		if (rows.length === 0) return;
+		try {
+			const encoded = rows.map((row) => ({
+				collection: row.collection,
+				id: row.id,
+				handle: row.handle,
+				value: encodeBoundaryValueForWire(row.value),
+			}));
+			parseBridgeResponse(
+				this.runtime.synchronize_transaction_projection(
+					session.handle,
+					JSON.stringify(encoded),
+				),
+			);
+			session.projection.markSynchronized(rows);
+		} catch (error) {
+			session.projection.invalidate();
+			throw error;
+		}
+	}
+
+	invokeTransactionStep<T>(
+		session: RuntimeTransactionSession,
+		method: string,
+		payload?: unknown,
+	): Promise<T> {
+		return settledPromise(() => {
+			if (session.projection.needsResynchronization) {
+				const handles = parseBridgeResponse<ProjectionHandles>(
+					this.runtime.transaction_projection_handles(session.handle),
+				);
+				session.projection.resynchronize(
+					projectionSnapshotFromHandles(handles),
+				);
+			}
+			this.synchronizeTransactionProjection(session);
+			if (method === "updateMany" || method === "deleteMany") {
+				this.diagnostics.bulkMutationDispatches += 1;
+			} else if (method === "query" || method === "queryCursor") {
+				this.diagnostics.queryDispatches += 1;
+			}
+			const prepared =
+				payload === undefined
+					? undefined
+					: prepareCommandPayload(method, payload);
+			const collection =
+				typeof prepared === "object" &&
+				prepared !== null &&
+				"collection" in prepared &&
+				typeof (prepared as { readonly collection?: unknown }).collection ===
+					"string"
+					? (prepared as { readonly collection: string }).collection
+					: undefined;
+			const projected =
+				shouldProjectRead(method, prepared) &&
+				(method !== "query" ||
+					(collection !== undefined &&
+						this.canonicalQueryCollections.has(collection)));
+			const wirePrepared =
+				projected && typeof prepared === "object" && prepared !== null
+					? { ...prepared, __proseqlProjectResult: true }
+					: prepared;
+			const payloadJson =
+				wirePrepared === undefined ? undefined : JSON.stringify(wirePrepared);
+			const deletionNeedsPriorIdentity = matchesDeletionResultMethod(method);
+			const priorMaterialized = new Map<string, unknown>();
+			this.diagnostics.transactionSteps += 1;
+			const raw = this.runtime.transaction_step(
+				session.handle,
+				method,
+				payloadJson,
+			);
+			const parsed = JSON.parse(raw) as BridgeResponse<unknown>;
+			let mutationSync: ProjectionSync | undefined;
+			if (MUTATION_METHODS.has(method)) {
+				if (parsed.projection === undefined) {
+					session.projection.invalidate();
+					throw new Error(
+						`Transaction mutation response omitted projection sync: ${method}`,
+					);
+				}
+				mutationSync = decodeBoundaryValueForHost(parsed.projection);
+				if (collection !== undefined && deletionNeedsPriorIdentity) {
+					for (const change of mutationSync.changes) {
+						if (change.collection !== collection || !change.deleted) continue;
+						const materialized = session.projection.materializedValue(
+							collection,
+							change.id,
+						);
+						if (materialized !== undefined)
+							priorMaterialized.set(change.id, materialized);
+					}
+				}
+				session.projection.apply(mutationSync);
+			} else if (parsed.kind === "defect") {
+				session.projection.invalidate();
+			}
+			const value = parseBridgeResponseValue(parsed, raw);
+			if (collection !== undefined && mutationSync !== undefined) {
+				return this.materializeMutationResult<T>(
+					method,
+					collection,
+					prepared,
+					value,
+					mutationSync,
+					priorMaterialized,
+					session.projection,
+				);
+			}
+			if (!projected || collection === undefined) return value as T;
+			if (isCompactMaterializedResultDescriptor(value)) {
+				return session.projection.materializeCompact<T>(
+					collection,
+					value,
+					raw.length,
+				);
+			}
+			if (!isMaterializedResultDescriptor(value)) return value as T;
+			return session.projection.materialize<T>(collection, value, raw.length);
+		});
+	}
+
+	commitTransactionSession(
+		session: RuntimeTransactionSession,
+	): ReadonlyArray<string> {
+		this.synchronizeTransactionProjection(session);
+		const raw = this.runtime.commit_transaction(session.handle);
+		const parsed = JSON.parse(raw) as BridgeResponse<unknown>;
+		if (parsed.kind === "defect") {
+			this.projection.invalidate();
+			parseBridgeResponseValue(parsed, raw);
+		}
+		if (parsed.projection === undefined) {
+			this.projection.invalidate();
+			parseBridgeResponseValue(parsed, raw);
+			throw new Error("Transaction commit response omitted projection sync");
+		}
+		const sync = decodeBoundaryValueForHost(
+			parsed.projection,
+		) as ProjectionSync;
+		this.projection.apply(sync);
+		const result = parseBridgeResponseValue(parsed, raw) as {
+			readonly changedCollections?: ReadonlyArray<string>;
+			readonly journalEntries?: number;
+			readonly journalBytes?: number;
+		};
+		this.diagnostics.transactionCommits += 1;
+		this.diagnostics.transactionJournalEntries += result.journalEntries ?? 0;
+		this.diagnostics.transactionJournalBytes += result.journalBytes ?? 0;
+		return result.changedCollections ?? [];
+	}
+
+	rollbackTransactionSession(session: RuntimeTransactionSession): void {
+		parseBridgeResponse(this.runtime.rollback_transaction(session.handle));
+		this.diagnostics.transactionRollbacks += 1;
+	}
+
+	finishTransactionSession(): void {
+		const release = this.releaseTransactionBarrier;
+		this.releaseTransactionBarrier = undefined;
+		this.transactionBarrier = undefined;
+		release?.();
+	}
+
+	waitForTransaction(): Promise<void> {
+		try {
+			this.assertTransactionWaitAllowed();
+		} catch (error) {
+			return Promise.reject(error);
+		}
+		return this.transactionBarrier ?? Promise.resolve();
 	}
 
 	async createTemporaryTransactionRuntime(): Promise<EngineRuntime> {
-		const snapshot = await this.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>("dumpAll");
+		this.diagnostics.temporaryTransactionRuntimes += 1;
+		this.diagnostics.transactionSnapshotTransfers += 1;
+		const snapshot = await this.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>(
+				"dumpAll",
+			);
 		const createPayload = {
 			descriptor: this.createInput.descriptor,
 			initialCollections: encodeBoundaryValueForWire(snapshot) as Record<
@@ -851,9 +1195,15 @@ class EngineRuntime {
 				ReadonlyArray<Record<string, unknown>>
 			>,
 		};
-		const handle = parseBridgeResponse<number>(this.runtime.create_database(JSON.stringify(createPayload)));
-		const handles = parseBridgeResponse<ProjectionHandles>(this.runtime.projection_handles(handle));
-		const projection = new MaterializedProjection(projectionSnapshotFromHandles(handles));
+		const handle = parseBridgeResponse<number>(
+			this.runtime.create_database(JSON.stringify(createPayload)),
+		);
+		const handles = parseBridgeResponse<ProjectionHandles>(
+			this.runtime.projection_handles(handle),
+		);
+		const projection = new MaterializedProjection(
+			projectionSnapshotFromHandles(handles),
+		);
 		return new EngineRuntime(
 			this.runtime,
 			handle,
@@ -866,13 +1216,17 @@ class EngineRuntime {
 	materializationDiagnostics() {
 		return {
 			...this.projection.stats,
-			bulkMutationDispatches: this.diagnostics.bulkMutationDispatches,
-			queryDispatches: this.diagnostics.queryDispatches,
+			...this.diagnostics,
 		};
 	}
 
 	drop(): Promise<void> {
-		return Promise.resolve().then(() => {
+		try {
+			this.assertTransactionWaitAllowed();
+		} catch (error) {
+			return Promise.reject(error);
+		}
+		return this.waitForTransaction().then(() => {
 			this.projection.clear();
 			parseBridgeResponse(this.runtime.drop_database(this.handle));
 		});
@@ -882,46 +1236,81 @@ class EngineRuntime {
 		collection: string,
 		config: EngineWatchConfig<T, unknown, unknown> | undefined,
 	): WatchSubscription<ReadonlyArray<T>> {
-		if (this.projection.needsResynchronization) this.resynchronizeProjection();
-		this.synchronizeDirtyProjection();
-		const queue = new AsyncQueue<ReadonlyArray<T>>(() =>
-			Promise.resolve().then(() => {
-				if (subscriptionId === undefined) return;
-				parseBridgeResponse(this.runtime.unsubscribe(this.handle, subscriptionId));
-			}),
-		);
+		this.assertTransactionWaitAllowed();
 		let subscriptionId: number | undefined;
+		let cancelled = false;
+		const queue = new AsyncQueue<ReadonlyArray<T>>(() =>
+			{
+			cancelled = true;
+			return Promise.resolve().then(() => {
+				if (subscriptionId === undefined) return;
+				parseBridgeResponse(
+					this.runtime.unsubscribe(this.handle, subscriptionId),
+		);
+		});
+		});
+		const subscribe = () => {
+			if (cancelled) return;
+			if (this.projection.needsResynchronization)
+				this.resynchronizeProjection();
+			this.synchronizeDirtyProjection();
 		subscriptionId = parseBridgeResponse<number>(
 			this.runtime.subscribe_watch(
 				this.handle,
-				JSON.stringify(prepareCommandPayload("subscribeWatch", { collection, config })),
-				(payloadJson) => queue.push(parseBoundaryJson(payloadJson) as ReadonlyArray<T>),
+				JSON.stringify(
+						prepareCommandPayload("subscribeWatch", { collection, config }),
+					),
+					(payloadJson) => queue.push(parseBoundaryJson(payloadJson) as ReadonlyArray<T>),
 			),
 		);
+		};
+		if (this.transactionBarrier) void this.transactionBarrier.then(subscribe);
+		else subscribe();
 		return queue;
 	}
 
-	watchById<T>(collection: string, id: string, debounceMs?: number): WatchSubscription<T | null> {
-		if (this.projection.needsResynchronization) this.resynchronizeProjection();
-		this.synchronizeDirtyProjection();
-		const queue = new AsyncQueue<T | null>(() =>
-			Promise.resolve().then(() => {
-				if (subscriptionId === undefined) return;
-				parseBridgeResponse(this.runtime.unsubscribe(this.handle, subscriptionId));
-			}),
-		);
+	watchById<T>(
+		collection: string, id: string, debounceMs?: number,
+	): WatchSubscription<T | null> {
+		this.assertTransactionWaitAllowed();
 		let subscriptionId: number | undefined;
+		let cancelled = false;
+		const queue = new AsyncQueue<T | null>(() =>
+			{
+			cancelled = true;
+			return Promise.resolve().then(() => {
+				if (subscriptionId === undefined) return;
+				parseBridgeResponse(
+					this.runtime.unsubscribe(this.handle, subscriptionId),
+		);
+		});
+		});
+		const subscribe = () => {
+			if (cancelled) return;
+			if (this.projection.needsResynchronization)
+				this.resynchronizeProjection();
+			this.synchronizeDirtyProjection();
 		subscriptionId = parseBridgeResponse<number>(
-			this.runtime.subscribe_watch_by_id(this.handle, JSON.stringify({ collection, id, debounceMs }), (payloadJson) =>
+			this.runtime.subscribe_watch_by_id(
+					this.handle,
+					JSON.stringify({ collection, id, debounceMs }), (payloadJson) =>
 				queue.push(parseBoundaryJson(payloadJson) as T | null),
 			),
 		);
+		};
+		if (this.transactionBarrier) void this.transactionBarrier.then(subscribe);
+		else subscribe();
 		return queue;
 	}
 }
 
+// Browsers do not expose a reliable async-context primitive. Returning
+// undefined there deliberately preserves FIFO queuing for genuine outside
+// callers instead of using a timeout/global flag that would misclassify them.
 const createTransactionContext = (): TransactionContext | undefined => {
-	const processRef = (globalThis as { process?: { getBuiltinModule?: (name: string) => unknown } }).process;
+	const processRef = (
+		globalThis as { process?: { getBuiltinModule?: (name: string) => unknown } }
+	).process;
 	const asyncHooks = processRef?.getBuiltinModule?.("node:async_hooks") as
 		| { AsyncLocalStorage?: new <T>() => TransactionContext }
 		| undefined;
@@ -929,7 +1318,9 @@ const createTransactionContext = (): TransactionContext | undefined => {
 };
 
 const importDefaultNodeStorageHost = async (): Promise<EngineStorageHost> => {
-	const module = (await import(/* @vite-ignore */ "./storage-host.js" as string)) as typeof import("./storage-host.js");
+	const module = (await import(
+		/* @vite-ignore */ "./storage-host.js" as string
+	)) as typeof import("./storage-host.js");
 	return module.createNodeEngineStorageHost();
 };
 
@@ -939,7 +1330,9 @@ export const createEngineDatabase = async <Config extends DatabaseConfig>(
 	options?: EngineDatabaseOptions,
 ): Promise<GenerateEngineDatabase<Config>> => {
 	const pluginRegistry = await buildPluginRegistry(options?.plugins);
-	for (const [name, collection] of Object.entries(getCollectionConfigs(config))) {
+	for (const [name, collection] of Object.entries(
+		getCollectionConfigs(config),
+	)) {
 		validateCollectionRuntimeConfig(name, collection, pluginRegistry);
 	}
 	const { runtime, collections } = await EngineRuntime.create(
@@ -948,10 +1341,15 @@ export const createEngineDatabase = async <Config extends DatabaseConfig>(
 		options,
 		pluginRegistry,
 	);
-	return buildDatabaseFacade(runtime, collections, undefined, config) as unknown as GenerateEngineDatabase<Config>;
+	return buildDatabaseFacade(
+		runtime,
+		collections, undefined, config,
+	) as unknown as GenerateEngineDatabase<Config>;
 };
 
-export const createPersistentEngineDatabase = async <Config extends DatabaseConfig>(
+export const createPersistentEngineDatabase = async <
+	Config extends DatabaseConfig,
+>(
 	config: Config,
 	initialData?: EngineInitialData<Config>,
 	persistenceOptions?: EnginePersistenceOptions,
@@ -960,23 +1358,33 @@ export const createPersistentEngineDatabase = async <Config extends DatabaseConf
 	const host = persistenceOptions?.storageHost ?? (await importDefaultNodeStorageHost());
 	const storageLayer = persistenceOptions?.storageLayer ?? makeEngineStorageLayer(host);
 	const pluginRegistry = await buildPluginRegistry(options?.plugins);
-	for (const [name, collection] of Object.entries(getCollectionConfigs(config))) {
+	for (const [name, collection] of Object.entries(
+		getCollectionConfigs(config),
+	)) {
 		validateCollectionRuntimeConfig(name, collection, pluginRegistry);
 	}
 	const serializerLayer = persistenceOptions?.serializerRegistry
 		? Layer.succeed(
 				SerializerRegistryService,
-				mergeSerializerWithPluginCodecs(persistenceOptions.serializerRegistry, pluginRegistry.codecs),
+				mergeSerializerWithPluginCodecs(
+					persistenceOptions.serializerRegistry,
+					pluginRegistry.codecs,
+				),
 			)
 		: makeSerializerLayer(inferCodecsFromConfig(config), pluginRegistry.codecs);
 	const layer = Layer.merge(storageLayer, serializerLayer) as any;
-	const collections = Object.entries(getCollectionConfigs(config)).map(([name, raw]) => ({
+	const collections = Object.entries(getCollectionConfigs(config)).map(
+		([name, raw]) => ({
 		name,
 		schema: raw.schema,
 		raw,
-	}));
+	}),
+	);
 	const loaded = isSourceOrientedDatabaseConfig(config)
-		? await loadSourceOrientedCollections(config, collections, initialData, host, layer)
+		? await loadSourceOrientedCollections(
+				config,
+				collections, initialData, host, layer,
+			)
 		: await loadLegacyCollections(collections, initialData, host, layer);
 	const { runtime } = await EngineRuntime.create(
 		config,
@@ -1021,20 +1429,29 @@ function buildDatabaseFacade(
 		depth: 0,
 		context: createTransactionContext(),
 	};
+	runtime.setTransactionContext(transactionGate.context);
 	const db: Record<string, unknown> = {};
 	for (const collection of collections) {
-		db[collection.name] = buildCollectionFacade(runtime, collection, persistence) as EngineCollection<any>;
+		db[collection.name] = buildCollectionFacade(
+			runtime,
+			collection, persistence,
+		) as EngineCollection<any>;
 	}
 	const documentGraph = {
 		getRecordProvenance: async (collection: string, id: string) =>
-			persistence?.sourceState?.graphState.provenance.get(`${collection}\u0000${id}`),
+			persistence?.sourceState?.graphState.provenance.get(
+				`${collection}\u0000${id}`,
+			),
 		getDiagnostics: async () => persistence?.sourceState?.graphState.diagnostics ?? [],
 	};
 	let transientClosePromise: Promise<void> | undefined;
 	const transactional = {
-		$transaction: <A>(fn: (ctx: EngineTransactionDatabase<any>) => Promise<A>) =>
+		$transaction: <A>(
+			fn: (ctx: EngineTransactionDatabase<any>) => Promise<A>,
+		) =>
 			runTransaction(runtime, collections, persistence, fn, transactionGate),
 		close: async () => {
+			runtime.assertTransactionWaitAllowed();
 			if (persistence) {
 				if (persistence.lifecycle.closePromise) {
 					return persistence.lifecycle.closePromise;
@@ -1042,6 +1459,7 @@ function buildDatabaseFacade(
 				persistence.lifecycle.status = "closing";
 				const closePromise = promiseCall(async () => {
 					await stopWatchers(persistence);
+					await runtime.waitForTransaction();
 					await waitForBackgroundReloads(persistence);
 					try {
 						await persistence.saver.flush();
@@ -1090,7 +1508,10 @@ function buildDatabaseFacade(
 			}
 		},
 		pendingCount: () => persistence.saver.pendingCount(),
-		$dryRunMigrations: () => runDryRunMigrations(config, hostFromPersistence(persistence), persistence.layer),
+		$dryRunMigrations: () => runDryRunMigrations(
+				config,
+				hostFromPersistence(persistence), persistence.layer,
+			),
 	});
 }
 
@@ -1117,12 +1538,15 @@ function applySelectionOrder<T>(value: T, select: unknown): T {
 	if (typeof select === "object" && select !== null) {
 		const keys = Object.keys(select as Record<string, unknown>);
 		if (keys.length === 0 || !Array.isArray(value)) return value;
-		return value.map((item) => reorderSelectedValue(item, select as Record<string, unknown>)) as T;
+		return value.map((item) => reorderSelectedValue(item, select as Record<string, unknown>),
+		) as T;
 	}
 	return value;
 }
 
-function reorderSelectedValue(value: unknown, select: ReadonlyArray<unknown> | Record<string, unknown>): unknown {
+function reorderSelectedValue(
+	value: unknown, select: ReadonlyArray<unknown> | Record<string, unknown>,
+): unknown {
 	if (Array.isArray(select)) {
 		if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
 		const record = value as Record<string, unknown>;
@@ -1140,9 +1564,13 @@ function reorderSelectedValue(value: unknown, select: ReadonlyArray<unknown> | R
 		const current = record[key];
 		if (nestedSelect && typeof nestedSelect === "object") {
 			if (Array.isArray(current)) {
-				ordered[key] = current.map((item) => reorderSelectedValue(item, nestedSelect as Record<string, unknown>));
+				ordered[key] = current.map((item) => reorderSelectedValue(item, nestedSelect as Record<string, unknown>),
+				);
 			} else {
-				ordered[key] = reorderSelectedValue(current, nestedSelect as Record<string, unknown>);
+				ordered[key] = reorderSelectedValue(
+					current,
+					nestedSelect as Record<string, unknown>,
+				);
 			}
 		} else if (nestedSelect === true) {
 			ordered[key] = current;
@@ -1162,14 +1590,20 @@ async function appendAppendOnlyEntities(
 	collection: CollectionRuntimeConfig,
 	entities: ReadonlyArray<Record<string, unknown>>,
 ) {
-	if (!persistence || entities.length === 0 || !isAppendOnlyJsonLinesCollection(collection) || !collection.raw.file) {
+	if (
+		!persistence || entities.length === 0 || !isAppendOnlyJsonLinesCollection(collection) || !collection.raw.file
+	) {
 		return;
 	}
 	try {
-		const encode = Schema.encodeEffect(collection.schema as Schema.Codec<Record<string, unknown>, unknown>);
+		const encode = Schema.encodeEffect(
+			collection.schema as Schema.Codec<Record<string, unknown>, unknown>,
+		);
 		let payload = "";
 		for (const entity of entities) {
-			const encoded = await Effect.runPromise(encode(entity).pipe(Effect.catch(() => Effect.succeed(entity))));
+			const encoded = await Effect.runPromise(
+				encode(entity).pipe(Effect.catch(() => Effect.succeed(entity))),
+			);
 			payload += `${JSON.stringify(encoded)}\n`;
 		}
 		await persistence.host.ensureDir(collection.raw.file);
@@ -1277,7 +1711,10 @@ function buildCollectionFacade(
 				items: [...inputs],
 				skipDuplicates: options?.skipDuplicates ?? false,
 			});
-			await appendAppendOnlyEntities(persistence, collection, value.created ?? []);
+			await appendAppendOnlyEntities(
+				persistence,
+				collection, value.created ?? [],
+			);
 			if ((value.created ?? []).length > 0) scheduleWrite();
 			return value;
 		},
@@ -1424,7 +1861,8 @@ async function loadLegacyCollections(
 								...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
 								...(collection.raw.migrations
 									? {
-											migrations: collection.raw.migrations as ReadonlyArray<Migration>,
+											migrations: collection.raw
+												.migrations as ReadonlyArray<Migration>,
 										}
 									: {}),
 							})),
@@ -1458,7 +1896,8 @@ async function loadLegacyCollections(
 									...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
 									...(collection.raw.migrations
 										? {
-												migrations: collection.raw.migrations as ReadonlyArray<Migration>,
+												migrations: collection.raw
+													.migrations as ReadonlyArray<Migration>,
 											}
 										: {}),
 									collectionName: collection.name,
@@ -1469,7 +1908,10 @@ async function loadLegacyCollections(
 					)
 				: undefined;
 			baselines[collection.name] = [...(loaded?.values() ?? [])];
-			result[collection.name] = mergeLoadedWithInitial(loaded, initialData?.[collection.name as never]);
+			result[collection.name] = mergeLoadedWithInitial(
+				loaded,
+				initialData?.[collection.name as never],
+			);
 			continue;
 		}
 		if (collection.raw.file) {
@@ -1481,7 +1923,8 @@ async function loadLegacyCollections(
 								...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
 								...(collection.raw.migrations
 									? {
-											migrations: collection.raw.migrations as ReadonlyArray<Migration>,
+											migrations: collection.raw
+												.migrations as ReadonlyArray<Migration>,
 										}
 									: {}),
 								collectionName: collection.name,
@@ -1495,17 +1938,25 @@ async function loadLegacyCollections(
 					)
 				: undefined;
 			baselines[collection.name] = [...(loaded?.values() ?? [])];
-			result[collection.name] = mergeLoadedWithInitial(loaded, initialData?.[collection.name as never]);
+			result[collection.name] = mergeLoadedWithInitial(
+				loaded,
+				initialData?.[collection.name as never],
+			);
 			continue;
 		}
 		baselines[collection.name] = [];
-		result[collection.name] = normalizeInitialCollection(initialData?.[collection.name as never]);
+		result[collection.name] = normalizeInitialCollection(
+			initialData?.[collection.name as never],
+		);
 	}
 	return { collections: result, baselines };
 }
 
 async function loadSourceOrientedCollections(
-	config: Extract<DatabaseConfig, { readonly collections: Record<string, CollectionConfig> }>,
+	config: Extract<
+		DatabaseConfig,
+		{ readonly collections: Record<string, CollectionConfig> }
+	>,
 	collections: ReadonlyArray<CollectionRuntimeConfig>,
 	initialData: EngineInitialData<DatabaseConfig> | undefined,
 	host: EngineStorageHost,
@@ -1514,7 +1965,9 @@ async function loadSourceOrientedCollections(
 	void host;
 	const normalizedConfig = normalizeSourceConfig(config);
 	const loadedDocuments = normalizedConfig.sources.length
-		? await Effect.runPromise(Effect.provide(loadDocumentSources(normalizedConfig), layer))
+		? await Effect.runPromise(
+				Effect.provide(loadDocumentSources(normalizedConfig), layer),
+			)
 		: undefined;
 	const graphOwnedCollections = new Set(
 		normalizedConfig.sources
@@ -1522,7 +1975,9 @@ async function loadSourceOrientedCollections(
 			.flatMap((source) => source.collections),
 	);
 	for (const collectionName of graphOwnedCollections) {
-		if ((initialData as Record<string, unknown> | undefined)?.[collectionName] !== undefined) {
+		if (
+			(initialData as Record<string, unknown> | undefined)?.[collectionName] !== undefined
+		) {
 			throw new SourceConfigError({
 				message: `Collection '${collectionName}' is backed by a read-only documentGraph source and cannot accept initialData`,
 				collection: collectionName,
@@ -1530,7 +1985,9 @@ async function loadSourceOrientedCollections(
 		}
 	}
 	const loadedGraph = graphOwnedCollections.size
-		? await Effect.runPromise(Effect.provide(loadDocumentGraphSources(normalizedConfig), layer))
+		? await Effect.runPromise(
+				Effect.provide(loadDocumentGraphSources(normalizedConfig), layer),
+			)
 		: undefined;
 	const writableSourceByCollection = new Map<string, string>();
 	for (const source of normalizedConfig.sources) {
@@ -1547,7 +2004,10 @@ async function loadSourceOrientedCollections(
 			loadedDocuments?.collections[collection.name] ??
 			new Map<string, Record<string, unknown>>();
 		baselines[collection.name] = [...loaded.values()];
-		result[collection.name] = mergeLoadedWithInitial(loaded, initialData?.[collection.name as never]);
+		result[collection.name] = mergeLoadedWithInitial(
+			loaded,
+			initialData?.[collection.name as never],
+		);
 	}
 	return {
 		collections: result,
@@ -1579,8 +2039,14 @@ function createPersistenceState(
 ): PersistenceState {
 	const sharedFiles = buildSharedFileGroups(collections);
 	const directoryIds = initializeDirectoryIds(runtime, collections);
-	const writeKeyByCollection = buildWriteKeyByCollection(collections, sharedFiles, sourceState);
-	const collectionBaselines = initializeCollectionBaselines(runtime, collections, initialBaselines);
+	const writeKeyByCollection = buildWriteKeyByCollection(
+		collections,
+		sharedFiles, sourceState,
+	);
+	const collectionBaselines = initializeCollectionBaselines(
+		runtime,
+		collections, initialBaselines,
+	);
 	const state: PersistenceState = {
 		host,
 		layer,
@@ -1606,23 +2072,39 @@ function createPersistenceState(
 	return state;
 }
 
-async function persistCollectionState(state: PersistenceState, runtime: EngineRuntime, key: string): Promise<void> {
+async function persistCollectionState(
+	state: PersistenceState, runtime: EngineRuntime, key: string,
+): Promise<void> {
 	if (state.sourceState && key.startsWith("source:")) {
 		const sourceId = key.slice("source:".length);
 		await persistDocumentSourceState(state, runtime, sourceId);
 		for (const collection of state.collections) {
-			if (state.sourceState.writableSourceByCollection.get(collection.name) !== sourceId) continue;
-			const rows = await runtime.invoke<Record<string, unknown>[]>("dumpCollection", { collection: collection.name });
+			if (
+				state.sourceState.writableSourceByCollection.get(collection.name) !== sourceId
+			)
+				continue;
+			const rows = await runtime.invoke<Record<string, unknown>[]>(
+				"dumpCollection",
+				{ collection: collection.name },
+			);
 			markCollectionPersisted(state, collection, rows);
 		}
 		return;
 	}
-	const sharedFile = state.sharedFiles.find((group) => `file:${group.file}` === key);
+	const sharedFile = state.sharedFiles.find(
+		(group) => `file:${group.file}` === key,
+	);
 	if (sharedFile) {
-		const rowsByCollection = new Map<string, ReadonlyArray<Record<string, unknown>>>();
+		const rowsByCollection = new Map<
+			string,
+			ReadonlyArray<Record<string, unknown>>
+		>();
 		const data = await Promise.all(
 			sharedFile.collections.map(async (collection) => {
-				const rows = await runtime.invoke<Record<string, unknown>[]>("dumpCollection", { collection: collection.name });
+				const rows = await runtime.invoke<Record<string, unknown>[]>(
+					"dumpCollection",
+					{ collection: collection.name },
+				);
 				rowsByCollection.set(collection.name, rows);
 				return {
 					name: collection.name,
@@ -1632,7 +2114,11 @@ async function persistCollectionState(state: PersistenceState, runtime: EngineRu
 				};
 			}),
 		);
-		await Effect.runPromise(Effect.provide(saveCollectionsToFile(sharedFile.file, data as never), state.layer));
+		await Effect.runPromise(
+			Effect.provide(
+				saveCollectionsToFile(sharedFile.file, data as never), state.layer,
+			),
+		);
 		for (const collection of sharedFile.collections) {
 			const rows = rowsByCollection.get(collection.name) ?? [];
 			markCollectionPersisted(state, collection, rows);
@@ -1642,20 +2128,28 @@ async function persistCollectionState(state: PersistenceState, runtime: EngineRu
 	const fileCollections = state.collections.filter(
 		(candidate) => candidate.raw.file && `file:${candidate.raw.file}` === key,
 	);
-	if (fileCollections.length > 0 && (fileCollections.length > 1 || fileCollections[0]?.raw.path)) {
+	if (
+		fileCollections.length > 0 && (fileCollections.length > 1 || fileCollections[0]?.raw.path)
+	) {
 		for (const collection of fileCollections) {
-			const entities = await runtime.invoke<Record<string, unknown>[]>("dumpCollection", {
+			const entities = await runtime.invoke<Record<string, unknown>[]>(
+				"dumpCollection",
+				{
 				collection: collection.name,
-			});
+			},
+			);
 			const map = toEntityMap(entities);
 			await Effect.runPromise(
 				Effect.provide(
-					saveData(collection.raw.file!, collection.schema as never, map as never, {
+					saveData(
+						collection.raw.file!,
+						collection.schema as never, map as never, {
 						...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
 						...(collection.raw.format ? { format: collection.raw.format } : {}),
 						...(collection.raw.path ? { path: collection.raw.path } : {}),
 						...(collection.raw.id ? { derivedId: collection.raw.id } : {}),
-					}),
+					},
+					),
 					state.layer,
 				),
 			);
@@ -1663,14 +2157,19 @@ async function persistCollectionState(state: PersistenceState, runtime: EngineRu
 		}
 		return;
 	}
-	const collection = state.collections.find((candidate) => state.writeKeyByCollection.get(candidate.name) === key);
+	const collection = state.collections.find(
+		(candidate) => state.writeKeyByCollection.get(candidate.name) === key,
+	);
 	if (!collection) {
 		throw new CollectionNotFoundError({
 			collection: key,
 			message: `Collection '${key}' not found`,
 		});
 	}
-	let entities = await runtime.invoke<Record<string, unknown>[]>("dumpCollection", { collection: collection.name });
+	let entities = await runtime.invoke<Record<string, unknown>[]>(
+		"dumpCollection",
+		{ collection: collection.name },
+	);
 	let map = toEntityMap(entities);
 	if (
 		isBrowserStorageHost(state.host) &&
@@ -1679,9 +2178,15 @@ async function persistCollectionState(state: PersistenceState, runtime: EngineRu
 	) {
 		const baseline = state.collectionBaselines.get(collection.name) ?? new Map<string, Record<string, unknown>>();
 		const baselineRows = [...baseline.values()];
-		const externalRows = await loadLegacyCollectionRows(collection, state.host, state.layer);
+		const externalRows = await loadLegacyCollectionRows(
+			collection,
+			state.host, state.layer,
+		);
 		if (rowsFingerprint(baselineRows) !== rowsFingerprint(externalRows)) {
-			const mergedRows = mergeExternalRowsWithLocalDelta(baseline, externalRows, entities);
+			const mergedRows = mergeExternalRowsWithLocalDelta(
+				baseline,
+				externalRows, entities,
+			);
 			await reloadCollectionIfChanged(runtime, collection.name, mergedRows);
 			entities = mergedRows;
 			map = toEntityMap(entities);
@@ -1694,7 +2199,10 @@ async function persistCollectionState(state: PersistenceState, runtime: EngineRu
 			if (!currentIds.has(id)) {
 				await Effect.runPromise(
 					Effect.provide(
-						removeEntityFromDirectory(collection.raw.directory, id, collection.raw.format ?? "json"),
+						removeEntityFromDirectory(
+							collection.raw.directory,
+							id, collection.raw.format ?? "json",
+						),
 						state.layer,
 					),
 				);
@@ -1720,12 +2228,15 @@ async function persistCollectionState(state: PersistenceState, runtime: EngineRu
 	if (collection.raw.file) {
 		await Effect.runPromise(
 			Effect.provide(
-				saveData(collection.raw.file, collection.schema as never, map as never, {
+				saveData(
+					collection.raw.file,
+					collection.schema as never, map as never, {
 					...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
 					...(collection.raw.format ? { format: collection.raw.format } : {}),
 					...(collection.raw.path ? { path: collection.raw.path } : {}),
 					...(collection.raw.id ? { derivedId: collection.raw.id } : {}),
-				}),
+				},
+				),
 				state.layer,
 			),
 		);
@@ -1740,9 +2251,14 @@ async function persistDocumentSourceState(
 ): Promise<void> {
 	const sourceState = state.sourceState;
 	if (!sourceState) return;
-	const snapshot = await runtime.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>("dumpAll");
+	const snapshot = await runtime.invoke<
+			Record<string, ReadonlyArray<Record<string, unknown>>>
+		>("dumpAll");
 	const collections = Object.fromEntries(
-		Object.entries(snapshot).map(([collection, rows]) => [collection, toEntityMap(rows)]),
+		Object.entries(snapshot).map(([collection, rows]) => [
+			collection,
+			toEntityMap(rows),
+		]),
 	) as Record<string, ReadonlyMap<string, Record<string, unknown>>>;
 	const saved = await Effect.runPromise(
 		Effect.provide(
@@ -1760,14 +2276,23 @@ async function persistDocumentSourceState(
 	sourceState.documentsState.documents = saved.documents;
 }
 
-function initializeDirectoryIds(runtime: EngineRuntime, collections: ReadonlyArray<CollectionRuntimeConfig>) {
+function initializeDirectoryIds(
+	runtime: EngineRuntime, collections: ReadonlyArray<CollectionRuntimeConfig>,
+) {
 	const ids = new Map<string, Set<string>>();
 	for (const collection of collections) {
 		if (!collection.raw.directory) continue;
 		const rows = runtime.dispatch<Record<string, unknown>[]>("dumpCollection", {
 			collection: collection.name,
 		});
-		ids.set(collection.name, new Set(rows.map((row) => row.id).filter((id): id is string => typeof id === "string")));
+		ids.set(
+			collection.name,
+			new Set(
+				rows
+					.map((row) => row.id)
+					.filter((id): id is string => typeof id === "string"),
+			),
+		);
 	}
 	return ids;
 }
@@ -1777,7 +2302,10 @@ function initializeCollectionBaselines(
 	collections: ReadonlyArray<CollectionRuntimeConfig>,
 	initialBaselines?: Record<string, ReadonlyArray<Record<string, unknown>>>,
 ) {
-	const baselines = new Map<string, ReadonlyMap<string, Record<string, unknown>>>();
+	const baselines = new Map<
+		string,
+		ReadonlyMap<string, Record<string, unknown>>
+	>();
 	for (const collection of collections) {
 		const rows =
 			initialBaselines?.[collection.name] ??
@@ -1796,7 +2324,9 @@ function buildWriteKeyByCollection(
 ) {
 	const keys = new Map<string, string>();
 	for (const collection of collections) {
-		const sourceId = sourceState?.writableSourceByCollection.get(collection.name);
+		const sourceId = sourceState?.writableSourceByCollection.get(
+			collection.name,
+		);
 		if (sourceId) {
 			keys.set(collection.name, `source:${sourceId}`);
 			continue;
@@ -1820,7 +2350,7 @@ function buildWriteKeyByCollection(
 }
 
 function mergeLoadedWithInitial(
-	loaded: ReadonlyMap<string, Record<string, unknown>> | Map<string, Record<string, unknown>> | undefined,
+	loaded: | ReadonlyMap<string, Record<string, unknown>> | Map<string, Record<string, unknown>> | undefined,
 	initial: unknown,
 ) {
 	const merged = new Map<string, Record<string, unknown>>(loaded ?? []);
@@ -1841,7 +2371,9 @@ function isBrowserStorageHost(
 	return host?.__proseqlBrowserStorageHost === true;
 }
 
-function markCollectionDirty(persistence: PersistenceState | undefined, collection: string) {
+function markCollectionDirty(
+	persistence: PersistenceState | undefined, collection: string,
+) {
 	if (!persistence || !isBrowserStorageHost(persistence.host)) return;
 	persistence.dirtyCollections.add(collection);
 }
@@ -1862,7 +2394,9 @@ function markCollectionPersisted(
 ) {
 	updateDirectoryBaseline(persistence, collection, rows);
 	updateCollectionBaseline(persistence, collection.name, rows);
-	if (isBrowserStorageHost(persistence.host) && (collection.raw.directory || collection.raw.file)) {
+	if (
+		isBrowserStorageHost(persistence.host) && (collection.raw.directory || collection.raw.file)
+	) {
 		persistence.collectionsAwaitingExternalMerge.add(collection.name);
 	}
 }
@@ -1877,7 +2411,9 @@ function mergeExternalRowsWithLocalDelta(
 	const merged = new Map(external);
 	for (const [id, row] of local) {
 		const baselineRow = baseline.get(id);
-		if (baselineRow === undefined || rowsFingerprint([baselineRow]) !== rowsFingerprint([row])) {
+		if (
+			baselineRow === undefined || rowsFingerprint([baselineRow]) !== rowsFingerprint([row])
+		) {
 			merged.set(id, row);
 		}
 	}
@@ -1894,13 +2430,21 @@ function mergeExternalRowsWithPersistedBaseline(
 	externalRows: ReadonlyArray<Record<string, unknown>>,
 ) {
 	const external = new Map(toEntityMap(externalRows));
-	const missingBaselineRows = [...baseline.entries()].filter(([id]) => !external.has(id));
-	const hasExternalAddition = [...external.keys()].some((id) => !baseline.has(id));
+	const missingBaselineRows = [...baseline.entries()].filter(
+		([id]) => !external.has(id),
+	);
+	const hasExternalAddition = [...external.keys()].some(
+		(id) => !baseline.has(id),
+	);
 	const hasExternalMutation = [...external.entries()].some(([id, row]) => {
 		const baselineRow = baseline.get(id);
-		return baselineRow !== undefined && rowsFingerprint([baselineRow]) !== rowsFingerprint([row]);
+		return (
+			baselineRow !== undefined && rowsFingerprint([baselineRow]) !== rowsFingerprint([row])
+		);
 	});
-	if (missingBaselineRows.length === 0 || (!hasExternalAddition && !hasExternalMutation)) {
+	if (
+		missingBaselineRows.length === 0 || (!hasExternalAddition && !hasExternalMutation)
+	) {
 		return externalRows;
 	}
 	const merged = new Map(external);
@@ -1922,7 +2466,9 @@ function isPersistenceOpen(persistence: PersistenceState) {
 	return persistence.lifecycle.status === "open";
 }
 
-function trackBackgroundReload(persistence: PersistenceState, task: Promise<void>) {
+function trackBackgroundReload(
+	persistence: PersistenceState, task: Promise<void>,
+) {
 	persistence.backgroundReloads.add(task);
 	void task.finally(() => {
 		persistence.backgroundReloads.delete(task);
@@ -1955,7 +2501,9 @@ function rowsFingerprint(rows: ReadonlyArray<Record<string, unknown>>) {
 	return JSON.stringify(rows);
 }
 
-async function currentCollectionRows(runtime: EngineRuntime, collection: string) {
+async function currentCollectionRows(
+	runtime: EngineRuntime, collection: string,
+) {
 	return runtime.invoke<Record<string, unknown>[]>("dumpCollection", {
 		collection,
 	});
@@ -1966,9 +2514,12 @@ async function reloadCollectionIfChanged(
 	collection: string,
 	rows: ReadonlyArray<Record<string, unknown>>,
 ) {
-	const changedCollections = await reloadCollectionsAtomicallyIfChanged(runtime, {
+	const changedCollections = await reloadCollectionsAtomicallyIfChanged(
+		runtime,
+		{
 		[collection]: rows,
-	});
+	},
+	);
 	return changedCollections.includes(collection);
 }
 
@@ -1976,7 +2527,9 @@ async function reloadCollectionsAtomicallyIfChanged(
 	runtime: EngineRuntime,
 	rowsByCollection: Record<string, ReadonlyArray<Record<string, unknown>>>,
 ) {
-	const changedEntries: Array<readonly [string, ReadonlyArray<Record<string, unknown>>]> = [];
+	const changedEntries: Array<
+		readonly [string, ReadonlyArray<Record<string, unknown>>]
+	> = [];
 	for (const [collection, rows] of Object.entries(rowsByCollection)) {
 		const current = await currentCollectionRows(runtime, collection);
 		if (rowsFingerprint(current) !== rowsFingerprint(rows)) {
@@ -1989,7 +2542,9 @@ async function reloadCollectionsAtomicallyIfChanged(
 		for (const [collection, rows] of changedEntries) {
 			await txRuntime.invoke("reloadCollection", { collection, records: rows });
 		}
-		const snapshot = await txRuntime.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>("dumpAll");
+		const snapshot = await txRuntime.invoke<
+				Record<string, ReadonlyArray<Record<string, unknown>>>
+			>("dumpAll");
 		const committed = await runtime.invoke<{
 			changedCollections: ReadonlyArray<string>;
 		}>("commitSnapshotTransaction", { collections: snapshot });
@@ -2012,7 +2567,10 @@ async function persistCollectionRowsDirect(
 			if (!currentIds.has(id)) {
 				await Effect.runPromise(
 					Effect.provide(
-						removeEntityFromDirectory(collection.raw.directory, id, collection.raw.format ?? "json"),
+						removeEntityFromDirectory(
+							collection.raw.directory,
+							id, collection.raw.format ?? "json",
+						),
 						persistence.layer,
 					),
 				);
@@ -2038,12 +2596,15 @@ async function persistCollectionRowsDirect(
 	if (collection.raw.file) {
 		await Effect.runPromise(
 			Effect.provide(
-				saveData(collection.raw.file, collection.schema as never, map as never, {
+				saveData(
+					collection.raw.file,
+					collection.schema as never, map as never, {
 					...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
 					...(collection.raw.format ? { format: collection.raw.format } : {}),
 					...(collection.raw.path ? { path: collection.raw.path } : {}),
 					...(collection.raw.id ? { derivedId: collection.raw.id } : {}),
-				}),
+				},
+				),
 				persistence.layer,
 			),
 		);
@@ -2060,14 +2621,20 @@ async function reconcileCollectionWithExternalRows(
 	const baseline = persistence.collectionBaselines.get(collection.name) ?? new Map<string, Record<string, unknown>>();
 	if (persistence.dirtyCollections.has(collection.name)) {
 		const localRows = await currentCollectionRows(runtime, collection.name);
-		const mergedRows = mergeExternalRowsWithLocalDelta(baseline, externalRows, localRows);
+		const mergedRows = mergeExternalRowsWithLocalDelta(
+			baseline,
+			externalRows, localRows,
+		);
 		await reloadCollectionIfChanged(runtime, collection.name, mergedRows);
 		await persistCollectionRowsDirect(persistence, collection, mergedRows);
 		persistence.collectionsAwaitingExternalMerge.delete(collection.name);
 		return;
 	}
 	if (persistence.collectionsAwaitingExternalMerge.has(collection.name)) {
-		const mergedRows = mergeExternalRowsWithPersistedBaseline(baseline, externalRows);
+		const mergedRows = mergeExternalRowsWithPersistedBaseline(
+			baseline,
+			externalRows,
+		);
 		if (rowsFingerprint(mergedRows) !== rowsFingerprint(externalRows)) {
 			await reloadCollectionIfChanged(runtime, collection.name, mergedRows);
 			await persistCollectionRowsDirect(persistence, collection, mergedRows);
@@ -2091,7 +2658,11 @@ function updateDirectoryBaseline(
 	if (!collection.raw.directory) return;
 	persistence.directoryIds.set(
 		collection.name,
-		new Set(rows.map((row) => row.id).filter((id): id is string => typeof id === "string")),
+		new Set(
+			rows
+				.map((row) => row.id)
+				.filter((id): id is string => typeof id === "string"),
+		),
 	);
 }
 
@@ -2140,15 +2711,19 @@ async function loadLegacyCollectionRows(
 		if (!dirExists) return [];
 		const loaded = await Effect.runPromise(
 			Effect.provide(
-				loadDataFromDirectory(collection.raw.directory, collection.schema as never, collection.raw.format ?? "json", {
+				loadDataFromDirectory(
+					collection.raw.directory,
+					collection.schema as never, collection.raw.format ?? "json", {
 					...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
 					...(collection.raw.migrations
 						? {
-								migrations: collection.raw.migrations as ReadonlyArray<Migration>,
+								migrations: collection.raw
+										.migrations as ReadonlyArray<Migration>,
 							}
 						: {}),
 					collectionName: collection.name,
-				}),
+				},
+				),
 				layer,
 			),
 		);
@@ -2163,7 +2738,8 @@ async function loadLegacyCollectionRows(
 					...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
 					...(collection.raw.migrations
 						? {
-								migrations: collection.raw.migrations as ReadonlyArray<Migration>,
+								migrations: collection.raw
+									.migrations as ReadonlyArray<Migration>,
 							}
 						: {}),
 					collectionName: collection.name,
@@ -2180,14 +2756,17 @@ async function loadLegacyCollectionRows(
 	return [];
 }
 
-async function loadLegacyFileCollections(group: SharedFileGroup, host: EngineStorageHost, layer: Layer.Layer<any>) {
-	if (group.collections.length > 1 && group.collections.every((collection) => !collection.raw.path)) {
+async function loadLegacyFileCollections(
+	group: SharedFileGroup, host: EngineStorageHost, layer: Layer.Layer<any>,
+) {
+	if (
+		group.collections.length > 1 && group.collections.every((collection) => !collection.raw.path)
+	) {
 		const fileExists = await host.exists(group.file);
 		if (!fileExists) {
-			return Object.fromEntries(group.collections.map((collection) => [collection.name, []])) as Record<
-				string,
-				ReadonlyArray<Record<string, unknown>>
-			>;
+			return Object.fromEntries(
+				group.collections.map((collection) => [collection.name, []]),
+			) as Record<string, ReadonlyArray<Record<string, unknown>>>;
 		}
 		const loaded = await Effect.runPromise(
 			Effect.provide(
@@ -2199,7 +2778,8 @@ async function loadLegacyFileCollections(group: SharedFileGroup, host: EngineSto
 						...(collection.raw.version !== undefined ? { version: collection.raw.version } : {}),
 						...(collection.raw.migrations
 							? {
-									migrations: collection.raw.migrations as ReadonlyArray<Migration>,
+									migrations: collection.raw
+										.migrations as ReadonlyArray<Migration>,
 								}
 							: {}),
 					})),
@@ -2208,18 +2788,26 @@ async function loadLegacyFileCollections(group: SharedFileGroup, host: EngineSto
 			),
 		);
 		return Object.fromEntries(
-			group.collections.map((collection) => [collection.name, [...(loaded?.[collection.name]?.values() ?? [])]]),
+			group.collections.map((collection) => [
+				collection.name,
+				[...(loaded?.[collection.name]?.values() ?? [])],
+			]),
 		) as Record<string, ReadonlyArray<Record<string, unknown>>>;
 	}
 
 	const result: Record<string, ReadonlyArray<Record<string, unknown>>> = {};
 	for (const collection of group.collections) {
-		result[collection.name] = await loadLegacyCollectionRows(collection, host, layer);
+		result[collection.name] = await loadLegacyCollectionRows(
+			collection,
+			host, layer,
+		);
 	}
 	return result;
 }
 
-async function registerLegacyWatchers(runtime: EngineRuntime, persistence: PersistenceState) {
+async function registerLegacyWatchers(
+	runtime: EngineRuntime, persistence: PersistenceState,
+) {
 	const fileGroups = new Map<string, CollectionRuntimeConfig[]>();
 	for (const collection of persistence.collections) {
 		if (!collection.raw.file) continue;
@@ -2243,11 +2831,16 @@ async function registerLegacyWatchers(runtime: EngineRuntime, persistence: Persi
 					for (const collection of collections) {
 						const rows = rowsByCollection[collection.name] ?? [];
 						if (supportsDirtyMerge) {
-							await reconcileCollectionWithExternalRows(persistence, runtime, collection, rows);
+							await reconcileCollectionWithExternalRows(
+								persistence,
+								runtime, collection, rows,
+							);
 							continue;
 						}
 						await reloadCollectionIfChanged(runtime, collection.name, rows);
-						persistence.collectionsAwaitingExternalMerge.delete(collection.name);
+						persistence.collectionsAwaitingExternalMerge.delete(
+							collection.name,
+						);
 						updateCollectionBaseline(persistence, collection.name, rows);
 					}
 				},
@@ -2285,12 +2878,20 @@ async function registerLegacyWatchers(runtime: EngineRuntime, persistence: Persi
 				runBackgroundReload(
 					persistence,
 					async () => {
-						const rows = await loadLegacyCollectionRows(collection, persistence.host, persistence.layer);
+						const rows = await loadLegacyCollectionRows(
+							collection,
+							persistence.host, persistence.layer,
+						);
 						if (supportsDirtyMerge) {
-							await reconcileCollectionWithExternalRows(persistence, runtime, collection, rows);
+							await reconcileCollectionWithExternalRows(
+								persistence,
+								runtime, collection, rows,
+							);
 							return;
 						}
-						if (await reloadCollectionIfChanged(runtime, collection.name, rows)) {
+						if (
+							await reloadCollectionIfChanged(runtime, collection.name, rows)
+						) {
 							updateDirectoryBaseline(persistence, collection, rows);
 						}
 					},
@@ -2304,7 +2905,9 @@ async function registerLegacyWatchers(runtime: EngineRuntime, persistence: Persi
 	}
 }
 
-async function registerSourceWatchers(runtime: EngineRuntime, persistence: PersistenceState) {
+async function registerSourceWatchers(
+	runtime: EngineRuntime, persistence: PersistenceState,
+) {
 	const sourceState = persistence.sourceState;
 	if (!sourceState) return;
 	for (const source of sourceState.normalizedConfig.sources) {
@@ -2312,12 +2915,17 @@ async function registerSourceWatchers(runtime: EngineRuntime, persistence: Persi
 			const stop = await persistence.host.watchDir(source.root, () => {
 				runBackgroundReload(persistence, async () => {
 					const loaded = await Effect.runPromise(
-						Effect.provide(loadDocumentSources(sourceState.normalizedConfig), persistence.layer),
+						Effect.provide(
+							loadDocumentSources(sourceState.normalizedConfig),
+							persistence.layer,
+						),
 					);
 					const rowsByCollection = Object.fromEntries(
 						source.collections.map((collection) => [
 							collection,
-							[...(loaded.collections[collection]?.values() ?? [])] as ReadonlyArray<Record<string, unknown>>,
+							[
+								...(loaded.collections[collection]?.values() ?? []),
+							] as ReadonlyArray<Record<string, unknown>>,
 						]),
 					) as Record<string, ReadonlyArray<Record<string, unknown>>>;
 					await reloadCollectionsAtomicallyIfChanged(runtime, rowsByCollection);
@@ -2334,12 +2942,17 @@ async function registerSourceWatchers(runtime: EngineRuntime, persistence: Persi
 			const stop = await persistence.host.watchDir(watchRoot, () => {
 				runBackgroundReload(persistence, async () => {
 					const loaded = await Effect.runPromise(
-						Effect.provide(loadDocumentGraphSources(sourceState.normalizedConfig), persistence.layer),
+						Effect.provide(
+							loadDocumentGraphSources(sourceState.normalizedConfig),
+							persistence.layer,
+						),
 					);
 					const rowsByCollection = Object.fromEntries(
 						source.collections.map((collection) => [
 							collection,
-							[...(loaded.collections[collection]?.values() ?? [])] as ReadonlyArray<Record<string, unknown>>,
+							[
+								...(loaded.collections[collection]?.values() ?? []),
+							] as ReadonlyArray<Record<string, unknown>>,
 						]),
 					) as Record<string, ReadonlyArray<Record<string, unknown>>>;
 					await reloadCollectionsAtomicallyIfChanged(runtime, rowsByCollection);
@@ -2352,12 +2965,18 @@ async function registerSourceWatchers(runtime: EngineRuntime, persistence: Persi
 	}
 }
 
-async function registerExternalReloadWatchers(runtime: EngineRuntime, persistence: PersistenceState) {
+async function registerExternalReloadWatchers(
+	runtime: EngineRuntime, persistence: PersistenceState,
+) {
 	await registerLegacyWatchers(runtime, persistence);
 	await registerSourceWatchers(runtime, persistence);
 }
 
-function transactionBeginError(reason: "nested transactions not supported" | "another transaction is already active") {
+function transactionBeginError(
+	reason:
+		| "nested transactions not supported" | "another transaction is already active"
+		| "transaction is active; use transaction context",
+) {
 	return new TransactionError({
 		operation: "begin",
 		reason,
@@ -2389,48 +3008,64 @@ async function runTransaction<A>(
 	}
 	transactionGate.active = true;
 	transactionGate.depth += 1;
-	let txRuntime: EngineRuntime | undefined;
+	let session: RuntimeTransactionSession | undefined;
+	let finalized = false;
 	const execute = async () => {
-		txRuntime = await runtime.createTemporaryTransactionRuntime();
-		const operations: Array<Record<string, unknown>> = [];
+		session = runtime.beginTransactionSession();
+		const sessionRuntime: TransactionStepRuntime = {
+			invoke: <T>(method: string, payload?: unknown) =>
+				runtime.invokeTransactionStep<T>(session!, method, payload),
+		};
 		const rollbackError = explicitRollbackError();
-		const txFacade = buildTransactionDatabaseFacade(txRuntime, collections, persistence, operations, rollbackError);
-		const result = await fn(txFacade as EngineTransactionDatabase<any>);
-		const snapshot = await txRuntime.invoke<Record<string, ReadonlyArray<Record<string, unknown>>>>("dumpAll");
-		const committed = await runtime.invoke<{
-			changedCollections: ReadonlyArray<string>;
-		}>("commitSnapshotTransaction", { collections: snapshot });
-		for (const collection of committed.changedCollections) {
+		const txFacade = buildTransactionDatabaseFacade(
+			sessionRuntime,
+			collections, persistence, rollbackError,
+		);
+		try {
+			const result = await fn(txFacade as EngineTransactionDatabase<any>);
+		const changedCollections = runtime.commitTransactionSession(session);
+			finalized = true;
+			for (const collection of changedCollections) {
 			markCollectionDirty(persistence, collection);
 			const key = persistence?.writeKeyByCollection.get(collection);
 			if (key) persistence?.saver.schedule(key);
 		}
 		return result;
+	} catch (error) {
+			if (!finalized) {
+				try {
+					runtime.rollbackTransactionSession(session);
+				} catch {
+					// Preserve the original callback or operation failure.
+				}
+				finalized = true;
+			}
+			throw error;
+		}
 	};
 	try {
 		return transactionGate.context ? await transactionGate.context.run(true, execute) : await execute();
 	} finally {
 		transactionGate.depth = Math.max(0, transactionGate.depth - 1);
-		try {
-			await txRuntime?.drop();
-		} catch {
-			// best-effort temporary runtime cleanup
-		} finally {
-			transactionGate.active = false;
+		if (session !== undefined) runtime.finishTransactionSession();
+		transactionGate.active = false;
 		}
 	}
-}
+type TransactionStepRuntime = {
+	invoke<T>(method: string, payload?: unknown): Promise<T>;
+};
 
 function buildTransactionDatabaseFacade(
-	runtime: EngineRuntime,
+	runtime: TransactionStepRuntime,
 	collections: ReadonlyArray<CollectionRuntimeConfig>,
 	persistence: PersistenceState | undefined,
-	operations: Array<Record<string, unknown>>,
 	rollbackError: TransactionError,
 ) {
 	const db: Record<string, unknown> = {};
 	for (const collection of collections) {
-		db[collection.name] = buildTransactionCollectionFacade(runtime, collection, persistence, operations);
+		db[collection.name] = buildTransactionCollectionFacade(
+			runtime,
+			collection, persistence, );
 	}
 	return Object.assign(db, {
 		rollback: async () => {
@@ -2440,11 +3075,10 @@ function buildTransactionDatabaseFacade(
 }
 
 function buildTransactionCollectionFacade(
-	runtime: EngineRuntime,
+	runtime: TransactionStepRuntime,
 	collection: CollectionRuntimeConfig,
 	persistence: PersistenceState | undefined,
-	operations: Array<Record<string, unknown>>,
-) {
+	) {
 	const ensureWritable = (operation: string) => {
 		if (persistence?.sourceState?.readOnlyCollections.has(collection.name)) {
 			throw new OperationError({
@@ -2454,7 +3088,7 @@ function buildTransactionCollectionFacade(
 			});
 		}
 	};
-	const push = (operation: Record<string, unknown>) => operations.push(operation);
+	const push = (_operation: Record<string, unknown>) => undefined;
 	return {
 		query: (config?: any) =>
 			config?.cursor
@@ -2715,10 +3349,14 @@ async function runDryRunMigrations(
 	_host: EngineStorageHost,
 	layer: Layer.Layer<any>,
 ): Promise<DryRunResult> {
-	return Effect.runPromise(Effect.provide(dryRunMigrations(config, {} as never), layer));
+	return Effect.runPromise(
+		Effect.provide(dryRunMigrations(config, {} as never), layer),
+	);
 }
 
-function buildSharedFileGroups(collections: ReadonlyArray<CollectionRuntimeConfig>) {
+function buildSharedFileGroups(
+	collections: ReadonlyArray<CollectionRuntimeConfig>,
+) {
 	const byFile = new Map<string, CollectionRuntimeConfig[]>();
 	for (const collection of collections) {
 		if (!collection.raw.file) continue;
@@ -2741,9 +3379,13 @@ function toEntityMap(values: ReadonlyArray<Record<string, unknown>>) {
 	return map;
 }
 
-function normalizeInitialCollection(value: unknown): ReadonlyArray<Record<string, unknown>> {
+function normalizeInitialCollection(
+	value: unknown,
+): ReadonlyArray<Record<string, unknown>> {
 	if (!Array.isArray(value)) return [];
-	return value.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null);
+	return value.filter(
+		(item): item is Record<string, unknown> => typeof item === "object" && item !== null,
+	);
 }
 
 function normalizeAggregateFields(value: unknown): ReadonlyArray<string> {
@@ -2790,7 +3432,9 @@ function wrapCallbackResult(fn: () => unknown): string {
 	}
 }
 
-function isTaggedError(error: unknown): error is { readonly _tag: string } & Record<string, unknown> {
+function isTaggedError(
+	error: unknown,
+): error is { readonly _tag: string } & Record<string, unknown> {
 	return (
 		typeof error === "object" &&
 		error !== null &&
@@ -2810,7 +3454,9 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 
 function isAsyncCallbackUnsupportedError(error: unknown) {
 	const message = error instanceof Error ? error.message : String(error);
-	return message.includes("Async Effect callbacks are not supported by @proseql/engine");
+	return message.includes(
+		"Async Effect callbacks are not supported by @proseql/engine",
+	);
 }
 
 function encodeDataForCommand(data: unknown) {
@@ -2825,7 +3471,9 @@ function encodeSortForCommand(sort: unknown): unknown {
 	if (typeof sort !== "object" || sort === null || Array.isArray(sort)) {
 		return sort;
 	}
-	return Object.entries(sort as Record<string, unknown>).map(([field, order]) => ({ field, order }));
+	return Object.entries(sort as Record<string, unknown>).map(
+		([field, order]) => ({ field, order }),
+	);
 }
 
 function prepareQueryConfigForCommand(config: unknown) {
@@ -2875,9 +3523,15 @@ function prepareTransactionOperationForCommand(operation: unknown): unknown {
 							typeof item === "object" && item !== null
 								? {
 										...(item as Record<string, unknown>),
-										where: encodeWhereForCommand((item as Record<string, unknown>).where),
-										create: encodeDataForCommand((item as Record<string, unknown>).create),
-										update: encodeDataForCommand((item as Record<string, unknown>).update),
+										where: encodeWhereForCommand(
+											(item as Record<string, unknown>).where,
+										),
+										create: encodeDataForCommand(
+											(item as Record<string, unknown>).create,
+										),
+										update: encodeDataForCommand(
+											(item as Record<string, unknown>).update,
+										),
 									}
 								: item,
 						)
@@ -2940,9 +3594,15 @@ function prepareCommandPayload(method: string, payload: unknown): unknown {
 							typeof item === "object" && item !== null
 								? {
 										...(item as Record<string, unknown>),
-										where: encodeWhereForCommand((item as Record<string, unknown>).where),
-										create: encodeDataForCommand((item as Record<string, unknown>).create),
-										update: encodeDataForCommand((item as Record<string, unknown>).update),
+										where: encodeWhereForCommand(
+											(item as Record<string, unknown>).where,
+										),
+										create: encodeDataForCommand(
+											(item as Record<string, unknown>).create,
+										),
+										update: encodeDataForCommand(
+											(item as Record<string, unknown>).update,
+										),
 									}
 								: item,
 						)
@@ -2964,7 +3624,8 @@ function prepareCommandPayload(method: string, payload: unknown): unknown {
 			return {
 				...command,
 				operations: Array.isArray(command.operations)
-					? command.operations.map((operation) => prepareTransactionOperationForCommand(operation))
+					? command.operations.map((operation) => prepareTransactionOperationForCommand(operation),
+						)
 					: command.operations,
 			};
 		case "subscribeWatch":
@@ -2989,7 +3650,9 @@ function settledPromise<T>(fn: () => T): Promise<Awaited<T>> {
 	}
 }
 
-function parseBridgeResponseValue<T>(parsed: BridgeResponse<T>, raw: string): T {
+function parseBridgeResponseValue<T>(
+	parsed: BridgeResponse<T>, raw: string,
+): T {
 	switch (parsed.kind) {
 		case "ok":
 			return decodeBoundaryValueForHost(parsed.value);

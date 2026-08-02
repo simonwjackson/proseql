@@ -2050,7 +2050,13 @@ impl Database {
         if changes.is_empty() {
             return;
         }
-        self.reactive.apply_changes(&changes);
+        // Owned transactions mutate the canonical collections across host turns,
+        // but reactive readers must continue to observe the pre-transaction
+        // snapshot until commit. The transaction journal owns these deltas and
+        // applies their net effect exactly once during commit.
+        if self.reactive_event_suppression_depth == 0 {
+            self.reactive.apply_changes(&changes);
+        }
         self.committed_changes.extend(changes);
     }
 

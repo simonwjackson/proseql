@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use indexmap::IndexMap;
 use proseql_engine::{
     callbacks::CallbackRegistry,
+    change_set::{ChangeSet, EntityChange},
     clock::FixedClock,
     collection::Collection,
     descriptor::{
@@ -144,7 +145,10 @@ fn users_descriptor() -> CollectionDescriptor {
             },
         ),
     ];
-    descriptor.indexes = vec![IndexDescriptor::Single("companyId".into())];
+    descriptor.indexes = vec![
+        IndexDescriptor::Single("companyId".into()),
+        IndexDescriptor::Compound(vec!["companyId".into(), "name".into()]),
+    ];
     descriptor.search_index = vec!["name".into()];
     descriptor
 }
@@ -305,6 +309,35 @@ fn indexed_fk_rollback_restores_earlier_insertion_order_and_recreate_moves_to_en
             .unwrap()
             .narrow_candidates(&json!({"companyId":"c1"})),
         Some(vec!["u2".into(), "u3".into(), "u1".into()])
+    );
+}
+
+#[test]
+fn rollback_preserves_snapshot_order_across_repeated_multi_entity_shifts() {
+    let mut db = make_db();
+    for (id, name) in [("u2", "Bob"), ("u3", "Carol"), ("u4", "Dana")] {
+        db.create("users", json!({"id":id,"name":name,"companyId":"c1"}))
+            .unwrap();
+    }
+    db.take_committed_changes();
+
+    let mut session = db.begin_owned_transaction().unwrap();
+    db.transaction_step(&mut session, |db| db.delete("users", "u2"))
+        .unwrap();
+    db.transaction_step(&mut session, |db| db.delete("users", "u4"))
+        .unwrap();
+    db.transaction_step(&mut session, |db| db.delete("users", "u1"))
+        .unwrap();
+    db.rollback_owned_transaction(session).unwrap();
+
+    assert_eq!(
+        db.collection("users")
+            .unwrap()
+            .list()
+            .into_iter()
+            .map(|entity| entity["id"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>(),
+        vec!["u1", "u2", "u3", "u4"]
     );
 }
 
@@ -511,6 +544,89 @@ fn indexed_and_search_state_matches_backing_state_after_transaction_rollback() {
 }
 
 #[test]
+fn rollback_rebuilds_indexes_for_touched_net_zero_materialized_changes() {
+    let mut db = make_db();
+    db.create("users", json!({"id":"u2","name":"Alice","companyId":"c1"}))
+        .unwrap();
+    db.take_committed_changes();
+    let before = db
+        .collection("users")
+        .unwrap()
+        .list()
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let revision_before = db.collection("users").unwrap().revision();
+
+    let mut session = db.begin_owned_transaction().unwrap();
+    let updated = db
+        .transaction_step(&mut session, |database| {
+            database.update("users", "u1", json!({"name":"Bob"}))
+        })
+        .unwrap();
+    assert_eq!(updated["name"], json!("Bob"));
+    let mut caller_value = updated.clone();
+    caller_value["name"] = json!("Alice");
+    assert!(db
+        .synchronize_materialized_value("users", "u1", caller_value.clone())
+        .unwrap());
+    let mut caller_changes = ChangeSet::default();
+    caller_changes.record(EntityChange {
+        collection: "users".into(),
+        id: "u1".into(),
+        before: Some(updated),
+        after: Some(caller_value),
+        before_position: Some(0),
+        after_position: Some(0),
+    });
+    session.absorb_changes(caller_changes);
+
+    let users = db.collection("users").unwrap();
+    assert_eq!(
+        users.list().into_iter().cloned().collect::<Vec<_>>(),
+        before
+    );
+    assert_eq!(users.revision(), revision_before + 1);
+    assert_eq!(
+        users.narrow_candidates(&json!({"companyId":"c1","name":"Alice"})),
+        Some(vec!["u2".into()])
+    );
+    assert_eq!(
+        users.narrow_candidates(&json!({"$search":{"query":"alice","fields":["name"]}})),
+        Some(vec!["u2".into()])
+    );
+
+    db.rollback_owned_transaction(session).unwrap();
+
+    let users = db.collection("users").unwrap();
+    assert_eq!(
+        users.list().into_iter().cloned().collect::<Vec<_>>(),
+        before
+    );
+    assert_eq!(users.revision(), revision_before);
+    assert_eq!(
+        users.narrow_candidates(&json!({"companyId":"c1"})),
+        Some(vec!["u1".into(), "u2".into()])
+    );
+    assert_eq!(
+        users.narrow_candidates(&json!({"companyId":"c1","name":"Alice"})),
+        Some(vec!["u1".into(), "u2".into()])
+    );
+    assert_eq!(
+        users.narrow_candidates(&json!({"companyId":"c1","name":"Bob"})),
+        Some(Vec::new())
+    );
+    assert_eq!(
+        users.narrow_candidates(&json!({"$search":{"query":"alice","fields":["name"]}})),
+        Some(vec!["u1".into(), "u2".into()])
+    );
+    assert_eq!(
+        users.narrow_candidates(&json!({"$search":{"query":"bob","fields":["name"]}})),
+        Some(Vec::new())
+    );
+}
+
+#[test]
 fn callback_transaction_auto_rolls_back_and_rethrows_original_error() {
     let mut db = make_db();
     let error = db
@@ -689,6 +805,48 @@ fn transaction_query_reads_mutated_state() {
 }
 
 #[test]
+fn stateful_transaction_journals_each_step_without_collection_snapshots() {
+    let mut expected_db = make_db();
+    let mut expected_bytes = 0;
+    expected_db
+        .create("users", json!({"id":"u2","name":"Bob"}))
+        .unwrap();
+    expected_bytes += serde_json::to_vec(&expected_db.take_committed_changes())
+        .unwrap()
+        .len();
+    expected_db
+        .update("users", "u2", json!({"name":"Bobby"}))
+        .unwrap();
+    expected_bytes += serde_json::to_vec(&expected_db.take_committed_changes())
+        .unwrap()
+        .len();
+    expected_db.delete("posts", "p1").unwrap();
+    expected_bytes += serde_json::to_vec(&expected_db.take_committed_changes())
+        .unwrap()
+        .len();
+
+    let mut db = make_db();
+    let mut tx = db.begin_transaction(None).unwrap();
+    tx.create("users", json!({"id":"u2","name":"Bob"})).unwrap();
+    tx.update("users", "u2", json!({"name":"Bobby"})).unwrap();
+    tx.delete("posts", "p1").unwrap();
+
+    assert_eq!(tx.journal_entry_count(), 3);
+    assert_eq!(
+        tx.mutated_collections().iter().cloned().collect::<Vec<_>>(),
+        vec!["users", "posts"]
+    );
+    assert_eq!(tx.journal_bytes(), expected_bytes);
+
+    let _ = tx.rollback();
+    assert!(db.collection("users").unwrap().get("u2").is_none());
+    assert_eq!(
+        db.collection("posts").unwrap().get("p1").unwrap()["title"],
+        json!("Hello")
+    );
+}
+
+#[test]
 fn commit_schedules_persistence_once_per_collection_even_after_many_mutations() {
     let mut db = make_db();
     let recorder = Recorder::default();
@@ -698,6 +856,30 @@ fn commit_schedules_persistence_once_per_collection_even_after_many_mutations() 
     tx.update("posts", "p1", json!({"title":"T1"})).unwrap();
     tx.commit().unwrap();
     assert_eq!(scheduled(&recorder), vec!["users", "posts"]);
+}
+
+#[test]
+fn net_zero_commit_preserves_touched_collection_event_and_persistence_artifact() {
+    let mut db = make_db();
+    let recorder = Recorder::default();
+    let sub = db.subscribe_change_events();
+    let mut tx = db.begin_transaction(Some(&recorder)).unwrap();
+    tx.create("users", json!({"id":"transient","name":"Transient"}))
+        .unwrap();
+    tx.delete("users", "transient").unwrap();
+
+    assert_eq!(
+        tx.mutated_collections().iter().cloned().collect::<Vec<_>>(),
+        vec!["users"]
+    );
+    tx.commit().unwrap();
+
+    assert!(db.collection("users").unwrap().get("transient").is_none());
+    assert_eq!(scheduled(&recorder), vec!["users"]);
+    let event = sub.recv().unwrap();
+    assert_eq!(event.collection, "users");
+    assert_eq!(event.operation, ChangeOperation::Update);
+    assert!(sub.try_recv().is_err());
 }
 
 #[test]

@@ -473,7 +473,27 @@ const createTransactionCollectionAdapter = (
 	collectionName: string,
 	state: TransactionAdapterState,
 ) => ({
-	query: (config?: QueryConfig<any, any, any>) => cursorOrStreamQuery(engineCollection, config),
+	query: (config?: QueryConfig<any, any, any>) => {
+		if (config && "cursor" in config && config.cursor !== undefined) {
+			return wrapTransactionOperation(state, () =>
+				engineCollection.query(config as never),
+			) as never;
+		}
+		return withStreamRunPromise(
+			Stream.unwrap(
+				Effect.suspend(() => {
+					if (!state.active) {
+						return Effect.fail(transactionInactiveError("begin"));
+					}
+					return liftPromise(() => engineCollection.query(config as never)).pipe(
+						Effect.map((rows) =>
+							Stream.fromIterable(rows as Iterable<unknown>),
+						),
+					);
+				}),
+			),
+		) as never;
+	},
 	findById: (id: string) => wrapTransactionOperation(state, () => engineCollection.findById(id)) as never,
 	exists: (id: string) => wrapTransactionOperation(state, () => engineCollection.exists(id)) as never,
 	create: (input: unknown) =>
@@ -679,7 +699,7 @@ const adaptDatabase = <Config extends DatabaseConfig>(
 		$transaction: <A, E>(fn: (ctx: TransactionContext<GenerateDatabase<Config>>) => Effect.Effect<A, E>) =>
 			withRunPromise(
 				Effect.tryPromise({
-					try: () =>
+					try: (signal) =>
 						engineDb.$transaction(async (tx) => {
 							const txRecord = tx as Record<string, EngineCollection<any, any, any>>;
 							const state: TransactionAdapterState = {
@@ -733,7 +753,7 @@ const adaptDatabase = <Config extends DatabaseConfig>(
 								}
 							});
 							const typedTxContext = txContext as TransactionContext<GenerateDatabase<Config>>;
-							const exit = await Effect.runPromiseExit(fn(typedTxContext));
+							const exit = await Effect.runPromiseExit(fn(typedTxContext), { signal });
 							if (exit._tag === "Success") {
 								if (state.rollbackRequested) {
 									throw new TransactionCallbackFailure(state.rollbackError);

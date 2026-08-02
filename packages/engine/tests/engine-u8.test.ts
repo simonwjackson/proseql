@@ -1162,6 +1162,354 @@ describe("@proseql/engine U8 fixes", () => {
 		await expect(db.users.findById("u3")).rejects.toBeInstanceOf(Error);
 	});
 
+	it("rolls back without publishing a projection delta or replacing prior identity", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		const before = await db.users.findById("u1");
+		const failure = new Error("rollback identity");
+		await expect(
+			db.$transaction(async (tx) => {
+				await tx.users.update("u1", { name: "Changed" });
+				throw failure;
+			}),
+		).rejects.toBe(failure);
+		const after = await db.users.findById("u1");
+		expect(after).toBe(before);
+		expect(after).toEqual({ id: "u1", name: "Alice" });
+		await db.close();
+	});
+
+	it("uses a transaction-local projection for identity and caller mutation without leaking rollback state", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		const mainBefore = await db.users.findById("u1");
+		const failure = new Error("rollback local projection");
+		await expect(
+			db.$transaction(async (tx) => {
+				const first = await tx.users.findById("u1");
+				const repeated = await tx.users.findById("u1");
+				expect(repeated).toBe(first);
+				first.name = "Caller changed";
+				const synchronized = await tx.users.findById("u1");
+				expect(synchronized).toBe(first);
+				expect(synchronized.name).toBe("Caller changed");
+				const updated = await tx.users.update("u1", { name: "Updated" });
+				expect(await tx.users.findById("u1")).toBe(updated);
+				expect(mainBefore.name).toBe("Alice");
+				throw failure;
+			}),
+		).rejects.toBe(failure);
+		expect(await db.users.findById("u1")).toBe(mainBefore);
+		expect(mainBefore.name).toBe("Alice");
+		await db.close();
+	});
+
+	it("rebuilds equality, compound, and search indexes after a net-zero projected rollback", async () => {
+		const IndexedUserSchema = Schema.Struct({
+			id: Schema.String,
+			name: Schema.String,
+		});
+		const db = await createEngineDatabase(
+			{
+				users: {
+					schema: IndexedUserSchema,
+					relationships: {},
+					indexes: ["name", ["name", "id"]],
+					searchIndex: ["name"],
+				},
+			} as const,
+			{
+				users: [
+					{ id: "u1", name: "Alice" },
+					{ id: "u2", name: "Alice" },
+				],
+			},
+		);
+		try {
+			const mainBefore = await db.users.findById("u1");
+			const failure = new Error("net-zero rollback");
+			await expect(
+				db.$transaction(async (tx) => {
+					const updated = await tx.users.update("u1", { name: "Bob" });
+					updated.name = "Alice";
+					await tx.users.findById("u1");
+
+					expect(
+						(await tx.users.query({ where: { name: "Alice" } })).map(
+							(row) => row.id,
+						),
+					).toEqual(["u2"]);
+					expect(
+						(
+							await tx.users.query({
+								where: {
+									$search: { query: "alice", fields: ["name"] },
+								},
+							})
+						).map((row) => row.id),
+					).toEqual(["u2"]);
+					throw failure;
+				}),
+			).rejects.toBe(failure);
+
+			expect(await db.users.findById("u1")).toBe(mainBefore);
+			expect(await db.users.query({ where: { name: "Alice" } })).toEqual([
+				{ id: "u1", name: "Alice" },
+				{ id: "u2", name: "Alice" },
+			]);
+			expect(
+				await db.users.query({ where: { name: "Alice", id: "u1" } }),
+			).toEqual([{ id: "u1", name: "Alice" }]);
+			expect(await db.users.query({ where: { name: "Bob" } })).toEqual([]);
+			expect(
+				(
+					await db.users.query({
+						where: {
+							$search: { query: "alice", fields: ["name"] },
+						},
+					})
+				).map((row) => row.id),
+			).toEqual(["u1", "u2"]);
+			expect(
+				await db.users.query({
+					where: { $search: { query: "bob", fields: ["name"] } },
+				}),
+			).toEqual([]);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("flushes final transaction-local caller mutations with exact boundary values before commit", async () => {
+		const PayloadSchema = Schema.Struct({
+			id: Schema.String,
+			missing: Schema.optional(Schema.String),
+			negativeZero: Schema.Number,
+			values: Schema.Array(Schema.NullOr(Schema.String)),
+			sentinel: Schema.Struct({ __proseqlArrayHole__: Schema.Number }),
+		});
+		const db = await createEngineDatabase(
+			{ payloads: { schema: PayloadSchema, relationships: {} } } as const,
+			{
+				payloads: [
+					{
+						id: "p1",
+						negativeZero: 0,
+						values: ["a", "b", "c"],
+						sentinel: { __proseqlArrayHole__: 1 },
+					},
+				],
+			},
+		);
+		try {
+			const mainBefore = await db.payloads.findById("p1");
+			const local = await db.$transaction(async (tx) => {
+				const row = await tx.payloads.findById("p1");
+				const mutable = row as unknown as {
+					missing?: string;
+					negativeZero: number;
+					values: Array<string | null | undefined>;
+					sentinel: { __proseqlArrayHole__: number };
+				};
+				mutable.missing = undefined;
+				mutable.negativeZero = -0;
+				delete mutable.values[0];
+				mutable.values[1] = undefined;
+				mutable.values[2] = null;
+				mutable.sentinel = { __proseqlArrayHole__: 1 };
+				return row;
+			});
+			const committed = await db.payloads.findById("p1");
+			expect(committed).not.toBe(mainBefore);
+			expect(committed).not.toBe(local);
+			expect(Object.hasOwn(committed, "missing")).toBe(true);
+			expect(committed.missing).toBeUndefined();
+			expect(Object.is(committed.negativeZero, -0)).toBe(true);
+			expect(0 in committed.values).toBe(false);
+			expect(1 in committed.values).toBe(true);
+			expect(committed.values[1]).toBeUndefined();
+			expect(committed.values[2]).toBeNull();
+			expect(committed.sentinel).toEqual({ __proseqlArrayHole__: 1 });
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("rolls back and preserves main identity when final dirty synchronization fails", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		try {
+			const mainBefore = await db.users.findById("u1");
+			const syncFailure = new Error("final dirty sync failed");
+			await expect(
+				db.$transaction(async (tx) => {
+					const row = await tx.users.findById("u1");
+					Object.defineProperty(row, "explodes", {
+						configurable: true,
+						enumerable: true,
+						get: () => {
+							throw syncFailure;
+						},
+					});
+					return row;
+				}),
+			).rejects.toBe(syncFailure);
+			const after = await db.users.findById("u1");
+			expect(after).toBe(mainBefore);
+			expect(after).toEqual({ id: "u1", name: "Alice" });
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("rejects same-context parent operations and close instead of self-deadlocking", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		await db.$transaction(async (tx) => {
+			await expect(db.users.findById("u1")).rejects.toMatchObject({
+				_tag: "TransactionError",
+				reason: "transaction is active; use transaction context",
+			});
+			await expect(db.close()).rejects.toMatchObject({
+				_tag: "TransactionError",
+				reason: "transaction is active; use transaction context",
+			});
+			return tx.users.findById("u1");
+		});
+		expect(await db.users.findById("u1")).toEqual({ id: "u1", name: "Alice" });
+		await db.close();
+	});
+
+	it("keeps existing and newly requested watches isolated across commit and rollback", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		const existing = db.users.watch({ debounceMs: 5 });
+		expect((await existing.next()).value?.[0]?.name).toBe("Alice");
+		let release!: () => void;
+		const blocked = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const transaction = db.$transaction(async (tx) => {
+			await tx.users.update("u1", { name: "Committed" });
+			await blocked;
+		});
+		await sleep(20);
+		let existingSettled = false;
+		const existingNext = existing.next().then((value) => {
+			existingSettled = true;
+			return value;
+		});
+		const queued = db.users.watch({ debounceMs: 5 });
+		await sleep(20);
+		expect(existingSettled).toBe(false);
+		release();
+		await transaction;
+		expect((await existingNext).value?.[0]?.name).toBe("Committed");
+		expect((await queued.next()).value?.[0]?.name).toBe("Committed");
+
+		const rollbackFailure = new Error("watch rollback");
+		await expect(
+			db.$transaction(async (tx) => {
+				await tx.users.update("u1", { name: "Rolled back" });
+				await sleep(20);
+				throw rollbackFailure;
+			}),
+		).rejects.toBe(rollbackFailure);
+		let rollbackEmission = false;
+		const pending = existing.next().then((value) => {
+			rollbackEmission = true;
+			return value;
+		});
+		await sleep(20);
+		expect(rollbackEmission).toBe(false);
+		await existing.unsubscribe();
+		await queued.unsubscribe();
+		await pending;
+		await db.close();
+	});
+
+	it("poisons a transaction after a caught defect and rolls it back instead of committing", async () => {
+		const db = await createEngineDatabase(
+			{
+				users: {
+					schema: UserSchema,
+					relationships: {},
+					hooks: {
+						beforeCreate: [
+							() => {
+								throw new Error("transaction defect");
+							},
+						],
+					},
+				},
+			} as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		await expect(
+			db.$transaction(async (tx) => {
+				await expect(
+					tx.users.create({ id: "u2", name: "Bob" }),
+				).rejects.toBeInstanceOf(WasmEngineDefectError);
+				await expect(tx.users.findById("u1")).rejects.toMatchObject({
+					_tag: "OperationError",
+					reason: "session-poisoned",
+				});
+			}),
+		).rejects.toMatchObject({
+			_tag: "OperationError",
+			reason: "session-poisoned",
+		});
+		expect(await db.users.findById("u1")).toEqual({ id: "u1", name: "Alice" });
+		await db.close();
+	});
+
+	it("uses stateful transaction crossings without snapshot or temporary-runtime transfers", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		const diagnostics = () =>
+			(
+				db as unknown as {
+					__proseqlMaterializationDiagnostics: () => Record<string, number>;
+				}
+			).__proseqlMaterializationDiagnostics();
+		const before = diagnostics();
+		await db.$transaction(async (tx) => {
+			await tx.users.create({ id: "u2", name: "Bob" });
+			await tx.users.update("u2", { name: "Bobby" });
+			await tx.users.delete("u2");
+		});
+		const after = diagnostics();
+		expect(after.transactionBegins - before.transactionBegins).toBe(1);
+		expect(after.transactionSteps - before.transactionSteps).toBe(3);
+		expect(after.transactionCommits - before.transactionCommits).toBe(1);
+		expect(after.transactionRollbacks - before.transactionRollbacks).toBe(0);
+		expect(
+			after.transactionJournalEntries - before.transactionJournalEntries,
+		).toBe(3);
+		expect(after.transactionJournalBytes).toBeGreaterThan(
+			before.transactionJournalBytes,
+		);
+		expect(
+			after.transactionSnapshotTransfers - before.transactionSnapshotTransfers,
+		).toBe(0);
+		expect(
+			after.temporaryTransactionRuntimes - before.temporaryTransactionRuntimes,
+		).toBe(0);
+		await db.close();
+	});
+
 	it("rejects overlapping $transaction calls immediately without losing committed state", async () => {
 		const db = await createEngineDatabase(
 			{ users: { schema: UserSchema, relationships: {} } } as const,
@@ -1176,12 +1524,13 @@ describe("@proseql/engine U8 fixes", () => {
 			await firstBlocked;
 			return tx.users.findById("u1");
 		});
-		await waitFor(async () => {
-			expect(await db.users.findById("u1")).toEqual({
-				id: "u1",
-				name: "Alice",
-			});
+		let outsideReadSettled = false;
+		const outsideRead = db.users.findById("u1").then((value) => {
+			outsideReadSettled = true;
+			return value;
 		});
+		await Promise.resolve();
+		expect(outsideReadSettled).toBe(false);
 		const second = db.$transaction(async (tx) => {
 			await tx.users.update("u1", { name: { $set: "Second" } });
 			return tx.users.findById("u1");
@@ -1193,9 +1542,50 @@ describe("@proseql/engine U8 fixes", () => {
 		});
 		releaseFirst();
 		expect(await first).toEqual({ id: "u1", name: "First" });
+		expect(await outsideRead).toEqual({ id: "u1", name: "First" });
 		expect(await db.users.findById("u1")).toEqual({ id: "u1", name: "First" });
 		const after = await db.$transaction(async (tx) => tx.users.findById("u1"));
 		expect(after).toEqual({ id: "u1", name: "First" });
+	});
+
+	it("keeps queued reads and close behind rollback restoration", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+		let release!: () => void;
+		const blocked = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const failure = new Error("rollback callback");
+		const transaction = db.$transaction(async (tx) => {
+			await tx.users.create({ id: "u2", name: "Bob" });
+			await blocked;
+			throw failure;
+		});
+		let readSettled = false;
+		const queuedRead = db.users.findById("u2").finally(() => {
+			readSettled = true;
+		});
+		const queuedReadOutcome = queuedRead.then(
+			(value) => ({ value, error: undefined }),
+			(error: unknown) => ({ value: undefined, error }),
+		);
+		let closeSettled = false;
+		const close = db.close().then(() => {
+			closeSettled = true;
+		});
+		await Promise.resolve();
+		expect(readSettled).toBe(false);
+		expect(closeSettled).toBe(false);
+		release();
+		await expect(transaction).rejects.toBe(failure);
+		expect((await queuedReadOutcome).error).toMatchObject({
+			_tag: "NotFoundError",
+			id: "u2",
+		});
+		await close;
+		expect(closeSettled).toBe(true);
 	});
 
 	it("rolls back nested $transaction attempts and releases the guard in finally", async () => {

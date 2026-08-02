@@ -1075,6 +1075,30 @@ impl Collection {
         true
     }
 
+    /// Restore a reversed, per-collection transaction journal and rebuild all
+    /// derived indexes exactly once. The caller must provide changes in rollback
+    /// order. An empty journal still rebuilds indexes because direct materialized
+    /// row synchronization can compact a touched transaction to net zero while
+    /// intentionally leaving its derived indexes stale.
+    pub(crate) fn rollback_entity_changes(&mut self, changes: &[EntityChange]) {
+        for change in changes {
+            self.state.shift_remove(&change.id);
+            if let Some(before) = &change.before {
+                let position = change.before_position.unwrap_or(self.state.len());
+                self.state.shift_insert(
+                    position.min(self.state.len()),
+                    change.id.clone(),
+                    before.clone(),
+                );
+            }
+        }
+        self.rebuild_indexes();
+    }
+
+    pub(crate) fn restore_revision(&mut self, revision: u64) {
+        self.revision = revision;
+    }
+
     /// Replace the full collection state and rebuild indexes.
     pub(crate) fn restore_state(&mut self, snapshot: IndexMap<String, Value>) {
         self.replace_entire_state(snapshot);
