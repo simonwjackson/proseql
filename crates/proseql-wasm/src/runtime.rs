@@ -11,7 +11,7 @@ use proseql_engine::collection::Collection;
 use proseql_engine::descriptor::CollectionDescriptor;
 use proseql_engine::errors::{EngineError, OperationError};
 use proseql_engine::id_gen::{IdGenerator, SequentialGenerator};
-use proseql_engine::reactive::CallbackSubscription;
+use proseql_engine::reactive::{CallbackSubscription, WatchDelivery};
 use proseql_engine::relationships::Database;
 use proseql_engine::transactions::OwnedTransactionSession;
 use proseql_engine::value::{decode_boundary_input_value, encode_boundary_output_value};
@@ -936,7 +936,7 @@ impl Runtime {
         &mut self,
         handle: u32,
         command_json: &str,
-        callback: impl Fn(Value) + Send + Sync + 'static,
+        callback: impl Fn(WatchDelivery) + Send + Sync + 'static,
     ) -> String {
         bridge::handle(|| command::subscribe_watch(&mut self.inner, handle, command_json, callback))
     }
@@ -945,7 +945,7 @@ impl Runtime {
         &mut self,
         handle: u32,
         command_json: &str,
-        callback: impl Fn(Value) + Send + Sync + 'static,
+        callback: impl Fn(WatchDelivery) + Send + Sync + 'static,
     ) -> String {
         bridge::handle(|| {
             command::subscribe_watch_by_id(&mut self.inner, handle, command_json, callback)
@@ -1227,15 +1227,17 @@ impl WasmRuntime {
         command_json: String,
         callback: js_sys::Function,
     ) -> String {
-        self.inner
-            .borrow_mut()
-            .subscribe_watch_json(handle, command_json.as_str(), move |value| {
-                let payload = serde_json::to_string(&value).unwrap_or_else(|_| "null".to_owned());
+        self.inner.borrow_mut().subscribe_watch_json(
+            handle,
+            command_json.as_str(),
+            move |delivery| {
+                let payload = watch_delivery_response(delivery);
                 let _ = callback.call1(
                     &wasm_bindgen::JsValue::NULL,
                     &wasm_bindgen::JsValue::from_str(payload.as_str()),
                 );
-            })
+            },
+        )
     }
 
     pub fn subscribe_watch_by_id(
@@ -1247,8 +1249,8 @@ impl WasmRuntime {
         self.inner.borrow_mut().subscribe_watch_by_id_json(
             handle,
             command_json.as_str(),
-            move |value| {
-                let payload = serde_json::to_string(&value).unwrap_or_else(|_| "null".to_owned());
+            move |delivery| {
+                let payload = watch_delivery_response(delivery);
                 let _ = callback.call1(
                     &wasm_bindgen::JsValue::NULL,
                     &wasm_bindgen::JsValue::from_str(payload.as_str()),
@@ -1261,6 +1263,20 @@ impl WasmRuntime {
         self.inner
             .borrow_mut()
             .unsubscribe_json(handle, subscription_id)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn watch_delivery_response(delivery: WatchDelivery) -> String {
+    if let Some(message) = crate::callbacks::take_pending_callback_defect() {
+        return bridge::response_defect(format!("unexpected defect: {message}"));
+    }
+    match delivery {
+        WatchDelivery::Value(value) => bridge::response_ok(value),
+        WatchDelivery::Error(error) => bridge::response_error(error),
+        WatchDelivery::Defect(message) => {
+            bridge::response_defect(format!("unexpected defect: {message}"))
+        }
     }
 }
 

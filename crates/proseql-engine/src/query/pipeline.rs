@@ -59,7 +59,7 @@ use crate::errors::{EngineError, OperationError, ValidationError, ValidationIssu
 use super::aggregate::{
     compute_aggregates, compute_grouped_aggregates, AggregateConfig, AggregateResult, GroupResult,
 };
-use super::computed::resolve_computed_for_all;
+use super::computed::{resolve_computed_for_all, should_resolve_computed};
 use super::cursor::{apply_cursor, CursorConfig, CursorPageResult};
 use super::filter::matches_where_with_registry;
 use super::paginate::paginate;
@@ -160,7 +160,11 @@ pub fn execute_query_over_entities(
     computed_fields: &[ComputedFieldDescriptor],
     registry: &Arc<CallbackRegistry>,
 ) -> Result<Vec<Value>, EngineError> {
-    let with_computed = resolve_computed_for_all(&entities, computed_fields, registry)?;
+    let with_computed = if should_resolve_computed(&input.select, computed_fields) {
+        resolve_computed_for_all(&entities, computed_fields, registry)?
+    } else {
+        entities
+    };
     let filtered: Vec<Value> = match &input.r#where {
         None => with_computed,
         Some(w) => with_computed
@@ -205,7 +209,11 @@ pub fn execute_cursor_query_over_entities(
         input.sort.clone()
     };
 
-    let with_computed = resolve_computed_for_all(&entities, computed_fields, registry)?;
+    let with_computed = if should_resolve_computed(&input.select, computed_fields) {
+        resolve_computed_for_all(&entities, computed_fields, registry)?
+    } else {
+        entities
+    };
     let filtered: Vec<Value> = match &input.r#where {
         None => with_computed,
         Some(w) => with_computed

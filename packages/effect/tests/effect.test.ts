@@ -949,6 +949,44 @@ describe("@proseql/effect", () => {
 		});
 	});
 
+	it("surfaces computed watch callback defects through Stream.runPromise", async () => {
+		const trace: string[] = [];
+		const computedConfig = {
+			users: {
+				schema: UserSchema,
+				relationships: {},
+				computed: {
+					marker: (user: { readonly id: string }) => {
+						trace.push(user.id);
+						if (user.id === "u2") throw new Error("effect-watch-u2");
+						return user.id;
+					},
+				},
+			},
+		} as const;
+
+		await expect(
+			Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const db = yield* createEffectDatabase(computedConfig, {
+							users: [
+								{ id: "u1", name: "one", age: 1, companyId: "c1" },
+								{ id: "u2", name: "two", age: 2, companyId: "c1" },
+							],
+						});
+						const stream = yield* db.users.watch({ debounceMs: 0 });
+						return yield* Stream.runHead(stream);
+					}),
+				),
+			),
+		).rejects.toMatchObject({
+			name: "WasmEngineDefectError",
+			message: "unexpected defect: computedCallback: effect-watch-u2",
+		});
+		expect(trace).toEqual(["u1", "u2"]);
+	});
+
 	it("closes scoped persistent databases exactly once, stopping storage watchers and dropping engine handles", async () => {
 		const file = "/virtual/users.json";
 		const store = new Map<string, string>([[file, "{}"]]);

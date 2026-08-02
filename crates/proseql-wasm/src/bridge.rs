@@ -15,7 +15,7 @@ where
     Defect { message: String },
 }
 
-fn response_ok<T>(value: T) -> String
+pub(crate) fn response_ok<T>(value: T) -> String
 where
     T: Serialize,
 {
@@ -27,7 +27,7 @@ where
     })
 }
 
-fn response_error(error: EngineError) -> String {
+pub(crate) fn response_error(error: EngineError) -> String {
     let error = serde_json::to_value(error)
         .map(encode_boundary_output_value)
         .unwrap_or(Value::Null);
@@ -36,7 +36,7 @@ fn response_error(error: EngineError) -> String {
     })
 }
 
-fn response_defect(message: impl Into<String>) -> String {
+pub(crate) fn response_defect(message: impl Into<String>) -> String {
     serde_json::to_string(&BridgeResponse::<Value>::Defect {
         message: message.into(),
     })
@@ -49,7 +49,12 @@ pub(crate) fn handle<T>(f: impl FnOnce() -> Result<T, EngineError>) -> String
 where
     T: Serialize,
 {
-    match panic::catch_unwind(AssertUnwindSafe(f)) {
+    crate::callbacks::clear_pending_callback_defect();
+    let result = panic::catch_unwind(AssertUnwindSafe(f));
+    if let Some(message) = crate::callbacks::take_pending_callback_defect() {
+        return response_defect(format!("unexpected defect: {message}"));
+    }
+    match result {
         Ok(Ok(value)) => response_ok(value),
         Ok(Err(error)) => response_error(error),
         Err(payload) => response_defect(if let Some(message) = payload.downcast_ref::<String>() {

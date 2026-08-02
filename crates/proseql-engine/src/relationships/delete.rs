@@ -7,7 +7,7 @@ use serde_json::{Map, Value};
 
 use crate::collection::Collection;
 use crate::descriptor::{RelationshipDescriptor, RelationshipKind};
-use crate::errors::{EngineError, ValidationError, ValidationIssue};
+use crate::errors::{EngineError, OperationError, ValidationError, ValidationIssue};
 use crate::reactive::ChangeOperation;
 
 use super::helpers::{col_nf, ent_nf, related_entity_ids, resolve_inv_fk_crud};
@@ -275,6 +275,13 @@ impl Database {
                 })
                 .collect()
         };
+        if self.registry.callback_aborted() {
+            return Err(EngineError::Operation(OperationError {
+                operation: "deleteManyWithRelationships".to_owned(),
+                reason: "callback-aborted".to_owned(),
+                message: "Callback evaluation aborted before mutation".to_owned(),
+            }));
+        }
 
         // TS step 2: apply limit BEFORE restrict / cascade checks
         if let Some(lim) = opts.limit {

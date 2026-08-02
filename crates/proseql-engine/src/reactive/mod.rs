@@ -23,7 +23,9 @@ use crate::collection::{
     Collection, CreateManyResult, DeleteManyResult, SkippedEntry, UpdateManyResult, UpsertAction,
     UpsertManyResult, UpsertOutcome,
 };
+use crate::descriptor::ComputedFieldDescriptor;
 use crate::errors::{CollectionNotFoundError, EngineError, OperationError};
+use crate::query::computed::{resolve_computed, should_resolve_computed};
 use crate::query::{
     apply_selection, matches_where_with_registry, paginate, sort_entities_with_registry, SortEntry,
     SortOrder,
@@ -524,7 +526,7 @@ impl ChangeEventSubscription {
 }
 
 pub struct ValueSubscription {
-    receiver: Receiver<Value>,
+    receiver: Receiver<WatchDelivery>,
     state: Weak<Mutex<ReactiveState>>,
     registry: Arc<CallbackRegistry>,
     subscriber_id: u64,
@@ -533,23 +535,39 @@ pub struct ValueSubscription {
 
 impl ValueSubscription {
     pub fn recv(&self) -> Result<Value, RecvError> {
-        if let Some(value) = self.take_initial_value() {
-            return Ok(value);
+        let delivery = self
+            .take_initial_delivery()
+            .map_or_else(|| self.receiver.recv(), Ok)?;
+        match delivery {
+            WatchDelivery::Value(value) => Ok(value),
+            WatchDelivery::Error(_) | WatchDelivery::Defect(_) => Err(RecvError),
         }
-        self.receiver.recv()
     }
 
     pub fn try_recv(&self) -> Result<Value, TryRecvError> {
-        if let Some(value) = self.take_initial_value() {
-            return Ok(value);
+        let delivery = self
+            .take_initial_delivery()
+            .map_or_else(|| self.receiver.try_recv(), Ok)?;
+        match delivery {
+            WatchDelivery::Value(value) => Ok(value),
+            WatchDelivery::Error(_) | WatchDelivery::Defect(_) => Err(TryRecvError::Disconnected),
         }
-        self.receiver.try_recv()
     }
 
-    fn take_initial_value(&self) -> Option<Value> {
+    fn take_initial_delivery(&self) -> Option<WatchDelivery> {
         let state = self.state.upgrade()?;
-        take_initial_watch_output(&state, &self.registry, self.subscriber_id)
+        take_initial_watch_delivery(&state, &self.registry, self.subscriber_id)
     }
+}
+
+/// One internal reactive watch delivery. Callback hosts retain the distinction
+/// between typed engine errors and callback defects; native value receivers
+/// deterministically disconnect for either failure.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WatchDelivery {
+    Value(Value),
+    Error(EngineError),
+    Defect(String),
 }
 
 pub struct CallbackSubscription {
@@ -675,9 +693,9 @@ enum EventSink {
 
 #[derive(Clone)]
 enum WatchSink {
-    Channel(Sender<Value>),
+    Channel(Sender<WatchDelivery>),
     Callback {
-        callback: Arc<dyn Fn(Value) + Send + Sync>,
+        callback: Arc<dyn Fn(WatchDelivery) + Send + Sync>,
         gate: Arc<DeliveryGate>,
     },
 }
@@ -689,7 +707,7 @@ enum WatchMode {
 }
 
 struct ChannelDeliveryState {
-    buffered: Option<Value>,
+    buffered: Option<WatchDelivery>,
 }
 
 struct WatchSubscriber {
@@ -708,6 +726,7 @@ struct ReactiveState {
     next_subscription_id: u64,
     snapshots: IndexMap<String, Vec<Value>>,
     snapshot_positions: HashMap<String, HashMap<String, usize>>,
+    computed_fields: HashMap<String, Vec<ComputedFieldDescriptor>>,
     event_subscribers: IndexMap<u64, EventSink>,
     watch_subscribers: IndexMap<u64, WatchSubscriber>,
 }
@@ -724,12 +743,16 @@ impl ReactiveHub {
         registry: Arc<CallbackRegistry>,
         scheduler: Arc<dyn ReactiveScheduler>,
     ) -> Self {
-        let _ = collections;
+        let computed_fields = collections
+            .iter()
+            .map(|(name, collection)| (name.clone(), collection.descriptor.computed_fields.clone()))
+            .collect();
         Self {
             state: Arc::new(Mutex::new(ReactiveState {
                 next_subscription_id: 1,
                 snapshots: IndexMap::new(),
                 snapshot_positions: HashMap::new(),
+                computed_fields,
                 event_subscribers: IndexMap::new(),
                 watch_subscribers: IndexMap::new(),
             })),
@@ -928,7 +951,7 @@ impl ReactiveHub {
         collection: &str,
         current: &Collection,
         config: WatchQueryConfig,
-        callback: Box<dyn Fn(Value) + Send + Sync>,
+        callback: Box<dyn Fn(WatchDelivery) + Send + Sync>,
     ) -> Result<CallbackSubscription, EngineError> {
         self.ensure_watch_supported("watch")?;
         self.set_collection_snapshot(collection, current);
@@ -941,7 +964,7 @@ impl ReactiveHub {
         current: &Collection,
         id: &str,
         debounce_ms: Option<i64>,
-        callback: Box<dyn Fn(Value) + Send + Sync>,
+        callback: Box<dyn Fn(WatchDelivery) + Send + Sync>,
     ) -> Result<CallbackSubscription, EngineError> {
         self.ensure_watch_supported("watchById")?;
         self.set_collection_snapshot(collection, current);
@@ -1005,17 +1028,18 @@ impl ReactiveHub {
         collection: &str,
         config: WatchQueryConfig,
         mode: WatchMode,
-        callback: Box<dyn Fn(Value) + Send + Sync>,
+        callback: Box<dyn Fn(WatchDelivery) + Send + Sync>,
     ) -> Result<CallbackSubscription, EngineError> {
         let gate = Arc::new(DeliveryGate::new());
-        let callback = Arc::<dyn Fn(Value) + Send + Sync>::from(callback);
+        let callback = Arc::<dyn Fn(WatchDelivery) + Send + Sync>::from(callback);
         let sink = WatchSink::Callback {
             callback: Arc::clone(&callback),
             gate: Arc::clone(&gate),
         };
         let id = self.register_watch_subscriber(collection, config, mode, sink.clone())?;
-        if let Some(initial_output) = take_initial_watch_output(&self.state, &self.registry, id) {
-            let _ = deliver_watch_sink(id, &sink, initial_output);
+        if let Some(initial_delivery) = take_initial_watch_delivery(&self.state, &self.registry, id)
+        {
+            let _ = deliver_watch_sink(id, &sink, initial_delivery);
         }
         Ok(CallbackSubscription {
             _handle: self.make_handle(SubscriptionKind::Watch, id, Some(gate)),
@@ -1169,11 +1193,11 @@ fn clamp_debounce_ms(debounce_ms: Option<i64>) -> u64 {
     }
 }
 
-fn take_initial_watch_output(
+fn take_initial_watch_delivery(
     state: &Arc<Mutex<ReactiveState>>,
     registry: &CallbackRegistry,
     subscriber_id: u64,
-) -> Option<Value> {
+) -> Option<WatchDelivery> {
     loop {
         let (generation, collection, config, mode) = {
             let mut state_guard = state.lock().ok()?;
@@ -1194,14 +1218,31 @@ fn take_initial_watch_output(
                 subscriber.mode.clone(),
             )
         };
-        let snapshot = {
+        let (snapshot, computed_fields) = {
             let state_guard = state.lock().ok()?;
-            state_guard.snapshots.get(&collection)?.clone()
+            (
+                state_guard.snapshots.get(&collection)?.clone(),
+                state_guard
+                    .computed_fields
+                    .get(&collection)
+                    .cloned()
+                    .unwrap_or_default(),
+            )
         };
 
-        let array_result = evaluate_watch_array(&snapshot, &config, registry, &mode);
-        let serialized = serialize_value(&Value::Array(array_result.clone()));
-        let output = map_watch_output(&mode, &array_result);
+        let evaluated =
+            evaluate_watch_delivery(&snapshot, &computed_fields, &config, registry, &mode);
+        let (delivery, serialized) = match evaluated {
+            WatchDelivery::Value(array) => {
+                let values = array.as_array().cloned().unwrap_or_default();
+                (
+                    WatchDelivery::Value(map_watch_output(&mode, &values)),
+                    Some(serialize_value(&array)),
+                )
+            }
+            failure => (failure, None),
+        };
+        let failed = serialized.is_none();
 
         let mut state_guard = state.lock().ok()?;
         let subscriber = state_guard.watch_subscribers.get_mut(&subscriber_id)?;
@@ -1217,19 +1258,49 @@ fn take_initial_watch_output(
         if subscriber.generation != generation {
             continue;
         }
-        subscriber.last_serialized = Some(serialized);
+        subscriber.last_serialized = serialized;
         subscriber.initial_pending = false;
-        return Some(output);
+        if failed {
+            remove_watch_subscriber(&mut state_guard, subscriber_id);
+        }
+        return Some(delivery);
+    }
+}
+
+fn evaluate_watch_delivery(
+    snapshot: &[Value],
+    computed_fields: &[ComputedFieldDescriptor],
+    config: &WatchQueryConfig,
+    registry: &CallbackRegistry,
+    mode: &WatchMode,
+) -> WatchDelivery {
+    match panic::catch_unwind(AssertUnwindSafe(|| {
+        evaluate_watch_array(snapshot, computed_fields, config, registry, mode)
+    })) {
+        Ok(Ok(values)) => WatchDelivery::Value(Value::Array(values)),
+        Ok(Err(error)) => WatchDelivery::Error(error),
+        Err(payload) => payload.downcast_ref::<EngineError>().map_or_else(
+            || WatchDelivery::Defect(panic_payload_message(payload.as_ref())),
+            |error| WatchDelivery::Error(error.clone()),
+        ),
     }
 }
 
 fn evaluate_watch_array(
     snapshot: &[Value],
+    computed_fields: &[ComputedFieldDescriptor],
     config: &WatchQueryConfig,
     registry: &CallbackRegistry,
     mode: &WatchMode,
-) -> Vec<Value> {
-    let mut values = snapshot.to_vec();
+) -> Result<Vec<Value>, EngineError> {
+    let mut values = if should_resolve_computed(&config.select, computed_fields) {
+        snapshot
+            .iter()
+            .map(|value| resolve_computed(value, computed_fields, registry))
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        snapshot.to_vec()
+    };
 
     match mode {
         WatchMode::Query => {
@@ -1246,10 +1317,20 @@ fn evaluate_watch_array(
 
     sort_entities_with_registry(&mut values, &config.sort, Some(registry));
     let values = paginate(&values, config.offset, config.limit);
-    values
+    Ok(values
         .iter()
         .map(|value| apply_selection(value, config.select.as_ref()))
-        .collect()
+        .collect())
+}
+
+fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_owned()
+    } else {
+        "unexpected defect".to_owned()
+    }
 }
 
 fn map_watch_output(mode: &WatchMode, array_result: &[Value]) -> Value {
@@ -1272,11 +1353,11 @@ fn deliver_event_sink(subscriber_id: u64, sink: &EventSink, event: ChangeEvent) 
     }
 }
 
-fn deliver_watch_sink(subscriber_id: u64, sink: &WatchSink, value: Value) -> bool {
+fn deliver_watch_sink(subscriber_id: u64, sink: &WatchSink, delivery: WatchDelivery) -> bool {
     match sink {
-        WatchSink::Channel(sender) => sender.send(value).is_ok(),
+        WatchSink::Channel(sender) => sender.send(delivery).is_ok(),
         WatchSink::Callback { callback, gate } => {
-            deliver_callback(subscriber_id, gate, || callback(value))
+            deliver_callback(subscriber_id, gate, || callback(delivery))
         }
     }
 }
@@ -1320,7 +1401,7 @@ fn emit_watch_if_current(
     subscriber_id: u64,
     generation: u64,
 ) {
-    let (sink, mode, config, snapshot, last_serialized) = {
+    let (sink, mode, config, snapshot, computed_fields, last_serialized) = {
         let mut state_guard = match state.lock() {
             Ok(state) => state,
             Err(_) => return,
@@ -1344,15 +1425,37 @@ fn emit_watch_if_current(
         let Some(snapshot) = state_guard.snapshots.get(&collection) else {
             return;
         };
-        (sink, mode, config, snapshot.clone(), last_serialized)
+        let computed_fields = state_guard
+            .computed_fields
+            .get(&collection)
+            .cloned()
+            .unwrap_or_default();
+        (
+            sink,
+            mode,
+            config,
+            snapshot.clone(),
+            computed_fields,
+            last_serialized,
+        )
     };
 
-    let array_result = evaluate_watch_array(&snapshot, &config, &registry, &mode);
-    let serialized_array = serialize_value(&Value::Array(array_result.clone()));
-    if last_serialized.as_ref() == Some(&serialized_array) {
-        return;
-    }
-    let output = map_watch_output(&mode, &array_result);
+    let evaluated = evaluate_watch_delivery(&snapshot, &computed_fields, &config, &registry, &mode);
+    let (delivery, serialized_array) = match evaluated {
+        WatchDelivery::Value(array) => {
+            let values = array.as_array().cloned().unwrap_or_default();
+            let serialized = serialize_value(&array);
+            if last_serialized.as_ref() == Some(&serialized) {
+                return;
+            }
+            (
+                WatchDelivery::Value(map_watch_output(&mode, &values)),
+                Some(serialized),
+            )
+        }
+        failure => (failure, None),
+    };
+    let failed = serialized_array.is_none();
 
     let should_deliver = {
         let mut state_guard = match state.lock() {
@@ -1365,24 +1468,29 @@ fn emit_watch_if_current(
         if subscriber.generation != generation {
             return;
         }
-        subscriber.last_serialized = Some(serialized_array);
-        match &subscriber.sink {
-            WatchSink::Channel(_) => {
-                if subscriber.initial_pending {
-                    if let Some(channel_state) = subscriber.channel_state.as_mut() {
-                        channel_state.buffered = Some(output.clone());
-                        false
+        subscriber.last_serialized = serialized_array;
+        if failed {
+            subscriber.initial_pending = false;
+            true
+        } else {
+            match &subscriber.sink {
+                WatchSink::Channel(_) => {
+                    if subscriber.initial_pending {
+                        if let Some(channel_state) = subscriber.channel_state.as_mut() {
+                            channel_state.buffered = Some(delivery.clone());
+                            false
+                        } else {
+                            subscriber.initial_pending = false;
+                            true
+                        }
                     } else {
-                        subscriber.initial_pending = false;
                         true
                     }
-                } else {
+                }
+                WatchSink::Callback { .. } => {
+                    subscriber.initial_pending = false;
                     true
                 }
-            }
-            WatchSink::Callback { .. } => {
-                subscriber.initial_pending = false;
-                true
             }
         }
     };
@@ -1391,10 +1499,29 @@ fn emit_watch_if_current(
         return;
     }
 
-    if !deliver_watch_sink(subscriber_id, &sink, output) {
+    let delivered = deliver_watch_sink(subscriber_id, &sink, delivery);
+    if failed || !delivered {
         if let Ok(mut state_guard) = state.lock() {
-            state_guard.watch_subscribers.shift_remove(&subscriber_id);
+            remove_watch_subscriber(&mut state_guard, subscriber_id);
         }
+    }
+}
+
+fn remove_watch_subscriber(state: &mut ReactiveState, subscriber_id: u64) {
+    let Some(mut subscriber) = state.watch_subscribers.shift_remove(&subscriber_id) else {
+        return;
+    };
+    if let Some(handle) = subscriber.pending_task.take() {
+        handle.cancel();
+    }
+    let collection = subscriber.collection;
+    if !state
+        .watch_subscribers
+        .values()
+        .any(|remaining| remaining.collection == collection)
+    {
+        state.snapshots.shift_remove(&collection);
+        state.snapshot_positions.remove(&collection);
     }
 }
 
@@ -1489,6 +1616,23 @@ impl Database {
         config: WatchQueryConfig,
         callback: Box<dyn Fn(Value) + Send + Sync>,
     ) -> Result<CallbackSubscription, EngineError> {
+        self.watch_with_delivery_callback(
+            collection,
+            config,
+            Box::new(move |delivery| {
+                if let WatchDelivery::Value(value) = delivery {
+                    callback(value);
+                }
+            }),
+        )
+    }
+
+    pub fn watch_with_delivery_callback(
+        &self,
+        collection: &str,
+        config: WatchQueryConfig,
+        callback: Box<dyn Fn(WatchDelivery) + Send + Sync>,
+    ) -> Result<CallbackSubscription, EngineError> {
         self.reactive.ensure_watch_supported("watch")?;
         let current = self
             .collections
@@ -1519,6 +1663,25 @@ impl Database {
         id: &str,
         debounce_ms: Option<i64>,
         callback: Box<dyn Fn(Value) + Send + Sync>,
+    ) -> Result<CallbackSubscription, EngineError> {
+        self.watch_by_id_with_delivery_callback(
+            collection,
+            id,
+            debounce_ms,
+            Box::new(move |delivery| {
+                if let WatchDelivery::Value(value) = delivery {
+                    callback(value);
+                }
+            }),
+        )
+    }
+
+    pub fn watch_by_id_with_delivery_callback(
+        &self,
+        collection: &str,
+        id: &str,
+        debounce_ms: Option<i64>,
+        callback: Box<dyn Fn(WatchDelivery) + Send + Sync>,
     ) -> Result<CallbackSubscription, EngineError> {
         self.reactive.ensure_watch_supported("watchById")?;
         let current = self

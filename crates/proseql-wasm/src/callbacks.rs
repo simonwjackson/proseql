@@ -12,6 +12,8 @@ use proseql_engine::hooks::{
 };
 use proseql_engine::id_gen::IdGenerator;
 #[cfg(target_arch = "wasm32")]
+use proseql_engine::value::{decode_boundary_input_value, encode_boundary_output_value};
+#[cfg(target_arch = "wasm32")]
 use serde::Serialize;
 #[cfg(target_arch = "wasm32")]
 use serde_json::json;
@@ -216,6 +218,8 @@ impl CallbackTable {
 
     pub(crate) fn build_registry(&self) -> CallbackRegistry {
         let mut registry = CallbackRegistry::new();
+        #[cfg(target_arch = "wasm32")]
+        registry.register_callback_abort_probe(callback_defect_pending);
         for (id, callback) in &self.defaults {
             let callback = Arc::clone(callback);
             registry.register_default(id.clone(), Box::new(move || callback()));
@@ -309,6 +313,11 @@ fn js_value_to_string(value: &wasm_bindgen::JsValue) -> String {
     value
         .as_string()
         .or_else(|| {
+            js_sys::Reflect::get(value, &wasm_bindgen::JsValue::from_str("message"))
+                .ok()
+                .and_then(|message| message.as_string())
+        })
+        .or_else(|| {
             js_sys::JSON::stringify(value)
                 .ok()
                 .and_then(|value| value.as_string())
@@ -361,15 +370,61 @@ enum InboundBridgeResponse<T> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn call_json_result<T: for<'de> serde::Deserialize<'de>>(
-    function: &js_sys::Function,
+fn serialize_callback_payload(
     payload: &impl Serialize,
     operation: &str,
+) -> Result<String, EngineError> {
+    serde_json::to_value(payload)
+        .map(encode_boundary_output_value)
+        .and_then(|value| serde_json::to_string(&value))
+        .map_err(|error| callback_error(operation, "serialize-payload", error.to_string()))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn deserialize_callback_value<T: serde::de::DeserializeOwned>(
+    raw: &str,
+    operation: &str,
 ) -> Result<T, EngineError> {
-    let payload_json = serde_json::to_string(payload)
-        .map_err(|error| callback_error(operation, "serialize-payload", error.to_string()))?;
-    let raw = call_json_callback(function, Some(payload_json.as_str()), operation)?;
-    if let Ok(response) = serde_json::from_str::<InboundBridgeResponse<T>>(&raw) {
+    if !raw.contains("\"__proseql") {
+        return serde_json::from_str(raw).map_err(|error| {
+            callback_error(operation, "invalid-callback-response", error.to_string())
+        });
+    }
+    serde_json::from_str(raw)
+        .map(decode_boundary_input_value)
+        .and_then(serde_json::from_value)
+        .map_err(|error| callback_error(operation, "invalid-callback-response", error.to_string()))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn callback_value_requires_boundary_encoding(value: &Value) -> bool {
+    match value {
+        Value::Array(values) => values.iter().any(callback_value_requires_boundary_encoding),
+        Value::Object(object) => {
+            object.keys().any(|key| key.starts_with("__proseql"))
+                || object
+                    .values()
+                    .any(callback_value_requires_boundary_encoding)
+        }
+        Value::Number(number) => {
+            let safe_integer = number
+                .as_i64()
+                .is_some_and(|value| value.unsigned_abs() <= 9_007_199_254_740_991)
+                || number
+                    .as_u64()
+                    .is_some_and(|value| value <= 9_007_199_254_740_991);
+            !safe_integer
+        }
+        _ => false,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn decode_json_result<T: serde::de::DeserializeOwned>(
+    raw: &str,
+    operation: &str,
+) -> Result<T, EngineError> {
+    if let Ok(response) = deserialize_callback_value::<InboundBridgeResponse<T>>(raw, operation) {
         return match response {
             InboundBridgeResponse::Ok { value } => Ok(value),
             InboundBridgeResponse::Error { error } => Err(error),
@@ -378,8 +433,18 @@ fn call_json_result<T: for<'de> serde::Deserialize<'de>>(
             }
         };
     }
-    serde_json::from_str(&raw)
-        .map_err(|error| callback_error(operation, "invalid-callback-response", error.to_string()))
+    deserialize_callback_value(raw, operation)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn call_json_result<T: serde::de::DeserializeOwned>(
+    function: &js_sys::Function,
+    payload: &impl Serialize,
+    operation: &str,
+) -> Result<T, EngineError> {
+    let payload_json = serialize_callback_payload(payload, operation)?;
+    let raw = call_json_callback(function, Some(payload_json.as_str()), operation)?;
+    decode_json_result(&raw, operation)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -388,12 +453,9 @@ fn call_json_void(
     payload: &impl Serialize,
     operation: &str,
 ) -> Result<(), EngineError> {
-    let payload_json = serde_json::to_string(payload)
-        .map_err(|error| callback_error(operation, "serialize-payload", error.to_string()))?;
+    let payload_json = serialize_callback_payload(payload, operation)?;
     let raw = call_json_callback(function, Some(payload_json.as_str()), operation)?;
-    match serde_json::from_str::<InboundBridgeResponse<serde_json::Value>>(&raw).map_err(
-        |error| callback_error(operation, "invalid-callback-response", error.to_string()),
-    )? {
+    match deserialize_callback_value::<InboundBridgeResponse<serde_json::Value>>(&raw, operation)? {
         InboundBridgeResponse::Ok { .. } => Ok(()),
         InboundBridgeResponse::Error { error } => Err(error),
         InboundBridgeResponse::Defect { message } => {
@@ -415,6 +477,42 @@ fn callback_defect_message(operation: &str, error: &EngineError) -> String {
         }
         _ => format!("{operation}: {error}"),
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static PENDING_CALLBACK_DEFECT: std::cell::RefCell<Option<String>> = const {
+        std::cell::RefCell::new(None)
+    };
+}
+
+#[cfg(target_arch = "wasm32")]
+fn callback_defect_pending() -> bool {
+    PENDING_CALLBACK_DEFECT.with(|pending| pending.borrow().is_some())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn record_callback_defect(operation: &str, error: &EngineError) {
+    PENDING_CALLBACK_DEFECT.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        if pending.is_none() {
+            *pending = Some(callback_defect_message(operation, error));
+        }
+    });
+}
+
+pub(crate) fn clear_pending_callback_defect() {
+    #[cfg(target_arch = "wasm32")]
+    PENDING_CALLBACK_DEFECT.with(|pending| pending.borrow_mut().take());
+}
+
+pub(crate) fn take_pending_callback_defect() -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        return PENDING_CALLBACK_DEFECT.with(|pending| pending.borrow_mut().take());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    None
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -516,16 +614,8 @@ impl CallbackTable {
     pub fn register_default_js(&mut self, id: String, callback: js_sys::Function) {
         self.register_default(id, move || {
             match call_no_arg_string(&callback, "defaultCallback") {
-                Ok(raw) => serde_json::from_str(&raw).unwrap_or_else(|error| {
-                    panic_callback_defect(
-                        "defaultCallback",
-                        callback_error(
-                            "defaultCallback",
-                            "invalid-callback-response",
-                            error.to_string(),
-                        ),
-                    )
-                }),
+                Ok(raw) => deserialize_callback_value(&raw, "defaultCallback")
+                    .unwrap_or_else(|error| panic_callback_defect("defaultCallback", error)),
                 Err(error) => panic_callback_defect("defaultCallback", error),
             }
         });
@@ -533,12 +623,11 @@ impl CallbackTable {
 
     pub fn register_predicate_js(&mut self, id: String, callback: js_sys::Function) {
         self.register_predicate(id, move |value| {
-            let payload = serde_json::to_string(value).unwrap_or_else(|error| {
-                panic_callback_defect(
-                    "predicateCallback",
-                    callback_error("predicateCallback", "serialize-payload", error.to_string()),
-                )
-            });
+            if callback_defect_pending() {
+                return false;
+            }
+            let payload = serialize_callback_payload(value, "predicateCallback")
+                .unwrap_or_else(|error| panic_callback_defect("predicateCallback", error));
             match call_json_callback(&callback, Some(payload.as_str()), "predicateCallback") {
                 Ok(raw) => serde_json::from_str::<bool>(&raw).unwrap_or_else(|error| {
                     panic_callback_defect(
@@ -557,15 +646,34 @@ impl CallbackTable {
 
     pub fn register_computed_js(&mut self, id: String, callback: js_sys::Function) {
         self.register_computed(id, move |value| {
-            match call_json_result(&callback, value, "computedCallback") {
-                Ok(result) => result,
-                Err(error) => panic_callback_defect("computedCallback", error),
+            if callback_defect_pending() {
+                return Value::Null;
+            }
+            let payload = if callback_value_requires_boundary_encoding(value) {
+                serialize_callback_payload(value, "computedCallback")
+            } else {
+                serde_json::to_string(value).map_err(|error| {
+                    callback_error("computedCallback", "serialize-payload", error.to_string())
+                })
+            };
+            let result = payload.and_then(|payload| {
+                call_json_callback(&callback, Some(payload.as_str()), "computedCallback")
+            });
+            match result.and_then(|raw| decode_json_result(&raw, "computedCallback")) {
+                Ok(value) => value,
+                Err(error) => {
+                    record_callback_defect("computedCallback", &error);
+                    Value::Null
+                }
             }
         });
     }
 
     pub fn register_collator_js(&mut self, callback: js_sys::Function) {
         self.register_collator(move |a, b| {
+            if callback_defect_pending() {
+                return Ordering::Equal;
+            }
             let args = js_sys::Array::new();
             args.push(&wasm_bindgen::JsValue::from_str(a));
             args.push(&wasm_bindgen::JsValue::from_str(b));
@@ -705,33 +813,22 @@ impl CallbackTable {
                 )
             })?;
         self.register_custom_operator(name, supported_types, move |field_value, operand| {
-            let field_json = serde_json::to_string(field_value).unwrap_or_else(|error| {
-                panic_callback_defect(
-                    "customOperatorCallback",
-                    callback_error(
-                        "customOperatorCallback",
-                        "serialize-payload",
-                        error.to_string(),
-                    ),
-                )
-            });
-            let operand_json = serde_json::to_string(operand).unwrap_or_else(|error| {
-                panic_callback_defect(
-                    "customOperatorCallback",
-                    callback_error(
-                        "customOperatorCallback",
-                        "serialize-payload",
-                        error.to_string(),
-                    ),
-                )
-            });
-            let args = js_sys::Array::new();
-            args.push(&wasm_bindgen::JsValue::from_str(field_json.as_str()));
-            args.push(&wasm_bindgen::JsValue::from_str(operand_json.as_str()));
-            match call_callback_value(&callback, &args, "customOperatorCallback") {
-                Ok(value) => value.as_bool().unwrap_or_else(|| {
-                    panic_callback_defect(
-                        "customOperatorCallback",
+            if callback_defect_pending() {
+                return false;
+            }
+            let result = serialize_callback_payload(field_value, "customOperatorCallback")
+                .and_then(|field_json| {
+                    serialize_callback_payload(operand, "customOperatorCallback")
+                        .map(|operand_json| (field_json, operand_json))
+                })
+                .and_then(|(field_json, operand_json)| {
+                    let args = js_sys::Array::new();
+                    args.push(&wasm_bindgen::JsValue::from_str(field_json.as_str()));
+                    args.push(&wasm_bindgen::JsValue::from_str(operand_json.as_str()));
+                    call_callback_value(&callback, &args, "customOperatorCallback")
+                })
+                .and_then(|value| {
+                    value.as_bool().ok_or_else(|| {
                         callback_error(
                             "customOperatorCallback",
                             "invalid-callback-return-type",
@@ -739,10 +836,15 @@ impl CallbackTable {
                                 "Expected a boolean custom operator result, received {}",
                                 js_value_to_string(&value)
                             ),
-                        ),
-                    )
-                }),
-                Err(error) => panic_callback_defect("customOperatorCallback", error),
+                        )
+                    })
+                });
+            match result {
+                Ok(value) => value,
+                Err(error) => {
+                    record_callback_defect("customOperatorCallback", &error);
+                    false
+                }
             }
         });
         Ok(())

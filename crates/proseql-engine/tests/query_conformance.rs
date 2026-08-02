@@ -15,7 +15,10 @@
 //! 11. Computed fields — materialization, filter-on-computed, sort-on-computed
 //! 12. Pipeline ordering (computed before filter/sort)
 
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 use proseql_engine::{
     callbacks::CallbackRegistry,
@@ -1564,6 +1567,55 @@ fn select_excludes_computed_field_from_output() {
     assert_eq!(result[0], json!({"id":"b1","title":"Dune"}));
     assert!(result[0].get("displayName").is_none());
     assert!(result[0].get("isClassic").is_none());
+}
+
+#[test]
+fn object_select_lazily_skips_computed_but_array_and_mixed_object_keep_order() {
+    let (col, _) = make_computed_collection();
+    let col = seed(col, vec![json!({"id":"b1","title":"Dune","year":1965})]);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut registry = CallbackRegistry::new();
+    for id in ["display_name", "is_classic"] {
+        let calls = Arc::clone(&calls);
+        registry.register_computed(
+            id,
+            Box::new(move |_| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Value::String(id.to_owned())
+            }),
+        );
+    }
+    let registry = Arc::new(registry);
+
+    let stored_only = run_query(
+        &col,
+        &registry,
+        query_input(None, vec![], None, None, Some(json!({"id": true}))),
+    );
+    assert_eq!(stored_only, vec![json!({"id":"b1"})]);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    let array_selected = run_query(
+        &col,
+        &registry,
+        query_input(None, vec![], None, None, Some(json!(["id"]))),
+    );
+    assert_eq!(array_selected, vec![json!({"id":"b1"})]);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+    let mixed = run_query(
+        &col,
+        &registry,
+        query_input(
+            None,
+            vec![],
+            None,
+            None,
+            Some(json!({"id": true, "displayName": true})),
+        ),
+    );
+    assert_eq!(mixed, vec![json!({"id":"b1","displayName":"display_name"})]);
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
 }
 
 #[test]

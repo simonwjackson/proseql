@@ -2,6 +2,7 @@ use proseql_engine::errors::{CollectionNotFoundError, EngineError};
 use proseql_engine::query::{
     execute_aggregate, execute_grouped_aggregate, matches_where_with_registry,
 };
+use proseql_engine::reactive::WatchDelivery;
 use proseql_engine::relationships::Database;
 use serde_json::{json, Value};
 
@@ -242,13 +243,13 @@ pub(crate) fn subscribe_watch(
     runtime: &mut RuntimeCore,
     handle: u32,
     command_json: &str,
-    callback: impl Fn(Value) + Send + Sync + 'static,
+    callback: impl Fn(WatchDelivery) + Send + Sync + 'static,
 ) -> Result<Value, EngineError> {
     let command: WatchCommand = parse_json(command_json, "subscribeWatch")?;
     let context = runtime.database_mut(handle)?;
     let subscription_id = context.next_subscription_id.max(1);
     context.next_subscription_id = context.next_subscription_id.saturating_add(1);
-    let subscription = context.db.watch_with_callback(
+    let subscription = context.db.watch_with_delivery_callback(
         &command.collection,
         to_watch_config(command.config),
         Box::new(callback),
@@ -261,13 +262,13 @@ pub(crate) fn subscribe_watch_by_id(
     runtime: &mut RuntimeCore,
     handle: u32,
     command_json: &str,
-    callback: impl Fn(Value) + Send + Sync + 'static,
+    callback: impl Fn(WatchDelivery) + Send + Sync + 'static,
 ) -> Result<Value, EngineError> {
     let command: WatchByIdCommand = parse_json(command_json, "subscribeWatchById")?;
     let context = runtime.database_mut(handle)?;
     let subscription_id = context.next_subscription_id.max(1);
     context.next_subscription_id = context.next_subscription_id.saturating_add(1);
-    let subscription = context.db.watch_by_id_with_callback(
+    let subscription = context.db.watch_by_id_with_delivery_callback(
         &command.collection,
         &command.id,
         command.debounce_ms,

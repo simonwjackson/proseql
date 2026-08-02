@@ -1637,6 +1637,488 @@ describe("@proseql/engine U8 fixes", () => {
 		}
 	});
 
+	it("characterizes scalar callback order, edge values, query stages, and watches", async () => {
+		const callbackTrace: string[] = [];
+		const ComputedBookSchema = Schema.Struct({
+			id: Schema.String,
+			title: Schema.String,
+			authorId: Schema.String,
+		});
+		const db = await createEngineDatabase(
+			{
+				authors: { schema: AuthorSchema, relationships: {} },
+				books: {
+					schema: ComputedBookSchema,
+					relationships: {
+						author: {
+							type: "ref" as const,
+							target: "authors",
+							foreignKey: "authorId",
+						},
+					},
+					computed: {
+						edgeValue: (book: { readonly id: string }) => {
+							callbackTrace.push(`${book.id}:edgeValue`);
+							switch (book.id) {
+								case "b1":
+									return undefined;
+								case "b2":
+									return { __proseqlUndefined__: 1 };
+								case "b3":
+									return 3.5;
+								default:
+									return "mixed";
+							}
+						},
+						authorLabel: (book: {
+							readonly id: string;
+							readonly title: string;
+							readonly author?: { readonly name?: string };
+						}) => {
+							callbackTrace.push(`${book.id}:authorLabel`);
+							return `${book.id}:${book.author?.name ?? "missing"}:${book.title}`;
+						},
+					},
+				},
+			} as const,
+			{
+				authors: [{ id: "a1", name: "Author" }],
+				books: [
+					{ id: "b1", title: "One", authorId: "a1" },
+					{ id: "b2", title: "Two", authorId: "a1" },
+					{ id: "b3", title: "Three", authorId: "a1" },
+					{ id: "b4", title: "Four", authorId: "a1" },
+				],
+			},
+		);
+		try {
+			callbackTrace.length = 0;
+			const rows = (await db.books.query({
+				populate: { author: true },
+				sort: { id: "asc" },
+				offset: 1,
+				limit: 2,
+				select: ["id", "edgeValue", "authorLabel"],
+			} as never)) as unknown as ReadonlyArray<Record<string, unknown>>;
+			expect(callbackTrace).toEqual([
+				"b1:edgeValue",
+				"b1:authorLabel",
+				"b2:edgeValue",
+				"b2:authorLabel",
+				"b3:edgeValue",
+				"b3:authorLabel",
+				"b4:edgeValue",
+				"b4:authorLabel",
+			]);
+			expect(rows).toEqual([
+				{
+					id: "b2",
+					edgeValue: { __proseqlUndefined__: 1 },
+					authorLabel: "b2:Author:Two",
+				},
+				{ id: "b3", edgeValue: 3.5, authorLabel: "b3:Author:Three" },
+			]);
+
+			callbackTrace.length = 0;
+			expect(
+				await db.books.query({ select: { id: true, title: true } } as never),
+			).toEqual([
+				{ id: "b1", title: "One" },
+				{ id: "b2", title: "Two" },
+				{ id: "b3", title: "Three" },
+				{ id: "b4", title: "Four" },
+			]);
+			expect(callbackTrace).toEqual([]);
+
+			callbackTrace.length = 0;
+			expect(await db.books.query({ select: ["id"] } as never)).toEqual([
+				{ id: "b1" },
+				{ id: "b2" },
+				{ id: "b3" },
+				{ id: "b4" },
+			]);
+			expect(callbackTrace).toEqual([
+				"b1:edgeValue",
+				"b1:authorLabel",
+				"b2:edgeValue",
+				"b2:authorLabel",
+				"b3:edgeValue",
+				"b3:authorLabel",
+				"b4:edgeValue",
+				"b4:authorLabel",
+			]);
+
+			callbackTrace.length = 0;
+			const undefinedRow = (await db.books.query({
+				populate: { author: true },
+				where: { id: "b1" },
+			} as never)) as unknown as ReadonlyArray<Record<string, unknown>>;
+			expect(Object.hasOwn(undefinedRow[0] ?? {}, "edgeValue")).toBe(true);
+			expect(undefinedRow[0]?.edgeValue).toBeUndefined();
+
+			callbackTrace.length = 0;
+			const edgeWatch = db.books.watch({
+				sort: { id: "asc" },
+				select: ["id", "edgeValue"],
+			} as never);
+			const edgeInitial = (await edgeWatch.next()).value;
+			expect(edgeInitial).toEqual([
+				{ id: "b1", edgeValue: undefined },
+				{ id: "b2", edgeValue: { __proseqlUndefined__: 1 } },
+				{ id: "b3", edgeValue: 3.5 },
+				{ id: "b4", edgeValue: "mixed" },
+			]);
+			expect(Object.hasOwn(edgeInitial?.[0] ?? {}, "edgeValue")).toBe(true);
+			await edgeWatch.unsubscribe();
+
+			callbackTrace.length = 0;
+			const watch = db.books.watch({
+				where: { id: "b4" },
+				select: ["id", "authorLabel"],
+				debounceMs: 5,
+			} as never);
+			expect((await watch.next()).value).toEqual([
+				{ id: "b4", authorLabel: "b4:missing:Four" },
+			]);
+			callbackTrace.length = 0;
+			await db.books.update("b4", { title: "Changed" });
+			expect((await watch.next()).value).toEqual([
+				{ id: "b4", authorLabel: "b4:missing:Changed" },
+			]);
+			expect(callbackTrace).toEqual([
+				"b1:edgeValue",
+				"b1:authorLabel",
+				"b2:edgeValue",
+				"b2:authorLabel",
+				"b3:edgeValue",
+				"b3:authorLabel",
+				"b4:edgeValue",
+				"b4:authorLabel",
+			]);
+			await watch.unsubscribe();
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("stops computed and custom-operator callbacks at the first throwing row", async () => {
+		const computedTrace: string[] = [];
+		const computedDb = await createEngineDatabase(
+			{
+				users: {
+					schema: UserSchema,
+					relationships: {},
+					computed: {
+						marker: (user: { readonly id: string }) => {
+							computedTrace.push(user.id);
+							if (user.id === "u3") throw new Error("computed-u3");
+							return user.id;
+						},
+					},
+				},
+			} as const,
+			{
+				users: [
+					{ id: "u1", name: "one" },
+					{ id: "u2", name: "two" },
+					{ id: "u3", name: "three" },
+					{ id: "u4", name: "four" },
+				],
+			},
+		);
+		try {
+			await expect(computedDb.users.query()).rejects.toMatchObject({
+				name: "WasmEngineDefectError",
+				message: "unexpected defect: computedCallback: computed-u3",
+			});
+			expect(computedTrace).toEqual(["u1", "u2", "u3"]);
+		} finally {
+			await computedDb.close().catch(() => undefined);
+		}
+
+		const operatorTrace: string[] = [];
+		const operatorDb = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{
+				users: [
+					{ id: "u1", name: "one" },
+					{ id: "u2", name: "two" },
+					{ id: "u3", name: "boom" },
+					{ id: "u4", name: "four" },
+				],
+			},
+			{
+				plugins: [
+					{
+						name: "throwing-operator",
+						operators: [
+							{
+								name: "$trace",
+								types: ["string"] as const,
+								evaluate: (fieldValue: unknown) => {
+									operatorTrace.push(String(fieldValue));
+									if (fieldValue === "boom") throw new Error("operator-u3");
+									return true;
+								},
+							},
+						],
+					},
+				],
+			},
+		);
+		try {
+			await expect(
+				operatorDb.users.query({ where: { name: { $trace: true } } } as never),
+			).rejects.toMatchObject({
+				name: "WasmEngineDefectError",
+				message: "unexpected defect: customOperatorCallback: operator-u3",
+			});
+			expect(operatorTrace).toEqual(["one", "two", "boom"]);
+		} finally {
+			await operatorDb.close().catch(() => undefined);
+		}
+	});
+
+	it("keeps custom-operator bulk defects entirely pre-write", async () => {
+		const operatorTrace: string[] = [];
+		const db = await createEngineDatabase(
+			{
+				users: {
+					schema: UserSchema,
+					relationships: {},
+					indexes: ["name"],
+				},
+			} as const,
+			{
+				users: [
+					{ id: "u1", name: "one" },
+					{ id: "u2", name: "two" },
+					{ id: "u3", name: "boom" },
+					{ id: "u4", name: "four" },
+				],
+			},
+			{
+				plugins: [
+					{
+						name: "throwing-bulk-operator",
+						operators: [
+							{
+								name: "$traceBulk",
+								types: ["string"] as const,
+								evaluate: (fieldValue: unknown) => {
+									operatorTrace.push(String(fieldValue));
+									if (fieldValue === "boom") {
+										throw new Error("bulk-operator-u3");
+									}
+									return true;
+								},
+							},
+						],
+					},
+				],
+			},
+		);
+		const watch = db.users.watch({ debounceMs: 0 });
+		try {
+			expect((await watch.next()).value?.map((row) => row.name)).toEqual([
+				"one",
+				"two",
+				"boom",
+				"four",
+			]);
+			let watchSettled = false;
+			const pendingWatch = watch.next().finally(() => {
+				watchSettled = true;
+			});
+
+			await expect(
+				db.users.updateMany({ name: { $traceBulk: true } } as never, {
+					name: "changed",
+				}),
+			).rejects.toEqual(
+				new WasmEngineDefectError(
+					"unexpected defect: customOperatorCallback: bulk-operator-u3",
+				),
+			);
+			expect(operatorTrace).toEqual(["one", "two", "boom"]);
+			expect((await db.users.query()).map((row) => [row.id, row.name])).toEqual(
+				[
+					["u1", "one"],
+					["u2", "two"],
+					["u3", "boom"],
+					["u4", "four"],
+				],
+			);
+			expect(
+				(await db.users.query({ where: { name: "one" } })).map((row) => row.id),
+			).toEqual(["u1"]);
+			await sleep(10);
+			expect(watchSettled).toBe(false);
+
+			operatorTrace.length = 0;
+			await expect(
+				db.users.deleteManyWithRelationships(
+					{ name: { $traceBulk: true } } as never,
+					{},
+				),
+			).rejects.toEqual(
+				new WasmEngineDefectError(
+					"unexpected defect: customOperatorCallback: bulk-operator-u3",
+				),
+			);
+			expect(operatorTrace).toEqual(["one", "two", "boom"]);
+			expect((await db.users.query()).map((row) => row.id)).toEqual([
+				"u1",
+				"u2",
+				"u3",
+				"u4",
+			]);
+
+			operatorTrace.length = 0;
+			await expect(
+				db.users.deleteMany({ name: { $traceBulk: true } } as never),
+			).rejects.toEqual(
+				new WasmEngineDefectError(
+					"unexpected defect: customOperatorCallback: bulk-operator-u3",
+				),
+			);
+			expect(operatorTrace).toEqual(["one", "two", "boom"]);
+			expect((await db.users.query()).map((row) => row.id)).toEqual([
+				"u1",
+				"u2",
+				"u3",
+				"u4",
+			]);
+			await sleep(10);
+			expect(watchSettled).toBe(false);
+			await watch.unsubscribe();
+			await pendingWatch;
+		} finally {
+			await watch.unsubscribe().catch(() => undefined);
+			await db.close().catch(() => undefined);
+		}
+	});
+
+	it("terminates computed watches with the original initial and update callback defect", async () => {
+		const initialTrace: string[] = [];
+		const initialDb = await createEngineDatabase(
+			{
+				users: {
+					schema: UserSchema,
+					relationships: {},
+					computed: {
+						marker: (user: { readonly id: string }) => {
+							initialTrace.push(user.id);
+							if (user.id === "u2") throw new Error("watch-initial-u2");
+							return user.id;
+						},
+					},
+				},
+			} as const,
+			{
+				users: [
+					{ id: "u1", name: "one" },
+					{ id: "u2", name: "two" },
+				],
+			},
+		);
+		try {
+			const watch = initialDb.users.watch({ debounceMs: 0 } as never);
+			const firstFailure = await watch.next().then(
+				() => undefined,
+				(error: unknown) => error,
+			);
+			expect(firstFailure).toBeInstanceOf(WasmEngineDefectError);
+			expect((firstFailure as Error).name).toBe("WasmEngineDefectError");
+			expect((firstFailure as Error).message).toBe(
+				"unexpected defect: computedCallback: watch-initial-u2",
+			);
+			expect(initialTrace).toEqual(["u1", "u2"]);
+			const firstStack = (firstFailure as Error).stack;
+			(firstFailure as Error).message = "consumer-mutated";
+			const secondFailure = await watch.next().then(
+				() => undefined,
+				(error: unknown) => error,
+			);
+			expect(secondFailure).not.toBe(firstFailure);
+			expect(secondFailure).toBeInstanceOf(WasmEngineDefectError);
+			expect((secondFailure as Error).name).toBe("WasmEngineDefectError");
+			expect((secondFailure as Error).message).toBe(
+				"unexpected defect: computedCallback: watch-initial-u2",
+			);
+			expect((secondFailure as Error).stack).toBe(firstStack);
+			await watch.unsubscribe();
+		} finally {
+			await initialDb.close().catch(() => undefined);
+		}
+
+		const updateTrace: string[] = [];
+		const updateDb = await createEngineDatabase(
+			{
+				users: {
+					schema: UserSchema,
+					relationships: {},
+					computed: {
+						marker: (user: { readonly id: string; readonly name: string }) => {
+							updateTrace.push(`${user.id}:${user.name}`);
+							if (user.name === "boom") throw new Error("watch-update-u2");
+							return user.id;
+						},
+					},
+				},
+			} as const,
+			{
+				users: [
+					{ id: "u1", name: "one" },
+					{ id: "u2", name: "two" },
+				],
+			},
+		);
+		try {
+			const watch = updateDb.users.watch({ debounceMs: 0 } as never);
+			const queuedWatch = updateDb.users.watch({ debounceMs: 0 } as never);
+			expect((await watch.next()).done).toBe(false);
+			const pendingFailure = watch.next();
+			await updateDb.users.update("u2", { name: "boom" });
+			const pendingError = await pendingFailure.then(
+				() => undefined,
+				(error: unknown) => error,
+			);
+			expect(pendingError).toBeInstanceOf(WasmEngineDefectError);
+			expect((pendingError as Error).name).toBe("WasmEngineDefectError");
+			expect((pendingError as Error).message).toBe(
+				"unexpected defect: computedCallback: watch-update-u2",
+			);
+			expect((await queuedWatch.next()).value).toEqual([
+				{ id: "u1", name: "one", marker: "u1" },
+				{ id: "u2", name: "two", marker: "u2" },
+			]);
+			const queuedError = await queuedWatch.next().then(
+				() => undefined,
+				(error: unknown) => error,
+			);
+			expect(queuedError).toBeInstanceOf(WasmEngineDefectError);
+			expect((queuedError as Error).name).toBe("WasmEngineDefectError");
+			expect((queuedError as Error).message).toBe(
+				"unexpected defect: computedCallback: watch-update-u2",
+			);
+			expect(updateTrace).toEqual([
+				"u1:one",
+				"u2:two",
+				"u1:one",
+				"u2:two",
+				"u1:one",
+				"u2:boom",
+				"u1:one",
+				"u2:boom",
+			]);
+			await watch.unsubscribe();
+			await queuedWatch.unsubscribe();
+		} finally {
+			await updateDb.close().catch(() => undefined);
+		}
+	});
+
 	it("authorizes numeric fast finds by descriptor order and current storage token", async () => {
 		const db = await createEngineDatabase(
 			{
@@ -2085,6 +2567,114 @@ describe("@proseql/engine U8 fixes", () => {
 		).resolves.toEqual([
 			{ id: "u2", name: "Beta" },
 			{ id: "u1", name: "Alpha" },
+		]);
+	});
+
+	it("does not invoke later query callbacks after the first callback defect", async () => {
+		const computedTrace: string[] = [];
+		const computedRuntime = await createPublicWasmRuntime();
+		computedRuntime.register_computed("users.early", (payloadJson) => {
+			const row = JSON.parse(payloadJson) as { readonly id: string };
+			computedTrace.push(`early:${row.id}`);
+			throw new Error("first-computed-defect");
+		});
+		computedRuntime.register_computed("users.later", (payloadJson) => {
+			const row = JSON.parse(payloadJson) as { readonly id: string };
+			computedTrace.push(`later:${row.id}`);
+			return JSON.stringify(row.id);
+		});
+		computedRuntime.register_collator((left, right) => {
+			computedTrace.push(`collator:${left}:${right}`);
+			return left.localeCompare(right);
+		});
+		const computedHandle = await createRawDatabase(
+			computedRuntime,
+			createRawCollectionDescriptor({
+				schema: {
+					kind: "struct",
+					fields: [
+						{ name: "id", schema: { kind: "str" } },
+						{ name: "name", schema: { kind: "str" } },
+					],
+				},
+				computedFields: [
+					{ name: "early", callback_id: "users.early" },
+					{ name: "later", callback_id: "users.later" },
+				],
+			}),
+			{
+				users: [
+					{ id: "u1", name: "Beta" },
+					{ id: "u2", name: "Alpha" },
+				],
+			},
+		);
+		await expect(
+			dispatchRaw(computedRuntime, computedHandle, "query", {
+				collection: "users",
+				query: { sort: { name: "asc" } },
+			}),
+		).rejects.toMatchObject({
+			name: "WasmEngineDefectError",
+			message: "unexpected defect: computedCallback: first-computed-defect",
+		});
+		expect(computedTrace).toEqual(["early:u1"]);
+
+		const operatorTrace: string[] = [];
+		const operatorRuntime = await createPublicWasmRuntime();
+		await runPublicWasm(() =>
+			operatorRuntime.register_custom_operator(
+				"$traceThenThrow",
+				JSON.stringify(["string"]),
+				(fieldJson) => {
+					const field = JSON.parse(fieldJson) as string;
+					operatorTrace.push(`operator:${field}`);
+					if (field === "boom") throw new Error("first-operator-defect");
+					return true;
+				},
+			),
+		);
+		operatorRuntime.register_collator((left, right) => {
+			operatorTrace.push(`collator:${left}:${right}`);
+			return left.localeCompare(right);
+		});
+		const operatorHandle = await createRawDatabase(
+			operatorRuntime,
+			createRawCollectionDescriptor({
+				schema: {
+					kind: "struct",
+					fields: [
+						{ name: "id", schema: { kind: "str" } },
+						{ name: "name", schema: { kind: "str" } },
+					],
+				},
+			}),
+			{
+				users: [
+					{ id: "u1", name: "Beta" },
+					{ id: "u2", name: "Alpha" },
+					{ id: "u3", name: "boom" },
+					{ id: "u4", name: "Later" },
+				],
+			},
+		);
+		await expect(
+			dispatchRaw(operatorRuntime, operatorHandle, "query", {
+				collection: "users",
+				query: {
+					where: { name: { $traceThenThrow: true } },
+					sort: { name: "asc" },
+				},
+			}),
+		).rejects.toMatchObject({
+			name: "WasmEngineDefectError",
+			message:
+				"unexpected defect: customOperatorCallback: first-operator-defect",
+		});
+		expect(operatorTrace).toEqual([
+			"operator:Beta",
+			"operator:Alpha",
+			"operator:boom",
 		]);
 	});
 

@@ -6,15 +6,15 @@ use proseql_engine::{
     clock::FixedClock,
     collection::Collection,
     descriptor::{
-        CollectionDescriptor, IdStrategy, RelationshipDescriptor, RelationshipKind, SchemaNode,
-        StructField, ValidationMode,
+        CollectionDescriptor, ComputedFieldDescriptor, IdStrategy, RelationshipDescriptor,
+        RelationshipKind, SchemaNode, StructField, ValidationMode,
     },
-    errors::EngineError,
+    errors::{EngineError, OperationError},
     id_gen::SequentialGenerator,
     query::QueryInput,
     reactive::{
         ChangeEvent, ChangeOperation, ManualReactiveScheduler, ReactiveScheduler,
-        UnsupportedReactiveScheduler, WatchQueryConfig,
+        UnsupportedReactiveScheduler, WatchDelivery, WatchQueryConfig,
     },
     relationships::{CascadeOption, Database, DeleteRelationshipsOptions},
 };
@@ -290,6 +290,141 @@ fn make_books_db_with_scheduler(books: Vec<Value>) -> (Database, Arc<ManualReact
         ),
         scheduler,
     )
+}
+
+fn make_computed_books_db(
+    callback: impl Fn(&Value) -> Value + Send + Sync + 'static,
+) -> (Database, Arc<ManualReactiveScheduler>) {
+    let scheduler = Arc::new(ManualReactiveScheduler::default());
+    let mut registry = CallbackRegistry::new();
+    registry.register_computed("marker", Box::new(callback));
+    let registry = Arc::new(registry);
+    let mut descriptor = books_descriptor();
+    descriptor.computed_fields = vec![ComputedFieldDescriptor {
+        name: "marker".into(),
+        callback_id: "marker".into(),
+    }];
+    let books = seed(
+        Collection::new_with_clock(
+            "books",
+            descriptor,
+            Arc::clone(&registry),
+            Box::new(SequentialGenerator::new("book")),
+            Box::new(FixedClock::new("2024-01-01T00:00:00.000Z")),
+        ),
+        vec![
+            json!({"id":"b1","title":"Dune","author":"Frank Herbert","year":1965,"genre":"sci-fi"}),
+            json!({"id":"b2","title":"Messiah","author":"Frank Herbert","year":1969,"genre":"sci-fi"}),
+        ],
+    );
+    let mut collections = IndexMap::new();
+    collections.insert("books".into(), books);
+    (
+        Database::new_with_reactive_scheduler(
+            collections,
+            registry,
+            Arc::clone(&scheduler) as Arc<dyn ReactiveScheduler>,
+        ),
+        scheduler,
+    )
+}
+
+#[test]
+fn computed_watch_failures_disconnect_native_receivers_initially_and_after_debounce() {
+    let (initial_db, _) = make_computed_books_db(|book| {
+        if book["id"] == "b2" {
+            panic!("native-initial-b2");
+        }
+        book["id"].clone()
+    });
+    let initial = initial_db
+        .watch("books", WatchQueryConfig::default())
+        .unwrap();
+    assert!(initial.recv().is_err());
+    assert_eq!(initial_db.watch_subscription_count(), 0);
+
+    let (mut update_db, scheduler) = make_computed_books_db(|book| {
+        if book["title"] == "boom" {
+            panic!("native-update-b2");
+        }
+        book["id"].clone()
+    });
+    let update = update_db
+        .watch("books", WatchQueryConfig::default())
+        .unwrap();
+    assert!(update.recv().is_ok());
+    update_db
+        .update("books", "b2", json!({"title":"boom"}))
+        .unwrap();
+    scheduler.advance(10);
+    assert!(update.recv().is_err());
+    assert_eq!(update_db.watch_subscription_count(), 0);
+}
+
+fn typed_watch_error(phase: &str) -> EngineError {
+    EngineError::Operation(OperationError {
+        operation: "watch".into(),
+        reason: format!("typed-{phase}"),
+        message: format!("typed watch {phase} failure"),
+    })
+}
+
+#[test]
+fn typed_watch_errors_terminate_initial_immediate_and_debounced_deliveries() {
+    let initial_error = typed_watch_error("initial");
+    let initial_expected = initial_error.clone();
+    let (initial_db, _) =
+        make_computed_books_db(move |_| std::panic::panic_any(initial_error.clone()));
+    let initial_deliveries = Arc::new(Mutex::new(Vec::new()));
+    let initial_capture = Arc::clone(&initial_deliveries);
+    let _initial = initial_db
+        .watch_with_delivery_callback(
+            "books",
+            WatchQueryConfig::default(),
+            Box::new(move |delivery| initial_capture.lock().unwrap().push(delivery)),
+        )
+        .unwrap();
+    assert_eq!(
+        *initial_deliveries.lock().unwrap(),
+        vec![WatchDelivery::Error(initial_expected)]
+    );
+    assert_eq!(initial_db.watch_subscription_count(), 0);
+
+    for (phase, debounce_ms) in [("immediate", 0), ("debounced", 25)] {
+        let expected = typed_watch_error(phase);
+        let callback_error = expected.clone();
+        let (mut db, scheduler) = make_computed_books_db(move |book| {
+            if book["title"] == "boom" {
+                std::panic::panic_any(callback_error.clone());
+            }
+            book["id"].clone()
+        });
+        let deliveries = Arc::new(Mutex::new(Vec::new()));
+        let capture = Arc::clone(&deliveries);
+        let _subscription = db
+            .watch_with_delivery_callback(
+                "books",
+                WatchQueryConfig {
+                    debounce_ms: Some(debounce_ms),
+                    ..WatchQueryConfig::default()
+                },
+                Box::new(move |delivery| capture.lock().unwrap().push(delivery)),
+            )
+            .unwrap();
+        assert!(matches!(
+            deliveries.lock().unwrap().as_slice(),
+            [WatchDelivery::Value(_)]
+        ));
+        db.update("books", "b2", json!({"title":"boom"})).unwrap();
+        if debounce_ms > 0 {
+            assert_eq!(deliveries.lock().unwrap().len(), 1);
+            scheduler.advance(debounce_ms as u64);
+        }
+        let captured = deliveries.lock().unwrap().clone();
+        assert_eq!(captured.len(), 2);
+        assert_eq!(captured[1], WatchDelivery::Error(expected));
+        assert_eq!(db.watch_subscription_count(), 0);
+    }
 }
 
 #[test]

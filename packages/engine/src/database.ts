@@ -40,7 +40,6 @@ import {
 	encodeBoundaryValueForWire,
 	parseBoundaryJson,
 	serializeBoundaryValue,
-	serializeComputedBoundaryValue,
 } from "./boundary-values.js";
 import { reconstructBoundaryError, WasmEngineDefectError } from "./errors.js";
 import { loadWasmBindings, type WasmRuntimeBinding } from "./loader.js";
@@ -333,13 +332,13 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	}
 
 	registerComputed(
-		callback: (entity: unknown) => unknown, prefix: string,
+		callback: (entity: unknown) => unknown,
+		prefix: string,
 	): string {
 		const id = this.makeId(prefix);
-		this.runtime.register_computed(id, (payloadJson) => {
-			const payload = parseBoundaryJson(payloadJson);
-			return serializeComputedBoundaryValue(callback(payload));
-		});
+		this.runtime.register_computed(id, (payloadJson) =>
+			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
+		);
 		return id;
 	}
 
@@ -452,19 +451,71 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	}
 }
 
+const cloneFailureValue = (
+	value: unknown,
+	seen: Map<object, unknown> = new Map(),
+): unknown => {
+	if (
+		(typeof value !== "object" && typeof value !== "function") ||
+		value === null
+	) {
+		return value;
+	}
+	const existing = seen.get(value);
+	if (existing !== undefined) return existing;
+	const clone: object = Array.isArray(value)
+		? []
+		: Object.create(Object.getPrototypeOf(value));
+	seen.set(value, clone);
+	for (const key of Reflect.ownKeys(value)) {
+		if (Array.isArray(value) && key === "length") continue;
+		const descriptor = Object.getOwnPropertyDescriptor(value, key);
+		if (descriptor === undefined) continue;
+		Object.defineProperty(
+			clone,
+			key,
+			"value" in descriptor
+				? { ...descriptor, value: cloneFailureValue(descriptor.value, seen) }
+				: descriptor,
+		);
+	}
+	return clone;
+};
+
+const captureTerminalFailure = (error: unknown): (() => unknown) => {
+	const snapshot = cloneFailureValue(error);
+	return () => cloneFailureValue(snapshot);
+};
+
 class AsyncQueue<T> implements WatchSubscription<T> {
 	private readonly values: T[] = [];
-	private readonly resolvers: Array<(value: IteratorResult<T>) => void> = [];
+	private readonly waiters: Array<{
+		readonly resolve: (value: IteratorResult<T>) => void;
+		readonly reject: (error: unknown) => void;
+	}> = [];
 	private active = true;
+	private terminalFailure: (() => unknown) | undefined;
 	private unsubscribePromise: Promise<void> | undefined;
 
 	constructor(private readonly stop: () => Promise<void>) {}
 
 	push(value: T) {
 		if (!this.active) return;
-		const next = this.resolvers.shift();
-		if (next) next({ value, done: false });
+		const next = this.waiters.shift();
+		if (next) next.resolve({ value, done: false });
 		else this.values.push(value);
+	}
+
+	fail(error: unknown) {
+		if (!this.active) return;
+		this.active = false;
+		this.terminalFailure = captureTerminalFailure(error);
+		for (const waiter of this.waiters.splice(0)) {
+			waiter.reject(this.terminalFailure());
+		}
+		this.unsubscribePromise = Promise.resolve()
+			.then(() => this.stop())
+			.catch(() => undefined);
 	}
 
 	[Symbol.asyncIterator](): AsyncIterableIterator<T> {
@@ -475,10 +526,15 @@ class AsyncQueue<T> implements WatchSubscription<T> {
 		if (this.values.length > 0) {
 			return Promise.resolve({ value: this.values.shift() as T, done: false });
 		}
+		if (this.terminalFailure !== undefined) {
+			return Promise.reject(this.terminalFailure());
+		}
 		if (!this.active) {
 			return Promise.resolve({ value: undefined, done: true });
 		}
-		return new Promise((resolve) => this.resolvers.push(resolve));
+		return new Promise((resolve, reject) =>
+			this.waiters.push({ resolve, reject }),
+		);
 	}
 
 	async return(): Promise<IteratorResult<T>> {
@@ -489,8 +545,8 @@ class AsyncQueue<T> implements WatchSubscription<T> {
 	unsubscribe(): Promise<void> {
 		if (!this.unsubscribePromise) {
 			this.active = false;
-			for (const resolve of this.resolvers.splice(0)) {
-				resolve({ value: undefined, done: true });
+			for (const waiter of this.waiters.splice(0)) {
+				waiter.resolve({ value: undefined, done: true });
 			}
 			this.values.length = 0;
 			this.unsubscribePromise = this.stop();
@@ -1239,30 +1295,35 @@ class EngineRuntime {
 		this.assertTransactionWaitAllowed();
 		let subscriptionId: number | undefined;
 		let cancelled = false;
-		const queue = new AsyncQueue<ReadonlyArray<T>>(() =>
-			{
+		const queue = new AsyncQueue<ReadonlyArray<T>>(() => {
 			cancelled = true;
 			return Promise.resolve().then(() => {
 				if (subscriptionId === undefined) return;
 				parseBridgeResponse(
 					this.runtime.unsubscribe(this.handle, subscriptionId),
-		);
-		});
+				);
+			});
 		});
 		const subscribe = () => {
 			if (cancelled) return;
 			if (this.projection.needsResynchronization)
 				this.resynchronizeProjection();
 			this.synchronizeDirtyProjection();
-		subscriptionId = parseBridgeResponse<number>(
-			this.runtime.subscribe_watch(
-				this.handle,
-				JSON.stringify(
+			subscriptionId = parseBridgeResponse<number>(
+				this.runtime.subscribe_watch(
+					this.handle,
+					JSON.stringify(
 						prepareCommandPayload("subscribeWatch", { collection, config }),
 					),
-					(payloadJson) => queue.push(parseBoundaryJson(payloadJson) as ReadonlyArray<T>),
-			),
-		);
+					(payloadJson) => {
+						try {
+							queue.push(parseBridgeResponse<ReadonlyArray<T>>(payloadJson));
+						} catch (error) {
+							queue.fail(error);
+						}
+					},
+				),
+			);
 		};
 		if (this.transactionBarrier) void this.transactionBarrier.then(subscribe);
 		else subscribe();
@@ -1270,33 +1331,40 @@ class EngineRuntime {
 	}
 
 	watchById<T>(
-		collection: string, id: string, debounceMs?: number,
+		collection: string,
+		id: string,
+		debounceMs?: number,
 	): WatchSubscription<T | null> {
 		this.assertTransactionWaitAllowed();
 		let subscriptionId: number | undefined;
 		let cancelled = false;
-		const queue = new AsyncQueue<T | null>(() =>
-			{
+		const queue = new AsyncQueue<T | null>(() => {
 			cancelled = true;
 			return Promise.resolve().then(() => {
 				if (subscriptionId === undefined) return;
 				parseBridgeResponse(
 					this.runtime.unsubscribe(this.handle, subscriptionId),
-		);
-		});
+				);
+			});
 		});
 		const subscribe = () => {
 			if (cancelled) return;
 			if (this.projection.needsResynchronization)
 				this.resynchronizeProjection();
 			this.synchronizeDirtyProjection();
-		subscriptionId = parseBridgeResponse<number>(
-			this.runtime.subscribe_watch_by_id(
+			subscriptionId = parseBridgeResponse<number>(
+				this.runtime.subscribe_watch_by_id(
 					this.handle,
-					JSON.stringify({ collection, id, debounceMs }), (payloadJson) =>
-				queue.push(parseBoundaryJson(payloadJson) as T | null),
-			),
-		);
+					JSON.stringify({ collection, id, debounceMs }),
+					(payloadJson) => {
+						try {
+							queue.push(parseBridgeResponse<T | null>(payloadJson));
+						} catch (error) {
+							queue.fail(error);
+						}
+					},
+				),
+			);
 		};
 		if (this.transactionBarrier) void this.transactionBarrier.then(subscribe);
 		else subscribe();

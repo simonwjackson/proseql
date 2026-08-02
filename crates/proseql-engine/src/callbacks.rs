@@ -43,6 +43,7 @@ pub type AfterDeleteHookCallback =
 pub type OnChangeHookCallback =
     Box<dyn Fn(&OnChangeContext) -> Result<(), EngineError> + Send + Sync>;
 pub type CustomOperatorCallback = Box<dyn Fn(&Value, &Value) -> bool + Send + Sync>;
+type CallbackAbortProbe = Box<dyn Fn() -> bool + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CustomOperatorEvaluation {
@@ -82,6 +83,7 @@ pub struct CallbackRegistry {
     global_after_update_hooks: Vec<String>,
     global_after_delete_hooks: Vec<String>,
     global_on_change_hooks: Vec<String>,
+    callback_abort_probe: Option<CallbackAbortProbe>,
 }
 
 impl CallbackRegistry {
@@ -223,6 +225,19 @@ impl CallbackRegistry {
 
     pub fn on_change_hook(&self, id: &str) -> Option<&OnChangeHookCallback> {
         self.on_change_hooks.get(id)
+    }
+
+    pub fn register_callback_abort_probe(
+        &mut self,
+        probe: impl Fn() -> bool + Send + Sync + 'static,
+    ) {
+        self.callback_abort_probe = Some(Box::new(probe));
+    }
+
+    pub(crate) fn callback_aborted(&self) -> bool {
+        self.callback_abort_probe
+            .as_ref()
+            .is_some_and(|probe| probe())
     }
 
     pub fn register_custom_operator(

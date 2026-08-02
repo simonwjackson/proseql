@@ -845,6 +845,9 @@ impl Collection {
             .filter(|(_, v)| predicate(v))
             .map(|(k, _)| k.clone())
             .collect();
+        if self.callbacks.callback_aborted() {
+            return Err(callback_abort_error("deleteMany"));
+        }
 
         // TS source (`delete.ts`):
         //   if (options?.limit !== undefined && options.limit > 0) {
@@ -1677,6 +1680,9 @@ impl Collection {
             .filter(|(_, v)| predicate(v))
             .map(|(k, _)| k.clone())
             .collect();
+        if self.callbacks.callback_aborted() {
+            return Err(callback_abort_error("updateMany"));
+        }
         if matching_ids.is_empty() {
             return Ok(InternalUpdateManyOutcome {
                 result: UpdateManyResult::default(),
@@ -2491,6 +2497,14 @@ fn not_found(collection: &str, id: &str) -> EngineError {
 ///   message: `Operation '${opName}' is not allowed on append-only collection '${collectionName}'`,
 /// })
 /// ```
+fn callback_abort_error(operation: &str) -> EngineError {
+    EngineError::Operation(OperationError {
+        operation: operation.to_owned(),
+        reason: "callback-aborted".to_owned(),
+        message: "Callback evaluation aborted before mutation".to_owned(),
+    })
+}
+
 fn append_only_error(operation: &str, collection: &str) -> EngineError {
     EngineError::Operation(OperationError {
         operation: operation.to_string(),

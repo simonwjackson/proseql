@@ -255,23 +255,37 @@ const makePersistentCloseOnce = (
 	};
 };
 
+type SubscriptionDelivery<A> =
+	| { readonly _tag: "Value"; readonly value: A }
+	| { readonly _tag: "Defect"; readonly defect: unknown };
+
 const subscriptionEffectToStream = <A>(
-	acquire: () => AsyncIterableIterator<A> & { unsubscribe(): Promise<void> }
-): Effect.Effect<Stream.Stream<A, never, never>, never, import("effect").Scope.Scope> =>
+	acquire: () => AsyncIterableIterator<A> & { unsubscribe(): Promise<void> },
+): Effect.Effect<
+	Stream.Stream<A, never, never>,
+	never,
+	import("effect").Scope.Scope
+> =>
 	Effect.suspend(() =>
 		Effect.acquireRelease(
 			Effect.gen(function* () {
 				const sub = acquire();
-				const queue = yield* Queue.unbounded<A>();
+				const queue = yield* Queue.unbounded<SubscriptionDelivery<A>>();
 				void (async () => {
 					try {
 						while (true) {
 							const next = await sub.next();
-							if (next.done) break;
-							Queue.offerUnsafe(queue, next.value);
+							if (next.done) {
+								await Effect.runPromise(Queue.shutdown(queue));
+								break;
+							}
+							Queue.offerUnsafe(queue, { _tag: "Value", value: next.value });
 						}
-					} finally {
-						await Effect.runPromise(Queue.shutdown(queue));
+					} catch (defect) {
+						// Keep the queue open until the stream consumes this terminal
+						// delivery. Immediate shutdown would race and turn the defect into
+						// an anonymous interruption.
+						Queue.offerUnsafe(queue, { _tag: "Defect", defect });
 					}
 				})();
 				return { sub, queue };
@@ -280,11 +294,25 @@ const subscriptionEffectToStream = <A>(
 				Effect.gen(function* () {
 					yield* ignoreCloseError(() => sub.unsubscribe());
 					yield* Queue.shutdown(queue).pipe(Effect.ignore);
-				})
+				}),
 		).pipe(
-			Effect.map(({ queue }) => Stream.fromQueue(queue).pipe(Stream.orDie) as Stream.Stream<A, never, never>)
-		)
-	) as Effect.Effect<Stream.Stream<A, never, never>, never, import("effect").Scope.Scope>;
+			Effect.map(
+				({ queue }) =>
+					Stream.fromQueue(queue).pipe(
+						Stream.orDie,
+						Stream.mapEffect((delivery) =>
+							delivery._tag === "Value"
+								? Effect.succeed(delivery.value)
+								: Effect.die(delivery.defect),
+						),
+					) as Stream.Stream<A, never, never>,
+			),
+		),
+	) as Effect.Effect<
+		Stream.Stream<A, never, never>,
+		never,
+		import("effect").Scope.Scope
+	>;
 
 const engineOptionsFrom = (options: EffectDatabaseOptions | undefined): EngineDatabaseOptions | undefined =>
 	options ? { plugins: options.plugins } : undefined;
@@ -485,7 +513,9 @@ const createTransactionCollectionAdapter = (
 					if (!state.active) {
 						return Effect.fail(transactionInactiveError("begin"));
 					}
-					return liftPromise(() => engineCollection.query(config as never)).pipe(
+					return liftPromise(() =>
+						engineCollection.query(config as never),
+					).pipe(
 						Effect.map((rows) =>
 							Stream.fromIterable(rows as Iterable<unknown>),
 						),

@@ -5,9 +5,9 @@ use proseql_engine::descriptor::{
     CollectionDescriptor, ComputedFieldDescriptor, IdStrategy, RelationshipDescriptor,
     RelationshipKind, SchemaNode, StructField, ValidationMode,
 };
-use proseql_engine::errors::EngineError;
+use proseql_engine::errors::{EngineError, OperationError};
 use proseql_engine::id_gen::{IdGenerator, SequentialGenerator};
-use proseql_engine::reactive::{ManualReactiveScheduler, ReactiveScheduler};
+use proseql_engine::reactive::{ManualReactiveScheduler, ReactiveScheduler, WatchDelivery};
 use proseql_wasm::{Runtime, RuntimeConfig};
 use serde_json::{json, Value};
 
@@ -1975,7 +1975,11 @@ fn watch_subscription_emits_initial_and_update_and_unsubscribe_cleans_up() {
     let subscription_id = expect_ok(&runtime.subscribe_watch_json(
         handle,
         json!({"collection": "users"}).to_string().as_str(),
-        move |value| events_clone.lock().unwrap().push(value),
+        move |delivery| {
+            if let WatchDelivery::Value(value) = delivery {
+                events_clone.lock().unwrap().push(value);
+            }
+        },
     ))
     .as_u64()
     .unwrap() as u32;
@@ -2002,6 +2006,123 @@ fn watch_subscription_emits_initial_and_update_and_unsubscribe_cleans_up() {
     assert_eq!(events.lock().unwrap().len(), 2);
 }
 
+fn typed_watch_error(phase: &str) -> EngineError {
+    EngineError::Operation(OperationError {
+        operation: "watch".into(),
+        reason: format!("typed-{phase}"),
+        message: format!("typed watch {phase} failure"),
+    })
+}
+
+#[test]
+fn typed_watch_errors_cross_initial_immediate_and_debounced_runtime_deliveries() {
+    let (mut initial_runtime, _) = make_runtime();
+    let initial_error = typed_watch_error("initial");
+    let initial_callback_error = initial_error.clone();
+    initial_runtime
+        .callbacks_mut()
+        .register_computed("typedWatch", move |_| {
+            std::panic::panic_any(initial_callback_error.clone())
+        });
+    let mut initial_descriptor = users_descriptor();
+    initial_descriptor.computed_fields = vec![ComputedFieldDescriptor {
+        name: "typed".into(),
+        callback_id: "typedWatch".into(),
+    }];
+    let initial_handle = create_database(
+        &mut initial_runtime,
+        vec![initial_descriptor],
+        json!({"users": [{"id": "u1", "name": "Alice"}]}),
+    );
+    let initial_deliveries = Arc::new(Mutex::new(Vec::new()));
+    let initial_capture = Arc::clone(&initial_deliveries);
+    let initial_subscription = expect_ok(
+        &initial_runtime.subscribe_watch_json(
+            initial_handle,
+            json!({"collection":"users", "config":{"debounceMs":0}})
+                .to_string()
+                .as_str(),
+            move |delivery| initial_capture.lock().unwrap().push(delivery),
+        ),
+    )
+    .as_u64()
+    .unwrap() as u32;
+    assert_eq!(
+        *initial_deliveries.lock().unwrap(),
+        vec![WatchDelivery::Error(initial_error)]
+    );
+    assert_eq!(
+        expect_ok(&initial_runtime.unsubscribe_json(initial_handle, initial_subscription)),
+        json!(true)
+    );
+    assert_eq!(
+        expect_ok(&initial_runtime.unsubscribe_json(initial_handle, initial_subscription)),
+        json!(false)
+    );
+
+    for (phase, debounce_ms) in [("immediate", 0), ("debounced", 25)] {
+        let (mut runtime, scheduler) = make_runtime();
+        let expected = typed_watch_error(phase);
+        let callback_error = expected.clone();
+        runtime
+            .callbacks_mut()
+            .register_computed("typedWatch", move |value| {
+                if value["name"] == "boom" {
+                    std::panic::panic_any(callback_error.clone());
+                }
+                value["id"].clone()
+            });
+        let mut descriptor = users_descriptor();
+        descriptor.computed_fields = vec![ComputedFieldDescriptor {
+            name: "typed".into(),
+            callback_id: "typedWatch".into(),
+        }];
+        let handle = create_database(
+            &mut runtime,
+            vec![descriptor],
+            json!({"users": [{"id": "u1", "name": "Alice"}]}),
+        );
+        let deliveries = Arc::new(Mutex::new(Vec::new()));
+        let capture = Arc::clone(&deliveries);
+        let subscription = expect_ok(
+            &runtime.subscribe_watch_json(
+                handle,
+                json!({"collection":"users", "config":{"debounceMs":debounce_ms}})
+                    .to_string()
+                    .as_str(),
+                move |delivery| capture.lock().unwrap().push(delivery),
+            ),
+        )
+        .as_u64()
+        .unwrap() as u32;
+        assert!(matches!(
+            deliveries.lock().unwrap().as_slice(),
+            [WatchDelivery::Value(_)]
+        ));
+        dispatch(
+            &mut runtime,
+            handle,
+            "update",
+            json!({"collection":"users", "id":"u1", "data":{"name":"boom"}}),
+        );
+        if debounce_ms > 0 {
+            assert_eq!(deliveries.lock().unwrap().len(), 1);
+        }
+        scheduler.advance(debounce_ms as u64);
+        let captured = deliveries.lock().unwrap().clone();
+        assert_eq!(captured.len(), 2);
+        assert_eq!(captured[1], WatchDelivery::Error(expected));
+        assert_eq!(
+            expect_ok(&runtime.unsubscribe_json(handle, subscription)),
+            json!(true)
+        );
+        assert_eq!(
+            expect_ok(&runtime.unsubscribe_json(handle, subscription)),
+            json!(false)
+        );
+    }
+}
+
 #[test]
 fn watch_by_id_emits_null_after_delete() {
     let (mut runtime, scheduler) = make_runtime();
@@ -2018,7 +2139,11 @@ fn watch_by_id_emits_null_after_delete() {
             json!({"collection": "users", "id": "u1"})
                 .to_string()
                 .as_str(),
-            move |value| events_clone.lock().unwrap().push(value),
+            move |delivery| {
+                if let WatchDelivery::Value(value) = delivery {
+                    events_clone.lock().unwrap().push(value);
+                }
+            },
         ),
     );
     dispatch(

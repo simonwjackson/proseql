@@ -40,6 +40,24 @@ use crate::errors::{EngineError, OperationError};
 ///
 /// Mirrors `resolveComputedFields(entity, config)` from
 /// `packages/core/src/operations/query/resolve-computed.ts`.
+/// Match TypeScript's lazy computed-field gate. Only object-based selection
+/// can skip computed evaluation; undefined and string-array selection resolve
+/// every descriptor in declaration order.
+pub fn should_resolve_computed(
+    select: &Option<Value>,
+    descriptors: &[ComputedFieldDescriptor],
+) -> bool {
+    if descriptors.is_empty() {
+        return false;
+    }
+    let Some(Value::Object(selected)) = select else {
+        return true;
+    };
+    descriptors
+        .iter()
+        .any(|descriptor| selected.get(&descriptor.name).and_then(Value::as_bool) == Some(true))
+}
+
 pub fn resolve_computed(
     entity: &Value,
     descriptors: &[ComputedFieldDescriptor],
