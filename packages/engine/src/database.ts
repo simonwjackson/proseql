@@ -45,6 +45,7 @@ import {
 import { reconstructBoundaryError, WasmEngineDefectError } from "./errors.js";
 import { loadWasmBindings, type WasmRuntimeBinding } from "./loader.js";
 import {
+	isCompactMaterializedResultDescriptor,
 	isMaterializedResultDescriptor,
 	MaterializedProjection,
 	projectionSnapshotFromHandles,
@@ -497,6 +498,7 @@ class EngineRuntime {
 	readonly handle: number;
 	readonly createInput: { descriptor: Record<string, unknown> };
 	private readonly projection: MaterializedProjection;
+	private readonly collectionIndexes: ReadonlyMap<string, number>;
 	private readonly canonicalQueryCollections: ReadonlySet<string>;
 
 	private constructor(
@@ -510,6 +512,13 @@ class EngineRuntime {
 		this.createInput = createInput;
 		this.projection = projection;
 		const descriptors = Array.isArray(createInput.descriptor.collections) ? createInput.descriptor.collections : [];
+		this.collectionIndexes = new Map(
+			descriptors.flatMap((descriptor, index) => {
+				if (typeof descriptor !== "object" || descriptor === null) return [];
+				const name = (descriptor as { readonly name?: unknown }).name;
+				return typeof name === "string" ? [[name, index] as const] : [];
+			}),
+		);
 		this.canonicalQueryCollections = new Set(
 			descriptors.flatMap((descriptor) => {
 				if (typeof descriptor !== "object" || descriptor === null) return [];
@@ -563,7 +572,35 @@ class EngineRuntime {
 
 	dispatch<T>(method: string, payload?: unknown): T {
 		if (this.projection.needsResynchronization) this.resynchronizeProjection();
-		this.synchronizeDirtyProjection();
+		if (this.projection.hasDirtyRows) this.synchronizeDirtyProjection();
+		if (method === "findById" && typeof payload === "object" && payload !== null) {
+			const collection = "collection" in payload ? payload.collection : undefined;
+			const id = "id" in payload ? payload.id : undefined;
+			if (typeof collection === "string" && typeof id === "string") {
+				const collectionIndex = this.collectionIndexes.get(collection);
+				const candidate = this.projection.fastFindCandidate<T>(collection, id);
+				let authorized = 0;
+				if (collectionIndex !== undefined && candidate !== undefined) {
+					try {
+						authorized = this.runtime.fast_find_by_id(
+							this.handle,
+							collectionIndex,
+							id,
+							candidate.rustSlot,
+							candidate.generation,
+							candidate.revision,
+						);
+					} catch {
+						// The canonical bridge below owns exact error and defect classification.
+						authorized = 0;
+					}
+				}
+				if (authorized === 1 && candidate !== undefined) {
+					return this.projection.acceptAuthorizedFastFind(candidate);
+				}
+				this.projection.recordFastFindFallback();
+			}
+		}
 		const prepared = payload === undefined ? undefined : prepareCommandPayload(method, payload);
 		const payloadJson = prepared === undefined ? undefined : JSON.stringify(prepared);
 		return this.dispatchPrepared<T>(method, prepared, payloadJson, true);
@@ -609,9 +646,12 @@ class EngineRuntime {
 		if (collection !== undefined && mutationSync !== undefined) {
 			return this.materializeMutationResult<T>(method, collection, prepared, value, mutationSync, priorMaterialized);
 		}
-		if (!projected || !isMaterializedResultDescriptor(value)) return value as T;
-		if (collection === undefined) return value as T;
+		if (!projected || collection === undefined) return value as T;
 		try {
+			if (isCompactMaterializedResultDescriptor(value)) {
+				return this.projection.materializeCompact<T>(collection, value, raw.length);
+			}
+			if (!isMaterializedResultDescriptor(value)) return value as T;
 			return this.projection.materialize<T>(collection, value, raw.length);
 		} catch (error) {
 			if (!(error instanceof StaleMaterializedHandleError) || !allowRetry) throw error;
@@ -750,6 +790,7 @@ class EngineRuntime {
 	}
 
 	private synchronizeDirtyProjection() {
+		if (!this.projection.hasDirtyRows) return;
 		const rows = this.projection.dirtyRows;
 		if (rows.length === 0) return;
 		const payload = rows.map((row) => ({

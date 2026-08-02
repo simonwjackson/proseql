@@ -677,7 +677,7 @@ fn relationship_side_effect_carries_value_for_a_materialized_non_owner_row() {
             ),
         ),
     );
-    assert_eq!(projected["row"]["value"]["name"], json!("Before"));
+    assert_eq!(projected["r"][2]["name"], json!("Before"));
 
     let response = parse_response(
         &runtime.dispatch_json(
@@ -1250,6 +1250,114 @@ fn panic_in_callback_returns_defect_response() {
 }
 
 #[test]
+fn fast_find_by_id_authorizes_exact_collection_id_slot_and_token() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![users_descriptor(), posts_descriptor()],
+        json!({
+            "users":[{"id":"u1","name":"Alice"}],
+            "posts":[{"id":"u1","title":"Same id, different collection"}]
+        }),
+    );
+    let handles = expect_ok(&runtime.projection_handles_json(handle));
+    let user_handle = handles["collections"]["users"][0]["handle"]
+        .as_str()
+        .unwrap();
+    let token = user_handle
+        .split(':')
+        .map(|part| part.parse::<u32>().unwrap())
+        .collect::<Vec<_>>();
+    let (slot, generation, revision) = (token[0], token[1], token[2]);
+
+    assert_eq!(
+        runtime.fast_find_by_id(handle, 0, "u1", slot, generation, revision),
+        0
+    );
+    expect_ok(&runtime.dispatch_projected_json(
+        handle,
+        "findById",
+        Some(json!({"collection":"users","id":"u1"}).to_string().as_str()),
+    ));
+    assert_eq!(
+        runtime.fast_find_by_id(handle, 0, "u1", slot, generation, revision),
+        1
+    );
+    assert_eq!(
+        runtime.fast_find_by_id(handle, 1, "u1", slot, generation, revision),
+        0,
+        "wrong collection index"
+    );
+    assert_eq!(
+        runtime.fast_find_by_id(handle, 0, "missing", slot, generation, revision),
+        0,
+        "wrong requested id"
+    );
+    assert_eq!(
+        runtime.fast_find_by_id(handle, 0, "u1", slot + 1, generation, revision),
+        0,
+        "wrong slot"
+    );
+    assert_eq!(
+        runtime.fast_find_by_id(handle, 0, "u1", slot, generation + 1, revision),
+        0,
+        "wrong generation"
+    );
+    assert_eq!(
+        runtime.fast_find_by_id(handle, 0, "u1", slot, generation, revision + 1),
+        0,
+        "wrong revision"
+    );
+    assert_eq!(
+        runtime.fast_find_by_id(handle, 99, "u1", slot, generation, revision),
+        0,
+        "out-of-range collection index"
+    );
+
+    expect_ok(&runtime.dispatch_json(
+        handle,
+        "delete",
+        Some(json!({"collection":"users","id":"u1"}).to_string().as_str()),
+    ));
+    expect_ok(
+        &runtime.dispatch_json(
+            handle,
+            "create",
+            Some(
+                json!({"collection":"users","data":{"id":"u2","name":"Reused"}})
+                    .to_string()
+                    .as_str(),
+            ),
+        ),
+    );
+    assert_eq!(
+        runtime.fast_find_by_id(handle, 0, "u2", slot, generation, revision),
+        0,
+        "reused slot rejects the deleted row token"
+    );
+    let reused_handles = expect_ok(&runtime.projection_handles_json(handle));
+    let reused_handle = reused_handles["collections"]["users"][0]["handle"]
+        .as_str()
+        .unwrap();
+    let reused = reused_handle
+        .split(':')
+        .map(|part| part.parse::<u32>().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(reused[0], slot);
+    assert!(reused[1] > generation);
+    expect_ok(&runtime.dispatch_projected_json(
+        handle,
+        "findById",
+        Some(json!({"collection":"users","id":"u2"}).to_string().as_str()),
+    ));
+    assert_eq!(
+        runtime.fast_find_by_id(handle, 0, "u2", reused[0], reused[1], reused[2]),
+        1,
+        "the reused slot accepts only its current materialized token"
+    );
+}
+
+#[test]
 fn projected_reads_use_stable_revision_safe_handles_and_ordered_descriptors() {
     let (mut runtime, _) = make_runtime();
     let handle = create_database(
@@ -1278,16 +1386,23 @@ fn projected_reads_use_stable_revision_safe_handles_and_ordered_descriptors() {
             ),
         ),
     );
-    assert_eq!(descriptor["kind"], json!("materializedMany"));
-    assert_eq!(descriptor["rows"][0]["id"], json!("u2"));
-    assert_eq!(descriptor["rows"][1]["handle"], json!(first_handle));
-    assert_eq!(descriptor["rows"][1]["value"]["name"], json!("Alice"));
+    assert_eq!(descriptor["k"], json!("q"));
+    assert_eq!(descriptor["r"][0][1], json!("u2"));
+    assert_eq!(descriptor["r"][1][1], json!("u1"));
+    assert_eq!(descriptor["r"][1][2]["name"], json!("Alice"));
     let repeated = expect_ok(&runtime.dispatch_projected_json(
         handle,
         "findById",
         Some(json!({"collection":"users","id":"u1"}).to_string().as_str()),
     ));
-    assert!(repeated["row"].get("value").is_none());
+    let first_slot = first_handle
+        .split(':')
+        .next()
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+    assert_eq!(repeated["k"], json!("f"));
+    assert_eq!(repeated["r"], json!(first_slot));
 
     let deleted_response = parse_response(&runtime.dispatch_json(
         handle,
@@ -1413,7 +1528,7 @@ fn failed_upsert_many_does_not_mark_an_unobserved_projection_handle() {
         "findById",
         Some(json!({"collection":"users","id":"u1"}).to_string().as_str()),
     ));
-    assert_eq!(projected["row"]["value"]["name"], json!("Alice"));
+    assert_eq!(projected["r"][2]["name"], json!("Alice"));
 }
 
 #[test]
@@ -1424,14 +1539,21 @@ fn ambiguous_equal_unchanged_rows_do_not_authorize_a_projection_handle() {
         vec![users_descriptor()],
         json!({"users":[{"id":"u1","name":"Alice"},{"id":"u2","name":"Bob"}]}),
     );
-    expect_ok(&runtime.projection_handles_json(handle));
+    let handles = expect_ok(&runtime.projection_handles_json(handle));
     for id in ["u1", "u2"] {
-        let projected = expect_ok(&runtime.dispatch_projected_json(
+        expect_ok(&runtime.dispatch_projected_json(
             handle,
             "findById",
             Some(json!({"collection":"users","id":id}).to_string().as_str()),
         ));
-        let row_handle = projected["row"]["handle"].as_str().unwrap();
+        let row_handle = handles["collections"]["users"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == json!(id))
+            .unwrap()["handle"]
+            .as_str()
+            .unwrap();
         expect_ok(
             &runtime.synchronize_projection_json(
                 handle,
@@ -1457,10 +1579,10 @@ fn ambiguous_equal_unchanged_rows_do_not_authorize_a_projection_handle() {
             ),
         ),
     );
-    let rows = response["rows"].as_array().unwrap();
+    let rows = response["r"].as_array().unwrap();
     assert_eq!(rows.len(), 2);
-    assert!(rows.iter().all(|row| row.get("handle").is_none()));
-    assert!(rows.iter().all(|row| row["value"]["id"] == json!("shared")));
+    assert!(rows.iter().all(|row| row[0].is_null()));
+    assert!(rows.iter().all(|row| row[1]["id"] == json!("shared")));
 }
 
 #[test]
@@ -1471,12 +1593,15 @@ fn caller_mutated_projection_sync_is_authorized_and_not_a_formal_mutation() {
         vec![users_descriptor()],
         json!({"users":[{"id":"u1","name":"Alice"}]}),
     );
-    let projected = expect_ok(&runtime.dispatch_projected_json(
+    let handles = expect_ok(&runtime.projection_handles_json(handle));
+    expect_ok(&runtime.dispatch_projected_json(
         handle,
         "findById",
         Some(json!({"collection":"users","id":"u1"}).to_string().as_str()),
     ));
-    let row_handle = projected["row"]["handle"].as_str().unwrap();
+    let row_handle = handles["collections"]["users"][0]["handle"]
+        .as_str()
+        .unwrap();
     expect_ok(
         &runtime.synchronize_projection_json(
             handle,
@@ -1533,9 +1658,9 @@ fn projected_reads_inline_only_rust_authored_overlays() {
             ),
         ),
     );
-    assert_eq!(descriptor["kind"], json!("materializedMany"));
-    assert!(descriptor["rows"][0].get("handle").is_none());
-    assert_eq!(descriptor["rows"][0]["value"], json!({"name":"Alice"}));
+    assert_eq!(descriptor["k"], json!("q"));
+    assert!(descriptor["r"][0][0].is_null());
+    assert_eq!(descriptor["r"][0][1], json!({"name":"Alice"}));
 }
 
 #[test]
@@ -1631,9 +1756,9 @@ fn panic_after_mutation_does_not_publish_a_safe_delta() {
         "findById",
         Some(json!({"collection":"users","id":"u1"}).to_string().as_str()),
     ));
-    assert_eq!(projected["kind"], json!("materializedOne"));
-    assert!(projected["row"]["handle"].as_str().is_some());
-    assert_eq!(projected["row"]["value"]["name"], json!("Alice"));
+    assert_eq!(projected["k"], json!("f"));
+    assert_eq!(projected["r"][1], json!("u1"));
+    assert_eq!(projected["r"][2]["name"], json!("Alice"));
 }
 
 #[test]

@@ -14,6 +14,15 @@ export type MaterializedResultDescriptor =
 			readonly rows: ReadonlyArray<MaterializedRowDescriptor>;
 	  };
 
+type CompactMaterializedRow =
+	| number
+	| readonly [number, string, unknown]
+	| readonly [null, unknown];
+
+export type CompactMaterializedResultDescriptor =
+	| { readonly k: "f"; readonly r: CompactMaterializedRow }
+	| { readonly k: "q"; readonly r: ReadonlyArray<CompactMaterializedRow> };
+
 export type ProjectionHandles = {
 	readonly collections: Readonly<
 		Record<
@@ -57,6 +66,9 @@ type Slot = {
 	readonly collection: string;
 	readonly id: string;
 	readonly handle: string;
+	readonly rustSlot: number;
+	readonly generation: number;
+	readonly revision: number;
 	hasValue: boolean;
 	value?: unknown;
 	weakValue?: WeakRef<object>;
@@ -74,6 +86,10 @@ export type DirtyProjectionRow = {
 
 export type MaterializationStats = {
 	readonly descriptors: number;
+	readonly compactDescriptors: number;
+	readonly fastFindHits: number;
+	readonly fastFindFallbacks: number;
+	readonly fastPinnedRows: number;
 	readonly descriptorBytes: number;
 	readonly cacheHits: number;
 	readonly cacheMisses: number;
@@ -88,6 +104,45 @@ export type MaterializationStats = {
 
 const keyOf = (collection: string, id: string) => `${collection}\u0000${id}`;
 const ownsValue = (value: object) => Object.hasOwn(value, "value");
+const FAST_FIND_PIN_LIMIT = 256;
+
+type FastFindPin = {
+	readonly rustSlot: number;
+	readonly handle: string;
+};
+
+export type FastFindCandidate<T = unknown> = {
+	readonly collection: string;
+	readonly id: string;
+	readonly slot: number;
+	readonly rustSlot: number;
+	readonly generation: number;
+	readonly revision: number;
+	readonly handle: string;
+	readonly value: T;
+};
+
+type ProjectionHandleToken = {
+	readonly rustSlot: number;
+	readonly generation: number;
+	readonly revision: number;
+};
+
+const projectionHandleToken = (
+	handle: string,
+): ProjectionHandleToken | undefined => {
+	const parts = handle.split(":");
+	if (parts.length !== 3) return undefined;
+	const [rustSlot, generation, revision] = parts.map(Number);
+	if (
+		![rustSlot, generation, revision].every(
+			(part) => Number.isInteger(part) && part >= 0 && part <= 0xffff_ffff,
+		)
+	) {
+		return undefined;
+	}
+	return { rustSlot, generation, revision };
+};
 
 const trackDeep = (
 	value: unknown,
@@ -133,12 +188,27 @@ const trackDeep = (
 export class MaterializedProjection {
 	private slots: Array<Slot | undefined> = [];
 	private readonly slotById = new Map<string, number>();
+	private readonly slotByRustSlot = new Map<number, number>();
 	private readonly freeSlots: number[] = [];
 	private readonly materializedKeys = new Set<string>();
 	private readonly dirtyKeys = new Set<string>();
+	private readonly fastFindPins: FastFindPin[] = [];
+	private readonly fastFindPinnedHandles = new Set<string>();
+	private readonly fastFindCandidates = new Map<
+		string,
+		Map<string, FastFindCandidate>
+	>();
+	private readonly fastFindCandidateByHandle = new Map<
+		string,
+		FastFindCandidate
+	>();
 	private invalid = false;
 	private mutableStats = {
 		descriptors: 0,
+		compactDescriptors: 0,
+		fastFindHits: 0,
+		fastFindFallbacks: 0,
+		fastPinnedRows: 0,
 		descriptorBytes: 0,
 		cacheHits: 0,
 		cacheMisses: 0,
@@ -157,6 +227,10 @@ export class MaterializedProjection {
 
 	get needsResynchronization() {
 		return this.invalid;
+	}
+
+	get hasDirtyRows() {
+		return this.dirtyKeys.size > 0;
 	}
 
 	get stats(): MaterializationStats {
@@ -179,6 +253,34 @@ export class MaterializedProjection {
 					]
 				: [];
 		});
+	}
+
+	fastFindCandidate<T>(
+		collection: string,
+		id: string,
+	): FastFindCandidate<T> | undefined {
+		const pinned = this.fastFindCandidates.get(collection)?.get(id);
+		if (pinned !== undefined) return pinned as FastFindCandidate<T>;
+		const slot = this.slotById.get(keyOf(collection, id));
+		if (slot === undefined) return undefined;
+		const row = this.slots[slot];
+		const value = this.resolveValue(slot);
+		return row?.collection === collection && value !== undefined
+			? {
+					collection,
+					id,
+					slot,
+					rustSlot: row.rustSlot,
+					generation: row.generation,
+					revision: row.revision,
+					handle: row.handle,
+					value: value as T,
+				}
+			: undefined;
+	}
+
+	canFastFind(collection: string, id: string): boolean {
+		return this.fastFindCandidate(collection, id) !== undefined;
 	}
 
 	materializedValue(collection: string, id: string): unknown {
@@ -220,7 +322,11 @@ export class MaterializedProjection {
 			const current = slot === undefined ? undefined : this.slots[slot];
 			if (current?.handle === row.handle) {
 				this.dirtyKeys.delete(key);
-				if (typeof current.value === "object" && current.value !== null) {
+				if (
+					!this.fastFindPinnedHandles.has(current.handle) &&
+					typeof current.value === "object" &&
+					current.value !== null
+				) {
 					current.weakValue = new WeakRef(current.value);
 					current.value = undefined;
 				}
@@ -239,9 +345,11 @@ export class MaterializedProjection {
 	clear() {
 		this.slots.length = 0;
 		this.slotById.clear();
+		this.slotByRustSlot.clear();
 		this.freeSlots.length = 0;
 		this.materializedKeys.clear();
 		this.dirtyKeys.clear();
+		this.clearFastFindPins();
 		this.mutableStats.materializedRows = 0;
 		this.mutableStats.trackedProxies = 0;
 		this.invalid = true;
@@ -303,6 +411,106 @@ export class MaterializedProjection {
 		return value as T;
 	}
 
+	recordFastFindFallback() {
+		this.mutableStats.fastFindFallbacks += 1;
+	}
+
+	acceptAuthorizedFastFind<T>(candidate: FastFindCandidate<T>): T {
+		const row = this.slots[candidate.slot];
+		this.mutableStats.fastFindHits += 1;
+		this.mutableStats.cacheHits += 1;
+		this.mutableStats.fullValueBytesAvoided += row?.valueBytes ?? 0;
+		if (
+			row !== undefined &&
+			typeof candidate.value === "object" &&
+			candidate.value !== null
+		) {
+			this.pinFastFindValue(row, candidate.value);
+		}
+		return candidate.value;
+	}
+
+	materializeFastFindRustSlot<T>(collection: string, rustSlot: number): T {
+		const slot = this.slotByRustSlot.get(rustSlot);
+		const row = slot === undefined ? undefined : this.slots[slot];
+		const candidate =
+			row === undefined
+				? undefined
+				: this.fastFindCandidate<T>(collection, row.id);
+		if (candidate === undefined) {
+			this.mutableStats.cacheMisses += 1;
+			throw new StaleMaterializedHandleError(`slot:${rustSlot}`);
+		}
+		if (candidate.rustSlot !== rustSlot) {
+			this.mutableStats.cacheMisses += 1;
+			throw new StaleMaterializedHandleError(`slot:${rustSlot}`);
+		}
+		return this.acceptAuthorizedFastFind(candidate);
+	}
+
+	materializeRustSlot<T>(collection: string, rustSlot: number): T {
+		const slot = this.slotByRustSlot.get(rustSlot);
+		const row = slot === undefined ? undefined : this.slots[slot];
+		const value = slot === undefined ? undefined : this.resolveValue(slot);
+		if (row?.collection === collection && value !== undefined) {
+			this.mutableStats.cacheHits += 1;
+			this.mutableStats.fullValueBytesAvoided += row.valueBytes;
+			return value as T;
+		}
+		this.mutableStats.cacheMisses += 1;
+		throw new StaleMaterializedHandleError(`slot:${rustSlot}`);
+	}
+
+	materializeCompact<T>(
+		collection: string,
+		descriptor: CompactMaterializedResultDescriptor,
+		descriptorBytes: number,
+	): T {
+		const started = performance.now();
+		this.mutableStats.descriptors += 1;
+		this.mutableStats.compactDescriptors += 1;
+		this.mutableStats.descriptorBytes += descriptorBytes;
+		const materialize = (row: CompactMaterializedRow): unknown => {
+			if (typeof row === "number") {
+				return this.materializeRustSlot(collection, row);
+			}
+			if (row[0] === null) {
+				this.mutableStats.cacheMisses += 1;
+				return row[1];
+			}
+			const [rustSlot, id, value] = row;
+			const slot = this.slotByRustSlot.get(rustSlot);
+			const metadata = slot === undefined ? undefined : this.slots[slot];
+			if (metadata?.collection !== collection || metadata.id !== id) {
+				this.mutableStats.cacheMisses += 1;
+				this.invalidate();
+				throw new StaleMaterializedHandleError(`slot:${rustSlot}`);
+			}
+			this.put(collection, {
+				id,
+				handle: metadata.handle,
+				value,
+				valueBytes: JSON.stringify(value)?.length ?? 0,
+			});
+			this.mutableStats.cacheMisses += 1;
+			const activeSlot = this.slotByRustSlot.get(rustSlot);
+			const materialized =
+				activeSlot === undefined ? undefined : this.resolveValue(activeSlot);
+			if (materialized === undefined) {
+				this.invalidate();
+				throw new StaleMaterializedHandleError(`slot:${rustSlot}`);
+			}
+			return materialized;
+		};
+		const value =
+			descriptor.k === "f"
+				? materialize(descriptor.r)
+				: descriptor.r.map(materialize);
+		this.mutableStats.materializationMilliseconds +=
+			performance.now() - started;
+		return value as T;
+	}
+
 	private materializeRow(
 		collection: string,
 		descriptor: MaterializedRowDescriptor,
@@ -346,9 +554,11 @@ export class MaterializedProjection {
 	private replaceAll(snapshot: ProjectionSnapshot, resynchronization: boolean) {
 		this.slots = [];
 		this.slotById.clear();
+		this.slotByRustSlot.clear();
 		this.freeSlots.length = 0;
 		this.materializedKeys.clear();
 		this.dirtyKeys.clear();
+		this.clearFastFindPins();
 		this.mutableStats.materializedRows = 0;
 		this.mutableStats.trackedProxies = 0;
 		for (const [collection, rows] of Object.entries(snapshot.collections)) {
@@ -384,6 +594,11 @@ export class MaterializedProjection {
 		const existing = this.slotById.get(key);
 		const target = existing ?? this.freeSlots.pop() ?? this.slots.length;
 		const prior = this.slots[target];
+		const handleToken = projectionHandleToken(row.handle);
+		if (handleToken === undefined) {
+			this.invalidate();
+			throw new StaleMaterializedHandleError(row.handle);
+		}
 		const incomingHasValue = ownsValue(row);
 		if (!incomingHasValue && prior?.handle === row.handle) return;
 		let trackedValue: unknown;
@@ -421,6 +636,13 @@ export class MaterializedProjection {
 			);
 			valueBytes = row.valueBytes ?? 0;
 		}
+		if (
+			prior !== undefined &&
+			this.slotByRustSlot.get(prior.rustSlot) === target
+		) {
+			this.slotByRustSlot.delete(prior.rustSlot);
+		}
+		if (prior !== undefined) this.unpinFastFindHandle(prior.handle);
 		if (prior?.hasValue) {
 			this.materializedKeys.delete(key);
 			this.mutableStats.materializedRows = Math.max(
@@ -440,6 +662,9 @@ export class MaterializedProjection {
 			collection,
 			id: row.id,
 			handle: row.handle,
+			rustSlot: handleToken.rustSlot,
+			generation: handleToken.generation,
+			revision: handleToken.revision,
 			hasValue: incomingHasValue,
 			value: weakValue === undefined ? trackedValue : undefined,
 			weakValue,
@@ -449,6 +674,7 @@ export class MaterializedProjection {
 		};
 		installed = true;
 		this.slotById.set(key, target);
+		this.slotByRustSlot.set(handleToken.rustSlot, target);
 		this.dirtyKeys.delete(key);
 		if (incomingHasValue) {
 			this.materializedKeys.add(key);
@@ -465,6 +691,87 @@ export class MaterializedProjection {
 		}
 	}
 
+	private pinFastFindValue(row: Slot, value: object) {
+		if (this.fastFindPinnedHandles.has(row.handle)) return;
+		row.value = value;
+		row.weakValue = undefined;
+		this.fastFindPinnedHandles.add(row.handle);
+		this.fastFindPins.push({ rustSlot: row.rustSlot, handle: row.handle });
+		const slot = this.slotByRustSlot.get(row.rustSlot);
+		if (slot !== undefined) {
+			const candidate: FastFindCandidate = {
+				collection: row.collection,
+				id: row.id,
+				slot,
+				rustSlot: row.rustSlot,
+				generation: row.generation,
+				revision: row.revision,
+				handle: row.handle,
+				value,
+			};
+			let collectionCandidates = this.fastFindCandidates.get(row.collection);
+			if (collectionCandidates === undefined) {
+				collectionCandidates = new Map();
+				this.fastFindCandidates.set(row.collection, collectionCandidates);
+			}
+			collectionCandidates.set(row.id, candidate);
+			this.fastFindCandidateByHandle.set(row.handle, candidate);
+		}
+		while (this.fastFindPinnedHandles.size > FAST_FIND_PIN_LIMIT) {
+			const evicted = this.fastFindPins.shift();
+			if (
+				evicted === undefined ||
+				!this.fastFindPinnedHandles.delete(evicted.handle)
+			) {
+				continue;
+			}
+			this.removeFastFindCandidate(evicted.handle);
+			const slot = this.slotByRustSlot.get(evicted.rustSlot);
+			const current = slot === undefined ? undefined : this.slots[slot];
+			if (
+				current?.handle === evicted.handle &&
+				!this.dirtyKeys.has(keyOf(current.collection, current.id)) &&
+				typeof current.value === "object" &&
+				current.value !== null
+			) {
+				current.weakValue = new WeakRef(current.value);
+				current.value = undefined;
+			}
+		}
+		this.mutableStats.fastPinnedRows = this.fastFindPinnedHandles.size;
+	}
+
+	private removeFastFindCandidate(handle: string) {
+		const candidate = this.fastFindCandidateByHandle.get(handle);
+		if (candidate === undefined) return;
+		this.fastFindCandidateByHandle.delete(handle);
+		const collectionCandidates = this.fastFindCandidates.get(
+			candidate.collection,
+		);
+		if (collectionCandidates?.get(candidate.id)?.handle === handle) {
+			collectionCandidates.delete(candidate.id);
+			if (collectionCandidates.size === 0) {
+				this.fastFindCandidates.delete(candidate.collection);
+			}
+		}
+	}
+
+	private unpinFastFindHandle(handle: string) {
+		if (!this.fastFindPinnedHandles.delete(handle)) return;
+		const queued = this.fastFindPins.findIndex((pin) => pin.handle === handle);
+		if (queued >= 0) this.fastFindPins.splice(queued, 1);
+		this.removeFastFindCandidate(handle);
+		this.mutableStats.fastPinnedRows = this.fastFindPinnedHandles.size;
+	}
+
+	private clearFastFindPins() {
+		this.fastFindPins.length = 0;
+		this.fastFindPinnedHandles.clear();
+		this.fastFindCandidates.clear();
+		this.fastFindCandidateByHandle.clear();
+		this.mutableStats.fastPinnedRows = 0;
+	}
+
 	private remove(key: string, slot: number) {
 		const prior = this.slots[slot];
 		if (prior?.hasValue) {
@@ -473,6 +780,13 @@ export class MaterializedProjection {
 		}
 		this.slots[slot] = undefined;
 		this.slotById.delete(key);
+		if (
+			prior !== undefined &&
+			this.slotByRustSlot.get(prior.rustSlot) === slot
+		) {
+			this.slotByRustSlot.delete(prior.rustSlot);
+		}
+		if (prior !== undefined) this.unpinFastFindHandle(prior.handle);
 		this.materializedKeys.delete(key);
 		this.dirtyKeys.delete(key);
 		this.freeSlots.push(slot);
@@ -497,4 +811,14 @@ export const isMaterializedResultDescriptor = (
 		return false;
 	const kind = (value as { readonly kind?: unknown }).kind;
 	return kind === "materializedOne" || kind === "materializedMany";
+};
+
+export const isCompactMaterializedResultDescriptor = (
+	value: unknown,
+): value is CompactMaterializedResultDescriptor => {
+	if (typeof value !== "object" || value === null || !("k" in value)) {
+		return false;
+	}
+	const kind = (value as { readonly k?: unknown }).k;
+	return kind === "f" || kind === "q";
 };

@@ -267,6 +267,31 @@ impl Runtime {
         }
     }
 
+    pub fn fast_find_by_id(
+        &self,
+        handle: u32,
+        collection_index: u32,
+        id: &str,
+        expected_slot: u32,
+        expected_generation: u32,
+        expected_revision: u32,
+    ) -> i32 {
+        let Some(context) = self.inner.databases.get(&handle) else {
+            return 0;
+        };
+        let Some(collection) = context.collection_names.get(collection_index as usize) else {
+            return 0;
+        };
+        i32::from(context.projection.fast_find_authorized(
+            &context.db,
+            collection,
+            id,
+            expected_slot,
+            expected_generation,
+            expected_revision,
+        ))
+    }
+
     pub fn dispatch_projected_json(
         &mut self,
         handle: u32,
@@ -692,6 +717,27 @@ impl WasmRuntime {
             method.as_str(),
             payload_json.as_deref(),
         )
+    }
+
+    pub fn fast_find_by_id(
+        &self,
+        handle: u32,
+        collection_index: u32,
+        id: String,
+        expected_slot: u32,
+        expected_generation: u32,
+        expected_revision: u32,
+    ) -> i32 {
+        self.inner.try_borrow().map_or(0, |runtime| {
+            runtime.fast_find_by_id(
+                handle,
+                collection_index,
+                &id,
+                expected_slot,
+                expected_generation,
+                expected_revision,
+            )
+        })
     }
 
     pub fn projection_handles(&self, handle: u32) -> String {

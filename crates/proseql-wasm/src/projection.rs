@@ -89,20 +89,19 @@ impl MaterializedProjection {
         value: Value,
     ) -> Value {
         let Some(slot) = self.find(collection, storage_id) else {
-            return json!({"value": value});
+            return json!([Value::Null, value]);
         };
         let canonical = db
             .collection(collection)
             .and_then(|rows| rows.get(storage_id));
         if canonical != Some(&value) {
-            return json!({"value": value});
+            return json!([Value::Null, value]);
         }
-        let handle = self.handle(slot);
         if self.slots[slot].materialized {
-            json!({"id": storage_id, "handle": handle})
+            json!(slot)
         } else {
             self.slots[slot].materialized = true;
-            json!({"id": storage_id, "handle": handle, "value": value})
+            json!([slot, storage_id, value])
         }
     }
 
@@ -113,7 +112,7 @@ impl MaterializedProjection {
         value: Value,
     ) -> Value {
         let Some(rows) = db.collection(collection) else {
-            return json!({"value": value});
+            return json!([Value::Null, value]);
         };
         let storage_id = value
             .get("id")
@@ -123,7 +122,7 @@ impl MaterializedProjection {
             .or_else(|| rows.storage_id_for_value(&value).map(str::to_owned));
         match storage_id {
             Some(id) => self.descriptor_for_storage_id(db, collection, &id, value),
-            None => json!({"value": value}),
+            None => json!([Value::Null, value]),
         }
     }
 
@@ -142,14 +141,43 @@ impl MaterializedProjection {
                 } else {
                     self.descriptor_for_query_value(db, collection, value)
                 };
-                json!({"kind": "materializedOne", "row": row})
+                json!({"k": "f", "r": row})
             }
             ("query", Value::Array(values)) => json!({
-                "kind": "materializedMany",
-                "rows": values.into_iter().map(|value| self.descriptor_for_query_value(db, collection, value)).collect::<Vec<_>>(),
+                "k": "q",
+                "r": values.into_iter().map(|value| self.descriptor_for_query_value(db, collection, value)).collect::<Vec<_>>(),
             }),
             (_, value) => value,
         }
+    }
+
+    pub fn fast_find_authorized(
+        &self,
+        db: &Database,
+        collection: &str,
+        id: &str,
+        expected_slot: u32,
+        expected_generation: u32,
+        expected_revision: u32,
+    ) -> bool {
+        if db
+            .collection(collection)
+            .and_then(|rows| rows.get(id))
+            .is_none()
+        {
+            return false;
+        }
+        let Some(slot) = self.find(collection, id) else {
+            return false;
+        };
+        if slot != expected_slot as usize {
+            return false;
+        }
+        self.slots.get(slot).is_some_and(|metadata| {
+            metadata.materialized
+                && metadata.generation == expected_generation
+                && metadata.revision == expected_revision
+        })
     }
 
     pub fn authorizes(&self, collection: &str, id: &str, handle: &str) -> bool {

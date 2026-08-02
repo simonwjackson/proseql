@@ -404,6 +404,10 @@ describe("@proseql/engine U8 fixes", () => {
 		try {
 			const first = await db.users.findById("u1");
 			const repeated = await db.users.findById("u1");
+			await expect(db.users.findById("missing")).rejects.toMatchObject({
+				_tag: "NotFoundError",
+				id: "missing",
+			});
 			const ordered = await db.users.query({ sort: { id: "desc" } });
 			expect(repeated).toBe(first);
 			expect(ordered.map((row) => row.id)).toEqual(["u2", "u1"]);
@@ -427,11 +431,17 @@ describe("@proseql/engine U8 fixes", () => {
 					__proseqlMaterializationDiagnostics: () => {
 						cacheHits: number;
 						descriptorBytes: number;
+						compactDescriptors: number;
+						fastFindHits: number;
+						fastFindFallbacks: number;
 					};
 				}
 			).__proseqlMaterializationDiagnostics();
 			expect(diagnostics.cacheHits).toBeGreaterThan(0);
 			expect(diagnostics.descriptorBytes).toBeGreaterThan(0);
+			expect(diagnostics.compactDescriptors).toBeGreaterThan(0);
+			expect(diagnostics.fastFindHits).toBeGreaterThan(0);
+			expect(diagnostics.fastFindFallbacks).toBeGreaterThan(0);
 			expect(Object.keys(db)).not.toContain(
 				"__proseqlMaterializationDiagnostics",
 			);
@@ -1232,6 +1242,84 @@ describe("@proseql/engine U8 fixes", () => {
 				{ id: "u1", displayName: "Alice!" },
 			]);
 			expect(settled).toBe(true);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("authorizes numeric fast finds by descriptor order and current storage token", async () => {
+		const db = await createEngineDatabase(
+			{
+				users: { schema: UserSchema, relationships: {} },
+				posts: {
+					schema: Schema.Struct({ id: Schema.String, title: Schema.String }),
+					relationships: {},
+				},
+			} as const,
+			{
+				users: [{ id: "u1", name: "Alice" }],
+				posts: [{ id: "p1", title: "Hello" }],
+			},
+		);
+		try {
+			const post = await db.posts.findById("p1");
+			expect(await db.posts.findById("p1")).toBe(post);
+
+			const user = await db.users.findById("u1");
+			user.id = "caller-mutated";
+			expect(await db.users.findById("u1")).toBe(user);
+
+			expect(await db.users.delete("u1")).toBe(user);
+			const replacement = await db.users.create({ id: "u2", name: "Bob" });
+			expect(await db.users.findById("u2")).toBe(replacement);
+			await expect(db.users.findById("u1")).rejects.toMatchObject({
+				_tag: "NotFoundError",
+				id: "u1",
+			});
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("contains reentrant fast-find export failures behind the canonical defect bridge", async () => {
+		let reentrantRead:
+			| (() => Promise<{ id: string; name: string }>)
+			| undefined;
+		let nestedRead: Promise<{ id: string; name: string }> | undefined;
+		const db = await createEngineDatabase(
+			{
+				users: { schema: UserSchema, relationships: {} },
+			} as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+			{
+				plugins: [
+					{
+						name: "reentrant-fast-find",
+						operators: [
+							{
+								name: "$reentrantMatch",
+								types: ["string"] as const,
+								evaluate: () => {
+									nestedRead = reentrantRead?.();
+									void nestedRead?.catch(() => undefined);
+									return true;
+								},
+							},
+						],
+					},
+				],
+			},
+		);
+		try {
+			reentrantRead = () => db.users.findById("u1");
+			await db.users.findById("u1");
+			await expect(
+				db.users.query({
+					where: { name: { $reentrantMatch: true } },
+				} as never),
+			).resolves.toHaveLength(1);
+			expect(nestedRead).toBeDefined();
+			await expect(nestedRead).rejects.toBeInstanceOf(WasmEngineDefectError);
 		} finally {
 			await db.close();
 		}

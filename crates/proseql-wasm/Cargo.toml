@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 panic-integration-test = []
+transport-candidates = []
 
 [dependencies]
 serde = { workspace = true }

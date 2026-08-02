@@ -167,6 +167,129 @@ describe("materialized projection", () => {
 		).toThrow(StaleMaterializedHandleError);
 	});
 
+	it("materializes compact Rust slots only after an authoritative inline value", () => {
+		const projection = new MaterializedProjection({
+			collections: {
+				users: [{ id: "u1", handle: "7:1:1" }],
+			},
+		});
+		expect(() => projection.materializeRustSlot("users", 7)).toThrow(
+			StaleMaterializedHandleError,
+		);
+		const first = projection.materializeCompact<{ id: string; name: string }>(
+			"users",
+			{ k: "f", r: [7, "u1", { id: "u1", name: "Alice" }] },
+			24,
+		);
+		expect(projection.materializeRustSlot("users", 7)).toBe(first);
+		const rows = projection.materializeCompact<
+			ReadonlyArray<{ id: string; name: string }>
+		>("users", { k: "q", r: [7, 7] }, 12);
+		expect(rows).toEqual([first, first]);
+
+		projection.apply({
+			changes: [
+				{ collection: "users", id: "u1", handle: "7:1:1", deleted: true },
+				{ collection: "users", id: "u2", handle: "7:2:1" },
+			],
+		});
+		expect(() => projection.materializeRustSlot("users", 7)).toThrow(
+			StaleMaterializedHandleError,
+		);
+	});
+
+	it("bounds fast-read pins while preserving live identity and generation-safe reuse", () => {
+		const count = 300;
+		const projection = new MaterializedProjection({
+			collections: {
+				users: Array.from({ length: count }, (_, index) => ({
+					id: `u${index}`,
+					handle: `${index}:1:1`,
+				})),
+			},
+		});
+		expect(projection.canFastFind("users", "u0")).toBe(false);
+		const materialized = projection.materializeCompact<
+			ReadonlyArray<{ id: string }>
+		>(
+			"users",
+			{
+				k: "q",
+				r: Array.from({ length: count }, (_, index) => [
+					index,
+					`u${index}`,
+					{ id: `u${index}` },
+				]),
+			},
+			1,
+		);
+		const liveFirst = materialized[0];
+		for (let index = 0; index < count; index += 1) {
+			projection.materializeFastFindRustSlot("users", index);
+		}
+		expect(projection.stats.fastPinnedRows).toBeLessThanOrEqual(256);
+		expect(projection.canFastFind("users", "u0")).toBe(true);
+		expect(projection.materializeFastFindRustSlot("users", 0)).toBe(liveFirst);
+
+		projection.apply({
+			changes: [
+				{ collection: "users", id: "u0", handle: "0:1:1", deleted: true },
+				{ collection: "users", id: "replacement", handle: "0:2:1" },
+			],
+		});
+		expect(projection.canFastFind("users", "u0")).toBe(false);
+		expect(projection.canFastFind("users", "replacement")).toBe(false);
+		const replacement = projection.materializeCompact<{ id: string }>(
+			"users",
+			{ k: "f", r: [0, "replacement", { id: "replacement" }] },
+			1,
+		);
+		expect(projection.canFastFind("users", "replacement")).toBe(true);
+		expect(projection.materializeFastFindRustSlot("users", 0)).toBe(
+			replacement,
+		);
+		expect(projection.stats.fastPinnedRows).toBeLessThanOrEqual(256);
+		projection.clear();
+		expect(projection.stats.fastPinnedRows).toBe(0);
+	});
+
+	it("keeps dirty evicted fast rows strong until synchronization", () => {
+		const count = 258;
+		const projection = new MaterializedProjection({
+			collections: {
+				users: Array.from({ length: count }, (_, index) => ({
+					id: `u${index}`,
+					handle: `${index}:1:1`,
+				})),
+			},
+		});
+		const values = projection.materializeCompact<
+			ReadonlyArray<{ id: string; value: number }>
+		>(
+			"users",
+			{
+				k: "q",
+				r: Array.from({ length: count }, (_, index) => [
+					index,
+					`u${index}`,
+					{ id: `u${index}`, value: index },
+				]),
+			},
+			1,
+		);
+		const dirtyFirst = values[0];
+		if (dirtyFirst === undefined)
+			throw new Error("expected first projected row");
+		dirtyFirst.value = -1;
+		for (let index = 0; index < count; index += 1) {
+			projection.materializeFastFindRustSlot("users", index);
+		}
+		expect(projection.dirtyRows[0]?.value).toBe(values[0]);
+		projection.markSynchronized(projection.dirtyRows);
+		expect(projection.dirtyRows).toEqual([]);
+		expect(projection.stats.fastPinnedRows).toBeLessThanOrEqual(256);
+	});
+
 	it("invalidates atomically on stale generation reuse and accepts sparse resync", () => {
 		const projection = new MaterializedProjection({
 			collections: { users: [{ id: "u1", handle: "0:1:1" }] },
