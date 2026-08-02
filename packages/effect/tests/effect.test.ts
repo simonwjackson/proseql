@@ -15,7 +15,7 @@ import {
 	makeInMemoryStorageLayer,
 	makeSerializerLayer,
 } from "@proseql/core";
-import { Data, Effect, Fiber, Layer, Schema, Stream } from "effect";
+import { Cause, Data, Effect, Fiber, Layer, Schema, Stream } from "effect";
 import { beforeAll, describe, expect, it } from "vitest";
 import { unsafeSubscriptionEffectToStreamForTests, unsafeLiftPromiseForTests } from "../src/database.js";
 import { createEffectDatabase, createPersistentEffectDatabase } from "../src/index.js";
@@ -406,6 +406,268 @@ describe("@proseql/effect", () => {
 		expect(emissions).toHaveLength(2);
 		expect(emissions[0]?.[1]?.year).toBe(1965);
 		expect(emissions[1]?.[1]?.year).toBe(1967);
+	});
+
+	it("collapses scalar predicate bulk mutations to one Rust bulk command outside and inside transactions", async () => {
+		const rows = Array.from({ length: 12 }, (_, index) => ({
+			id: `b${index}`,
+			title: `Book ${index}`,
+			year: 2000 + index,
+			genre: index % 2 === 0 ? "even" : "odd",
+		}));
+		const db = await Effect.runPromise(
+			createEffectDatabase(config, {
+				users: [],
+				companies: [],
+				books: rows,
+			}),
+		);
+		const diagnostics = () =>
+			(
+				db as unknown as {
+					__proseqlMaterializationDiagnostics: () => {
+						queryDispatches: number;
+						bulkMutationDispatches: number;
+					};
+				}
+			).__proseqlMaterializationDiagnostics();
+
+		const updateCalls: Array<{
+			readonly id: string;
+			readonly argumentCount: number;
+			readonly receiver: unknown;
+		}> = [];
+		const beforeUpdate = { ...diagnostics() };
+		const updated = await db.books.updateMany(
+			function (book) {
+				updateCalls.push({
+					id: book.id,
+					argumentCount: arguments.length,
+					receiver: this,
+				});
+				return book.genre === "even";
+			},
+			{ genre: "updated" },
+		).runPromise;
+		const afterUpdate = diagnostics();
+
+		expect(updateCalls).toEqual(
+			rows.map((book) => ({
+				id: book.id,
+				argumentCount: 1,
+				receiver: undefined,
+			})),
+		);
+		expect(updated.updated.map((book) => book.id)).toEqual([
+			"b0",
+			"b2",
+			"b4",
+			"b6",
+			"b8",
+			"b10",
+		]);
+		expect(afterUpdate.queryDispatches - beforeUpdate.queryDispatches).toBe(1);
+		expect(
+			afterUpdate.bulkMutationDispatches - beforeUpdate.bulkMutationDispatches,
+		).toBe(1);
+
+		let zeroMatchCalls = 0;
+		const beforeZero = { ...diagnostics() };
+		const zero = await db.books.updateMany(
+			() => {
+				zeroMatchCalls += 1;
+				return false;
+			},
+			{ genre: "unused" },
+		).runPromise;
+		const afterZero = diagnostics();
+		expect(zero).toEqual({ count: 0, updated: [] });
+		expect(zeroMatchCalls).toBe(rows.length);
+		expect(afterZero.queryDispatches - beforeZero.queryDispatches).toBe(1);
+		expect(
+			afterZero.bulkMutationDispatches - beforeZero.bulkMutationDispatches,
+		).toBe(1);
+
+		const deleteCalls: string[] = [];
+		const beforeDelete = { ...diagnostics() };
+		const deleted = await Effect.runPromise(
+			db.$transaction((tx) =>
+				tx.books.deleteMany(
+					(book) => {
+						deleteCalls.push(book.id);
+						return book.genre === "odd";
+					},
+					{ limit: 3 },
+				),
+			),
+		);
+		const afterDelete = diagnostics();
+		expect(deleteCalls).toEqual(rows.map((book) => book.id));
+		expect(deleted.deleted.map((book) => book.id)).toEqual(["b1", "b3", "b5"]);
+		expect(afterDelete.queryDispatches - beforeDelete.queryDispatches).toBe(1);
+		expect(
+			afterDelete.bulkMutationDispatches - beforeDelete.bulkMutationDispatches,
+		).toBe(1);
+	});
+
+	it("preserves scalar deleteMany limit coercion after predicate selection", async () => {
+		const cases = [
+			{ limit: -1, expected: ["b0", "b1", "b2", "b3", "b4"] },
+			{ limit: 0, expected: ["b0", "b1", "b2", "b3", "b4"] },
+			{ limit: 2.8, expected: ["b0", "b1"] },
+			{ limit: 3, expected: ["b0", "b1", "b2"] },
+		] as const;
+
+		for (const [caseIndex, testCase] of cases.entries()) {
+			const rows = Array.from({ length: 5 }, (_, index) => ({
+				id: `b${index}`,
+				title: `Book ${index}`,
+				year: 2000 + index,
+				genre: "original",
+			}));
+			const db = await Effect.runPromise(
+				createEffectDatabase(config, {
+					users: [],
+					companies: [],
+					books: rows,
+				}),
+			);
+			const calls: string[] = [];
+			const remove = (book: (typeof rows)[number]) => {
+				calls.push(book.id);
+				return true;
+			};
+			const deleted =
+				caseIndex % 2 === 0
+					? await db.books.deleteMany(remove, {
+							limit: testCase.limit,
+						}).runPromise
+					: await Effect.runPromise(
+							db.$transaction((tx) =>
+								tx.books.deleteMany(remove, {
+									limit: testCase.limit,
+								}),
+							),
+						);
+
+			expect(calls).toEqual(rows.map((row) => row.id));
+			expect(deleted.deleted.map((row) => row.id)).toEqual(testCase.expected);
+			await db.close();
+		}
+	});
+
+	it("keeps predicate-captured rows live, identical, and dirty-synchronized", async () => {
+		const db = await Effect.runPromise(
+			createEffectDatabase(config, {
+				users: [],
+				companies: [],
+				books: [
+					{ id: "b1", title: "One", year: 2001, genre: "original" },
+					{ id: "b2", title: "Two", year: 2002, genre: "original" },
+				],
+			}),
+		);
+		let captured:
+			| { id: string; title: string; year: number; genre: string }
+			| undefined;
+
+		await db.books.updateMany(
+			(book) => {
+				if (book.id === "b1") captured = book;
+				return book.id === "b2";
+			},
+			{ genre: "updated" },
+		).runPromise;
+
+		expect(captured).toBeDefined();
+		expect(await db.books.findById("b1").runPromise).toBe(captured);
+		if (captured === undefined) throw new Error("expected captured row");
+		captured.genre = "caller-mutated";
+		expect((await db.books.findById("b1").runPromise)?.genre).toBe(
+			"caller-mutated",
+		);
+		expect(await db.books.findById("b1").runPromise).toBe(captured);
+		await db.close();
+	});
+
+	it("performs zero writes when a scalar bulk predicate throws midway", async () => {
+		const rows = Array.from({ length: 6 }, (_, index) => ({
+			id: `b${index}`,
+			title: `Book ${index}`,
+			year: 2000 + index,
+			genre: "original",
+		}));
+		const db = await Effect.runPromise(
+			createEffectDatabase(config, {
+				users: [],
+				companies: [],
+				books: rows,
+			}),
+		);
+		const diagnostics = () =>
+			(
+				db as unknown as {
+					__proseqlMaterializationDiagnostics: () => {
+						bulkMutationDispatches: number;
+					};
+				}
+			).__proseqlMaterializationDiagnostics();
+		const before = { ...diagnostics() };
+		const predicateError = new Error("predicate stopped");
+
+		const exit = await Effect.runPromiseExit(
+			db.books.updateMany(
+				(book) => {
+					if (book.id === "b3") throw predicateError;
+					return true;
+				},
+				{ genre: "changed" },
+			),
+		);
+
+		expect(exit._tag).toBe("Failure");
+		if (exit._tag === "Failure") {
+			const reason = exit.cause.reasons[0];
+			expect(reason === undefined ? false : Cause.isDieReason(reason)).toBe(
+				true,
+			);
+			if (reason !== undefined && Cause.isDieReason(reason)) {
+				expect(reason.defect).toBe(predicateError);
+			}
+		}
+		expect(
+			diagnostics().bulkMutationDispatches - before.bulkMutationDispatches,
+		).toBe(0);
+
+		const transactionPredicateError = new Error(
+			"transaction predicate stopped",
+		);
+		const transactionExit = await Effect.runPromiseExit(
+			db.$transaction((tx) =>
+				tx.books.deleteMany((book) => {
+					if (book.id === "b2") throw transactionPredicateError;
+					return true;
+				}),
+			),
+		);
+		expect(transactionExit._tag).toBe("Failure");
+		if (transactionExit._tag === "Failure") {
+			const reason = transactionExit.cause.reasons[0];
+			expect(reason === undefined ? false : Cause.isDieReason(reason)).toBe(
+				true,
+			);
+			if (reason !== undefined && Cause.isDieReason(reason)) {
+				expect(reason.defect).toBe(transactionPredicateError);
+			}
+		}
+		expect(
+			diagnostics().bulkMutationDispatches - before.bulkMutationDispatches,
+		).toBe(0);
+		expect(
+			(await db.books.query({ sort: { id: "asc" } }).runPromise).map(
+				(book) => book.genre,
+			),
+		).toEqual(rows.map((book) => book.genre));
 	});
 
 	it("supplies the full TransactionContext surface with manual commit/rollback, inactive guards, and mutation tracking", async () => {

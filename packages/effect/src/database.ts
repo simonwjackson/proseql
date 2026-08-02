@@ -178,6 +178,16 @@ const normalizeRejection = (error: unknown): Error => {
 	return new Error(`Unknown engine rejection: ${JSON.stringify(error)}`);
 };
 
+class ScalarPredicateDefect extends Error {
+	readonly defect: unknown;
+
+	constructor(defect: unknown) {
+		super("Scalar predicate threw");
+		this.name = "ScalarPredicateDefect";
+		this.defect = defect;
+	}
+}
+
 const liftPromise = <A, E extends Error = Error>(
 	thunk: () => Promise<A>,
 	isDefect: (error: Error) => boolean = () => false,
@@ -188,6 +198,9 @@ const liftPromise = <A, E extends Error = Error>(
 	}).pipe(
 		Effect.catch((error) => {
 			const normalized = normalizeRejection(error);
+			if (normalized instanceof ScalarPredicateDefect) {
+				return Effect.die(normalized.defect);
+			}
 			if (isDefect(normalized) || isWasmEngineDefectError(normalized)) {
 				return Effect.die(normalized);
 			}
@@ -428,6 +441,33 @@ const wrapTransactionOperation = <A>(
 		})
 	);
 
+const selectScalarPredicateIds = <Row extends { readonly id: string }>(
+	rows: ReadonlyArray<Row>,
+	predicate: (entity: Row) => boolean,
+	limit?: number,
+): ReadonlyArray<string> => {
+	const ids: string[] = [];
+	for (const row of rows) {
+		let matches: boolean;
+		try {
+			matches = predicate.call(undefined, row);
+		} catch (defect) {
+			throw new ScalarPredicateDefect(defect);
+		}
+		if (matches) ids.push(row.id);
+	}
+	return limit !== undefined && limit > 0 ? ids.slice(0, limit) : ids;
+};
+
+const idSetWhere = (ids: ReadonlyArray<string>) => ({
+	id: { $in: [...ids] },
+});
+
+const optionsAfterPredicateLimit = (
+	options?: { readonly soft?: boolean; readonly limit?: number },
+): { readonly soft?: boolean } | undefined =>
+	options?.soft === undefined ? undefined : { soft: options.soft };
+
 const createTransactionCollectionAdapter = (
 	engineCollection: EngineCollection<any, any, any>,
 	collectionName: string,
@@ -455,13 +495,12 @@ const createTransactionCollectionAdapter = (
 				if (typeof predicate !== "function") {
 					return engineCollection.updateMany(predicate as never, updates as never) as Promise<UpdateManyResult<any>>;
 				}
-				const matched = (await engineCollection.query()) as ReadonlyArray<any>;
-				const targets = matched.filter(predicate);
-				const updated: Array<any> = [];
-				for (const entity of targets) {
-					updated.push(await engineCollection.update(entity.id, updates as never));
-				}
-				return { count: updated.length, updated } as UpdateManyResult<any>;
+				const rows = (await engineCollection.query()) as ReadonlyArray<{ readonly id: string }>;
+				const ids = selectScalarPredicateIds(rows, predicate);
+				return engineCollection.updateMany(
+					idSetWhere(ids) as never,
+					updates as never,
+				) as Promise<UpdateManyResult<any>>;
 			},
 			() => {
 				state.mutatedCollections.add(collectionName);
@@ -478,14 +517,12 @@ const createTransactionCollectionAdapter = (
 				if (typeof predicate !== "function") {
 					return engineCollection.deleteMany(predicate as never, options) as Promise<DeleteManyResult<any>>;
 				}
-				const matched = (await engineCollection.query()) as ReadonlyArray<any>;
-				const targets = matched.filter(predicate);
-				const limited = options?.limit && options.limit > 0 ? targets.slice(0, options.limit) : targets;
-				const deleted: Array<any> = [];
-				for (const entity of limited) {
-					deleted.push(await engineCollection.delete(entity.id, options));
-				}
-				return { count: deleted.length, deleted } as DeleteManyResult<any>;
+				const rows = (await engineCollection.query()) as ReadonlyArray<{ readonly id: string }>;
+				const ids = selectScalarPredicateIds(rows, predicate, options?.limit);
+				return engineCollection.deleteMany(
+					idSetWhere(ids) as never,
+					optionsAfterPredicateLimit(options),
+				) as Promise<DeleteManyResult<any>>;
 			},
 			() => {
 				state.mutatedCollections.add(collectionName);
@@ -549,39 +586,42 @@ const createCollectionAdapter = (
 	update: (id: string, updates: unknown) => withRunPromise(liftPromise(() => engineCollection.update(id, updates as never))) as never,
 	updateMany: (predicate: (entity: any) => boolean, updates: unknown) =>
 		withRunPromise(
-			liftPromise(() =>
-				transactionRunner(async (txCollection) => {
-					if (typeof predicate !== "function") {
-						return txCollection.updateMany(predicate as never, updates as never) as Promise<UpdateManyResult<any>>;
-					}
-					const matched = (await txCollection.query()) as ReadonlyArray<any>;
-					const targets = matched.filter(predicate);
-					const updated: Array<any> = [];
-					for (const entity of targets) {
-						updated.push(await txCollection.update(entity.id, updates as never));
-					}
-					return { count: updated.length, updated } as UpdateManyResult<any>;
-				})
-			)
+			liftPromise(async () => {
+				if (typeof predicate !== "function") {
+					return engineCollection.updateMany(
+						predicate as never,
+						updates as never,
+					) as Promise<UpdateManyResult<any>>;
+				}
+				const rows = (await engineCollection.query()) as ReadonlyArray<{
+					readonly id: string;
+				}>;
+				const ids = selectScalarPredicateIds(rows, predicate);
+				return engineCollection.updateMany(
+					idSetWhere(ids) as never,
+					updates as never,
+				) as Promise<UpdateManyResult<any>>;
+			})
 		) as never,
 	delete: (id: string, options?: { readonly soft?: boolean }) => withRunPromise(liftPromise(() => engineCollection.delete(id, options))) as never,
 	deleteMany: (predicate: (entity: any) => boolean, options?: { readonly soft?: boolean; readonly limit?: number }) =>
 		withRunPromise(
-			liftPromise(() =>
-				transactionRunner(async (txCollection) => {
-					if (typeof predicate !== "function") {
-						return txCollection.deleteMany(predicate as never, options) as Promise<DeleteManyResult<any>>;
-					}
-					const matched = (await txCollection.query()) as ReadonlyArray<any>;
-					const targets = matched.filter(predicate);
-					const limited = options?.limit && options.limit > 0 ? targets.slice(0, options.limit) : targets;
-					const deleted: Array<any> = [];
-					for (const entity of limited) {
-						deleted.push(await txCollection.delete(entity.id, options));
-					}
-					return { count: deleted.length, deleted } as DeleteManyResult<any>;
-				})
-			)
+			liftPromise(async () => {
+				if (typeof predicate !== "function") {
+					return engineCollection.deleteMany(
+						predicate as never,
+						options,
+					) as Promise<DeleteManyResult<any>>;
+				}
+				const rows = (await engineCollection.query()) as ReadonlyArray<{
+					readonly id: string;
+				}>;
+				const ids = selectScalarPredicateIds(rows, predicate, options?.limit);
+				return engineCollection.deleteMany(
+					idSetWhere(ids) as never,
+					optionsAfterPredicateLimit(options),
+				) as Promise<DeleteManyResult<any>>;
+			})
 		) as never,
 	upsert: (input: unknown) => withRunPromise(liftPromise(() => engineCollection.upsert(input as never))) as never,
 	upsertMany: (inputs: ReadonlyArray<unknown>) => withRunPromise(liftPromise(() => engineCollection.upsertMany(inputs as never))) as never,

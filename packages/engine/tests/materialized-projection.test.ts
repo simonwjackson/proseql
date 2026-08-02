@@ -84,6 +84,39 @@ describe("materialized projection", () => {
 		).toBe(result[0]);
 	});
 
+	it("uses the sparse slot table as the only 10K materialization index", () => {
+		const count = 10_000;
+		const projection = new MaterializedProjection({
+			collections: {
+				users: Array.from({ length: count }, (_, index) => ({
+					id: `u${index}`,
+					handle: `${index}:1:1`,
+				})),
+			},
+		});
+		const result = projection.materializeCompact<ReadonlyArray<{ id: string }>>(
+			"users",
+			{
+				k: "q",
+				r: Array.from(
+					{ length: count },
+					(_, index) => [index, `u${index}`, { id: `u${index}` }] as const,
+				),
+			},
+			1,
+		);
+		const internals = projection as unknown as {
+			readonly slots: ReadonlyArray<{ readonly token?: unknown }>;
+		};
+
+		expect(result).toHaveLength(count);
+		expect(projection.materializedEntries("users").size).toBe(count);
+		expect(Object.hasOwn(projection, "materializedKeys")).toBe(false);
+		expect(
+			internals.slots.every((slot) => typeof slot.token === "number"),
+		).toBe(true);
+	});
+
 	it("tracks deep sets, deletes, definitions, and array holes without replacing identity", () => {
 		const value = { id: "u1", nested: { name: "Alice" }, values: [1, 2, 3] };
 		const projection = new MaterializedProjection({

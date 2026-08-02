@@ -493,6 +493,11 @@ const MUTATION_METHODS = new Set([
 	"commitSnapshotTransaction",
 ]);
 
+type EngineRuntimeDiagnostics = {
+	bulkMutationDispatches: number;
+	queryDispatches: number;
+};
+
 class EngineRuntime {
 	readonly runtime: WasmRuntimeBinding;
 	readonly handle: number;
@@ -500,17 +505,23 @@ class EngineRuntime {
 	private readonly projection: MaterializedProjection;
 	private readonly collectionIndexes: ReadonlyMap<string, number>;
 	private readonly canonicalQueryCollections: ReadonlySet<string>;
+	private readonly diagnostics: EngineRuntimeDiagnostics;
 
 	private constructor(
 		runtime: WasmRuntimeBinding,
 		handle: number,
 		createInput: { descriptor: Record<string, unknown> },
 		projection: MaterializedProjection,
+		diagnostics: EngineRuntimeDiagnostics = {
+			bulkMutationDispatches: 0,
+			queryDispatches: 0,
+		},
 	) {
 		this.runtime = runtime;
 		this.handle = handle;
 		this.createInput = createInput;
 		this.projection = projection;
+		this.diagnostics = diagnostics;
 		const descriptors = Array.isArray(createInput.descriptor.collections) ? createInput.descriptor.collections : [];
 		this.collectionIndexes = new Map(
 			descriptors.flatMap((descriptor, index) => {
@@ -623,10 +634,12 @@ class EngineRuntime {
 			shouldProjectRead(method, prepared) &&
 			(method !== "query" || (collection !== undefined && this.canonicalQueryCollections.has(collection)));
 		const deletionNeedsPriorIdentity = matchesDeletionResultMethod(method);
-		const priorMaterialized =
-			collection !== undefined && deletionNeedsPriorIdentity
-				? this.projection.materializedEntries(collection)
-				: new Map<string, unknown>();
+		const priorMaterialized = new Map<string, unknown>();
+		if (method === "updateMany" || method === "deleteMany") {
+			this.diagnostics.bulkMutationDispatches += 1;
+		} else if (method === "query" || method === "queryCursor") {
+			this.diagnostics.queryDispatches += 1;
+		}
 		const raw = projected
 			? this.runtime.dispatch_projected(this.handle, method, payloadJson)
 			: this.runtime.dispatch(this.handle, method, payloadJson);
@@ -638,6 +651,18 @@ class EngineRuntime {
 				throw new Error(`Mutation response omitted projection sync: ${method}`);
 			}
 			mutationSync = decodeBoundaryValueForHost(parsed.projection);
+			if (collection !== undefined && deletionNeedsPriorIdentity) {
+				for (const change of mutationSync.changes) {
+					if (change.collection !== collection || !change.deleted) continue;
+					const materialized = this.projection.materializedValue(
+						collection,
+						change.id,
+					);
+					if (materialized !== undefined) {
+						priorMaterialized.set(change.id, materialized);
+					}
+				}
+			}
 			this.projection.apply(mutationSync);
 		} else if (parsed.kind === "defect") {
 			this.projection.invalidate();
@@ -829,11 +854,21 @@ class EngineRuntime {
 		const handle = parseBridgeResponse<number>(this.runtime.create_database(JSON.stringify(createPayload)));
 		const handles = parseBridgeResponse<ProjectionHandles>(this.runtime.projection_handles(handle));
 		const projection = new MaterializedProjection(projectionSnapshotFromHandles(handles));
-		return new EngineRuntime(this.runtime, handle, { descriptor: createPayload.descriptor }, projection);
+		return new EngineRuntime(
+			this.runtime,
+			handle,
+			{ descriptor: createPayload.descriptor },
+			projection,
+			this.diagnostics,
+		);
 	}
 
 	materializationDiagnostics() {
-		return this.projection.stats;
+		return {
+			...this.projection.stats,
+			bulkMutationDispatches: this.diagnostics.bulkMutationDispatches,
+			queryDispatches: this.diagnostics.queryDispatches,
+		};
 	}
 
 	drop(): Promise<void> {

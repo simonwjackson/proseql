@@ -74,7 +74,7 @@ type Slot = {
 	weakValue?: WeakRef<object>;
 	readonly valueBytes: number;
 	proxyCount: number;
-	readonly token?: object;
+	readonly token?: number;
 };
 
 export type DirtyProjectionRow = {
@@ -190,7 +190,6 @@ export class MaterializedProjection {
 	private readonly slotById = new Map<string, number>();
 	private readonly slotByRustSlot = new Map<number, number>();
 	private readonly freeSlots: number[] = [];
-	private readonly materializedKeys = new Set<string>();
 	private readonly dirtyKeys = new Set<string>();
 	private readonly fastFindPins: FastFindPin[] = [];
 	private readonly fastFindPinnedHandles = new Set<string>();
@@ -203,6 +202,7 @@ export class MaterializedProjection {
 		FastFindCandidate
 	>();
 	private invalid = false;
+	private nextProxyToken = 1;
 	private mutableStats = {
 		descriptors: 0,
 		compactDescriptors: 0,
@@ -291,13 +291,11 @@ export class MaterializedProjection {
 
 	materializedEntries(collection: string): ReadonlyMap<string, unknown> {
 		const entries = new Map<string, unknown>();
-		const prefix = `${collection}\u0000`;
-		for (const key of this.materializedKeys) {
-			if (!key.startsWith(prefix)) continue;
-			const slot = this.slotById.get(key);
-			const row = slot === undefined ? undefined : this.slots[slot];
-			const value = slot === undefined ? undefined : this.resolveValue(slot);
-			if (row !== undefined && value !== undefined) entries.set(row.id, value);
+		for (let slot = 0; slot < this.slots.length; slot += 1) {
+			const row = this.slots[slot];
+			if (row?.collection !== collection || !row.hasValue) continue;
+			const value = this.resolveValue(slot);
+			if (value !== undefined) entries.set(row.id, value);
 		}
 		return entries;
 	}
@@ -347,7 +345,6 @@ export class MaterializedProjection {
 		this.slotById.clear();
 		this.slotByRustSlot.clear();
 		this.freeSlots.length = 0;
-		this.materializedKeys.clear();
 		this.dirtyKeys.clear();
 		this.clearFastFindPins();
 		this.mutableStats.materializedRows = 0;
@@ -556,7 +553,6 @@ export class MaterializedProjection {
 		this.slotById.clear();
 		this.slotByRustSlot.clear();
 		this.freeSlots.length = 0;
-		this.materializedKeys.clear();
 		this.dirtyKeys.clear();
 		this.clearFastFindPins();
 		this.mutableStats.materializedRows = 0;
@@ -576,7 +572,6 @@ export class MaterializedProjection {
 		if (value !== undefined) return value;
 		row.hasValue = false;
 		row.weakValue = undefined;
-		this.materializedKeys.delete(keyOf(row.collection, row.id));
 		this.mutableStats.materializedRows = Math.max(
 			0,
 			this.mutableStats.materializedRows - 1,
@@ -604,11 +599,12 @@ export class MaterializedProjection {
 		let trackedValue: unknown;
 		let valueBytes = 0;
 		let proxyCount = 0;
-		let token: object | undefined;
+		let token: number | undefined;
 		let installed = false;
 		if (incomingHasValue) {
 			const proxyCache = new WeakMap<object, unknown>();
-			token = {};
+			token = this.nextProxyToken;
+			this.nextProxyToken += 1;
 			const activeToken = token;
 			trackedValue = trackDeep(
 				row.value,
@@ -644,7 +640,6 @@ export class MaterializedProjection {
 		}
 		if (prior !== undefined) this.unpinFastFindHandle(prior.handle);
 		if (prior?.hasValue) {
-			this.materializedKeys.delete(key);
 			this.mutableStats.materializedRows = Math.max(
 				0,
 				this.mutableStats.materializedRows - 1,
@@ -677,7 +672,6 @@ export class MaterializedProjection {
 		this.slotByRustSlot.set(handleToken.rustSlot, target);
 		this.dirtyKeys.delete(key);
 		if (incomingHasValue) {
-			this.materializedKeys.add(key);
 			this.mutableStats.materializedRows += 1;
 			this.mutableStats.trackedProxies += proxyCount;
 			this.mutableStats.peakMaterializedRows = Math.max(
@@ -787,7 +781,6 @@ export class MaterializedProjection {
 			this.slotByRustSlot.delete(prior.rustSlot);
 		}
 		if (prior !== undefined) this.unpinFastFindHandle(prior.handle);
-		this.materializedKeys.delete(key);
 		this.dirtyKeys.delete(key);
 		this.freeSlots.push(slot);
 	}
