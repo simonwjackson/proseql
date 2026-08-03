@@ -2,17 +2,25 @@ import { Bench } from "tinybench";
 import { describe, expect, it, vi } from "vitest";
 import { attachTaskMetadata, buildComparisons } from "./comparison.js";
 import { createSuite as createQueryPipelineSuite } from "./query-pipeline.bench.js";
-import type { BenchmarkJsonOutput, DiscoveredBenchmark } from "./runner.js";
+import type {
+	BenchmarkJsonOutput,
+	BenchmarkSuiteJsonOutput,
+	DiscoveredBenchmark,
+} from "./runner.js";
 import {
 	BenchmarkExecutionError,
 	buildBenchmarkJsonOutput,
+	buildIsolatedSuiteChildProcessOptions,
 	discoverBenchmarks,
 	executeAllSuites,
 	executeIsolatedBenchmarkProcess,
 	filterBenchmarks,
+	isolatedSuiteWatchdogMs,
 	mergeIsolatedStressSuiteOutputs,
 	normalizeAttemptTimeoutMs,
+	parseBenchmarkRunnerArgs,
 	shouldRunInIsolatedStressChild,
+	shouldRunInIsolatedSuiteChild,
 } from "./runner.js";
 import { defaultBenchOptions } from "./utils.js";
 
@@ -504,7 +512,290 @@ const makeIsolatedOutput = (
 	...overrides,
 });
 
+describe("isolated full-suite execution", () => {
+	const suiteOutput = (suite: string): BenchmarkSuiteJsonOutput => ({
+		suite,
+		results: [],
+		comparisons: [],
+		contract: { passed: true, failures: [] },
+		timestamp: "2026-01-01T00:00:00.000Z",
+	});
+
+	it("calculates an overflow-safe parent watchdog across every adaptive attempt", () => {
+		expect(isolatedSuiteWatchdogMs(900_000, 3)).toBe(2_730_000);
+		expect(isolatedSuiteWatchdogMs(25, 4)).toBe(30_100);
+		expect(isolatedSuiteWatchdogMs(undefined, 3)).toBeUndefined();
+		expect(isolatedSuiteWatchdogMs(Number.MAX_SAFE_INTEGER, 3)).toBe(
+			2_147_483_647,
+		);
+	});
+
+	it("parses the adaptive controls propagated through the child CLI", () => {
+		expect(
+			parseBenchmarkRunnerArgs([
+				"query-pipeline",
+				"--json",
+				"--min-samples-per-task",
+				"41",
+				"--max-adaptive-attempts",
+				"4",
+				"--attempt-timeout-ms",
+				"125",
+				"--adaptive-time-multiplier",
+				"2.5",
+			]),
+		).toMatchObject({
+			filter: "query-pipeline",
+			json: true,
+			minSamplesPerTask: 41,
+			maxAdaptiveAttempts: 4,
+			attemptTimeoutMs: 125,
+			adaptiveTimeMultiplier: 2.5,
+		});
+	});
+
+	it("builds child arguments with adaptive controls and distinct timeout budgets", () => {
+		const child = buildIsolatedSuiteChildProcessOptions({
+			suiteName: "query-pipeline",
+			includeStress: false,
+			minSamplesPerTask: 41,
+			maxAdaptiveAttempts: 4,
+			attemptTimeoutMs: 125,
+			adaptiveTimeMultiplier: 2.5,
+			engines: ["wasm"],
+			caseName: "filter equality @ 10K",
+		});
+
+		expect(child.env).toEqual({ PROSEQL_BENCH_SUITE_CHILD: "1" });
+		expect(child.timeoutMs).toBe(30_500);
+		expect(child.cmd).toEqual(
+			expect.arrayContaining([
+				"query-pipeline",
+				"--json",
+				"--engine",
+				"wasm",
+				"--case",
+				"filter equality @ 10K",
+				"--min-samples-per-task",
+				"41",
+				"--max-adaptive-attempts",
+				"4",
+				"--adaptive-time-multiplier",
+				"2.5",
+				"--attempt-timeout-ms",
+				"125",
+			]),
+		);
+	});
+
+	it("isolates full-report suites while single-suite and guarded children stay in-process", () => {
+		expect(
+			shouldRunInIsolatedSuiteChild({
+				isolateSuites: true,
+				suiteName: "query-pipeline",
+				includeStress: false,
+				env: {},
+			}),
+		).toBe(true);
+		expect(
+			shouldRunInIsolatedSuiteChild({
+				isolateSuites: false,
+				suiteName: "query-pipeline",
+				includeStress: false,
+				env: {},
+			}),
+		).toBe(false);
+		expect(
+			shouldRunInIsolatedSuiteChild({
+				isolateSuites: true,
+				suiteName: "query-pipeline",
+				includeStress: false,
+				env: { PROSEQL_BENCH_SUITE_CHILD: "1" },
+			}),
+		).toBe(false);
+		expect(
+			shouldRunInIsolatedSuiteChild({
+				isolateSuites: true,
+				suiteName: "scaling",
+				includeStress: true,
+				env: {},
+			}),
+		).toBe(false);
+	});
+
+	it("merges exact suite JSON from a fresh child for every full-report suite", async () => {
+		const executeProcess = vi.fn(
+			async ({ cmd }: { cmd: ReadonlyArray<string> }) => {
+				const suite = cmd[2] ?? "";
+				return {
+					exitCode: 0,
+					stdout: JSON.stringify(
+						makeIsolatedOutput({ suites: [suiteOutput(suite)] }),
+					),
+					stderr: "",
+					timedOut: false,
+				};
+			},
+		);
+		const results = await executeAllSuites(
+			[
+				createSyntheticBenchmark({ suiteName: "serialization" }),
+				createSyntheticBenchmark({ suiteName: "query-pipeline" }),
+			],
+			{
+				verbose: false,
+				isolateSuites: true,
+				isolatedProcessExecutor: executeProcess,
+			},
+		);
+
+		expect(results.map((result) => result.suiteOutput?.suite)).toEqual([
+			"serialization",
+			"query-pipeline",
+		]);
+		expect(executeProcess).toHaveBeenCalledTimes(2);
+		for (const [call] of executeProcess.mock.calls) {
+			expect(call.env).toEqual({ PROSEQL_BENCH_SUITE_CHILD: "1" });
+			expect(call.timeoutMs).toBe(2_730_000);
+			expect(call.cmd).toContain("--json");
+			expect(call.cmd).toContain("--min-samples-per-task");
+			expect(call.cmd).toContain("30");
+			expect(call.cmd).toContain("--max-adaptive-attempts");
+			expect(call.cmd).toContain("3");
+			expect(call.cmd).toContain("--adaptive-time-multiplier");
+			expect(call.cmd).toContain("2");
+			expect(call.cmd).toContain("--attempt-timeout-ms");
+			expect(call.cmd).toContain("900000");
+		}
+	});
+
+	it("attributes isolated child process failures to their suite", async () => {
+		await expect(
+			executeAllSuites(
+				[createSyntheticBenchmark({ suiteName: "query-pipeline" })],
+				{
+					verbose: false,
+					isolateSuites: true,
+					isolatedProcessExecutor: async () => ({
+						exitCode: 2,
+						stdout: JSON.stringify(
+							makeIsolatedOutput({
+								executionFailures: [
+									{
+										suiteName: "query-pipeline",
+										path: "/bench/query-pipeline.bench.ts",
+										message: "callback state failed",
+									},
+								],
+							}),
+						),
+						stderr: "",
+						timedOut: false,
+					}),
+				},
+			),
+		).rejects.toMatchObject({
+			failures: [
+				{
+					suiteName: "query-pipeline",
+					message: "callback state failed",
+					timedOut: false,
+				},
+			],
+		});
+	});
+
+	it("reports and stops after an isolated suite timeout", async () => {
+		const executeProcess = vi.fn(async () => ({
+			exitCode: null,
+			stdout: "",
+			stderr: "",
+			timedOut: true,
+		}));
+		await expect(
+			executeAllSuites(
+				[
+					createSyntheticBenchmark({ suiteName: "serialization" }),
+					createSyntheticBenchmark({ suiteName: "query-pipeline" }),
+				],
+				{
+					verbose: false,
+					attemptTimeoutMs: 25,
+					isolateSuites: true,
+					isolatedProcessExecutor: executeProcess,
+				},
+			),
+		).rejects.toMatchObject({
+			failures: [
+				{
+					suiteName: "serialization",
+					timedOut: true,
+					message:
+						"Parent watchdog timed out after 30075ms for isolated serialization suite; each child attempt remains bounded to 25ms",
+				},
+			],
+		});
+		expect(executeProcess).toHaveBeenCalledTimes(1);
+	});
+});
+
 describe("isolated stress execution", () => {
+	it("propagates adaptive controls and the aggregate watchdog to stress children", async () => {
+		const executeProcess = vi.fn(
+			async ({ cmd }: { cmd: ReadonlyArray<string> }) => ({
+				exitCode: 0,
+				stdout: JSON.stringify(
+					makeIsolatedOutput({
+						suites: [
+							{
+								suite: "scaling",
+								results: [],
+								comparisons: [],
+								contract: { passed: true, failures: [] },
+								timestamp: "2026-01-01T00:00:00.000Z",
+							},
+						],
+					}),
+				),
+				stderr: "",
+				timedOut: false,
+				cmd,
+			}),
+		);
+
+		await executeAllSuites(
+			[createSyntheticBenchmark({ suiteName: "scaling" })],
+			{
+				verbose: false,
+				includeStress: true,
+				caseName: "findById @ 100K",
+				minSamplesPerTask: 41,
+				maxAdaptiveAttempts: 4,
+				attemptTimeoutMs: 125,
+				adaptiveTimeMultiplier: 2.5,
+				isolatedProcessExecutor: executeProcess,
+			},
+		);
+
+		expect(executeProcess).toHaveBeenCalledTimes(2);
+		for (const [call] of executeProcess.mock.calls) {
+			expect(call.env).toEqual({ PROSEQL_BENCH_STRESS_CHILD: "1" });
+			expect(call.timeoutMs).toBe(30_500);
+			expect(call.cmd).toEqual(
+				expect.arrayContaining([
+					"--min-samples-per-task",
+					"41",
+					"--max-adaptive-attempts",
+					"4",
+					"--adaptive-time-multiplier",
+					"2.5",
+					"--attempt-timeout-ms",
+					"125",
+				]),
+			);
+		}
+	});
+
 	it("detects when scaling stress should run in a fresh child process without recursion", () => {
 		expect(
 			shouldRunInIsolatedStressChild({

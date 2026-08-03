@@ -24,7 +24,10 @@ const DEFAULT_MIN_SAMPLES_PER_TASK = 30;
 const DEFAULT_MAX_ADAPTIVE_ATTEMPTS = 3;
 const DEFAULT_ATTEMPT_TIMEOUT_MS = 900_000;
 const DEFAULT_ADAPTIVE_TIME_MULTIPLIER = 2;
+const ISOLATED_SUITE_PROCESS_MARGIN_MS = 30_000;
+const MAX_JAVASCRIPT_TIMER_MS = 2_147_483_647;
 const STRESS_CHILD_ENV = "PROSEQL_BENCH_STRESS_CHILD";
+const SUITE_CHILD_ENV = "PROSEQL_BENCH_SUITE_CHILD";
 const RUNNER_PATH = fileURLToPath(import.meta.url);
 
 export interface BenchmarkSuiteOptions {
@@ -244,6 +247,20 @@ export const shouldRunInIsolatedStressChild = (options: {
 	);
 };
 
+export const shouldRunInIsolatedSuiteChild = (options: {
+	readonly isolateSuites: boolean;
+	readonly suiteName: string;
+	readonly includeStress: boolean;
+	readonly env?: Record<string, string | undefined>;
+}): boolean => {
+	const env = options.env ?? process.env;
+	return (
+		options.isolateSuites &&
+		env[SUITE_CHILD_ENV] !== "1" &&
+		!(options.includeStress && options.suiteName === "scaling")
+	);
+};
+
 const SCALING_STRESS_CASE_NAMES = WORKLOAD_MANIFEST.filter(
 	(entry) => entry.suite === "scaling" && entry.caseType === "stress",
 ).map((entry) => entry.name);
@@ -314,6 +331,31 @@ const parseBenchmarkJsonOutput = (
 			`${context} produced invalid machine-readable JSON output: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
+};
+
+const isolatedProcessFailureMessage = (options: {
+	readonly result: IsolatedProcessResult;
+	readonly suiteName: string;
+	readonly childDescription: string;
+}): string => {
+	if (options.result.stdout.trim().length > 0) {
+		try {
+			const output = parseBenchmarkJsonOutput(
+				options.result.stdout,
+				options.childDescription,
+			);
+			const failure = output.executionFailures.find(
+				(candidate) => candidate.suiteName === options.suiteName,
+			);
+			if (failure) return failure.message;
+		} catch {
+			// Fall through to stderr or the process-level failure below.
+		}
+	}
+	return (
+		options.result.stderr.trim() ||
+		`${options.childDescription} exited with code ${String(options.result.exitCode)}`
+	);
 };
 
 async function executeSuiteAttempt(
@@ -467,10 +509,14 @@ async function executeSuite(
 	return lastResult;
 }
 
-const requireSuiteOutput = (output: BenchmarkJsonOutput, suiteName: string) => {
+const requireSuiteOutput = (
+	output: BenchmarkJsonOutput,
+	suiteName: string,
+	context = "Isolated child",
+) => {
 	const suiteOutput = output.suites.find((suite) => suite.suite === suiteName);
 	if (!suiteOutput) {
-		throw new Error(`Isolated stress child did not report suite ${suiteName}`);
+		throw new Error(`${context} did not report suite ${suiteName}`);
 	}
 	const suiteFailure = output.executionFailures.find(
 		(failure) => failure.suiteName === suiteName,
@@ -541,11 +587,138 @@ export const mergeIsolatedStressSuiteOutputs = (options: {
 	};
 };
 
+type IsolatedProcessExecutor = typeof executeIsolatedBenchmarkProcess;
+
+export const isolatedSuiteWatchdogMs = (
+	attemptTimeoutMs: number | undefined,
+	maxAdaptiveAttempts: number,
+): number | undefined => {
+	if (attemptTimeoutMs === undefined) return undefined;
+	const attempts = Math.max(1, Math.trunc(maxAdaptiveAttempts));
+	const maximumAttemptBudget =
+		MAX_JAVASCRIPT_TIMER_MS - ISOLATED_SUITE_PROCESS_MARGIN_MS;
+	if (attemptTimeoutMs >= maximumAttemptBudget / attempts) {
+		return MAX_JAVASCRIPT_TIMER_MS;
+	}
+	return attemptTimeoutMs * attempts + ISOLATED_SUITE_PROCESS_MARGIN_MS;
+};
+
+export const buildIsolatedSuiteChildProcessOptions = (options: {
+	readonly suiteName: string;
+	readonly includeStress: boolean;
+	readonly minSamplesPerTask: number;
+	readonly maxAdaptiveAttempts: number;
+	readonly attemptTimeoutMs: number | undefined;
+	readonly adaptiveTimeMultiplier: number;
+	readonly engines?: ReadonlyArray<EngineId>;
+	readonly caseName?: string;
+}): {
+	readonly cmd: ReadonlyArray<string>;
+	readonly env: Record<string, string>;
+	readonly timeoutMs: number | undefined;
+} => {
+	const engineArgs =
+		options.engines?.length === 1
+			? ["--engine", options.engines[0] as EngineId]
+			: [];
+	return {
+		cmd: [
+			process.execPath,
+			RUNNER_PATH,
+			options.suiteName,
+			"--json",
+			...(options.includeStress ? ["--stress"] : []),
+			...engineArgs,
+			...(options.caseName === undefined ? [] : ["--case", options.caseName]),
+			"--min-samples-per-task",
+			String(options.minSamplesPerTask),
+			"--max-adaptive-attempts",
+			String(options.maxAdaptiveAttempts),
+			"--adaptive-time-multiplier",
+			String(options.adaptiveTimeMultiplier),
+			...(options.attemptTimeoutMs === undefined
+				? ["--no-attempt-timeout"]
+				: ["--attempt-timeout-ms", String(options.attemptTimeoutMs)]),
+		],
+		env: { [SUITE_CHILD_ENV]: "1" },
+		timeoutMs: isolatedSuiteWatchdogMs(
+			options.attemptTimeoutMs,
+			options.maxAdaptiveAttempts,
+		),
+	};
+};
+
+async function executeSuiteInIsolatedChild(
+	benchmark: DiscoveredBenchmark,
+	options: {
+		readonly includeStress: boolean;
+		readonly minSamplesPerTask: number;
+		readonly maxAdaptiveAttempts: number;
+		readonly attemptTimeoutMs: number | undefined;
+		readonly adaptiveTimeMultiplier: number;
+		readonly engines?: ReadonlyArray<EngineId>;
+		readonly caseName?: string;
+		readonly executeProcess: IsolatedProcessExecutor;
+		readonly verbose: boolean;
+	},
+): Promise<SuiteExecutionResult> {
+	const startedAt = performance.now();
+	const childDescription = `${benchmark.module.suiteName} suite`;
+	const childProcessOptions = buildIsolatedSuiteChildProcessOptions({
+		suiteName: benchmark.module.suiteName,
+		includeStress: options.includeStress,
+		minSamplesPerTask: options.minSamplesPerTask,
+		maxAdaptiveAttempts: options.maxAdaptiveAttempts,
+		attemptTimeoutMs: options.attemptTimeoutMs,
+		adaptiveTimeMultiplier: options.adaptiveTimeMultiplier,
+		engines: options.engines,
+		caseName: options.caseName,
+	});
+	const result = await options.executeProcess(childProcessOptions);
+	if (options.verbose && result.stderr.trim().length > 0) {
+		console.error(result.stderr.trimEnd());
+	}
+	if (result.timedOut) {
+		const watchdogMs =
+			childProcessOptions.timeoutMs ?? DEFAULT_ATTEMPT_TIMEOUT_MS;
+		throw new BenchmarkAttemptTimeoutError(
+			`Parent watchdog timed out after ${watchdogMs}ms for isolated ${childDescription}; each child attempt remains bounded to ${options.attemptTimeoutMs ?? "no"}ms`,
+			watchdogMs,
+		);
+	}
+	if (result.exitCode !== 0) {
+		throw new Error(
+			isolatedProcessFailureMessage({
+				result,
+				suiteName: benchmark.module.suiteName,
+				childDescription: `Isolated suite child ${childDescription}`,
+			}),
+		);
+	}
+	const output = parseBenchmarkJsonOutput(
+		result.stdout,
+		`Isolated suite child ${childDescription}`,
+	);
+	return {
+		suiteName: benchmark.module.suiteName,
+		suiteOutput: requireSuiteOutput(
+			output,
+			benchmark.module.suiteName,
+			"Isolated suite child",
+		),
+		durationMs: performance.now() - startedAt,
+	};
+}
+
 async function executeSuiteInIsolatedStressChild(
 	benchmark: DiscoveredBenchmark,
 	options: {
+		readonly minSamplesPerTask: number;
+		readonly maxAdaptiveAttempts: number;
 		readonly attemptTimeoutMs: number | undefined;
+		readonly adaptiveTimeMultiplier: number;
 		readonly caseName?: string;
+		readonly executeProcess: IsolatedProcessExecutor;
 	},
 ): Promise<SuiteExecutionResult> {
 	const startedAt = performance.now();
@@ -563,36 +736,36 @@ async function executeSuiteInIsolatedStressChild(
 			"wasm",
 		] as const satisfies ReadonlyArray<EngineId>) {
 			const childDescription = `${benchmark.module.suiteName} / ${caseName} / ${engineId}`;
-			const result = await executeIsolatedBenchmarkProcess({
-				cmd: [
-					process.execPath,
-					RUNNER_PATH,
-					benchmark.module.suiteName,
-					"--json",
-					"--stress",
-					"--engine",
-					engineId,
-					"--case",
-					caseName,
-					...(options.attemptTimeoutMs === undefined
-						? ["--no-attempt-timeout"]
-						: ["--attempt-timeout-ms", String(options.attemptTimeoutMs)]),
-				],
-				env: {
-					[STRESS_CHILD_ENV]: "1",
-				},
-				timeoutMs: options.attemptTimeoutMs,
+			const suiteChildOptions = buildIsolatedSuiteChildProcessOptions({
+				suiteName: benchmark.module.suiteName,
+				includeStress: true,
+				minSamplesPerTask: options.minSamplesPerTask,
+				maxAdaptiveAttempts: options.maxAdaptiveAttempts,
+				attemptTimeoutMs: options.attemptTimeoutMs,
+				adaptiveTimeMultiplier: options.adaptiveTimeMultiplier,
+				engines: [engineId],
+				caseName,
 			});
+			const stressChildOptions = {
+				...suiteChildOptions,
+				env: { [STRESS_CHILD_ENV]: "1" },
+			};
+			const result = await options.executeProcess(stressChildOptions);
 			if (result.timedOut) {
+				const watchdogMs =
+					stressChildOptions.timeoutMs ?? DEFAULT_ATTEMPT_TIMEOUT_MS;
 				throw new BenchmarkAttemptTimeoutError(
-					`Isolated stress child timed out after ${options.attemptTimeoutMs}ms for ${childDescription}`,
-					options.attemptTimeoutMs ?? DEFAULT_ATTEMPT_TIMEOUT_MS,
+					`Parent watchdog timed out after ${watchdogMs}ms for isolated stress child ${childDescription}; each child attempt remains bounded to ${options.attemptTimeoutMs ?? "no"}ms`,
+					watchdogMs,
 				);
 			}
 			if (result.exitCode !== 0) {
 				throw new Error(
-					result.stderr.trim() ||
-						`Isolated stress child exited with code ${String(result.exitCode)} for ${childDescription}`,
+					isolatedProcessFailureMessage({
+						result,
+						suiteName: benchmark.module.suiteName,
+						childDescription: `Isolated stress child ${childDescription}`,
+					}),
 				);
 			}
 			outputs.push({
@@ -625,6 +798,8 @@ export async function executeAllSuites(
 		readonly adaptiveTimeMultiplier?: number;
 		readonly engines?: ReadonlyArray<EngineId>;
 		readonly caseName?: string;
+		readonly isolateSuites?: boolean;
+		readonly isolatedProcessExecutor?: IsolatedProcessExecutor;
 	} = {},
 ): Promise<ReadonlyArray<SuiteExecutionResult>> {
 	const results: SuiteExecutionResult[] = [];
@@ -638,6 +813,8 @@ export async function executeAllSuites(
 		adaptiveTimeMultiplier = DEFAULT_ADAPTIVE_TIME_MULTIPLIER,
 		engines,
 		caseName,
+		isolateSuites = false,
+		isolatedProcessExecutor = executeIsolatedBenchmarkProcess,
 	} = options;
 	const attemptTimeoutMs = normalizeAttemptTimeoutMs(rawAttemptTimeoutMs);
 
@@ -650,23 +827,45 @@ export async function executeAllSuites(
 		}
 
 		try {
-			const result = shouldRunInIsolatedStressChild({
+			const isolateStress = shouldRunInIsolatedStressChild({
 				suiteName: benchmark.module.suiteName,
 				includeStress,
-			})
+			});
+			const isolateSuite = shouldRunInIsolatedSuiteChild({
+				isolateSuites,
+				suiteName: benchmark.module.suiteName,
+				includeStress,
+			});
+			const result = isolateStress
 				? await executeSuiteInIsolatedStressChild(benchmark, {
-						attemptTimeoutMs,
-						caseName,
-					})
-				: await executeSuite(benchmark, {
-						includeStress,
 						minSamplesPerTask,
 						maxAdaptiveAttempts,
 						attemptTimeoutMs,
 						adaptiveTimeMultiplier,
-						engines,
 						caseName,
-					});
+						executeProcess: isolatedProcessExecutor,
+					})
+				: isolateSuite
+					? await executeSuiteInIsolatedChild(benchmark, {
+							includeStress,
+							minSamplesPerTask,
+							maxAdaptiveAttempts,
+							attemptTimeoutMs,
+							adaptiveTimeMultiplier,
+							engines,
+							caseName,
+							executeProcess: isolatedProcessExecutor,
+							verbose,
+						})
+					: await executeSuite(benchmark, {
+							includeStress,
+							minSamplesPerTask,
+							maxAdaptiveAttempts,
+							attemptTimeoutMs,
+							adaptiveTimeMultiplier,
+							engines,
+							caseName,
+						});
 			results.push(result);
 			if (verbose) {
 				const benchmarkCount =
@@ -751,20 +950,25 @@ export const buildBenchmarkJsonOutput = (
 	};
 };
 
-function parseArgs(): {
+export function parseBenchmarkRunnerArgs(args: ReadonlyArray<string>): {
 	readonly json: boolean;
 	readonly filter: string | null;
 	readonly includeStress: boolean;
 	readonly engines: ReadonlyArray<EngineId> | undefined;
 	readonly caseName: string | null;
+	readonly minSamplesPerTask: number | undefined;
+	readonly maxAdaptiveAttempts: number | undefined;
 	readonly attemptTimeoutMs: number | null | undefined;
+	readonly adaptiveTimeMultiplier: number | undefined;
 } {
-	const args = process.argv.slice(2);
 	let json = false;
 	let includeStress = false;
 	let engineValue: EngineId | undefined;
 	let caseName: string | null = null;
+	let minSamplesPerTask: number | undefined;
+	let maxAdaptiveAttempts: number | undefined;
 	let attemptTimeoutMs: number | null | undefined;
+	let adaptiveTimeMultiplier: number | undefined;
 	const positionals: string[] = [];
 
 	for (let index = 0; index < args.length; index++) {
@@ -788,11 +992,39 @@ function parseArgs(): {
 				caseName = args[index + 1] ?? null;
 				index += 1;
 				break;
+			case "--min-samples-per-task": {
+				const value = args[index + 1];
+				if (value !== undefined) {
+					const parsed = Number.parseInt(value, 10);
+					minSamplesPerTask = parsed > 0 ? parsed : undefined;
+					index += 1;
+				}
+				break;
+			}
+			case "--max-adaptive-attempts": {
+				const value = args[index + 1];
+				if (value !== undefined) {
+					const parsed = Number.parseInt(value, 10);
+					maxAdaptiveAttempts = parsed > 0 ? parsed : undefined;
+					index += 1;
+				}
+				break;
+			}
 			case "--attempt-timeout-ms": {
 				const value = args[index + 1];
 				if (value !== undefined) {
 					const parsed = Number.parseInt(value, 10);
 					attemptTimeoutMs = Number.isFinite(parsed) ? parsed : undefined;
+					index += 1;
+				}
+				break;
+			}
+			case "--adaptive-time-multiplier": {
+				const value = args[index + 1];
+				if (value !== undefined) {
+					const parsed = Number(value);
+					adaptiveTimeMultiplier =
+						Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 					index += 1;
 				}
 				break;
@@ -814,13 +1046,25 @@ function parseArgs(): {
 		includeStress,
 		engines: engineValue === undefined ? undefined : [engineValue],
 		caseName,
+		minSamplesPerTask,
+		maxAdaptiveAttempts,
 		attemptTimeoutMs,
+		adaptiveTimeMultiplier,
 	};
 }
 
 async function main(): Promise<void> {
-	const { json, filter, includeStress, engines, caseName, attemptTimeoutMs } =
-		parseArgs();
+	const {
+		json,
+		filter,
+		includeStress,
+		engines,
+		caseName,
+		minSamplesPerTask,
+		maxAdaptiveAttempts,
+		attemptTimeoutMs,
+		adaptiveTimeMultiplier,
+	} = parseBenchmarkRunnerArgs(process.argv.slice(2));
 	let benchmarks = await discoverBenchmarks();
 
 	if (benchmarks.length === 0) {
@@ -854,9 +1098,13 @@ async function main(): Promise<void> {
 		results = await executeAllSuites(benchmarks, {
 			verbose: !json,
 			includeStress,
+			minSamplesPerTask,
+			maxAdaptiveAttempts,
 			engines,
 			caseName: caseName ?? undefined,
 			attemptTimeoutMs,
+			adaptiveTimeMultiplier,
+			isolateSuites: filter === null && caseName === null,
 		});
 	} catch (error) {
 		if (error instanceof BenchmarkExecutionError) {
