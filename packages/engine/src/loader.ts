@@ -149,6 +149,82 @@ export interface WasmRuntimeBinding {
 	unsubscribe(handle: number, subscriptionId: number): string;
 }
 
+export const WASM_RUNTIME_ABI_METHODS = [
+	"register_default",
+	"register_predicate",
+	"register_computed",
+	"register_collator",
+	"register_migration",
+	"register_id_generator",
+	"register_before_create_hook",
+	"register_before_update_hook",
+	"register_before_delete_hook",
+	"register_after_create_hook",
+	"register_after_update_hook",
+	"register_after_delete_hook",
+	"register_on_change_hook",
+	"register_custom_operator",
+	"create_database",
+	"drop_database",
+	"dispatch",
+	"dispatch_projected",
+	"begin_transaction",
+	"transaction_step",
+	"synchronize_transaction_projection",
+	"transaction_projection_handles",
+	"commit_transaction",
+	"rollback_transaction",
+	"compact_create_many",
+	"authorized_bulk_update",
+	"authorized_bulk_delete",
+	"fast_find_by_id",
+	"fast_find_by_id_descriptor",
+	"fast_query_range",
+	"fast_projected_query_slots",
+	"take_callback_defect",
+	"fast_index_query_revision",
+	"fast_selected_primitive_query",
+	"projection_handles",
+	"projection_handles_preserving_materializations",
+	"synchronize_projection",
+	"subscribe_watch",
+	"subscribe_watch_by_id",
+	"unsubscribe",
+] as const satisfies ReadonlyArray<keyof WasmRuntimeBinding>;
+
+const WASM_REBUILD_INSTRUCTION = "bun run --cwd packages/engine build:wasm";
+
+export class WasmBindingsAbiError extends Error {
+	readonly missingMethods: ReadonlyArray<string>;
+
+	constructor(missingMethods: ReadonlyArray<string>) {
+		super(
+			`Stale or incompatible proseql-wasm bindings: missing WasmRuntime method(s): ${missingMethods.join(", ")}. Rebuild with \`${WASM_REBUILD_INSTRUCTION}\`.`,
+		);
+		this.name = "WasmBindingsAbiError";
+		this.missingMethods = missingMethods;
+	}
+}
+
+export const assertWasmBindingsAbi: (
+	module: unknown,
+) => asserts module is WasmBindingsModule = (module) => {
+	const runtime =
+		typeof module === "object" && module !== null && "WasmRuntime" in module
+			? (module as { readonly WasmRuntime?: unknown }).WasmRuntime
+			: undefined;
+	if (typeof runtime !== "function") {
+		throw new WasmBindingsAbiError(["WasmRuntime constructor"]);
+	}
+	const prototype = runtime.prototype as Record<string, unknown> | undefined;
+	const missingMethods = WASM_RUNTIME_ABI_METHODS.filter(
+		(method) => typeof prototype?.[method] !== "function",
+	);
+	if (missingMethods.length > 0) {
+		throw new WasmBindingsAbiError(missingMethods);
+	}
+};
+
 let initPromise: Promise<WasmBindingsModule> | undefined;
 
 export const getLoadedWasmMemoryByteLength = async (): Promise<
@@ -173,17 +249,26 @@ export const loadWasmBindings = async (): Promise<WasmBindingsModule> => {
 const isBrowserRuntime = (): boolean =>
 	typeof window !== "undefined" && typeof window.document !== "undefined";
 
+export const initializeBrowserWasmBindings = async (
+	module: unknown,
+	wasmUrl: URL,
+): Promise<WasmBindingsModule> => {
+	assertWasmBindingsAbi(module);
+	if (typeof module.default === "function") {
+		await module.default(wasmUrl);
+	}
+	return module;
+};
+
 const loadBrowserBindings = async (): Promise<WasmBindingsModule> => {
-	const wasmModule = (await import(
+	const wasmModule: unknown = await import(
 		// @ts-expect-error generated at build time by packages/engine/scripts/build-wasm.mjs
 		"./browser-wasm/proseql_wasm.js"
-	)) as WasmBindingsModule;
-	if (typeof wasmModule.default === "function") {
-		await wasmModule.default(
-			new URL("./browser-wasm/proseql_wasm_bg.wasm", import.meta.url),
-		);
-	}
-	return wasmModule;
+	);
+	return initializeBrowserWasmBindings(
+		wasmModule,
+		new URL("./browser-wasm/proseql_wasm_bg.wasm", import.meta.url),
+	);
 };
 
 const loadNodeBindings = async (): Promise<WasmBindingsModule> => {
@@ -199,18 +284,37 @@ const loadNodeBindings = async (): Promise<WasmBindingsModule> => {
 		join(currentDir, "wasm"),
 		resolve(currentDir, "..", "dist", "wasm"),
 	];
+	let importFailure: unknown;
 	for (const candidate of candidates) {
 		try {
 			await access(join(candidate, "proseql_wasm.js"));
 			await access(join(candidate, "proseql_wasm_bg.wasm"));
-			return (await import(
+		} catch {
+			continue;
+		}
+		let module: unknown;
+		try {
+			module = await import(
 				/* @vite-ignore */ pathToFileURL(join(candidate, "proseql_wasm.js"))
 					.href
-			)) as WasmBindingsModule;
-		} catch {}
+			);
+		} catch (error) {
+			importFailure = error;
+			continue;
+		}
+		// Compatibility failures are actionable and must not be hidden by trying
+		// another generated-artifact directory.
+		assertWasmBindingsAbi(module);
+		return module;
+	}
+	if (importFailure !== undefined) {
+		throw new Error(
+			`Failed to import proseql-wasm artifacts. Rebuild with \`${WASM_REBUILD_INSTRUCTION}\`.`,
+			{ cause: importFailure },
+		);
 	}
 	throw new Error(
-		"Missing proseql-wasm artifacts. Run `bun run --cwd packages/engine build:wasm` first.",
+		`Missing proseql-wasm artifacts. Run \`${WASM_REBUILD_INSTRUCTION}\` first.`,
 	);
 };
 

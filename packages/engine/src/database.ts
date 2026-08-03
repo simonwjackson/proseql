@@ -1399,7 +1399,7 @@ class EngineRuntime {
 				? payload === undefined
 					? undefined
 					: prepareCommandPayload(method, payload)
-				: { ...(payload as Record<string, unknown>), compactResult: true };
+				: payload;
 		const authorizedBulk = this.tryAuthorizedBulk<T>(method, prepared);
 		if (authorizedBulk.hit) return authorizedBulk.value;
 		if (method === "updateMany" || method === "deleteMany") {
@@ -1853,13 +1853,11 @@ class EngineRuntime {
 						row.updatedAt = native[1];
 					this.touchStrongStructureLease();
 					this.deferStrongStructureRelease();
-					return (
-						this.projection.cacheAuthoritativeValue(
-							prepared.collection,
-							id,
-							row,
-						)?.value ?? row
-					) as T;
+					return (this.projection.cacheAuthoritativeValue(
+						prepared.collection,
+						id,
+						row,
+					)?.value ?? row) as T;
 				}
 				if (typeof native === "string") {
 					const parsed = JSON.parse(native) as BridgeResponse<unknown>;
@@ -1935,7 +1933,6 @@ class EngineRuntime {
 			payloadJson ??
 				(prepared === undefined ? undefined : JSON.stringify(prepared)),
 			true,
-			compactCreateManySource,
 		);
 	}
 
@@ -1944,7 +1941,6 @@ class EngineRuntime {
 		prepared: unknown,
 		payloadJson: string | undefined,
 		allowRetry: boolean,
-		compactCreateManySource?: ReadonlyArray<Record<string, unknown>>,
 	): T {
 		const collection =
 			typeof prepared === "object" &&
@@ -2008,7 +2004,6 @@ class EngineRuntime {
 				mutationSync,
 				priorMaterialized,
 				this.projection,
-				compactCreateManySource,
 			);
 		}
 		if (!projected || collection === undefined) return value as T;
@@ -2026,13 +2021,7 @@ class EngineRuntime {
 			if (!(error instanceof StaleMaterializedHandleError) || !allowRetry)
 				throw error;
 			this.resynchronizeProjection();
-			return this.dispatchPrepared<T>(
-				method,
-				prepared,
-				payloadJson,
-				false,
-				compactCreateManySource,
-			);
+			return this.dispatchPrepared<T>(method, prepared, payloadJson, false);
 		}
 	}
 
@@ -2044,59 +2033,11 @@ class EngineRuntime {
 		sync: ProjectionSync,
 		priorMaterialized: ReadonlyMap<string, unknown>,
 		projection: MaterializedProjection = this.projection,
-		compactCreateManySource?: ReadonlyArray<Record<string, unknown>>,
 	): T {
 		if (method === "upsert") return value as T;
 		const ownerChanges = sync.changes.filter(
 			(change) => change.collection === collection,
 		);
-		const compactCreateMany =
-			typeof value === "object" && value !== null
-				? (
-						value as {
-							readonly __proseqlCompactCreateMany?: {
-								readonly count?: unknown;
-								readonly createdAt?: unknown;
-								readonly updatedAt?: unknown;
-							};
-						}
-					).__proseqlCompactCreateMany
-				: undefined;
-		if (
-			method === "createMany" &&
-			compactCreateMany !== undefined &&
-			typeof compactCreateMany.count === "number" &&
-			compactCreateMany.count === ownerChanges.length &&
-			typeof prepared === "object" &&
-			prepared !== null &&
-			"items" in prepared &&
-			Array.isArray(prepared.items) &&
-			prepared.items.length === ownerChanges.length &&
-			compactCreateManySource?.length === ownerChanges.length
-		) {
-			const fields = this.compactCreateManyFields.get(collection);
-			if (fields !== undefined) {
-				const created = compactCreateManySource.map((sourceItem, index) => {
-					const row: Record<string, unknown> = { ...sourceItem };
-					if (
-						fields.has("createdAt") &&
-						typeof compactCreateMany.createdAt === "string"
-					)
-						row.createdAt = compactCreateMany.createdAt;
-					if (
-						fields.has("updatedAt") &&
-						typeof compactCreateMany.updatedAt === "string"
-					)
-						row.updatedAt = compactCreateMany.updatedAt;
-					const change = ownerChanges[index]!;
-					return (
-						projection.cacheAuthoritativeValue(collection, change.id, row)
-							?.value ?? row
-					);
-				});
-				return { created, skipped: [] } as T;
-			}
-		}
 		if (
 			method === "createMany" &&
 			typeof value === "object" &&
@@ -3496,27 +3437,28 @@ function buildCollectionFacade(
 			});
 			return results.length > 0;
 		},
-		create: (input: any) => {
-			ensureWritable("create");
-			const payload = { collection: collection.name, data: input };
-			const finish = (value: any) => {
-				applyFormalMutationToPersistenceMirror(
-					persistence,
-					collection.name,
-					"create",
-					value,
-				);
-				scheduleWrite();
-				return value;
-			};
-			if (!isAppendOnlyJsonLinesCollection(collection)) {
-				return runtime.invokeMapped("create", payload, finish);
-			}
-			return runtime.invoke<any>("create", payload).then(async (value) => {
-				await appendAppendOnlyEntities(persistence, collection, [value]);
-				return finish(value);
-			});
-		},
+		create: (input: any) =>
+			settledPromise(() => {
+				ensureWritable("create");
+				const payload = { collection: collection.name, data: input };
+				const finish = (value: any) => {
+					applyFormalMutationToPersistenceMirror(
+						persistence,
+						collection.name,
+						"create",
+						value,
+					);
+					scheduleWrite();
+					return value;
+				};
+				if (!isAppendOnlyJsonLinesCollection(collection)) {
+					return runtime.invokeMapped("create", payload, finish);
+				}
+				return runtime.invoke<any>("create", payload).then(async (value) => {
+					await appendAppendOnlyEntities(persistence, collection, [value]);
+					return finish(value);
+				});
+			}),
 		createMany: async (inputs: ReadonlyArray<any>, options?: any) => {
 			ensureWritable("createMany");
 			const value = await runtime.invoke<any>("createMany", {
@@ -3617,7 +3559,9 @@ function buildCollectionFacade(
 				limit: options?.limit,
 			});
 			if (options?.soft) {
-				if (!mirrorUpsertRows(persistence, collection.name, value.deleted ?? []))
+				if (
+					!mirrorUpsertRows(persistence, collection.name, value.deleted ?? [])
+				)
 					invalidatePersistenceMirror(
 						persistence,
 						collection.name,
@@ -3922,10 +3866,7 @@ function createPersistenceState(
 	host: EngineStorageHost,
 	layer: Layer.Layer<any>,
 	writeDebounce: number,
-	initialCollections: Record<
-		string,
-		ReadonlyArray<Record<string, unknown>>
-	>,
+	initialCollections: Record<string, ReadonlyArray<Record<string, unknown>>>,
 	serializerRegistry?: SerializerRegistryShape,
 	persistObjectFile?: (
 		path: string,
