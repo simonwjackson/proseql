@@ -8,6 +8,8 @@ default:
 # Test Korri-ready foundation paths (accepts optional args)
 test *args:
     bun test \
+        ./bench/runner.test.ts \
+        ./packages/engine/tests/loader.test.ts \
         packages/core/tests/database-effect.test.ts \
         packages/core/tests/database-source-config.test.ts \
         packages/core/tests/database-document-graph.test.ts \
