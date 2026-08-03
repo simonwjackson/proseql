@@ -221,5 +221,10 @@ export type EnginePersistenceOptions = {
 	readonly storageHost?: import("./storage-host-shared.js").EngineStorageHost;
 	readonly storageLayer?: import("effect").Layer.Layer<any>;
 	readonly serializerRegistry?: import("@proseql/core").SerializerRegistryShape;
+	readonly _persistObjectFile?: (
+		path: string,
+		data: unknown,
+		format: string,
+	) => Promise<void>;
 	readonly _suppressInitialWrites?: boolean;
 };

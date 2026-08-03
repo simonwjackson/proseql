@@ -351,7 +351,26 @@ const makePersistenceOptions = (
 	return {
 		writeDebounce: persistenceConfig?.writeDebounce,
 		_suppressInitialWrites: true,
-		...(serializerRegistry ? { serializerRegistry } : {}),
+		...(serializerRegistry
+			? {
+					serializerRegistry,
+					_persistObjectFile: (
+						path: string,
+						data: unknown,
+						format: string,
+					) =>
+						Effect.runPromise(
+							Effect.gen(function* () {
+								const content = yield* serializerRegistry.serialize(
+									data,
+									format,
+								);
+								yield* adapter.ensureDir(path);
+								yield* adapter.write(path, content);
+							}),
+						),
+				}
+			: {}),
 		storageHost: {
 			read: (path: string) => Effect.runPromise(adapter.read(path)),
 			write: (path: string, data: string) => Effect.runPromise(adapter.write(path, data)),
@@ -694,7 +713,10 @@ const createCollectionAdapter = (
 		) as never;
 	},
 	exists: (id: string) => withRunPromise(liftPromise(() => engineCollection.exists(id))) as never,
-	create: (input: unknown) => withRunPromise(liftPromise(() => engineCollection.create(input as never))) as never,
+	create: (input: unknown) => {
+		const operation = () => engineCollection.create(input as never);
+		return withRunPromise(liftPromise(operation), operation) as never;
+	},
 	createMany: (inputs: ReadonlyArray<unknown>, options?: { readonly skipDuplicates?: boolean; readonly validateRelationships?: boolean }) => {
 		const operation = () => engineCollection.createMany(inputs as never, options);
 		return withRunPromise(liftPromise(operation), operation) as never;

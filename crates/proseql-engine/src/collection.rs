@@ -688,7 +688,7 @@ impl Collection {
             BeforeCreateContext {
                 operation: HookOperation::Create,
                 collection: self.name.clone(),
-                data: self.validate_entity(Value::Object(obj), &id)?,
+                data: self.validate_entity_owned(Value::Object(obj), &id)?,
             },
         )?;
 
@@ -722,7 +722,7 @@ impl Collection {
         obj.insert("createdAt".to_string(), Value::String(now.clone()));
         obj.insert("updatedAt".to_string(), Value::String(now.clone()));
         self.apply_defaults(&mut obj, &self.descriptor.schema.clone())?;
-        let entity = self.validate_entity(Value::Object(obj), &id)?;
+        let entity = self.validate_entity_owned(Value::Object(obj), &id)?;
 
         if self.state.contains_key(&id) {
             return Err(EngineError::DuplicateKey(Box::new(DuplicateKeyError {

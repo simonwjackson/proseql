@@ -82,7 +82,8 @@ export interface WasmRuntimeBinding {
 	compact_create_many(
 		handle: number,
 		collectionIndex: number,
-		commandJson: string,
+		itemsJson: string,
+		single: boolean,
 	): unknown;
 	authorized_bulk_update(
 		handle: number,
@@ -146,7 +147,6 @@ export interface WasmRuntimeBinding {
 		callback: (payloadJson: string) => void,
 	): string;
 	unsubscribe(handle: number, subscriptionId: number): string;
-	dry_run_migrations(inputJson: string): string;
 }
 
 let initPromise: Promise<WasmBindingsModule> | undefined;

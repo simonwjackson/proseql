@@ -82,7 +82,8 @@ declare module "./browser-wasm/proseql_wasm.js" {
 		compact_create_many(
 			handle: number,
 			collectionIndex: number,
-			commandJson: string,
+			itemsJson: string,
+			single: boolean,
 		): unknown;
 		authorized_bulk_update(
 			handle: number,
@@ -146,6 +147,5 @@ declare module "./browser-wasm/proseql_wasm.js" {
 			callback: (payloadJson: string) => void,
 		): string;
 		unsubscribe(handle: number, subscriptionId: number): string;
-		dry_run_migrations(inputJson: string): string;
 	}
 }

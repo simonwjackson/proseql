@@ -25,6 +25,7 @@ import {
 	type PluginRegistry,
 	removeEntityFromDirectory,
 	SerializerRegistryService,
+	type SerializerRegistryShape,
 	SourceConfigError,
 	StorageAdapterService as StorageAdapter,
 	saveCollectionsToFile,
@@ -65,6 +66,7 @@ import {
 import {
 	type EngineStorageHost,
 	makeEngineStorageLayer,
+	toEngineStorageError,
 } from "./storage-host-shared.js";
 import type {
 	EngineCollection,
@@ -187,9 +189,27 @@ type PersistenceLifecycle = {
 	closePromise?: Promise<void>;
 };
 
+type PersistenceMirrorState =
+	| {
+			readonly _tag: "valid";
+			readonly rows: Map<string, Record<string, unknown>>;
+	  }
+	| {
+			readonly _tag: "canonicalRequired";
+			readonly reason: string;
+	  };
+
 type PersistenceState = {
 	host: EngineStorageHost;
 	readonly layer: Layer.Layer<any>;
+	readonly serializerRegistry?: SerializerRegistryShape;
+	readonly persistObjectFile?: (
+		path: string,
+		data: unknown,
+		format: string,
+	) => Promise<void>;
+	readonly collectionMirrors: Map<string, PersistenceMirrorState>;
+	readonly mirrorEligibleCollections: ReadonlySet<string>;
 	readonly collections: ReadonlyArray<CollectionRuntimeConfig>;
 	readonly sharedFiles: ReadonlyArray<SharedFileGroup>;
 	readonly directoryIds: Map<string, Set<string>>;
@@ -724,6 +744,30 @@ const isDirectWireScalar = (value: unknown): boolean =>
 		Number.isFinite(value) &&
 		!Object.is(value, -0));
 
+const compactIdentitySource = (
+	value: unknown,
+	fields: ReadonlySet<string> | undefined,
+): value is Record<string, unknown> => {
+	if (
+		fields === undefined ||
+		typeof value !== "object" ||
+		value === null ||
+		typeof Reflect.get(value, "id") !== "string" ||
+		!Object.hasOwn(value, "id")
+	)
+		return false;
+	return Reflect.ownKeys(value).every((field) => {
+		if (typeof field !== "string" || !fields.has(field)) return false;
+		const descriptor = Reflect.getOwnPropertyDescriptor(value, field);
+		return (
+			descriptor !== undefined &&
+			descriptor.enumerable === true &&
+			"value" in descriptor &&
+			isDirectWireScalar(descriptor.value)
+		);
+	});
+};
+
 const nativeBulkWhere = (where: unknown) => {
 	if (typeof where !== "object" || where === null || Array.isArray(where))
 		return undefined;
@@ -839,6 +883,9 @@ class EngineRuntime {
 	private transactionBarrier: Promise<void> | undefined;
 	private releaseTransactionBarrier: (() => void) | undefined;
 	private transactionContext: TransactionContext | undefined;
+	private projectionSynchronizationListener:
+		| ((collections: ReadonlySet<string>) => void)
+		| undefined;
 
 	private constructor(
 		runtime: WasmRuntimeBinding,
@@ -1311,6 +1358,21 @@ class EngineRuntime {
 			if (method !== "updateMany") this.clearHotBulkSelections();
 			else this.hotDeleteBulkIds = undefined;
 		}
+		let compactCreateSource: Record<string, unknown> | undefined;
+		if (
+			method === "create" &&
+			typeof payload === "object" &&
+			payload !== null &&
+			"collection" in payload &&
+			typeof payload.collection === "string" &&
+			"data" in payload &&
+			compactIdentitySource(
+				payload.data,
+				this.compactCreateManyFields.get(payload.collection),
+			)
+		) {
+			compactCreateSource = payload.data;
+		}
 		let compactCreateManySource:
 			| ReadonlyArray<Record<string, unknown>>
 			| undefined;
@@ -1322,38 +1384,18 @@ class EngineRuntime {
 			typeof payload.collection === "string" &&
 			"items" in payload &&
 			Array.isArray(payload.items) &&
+			payload.items.length !== 1 &&
 			!("skipDuplicates" in payload && payload.skipDuplicates === true)
 		) {
 			const fields = this.compactCreateManyFields.get(payload.collection);
-			if (
-				fields !== undefined &&
-				payload.items.every((item) => {
-					if (
-						typeof item !== "object" ||
-						item === null ||
-						typeof Reflect.get(item, "id") !== "string" ||
-						!Object.hasOwn(item, "id")
-					)
-						return false;
-					return Reflect.ownKeys(item).every((field) => {
-						if (typeof field !== "string" || !fields.has(field)) return false;
-						const descriptor = Reflect.getOwnPropertyDescriptor(item, field);
-						return (
-							descriptor !== undefined &&
-							descriptor.enumerable === true &&
-							"value" in descriptor &&
-							isDirectWireScalar(descriptor.value)
-						);
-					});
-				})
-			) {
+			if (payload.items.every((item) => compactIdentitySource(item, fields))) {
 				compactCreateManySource = payload.items as ReadonlyArray<
 					Record<string, unknown>
 				>;
 			}
 		}
 		const prepared =
-			compactCreateManySource === undefined
+			compactCreateManySource === undefined && compactCreateSource === undefined
 				? payload === undefined
 					? undefined
 					: prepareCommandPayload(method, payload)
@@ -1767,21 +1809,78 @@ class EngineRuntime {
 			}
 		}
 		const payloadJson =
-			prepared === undefined ? undefined : JSON.stringify(prepared);
+			compactCreateSource === undefined && compactCreateManySource === undefined
+				? prepared === undefined
+					? undefined
+					: JSON.stringify(prepared)
+				: undefined;
 		if (
-			compactCreateManySource !== undefined &&
+			compactCreateSource !== undefined &&
 			typeof prepared === "object" &&
 			prepared !== null &&
 			"collection" in prepared &&
-			typeof prepared.collection === "string" &&
-			payloadJson !== undefined
+			typeof prepared.collection === "string"
 		) {
 			const collectionIndex = this.collectionIndexes.get(prepared.collection);
 			if (collectionIndex !== undefined) {
 				const native = this.runtime.compact_create_many(
 					this.handle,
 					collectionIndex,
-					payloadJson,
+					JSON.stringify([compactCreateSource]),
+					true,
+				);
+				if (
+					Array.isArray(native) &&
+					native[0] instanceof Float64Array &&
+					native[0].length === 3
+				) {
+					const packed = native[0];
+					const id = compactCreateSource.id as string;
+					const rustSlot = packed[0]!;
+					const token = packed[1]!;
+					const change: ProjectionSync["changes"][number] = {
+						collection: prepared.collection,
+						id,
+						handle: `${rustSlot}:${Math.floor(token / 2 ** 21) % 2 ** 21}:${token % 2 ** 21}`,
+						position: packed[2]!,
+					};
+					this.projection.apply({ changes: [change] });
+					const fields = this.compactCreateManyFields.get(prepared.collection);
+					const row: Record<string, unknown> = { ...compactCreateSource };
+					if (fields?.has("createdAt") && typeof native[1] === "string")
+						row.createdAt = native[1];
+					if (fields?.has("updatedAt") && typeof native[1] === "string")
+						row.updatedAt = native[1];
+					this.touchStrongStructureLease();
+					this.deferStrongStructureRelease();
+					return (
+						this.projection.cacheAuthoritativeValue(
+							prepared.collection,
+							id,
+							row,
+						)?.value ?? row
+					) as T;
+				}
+				if (typeof native === "string") {
+					const parsed = JSON.parse(native) as BridgeResponse<unknown>;
+					return parseBridgeResponseValue(parsed, native) as T;
+				}
+			}
+		}
+		if (
+			compactCreateManySource !== undefined &&
+			typeof prepared === "object" &&
+			prepared !== null &&
+			"collection" in prepared &&
+			typeof prepared.collection === "string"
+		) {
+			const collectionIndex = this.collectionIndexes.get(prepared.collection);
+			if (collectionIndex !== undefined) {
+				const native = this.runtime.compact_create_many(
+					this.handle,
+					collectionIndex,
+					JSON.stringify(compactCreateManySource),
+					false,
 				);
 				if (Array.isArray(native) && native[0] instanceof Float64Array) {
 					const packed = native[0];
@@ -1833,7 +1932,8 @@ class EngineRuntime {
 		return this.dispatchPrepared<T>(
 			method,
 			prepared,
-			payloadJson,
+			payloadJson ??
+				(prepared === undefined ? undefined : JSON.stringify(prepared)),
 			true,
 			compactCreateManySource,
 		);
@@ -2170,6 +2270,21 @@ class EngineRuntime {
 		return result as T;
 	}
 
+	canUseIdentityPersistence(collection: string): boolean {
+		return this.compactCreateManyFields.has(collection);
+	}
+
+	setProjectionSynchronizationListener(
+		listener: ((collections: ReadonlySet<string>) => void) | undefined,
+	) {
+		this.projectionSynchronizationListener = listener;
+	}
+
+	synchronizeForPersistence() {
+		if (this.projection.needsResynchronization) this.resynchronizeProjection();
+		if (this.projection.hasDirtyRows) this.synchronizeDirtyProjection();
+	}
+
 	private synchronizeDirtyProjection() {
 		if (!this.projection.hasDirtyRows) return;
 		this.clearHotBulkSelections();
@@ -2189,6 +2304,9 @@ class EngineRuntime {
 				),
 			);
 			this.projection.markSynchronized(rows);
+			this.projectionSynchronizationListener?.(
+				new Set(rows.map((row) => row.collection)),
+			);
 		} catch (error) {
 			this.invalidateProjection();
 			throw error;
@@ -2198,6 +2316,9 @@ class EngineRuntime {
 	private resynchronizeProjection() {
 		this.clearHotIndexedQuery();
 		this.clearHotBulkSelections();
+		this.projectionSynchronizationListener?.(
+			new Set(this.collectionIndexes.keys()),
+		);
 		const handles = parseBridgeResponse<ProjectionHandles>(
 			this.projection.canPreserveValuesOnResync
 				? this.runtime.projection_handles_preserving_materializations(
@@ -2302,6 +2423,27 @@ class EngineRuntime {
 		return operation.finally(() => this.deferStrongStructureRelease());
 	}
 
+	invokeMapped<T, U>(
+		method: string,
+		payload: unknown,
+		map: (value: T) => U,
+	): Promise<U> {
+		try {
+			this.assertTransactionWaitAllowed();
+		} catch (error) {
+			return Promise.reject(error);
+		}
+		const run = () => {
+			this.touchStrongStructureLease();
+			try {
+				return settledPromise(() => map(this.dispatch<T>(method, payload)));
+			} finally {
+				this.deferStrongStructureRelease();
+			}
+		};
+		return this.transactionBarrier ? this.transactionBarrier.then(run) : run();
+	}
+
 	invoke<T>(method: string, payload?: unknown): Promise<T> {
 		try {
 			this.assertTransactionWaitAllowed();
@@ -2310,12 +2452,13 @@ class EngineRuntime {
 		}
 		const run = () => {
 			this.touchStrongStructureLease();
-			return settledPromise(() => this.dispatch<T>(method, payload));
+			try {
+				return settledPromise(() => this.dispatch<T>(method, payload));
+			} finally {
+				this.deferStrongStructureRelease();
+			}
 		};
-		const operation = this.transactionBarrier
-			? this.transactionBarrier.then(run)
-			: run();
-		return operation.finally(() => this.deferStrongStructureRelease());
+		return this.transactionBarrier ? this.transactionBarrier.then(run) : run();
 	}
 
 	invokePredicateBulk<T>(
@@ -2802,14 +2945,14 @@ export const createPersistentEngineDatabase = async <
 	)) {
 		validateCollectionRuntimeConfig(name, collection, pluginRegistry);
 	}
-	const serializerLayer = persistenceOptions?.serializerRegistry
-		? Layer.succeed(
-				SerializerRegistryService,
-				mergeSerializerWithPluginCodecs(
-					persistenceOptions.serializerRegistry,
-					pluginRegistry.codecs,
-				),
+	const configuredSerializerRegistry = persistenceOptions?.serializerRegistry
+		? mergeSerializerWithPluginCodecs(
+				persistenceOptions.serializerRegistry,
+				pluginRegistry.codecs,
 			)
+		: undefined;
+	const serializerLayer = configuredSerializerRegistry
+		? Layer.succeed(SerializerRegistryService, configuredSerializerRegistry)
 		: makeSerializerLayer(inferCodecsFromConfig(config), pluginRegistry.codecs);
 	const layer = Layer.merge(storageLayer, serializerLayer) as any;
 	const collections = Object.entries(getCollectionConfigs(config)).map(
@@ -2840,6 +2983,15 @@ export const createPersistentEngineDatabase = async <
 		host,
 		layer,
 		persistenceOptions?.writeDebounce ?? DEFAULT_WRITE_DEBOUNCE,
+		loaded.collections,
+		pluginRegistry.codecs.length === 0
+			? configuredSerializerRegistry
+			: undefined,
+		pluginRegistry.codecs.length === 0
+			? persistenceOptions?._persistObjectFile
+			: undefined,
+		persistenceOptions?.storageLayer === undefined ||
+			persistenceOptions?._persistObjectFile !== undefined,
 		loaded.baselines,
 		loaded.sourceState,
 	);
@@ -2945,6 +3097,7 @@ function buildDatabaseFacade(
 		...transactional,
 		$documentGraph: documentGraph,
 		flush: async () => {
+			runtime.synchronizeForPersistence();
 			await persistence.saver.flush();
 			if (persistence.backgroundError !== undefined) {
 				throw persistence.backgroundError;
@@ -3089,6 +3242,140 @@ async function appendAppendOnlyEntities(
 	}
 }
 
+function invalidatePersistenceMirror(
+	persistence: PersistenceState | undefined,
+	collection: string,
+	reason: string,
+) {
+	if (!persistence?.mirrorEligibleCollections.has(collection)) return;
+	persistence.collectionMirrors.set(collection, {
+		_tag: "canonicalRequired",
+		reason,
+	});
+}
+
+function invalidateAllPersistenceMirrors(
+	persistence: PersistenceState | undefined,
+	reason: string,
+) {
+	if (!persistence) return;
+	for (const collection of persistence.mirrorEligibleCollections) {
+		invalidatePersistenceMirror(persistence, collection, reason);
+	}
+}
+
+function refreshPersistenceMirror(
+	persistence: PersistenceState | undefined,
+	collection: string,
+	rows: ReadonlyArray<Record<string, unknown>>,
+) {
+	if (!persistence?.mirrorEligibleCollections.has(collection)) return;
+	persistence.collectionMirrors.set(collection, {
+		_tag: "valid",
+		rows: toEntityMap(rows),
+	});
+}
+
+function validPersistenceMirror(
+	persistence: PersistenceState | undefined,
+	collection: string,
+): Map<string, Record<string, unknown>> | undefined {
+	const state = persistence?.collectionMirrors.get(collection);
+	return state?._tag === "valid" ? state.rows : undefined;
+}
+
+function isPersistenceRow(value: unknown): value is Record<string, unknown> {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		!Array.isArray(value) &&
+		typeof (value as { readonly id?: unknown }).id === "string"
+	);
+}
+
+function mirrorUpsertRows(
+	persistence: PersistenceState | undefined,
+	collection: string,
+	values: ReadonlyArray<unknown>,
+): boolean {
+	const rows = validPersistenceMirror(persistence, collection);
+	if (!rows) return false;
+	for (const value of values) {
+		if (!isPersistenceRow(value)) return false;
+		rows.set(value.id as string, value);
+	}
+	return true;
+}
+
+function mirrorDeleteRows(
+	persistence: PersistenceState | undefined,
+	collection: string,
+	values: ReadonlyArray<unknown>,
+): boolean {
+	const rows = validPersistenceMirror(persistence, collection);
+	if (!rows) return false;
+	for (const value of values) {
+		if (!isPersistenceRow(value)) return false;
+		rows.delete(value.id as string);
+	}
+	return true;
+}
+
+function applyFormalMutationToPersistenceMirror(
+	persistence: PersistenceState | undefined,
+	collection: string,
+	method: string,
+	value: unknown,
+) {
+	if (!persistence?.mirrorEligibleCollections.has(collection)) return;
+	const record =
+		typeof value === "object" && value !== null
+			? (value as Record<string, unknown>)
+			: undefined;
+	let applied = false;
+	switch (method) {
+		case "create":
+		case "update":
+			applied = mirrorUpsertRows(persistence, collection, [value]);
+			break;
+		case "createMany":
+			applied =
+				Array.isArray(record?.created) &&
+				mirrorUpsertRows(persistence, collection, record.created);
+			break;
+		case "updateMany":
+			applied =
+				Array.isArray(record?.updated) &&
+				mirrorUpsertRows(persistence, collection, record.updated);
+			break;
+		case "delete":
+			applied = mirrorDeleteRows(persistence, collection, [value]);
+			break;
+		case "deleteMany":
+			applied =
+				Array.isArray(record?.deleted) &&
+				mirrorDeleteRows(persistence, collection, record.deleted);
+			break;
+		case "upsert":
+			if (isPersistenceRow(value)) {
+				const stored = { ...value };
+				delete stored.__action;
+				applied = mirrorUpsertRows(persistence, collection, [stored]);
+			}
+			break;
+		case "upsertMany":
+			applied =
+				Array.isArray(record?.created) &&
+				Array.isArray(record?.updated) &&
+				mirrorUpsertRows(persistence, collection, [
+					...record.created,
+					...record.updated,
+				]);
+			break;
+	}
+	if (!applied) invalidatePersistenceMirror(persistence, collection, method);
+}
+
 function buildCollectionFacade(
 	runtime: EngineRuntime,
 	collection: CollectionRuntimeConfig,
@@ -3134,8 +3421,21 @@ function buildCollectionFacade(
 				selectIds,
 				data,
 				options,
-				scheduleWriteOnce,
+				() => {
+					invalidatePersistenceMirror(
+						persistence,
+						collection.name,
+						"predicate-callback-mutation",
+					);
+					scheduleWriteOnce();
+				},
 				(value) => {
+					applyFormalMutationToPersistenceMirror(
+						persistence,
+						collection.name,
+						method,
+						value,
+					);
 					if ((value.count ?? 0) > 0) scheduleWriteOnce();
 				},
 			);
@@ -3196,15 +3496,26 @@ function buildCollectionFacade(
 			});
 			return results.length > 0;
 		},
-		create: async (input: any) => {
+		create: (input: any) => {
 			ensureWritable("create");
-			const value = await runtime.invoke<any>("create", {
-				collection: collection.name,
-				data: input,
+			const payload = { collection: collection.name, data: input };
+			const finish = (value: any) => {
+				applyFormalMutationToPersistenceMirror(
+					persistence,
+					collection.name,
+					"create",
+					value,
+				);
+				scheduleWrite();
+				return value;
+			};
+			if (!isAppendOnlyJsonLinesCollection(collection)) {
+				return runtime.invokeMapped("create", payload, finish);
+			}
+			return runtime.invoke<any>("create", payload).then(async (value) => {
+				await appendAppendOnlyEntities(persistence, collection, [value]);
+				return finish(value);
 			});
-			await appendAppendOnlyEntities(persistence, collection, [value]);
-			scheduleWrite();
-			return value;
 		},
 		createMany: async (inputs: ReadonlyArray<any>, options?: any) => {
 			ensureWritable("createMany");
@@ -3218,6 +3529,12 @@ function buildCollectionFacade(
 				collection,
 				value.created ?? [],
 			);
+			applyFormalMutationToPersistenceMirror(
+				persistence,
+				collection.name,
+				"createMany",
+				value,
+			);
 			if ((value.created ?? []).length > 0) scheduleWrite();
 			return value;
 		},
@@ -3228,6 +3545,12 @@ function buildCollectionFacade(
 				id,
 				data: updates,
 			});
+			applyFormalMutationToPersistenceMirror(
+				persistence,
+				collection.name,
+				"update",
+				value,
+			);
 			scheduleWrite();
 			return value;
 		},
@@ -3238,6 +3561,12 @@ function buildCollectionFacade(
 				where,
 				data: updates,
 			});
+			applyFormalMutationToPersistenceMirror(
+				persistence,
+				collection.name,
+				"updateMany",
+				value,
+			);
 			if ((value.count ?? 0) > 0) scheduleWrite();
 			return value;
 		},
@@ -3257,6 +3586,12 @@ function buildCollectionFacade(
 						message: `Entity with id "${id}" not found in collection "${collection.name}"`,
 					});
 				}
+				if (!mirrorUpsertRows(persistence, collection.name, value.deleted))
+					invalidatePersistenceMirror(
+						persistence,
+						collection.name,
+						"soft-delete",
+					);
 				scheduleWrite();
 				return value.deleted[0];
 			}
@@ -3264,6 +3599,12 @@ function buildCollectionFacade(
 				collection: collection.name,
 				id,
 			});
+			applyFormalMutationToPersistenceMirror(
+				persistence,
+				collection.name,
+				"delete",
+				value,
+			);
 			scheduleWrite();
 			return value;
 		},
@@ -3275,6 +3616,21 @@ function buildCollectionFacade(
 				soft: options?.soft ?? false,
 				limit: options?.limit,
 			});
+			if (options?.soft) {
+				if (!mirrorUpsertRows(persistence, collection.name, value.deleted ?? []))
+					invalidatePersistenceMirror(
+						persistence,
+						collection.name,
+						"soft-delete-many",
+					);
+			} else {
+				applyFormalMutationToPersistenceMirror(
+					persistence,
+					collection.name,
+					"deleteMany",
+					value,
+				);
+			}
 			if ((value.count ?? 0) > 0) scheduleWrite();
 			return value;
 		},
@@ -3286,6 +3642,12 @@ function buildCollectionFacade(
 				create: input.create,
 				update: input.update,
 			});
+			applyFormalMutationToPersistenceMirror(
+				persistence,
+				collection.name,
+				"upsert",
+				value,
+			);
 			scheduleWrite();
 			return value;
 		},
@@ -3295,6 +3657,12 @@ function buildCollectionFacade(
 				collection: collection.name,
 				items: [...inputs],
 			});
+			applyFormalMutationToPersistenceMirror(
+				persistence,
+				collection.name,
+				"upsertMany",
+				value,
+			);
 			if ((value.created?.length ?? 0) + (value.updated?.length ?? 0) > 0)
 				scheduleWrite();
 			return value;
@@ -3305,6 +3673,7 @@ function buildCollectionFacade(
 				collection: collection.name,
 				data: input,
 			});
+			invalidateAllPersistenceMirrors(persistence, "relationship-create");
 			scheduleWrite();
 			return value;
 		},
@@ -3315,6 +3684,7 @@ function buildCollectionFacade(
 				id,
 				data: input,
 			});
+			invalidateAllPersistenceMirrors(persistence, "relationship-update");
 			scheduleWrite();
 			return value;
 		},
@@ -3325,6 +3695,7 @@ function buildCollectionFacade(
 				id,
 				options,
 			});
+			invalidateAllPersistenceMirrors(persistence, "relationship-delete");
 			scheduleWrite();
 			return value;
 		},
@@ -3335,6 +3706,7 @@ function buildCollectionFacade(
 				where,
 				options,
 			});
+			invalidateAllPersistenceMirrors(persistence, "relationship-delete-many");
 			if ((value.count ?? 0) > 0) scheduleWrite();
 			return value;
 		},
@@ -3550,6 +3922,17 @@ function createPersistenceState(
 	host: EngineStorageHost,
 	layer: Layer.Layer<any>,
 	writeDebounce: number,
+	initialCollections: Record<
+		string,
+		ReadonlyArray<Record<string, unknown>>
+	>,
+	serializerRegistry?: SerializerRegistryShape,
+	persistObjectFile?: (
+		path: string,
+		data: unknown,
+		format: string,
+	) => Promise<void>,
+	mirrorWritesUseConfiguredStorage = true,
 	initialBaselines?: Record<string, ReadonlyArray<Record<string, unknown>>>,
 	sourceState?: SourcePersistenceState,
 ): PersistenceState {
@@ -3565,9 +3948,43 @@ function createPersistenceState(
 		collections,
 		initialBaselines,
 	);
+	const mirrorEligibleCollections = new Set(
+		collections.flatMap((collection) => {
+			const format = inferCollectionFormat(collection.raw);
+			const ordinaryObjectFile =
+				collection.raw.file !== undefined &&
+				collection.raw.directory === undefined &&
+				collection.raw.path === undefined &&
+				collection.raw.version === undefined &&
+				collection.raw.id === undefined &&
+				collection.raw.appendOnly !== true &&
+				format !== undefined &&
+				OBJECT_KEYED_ONLY_FORMATS.has(format) &&
+				!sharedFiles.some((group) => group.file === collection.raw.file);
+			return serializerRegistry !== undefined &&
+				mirrorWritesUseConfiguredStorage &&
+				ordinaryObjectFile &&
+				!isBrowserStorageHost(host) &&
+				sourceState === undefined &&
+				runtime.canUseIdentityPersistence(collection.name)
+				? [collection.name]
+				: [];
+		}),
+	);
+	const collectionMirrors = new Map<string, PersistenceMirrorState>();
+	for (const collection of mirrorEligibleCollections) {
+		collectionMirrors.set(collection, {
+			_tag: "valid",
+			rows: toEntityMap(initialCollections[collection] ?? []),
+		});
+	}
 	const state: PersistenceState = {
 		host,
 		layer,
+		serializerRegistry,
+		persistObjectFile,
+		collectionMirrors,
+		mirrorEligibleCollections,
 		collections,
 		sharedFiles,
 		directoryIds,
@@ -3584,6 +4001,15 @@ function createPersistenceState(
 			await persistCollectionState(state, runtime, key);
 		}),
 	};
+	runtime.setProjectionSynchronizationListener((changedCollections) => {
+		for (const collection of changedCollections) {
+			invalidatePersistenceMirror(
+				state,
+				collection,
+				"caller-mutated-projection",
+			);
+		}
+	});
 	for (const key of new Set(writeKeyByCollection.values())) {
 		state.saver.registerKey(key);
 	}
@@ -3595,6 +4021,7 @@ async function persistCollectionState(
 	runtime: EngineRuntime,
 	key: string,
 ): Promise<void> {
+	runtime.synchronizeForPersistence();
 	if (state.sourceState && key.startsWith("source:")) {
 		const sourceId = key.slice("source:".length);
 		await persistDocumentSourceState(state, runtime, sourceId);
@@ -3696,6 +4123,37 @@ async function persistCollectionState(
 			collection: key,
 			message: `Collection '${key}' not found`,
 		});
+	}
+	const mirror = state.collectionMirrors.get(collection.name);
+	if (
+		mirror?._tag === "valid" &&
+		state.serializerRegistry !== undefined &&
+		collection.raw.file !== undefined
+	) {
+		const format = inferCollectionFormat(collection.raw);
+		if (format !== undefined) {
+			const rows = [...mirror.rows.values()];
+			const entityMap = Object.fromEntries(mirror.rows);
+			if (state.persistObjectFile) {
+				await state.persistObjectFile(collection.raw.file, entityMap, format);
+			} else {
+				const content = await Effect.runPromise(
+					state.serializerRegistry.serialize(entityMap, format),
+				);
+				try {
+					await state.host.ensureDir(collection.raw.file);
+				} catch (error) {
+					throw toEngineStorageError(collection.raw.file, "write", error);
+				}
+				try {
+					await state.host.write(collection.raw.file, content);
+				} catch (error) {
+					throw toEngineStorageError(collection.raw.file, "write", error);
+				}
+			}
+			markCollectionPersisted(state, collection, rows);
+			return;
+		}
 	}
 	let entities = await runtime.invoke<Record<string, unknown>[]>(
 		"dumpCollection",
@@ -3941,6 +4399,7 @@ function markCollectionPersisted(
 ) {
 	updateDirectoryBaseline(persistence, collection, rows);
 	updateCollectionBaseline(persistence, collection.name, rows);
+	refreshPersistenceMirror(persistence, collection.name, rows);
 	if (
 		isBrowserStorageHost(persistence.host) &&
 		(collection.raw.directory || collection.raw.file)
@@ -4211,6 +4670,7 @@ async function reconcileCollectionWithExternalRows(
 	}
 	persistence.collectionsAwaitingExternalMerge.delete(collection.name);
 	updateCollectionBaseline(persistence, collection.name, externalRows);
+	refreshPersistenceMirror(persistence, collection.name, externalRows);
 }
 
 function updateDirectoryBaseline(
@@ -4424,6 +4884,7 @@ async function registerLegacyWatchers(
 							collection.name,
 						);
 						updateCollectionBaseline(persistence, collection.name, rows);
+						refreshPersistenceMirror(persistence, collection.name, rows);
 					}
 				},
 				{ skipFlush: supportsDirtyMerge },
@@ -4480,6 +4941,7 @@ async function registerLegacyWatchers(
 						) {
 							updateDirectoryBaseline(persistence, collection, rows);
 						}
+						refreshPersistenceMirror(persistence, collection.name, rows);
 					},
 					{ skipFlush: supportsDirtyMerge },
 				);
@@ -4618,6 +5080,11 @@ async function runTransaction<A>(
 			const changedCollections = runtime.commitTransactionSession(session);
 			finalized = true;
 			for (const collection of changedCollections) {
+				invalidatePersistenceMirror(
+					persistence,
+					collection,
+					"transaction-commit",
+				);
 				markCollectionDirty(persistence, collection);
 				const key = persistence?.writeKeyByCollection.get(collection);
 				if (key) persistence?.saver.schedule(key);

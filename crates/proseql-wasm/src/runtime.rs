@@ -25,11 +25,9 @@ use crate::callbacks::CallbackTable;
 use crate::command;
 use crate::projection::MaterializedProjection;
 use crate::reactive::{unsupported_scheduler_factory, ReactiveSchedulerFactory};
-use crate::types::{
-    parse_json, to_query_input, CollectionManyCommand, CreateDatabaseInput, QueryCommand,
-};
+use crate::types::{parse_json, to_query_input, CreateDatabaseInput, QueryCommand};
 
-type CompactCreateManyCompletion = (Vec<f64>, Option<String>);
+type CompactCreateCompletion = (Vec<f64>, Option<String>);
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -379,8 +377,9 @@ impl Runtime {
         &mut self,
         handle: u32,
         collection_index: u32,
-        command_json: &str,
-    ) -> Result<Option<CompactCreateManyCompletion>, EngineError> {
+        items: Vec<Value>,
+        single: bool,
+    ) -> Result<Option<CompactCreateCompletion>, EngineError> {
         let context = self.inner.database_mut(handle)?;
         let Some(collection) = context
             .collection_names
@@ -389,13 +388,14 @@ impl Runtime {
         else {
             return Ok(None);
         };
-        let command: CollectionManyCommand = parse_json(command_json, "createMany")?;
-        if command.collection != collection || command.skip_duplicates {
-            return Ok(None);
-        }
-        let result = context.db.create_many(&collection, command.items, false)?;
-        let created_at = result
-            .created
+        let created = if single {
+            vec![context
+                .db
+                .create(&collection, items.into_iter().next().unwrap_or(Value::Null))?]
+        } else {
+            context.db.create_many(&collection, items, false)?.created
+        };
+        let created_at = created
             .first()
             .and_then(|row| row.get("createdAt"))
             .and_then(Value::as_str)
@@ -1270,7 +1270,7 @@ fn native_bulk_response(
 
 #[cfg(target_arch = "wasm32")]
 fn native_create_many_response(
-    operation: impl FnOnce() -> Result<Option<CompactCreateManyCompletion>, EngineError>,
+    operation: impl FnOnce() -> Result<Option<CompactCreateCompletion>, EngineError>,
 ) -> wasm_bindgen::JsValue {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)) {
         Ok(Ok(Some((packed, created_at)))) => {
@@ -1530,14 +1530,16 @@ impl WasmRuntime {
         &self,
         handle: u32,
         collection_index: u32,
-        command_json: String,
+        items_json: String,
+        single: bool,
     ) -> wasm_bindgen::JsValue {
         native_create_many_response(|| {
+            let items = parse_json(&items_json, "createMany")?;
             let mut runtime = self
                 .inner
                 .try_borrow_mut()
                 .map_err(|_| runtime_busy("createMany"))?;
-            runtime.compact_create_many(handle, collection_index, &command_json)
+            runtime.compact_create_many(handle, collection_index, items, single)
         })
     }
 
@@ -1890,12 +1892,6 @@ impl WasmRuntime {
         self.inner
             .borrow_mut()
             .synchronize_projection_json(handle, &rows_json)
-    }
-
-    pub fn dry_run_migrations(&self, input_json: String) -> String {
-        self.inner
-            .borrow_mut()
-            .dry_run_migrations_json(input_json.as_str())
     }
 
     pub fn subscribe_watch(

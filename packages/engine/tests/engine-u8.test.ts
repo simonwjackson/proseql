@@ -2012,6 +2012,252 @@ describe("@proseql/engine U8 fixes", () => {
 		}
 	});
 
+	it("persists identity-safe formal mutations through the active serializer and falls back after caller mutation", async () => {
+		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u11-mirror-"));
+		const file = join(root, "users.json");
+		let serializeCalls = 0;
+		const serializerRegistry = {
+			supportedExtensions: () => ["json"],
+			serialize: (data: unknown, extension: string) =>
+				Effect.sync(() => {
+					serializeCalls += 1;
+					expect(extension).toBe("json");
+					return JSON.stringify(data, null, 2);
+				}),
+			deserialize: (content: string) => Effect.sync(() => JSON.parse(content)),
+		};
+		try {
+			const db = await createPersistentEngineDatabase(
+				{
+					users: {
+						schema: UserSchema,
+						file,
+						relationships: {},
+					},
+				},
+				undefined,
+				{
+					storageHost: createNodeEngineStorageHost(),
+					serializerRegistry,
+					writeDebounce: 60_000,
+					_suppressInitialWrites: true,
+				},
+			);
+			const first = await db.users.create({ id: "u1", name: "Alice" });
+			await db.users.create({ id: "u2", name: "Bob" });
+			await db.flush();
+			expect(serializeCalls).toBe(1);
+			expect(await readFile(file, "utf8")).toBe(
+				JSON.stringify(
+					{
+						u1: { id: "u1", name: "Alice" },
+						u2: { id: "u2", name: "Bob" },
+					},
+					null,
+					2,
+				),
+			);
+
+			(first as { name: unknown }).name = 42;
+			await db.users.update("u2", { name: "Scheduled" });
+			await expect(db.flush()).rejects.toBeInstanceOf(ValidationError);
+			expect(serializeCalls).toBe(1);
+			(first as { name: unknown }).name = "Recovered";
+			await db.users.update("u2", { name: "Recovered Too" });
+			await db.flush();
+			expect(serializeCalls).toBe(2);
+			expect(JSON.parse(await readFile(file, "utf8")).u1.name).toBe(
+				"Recovered",
+			);
+			await db.close();
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("refreshes the persistence mirror after an external file reload", async () => {
+		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u11-mirror-watch-"));
+		const file = join(root, "users.json");
+		const host = createTriggerableFileWatchHost(root);
+		const serializerRegistry = {
+			supportedExtensions: () => ["json"],
+			serialize: (data: unknown) => Effect.succeed(JSON.stringify(data, null, 2)),
+			deserialize: (content: string) => Effect.sync(() => JSON.parse(content)),
+		};
+		try {
+			await writeFile(file, JSON.stringify({ u1: { id: "u1", name: "Alice" } }));
+			const db = await createPersistentEngineDatabase(
+				{
+					users: { schema: UserSchema, file, relationships: {} },
+				},
+				undefined,
+				{
+					storageHost: host,
+					serializerRegistry,
+					writeDebounce: 60_000,
+					_suppressInitialWrites: true,
+				},
+			);
+			await writeFile(
+				file,
+				JSON.stringify({
+					u1: { id: "u1", name: "External" },
+					u2: { id: "u2", name: "External Only" },
+				}),
+			);
+			host.watchCallbackFor(file)?.();
+			await waitFor(async () => {
+				expect((await db.users.findById("u2"))?.name).toBe("External Only");
+			});
+			await db.users.update("u1", { name: "Local" });
+			await db.flush();
+			const stored = JSON.parse(await readFile(file, "utf8"));
+			expect(stored).toEqual({
+				u1: { id: "u1", name: "Local" },
+				u2: { id: "u2", name: "External Only" },
+			});
+			await db.close();
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("uses the configured storage layer when it differs from the storage host", async () => {
+		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u11-mirror-layer-"));
+		const file = join(root, "users.json");
+		const host = createControlledHost(root);
+		const layerHost = createControlledHost(root);
+		try {
+			const db = await createPersistentEngineDatabase(
+				{
+					users: { schema: UserSchema, file, relationships: {} },
+				},
+				undefined,
+				{
+					storageHost: host,
+					storageLayer: makeEngineStorageLayer(layerHost),
+					serializerRegistry: {
+						supportedExtensions: () => ["json"],
+						serialize: (data: unknown) => Effect.succeed(JSON.stringify(data)),
+						deserialize: (content: string) => Effect.sync(() => JSON.parse(content)),
+					},
+					writeDebounce: 60_000,
+					_suppressInitialWrites: true,
+				},
+			);
+			await db.users.create({ id: "u1", name: "Layer" });
+			await db.flush();
+			expect(host.writes).toHaveLength(0);
+			expect(layerHost.writes).toHaveLength(1);
+			expect(JSON.parse(layerHost.writes[0]!.data)).toEqual({
+				u1: { id: "u1", name: "Layer" },
+			});
+			await db.close();
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("retries mirror serializer and storage failures without losing dirty rows", async () => {
+		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u11-mirror-retry-"));
+		const file = join(root, "users.json");
+		const host = createControlledHost(root);
+		let serializerFailures = 1;
+		let serializeCalls = 0;
+		const serializerRegistry = {
+			supportedExtensions: () => ["json"],
+			serialize: (data: unknown) =>
+				serializerFailures-- > 0
+					? Effect.fail(
+							new SerializationError({
+								format: "json",
+								message: "Injected serializer failure",
+							}),
+						)
+					: Effect.sync(() => {
+						serializeCalls += 1;
+						return JSON.stringify(data);
+					}),
+			deserialize: (content: string) => Effect.sync(() => JSON.parse(content)),
+		};
+		try {
+			const db = await createPersistentEngineDatabase(
+				{
+					users: { schema: UserSchema, file, relationships: {} },
+				},
+				undefined,
+				{
+					storageHost: host,
+					serializerRegistry,
+					writeDebounce: 60_000,
+					_suppressInitialWrites: true,
+				},
+			);
+			await db.users.create({ id: "u1", name: "Retry" });
+			await expect(db.flush()).rejects.toBeInstanceOf(SerializationError);
+			expect(host.writes).toHaveLength(0);
+			await db.flush();
+			expect(serializeCalls).toBe(1);
+			expect(host.writes).toHaveLength(1);
+			expect(JSON.parse(host.writes[0]!.data)).toEqual({
+				u1: { id: "u1", name: "Retry" },
+			});
+
+			host.failNextWrite(file);
+			await db.users.update("u1", { name: "Storage Retry" });
+			await expect(db.flush()).rejects.toBeInstanceOf(StorageError);
+			expect(host.writes).toHaveLength(1);
+			await db.flush();
+			expect(host.writes).toHaveLength(2);
+			expect(JSON.parse(host.writes[1]!.data)).toEqual({
+				u1: { id: "u1", name: "Storage Retry" },
+			});
+			await db.close();
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("uses canonical schema encoding for transforming schemas", async () => {
+		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u11-transform-"));
+		const file = join(root, "events.json");
+		try {
+			const db = await createPersistentEngineDatabase(
+				{
+					events: {
+						schema: Schema.Struct({
+							id: Schema.String,
+							count: Schema.NumberFromString,
+						}),
+						file,
+						relationships: {},
+					},
+				},
+				undefined,
+				{
+					storageHost: createNodeEngineStorageHost(),
+					serializerRegistry: {
+						supportedExtensions: () => ["json"],
+						serialize: (data: unknown) =>
+							Effect.succeed(JSON.stringify(data)),
+						deserialize: (content: string) =>
+							Effect.sync(() => JSON.parse(content)),
+					},
+					writeDebounce: 60_000,
+					_suppressInitialWrites: true,
+				},
+			);
+			await db.events.create({ id: "e1", count: "777" });
+			await db.flush();
+			expect(JSON.parse(await readFile(file, "utf8")).e1.count).toBe(
+				"777",
+			);
+			await db.close();
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
 	it("retains background durability errors until a successful retry and flush rejects durability failures", async () => {
 		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u8-durability-"));
 		try {
