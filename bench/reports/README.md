@@ -9,6 +9,7 @@ The benchmark contract compares the supported Rust/WASM path through `@proseql/e
 - CRUD, query-pipeline, transaction, persistence, and callback-characterization fixtures use 10,000 records per collection.
 - Required scaling reads use fixed 100, 1,000, and 10,000-record fixtures.
 - The 100,000-record cases are safety and memory gates, not throughput gates.
+- Browser JavaScript heap has an explicit absolute maximum of `50,000,000` bytes. The historical `11,739,108`-byte measurement remains the recorded baseline rather than being rebased.
 - Every blocking result requires both engines, finite positive throughput, at least 30 samples per engine, matching decoded-value checksums, and manifest-identical category, case type, fixture size, logical operation count, and normal-interaction metadata.
 - Logical operation count records the fixed work represented by one timed invocation: batch mutations use 100, transaction and hook sequences use 3, and ordinary reads/single operations use 1.
 
