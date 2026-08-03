@@ -25,7 +25,11 @@ use crate::callbacks::CallbackTable;
 use crate::command;
 use crate::projection::MaterializedProjection;
 use crate::reactive::{unsupported_scheduler_factory, ReactiveSchedulerFactory};
-use crate::types::{parse_json, to_query_input, CreateDatabaseInput, QueryCommand};
+use crate::types::{
+    parse_json, to_query_input, CollectionManyCommand, CreateDatabaseInput, QueryCommand,
+};
+
+type CompactCreateManyCompletion = (Vec<f64>, Option<String>);
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -129,7 +133,6 @@ pub(crate) struct RuntimeTransactionSession {
     pub database_handle: u32,
     pub state: OwnedTransactionSession,
     pub projection: MaterializedProjection,
-    pub step_crossings: u64,
     pub poisoned: bool,
 }
 
@@ -372,6 +375,134 @@ impl Runtime {
         }
     }
 
+    pub fn compact_create_many(
+        &mut self,
+        handle: u32,
+        collection_index: u32,
+        command_json: &str,
+    ) -> Result<Option<CompactCreateManyCompletion>, EngineError> {
+        let context = self.inner.database_mut(handle)?;
+        let Some(collection) = context
+            .collection_names
+            .get(collection_index as usize)
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let command: CollectionManyCommand = parse_json(command_json, "createMany")?;
+        if command.collection != collection || command.skip_duplicates {
+            return Ok(None);
+        }
+        let result = context.db.create_many(&collection, command.items, false)?;
+        let created_at = result
+            .created
+            .first()
+            .and_then(|row| row.get("createdAt"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let changes = context.db.take_committed_changes();
+        let Some(packed) = context
+            .projection
+            .apply_native_creates(&changes, &collection)
+        else {
+            return Err(EngineError::Operation(OperationError {
+                operation: "createMany".to_owned(),
+                reason: "invalid compact create projection".to_owned(),
+                message: "Compact create projection did not match committed rows".to_owned(),
+            }));
+        };
+        Ok(Some((packed, created_at)))
+    }
+
+    fn authorized_bulk_mutation(
+        &mut self,
+        handle: u32,
+        collection_index: u32,
+        slots: &[u32],
+        tokens: &[f64],
+        update: Option<Value>,
+        delete_equality: Option<(String, Value)>,
+    ) -> Result<Option<f64>, EngineError> {
+        const COUNT_RADIX: u64 = 1 << 21;
+        let context = self.inner.database_mut(handle)?;
+        let Some(collection) = context
+            .collection_names
+            .get(collection_index as usize)
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        // Collection mutation authorization below requires ids in strict
+        // insertion order, which also rejects duplicate rows before mutation.
+        // Derive ids from the authorized slots so the native boundary carries
+        // only packed numeric identity metadata.
+        let Some(ids) = context
+            .projection
+            .authorized_bulk_ids(collection_index, slots, tokens)
+        else {
+            return Ok(None);
+        };
+        let prior_revision = context
+            .db
+            .collection(&collection)
+            .map(Collection::revision)
+            .unwrap_or(u64::MAX);
+        if ids.len() >= COUNT_RADIX as usize
+            || prior_revision > u64::from(u32::MAX).saturating_sub(ids.len() as u64)
+        {
+            return Ok(None);
+        }
+        let delete = update.is_none();
+        let count = match update {
+            Some(updates) => {
+                context
+                    .db
+                    .authorized_update_many_ids_compact(&collection, &ids, updates)?
+            }
+            None => {
+                context
+                    .db
+                    .authorized_delete_many_ids_compact(&collection, &ids, delete_equality)?
+            }
+        };
+        let Some(count) = count else {
+            return Ok(None);
+        };
+        let changes = context.db.take_committed_changes();
+        context
+            .projection
+            .apply_authorized_bulk_changes(&changes, &collection, &ids, delete);
+        let revision = context
+            .db
+            .collection(&collection)
+            .map(Collection::revision)
+            .expect("authorized bulk collection remains live");
+        context.last_changes = changes;
+        Ok(Some((revision * COUNT_RADIX + count as u64) as f64))
+    }
+
+    pub fn authorized_bulk_update(
+        &mut self,
+        handle: u32,
+        collection_index: u32,
+        slots: &[u32],
+        tokens: &[f64],
+        updates: Value,
+    ) -> Result<Option<f64>, EngineError> {
+        self.authorized_bulk_mutation(handle, collection_index, slots, tokens, Some(updates), None)
+    }
+
+    pub fn authorized_bulk_delete(
+        &mut self,
+        handle: u32,
+        collection_index: u32,
+        slots: &[u32],
+        tokens: &[f64],
+        equality: Option<(String, Value)>,
+    ) -> Result<Option<f64>, EngineError> {
+        self.authorized_bulk_mutation(handle, collection_index, slots, tokens, None, equality)
+    }
+
     pub fn fast_find_by_id(
         &self,
         handle: u32,
@@ -594,6 +725,19 @@ impl Runtime {
         })
     }
 
+    pub fn projection_handles_preserving_materializations_json(&self, handle: u32) -> String {
+        bridge::handle(|| {
+            let context = self.inner.databases.get(&handle).ok_or_else(|| {
+                EngineError::Operation(OperationError {
+                    operation: "database".to_owned(),
+                    reason: "unknown-handle".to_owned(),
+                    message: format!("Unknown database handle {handle}"),
+                })
+            })?;
+            Ok(context.projection.handles(&context.collection_names))
+        })
+    }
+
     /// Test-only bridge accessor. Production mutations carry this sync on the
     /// same response as their result/error/defect.
     pub fn projection_changes_json(&self, handle: u32) -> String {
@@ -693,7 +837,6 @@ impl Runtime {
                     database_handle: handle,
                     state,
                     projection,
-                    step_crossings: 0,
                     poisoned: false,
                 },
             );
@@ -780,8 +923,6 @@ impl Runtime {
             .get_mut(&database_handle)
             .map(|context| context.db.take_committed_changes())
             .unwrap_or_default();
-        session.step_crossings = session.step_crossings.saturating_add(1);
-
         let response_kind = serde_json::from_str::<Value>(&response)
             .ok()
             .and_then(|value| value.get("kind").and_then(Value::as_str).map(str::to_owned));
@@ -1004,9 +1145,6 @@ impl Runtime {
             context.last_changes = committed_stream;
             Ok(json!({
                 "changedCollections": committed.touched_collections,
-                "journalEntries": committed.journal_entries,
-                "journalBytes": committed.journal_bytes,
-                "stepCrossings": session.step_crossings,
             }))
         });
         if response.starts_with("{\"kind\":\"defect\"") {
@@ -1046,10 +1184,7 @@ impl Runtime {
             let context = self.inner.database_mut(session.database_handle)?;
             context.db.rollback_owned_transaction(session.state)?;
             let _ = context.db.take_committed_changes();
-            Ok(json!({
-                "rolledBack": true,
-                "stepCrossings": session.step_crossings,
-            }))
+            Ok(json!({"rolledBack": true}))
         });
         if response.starts_with("{\"kind\":\"defect\"") {
             if let Some(context) =
@@ -1101,6 +1236,66 @@ impl Runtime {
 
     pub fn unsubscribe_json(&mut self, handle: u32, subscription_id: u32) -> String {
         bridge::handle(|| command::unsubscribe(&mut self.inner, handle, subscription_id))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn runtime_busy(operation: &str) -> EngineError {
+    EngineError::Operation(OperationError {
+        operation: operation.to_owned(),
+        reason: "runtime-busy".to_owned(),
+        message: "WASM runtime is already borrowed".to_owned(),
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_bulk_response(
+    operation: impl FnOnce() -> Result<Option<f64>, EngineError>,
+) -> wasm_bindgen::JsValue {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)) {
+        Ok(Ok(Some(completion))) => wasm_bindgen::JsValue::from_f64(completion),
+        Ok(Ok(None)) => wasm_bindgen::JsValue::UNDEFINED,
+        Ok(Err(error)) => {
+            wasm_bindgen::JsValue::from_str(&bridge::handle(|| -> Result<Value, EngineError> {
+                Err(error)
+            }))
+        }
+        Err(payload) => {
+            wasm_bindgen::JsValue::from_str(&bridge::handle(|| -> Result<Value, EngineError> {
+                std::panic::resume_unwind(payload)
+            }))
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_create_many_response(
+    operation: impl FnOnce() -> Result<Option<CompactCreateManyCompletion>, EngineError>,
+) -> wasm_bindgen::JsValue {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)) {
+        Ok(Ok(Some((packed, created_at)))) => {
+            let output = js_sys::Array::new_with_length(2);
+            output.set(0, js_sys::Float64Array::from(packed.as_slice()).into());
+            output.set(
+                1,
+                created_at.as_deref().map_or(
+                    wasm_bindgen::JsValue::UNDEFINED,
+                    wasm_bindgen::JsValue::from_str,
+                ),
+            );
+            output.into()
+        }
+        Ok(Ok(None)) => wasm_bindgen::JsValue::UNDEFINED,
+        Ok(Err(error)) => {
+            wasm_bindgen::JsValue::from_str(&bridge::handle(|| -> Result<Value, EngineError> {
+                Err(error)
+            }))
+        }
+        Err(payload) => {
+            wasm_bindgen::JsValue::from_str(&bridge::handle(|| -> Result<Value, EngineError> {
+                std::panic::resume_unwind(payload)
+            }))
+        }
     }
 }
 
@@ -1329,6 +1524,80 @@ impl WasmRuntime {
         self.inner
             .borrow_mut()
             .rollback_transaction_json(session_handle)
+    }
+
+    pub fn compact_create_many(
+        &self,
+        handle: u32,
+        collection_index: u32,
+        command_json: String,
+    ) -> wasm_bindgen::JsValue {
+        native_create_many_response(|| {
+            let mut runtime = self
+                .inner
+                .try_borrow_mut()
+                .map_err(|_| runtime_busy("createMany"))?;
+            runtime.compact_create_many(handle, collection_index, &command_json)
+        })
+    }
+
+    pub fn authorized_bulk_update(
+        &self,
+        handle: u32,
+        collection_index: u32,
+        slots: js_sys::Uint32Array,
+        tokens: js_sys::Float64Array,
+        updates_json: String,
+    ) -> wasm_bindgen::JsValue {
+        let slots = slots.to_vec();
+        let tokens = tokens.to_vec();
+        let updates = match parse_json::<Value>(&updates_json, "authorizedBulkUpdate") {
+            Ok(updates) => updates,
+            Err(error) => {
+                return wasm_bindgen::JsValue::from_str(&bridge::handle(
+                    || -> Result<Value, EngineError> { Err(error) },
+                ));
+            }
+        };
+        native_bulk_response(|| {
+            let mut runtime = self
+                .inner
+                .try_borrow_mut()
+                .map_err(|_| runtime_busy("authorizedBulkUpdate"))?;
+            runtime.authorized_bulk_update(handle, collection_index, &slots, &tokens, updates)
+        })
+    }
+
+    pub fn authorized_bulk_delete(
+        &self,
+        handle: u32,
+        collection_index: u32,
+        slots: js_sys::Uint32Array,
+        tokens: js_sys::Float64Array,
+        equality_field: Option<String>,
+        equality_json: Option<String>,
+    ) -> wasm_bindgen::JsValue {
+        let slots = slots.to_vec();
+        let tokens = tokens.to_vec();
+        let equality = match (equality_field, equality_json) {
+            (Some(field), Some(json)) => match parse_json::<Value>(&json, "authorizedBulkDelete") {
+                Ok(value) => Some((field, value)),
+                Err(error) => {
+                    return wasm_bindgen::JsValue::from_str(&bridge::handle(
+                        || -> Result<Value, EngineError> { Err(error) },
+                    ));
+                }
+            },
+            (None, None) => None,
+            _ => return wasm_bindgen::JsValue::UNDEFINED,
+        };
+        native_bulk_response(|| {
+            let mut runtime = self
+                .inner
+                .try_borrow_mut()
+                .map_err(|_| runtime_busy("authorizedBulkDelete"))?;
+            runtime.authorized_bulk_delete(handle, collection_index, &slots, &tokens, equality)
+        })
     }
 
     pub fn fast_find_by_id(
@@ -1609,6 +1878,12 @@ impl WasmRuntime {
 
     pub fn projection_handles(&self, handle: u32) -> String {
         self.inner.borrow_mut().projection_handles_json(handle)
+    }
+
+    pub fn projection_handles_preserving_materializations(&self, handle: u32) -> String {
+        self.inner
+            .borrow()
+            .projection_handles_preserving_materializations_json(handle)
     }
 
     pub fn synchronize_projection(&self, handle: u32, rows_json: String) -> String {

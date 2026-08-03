@@ -1040,6 +1040,288 @@ describe("@proseql/engine U8 fixes", () => {
 		}
 	});
 
+	it("falls back from compact createMany when decoding coerces values", async () => {
+		const DecodedSchema = Schema.Struct({
+			id: Schema.String,
+			amount: Schema.NumberFromString,
+		});
+		const db = await createEngineDatabase({
+			rows: { schema: DecodedSchema, relationships: {} },
+		} as const);
+		try {
+			const created = await db.rows.createMany([
+				{ id: "r1", amount: "41" },
+				{ id: "r2", amount: "42" },
+			] as never);
+			expect(created.created).toEqual([
+				{ id: "r1", amount: 41 },
+				{ id: "r2", amount: 42 },
+			]);
+			expect(await db.rows.query({ sort: { id: "asc" } })).toEqual(
+				created.created,
+			);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("falls back from direct compact createMany preparation for boundary numbers", async () => {
+		const NumberSchema = Schema.Struct({
+			id: Schema.String,
+			amount: Schema.Number,
+		});
+		const db = await createEngineDatabase({
+			rows: { schema: NumberSchema, relationships: {} },
+		} as const);
+		try {
+			const created = await db.rows.createMany([
+				{ id: "negative-zero", amount: -0 },
+			]);
+			expect(Object.is(created.created[0]?.amount, -0)).toBe(true);
+			expect(
+				Object.is((await db.rows.findById("negative-zero"))?.amount, -0),
+			).toBe(true);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("retains a reused 10K shell through the current event-loop turn and releases it on the next turn", async () => {
+		const count = 10_000;
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{
+				users: Array.from({ length: count }, (_, index) => ({
+					id: `u${index}`,
+					name: `User ${index}`,
+				})),
+			},
+		);
+		try {
+			const diagnostics = () =>
+				(
+					db as unknown as {
+						__proseqlMaterializationDiagnostics: () => {
+							peakMaterializedRows: number;
+							retainedStrongRows: number;
+							retainedStrongProxies: number;
+							strongStructureReleaseScheduled: boolean;
+						};
+					}
+				).__proseqlMaterializationDiagnostics();
+			let first: ReadonlyArray<{ id: string; name: string }> | undefined =
+				await db.users.query();
+			for (let phase = 0; phase < 64; phase += 1) await Promise.resolve();
+			let second: ReadonlyArray<{ id: string; name: string }> | undefined =
+				await db.users.query();
+			const retained = first[0];
+			expect(second[0]).toBe(retained);
+			expect(diagnostics().peakMaterializedRows).toBe(count);
+			expect(diagnostics().retainedStrongRows).toBe(count);
+			expect(diagnostics().strongStructureReleaseScheduled).toBe(true);
+
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			expect(diagnostics().strongStructureReleaseScheduled).toBe(false);
+			expect(diagnostics().retainedStrongRows).toBe(0);
+			expect(diagnostics().retainedStrongProxies).toBe(0);
+			expect(first[0]).toBe(retained);
+			expect(second[0]).toBe(retained);
+
+			first = undefined;
+			second = undefined;
+			(globalThis as { Bun?: { gc(full?: boolean): void } }).Bun?.gc(true);
+			expect(diagnostics().retainedStrongRows).toBe(0);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("keeps mutation result identity while idle release and close clear structural owners", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{
+				users: Array.from({ length: 100 }, (_, index) => ({
+					id: `u${index}`,
+					name: `User ${index}`,
+				})),
+			},
+		);
+		let closed = false;
+		try {
+			const diagnostics = () =>
+				(
+					db as unknown as {
+						__proseqlMaterializationDiagnostics: () => {
+							retainedStrongRows: number;
+						};
+					}
+				).__proseqlMaterializationDiagnostics();
+			const rows = await db.users.query();
+			const updated = await db.users.updateMany(
+				{ id: { $in: ["u0"] } },
+				{ name: "Updated" },
+			);
+			expect(updated.updated[0]).toBe(rows[0]);
+			expect(rows[0]?.name).toBe("Updated");
+			expect(diagnostics().retainedStrongRows).toBe(100);
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			expect(diagnostics().retainedStrongRows).toBe(0);
+			expect(updated.updated[0]).toBe(rows[0]);
+
+			await db.users.query();
+			expect(diagnostics().retainedStrongRows).toBe(100);
+			const closing = db.close();
+			closed = true;
+			expect(diagnostics().retainedStrongRows).toBe(0);
+			await closing;
+		} finally {
+			if (!closed) await db.close();
+		}
+	});
+
+	it("isolates event-turn shell leases between databases", async () => {
+		const create = () =>
+			createEngineDatabase(
+				{ users: { schema: UserSchema, relationships: {} } } as const,
+				{
+					users: Array.from({ length: 100 }, (_, index) => ({
+						id: `u${index}`,
+						name: `User ${index}`,
+					})),
+				},
+			);
+		const first = await create();
+		const second = await create();
+		const diagnostics = (db: typeof first) =>
+			(
+				db as unknown as {
+					__proseqlMaterializationDiagnostics: () => {
+						retainedStrongRows: number;
+					};
+				}
+			).__proseqlMaterializationDiagnostics();
+		const retainedRows = (db: typeof first) =>
+			diagnostics(db).retainedStrongRows;
+		try {
+			await first.users.query();
+			await second.users.query();
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			expect(retainedRows(first)).toBe(0);
+			expect(retainedRows(second)).toBe(0);
+
+			await first.users.query();
+			expect(retainedRows(first)).toBe(100);
+			expect(retainedRows(second)).toBe(0);
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			expect(retainedRows(first)).toBe(0);
+		} finally {
+			await Promise.all([first.close(), second.close()]);
+		}
+	});
+
+	it("resynchronizes scalar bulk deletes lazily without replacing surviving or retained identities", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{
+				users: [
+					{ id: "u1", name: "Alice" },
+					{ id: "u2", name: "Bob" },
+					{ id: "u3", name: "Cara" },
+				],
+			},
+		);
+		const watch = db.users.watch({ debounceMs: 0 });
+		try {
+			await watch.next();
+			const snapshot = await db.users.query();
+			const deleted = await db.users.deleteMany({
+				id: { $in: ["u2", "u3"] },
+			} as never);
+			expect(deleted.deleted[0]).toBe(snapshot[1]);
+			expect(deleted.deleted[1]).toBe(snapshot[2]);
+			expect(snapshot.map((row) => row.id)).toEqual(["u1", "u2", "u3"]);
+
+			await expect(db.users.findById("u2")).rejects.toMatchObject({
+				_tag: "NotFoundError",
+				id: "u2",
+			});
+			const survivors = await db.users.query();
+			expect(survivors).toHaveLength(1);
+			expect(survivors[0]).toBe(snapshot[0]);
+			expect((await watch.next()).value?.map((row) => row.id)).toEqual(["u1"]);
+
+			const recreated = await db.users.create({ id: "u2", name: "Recreated" });
+			expect(recreated).not.toBe(deleted.deleted[0]);
+			expect(await db.users.findById("u2")).toBe(recreated);
+			await db.$transaction(async (tx) => {
+				expect((await tx.users.query()).map((row) => row.id)).toEqual([
+					"u1",
+					"u2",
+				]);
+			});
+		} finally {
+			await watch.return();
+			await db.close();
+		}
+	});
+
+	it("revalidates cached equality cohorts in Rust before an authorized delete writes", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{
+				users: [
+					{ id: "u1", name: "keep" },
+					{ id: "u2", name: "drop" },
+					{ id: "u3", name: "drop" },
+				],
+			},
+		);
+		try {
+			await db.users.query();
+			expect((await db.users.deleteMany({ name: "drop" })).count).toBe(2);
+			await db.users.createMany([
+				{ id: "u2", name: "drop" },
+				{ id: "u3", name: "drop" },
+				{ id: "u4", name: "drop" },
+			]);
+			const deleted = await db.users.deleteMany({ name: "drop" });
+			expect(deleted.count).toBe(3);
+			expect(deleted.deleted.map((row) => row.id)).toEqual(["u2", "u3", "u4"]);
+			expect((await db.users.query()).map((row) => row.id)).toEqual(["u1"]);
+		} finally {
+			await db.close();
+		}
+	});
+
+	it("recreates a 100-row tail after repeated authorized deletes without leaving stale storage ids", async () => {
+		const count = 10_000;
+		const targets = Array.from({ length: 100 }, (_, index) => ({
+			id: `u${count - 100 + index}`,
+			name: "drop",
+		}));
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{
+				users: Array.from({ length: count }, (_, index) => ({
+					id: `u${index}`,
+					name: index >= count - 100 ? "drop" : "keep",
+				})),
+			},
+		);
+		try {
+			for (let iteration = 0; iteration < 5; iteration += 1) {
+				await db.users.query();
+				const deleted = await db.users.deleteMany({ name: "drop" });
+				expect(deleted.count).toBe(100);
+				expect(await db.users.query({ where: { name: "drop" } })).toEqual([]);
+				const recreated = await db.users.createMany(targets);
+				expect(recreated.created).toHaveLength(100);
+			}
+		} finally {
+			await db.close();
+		}
+	});
+
 	it("keeps transformed create results identical to their stable storage-key lookup", async () => {
 		const db = await createEngineDatabase({
 			users: {
@@ -1515,6 +1797,115 @@ describe("@proseql/engine U8 fixes", () => {
 				},
 			} as const);
 			expect(await reloaded.teams.query()).toEqual([]);
+			await reloaded.close();
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("persists predicate bulk successes and callback side effects across flush and reload", async () => {
+		const root = await mkdtemp(
+			join(tmpdir(), "proseql-engine-u8-predicate-persistence-"),
+		);
+		const file = join(root, "users.json");
+		const config = {
+			users: {
+				schema: UserSchema,
+				file,
+				format: "json",
+				relationships: {},
+			},
+		} as const;
+		const predicateBulk = Symbol.for(
+			"@proseql/engine/predicate-bulk-operation",
+		);
+		const invoke = (
+			collection: unknown,
+			method: "updateMany" | "deleteMany",
+			selectIds: (
+				rows: ReadonlyArray<Record<string, unknown>>,
+			) => ReadonlyArray<string>,
+			data?: unknown,
+		) =>
+			(
+				collection as Record<
+					symbol,
+					(
+						method: "updateMany" | "deleteMany",
+						selectIds: (
+							rows: ReadonlyArray<Record<string, unknown>>,
+						) => ReadonlyArray<string>,
+						data: unknown,
+					) => Promise<unknown>
+				>
+			)[predicateBulk](method, selectIds, data);
+		try {
+			let db = await createPersistentEngineDatabase(
+				config,
+				{
+					users: [
+						{ id: "u1", name: "One" },
+						{ id: "u2", name: "Two" },
+					],
+				},
+				{ writeDebounce: 5 },
+			);
+			await db.users.query();
+			const predicateDefect = new Error("persistent predicate defect");
+			await expect(
+				invoke(db.users, "updateMany", (rows) => {
+					(rows[1] as { name: string }).name = "Callback Side Effect";
+					throw predicateDefect;
+				}),
+			).rejects.toBe(predicateDefect);
+			await db.flush();
+			await db.close();
+
+			db = await createPersistentEngineDatabase(config);
+			expect(await db.users.findById("u2")).toMatchObject({
+				name: "Callback Side Effect",
+			});
+			await db.users.query();
+			await invoke(
+				db.users,
+				"updateMany",
+				(rows) => {
+					const nonmatching = rows.find((row) => row.id === "u2") as
+						| { name: string }
+						| undefined;
+					if (nonmatching !== undefined) {
+						nonmatching.name = "Successful Callback Side Effect";
+					}
+					return rows
+						.filter((row) => row.id === "u1")
+						.map((row) => String(row.id));
+				},
+				{ name: "Formal Update" },
+			);
+			await db.flush();
+			await db.close();
+
+			db = await createPersistentEngineDatabase(config);
+			expect(await db.users.findById("u1")).toMatchObject({
+				name: "Formal Update",
+			});
+			expect(await db.users.findById("u2")).toMatchObject({
+				name: "Successful Callback Side Effect",
+			});
+			await db.users.query();
+			await invoke(db.users, "deleteMany", (rows) =>
+				rows.filter((row) => row.id === "u1").map((row) => String(row.id)),
+			);
+			await db.flush();
+			await db.close();
+
+			const reloaded = await createPersistentEngineDatabase(config);
+			await expect(reloaded.users.findById("u1")).rejects.toMatchObject({
+				_tag: "NotFoundError",
+			});
+			expect(await reloaded.users.findById("u2")).toMatchObject({
+				name: "Successful Callback Side Effect",
+			});
 			await reloaded.close();
 		} finally {
 			await rm(root, { recursive: true, force: true });
@@ -2056,12 +2447,6 @@ describe("@proseql/engine U8 fixes", () => {
 		expect(after.transactionSteps - before.transactionSteps).toBe(3);
 		expect(after.transactionCommits - before.transactionCommits).toBe(1);
 		expect(after.transactionRollbacks - before.transactionRollbacks).toBe(0);
-		expect(
-			after.transactionJournalEntries - before.transactionJournalEntries,
-		).toBe(3);
-		expect(after.transactionJournalBytes).toBeGreaterThan(
-			before.transactionJournalBytes,
-		);
 		expect(
 			after.transactionSnapshotTransfers - before.transactionSnapshotTransfers,
 		).toBe(0);
@@ -3321,6 +3706,23 @@ describe("@proseql/engine U8 fixes", () => {
 				data: { id: "u1" },
 			}),
 		).resolves.toEqual({ id: "u1", nickname: null });
+		await expect(
+			dispatchRaw<{ created: ReadonlyArray<Record<string, unknown>> }>(
+				runtime,
+				handle,
+				"createMany",
+				{
+					collection: "users",
+					items: [{ id: "u2" }, { id: "u3", nickname: "explicit" }],
+				},
+			),
+		).resolves.toEqual({
+			created: [
+				{ id: "u2", nickname: null },
+				{ id: "u3", nickname: "explicit" },
+			],
+			skipped: [],
+		});
 	});
 
 	it("rejects invalid default and id-generator callback returns via WasmEngineDefectError", async () => {
@@ -4193,11 +4595,42 @@ describe("@proseql/engine U8 fixes", () => {
 				{ users: [{ id: "u1", name: "Seed" }] },
 				{ writeDebounce: 5 },
 			);
-			await db.users.update("u1", { name: { $set: "Updated" } });
+			const predicateBulk = Symbol.for(
+				"@proseql/engine/predicate-bulk-operation",
+			);
+			const invokePredicateBulk = (
+				collection: unknown,
+				method: "updateMany" | "deleteMany",
+				selectIds: (
+					rows: ReadonlyArray<Record<string, unknown>>,
+				) => ReadonlyArray<string>,
+				data?: unknown,
+			) =>
+				(
+					collection as Record<
+						symbol,
+						(
+							method: "updateMany" | "deleteMany",
+							selectIds: (
+								rows: ReadonlyArray<Record<string, unknown>>,
+							) => ReadonlyArray<string>,
+							data: unknown,
+						) => Promise<unknown>
+					>
+				)[predicateBulk](method, selectIds, data);
+
+			await db.users.query();
+			await invokePredicateBulk(
+				db.users,
+				"updateMany",
+				(rows) =>
+					rows.filter((row) => row.id === "u1").map((row) => String(row.id)),
+				{ name: "Predicate Updated" },
+			);
 			await db.posts.create({ id: "p1", title: "Post" });
 			await db.flush();
 			expect(await readFile(join(docsRoot, "base.yaml"), "utf8")).toContain(
-				"name: Updated",
+				"name: Predicate Updated",
 			);
 			expect(
 				await readFile(join(docsRoot, "generated.yaml"), "utf8"),
@@ -4216,6 +4649,33 @@ describe("@proseql/engine U8 fixes", () => {
 			await expect(
 				db.books.create({ id: "b2", title: "Nope", year: 2000 }),
 			).rejects.toBeInstanceOf(OperationError);
+			let readOnlyPredicateCalls = 0;
+			await expect(
+				invokePredicateBulk(
+					db.books,
+					"updateMany",
+					(rows) => {
+						readOnlyPredicateCalls += rows.length;
+						return rows.map((row) => String(row.id));
+					},
+					{ title: "Nope" },
+				),
+			).rejects.toMatchObject({ reason: "read-only-source" });
+			await expect(
+				invokePredicateBulk(db.books, "deleteMany", (rows) => {
+					readOnlyPredicateCalls += rows.length;
+					return rows.map((row) => String(row.id));
+				}),
+			).rejects.toMatchObject({ reason: "read-only-source" });
+			expect(readOnlyPredicateCalls).toBe(0);
+
+			await invokePredicateBulk(db.users, "deleteMany", (rows) =>
+				rows.filter((row) => row.id === "u1").map((row) => String(row.id)),
+			);
+			await db.flush();
+			expect(await readFile(join(docsRoot, "base.yaml"), "utf8")).not.toContain(
+				"u1:",
+			);
 			await db.close();
 		} finally {
 			await rm(root, { recursive: true, force: true });

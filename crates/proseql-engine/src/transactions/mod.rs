@@ -1,5 +1,3 @@
-use std::io::{self, Write};
-
 use indexmap::{IndexMap, IndexSet};
 use serde_json::Value;
 
@@ -34,16 +32,12 @@ pub struct OwnedTransactionSession {
     touched_collections: IndexSet<String>,
     revisions_before: IndexMap<String, u64>,
     prior_changes: ChangeSet,
-    journal_entries: usize,
-    journal_bytes: usize,
     active: bool,
 }
 
 #[derive(Debug)]
 pub struct CommittedTransaction {
     pub touched_collections: IndexSet<String>,
-    pub journal_entries: usize,
-    pub journal_bytes: usize,
 }
 
 pub struct TransactionContext<'a> {
@@ -64,31 +58,9 @@ fn tx_error(
     })
 }
 
-#[derive(Default)]
-struct CountingWriter(usize);
-
-impl Write for CountingWriter {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.0 = self.0.saturating_add(bytes.len());
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
 impl OwnedTransactionSession {
     pub fn is_active(&self) -> bool {
         self.active
-    }
-
-    pub fn journal_entry_count(&self) -> usize {
-        self.journal_entries
-    }
-
-    pub fn journal_bytes(&self) -> usize {
-        self.journal_bytes
     }
 
     pub fn touched_collections(&self) -> &IndexSet<String> {
@@ -111,10 +83,6 @@ impl OwnedTransactionSession {
     }
 
     pub fn absorb_changes(&mut self, changes: ChangeSet) {
-        self.journal_entries = self.journal_entries.saturating_add(changes.len());
-        let mut counter = CountingWriter::default();
-        let encoded_bytes = serde_json::to_writer(&mut counter, &changes).map_or(0, |()| counter.0);
-        self.journal_bytes = self.journal_bytes.saturating_add(encoded_bytes);
         for change in changes.entities() {
             self.touched_collections.insert(change.collection.clone());
         }
@@ -151,8 +119,6 @@ impl Database {
             touched_collections: IndexSet::new(),
             revisions_before,
             prior_changes,
-            journal_entries: 0,
-            journal_bytes: 0,
             active: true,
         })
     }
@@ -196,8 +162,6 @@ impl Database {
         session.ensure_active("commit")?;
         let trailing = self.take_committed_changes();
         session.absorb_changes(trailing);
-        let journal_entries = session.journal_entry_count();
-        let journal_bytes = session.journal_bytes();
         for change in session.journal.entities_mut() {
             change.after_position = change.after.as_ref().and_then(|_| {
                 self.collections
@@ -223,8 +187,6 @@ impl Database {
         }
         Ok(CommittedTransaction {
             touched_collections,
-            journal_entries,
-            journal_bytes,
         })
     }
 
@@ -511,8 +473,6 @@ impl<'a> TransactionContext<'a> {
             touched_collections: IndexSet::new(),
             revisions_before: IndexMap::new(),
             prior_changes: ChangeSet::default(),
-            journal_entries: 0,
-            journal_bytes: 0,
             active: false,
         };
         let session = std::mem::replace(&mut self.session, placeholder);
@@ -532,8 +492,6 @@ impl<'a> TransactionContext<'a> {
             touched_collections: IndexSet::new(),
             revisions_before: IndexMap::new(),
             prior_changes: ChangeSet::default(),
-            journal_entries: 0,
-            journal_bytes: 0,
             active: false,
         };
         let session = std::mem::replace(&mut self.session, placeholder);
@@ -554,11 +512,5 @@ impl<'a> TransactionContext<'a> {
     }
     pub fn mutated_collections(&self) -> &IndexSet<String> {
         self.session.touched_collections()
-    }
-    pub fn journal_entry_count(&self) -> usize {
-        self.session.journal_entry_count()
-    }
-    pub fn journal_bytes(&self) -> usize {
-        self.session.journal_bytes()
     }
 }

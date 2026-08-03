@@ -765,6 +765,9 @@ impl ReactiveHub {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
+        if state.snapshots.is_empty() {
+            return;
+        }
         let mut by_collection = HashMap::<&str, Vec<_>>::new();
         for change in changes.entities() {
             by_collection
@@ -1904,6 +1907,64 @@ impl Database {
             self.emit_owner_change_event(collection, ChangeOperation::Create);
         }
         Ok(result)
+    }
+
+    fn authorized_bulk_has_relationship_work(&self, collection: &str) -> bool {
+        self.collections.iter().any(|(name, rows)| {
+            (name == collection && !rows.descriptor.relationships.is_empty())
+                || rows
+                    .descriptor
+                    .relationships
+                    .iter()
+                    .any(|(_, relationship)| relationship.target == collection)
+        })
+    }
+
+    pub fn authorized_update_many_ids_compact(
+        &mut self,
+        collection: &str,
+        ids: &[String],
+        updates: Value,
+    ) -> Result<Option<usize>, EngineError> {
+        if self.authorized_bulk_has_relationship_work(collection) {
+            return Ok(None);
+        }
+        let count = self
+            .collections
+            .get_mut(collection)
+            .ok_or_else(|| col_nf(collection))?
+            .authorized_update_many_ids_compact(ids, updates)?;
+        if count.is_some_and(|count| count > 0) {
+            self.sync_reactive_snapshots();
+            self.emit_owner_change_event(collection, ChangeOperation::Update);
+        }
+        Ok(count)
+    }
+
+    pub fn authorized_delete_many_ids_compact(
+        &mut self,
+        collection: &str,
+        ids: &[String],
+        equality: Option<(String, Value)>,
+    ) -> Result<Option<usize>, EngineError> {
+        if self.authorized_bulk_has_relationship_work(collection) {
+            return Ok(None);
+        }
+        let count = self
+            .collections
+            .get_mut(collection)
+            .ok_or_else(|| col_nf(collection))?
+            .authorized_delete_many_ids_compact(
+                ids,
+                equality
+                    .as_ref()
+                    .map(|(field, expected)| (field.as_str(), expected)),
+            )?;
+        if count.is_some_and(|count| count > 0) {
+            self.sync_reactive_snapshots();
+            self.emit_owner_change_event(collection, ChangeOperation::Delete);
+        }
+        Ok(count)
     }
 
     pub fn update_many(

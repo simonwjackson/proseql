@@ -56,7 +56,7 @@ const debugNameSentinel = "wasmruntime_create_database";
  *       wasmLinearMemoryBytes: number,
  *     },
  *     coldStartupMaxGrowthRatio: number,
- *     jsHeapMaxGrowthRatio: number,
+ *     jsHeapMaximumBytes: number,
  *     wasmLinearMemoryMaxGrowthRatio: number,
  *   },
  * },

@@ -178,6 +178,28 @@ pub(crate) struct InternalUpsertManyOutcome {
 
 // ── Collection ────────────────────────────────────────────────────────────────
 
+fn primitive_patch_value_matches_schema(schema: &SchemaNode, value: &Value) -> bool {
+    match schema {
+        SchemaNode::Str => value.is_string(),
+        SchemaNode::Num => value.is_number(),
+        SchemaNode::Bool => value.is_boolean(),
+        SchemaNode::Unknown => true,
+        SchemaNode::Literal { value: literal } => value == literal,
+        SchemaNode::LiteralUnion { values } => values.iter().any(|literal| value == literal),
+        SchemaNode::Optional(inner) => primitive_patch_value_matches_schema(inner, value),
+        SchemaNode::NullOr(inner) => {
+            value.is_null() || primitive_patch_value_matches_schema(inner, value)
+        }
+        _ => false,
+    }
+}
+
+struct AuthorizedEqualityCache {
+    field: String,
+    expected: Value,
+    ids: HashSet<String>,
+}
+
 /// In-memory collection of JSON entities keyed by `id`.
 ///
 /// Entity order matches insertion order (JS `Map` semantics via `IndexMap`).
@@ -207,6 +229,7 @@ pub struct Collection {
     pending_changes: ChangeSet,
     /// Monotonic state revision used by synchronized host projections.
     revision: u64,
+    authorized_equality_cache: Option<AuthorizedEqualityCache>,
 }
 
 impl Collection {
@@ -283,6 +306,7 @@ impl Collection {
             query_indexes,
             pending_changes: ChangeSet::default(),
             revision: 0,
+            authorized_equality_cache: None,
         }
     }
 
@@ -291,6 +315,7 @@ impl Collection {
     /// Reserved for trusted whole-state loads, recovery, and legacy snapshot
     /// restoration. Ordinary writes use entity-granular index deltas.
     fn rebuild_indexes(&mut self) {
+        self.authorized_equality_cache = None;
         let entity_refs: Vec<(String, &Value)> =
             self.state.iter().map(|(id, v)| (id.clone(), v)).collect();
         self.query_indexes.rebuild(
@@ -298,6 +323,27 @@ impl Collection {
             &self.descriptor.indexes,
             &self.descriptor.search_index,
         );
+    }
+
+    fn update_authorized_equality_cache(
+        &mut self,
+        id: &str,
+        before: Option<&Value>,
+        after: Option<&Value>,
+    ) {
+        let Some(cache) = self.authorized_equality_cache.as_mut() else {
+            return;
+        };
+        let matches = |entity: &Value| {
+            crate::query::filter::get_nested_value(entity, &cache.field)
+                .is_some_and(|value| js_eq(value, &cache.expected))
+        };
+        if before.is_some_and(matches) {
+            cache.ids.remove(id);
+        }
+        if after.is_some_and(matches) {
+            cache.ids.insert(id.to_owned());
+        }
     }
 
     fn insert_state(&mut self, id: String, entity: Value) -> Option<Value> {
@@ -308,6 +354,7 @@ impl Collection {
             Some(previous) => self.query_indexes.replace(&id, previous, &entity),
             None => self.query_indexes.insert(&id, &entity),
         }
+        self.update_authorized_equality_cache(&id, before.as_ref(), Some(&entity));
         self.pending_changes.record(EntityChange {
             collection: self.name.clone(),
             id,
@@ -324,6 +371,7 @@ impl Collection {
         let before_position = self.state.get_index_of(id);
         let removed = self.state.shift_remove(id)?;
         self.query_indexes.remove(id, &removed);
+        self.update_authorized_equality_cache(id, Some(&removed), None);
         self.pending_changes.record(EntityChange {
             collection: self.name.clone(),
             id: id.to_owned(),
@@ -839,6 +887,126 @@ impl Collection {
     ///
     /// `limit` caps how many are deleted.  All deletions happen atomically after
     /// validation.
+    fn authorized_ids_in_order(&self, ids: &[String]) -> bool {
+        let mut previous = None;
+        for id in ids {
+            let Some(position) = self.state.get_index_of(id) else {
+                return false;
+            };
+            if previous.is_some_and(|previous| previous >= position) {
+                return false;
+            }
+            previous = Some(position);
+        }
+        true
+    }
+
+    pub(crate) fn authorized_delete_many_ids_compact(
+        &mut self,
+        ids: &[String],
+        equality: Option<(&str, &Value)>,
+    ) -> Result<Option<usize>, EngineError> {
+        let has_hooks = !self.descriptor.before_delete_hooks.is_empty()
+            || !self.descriptor.after_delete_hooks.is_empty()
+            || !self.descriptor.on_change_hooks.is_empty()
+            || !self.callbacks.global_before_delete_hooks().is_empty()
+            || !self.callbacks.global_after_delete_hooks().is_empty()
+            || !self.callbacks.global_on_change_hooks().is_empty();
+        if self.descriptor.append_only || has_hooks {
+            return Ok(None);
+        }
+        if !self.authorized_ids_in_order(ids) {
+            return Ok(None);
+        }
+        if let Some((field, expected)) = equality {
+            let cache_matches = self
+                .authorized_equality_cache
+                .as_ref()
+                .is_some_and(|cache| cache.field == field && cache.expected == *expected);
+            if !cache_matches {
+                let matching_ids = self
+                    .state
+                    .iter()
+                    .filter(|(_, entity)| {
+                        crate::query::filter::get_nested_value(entity, field)
+                            .is_some_and(|value| js_eq(value, expected))
+                    })
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                self.authorized_equality_cache = Some(AuthorizedEqualityCache {
+                    field: field.to_owned(),
+                    expected: expected.clone(),
+                    ids: matching_ids,
+                });
+            }
+            let cache = self
+                .authorized_equality_cache
+                .as_ref()
+                .expect("authorized equality cache initialized");
+            if cache.ids.len() != ids.len() || ids.iter().any(|id| !cache.ids.contains(id)) {
+                return Ok(None);
+            }
+        }
+        let count = ids.len();
+        let suffix_start = self.state.len().saturating_sub(count);
+        let is_suffix = ids
+            .iter()
+            .enumerate()
+            .all(|(offset, id)| self.state.get_index_of(id) == Some(suffix_start + offset));
+        if is_suffix {
+            let mut removed = Vec::with_capacity(count);
+            for _ in 0..count {
+                if let Some(entry) = self.state.pop() {
+                    removed.push(entry);
+                }
+            }
+            for (position, (id, value)) in removed.into_iter().rev().enumerate() {
+                self.query_indexes.remove(&id, &value);
+                self.update_authorized_equality_cache(&id, Some(&value), None);
+                self.pending_changes.record(EntityChange {
+                    collection: self.name.clone(),
+                    id,
+                    before: Some(value),
+                    after: None,
+                    before_position: Some(suffix_start + position),
+                    after_position: None,
+                });
+                self.revision = self.revision.saturating_add(1);
+            }
+        } else {
+            // Positions are already proven strictly increasing. Remove from the
+            // tail so earlier positions remain valid, then publish changes in
+            // the original insertion order. This avoids a second hash lookup
+            // and a full JSON value clone for every deleted row.
+            let positions = ids
+                .iter()
+                .map(|id| self.state.get_index_of(id).expect("authorized id position"))
+                .collect::<Vec<_>>();
+            let mut removed = Vec::with_capacity(count);
+            for position in positions.into_iter().rev() {
+                let (id, value) = self
+                    .state
+                    .shift_remove_index(position)
+                    .expect("authorized id position must remain valid");
+                removed.push((position, id, value));
+            }
+            for (position, id, value) in removed.into_iter().rev() {
+                self.query_indexes.remove(&id, &value);
+                self.update_authorized_equality_cache(&id, Some(&value), None);
+                self.pending_changes.record(EntityChange {
+                    collection: self.name.clone(),
+                    id,
+                    before: Some(value),
+                    after: None,
+                    before_position: Some(position),
+                    after_position: None,
+                });
+                self.revision = self.revision.saturating_add(1);
+            }
+        }
+        Ok(Some(count))
+    }
+
     pub fn delete_many(
         &mut self,
         predicate: impl Fn(&Value) -> bool,
@@ -1093,7 +1261,13 @@ impl Collection {
         let Some(current) = self.state.get_mut(id) else {
             return false;
         };
-        *current = value;
+        let before = std::mem::replace(current, value);
+        let after = self
+            .state
+            .get(id)
+            .expect("synchronized row remains live")
+            .clone();
+        self.update_authorized_equality_cache(id, Some(&before), Some(&after));
         true
     }
 
@@ -1695,6 +1869,83 @@ impl Collection {
         Ok(InternalCreateManyOutcome {
             result: CreateManyResult { created, skipped },
         })
+    }
+
+    pub(crate) fn authorized_update_many_ids_compact(
+        &mut self,
+        ids: &[String],
+        updates: Value,
+    ) -> Result<Option<usize>, EngineError> {
+        let has_hooks = !self.descriptor.before_update_hooks.is_empty()
+            || !self.descriptor.after_update_hooks.is_empty()
+            || !self.descriptor.on_change_hooks.is_empty()
+            || !self.callbacks.global_before_update_hooks().is_empty()
+            || !self.callbacks.global_after_update_hooks().is_empty()
+            || !self.callbacks.global_on_change_hooks().is_empty();
+        let updated_at = matches!(
+            &self.descriptor.schema,
+            SchemaNode::Struct { fields }
+                if fields.iter().any(|field| field.name == "updatedAt")
+        );
+        let Some(update_object) = updates.as_object() else {
+            return Ok(None);
+        };
+        if self.descriptor.append_only
+            || has_hooks
+            || updated_at
+            || update_object
+                .keys()
+                .any(|field| field == "id" || self.computed_field_names.contains(field))
+            || update_touches_unique_fields(&updates, &self.descriptor.unique_fields)
+        {
+            return Ok(None);
+        }
+        validate_immutable_fields(&updates)?;
+        if !self.authorized_ids_in_order(ids) {
+            return Ok(None);
+        }
+        let SchemaNode::Struct {
+            fields: schema_fields,
+        } = &self.descriptor.schema
+        else {
+            return Ok(None);
+        };
+        if update_object.iter().any(|(name, value)| {
+            schema_fields
+                .iter()
+                .find(|field| field.name == *name)
+                .is_none_or(|field| !primitive_patch_value_matches_schema(&field.schema, value))
+        }) {
+            return Ok(None);
+        }
+        let patch_fields = update_object.keys().cloned().collect::<Vec<_>>();
+        let updates_indexes = self.query_indexes.touches_any(&patch_fields);
+        for id in ids {
+            let position = self.state.get_index_of(id);
+            let before = self.state.get(id).cloned().expect("authorized row exists");
+            let entity = self.state.get_mut(id).expect("authorized row exists");
+            let object = entity
+                .as_object_mut()
+                .expect("validated collection entity must remain an object");
+            for (field, value) in update_object {
+                object.insert(field.clone(), value.clone());
+            }
+            let after = entity.clone();
+            if updates_indexes {
+                self.query_indexes.replace(id, &before, &after);
+            }
+            self.update_authorized_equality_cache(id, Some(&before), Some(&after));
+            self.pending_changes.record(EntityChange {
+                collection: self.name.clone(),
+                id: id.clone(),
+                before: Some(before),
+                after: Some(after),
+                before_position: position,
+                after_position: position,
+            });
+            self.revision = self.revision.saturating_add(1);
+        }
+        Ok(Some(ids.len()))
     }
 
     pub(crate) fn update_many_internal(

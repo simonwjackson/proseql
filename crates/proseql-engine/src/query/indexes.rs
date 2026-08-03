@@ -120,6 +120,16 @@ impl QueryIndexes {
         self.next_order = 0;
     }
 
+    pub(crate) fn touches_any(&self, fields: &[String]) -> bool {
+        self.equality
+            .iter()
+            .any(|index| index.fields.iter().any(|field| fields.contains(field)))
+            || self
+                .search_fields
+                .iter()
+                .any(|field| fields.contains(field))
+    }
+
     /// Add one entity to every configured index.
     pub(crate) fn insert(&mut self, id: &str, entity: &Value) {
         if !self.entity_order.contains_key(id) {

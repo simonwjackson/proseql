@@ -191,6 +191,19 @@ class ScalarPredicateDefect extends Error {
 	}
 }
 
+const directPredicatePromise = <A>(operation: () => Promise<A>): Promise<A> => {
+	try {
+		return operation().catch((error) => {
+			if (error instanceof ScalarPredicateDefect) throw error.defect;
+			throw error;
+		});
+	} catch (error) {
+		return Promise.reject(
+			error instanceof ScalarPredicateDefect ? error.defect : error,
+		);
+	}
+};
+
 const liftPromise = <A, E extends Error = Error>(
 	thunk: () => Promise<A>,
 	isDefect: (error: Error) => boolean = () => false,
@@ -486,20 +499,28 @@ const findEffectAdapterWarmup = (() => {
 	return chain;
 })();
 
+const collectScalarPredicateIds = <Row extends { readonly id: string }>(
+	rows: ReadonlyArray<Row>,
+	predicate: (entity: Row) => boolean,
+): ReadonlyArray<string> => {
+	const ids: string[] = [];
+	for (let index = 0; index < rows.length; index += 1) {
+		const row = rows[index]!;
+		if (predicate(row)) ids.push(row.id);
+	}
+	return ids;
+};
+
 const selectScalarPredicateIds = <Row extends { readonly id: string }>(
 	rows: ReadonlyArray<Row>,
 	predicate: (entity: Row) => boolean,
 	limit?: number,
 ): ReadonlyArray<string> => {
-	const ids: string[] = [];
-	for (const row of rows) {
-		let matches: boolean;
-		try {
-			matches = predicate.call(undefined, row);
-		} catch (defect) {
-			throw new ScalarPredicateDefect(defect);
-		}
-		if (matches) ids.push(row.id);
+	let ids: ReadonlyArray<string>;
+	try {
+		ids = collectScalarPredicateIds(rows, predicate);
+	} catch (defect) {
+		throw new ScalarPredicateDefect(defect);
 	}
 	return limit !== undefined && limit > 0 ? ids.slice(0, limit) : ids;
 };
@@ -507,6 +528,26 @@ const selectScalarPredicateIds = <Row extends { readonly id: string }>(
 const idSetWhere = (ids: ReadonlyArray<string>) => ({
 	id: { $in: [...ids] },
 });
+
+const PREDICATE_BULK_OPERATION = Symbol.for(
+	"@proseql/engine/predicate-bulk-operation",
+);
+
+type PredicateBulkOperation = <A>(
+	method: "updateMany" | "deleteMany",
+	selectIds: (
+		rows: ReadonlyArray<Record<string, unknown>>,
+	) => ReadonlyArray<string>,
+	data: unknown,
+	options?: { readonly soft?: boolean },
+) => Promise<A>;
+
+const predicateBulkOperation = (
+	collection: EngineCollection<any, any, any>,
+): PredicateBulkOperation | undefined =>
+	(
+		collection as unknown as Record<symbol, PredicateBulkOperation | undefined>
+	)[PREDICATE_BULK_OPERATION];
 
 const optionsAfterPredicateLimit = (
 	options?: { readonly soft?: boolean; readonly limit?: number },
@@ -654,18 +695,28 @@ const createCollectionAdapter = (
 	},
 	exists: (id: string) => withRunPromise(liftPromise(() => engineCollection.exists(id))) as never,
 	create: (input: unknown) => withRunPromise(liftPromise(() => engineCollection.create(input as never))) as never,
-	createMany: (inputs: ReadonlyArray<unknown>, options?: { readonly skipDuplicates?: boolean; readonly validateRelationships?: boolean }) =>
-		withRunPromise(liftPromise(() => engineCollection.createMany(inputs as never, options))) as never,
+	createMany: (inputs: ReadonlyArray<unknown>, options?: { readonly skipDuplicates?: boolean; readonly validateRelationships?: boolean }) => {
+		const operation = () => engineCollection.createMany(inputs as never, options);
+		return withRunPromise(liftPromise(operation), operation) as never;
+	},
 	update: (id: string, updates: unknown) => withRunPromise(liftPromise(() => engineCollection.update(id, updates as never))) as never,
-	updateMany: (predicate: (entity: any) => boolean, updates: unknown) =>
-		withRunPromise(
-			liftPromise(async () => {
-				if (typeof predicate !== "function") {
-					return engineCollection.updateMany(
-						predicate as never,
-						updates as never,
-					) as Promise<UpdateManyResult<any>>;
-				}
+	updateMany: (predicate: (entity: any) => boolean, updates: unknown) => {
+		const operation = () => {
+			if (typeof predicate !== "function") {
+				return engineCollection.updateMany(
+					predicate as never,
+					updates as never,
+				) as Promise<UpdateManyResult<any>>;
+			}
+			const native = predicateBulkOperation(engineCollection);
+			if (native !== undefined) {
+				return native<UpdateManyResult<any>>(
+					"updateMany",
+					(rows) => selectScalarPredicateIds(rows as never, predicate),
+					updates,
+				);
+			}
+			return (async () => {
 				const rows = (await engineCollection.query()) as ReadonlyArray<{
 					readonly id: string;
 				}>;
@@ -674,18 +725,32 @@ const createCollectionAdapter = (
 					idSetWhere(ids) as never,
 					updates as never,
 				) as Promise<UpdateManyResult<any>>;
-			})
-		) as never,
+			})();
+		};
+		return withRunPromise(liftPromise(operation), () =>
+			directPredicatePromise(operation),
+		) as never;
+	},
 	delete: (id: string, options?: { readonly soft?: boolean }) => withRunPromise(liftPromise(() => engineCollection.delete(id, options))) as never,
-	deleteMany: (predicate: (entity: any) => boolean, options?: { readonly soft?: boolean; readonly limit?: number }) =>
-		withRunPromise(
-			liftPromise(async () => {
-				if (typeof predicate !== "function") {
-					return engineCollection.deleteMany(
-						predicate as never,
-						options,
-					) as Promise<DeleteManyResult<any>>;
-				}
+	deleteMany: (predicate: (entity: any) => boolean, options?: { readonly soft?: boolean; readonly limit?: number }) => {
+		const operation = () => {
+			if (typeof predicate !== "function") {
+				return engineCollection.deleteMany(
+					predicate as never,
+					options,
+				) as Promise<DeleteManyResult<any>>;
+			}
+			const native = predicateBulkOperation(engineCollection);
+			if (native !== undefined) {
+				return native<DeleteManyResult<any>>(
+					"deleteMany",
+					(rows) =>
+						selectScalarPredicateIds(rows as never, predicate, options?.limit),
+					undefined,
+					optionsAfterPredicateLimit(options),
+				);
+			}
+			return (async () => {
 				const rows = (await engineCollection.query()) as ReadonlyArray<{
 					readonly id: string;
 				}>;
@@ -694,8 +759,12 @@ const createCollectionAdapter = (
 					idSetWhere(ids) as never,
 					optionsAfterPredicateLimit(options),
 				) as Promise<DeleteManyResult<any>>;
-			})
-		) as never,
+			})();
+		};
+		return withRunPromise(liftPromise(operation), () =>
+			directPredicatePromise(operation),
+		) as never;
+	},
 	upsert: (input: unknown) => withRunPromise(liftPromise(() => engineCollection.upsert(input as never))) as never,
 	upsertMany: (inputs: ReadonlyArray<unknown>) => withRunPromise(liftPromise(() => engineCollection.upsertMany(inputs as never))) as never,
 	createWithRelationships: (input: unknown) => withRunPromise(liftPromise(() => engineCollection.createWithRelationships(input as never))) as never,

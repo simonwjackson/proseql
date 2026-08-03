@@ -75,7 +75,7 @@
         "wasmLinearMemoryBytes": 54525952
       },
       "coldStartupMaxGrowthRatio": 1.1,
-      "jsHeapMaxGrowthRatio": 1.05,
+      "jsHeapMaximumBytes": 50000000,
       "wasmLinearMemoryMaxGrowthRatio": 1.05
     }
   },

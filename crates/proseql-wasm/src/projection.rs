@@ -18,6 +18,7 @@ struct PopulatePlan {
 
 #[derive(Debug, Clone)]
 struct RowSlot {
+    id: String,
     generation: u32,
     revision: u32,
     collection_index: u32,
@@ -151,6 +152,7 @@ impl MaterializedProjection {
             .unwrap_or(u32::MAX);
         let slot = if let Some(slot) = self.free.pop() {
             let row_slot = &mut self.slots[slot as usize];
+            id.clone_into(&mut row_slot.id);
             row_slot.revision = 1;
             row_slot.collection_index = collection_index;
             row_slot.materialized = false;
@@ -159,6 +161,7 @@ impl MaterializedProjection {
         } else {
             let slot = u32::try_from(self.slots.len()).expect("projection slot capacity exceeded");
             self.slots.push(RowSlot {
+                id: id.to_owned(),
                 generation: 1,
                 revision: 1,
                 collection_index,
@@ -449,6 +452,99 @@ impl MaterializedProjection {
                     && metadata.generation == expected_generation
                     && metadata.revision == expected_revision
             })
+    }
+
+    pub fn authorized_bulk_ids(
+        &self,
+        collection_index: u32,
+        slots: &[u32],
+        tokens: &[f64],
+    ) -> Option<Vec<String>> {
+        if slots.len() != tokens.len() || slots.is_empty() {
+            return None;
+        }
+        slots
+            .iter()
+            .zip(tokens)
+            .map(|(slot, token)| {
+                let metadata = self.slots.get(*slot as usize)?;
+                (metadata.collection_index == collection_index
+                    && self.fast_find_authorized(*slot, *token))
+                .then(|| metadata.id.clone())
+            })
+            .collect()
+    }
+
+    pub fn apply_native_creates(
+        &mut self,
+        changes: &ChangeSet,
+        collection: &str,
+    ) -> Option<Vec<f64>> {
+        const TOKEN_RADIX: u64 = 1 << 21;
+        let mut packed = Vec::with_capacity(changes.len() * 3);
+        for change in changes.entities() {
+            if change.collection != collection || change.before.is_some() || change.after.is_none()
+            {
+                return None;
+            }
+            let slot = self.allocate(collection, &change.id);
+            let metadata = self.slots.get_mut(slot)?;
+            metadata.materialized = true;
+            metadata.positioned = false;
+            let token = (u64::from(metadata.collection_index) * TOKEN_RADIX
+                + u64::from(metadata.generation))
+                * TOKEN_RADIX
+                + u64::from(metadata.revision);
+            packed.push(slot as f64);
+            packed.push(token as f64);
+            packed.push(change.after_position? as f64);
+        }
+        self.last_sync = json!({"changes": []});
+        Some(packed)
+    }
+
+    pub fn apply_authorized_bulk_changes(
+        &mut self,
+        changes: &ChangeSet,
+        collection: &str,
+        ids: &[String],
+        delete: bool,
+    ) {
+        debug_assert!(changes
+            .entities()
+            .all(|change| change.collection == collection));
+        let changed_ids = (!delete).then(|| {
+            changes
+                .entities()
+                .map(|change| change.id.as_str())
+                .collect::<std::collections::HashSet<_>>()
+        });
+        debug_assert!(
+            !delete
+                || (changes.len() == ids.len()
+                    && changes
+                        .entities()
+                        .zip(ids)
+                        .all(|(change, id)| change.id == *id && change.after.is_none()))
+        );
+        for id in ids {
+            let slot = self
+                .find(collection, id)
+                .expect("authorized bulk slot must remain live until projection update");
+            if delete {
+                self.remove(collection, id)
+                    .expect("authorized bulk delete must remove a live projection slot");
+            } else {
+                if changed_ids
+                    .as_ref()
+                    .is_some_and(|changed_ids| changed_ids.contains(id.as_str()))
+                {
+                    self.slots[slot].revision = self.slots[slot].revision.saturating_add(1);
+                }
+                self.slots[slot].materialized = true;
+            }
+        }
+        self.last_sync = json!({"changes": []});
     }
 
     pub fn authorizes(&self, collection: &str, id: &str, handle: &str) -> bool {

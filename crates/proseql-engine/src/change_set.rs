@@ -140,6 +140,10 @@ impl ChangeSet {
     }
 
     pub fn extend(&mut self, other: ChangeSet) {
+        if self.is_empty() {
+            *self = other;
+            return;
+        }
         for change in other.into_entities() {
             self.record(change);
         }

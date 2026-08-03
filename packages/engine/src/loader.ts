@@ -79,6 +79,26 @@ export interface WasmRuntimeBinding {
 	transaction_projection_handles(sessionHandle: number): string;
 	commit_transaction(sessionHandle: number): string;
 	rollback_transaction(sessionHandle: number): string;
+	compact_create_many(
+		handle: number,
+		collectionIndex: number,
+		commandJson: string,
+	): unknown;
+	authorized_bulk_update(
+		handle: number,
+		collectionIndex: number,
+		slots: Uint32Array,
+		tokens: Float64Array,
+		updatesJson: string,
+	): unknown;
+	authorized_bulk_delete(
+		handle: number,
+		collectionIndex: number,
+		slots: Uint32Array,
+		tokens: Float64Array,
+		equalityField?: string,
+		equalityJson?: string,
+	): unknown;
 	fast_find_by_id(
 		handle: number,
 		expectedSlot: number,
@@ -113,6 +133,7 @@ export interface WasmRuntimeBinding {
 	): number;
 	fast_selected_primitive_query(handle: number, commandJson: string): unknown;
 	projection_handles(handle: number): string;
+	projection_handles_preserving_materializations(handle: number): string;
 	synchronize_projection(handle: number, rowsJson: string): string;
 	subscribe_watch(
 		handle: number,

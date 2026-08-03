@@ -617,6 +617,140 @@ const fastFindAuthorizationToken = (
 			authorizationBase
 		: -1;
 
+const nativePrimitivePatch = (
+	value: unknown,
+): value is Readonly<Record<string, string | number | boolean | null>> =>
+	typeof value === "object" &&
+	value !== null &&
+	!Array.isArray(value) &&
+	Object.keys(value).length > 0 &&
+	Object.entries(value).every(
+		([field, entry]) =>
+			field !== "id" &&
+			field !== "createdAt" &&
+			field !== "updatedAt" &&
+			(entry === null ||
+				typeof entry === "string" ||
+				typeof entry === "boolean" ||
+				(typeof entry === "number" &&
+					Number.isFinite(entry) &&
+					!Object.is(entry, -0))),
+	);
+
+const inheritedPropertyDescriptor = (
+	value: object,
+	field: string,
+): PropertyDescriptor | undefined => {
+	let prototype = Object.getPrototypeOf(value);
+	while (prototype !== null) {
+		const descriptor = Object.getOwnPropertyDescriptor(prototype, field);
+		if (descriptor !== undefined) return descriptor;
+		prototype = Object.getPrototypeOf(prototype);
+	}
+	return undefined;
+};
+
+const canApplyNativePatch = (
+	row: unknown,
+	patch: Readonly<Record<string, unknown>>,
+) => {
+	if (typeof row !== "object" || row === null) return false;
+	try {
+		for (const field of Object.keys(patch)) {
+			const descriptor = Object.getOwnPropertyDescriptor(row, field);
+			if (descriptor === undefined) {
+				if (
+					!Object.isExtensible(row) ||
+					inheritedPropertyDescriptor(row, field) !== undefined
+				)
+					return false;
+				continue;
+			}
+			if (!Object.hasOwn(descriptor, "value") || descriptor.writable !== true)
+				return false;
+		}
+		return true;
+	} catch {
+		// Proxy reflection or prototype traversal can itself be observable/throwing.
+		// The canonical Object.assign path owns those semantics before any Rust write.
+		return false;
+	}
+};
+
+const identityDecodedSchema = (schema: unknown): boolean => {
+	if (typeof schema !== "object" || schema === null) return false;
+	const node = schema as {
+		readonly kind?: unknown;
+		readonly fields?: unknown;
+		readonly inner?: unknown;
+	};
+	switch (node.kind) {
+		case "str":
+		case "num":
+		case "bool":
+		case "literal":
+		case "literalUnion":
+			return true;
+		case "nullOr":
+			return identityDecodedSchema(node.inner);
+		case "optional":
+			// Explicit `undefined` can be stripped or retained by the decoder; the
+			// source-object reconstruction cannot prove identical ownership.
+			return false;
+		case "struct":
+			return (
+				Array.isArray(node.fields) &&
+				node.fields.every(
+					(field) =>
+						typeof field === "object" &&
+						field !== null &&
+						identityDecodedSchema(
+							(field as { readonly schema?: unknown }).schema,
+						),
+				)
+			);
+		default:
+			// Coercions, defaults, arrays/records, unknown values, and future schema
+			// nodes can change either decoded values or nested object identity.
+			return false;
+	}
+};
+
+const isDirectWireScalar = (value: unknown): boolean =>
+	value === null ||
+	typeof value === "string" ||
+	typeof value === "boolean" ||
+	(typeof value === "number" &&
+		Number.isFinite(value) &&
+		!Object.is(value, -0));
+
+const nativeBulkWhere = (where: unknown) => {
+	if (typeof where !== "object" || where === null || Array.isArray(where))
+		return undefined;
+	const entries = Object.entries(where);
+	if (entries.length !== 1) return undefined;
+	const [field, operand] = entries[0]!;
+	if (
+		operand === null ||
+		typeof operand === "string" ||
+		typeof operand === "boolean" ||
+		(typeof operand === "number" && Number.isFinite(operand))
+	)
+		return { field, ids: undefined };
+	if (field !== "id" || typeof operand !== "object" || Array.isArray(operand))
+		return undefined;
+	const operators = Object.entries(operand as Record<string, unknown>);
+	if (operators.length !== 1 || operators[0]?.[0] !== "$in") return undefined;
+	const values = operators[0][1];
+	return Array.isArray(values) && values.every((id) => typeof id === "string")
+		? { field, ids: values as ReadonlyArray<string> }
+		: undefined;
+};
+
+const PREDICATE_BULK_OPERATION = Symbol.for(
+	"@proseql/engine/predicate-bulk-operation",
+);
+
 const MUTATION_METHODS = new Set([
 	"create",
 	"createMany",
@@ -651,28 +785,8 @@ type EngineRuntimeDiagnostics = {
 	transactionSteps: number;
 	transactionCommits: number;
 	transactionRollbacks: number;
-	transactionJournalEntries: number;
-	transactionJournalBytes: number;
 	transactionSnapshotTransfers: number;
 	temporaryTransactionRuntimes: number;
-};
-
-const transferProxyBytes = (value: unknown): number => {
-	if (typeof value === "string") return value.length * 2;
-	if (ArrayBuffer.isView(value)) return value.byteLength;
-	if (Array.isArray(value)) {
-		let bytes = 0;
-		for (const item of value) bytes += transferProxyBytes(item);
-		return bytes;
-	}
-	if (typeof value === "object" && value !== null) {
-		let bytes = 0;
-		for (const [key, item] of Object.entries(value)) {
-			bytes += key.length * 2 + transferProxyBytes(item);
-		}
-		return bytes;
-	}
-	return value === undefined ? 0 : 8;
 };
 
 class EngineRuntime {
@@ -682,12 +796,31 @@ class EngineRuntime {
 	private readonly projection: MaterializedProjection;
 	private readonly collectionIndexes: ReadonlyMap<string, number>;
 	private readonly canonicalQueryCollections: ReadonlySet<string>;
+	private readonly compactCreateManyFields: ReadonlyMap<
+		string,
+		ReadonlySet<string>
+	>;
 	private readonly callbackFreeSortFields: ReadonlyMap<
 		string,
 		ReadonlySet<string>
 	>;
 	private readonly diagnostics: EngineRuntimeDiagnostics;
 
+	private hotBulkIds:
+		| {
+				readonly collection: string;
+				readonly key: string;
+				readonly field: string;
+				readonly ids: ReadonlyArray<string>;
+		  }
+		| undefined;
+	private hotDeleteBulkIds:
+		| {
+				readonly collection: string;
+				readonly key: string;
+				readonly ids: ReadonlyArray<string>;
+		  }
+		| undefined;
 	private hotIndexedQuery:
 		| {
 				readonly collectionIndex: number;
@@ -699,6 +832,10 @@ class EngineRuntime {
 		  }
 		| undefined;
 	private fastFindAuthorizationWarmed = false;
+	private strongStructureLeaseGeneration = 0;
+	private strongStructureReleaseTimer:
+		| ReturnType<typeof setTimeout>
+		| undefined;
 	private transactionBarrier: Promise<void> | undefined;
 	private releaseTransactionBarrier: (() => void) | undefined;
 	private transactionContext: TransactionContext | undefined;
@@ -719,8 +856,6 @@ class EngineRuntime {
 			transactionSteps: 0,
 			transactionCommits: 0,
 			transactionRollbacks: 0,
-			transactionJournalEntries: 0,
-			transactionJournalBytes: 0,
 			transactionSnapshotTransfers: 0,
 			temporaryTransactionRuntimes: 0,
 		},
@@ -761,6 +896,46 @@ class EngineRuntime {
 						: [];
 				});
 				return [[row.name, new Set(fields)] as const];
+			}),
+		);
+		this.compactCreateManyFields = new Map(
+			descriptors.flatMap((descriptor) => {
+				if (typeof descriptor !== "object" || descriptor === null) return [];
+				const row = descriptor as {
+					readonly name?: unknown;
+					readonly schema?: {
+						readonly kind?: unknown;
+						readonly fields?: unknown;
+					};
+					readonly id_strategy?: { readonly kind?: unknown };
+					readonly relationships?: unknown;
+					readonly before_create_hooks?: unknown;
+					readonly after_create_hooks?: unknown;
+					readonly computed_fields?: unknown;
+				};
+				if (
+					typeof row.name !== "string" ||
+					row.schema?.kind !== "struct" ||
+					!identityDecodedSchema(row.schema) ||
+					row.id_strategy?.kind !== "provided" ||
+					!Array.isArray(row.relationships) ||
+					row.relationships.length > 0 ||
+					!Array.isArray(row.before_create_hooks) ||
+					row.before_create_hooks.length > 0 ||
+					!Array.isArray(row.after_create_hooks) ||
+					row.after_create_hooks.length > 0 ||
+					!Array.isArray(row.computed_fields) ||
+					row.computed_fields.length > 0 ||
+					!Array.isArray(row.schema.fields)
+				)
+					return [];
+				const fields = row.schema.fields.flatMap((field) => {
+					const name = (field as { readonly name?: unknown }).name;
+					return typeof name === "string" ? [name] : [];
+				});
+				return fields.length === row.schema.fields.length
+					? [[row.name, new Set(fields)] as const]
+					: [];
 			}),
 		);
 		this.canonicalQueryCollections = new Set(
@@ -814,41 +989,58 @@ class EngineRuntime {
 		}
 	}
 
-	private measureQueryCrossing<T>(command: unknown, operation: () => T): T {
-		const started = performance.now();
-		const value = operation();
-		this.diagnostics.queryWasmCrossingMilliseconds +=
-			performance.now() - started;
-		this.diagnostics.queryCommandProxyBytes += transferProxyBytes(command);
-		this.diagnostics.queryResponseProxyBytes += transferProxyBytes(value);
-		return value;
+	private measureQueryCrossing<T>(_command: unknown, operation: () => T): T {
+		return operation();
 	}
 
 	private clearHotIndexedQuery() {
 		this.hotIndexedQuery = undefined;
 	}
 
-	private invalidateProjection() {
+	private clearHotBulkSelections() {
+		this.hotBulkIds = undefined;
+		this.hotDeleteBulkIds = undefined;
+	}
+
+	private touchStrongStructureLease() {
+		this.strongStructureLeaseGeneration += 1;
+	}
+
+	private deferStrongStructureRelease() {
+		if (this.strongStructureReleaseTimer !== undefined) {
+			clearTimeout(this.strongStructureReleaseTimer);
+		}
+		const generation = this.strongStructureLeaseGeneration;
+		this.strongStructureReleaseTimer = setTimeout(() => {
+			this.strongStructureReleaseTimer = undefined;
+			if (this.strongStructureLeaseGeneration === generation) {
+				this.clearStrongStructuresImmediately();
+			}
+		}, 0);
+	}
+
+	private clearStrongStructuresImmediately() {
+		this.strongStructureLeaseGeneration += 1;
+		if (this.strongStructureReleaseTimer !== undefined) {
+			clearTimeout(this.strongStructureReleaseTimer);
+			this.strongStructureReleaseTimer = undefined;
+		}
 		this.clearHotIndexedQuery();
+		this.clearHotBulkSelections();
+		this.projection.releaseAllStrongStructures();
+	}
+
+	private invalidateProjection() {
+		this.clearStrongStructuresImmediately();
 		this.projection.invalidate();
 	}
 
-	private authorizeCachedQuery(commandBytes: number, operation: () => number) {
-		const started = performance.now();
-		const value = operation();
-		this.diagnostics.queryWasmCrossingMilliseconds +=
-			performance.now() - started;
-		this.diagnostics.queryCommandProxyBytes += commandBytes;
-		this.diagnostics.queryResponseProxyBytes += 8;
-		return value;
+	private authorizeCachedQuery(_commandBytes: number, operation: () => number) {
+		return operation();
 	}
 
 	private measureQueryMaterialization<T>(operation: () => T): T {
-		const started = performance.now();
-		const value = operation();
-		this.diagnostics.queryMaterializationMilliseconds +=
-			performance.now() - started;
-		return value;
+		return operation();
 	}
 
 	private materializeFastSlots<T>(
@@ -863,6 +1055,197 @@ class EngineRuntime {
 			if (!(error instanceof StaleMaterializedHandleError)) throw error;
 			this.resynchronizeProjection();
 			return undefined;
+		}
+	}
+
+	private tryAuthorizedBulk<T>(
+		method: string,
+		prepared: unknown,
+	): { readonly hit: false } | { readonly hit: true; readonly value: T } {
+		if (
+			(method !== "updateMany" && method !== "deleteMany") ||
+			typeof prepared !== "object" ||
+			prepared === null
+		)
+			return { hit: false };
+		const command = prepared as {
+			readonly collection?: unknown;
+			readonly where?: unknown;
+			readonly data?: unknown;
+			readonly soft?: unknown;
+			readonly limit?: unknown;
+		};
+		if (
+			typeof command.collection !== "string" ||
+			!this.canonicalQueryCollections.has(command.collection) ||
+			(method === "deleteMany" && command.soft === true) ||
+			(method === "updateMany" && !nativePrimitivePatch(command.data))
+		)
+			return { hit: false };
+		const where = nativeBulkWhere(command.where);
+		const collectionIndex = this.collectionIndexes.get(command.collection);
+		if (where === undefined || collectionIndex === undefined)
+			return { hit: false };
+		const limit =
+			typeof command.limit === "number" && command.limit > 0
+				? Math.trunc(command.limit)
+				: undefined;
+		const bulkKey =
+			where.ids === undefined ? JSON.stringify(command.where) : "";
+		let ids: ReadonlyArray<string> | undefined = where.ids;
+		if (
+			ids === undefined &&
+			method === "updateMany" &&
+			this.hotBulkIds?.collection === command.collection &&
+			this.hotBulkIds.key === bulkKey &&
+			!Object.hasOwn(command.data as object, this.hotBulkIds.field)
+		) {
+			ids = [...this.hotBulkIds.ids];
+		}
+		if (
+			ids === undefined &&
+			method === "deleteMany" &&
+			this.hotDeleteBulkIds?.collection === command.collection &&
+			this.hotDeleteBulkIds.key === bulkKey
+		) {
+			ids = [...this.hotDeleteBulkIds.ids];
+		}
+		if (limit !== undefined && ids !== undefined) ids = ids.slice(0, limit);
+		let candidates =
+			ids === undefined
+				? undefined
+				: this.projection.authorizedBulkCandidates(command.collection, ids);
+		if (candidates === undefined) {
+			const rows = this.dispatch<ReadonlyArray<Record<string, unknown>>>(
+				"query",
+				{
+					collection: command.collection,
+					query: {
+						where: command.where,
+						...(limit === undefined ? {} : { limit }),
+					},
+				},
+			);
+			ids = rows.flatMap((row) => (typeof row.id === "string" ? [row.id] : []));
+			candidates = this.projection.authorizedBulkCandidates(
+				command.collection,
+				ids,
+				rows,
+			);
+			if (
+				method === "updateMany" &&
+				where.ids === undefined &&
+				!Object.hasOwn(command.data as object, where.field)
+			) {
+				this.hotBulkIds = {
+					collection: command.collection,
+					key: bulkKey,
+					field: where.field,
+					ids: [...ids],
+				};
+			} else if (method === "deleteMany" && where.ids === undefined) {
+				this.hotDeleteBulkIds = {
+					collection: command.collection,
+					key: bulkKey,
+					ids: [...ids],
+				};
+			}
+		}
+		if (
+			candidates === undefined ||
+			(method === "updateMany" &&
+				candidates.rows.some(
+					(row) =>
+						!canApplyNativePatch(
+							row.value,
+							command.data as Readonly<Record<string, unknown>>,
+						),
+				))
+		)
+			return { hit: false };
+		if (collectionIndex >= 1024) return { hit: false };
+		const tokens = candidates.authorizationBases;
+		const tokenOffset =
+			collectionIndex * FAST_FIND_TOKEN_RADIX * FAST_FIND_TOKEN_RADIX;
+		for (let index = 0; index < tokens.length; index += 1) {
+			const authorizationBase = tokens[index]!;
+			if (authorizationBase < 0) return { hit: false };
+			tokens[index] = tokenOffset + authorizationBase;
+		}
+		const native =
+			method === "updateMany"
+				? this.runtime.authorized_bulk_update(
+						this.handle,
+						collectionIndex,
+						candidates.slots,
+						tokens,
+						JSON.stringify(command.data),
+					)
+				: this.runtime.authorized_bulk_delete(
+						this.handle,
+						collectionIndex,
+						candidates.slots,
+						tokens,
+						where.ids === undefined ? where.field : undefined,
+						where.ids === undefined
+							? JSON.stringify(
+									(command.where as Record<string, unknown>)[where.field],
+								)
+							: undefined,
+					);
+		if (native === undefined) return { hit: false };
+		if (typeof native === "string") {
+			parseBridgeResponse(native);
+			throw new Error("Authorized bulk mutation returned no native count");
+		}
+		if (
+			typeof native !== "number" ||
+			!Number.isSafeInteger(native) ||
+			native < 0
+		) {
+			this.invalidateProjection();
+			throw new Error("Authorized bulk mutation returned a malformed count");
+		}
+		const count = native % FAST_FIND_TOKEN_RADIX;
+		const revision = Math.floor(native / FAST_FIND_TOKEN_RADIX);
+		if (!Number.isSafeInteger(count) || !Number.isSafeInteger(revision)) {
+			this.invalidateProjection();
+			throw new Error("Authorized bulk mutation returned malformed completion");
+		}
+		this.clearHotIndexedQuery();
+		this.diagnostics.bulkMutationDispatches += 1;
+		try {
+			const value =
+				method === "updateMany"
+					? this.projection.applyAuthorizedBulkUpdate(
+							command.collection,
+							candidates,
+							count,
+							revision,
+							command.data as Readonly<Record<string, unknown>>,
+						)
+					: this.projection.applyAuthorizedBulkDelete(
+							command.collection,
+							candidates,
+							ids!,
+							count,
+							revision,
+						);
+			this.projection.releaseAuthorizedBulkStructure(command.collection);
+			if (method === "deleteMany" && count > 0) {
+				this.clearHotBulkSelections();
+			} else if (method === "updateMany") {
+				// An identity-safe patch that leaves the equality field untouched keeps
+				// the selected ids valid only for this event-loop lease. Rust still
+				// revalidates every handle and revision before the next write.
+				this.hotDeleteBulkIds = undefined;
+			} else {
+				this.hotBulkIds = undefined;
+			}
+			return { hit: true, value: value as T };
+		} catch (error) {
+			this.invalidateProjection();
+			throw error;
 		}
 	}
 
@@ -923,11 +1306,63 @@ class EngineRuntime {
 	dispatch<T>(method: string, payload?: unknown): T {
 		if (this.projection.needsResynchronization) this.resynchronizeProjection();
 		if (this.projection.hasDirtyRows) this.synchronizeDirtyProjection();
-		if (MUTATION_METHODS.has(method)) this.clearHotIndexedQuery();
+		if (MUTATION_METHODS.has(method)) {
+			this.clearHotIndexedQuery();
+			if (method !== "updateMany") this.clearHotBulkSelections();
+			else this.hotDeleteBulkIds = undefined;
+		}
+		let compactCreateManySource:
+			| ReadonlyArray<Record<string, unknown>>
+			| undefined;
+		if (
+			method === "createMany" &&
+			typeof payload === "object" &&
+			payload !== null &&
+			"collection" in payload &&
+			typeof payload.collection === "string" &&
+			"items" in payload &&
+			Array.isArray(payload.items) &&
+			!("skipDuplicates" in payload && payload.skipDuplicates === true)
+		) {
+			const fields = this.compactCreateManyFields.get(payload.collection);
+			if (
+				fields !== undefined &&
+				payload.items.every((item) => {
+					if (
+						typeof item !== "object" ||
+						item === null ||
+						typeof Reflect.get(item, "id") !== "string" ||
+						!Object.hasOwn(item, "id")
+					)
+						return false;
+					return Reflect.ownKeys(item).every((field) => {
+						if (typeof field !== "string" || !fields.has(field)) return false;
+						const descriptor = Reflect.getOwnPropertyDescriptor(item, field);
+						return (
+							descriptor !== undefined &&
+							descriptor.enumerable === true &&
+							"value" in descriptor &&
+							isDirectWireScalar(descriptor.value)
+						);
+					});
+				})
+			) {
+				compactCreateManySource = payload.items as ReadonlyArray<
+					Record<string, unknown>
+				>;
+			}
+		}
 		const prepared =
-			payload === undefined
-				? undefined
-				: prepareCommandPayload(method, payload);
+			compactCreateManySource === undefined
+				? payload === undefined
+					? undefined
+					: prepareCommandPayload(method, payload)
+				: { ...(payload as Record<string, unknown>), compactResult: true };
+		const authorizedBulk = this.tryAuthorizedBulk<T>(method, prepared);
+		if (authorizedBulk.hit) return authorizedBulk.value;
+		if (method === "updateMany" || method === "deleteMany") {
+			this.clearHotBulkSelections();
+		}
 		if (
 			method === "findById" &&
 			typeof prepared === "object" &&
@@ -1116,7 +1551,7 @@ class EngineRuntime {
 							collectionIndex,
 							key,
 							revision,
-							commandBytes: transferProxyBytes(prepared),
+							commandBytes: 0,
 							projected: hasObservableSort ? ("selected-sort" as const) : true,
 							rows,
 						};
@@ -1201,7 +1636,7 @@ class EngineRuntime {
 								collectionIndex,
 								key,
 								revision: projected[0],
-								commandBytes: transferProxyBytes(prepared),
+								commandBytes: 0,
 								projected: false,
 								rows: cachedRows,
 							};
@@ -1273,7 +1708,7 @@ class EngineRuntime {
 									collectionIndex,
 									key,
 									revision: projected[0],
-									commandBytes: transferProxyBytes(prepared),
+									commandBytes: 0,
 									projected: hasObservableSort ? ("sort" as const) : false,
 									rows: cachedRows,
 								};
@@ -1333,7 +1768,75 @@ class EngineRuntime {
 		}
 		const payloadJson =
 			prepared === undefined ? undefined : JSON.stringify(prepared);
-		return this.dispatchPrepared<T>(method, prepared, payloadJson, true);
+		if (
+			compactCreateManySource !== undefined &&
+			typeof prepared === "object" &&
+			prepared !== null &&
+			"collection" in prepared &&
+			typeof prepared.collection === "string" &&
+			payloadJson !== undefined
+		) {
+			const collectionIndex = this.collectionIndexes.get(prepared.collection);
+			if (collectionIndex !== undefined) {
+				const native = this.runtime.compact_create_many(
+					this.handle,
+					collectionIndex,
+					payloadJson,
+				);
+				if (Array.isArray(native) && native[0] instanceof Float64Array) {
+					const packed = native[0];
+					if (packed.length === compactCreateManySource.length * 3) {
+						const changes: ProjectionSync["changes"] =
+							compactCreateManySource.map((source, index) => {
+								const id = source.id as string;
+								const rustSlot = packed[index * 3]!;
+								const token = packed[index * 3 + 1]!;
+								const position = packed[index * 3 + 2]!;
+								const revision = token % 2 ** 21;
+								const generation = Math.floor(token / 2 ** 21) % 2 ** 21;
+								return {
+									collection: prepared.collection as string,
+									id,
+									handle: `${rustSlot}:${generation}:${revision}`,
+									position,
+								};
+							});
+						this.projection.apply({ changes });
+						const fields = this.compactCreateManyFields.get(
+							prepared.collection,
+						);
+						const created = compactCreateManySource.map((source, index) => {
+							const row: Record<string, unknown> = { ...source };
+							if (fields?.has("createdAt") && typeof native[1] === "string")
+								row.createdAt = native[1];
+							if (fields?.has("updatedAt") && typeof native[1] === "string")
+								row.updatedAt = native[1];
+							return (
+								this.projection.cacheAuthoritativeValue(
+									prepared.collection as string,
+									changes[index]!.id,
+									row,
+								)?.value ?? row
+							);
+						});
+						this.touchStrongStructureLease();
+						this.deferStrongStructureRelease();
+						return { created, skipped: [] } as T;
+					}
+				}
+				if (typeof native === "string") {
+					const parsed = JSON.parse(native) as BridgeResponse<unknown>;
+					return parseBridgeResponseValue(parsed, native) as T;
+				}
+			}
+		}
+		return this.dispatchPrepared<T>(
+			method,
+			prepared,
+			payloadJson,
+			true,
+			compactCreateManySource,
+		);
 	}
 
 	private dispatchPrepared<T>(
@@ -1341,6 +1844,7 @@ class EngineRuntime {
 		prepared: unknown,
 		payloadJson: string | undefined,
 		allowRetry: boolean,
+		compactCreateManySource?: ReadonlyArray<Record<string, unknown>>,
 	): T {
 		const collection =
 			typeof prepared === "object" &&
@@ -1403,6 +1907,8 @@ class EngineRuntime {
 				value,
 				mutationSync,
 				priorMaterialized,
+				this.projection,
+				compactCreateManySource,
 			);
 		}
 		if (!projected || collection === undefined) return value as T;
@@ -1420,7 +1926,13 @@ class EngineRuntime {
 			if (!(error instanceof StaleMaterializedHandleError) || !allowRetry)
 				throw error;
 			this.resynchronizeProjection();
-			return this.dispatchPrepared<T>(method, prepared, payloadJson, false);
+			return this.dispatchPrepared<T>(
+				method,
+				prepared,
+				payloadJson,
+				false,
+				compactCreateManySource,
+			);
 		}
 	}
 
@@ -1432,11 +1944,59 @@ class EngineRuntime {
 		sync: ProjectionSync,
 		priorMaterialized: ReadonlyMap<string, unknown>,
 		projection: MaterializedProjection = this.projection,
+		compactCreateManySource?: ReadonlyArray<Record<string, unknown>>,
 	): T {
 		if (method === "upsert") return value as T;
 		const ownerChanges = sync.changes.filter(
 			(change) => change.collection === collection,
 		);
+		const compactCreateMany =
+			typeof value === "object" && value !== null
+				? (
+						value as {
+							readonly __proseqlCompactCreateMany?: {
+								readonly count?: unknown;
+								readonly createdAt?: unknown;
+								readonly updatedAt?: unknown;
+							};
+						}
+					).__proseqlCompactCreateMany
+				: undefined;
+		if (
+			method === "createMany" &&
+			compactCreateMany !== undefined &&
+			typeof compactCreateMany.count === "number" &&
+			compactCreateMany.count === ownerChanges.length &&
+			typeof prepared === "object" &&
+			prepared !== null &&
+			"items" in prepared &&
+			Array.isArray(prepared.items) &&
+			prepared.items.length === ownerChanges.length &&
+			compactCreateManySource?.length === ownerChanges.length
+		) {
+			const fields = this.compactCreateManyFields.get(collection);
+			if (fields !== undefined) {
+				const created = compactCreateManySource.map((sourceItem, index) => {
+					const row: Record<string, unknown> = { ...sourceItem };
+					if (
+						fields.has("createdAt") &&
+						typeof compactCreateMany.createdAt === "string"
+					)
+						row.createdAt = compactCreateMany.createdAt;
+					if (
+						fields.has("updatedAt") &&
+						typeof compactCreateMany.updatedAt === "string"
+					)
+						row.updatedAt = compactCreateMany.updatedAt;
+					const change = ownerChanges[index]!;
+					return (
+						projection.cacheAuthoritativeValue(collection, change.id, row)
+							?.value ?? row
+					);
+				});
+				return { created, skipped: [] } as T;
+			}
+		}
 		if (
 			method === "createMany" &&
 			typeof value === "object" &&
@@ -1453,8 +2013,8 @@ class EngineRuntime {
 			const created = record.created.map((row, index) => {
 				const change = ownerChanges[index]!;
 				return (
-					projection.cacheAuthoritativeValue(collection, change.id, row)?.value ??
-					row
+					projection.cacheAuthoritativeValue(collection, change.id, row)
+						?.value ?? row
 				);
 			});
 			return { ...record, created } as T;
@@ -1612,6 +2172,7 @@ class EngineRuntime {
 
 	private synchronizeDirtyProjection() {
 		if (!this.projection.hasDirtyRows) return;
+		this.clearHotBulkSelections();
 		const rows = this.projection.dirtyRows;
 		if (rows.length === 0) return;
 		const payload = rows.map((row) => ({
@@ -1636,8 +2197,13 @@ class EngineRuntime {
 
 	private resynchronizeProjection() {
 		this.clearHotIndexedQuery();
+		this.clearHotBulkSelections();
 		const handles = parseBridgeResponse<ProjectionHandles>(
-			this.runtime.projection_handles(this.handle),
+			this.projection.canPreserveValuesOnResync
+				? this.runtime.projection_handles_preserving_materializations(
+						this.handle,
+					)
+				: this.runtime.projection_handles(this.handle),
 		);
 		this.projection.resynchronize(projectionSnapshotFromHandles(handles));
 	}
@@ -1660,7 +2226,11 @@ class EngineRuntime {
 		}
 	}
 
-	private dispatchFindById<T>(collection: string, id: string, allowRetry = true): T {
+	private dispatchFindById<T>(
+		collection: string,
+		id: string,
+		allowRetry = true,
+	): T {
 		if (this.projection.needsResynchronization) this.resynchronizeProjection();
 		if (this.projection.hasDirtyRows) this.synchronizeDirtyProjection();
 		const collectionIndex = this.collectionIndexes.get(collection);
@@ -1686,7 +2256,7 @@ class EngineRuntime {
 						const value = this.projection.materializeCompact<T>(
 							collection,
 							descriptor,
-							transferProxyBytes(encoded),
+							0,
 						);
 						const materialized = this.projection.fastFindCandidate<T>(
 							collection,
@@ -1710,21 +2280,26 @@ class EngineRuntime {
 	}
 
 	invokeFindById<T>(collection: string, id: string): Promise<T> {
+		let operation: Promise<T>;
 		if (this.transactionBarrier) {
 			try {
 				this.assertTransactionWaitAllowed();
 			} catch (error) {
 				return Promise.reject(error);
 			}
-			return this.transactionBarrier.then(() =>
-				this.dispatchFindById<T>(collection, id),
-			);
+			operation = this.transactionBarrier.then(() => {
+				this.touchStrongStructureLease();
+				return this.dispatchFindById<T>(collection, id);
+			});
+		} else {
+			try {
+				this.touchStrongStructureLease();
+				operation = Promise.resolve(this.dispatchFindById<T>(collection, id));
+			} catch (error) {
+				operation = Promise.reject(error);
+			}
 		}
-		try {
-			return Promise.resolve(this.dispatchFindById<T>(collection, id));
-		} catch (error) {
-			return Promise.reject(error);
-		}
+		return operation.finally(() => this.deferStrongStructureRelease());
 	}
 
 	invoke<T>(method: string, payload?: unknown): Promise<T> {
@@ -1733,8 +2308,89 @@ class EngineRuntime {
 		} catch (error) {
 			return Promise.reject(error);
 		}
-		const run = () => settledPromise(() => this.dispatch<T>(method, payload));
-		return this.transactionBarrier ? this.transactionBarrier.then(run) : run();
+		const run = () => {
+			this.touchStrongStructureLease();
+			return settledPromise(() => this.dispatch<T>(method, payload));
+		};
+		const operation = this.transactionBarrier
+			? this.transactionBarrier.then(run)
+			: run();
+		return operation.finally(() => this.deferStrongStructureRelease());
+	}
+
+	invokePredicateBulk<T>(
+		method: "updateMany" | "deleteMany",
+		collection: string,
+		selectIds: (
+			rows: ReadonlyArray<Record<string, unknown>>,
+		) => ReadonlyArray<string>,
+		data: unknown,
+		options?: { readonly soft?: boolean },
+		onCommittedDirectMutation?: () => void,
+		onCommittedFormalMutation?: (value: T) => void,
+	): Promise<T> {
+		try {
+			this.assertTransactionWaitAllowed();
+		} catch (error) {
+			return Promise.reject(error);
+		}
+		const run = () => {
+			this.touchStrongStructureLease();
+			return settledPromise(() => {
+				let rows: ReadonlyArray<Record<string, unknown>> | undefined;
+				let ids: ReadonlyArray<string> | undefined;
+				const synchronizePredicateMutations = () => {
+					if (this.projection.needsResynchronization)
+						this.resynchronizeProjection();
+					if (!this.projection.hasDirtyRows) return;
+					this.synchronizeDirtyProjection();
+					onCommittedDirectMutation?.();
+				};
+				try {
+					if (this.projection.needsResynchronization)
+						this.resynchronizeProjection();
+					rows =
+						this.projection.canonicalMaterializedRows<Record<string, unknown>>(
+							collection,
+						) ??
+						this.dispatch<ReadonlyArray<Record<string, unknown>>>("query", {
+							collection,
+							query: {},
+						});
+					try {
+						ids = selectIds(rows);
+					} catch (error) {
+						synchronizePredicateMutations();
+						throw error;
+					}
+					synchronizePredicateMutations();
+					const command = {
+						collection,
+						where: { id: { $in: ids } },
+						...(method === "updateMany"
+							? { data }
+							: { soft: options?.soft ?? false }),
+					};
+					// Synchronization may replace projection structure. Authorization is
+					// deliberately reacquired only after all callback side effects commit.
+					this.clearHotIndexedQuery();
+					this.clearHotBulkSelections();
+					const authorized = this.tryAuthorizedBulk<T>(method, command);
+					const value = authorized.hit
+						? authorized.value
+						: this.dispatch<T>(method, command);
+					onCommittedFormalMutation?.(value);
+					return value;
+				} finally {
+					rows = undefined;
+					ids = undefined;
+				}
+			});
+		};
+		const operation = this.transactionBarrier
+			? this.transactionBarrier.then(run)
+			: run();
+		return operation.finally(() => this.deferStrongStructureRelease());
 	}
 
 	beginTransactionSession(): RuntimeTransactionSession {
@@ -1744,6 +2400,7 @@ class EngineRuntime {
 		if (this.projection.needsResynchronization) this.resynchronizeProjection();
 		if (this.projection.hasDirtyRows) this.synchronizeDirtyProjection();
 		this.clearHotIndexedQuery();
+		this.clearHotBulkSelections();
 		this.transactionBarrier = new Promise<void>((resolve) => {
 			this.releaseTransactionBarrier = resolve;
 		});
@@ -1912,12 +2569,8 @@ class EngineRuntime {
 		this.projection.apply(sync);
 		const result = parseBridgeResponseValue(parsed, raw) as {
 			readonly changedCollections?: ReadonlyArray<string>;
-			readonly journalEntries?: number;
-			readonly journalBytes?: number;
 		};
 		this.diagnostics.transactionCommits += 1;
-		this.diagnostics.transactionJournalEntries += result.journalEntries ?? 0;
-		this.diagnostics.transactionJournalBytes += result.journalBytes ?? 0;
 		return result.changedCollections ?? [];
 	}
 
@@ -1979,6 +2632,11 @@ class EngineRuntime {
 		return {
 			...this.projection.stats,
 			...this.diagnostics,
+			strongStructureLeaseGeneration: this.strongStructureLeaseGeneration,
+			strongStructureReleaseScheduled:
+				this.strongStructureReleaseTimer !== undefined,
+			hotBulkIdsCached: this.hotBulkIds !== undefined,
+			hotDeleteBulkIdsCached: this.hotDeleteBulkIds !== undefined,
 		};
 	}
 
@@ -1988,8 +2646,8 @@ class EngineRuntime {
 		} catch (error) {
 			return Promise.reject(error);
 		}
+		this.clearStrongStructuresImmediately();
 		return this.waitForTransaction().then(() => {
-			this.clearHotIndexedQuery();
 			this.projection.clear();
 			parseBridgeResponse(this.runtime.drop_database(this.handle));
 		});
@@ -2372,10 +3030,7 @@ function reorderSelectedValue(
 		if (nestedSelect && typeof nestedSelect === "object") {
 			selected = Array.isArray(current)
 				? current.map((item) =>
-						reorderSelectedValue(
-							item,
-							nestedSelect as Record<string, unknown>,
-						),
+						reorderSelectedValue(item, nestedSelect as Record<string, unknown>),
 					)
 				: reorderSelectedValue(
 						current,
@@ -2454,6 +3109,37 @@ function buildCollectionFacade(
 		if (writeKey) persistence?.saver.schedule(writeKey);
 	};
 	return {
+		[PREDICATE_BULK_OPERATION]: (
+			method: "updateMany" | "deleteMany",
+			selectIds: (
+				rows: ReadonlyArray<Record<string, unknown>>,
+			) => ReadonlyArray<string>,
+			data: unknown,
+			options?: { readonly soft?: boolean },
+		) => {
+			try {
+				ensureWritable(method);
+			} catch (error) {
+				return Promise.reject(error);
+			}
+			let writeScheduled = false;
+			const scheduleWriteOnce = () => {
+				if (writeScheduled) return;
+				writeScheduled = true;
+				scheduleWrite();
+			};
+			return runtime.invokePredicateBulk<{ readonly count?: number }>(
+				method,
+				collection.name,
+				selectIds,
+				data,
+				options,
+				scheduleWriteOnce,
+				(value) => {
+					if ((value.count ?? 0) > 0) scheduleWriteOnce();
+				},
+			);
+		},
 		query: ((config?: any) => {
 			if (config?.cursor) {
 				return settledPromise(() => {
@@ -2655,7 +3341,7 @@ function buildCollectionFacade(
 		watch: (config?: any) => runtime.watch(collection.name, config),
 		watchById: (id: string, options?: any) =>
 			runtime.watchById(collection.name, id, options?.debounceMs),
-	};
+	} as EngineCollection<any> & Record<symbol, unknown>;
 }
 
 async function loadLegacyCollections(

@@ -41,7 +41,7 @@ export interface WasmBuildBrowserBudgetContract {
 			readonly wasmLinearMemoryBytes: number;
 		};
 		readonly coldStartupMaxGrowthRatio: number;
-		readonly jsHeapMaxGrowthRatio: number;
+		readonly jsHeapMaximumBytes: number;
 		readonly wasmLinearMemoryMaxGrowthRatio: number;
 	};
 }
@@ -389,12 +389,11 @@ export const validateBrowserPerformanceContract = (
 	};
 };
 
-const evaluateBudgetGate = (
+const evaluateAbsoluteBudgetGate = (
 	baseline: number,
 	current: number | undefined,
-	maxGrowthRatio: number,
+	maxAllowed: number,
 ): BrowserBudgetMetricGate => {
-	const maxAllowed = baseline * maxGrowthRatio;
 	if (current === undefined) {
 		return {
 			baseline,
@@ -412,6 +411,13 @@ const evaluateBudgetGate = (
 	};
 };
 
+const evaluateBudgetGate = (
+	baseline: number,
+	current: number | undefined,
+	maxGrowthRatio: number,
+): BrowserBudgetMetricGate =>
+	evaluateAbsoluteBudgetGate(baseline, current, baseline * maxGrowthRatio);
+
 export const evaluateBrowserBudget = (options: {
 	readonly contract: WasmBuildBrowserBudgetContract;
 	readonly report: BrowserPerformanceReport;
@@ -428,12 +434,12 @@ export const evaluateBrowserBudget = (options: {
 		report.coldStartupMs,
 		contract.browserBudgets.coldStartupMaxGrowthRatio,
 	);
-	const jsHeap = evaluateBudgetGate(
+	const jsHeap = evaluateAbsoluteBudgetGate(
 		contract.browserBudgets.baseline.jsHeapBytes,
 		report.jsHeapBytes.status === "available"
 			? report.jsHeapBytes.value
 			: undefined,
-		contract.browserBudgets.jsHeapMaxGrowthRatio,
+		contract.browserBudgets.jsHeapMaximumBytes,
 	);
 	const wasmLinearMemory = evaluateBudgetGate(
 		contract.browserBudgets.baseline.wasmLinearMemoryBytes,

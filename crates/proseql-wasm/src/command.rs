@@ -105,11 +105,12 @@ pub(crate) fn dispatch(
         }
         "createMany" => {
             let command: CollectionManyCommand = parse_json(payload_json, "createMany")?;
-            Ok(create_many_result_value(context.db.create_many(
+            let result = context.db.create_many(
                 &command.collection,
                 command.items,
                 command.skip_duplicates,
-            )?))
+            )?;
+            Ok(create_many_result_value(result))
         }
         "update" => {
             let command: UpdateCommand = parse_json(payload_json, "update")?;

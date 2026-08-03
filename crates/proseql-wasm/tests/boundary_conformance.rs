@@ -269,7 +269,6 @@ fn create_database(
 fn dispatch(runtime: &mut Runtime, handle: u32, method: &str, payload: Value) -> Value {
     expect_ok(&runtime.dispatch_json(handle, method, Some(payload.to_string().as_str())))
 }
-
 fn dispatch_no_payload(runtime: &mut Runtime, handle: u32, method: &str) -> Value {
     expect_ok(&runtime.dispatch_json(handle, method, None))
 }
@@ -382,7 +381,7 @@ fn transaction_defect_poisons_session_and_forces_rollback() {
 }
 
 #[test]
-fn owned_transaction_commit_returns_one_journal_and_projection_delta() {
+fn owned_transaction_commit_returns_changed_collections_and_projection_delta() {
     let (mut runtime, _) = make_runtime();
     let handle = create_database(
         &mut runtime,
@@ -407,8 +406,6 @@ fn owned_transaction_commit_returns_one_journal_and_projection_delta() {
     let response = parse_response(&raw);
     assert_eq!(response["kind"], json!("ok"), "{response}");
     assert_eq!(response["value"]["changedCollections"], json!(["users"]));
-    assert_eq!(response["value"]["journalEntries"], json!(1));
-    assert!(response["value"]["journalBytes"].as_u64().unwrap() > 0);
     assert!(response.get("projection").is_some());
     assert_eq!(
         dispatch(
@@ -1784,6 +1781,69 @@ fn contiguous_query_positions_authorize_distinct_equal_storage_rows() {
 }
 
 #[test]
+fn id_set_bulk_mutations_preserve_collection_order_duplicates_and_limits() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![users_descriptor()],
+        json!({"users":[
+            {"id":"u1","name":"Alice"},
+            {"id":"u2","name":"Bob"},
+            {"id":"u3","name":"Cara"}
+        ]}),
+    );
+
+    let updated = dispatch(
+        &mut runtime,
+        handle,
+        "updateMany",
+        json!({
+            "collection":"users",
+            "where":{"id":{"$in":["u3","missing","u1","u3"]}},
+            "data":{"name":"Updated"}
+        }),
+    );
+    assert_eq!(updated["count"], json!(2));
+    assert_eq!(
+        updated["updated"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["u1", "u3"]
+    );
+
+    let deleted = dispatch(
+        &mut runtime,
+        handle,
+        "deleteMany",
+        json!({
+            "collection":"users",
+            "where":{"id":{"$in":["u3","u1"]}},
+            "soft":false,
+            "limit":1
+        }),
+    );
+    assert_eq!(deleted["count"], json!(1));
+    assert_eq!(deleted["deleted"][0]["id"], json!("u1"));
+    assert_eq!(
+        dispatch(
+            &mut runtime,
+            handle,
+            "query",
+            json!({"collection":"users","query":{}}),
+        )
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect::<Vec<_>>(),
+        vec!["u2", "u3"]
+    );
+}
+
+#[test]
 fn caller_mutated_projection_sync_is_authorized_and_not_a_formal_mutation() {
     let (mut runtime, _) = make_runtime();
     let handle = create_database(
@@ -2201,5 +2261,121 @@ fn unsubscribe_missing_subscription_returns_false() {
     assert_eq!(
         expect_ok(&runtime.unsubscribe_json(handle, 999)),
         json!(false)
+    );
+}
+
+#[test]
+fn authorized_native_bulk_requires_current_materialized_handles_and_is_atomic_on_miss() {
+    let (mut runtime, _) = make_runtime();
+    let handle = create_database(
+        &mut runtime,
+        vec![base_collection(
+            "users",
+            SchemaNode::Struct {
+                fields: vec![
+                    StructField {
+                        name: "id".into(),
+                        schema: SchemaNode::Str,
+                    },
+                    StructField {
+                        name: "name".into(),
+                        schema: SchemaNode::Str,
+                    },
+                ],
+            },
+        )],
+        json!({"users":[
+            {"id":"u1","name":"Alice"},
+            {"id":"u2","name":"Bob"},
+            {"id":"u3","name":"Cara"}
+        ]}),
+    );
+    let handles = expect_ok(&runtime.projection_handles_json(handle));
+    let tokens = handles["collections"]["users"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            let parts = row["handle"]
+                .as_str()
+                .unwrap()
+                .split(':')
+                .map(|part| part.parse::<u64>().unwrap())
+                .collect::<Vec<_>>();
+            (
+                row["id"].as_str().unwrap().to_owned(),
+                ((parts[1] << 21) | parts[2]) as f64,
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let descriptor = expect_ok(
+        &runtime.dispatch_projected_json(
+            handle,
+            "query",
+            Some(
+                json!({"collection":"users","query":{}})
+                    .to_string()
+                    .as_str(),
+            ),
+        ),
+    );
+    let additions = descriptor["a"].as_array().unwrap();
+    let slots = additions
+        .iter()
+        .map(|addition| addition[1][0].as_u64().unwrap() as u32)
+        .collect::<Vec<_>>();
+    let ids = ["u1".to_owned(), "u3".to_owned()];
+    let selected_slots = vec![slots[0], slots[2]];
+    let selected_tokens = ids.iter().map(|id| tokens[id]).collect::<Vec<_>>();
+    assert_eq!(
+        runtime.fast_find_by_id(handle, selected_slots[0], selected_tokens[0]),
+        1
+    );
+    assert_eq!(
+        runtime.fast_find_by_id(handle, selected_slots[1], selected_tokens[1]),
+        1
+    );
+
+    let updated = runtime
+        .authorized_bulk_update(
+            handle,
+            0,
+            &selected_slots,
+            &selected_tokens,
+            json!({"name":"Updated"}),
+        )
+        .unwrap()
+        .expect("eligible current handles");
+    assert_eq!((updated as u64) % (1 << 21), 2);
+    assert_eq!(
+        dispatch(
+            &mut runtime,
+            handle,
+            "query",
+            json!({"collection":"users","query":{}}),
+        )
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["name"].as_str().unwrap())
+        .collect::<Vec<_>>(),
+        vec!["Updated", "Bob", "Updated"]
+    );
+
+    let stale = runtime
+        .authorized_bulk_delete(handle, 0, &selected_slots, &selected_tokens, None)
+        .unwrap();
+    assert!(stale.is_none());
+    assert_eq!(
+        dispatch(
+            &mut runtime,
+            handle,
+            "query",
+            json!({"collection":"users","query":{}}),
+        )
+        .as_array()
+        .unwrap()
+        .len(),
+        3
     );
 }

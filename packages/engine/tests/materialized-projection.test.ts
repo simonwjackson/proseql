@@ -39,7 +39,7 @@ describe("materialized projection", () => {
 		expect(projection.stats.cacheHits).toBe(1);
 		expect(projection.stats.cacheMisses).toBe(1);
 		expect(projection.stats.materializedRows).toBe(1);
-		expect(projection.stats.fullValueBytesAvoided).toBeGreaterThan(0);
+		expect(projection.stats.fullValueBytesAvoided).toBe(0);
 	});
 
 	it("materializes contiguous descriptors as fresh arrays without poisoning structural caches", () => {
@@ -127,6 +127,62 @@ describe("materialized projection", () => {
 		).toBe(result[0]);
 	});
 
+	it("releases 10K authorized-bulk structure immediately while retaining caller identity", async () => {
+		const count = 10_000;
+		const handles = Array.from({ length: count }, (_, index) => ({
+			id: `u${index}`,
+			handle: `${index}:1:1`,
+		}));
+		const projection = new MaterializedProjection({
+			collections: { users: handles },
+		});
+		let rows: ReadonlyArray<{ id: string; active: boolean }> | undefined =
+			projection.materializeCompact(
+				"users",
+				{
+					k: "c",
+					o: 0,
+					l: count,
+					t: count,
+					v: 1,
+					a: handles.map(
+						(row, index) =>
+							[index, [index, row.id, { id: row.id, active: false }]] as const,
+					),
+				},
+				1,
+			);
+		const retained = rows[0];
+		let candidates = projection.authorizedBulkCandidates(
+			"users",
+			rows.slice(0, 100).map((row) => row.id),
+			rows.slice(0, 100),
+		)!;
+		const result = projection.applyAuthorizedBulkUpdate(
+			"users",
+			candidates,
+			100,
+			2,
+			{ active: true },
+		);
+		expect(result.updated[0]).toBe(retained);
+		expect(retained.active).toBe(true);
+		expect(projection.stats.peakMaterializedRows).toBe(count);
+		expect(projection.stats.retainedStrongRows).toBe(count);
+
+		projection.releaseAuthorizedBulkStructure("users");
+		expect(result.updated[0]).toBe(retained);
+		projection.releaseStrongStructure("users");
+		expect(projection.stats.retainedStrongRows).toBe(0);
+		expect(projection.stats.retainedStrongProxies).toBe(0);
+
+		rows = undefined;
+		candidates = undefined as never;
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+		(globalThis as { Bun?: { gc(full?: boolean): void } }).Bun?.gc(true);
+		expect(projection.stats.retainedStrongRows).toBe(0);
+	});
+
 	it("uses the sparse slot table as the only 10K materialization index", () => {
 		const count = 10_000;
 		const projection = new MaterializedProjection({
@@ -153,7 +209,7 @@ describe("materialized projection", () => {
 		};
 
 		expect(result).toHaveLength(count);
-		expect(projection.materializedEntries("users").size).toBe(count);
+		expect(projection.stats.materializedRows).toBe(count);
 		expect(Object.hasOwn(projection, "materializedKeys")).toBe(false);
 		expect(
 			internals.slots.every((slot) => typeof slot.token === "number"),
@@ -441,5 +497,77 @@ describe("materialized projection", () => {
 			).name,
 		).toBe("Recreated");
 		expect(projection.stats.resynchronizations).toBe(1);
+	});
+
+	it("applies scalar authorized bulk completion and preserves identities across lazy resync", () => {
+		const projection = new MaterializedProjection({
+			collections: {
+				users: [
+					{ id: "u1", handle: "0:1:1" },
+					{ id: "u2", handle: "1:1:1" },
+				],
+			},
+		});
+		const rows = projection.materializeCompact<
+			ReadonlyArray<{ id: string; name: string }>
+		>(
+			"users",
+			{
+				k: "q",
+				r: [
+					[0, "u1", { id: "u1", name: "Alice" }],
+					[1, "u2", { id: "u2", name: "Bob" }],
+				],
+			},
+			1,
+		);
+		const candidates = projection.authorizedBulkCandidates(
+			"users",
+			["u1", "u2"],
+			rows,
+		)!;
+		const updated = projection.applyAuthorizedBulkUpdate(
+			"users",
+			candidates,
+			2,
+			3,
+			{ name: "Updated" },
+		);
+		expect(updated.updated[0]).toBe(rows[0]);
+		expect(updated.updated[1]).toBe(rows[1]);
+		expect(updated.updated.map((row) => row.name)).toEqual([
+			"Updated",
+			"Updated",
+		]);
+		expect(projection.needsResynchronization).toBe(false);
+		expect(projection.materializedValue("users", "u1")).toBe(rows[0]);
+		expect(projection.materializedValue("users", "u2")).toBe(rows[1]);
+
+		const next = projection.authorizedBulkCandidates(
+			"users",
+			["u1", "u2"],
+			rows,
+		)!;
+		const deleted = projection.applyAuthorizedBulkDelete(
+			"users",
+			next,
+			["u1", "u2"],
+			2,
+			5,
+		);
+		expect(deleted.deleted[0]).toBe(rows[0]);
+		expect(deleted.deleted[1]).toBe(rows[1]);
+		expect(projection.needsResynchronization).toBe(false);
+		expect(projection.materializedValue("users", "u1")).toBeUndefined();
+		expect(deleted.deleted[0]).toBe(rows[0]);
+		expect(() =>
+			projection.applyAuthorizedBulkDelete(
+				"users",
+				next,
+				["u1", "u2"],
+				1,
+				6,
+			),
+		).toThrow(StaleMaterializedHandleError);
 	});
 });

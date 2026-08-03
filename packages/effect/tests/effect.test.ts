@@ -408,6 +408,79 @@ describe("@proseql/effect", () => {
 		expect(emissions[1]?.[1]?.year).toBe(1967);
 	});
 
+	it("retains an Effect runPromise query shell through the current event-loop turn", async () => {
+		const db = await Effect.runPromise(
+			createEffectDatabase(
+				{
+					books: {
+						schema: Schema.Struct({
+							id: Schema.String,
+							title: Schema.String,
+							year: Schema.Number,
+							genre: Schema.String,
+						}),
+						relationships: {},
+					},
+				} as const,
+				{
+					books: Array.from({ length: 100 }, (_, index) => ({
+						id: `lease-${index}`,
+						title: `Lease ${index}`,
+						year: 2000 + (index % 20),
+						genre: "test",
+					})),
+				},
+			),
+		);
+		const diagnostics = () =>
+			(
+				db as unknown as {
+					__proseqlMaterializationDiagnostics: () => {
+						retainedStrongRows: number;
+						strongStructureLeaseGeneration: number;
+						strongStructureReleaseScheduled: boolean;
+						hotBulkIdsCached: boolean;
+						hotDeleteBulkIdsCached: boolean;
+					};
+				}
+			).__proseqlMaterializationDiagnostics();
+		try {
+			await db.books.query().runPromise;
+			const firstGeneration = diagnostics().strongStructureLeaseGeneration;
+			for (let phase = 0; phase < 64; phase += 1) await Promise.resolve();
+			expect(diagnostics().retainedStrongRows).toBe(100);
+			expect(diagnostics().strongStructureReleaseScheduled).toBe(true);
+
+			await (
+				db.books as unknown as {
+					updateMany: (
+						where: Record<string, unknown>,
+						data: Record<string, unknown>,
+					) => { readonly runPromise: Promise<unknown> };
+				}
+			).updateMany({ genre: "test" }, { title: "Changed" }).runPromise;
+			expect(diagnostics().hotBulkIdsCached).toBe(true);
+			await (
+				db.books as unknown as {
+					deleteMany: (where: Record<string, unknown>) => {
+						readonly runPromise: Promise<unknown>;
+					};
+				}
+			).deleteMany({ genre: "missing" }).runPromise;
+			expect(diagnostics().hotDeleteBulkIdsCached).toBe(false);
+			expect(diagnostics().strongStructureLeaseGeneration).toBeGreaterThan(firstGeneration);
+			expect(diagnostics().retainedStrongRows).toBe(100);
+
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			expect(diagnostics().strongStructureReleaseScheduled).toBe(false);
+			expect(diagnostics().retainedStrongRows).toBe(0);
+			expect(diagnostics().hotBulkIdsCached).toBe(false);
+			expect(diagnostics().hotDeleteBulkIdsCached).toBe(false);
+		} finally {
+			await db.close();
+		}
+	});
+
 	it("collapses scalar predicate bulk mutations to one Rust bulk command outside and inside transactions", async () => {
 		const rows = Array.from({ length: 12 }, (_, index) => ({
 			id: `b${index}`,
@@ -588,6 +661,215 @@ describe("@proseql/effect", () => {
 		);
 		expect(await db.books.findById("b1").runPromise).toBe(captured);
 		await db.close();
+	});
+
+	it("commits predicate-side mutations before a successful formal bulk update", async () => {
+		const emissions = await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const db = yield* createEffectDatabase(
+						{
+							...config,
+							books: { ...config.books, indexes: ["genre"] },
+						} as const,
+						{
+							users: [],
+							companies: [],
+							books: [
+								{ id: "b1", title: "One", year: 2001, genre: "original" },
+								{ id: "b2", title: "Two", year: 2002, genre: "original" },
+							],
+						},
+					);
+					const stream = yield* db.books.watch({ sort: { id: "asc" } });
+					const fiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.forkChild,
+					);
+
+					const result = yield* db.books.updateMany(
+						(book) => {
+							if (book.id === "b1") {
+								book.title = "matching predicate side effect";
+								return true;
+							}
+							book.genre = "nonmatching predicate side effect";
+							return false;
+						},
+						{ genre: "formal update" },
+					);
+					expect(result.updated).toHaveLength(1);
+					expect(result.updated[0]).toMatchObject({
+						id: "b1",
+						title: "matching predicate side effect",
+						genre: "formal update",
+					});
+					expect(yield* db.books.findById("b2")).toMatchObject({
+						genre: "nonmatching predicate side effect",
+					});
+				// Direct mutable-reference writes deliberately do not repair indexes.
+				const staleIndex = yield* Stream.runCollect(
+					db.books.query({
+						where: { genre: "nonmatching predicate side effect" },
+					}),
+				);
+				const formalIndex = yield* Stream.runCollect(
+					db.books.query({ where: { genre: "formal update" } }),
+				);
+					expect(staleIndex).toEqual([]);
+					expect(formalIndex.map((book) => book.id)).toEqual(["b1"]);
+
+					return yield* Fiber.join(fiber);
+				}),
+			),
+		);
+		expect(emissions).toHaveLength(2);
+		expect(emissions[1]?.[0]).toMatchObject({
+			id: "b1",
+			title: "matching predicate side effect",
+			genre: "formal update",
+		});
+		expect(emissions[1]?.[1]).toMatchObject({
+			id: "b2",
+			genre: "original",
+		});
+	});
+
+	it("preserves scalar predicate identity, getter receivers, order, and caller mutations before a defect", async () => {
+		const rows = Array.from({ length: 5 }, (_, index) => ({
+			id: `b${index}`,
+			title: `Book ${index}`,
+			year: 2000 + index,
+			genre: "original",
+		}));
+		const db = await Effect.runPromise(
+			createEffectDatabase(config, {
+				users: [],
+				companies: [],
+				books: rows,
+			}),
+		);
+		const canonical = await db.books.query({ sort: { id: "asc" } }).runPromise;
+		let getterReceiver: unknown;
+		Object.setPrototypeOf(canonical[1]!, {
+			get predicateMarker() {
+				getterReceiver = this;
+				return (this as { readonly id: string }).id;
+			},
+		});
+		const calls: string[] = [];
+		const defect = new Error("predicate identity defect");
+		const exit = await Effect.runPromiseExit(
+			db.books.deleteMany((book) => {
+				calls.push(book.id);
+				expect(book).toBe(canonical[Number(book.id.slice(1))]);
+				if (book.id === "b0") book.genre = "predicate-mutated";
+				if (book.id === "b1") {
+					expect((book as typeof book & { predicateMarker: string }).predicateMarker).toBe("b1");
+				}
+				if (book.id === "b2") throw defect;
+				return book.id === "b1";
+			}),
+		);
+		expect(exit._tag).toBe("Failure");
+		expect(calls).toEqual(["b0", "b1", "b2"]);
+		expect(getterReceiver).toBe(canonical[1]);
+		expect(await db.books.findById("b0").runPromise).toBe(canonical[0]);
+		expect((await db.books.findById("b0").runPromise)?.genre).toBe(
+			"predicate-mutated",
+		);
+
+		const updateDefect = new Error("predicate update identity defect");
+		const updateExit = await Effect.runPromiseExit(
+			db.books.updateMany(
+				(book) => {
+					if (book.id === "b3") book.genre = "nonmatching-update-side-effect";
+					if (book.id === "b4") throw updateDefect;
+					return book.id === "b2";
+				},
+				{ genre: "formal-update" },
+			),
+		);
+		expect(updateExit._tag).toBe("Failure");
+		expect((await db.books.findById("b3").runPromise)?.genre).toBe(
+			"nonmatching-update-side-effect",
+		);
+		expect((await db.books.findById("b2").runPromise)?.genre).toBe("original");
+
+		const inheritedSetterCalls: unknown[] = [];
+		Object.setPrototypeOf(canonical[2]!, {
+			set genre(value: unknown) {
+				inheritedSetterCalls.push(value);
+			},
+		});
+		const updated = await db.books.updateMany(
+			(book) => book.id === "b2",
+			{ genre: "canonical-fallback" },
+		).runPromise;
+		expect(updated.updated).toHaveLength(1);
+		expect(updated.updated[0]).toMatchObject({
+			id: "b2",
+			genre: "canonical-fallback",
+		});
+		expect(inheritedSetterCalls).toEqual([]);
+		expect((await db.books.findById("b2").runPromise)?.genre).toBe(
+			"canonical-fallback",
+		);
+
+		const deleted = await db.books.deleteMany((book) => book.id === "b1").runPromise;
+		expect(deleted.deleted).toEqual([canonical[1]]);
+		expect(deleted.deleted[0]).toBe(canonical[1]);
+		await db.close();
+	});
+
+	it("preserves predicate defect identity for direct runPromise and Effect execution", async () => {
+		const makeDatabase = () =>
+			Effect.runPromise(
+				createEffectDatabase(config, {
+					users: [],
+					companies: [],
+					books: [
+						{ id: "b1", title: "One", year: 2001, genre: "original" },
+						{ id: "b2", title: "Two", year: 2002, genre: "original" },
+					],
+				}),
+			);
+
+		for (const method of ["updateMany", "deleteMany"] as const) {
+			const directDb = await makeDatabase();
+			const directDefect = new TypeError(`direct ${method} predicate defect`);
+			const directOperation =
+				method === "updateMany"
+					? directDb.books.updateMany(() => {
+							throw directDefect;
+						}, { genre: "updated" })
+					: directDb.books.deleteMany(() => {
+							throw directDefect;
+						});
+			await expect(directOperation.runPromise).rejects.toBe(directDefect);
+			await directDb.close();
+
+			const effectDb = await makeDatabase();
+			const effectDefect = new TypeError(`effect ${method} predicate defect`);
+			const effectOperation =
+				method === "updateMany"
+					? effectDb.books.updateMany(() => {
+							throw effectDefect;
+						}, { genre: "updated" })
+					: effectDb.books.deleteMany(() => {
+							throw effectDefect;
+						});
+			const exit = await Effect.runPromiseExit(effectOperation);
+			expect(exit._tag).toBe("Failure");
+			if (exit._tag === "Failure") {
+				const reason = exit.cause.reasons[0];
+				expect(reason === undefined ? false : Cause.isDieReason(reason)).toBe(true);
+				if (reason !== undefined && Cause.isDieReason(reason)) {
+					expect(reason.defect).toBe(effectDefect);
+				}
+			}
+			await effectDb.close();
+		}
 	});
 
 	it("performs zero writes when a scalar bulk predicate throws midway", async () => {

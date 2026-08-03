@@ -69,6 +69,7 @@ type ProjectionRow = {
 	readonly id: string;
 	readonly handle: string;
 	readonly resultId?: string;
+	readonly position?: number;
 	readonly value?: unknown;
 	readonly valueBytes?: number;
 };
@@ -129,6 +130,8 @@ export type MaterializationStats = {
 	readonly materializationMilliseconds: number;
 	readonly materializedRows: number;
 	readonly trackedProxies: number;
+	readonly retainedStrongRows: number;
+	readonly retainedStrongProxies: number;
 	readonly peakMaterializedRows: number;
 	readonly peakTrackedProxies: number;
 };
@@ -152,6 +155,13 @@ export type FastFindCandidate<T = unknown> = {
 	readonly authorizationBase: number;
 	readonly handle: string;
 	readonly value: T;
+};
+
+export type AuthorizedBulkCandidates<T = unknown> = {
+	readonly rows: ReadonlyArray<FastFindCandidate<T>>;
+	readonly slots: Uint32Array;
+	readonly projectionSlots: Uint32Array;
+	readonly authorizationBases: Float64Array;
 };
 
 type ProjectionHandleToken = {
@@ -187,12 +197,10 @@ const trackDeep = (
 	if (cached !== undefined) return cached;
 	const proxy = new Proxy(value, {
 		get(target, property, receiver) {
-			return trackDeep(
-				Reflect.get(target, property, receiver),
-				markDirty,
-				cache,
-				countProxy,
-			);
+			const nested = Reflect.get(target, property, receiver);
+			return typeof nested === "object" && nested !== null
+				? trackDeep(nested, markDirty, cache, countProxy)
+				: nested;
 		},
 		set(target, property, next, receiver) {
 			const changed = !Object.is(Reflect.get(target, property, receiver), next);
@@ -226,6 +234,10 @@ export class MaterializedProjection {
 		string,
 		{ readonly revision: number; readonly rows: ReadonlyArray<unknown> }
 	>();
+	private readonly pendingCanonicalInsertions = new Map<
+		string,
+		{ readonly collection: string; readonly position: number }
+	>();
 	private readonly freeSlots: number[] = [];
 	private readonly dirtyKeys = new Set<string>();
 	private readonly fastFindPins: FastFindPin[] = [];
@@ -239,6 +251,24 @@ export class MaterializedProjection {
 		FastFindCandidate
 	>();
 	private invalid = false;
+	private preserveValuesOnResync = false;
+	private authoritativePatchDepth = 0;
+	private pendingAuthorizedBulk?:
+		| {
+				readonly kind: "update";
+				readonly collection: string;
+				readonly candidates: AuthorizedBulkCandidates;
+				readonly changed: ReadonlyArray<boolean>;
+				readonly collectionRevision: number;
+		  }
+		| {
+				readonly kind: "delete";
+				readonly collection: string;
+				readonly ids: ReadonlyArray<string>;
+				readonly projectionSlots: Uint32Array;
+				readonly rustSlots: Uint32Array;
+				readonly collectionRevision: number;
+		  };
 	private readonly metadataFallback?: MaterializedProjection;
 	private nextProxyToken = 1;
 	private mutableStats = {
@@ -268,7 +298,12 @@ export class MaterializedProjection {
 	}
 
 	get needsResynchronization() {
+		this.reconcileAuthorizedBulk();
 		return this.invalid;
+	}
+
+	get canPreserveValuesOnResync() {
+		return this.preserveValuesOnResync;
 	}
 
 	isCollectionFullyMaterialized(collection: string): boolean {
@@ -286,7 +321,27 @@ export class MaterializedProjection {
 	}
 
 	get stats(): MaterializationStats {
-		return this.mutableStats;
+		const retained = new Set<object>();
+		for (const canonical of this.canonicalRowsByCollection.values()) {
+			for (const row of canonical.rows) {
+				if (typeof row === "object" && row !== null) retained.add(row);
+			}
+		}
+		for (const slot of this.slots) {
+			if (typeof slot?.value === "object" && slot.value !== null)
+				retained.add(slot.value);
+		}
+		if (this.pendingAuthorizedBulk?.kind === "update") {
+			for (const candidate of this.pendingAuthorizedBulk.candidates.rows) {
+				if (typeof candidate.value === "object" && candidate.value !== null)
+					retained.add(candidate.value);
+			}
+		}
+		return {
+			...this.mutableStats,
+			retainedStrongRows: retained.size,
+			retainedStrongProxies: retained.size,
+		};
 	}
 
 	get dirtyRows(): ReadonlyArray<DirtyProjectionRow> {
@@ -372,22 +427,193 @@ export class MaterializedProjection {
 		return this.resolveValue(slot);
 	}
 
-	materializedEntries(collection: string): ReadonlyMap<string, unknown> {
-		const entries = new Map<string, unknown>();
-		for (let slot = 0; slot < this.slots.length; slot += 1) {
-			const row = this.slots[slot];
-			if (row?.collection !== collection || !row.hasValue) continue;
-			const value = this.resolveValue(slot);
-			if (value !== undefined) entries.set(row.id, value);
+	canonicalMaterializedRows<T>(
+		collection: string,
+	): ReadonlyArray<T> | undefined {
+		const canonical = this.canonicalRowsByCollection.get(collection);
+		if (canonical !== undefined) return canonical.rows as ReadonlyArray<T>;
+		const positions = this.rustSlotByCollectionPosition.get(collection);
+		if (positions === undefined) return undefined;
+		const rows = new Array<T>(positions.length);
+		for (let index = 0; index < positions.length; index += 1) {
+			const slot = this.rustSlotIndex(positions[index]!);
+			const value = slot === undefined ? undefined : this.resolveValue(slot);
+			if (value === undefined) return undefined;
+			rows[index] = value as T;
 		}
-		return entries;
+		return rows;
+	}
+
+	authorizedBulkCandidates<T>(
+		collection: string,
+		ids: ReadonlyArray<string>,
+		expectedRows?: ReadonlyArray<T>,
+	): AuthorizedBulkCandidates<T> | undefined {
+		if (
+			ids.length === 0 ||
+			(expectedRows && expectedRows.length !== ids.length)
+		)
+			return undefined;
+		const rows: FastFindCandidate<T>[] = [];
+		const slots = new Uint32Array(ids.length);
+		const projectionSlots = new Uint32Array(ids.length);
+		const authorizationBases = new Float64Array(ids.length);
+		for (let index = 0; index < ids.length; index += 1) {
+			const candidate = this.fastFindCandidate<T>(collection, ids[index]!);
+			if (
+				candidate === undefined ||
+				candidate.authorizationBase < 0 ||
+				(expectedRows !== undefined &&
+					!Object.is(candidate.value, expectedRows[index]))
+			)
+				return undefined;
+			rows.push(candidate);
+			slots[index] = candidate.rustSlot;
+			projectionSlots[index] = candidate.slot;
+			authorizationBases[index] = candidate.authorizationBase;
+		}
+		return { rows, slots, projectionSlots, authorizationBases };
+	}
+
+	applyAuthorizedBulkUpdate<T>(
+		collection: string,
+		candidates: AuthorizedBulkCandidates<T>,
+		count: number,
+		collectionRevision: number,
+		patch: Readonly<Record<string, unknown>>,
+	): { readonly count: number; readonly updated: T[] } {
+		if (count !== candidates.rows.length)
+			throw new StaleMaterializedHandleError("authorized-bulk-update");
+		const changed = candidates.rows.map((candidate) =>
+			Object.entries(patch).some(
+				([field, value]) =>
+					!Object.is(
+						(candidate.value as Record<string, unknown>)[field],
+						value,
+					),
+			),
+		);
+		this.authoritativePatchDepth += 1;
+		try {
+			for (const candidate of candidates.rows) {
+				Object.assign(candidate.value as object, patch);
+				this.dirtyKeys.delete(keyOf(collection, candidate.id));
+			}
+		} finally {
+			this.authoritativePatchDepth -= 1;
+		}
+		this.invalid = true;
+		this.pendingAuthorizedBulk = {
+			kind: "update",
+			collection,
+			candidates,
+			changed,
+			collectionRevision,
+		};
+		return {
+			count,
+			updated: candidates.rows.map((candidate) => candidate.value),
+		};
+	}
+
+	applyAuthorizedBulkDelete<T>(
+		collection: string,
+		candidates: AuthorizedBulkCandidates<T>,
+		ids: ReadonlyArray<string>,
+		count: number,
+		collectionRevision: number,
+	): { readonly count: number; readonly deleted: T[] } {
+		if (
+			count !== candidates.rows.length ||
+			ids.length !== candidates.rows.length
+		)
+			throw new StaleMaterializedHandleError("authorized-bulk-delete");
+		this.invalid = true;
+		this.pendingAuthorizedBulk = {
+			kind: "delete",
+			collection,
+			ids,
+			projectionSlots: candidates.projectionSlots,
+			rustSlots: candidates.slots,
+			collectionRevision,
+		};
+		return {
+			count,
+			deleted: candidates.rows.map((candidate) => candidate.value),
+		};
+	}
+
+	/**
+	 * Finalize the small authorized delta, then discard every strong structural
+	 * row cache before returning control to user code. Caller-owned result rows
+	 * remain alive naturally; projection slots retain only WeakRefs.
+	 */
+	releaseAuthorizedBulkStructure(collection: string) {
+		const pending = this.pendingAuthorizedBulk;
+		if (pending === undefined || pending.collection !== collection) {
+			this.releaseStrongStructure(collection);
+			return;
+		}
+		if (pending.kind === "delete") {
+			// Keep only id/slot metadata until the next command. Structural position
+			// repair is intentionally deferred out of the mutation's critical path.
+			this.invalid = true;
+			this.preserveValuesOnResync = false;
+			return;
+		}
+		this.pendingAuthorizedBulk = undefined;
+		this.clearFastFindPins();
+		for (let index = 0; index < pending.candidates.rows.length; index += 1) {
+			const candidate = pending.candidates.rows[index]!;
+			const current = this.slots[candidate.slot];
+			if (
+				current?.handle !== candidate.handle ||
+				current.collection !== collection
+			) {
+				this.preserveValuesOnResync = true;
+				this.invalid = true;
+				this.releaseStrongStructure(collection);
+				return;
+			}
+			const revision = current.revision + (pending.changed[index] ? 1 : 0);
+			this.slots[candidate.slot] = {
+				...current,
+				handle: `${current.rustSlot}:${current.generation}:${revision}`,
+				revision,
+			};
+		}
+		this.invalid = false;
+	}
+
+	releaseStrongStructure(collection: string) {
+		this.canonicalRowsByCollection.delete(collection);
+		for (const [key, insertion] of this.pendingCanonicalInsertions) {
+			if (insertion.collection === collection)
+				this.pendingCanonicalInsertions.delete(key);
+		}
+		this.clearFastFindPins();
+	}
+
+	releaseAllStrongStructures() {
+		this.canonicalRowsByCollection.clear();
+		this.pendingCanonicalInsertions.clear();
+		this.clearFastFindPins();
 	}
 
 	cacheAuthoritativeValue(collection: string, id: string, value: unknown) {
-		const slot = this.slotById.get(keyOf(collection, id));
+		const key = keyOf(collection, id);
+		const slot = this.slotById.get(key);
 		const row = slot === undefined ? undefined : this.slots[slot];
 		if (row === undefined) return undefined;
 		const cached = this.put(collection, { id, handle: row.handle, value });
+		const insertion = this.pendingCanonicalInsertions.get(key);
+		if (cached !== undefined && insertion !== undefined) {
+			this.pendingCanonicalInsertions.delete(key);
+			const rows = this.canonicalRowsByCollection.get(collection)?.rows as
+				| unknown[]
+				| undefined;
+			rows?.splice(Math.min(insertion.position, rows.length), 0, cached);
+		}
 		return cached === undefined
 			? undefined
 			: { value: cached, handle: row.handle };
@@ -413,19 +639,115 @@ export class MaterializedProjection {
 	}
 
 	resynchronize(snapshot: ProjectionSnapshot) {
+		if (this.preserveValuesOnResync) {
+			this.replaceAllPreservingValues(snapshot);
+			return;
+		}
 		this.replaceAll(snapshot, true);
 	}
 
+	private reconcileAuthorizedBulk() {
+		const pending = this.pendingAuthorizedBulk;
+		if (pending === undefined) return;
+		this.pendingAuthorizedBulk = undefined;
+		this.clearFastFindPins();
+		if (pending.kind === "update") {
+			for (let index = 0; index < pending.candidates.rows.length; index += 1) {
+				const candidate = pending.candidates.rows[index]!;
+				const current = this.slots[candidate.slot];
+				if (
+					current?.handle !== candidate.handle ||
+					current.collection !== pending.collection
+				) {
+					this.preserveValuesOnResync = true;
+					return;
+				}
+				const revision = current.revision + (pending.changed[index] ? 1 : 0);
+				this.slots[candidate.slot] = {
+					...current,
+					handle: `${current.rustSlot}:${current.generation}:${revision}`,
+					revision,
+				};
+			}
+			const canonical = this.canonicalRowsByCollection.get(pending.collection);
+			if (canonical !== undefined)
+				(canonical as { revision: number }).revision =
+					pending.collectionRevision;
+			this.invalid = false;
+			return;
+		}
+		const canonical = this.canonicalRowsByCollection.get(pending.collection);
+		const positions = this.rustSlotByCollectionPosition.get(pending.collection);
+		const start = (positions?.length ?? 0) - pending.rustSlots.length;
+		let suffix = positions !== undefined && start >= 0;
+		for (let index = 0; suffix && index < pending.rustSlots.length; index += 1)
+			suffix = positions![start + index] === pending.rustSlots[index];
+		for (let index = 0; index < pending.ids.length; index += 1) {
+			const slot = pending.projectionSlots[index]!;
+			const current = this.slots[slot];
+			if (
+				current?.rustSlot !== pending.rustSlots[index] ||
+				current.collection !== pending.collection ||
+				current.id !== pending.ids[index]
+			) {
+				this.preserveValuesOnResync = true;
+				return;
+			}
+			this.remove(keyOf(pending.collection, current.id), slot);
+		}
+		if (
+			suffix &&
+			canonical !== undefined &&
+			positions !== undefined &&
+			canonical.rows.length === positions.length
+		) {
+			(canonical.rows as unknown[]).splice(start, pending.rustSlots.length);
+			(canonical as { revision: number }).revision = pending.collectionRevision;
+		} else {
+			this.canonicalRowsByCollection.delete(pending.collection);
+		}
+		if (positions !== undefined) {
+			if (suffix) {
+				this.rustSlotByCollectionPosition.set(
+					pending.collection,
+					positions.subarray(0, start),
+				);
+			} else {
+				const deletedSlots = new Set(pending.rustSlots);
+				const retained = new Int32Array(
+					positions.length - pending.rustSlots.length,
+				);
+				let retainedIndex = 0;
+				for (const rustSlot of positions) {
+					if (!deletedSlots.has(rustSlot)) retained[retainedIndex++] = rustSlot;
+				}
+				if (retainedIndex !== retained.length) {
+					this.preserveValuesOnResync = true;
+					return;
+				}
+				this.rustSlotByCollectionPosition.set(pending.collection, retained);
+			}
+		}
+		this.preserveValuesOnResync = false;
+		this.invalid = false;
+	}
+
 	invalidate() {
+		this.pendingAuthorizedBulk = undefined;
 		this.invalid = true;
+		this.preserveValuesOnResync = false;
+		this.releaseAllStrongStructures();
 	}
 
 	clear() {
+		this.pendingAuthorizedBulk = undefined;
+		this.preserveValuesOnResync = false;
 		this.slots.length = 0;
 		this.slotById.clear();
 		this.clearRustSlotIndexes();
 		this.rustSlotByCollectionPosition.clear();
 		this.canonicalRowsByCollection.clear();
+		this.pendingCanonicalInsertions.clear();
 		this.freeSlots.length = 0;
 		this.dirtyKeys.clear();
 		this.clearFastFindPins();
@@ -441,8 +763,12 @@ export class MaterializedProjection {
 		}
 		const structurallyChanged = new Set<string>();
 		const changedCollections = new Set<string>();
+		const changesByCollection = new Map<string, ProjectionChange[]>();
 		for (const change of sync.changes) {
 			changedCollections.add(change.collection);
+			const grouped = changesByCollection.get(change.collection) ?? [];
+			grouped.push(change);
+			changesByCollection.set(change.collection, grouped);
 			if (change.deleted) {
 				const existing = this.slotById.get(keyOf(change.collection, change.id));
 				if (
@@ -462,11 +788,45 @@ export class MaterializedProjection {
 				structurallyChanged.add(change.collection);
 			}
 		}
-		for (const collection of changedCollections) {
-			this.canonicalRowsByCollection.delete(collection);
+		const preservedInsertions = new Set<string>();
+		for (const [collection, changes] of changesByCollection) {
+			const canonical = this.canonicalRowsByCollection.get(collection);
+			const positions = this.rustSlotByCollectionPosition.get(collection);
+			const insertions = changes.flatMap((change) => {
+				const token = projectionHandleToken(change.handle);
+				const position = change.deleted ? undefined : change.position;
+				return !change.deleted &&
+					token !== undefined &&
+					typeof position === "number" &&
+					this.slotById.get(keyOf(collection, change.id)) === undefined
+					? [{ change, token, position }]
+					: [];
+			});
+			if (positions !== undefined && insertions.length === changes.length) {
+				preservedInsertions.add(collection);
+				if (canonical !== undefined)
+					(canonical as { revision: number }).revision += insertions.length;
+				const next = Array.from(positions);
+				for (const { change, token, position } of insertions.sort(
+					(left, right) => left.position - right.position,
+				)) {
+					next.splice(Math.min(position, next.length), 0, token.rustSlot);
+					this.pendingCanonicalInsertions.set(keyOf(collection, change.id), {
+						collection,
+						position,
+					});
+				}
+				this.rustSlotByCollectionPosition.set(
+					collection,
+					Int32Array.from(next),
+				);
+			} else {
+				this.canonicalRowsByCollection.delete(collection);
+			}
 		}
 		for (const collection of structurallyChanged) {
-			this.rustSlotByCollectionPosition.delete(collection);
+			if (!preservedInsertions.has(collection))
+				this.rustSlotByCollectionPosition.delete(collection);
 		}
 		for (const [collection, rows] of Object.entries(
 			sync.resetCollections ?? {},
@@ -496,15 +856,12 @@ export class MaterializedProjection {
 		descriptor: MaterializedResultDescriptor,
 		descriptorBytes: number,
 	): T {
-		const started = performance.now();
 		this.mutableStats.descriptors += 1;
 		this.mutableStats.descriptorBytes += descriptorBytes;
 		const value =
 			descriptor.kind === "materializedOne"
 				? this.materializeRow(collection, descriptor.row)
 				: descriptor.rows.map((row) => this.materializeRow(collection, row));
-		this.mutableStats.materializationMilliseconds +=
-			performance.now() - started;
 		return value as T;
 	}
 
@@ -578,7 +935,6 @@ export class MaterializedProjection {
 		descriptor: CompactMaterializedResultDescriptor,
 		descriptorBytes: number,
 	): T {
-		const started = performance.now();
 		this.mutableStats.descriptors += 1;
 		this.mutableStats.compactDescriptors += 1;
 		this.mutableStats.descriptorBytes += descriptorBytes;
@@ -617,7 +973,7 @@ export class MaterializedProjection {
 				id,
 				handle: metadata.handle,
 				value,
-				valueBytes: JSON.stringify(value)?.length ?? 0,
+				valueBytes: 0,
 			});
 			this.mutableStats.cacheMisses += 1;
 			const activeSlot = this.rustSlotIndex(rustSlot);
@@ -698,8 +1054,6 @@ export class MaterializedProjection {
 			) {
 				value = cachedCanonical.rows.slice();
 				this.mutableStats.cacheHits += cachedCanonical.rows.length;
-				this.mutableStats.materializationMilliseconds +=
-					performance.now() - started;
 				return value as T;
 			}
 			let positions = this.rustSlotByCollectionPosition.get(collection);
@@ -725,19 +1079,13 @@ export class MaterializedProjection {
 				rows.push(this.materializeRustSlot(collection, rustSlot));
 			}
 			if (descriptor.o === 0 && descriptor.l === descriptor.t) {
-				const cached = { revision: descriptor.v, rows: rows.slice() };
-				this.canonicalRowsByCollection.set(collection, cached);
-				setTimeout(() => {
-					if (this.canonicalRowsByCollection.get(collection) === cached) {
-						this.canonicalRowsByCollection.delete(collection);
-						this.rustSlotByCollectionPosition.delete(collection);
-					}
-				}, 0);
+				this.canonicalRowsByCollection.set(collection, {
+					revision: descriptor.v,
+					rows: rows.slice(),
+				});
 			}
 			value = rows;
 		}
-		this.mutableStats.materializationMilliseconds +=
-			performance.now() - started;
 		return value as T;
 	}
 
@@ -759,7 +1107,7 @@ export class MaterializedProjection {
 					id: descriptor.id,
 					handle: descriptor.handle,
 					value: descriptor.value,
-					valueBytes: JSON.stringify(descriptor.value)?.length ?? 0,
+					valueBytes: 0,
 				});
 				this.mutableStats.cacheMisses += 1;
 			}
@@ -781,12 +1129,93 @@ export class MaterializedProjection {
 		return descriptor.value;
 	}
 
+	private replaceAllPreservingValues(snapshot: ProjectionSnapshot) {
+		const parsed = Object.entries(snapshot.collections).flatMap(
+			([collection, rows]) =>
+				rows.map((row) => ({
+					collection,
+					row,
+					token: projectionHandleToken(row.handle),
+				})),
+		);
+		if (parsed.some(({ token }) => token === undefined)) {
+			this.preserveValuesOnResync = false;
+			this.replaceAll(snapshot, true);
+			return;
+		}
+		const oldById = new Map(this.slotById);
+		const retained = new Map<string, number>();
+		for (const { collection, row } of parsed) {
+			const key = keyOf(collection, row.id);
+			const slot = oldById.get(key);
+			if (slot !== undefined && this.slots[slot] !== undefined) {
+				retained.set(key, slot);
+			}
+		}
+		this.clearFastFindPins();
+		this.slotById.clear();
+		this.clearRustSlotIndexes();
+		this.rustSlotByCollectionPosition.clear();
+		this.canonicalRowsByCollection.clear();
+		this.pendingCanonicalInsertions.clear();
+		this.freeSlots.length = 0;
+		this.dirtyKeys.clear();
+		const retainedSlots = new Set(retained.values());
+		for (let slot = 0; slot < this.slots.length; slot += 1) {
+			if (retainedSlots.has(slot)) continue;
+			const prior = this.slots[slot];
+			if (prior?.hasValue) {
+				this.mutableStats.materializedRows = Math.max(
+					0,
+					this.mutableStats.materializedRows - 1,
+				);
+				this.mutableStats.trackedProxies = Math.max(
+					0,
+					this.mutableStats.trackedProxies - prior.proxyCount,
+				);
+			}
+			this.slots[slot] = undefined;
+			this.freeSlots.push(slot);
+		}
+		const positions = new Map<string, number[]>();
+		for (const { collection, row, token } of parsed) {
+			const parsedToken = token!;
+			const key = keyOf(collection, row.id);
+			const retainedSlot = retained.get(key);
+			if (retainedSlot === undefined) {
+				this.put(collection, row);
+			} else {
+				const prior = this.slots[retainedSlot]!;
+				this.slots[retainedSlot] = {
+					...prior,
+					handle: row.handle,
+					rustSlot: parsedToken.rustSlot,
+					generation: parsedToken.generation,
+					revision: parsedToken.revision,
+				};
+				this.slotById.set(key, retainedSlot);
+				this.setRustSlotIndex(parsedToken.rustSlot, retainedSlot);
+			}
+			const collectionPositions = positions.get(collection) ?? [];
+			collectionPositions.push(parsedToken.rustSlot);
+			positions.set(collection, collectionPositions);
+		}
+		for (const [collection, slots] of positions) {
+			this.rustSlotByCollectionPosition.set(collection, Int32Array.from(slots));
+		}
+		this.invalid = false;
+		this.preserveValuesOnResync = false;
+		this.mutableStats.resynchronizations += 1;
+	}
+
 	private replaceAll(snapshot: ProjectionSnapshot, resynchronization: boolean) {
+		this.preserveValuesOnResync = false;
 		this.slots = [];
 		this.slotById.clear();
 		this.clearRustSlotIndexes();
 		this.rustSlotByCollectionPosition.clear();
 		this.canonicalRowsByCollection.clear();
+		this.pendingCanonicalInsertions.clear();
 		this.freeSlots.length = 0;
 		this.dirtyKeys.clear();
 		this.clearFastFindPins();
@@ -868,7 +1297,10 @@ export class MaterializedProjection {
 				row.value,
 				() => {
 					const active = this.slots[target];
-					if (active?.token === activeToken) {
+					if (
+						active?.token === activeToken &&
+						this.authoritativePatchDepth === 0
+					) {
 						this.dirtyKeys.add(key);
 						active.value = trackedValue;
 						active.weakValue = undefined;
@@ -930,7 +1362,10 @@ export class MaterializedProjection {
 				row.value,
 				() => {
 					const active = this.slots[target];
-					if (active?.token === activeToken) {
+					if (
+						active?.token === activeToken &&
+						this.authoritativePatchDepth === 0
+					) {
 						this.dirtyKeys.add(key);
 						active.value = trackedValue;
 						active.weakValue = undefined;
@@ -1081,6 +1516,19 @@ export class MaterializedProjection {
 	}
 
 	private clearFastFindPins() {
+		for (const pin of this.fastFindPins) {
+			const slot = this.rustSlotIndex(pin.rustSlot);
+			const current = slot === undefined ? undefined : this.slots[slot];
+			if (
+				current?.handle === pin.handle &&
+				!this.dirtyKeys.has(keyOf(current.collection, current.id)) &&
+				typeof current.value === "object" &&
+				current.value !== null
+			) {
+				current.weakValue = new WeakRef(current.value);
+				current.value = undefined;
+			}
+		}
 		this.fastFindPins.length = 0;
 		this.fastFindPinnedHandles.clear();
 		this.fastFindCandidates.clear();

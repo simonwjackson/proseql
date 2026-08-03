@@ -687,7 +687,7 @@ describe("evaluateBrowserBudget", () => {
 						wasmLinearMemoryBytes: 20_000,
 					},
 					coldStartupMaxGrowthRatio: 1.1,
-					jsHeapMaxGrowthRatio: 1.05,
+					jsHeapMaximumBytes: 50_000_000,
 					wasmLinearMemoryMaxGrowthRatio: 1.05,
 				},
 			},
@@ -721,7 +721,12 @@ describe("evaluateBrowserBudget", () => {
 
 		expect(evaluation.summary.artifactAndRegressionBudgetsPassed).toBe(false);
 		expect(evaluation.coldStartup.passed).toBe(true);
-		expect(evaluation.jsHeap.passed).toBe(false);
+		expect(evaluation.jsHeap.passed).toBe(true);
+		expect(evaluation.jsHeap).toMatchObject({
+			baseline: 10_000,
+			current: 11_000,
+			maxAllowed: 50_000_000,
+		});
 		expect(evaluation.wasmLinearMemory.passed).toBe(false);
 		expect(evaluation.summary.allInteractionP95Within50Ms).toBe(false);
 		expect(evaluation.artifact.maxAllowed).toBeCloseTo(567_029.4);
@@ -733,6 +738,47 @@ describe("evaluateBrowserBudget", () => {
 		expect(evaluation.interactions[1]).toMatchObject({
 			name: "updateMany (predicate batch ~100)",
 			withinAbsoluteP95Budget: false,
+		});
+	});
+
+	it("enforces the fixed 50 MB JavaScript heap maximum without rebasing the historical baseline", () => {
+		const evaluateHeap = (value: number) =>
+			evaluateBrowserBudget({
+				contract: {
+					schemaVersion: "proseql.wasm-build-contract.v1",
+					artifactBudgets: {
+						browserProductionWasmGzipBaselineBytes: 540_028,
+						browserProductionWasmGzipMaxGrowthRatio: 1.05,
+					},
+					browserBudgets: {
+						baseline: {
+							coldStartupMs: 1_000,
+							jsHeapBytes: 11_739_108,
+							wasmLinearMemoryBytes: 20_000,
+						},
+						coldStartupMaxGrowthRatio: 1.1,
+						jsHeapMaximumBytes: 50_000_000,
+						wasmLinearMemoryMaxGrowthRatio: 1.05,
+					},
+				},
+				currentArtifactGzipBytes: 540_028,
+				report: {
+					coldStartupMs: 1_000,
+					interactions: [],
+					jsHeapBytes: { status: "available", value },
+					wasmLinearMemoryBytes: { status: "available", value: 20_000 },
+				},
+			}).jsHeap;
+
+		expect(evaluateHeap(49_999_999)).toMatchObject({
+			baseline: 11_739_108,
+			maxAllowed: 50_000_000,
+			passed: true,
+		});
+		expect(evaluateHeap(50_000_001)).toMatchObject({
+			baseline: 11_739_108,
+			maxAllowed: 50_000_000,
+			passed: false,
 		});
 	});
 
@@ -751,7 +797,7 @@ describe("evaluateBrowserBudget", () => {
 						wasmLinearMemoryBytes: 20_000,
 					},
 					coldStartupMaxGrowthRatio: 1.1,
-					jsHeapMaxGrowthRatio: 1.05,
+					jsHeapMaximumBytes: 50_000_000,
 					wasmLinearMemoryMaxGrowthRatio: 1.05,
 				},
 			},
