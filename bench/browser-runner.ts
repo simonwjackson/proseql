@@ -1,19 +1,25 @@
-import { type Browser, chromium, type Page } from "playwright";
-import { createServer as createViteServer } from "vite";
-import { validateBrowserPerformanceContract } from "./performance-contract.js";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
+import { type Browser, chromium, type Page } from "playwright";
+import { createServer as createViteServer } from "vite";
+import {
+	aggregateBrowserPerformanceTrials,
+	BROWSER_PERFORMANCE_TRIAL_COUNT,
+} from "./browser-aggregation.js";
 import {
 	createUnavailableMetric,
-	type NumericMetric,
 	exactPercentile,
+	type NumericMetric,
 } from "./comparison.js";
+import { validateBrowserPerformanceContract } from "./performance-contract.js";
 import {
 	BROWSER_WORKLOAD_EXPECTATIONS,
 	BROWSER_WORKLOAD_INTERACTION_NAMES,
 	type BrowserPerformanceWorkloadState,
 	type BrowserWorkloadName,
 } from "./workloads.js";
+
 export { BROWSER_WORKLOAD_INTERACTION_NAMES } from "./workloads.js";
 
 const parsedBrowserReportTimeoutMs = Number.parseInt(
@@ -48,9 +54,23 @@ export interface BrowserPerformanceReport {
 	readonly wasmLinearMemoryBytes: NumericMetric;
 }
 
+export interface BrowserPerformanceTrialEvidence {
+	readonly trial: number;
+	readonly report: BrowserPerformanceReport;
+	readonly contract: ReturnType<typeof validateBrowserPerformanceContract>;
+}
+
 export interface BrowserPerformanceJsonOutput {
 	readonly timestamp: string;
 	readonly runtime: "chromium";
+	readonly trialCount?: number;
+	readonly trials?: ReadonlyArray<BrowserPerformanceTrialEvidence>;
+	readonly aggregation?: {
+		readonly coldStartup: "median-of-three-independent-cold-trials";
+		readonly memory: "maximum-of-three-trials";
+		readonly interactions: "combined-samples-from-three-trials";
+		readonly minimumSamplesPerInteractionPerTrial: 30;
+	};
 	readonly report: BrowserPerformanceReport;
 	readonly contract: ReturnType<typeof validateBrowserPerformanceContract>;
 }
@@ -346,6 +366,30 @@ export const buildBrowserPerformanceJsonOutput = (
 	contract: validateBrowserPerformanceContract(report),
 });
 
+export const buildBrowserPerformanceTrialJsonOutput = (
+	trialReports: ReadonlyArray<BrowserPerformanceReport>,
+): BrowserPerformanceJsonOutput => {
+	const report = aggregateBrowserPerformanceTrials(trialReports);
+	return {
+		timestamp: new Date().toISOString(),
+		runtime: "chromium",
+		trialCount: BROWSER_PERFORMANCE_TRIAL_COUNT,
+		trials: trialReports.map((trialReport, index) => ({
+			trial: index + 1,
+			report: trialReport,
+			contract: validateBrowserPerformanceContract(trialReport),
+		})),
+		aggregation: {
+			coldStartup: "median-of-three-independent-cold-trials",
+			memory: "maximum-of-three-trials",
+			interactions: "combined-samples-from-three-trials",
+			minimumSamplesPerInteractionPerTrial: 30,
+		},
+		report,
+		contract: validateBrowserPerformanceContract(report),
+	};
+};
+
 interface BrowserWorkloadServer {
 	readonly baseUrl: string;
 	readonly close: () => Promise<void>;
@@ -464,7 +508,10 @@ export const collectBrowserWorkloadReport = async (
 			ownedBrowser,
 			async () => {
 				const page = await ownedBrowser.newPage();
-				await page.goto(server.baseUrl, { waitUntil: "networkidle" });
+				// The product startup boundary is the harness readiness signal below.
+				// Chromium's networkidle adds a fixed quiet-window delay and dev-server
+				// scheduling noise after the WASM application is already ready.
+				await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
 				await page.waitForFunction(
 					() =>
 						Boolean(
@@ -591,32 +638,39 @@ const measureBestEffortWasmMemoryBytes = async (
 	}
 };
 
+const collectIsolatedBrowserWorkloadTrial = (): BrowserPerformanceReport => {
+	const stdout = execFileSync(
+		process.execPath,
+		[fileURLToPath(import.meta.url), "--single-trial"],
+		{
+			cwd: repoRoot,
+			env: process.env,
+			encoding: "utf8",
+			maxBuffer: 1024 * 1024,
+			timeout: DEFAULT_BROWSER_REPORT_TIMEOUT_MS + 120_000,
+			stdio: ["ignore", "pipe", PROGRESS_ENABLED ? "inherit" : "pipe"],
+		},
+	);
+	return JSON.parse(stdout) as BrowserPerformanceReport;
+};
+
 if (import.meta.main) {
-	const browser = await launchBenchmarkBrowser();
-	let failure: unknown;
-	try {
-		const report = await collectBrowserWorkloadReport(browser);
-		console.log(
-			JSON.stringify(buildBrowserPerformanceJsonOutput(report), null, 2),
-		);
-	} catch (error) {
-		failure = error;
-		throw error;
-	} finally {
-		logBrowserProgress("teardown: close shared browser");
-		try {
-			await withTimeout(
-				"shared browser close",
-				DEFAULT_BROWSER_TEARDOWN_TIMEOUT_MS,
-				() => browser.close(),
-			);
-		} catch (closeError) {
-			if (failure === undefined) {
-				throw closeError;
-			}
-			logBrowserProgress(
-				`teardown: shared browser close failed after primary error (${closeError instanceof Error ? closeError.message : String(closeError)})`,
-			);
+	const args = process.argv.slice(2);
+	if (args.length === 1 && args[0] === "--single-trial") {
+		console.log(JSON.stringify(await collectBrowserWorkloadReport()));
+	} else {
+		if (args.length > 0) {
+			throw new Error(`unknown browser runner arguments: ${args.join(" ")}`);
 		}
+		const trials: BrowserPerformanceReport[] = [];
+		for (let trial = 1; trial <= BROWSER_PERFORMANCE_TRIAL_COUNT; trial++) {
+			logBrowserProgress(
+				`independent cold trial ${trial}/${BROWSER_PERFORMANCE_TRIAL_COUNT}`,
+			);
+			trials.push(collectIsolatedBrowserWorkloadTrial());
+		}
+		console.log(
+			JSON.stringify(buildBrowserPerformanceTrialJsonOutput(trials), null, 2),
+		);
 	}
 }

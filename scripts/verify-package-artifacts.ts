@@ -5,6 +5,10 @@ import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import {
+	aggregateBrowserPerformanceTrials,
+	BROWSER_PERFORMANCE_TRIAL_COUNT,
+} from "../bench/browser-aggregation.js";
+import {
 	evaluateBrowserBudget,
 	validateBrowserPerformanceContract,
 } from "../bench/performance-contract.js";
@@ -489,6 +493,18 @@ function countBufferOccurrences(buffer: Buffer, needle: Buffer): number {
 }
 
 type BrowserPerformanceJsonOutput = {
+	readonly trialCount: number;
+	readonly trials: ReadonlyArray<{
+		readonly trial: number;
+		readonly report: Parameters<typeof evaluateBrowserBudget>[0]["report"];
+		readonly contract: ReturnType<typeof validateBrowserPerformanceContract>;
+	}>;
+	readonly aggregation: {
+		readonly coldStartup: string;
+		readonly memory: string;
+		readonly interactions: string;
+		readonly minimumSamplesPerInteractionPerTrial: number;
+	};
 	readonly report: Parameters<typeof evaluateBrowserBudget>[0]["report"];
 	readonly contract: ReturnType<typeof validateBrowserPerformanceContract>;
 };
@@ -527,6 +543,35 @@ function readJsonFromRoot<T>(path: string): T {
 function assertEmbeddedBrowserContractIsCurrent(
 	report: BrowserPerformanceJsonOutput,
 ): ReturnType<typeof validateBrowserPerformanceContract> {
+	if (
+		report.trialCount !== BROWSER_PERFORMANCE_TRIAL_COUNT ||
+		report.trials.length !== BROWSER_PERFORMANCE_TRIAL_COUNT
+	) {
+		throw new Error(
+			`Current browser report must contain exactly ${BROWSER_PERFORMANCE_TRIAL_COUNT} independent trials`,
+		);
+	}
+	for (const [index, trial] of report.trials.entries()) {
+		if (trial.trial !== index + 1) {
+			throw new Error(
+				`Current browser report trial ${index + 1} is misnumbered`,
+			);
+		}
+		const trialValidation = validateBrowserPerformanceContract(trial.report);
+		if (JSON.stringify(trialValidation) !== JSON.stringify(trial.contract)) {
+			throw new Error(
+				`Current browser report trial ${index + 1} contract drifted from its measurements`,
+			);
+		}
+	}
+	const aggregate = aggregateBrowserPerformanceTrials(
+		report.trials.map((trial) => trial.report),
+	);
+	if (JSON.stringify(aggregate) !== JSON.stringify(report.report)) {
+		throw new Error(
+			"Current browser aggregate does not match its three trial measurements",
+		);
+	}
 	const validation = validateBrowserPerformanceContract(report.report);
 	if (JSON.stringify(validation) !== JSON.stringify(report.contract)) {
 		throw new Error(
@@ -563,7 +608,7 @@ function generateU2BrowserEvidence(options: U2BrowserEvidenceOptions = {}) {
 		currentArtifactGzipBytes: browserProductionArtifact.wasmGzipBytes,
 	});
 	return {
-		schemaVersion: "proseql.u2-browser-evidence.v2",
+		schemaVersion: "proseql.u2-browser-evidence.v3",
 		sources: {
 			contract: {
 				path: contractPath,
@@ -586,6 +631,8 @@ function generateU2BrowserEvidence(options: U2BrowserEvidenceOptions = {}) {
 			wasmPath: browserProductionArtifact.wasmPath,
 			gzipBytes: browserProductionArtifact.wasmGzipBytes,
 		},
+		browserTrials: currentBrowserReport.trials,
+		aggregation: currentBrowserReport.aggregation,
 		currentBrowserContract,
 		artifact: {
 			...evaluation.artifact,

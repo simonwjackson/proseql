@@ -8,6 +8,7 @@ default:
 # Test Korri-ready foundation paths (accepts optional args)
 test *args:
     bun test \
+        ./bench/browser-runner.test.ts \
         ./bench/runner.test.ts \
         ./packages/engine/tests/boundary-values.test.ts \
         ./packages/engine/tests/browser-entry.test.ts \
