@@ -1,13 +1,13 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist"
-  },
-  "include": ["src"],
-  "references": [
-    { "path": "../core" },
-    { "path": "../engine" },
-    { "path": "../effect" }
-  ]
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"rootDir": "src",
+		"outDir": "dist"
+	},
+	"include": ["src"],
+	"references": [
+		{ "path": "../core" },
+		{ "path": "../engine" },
+		{ "path": "../effect" }
+	]
 }

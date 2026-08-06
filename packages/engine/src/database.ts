@@ -27,7 +27,6 @@ import {
 	SerializerRegistryService,
 	type SerializerRegistryShape,
 	SourceConfigError,
-	StorageAdapterService as StorageAdapter,
 	saveCollectionsToFile,
 	saveData,
 	saveDocumentSource,
@@ -2962,7 +2961,7 @@ const createTransactionContext = (): TransactionContext | undefined => {
 		globalThis as { process?: { getBuiltinModule?: (name: string) => unknown } }
 	).process;
 	const asyncHooks = processRef?.getBuiltinModule?.("node:async_hooks") as
-		| { AsyncLocalStorage?: new <T>() => TransactionContext }
+		| { AsyncLocalStorage?: new <_T>() => TransactionContext }
 		| undefined;
 	return asyncHooks?.AsyncLocalStorage
 		? new asyncHooks.AsyncLocalStorage<true>()

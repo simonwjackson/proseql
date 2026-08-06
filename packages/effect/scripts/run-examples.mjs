@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
+import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 import {
 	ensureBuiltEngineWasm,
 	normalizeOutput,
@@ -12,19 +12,62 @@ import {
 
 const repoRoot = repoRootFromImportMetaUrl(import.meta.url);
 const examplesDir = resolveFromRepo(repoRoot, "examples");
-const effectIndex = resolveFromRepo(repoRoot, "packages/effect/src/index.ts").replaceAll("\\", "/");
+const effectIndex = resolveFromRepo(
+	repoRoot,
+	"packages/effect/src/index.ts",
+).replaceAll("\\", "/");
 const reportDir = resolveFromRepo(repoRoot, "packages/effect/reports");
 const reportPath = join(reportDir, "examples-report.json");
 
 const inventory = [
-	{ test: "01-basic-crud", entry: "index.ts", expectation: "pass", owner: "effect-adapter" },
-	{ test: "02-filtering-and-selection", entry: "index.ts", expectation: "pass", owner: "effect-adapter" },
-	{ test: "03-update-operators", entry: "index.ts", expectation: "pass", owner: "effect-adapter" },
-	{ test: "04-nested-data", entry: "index.ts", expectation: "pass", owner: "effect-adapter" },
-	{ test: "05-cursor-pagination", entry: "index.ts", expectation: "pass", owner: "effect-adapter" },
-	{ test: "06-aggregation", entry: "index.ts", expectation: "pass", owner: "effect-adapter" },
-	{ test: "07-computed-fields", entry: "index.ts", expectation: "pass", owner: "effect-adapter" },
-	{ test: "08-full-text-search", entry: "index.ts", expectation: "pass", owner: "effect-adapter" },
+	{
+		test: "01-basic-crud",
+		entry: "index.ts",
+		expectation: "pass",
+		owner: "effect-adapter",
+	},
+	{
+		test: "02-filtering-and-selection",
+		entry: "index.ts",
+		expectation: "pass",
+		owner: "effect-adapter",
+	},
+	{
+		test: "03-update-operators",
+		entry: "index.ts",
+		expectation: "pass",
+		owner: "effect-adapter",
+	},
+	{
+		test: "04-nested-data",
+		entry: "index.ts",
+		expectation: "pass",
+		owner: "effect-adapter",
+	},
+	{
+		test: "05-cursor-pagination",
+		entry: "index.ts",
+		expectation: "pass",
+		owner: "effect-adapter",
+	},
+	{
+		test: "06-aggregation",
+		entry: "index.ts",
+		expectation: "pass",
+		owner: "effect-adapter",
+	},
+	{
+		test: "07-computed-fields",
+		entry: "index.ts",
+		expectation: "pass",
+		owner: "effect-adapter",
+	},
+	{
+		test: "08-full-text-search",
+		entry: "index.ts",
+		expectation: "pass",
+		owner: "effect-adapter",
+	},
 	{
 		test: "09-query-with-population",
 		entry: "index.ts",
@@ -34,7 +77,12 @@ const inventory = [
 		reason:
 			"Fails unchanged under @proseql/core because the example misuses Stream.runCollect on an Effect-returning query. Keep excluded from the runnable slice until upstream is fixed.",
 	},
-	{ test: "10-lifecycle-hooks", entry: "index.ts", expectation: "pass", owner: "effect-adapter" },
+	{
+		test: "10-lifecycle-hooks",
+		entry: "index.ts",
+		expectation: "pass",
+		owner: "effect-adapter",
+	},
 	{
 		test: "11-persistence-setup",
 		expectation: "skip",
@@ -112,17 +160,24 @@ try {
 
 		const sourcePath = join(examplesDir, entry.test, entry.entry);
 		const targetPath = join(workspace, `${entry.test}.ts`);
-		writeFileSync(targetPath, transformExample(readFileSync(sourcePath, "utf8")));
+		writeFileSync(
+			targetPath,
+			transformExample(readFileSync(sourcePath, "utf8")),
+		);
 
 		const coreRun = runExample(sourcePath);
 		const effectRun = runExample(targetPath);
 		const coreOutput = normalizeExampleIo(coreRun, repoRoot);
 		const effectOutput = normalizeExampleIo(effectRun, repoRoot);
 		const outputsMatch =
-			coreOutput.stdout === effectOutput.stdout && coreOutput.stderr === effectOutput.stderr;
+			coreOutput.stdout === effectOutput.stdout &&
+			coreOutput.stderr === effectOutput.stderr;
 
 		if (entry.expectation === "xfail") {
-			const xfailed = hasFailureSignal(coreRun, coreOutput) && hasFailureSignal(effectRun, effectOutput) && outputsMatch;
+			const xfailed =
+				hasFailureSignal(coreRun, coreOutput) &&
+				hasFailureSignal(effectRun, effectOutput) &&
+				outputsMatch;
 			results.push({
 				test: entry.test,
 				expectation: entry.expectation,
@@ -137,7 +192,8 @@ try {
 			continue;
 		}
 
-		const passed = coreRun.status === 0 && effectRun.status === 0 && outputsMatch;
+		const passed =
+			coreRun.status === 0 && effectRun.status === 0 && outputsMatch;
 		results.push({
 			test: entry.test,
 			expectation: entry.expectation,
@@ -152,7 +208,12 @@ try {
 			owner: entry.owner,
 			reason: passed
 				? undefined
-				: summarizeDifference(coreOutput, effectOutput, coreRun.status, effectRun.status),
+				: summarizeDifference(
+						coreOutput,
+						effectOutput,
+						coreRun.status,
+						effectRun.status,
+					),
 			core: describeRun(coreRun, coreOutput),
 			effect: describeRun(effectRun, effectOutput),
 			outputsMatch,
@@ -162,12 +223,22 @@ try {
 	rmSync(workspace, { recursive: true, force: true });
 }
 
-const runnableResults = results.filter((result) => result.expectation === "pass");
+const runnableResults = results.filter(
+	(result) => result.expectation === "pass",
+);
 const xfailResults = results.filter((result) => result.expectation === "xfail");
-const skippedResults = results.filter((result) => result.expectation === "skip");
-const passedResults = runnableResults.filter((result) => result.status === "passed");
-const failedResults = runnableResults.filter((result) => result.status === "failed");
-const xpassedResults = xfailResults.filter((result) => result.status === "xpassed");
+const skippedResults = results.filter(
+	(result) => result.expectation === "skip",
+);
+const passedResults = runnableResults.filter(
+	(result) => result.status === "passed",
+);
+const failedResults = runnableResults.filter(
+	(result) => result.status === "failed",
+);
+const xpassedResults = xfailResults.filter(
+	(result) => result.status === "xpassed",
+);
 
 const report = {
 	phase: "phase-2-gate",
@@ -176,19 +247,29 @@ const report = {
 		executedExamples: runnableResults.length + xfailResults.length,
 		runnableExamples: runnableResults.length,
 		skippedExamples: skippedResults.length,
-		xfailedExamples: xfailResults.filter((result) => result.status === "xfailed").length,
+		xfailedExamples: xfailResults.filter(
+			(result) => result.status === "xfailed",
+		).length,
 		xpassedExamples: xpassedResults.length,
 		passedExamples: passedResults.length,
 		failedExamples: failedResults.length,
-		coverageRate: inventory.length === 0 ? 0 : (runnableResults.length + xfailResults.length) / inventory.length,
-		slicePassRate: runnableResults.length === 0 ? 0 : passedResults.length / runnableResults.length,
+		coverageRate:
+			inventory.length === 0
+				? 0
+				: (runnableResults.length + xfailResults.length) / inventory.length,
+		slicePassRate:
+			runnableResults.length === 0
+				? 0
+				: passedResults.length / runnableResults.length,
 	},
 	results,
-	failures: failedResults.concat(xpassedResults).map(({ test, category, reason }) => ({
-		test,
-		category,
-		reason: reason ?? "failed",
-	})),
+	failures: failedResults
+		.concat(xpassedResults)
+		.map(({ test, category, reason }) => ({
+			test,
+			category,
+			reason: reason ?? "failed",
+		})),
 	xfails: xfailResults.map(({ test, category, reason, status }) => ({
 		test,
 		category,
@@ -228,7 +309,10 @@ function runExample(path) {
 function transformExample(source) {
 	return source
 		.replace(/from\s+["']@proseql\/core["']/g, `from "${effectIndex}"`)
-		.replace(/\.catch\(console\.error\)/g, ".catch((error) => { console.error(error); process.exitCode = 1; })");
+		.replace(
+			/\.catch\(console\.error\)/g,
+			".catch((error) => { console.error(error); process.exitCode = 1; })",
+		);
 }
 
 function normalizeExampleIo(run, repoRoot) {
@@ -251,12 +335,19 @@ function hasFailureSignal(run, output) {
 }
 
 function normalizeFailureOutput(stderr) {
-	const marker = stderr.match(/(?:^|\n)([A-Za-z]+Error:.*|TypeError:.*|ReferenceError:.*|SyntaxError:.*)/);
+	const marker = stderr.match(
+		/(?:^|\n)([A-Za-z]+Error:.*|TypeError:.*|ReferenceError:.*|SyntaxError:.*)/,
+	);
 	if (!marker) return stderr;
 	return marker[1] ?? stderr;
 }
 
-function summarizeDifference(coreOutput, effectOutput, coreExitCode, effectExitCode) {
+function summarizeDifference(
+	coreOutput,
+	effectOutput,
+	coreExitCode,
+	effectExitCode,
+) {
 	return [
 		`core exit=${coreExitCode}`,
 		`effect exit=${effectExitCode}`,
@@ -264,5 +355,7 @@ function summarizeDifference(coreOutput, effectOutput, coreExitCode, effectExitC
 		`effect stdout:\n${effectOutput.stdout}`,
 		`core stderr:\n${coreOutput.stderr}`,
 		`effect stderr:\n${effectOutput.stderr}`,
-	].join("\n\n").slice(0, 8000);
+	]
+		.join("\n\n")
+		.slice(0, 8000);
 }

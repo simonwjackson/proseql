@@ -1,66 +1,66 @@
 {
-  "name": "@proseql/rpc",
-  "version": "0.15.0",
-  "description": "Effect RPC integration for ProseQL type-safe in-memory database",
-  "type": "module",
-  "scripts": {
-    "build": "bunx tsc --build",
-    "clean": "rm -rf dist *.tsbuildinfo",
-    "prepublishOnly": "bun run build && bun test"
-  },
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./server": {
-      "types": "./dist/server.d.ts",
-      "import": "./dist/server.js"
-    }
-  },
-  "files": [
-    "dist",
-    "LICENSE",
-    "README.md"
-  ],
-  "license": "MIT",
-  "author": "Simon W. Jackson",
-  "publishConfig": {
-    "access": "public"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/simonwjackson/proseql.git",
-    "directory": "packages/rpc"
-  },
-  "keywords": [
-    "database",
-    "typescript",
-    "effect",
-    "rpc",
-    "effect-rpc",
-    "type-safe",
-    "in-memory"
-  ],
-  "engines": {
-    "node": ">=18"
-  },
-  "sideEffects": false,
-  "dependencies": {
-    "@proseql/core": "workspace:*"
-  },
-  "peerDependencies": {
-    "@proseql/effect": "workspace:*",
-    "effect": "4.0.0-beta.103"
-  },
-  "peerDependenciesMeta": {
-    "@proseql/effect": {
-      "optional": true
-    }
-  },
-  "devDependencies": {
-    "@proseql/effect": "workspace:*"
-  }
+	"name": "@proseql/rpc",
+	"version": "0.15.0",
+	"description": "Effect RPC integration for ProseQL type-safe in-memory database",
+	"type": "module",
+	"scripts": {
+		"build": "bunx tsc --build",
+		"clean": "rm -rf dist *.tsbuildinfo",
+		"prepublishOnly": "bun run build && bun test"
+	},
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./server": {
+			"types": "./dist/server.d.ts",
+			"import": "./dist/server.js"
+		}
+	},
+	"files": [
+		"dist",
+		"LICENSE",
+		"README.md"
+	],
+	"license": "MIT",
+	"author": "Simon W. Jackson",
+	"publishConfig": {
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/simonwjackson/proseql.git",
+		"directory": "packages/rpc"
+	},
+	"keywords": [
+		"database",
+		"typescript",
+		"effect",
+		"rpc",
+		"effect-rpc",
+		"type-safe",
+		"in-memory"
+	],
+	"engines": {
+		"node": ">=18"
+	},
+	"sideEffects": false,
+	"dependencies": {
+		"@proseql/core": "workspace:*"
+	},
+	"peerDependencies": {
+		"@proseql/effect": "workspace:*",
+		"effect": "4.0.0-beta.103"
+	},
+	"peerDependenciesMeta": {
+		"@proseql/effect": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@proseql/effect": "workspace:*"
+	}
 }

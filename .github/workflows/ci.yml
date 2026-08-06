@@ -7,32 +7,21 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
-      - run: nix develop --command bash -c "bun install && just typecheck && just test"
+      - run: nix develop --command bun install --frozen-lockfile --ignore-scripts
+      - run: nix develop --command just typecheck
+      - run: nix develop --command just lint
 
-  typecheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-      - run: nix develop --command bash -c "bun install && just typecheck"
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-      - run: nix develop --command bash -c "bun install && just lint"
-
-  parity-gate:
+  tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,16 +29,91 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            crates -> crates/target
-      - run: nix develop --command bash -c "bun install && just parity-gate"
+          workspaces: crates -> crates/target
+      - run: nix develop --command bun install --frozen-lockfile --ignore-scripts
+      - run: nix develop --command just build-release-artifacts
+      - run: nix develop --command just test
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> crates/target
+      - run: nix develop --command just rust-format-check
+      - run: nix develop --command just rust-check
+      - run: nix develop --command just rust-test
+      - run: nix develop --command just rust-lint
+      - run: nix develop --command just rust-wasm-check
+
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> crates/target
+      - run: nix develop --command bun install --frozen-lockfile --ignore-scripts
+      - run: nix develop --command just build-release-artifacts
+      - run: nix develop --command just parity-gate
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: parity-reports
+          if-no-files-found: ignore
+          retention-days: 7
           path: |
             packages/effect/reports/corpus-report.json
             packages/effect/reports/examples-report.json
 
-# npm and GitHub Package Registry publishing jobs are intentionally absent.
-# Releases remain manual until the Rust-engine package set and order are finalized.
+  wasm-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> crates/target
+      - run: nix develop --command bun install --frozen-lockfile --ignore-scripts
+      - run: nix develop --command just build-release-artifacts
+      - run: nix develop --command bun run scripts/verify-packed-packages.ts --skip-build --output .artifacts/packages
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wasm-package-evidence
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            packages/engine/build/wasm-build-report.json
+            packages/engine/dist/wasm/
+            packages/engine/dist/browser-wasm/
+            .artifacts/packages/tarballs/*.tgz
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> crates/target
+      - run: nix develop --command bun install --frozen-lockfile --ignore-scripts
+      - run: nix develop --command just build-release-artifacts
+      - run: nix develop --command just browser-smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-wasm-evidence
+          if-no-files-found: ignore
+          retention-days: 7
+          path: packages/engine/build/wasm-build-report.json
+
+# Ordinary pushes and pull requests only run reversible checks. This workflow has
+# no publication job, registry credential, push, tag, or GitHub release step.

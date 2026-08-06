@@ -1,47 +1,47 @@
 {
-  "private": true,
-  "workspaces": [
-    "packages/*"
-  ],
-  "scripts": {
-    "postinstall": "bun2nix -o bun.nix",
-    "bench": "bun run bench/runner.ts",
-    "bench:report": "bun run bench/runner.ts --json",
-    "bench:browser-report": "nix develop .#tooling --command bun run bench/browser-runner.ts",
-    "bench:baseline": "bun run bench/baseline.ts",
-    "generate:u2-browser-evidence": "bun run scripts/verify-package-artifacts.ts --u2-browser-evidence-write",
-    "verify:u2-browser-evidence": "bun run scripts/verify-package-artifacts.ts --u2-browser-evidence-check",
-    "build": "bun run copy-license && bunx tsc --build && chmod +x packages/cli/dist/main.js",
-    "build:clean": "bun run clean && bun run build",
-    "clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo *.tsbuildinfo dist/**/*.tsbuildinfo",
-    "copy-license": "for dir in packages/*/; do cp LICENSE \"$dir\"; done",
-    "verify:browser": "node scripts/verify-browser.mjs",
-    "verify:packages": "bun run scripts/verify-package-artifacts.ts && bun run verify:browser",
-    "verify:packed": "bun run scripts/verify-packed-packages.ts"
-  },
-  "dependencies": {
-    "effect": "4.0.0-beta.103",
-    "yaml": "^2.3.4",
-    "json5": "^2.2.3",
-    "jsonc-parser": "^3.3.1",
-    "smol-toml": "^1.6.0",
-    "@toon-format/toon": "^2.1.0",
-    "hjson": "^3.2.2",
-    "@proseql/core": "workspace:*",
-    "@proseql/node": "workspace:*",
-    "@proseql/engine": "workspace:*",
-    "@proseql/effect": "workspace:*",
-    "@proseql/browser": "workspace:*",
-    "@proseql/cli": "workspace:*"
-  },
-  "devDependencies": {
-    "@types/bun": "^1.2.17",
-    "@types/hjson": "^2.4.6",
-    "@types/node": "^25.6.0",
-    "fast-check": "^3.23.2",
-    "tinybench": "^3.0.8",
-    "vite": "^5.4.20",
-    "vitest": "^1.1.1",
-    "playwright": "^1.55.0"
-  }
+	"private": true,
+	"workspaces": [
+		"packages/*"
+	],
+	"scripts": {
+		"postinstall": "bun2nix -o bun.nix",
+		"bench": "bun run bench/runner.ts",
+		"bench:report": "bun run bench/runner.ts --json",
+		"bench:browser-report": "nix develop .#tooling --command bun run bench/browser-runner.ts",
+		"bench:baseline": "bun run bench/baseline.ts",
+		"generate:u2-browser-evidence": "bun run scripts/verify-package-artifacts.ts --u2-browser-evidence-write",
+		"verify:u2-browser-evidence": "bun run scripts/verify-package-artifacts.ts --u2-browser-evidence-check",
+		"build": "bun run copy-license && bunx tsc --build && chmod +x packages/cli/dist/main.js",
+		"build:clean": "bun run clean && bun run build",
+		"clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo *.tsbuildinfo dist/**/*.tsbuildinfo",
+		"copy-license": "for dir in packages/*/; do cp LICENSE \"$dir\"; done",
+		"verify:browser": "node scripts/verify-browser.mjs",
+		"verify:packages": "bun run scripts/verify-package-artifacts.ts && bun run verify:browser",
+		"verify:packed": "bun run scripts/verify-packed-packages.ts"
+	},
+	"dependencies": {
+		"effect": "4.0.0-beta.103",
+		"yaml": "^2.3.4",
+		"json5": "^2.2.3",
+		"jsonc-parser": "^3.3.1",
+		"smol-toml": "^1.6.0",
+		"@toon-format/toon": "^2.1.0",
+		"hjson": "^3.2.2",
+		"@proseql/core": "workspace:*",
+		"@proseql/node": "workspace:*",
+		"@proseql/engine": "workspace:*",
+		"@proseql/effect": "workspace:*",
+		"@proseql/browser": "workspace:*",
+		"@proseql/cli": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.2.17",
+		"@types/hjson": "^2.4.6",
+		"@types/node": "^25.6.0",
+		"fast-check": "^3.23.2",
+		"tinybench": "^3.0.8",
+		"vite": "^5.4.20",
+		"vitest": "^1.1.1",
+		"playwright": "^1.55.0"
+	}
 }

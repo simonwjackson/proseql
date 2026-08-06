@@ -1,29 +1,29 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "composite": true,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "types": ["bun", "node"],
-    "paths": {
-      "@proseql/core": ["./packages/core/src/index.ts"],
-      "@proseql/core/*": ["./packages/core/src/*"],
-      "@proseql/engine": ["./packages/engine/src/index.ts"],
-      "@proseql/engine/browser": ["./packages/engine/src/browser.ts"],
-      "@proseql/engine/*": ["./packages/engine/src/*"],
-      "@proseql/effect": ["./packages/effect/src/index.ts"],
-      "@proseql/effect/browser": ["./packages/effect/src/browser.ts"],
-      "@proseql/effect/*": ["./packages/effect/src/*"],
-      "@proseql/browser": ["./packages/browser/src/index.ts"],
-      "@proseql/browser/*": ["./packages/browser/src/*"],
-      "@proseql/node": ["./packages/node/src/index.ts"],
-      "@proseql/node/*": ["./packages/node/src/*"]
-    }
-  }
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"strict": true,
+		"declaration": true,
+		"declarationMap": true,
+		"sourceMap": true,
+		"composite": true,
+		"skipLibCheck": true,
+		"esModuleInterop": true,
+		"types": ["bun", "node"],
+		"paths": {
+			"@proseql/core": ["./packages/core/src/index.ts"],
+			"@proseql/core/*": ["./packages/core/src/*"],
+			"@proseql/engine": ["./packages/engine/src/index.ts"],
+			"@proseql/engine/browser": ["./packages/engine/src/browser.ts"],
+			"@proseql/engine/*": ["./packages/engine/src/*"],
+			"@proseql/effect": ["./packages/effect/src/index.ts"],
+			"@proseql/effect/browser": ["./packages/effect/src/browser.ts"],
+			"@proseql/effect/*": ["./packages/effect/src/*"],
+			"@proseql/browser": ["./packages/browser/src/index.ts"],
+			"@proseql/browser/*": ["./packages/browser/src/*"],
+			"@proseql/node": ["./packages/node/src/index.ts"],
+			"@proseql/node/*": ["./packages/node/src/*"]
+		}
+	}
 }

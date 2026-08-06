@@ -1,61 +1,61 @@
 {
-  "name": "@proseql/core",
-  "version": "0.15.0",
-  "description": "Type-safe in-memory database that persists to plain text files (JSON, YAML, TOML), built on Effect",
-  "type": "module",
-  "scripts": {
-    "build": "bunx tsc --build",
-    "clean": "rm -rf dist *.tsbuildinfo",
-    "prepublishOnly": "bun run build && bun test"
-  },
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
-  "files": [
-    "dist",
-    "LICENSE",
-    "README.md"
-  ],
-  "license": "MIT",
-  "author": "Simon W. Jackson",
-  "publishConfig": {
-    "access": "public"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/simonwjackson/proseql.git",
-    "directory": "packages/core"
-  },
-  "keywords": [
-    "database",
-    "typescript",
-    "effect",
-    "yaml",
-    "json",
-    "plain-text",
-    "type-safe",
-    "in-memory"
-  ],
-  "engines": {
-    "node": ">=18"
-  },
-  "sideEffects": false,
-  "dependencies": {
-    "effect": "4.0.0-beta.103",
-    "yaml": "^2.3.4",
-    "json5": "^2.2.3",
-    "jsonc-parser": "^3.3.1",
-    "smol-toml": "^1.6.0",
-    "@toon-format/toon": "^2.1.0",
-    "hjson": "^3.2.2",
-    "picomatch": "^4.0.4"
-  },
-  "devDependencies": {
-    "@types/picomatch": "^4.0.3"
-  }
+	"name": "@proseql/core",
+	"version": "0.15.0",
+	"description": "Type-safe in-memory database that persists to plain text files (JSON, YAML, TOML), built on Effect",
+	"type": "module",
+	"scripts": {
+		"build": "bunx tsc --build",
+		"clean": "rm -rf dist *.tsbuildinfo",
+		"prepublishOnly": "bun run build && bun test"
+	},
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"LICENSE",
+		"README.md"
+	],
+	"license": "MIT",
+	"author": "Simon W. Jackson",
+	"publishConfig": {
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/simonwjackson/proseql.git",
+		"directory": "packages/core"
+	},
+	"keywords": [
+		"database",
+		"typescript",
+		"effect",
+		"yaml",
+		"json",
+		"plain-text",
+		"type-safe",
+		"in-memory"
+	],
+	"engines": {
+		"node": ">=18"
+	},
+	"sideEffects": false,
+	"dependencies": {
+		"effect": "4.0.0-beta.103",
+		"yaml": "^2.3.4",
+		"json5": "^2.2.3",
+		"jsonc-parser": "^3.3.1",
+		"smol-toml": "^1.6.0",
+		"@toon-format/toon": "^2.1.0",
+		"hjson": "^3.2.2",
+		"picomatch": "^4.0.4"
+	},
+	"devDependencies": {
+		"@types/picomatch": "^4.0.3"
+	}
 }

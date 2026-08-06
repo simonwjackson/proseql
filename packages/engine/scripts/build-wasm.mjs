@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSync } from "node:child_process";
 import {
 	cpSync,
 	existsSync,
@@ -8,7 +9,6 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
@@ -28,9 +28,17 @@ const nodeProfileOutDir = join(buildDir, "wasm-profile");
 const browserProfileOutDir = join(buildDir, "browser-wasm-profile");
 const panicTestOutDir = join(buildDir, "wasm-panic-test");
 const panicTestCargoTargetDir = join(buildDir, ".panic-cargo-target");
-const panicTestBrowserBindgenDir = join(buildDir, ".tmp", "wasm-panic-test-browser");
+const panicTestBrowserBindgenDir = join(
+	buildDir,
+	".tmp",
+	"wasm-panic-test-browser",
+);
 const nodeProductionBindgenDir = join(buildDir, ".tmp", "wasm-production-node");
-const browserProductionBindgenDir = join(buildDir, ".tmp", "wasm-production-browser");
+const browserProductionBindgenDir = join(
+	buildDir,
+	".tmp",
+	"wasm-production-browser",
+);
 const debugNameSentinel = "wasmruntime_create_database";
 
 /** @type {{
@@ -107,7 +115,11 @@ const bindgenBin = requireEnv("PROSEQL_WASM_BINDGEN_BIN");
 const wasmOptBin = requireEnv("PROSEQL_WASM_OPT_BIN");
 const linker = requireEnv("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER");
 
-assertExactVersion(bindgenBin, ["--version"], `wasm-bindgen ${wasmBindgenVersion}`);
+assertExactVersion(
+	bindgenBin,
+	["--version"],
+	`wasm-bindgen ${wasmBindgenVersion}`,
+);
 assertVersionContains(wasmOptBin, ["--version"], wasmOptVersion);
 
 for (const directory of [
@@ -125,22 +137,26 @@ for (const directory of [
 mkdirSync(dirname(buildReportPath), { recursive: true });
 
 for (const cargoProfile of [productionCargoProfile, profileCargoProfile]) {
-	run("cargo", [
-		"build",
-		"--manifest-path",
-		wasmCrate,
-		"-p",
-		"proseql-wasm",
-		"--target",
-		rustTarget,
-		"--profile",
-		cargoProfile,
-	], {
-		env: {
-			...process.env,
-			CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER: linker,
+	run(
+		"cargo",
+		[
+			"build",
+			"--manifest-path",
+			wasmCrate,
+			"-p",
+			"proseql-wasm",
+			"--target",
+			rustTarget,
+			"--profile",
+			cargoProfile,
+		],
+		{
+			env: {
+				...process.env,
+				CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER: linker,
+			},
 		},
-	});
+	);
 }
 
 assertExists(productionTargetWasm, "compiled production wasm artifact");
@@ -173,25 +189,29 @@ copyArtifactDirectory(browserProductionBindgenDir, browserOutDir);
 optimizeProductionWasm(wasmOptBin, join(nodeOutDir, "proseql_wasm_bg.wasm"));
 optimizeProductionWasm(wasmOptBin, join(browserOutDir, "proseql_wasm_bg.wasm"));
 
-run("cargo", [
-	"build",
-	"--manifest-path",
-	wasmCrate,
-	"-p",
-	"proseql-wasm",
-	"--target",
-	rustTarget,
-	"--profile",
-	productionCargoProfile,
-	"--features",
-	"panic-integration-test",
-], {
-	env: {
-		...process.env,
-		CARGO_TARGET_DIR: panicTestCargoTargetDir,
-		CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER: linker,
+run(
+	"cargo",
+	[
+		"build",
+		"--manifest-path",
+		wasmCrate,
+		"-p",
+		"proseql-wasm",
+		"--target",
+		rustTarget,
+		"--profile",
+		productionCargoProfile,
+		"--features",
+		"panic-integration-test",
+	],
+	{
+		env: {
+			...process.env,
+			CARGO_TARGET_DIR: panicTestCargoTargetDir,
+			CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER: linker,
+		},
 	},
-});
+);
 bindgen({
 	bindgenBin,
 	targetWasm: panicTestTargetWasm,
@@ -199,7 +219,10 @@ bindgen({
 	browserOutDir: panicTestBrowserBindgenDir,
 });
 patchGeneratedBindings(join(panicTestOutDir, "proseql_wasm.js"));
-optimizeProductionWasm(wasmOptBin, join(panicTestOutDir, "proseql_wasm_bg.wasm"));
+optimizeProductionWasm(
+	wasmOptBin,
+	join(panicTestOutDir, "proseql_wasm_bg.wasm"),
+);
 rmSync(join(buildDir, ".tmp"), { recursive: true, force: true });
 
 const report = buildArtifactsReport();
@@ -231,10 +254,22 @@ function restorePrebuiltArtifacts(prebuiltDir) {
 		cleanDirectory(directory);
 	}
 	copyArtifactDirectory(join(prebuiltDir, "dist", "wasm"), nodeOutDir);
-	copyArtifactDirectory(join(prebuiltDir, "dist", "browser-wasm"), browserOutDir);
-	copyArtifactDirectory(join(prebuiltDir, "build", "wasm-profile"), nodeProfileOutDir);
-	copyArtifactDirectory(join(prebuiltDir, "build", "browser-wasm-profile"), browserProfileOutDir);
-	copyArtifactDirectory(join(prebuiltDir, "build", "wasm-panic-test"), panicTestOutDir);
+	copyArtifactDirectory(
+		join(prebuiltDir, "dist", "browser-wasm"),
+		browserOutDir,
+	);
+	copyArtifactDirectory(
+		join(prebuiltDir, "build", "wasm-profile"),
+		nodeProfileOutDir,
+	);
+	copyArtifactDirectory(
+		join(prebuiltDir, "build", "browser-wasm-profile"),
+		browserProfileOutDir,
+	);
+	copyArtifactDirectory(
+		join(prebuiltDir, "build", "wasm-panic-test"),
+		panicTestOutDir,
+	);
 	mkdirSync(dirname(buildReportPath), { recursive: true });
 	cpSync(join(prebuiltDir, "build", "wasm-build-report.json"), buildReportPath);
 }
@@ -248,9 +283,19 @@ function ensureToolingShell() {
 			"Missing pinned WASM tooling environment. Enter `nix develop .#tooling` or install nix to run the pinned build shell.",
 		);
 	}
-	run("nix", ["develop", `${repoRoot}#tooling`, "--command", process.execPath, scriptPath], {
-		stdio: "inherit",
-	});
+	run(
+		"nix",
+		[
+			"develop",
+			`${repoRoot}#tooling`,
+			"--command",
+			process.execPath,
+			scriptPath,
+		],
+		{
+			stdio: "inherit",
+		},
+	);
 	process.exit(0);
 }
 
@@ -282,7 +327,12 @@ function assertExists(path, description) {
 	}
 }
 
-function bindgen({ bindgenBin: currentBindgenBin, targetWasm, nodeOutDir: currentNodeOutDir, browserOutDir: currentBrowserOutDir }) {
+function bindgen({
+	bindgenBin: currentBindgenBin,
+	targetWasm,
+	nodeOutDir: currentNodeOutDir,
+	browserOutDir: currentBrowserOutDir,
+}) {
 	run(currentBindgenBin, [
 		"--target",
 		"experimental-nodejs-module",
@@ -406,7 +456,9 @@ function summarizeArtifact({
 		jsGzipBytes: measureGzipBytes(jsSource),
 		wasmRawBytes: wasmBytes.byteLength,
 		wasmGzipBytes: measureGzipBytes(wasmBytes),
-		memoryExportPatched: jsSource.includes("export function __proseql_wasm_memory()"),
+		memoryExportPatched: jsSource.includes(
+			"export function __proseql_wasm_memory()",
+		),
 		postBindgenOptimized,
 		debugInfoStripped,
 		debugNameSentinelCount: countBufferOccurrences(
@@ -417,9 +469,11 @@ function summarizeArtifact({
 }
 
 function assertBrowserProductionBudget(browserProductionArtifact) {
-	const baselineBytes = contract.artifactBudgets.browserProductionWasmGzipBaselineBytes;
+	const baselineBytes =
+		contract.artifactBudgets.browserProductionWasmGzipBaselineBytes;
 	const maxBytes = Math.floor(
-		baselineBytes * contract.artifactBudgets.browserProductionWasmGzipMaxGrowthRatio,
+		baselineBytes *
+			contract.artifactBudgets.browserProductionWasmGzipMaxGrowthRatio,
 	);
 	if (browserProductionArtifact.wasmGzipBytes > maxBytes) {
 		throw new Error(
@@ -460,7 +514,7 @@ function patchGeneratedBindings(path) {
 	}
 	writeFileSync(
 		path,
-		`${patched}\nconst __proseql_wasm_defect_response = (error) => JSON.stringify({ kind: \"defect\", message: \"unexpected defect: \" + (error instanceof Error ? error.message : String(error)) });\nconst __proseql_wasm_wrap_string_method = (prototype, name) => {\n    const original = prototype?.[name];\n    if (typeof original !== \"function\") {\n        return;\n    }\n    prototype[name] = function (...args) {\n        try {\n            return original.apply(this, args);\n        } catch (error) {\n            return __proseql_wasm_defect_response(error);\n        }\n    };\n};\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, \"create_database\");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, \"dispatch\");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, \"dispatch_projected\");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, \"projection_handles\");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, \"synchronize_projection\");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, \"drop_database\");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, \"dry_run_migrations\");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, \"register_custom_operator\");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, \"subscribe_watch\");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, \"subscribe_watch_by_id\");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, \"unsubscribe\");\nexport function __proseql_wasm_memory() {\n    return wasm?.memory;\n}\n${patched.includes("function __proseql_test_panic_bridge_raw() {") ? "export function __proseql_test_panic_bridge() {\n    try {\n        return __proseql_test_panic_bridge_raw();\n    } catch (_error) {\n        return JSON.stringify({ kind: \"defect\", message: \"unexpected defect: proseql wasm panic integration\" });\n    }\n}\n" : ""}`,
+		`${patched}\nconst __proseql_wasm_defect_response = (error) => JSON.stringify({ kind: "defect", message: "unexpected defect: " + (error instanceof Error ? error.message : String(error)) });\nconst __proseql_wasm_wrap_string_method = (prototype, name) => {\n    const original = prototype?.[name];\n    if (typeof original !== "function") {\n        return;\n    }\n    prototype[name] = function (...args) {\n        try {\n            return original.apply(this, args);\n        } catch (error) {\n            return __proseql_wasm_defect_response(error);\n        }\n    };\n};\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, "create_database");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, "dispatch");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, "dispatch_projected");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, "projection_handles");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, "synchronize_projection");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, "drop_database");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, "dry_run_migrations");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, "register_custom_operator");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, "subscribe_watch");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, "subscribe_watch_by_id");\n__proseql_wasm_wrap_string_method(WasmRuntime.prototype, "unsubscribe");\nexport function __proseql_wasm_memory() {\n    return wasm?.memory;\n}\n${patched.includes("function __proseql_test_panic_bridge_raw() {") ? 'export function __proseql_test_panic_bridge() {\n    try {\n        return __proseql_test_panic_bridge_raw();\n    } catch (_error) {\n        return JSON.stringify({ kind: "defect", message: "unexpected defect: proseql wasm panic integration" });\n    }\n}\n' : ""}`,
 	);
 }
 

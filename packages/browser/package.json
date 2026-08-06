@@ -1,56 +1,56 @@
 {
-  "name": "@proseql/browser",
-  "version": "0.15.0",
-  "description": "Browser storage adapters and Rust/WASM database runtime for ProseQL",
-  "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
-  "files": [
-    "dist",
-    "LICENSE",
-    "README.md"
-  ],
-  "scripts": {
-    "build": "bunx tsc --build",
-    "clean": "rm -rf dist *.tsbuildinfo",
-    "prepublishOnly": "bun run build && bun test",
-    "smoke:browser": "nix shell nixpkgs#nodejs nixpkgs#chromium -c sh -lc 'CHROMIUM_EXECUTABLE_PATH=$(command -v chromium) node ./tests/browser-smoke.mjs'"
-  },
-  "license": "MIT",
-  "author": "Simon W. Jackson",
-  "publishConfig": {
-    "access": "public"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/simonwjackson/proseql.git",
-    "directory": "packages/browser"
-  },
-  "keywords": [
-    "database",
-    "typescript",
-    "browser",
-    "wasm",
-    "effect",
-    "indexeddb",
-    "localstorage"
-  ],
-  "engines": {
-    "node": ">=18"
-  },
-  "sideEffects": false,
-  "dependencies": {
-    "@proseql/core": "workspace:*",
-    "@proseql/effect": "workspace:*",
-    "@proseql/engine": "workspace:*"
-  },
-  "peerDependencies": {
-    "effect": "4.0.0-beta.103"
-  }
+	"name": "@proseql/browser",
+	"version": "0.15.0",
+	"description": "Browser storage adapters and Rust/WASM database runtime for ProseQL",
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"LICENSE",
+		"README.md"
+	],
+	"scripts": {
+		"build": "bunx tsc --build",
+		"clean": "rm -rf dist *.tsbuildinfo",
+		"prepublishOnly": "bun run build && bun test",
+		"smoke:browser": "nix shell nixpkgs#nodejs nixpkgs#chromium -c sh -lc 'CHROMIUM_EXECUTABLE_PATH=$(command -v chromium) node ./tests/browser-smoke.mjs'"
+	},
+	"license": "MIT",
+	"author": "Simon W. Jackson",
+	"publishConfig": {
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/simonwjackson/proseql.git",
+		"directory": "packages/browser"
+	},
+	"keywords": [
+		"database",
+		"typescript",
+		"browser",
+		"wasm",
+		"effect",
+		"indexeddb",
+		"localstorage"
+	],
+	"engines": {
+		"node": ">=18"
+	},
+	"sideEffects": false,
+	"dependencies": {
+		"@proseql/core": "workspace:*",
+		"@proseql/effect": "workspace:*",
+		"@proseql/engine": "workspace:*"
+	},
+	"peerDependencies": {
+		"effect": "4.0.0-beta.103"
+	}
 }

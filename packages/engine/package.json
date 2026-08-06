@@ -1,89 +1,89 @@
 {
-  "name": "@proseql/engine",
-  "version": "0.15.0",
-  "description": "Promise-first WASM engine binding for proseQL",
-  "type": "module",
-  "scripts": {
-    "build:wasm": "bun ./scripts/build-wasm.mjs",
-    "build": "bun run build:wasm && bunx tsc --build",
-    "clean": "rm -rf build dist *.tsbuildinfo",
-    "prepublishOnly": "bun run build && bun test",
-    "test:node": "nix shell nixpkgs#nodejs -c node ./tests/node-smoke.mjs",
-    "typecheck:tests": "bunx tsc --build ../core ."
-  },
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./browser": {
-      "types": "./dist/browser.d.ts",
-      "import": "./dist/browser.js"
-    }
-  },
-  "files": [
-    "dist",
-    "LICENSE",
-    "README.md"
-  ],
-  "license": "MIT",
-  "author": "Simon W. Jackson",
-  "publishConfig": {
-    "access": "public"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/simonwjackson/proseql.git",
-    "directory": "packages/engine"
-  },
-  "keywords": [
-    "database",
-    "typescript",
-    "wasm",
-    "effect",
-    "plain-text",
-    "promise"
-  ],
-  "engines": {
-    "node": ">=18"
-  },
-  "proseqlWasmContract": {
-    "schemaVersion": "proseql.wasm-build-contract.v1",
-    "toolchain": {
-      "rustTarget": "wasm32-unknown-unknown",
-      "productionCargoProfile": "wasm-production",
-      "profileCargoProfile": "wasm-profile",
-      "wasmBindgenVersion": "0.2.126",
-      "wasmOptVersion": "125",
-      "wasmOptArgs": [
-        "-O2",
-        "--strip-debug",
-        "--strip-dwarf",
-        "--strip-producers"
-      ]
-    },
-    "artifactBudgets": {
-      "browserProductionWasmGzipBaselineBytes": 540028,
-      "browserProductionWasmGzipMaxGrowthRatio": 1.05
-    },
-    "browserBudgets": {
-      "baseline": {
-        "coldStartupMs": 1024.016123,
-        "jsHeapBytes": 11739108,
-        "wasmLinearMemoryBytes": 54525952
-      },
-      "coldStartupMaxGrowthRatio": 1.1,
-      "jsHeapMaximumBytes": 50000000,
-      "wasmLinearMemoryMaxGrowthRatio": 1.05
-    }
-  },
-  "sideEffects": false,
-  "dependencies": {
-    "@proseql/core": "workspace:*"
-  },
-  "peerDependencies": {
-    "effect": "4.0.0-beta.103"
-  }
+	"name": "@proseql/engine",
+	"version": "0.15.0",
+	"description": "Promise-first WASM engine binding for proseQL",
+	"type": "module",
+	"scripts": {
+		"build:wasm": "bun ./scripts/build-wasm.mjs",
+		"build": "bun run build:wasm && bunx tsc --build",
+		"clean": "rm -rf build dist *.tsbuildinfo",
+		"prepublishOnly": "bun run build && bun test",
+		"test:node": "nix shell nixpkgs#nodejs -c node ./tests/node-smoke.mjs",
+		"typecheck:tests": "bunx tsc --build ../core ."
+	},
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./browser": {
+			"types": "./dist/browser.d.ts",
+			"import": "./dist/browser.js"
+		}
+	},
+	"files": [
+		"dist",
+		"LICENSE",
+		"README.md"
+	],
+	"license": "MIT",
+	"author": "Simon W. Jackson",
+	"publishConfig": {
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/simonwjackson/proseql.git",
+		"directory": "packages/engine"
+	},
+	"keywords": [
+		"database",
+		"typescript",
+		"wasm",
+		"effect",
+		"plain-text",
+		"promise"
+	],
+	"engines": {
+		"node": ">=18"
+	},
+	"proseqlWasmContract": {
+		"schemaVersion": "proseql.wasm-build-contract.v1",
+		"toolchain": {
+			"rustTarget": "wasm32-unknown-unknown",
+			"productionCargoProfile": "wasm-production",
+			"profileCargoProfile": "wasm-profile",
+			"wasmBindgenVersion": "0.2.126",
+			"wasmOptVersion": "125",
+			"wasmOptArgs": [
+				"-O2",
+				"--strip-debug",
+				"--strip-dwarf",
+				"--strip-producers"
+			]
+		},
+		"artifactBudgets": {
+			"browserProductionWasmGzipBaselineBytes": 540028,
+			"browserProductionWasmGzipMaxGrowthRatio": 1.05
+		},
+		"browserBudgets": {
+			"baseline": {
+				"coldStartupMs": 1024.016123,
+				"jsHeapBytes": 11739108,
+				"wasmLinearMemoryBytes": 54525952
+			},
+			"coldStartupMaxGrowthRatio": 1.1,
+			"jsHeapMaximumBytes": 50000000,
+			"wasmLinearMemoryMaxGrowthRatio": 1.05
+		}
+	},
+	"sideEffects": false,
+	"dependencies": {
+		"@proseql/core": "workspace:*"
+	},
+	"peerDependencies": {
+		"effect": "4.0.0-beta.103"
+	}
 }

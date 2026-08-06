@@ -9,6 +9,7 @@ packages/*/LICENSE
 packages/*/.wasm-bindgen-cli/
 packages/*/.tmp/
 coverage/
+.artifacts/
 .direnv/
 .worktrees
 crates/target/

@@ -1,13 +1,21 @@
 #!/usr/bin/env -S nix develop .#tooling --command node
 
+import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const proseqlModules = join(repoRoot, "node_modules", "@proseql");
-const packageNames = ["core", "effect", "engine", "browser", "node", "rest", "cli"];
+const packageNames = [
+	"core",
+	"effect",
+	"engine",
+	"browser",
+	"node",
+	"rest",
+	"cli",
+];
 
 mkdirSync(proseqlModules, { recursive: true });
 for (const packageName of packageNames) {
@@ -19,7 +27,13 @@ for (const packageName of packageNames) {
 	symlinkSync(relative(proseqlModules, packageDirectory), modulePath, "dir");
 }
 
-const smokeScript = join(repoRoot, "packages", "browser", "tests", "browser-smoke.mjs");
+const smokeScript = join(
+	repoRoot,
+	"packages",
+	"browser",
+	"tests",
+	"browser-smoke.mjs",
+);
 const inPinnedShell =
 	process.env.PROSEQL_NIX_TOOLING === "1" ||
 	Boolean(process.env.CHROMIUM_EXECUTABLE_PATH);

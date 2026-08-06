@@ -1,62 +1,62 @@
 {
-  "name": "@proseql/effect",
-  "version": "0.15.0",
-  "description": "Effect-first adapter over the proseQL WASM engine binding",
-  "type": "module",
-  "scripts": {
-    "build": "bunx tsc --build",
-    "clean": "rm -rf dist *.tsbuildinfo reports/*.json",
-    "prepublishOnly": "bun run build && bun test",
-    "test:node": "nix shell nixpkgs#nodejs -c node ./tests/node-smoke.mjs",
-    "typecheck:tests": "bunx tsc --build ../core ../engine .",
-    "corpus": "bun ./scripts/run-corpus.mjs",
-    "examples": "bun ./scripts/run-examples.mjs",
-    "validate:reports": "bun ./scripts/validate-parity-reports.mjs"
-  },
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./browser": {
-      "types": "./dist/browser.d.ts",
-      "import": "./dist/browser.js"
-    }
-  },
-  "files": [
-    "dist",
-    "LICENSE",
-    "README.md"
-  ],
-  "license": "MIT",
-  "author": "Simon W. Jackson",
-  "publishConfig": {
-    "access": "public"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/simonwjackson/proseql.git",
-    "directory": "packages/effect"
-  },
-  "keywords": [
-    "database",
-    "typescript",
-    "effect",
-    "wasm",
-    "stream",
-    "plain-text"
-  ],
-  "engines": {
-    "node": ">=18"
-  },
-  "sideEffects": false,
-  "dependencies": {
-    "@proseql/core": "workspace:*",
-    "@proseql/engine": "workspace:*"
-  },
-  "peerDependencies": {
-    "effect": "4.0.0-beta.103"
-  }
+	"name": "@proseql/effect",
+	"version": "0.15.0",
+	"description": "Effect-first adapter over the proseQL WASM engine binding",
+	"type": "module",
+	"scripts": {
+		"build": "bunx tsc --build",
+		"clean": "rm -rf dist *.tsbuildinfo reports/*.json",
+		"prepublishOnly": "bun run build && bun test",
+		"test:node": "nix shell nixpkgs#nodejs -c node ./tests/node-smoke.mjs",
+		"typecheck:tests": "bunx tsc --build ../core ../engine .",
+		"corpus": "bun ./scripts/run-corpus.mjs",
+		"examples": "bun ./scripts/run-examples.mjs",
+		"validate:reports": "bun ./scripts/validate-parity-reports.mjs"
+	},
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./browser": {
+			"types": "./dist/browser.d.ts",
+			"import": "./dist/browser.js"
+		}
+	},
+	"files": [
+		"dist",
+		"LICENSE",
+		"README.md"
+	],
+	"license": "MIT",
+	"author": "Simon W. Jackson",
+	"publishConfig": {
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/simonwjackson/proseql.git",
+		"directory": "packages/effect"
+	},
+	"keywords": [
+		"database",
+		"typescript",
+		"effect",
+		"wasm",
+		"stream",
+		"plain-text"
+	],
+	"engines": {
+		"node": ">=18"
+	},
+	"sideEffects": false,
+	"dependencies": {
+		"@proseql/core": "workspace:*",
+		"@proseql/engine": "workspace:*"
+	},
+	"peerDependencies": {
+		"effect": "4.0.0-beta.103"
+	}
 }

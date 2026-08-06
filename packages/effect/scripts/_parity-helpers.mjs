@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,7 +15,9 @@ export const repoRootFromImportMetaUrl = (importMetaUrl) => {
 		}
 		const parent = dirname(current);
 		if (parent === current) {
-			throw new Error(`Unable to locate proseql repo root from ${importMetaUrl}`);
+			throw new Error(
+				`Unable to locate proseql repo root from ${importMetaUrl}`,
+			);
 		}
 		current = parent;
 	}
@@ -38,8 +40,13 @@ export const normalizeOutput = (text, repoRoot) => {
 };
 
 export const parseJUnitCounts = (xml) => {
-	const opening = xml.match(/<testsuites[^>]*tests="(\d+)"[^>]*failures="(\d+)"[^>]*?(?:errors="(\d+)")?[^>]*>/) ??
-		xml.match(/<testsuite[^>]*tests="(\d+)"[^>]*failures="(\d+)"[^>]*?(?:errors="(\d+)")?[^>]*>/);
+	const opening =
+		xml.match(
+			/<testsuites[^>]*tests="(\d+)"[^>]*failures="(\d+)"[^>]*?(?:errors="(\d+)")?[^>]*>/,
+		) ??
+		xml.match(
+			/<testsuite[^>]*tests="(\d+)"[^>]*failures="(\d+)"[^>]*?(?:errors="(\d+)")?[^>]*>/,
+		);
 	if (!opening) return { tests: 0, failures: 0, errors: 0 };
 	return {
 		tests: Number(opening[1] ?? 0),
@@ -63,29 +70,45 @@ export const ensureBuiltEngineWasm = (repoRoot) => {
 	});
 };
 
-export const resolveFromRepo = (repoRoot, ...segments) => resolve(repoRoot, ...segments);
+export const resolveFromRepo = (repoRoot, ...segments) =>
+	resolve(repoRoot, ...segments);
 
 function normalizeOutputLine(line) {
 	const dynamicNormalized = line
-		.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\b/g, "<iso-timestamp>")
+		.replace(
+			/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\b/g,
+			"<iso-timestamp>",
+		)
 		.replace(/^(\s*Created:\s+[^\s]+)\s+[^\s]+$/u, "$1 <generated-id>")
-		.replace(/^(\s*\[afterCreate\]\s+New user:\s+"[^"]+")\s+\([^)]+\)$/u, "$1 (<generated-id>)")
+		.replace(
+			/^(\s*\[afterCreate\]\s+New user:\s+"[^"]+")\s+\([^)]+\)$/u,
+			"$1 (<generated-id>)",
+		)
 		.replace(/(already exists \(id:\s+)[^)]+(\))/u, "$1<generated-id>$2")
-		.replace(/^(\s*(?:UUID|NanoId|ULID|Timestamp|Prefixed|Typed):\s+).+$/u, "$1<generated-id>")
+		.replace(
+			/^(\s*(?:UUID|NanoId|ULID|Timestamp|Prefixed|Typed):\s+).+$/u,
+			"$1<generated-id>",
+		)
 		.replace(/^(\s*(?:createdAt|updatedAt) set:\s+).+$/u, "$1<iso-timestamp>");
-	const withSortedInlineJson = dynamicNormalized.replace(/\{[^{}]+\}/g, (fragment) => {
-		try {
-			return stableJson(JSON.parse(fragment));
-		} catch {
-			return fragment;
-		}
-	});
+	const withSortedInlineJson = dynamicNormalized.replace(
+		/\{[^{}]+\}/g,
+		(fragment) => {
+			try {
+				return stableJson(JSON.parse(fragment));
+			} catch {
+				return fragment;
+			}
+		},
+	);
 	const trimmed = withSortedInlineJson.trim();
 	if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
 		return withSortedInlineJson;
 	}
 	try {
-		return withSortedInlineJson.replace(trimmed, stableJson(JSON.parse(trimmed)));
+		return withSortedInlineJson.replace(
+			trimmed,
+			stableJson(JSON.parse(trimmed)),
+		);
 	} catch {
 		return withSortedInlineJson;
 	}

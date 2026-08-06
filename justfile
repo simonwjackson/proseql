@@ -10,6 +10,16 @@ test *args:
     bun test \
         ./bench/runner.test.ts \
         ./packages/engine/tests/loader.test.ts \
+        ./packages/effect/tests/effect.test.ts \
+        ./packages/browser/tests/browser-entry.test.ts \
+        ./packages/rpc/tests/rpc-group.test.ts \
+        ./packages/rpc/tests/rpc-handlers.test.ts \
+        ./packages/rpc/tests/rpc-streaming.test.ts \
+        ./packages/rpc/tests/multi-collection-namespacing.test.ts \
+        ./packages/rpc/tests/rpc-wire-contract.test.ts \
+        ./scripts/verify-package-artifacts.test.ts \
+        ./scripts/verify-packed-packages.test.ts \
+        ./scripts/release-check-wiring.test.ts \
         packages/core/tests/database-effect.test.ts \
         packages/core/tests/database-source-config.test.ts \
         packages/core/tests/database-document-graph.test.ts \
@@ -86,19 +96,20 @@ parity-gate:
     bun run packages/effect/scripts/run-examples.mjs
     bun run packages/effect/scripts/validate-parity-reports.mjs
 
-# Lint Korri-ready foundation paths
+# Lint and format-check every coordinated release source, script, and manifest
 lint:
-    biome check \
-        packages/core/src \
-        packages/node/src \
-        packages/rest/src \
+    biome check --config-path=./biome.json \
+        packages/{core,engine,node,rest,effect,cli,browser,rpc}/src \
+        packages/{engine,effect}/scripts \
+        scripts \
         package.json \
-        packages/core/package.json \
-        packages/node/package.json \
-        packages/rest/package.json \
+        packages/{core,engine,node,rest,effect,cli,browser,rpc}/package.json \
+        packages/{core,engine,node,rest,effect,cli,browser,rpc}/tsconfig.json \
         tsconfig.json \
         tsconfig.base.json \
-        justfile
+        biome.json \
+        justfile \
+        .github/workflows/ci.yml
 
 # Format
 format:
@@ -107,6 +118,32 @@ format:
 # Clean
 clean:
     rm -rf packages/*/dist packages/*/*.tsbuildinfo *.tsbuildinfo dist/**/*.tsbuildinfo
+
+# Build the publishable TypeScript packages and pinned production/profile WASM artifacts from clean source
+build-release-artifacts:
+    just clean
+    bun run copy-license
+    bun run --cwd packages/engine build:wasm
+    bunx tsc --build
+    chmod +x packages/cli/dist/main.js
+
+# Non-destructive release readiness: never publishes, pushes, tags, or requires npm credentials
+release-check:
+    bun install --frozen-lockfile --ignore-scripts
+    just lint
+    just build-release-artifacts
+    just typecheck
+    just test
+    just rust-format-check
+    just rust-check
+    just rust-test
+    just rust-lint
+    just rust-wasm-check
+    just parity-gate
+    rm -rf .artifacts/release-check
+    mkdir -p .artifacts/release-check
+    bun run scripts/verify-packed-packages.ts --skip-build --output .artifacts/release-check
+    just browser-smoke
 
 # Release a new version (auto-detects bump type, or pass patch/minor/major)
 release *bump:
@@ -129,6 +166,14 @@ rust-lint:
 # Format the Rust engine workspace
 rust-format:
     cargo fmt --manifest-path crates/Cargo.toml
+
+# Verify Rust formatting without modifying source
+rust-format-check:
+    cargo fmt --manifest-path crates/Cargo.toml -- --check
+
+# Check the WASM boundary crate for its production target
+rust-wasm-check:
+    cargo check --manifest-path crates/Cargo.toml -p proseql-wasm --target wasm32-unknown-unknown
 
 # Build a release artifact for the Rust engine
 rust-build:

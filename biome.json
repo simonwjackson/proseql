@@ -5,9 +5,16 @@
 		"includes": [
 			"packages/*/src/**/*.ts",
 			"packages/*/tests/**/*.ts",
+			"packages/*/scripts/**/*.{js,mjs,ts}",
 			"bench/**/*.ts",
-			"scripts/**/*.ts",
+			"scripts/**/*.{js,mjs,ts}",
 			"examples/**/*.ts",
+			"package.json",
+			"packages/*/package.json",
+			"tsconfig.json",
+			"tsconfig.base.json",
+			"packages/*/tsconfig.json",
+			"biome.json",
 			"!**/dist",
 			"!!node_modules"
 		]
