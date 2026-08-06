@@ -81,6 +81,10 @@ import type {
 } from "./types.js";
 
 const DEFAULT_WRITE_DEBOUNCE = 100;
+const SYNCHRONOUS_AFTER_HOOK_FIND_BY_ID = Symbol.for(
+	"@proseql/engine/synchronous-after-hook-find-by-id",
+);
+const DELETED_AFTER_HOOK_VALUE = Symbol("deleted-after-hook-value");
 const OBJECT_KEYED_ONLY_FORMATS = new Set([
 	"json",
 	"yaml",
@@ -364,8 +368,84 @@ class DebouncedSaver {
 class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	private nextId = 1;
 	private collatorRegistered = false;
+	private afterHookDepth = 0;
+	private readonly afterHookValues = new Map<
+		string,
+		unknown | typeof DELETED_AFTER_HOOK_VALUE
+	>();
 
 	constructor(private readonly runtime: WasmRuntimeBinding) {}
+
+	beginMutationDispatch(): void {
+		if (this.afterHookDepth === 0) this.afterHookValues.clear();
+	}
+
+	endMutationDispatch(): void {
+		if (this.afterHookDepth === 0) this.afterHookValues.clear();
+	}
+
+	readAfterHookValue(
+		collection: string,
+		id: string,
+	):
+		| { readonly available: false }
+		| {
+				readonly available: true;
+				readonly changed: boolean;
+				readonly value?: unknown;
+		  } {
+		if (this.afterHookDepth === 0) return { available: false };
+		const key = callbackEntityKey(collection, id);
+		if (!this.afterHookValues.has(key)) {
+			return { available: true, changed: false };
+		}
+		const value = this.afterHookValues.get(key);
+		return value === DELETED_AFTER_HOOK_VALUE
+			? { available: true, changed: true }
+			: { available: true, changed: true, value };
+	}
+
+	private invokeAfterHook(
+		callback: (ctx: unknown) => unknown,
+		context: unknown,
+	): unknown {
+		this.recordAfterHookValue(context);
+		this.afterHookDepth += 1;
+		try {
+			return callback(context);
+		} finally {
+			this.afterHookDepth -= 1;
+		}
+	}
+
+	private recordAfterHookValue(context: unknown): void {
+		if (typeof context !== "object" || context === null) return;
+		const row = context as Record<string, unknown>;
+		if (typeof row.collection !== "string") return;
+		const operation = row.operation ?? row.type;
+		if (operation === "create") {
+			const entity = row.entity;
+			if (typeof entity !== "object" || entity === null) return;
+			const id = (entity as Record<string, unknown>).id;
+			if (typeof id === "string")
+				this.afterHookValues.set(callbackEntityKey(row.collection, id), entity);
+			return;
+		}
+		if (operation === "update") {
+			if (typeof row.id === "string" && row.current !== undefined)
+				this.afterHookValues.set(
+					callbackEntityKey(row.collection, row.id),
+					row.current,
+				);
+			return;
+		}
+		if (operation === "delete" && typeof row.id === "string") {
+			this.afterHookValues.set(
+				callbackEntityKey(row.collection, row.id),
+				DELETED_AFTER_HOOK_VALUE,
+			);
+		}
+	}
 
 	registerDefault(callback: () => unknown, prefix: string): string {
 		const id = this.makeId(prefix);
@@ -423,7 +503,10 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_after_create_hook(id, (payloadJson) =>
-			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
+			wrapCallbackResult(() => {
+				const context = parseBoundaryJson(payloadJson);
+				return this.invokeAfterHook(callback, context);
+			}),
 		);
 		return id;
 	}
@@ -434,7 +517,10 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_after_update_hook(id, (payloadJson) =>
-			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
+			wrapCallbackResult(() => {
+				const context = parseBoundaryJson(payloadJson);
+				return this.invokeAfterHook(callback, context);
+			}),
 		);
 		return id;
 	}
@@ -445,7 +531,10 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_after_delete_hook(id, (payloadJson) =>
-			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
+			wrapCallbackResult(() => {
+				const context = parseBoundaryJson(payloadJson);
+				return this.invokeAfterHook(callback, context);
+			}),
 		);
 		return id;
 	}
@@ -456,7 +545,10 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 	): string {
 		const id = this.makeId(prefix);
 		this.runtime.register_on_change_hook(id, (payloadJson) =>
-			wrapCallbackResult(() => callback(parseBoundaryJson(payloadJson))),
+			wrapCallbackResult(() => {
+				const context = parseBoundaryJson(payloadJson);
+				return this.invokeAfterHook(callback, context);
+			}),
 		);
 		return id;
 	}
@@ -892,6 +984,7 @@ class EngineRuntime {
 		handle: number,
 		createInput: { descriptor: Record<string, unknown> },
 		projection: MaterializedProjection,
+		private readonly callbackRegistrar: RuntimeCallbackRegistrar,
 		diagnostics: EngineRuntimeDiagnostics = {
 			bulkMutationDispatches: 0,
 			queryDispatches: 0,
@@ -1346,11 +1439,23 @@ class EngineRuntime {
 			handle,
 			{ descriptor: createPayload.descriptor },
 			new MaterializedProjection(projectionSnapshotFromHandles(handles)),
+			registrar,
 		);
 		return { runtime: engineRuntime, registry, collections };
 	}
 
 	dispatch<T>(method: string, payload?: unknown): T {
+		if (!MUTATION_METHODS.has(method))
+			return this.dispatchInternal(method, payload);
+		this.callbackRegistrar.beginMutationDispatch();
+		try {
+			return this.dispatchInternal(method, payload);
+		} finally {
+			this.callbackRegistrar.endMutationDispatch();
+		}
+	}
+
+	private dispatchInternal<T>(method: string, payload?: unknown): T {
 		if (this.projection.needsResynchronization) this.resynchronizeProjection();
 		if (this.projection.hasDirtyRows) this.synchronizeDirtyProjection();
 		if (MUTATION_METHODS.has(method)) {
@@ -2341,6 +2446,34 @@ class EngineRuntime {
 		return this.dispatch<T>("findById", { collection, id });
 	}
 
+	synchronousAfterHookFindById<T>(
+		collection: string,
+		id: string,
+	):
+		| { readonly available: false }
+		| {
+				readonly available: true;
+				readonly value?: T;
+				readonly error?: NotFoundError;
+		  } {
+		const observed = this.callbackRegistrar.readAfterHookValue(collection, id);
+		if (!observed.available) return observed;
+		const value = observed.changed
+			? observed.value
+			: this.projection.materializedValue(collection, id);
+		if (value === undefined) {
+			return {
+				available: true,
+				error: new NotFoundError({
+					collection,
+					id,
+					message: `Entity '${id}' not found in collection '${collection}'`,
+				}),
+			};
+		}
+		return { available: true, value: value as T };
+	}
+
 	invokeFindById<T>(collection: string, id: string): Promise<T> {
 		let operation: Promise<T>;
 		if (this.transactionBarrier) {
@@ -2707,6 +2840,7 @@ class EngineRuntime {
 			handle,
 			{ descriptor: createPayload.descriptor },
 			projection,
+			this.callbackRegistrar,
 			this.diagnostics,
 		);
 	}
@@ -3336,6 +3470,8 @@ function buildCollectionFacade(
 		if (writeKey) persistence?.saver.schedule(writeKey);
 	};
 	return {
+		[SYNCHRONOUS_AFTER_HOOK_FIND_BY_ID]: (id: string) =>
+			runtime.synchronousAfterHookFindById(collection.name, id),
 		[PREDICATE_BULK_OPERATION]: (
 			method: "updateMany" | "deleteMany",
 			selectIds: (
@@ -5397,6 +5533,10 @@ function normalizeAggregateFields(value: unknown): ReadonlyArray<string> {
 	if (Array.isArray(value))
 		return value.filter((field): field is string => typeof field === "string");
 	return typeof value === "string" ? [value] : [];
+}
+
+function callbackEntityKey(collection: string, id: string): string {
+	return `${collection}\u0000${id}`;
 }
 
 function wrapCallbackResult(fn: () => unknown): string {

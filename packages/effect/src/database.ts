@@ -48,6 +48,20 @@ import type {
 } from "@proseql/engine";
 import { Effect, Layer, Queue, Stream } from "effect";
 
+const SYNCHRONOUS_AFTER_HOOK_FIND_BY_ID = Symbol.for(
+	"@proseql/engine/synchronous-after-hook-find-by-id",
+);
+
+type SynchronousAfterHookFindById = (
+	id: string,
+) =>
+	| { readonly available: false }
+	| {
+			readonly available: true;
+			readonly value?: unknown;
+			readonly error?: NotFoundError;
+	  };
+
 export type RunnableEffect<A, E> = Effect.Effect<A, E, never> & {
 	readonly runPromise: Promise<A>;
 };
@@ -707,8 +721,21 @@ const createCollectionAdapter = (
 	query: (config?: QueryConfig<any, any, any>) => cursorOrStreamQuery(engineCollection, config),
 	findById: (id: string) => {
 		const operation = () => engineCollection.findById(id);
+		const synchronousAfterHookFindById = (
+			engineCollection as unknown as Record<symbol, unknown>
+		)[SYNCHRONOUS_AFTER_HOOK_FIND_BY_ID] as
+			| SynchronousAfterHookFindById
+			| undefined;
 		return withRunPromise(
-			Effect.suspend(() => liftPromise(operation)),
+			Effect.suspend(() => {
+				const synchronous = synchronousAfterHookFindById?.(id);
+				if (synchronous?.available) {
+					return synchronous.error === undefined
+						? Effect.succeed(synchronous.value)
+						: Effect.fail(synchronous.error);
+				}
+				return liftPromise(operation);
+			}),
 			operation,
 		) as never;
 	},

@@ -90,6 +90,50 @@ describe("@proseql/effect", () => {
 		}
 	});
 
+	it("lets ordered after hooks read committed state before the operation completes", async () => {
+		const observations: string[] = [];
+		let dbRef: any;
+		const hookedConfig = {
+			users: {
+				schema: UserSchema,
+				relationships: {},
+				hooks: {
+					afterCreate: [
+						(ctx: { readonly entity: { readonly id: string } }) =>
+							Effect.gen(function* () {
+								const found = yield* dbRef.users.findById(ctx.entity.id);
+								observations.push(`read:${found.name}`);
+							}),
+						() =>
+							Effect.sync(() => {
+								observations.push("second");
+							}),
+						() => Effect.fail(new Error("ignored after-hook failure")),
+					],
+					onChange: [
+						() =>
+							Effect.sync(() => {
+								observations.push("change");
+							}),
+					],
+				},
+			},
+		} as const;
+
+		dbRef = await Effect.runPromise(
+			createEffectDatabase(hookedConfig, { users: [] }),
+		);
+		const created = await dbRef.users.create({
+			id: "u-hook",
+			name: "Hook User",
+			age: 42,
+			companyId: "c1",
+		}).runPromise;
+
+		expect(created.id).toBe("u-hook");
+		expect(observations).toEqual(["read:Hook User", "second", "change"]);
+	});
+
 	it("acquires watch subscriptions lazily and unsubscribes on scope close without consumption", async () => {
 		let activeSubscriptions = 0;
 		let unsubscribeCalls = 0;
