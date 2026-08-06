@@ -1,9 +1,20 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	type CommandResult,
 	type CommandRunner,
 	type ConsumerVerification,
+	createCommandRunner,
 	NpmRegistry,
 	publishPackages,
 	type Registry,
@@ -11,9 +22,11 @@ import {
 } from "./publish-packages.js";
 import {
 	computeBumpType,
+	finalizeRelease,
 	incrementVersion,
-	prepareRelease,
-	type ReleasePreparationServices,
+	prepareReleaseVersion,
+	type ReleaseFinalizationServices,
+	type ReleaseVersionPreparationServices,
 	updateWorkspaceForRelease,
 } from "./release.js";
 import {
@@ -48,6 +61,32 @@ const workspaceLock = (version: string): string =>
 		"\n",
 	)}\n"packages/ai": { "name": "@proseql/ai", "version": "0.5.0" },\n`;
 
+const workspaceFiles = (
+	version: string,
+	options: { readonly releaseEntry?: boolean } = {},
+): Map<string, string> => {
+	const files = new Map<string, string>();
+	for (const name of COORDINATED_PACKAGE_NAMES) {
+		files.set(
+			`packages/${name}/package.json`,
+			`${JSON.stringify({ ...packageManifest(name), version })}\n`,
+		);
+	}
+	files.set(
+		"packages/ai/package.json",
+		'{"name":"@proseql/ai","version":"0.5.0"}\n',
+	);
+	files.set("packages/cli/src/main.ts", `const VERSION = "${version}";\n`);
+	files.set("bun.lock", workspaceLock(version));
+	files.set(
+		"CHANGELOG.md",
+		options.releaseEntry
+			? `# Changelog\n\n## v${version} (2026-08-05)\n`
+			: "# Changelog\n",
+	);
+	return files;
+};
+
 const artifact = (
 	packageName: (typeof COORDINATED_PACKAGE_NAMES)[number],
 ): PreparedArtifact => {
@@ -77,11 +116,17 @@ class RecordingRegistry implements Registry {
 	readonly versions = new Map<string, RegistryVersion>();
 	readonly tags = new Map<string, string>();
 	credentialError: Error | undefined;
+	artifactVerificationError: Error | undefined;
 	publishErrorAt: string | undefined;
 	visibilityFailures = new Map<string, number>();
 
 	key(name: string, version: string): string {
 		return `${name}@${version}`;
+	}
+
+	async verifyPreparedArtifacts(): Promise<void> {
+		this.calls.push("verify-artifacts");
+		if (this.artifactVerificationError) throw this.artifactVerificationError;
 	}
 
 	seed(release: PreparedRelease, packageName: string): void {
@@ -274,28 +319,21 @@ describe("reversible release preparation", () => {
 		);
 	});
 
-	it("checks every registry version, requires preflight, and writes only reversible files", async () => {
-		const events: string[] = [];
-		const services: ReleasePreparationServices = {
-			readWorkspace: async () => {
-				const files = new Map<string, string>();
-				for (const name of COORDINATED_PACKAGE_NAMES) {
-					files.set(
-						`packages/${name}/package.json`,
-						`${JSON.stringify({ ...packageManifest(name), version: "0.15.0" })}\n`,
-					);
-				}
-				files.set(
-					"packages/ai/package.json",
-					'{"name":"@proseql/ai","version":"0.5.0"}\n',
+	it("prepares source edits only and rolls partial writes back before retry", async () => {
+		let files = workspaceFiles("0.15.0");
+		let failWrite = true;
+		const writes: string[] = [];
+		const services: ReleaseVersionPreparationServices = {
+			readWorkspace: async () => new Map(files),
+			writeWorkspace: async (next) => {
+				files = new Map(next);
+				writes.push(
+					JSON.parse(next.get("packages/core/package.json") ?? "").version,
 				);
-				files.set("packages/cli/src/main.ts", 'const VERSION = "0.15.0";\n');
-				files.set("bun.lock", workspaceLock("0.15.0"));
-				files.set("CHANGELOG.md", "# Changelog\n");
-				return files;
-			},
-			writeWorkspace: async () => {
-				events.push("write-workspace");
+				if (failWrite) {
+					failWrite = false;
+					throw new Error("partial write failed");
+				}
 			},
 			readGitHistory: async () => ({
 				commit: "0123456789abcdef0123456789abcdef01234567",
@@ -303,88 +341,154 @@ describe("reversible release preparation", () => {
 					{ hash: "abc1234", subject: "feat: publish packages", body: "" },
 				],
 			}),
+			now: () => new Date("2026-08-05T12:00:00.000Z"),
+		};
+		await expect(
+			prepareReleaseVersion({ bump: "minor" }, services),
+		).rejects.toThrow(/partial write failed/);
+		expect(writes).toEqual([VERSION, "0.15.0"]);
+		expect(
+			JSON.parse(files.get("packages/core/package.json") ?? "").version,
+		).toBe("0.15.0");
+		const retry = await prepareReleaseVersion({ bump: "minor" }, services);
+		expect(retry.version).toBe(VERSION);
+		expect(
+			JSON.parse(files.get("packages/core/package.json") ?? "").version,
+		).toBe(VERSION);
+	});
+
+	it("finalizes a clean coordinated commit and records the exact HEAD after all gates", async () => {
+		const events: string[] = [];
+		const commit = "fedcba9876543210fedcba9876543210fedcba98";
+		const services: ReleaseFinalizationServices = {
+			readWorkspace: async () =>
+				workspaceFiles(VERSION, { releaseEntry: true }),
+			readGitHistory: async () => ({ commit, commits: [] }),
+			assertCleanTree: async () => {
+				events.push("clean");
+			},
 			checkVersionAvailable: async (name, version) => {
 				events.push(`available:${name}@${version}`);
 			},
 			runPreflight: async () => {
 				events.push("preflight");
 			},
-			prepareArtifacts: async (version) => {
+			prepareArtifacts: async () => {
 				events.push("artifacts");
-				return preparedRelease().artifacts.map((item) => ({
-					...item,
-					version,
-				}));
+				return preparedRelease().artifacts;
 			},
 			writePreparedRelease: async () => {
 				events.push("manifest");
 			},
 			now: () => new Date("2026-08-05T12:00:00.000Z"),
 		};
-		await prepareRelease({ bump: "minor" }, services);
+		const release = await finalizeRelease(services);
+		expect(release.version).toBe(VERSION);
+		expect(release.commit).toBe(commit);
 		expect(
 			events.filter((event) => event.startsWith("available:")),
 		).toHaveLength(8);
+		expect(events.filter((event) => event === "clean")).toHaveLength(3);
 		expect(events.indexOf("preflight")).toBeGreaterThan(
 			events.lastIndexOf(`available:@proseql/rpc@${VERSION}`),
 		);
-		expect(events.indexOf("artifacts")).toBeGreaterThan(
-			events.indexOf("preflight"),
-		);
-		expect(events).toEqual(
-			expect.not.arrayContaining([
-				expect.stringMatching(/push|tag|publish|github/i),
-			]),
-		);
+		const cleanEvents = events
+			.map((event, index) => (event === "clean" ? index : -1))
+			.filter((index) => index >= 0);
+		expect(events.indexOf("artifacts")).toBeGreaterThan(cleanEvents[1] ?? -1);
+		expect(events.indexOf("artifacts")).toBeLessThan(cleanEvents[2] ?? -1);
+	});
+
+	it("fails dirty finalization before registry and artifacts", async () => {
+		const events: string[] = [];
+		const services: ReleaseFinalizationServices = {
+			readWorkspace: async () =>
+				workspaceFiles(VERSION, { releaseEntry: true }),
+			readGitHistory: async () => ({ commit: "head", commits: [] }),
+			assertCleanTree: async () => {
+				throw new Error("dirty tree");
+			},
+			checkVersionAvailable: async () => {
+				events.push("registry");
+			},
+			runPreflight: async () => {
+				events.push("preflight");
+			},
+			prepareArtifacts: async () => {
+				events.push("artifacts");
+				return preparedRelease().artifacts;
+			},
+			writePreparedRelease: async () => {
+				events.push("manifest");
+			},
+			now: () => new Date(),
+		};
+		await expect(finalizeRelease(services)).rejects.toThrow(/dirty tree/);
+		expect(events).toEqual([]);
 	});
 
 	it.each([
-		"used version",
-		"missing package",
-		"failed gate",
-		"bad tarball",
-	])("stops preparation on %s", async (failure) => {
-		const writes: string[] = [];
-		const base = preparedRelease();
-		const files = new Map<string, string>();
-		for (const name of COORDINATED_PACKAGE_NAMES) {
+		"manifest",
+		"cli",
+		"lock",
+		"changelog",
+	])("rejects an uncoordinated %s before registry reads", async (failure) => {
+		const files = workspaceFiles(VERSION, { releaseEntry: true });
+		if (failure === "manifest") {
 			files.set(
-				`packages/${name}/package.json`,
-				`${JSON.stringify({ ...packageManifest(name), version: "0.15.0" })}\n`,
+				"packages/rpc/package.json",
+				`${JSON.stringify({ ...packageManifest("rpc"), version: "0.15.0" })}\n`,
 			);
+		} else if (failure === "cli") {
+			files.set("packages/cli/src/main.ts", 'const VERSION = "0.15.0";\n');
+		} else if (failure === "lock") {
+			files.set("bun.lock", workspaceLock("0.15.0"));
+		} else {
+			files.set("CHANGELOG.md", "# Changelog\n");
 		}
-		files.set("packages/ai/package.json", '{"version":"0.5.0"}');
-		files.set("packages/cli/src/main.ts", 'const VERSION = "0.15.0";');
-		files.set("bun.lock", workspaceLock("0.15.0"));
-		files.set("CHANGELOG.md", "# Changelog\n");
-		const services: ReleasePreparationServices = {
-			readWorkspace: async () =>
-				failure === "missing package"
-					? new Map([...files].filter(([path]) => !path.includes("/rpc/")))
-					: files,
-			writeWorkspace: async () => {
-				writes.push("workspace");
+		let registryReads = 0;
+		const services: ReleaseFinalizationServices = {
+			readWorkspace: async () => files,
+			readGitHistory: async () => ({ commit: "head", commits: [] }),
+			assertCleanTree: async () => {},
+			checkVersionAvailable: async () => {
+				registryReads += 1;
 			},
+			runPreflight: async () => {},
+			prepareArtifacts: async () => preparedRelease().artifacts,
+			writePreparedRelease: async () => {},
+			now: () => new Date(),
+		};
+		await expect(finalizeRelease(services)).rejects.toThrow();
+		expect(registryReads).toBe(0);
+	});
+
+	it("retries failed finalization at the same version without another bump", async () => {
+		let attempts = 0;
+		const versions: string[] = [];
+		const services: ReleaseFinalizationServices = {
+			readWorkspace: async () =>
+				workspaceFiles(VERSION, { releaseEntry: true }),
 			readGitHistory: async () => ({
 				commit: "0123456789abcdef0123456789abcdef01234567",
 				commits: [],
 			}),
-			checkVersionAvailable: async (name) => {
-				if (failure === "used version" && name === "@proseql/node")
-					throw new Error("already exists");
+			assertCleanTree: async () => {},
+			checkVersionAvailable: async (_name, version) => {
+				versions.push(version);
 			},
 			runPreflight: async () => {
-				if (failure === "failed gate") throw new Error("gate failed");
+				attempts += 1;
+				if (attempts === 1) throw new Error("gate failed");
 			},
-			prepareArtifacts: async () =>
-				failure === "bad tarball" ? base.artifacts.slice(0, 7) : base.artifacts,
-			writePreparedRelease: async () => {
-				writes.push("manifest");
-			},
+			prepareArtifacts: async () => preparedRelease().artifacts,
+			writePreparedRelease: async () => {},
 			now: () => new Date("2026-08-05T12:00:00.000Z"),
 		};
-		await expect(prepareRelease({ bump: "minor" }, services)).rejects.toThrow();
-		expect(writes).not.toContain("manifest");
+		await expect(finalizeRelease(services)).rejects.toThrow(/gate failed/);
+		const release = await finalizeRelease(services);
+		expect(release.version).toBe(VERSION);
+		expect(new Set(versions)).toEqual(new Set([VERSION]));
 	});
 });
 
@@ -409,6 +513,47 @@ describe("safe candidate publication", () => {
 			}),
 		).rejects.toThrow(/approval/i);
 		expect(registry.calls).toEqual([]);
+	});
+
+	it("rejects unknown runtime modes before authentication or registry access", async () => {
+		const registry = new RecordingRegistry();
+		await expect(
+			publishPackages(preparedRelease(), registry, {
+				mode: "unexpected" as "candidate",
+				approval: preparedRelease().releaseId,
+			}),
+		).rejects.toThrow(/unknown publication mode/i);
+		expect(registry.calls).toEqual([]);
+	});
+
+	it("re-inspects artifacts before authentication or registry access", async () => {
+		const release = preparedRelease();
+		const registry = new RecordingRegistry();
+		registry.artifactVerificationError = new Error(
+			"embedded manifest mismatch",
+		);
+		await expect(
+			publishPackages(release, registry, {
+				mode: "candidate",
+				approval: release.releaseId,
+			}),
+		).rejects.toThrow(/embedded manifest mismatch/);
+		expect(registry.calls).toEqual(["verify-artifacts"]);
+	});
+
+	it("uses npm --tag semantics for a brand-new package without creating latest", async () => {
+		const release = preparedRelease();
+		const registry = new RecordingRegistry();
+		await publishPackages(release, registry, {
+			mode: "candidate",
+			approval: release.releaseId,
+		});
+		for (const candidate of release.artifacts) {
+			expect(
+				registry.tags.get(`${candidate.name}:${release.candidateTag}`),
+			).toBe(VERSION);
+			expect(registry.tags.get(`${candidate.name}:latest`)).toBeUndefined();
+		}
 	});
 
 	it("publishes exact tarballs sequentially, waits boundedly, and fails fast", async () => {
@@ -451,6 +596,29 @@ describe("safe candidate publication", () => {
 			registry.calls.filter((call) => call.startsWith("publish:"))[0],
 		).toBe(`publish:node:${TAG}`);
 
+		const registryMetadata = new RecordingRegistry();
+		for (const name of COORDINATED_PACKAGE_NAMES) {
+			registryMetadata.seed(release, name);
+			const candidate = release.artifacts.find(
+				(artifact) => artifact.packageName === name,
+			);
+			if (!candidate) throw new Error(`missing ${name}`);
+			registryMetadata.versions.set(`${candidate.name}@${VERSION}`, {
+				manifest: {
+					...candidate.manifest,
+					_id: `${candidate.name}@${VERSION}`,
+				},
+				integrity: candidate.integrity,
+			});
+		}
+		await publishPackages(release, registryMetadata, {
+			mode: "candidate",
+			approval: release.releaseId,
+		});
+		expect(
+			registryMetadata.calls.some((call) => call.startsWith("publish:")),
+		).toBe(false);
+
 		const mismatch = new RecordingRegistry();
 		mismatch.seed(release, "core");
 		mismatch.versions.set("@proseql/core@0.16.0", {
@@ -462,7 +630,9 @@ describe("safe candidate publication", () => {
 				mode: "candidate",
 				approval: release.releaseId,
 			}),
-		).rejects.toThrow(/deprecate.*new coordinated version/i);
+		).rejects.toThrow(
+			/dependencies: expected.*deprecate.*new coordinated version/i,
+		);
 		expect(mismatch.calls.some((call) => call.startsWith("publish:"))).toBe(
 			false,
 		);
@@ -478,7 +648,7 @@ describe("safe candidate publication", () => {
 				approval: release.releaseId,
 			}),
 		).rejects.toThrow(/token expired/);
-		expect(registry.calls).toEqual(["authenticate"]);
+		expect(registry.calls).toEqual(["verify-artifacts", "authenticate"]);
 		registry.credentialError = undefined;
 		await expect(
 			publishPackages(release, registry, {
@@ -581,6 +751,61 @@ describe("verified latest promotion", () => {
 });
 
 describe("npm command safety", () => {
+	it("safely rejects a tarball whose embedded manifest differs before npm calls", async () => {
+		const root = mkdtempSync(join(tmpdir(), "proseql-release-test-"));
+		try {
+			const source = join(root, "source", "package");
+			const tarballs = join(root, "tarballs");
+			mkdirSync(source, { recursive: true });
+			mkdirSync(tarballs);
+			writeFileSync(
+				join(source, "package.json"),
+				JSON.stringify(
+					packageManifest("core", { "unexpected-dependency": "1.0.0" }),
+				),
+			);
+			const tarball = join(tarballs, `proseql-core-${VERSION}.tgz`);
+			execFileSync("tar", [
+				"-czf",
+				tarball,
+				"-C",
+				join(root, "source"),
+				"package",
+			]);
+			const bytes = readFileSync(tarball);
+			const candidate: PreparedArtifact = {
+				...artifact("core"),
+				tarball: `tarballs/proseql-core-${VERSION}.tgz`,
+				sizeBytes: bytes.byteLength,
+				sha256: createHash("sha256").update(bytes).digest("hex"),
+				integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
+			};
+			let npmCalls = 0;
+			const npm = new NpmRegistry(async () => {
+				npmCalls += 1;
+				return { status: 0, stdout: "", stderr: "" };
+			}, root);
+			await expect(
+				npm.verifyPreparedArtifacts({
+					...preparedRelease(),
+					artifacts: [candidate],
+				}),
+			).rejects.toThrow(/embedded package\.json.*dependencies/i);
+			expect(npmCalls).toBe(0);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("bounds every npm/registry subprocess", async () => {
+		const result = await createCommandRunner(10)(process.execPath, [
+			"-e",
+			"setTimeout(() => {}, 10000)",
+		]);
+		expect(result.status).toBe(124);
+		expect(result.stderr).toContain("timed out after 10ms");
+	});
+
 	it("uses read commands in dry runs and lifecycle-free writes only after orchestration approval", async () => {
 		const commands: Array<{ command: string; args: readonly string[] }> = [];
 		const runner: CommandRunner = async (

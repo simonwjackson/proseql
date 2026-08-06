@@ -2,15 +2,18 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
 	createPreparedRelease,
+	manifestContractDiff,
 	manifestsMatch,
 	type PreparedArtifact,
 	type PreparedRelease,
 	type ReleasePackageManifest,
 } from "./release-manifest.js";
+import { inspectAndExtractTarball } from "./verify-packed-packages.js";
 
 export type CommandResult = {
 	readonly status: number;
@@ -29,6 +32,7 @@ export type RegistryVersion = {
 };
 
 export interface Registry {
+	verifyPreparedArtifacts(release: PreparedRelease): Promise<void>;
 	authenticate(): Promise<string>;
 	getVersion(
 		name: string,
@@ -69,6 +73,45 @@ export class NpmRegistry implements Registry {
 		private readonly run: CommandRunner,
 		private readonly preparedRoot: string,
 	) {}
+
+	async verifyPreparedArtifacts(release: PreparedRelease): Promise<void> {
+		const extractionParent = mkdtempSync(
+			join(tmpdir(), "proseql-publish-inspect-"),
+		);
+		try {
+			for (const candidate of release.artifacts) {
+				const tarball = isAbsolute(candidate.tarball)
+					? candidate.tarball
+					: join(this.preparedRoot, candidate.tarball);
+				const bytes = readFileSync(tarball);
+				assert(
+					bytes.byteLength === candidate.sizeBytes,
+					`${candidate.name}: prepared tarball size mismatch`,
+				);
+				assert(
+					createHash("sha256").update(bytes).digest("hex") === candidate.sha256,
+					`${candidate.name}: prepared tarball sha256 mismatch`,
+				);
+				assert(
+					`sha512-${createHash("sha512").update(bytes).digest("base64")}` ===
+						candidate.integrity,
+					`${candidate.name}: prepared tarball integrity mismatch`,
+				);
+				const extracted = join(extractionParent, candidate.packageName);
+				inspectAndExtractTarball(tarball, extracted);
+				const embedded = parseJsonObject(
+					readFileSync(join(extracted, "package.json"), "utf8"),
+					`${candidate.name} embedded package.json`,
+				);
+				assert(
+					manifestsMatch(candidate.manifest, embedded),
+					`${candidate.name}: embedded package.json does not match prepared manifest (${formatManifestDiff(candidate.manifest, embedded)})`,
+				);
+			}
+		} finally {
+			rmSync(extractionParent, { recursive: true, force: true });
+		}
+	}
 
 	async authenticate(): Promise<string> {
 		const result = await this.run("npm", ["whoami"]);
@@ -160,6 +203,15 @@ export async function publishPackages(
 	options: PublishOptions,
 ): Promise<void> {
 	validatePreparedRelease(release);
+	const mode = options.mode as string;
+	switch (mode) {
+		case "dry-run":
+		case "candidate":
+		case "promote":
+			break;
+		default:
+			throw new Error(`unknown publication mode ${JSON.stringify(mode)}`);
+	}
 	const visibility = options.visibility ?? defaultVisibility;
 	assert(
 		Number.isInteger(visibility.attempts) && visibility.attempts > 0,
@@ -170,7 +222,7 @@ export async function publishPackages(
 		"registry visibility delay must be non-negative",
 	);
 
-	if (options.mode === "dry-run") {
+	if (mode === "dry-run") {
 		for (const candidate of release.artifacts) {
 			const live = await registry.getVersion(candidate.name, candidate.version);
 			if (live) assertMatchingCandidate(candidate, live);
@@ -183,12 +235,14 @@ export async function publishPackages(
 		options.approval === release.releaseId,
 		`destructive publication requires approval ${release.releaseId}`,
 	);
-	if (options.mode === "promote") {
+	if (mode === "promote") {
 		assertConsumerVerification(release, options.consumerVerification);
+	} else {
+		await registry.verifyPreparedArtifacts(release);
 	}
 	await registry.authenticate();
 
-	if (options.mode === "candidate") {
+	if (mode === "candidate") {
 		await publishCandidates(release, registry, visibility);
 		return;
 	}
@@ -349,11 +403,25 @@ function assertMatchingCandidate(
 	candidate: PreparedArtifact,
 	live: RegistryVersion,
 ): void {
+	const differences = manifestContractDiff(candidate.manifest, live.manifest);
+	const integrityDifference =
+		live.integrity === candidate.integrity
+			? []
+			: [
+					`integrity: expected ${candidate.integrity}, actual ${live.integrity}`,
+				];
+	const allDifferences = [...integrityDifference, ...differences];
 	assert(
-		live.integrity === candidate.integrity &&
-			manifestsMatch(candidate.manifest, live.manifest),
-		`${candidate.name}@${candidate.version} does not match the prepared manifest and integrity; deprecate the bad version and prepare a new coordinated version`,
+		allDifferences.length === 0,
+		`${candidate.name}@${candidate.version} does not match the prepared manifest and integrity (${allDifferences.slice(0, 4).join("; ")}); deprecate the bad version and prepare a new coordinated version`,
 	);
+}
+
+function formatManifestDiff(
+	expected: ReleasePackageManifest,
+	actual: ReleasePackageManifest,
+): string {
+	return manifestContractDiff(expected, actual).slice(0, 4).join("; ");
 }
 
 function validatePreparedRelease(release: PreparedRelease): void {
@@ -403,33 +471,51 @@ async function waitFor(
 	);
 }
 
-function defaultCommandRunner(
-	command: string,
-	args: ReadonlyArray<string>,
-): Promise<CommandResult> {
-	return new Promise((resolveCommand, rejectCommand) => {
-		const child = spawn(command, args, {
-			stdio: ["ignore", "pipe", "pipe"],
-			env: process.env,
+export function createCommandRunner(timeoutMs = 60_000): CommandRunner {
+	assert(
+		Number.isInteger(timeoutMs) && timeoutMs > 0,
+		"command timeout must be positive",
+	);
+	return (command, args) =>
+		new Promise((resolveCommand, rejectCommand) => {
+			const child = spawn(command, args, {
+				stdio: ["ignore", "pipe", "pipe"],
+				env: process.env,
+			});
+			let stdout = "";
+			let stderr = "";
+			let timedOut = false;
+			const timeout = setTimeout(() => {
+				timedOut = true;
+				stderr += `\ncommand timed out after ${timeoutMs}ms`;
+				child.kill("SIGKILL");
+			}, timeoutMs);
+			child.stdout.setEncoding("utf8");
+			child.stderr.setEncoding("utf8");
+			child.stdout.on("data", (chunk: string) => {
+				stdout += chunk;
+			});
+			child.stderr.on("data", (chunk: string) => {
+				stderr += chunk;
+			});
+			child.on("error", (error) => {
+				clearTimeout(timeout);
+				rejectCommand(error);
+			});
+			child.on("close", (status) => {
+				clearTimeout(timeout);
+				resolveCommand({
+					status: timedOut ? 124 : (status ?? 1),
+					stdout,
+					stderr,
+				});
+			});
 		});
-		let stdout = "";
-		let stderr = "";
-		child.stdout.setEncoding("utf8");
-		child.stderr.setEncoding("utf8");
-		child.stdout.on("data", (chunk: string) => {
-			stdout += chunk;
-		});
-		child.stderr.on("data", (chunk: string) => {
-			stderr += chunk;
-		});
-		child.on("error", rejectCommand);
-		child.on("close", (status) =>
-			resolveCommand({ status: status ?? 1, stdout, stderr }),
-		);
-	});
 }
 
-function loadPreparedRelease(path: string): PreparedRelease {
+const defaultCommandRunner = createCommandRunner();
+
+export function loadPreparedRelease(path: string): PreparedRelease {
 	const release = JSON.parse(readFileSync(path, "utf8")) as PreparedRelease;
 	validatePreparedRelease(release);
 	const root = dirname(path);

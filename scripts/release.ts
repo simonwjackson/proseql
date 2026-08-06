@@ -32,12 +32,19 @@ export type GitHistory = {
 	readonly commits: ReadonlyArray<ReleaseCommit>;
 };
 
-export type ReleasePreparationServices = {
+export type ReleaseVersionPreparationServices = {
 	readonly readWorkspace: () => Promise<ReadonlyMap<string, string>>;
 	readonly writeWorkspace: (
 		files: ReadonlyMap<string, string>,
 	) => Promise<void>;
 	readonly readGitHistory: () => Promise<GitHistory>;
+	readonly now: () => Date;
+};
+
+export type ReleaseFinalizationServices = {
+	readonly readWorkspace: () => Promise<ReadonlyMap<string, string>>;
+	readonly readGitHistory: () => Promise<GitHistory>;
+	readonly assertCleanTree: () => Promise<void>;
 	readonly checkVersionAvailable: (
 		name: string,
 		version: string,
@@ -48,6 +55,11 @@ export type ReleasePreparationServices = {
 	) => Promise<ReadonlyArray<PreparedArtifact>>;
 	readonly writePreparedRelease: (release: PreparedRelease) => Promise<void>;
 	readonly now: () => Date;
+};
+
+export type PreparedVersion = {
+	readonly version: string;
+	readonly date: string;
 };
 
 export function computeBumpType(
@@ -144,22 +156,15 @@ export function updateWorkspaceForRelease(input: {
 	return updated;
 }
 
-export async function prepareRelease(
+export async function prepareReleaseVersion(
 	options: { readonly bump?: BumpType },
-	services: ReleasePreparationServices,
-): Promise<PreparedRelease> {
+	services: ReleaseVersionPreparationServices,
+): Promise<PreparedVersion> {
 	const [files, history] = await Promise.all([
 		services.readWorkspace(),
 		services.readGitHistory(),
 	]);
-	const coreManifest = parseObject(
-		requiredFile(files, "packages/core/package.json"),
-		"packages/core/package.json",
-	);
-	assert(
-		typeof coreManifest.version === "string",
-		"@proseql/core is missing its version",
-	);
+	const currentVersion = coordinatedWorkspaceVersion(files, false);
 	const commits = history.commits.filter(
 		({ subject }) => !subject.startsWith("chore: release"),
 	);
@@ -169,33 +174,115 @@ export async function prepareRelease(
 			commits.map(({ subject }) => subject),
 			commits.map(({ body }) => body ?? "").join("\n"),
 		);
-	const nextVersion = incrementVersion(coreManifest.version, bump);
-	const now = services.now();
-	const date = now.toISOString().slice(0, 10);
+	const nextVersion = incrementVersion(currentVersion, bump);
+	const date = services.now().toISOString().slice(0, 10);
 	const updated = updateWorkspaceForRelease({
 		files,
 		nextVersion,
 		date,
 		commits,
 	});
-	await services.writeWorkspace(updated);
+	try {
+		await services.writeWorkspace(updated);
+	} catch (writeError) {
+		try {
+			await services.writeWorkspace(files);
+		} catch (rollbackError) {
+			throw new AggregateError(
+				[writeError, rollbackError],
+				"release version preparation failed and source rollback also failed",
+			);
+		}
+		throw writeError;
+	}
+	return { version: nextVersion, date };
+}
 
+export async function finalizeRelease(
+	services: ReleaseFinalizationServices,
+): Promise<PreparedRelease> {
+	await services.assertCleanTree();
+	const [files, history] = await Promise.all([
+		services.readWorkspace(),
+		services.readGitHistory(),
+	]);
+	const version = coordinatedWorkspaceVersion(files, true);
 	for (const packageName of COORDINATED_PACKAGE_NAMES) {
-		await services.checkVersionAvailable(
-			`@proseql/${packageName}`,
-			nextVersion,
-		);
+		await services.checkVersionAvailable(`@proseql/${packageName}`, version);
 	}
 	await services.runPreflight();
-	const artifacts = await services.prepareArtifacts(nextVersion);
+	await services.assertCleanTree();
+	const postflightHistory = await services.readGitHistory();
+	assert(
+		postflightHistory.commit === history.commit,
+		`HEAD changed during finalization from ${history.commit} to ${postflightHistory.commit}`,
+	);
+	const artifacts = await services.prepareArtifacts(version);
+	await services.assertCleanTree();
+	const finalHistory = await services.readGitHistory();
+	assert(
+		finalHistory.commit === history.commit,
+		`HEAD changed while copying release artifacts from ${history.commit} to ${finalHistory.commit}`,
+	);
 	const release = createPreparedRelease({
-		version: nextVersion,
-		commit: history.commit,
-		preparedAt: now.toISOString(),
+		version,
+		commit: finalHistory.commit,
+		preparedAt: services.now().toISOString(),
 		artifacts,
 	});
 	await services.writePreparedRelease(release);
 	return release;
+}
+
+function coordinatedWorkspaceVersion(
+	files: ReadonlyMap<string, string>,
+	requireReleaseEntry: boolean,
+): string {
+	let coordinatedVersion: string | undefined;
+	for (const packageName of COORDINATED_PACKAGE_NAMES) {
+		const path = `packages/${packageName}/package.json`;
+		const version = parseObject(requiredFile(files, path), path).version;
+		assert(typeof version === "string", `${path}: version is missing`);
+		assert(
+			/^\d+\.\d+\.\d+$/.test(version),
+			`${path}: invalid version ${version}`,
+		);
+		coordinatedVersion ??= version;
+		assert(
+			version === coordinatedVersion,
+			`${path}: version ${version} does not match coordinated version ${coordinatedVersion}`,
+		);
+	}
+	assert(
+		coordinatedVersion !== undefined,
+		"coordinated release has no packages",
+	);
+	const cliPath = "packages/cli/src/main.ts";
+	assert(
+		requiredFile(files, cliPath).includes(
+			`const VERSION = "${coordinatedVersion}";`,
+		),
+		`${cliPath}: VERSION must be ${coordinatedVersion}`,
+	);
+	const lock = requiredFile(files, "bun.lock");
+	for (const packageName of COORDINATED_PACKAGE_NAMES) {
+		const pattern = new RegExp(
+			`"packages/${packageName}":\\s*\\{[\\s\\S]*?"name":\\s*"@proseql/${packageName}",\\s*"version":\\s*"${escapeRegExp(coordinatedVersion)}"`,
+		);
+		assert(
+			pattern.test(lock),
+			`bun.lock: ${packageName} workspace version must be ${coordinatedVersion}`,
+		);
+	}
+	if (requireReleaseEntry) {
+		assert(
+			requiredFile(files, "CHANGELOG.md").includes(
+				`## v${coordinatedVersion} (`,
+			),
+			`CHANGELOG.md: missing v${coordinatedVersion} release entry`,
+		);
+	}
+	return coordinatedVersion;
 }
 
 function createChangelogEntry(
@@ -224,7 +311,9 @@ function createChangelogEntry(
 	return `## v${version} (${date})\n${content}`;
 }
 
-function createDefaultServices(root: string): ReleasePreparationServices {
+function createDefaultServices(
+	root: string,
+): ReleaseVersionPreparationServices & ReleaseFinalizationServices {
 	const workspacePaths = [
 		...COORDINATED_PACKAGE_NAMES.map(
 			(packageName) => `packages/${packageName}/package.json`,
@@ -248,6 +337,7 @@ function createDefaultServices(root: string): ReleasePreparationServices {
 			}
 		},
 		readGitHistory: async () => readGitHistory(root),
+		assertCleanTree: async () => assertCleanTree(root),
 		checkVersionAvailable: async (name, version) =>
 			checkNpmVersionAvailable(root, name, version),
 		runPreflight: async () => {
@@ -290,6 +380,18 @@ function readGitHistory(root: string): GitHistory {
 	return { commit, commits };
 }
 
+function assertCleanTree(root: string): void {
+	const status = execFileSync(
+		"git",
+		["status", "--porcelain", "--untracked-files=all"],
+		{ cwd: root, encoding: "utf8" },
+	).trim();
+	assert(
+		status.length === 0,
+		`release finalization requires a clean tree; commit or revert:\n${status}`,
+	);
+}
+
 function checkNpmVersionAvailable(
 	root: string,
 	name: string,
@@ -301,8 +403,15 @@ function checkNpmVersionAvailable(
 		{
 			cwd: root,
 			encoding: "utf8",
+			timeout: 30_000,
+			killSignal: "SIGTERM",
 		},
 	);
+	if (result.error) {
+		throw new Error(
+			`could not prove ${name}@${version} is available within 30000ms: ${result.error.message}`,
+		);
+	}
 	if (result.status === 0) {
 		throw new Error(`${name}@${version} already exists in the registry`);
 	}
@@ -377,35 +486,59 @@ function capitalize(value: string): string {
 	return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function assert(condition: boolean, message: string): asserts condition {
 	if (!condition) throw new Error(message);
 }
 
-function parseBump(args: ReadonlyArray<string>): BumpType | undefined {
-	if (args.length === 0) return undefined;
-	const [value, ...rest] = args;
-	if (
-		rest.length > 0 ||
-		value === undefined ||
-		!["patch", "minor", "major"].includes(value)
-	) {
-		throw new Error("Usage: bun run scripts/release.ts [patch|minor|major]");
+function parseCli(
+	args: ReadonlyArray<string>,
+):
+	| { readonly stage: "prepare"; readonly bump?: BumpType }
+	| { readonly stage: "finalize" } {
+	const [stage, bump, ...rest] = args;
+	if (stage === "finalize" && bump === undefined && rest.length === 0) {
+		return { stage };
 	}
-	return value as BumpType;
+	if (
+		stage === "prepare" &&
+		rest.length === 0 &&
+		(bump === undefined || ["patch", "minor", "major"].includes(bump))
+	) {
+		return { stage, bump: bump as BumpType | undefined };
+	}
+	throw new Error(
+		"Usage: bun run scripts/release.ts prepare [patch|minor|major] | finalize",
+	);
 }
 
 if (import.meta.main) {
 	const root = resolve(dirname(import.meta.path), "..");
 	try {
-		const release = await prepareRelease(
-			{ bump: parseBump(process.argv.slice(2)) },
-			createDefaultServices(root),
-		);
-		console.log(`Prepared @proseql coordinated release ${release.version}`);
-		console.log(
-			`Manifest: ${join(root, ".artifacts/release/prepared-release.json")}`,
-		);
-		console.log(`Approval id: ${release.releaseId}`);
+		const cli = parseCli(process.argv.slice(2));
+		const services = createDefaultServices(root);
+		if (cli.stage === "prepare") {
+			const prepared = await prepareReleaseVersion(
+				{ bump: cli.bump },
+				services,
+			);
+			console.log(
+				`Prepared source edits for coordinated release ${prepared.version}.`,
+			);
+			console.log(
+				"Review and commit the version, lockfile, CLI, and changelog edits before finalization.",
+			);
+		} else {
+			const release = await finalizeRelease(services);
+			console.log(`Finalized @proseql coordinated release ${release.version}`);
+			console.log(
+				`Manifest: ${join(root, ".artifacts/release/prepared-release.json")}`,
+			);
+			console.log(`Approval id: ${release.releaseId}`);
+		}
 		console.log(
 			"No commit, push, tag, GitHub release, or npm registry write was performed.",
 		);

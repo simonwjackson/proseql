@@ -228,10 +228,38 @@ export function manifestsMatch(
 	expected: ReleasePackageManifest,
 	actual: ReleasePackageManifest,
 ): boolean {
-	return (
-		stableStringify(registryManifestContract(expected)) ===
-		stableStringify(registryManifestContract(actual))
-	);
+	return manifestContractDiff(expected, actual).length === 0;
+}
+
+export function manifestContractDiff(
+	expected: ReleasePackageManifest,
+	actual: ReleasePackageManifest,
+): ReadonlyArray<string> {
+	const expectedContract = registryManifestContract(expected);
+	const actualContract = registryManifestContract(actual);
+	return [
+		...new Set([
+			...Object.keys(expectedContract),
+			...Object.keys(actualContract),
+		]),
+	]
+		.sort()
+		.filter(
+			(key) =>
+				stableStringify(expectedContract[key]) !==
+				stableStringify(actualContract[key]),
+		)
+		.map(
+			(key) =>
+				`${key}: expected ${conciseValue(expectedContract[key])}, actual ${conciseValue(actualContract[key])}`,
+		);
+}
+
+function conciseValue(value: unknown): string {
+	const serialized = stableStringify(value);
+	return serialized.length <= 120
+		? serialized
+		: `${serialized.slice(0, 117)}...`;
 }
 
 export function stableStringify(value: unknown): string {

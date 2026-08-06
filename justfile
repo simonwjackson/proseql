@@ -160,9 +160,13 @@ release-check:
     just browser-smoke
     just browser-budget
 
-# Reversibly prepare a release (auto-detects bump type, or pass patch/minor/major); never publishes, commits, pushes, or tags
-release *bump:
-    bun run scripts/release.ts {{bump}}
+# Prepare reversible version/changelog edits (auto-detects bump, or pass patch/minor/major); never builds, commits, pushes, tags, or publishes
+release-prepare *bump:
+    bun run scripts/release.ts prepare {{bump}}
+
+# From a clean reviewed commit, run all gates and bind exact tarballs to HEAD; never commits, pushes, tags, or publishes
+release-finalize:
+    bun run scripts/release.ts finalize
 
 # Inspect prepared registry state by default; destructive modes require explicit flags and PROSEQL_PUBLISH_APPROVAL
 publish-packages *args:
