@@ -168,10 +168,10 @@ describe("aggregateBrowserPerformanceTrials", () => {
 		expect(budget.wasmLinearMemory.passed).toBe(false);
 	});
 
-	it("fails when the combined interaction p95 reaches the strict 50ms boundary", () => {
+	it("uses the slowest per-trial p95 so fast trials cannot dilute a regression", () => {
 		const slowSamples = [
-			...Array.from({ length: 25 }, () => 10),
-			...Array.from({ length: 5 }, () => 50),
+			...Array.from({ length: 26 }, () => 10),
+			...Array.from({ length: 4 }, () => 50),
 		];
 		const aggregate = aggregateBrowserPerformanceTrials([
 			makeBrowserReport({
@@ -192,6 +192,7 @@ describe("aggregateBrowserPerformanceTrials", () => {
 			}),
 		]);
 		const budget = evaluateAggregate(aggregate);
+		// Only 4/90 combined samples are slow, so a pooled p95 would be 10ms.
 		expect(aggregate.interactions[0]?.p95Ms).toBe(50);
 		expect(
 			budget.interactions.every(

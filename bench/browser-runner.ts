@@ -1,6 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
 import { type Browser, chromium, type Page } from "playwright";
 import { createServer as createViteServer } from "vite";
 import {
@@ -68,7 +68,7 @@ export interface BrowserPerformanceJsonOutput {
 	readonly aggregation?: {
 		readonly coldStartup: "median-of-three-independent-cold-trials";
 		readonly memory: "maximum-of-three-trials";
-		readonly interactions: "combined-samples-from-three-trials";
+		readonly interactions: "combined-samples-with-maximum-per-trial-p95";
 		readonly minimumSamplesPerInteractionPerTrial: 30;
 	};
 	readonly report: BrowserPerformanceReport;
@@ -310,6 +310,7 @@ export const collectBrowserPerformanceReport = async (
 				const interactionReports: BrowserInteractionReport[] = [];
 				for (const interaction of interactions) {
 					logBrowserProgress(`interaction: ${interaction.name}`);
+					const afterBatch = interaction.afterBatch;
 					interactionReports.push(
 						await measureBrowserInteractionSamples(page, {
 							name: interaction.name,
@@ -318,9 +319,7 @@ export const collectBrowserPerformanceReport = async (
 							warmupIterations: interaction.warmupIterations,
 							sampleTimeoutMs: interaction.sampleTimeoutMs,
 							afterBatch:
-								interaction.afterBatch === undefined
-									? undefined
-									: () => interaction.afterBatch!(page),
+								afterBatch === undefined ? undefined : () => afterBatch(page),
 							evaluate: () => interaction.evaluate(page),
 						}),
 					);
@@ -382,7 +381,7 @@ export const buildBrowserPerformanceTrialJsonOutput = (
 		aggregation: {
 			coldStartup: "median-of-three-independent-cold-trials",
 			memory: "maximum-of-three-trials",
-			interactions: "combined-samples-from-three-trials",
+			interactions: "combined-samples-with-maximum-per-trial-p95",
 			minimumSamplesPerInteractionPerTrial: 30,
 		},
 		report,
@@ -502,9 +501,11 @@ export const collectBrowserWorkloadReport = async (
 ): Promise<BrowserPerformanceReport> => {
 	const ownedBrowser = browser ?? (await launchBenchmarkBrowser());
 	const server = await startBrowserWorkloadServer();
-	let failure: unknown;
+	let report: BrowserPerformanceReport | undefined;
+	let primaryFailed = false;
+	let primaryFailure: unknown;
 	try {
-		return await collectBrowserPerformanceReport(
+		report = await collectBrowserPerformanceReport(
 			ownedBrowser,
 			async () => {
 				const page = await ownedBrowser.newPage();
@@ -527,38 +528,49 @@ export const collectBrowserWorkloadReport = async (
 			options,
 		);
 	} catch (error) {
-		failure = error;
-		throw error;
-	} finally {
-		logBrowserProgress("teardown: close workload server");
-		try {
-			await server.close();
-		} catch (closeError) {
-			if (failure === undefined) {
-				throw closeError;
-			}
+		primaryFailed = true;
+		primaryFailure = error;
+	}
+
+	let teardownFailed = false;
+	let teardownFailure: unknown;
+	const captureTeardownFailure = (label: string, error: unknown): void => {
+		if (!teardownFailed) {
+			teardownFailed = true;
+			teardownFailure = error;
+		}
+		if (primaryFailed || teardownFailed) {
 			logBrowserProgress(
-				`teardown: workload server close failed after primary error (${closeError instanceof Error ? closeError.message : String(closeError)})`,
+				`teardown: ${label} failed${primaryFailed ? " after primary error" : ""} (${error instanceof Error ? error.message : String(error)})`,
 			);
 		}
-		if (!browser) {
-			logBrowserProgress("teardown: close owned browser");
-			try {
-				await withTimeout(
-					"owned browser close",
-					DEFAULT_BROWSER_TEARDOWN_TIMEOUT_MS,
-					() => ownedBrowser.close(),
-				);
-			} catch (closeError) {
-				if (failure === undefined) {
-					throw closeError;
-				}
-				logBrowserProgress(
-					`teardown: owned browser close failed after primary error (${closeError instanceof Error ? closeError.message : String(closeError)})`,
-				);
-			}
+	};
+
+	logBrowserProgress("teardown: close workload server");
+	try {
+		await server.close();
+	} catch (closeError) {
+		captureTeardownFailure("workload server close", closeError);
+	}
+	if (!browser) {
+		logBrowserProgress("teardown: close owned browser");
+		try {
+			await withTimeout(
+				"owned browser close",
+				DEFAULT_BROWSER_TEARDOWN_TIMEOUT_MS,
+				() => ownedBrowser.close(),
+			);
+		} catch (closeError) {
+			captureTeardownFailure("owned browser close", closeError);
 		}
 	}
+
+	if (primaryFailed) throw primaryFailure;
+	if (teardownFailed) throw teardownFailure;
+	if (report === undefined) {
+		throw new Error("browser workload report completed without a result");
+	}
+	return report;
 };
 
 export const closeBrowserPerformancePage = async (

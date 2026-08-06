@@ -47,6 +47,7 @@ const aggregateInteraction = (
 	trials: ReadonlyArray<BrowserPerformanceReport>,
 ): BrowserInteractionReport => {
 	const samples: number[] = [];
+	const trialP95s: number[] = [];
 	for (const [trialIndex, trial] of trials.entries()) {
 		const matching = trial.interactions.filter(
 			(interaction) => interaction.name === name,
@@ -73,6 +74,9 @@ const aggregateInteraction = (
 			);
 			samples.push(sample);
 		}
+		const trialP95 = exactPercentile(interaction.samples, 95);
+		assert(trialP95 !== undefined, `${name} browser trial has no p95 sample`);
+		trialP95s.push(trialP95);
 	}
 	const meanMs =
 		samples.reduce((sum, sample) => sum + sample, 0) / samples.length;
@@ -80,7 +84,8 @@ const aggregateInteraction = (
 		name,
 		samples,
 		p50Ms: exactPercentile(samples, 50),
-		p95Ms: exactPercentile(samples, 95),
+		// Do not let two fast trials dilute a slow trial below the release budget.
+		p95Ms: Math.max(...trialP95s),
 		p99Ms: exactPercentile(samples, 99),
 		meanMs,
 		observedCleanupCount: BROWSER_WORKLOAD_EXPECTATIONS[name].cleanupCount,

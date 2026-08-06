@@ -119,6 +119,9 @@ workflow-lint:
 # Lint and format-check every coordinated release source, script, and manifest
 lint:
     biome check --config-path=./biome.json \
+        bench/browser-aggregation.ts \
+        bench/browser-runner.ts \
+        bench/browser-runner.test.ts \
         packages/{core,engine,node,rest,effect,cli,browser,rpc}/src \
         packages/{engine,effect}/scripts \
         scripts \
