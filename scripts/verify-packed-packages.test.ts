@@ -407,6 +407,14 @@ describe("safe package tarball extraction", () => {
 			expect(Date.now() - startedAt).toBeLessThan(2_000);
 			expect(existsSync(destination)).toBe(false);
 			expect(readFileSync(outside, "utf8")).toBe("unchanged");
+			const processes = execFileSync("ps", ["-eo", "args="], {
+				encoding: "utf8",
+			});
+			expect(
+				processes
+					.split("\n")
+					.filter((line) => line.includes(`tar -tzf ${tarball}`)),
+			).toEqual([]);
 		});
 	});
 

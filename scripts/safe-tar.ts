@@ -62,19 +62,27 @@ function runBoundedTar(
 	stdio: "inherit" | ["ignore", "pipe", "pipe"],
 ): string {
 	try {
-		const output = execFileSync(tarExecutable, args, {
-			encoding: "utf8",
-			stdio,
-			timeout: timeoutMs,
-			killSignal: "SIGKILL",
-		});
+		const output = execFileSync(
+			"timeout",
+			[
+				"--signal=TERM",
+				"--kill-after=1s",
+				`${timeoutMs / 1_000}s`,
+				tarExecutable,
+				...args,
+			],
+			{
+				encoding: "utf8",
+				stdio,
+			},
+		);
 		return typeof output === "string" ? output : "";
 	} catch (error) {
 		if (
 			typeof error === "object" &&
 			error !== null &&
-			"code" in error &&
-			error.code === "ETIMEDOUT"
+			"status" in error &&
+			(error.status === 124 || error.status === 137)
 		) {
 			throw new Error(`tar ${phase} timed out after ${timeoutMs}ms`, {
 				cause: error,
