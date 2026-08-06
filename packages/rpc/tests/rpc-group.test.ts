@@ -15,7 +15,13 @@ import { fileURLToPath } from "node:url";
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { beforeAll, describe, expect, expectTypeOf, it } from "vitest";
-import { makeCollectionRpcs, makeRpcGroup } from "../src/index.js";
+import {
+	type CollectedQueryResult,
+	type CreateManyResult,
+	makeCollectionRpcs,
+	makeRpcGroup,
+	type UpsertResult,
+} from "../src/index.js";
 
 const BookSchema = Schema.Struct({
 	id: Schema.String,
@@ -104,6 +110,16 @@ describe("public RPC definitions", () => {
 		expectTypeOf<
 			QueryRows<Success<typeof books.query.successSchema>>
 		>().toMatchTypeOf<Partial<Book>>();
+		expectTypeOf<
+			CreateManyResult<Book>["created"][number]
+		>().toEqualTypeOf<Book>();
+		expectTypeOf<UpsertResult<Book>>().toMatchTypeOf<
+			Book & { readonly __action: string }
+		>();
+		expectTypeOf<CollectedQueryResult<Book>>().toMatchTypeOf<
+			| ReadonlyArray<Partial<Book>>
+			| { readonly items: ReadonlyArray<Partial<Book>> }
+		>();
 	});
 
 	it("loads the built root without engine packages and gates ./server on its optional peer", () => {
