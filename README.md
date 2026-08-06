@@ -42,10 +42,12 @@ your-project/
 ## Install
 
 ```sh
-npm install @proseql/core
+npm install @proseql/core effect@4.0.0-beta.103
 # For file persistence (Node.js):
-npm install @proseql/node
+npm install @proseql/node effect@4.0.0-beta.103
 ```
+
+The Effect-facing packages are tested with exactly `effect@4.0.0-beta.103`. The Promise-first `@proseql/engine` package runs queries and mutations in Rust compiled to WebAssembly. `@proseql/effect` adds Effect and Stream APIs over that engine, and `@proseql/browser` supplies the browser entry point and storage hosts.
 
 ## Quick Start
 
@@ -141,12 +143,14 @@ Need the opposite shape — many fragments merged into one read-only view rather
 
 | Package | Description |
 |---------|-------------|
-| [`@proseql/core`](packages/core/README.md) | Runtime-agnostic database core. Schema, CRUD, queries, aggregation, relationships, indexing, transactions, plugins. |
+| [`@proseql/core`](packages/core/README.md) | Shared TypeScript schemas, types, and the original runtime-agnostic database APIs. |
+| [`@proseql/engine`](packages/engine/README.md) | Promise-first database execution in Rust/WASM for Node and browsers. |
+| [`@proseql/effect`](packages/effect/README.md) | Effect and Stream APIs over the Rust/WASM engine. |
 | [`@proseql/node`](packages/node/README.md) | Node.js file persistence. File formats, debounced writes, append-only collections. |
-| [`@proseql/browser`](packages/browser/README.md) | Browser storage adapters: localStorage, sessionStorage, IndexedDB. |
+| [`@proseql/browser`](packages/browser/README.md) | Browser-safe WASM entry points plus localStorage, sessionStorage, and IndexedDB hosts. |
 | [`@proseql/cli`](packages/cli/README.md) | Command-line interface. Query, create, update, delete, migrate, convert formats. |
 | [`@proseql/rest`](packages/rest/README.md) | Framework-agnostic REST API handlers. Route generation, query parsing, error mapping. |
-| [`@proseql/rpc`](packages/rpc/README.md) | Effect RPC integration. Type-safe procedures, streaming queries, error schemas. |
+| [`@proseql/rpc`](packages/rpc/README.md) | Client-safe Effect RPC definitions at the root and Rust/WASM-backed handlers under `./server`; transport and access control stay in the application. |
 
 ## Examples
 
@@ -168,6 +172,10 @@ Need the opposite shape — many fragments merged into one read-only view rather
 | [14-append-only-jsonl](examples/14-append-only-jsonl) | Event logs, audit trails |
 | [15-reactive-queries](examples/15-reactive-queries) | Live query streams |
 | [16-advanced-features](examples/16-advanced-features) | ID generation, indexing, unique constraints, transactions, migrations, plugins, foreign keys, document sources |
+
+## Publishing
+
+Maintainers use the two-approval, exact-commit process in [`docs/releases/npm-packages.md`](docs/releases/npm-packages.md). Package preparation and ordinary CI do not publish, push tags, or require npm credentials.
 
 ## License
 

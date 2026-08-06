@@ -1,8 +1,10 @@
 # @proseql/rpc
 
-Effect 4 RPC definitions and Rust/WASM-backed server handlers for ProseQL.
+Effect 4 RPC definitions and Rust/WASM-backed server handlers for ProseQL, tested with exactly `effect@4.0.0-beta.103`.
 
-The package does not choose a network transport. Applications use the client and server transports from `effect/unstable/rpc` and must authenticate and authorize callers before requests reach mutation handlers.
+The root `@proseql/rpc` export is the client-safe call contract: operation names, payloads, results, and error schemas. It does not install or load the database engine. The `@proseql/rpc/server` export builds handlers through `@proseql/effect`, so server-side queries and mutations run in the Rust/WASM engine.
+
+This package does not provide a network server, choose a transport, or implement authentication or authorization. Applications use client and server transports from `effect/unstable/rpc` and must authenticate and authorize callers before any request reaches these handlers, especially mutation handlers.
 
 ## Install
 

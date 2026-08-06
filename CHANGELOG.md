@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Features
+- Prepare the coordinated Rust/WASM engine, Effect, browser, and RPC npm package set with an exact `effect@4.0.0-beta.103` contract, packed and registry consumer verification, and a protected manual publication workflow.
+
+### Documentation
+- Document package roles, WASM loading, RPC security boundaries, the deferred AI release, the browser async transaction limitation, and first-publication recovery procedures.
+
 ## v0.15.0 (2026-06-11)
 
 ### Features
