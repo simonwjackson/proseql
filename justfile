@@ -169,7 +169,7 @@ rust-format:
 
 # Verify Rust formatting without modifying source
 rust-format-check:
-    cargo fmt --manifest-path crates/Cargo.toml -- --check
+    cargo fmt --manifest-path crates/Cargo.toml --all --check
 
 # Check the WASM boundary crate for its production target
 rust-wasm-check:
