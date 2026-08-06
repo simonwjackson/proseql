@@ -599,36 +599,73 @@ function verifyStrictEffectPeers(
 	packed: ReadonlyArray<PackedPackage>,
 	outputDirectory: string,
 ): void {
-	for (const rejectedVersion of ["4.0.0-beta.60", "4.0.0-beta.102"]) {
-		const consumer = createConsumer(
-			outputDirectory,
-			`effect-${rejectedVersion}`,
-			packed,
-			["core", "node"],
-			rejectedVersion,
-		);
-		const result = spawnSync(
-			"npm",
-			[
-				"install",
-				"--strict-peer-deps",
-				"--ignore-scripts",
-				"--no-audit",
-				"--no-fund",
-				"--package-lock=false",
-			],
-			{ cwd: consumer, encoding: "utf8" },
-		);
-		assert(
-			result.status !== 0,
-			`strict install unexpectedly accepted effect@${rejectedVersion}`,
-		);
-		const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-		assert(
-			output.includes("ERESOLVE") || output.includes("peer effect"),
-			`effect@${rejectedVersion} failed for an unexpected reason: ${output}`,
-		);
+	const peerPackages = packed.filter(
+		(artifact) => artifact.manifest.peerDependencies?.effect === EFFECT_VERSION,
+	);
+	assert(peerPackages.length > 0, "no coordinated Effect peers were found");
+	for (const artifact of peerPackages) {
+		const closure = coordinatedDependencyClosure(packed, artifact.packageName);
+		for (const rejectedVersion of ["4.0.0-beta.60", "4.0.0-beta.102"]) {
+			const consumer = createConsumer(
+				outputDirectory,
+				`effect-${artifact.packageName}-${rejectedVersion}`,
+				packed,
+				closure,
+				rejectedVersion,
+			);
+			const result = spawnSync(
+				"npm",
+				[
+					"install",
+					"--strict-peer-deps",
+					"--ignore-scripts",
+					"--no-audit",
+					"--no-fund",
+					"--package-lock=false",
+				],
+				{ cwd: consumer, encoding: "utf8" },
+			);
+			assert(
+				result.status !== 0,
+				`@proseql/${artifact.packageName} unexpectedly accepted effect@${rejectedVersion}`,
+			);
+			const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+			assert(
+				output.includes("ERESOLVE") || output.includes("peer effect"),
+				`@proseql/${artifact.packageName} rejected effect@${rejectedVersion} for an unexpected reason: ${output}`,
+			);
+		}
 	}
+}
+
+function coordinatedDependencyClosure(
+	packed: ReadonlyArray<PackedPackage>,
+	packageName: CoordinatedPackageName,
+): ReadonlyArray<CoordinatedPackageName> {
+	const included = new Set<CoordinatedPackageName>();
+	const visit = (current: CoordinatedPackageName): void => {
+		if (included.has(current)) return;
+		const artifact = packed.find(
+			(candidate) => candidate.packageName === current,
+		);
+		assert(artifact !== undefined, `missing ${current} tarball`);
+		for (const dependency of Object.keys(
+			artifact.manifest.dependencies ?? {},
+		)) {
+			if (!dependency.startsWith("@proseql/")) continue;
+			const dependencyName = dependency.slice("@proseql/".length);
+			assert(
+				COORDINATED_PACKAGE_NAMES.includes(
+					dependencyName as CoordinatedPackageName,
+				),
+				`@proseql/${current} depends on non-coordinated ${dependency}`,
+			);
+			visit(dependencyName as CoordinatedPackageName);
+		}
+		included.add(current);
+	};
+	visit(packageName);
+	return [...included];
 }
 
 function verifyBrowserConsumer(
@@ -656,7 +693,7 @@ function verifyBrowserConsumer(
 	installConsumer(consumer);
 	writeFileSync(
 		join(consumer, "index.html"),
-		'<div id="app"></div><script type="module" src="/main.js"></script>\n',
+		'<link rel="icon" href="data:,"><div id="app"></div><script type="module" src="/main.js"></script>\n',
 	);
 	writeFileSync(join(consumer, "main.js"), browserConsumerSource());
 	writeFileSync(join(consumer, "browser-smoke.mjs"), browserRunnerSource());
@@ -863,20 +900,45 @@ window.__PROSEQL_PACKED_RESULT__ = rows.map((row) => ({ ...row }));
 
 function browserRunnerSource(): string {
 	return `import { chromium } from "playwright";
-import { createServer } from "vite";
-const server = await createServer({ root: process.cwd(), optimizeDeps: { exclude: ["@proseql/engine"], include: ["@proseql/core", "picomatch", "hjson"] }, server: { host: "127.0.0.1", port: 0 } });
+import { createLogger, createServer } from "vite";
+const viteFailures = [];
+const logger = createLogger("info", { allowClearScreen: false });
+const originalWarn = logger.warn.bind(logger);
+const originalError = logger.error.bind(logger);
+logger.warn = (message, options) => {
+  if (/externalized for browser compatibility|cannot access .*externalized/i.test(message)) viteFailures.push("vite warning: " + message);
+  originalWarn(message, options);
+};
+logger.error = (message, options) => {
+  viteFailures.push("vite error: " + message);
+  originalError(message, options);
+};
+const server = await createServer({ root: process.cwd(), customLogger: logger, optimizeDeps: { exclude: ["@proseql/engine"], include: ["@proseql/core", "picomatch"] }, server: { host: "127.0.0.1", port: 0 } });
 await server.listen();
 const url = server.resolvedUrls?.local?.[0] ?? "http://127.0.0.1:5173";
 const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.CHROMIUM_EXECUTABLE_PATH } : {}) });
 try {
+  const failures = viteFailures;
+  const wasmResponses = [];
   const page = await browser.newPage();
-  page.on("pageerror", (error) => console.error("[packed-browser-pageerror]", error));
-  page.on("console", (message) => console.error("[packed-browser-console:" + message.type() + "]", message.text()));
-  page.on("response", (response) => { if (response.status() >= 400) console.error("[packed-browser-response]", response.status(), response.url()); });
+  page.on("pageerror", (error) => failures.push("page error: " + error.stack));
+  page.on("console", (message) => {
+    const text = message.text();
+    if (message.type() === "error" || /externalized for browser compatibility|cannot access .*externalized/i.test(text)) failures.push("console " + message.type() + ": " + text);
+  });
+  page.on("requestfailed", (request) => failures.push("request failed: " + request.url() + " " + (request.failure()?.errorText ?? "unknown")));
+  page.on("response", (response) => {
+    const parsed = new URL(response.url());
+    if (parsed.pathname.endsWith(".wasm") && response.status() >= 200 && response.status() < 300) wasmResponses.push(response.url());
+    if (response.status() >= 400 && parsed.pathname !== "/favicon.ico") failures.push("response " + response.status() + ": " + response.url());
+  });
   await page.goto(url, { waitUntil: "networkidle" });
   await page.waitForFunction(() => Array.isArray(window.__PROSEQL_PACKED_RESULT__));
+  await page.waitForTimeout(50);
   const result = await page.evaluate(() => window.__PROSEQL_PACKED_RESULT__);
-  if (result.length !== 1 || result[0].title !== "Dune") throw new Error("packed browser behavior failed");
+  if (result.length !== 1 || result[0].title !== "Dune") failures.push("packed browser behavior failed");
+  if (wasmResponses.length === 0) failures.push("no successful WASM response was observed");
+  if (failures.length > 0) throw new Error(failures.join("\\n"));
 } finally {
   await browser.close();
   await server.close();

@@ -54,8 +54,7 @@
   "sideEffects": false,
   "dependencies": {
     "@proseql/core": "workspace:*",
-    "@proseql/engine": "workspace:*",
-    "effect": "4.0.0-beta.103"
+    "@proseql/engine": "workspace:*"
   },
   "peerDependencies": {
     "effect": "4.0.0-beta.103"
