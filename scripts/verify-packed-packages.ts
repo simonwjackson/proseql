@@ -16,7 +16,15 @@ import {
 } from "node:fs";
 import { builtinModules } from "node:module";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import {
+	basename,
+	dirname,
+	isAbsolute,
+	join,
+	relative,
+	resolve,
+	sep,
+} from "node:path";
 
 export const EFFECT_VERSION = "4.0.0-beta.103";
 export const COORDINATED_PACKAGE_NAMES = [
@@ -366,6 +374,93 @@ function buildFromCleanSource(): void {
 	chmodSync(join(repoRoot, "packages/cli/dist/main.js"), 0o755);
 }
 
+export function inspectAndExtractTarball(
+	tarballPath: string,
+	destinationDirectory: string,
+): void {
+	const list = (verbose: boolean): ReadonlyArray<string> => {
+		const output = execFileSync(
+			"tar",
+			[
+				verbose ? "-tvzf" : "-tzf",
+				tarballPath,
+				"--quoting-style=escape",
+				...(verbose ? ["--numeric-owner"] : []),
+			],
+			{
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		);
+		return output.split("\n").filter((line) => line.length > 0);
+	};
+
+	const names = list(false);
+	const verbose = list(true);
+	assert(names.length > 0, `${tarballPath}: empty tarball`);
+	assert(
+		names.length === verbose.length,
+		`${tarballPath}: inconsistent tar member listing`,
+	);
+	const root = resolve(destinationDirectory);
+	const seen = new Set<string>();
+	for (let index = 0; index < names.length; index += 1) {
+		const name = names[index];
+		assert(name !== undefined, `${tarballPath}: missing tar member name`);
+		assert(
+			!name.includes("\\"),
+			`${tarballPath}: escaped or platform-specific tar member ${name}`,
+		);
+		assert(!isAbsolute(name), `${tarballPath}: absolute tar member ${name}`);
+		const withoutTrailingSlash = name.endsWith("/") ? name.slice(0, -1) : name;
+		const parts = withoutTrailingSlash.split("/");
+		assert(
+			parts[0] === "package",
+			`${tarballPath}: tar member must be rooted at package/: ${name}`,
+		);
+		assert(
+			parts.every((part) => part !== "." && part !== ".." && part.length > 0),
+			`${tarballPath}: traversal tar member ${name}`,
+		);
+		const relativeParts = parts.slice(1);
+		const outputPath = resolve(root, ...relativeParts);
+		assert(
+			outputPath === root || outputPath.startsWith(`${root}${sep}`),
+			`${tarballPath}: tar member resolves outside extraction root: ${name}`,
+		);
+		assert(
+			!seen.has(outputPath),
+			`${tarballPath}: duplicate tar member ${name}`,
+		);
+		seen.add(outputPath);
+		const type = verbose[index]?.[0];
+		assert(
+			type === "-" || type === "d",
+			`${tarballPath}: unsupported tar member type ${String(type)} for ${name}`,
+		);
+		if (relativeParts.length === 0) {
+			assert(type === "d", `${tarballPath}: package root must be a directory`);
+		}
+	}
+
+	mkdirSync(root, { recursive: true });
+	execFileSync(
+		"tar",
+		[
+			"-xzf",
+			tarballPath,
+			"--strip-components=1",
+			"--no-same-owner",
+			"--no-same-permissions",
+			"--delay-directory-restore",
+			"--no-overwrite-dir",
+			"-C",
+			root,
+		],
+		{ stdio: "inherit" },
+	);
+}
+
 function packAndInspect(
 	tarballDirectory: string,
 	extractedDirectory: string,
@@ -394,14 +489,7 @@ function packAndInspect(
 		const tarballPath = join(tarballDirectory, filename);
 		assert(existsSync(tarballPath), `missing packed tarball ${tarballPath}`);
 		const packageDirectory = join(extractedDirectory, packageName);
-		mkdirSync(packageDirectory, { recursive: true });
-		run("tar", [
-			"-xzf",
-			tarballPath,
-			"--strip-components=1",
-			"-C",
-			packageDirectory,
-		]);
+		inspectAndExtractTarball(tarballPath, packageDirectory);
 		const files = readExtractedPackageFiles(packageDirectory);
 		const manifestBytes = files.get("package.json");
 		assert(

@@ -1,10 +1,22 @@
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+	existsSync,
+	linkSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	COORDINATED_PACKAGE_NAMES,
 	type CoordinatedPackageName,
 	EFFECT_VERSION,
+	inspectAndExtractTarball,
 	type PackedPackageContract,
 	type PackedPackageJson,
 	validatePackedPackage,
@@ -222,5 +234,84 @@ describe("packed package contract", () => {
 		expect(() =>
 			validatePackedPackage(mutate(contract, contract.manifest, files)),
 		).toThrow(/unexpected packed file src\/index\.ts/);
+	});
+});
+
+describe("safe package tarball extraction", () => {
+	const withFixture = (run: (root: string, source: string) => void) => {
+		const root = mkdtempSync(join(tmpdir(), "proseql-tar-security-"));
+		const source = join(root, "source");
+		mkdirSync(source);
+		try {
+			run(root, source);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	};
+
+	it("rejects traversal members before they can write outside extraction root", () => {
+		withFixture((root, source) => {
+			writeFileSync(join(source, "escape.txt"), "owned");
+			const tarball = join(root, "traversal.tgz");
+			execFileSync("tar", [
+				"-czf",
+				tarball,
+				"--transform=s#^escape.txt$#package/../../outside.txt#",
+				"-C",
+				source,
+				"escape.txt",
+			]);
+			const destination = join(root, "extract", "package");
+			expect(() => inspectAndExtractTarball(tarball, destination)).toThrow(
+				/traversal|outside extraction root/,
+			);
+			expect(existsSync(join(root, "extract", "outside.txt"))).toBe(false);
+		});
+	});
+
+	it("rejects absolute member paths", () => {
+		withFixture((root, source) => {
+			writeFileSync(join(source, "absolute.txt"), "owned");
+			const tarball = join(root, "absolute.tgz");
+			execFileSync("tar", [
+				"-czf",
+				tarball,
+				"--transform=s#^absolute.txt$#/tmp/proseql-absolute-escape#",
+				"-C",
+				source,
+				"absolute.txt",
+			]);
+			expect(() =>
+				inspectAndExtractTarball(tarball, join(root, "extract")),
+			).toThrow(/absolute/);
+		});
+	});
+
+	it.each([
+		"symlink",
+		"hardlink",
+		"fifo",
+	] as const)("rejects %s members before extraction", (kind) => {
+		withFixture((root, source) => {
+			writeFileSync(join(source, "target.txt"), "target");
+			const member = join(source, `${kind}.entry`);
+			if (kind === "symlink") symlinkSync("target.txt", member);
+			else if (kind === "hardlink")
+				linkSync(join(source, "target.txt"), member);
+			else execFileSync("mkfifo", [member]);
+			const tarball = join(root, `${kind}.tgz`);
+			execFileSync("tar", [
+				"-czf",
+				tarball,
+				"--transform=s#^#package/#",
+				"-C",
+				source,
+				...(kind === "hardlink" ? ["target.txt"] : []),
+				`${kind}.entry`,
+			]);
+			expect(() =>
+				inspectAndExtractTarball(tarball, join(root, "extract")),
+			).toThrow(/unsupported tar member type/);
+		});
 	});
 });
