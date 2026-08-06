@@ -6,6 +6,12 @@
     url = "https://registry.npmjs.org/@effect/platform/-/platform-0.76.1.tgz";
     hash = "sha512-r55Bq+hmuFqOBZ6cgYojWqrQmPM6JEnVZOgX3V4xDi+PfxnW3WEkQEHxb+pl8y36ooCRT/+8QlMuoFwUtz/pag==";
   };
+  "@effect/platform/multipasta" = {
+    out_path = "@effect/platform/node_modules/multipasta";
+    name = "multipasta@0.2.7";
+    url = "https://registry.npmjs.org/multipasta/-/multipasta-0.2.7.tgz";
+    hash = "sha512-KPA58d68KgGil15oDqXjkUBEBYc00XvbPj5/X+dyzeo/lWm9Nc25pQRlf1D+gv4OpK7NM0J1odrbu9JNNGvynA==";
+  };
   "@effect/rpc" = {
     out_path = "@effect/rpc";
     name = "@effect/rpc@0.51.1";
@@ -164,39 +170,39 @@
   };
   "@msgpackr-extract/msgpackr-extract-darwin-arm64" = {
     out_path = "@msgpackr-extract/msgpackr-extract-darwin-arm64";
-    name = "@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3";
-    url = "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-darwin-arm64/-/msgpackr-extract-darwin-arm64-3.0.3.tgz";
-    hash = "sha512-QZHtlVgbAdy2zAqNA9Gu1UpIuI8Xvsd1v8ic6B2pZmeFnFcMWiPLfWXh7TVw4eGEZ/C9TH281KwhVoeQUKbyjw==";
+    name = "@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4";
+    url = "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-darwin-arm64/-/msgpackr-extract-darwin-arm64-3.0.4.tgz";
+    hash = "sha512-LCkGo6JDfaBhgST7UpPWgNgLINpcpabaHfyz5OBx75nUYxBsaEPxjnyNjWpeb/xBup/682QnBfRBy2/LvPutZQ==";
   };
   "@msgpackr-extract/msgpackr-extract-darwin-x64" = {
     out_path = "@msgpackr-extract/msgpackr-extract-darwin-x64";
-    name = "@msgpackr-extract/msgpackr-extract-darwin-x64@3.0.3";
-    url = "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-darwin-x64/-/msgpackr-extract-darwin-x64-3.0.3.tgz";
-    hash = "sha512-mdzd3AVzYKuUmiWOQ8GNhl64/IoFGol569zNRdkLReh6LRLHOXxU4U8eq0JwaD8iFHdVGqSy4IjFL4reoWCDFw==";
+    name = "@msgpackr-extract/msgpackr-extract-darwin-x64@3.0.4";
+    url = "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-darwin-x64/-/msgpackr-extract-darwin-x64-3.0.4.tgz";
+    hash = "sha512-zExlW9zUJKZH/tOtVMttwjKa4Xm/3KcNjnE3dPN92uCktwavMxpgCA3MoJK/DOnTWsQgo224OaST27/mPNAf+w==";
   };
   "@msgpackr-extract/msgpackr-extract-linux-arm" = {
     out_path = "@msgpackr-extract/msgpackr-extract-linux-arm";
-    name = "@msgpackr-extract/msgpackr-extract-linux-arm@3.0.3";
-    url = "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-linux-arm/-/msgpackr-extract-linux-arm-3.0.3.tgz";
-    hash = "sha512-fg0uy/dG/nZEXfYilKoRe7yALaNmHoYeIoJuJ7KJ+YyU2bvY8vPv27f7UKhGRpY6euFYqEVhxCFZgAUNQBM3nw==";
+    name = "@msgpackr-extract/msgpackr-extract-linux-arm@3.0.4";
+    url = "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-linux-arm/-/msgpackr-extract-linux-arm-3.0.4.tgz";
+    hash = "sha512-Tg3yX65f5GbtXLkrYEHE5oibZG9epyYWas7FogTTEJeDEF9JlXJzKgXaNhT3UXlTOeA+AfZpYZYZ0uPj7Cfquw==";
   };
   "@msgpackr-extract/msgpackr-extract-linux-arm64" = {
     out_path = "@msgpackr-extract/msgpackr-extract-linux-arm64";
-    name = "@msgpackr-extract/msgpackr-extract-linux-arm64@3.0.3";
-    url = "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-linux-arm64/-/msgpackr-extract-linux-arm64-3.0.3.tgz";
-    hash = "sha512-YxQL+ax0XqBJDZiKimS2XQaf+2wDGVa1enVRGzEvLLVFeqa5kx2bWbtcSXgsxjQB7nRqqIGFIcLteF/sHeVtQg==";
+    name = "@msgpackr-extract/msgpackr-extract-linux-arm64@3.0.4";
+    url = "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-linux-arm64/-/msgpackr-extract-linux-arm64-3.0.4.tgz";
+    hash = "sha512-dgX0P/9wGPJeHFBG+ZmhgE6bmtMt7NP5CRBGyyktpopdk/mW4POnrpQsSLtKI1dwpc+pPLuXHDh6vvskyQE/sw==";
   };
   "@msgpackr-extract/msgpackr-extract-linux-x64" = {
     out_path = "@msgpackr-extract/msgpackr-extract-linux-x64";
-    name = "@msgpackr-extract/msgpackr-extract-linux-x64@3.0.3";
-    url = "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-linux-x64/-/msgpackr-extract-linux-x64-3.0.3.tgz";
-    hash = "sha512-cvwNfbP07pKUfq1uH+S6KJ7dT9K8WOE4ZiAcsrSes+UY55E/0jLYc+vq+DO7jlmqRb5zAggExKm0H7O/CBaesg==";
+    name = "@msgpackr-extract/msgpackr-extract-linux-x64@3.0.4";
+    url = "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-linux-x64/-/msgpackr-extract-linux-x64-3.0.4.tgz";
+    hash = "sha512-8TNXMEjJc3QEy7R/x1INhgiU+XakDAFUzBhaz7+Rbrs8NH5UQeHQxxmzsSBJGyV6I1jW79undiQm8tOI+D+8FQ==";
   };
   "@msgpackr-extract/msgpackr-extract-win32-x64" = {
     out_path = "@msgpackr-extract/msgpackr-extract-win32-x64";
-    name = "@msgpackr-extract/msgpackr-extract-win32-x64@3.0.3";
-    url = "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-win32-x64/-/msgpackr-extract-win32-x64-3.0.3.tgz";
-    hash = "sha512-x0fWaQtYp4E6sktbsdAqnehxDgEc/VwM7uLsRCYWaiGu0ykYdZPiS8zCWdnjHwyiumousxfBm4SO31eXqwEZhQ==";
+    name = "@msgpackr-extract/msgpackr-extract-win32-x64@3.0.4";
+    url = "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-win32-x64/-/msgpackr-extract-win32-x64-3.0.4.tgz";
+    hash = "sha512-CmCXPQrkbwExx3j946/PtHWHbYJiCRBRDl4BlkRQcJB/YOwQxJRTpoo7aTsortjgoJ1x7opzTSxn7C+ASSLVjQ==";
   };
   "@proseql/ai" = {
     out_path = "@proseql/ai";
@@ -590,15 +596,15 @@
   };
   "effect" = {
     out_path = "effect";
-    name = "effect@4.0.0-beta.60";
-    url = "https://registry.npmjs.org/effect/-/effect-4.0.0-beta.60.tgz";
-    hash = "sha512-OkrCKT+aBFIti4ryuxKfIozNx2SMxmFZ8uWB53gGzdjQzaJ7RVf0s6nJQ4JubJM//R24DtSYNOdmPRSK+qoRww==";
+    name = "effect@4.0.0-beta.103";
+    url = "https://registry.npmjs.org/effect/-/effect-4.0.0-beta.103.tgz";
+    hash = "sha512-pE8TxF4m2tQzVI+77dIlm3s+81TACV1AiX1JEkvY+zVuxgQQ8aGSkqXNJF6b/ST+coCSk5cUdbULpQ7sm4oHyw==";
   };
   "effect/fast-check" = {
     out_path = "effect/node_modules/fast-check";
-    name = "fast-check@4.7.0";
-    url = "https://registry.npmjs.org/fast-check/-/fast-check-4.7.0.tgz";
-    hash = "sha512-NsZRtqvSSoCP0HbNjUD+r1JH8zqZalyp6gLY9e7OYs7NK9b6AHOs2baBFeBG7bVNsuoukh89x2Yg3rPsul8ziQ==";
+    name = "fast-check@4.9.0";
+    url = "https://registry.npmjs.org/fast-check/-/fast-check-4.9.0.tgz";
+    hash = "sha512-7ms6T7SybUev/PQITciI0yLM2pOSFy5zpG8Ty7tQofcVaQUvrMXp6CBwqF6fThLCLOrfBtuHAtwq6Yu4XPCllg==";
   };
   "effect/fast-check/pure-rand" = {
     out_path = "effect/node_modules/fast-check/node_modules/pure-rand";
@@ -611,9 +617,9 @@
     binaries = {
       "yaml" = "../effect/node_modules/yaml/bin.mjs";
     };
-    name = "yaml@2.8.4";
-    url = "https://registry.npmjs.org/yaml/-/yaml-2.8.4.tgz";
-    hash = "sha512-ml/JPOj9fOQK8RNnWojA67GbZ0ApXAUlN2UQclwv2eVgTgn7O9gg9o7paZWKMp4g0H3nTLtS9LVzhkpOFIKzog==";
+    name = "yaml@2.9.0";
+    url = "https://registry.npmjs.org/yaml/-/yaml-2.9.0.tgz";
+    hash = "sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==";
   };
   "esbuild" = {
     out_path = "esbuild";
@@ -683,9 +689,9 @@
   };
   "ini" = {
     out_path = "ini";
-    name = "ini@6.0.0";
-    url = "https://registry.npmjs.org/ini/-/ini-6.0.0.tgz";
-    hash = "sha512-IBTdIkzZNOpqm7q3dRqJvMaldXjDHWkEDfrwGEQTs5eaQMWV+djAhR+wahyNNMAa+qpbDUhBMVt4ZKNwpPm7xQ==";
+    name = "ini@7.0.0";
+    url = "https://registry.npmjs.org/ini/-/ini-7.0.0.tgz";
+    hash = "sha512-ifK0CgjALofS5bkrcTy4RaQ9Vx2Knf/eLeIO+NaswQEpH1UblrtTSCIvN71qQDMq0PeQ/SSPojvEJp9vvvfr+w==";
   };
   "is-stream" = {
     out_path = "is-stream";
@@ -776,24 +782,24 @@
   };
   "msgpackr" = {
     out_path = "msgpackr";
-    name = "msgpackr@1.11.12";
-    url = "https://registry.npmjs.org/msgpackr/-/msgpackr-1.11.12.tgz";
-    hash = "sha512-RBdJ1Un7yGlXWajrkxcSa93nvQ0w4zBf60c0yYv7YtBelP8H2FA7XsfBbMHtXKXUMUxH7zV3Zuozh+kUQWhHvg==";
+    name = "msgpackr@2.0.5";
+    url = "https://registry.npmjs.org/msgpackr/-/msgpackr-2.0.5.tgz";
+    hash = "sha512-cef05H/dSYpLpqp3sj/qyZh5vhUYCalnaLO7j1yOmpsR0y/XwLVtK7r5gn+U/F7CTEfMowcGhlUQJDLcLf7jcA==";
   };
   "msgpackr-extract" = {
     out_path = "msgpackr-extract";
     binaries = {
       "download-msgpackr-prebuilds" = "../msgpackr-extract/bin/download-prebuilds.js";
     };
-    name = "msgpackr-extract@3.0.3";
-    url = "https://registry.npmjs.org/msgpackr-extract/-/msgpackr-extract-3.0.3.tgz";
-    hash = "sha512-P0efT1C9jIdVRefqjzOQ9Xml57zpOXnIuS+csaB4MdZbTdmGDLo8XhzBG1N7aO11gKDDkJvBLULeFTo46wwreA==";
+    name = "msgpackr-extract@3.0.4";
+    url = "https://registry.npmjs.org/msgpackr-extract/-/msgpackr-extract-3.0.4.tgz";
+    hash = "sha512-4kmO/MdyUIkLIvTPr8VHLil4AtoKIoniWPIEk5+CDy0xnWC84azhSFmuJ7PxZdsYtiP5kEeQsORAVIeMgxT+Hw==";
   };
   "multipasta" = {
     out_path = "multipasta";
-    name = "multipasta@0.2.7";
-    url = "https://registry.npmjs.org/multipasta/-/multipasta-0.2.7.tgz";
-    hash = "sha512-KPA58d68KgGil15oDqXjkUBEBYc00XvbPj5/X+dyzeo/lWm9Nc25pQRlf1D+gv4OpK7NM0J1odrbu9JNNGvynA==";
+    name = "multipasta@0.2.8";
+    url = "https://registry.npmjs.org/multipasta/-/multipasta-0.2.8.tgz";
+    hash = "sha512-ZPWuMKyv0cSO29f7hozp+k6+crZbQijV8ipMvxNxRf2SwtYGTX1ZX89Kd20VV4H9Znonx+EQn+iy1wGQsJ+b+Q==";
   };
   "nanoid" = {
     out_path = "nanoid";
@@ -1018,9 +1024,9 @@
   };
   "toml" = {
     out_path = "toml";
-    name = "toml@4.1.1";
-    url = "https://registry.npmjs.org/toml/-/toml-4.1.1.tgz";
-    hash = "sha512-EBJnVBr3dTXdA89WVFoAIPUqkBjxPMwRqsfuo1r240tKFHXv3zgca4+NJib/h6TyvGF7vOawz0jGuryJCdNHrw==";
+    name = "toml@4.3.0";
+    url = "https://registry.npmjs.org/toml/-/toml-4.3.0.tgz";
+    hash = "sha512-lVb8X9BsPVuH0M4BKeS91tXAmJvCjQ5UIyAbQFaxkKGyUFK2RPkhwaFSQH8vbpl1d23eu/IBH+dwVMHWaq9A5A==";
   };
   "type-detect" = {
     out_path = "type-detect";
@@ -1045,9 +1051,9 @@
     binaries = {
       "uuid" = "../uuid/dist-node/bin/uuid";
     };
-    name = "uuid@13.0.2";
-    url = "https://registry.npmjs.org/uuid/-/uuid-13.0.2.tgz";
-    hash = "sha512-vzi9uRZ926x4XV73S/4qQaTwPXM2JBj6/6lI/byHH1jOpCzb0zDbfytgA9LcN/hzb2l7WQSQnxITOVx5un/wGw==";
+    name = "uuid@14.0.1";
+    url = "https://registry.npmjs.org/uuid/-/uuid-14.0.1.tgz";
+    hash = "sha512-6ZxzVpzDXDa3bJWaHilVayA+BH/1zmxCJoVgvmqJnid/gPoKHxUrS/aC/T6LGQtNHT+XHG9fXPJB4d+IrU30Ew==";
   };
   "vite" = {
     out_path = "vite";

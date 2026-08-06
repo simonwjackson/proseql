@@ -110,7 +110,7 @@ const extractFieldType = (
 
 	// Handle arrays
 	if (ast._tag === "Arrays" && ast.rest.length > 0) {
-		const elementAst = ast.rest[0].type;
+		const elementAst = ast.rest[0];
 		let elementType: "string" | "number" | "boolean" | "unknown" = "unknown";
 		if (elementAst._tag === "String") {
 			elementType = "string";

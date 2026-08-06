@@ -93,7 +93,7 @@ describe("watchById()", () => {
 
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.fork,
+				Effect.forkChild,
 			);
 
 			// Wait, then update the entity
@@ -132,7 +132,7 @@ describe("watchById()", () => {
 
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.fork,
+				Effect.forkChild,
 			);
 
 			// Wait, then delete the entity
@@ -170,7 +170,7 @@ describe("watchById()", () => {
 
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.fork,
+				Effect.forkChild,
 			);
 
 			// Wait, then create the entity
@@ -210,12 +210,9 @@ describe("watchById()", () => {
 			// Try to collect 2 emissions with a timeout
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.timeoutFail({
-					duration: "100 millis",
-					onTimeout: () => new Error("timeout"),
-				}),
-				Effect.either,
-				Effect.fork,
+				Effect.timeout("100 millis"),
+				Effect.result,
+				Effect.forkChild,
 			);
 
 			// Wait, then modify a different entity
@@ -233,7 +230,7 @@ describe("watchById()", () => {
 
 			// Should timeout because the watched entity (id=1) didn't change
 			// Deduplication should prevent re-emission of identical result
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 		});
 
 		await Effect.runPromise(Effect.scoped(program));

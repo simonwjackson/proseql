@@ -270,7 +270,7 @@ function transformCoreTest(source, fileName = "") {
 		.replace(/\b_as ([^;]+);/g, "as $1;")
 		.replace(/([A-Za-z0-9_]+)\.pipe\(\s*\(chunk\) => Array\.from\(chunk\)\[0\],\s*\)/g, "Array.from($1)[0]")
 		.replace(/Effect\.timeoutFail\(\{\s*duration:\s*"([^"]+)",\s*onTimeout:\s*\(\) => new Error\("[^"]*"\),\s*\}\)/g, 'Effect.timeout("$1")')
-		.replace(/([A-Za-z0-9_]*Scope)\.fork\(([^)]+)\)/g, 'Scope.fork($1, $2)')
+		.replace(/([a-z][A-Za-z0-9_]*Scope)\.fork\(([^)]+)\)/g, 'Scope.fork($1, $2)')
 		.replaceAll("ExecutionStrategy.sequential", "({ _tag: \"Sequential\" } as any)")
 		.replace(/ExecutionStrategy,\s*/g, "")
 		.replaceAll("Effect.either", "Effect.result")

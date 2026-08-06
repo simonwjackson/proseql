@@ -86,6 +86,36 @@ describe("NodeStorageLayer (filesystem)", () => {
 		}
 	});
 
+	it("retries transient filesystem failures up to the configured limit", async () => {
+		const tempDir = join(
+			tmpdir(),
+			`ptdb-test-${randomBytes(8).toString("hex")}`,
+		);
+		const filePath = join(tempDir, "eventual.txt");
+		await fs.mkdir(tempDir, { recursive: true });
+
+		const createFile = setTimeout(() => {
+			void fs.writeFile(filePath, "ready");
+		}, 20);
+
+		try {
+			const result = await Effect.runPromise(
+				Effect.provide(
+					Effect.gen(function* () {
+						const storage = yield* StorageAdapter;
+						return yield* storage.read(filePath);
+					}),
+					makeNodeStorageLayer({ maxRetries: 1, baseDelay: 100 }),
+				),
+			);
+
+			expect(result).toBe("ready");
+		} finally {
+			clearTimeout(createFile);
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("runs the same program against NodeStorageLayer (filesystem)", async () => {
 		const tempDir = join(
 			tmpdir(),

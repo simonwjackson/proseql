@@ -299,13 +299,13 @@ describe("CRUD Batch Operations and Edge Cases (Effect-based)", () => {
 							timestamp: new Date().toISOString(),
 						},
 					])
-					.pipe(Effect.either),
+					.pipe(Effect.result),
 			);
 
 			// Regardless of success/failure, verify count
 			const logs = await db.auditLogs.query().runPromise;
 			// If it failed, count should be original. If it succeeded, count should be +3.
-			if (error._tag === "Left") {
+			if (error._tag === "Failure") {
 				expect(logs).toHaveLength(originalCount);
 			}
 		});

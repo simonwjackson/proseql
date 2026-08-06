@@ -6,7 +6,7 @@
  *
  * Query pipeline: Ref snapshot → Stream.fromIterable → filter → populate → sort → paginate → select
  * CRUD: Effect-based operations with typed error channels
- * Persistence: Optional debounced save after each CRUD mutation via Effect.fork
+ * Persistence: Optional debounced save after each CRUD mutation via Effect.forkDetach
  */
 
 import { Effect, Layer, PubSub, Ref, Schema, type Scope, Stream } from "effect";

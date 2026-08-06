@@ -2483,8 +2483,7 @@ class EngineRuntime {
 		}
 		if (this.projection.needsResynchronization) this.resynchronizeProjection();
 		if (this.projection.hasDirtyRows) this.synchronizeDirtyProjection();
-		this.clearHotIndexedQuery();
-		this.clearHotBulkSelections();
+		this.clearStrongStructuresImmediately();
 		this.transactionBarrier = new Promise<void>((resolve) => {
 			this.releaseTransactionBarrier = resolve;
 		});

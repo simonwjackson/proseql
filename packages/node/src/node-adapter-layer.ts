@@ -52,7 +52,7 @@ const toStorageError = (
 
 const retryPolicy = (config: Required<NodeAdapterConfig>) =>
 	Schedule.exponential(`${config.baseDelay} millis`).pipe(
-		Schedule.both(Schedule.recurs(config.maxRetries)),
+		Schedule.upTo({ times: config.maxRetries }),
 	);
 
 // ============================================================================

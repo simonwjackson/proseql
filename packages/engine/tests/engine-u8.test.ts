@@ -2671,6 +2671,24 @@ describe("@proseql/engine U8 fixes", () => {
 		await db.close();
 	});
 
+	it("invalidates same-turn query structures before committing transaction changes", async () => {
+		const db = await createEngineDatabase(
+			{ users: { schema: UserSchema, relationships: {} } } as const,
+			{ users: [{ id: "u1", name: "Alice" }] },
+		);
+
+		expect(await db.users.query()).toEqual([{ id: "u1", name: "Alice" }]);
+		await db.$transaction(async (tx) => {
+			await tx.users.create({ id: "u2", name: "Bob" });
+		});
+
+		expect(await db.users.query()).toEqual([
+			{ id: "u1", name: "Alice" },
+			{ id: "u2", name: "Bob" },
+		]);
+		await db.close();
+	});
+
 	it("uses stateful transaction crossings without snapshot or temporary-runtime transfers", async () => {
 		const db = await createEngineDatabase(
 			{ users: { schema: UserSchema, relationships: {} } } as const,

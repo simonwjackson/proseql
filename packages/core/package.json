@@ -46,7 +46,7 @@
   },
   "sideEffects": false,
   "dependencies": {
-    "effect": "4.0.0-beta.60",
+    "effect": "4.0.0-beta.103",
     "yaml": "^2.3.4",
     "json5": "^2.2.3",
     "jsonc-parser": "^3.3.1",

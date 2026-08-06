@@ -78,13 +78,9 @@ describe("watch() deduplication", () => {
 			// Start collecting with a timeout to catch if extra emissions happen
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.timeoutFail({
-					duration: "200 millis",
-					onTimeout: () =>
-						new Error("timeout - only got 1 emission as expected"),
-				}),
-				Effect.either,
-				Effect.fork,
+				Effect.timeout("200 millis"),
+				Effect.result,
+				Effect.forkChild,
 			);
 
 			// Wait a tick for initial emission
@@ -113,7 +109,7 @@ describe("watch() deduplication", () => {
 			const result = yield* Fiber.join(collectedFiber);
 
 			// Should timeout because no second emission occurred (deduplication worked)
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 		});
 
 		await Effect.runPromise(Effect.scoped(program));
@@ -132,7 +128,7 @@ describe("watch() deduplication", () => {
 			// Collect 2 emissions
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.fork,
+				Effect.forkChild,
 			);
 
 			// Wait a tick for initial emission
@@ -184,12 +180,9 @@ describe("watch() deduplication", () => {
 			// Start collecting with a timeout
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.timeoutFail({
-					duration: "200 millis",
-					onTimeout: () => new Error("timeout - deduplication worked"),
-				}),
-				Effect.either,
-				Effect.fork,
+				Effect.timeout("200 millis"),
+				Effect.result,
+				Effect.forkChild,
 			);
 
 			// Wait a tick for initial emission
@@ -218,7 +211,7 @@ describe("watch() deduplication", () => {
 			const result = yield* Fiber.join(collectedFiber);
 
 			// Should timeout because no second emission occurred despite 5 events
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 		});
 
 		await Effect.runPromise(Effect.scoped(program));
@@ -237,12 +230,9 @@ describe("watch() deduplication", () => {
 			// Start collecting with a timeout
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.timeoutFail({
-					duration: "200 millis",
-					onTimeout: () => new Error("timeout - deduplication worked"),
-				}),
-				Effect.either,
-				Effect.fork,
+				Effect.timeout("200 millis"),
+				Effect.result,
+				Effect.forkChild,
 			);
 
 			// Wait a tick for initial emission
@@ -268,7 +258,7 @@ describe("watch() deduplication", () => {
 			const result = yield* Fiber.join(collectedFiber);
 
 			// Should timeout because both results are empty arrays
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 		});
 
 		await Effect.runPromise(Effect.scoped(program));
@@ -287,7 +277,7 @@ describe("watch() deduplication", () => {
 			// Collect 2 emissions
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.fork,
+				Effect.forkChild,
 			);
 
 			// Wait a tick for initial emission

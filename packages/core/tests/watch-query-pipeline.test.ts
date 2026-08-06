@@ -90,9 +90,7 @@ describe("watch() query pipeline on re-evaluation", () => {
 
 			// Take just the initial emission
 			const results = yield* Stream.runCollect(Stream.take(stream, 1));
-			const firstEmission = results.pipe(
-				(chunk) => Array.from(chunk)[0],
-			) as ReadonlyArray<Book>;
+			const firstEmission = results[0] as ReadonlyArray<Book>;
 
 			// Should only include sci-fi books
 			expect(firstEmission).toHaveLength(3);
@@ -113,9 +111,7 @@ describe("watch() query pipeline on re-evaluation", () => {
 			});
 
 			const results = yield* Stream.runCollect(Stream.take(stream, 1));
-			const firstEmission = results.pipe(
-				(chunk) => Array.from(chunk)[0],
-			) as ReadonlyArray<Book>;
+			const firstEmission = results[0] as ReadonlyArray<Book>;
 
 			// Should be sorted by year ascending
 			expect(firstEmission[0].year).toBe(1951); // Foundation
@@ -138,9 +134,7 @@ describe("watch() query pipeline on re-evaluation", () => {
 			});
 
 			const results = yield* Stream.runCollect(Stream.take(stream, 1));
-			const firstEmission = results.pipe(
-				(chunk) => Array.from(chunk)[0],
-			) as ReadonlyArray<Book>;
+			const firstEmission = results[0] as ReadonlyArray<Book>;
 
 			// Should skip first (1937), take next 2 (1949, 1951)
 			expect(firstEmission).toHaveLength(2);
@@ -162,9 +156,9 @@ describe("watch() query pipeline on re-evaluation", () => {
 			});
 
 			const results = yield* Stream.runCollect(Stream.take(stream, 1));
-			const firstEmission = results.pipe(
-				(chunk) => Array.from(chunk)[0],
-			) as ReadonlyArray<Record<string, unknown>>;
+			const firstEmission = results[0] as ReadonlyArray<
+				Record<string, unknown>
+			>;
 
 			// Should only have title and author fields
 			expect(firstEmission).toHaveLength(1);
@@ -192,9 +186,9 @@ describe("watch() query pipeline on re-evaluation", () => {
 			});
 
 			const results = yield* Stream.runCollect(Stream.take(stream, 1));
-			const firstEmission = results.pipe(
-				(chunk) => Array.from(chunk)[0],
-			) as ReadonlyArray<Record<string, unknown>>;
+			const firstEmission = results[0] as ReadonlyArray<
+				Record<string, unknown>
+			>;
 
 			// Filter: sci-fi (1965, 1984, 1951)
 			// Sort: desc (1984, 1965, 1951)
@@ -220,7 +214,7 @@ describe("watch() query pipeline on re-evaluation", () => {
 			// Collect in the background to get emissions
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.fork,
+				Effect.forkChild,
 			);
 
 			// Wait a tick, then add a new sci-fi book
@@ -269,7 +263,7 @@ describe("watch() query pipeline on re-evaluation", () => {
 			// Collect in the background
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.fork,
+				Effect.forkChild,
 			);
 
 			// Wait a tick, then add a book with year between existing ones
@@ -318,7 +312,7 @@ describe("watch() query pipeline on re-evaluation", () => {
 
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.fork,
+				Effect.forkChild,
 			);
 
 			// Wait a tick, then add a book that should appear in the first 2
@@ -368,7 +362,7 @@ describe("watch() query pipeline on re-evaluation", () => {
 
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.fork,
+				Effect.forkChild,
 			);
 
 			yield* Effect.sleep("10 millis");
@@ -420,7 +414,7 @@ describe("watch() query pipeline on re-evaluation", () => {
 
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.fork,
+				Effect.forkChild,
 			);
 
 			// Add a very recent sci-fi book
@@ -478,12 +472,9 @@ describe("watch() query pipeline on re-evaluation", () => {
 			// Collect emissions with a timeout
 			const collectedFiber = yield* Stream.take(stream, 2).pipe(
 				Stream.runCollect,
-				Effect.timeoutFail({
-					duration: "100 millis",
-					onTimeout: () => new Error("timeout"),
-				}),
-				Effect.either,
-				Effect.fork,
+				Effect.timeout("100 millis"),
+				Effect.result,
+				Effect.forkChild,
 			);
 
 			// Wait a tick, then publish event for different collection
@@ -493,7 +484,7 @@ describe("watch() query pipeline on re-evaluation", () => {
 			const result = yield* Fiber.join(collectedFiber);
 
 			// Should timeout because no second emission was triggered
-			expect(result._tag).toBe("Left");
+			expect(result._tag).toBe("Failure");
 		});
 
 		await Effect.runPromise(Effect.scoped(program));
@@ -522,7 +513,7 @@ describe("watch() query pipeline on re-evaluation", () => {
 			// Collect emissions with a timeout
 			const collectedFiber = yield* Stream.take(countingStream, 2).pipe(
 				Stream.runCollect,
-				Effect.fork,
+				Effect.forkChild,
 			);
 
 			// Wait for initial emission

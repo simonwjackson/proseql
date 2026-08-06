@@ -6,15 +6,7 @@
  * proper integration with CRUD operations that trigger change events.
  */
 
-import {
-	Effect,
-	ExecutionStrategy,
-	Exit,
-	Fiber,
-	Schema,
-	Scope,
-	Stream,
-} from "effect";
+import { Effect, Exit, Fiber, Schema, Scope, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "../src/factories/database-effect.js";
 
@@ -159,9 +151,7 @@ describe("reactive queries - basic watch", () => {
 
 					// Take just the initial emission
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = 
-						results,
-					[0] _as ReadonlyArray<Book>;
+					const emission = results[0] as ReadonlyArray<Book>;
 
 					// Should emit all books immediately
 					expect(emission).toHaveLength(3);
@@ -180,9 +170,7 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = 
-						results,
-					[0] _as ReadonlyArray<Book>;
+					const emission = results[0] as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(0);
 				}),
@@ -199,9 +187,7 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = 
-						results,
-					[0] _as ReadonlyArray<Book>;
+					const emission = results[0] as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(2);
 					expect(emission.every((b) => b.genre === "sci-fi")).toBe(true);
@@ -217,9 +203,7 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = 
-						results,
-					[0] _as ReadonlyArray<Book>;
+					const emission = results[0] as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(3);
 					expect(emission[0].year).toBe(1937);
@@ -237,9 +221,7 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = results[0] as ReadonlyArray<
-						Record<string, unknown>
-					>;
+					const emission = results[0] as ReadonlyArray<Record<string, unknown>>;
 
 					expect(emission).toHaveLength(3);
 					for (const item of emission) {
@@ -258,9 +240,7 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = 
-						results,
-					[0] _as ReadonlyArray<Book>;
+					const emission = results[0] as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(2);
 					expect(emission[0].title).toBe("The Hobbit");
@@ -279,9 +259,7 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = 
-						results,
-					[0] _as ReadonlyArray<Book>;
+					const emission = results[0] as ReadonlyArray<Book>;
 
 					expect(emission).toHaveLength(2);
 					expect(emission[0].title).toBe("Dune");
@@ -301,9 +279,7 @@ describe("reactive queries - basic watch", () => {
 					});
 
 					const results = yield* Stream.runCollect(Stream.take(stream, 1));
-					const emission = results[0] as ReadonlyArray<
-						Record<string, unknown>
-					>;
+					const emission = results[0] as ReadonlyArray<Record<string, unknown>>;
 
 					expect(emission).toHaveLength(1);
 					expect(emission[0]).toEqual({ title: "Neuromancer", year: 1984 });
@@ -321,7 +297,7 @@ describe("reactive queries - basic watch", () => {
 					// Fork collection to allow concurrent operations
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -337,9 +313,7 @@ describe("reactive queries - basic watch", () => {
 
 					// Wait for second emission and collect
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					expect(emissions).toHaveLength(2);
 					expect(emissions[0]).toHaveLength(3);
@@ -400,22 +374,18 @@ describe("reactive queries - basic watch", () => {
 					// Take initial emissions from both
 					const fiber1 = yield* Stream.take(stream1, 1).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 					const fiber2 = yield* Stream.take(stream2, 1).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					const results1 = yield* Fiber.join(fiber1);
 					const results2 = yield* Fiber.join(fiber2);
 
-					const emission1 = 
-						results1,
-					[0] _as ReadonlyArray<Book>;
-					const emission2 = 
-						results2,
-					[0] _as ReadonlyArray<Book>;
+					const emission1 = results1[0] as ReadonlyArray<Book>;
+					const emission2 = results2[0] as ReadonlyArray<Book>;
 
 					// Each subscription should have its own filtered results
 					expect(emission1).toHaveLength(2);
@@ -447,7 +417,7 @@ describe("reactive queries - mutation triggers", () => {
 					// Fork collection to get 2 emissions: initial + after create
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission to be processed
@@ -463,9 +433,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Wait for the stream to emit and collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					// Should have 2 emissions
 					expect(emissions).toHaveLength(2);
@@ -503,7 +471,7 @@ describe("reactive queries - mutation triggers", () => {
 					// Fork collection to get 2 emissions
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -527,9 +495,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Wait for emission and collect
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					expect(emissions).toHaveLength(2);
 
@@ -562,7 +528,7 @@ describe("reactive queries - mutation triggers", () => {
 					// Fork collection to get 2 emissions: initial + after update
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission to be processed
@@ -573,9 +539,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Wait for the stream to emit and collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					// Should have 2 emissions
 					expect(emissions).toHaveLength(2);
@@ -602,7 +566,7 @@ describe("reactive queries - mutation triggers", () => {
 					// Fork collection to get 2 emissions
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -613,9 +577,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					expect(emissions).toHaveLength(2);
 
@@ -648,7 +610,7 @@ describe("reactive queries - mutation triggers", () => {
 					// Fork collection to get 2 emissions
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -661,9 +623,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					expect(emissions).toHaveLength(2);
 
@@ -690,7 +650,7 @@ describe("reactive queries - mutation triggers", () => {
 					// Fork collection to get 2 emissions: initial + after update
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission to be processed
@@ -702,9 +662,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Wait for the stream to emit and collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					// Should have 2 emissions
 					expect(emissions).toHaveLength(2);
@@ -744,7 +702,7 @@ describe("reactive queries - mutation triggers", () => {
 					// Fork collection to get 2 emissions
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -755,9 +713,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					expect(emissions).toHaveLength(2);
 
@@ -789,7 +745,7 @@ describe("reactive queries - mutation triggers", () => {
 					// Fork collection to get 2 emissions: initial + after update
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission to be processed
@@ -801,9 +757,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Wait for the stream to emit and collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					// Should have 2 emissions
 					expect(emissions).toHaveLength(2);
@@ -837,7 +791,7 @@ describe("reactive queries - mutation triggers", () => {
 					// Fork collection to get 2 emissions
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -849,9 +803,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					expect(emissions).toHaveLength(2);
 
@@ -881,7 +833,7 @@ describe("reactive queries - mutation triggers", () => {
 					// Fork collection to get 2 emissions
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -895,9 +847,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					expect(emissions).toHaveLength(2);
 
@@ -930,7 +880,7 @@ describe("reactive queries - mutation triggers", () => {
 					// Fork collection to get 2 emissions: initial + after delete
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission to be processed
@@ -941,9 +891,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Wait for the stream to emit and collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					// Should have 2 emissions
 					expect(emissions).toHaveLength(2);
@@ -975,7 +923,7 @@ describe("reactive queries - mutation triggers", () => {
 					// Fork collection to get 2 emissions
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -986,9 +934,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					expect(emissions).toHaveLength(2);
 
@@ -1017,7 +963,7 @@ describe("reactive queries - mutation triggers", () => {
 					// Fork collection to get 2 emissions
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -1037,9 +983,7 @@ describe("reactive queries - mutation triggers", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					expect(emissions).toHaveLength(2);
 
@@ -1084,12 +1028,9 @@ describe("reactive queries - irrelevant mutations", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "100 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("100 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission to be processed
@@ -1140,12 +1081,9 @@ describe("reactive queries - irrelevant mutations", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "100 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("100 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -1204,12 +1142,9 @@ describe("reactive queries - irrelevant mutations", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "100 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("100 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -1250,12 +1185,9 @@ describe("reactive queries - irrelevant mutations", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "100 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("100 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -1290,7 +1222,7 @@ describe("reactive queries - irrelevant mutations", () => {
 					// Fork collection to get 2 emissions: initial + after meaningful update
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -1301,9 +1233,7 @@ describe("reactive queries - irrelevant mutations", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					// Should have 2 emissions because the result set content changed
 					expect(emissions).toHaveLength(2);
@@ -1337,13 +1267,10 @@ describe("reactive queries - irrelevant mutations", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "100 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("100 millis"),
 						Effect.catchTag("NoSuchElementException", () => Effect.void),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission to be processed
@@ -1391,12 +1318,9 @@ describe("reactive queries - irrelevant mutations", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "100 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("100 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -1441,12 +1365,9 @@ describe("reactive queries - irrelevant mutations", () => {
 							bookEmissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "150 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("150 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					const authorsFiber = yield* Stream.runForEach(
@@ -1456,12 +1377,9 @@ describe("reactive queries - irrelevant mutations", () => {
 								authorEmissions.push(emission);
 							}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "150 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("150 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emissions
@@ -1518,12 +1436,9 @@ describe("reactive queries - transactions", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "200 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("200 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission to be processed
@@ -1615,12 +1530,9 @@ describe("reactive queries - transactions", () => {
 							bookEmissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "200 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("200 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					const authorsFiber = yield* Stream.runForEach(
@@ -1630,12 +1542,9 @@ describe("reactive queries - transactions", () => {
 								authorEmissions.push(emission);
 							}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "200 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("200 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emissions
@@ -1701,7 +1610,7 @@ describe("reactive queries - transactions", () => {
 					// Fork to get exactly 2 emissions: initial + post-commit
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -1735,9 +1644,7 @@ describe("reactive queries - transactions", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					// Should have exactly 2 emissions: initial + one post-commit
 					expect(emissions).toHaveLength(2);
@@ -1784,7 +1691,7 @@ describe("reactive queries - transactions", () => {
 					// Fork to get 3 emissions: initial + 2 post-commit
 					const collectedFiber = yield* Stream.take(stream, 3).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -1819,9 +1726,7 @@ describe("reactive queries - transactions", () => {
 
 					// Collect results
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					// Should have exactly 3 emissions: initial + one per transaction
 					expect(emissions).toHaveLength(3);
@@ -1868,11 +1773,11 @@ describe("reactive queries - transactions", () => {
 					// Fork both to get 2 emissions each: initial + post-commit
 					const booksFiber = yield* Stream.take(booksStream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 					const authorsFiber = yield* Stream.take(authorsStream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emissions
@@ -1898,12 +1803,12 @@ describe("reactive queries - transactions", () => {
 					const booksResults = yield* Fiber.join(booksFiber);
 					const authorsResults = yield* Fiber.join(authorsFiber);
 
-					const bookEmissions = 
-						booksResults,
-					 _as ReadonlyArray<ReadonlyArray<Book>>;
-					const authorEmissions = 
-						authorsResults,
-					 as ReadonlyArray<ReadonlyArray<Author>>;
+					const bookEmissions = booksResults as ReadonlyArray<
+						ReadonlyArray<Book>
+					>;
+					const authorEmissions = authorsResults as ReadonlyArray<
+						ReadonlyArray<Author>
+					>;
 
 					// Books: exactly 2 emissions (initial + one post-commit)
 					expect(bookEmissions).toHaveLength(2);
@@ -1946,12 +1851,9 @@ describe("reactive queries - transactions", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "200 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("200 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission to be processed
@@ -2021,12 +1923,9 @@ describe("reactive queries - transactions", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "200 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("200 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -2096,12 +1995,9 @@ describe("reactive queries - transactions", () => {
 							bookEmissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "200 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("200 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					const authorsFiber = yield* Stream.runForEach(
@@ -2111,12 +2007,9 @@ describe("reactive queries - transactions", () => {
 								authorEmissions.push(emission);
 							}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "200 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("200 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emissions
@@ -2303,12 +2196,9 @@ describe("reactive queries - file changes", () => {
 						emissions.push(emission as ReadonlyArray<FileBook>);
 					}),
 				).pipe(
-					Effect.timeoutFail({
-						duration: "300 millis",
-						onTimeout: () => new Error("timeout"),
-					}),
+					Effect.timeout("300 millis"),
 					Effect.catch(() => Effect.void),
-					Effect.fork,
+					Effect.forkChild,
 				);
 
 				// Wait for initial emission to be processed
@@ -2426,12 +2316,9 @@ describe("reactive queries - file changes", () => {
 						emissions.push(emission as ReadonlyArray<FileBook>);
 					}),
 				).pipe(
-					Effect.timeoutFail({
-						duration: "300 millis",
-						onTimeout: () => new Error("timeout"),
-					}),
+					Effect.timeout("300 millis"),
 					Effect.catch(() => Effect.void),
-					Effect.fork,
+					Effect.forkChild,
 				);
 
 				yield* Effect.sleep("50 millis");
@@ -2530,12 +2417,9 @@ describe("reactive queries - file changes", () => {
 						emissions.push(emission as ReadonlyArray<FileBook>);
 					}),
 				).pipe(
-					Effect.timeoutFail({
-						duration: "300 millis",
-						onTimeout: () => new Error("timeout"),
-					}),
+					Effect.timeout("300 millis"),
 					Effect.catch(() => Effect.void),
-					Effect.fork,
+					Effect.forkChild,
 				);
 
 				yield* Effect.sleep("50 millis");
@@ -2641,12 +2525,9 @@ describe("reactive queries - file changes", () => {
 						emissions.push(emission as ReadonlyArray<FileBook>);
 					}),
 				).pipe(
-					Effect.timeoutFail({
-						duration: "300 millis",
-						onTimeout: () => new Error("timeout"),
-					}),
+					Effect.timeout("300 millis"),
 					Effect.catch(() => Effect.void),
-					Effect.fork,
+					Effect.forkChild,
 				);
 
 				// Wait for initial emission to be processed
@@ -2737,12 +2618,9 @@ describe("reactive queries - file changes", () => {
 						emissions.push(emission as ReadonlyArray<FileBook>);
 					}),
 				).pipe(
-					Effect.timeoutFail({
-						duration: "300 millis",
-						onTimeout: () => new Error("timeout"),
-					}),
+					Effect.timeout("300 millis"),
 					Effect.catch(() => Effect.void),
-					Effect.fork,
+					Effect.forkChild,
 				);
 
 				yield* Effect.sleep("50 millis");
@@ -2850,12 +2728,9 @@ describe("reactive queries - file changes", () => {
 						emissions.push(emission as ReadonlyArray<FileBook>);
 					}),
 				).pipe(
-					Effect.timeoutFail({
-						duration: "300 millis",
-						onTimeout: () => new Error("timeout"),
-					}),
+					Effect.timeout("300 millis"),
 					Effect.catch(() => Effect.void),
-					Effect.fork,
+					Effect.forkChild,
 				);
 
 				yield* Effect.sleep("50 millis");
@@ -2949,12 +2824,9 @@ describe("reactive queries - file changes", () => {
 						emissions.push(emission as ReadonlyArray<FileBook>);
 					}),
 				).pipe(
-					Effect.timeoutFail({
-						duration: "400 millis",
-						onTimeout: () => new Error("timeout"),
-					}),
+					Effect.timeout("400 millis"),
 					Effect.catch(() => Effect.void),
-					Effect.fork,
+					Effect.forkChild,
 				);
 
 				yield* Effect.sleep("50 millis");
@@ -3011,12 +2883,9 @@ describe("reactive queries - debounce", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "500 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("500 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission to be processed
@@ -3080,12 +2949,9 @@ describe("reactive queries - debounce", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "500 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("500 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -3137,12 +3003,9 @@ describe("reactive queries - debounce", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "500 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("500 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -3221,12 +3084,9 @@ describe("reactive queries - debounce", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "500 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("500 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -3308,12 +3168,9 @@ describe("reactive queries - debounce", () => {
 									emissions.push(emission);
 								}),
 						).pipe(
-							Effect.timeoutFail({
-								duration: "500 millis",
-								onTimeout: () => new Error("timeout"),
-							}),
+							Effect.timeout("500 millis"),
 							Effect.catch(() => Effect.void),
-							Effect.fork,
+							Effect.forkChild,
 						);
 
 						// Wait for initial emission
@@ -3359,7 +3216,7 @@ describe("reactive queries - debounce", () => {
 					const emissions: ReadonlyArray<Book>[] = [];
 
 					// Start collecting emissions in a fiber
-					const collectedFiber = yield* Effect.fork(
+					const collectedFiber = yield* Effect.forkChild(
 						Stream.runForEach(stream, (emission) =>
 							Effect.sync(() => {
 								emissions.push(emission);
@@ -3410,7 +3267,7 @@ describe("reactive queries - debounce", () => {
 
 					const emissions: ReadonlyArray<Book>[] = [];
 
-					const collectedFiber = yield* Effect.fork(
+					const collectedFiber = yield* Effect.forkChild(
 						Stream.runForEach(stream, (emission) =>
 							Effect.sync(() => {
 								emissions.push(emission);
@@ -3461,7 +3318,7 @@ describe("reactive queries - debounce", () => {
 					const slowEmissions: ReadonlyArray<Book>[] = [];
 
 					// Start collecting emissions in fibers
-					const fastFiber = yield* Effect.fork(
+					const fastFiber = yield* Effect.forkChild(
 						Stream.runForEach(fastStream, (emission) =>
 							Effect.sync(() => {
 								fastEmissions.push(emission);
@@ -3469,7 +3326,7 @@ describe("reactive queries - debounce", () => {
 						),
 					);
 
-					const slowFiber = yield* Effect.fork(
+					const slowFiber = yield* Effect.forkChild(
 						Stream.runForEach(slowStream, (emission) =>
 							Effect.sync(() => {
 								slowEmissions.push(emission);
@@ -3535,7 +3392,7 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 						Effect.sync(() => {
 							emissions.push(emission);
 						}),
-					).pipe(Effect.fork);
+					).pipe(Effect.forkChild);
 
 					// Wait for initial emission
 					yield* Effect.sleep("30 millis");
@@ -3592,7 +3449,7 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 						Effect.sync(() => {
 							emissions.push(emission);
 						}),
-					).pipe(Effect.fork);
+					).pipe(Effect.forkChild);
 
 					// Wait for initial emission
 					yield* Effect.sleep("30 millis");
@@ -3662,13 +3519,13 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 						Effect.sync(() => {
 							emissions1.push(emission);
 						}),
-					).pipe(Effect.fork);
+					).pipe(Effect.forkChild);
 
 					const fiber2 = yield* Stream.runForEach(stream2, (emission) =>
 						Effect.sync(() => {
 							emissions2.push(emission);
 						}),
-					).pipe(Effect.fork);
+					).pipe(Effect.forkChild);
 
 					// Wait for initial emissions
 					yield* Effect.sleep("30 millis");
@@ -3724,7 +3581,7 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 					// Use Stream.take to get only 2 emissions, then stream ends naturally
 					const collectedFiber = yield* Stream.take(stream, 2).pipe(
 						Stream.runCollect,
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -3740,9 +3597,7 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 
 					// Wait for the fiber to complete (should complete after 2 emissions)
 					const results = yield* Fiber.join(collectedFiber);
-					const emissions = results as ReadonlyArray<
-						ReadonlyArray<Book>
-					>;
+					const emissions = results as ReadonlyArray<ReadonlyArray<Book>>;
 
 					// Should have exactly 2 emissions
 					expect(emissions).toHaveLength(2);
@@ -3799,18 +3654,18 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 						.watch({ where: { genre: "fantasy" } })
 						.pipe(Effect.provideService(Scope.Scope, innerScope));
 
-					// Fork stream consumers
+					// Fork stream consumers into the scope that owns their subscriptions
 					const fiber1 = yield* Stream.runForEach(stream1, (emission) =>
 						Effect.sync(() => {
 							emissions1.push(emission);
 						}),
-					).pipe(Effect.fork);
+					).pipe(Effect.forkIn(innerScope));
 
 					const fiber2 = yield* Stream.runForEach(stream2, (emission) =>
 						Effect.sync(() => {
 							emissions2.push(emission);
 						}),
-					).pipe(Effect.fork);
+					).pipe(Effect.forkIn(innerScope));
 
 					// Wait for initial emissions
 					yield* Effect.sleep("30 millis");
@@ -3902,18 +3757,18 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 						.watch({ where: { genre: "fantasy" } })
 						.pipe(Effect.provideService(Scope.Scope, scopeB));
 
-					// Fork consumers
+					// Fork each consumer into the scope that owns its subscription
 					const fiberA = yield* Stream.runForEach(streamA, (emission) =>
 						Effect.sync(() => {
 							scopeAEmissions.push(emission);
 						}),
-					).pipe(Effect.fork);
+					).pipe(Effect.forkIn(scopeA));
 
 					const fiberB = yield* Stream.runForEach(streamB, (emission) =>
 						Effect.sync(() => {
 							scopeBEmissions.push(emission);
 						}),
-					).pipe(Effect.fork);
+					).pipe(Effect.forkIn(scopeB));
 
 					// Wait for initial emissions
 					yield* Effect.sleep("30 millis");
@@ -3970,12 +3825,10 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 						Effect.sync(() => {
 							outerScopeEmissions.push(emission);
 						}),
-					).pipe(Effect.fork);
+					).pipe(Effect.forkIn(outerScope));
 
 					// Create inner scope forked from outer scope
-					const innerScope = yield* outerScope.fork(
-						ExecutionStrategy.sequential,
-					);
+					const innerScope = yield* Scope.fork(outerScope, "sequential");
 
 					// Create subscription in inner scope
 					const innerStream = yield* db.books
@@ -3986,7 +3839,7 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 						Effect.sync(() => {
 							innerScopeEmissions.push(emission);
 						}),
-					).pipe(Effect.fork);
+					).pipe(Effect.forkIn(innerScope));
 
 					// Wait for initial emissions
 					yield* Effect.sleep("30 millis");
@@ -4088,12 +3941,9 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "200 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("200 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -4137,12 +3987,9 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "200 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("200 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -4182,12 +4029,9 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "400 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("400 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -4239,12 +4083,9 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "200 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("200 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -4282,12 +4123,9 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "200 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("200 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission
@@ -4333,12 +4171,9 @@ describe("reactive queries - unsubscribe and cleanup", () => {
 							emissions.push(emission);
 						}),
 					).pipe(
-						Effect.timeoutFail({
-							duration: "500 millis",
-							onTimeout: () => new Error("timeout"),
-						}),
+						Effect.timeout("500 millis"),
 						Effect.catch(() => Effect.void),
-						Effect.fork,
+						Effect.forkChild,
 					);
 
 					// Wait for initial emission (null - doesn't exist)
