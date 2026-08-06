@@ -1,5 +1,6 @@
+import { OperationError, type ProseQLPlugin } from "@proseql/core";
 import { createEffectDatabase } from "@proseql/effect";
-import { Effect, Schema } from "effect";
+import { Deferred, Effect, Fiber, Schema } from "effect";
 import { RpcTest } from "effect/unstable/rpc";
 import { describe, expect, it } from "vitest";
 import { makeRpcGroup } from "../src/index.js";
@@ -13,6 +14,18 @@ const BookSchema = Schema.Struct({
 	genre: Schema.String,
 });
 const config = { books: { schema: BookSchema, relationships: {} } } as const;
+type BookRpcClient = Effect.Success<
+	ReturnType<
+		typeof RpcTest.makeClient<
+			ReturnType<
+				typeof makeRpcGroup<typeof config>
+			> extends import("effect/unstable/rpc").RpcGroup.RpcGroup<infer Rpcs>
+				? Rpcs
+				: never
+		>
+	>
+>;
+
 const books = [
 	{ id: "b1", title: "Dune", author: "Frank Herbert", year: 1965, genre: "sf" },
 	{
@@ -33,19 +46,7 @@ const books = [
 
 const withClient = <A>(
 	initialData: { readonly books: ReadonlyArray<(typeof books)[number]> },
-	use: (
-		client: Effect.Success<
-			ReturnType<
-				typeof RpcTest.makeClient<
-					ReturnType<
-						typeof makeRpcGroup<typeof config>
-					> extends import("effect/unstable/rpc").RpcGroup.RpcGroup<infer Rpcs>
-						? Rpcs
-						: never
-				>
-			>
-		>,
-	) => Effect.Effect<A, unknown>,
+	use: (client: BookRpcClient) => Effect.Effect<A, unknown>,
 ) =>
 	Effect.runPromise(
 		Effect.scoped(
@@ -289,5 +290,136 @@ describe("WASM-backed RPC handlers", () => {
 				);
 			}),
 		);
+	});
+
+	const lifecyclePlugin = (onShutdown: () => void): ProseQLPlugin => ({
+		name: "rpc-owned-database-lifecycle",
+		shutdown: () => Effect.sync(onShutdown),
+	});
+
+	it("closes an owned database exactly once when its handler scope ends", async () => {
+		let shutdowns = 0;
+		const incrementShutdowns = () => {
+			shutdowns += 1;
+		};
+		let leakedClient: BookRpcClient | undefined;
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					leakedClient = yield* RpcTest.makeClient(makeRpcGroup(config));
+					expect((yield* leakedClient["books.query"]({})).length).toBe(3);
+				}).pipe(
+					Effect.provide(
+						makeRpcHandlers(
+							config,
+							{ books },
+							{
+								plugins: [lifecyclePlugin(incrementShutdowns)],
+							},
+						),
+					),
+				),
+			),
+		);
+		expect(shutdowns).toBe(1);
+		if (leakedClient === undefined) throw new Error("client was not acquired");
+		const closed = await Effect.runPromiseExit(leakedClient["books.query"]({}));
+		expect(closed._tag).toBe("Failure");
+		expect(shutdowns).toBe(1);
+	});
+
+	it("closes an owned database exactly once when its handler scope is interrupted", async () => {
+		let shutdowns = 0;
+		const incrementShutdowns = () => {
+			shutdowns += 1;
+		};
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const acquired = yield* Deferred.make<void>();
+				const fiber = yield* Effect.forkChild(
+					Effect.scoped(
+						Effect.gen(function* () {
+							yield* RpcTest.makeClient(makeRpcGroup(config));
+							yield* Deferred.succeed(acquired, undefined);
+							yield* Effect.never;
+						}).pipe(
+							Effect.provide(
+								makeRpcHandlers(
+									config,
+									{ books },
+									{
+										plugins: [lifecyclePlugin(incrementShutdowns)],
+									},
+								),
+							),
+						),
+					),
+				);
+				yield* Deferred.await(acquired);
+				yield* Fiber.interrupt(fiber);
+			}),
+		);
+		expect(shutdowns).toBe(1);
+	});
+
+	it("closes an owned database exactly once when its handler scope fails", async () => {
+		let shutdowns = 0;
+		const incrementShutdowns = () => {
+			shutdowns += 1;
+		};
+		const result = await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					yield* RpcTest.makeClient(makeRpcGroup(config));
+					yield* Effect.fail("handler-scope-failed");
+				}).pipe(
+					Effect.provide(
+						makeRpcHandlers(
+							config,
+							{ books },
+							{
+								plugins: [lifecyclePlugin(incrementShutdowns)],
+							},
+						),
+					),
+					Effect.result,
+				),
+			),
+		);
+		expect(result._tag).toBe("Failure");
+		expect(shutdowns).toBe(1);
+	});
+
+	it("does not close a database borrowed by makeRpcHandlersFromDatabase", async () => {
+		let shutdowns = 0;
+		const incrementShutdowns = () => {
+			shutdowns += 1;
+		};
+		const db = await Effect.runPromise(
+			createEffectDatabase(
+				config,
+				{ books },
+				{
+					plugins: [lifecyclePlugin(incrementShutdowns)],
+				},
+			),
+		);
+		await Effect.runPromise(
+			Effect.scoped(
+				RpcTest.makeClient(makeRpcGroup(config)).pipe(
+					Effect.flatMap((client) => client["books.findById"]({ id: "b1" })),
+					Effect.provide(makeRpcHandlersFromDatabase(config, db)),
+				),
+			),
+		);
+		expect(shutdowns).toBe(0);
+		expect((await Effect.runPromise(db.books.findById("b1"))).title).toBe(
+			"Dune",
+		);
+		await (db as typeof db & { close: () => Promise<void> }).close();
+		expect(shutdowns).toBe(1);
+		await expect(
+			Effect.runPromise(db.books.findById("b1")),
+		).rejects.toBeInstanceOf(OperationError);
 	});
 });

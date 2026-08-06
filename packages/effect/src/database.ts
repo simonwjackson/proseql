@@ -244,10 +244,10 @@ const ignoreCloseError = (close: () => Promise<void>) =>
 		catch: () => undefined
 	}).pipe(Effect.ignore);
 
-const makePersistentCloseOnce = (
-	flush: () => Promise<void>,
+const makeCloseOnce = (
 	close: () => Promise<void>,
-	plugins: ReadonlyArray<{ readonly shutdown?: () => Effect.Effect<unknown, unknown, never> }> | undefined
+	plugins: ReadonlyArray<{ readonly shutdown?: () => Effect.Effect<unknown, unknown, never> }> | undefined,
+	flush?: () => Promise<void>
 ) => {
 	let closePromise: Promise<void> | undefined;
 	return () => {
@@ -259,10 +259,12 @@ const makePersistentCloseOnce = (
 					firstError = normalizeRejection(error);
 				}
 			};
-			try {
-				await flush();
-			} catch (error) {
-				capture(error);
+			if (flush !== undefined) {
+				try {
+					await flush();
+				} catch (error) {
+					capture(error);
+				}
 			}
 			for (const plugin of [...(plugins ?? [])].reverse()) {
 				if (plugin.shutdown === undefined) continue;
@@ -1014,7 +1016,11 @@ const createEffectDatabaseWithLoader = (
 				initialData as EngineInitialData<Config> | undefined,
 				engineOptionsFrom(options),
 			);
-			return adaptDatabase(db, collectionNames);
+			const adapted = adaptDatabase(db, collectionNames);
+			const baseClose = adapted.close.bind(adapted);
+			return Object.assign(adapted, {
+				close: makeCloseOnce(() => baseClose(), options?.plugins),
+			});
 		},
 		(error) => defectConstructor !== undefined && error instanceof defectConstructor,
 	);
@@ -1068,10 +1074,10 @@ const createPersistentEffectDatabaseWithLoader = (
 			(error) => defectConstructor !== undefined && error instanceof defectConstructor,
 		);
 		const baseClose = baseDb.close.bind(baseDb);
-		const close = makePersistentCloseOnce(
-			() => baseDb.flush(),
+		const close = makeCloseOnce(
 			() => baseClose(),
 			options?.plugins,
+			() => baseDb.flush(),
 		);
 		const db = Object.assign(baseDb, { close });
 		yield* Effect.addFinalizer(() => Effect.promise(() => close()).pipe(Effect.orDie));

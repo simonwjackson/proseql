@@ -2,6 +2,7 @@ import {
 	createEffectDatabase,
 	type DatabaseConfig,
 	type DatasetFor,
+	type EffectDatabaseOptions,
 	type GenerateDatabase,
 	getCollectionConfigs,
 } from "@proseql/effect";
@@ -480,11 +481,19 @@ export const makeRpcHandlersFromDatabase = <Config extends DatabaseConfig>(
 export const makeRpcHandlers = <Config extends DatabaseConfig>(
 	config: Config,
 	initialData?: Partial<DatasetFor<Config>>,
+	options?: EffectDatabaseOptions,
 ) => {
 	const group = makeRpcGroup(config);
+	const database = Effect.acquireRelease(
+		createEffectDatabase(config, initialData as never, options),
+		(db) =>
+			Effect.promise(() =>
+				(db as typeof db & { close: () => Promise<void> }).close(),
+			),
+	);
 	return group.toLayer(
 		Effect.map(
-			createEffectDatabase(config, initialData as never),
+			database,
 			(db) => makeHandlerFunctions(config, db) as unknown as HandlerMap<Config>,
 		),
 	);
