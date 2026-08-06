@@ -1,6 +1,20 @@
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { beforeAll, describe, expect, expectTypeOf, it } from "vitest";
 import { makeCollectionRpcs, makeRpcGroup } from "../src/index.js";
 
 const BookSchema = Schema.Struct({
@@ -12,6 +26,18 @@ const BookSchema = Schema.Struct({
 const config = {
 	books: { schema: BookSchema, relationships: {} },
 } as const;
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+
+beforeAll(() => {
+	execFileSync("bunx", ["tsc", "--build", "packages/core", "packages/rpc"], {
+		cwd: root,
+		stdio: "inherit",
+	});
+});
+
+const existsInConsumer = (consumer: string, packageName: string): boolean =>
+	existsSync(join(consumer, "node_modules", "@proseql", packageName));
 
 const operationNames = [
 	"findById",
@@ -53,11 +79,12 @@ describe("public RPC definitions", () => {
 		const books = makeCollectionRpcs("books", BookSchema);
 		type Book = typeof BookSchema.Type;
 		type Success<S extends Schema.Top> = Schema.Schema.Type<S>;
-		type QueryRows<T> = T extends ReadonlyArray<infer Row>
-			? Row
-			: T extends { readonly items: ReadonlyArray<infer Row> }
+		type QueryRows<T> =
+			T extends ReadonlyArray<infer Row>
 				? Row
-				: never;
+				: T extends { readonly items: ReadonlyArray<infer Row> }
+					? Row
+					: never;
 
 		expectTypeOf<
 			Success<typeof books.createMany.successSchema>["created"][number]
@@ -71,32 +98,66 @@ describe("public RPC definitions", () => {
 		expectTypeOf<
 			Success<typeof books.upsertMany.successSchema>["created"][number]
 		>().toEqualTypeOf<Book>();
-		expectTypeOf<
-			Success<typeof books.upsert.successSchema>
-		>().toMatchTypeOf<Book & { readonly __action: string }>();
+		expectTypeOf<Success<typeof books.upsert.successSchema>>().toMatchTypeOf<
+			Book & { readonly __action: string }
+		>();
 		expectTypeOf<
 			QueryRows<Success<typeof books.query.successSchema>>
 		>().toMatchTypeOf<Partial<Book>>();
 	});
 
-	it("keeps the root export client-safe and the WASM adapter behind ./server", async () => {
-		const manifest = (await Bun.file(
-			new URL("../package.json", import.meta.url),
-		).json()) as {
-			readonly exports: Readonly<Record<string, unknown>>;
-			readonly peerDependenciesMeta: Readonly<
-				Record<string, { readonly optional?: boolean }>
-			>;
-		};
-		const rootSource = await Bun.file(
-			new URL("../src/index.ts", import.meta.url),
-		).text();
-		expect(manifest.exports["./server"]).toBeDefined();
-		expect(manifest.peerDependenciesMeta["@proseql/effect"]?.optional).toBe(
-			true,
-		);
-		expect(rootSource).not.toContain("@proseql/effect");
-		expect(rootSource).not.toContain("rpc-handlers");
+	it("loads the built root without engine packages and gates ./server on its optional peer", () => {
+		const consumer = mkdtempSync(join(tmpdir(), "proseql-rpc-client-"));
+		try {
+			const scope = join(consumer, "node_modules", "@proseql");
+			mkdirSync(scope, { recursive: true });
+			const rpcPackage = join(scope, "rpc");
+			mkdirSync(rpcPackage, { recursive: true });
+			cpSync(join(root, "packages/rpc/dist"), join(rpcPackage, "dist"), {
+				recursive: true,
+			});
+			cpSync(
+				join(root, "packages/rpc/package.json"),
+				join(rpcPackage, "package.json"),
+			);
+			symlinkSync(
+				realpathSync(join(root, "packages/core")),
+				join(scope, "core"),
+				"dir",
+			);
+			symlinkSync(
+				realpathSync(join(root, "node_modules/effect")),
+				join(consumer, "node_modules", "effect"),
+				"dir",
+			);
+			writeFileSync(
+				join(consumer, "package.json"),
+				JSON.stringify({ type: "module" }),
+			);
+
+			const rootImport = spawnSync(
+				"node",
+				["--input-type=module", "--eval", "await import('@proseql/rpc')"],
+				{ cwd: consumer, encoding: "utf8" },
+			);
+			expect(rootImport.status, rootImport.stderr).toBe(0);
+			expect(existsInConsumer(consumer, "effect")).toBe(false);
+			expect(existsInConsumer(consumer, "engine")).toBe(false);
+
+			const serverImport = spawnSync(
+				"node",
+				[
+					"--input-type=module",
+					"--eval",
+					"await import('@proseql/rpc/server')",
+				],
+				{ cwd: consumer, encoding: "utf8" },
+			);
+			expect(serverImport.status).not.toBe(0);
+			expect(serverImport.stderr).toContain("@proseql/effect");
+		} finally {
+			rmSync(consumer, { recursive: true, force: true });
+		}
 	});
 
 	it.each([

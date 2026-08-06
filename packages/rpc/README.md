@@ -111,7 +111,7 @@ A collected cursor query returns `{ items, pageInfo }`; other collected queries 
 
 Bulk update and delete pass the declarative filter to the canonical database path. They do not replace operators with equality checks.
 
-Streaming has no ProseQL-specific chunk or buffer options. Transport buffering is configured with Effect's client transport options, such as `streamBufferSize`, when appropriate.
+Streaming has no ProseQL-specific chunk or buffer options. Transport buffering is configured with Effect's client transport options, such as `streamBufferSize`, when appropriate. The current WASM query API materializes the matching rows before the RPC stream starts; client cancellation still stops further transport emission and finalizes the server stream, but it does not make the underlying database query incremental.
 
 ## Typed failures
 

@@ -39,13 +39,6 @@ describe("streaming RPC", () => {
 		expect(rows.map((row) => row.title)).toEqual(["Neuromancer", "Snow Crash"]);
 	});
 
-	it("supports client interruption without buffering the full result", async () => {
-		const rows = await run((client) =>
-			Stream.runCollect(Stream.take(client["books.queryStream"]({}), 1)),
-		);
-		expect(rows.map((row) => row.id)).toEqual(["1"]);
-	});
-
 	it("reports pre-execution stream failures instead of a successful end", async () => {
 		const error = await run((client) =>
 			Stream.runCollect(
