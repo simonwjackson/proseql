@@ -90,6 +90,19 @@ export function updateWorkspaceForRelease(input: {
 		manifest.version = input.nextVersion;
 		updated.set(path, `${JSON.stringify(manifest, null, 2)}\n`);
 	}
+	const lockPath = "bun.lock";
+	let lock = requiredFile(input.files, lockPath);
+	for (const packageName of COORDINATED_PACKAGE_NAMES) {
+		const pattern = new RegExp(
+			`("packages/${packageName}":\\s*\\{[\\s\\S]*?"name":\\s*"@proseql/${packageName}",\\s*"version":\\s*")[^"]+(")`,
+		);
+		assert(
+			pattern.test(lock),
+			`${lockPath}: missing ${packageName} workspace version`,
+		);
+		lock = lock.replace(pattern, `$1${input.nextVersion}$2`);
+	}
+	updated.set(lockPath, lock);
 
 	const aiPath = "packages/ai/package.json";
 	const aiSource = requiredFile(input.files, aiPath);
@@ -218,6 +231,7 @@ function createDefaultServices(root: string): ReleasePreparationServices {
 		),
 		"packages/ai/package.json",
 		"packages/cli/src/main.ts",
+		"bun.lock",
 		"CHANGELOG.md",
 	];
 	return {

@@ -40,6 +40,14 @@ const packageManifest = (
 	peerDependencies: { effect: "4.0.0-beta.103" },
 });
 
+const workspaceLock = (version: string): string =>
+	`${COORDINATED_PACKAGE_NAMES.map(
+		(name) =>
+			`"packages/${name}": { "name": "@proseql/${name}", "version": "${version}" },`,
+	).join(
+		"\n",
+	)}\n"packages/ai": { "name": "@proseql/ai", "version": "0.5.0" },\n`;
+
 const artifact = (
 	packageName: (typeof COORDINATED_PACKAGE_NAMES)[number],
 ): PreparedArtifact => {
@@ -236,6 +244,7 @@ describe("reversible release preparation", () => {
 			`${JSON.stringify({ name: "@proseql/ai", version: "0.5.0" })}\n`,
 		);
 		files.set("packages/cli/src/main.ts", 'const VERSION = "0.15.0";\n');
+		files.set("bun.lock", workspaceLock("0.15.0"));
 		files.set("CHANGELOG.md", "# Changelog\n\nold\n");
 		const updated = updateWorkspaceForRelease({
 			files,
@@ -253,6 +262,12 @@ describe("reversible release preparation", () => {
 		).toBe("0.5.0");
 		expect(updated.get("packages/cli/src/main.ts")).toContain(
 			`VERSION = "${VERSION}"`,
+		);
+		expect(updated.get("bun.lock")).toContain(
+			`"packages/rpc": { "name": "@proseql/rpc", "version": "${VERSION}" }`,
+		);
+		expect(updated.get("bun.lock")).toContain(
+			'"packages/ai": { "name": "@proseql/ai", "version": "0.5.0" }',
 		);
 		expect(updated.get("CHANGELOG.md")).toContain(
 			`## v${VERSION} (2026-08-05)`,
@@ -275,6 +290,7 @@ describe("reversible release preparation", () => {
 					'{"name":"@proseql/ai","version":"0.5.0"}\n',
 				);
 				files.set("packages/cli/src/main.ts", 'const VERSION = "0.15.0";\n');
+				files.set("bun.lock", workspaceLock("0.15.0"));
 				files.set("CHANGELOG.md", "# Changelog\n");
 				return files;
 			},
@@ -339,6 +355,7 @@ describe("reversible release preparation", () => {
 		}
 		files.set("packages/ai/package.json", '{"version":"0.5.0"}');
 		files.set("packages/cli/src/main.ts", 'const VERSION = "0.15.0";');
+		files.set("bun.lock", workspaceLock("0.15.0"));
 		files.set("CHANGELOG.md", "# Changelog\n");
 		const services: ReleasePreparationServices = {
 			readWorkspace: async () =>
