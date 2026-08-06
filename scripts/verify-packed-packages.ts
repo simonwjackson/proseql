@@ -32,6 +32,13 @@ import {
 
 export { COORDINATED_PACKAGE_NAMES, type CoordinatedPackageName };
 export const EFFECT_VERSION = "4.0.0-beta.103";
+export const TAR_COMMAND_TIMEOUT_MS = 30_000;
+
+export type TarInspectionOptions = {
+	readonly timeoutMs?: number;
+	/** Override only for hermetic tests or controlled tooling environments. */
+	readonly tarExecutable?: string;
+};
 
 export type PackedPackageJson = {
 	readonly name?: string;
@@ -401,23 +408,61 @@ function prepareExtractionDirectory(destinationDirectory: string): string {
 	return realRoot;
 }
 
+function runBoundedTar(
+	tarExecutable: string,
+	args: ReadonlyArray<string>,
+	timeoutMs: number,
+	phase: "listing" | "extraction",
+	stdio: "inherit" | ["ignore", "pipe", "pipe"],
+): string {
+	try {
+		const output = execFileSync(tarExecutable, args, {
+			encoding: "utf8",
+			stdio,
+			timeout: timeoutMs,
+			killSignal: "SIGKILL",
+		});
+		return typeof output === "string" ? output : "";
+	} catch (error) {
+		if (
+			typeof error === "object" &&
+			error !== null &&
+			"code" in error &&
+			error.code === "ETIMEDOUT"
+		) {
+			throw new Error(`tar ${phase} timed out after ${timeoutMs}ms`, {
+				cause: error,
+			});
+		}
+		throw error;
+	}
+}
+
 export function inspectAndExtractTarball(
 	tarballPath: string,
 	destinationDirectory: string,
+	options: TarInspectionOptions = {},
 ): void {
+	const timeoutMs = options.timeoutMs ?? TAR_COMMAND_TIMEOUT_MS;
+	assert(
+		Number.isInteger(timeoutMs) && timeoutMs > 0,
+		"tar command timeout must be a positive integer",
+	);
+	const tarExecutable = options.tarExecutable ?? "tar";
+	assert(tarExecutable.length > 0, "tar executable must not be empty");
+
 	const list = (verbose: boolean): ReadonlyArray<string> => {
-		const output = execFileSync(
-			"tar",
+		const output = runBoundedTar(
+			tarExecutable,
 			[
 				verbose ? "-tvzf" : "-tzf",
 				tarballPath,
 				"--quoting-style=escape",
 				...(verbose ? ["--numeric-owner"] : []),
 			],
-			{
-				encoding: "utf8",
-				stdio: ["ignore", "pipe", "pipe"],
-			},
+			timeoutMs,
+			"listing",
+			["ignore", "pipe", "pipe"],
 		);
 		return output.split("\n").filter((line) => line.length > 0);
 	};
@@ -471,8 +516,8 @@ export function inspectAndExtractTarball(
 	}
 
 	const preparedRoot = prepareExtractionDirectory(root);
-	execFileSync(
-		"tar",
+	runBoundedTar(
+		tarExecutable,
 		[
 			"-xzf",
 			tarballPath,
@@ -484,7 +529,9 @@ export function inspectAndExtractTarball(
 			"-C",
 			preparedRoot,
 		],
-		{ stdio: "inherit" },
+		timeoutMs,
+		"extraction",
+		"inherit",
 	);
 }
 

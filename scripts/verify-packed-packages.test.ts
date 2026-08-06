@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import {
+	chmodSync,
 	existsSync,
 	linkSync,
 	mkdirSync,
@@ -370,6 +371,76 @@ describe("safe package tarball extraction", () => {
 			expect(() =>
 				inspectAndExtractTarball(tarball, join(root, "extract")),
 			).toThrow(/unsupported tar member type/);
+		});
+	});
+
+	it.each([
+		0,
+		-1,
+		1.5,
+		Number.POSITIVE_INFINITY,
+	])("rejects invalid tar command timeout %s before invoking tar", (timeoutMs) => {
+		withFixture((root) => {
+			const destination = join(root, "extract", "package");
+			expect(() =>
+				inspectAndExtractTarball(join(root, "missing.tgz"), destination, {
+					timeoutMs,
+				}),
+			).toThrow(/timeout must be a positive integer/);
+			expect(existsSync(destination)).toBe(false);
+		});
+	});
+
+	it("bounds a tar listing blocked on a FIFO before creating extraction output", () => {
+		withFixture((root) => {
+			const tarball = join(root, "blocked.tgz");
+			const destination = join(root, "extract", "package");
+			const outside = join(root, "outside.txt");
+			execFileSync("mkfifo", [tarball]);
+			writeFileSync(outside, "unchanged");
+
+			const startedAt = Date.now();
+			expect(() =>
+				inspectAndExtractTarball(tarball, destination, { timeoutMs: 100 }),
+			).toThrow(/tar listing timed out after 100ms/);
+
+			expect(Date.now() - startedAt).toBeLessThan(2_000);
+			expect(existsSync(destination)).toBe(false);
+			expect(readFileSync(outside, "utf8")).toBe("unchanged");
+		});
+	});
+
+	it("bounds tar extraction after validated listings", () => {
+		withFixture((root) => {
+			const tarball = join(root, "crafted.tgz");
+			const destination = join(root, "extract", "package");
+			const outside = join(root, "outside.txt");
+			const fakeTar = join(root, "blocking-tar");
+			writeFileSync(tarball, "ignored by crafted tar executable");
+			writeFileSync(outside, "unchanged");
+			writeFileSync(
+				fakeTar,
+				`#!/bin/sh
+case "$1" in
+  -tzf) printf 'package/\\npackage/index.js\\n' ;;
+  -tvzf) printf 'drwxr-xr-x 0/0 0 2026-01-01 00:00 package/\\n-rw-r--r-- 0/0 1 2026-01-01 00:00 package/index.js\\n' ;;
+  -xzf) exec sleep 60 ;;
+esac
+`,
+			);
+			chmodSync(fakeTar, 0o755);
+
+			const startedAt = Date.now();
+			expect(() =>
+				inspectAndExtractTarball(tarball, destination, {
+					timeoutMs: 100,
+					tarExecutable: fakeTar,
+				}),
+			).toThrow(/tar extraction timed out after 100ms/);
+
+			expect(Date.now() - startedAt).toBeLessThan(2_000);
+			expect(readFileSync(outside, "utf8")).toBe("unchanged");
+			expect(existsSync(join(destination, "index.js"))).toBe(false);
 		});
 	});
 });
