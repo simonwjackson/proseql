@@ -1,4 +1,4 @@
-import pkg from "hjson";
+import pkg from "hjson/bundle/hjson.js";
 
 const { parse, stringify } = pkg;
 
