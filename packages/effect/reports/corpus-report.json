@@ -1,16 +1,16 @@
 {
   "phase": "phase-2-gate",
   "summary": {
-    "totalFiles": 97,
+    "totalFiles": 98,
     "executedFiles": 79,
     "runnableFiles": 79,
-    "skippedFiles": 18,
+    "skippedFiles": 19,
     "xfailedFiles": 0,
     "xpassedFiles": 0,
     "passedFiles": 79,
     "failedFiles": 0,
-    "coverageRate": 0.8144329896907216,
-    "executedFraction": 0.8144329896907216,
+    "coverageRate": 0.8061224489795918,
+    "executedFraction": 0.8061224489795918,
     "slicePassRate": 1,
     "totalAssertions": 2353,
     "passedAssertions": 2353,
@@ -395,6 +395,14 @@
     },
     {
       "test": "glob-match.test.ts",
+      "expectation": "skip",
+      "status": "skipped",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "hjson-codec.test.ts",
       "expectation": "skip",
       "status": "skipped",
       "category": "non-applicable",
@@ -999,6 +1007,12 @@
     },
     {
       "test": "glob-match.test.ts",
+      "category": "non-applicable",
+      "owner": "effect-adapter",
+      "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."
+    },
+    {
+      "test": "hjson-codec.test.ts",
       "category": "non-applicable",
       "owner": "effect-adapter",
       "reason": "Targets internal core primitives or helper modules rather than the factory-swappable adapter surface exercised by the U9 parity slice."

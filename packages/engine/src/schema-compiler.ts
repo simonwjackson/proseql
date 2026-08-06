@@ -606,9 +606,6 @@ function compileSchemaNode(
 			if (literal !== undefined) return { kind: "literal", value: literal };
 			throw new Error(`Unsupported literal at '${path}'`);
 		}
-		case "Refinement":
-		case "Suspend":
-		case "Declaration":
 		default:
 			throw new Error(
 				`Unsupported schema combinator at '${path}': ${describeAst(ast)}`,

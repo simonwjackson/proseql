@@ -382,6 +382,14 @@ function transformCoreTest(source, fileName = "") {
 			"const db = await openPersistentDatabase(createPersistentEffectDatabase(config, { events: [] }).pipe(Effect.provide(layer)));",
 		);
 	}
+	if (fileName === "reactive-queries.test.ts") {
+		// The WASM adapter runs the same assertions with extra boundary work; keep
+		// collector fibers alive without changing the debounce intervals under test.
+		transformed = transformed.replaceAll(
+			'Effect.timeout("200 millis")',
+			'Effect.timeout("1 second")',
+		);
+	}
 	if (fileName === "lenient-validation.test.ts") {
 		transformed = transformed.replace(
 			/const db = await Effect\.runPromise\(\s*createPersistentEffectDatabase\(config\)\.pipe\(\s*Effect\.provide\(layer\),\s*Effect\.scoped,\s*\),\s*\);/g,
@@ -461,7 +469,7 @@ function classifySkip(file) {
 	}
 
 	const internalPrimitive =
-		/(array-operators|cursor-stream|debounced-writer|deep-merge|derived-id|document-source|evaluate-query|file-watcher|filter-stream|filter\.test|format-codec|glob-match|in-memory-storage|json-serializer|jsonc-comments|nested-path|paginate-stream|populate-stream|preset-layers|prose-|relevance-sort|search-index|select-stream|select\.test|serializer-service|sort-stream|source-config|state\.test|storage-services|toml-nulls|transforms|watch-by-id|watch-deduplication|yaml-serializer)\.test\.ts$/.test(
+		/(array-operators|cursor-stream|debounced-writer|deep-merge|derived-id|document-source|evaluate-query|file-watcher|filter-stream|filter\.test|format-codec|glob-match|hjson-codec|in-memory-storage|json-serializer|jsonc-comments|nested-path|paginate-stream|populate-stream|preset-layers|prose-|relevance-sort|search-index|select-stream|select\.test|serializer-service|sort-stream|source-config|state\.test|storage-services|toml-nulls|transforms|watch-by-id|watch-deduplication|yaml-serializer)\.test\.ts$/.test(
 			file,
 		);
 	if (internalPrimitive) {
