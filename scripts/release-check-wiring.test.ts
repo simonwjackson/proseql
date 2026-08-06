@@ -57,6 +57,7 @@ describe("release readiness wiring", () => {
 			"packages/rpc/tests/rpc-streaming.test.ts",
 			"scripts/verify-package-artifacts.test.ts",
 			"scripts/verify-packed-packages.test.ts",
+			"scripts/release.test.ts",
 		]) {
 			expect(justfile).toContain(path);
 		}

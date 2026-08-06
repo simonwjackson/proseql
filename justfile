@@ -25,6 +25,7 @@ test *args:
         ./packages/rpc/tests/rpc-wire-contract.test.ts \
         ./scripts/verify-package-artifacts.test.ts \
         ./scripts/verify-packed-packages.test.ts \
+        ./scripts/release.test.ts \
         ./scripts/release-check-wiring.test.ts \
         packages/core/tests/database-effect.test.ts \
         packages/core/tests/database-source-config.test.ts \
@@ -159,9 +160,13 @@ release-check:
     just browser-smoke
     just browser-budget
 
-# Release a new version (auto-detects bump type, or pass patch/minor/major)
+# Reversibly prepare a release (auto-detects bump type, or pass patch/minor/major); never publishes, commits, pushes, or tags
 release *bump:
     bun run scripts/release.ts {{bump}}
+
+# Inspect prepared registry state by default; destructive modes require explicit flags and PROSEQL_PUBLISH_APPROVAL
+publish-packages *args:
+    bun run scripts/publish-packages.ts {{args}}
 
 # ── Rust engine (crates/) ────────────────────────────────────────────────────
 

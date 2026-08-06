@@ -1,226 +1,402 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S nix develop .#tooling --command bun
 
-import { execSync } from "node:child_process";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
+import {
+	COORDINATED_PACKAGE_NAMES,
+	createPreparedRelease,
+	type PreparedArtifact,
+	type PreparedRelease,
+	type ReleasePackageManifest,
+} from "./release-manifest.js";
 
-const root = join(import.meta.dirname, "..");
+export type BumpType = "patch" | "minor" | "major";
 
-const explicitBump = process.argv[2] as "patch" | "minor" | "major" | undefined;
-if (explicitBump && !["patch", "minor", "major"].includes(explicitBump)) {
-	console.error(
-		"Usage: bun run scripts/release.ts [patch|minor|major]\n       (omit argument to auto-detect from commits)",
+export type ReleaseCommit = {
+	readonly hash: string;
+	readonly subject: string;
+	readonly body?: string;
+};
+
+export type GitHistory = {
+	readonly commit: string;
+	readonly commits: ReadonlyArray<ReleaseCommit>;
+};
+
+export type ReleasePreparationServices = {
+	readonly readWorkspace: () => Promise<ReadonlyMap<string, string>>;
+	readonly writeWorkspace: (
+		files: ReadonlyMap<string, string>,
+	) => Promise<void>;
+	readonly readGitHistory: () => Promise<GitHistory>;
+	readonly checkVersionAvailable: (
+		name: string,
+		version: string,
+	) => Promise<void>;
+	readonly runPreflight: () => Promise<void>;
+	readonly prepareArtifacts: (
+		version: string,
+	) => Promise<ReadonlyArray<PreparedArtifact>>;
+	readonly writePreparedRelease: (release: PreparedRelease) => Promise<void>;
+	readonly now: () => Date;
+};
+
+export function computeBumpType(
+	subjects: ReadonlyArray<string>,
+	bodies: string,
+): BumpType {
+	if (
+		subjects.some((subject) => /^[a-z]+(?:\([^)]*\))?!:/.test(subject)) ||
+		/^BREAKING CHANGE[:\s]/m.test(bodies)
+	) {
+		return "major";
+	}
+	return subjects.some((subject) => subject.startsWith("feat"))
+		? "minor"
+		: "patch";
+}
+
+export function incrementVersion(version: string, bump: BumpType): string {
+	const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+	if (!match) throw new Error(`invalid current version ${version}`);
+	const major = Number(match[1]);
+	const minor = Number(match[2]);
+	const patch = Number(match[3]);
+	if (bump === "major") return `${major + 1}.0.0`;
+	if (bump === "minor") return `${major}.${minor + 1}.0`;
+	return `${major}.${minor}.${patch + 1}`;
+}
+
+export function updateWorkspaceForRelease(input: {
+	readonly files: ReadonlyMap<string, string>;
+	readonly nextVersion: string;
+	readonly date: string;
+	readonly commits: ReadonlyArray<ReleaseCommit>;
+}): ReadonlyMap<string, string> {
+	const updated = new Map(input.files);
+	for (const packageName of COORDINATED_PACKAGE_NAMES) {
+		const path = `packages/${packageName}/package.json`;
+		const source = requiredFile(input.files, path);
+		const manifest = parseObject(source, path);
+		manifest.version = input.nextVersion;
+		updated.set(path, `${JSON.stringify(manifest, null, 2)}\n`);
+	}
+
+	const aiPath = "packages/ai/package.json";
+	const aiSource = requiredFile(input.files, aiPath);
+	const aiVersion = parseObject(aiSource, aiPath).version;
+	assert(
+		typeof aiVersion === "string",
+		"packages/ai/package.json is missing its independent version",
 	);
-	process.exit(1);
-}
+	updated.set(aiPath, aiSource);
 
-// --- Read current version from core ---
-
-const corePkgPath = join(root, "packages/core/package.json");
-const corePkg = JSON.parse(readFileSync(corePkgPath, "utf-8"));
-const current = corePkg.version as string;
-const [currentMajor, currentMinor, currentPatch] = current
-	.split(".")
-	.map(Number);
-
-// --- Find last version tag ---
-
-let lastTag: string | null = null;
-try {
-	lastTag = execSync("git describe --tags --abbrev=0 2>/dev/null", {
-		encoding: "utf-8",
-		cwd: root,
-	}).trim();
-} catch {
-	// No tags yet
-}
-
-const range = lastTag ? `${lastTag}..HEAD` : "HEAD";
-const logCmd = `git log --oneline --no-decorate ${range}`;
-const rawLog = execSync(logCmd, { encoding: "utf-8", cwd: root }).trim();
-const commits = rawLog
-	.split("\n")
-	.filter((line) => line.length > 0)
-	.filter((line) => !line.match(/^[a-f0-9]+ chore: release/));
-
-const features: string[] = [];
-const fixes: string[] = [];
-const other: string[] = [];
-
-let hasBreaking = false;
-let hasFeature = false;
-
-for (const line of commits) {
-	const match = line.match(/^([a-f0-9]+)\s+(.+)$/);
-	if (!match) continue;
-	const [, hash, message] = match;
-	const short = hash.slice(0, 7);
-
-	// Check for breaking change indicator in subject (e.g. "feat!:", "fix!:")
-	if (message.match(/^[a-z]+(\([^)]*\))?!:/)) {
-		hasBreaking = true;
-	}
-
-	if (message.startsWith("feat")) {
-		hasFeature = true;
-		const clean = message.replace(/^feat(\([^)]*\))?!?:\s*/, "");
-		features.push(`- ${capitalize(clean)} (${short})`);
-	} else if (message.startsWith("fix")) {
-		const clean = message.replace(/^fix(\([^)]*\))?!?:\s*/, "");
-		fixes.push(`- ${capitalize(clean)} (${short})`);
-	} else {
-		const clean = message.replace(/^[a-z]+(\([^)]*\))?!?:\s*/, "");
-		other.push(`- ${capitalize(clean)} (${short})`);
-	}
-}
-
-// Check full commit bodies for BREAKING CHANGE footer
-if (!hasBreaking) {
-	const fullLogCmd = `git log --format=%B ${range}`;
-	const fullLog = execSync(fullLogCmd, {
-		encoding: "utf-8",
-		cwd: root,
-	}).trim();
-	if (fullLog.match(/^BREAKING CHANGE[:\s]/m)) {
-		hasBreaking = true;
-	}
-}
-
-// Determine bump type: explicit override > auto-detect
-const bumpType: "patch" | "minor" | "major" = explicitBump
-	? explicitBump
-	: hasBreaking
-		? "major"
-		: hasFeature
-			? "minor"
-			: "patch";
-
-if (explicitBump) {
-	console.log(`Bump type: ${bumpType} (explicit)`);
-} else {
-	console.log(`Bump type: ${bumpType} (auto-detected from commits)`);
-}
-
-// --- Compute next version ---
-
-const next =
-	bumpType === "major"
-		? `${currentMajor + 1}.0.0`
-		: bumpType === "minor"
-			? `${currentMajor}.${currentMinor + 1}.0`
-			: `${currentMajor}.${currentMinor}.${currentPatch + 1}`;
-
-console.log(`Bumping ${current} -> ${next}`);
-
-// --- Update all package.json files ---
-
-const packages = ["core", "node", "browser", "cli", "rest", "rpc"];
-for (const pkg of packages) {
-	const pkgPath = join(root, `packages/${pkg}/package.json`);
-	const content = readFileSync(pkgPath, "utf-8");
-	const json = JSON.parse(content);
-	json.version = next;
-	writeFileSync(pkgPath, `${JSON.stringify(json, null, 2)}\n`);
-	console.log(`  Updated packages/${pkg}/package.json`);
-}
-
-// --- Sync VERSION constant in CLI main.ts ---
-
-const cliMainPath = join(root, "packages/cli/src/main.ts");
-const cliMainContent = readFileSync(cliMainPath, "utf-8");
-const updatedCliMain = cliMainContent.replace(
-	/const VERSION = "[^"]+";/,
-	`const VERSION = "${next}";`,
-);
-writeFileSync(cliMainPath, updatedCliMain);
-console.log("  Updated packages/cli/src/main.ts VERSION constant");
-
-// --- Generate changelog ---
-
-const today = new Date().toISOString().split("T")[0];
-let entry = `## v${next} (${today})\n`;
-
-if (features.length > 0) {
-	entry += `\n### Features\n${features.join("\n")}\n`;
-}
-if (fixes.length > 0) {
-	entry += `\n### Fixes\n${fixes.join("\n")}\n`;
-}
-if (other.length > 0) {
-	entry += `\n### Other\n${other.join("\n")}\n`;
-}
-
-const changelogPath = join(root, "CHANGELOG.md");
-let existing = "";
-if (existsSync(changelogPath)) {
-	existing = readFileSync(changelogPath, "utf-8");
-}
-
-if (existing.startsWith("# Changelog\n")) {
-	// Insert after the header
-	const rest = existing.slice("# Changelog\n".length);
-	writeFileSync(changelogPath, `# Changelog\n\n${entry}\n${rest}`);
-} else {
-	writeFileSync(changelogPath, `# Changelog\n\n${entry}\n${existing}`);
-}
-
-console.log("  Updated CHANGELOG.md");
-
-// --- Git commit and tag ---
-
-const filesToStage = [
-	"CHANGELOG.md",
-	"packages/cli/src/main.ts",
-	...packages.map((p) => `packages/${p}/package.json`),
-];
-execSync(`git add ${filesToStage.join(" ")}`, { cwd: root, stdio: "inherit" });
-execSync(`git commit -m "chore: release v${next}"`, {
-	cwd: root,
-	stdio: "inherit",
-});
-execSync(`git tag v${next}`, { cwd: root, stdio: "inherit" });
-execSync("git push && git push --tags", { cwd: root, stdio: "inherit" });
-
-// --- Create GitHub Release ---
-const notesFile = join(root, ".release-notes.tmp");
-writeFileSync(notesFile, entry);
-try {
-	execSync(
-		`gh release create v${next} --title "v${next}" --notes-file "${notesFile}"`,
-		{ cwd: root, stdio: "inherit" },
+	const cliPath = "packages/cli/src/main.ts";
+	const cliSource = requiredFile(input.files, cliPath);
+	const cliVersionPattern = /const VERSION = "[^"]+";/;
+	assert(
+		cliVersionPattern.test(cliSource),
+		`${cliPath}: VERSION constant missing`,
 	);
-} finally {
-	if (existsSync(notesFile)) unlinkSync(notesFile);
+	updated.set(
+		cliPath,
+		cliSource.replace(
+			cliVersionPattern,
+			`const VERSION = "${input.nextVersion}";`,
+		),
+	);
+
+	const changelogPath = "CHANGELOG.md";
+	const changelog = requiredFile(input.files, changelogPath);
+	const entry = createChangelogEntry(
+		input.nextVersion,
+		input.date,
+		input.commits,
+	);
+	updated.set(
+		changelogPath,
+		changelog.startsWith("# Changelog\n")
+			? `# Changelog\n\n${entry}\n${changelog.slice("# Changelog\n".length).replace(/^\n+/, "")}`
+			: `# Changelog\n\n${entry}\n${changelog}`,
+	);
+	return updated;
 }
 
-// --- Publish packages to npm ---
-// bun publish resolves workspace:* → actual versions automatically
+export async function prepareRelease(
+	options: { readonly bump?: BumpType },
+	services: ReleasePreparationServices,
+): Promise<PreparedRelease> {
+	const [files, history] = await Promise.all([
+		services.readWorkspace(),
+		services.readGitHistory(),
+	]);
+	const coreManifest = parseObject(
+		requiredFile(files, "packages/core/package.json"),
+		"packages/core/package.json",
+	);
+	assert(
+		typeof coreManifest.version === "string",
+		"@proseql/core is missing its version",
+	);
+	const commits = history.commits.filter(
+		({ subject }) => !subject.startsWith("chore: release"),
+	);
+	const bump =
+		options.bump ??
+		computeBumpType(
+			commits.map(({ subject }) => subject),
+			commits.map(({ body }) => body ?? "").join("\n"),
+		);
+	const nextVersion = incrementVersion(coreManifest.version, bump);
+	const now = services.now();
+	const date = now.toISOString().slice(0, 10);
+	const updated = updateWorkspaceForRelease({
+		files,
+		nextVersion,
+		date,
+		commits,
+	});
+	await services.writeWorkspace(updated);
 
-const publishOrder = ["core", "node", "cli", "rest"];
-console.log("\nPublishing to npm...");
+	for (const packageName of COORDINATED_PACKAGE_NAMES) {
+		await services.checkVersionAvailable(
+			`@proseql/${packageName}`,
+			nextVersion,
+		);
+	}
+	await services.runPreflight();
+	const artifacts = await services.prepareArtifacts(nextVersion);
+	const release = createPreparedRelease({
+		version: nextVersion,
+		commit: history.commit,
+		preparedAt: now.toISOString(),
+		artifacts,
+	});
+	await services.writePreparedRelease(release);
+	return release;
+}
 
-// Build from a clean tree to ensure dist/ is fresh, then verify packages before publishing.
-execSync("bun run build:clean", { cwd: root, stdio: "inherit" });
-execSync("bun run verify:packages", { cwd: root, stdio: "inherit" });
+function createChangelogEntry(
+	version: string,
+	date: string,
+	commits: ReadonlyArray<ReleaseCommit>,
+): string {
+	const sections = new Map<string, string[]>([
+		["Features", []],
+		["Fixes", []],
+		["Other", []],
+	]);
+	for (const { hash, subject } of commits) {
+		const section = subject.startsWith("feat")
+			? "Features"
+			: subject.startsWith("fix")
+				? "Fixes"
+				: "Other";
+		const clean = subject.replace(/^[a-z]+(?:\([^)]*\))?!?:\s*/, "");
+		sections.get(section)?.push(`- ${capitalize(clean)} (${hash.slice(0, 7)})`);
+	}
+	const content = [...sections]
+		.filter(([, lines]) => lines.length > 0)
+		.map(([heading, lines]) => `\n### ${heading}\n${lines.join("\n")}\n`)
+		.join("");
+	return `## v${version} (${date})\n${content}`;
+}
 
-for (const pkg of publishOrder) {
-	const pkgDir = join(root, `packages/${pkg}`);
+function createDefaultServices(root: string): ReleasePreparationServices {
+	const workspacePaths = [
+		...COORDINATED_PACKAGE_NAMES.map(
+			(packageName) => `packages/${packageName}/package.json`,
+		),
+		"packages/ai/package.json",
+		"packages/cli/src/main.ts",
+		"CHANGELOG.md",
+	];
+	return {
+		readWorkspace: async () =>
+			new Map(
+				workspacePaths.map((path) => [
+					path,
+					readFileSync(join(root, path), "utf8"),
+				]),
+			),
+		writeWorkspace: async (files) => {
+			for (const path of workspacePaths) {
+				writeFileSync(join(root, path), requiredFile(files, path));
+			}
+		},
+		readGitHistory: async () => readGitHistory(root),
+		checkVersionAvailable: async (name, version) =>
+			checkNpmVersionAvailable(root, name, version),
+		runPreflight: async () => {
+			execFileSync("just", ["release-check"], { cwd: root, stdio: "inherit" });
+		},
+		prepareArtifacts: async (version) => prepareArtifacts(root, version),
+		writePreparedRelease: async (release) => {
+			const path = join(root, ".artifacts/release/prepared-release.json");
+			mkdirSync(dirname(path), { recursive: true });
+			writeFileSync(path, `${JSON.stringify(release, null, 2)}\n`);
+		},
+		now: () => new Date(),
+	};
+}
+
+function readGitHistory(root: string): GitHistory {
+	const commit = execFileSync("git", ["rev-parse", "HEAD"], {
+		cwd: root,
+		encoding: "utf8",
+	}).trim();
+	const tagResult = spawnSync("git", ["describe", "--tags", "--abbrev=0"], {
+		cwd: root,
+		encoding: "utf8",
+	});
+	const range =
+		tagResult.status === 0 ? `${tagResult.stdout.trim()}..HEAD` : "HEAD";
+	const output = execFileSync(
+		"git",
+		["log", "--format=%H%x1f%s%x1f%b%x1e", range],
+		{ cwd: root, encoding: "utf8" },
+	);
+	const commits = output
+		.split("\x1e")
+		.map((record) => record.trim())
+		.filter(Boolean)
+		.map((record) => {
+			const [hash = "", subject = "", body = ""] = record.split("\x1f");
+			return { hash, subject, body };
+		});
+	return { commit, commits };
+}
+
+function checkNpmVersionAvailable(
+	root: string,
+	name: string,
+	version: string,
+): void {
+	const result = spawnSync(
+		"npm",
+		["view", `${name}@${version}`, "version", "--json"],
+		{
+			cwd: root,
+			encoding: "utf8",
+		},
+	);
+	if (result.status === 0) {
+		throw new Error(`${name}@${version} already exists in the registry`);
+	}
+	const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+	if (/E404|404 Not Found|code E404/i.test(output)) return;
+	throw new Error(
+		`could not prove ${name}@${version} is available: ${output.trim()}`,
+	);
+}
+
+function prepareArtifacts(
+	root: string,
+	version: string,
+): ReadonlyArray<PreparedArtifact> {
+	const preflight = join(root, ".artifacts/release-check");
+	const output = join(root, ".artifacts/release");
+	const outputTarballs = join(output, "tarballs");
+	rmSync(output, { recursive: true, force: true });
+	mkdirSync(outputTarballs, { recursive: true });
+	return COORDINATED_PACKAGE_NAMES.map((packageName) => {
+		const filename = `proseql-${packageName}-${version}.tgz`;
+		const sourceTarball = join(preflight, "tarballs", filename);
+		assert(existsSync(sourceTarball), `preflight did not produce ${filename}`);
+		const destinationTarball = join(outputTarballs, filename);
+		copyFileSync(sourceTarball, destinationTarball);
+		const bytes = readFileSync(destinationTarball);
+		const manifestPath = join(
+			preflight,
+			"extracted",
+			packageName,
+			"package.json",
+		);
+		assert(
+			existsSync(manifestPath),
+			`preflight did not inspect ${packageName}`,
+		);
+		const manifest = JSON.parse(
+			readFileSync(manifestPath, "utf8"),
+		) as ReleasePackageManifest;
+		return {
+			packageName,
+			name: `@proseql/${packageName}`,
+			version,
+			tarball: relative(output, destinationTarball),
+			sha256: createHash("sha256").update(bytes).digest("hex"),
+			integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
+			sizeBytes: bytes.byteLength,
+			manifest,
+		};
+	});
+}
+
+function requiredFile(
+	files: ReadonlyMap<string, string>,
+	path: string,
+): string {
+	const content = files.get(path);
+	assert(content !== undefined, `missing release file ${path}`);
+	return content;
+}
+
+function parseObject(source: string, path: string): Record<string, unknown> {
+	const value = JSON.parse(source) as unknown;
+	assert(
+		typeof value === "object" && value !== null && !Array.isArray(value),
+		`${path} must contain a JSON object`,
+	);
+	return value as Record<string, unknown>;
+}
+
+function capitalize(value: string): string {
+	return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function assert(condition: boolean, message: string): asserts condition {
+	if (!condition) throw new Error(message);
+}
+
+function parseBump(args: ReadonlyArray<string>): BumpType | undefined {
+	if (args.length === 0) return undefined;
+	const [value, ...rest] = args;
+	if (
+		rest.length > 0 ||
+		value === undefined ||
+		!["patch", "minor", "major"].includes(value)
+	) {
+		throw new Error("Usage: bun run scripts/release.ts [patch|minor|major]");
+	}
+	return value as BumpType;
+}
+
+if (import.meta.main) {
+	const root = resolve(dirname(import.meta.path), "..");
 	try {
-		execSync("bun publish --access public", { cwd: pkgDir, stdio: "inherit" });
-		console.log(`  Published @proseql/${pkg}@${next}`);
-	} catch (e) {
-		console.error(`  Failed to publish @proseql/${pkg}: ${e}`);
-		// Don't abort — some packages might already be published at this version
+		const release = await prepareRelease(
+			{ bump: parseBump(process.argv.slice(2)) },
+			createDefaultServices(root),
+		);
+		console.log(`Prepared @proseql coordinated release ${release.version}`);
+		console.log(
+			`Manifest: ${join(root, ".artifacts/release/prepared-release.json")}`,
+		);
+		console.log(`Approval id: ${release.releaseId}`);
+		console.log(
+			"No commit, push, tag, GitHub release, or npm registry write was performed.",
+		);
+	} catch (error) {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exitCode = 1;
 	}
-}
-
-console.log(`\nReleased v${next}`);
-console.log(`  Commit: chore: release v${next}`);
-console.log(`  Tag: v${next}`);
-console.log("  Pushed to origin");
-console.log("  GitHub Release created");
-console.log("  Published to npm");
-
-function capitalize(s: string): string {
-	return s.charAt(0).toUpperCase() + s.slice(1);
 }

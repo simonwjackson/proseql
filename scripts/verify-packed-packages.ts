@@ -25,20 +25,13 @@ import {
 	resolve,
 	sep,
 } from "node:path";
+import {
+	COORDINATED_PACKAGE_NAMES,
+	type CoordinatedPackageName,
+} from "./release-manifest.js";
 
+export { COORDINATED_PACKAGE_NAMES, type CoordinatedPackageName };
 export const EFFECT_VERSION = "4.0.0-beta.103";
-export const COORDINATED_PACKAGE_NAMES = [
-	"core",
-	"engine",
-	"node",
-	"rest",
-	"effect",
-	"cli",
-	"browser",
-	"rpc",
-] as const;
-
-export type CoordinatedPackageName = (typeof COORDINATED_PACKAGE_NAMES)[number];
 
 export type PackedPackageJson = {
 	readonly name?: string;
@@ -610,7 +603,15 @@ function verifyCoordinatedNodeConsumer(
 		COORDINATED_PACKAGE_NAMES,
 	);
 	installConsumer(consumer);
-	writeFileSync(join(consumer, "smoke.mjs"), nodeConsumerSmokeSource());
+	const coordinatedVersion = packed[0]?.manifest.version;
+	assert(
+		typeof coordinatedVersion === "string",
+		"coordinated package version is missing",
+	);
+	writeFileSync(
+		join(consumer, "smoke.mjs"),
+		nodeConsumerSmokeSource(coordinatedVersion),
+	);
 	run("node", ["smoke.mjs"], consumer);
 	assertInstalledPackagesAreCopies(consumer, COORDINATED_PACKAGE_NAMES);
 	const effectInstallations = findInstalledEffectPackages(
@@ -835,7 +836,7 @@ function run(
 	execFileSync(command, args, { cwd, env: process.env, stdio: "inherit" });
 }
 
-function nodeConsumerSmokeSource(): string {
+function nodeConsumerSmokeSource(coordinatedVersion: string): string {
 	return `import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -874,7 +875,7 @@ const restDb = await Effect.runPromise(createEffectDatabase(config, initial));
 const route = createRestHandlers(config, restDb).find((candidate) => candidate.method === "GET" && candidate.path === "/books");
 if (!route || (await route.handler({ params: {}, query: {} })).status !== 200) throw new Error("REST failed");
 const cli = execFileSync(join(process.cwd(), "node_modules/.bin/proseql"), ["--version"], { encoding: "utf8" });
-if (!cli.includes("0.15.0")) throw new Error("CLI failed");
+if (!cli.includes("${coordinatedVersion}")) throw new Error("CLI failed");
 
 const rpcResult = await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
   const toServer = yield* Queue.unbounded();
