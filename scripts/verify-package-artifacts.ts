@@ -8,15 +8,13 @@ import {
 	evaluateBrowserBudget,
 	validateBrowserPerformanceContract,
 } from "../bench/performance-contract.js";
+import {
+	type CoordinatedPackageName,
+	type PackedPackageJson,
+	validatePackedPackage,
+} from "./verify-packed-packages.js";
 
-type PackageJson = {
-	name?: string;
-	main?: string;
-	types?: string;
-	bin?: string | Record<string, string>;
-	files?: string[];
-	exports?: unknown;
-};
+type PackageJson = PackedPackageJson;
 
 type PackFile = { path: string };
 type PackResult = { files: ReadonlyArray<PackFile> };
@@ -74,7 +72,7 @@ function runPackageArtifactVerification(): void {
 	const packageNames =
 		requestedPackageNames && requestedPackageNames.length > 0
 			? requestedPackageNames
-			: ["core", "engine", "effect", "browser", "node", "rest", "cli"];
+			: ["core", "engine", "node", "rest", "effect", "cli", "browser", "rpc"];
 
 	let failed = false;
 
@@ -137,6 +135,18 @@ function runPackageArtifactVerification(): void {
 
 		if (!packageFailed) {
 			try {
+				const packedManifest = rewriteWorkspaceVersions(packageJson);
+				validatePackedPackage({
+					packageName: packageName as CoordinatedPackageName,
+					manifest: packedManifest,
+					files: new Map(
+						packFiles.map((path) => [
+							path,
+							readFileSync(join(packageDir, path)),
+						]),
+					),
+					coordinatedVersion: packageJson.version ?? "",
+				});
 				verifyPackageConformance(packageJson, packageDir, packedFileSet);
 				console.log(`✓ ${displayName}: package artifacts verified`);
 			} catch (error) {
@@ -149,6 +159,28 @@ function runPackageArtifactVerification(): void {
 	}
 
 	if (failed) process.exit(1);
+}
+
+function rewriteWorkspaceVersions(packageJson: PackageJson): PackedPackageJson {
+	const version = packageJson.version ?? "";
+	const rewrite = (
+		dependencies: Readonly<Record<string, string>> | undefined,
+	): Readonly<Record<string, string>> | undefined =>
+		dependencies
+			? Object.fromEntries(
+					Object.entries(dependencies).map(([name, declaration]) => [
+						name,
+						declaration.startsWith("workspace:") ? version : declaration,
+					]),
+				)
+			: undefined;
+	return {
+		...packageJson,
+		dependencies: rewrite(packageJson.dependencies),
+		optionalDependencies: rewrite(packageJson.optionalDependencies),
+		peerDependencies: rewrite(packageJson.peerDependencies),
+		devDependencies: rewrite(packageJson.devDependencies),
+	};
 }
 
 function requiredPackageArtifacts(packageJson: PackageJson): string[] {

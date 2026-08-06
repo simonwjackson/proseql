@@ -16,7 +16,8 @@
     "clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo *.tsbuildinfo dist/**/*.tsbuildinfo",
     "copy-license": "for dir in packages/*/; do cp LICENSE \"$dir\"; done",
     "verify:browser": "node scripts/verify-browser.mjs",
-    "verify:packages": "bun run scripts/verify-package-artifacts.ts && bun run verify:browser"
+    "verify:packages": "bun run scripts/verify-package-artifacts.ts && bun run verify:browser",
+    "verify:packed": "bun run scripts/verify-packed-packages.ts"
   },
   "dependencies": {
     "effect": "4.0.0-beta.103",

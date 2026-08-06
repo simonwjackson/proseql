@@ -184,6 +184,17 @@ describe("packed package contract", () => {
 		).toThrow(/missing public entry point dist\/index\.js/);
 	});
 
+	it("ignores package examples in emitted documentation comments", () => {
+		const contract = validContract();
+		const files = new Map(contract.files).set(
+			"dist/index.js",
+			'/** @example import { makeRpcGroup } from "@proseql/rpc" */\nexport {};',
+		);
+		expect(() =>
+			validatePackedPackage(mutate(contract, contract.manifest, files)),
+		).not.toThrow();
+	});
+
 	it("rejects undeclared runtime dependencies and deep old RPC imports", () => {
 		const contract = validContract();
 		const undeclaredFiles = new Map(contract.files).set(
