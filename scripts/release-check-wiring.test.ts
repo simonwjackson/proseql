@@ -24,6 +24,7 @@ describe("release readiness wiring", () => {
 		for (const path of [
 			"package.json",
 			"justfile",
+			"scripts/verify-packed-packages.ts",
 			...[
 				"ai",
 				"browser",

@@ -356,8 +356,8 @@ function buildFromCleanSource(): void {
 	run("bun", ["run", "clean"]);
 	run("bun", ["run", "copy-license"]);
 	run("bun", ["run", "--cwd", "packages/engine", "build:wasm"]);
-	run("bunx", ["tsc", "--build"]);
-	run("bunx", ["tsc", "--build", "packages/rpc"]);
+	run("bun", ["run", "tsc", "--build"]);
+	run("bun", ["run", "tsc", "--build", "packages/rpc"]);
 	chmodSync(join(repoRoot, "packages/cli/dist/main.js"), 0o755);
 }
 
@@ -531,7 +531,16 @@ function verifyStrictEffectPeers(
 					"--no-fund",
 					"--package-lock=false",
 				],
-				{ cwd: consumer, encoding: "utf8" },
+				{
+					cwd: consumer,
+					encoding: "utf8",
+					timeout: 10 * 60_000,
+					killSignal: "SIGKILL",
+				},
+			);
+			assert(
+				result.error === undefined,
+				`@proseql/${artifact.packageName} peer-resolution check could not complete: ${result.error?.message ?? "unknown subprocess error"}`,
 			);
 			assert(
 				result.status !== 0,
@@ -706,7 +715,13 @@ function run(
 	args: ReadonlyArray<string>,
 	cwd = repoRoot,
 ): void {
-	execFileSync(command, args, { cwd, env: process.env, stdio: "inherit" });
+	execFileSync(command, args, {
+		cwd,
+		env: process.env,
+		stdio: "inherit",
+		timeout: 10 * 60_000,
+		killSignal: "SIGKILL",
+	});
 }
 
 export function nodeConsumerSmokeSource(coordinatedVersion: string): string {
