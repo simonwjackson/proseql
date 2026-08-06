@@ -1,7 +1,7 @@
 ---
 title: "feat: Publish the Rust/WASM package set"
 type: feat
-status: active
+status: completed
 date: 2026-08-06
 deepened: 2026-08-06
 verify_command: "just release-check"
