@@ -125,7 +125,7 @@ const result = client["books.findById"]({ id: "missing" }).pipe(
 )
 ```
 
-The public schemas cover validation, not-found, duplicate-key, unique-constraint, foreign-key, hook, operation, transaction, concurrency, population, dangling-reference, collection, and invalid-RPC-request failures.
+The operation contracts cover the failures their database calls can return, including validation, not-found, duplicate-key, unique-constraint, foreign-key, hook, operation, population, dangling-reference, and invalid-request failures. Shared transaction, concurrency, and collection error schemas are also exported for applications that compose broader protocols, but this package does not define a remote transaction operation.
 
 ## Exports
 
