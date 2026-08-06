@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { makeCollectionRpcs, makeRpcGroup } from "../src/index.js";
 
 const BookSchema = Schema.Struct({
@@ -47,6 +47,36 @@ describe("public RPC definitions", () => {
 		expect([...books.group.requests.keys()]).toHaveLength(
 			operationNames.length,
 		);
+	});
+
+	it("derives entity-bearing result types from the collection schema", () => {
+		const books = makeCollectionRpcs("books", BookSchema);
+		type Book = typeof BookSchema.Type;
+		type Success<S extends Schema.Top> = Schema.Schema.Type<S>;
+		type QueryRows<T> = T extends ReadonlyArray<infer Row>
+			? Row
+			: T extends { readonly items: ReadonlyArray<infer Row> }
+				? Row
+				: never;
+
+		expectTypeOf<
+			Success<typeof books.createMany.successSchema>["created"][number]
+		>().toEqualTypeOf<Book>();
+		expectTypeOf<
+			Success<typeof books.updateMany.successSchema>["updated"][number]
+		>().toEqualTypeOf<Book>();
+		expectTypeOf<
+			Success<typeof books.deleteMany.successSchema>["deleted"][number]
+		>().toEqualTypeOf<Book>();
+		expectTypeOf<
+			Success<typeof books.upsertMany.successSchema>["created"][number]
+		>().toEqualTypeOf<Book>();
+		expectTypeOf<
+			Success<typeof books.upsert.successSchema>
+		>().toMatchTypeOf<Book & { readonly __action: string }>();
+		expectTypeOf<
+			QueryRows<Success<typeof books.query.successSchema>>
+		>().toMatchTypeOf<Partial<Book>>();
 	});
 
 	it("keeps the root export client-safe and the WASM adapter behind ./server", async () => {

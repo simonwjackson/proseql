@@ -86,6 +86,25 @@ export const UpsertManyPayloadSchema = Schema.Struct({
 	),
 });
 
+export type EntityType<EntitySchema extends Schema.Top> =
+	Schema.Schema.Type<EntitySchema>;
+export type QueryRow<EntitySchema extends Schema.Top> = Readonly<
+	Partial<EntityType<EntitySchema>>
+> &
+	Readonly<Record<string, unknown>>;
+
+/**
+ * Query rows can be full entities, selected partial entities, or populated rows
+ * with relationship fields. The static type remains tied to the configured
+ * entity while the wire schema preserves all selected/populated JSON fields.
+ */
+export const makeQueryRowSchema = <EntitySchema extends Schema.Top>(
+	entitySchema: EntitySchema,
+): Schema.Schema<QueryRow<EntitySchema>> =>
+	Schema.Union([RpcRecordSchema, entitySchema]) as unknown as Schema.Schema<
+		QueryRow<EntitySchema>
+	>;
+
 export const QueryRowSchema = RpcRecordSchema;
 export const CursorPageInfoSchema = Schema.Struct({
 	startCursor: Schema.NullOr(Schema.String),
@@ -101,6 +120,22 @@ export const CollectedQueryResultSchema = Schema.Union([
 	Schema.Array(QueryRowSchema),
 	CursorPageResultSchema,
 ]);
+
+export const makeCursorPageResultSchema = <EntitySchema extends Schema.Top>(
+	entitySchema: EntitySchema,
+) =>
+	Schema.Struct({
+		items: Schema.Array(makeQueryRowSchema(entitySchema)),
+		pageInfo: CursorPageInfoSchema,
+	});
+
+export const makeCollectedQueryResultSchema = <EntitySchema extends Schema.Top>(
+	entitySchema: EntitySchema,
+) =>
+	Schema.Union([
+		Schema.Array(makeQueryRowSchema(entitySchema)),
+		makeCursorPageResultSchema(entitySchema),
+	]);
 
 const NumberRecordSchema = Schema.Record(Schema.String, Schema.Number);
 const NullableNumberRecordSchema = Schema.Record(
@@ -150,6 +185,66 @@ export const UpsertManyResultSchema = Schema.Struct({
 	updated: Schema.Array(QueryRowSchema),
 	unchanged: Schema.Array(QueryRowSchema),
 });
+
+const SkippedCreateSchema = Schema.Struct({
+	data: Schema.Unknown,
+	reason: Schema.String,
+});
+
+export const makeCreateManyResultSchema = <EntitySchema extends Schema.Top>(
+	entitySchema: EntitySchema,
+) =>
+	Schema.Struct({
+		created: Schema.Array(entitySchema),
+		skipped: Schema.optional(Schema.Array(SkippedCreateSchema)),
+	});
+
+export const makeUpdateManyResultSchema = <EntitySchema extends Schema.Top>(
+	entitySchema: EntitySchema,
+) =>
+	Schema.Struct({
+		count: Schema.Number,
+		updated: Schema.Array(entitySchema),
+	});
+
+export const makeDeleteManyResultSchema = <EntitySchema extends Schema.Top>(
+	entitySchema: EntitySchema,
+) =>
+	Schema.Struct({
+		count: Schema.Number,
+		deleted: Schema.Array(entitySchema),
+	});
+
+export type UpsertAction = "created" | "updated" | "unchanged";
+export type UpsertResult<EntitySchema extends Schema.Top> =
+	EntityType<EntitySchema> & {
+		readonly __action: UpsertAction;
+	};
+
+export const makeUpsertResultSchema = <EntitySchema extends Schema.Top>(
+	entitySchema: EntitySchema,
+): Schema.Schema<UpsertResult<EntitySchema>> => {
+	const isEntity = Schema.is(entitySchema);
+	return Schema.declare<UpsertResult<EntitySchema>>(
+		(value): value is UpsertResult<EntitySchema> =>
+			typeof value === "object" &&
+			value !== null &&
+			"__action" in value &&
+			["created", "updated", "unchanged"].includes(
+				(value as { readonly __action?: unknown }).__action as string,
+			) &&
+			isEntity(value),
+	);
+};
+
+export const makeUpsertManyResultSchema = <EntitySchema extends Schema.Top>(
+	entitySchema: EntitySchema,
+) =>
+	Schema.Struct({
+		created: Schema.Array(entitySchema),
+		updated: Schema.Array(entitySchema),
+		unchanged: Schema.Array(entitySchema),
+	});
 
 export type FindByIdPayload = typeof FindByIdPayloadSchema.Type;
 export type QueryPayload = typeof QueryPayloadSchema.Type;

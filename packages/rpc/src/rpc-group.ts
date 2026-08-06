@@ -21,22 +21,22 @@ import {
 import {
 	AggregatePayloadSchema,
 	AggregateRpcResultSchema,
-	CollectedQueryResultSchema,
 	CreateManyPayloadSchema,
-	CreateManyResultSchema,
 	CreatePayloadSchema,
 	DeleteManyPayloadSchema,
-	DeleteManyResultSchema,
 	DeletePayloadSchema,
 	QueryPayloadSchema,
-	QueryRowSchema,
 	UpdateManyPayloadSchema,
-	UpdateManyResultSchema,
 	UpdatePayloadSchema,
 	UpsertManyPayloadSchema,
-	UpsertManyResultSchema,
 	UpsertPayloadSchema,
-	UpsertResultSchema,
+	makeCollectedQueryResultSchema,
+	makeCreateManyResultSchema,
+	makeDeleteManyResultSchema,
+	makeQueryRowSchema,
+	makeUpdateManyResultSchema,
+	makeUpsertManyResultSchema,
+	makeUpsertResultSchema,
 } from "./rpc-schemas.js";
 
 const QueryErrorSchema = Schema.Union([
@@ -110,14 +110,15 @@ export const makeCollectionRpcs = <
 		success: entitySchema,
 		error: NotFoundErrorSchema,
 	});
+	const queryRowSchema = makeQueryRowSchema(entitySchema);
 	const query = Rpc.make(`${prefix}query`, {
 		payload: QueryPayloadSchema,
-		success: CollectedQueryResultSchema,
+		success: makeCollectedQueryResultSchema(entitySchema),
 		error: QueryErrorSchema,
 	});
 	const queryStream = Rpc.make(`${prefix}queryStream`, {
 		payload: QueryPayloadSchema,
-		success: QueryRowSchema,
+		success: queryRowSchema,
 		error: QueryErrorSchema,
 		stream: true,
 	});
@@ -143,27 +144,27 @@ export const makeCollectionRpcs = <
 	});
 	const createMany = Rpc.make(`${prefix}createMany`, {
 		payload: CreateManyPayloadSchema,
-		success: CreateManyResultSchema,
+		success: makeCreateManyResultSchema(entitySchema),
 		error: CreateErrorSchema,
 	});
 	const updateMany = Rpc.make(`${prefix}updateMany`, {
 		payload: UpdateManyPayloadSchema,
-		success: UpdateManyResultSchema,
+		success: makeUpdateManyResultSchema(entitySchema),
 		error: BulkMutationErrorSchema,
 	});
 	const deleteMany = Rpc.make(`${prefix}deleteMany`, {
 		payload: DeleteManyPayloadSchema,
-		success: DeleteManyResultSchema,
+		success: makeDeleteManyResultSchema(entitySchema),
 		error: BulkMutationErrorSchema,
 	});
 	const upsert = Rpc.make(`${prefix}upsert`, {
 		payload: UpsertPayloadSchema,
-		success: UpsertResultSchema,
+		success: makeUpsertResultSchema(entitySchema),
 		error: UpsertErrorSchema,
 	});
 	const upsertMany = Rpc.make(`${prefix}upsertMany`, {
 		payload: UpsertManyPayloadSchema,
-		success: UpsertManyResultSchema,
+		success: makeUpsertManyResultSchema(entitySchema),
 		error: UpsertErrorSchema,
 	});
 

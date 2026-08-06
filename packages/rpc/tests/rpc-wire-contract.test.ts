@@ -113,6 +113,19 @@ describe("serialized RPC wire contract", () => {
 		},
 	);
 
+	it("validates full entity results while preserving shape-changing query rows", () => {
+		const definitions = makeCollectionRpcs("books", BookSchema);
+		expect(() =>
+			Schema.encodeUnknownSync(definitions.createMany.successSchema)({
+				created: [{ id: "1", title: "Missing year" }],
+			}),
+		).toThrow();
+		const selected = Schema.encodeUnknownSync(definitions.query.successSchema)([
+			{ title: "Dune" },
+		]);
+		expect(selected).toEqual([{ title: "Dune" }]);
+	});
+
 	it("JSON-encodes and decodes normal calls, typed failures, and stream chunks", async () => {
 		const result = await Effect.runPromise(
 			Effect.scoped(
