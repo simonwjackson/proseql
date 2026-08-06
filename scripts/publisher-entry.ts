@@ -1,3 +1,5 @@
+#!/usr/bin/env -S nix develop .#tooling --command bun
+
 import { runPublishCli } from "./publish-packages.js";
 
 try {

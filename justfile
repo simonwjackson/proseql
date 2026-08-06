@@ -172,7 +172,7 @@ release-finalize:
 
 # Inspect prepared registry state by default; destructive modes require explicit flags and PROSEQL_PUBLISH_APPROVAL
 publish-packages *args:
-    bun run scripts/publish-packages.ts {{args}}
+    bun run scripts/publisher-entry.ts {{args}}
 
 # ── Rust engine (crates/) ────────────────────────────────────────────────────
 

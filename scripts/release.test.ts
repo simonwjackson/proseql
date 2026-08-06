@@ -514,6 +514,7 @@ describe("prepared publication artifacts", () => {
 			]);
 			const publisher = readFileSync(join(root, "publisher.mjs"), "utf8");
 			expect(publisher).toContain("approve-candidate-upload");
+			expect(publisher).not.toContain("import.meta.main");
 			expect(publisher).not.toMatch(/from ["']\.\//);
 			const checksums = readFileSync(join(root, "SHA256SUMS"), "utf8");
 			for (const path of paths) expect(checksums).toContain(`  ${path}`);

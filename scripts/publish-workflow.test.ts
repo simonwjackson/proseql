@@ -53,6 +53,7 @@ describe("approved npm publication workflow", () => {
 		for (const name of ["candidate-upload", "promote-latest"]) {
 			const body = jobBody(name);
 			expect(body).toContain("environment: npm-production");
+			expect(body).toContain("permissions: {}");
 			expect(body).toContain(`NODE_AUTH_TOKEN: \${{ secrets.NPM_TOKEN }}`);
 			expect(body).toContain('test -n "$NODE_AUTH_TOKEN"');
 			expect(body).toContain("actions/download-artifact@");

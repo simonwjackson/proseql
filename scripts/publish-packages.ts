@@ -635,12 +635,3 @@ export async function runPublishCli(
 		console.log(`${cli.mode} phase completed for ${release.version}`);
 	}
 }
-
-if (import.meta.main) {
-	try {
-		await runPublishCli();
-	} catch (error) {
-		console.error(error instanceof Error ? error.message : String(error));
-		process.exitCode = 1;
-	}
-}
