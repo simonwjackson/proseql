@@ -1,6 +1,9 @@
 export * from "@proseql/core";
 
-export { createEngineDatabase, createPersistentEngineDatabase } from "./database.js";
+export {
+	createEngineDatabase,
+	createPersistentEngineDatabase,
+} from "./database.js";
 export { WasmEngineDefectError } from "./errors.js";
 export {
 	createNodeEngineStorageHost,

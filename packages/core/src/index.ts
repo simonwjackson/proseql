@@ -99,6 +99,7 @@ export type {
 // Migration Types
 // ============================================================================
 
+export { dryRunMigrations } from "./migrations/migration-runner.js";
 export type {
 	DryRunCollectionResult,
 	DryRunMigration,
@@ -106,7 +107,6 @@ export type {
 	DryRunStatus,
 	Migration,
 } from "./migrations/migration-types.js";
-export { dryRunMigrations } from "./migrations/migration-runner.js";
 
 // ============================================================================
 // Context Tag Factory
@@ -127,7 +127,10 @@ export type {
 } from "./storage/document-graph-source.js";
 export { loadDocumentGraphSources } from "./storage/document-graph-source.js";
 export type { LoadedDocumentSources } from "./storage/document-source.js";
-export { loadDocumentSources, saveDocumentSource } from "./storage/document-source.js";
+export {
+	loadDocumentSources,
+	saveDocumentSource,
+} from "./storage/document-source.js";
 export type { OriginIndex, RecordOrigin } from "./storage/origin-index.js";
 export { getOrigin } from "./storage/origin-index.js";
 export type {

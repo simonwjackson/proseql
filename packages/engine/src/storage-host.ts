@@ -2,8 +2,8 @@ import { randomBytes } from "node:crypto";
 import { promises as fs, watch as fsWatch } from "node:fs";
 import { dirname, join } from "node:path";
 import {
-	makeEngineStorageLayer,
 	type EngineStorageHost,
+	makeEngineStorageLayer,
 } from "./storage-host-shared.js";
 
 export interface NodeEngineStorageHostConfig {
@@ -63,7 +63,10 @@ export const createNodeEngineStorageHost = (
 			});
 		},
 		ensureDir: async (path) => {
-			await fs.mkdir(dirname(path), { recursive: true, mode: resolved.dirMode });
+			await fs.mkdir(dirname(path), {
+				recursive: true,
+				mode: resolved.dirMode,
+			});
 		},
 		listDirectory: async (dirPath) => {
 			try {
@@ -80,7 +83,11 @@ export const createNodeEngineStorageHost = (
 		listRecursive: async (rootPath) => {
 			const files: string[] = [];
 			const visit = async (dirPath: string) => {
-				let entries: Array<{ isDirectory(): boolean; isFile(): boolean; name: string }>;
+				let entries: Array<{
+					isDirectory(): boolean;
+					isFile(): boolean;
+					name: string;
+				}>;
 				try {
 					entries = await fs.readdir(dirPath, { withFileTypes: true });
 				} catch (error) {
@@ -113,26 +120,32 @@ export const createNodeEngineStorageHost = (
 					if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
 					throw error;
 				}
-				const watcher = fsWatch(watchedDir, { persistent: false }, (eventType, filename) => {
-					const childPath = typeof filename === "string" ? join(watchedDir, filename) : null;
-					onChange({
-						filename: childPath,
-						type: eventType === "rename" ? "add" : "change",
-					});
-					if (childPath) {
-						void (async () => {
-							try {
-								const stat = await fs.stat(childPath);
-								if (stat.isDirectory()) await watchDirectory(childPath);
-							} catch {
-								// ignore races where the entry disappears before inspection
-							}
-						})();
-					}
-				});
+				const watcher = fsWatch(
+					watchedDir,
+					{ persistent: false },
+					(eventType, filename) => {
+						const childPath =
+							typeof filename === "string" ? join(watchedDir, filename) : null;
+						onChange({
+							filename: childPath,
+							type: eventType === "rename" ? "add" : "change",
+						});
+						if (childPath) {
+							void (async () => {
+								try {
+									const stat = await fs.stat(childPath);
+									if (stat.isDirectory()) await watchDirectory(childPath);
+								} catch {
+									// ignore races where the entry disappears before inspection
+								}
+							})();
+						}
+					},
+				);
 				watchers.set(watchedDir, watcher);
 				for (const entry of entries) {
-					if (entry.isDirectory()) await watchDirectory(join(watchedDir, entry.name));
+					if (entry.isDirectory())
+						await watchDirectory(join(watchedDir, entry.name));
 				}
 			};
 			await watchDirectory(dirPath);

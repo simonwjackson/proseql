@@ -1,11 +1,11 @@
-import { StorageAdapterService as StorageAdapter } from "@proseql/core";
 import type { StorageAdapterShape } from "@proseql/core";
-import { Layer } from "effect";
+import { StorageAdapterService as StorageAdapter } from "@proseql/core";
 import {
 	createEngineStorageAdapter,
 	createSessionStorageEngineStorageHost,
 	type SessionStorageEngineStorageHostConfig,
 } from "@proseql/engine/browser";
+import { Layer } from "effect";
 
 export type WebStorageConfig = SessionStorageEngineStorageHostConfig;
 

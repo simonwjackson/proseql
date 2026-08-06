@@ -7,6 +7,7 @@ import type {
 	CollectionConfig,
 	ComputedFieldsConfig,
 	ConfiguredCollections,
+	GenerateDatabase as CoreGenerateDatabase,
 	CreateInput,
 	CreateManyOptions,
 	CreateManyResult,
@@ -18,7 +19,6 @@ import type {
 	DeleteWithRelationshipsOptions,
 	DeleteWithRelationshipsResult,
 	DryRunResult,
-	GenerateDatabase as CoreGenerateDatabase,
 	GroupedAggregateResult,
 	InferComputedFields,
 	PopulateConfig,
@@ -121,7 +121,9 @@ export interface EngineCollection<
 		options?: { readonly soft?: boolean; readonly limit?: number },
 	): Promise<DeleteManyResult<T>>;
 	upsert(input: UpsertInput<T>): Promise<UpsertResult<T>>;
-	upsertMany(inputs: ReadonlyArray<UpsertInput<T>>): Promise<UpsertManyResult<T>>;
+	upsertMany(
+		inputs: ReadonlyArray<UpsertInput<T>>,
+	): Promise<UpsertManyResult<T>>;
 	createWithRelationships(
 		input: CreateWithRelationshipsInput<T, Relations>,
 	): Promise<T>;
@@ -149,12 +151,16 @@ export interface EngineCollection<
 	watch<C extends EngineWatchConfig<T, Relations, DB>>(
 		config?: C,
 	): WatchSubscription<ReadonlyArray<QueryItemType<T, Relations, C, DB>>>;
-	watchById(id: string, options?: { readonly debounceMs?: number }): WatchSubscription<T | null>;
+	watchById(
+		id: string,
+		options?: { readonly debounceMs?: number },
+	): WatchSubscription<T | null>;
 }
 
-type EntityWithComputed<Entity, Computed> = Computed extends ComputedFieldsConfig<Entity>
-	? Entity & InferComputedFields<Computed>
-	: Entity;
+type EntityWithComputed<Entity, Computed> =
+	Computed extends ComputedFieldsConfig<Entity>
+		? Entity & InferComputedFields<Computed>
+		: Entity;
 
 export type EngineDatabaseEntityMap<Config> = {
 	[P in keyof ConfiguredCollections<Config>]: RuntimeEntityFromCollection<

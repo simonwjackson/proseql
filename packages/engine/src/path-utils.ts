@@ -22,7 +22,10 @@ export const isWithinComparableDirectory = (
 	if (filename === null) return true;
 	const eventPath = normalizeComparablePath(filename);
 	const target = normalizeComparablePath(directory);
-	return eventPath === target || eventPath.startsWith(target.length === 0 ? "" : `${target}/`);
+	return (
+		eventPath === target ||
+		eventPath.startsWith(target.length === 0 ? "" : `${target}/`)
+	);
 };
 
 export const matchesComparableFile = (

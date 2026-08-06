@@ -1,8 +1,8 @@
 import {
 	StorageAdapterService as StorageAdapter,
+	type StorageAdapterShape,
 	StorageError,
 	UnsupportedFormatError,
-	type StorageAdapterShape,
 } from "@proseql/core";
 import { Effect, Layer } from "effect";
 
@@ -21,10 +21,7 @@ export interface EngineStorageHost {
 	readonly ensureDir: (path: string) => Promise<void>;
 	readonly listDirectory: (dirPath: string) => Promise<ReadonlyArray<string>>;
 	readonly listRecursive: (rootPath: string) => Promise<ReadonlyArray<string>>;
-	readonly watch: (
-		path: string,
-		onChange: () => void,
-	) => Promise<() => void>;
+	readonly watch: (path: string, onChange: () => void) => Promise<() => void>;
 	readonly watchDir: (
 		dirPath: string,
 		onChange: (event: EngineStorageWatchEvent) => void,
@@ -42,7 +39,8 @@ export const toEngineStorageError = (
 	return new StorageError({
 		path,
 		operation,
-		message: error instanceof Error ? error.message : `Unknown ${operation} error`,
+		message:
+			error instanceof Error ? error.message : `Unknown ${operation} error`,
 		cause: error,
 	});
 };
@@ -52,7 +50,10 @@ export const toEngineStorageReadWriteError = (
 	operation: StorageError["operation"],
 	error: unknown,
 ): StorageError | UnsupportedFormatError => {
-	if (error instanceof UnsupportedFormatError || error instanceof StorageError) {
+	if (
+		error instanceof UnsupportedFormatError ||
+		error instanceof StorageError
+	) {
 		return error;
 	}
 	return toEngineStorageError(path, operation, error);
@@ -115,4 +116,5 @@ export const createEngineStorageAdapter = (
 
 export const makeEngineStorageLayer = (
 	host: EngineStorageHost,
-): Layer.Layer<any> => Layer.succeed(StorageAdapter, createEngineStorageAdapter(host));
+): Layer.Layer<any> =>
+	Layer.succeed(StorageAdapter, createEngineStorageAdapter(host));

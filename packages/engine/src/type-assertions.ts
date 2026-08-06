@@ -17,7 +17,11 @@ const config = {
 	users: {
 		schema: UserSchema,
 		relationships: {
-			company: { type: "ref" as const, target: "companies", foreignKey: "companyId" },
+			company: {
+				type: "ref" as const,
+				target: "companies",
+				foreignKey: "companyId",
+			},
 		},
 	},
 	companies: {

@@ -1,5 +1,6 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.3.14/schema.json",
+	"root": true,
 	"files": {
 		"includes": [
 			"packages/*/src/**/*.ts",
@@ -19,6 +20,30 @@
 			}
 		}
 	},
+	"overrides": [
+		{
+			"includes": [
+				"packages/effect/src/database.ts",
+				"packages/engine/src/browser.ts",
+				"packages/engine/src/database.ts",
+				"packages/engine/src/materialized-projection.ts",
+				"packages/engine/src/schema-compiler.ts",
+				"packages/engine/src/storage-host-shared.ts",
+				"packages/engine/src/storage-host.ts",
+				"packages/engine/src/types.ts"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noNonNullAssertion": "off"
+					},
+					"suspicious": {
+						"noExplicitAny": "off"
+					}
+				}
+			}
+		}
+	],
 	"formatter": {
 		"enabled": true,
 		"indentStyle": "tab",

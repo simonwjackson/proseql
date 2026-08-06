@@ -1,14 +1,14 @@
 import { StorageError, UnsupportedFormatError } from "@proseql/core";
-import type {
-	EngineStorageHost,
-	EngineStorageWatchEvent,
-} from "./storage-host-shared.js";
 import {
 	dirnameComparable,
 	isWithinComparableDirectory,
 	matchesComparableFile,
 	normalizeComparablePath,
 } from "./path-utils.js";
+import type {
+	EngineStorageHost,
+	EngineStorageWatchEvent,
+} from "./storage-host-shared.js";
 
 export const DEFAULT_STORAGE_KEY_PREFIX = "proseql:";
 
@@ -49,7 +49,9 @@ let nextBrowserObjectId = 1;
 const normalizeAllowedFormats = (
 	allowedFormats: ReadonlyArray<string> | undefined,
 ): ReadonlyArray<string> | undefined =>
-	allowedFormats === undefined ? undefined : allowedFormats.map((value) => value.toLowerCase());
+	allowedFormats === undefined
+		? undefined
+		: allowedFormats.map((value) => value.toLowerCase());
 
 const getFileExtension = (filePath: string): string => {
 	const lastDotIndex = filePath.lastIndexOf(".");
@@ -87,7 +89,10 @@ const createOriginId = (): string =>
 		? crypto.randomUUID()
 		: `origin-${Math.random().toString(36).slice(2)}`;
 
-const objectIdentity = (target: object, ids: WeakMap<object, number>): number => {
+const objectIdentity = (
+	target: object,
+	ids: WeakMap<object, number>,
+): number => {
 	const existing = ids.get(target);
 	if (existing !== undefined) return existing;
 	const created = nextBrowserObjectId++;
@@ -99,15 +104,21 @@ const createWebStorageNamespace = (
 	storage: Storage,
 	kind: "localStorage" | "sessionStorage",
 	prefix: string,
-): string => `${kind}:${objectIdentity(storage as object, storageObjectIds)}:${prefix}`;
+): string =>
+	`${kind}:${objectIdentity(storage as object, storageObjectIds)}:${prefix}`;
 
 const createIndexedDbCacheKey = (
 	factory: IDBFactory | undefined,
-	config: Required<Pick<IndexedDBEngineHostConfig, "databaseName" | "storeName" | "version">>,
+	config: Required<
+		Pick<IndexedDBEngineHostConfig, "databaseName" | "storeName" | "version">
+	>,
 ): string =>
 	`${factory ? objectIdentity(factory as object, indexedDbFactoryIds) : "global"}:${config.databaseName}:${config.storeName}:${config.version}`;
 
-const subscribeLocal = (namespace: string, listener: LocalListener): (() => void) => {
+const subscribeLocal = (
+	namespace: string,
+	listener: LocalListener,
+): (() => void) => {
 	const listeners = localListeners.get(namespace) ?? new Set<LocalListener>();
 	listeners.add(listener);
 	localListeners.set(namespace, listeners);
@@ -130,14 +141,21 @@ const makeStorageError = (
 	cause?: unknown,
 ): StorageError => new StorageError({ path, operation, message, cause });
 
-const quotaStorageError = (path: string, action: "writing" | "appending to"): StorageError =>
+const quotaStorageError = (
+	path: string,
+	action: "writing" | "appending to",
+): StorageError =>
 	new StorageError({
 		path,
 		operation: "write",
 		message: `Storage quota exceeded while ${action} '${path}'`,
 	});
 
-const storageDeniedError = (path: string, operation: StorageError["operation"], error: unknown): StorageError =>
+const storageDeniedError = (
+	path: string,
+	operation: StorageError["operation"],
+	error: unknown,
+): StorageError =>
 	new StorageError({
 		path,
 		operation,
@@ -150,13 +168,18 @@ const storageDeniedError = (path: string, operation: StorageError["operation"], 
 		cause: error,
 	});
 
-const watchEventForPath = (path: string, type: "add" | "change" | "remove"): EngineStorageWatchEvent => ({
+const watchEventForPath = (
+	path: string,
+	type: "add" | "change" | "remove",
+): EngineStorageWatchEvent => ({
 	filename: normalizeComparablePath(path),
 	type,
 });
 
-const matchesDirectoryEvent = (event: BrowserStorageChange, directory: string) =>
-	isWithinComparableDirectory(event.path, directory);
+const matchesDirectoryEvent = (
+	event: BrowserStorageChange,
+	directory: string,
+) => isWithinComparableDirectory(event.path, directory);
 
 const watchStorageEvent = (
 	storage: Storage,
@@ -228,7 +251,10 @@ const emitWebStorageChange = (
 	});
 };
 
-const listStoragePaths = (storage: Storage, prefix: string): ReadonlyArray<string> => {
+const listStoragePaths = (
+	storage: Storage,
+	prefix: string,
+): ReadonlyArray<string> => {
 	const paths: string[] = [];
 	for (let index = 0; index < storage.length; index += 1) {
 		const key = storage.key(index);
@@ -245,17 +271,33 @@ export const createWebStorageEngineStorageHost = (
 	const kind = config.kind ?? "localStorage";
 	const storage =
 		config.storage ??
-		(kind === "localStorage" ? globalThis.localStorage : globalThis.sessionStorage);
+		(kind === "localStorage"
+			? globalThis.localStorage
+			: globalThis.sessionStorage);
 	const prefix = config.keyPrefix ?? DEFAULT_STORAGE_KEY_PREFIX;
 	const allowedFormats = normalizeAllowedFormats(config.allowedFormats);
 	const originId = config.originId ?? createOriginId();
 
-	const writeValue = (path: string, nextValue: string, existingValue: string | null) => {
+	const writeValue = (
+		path: string,
+		nextValue: string,
+		existingValue: string | null,
+	) => {
 		try {
 			storage.setItem(pathToKey(path, prefix), nextValue);
-			emitWebStorageChange(storage, kind, prefix, originId, path, existingValue === null ? "add" : "change");
+			emitWebStorageChange(
+				storage,
+				kind,
+				prefix,
+				originId,
+				path,
+				existingValue === null ? "add" : "change",
+			);
 		} catch (error) {
-			if (error instanceof DOMException && error.name === "QuotaExceededError") {
+			if (
+				error instanceof DOMException &&
+				error.name === "QuotaExceededError"
+			) {
 				throw quotaStorageError(path, "writing");
 			}
 			throw storageDeniedError(path, "write", error);
@@ -268,7 +310,11 @@ export const createWebStorageEngineStorageHost = (
 			validateAllowedFormat(path, allowedFormats);
 			const value = storage.getItem(pathToKey(path, prefix));
 			if (value === null) {
-				throw makeStorageError(path, "read", `Key not found: ${pathToKey(path, prefix)}`);
+				throw makeStorageError(
+					path,
+					"read",
+					`Key not found: ${pathToKey(path, prefix)}`,
+				);
 			}
 			return value;
 		},
@@ -306,7 +352,8 @@ export const createWebStorageEngineStorageHost = (
 			const prefixPath = root.length > 0 ? `${root}/` : "";
 			return listStoragePaths(storage, prefix).filter((path) => {
 				if (root.length > 0 && !path.startsWith(prefixPath)) return false;
-				const remainder = root.length > 0 ? path.slice(prefixPath.length) : path;
+				const remainder =
+					root.length > 0 ? path.slice(prefixPath.length) : path;
 				return remainder.length > 0 && !remainder.includes("/");
 			});
 		},
@@ -334,11 +381,13 @@ export const createWebStorageEngineStorageHost = (
 
 export const createLocalStorageEngineStorageHost = (
 	config: Omit<WebStorageEngineHostConfig, "kind"> = {},
-): EngineStorageHost => createWebStorageEngineStorageHost({ ...config, kind: "localStorage" });
+): EngineStorageHost =>
+	createWebStorageEngineStorageHost({ ...config, kind: "localStorage" });
 
 export const createSessionStorageEngineStorageHost = (
 	config: Omit<WebStorageEngineHostConfig, "kind"> = {},
-): EngineStorageHost => createWebStorageEngineStorageHost({ ...config, kind: "sessionStorage" });
+): EngineStorageHost =>
+	createWebStorageEngineStorageHost({ ...config, kind: "sessionStorage" });
 
 const createIndexedDbNamespace = (
 	factory: IDBFactory | undefined,
@@ -353,7 +402,9 @@ const isLikelyDirectoryPath = (path: string): boolean =>
 
 const openIndexedDb = async (
 	factory: IDBFactory | undefined,
-	config: Required<Pick<IndexedDBEngineHostConfig, "databaseName" | "storeName" | "version">>,
+	config: Required<
+		Pick<IndexedDBEngineHostConfig, "databaseName" | "storeName" | "version">
+	>,
 ): Promise<IDBDatabase> => {
 	if (!factory) {
 		throw makeStorageError(
@@ -420,7 +471,8 @@ const withStore = async <T>(
 			const store = transaction.objectStore(storeName);
 			const request = run(store);
 			request.onsuccess = () => resolve(request.result);
-			request.onerror = () => reject(storageDeniedError(path, operation, request.error));
+			request.onerror = () =>
+				reject(storageDeniedError(path, operation, request.error));
 		} catch (error) {
 			reject(storageDeniedError(path, operation, error));
 		}
@@ -431,13 +483,22 @@ const listIndexedDbKeys = async (
 	storeName: string,
 	path: string,
 ): Promise<ReadonlyArray<string>> => {
-	const keys = await withStore<IDBValidKey[]>(db, storeName, "readonly", path, "list", (store) =>
-		store.getAllKeys(),
+	const keys = await withStore<IDBValidKey[]>(
+		db,
+		storeName,
+		"readonly",
+		path,
+		"list",
+		(store) => store.getAllKeys(),
 	);
 	return keys.map((value) => String(value)).sort();
 };
 
-const createBroadcastPair = (namespace: string, originId: string, handler: (event: BrowserStorageChange) => void) => {
+const createBroadcastPair = (
+	namespace: string,
+	originId: string,
+	handler: (event: BrowserStorageChange) => void,
+) => {
 	const unsubscribeLocal = subscribeLocal(namespace, (event) => {
 		if (event.originId === originId) return;
 		handler(event);
@@ -480,8 +541,14 @@ export const createIndexedDBEngineStorageHost = (
 	const namespace = createIndexedDbNamespace(factory, config, prefix);
 	const notify = createBroadcastPair(namespace, originId, () => {});
 	const emit = (path: string, type: "add" | "change" | "remove") =>
-		notify.post({ namespace, path: normalizeComparablePath(path), type, originId });
-	const getDb = () => openIndexedDb(factory, { databaseName, storeName, version });
+		notify.post({
+			namespace,
+			path: normalizeComparablePath(path),
+			type,
+			originId,
+		});
+	const getDb = () =>
+		openIndexedDb(factory, { databaseName, storeName, version });
 
 	return {
 		__proseqlBrowserStorageHost: true,
@@ -496,7 +563,11 @@ export const createIndexedDBEngineStorageHost = (
 				(store) => store.get(pathToKey(path, prefix)),
 			);
 			if (value === undefined) {
-				throw makeStorageError(path, "read", `Key not found: ${pathToKey(path, prefix)}`);
+				throw makeStorageError(
+					path,
+					"read",
+					`Key not found: ${pathToKey(path, prefix)}`,
+				);
 			}
 			return value;
 		},
@@ -504,11 +575,23 @@ export const createIndexedDBEngineStorageHost = (
 			validateAllowedFormat(path, allowedFormats);
 			const db = await getDb();
 			const key = pathToKey(path, prefix);
-			const existing = await withStore<string | undefined>(db, storeName, "readonly", path, "read", (store) => store.get(key));
+			const existing = await withStore<string | undefined>(
+				db,
+				storeName,
+				"readonly",
+				path,
+				"read",
+				(store) => store.get(key),
+			);
 			try {
-				await withStore(db, storeName, "readwrite", path, "write", (store) => store.put(data, key));
+				await withStore(db, storeName, "readwrite", path, "write", (store) =>
+					store.put(data, key),
+				);
 			} catch (error) {
-				if (error instanceof DOMException && error.name === "QuotaExceededError") {
+				if (
+					error instanceof DOMException &&
+					error.name === "QuotaExceededError"
+				) {
 					throw quotaStorageError(path, "writing");
 				}
 				throw error;
@@ -519,24 +602,51 @@ export const createIndexedDBEngineStorageHost = (
 			validateAllowedFormat(path, allowedFormats);
 			const db = await getDb();
 			const key = pathToKey(path, prefix);
-			const existing = await withStore<string | undefined>(db, storeName, "readonly", path, "read", (store) => store.get(key));
-			await withStore(db, storeName, "readwrite", path, "write", (store) => store.put(`${existing ?? ""}${data}`, key));
+			const existing = await withStore<string | undefined>(
+				db,
+				storeName,
+				"readonly",
+				path,
+				"read",
+				(store) => store.get(key),
+			);
+			await withStore(db, storeName, "readwrite", path, "write", (store) =>
+				store.put(`${existing ?? ""}${data}`, key),
+			);
 			emit(path, existing === undefined ? "add" : "change");
 		},
 		async exists(path) {
 			const db = await getDb();
 			const key = pathToKey(path, prefix);
-			const count = await withStore<number>(db, storeName, "readonly", path, "read", (store) => store.count(key));
+			const count = await withStore<number>(
+				db,
+				storeName,
+				"readonly",
+				path,
+				"read",
+				(store) => store.count(key),
+			);
 			if (count > 0) return true;
 			if (!isLikelyDirectoryPath(path)) return false;
-			const keys = await listIndexedDbKeys(db, storeName, path).catch(() => [] as string[]);
+			const keys = await listIndexedDbKeys(db, storeName, path).catch(
+				() => [] as string[],
+			);
 			return keys.some((candidate) => candidate.startsWith(`${key}/`));
 		},
 		async remove(path) {
 			const db = await getDb();
 			const key = pathToKey(path, prefix);
-			const existing = await withStore<string | undefined>(db, storeName, "readonly", path, "read", (store) => store.get(key));
-			await withStore(db, storeName, "readwrite", path, "delete", (store) => store.delete(key));
+			const existing = await withStore<string | undefined>(
+				db,
+				storeName,
+				"readonly",
+				path,
+				"read",
+				(store) => store.get(key),
+			);
+			await withStore(db, storeName, "readwrite", path, "delete", (store) =>
+				store.delete(key),
+			);
 			if (existing !== undefined) emit(path, "remove");
 		},
 		async ensureDir(_path) {},
@@ -548,7 +658,8 @@ export const createIndexedDBEngineStorageHost = (
 				.filter((key) => key.startsWith(prefixPath))
 				.map((key) => key.slice(prefix.length))
 				.filter((path) => {
-					const remainder = root.length > 0 ? path.slice(root.length + 1) : path;
+					const remainder =
+						root.length > 0 ? path.slice(root.length + 1) : path;
 					return remainder.length > 0 && !remainder.includes("/");
 				})
 				.sort();
@@ -558,7 +669,12 @@ export const createIndexedDBEngineStorageHost = (
 			const root = normalizeComparablePath(rootPath);
 			const prefixPath = `${prefix}${root.length > 0 ? `${root}/` : ""}`;
 			return keys
-				.filter((key) => root.length === 0 || key === `${prefix}${root}` || key.startsWith(prefixPath))
+				.filter(
+					(key) =>
+						root.length === 0 ||
+						key === `${prefix}${root}` ||
+						key.startsWith(prefixPath),
+				)
 				.map((key) => key.slice(prefix.length))
 				.sort();
 		},
@@ -582,7 +698,14 @@ export const createIndexedDBEngineStorageHost = (
 };
 
 export type BrowserEngineStorageHost = EngineStorageHost;
-export type LocalStorageEngineStorageHostConfig = Omit<WebStorageEngineHostConfig, "kind">;
-export type SessionStorageEngineStorageHostConfig = Omit<WebStorageEngineHostConfig, "kind">;
+export type LocalStorageEngineStorageHostConfig = Omit<
+	WebStorageEngineHostConfig,
+	"kind"
+>;
+export type SessionStorageEngineStorageHostConfig = Omit<
+	WebStorageEngineHostConfig,
+	"kind"
+>;
 
-export const createIndexedDbWatchRoot = (path: string): string => dirnameComparable(path);
+export const createIndexedDbWatchRoot = (path: string): string =>
+	dirnameComparable(path);

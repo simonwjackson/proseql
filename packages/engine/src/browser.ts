@@ -2,28 +2,28 @@ export * from "@proseql/core";
 
 import { OperationError } from "@proseql/core";
 import {
-	createEngineDatabase as createBaseEngineDatabase,
-	createPersistentEngineDatabase as createBasePersistentEngineDatabase,
-} from "./database.js";
-import {
-	createLocalStorageEngineStorageHost,
+	type BrowserEngineStorageHost,
+	type BrowserStorageHostConfig,
 	createIndexedDBEngineStorageHost,
+	createLocalStorageEngineStorageHost,
 	createSessionStorageEngineStorageHost,
 	createWebStorageEngineStorageHost,
 	DEFAULT_STORAGE_KEY_PREFIX,
-	type BrowserEngineStorageHost,
-	type BrowserStorageHostConfig,
 	type IndexedDBEngineHostConfig,
 	type LocalStorageEngineStorageHostConfig,
 	type SessionStorageEngineStorageHostConfig,
 	type WebStorageEngineHostConfig,
 } from "./browser-storage-host.js";
+import {
+	createEngineDatabase as createBaseEngineDatabase,
+	createPersistentEngineDatabase as createBasePersistentEngineDatabase,
+} from "./database.js";
 import { WasmEngineDefectError } from "./errors.js";
 import {
 	createEngineStorageAdapter,
-	makeEngineStorageLayer,
 	type EngineStorageHost,
 	type EngineStorageWatchEvent,
+	makeEngineStorageLayer,
 } from "./storage-host-shared.js";
 import type {
 	EngineCollection,
@@ -83,7 +83,9 @@ const defaultBrowserStorageHost = (): EngineStorageHost => {
 	});
 };
 
-export const createPersistentEngineDatabase = async <Config extends Record<string, any>>(
+export const createPersistentEngineDatabase = async <
+	Config extends Record<string, any>,
+>(
 	config: Config,
 	initialData?: EngineInitialData<Config>,
 	persistenceOptions?: EnginePersistenceOptions,
@@ -94,7 +96,8 @@ export const createPersistentEngineDatabase = async <Config extends Record<strin
 		initialData,
 		{
 			...persistenceOptions,
-			storageHost: persistenceOptions?.storageHost ?? defaultBrowserStorageHost(),
+			storageHost:
+				persistenceOptions?.storageHost ?? defaultBrowserStorageHost(),
 		},
 		options,
 	) as Promise<GenerateEngineDatabaseWithPersistence<Config>>;

@@ -1,12 +1,12 @@
 import {
-	validateDependencies,
-	validateOperatorConflicts,
-	validatePlugin,
 	type CustomIdGenerator,
 	type CustomOperator,
 	type GlobalHooksConfig,
 	type PluginRegistry,
 	type ProseQLPlugin,
+	validateDependencies,
+	validateOperatorConflicts,
+	validatePlugin,
 } from "@proseql/core";
 import { Effect } from "effect";
 
@@ -37,10 +37,17 @@ export const buildPluginRegistry = async (
 	const operators = new Map<string, CustomOperator>();
 	const idGenerators = new Map<string, CustomIdGenerator>();
 	for (const plugin of plugins) {
-		for (const operator of plugin.operators ?? []) operators.set(operator.name, operator);
-		for (const generator of plugin.idGenerators ?? []) idGenerators.set(generator.name, generator);
+		for (const operator of plugin.operators ?? [])
+			operators.set(operator.name, operator);
+		for (const generator of plugin.idGenerators ?? [])
+			idGenerators.set(generator.name, generator);
 	}
-	return { codecs, operators, idGenerators, globalHooks: mergeGlobalHooks(plugins) };
+	return {
+		codecs,
+		operators,
+		idGenerators,
+		globalHooks: mergeGlobalHooks(plugins),
+	};
 };
 
 export const mergeGlobalHooks = (

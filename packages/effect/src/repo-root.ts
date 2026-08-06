@@ -14,7 +14,9 @@ export const repoRootFromImportMetaUrl = (importMetaUrl: string): string => {
 		}
 		const parent = dirname(current);
 		if (parent === current) {
-			throw new Error(`Unable to locate proseql repo root from ${importMetaUrl}`);
+			throw new Error(
+				`Unable to locate proseql repo root from ${importMetaUrl}`,
+			);
 		}
 		current = parent;
 	}

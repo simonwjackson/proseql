@@ -29,10 +29,13 @@ export function makeWebStorageAdapter(
 		watchImpl === undefined
 			? host
 			: {
-				...host,
-				watch: (path, onChange) =>
-					watchImpl(`${prefix}${path.replace(/\\/g, "/").replace(/^\.\//, "")}` , onChange),
-			};
+					...host,
+					watch: (path, onChange) =>
+						watchImpl(
+							`${prefix}${path.replace(/\\/g, "/").replace(/^\.\//, "")}`,
+							onChange,
+						),
+				};
 	return createEngineStorageAdapter(wrappedHost);
 }
 
