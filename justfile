@@ -111,6 +111,10 @@ parity-gate:
     bun run packages/effect/scripts/run-examples.mjs
     bun run packages/effect/scripts/validate-parity-reports.mjs
 
+# Validate GitHub Actions structure and every embedded shell script
+workflow-lint:
+    actionlint -shellcheck shellcheck .github/workflows/*.yml
+
 # Lint and format-check every coordinated release source, script, and manifest
 lint:
     biome check --config-path=./biome.json \
@@ -146,6 +150,7 @@ build-release-artifacts:
 # Non-destructive release readiness: never publishes, pushes, tags, or requires npm credentials
 release-check:
     bun install --frozen-lockfile --ignore-scripts
+    just workflow-lint
     just lint
     just build-release-artifacts
     just typecheck

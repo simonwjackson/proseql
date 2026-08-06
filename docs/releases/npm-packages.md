@@ -62,7 +62,7 @@ Any source change after review creates a new commit SHA and requires the local c
 
 ## Run the protected workflow
 
-Open **Actions → Publish reviewed npm packages → Run workflow** and enter the lowercase, full 40-character reviewed commit SHA. The workflow has no push, tag, release, or schedule trigger.
+Open **Actions → Publish reviewed npm packages → Run workflow**. In **Use workflow from**, select the reviewed release ref whose tip is the exact approved commit, then enter that same lowercase, full 40-character SHA. With the GitHub CLI, pass that reviewed ref with `--ref` and the SHA as `commit_sha`. The workflow rejects the run before checkout unless its own `${{ github.sha }}` exactly equals the input SHA, so dispatching the default branch or any other workflow revision cannot authorize the release. The workflow has no push, tag, release, or schedule trigger.
 
 The jobs run in this order:
 

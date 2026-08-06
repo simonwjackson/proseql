@@ -210,6 +210,8 @@
             pkgs.bun
             pkgs.nodejs
             pkgs.biome
+            pkgs.actionlint
+            pkgs.shellcheck
             pkgs.just
             bun2nixPkgs.default
             pkgs.git

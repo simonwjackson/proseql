@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+	chmodSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -112,6 +113,40 @@ const preparedRelease = (): PreparedRelease =>
 		preparedAt: "2026-08-05T12:00:00.000Z",
 		artifacts: COORDINATED_PACKAGE_NAMES.map(artifact),
 	});
+
+const executablePreparedRelease = (root: string): PreparedRelease => {
+	const artifacts = COORDINATED_PACKAGE_NAMES.map((packageName) => {
+		const manifest = packageManifest(packageName);
+		const staging = join(root, `staging-${packageName}`);
+		const packageRoot = join(staging, "package");
+		mkdirSync(packageRoot, { recursive: true });
+		writeFileSync(
+			join(packageRoot, "package.json"),
+			`${JSON.stringify(manifest)}\n`,
+		);
+		const tarball = `tarballs/proseql-${packageName}-${VERSION}.tgz`;
+		const tarballPath = join(root, tarball);
+		mkdirSync(join(tarballPath, ".."), { recursive: true });
+		execFileSync("tar", ["-czf", tarballPath, "-C", staging, "package"]);
+		const bytes = readFileSync(tarballPath);
+		return {
+			packageName,
+			name: `@proseql/${packageName}`,
+			version: VERSION,
+			tarball,
+			sha256: createHash("sha256").update(bytes).digest("hex"),
+			integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
+			sizeBytes: bytes.byteLength,
+			manifest,
+		};
+	});
+	return createPreparedRelease({
+		version: VERSION,
+		commit: "0123456789abcdef0123456789abcdef01234567",
+		preparedAt: "2026-08-05T12:00:00.000Z",
+		artifacts,
+	});
+};
 
 class RecordingRegistry implements Registry {
 	readonly calls: string[] = [];
@@ -518,6 +553,49 @@ describe("prepared publication artifacts", () => {
 			expect(publisher).not.toMatch(/from ["']\.\//);
 			const checksums = readFileSync(join(root, "SHA256SUMS"), "utf8");
 			for (const path of paths) expect(checksums).toContain(`  ${path}`);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("executes the generated publisher under Node in dry-run mode without npm writes", async () => {
+		const root = mkdtempSync(join(tmpdir(), "proseql-publisher-exec-"));
+		try {
+			const release = executablePreparedRelease(root);
+			const manifestPath = join(root, "prepared-release.json");
+			writeFileSync(manifestPath, `${JSON.stringify(release)}\n`);
+			await preparePublisherBundle(manifestPath);
+
+			const fakeBin = join(root, "bin");
+			const npmLog = join(root, "npm.log");
+			mkdirSync(fakeBin);
+			const fakeNpm = join(fakeBin, "npm");
+			writeFileSync(
+				fakeNpm,
+				`#!/bin/sh\nprintf '%s\\n' "$*" >> "$NPM_LOG"\nif [ "$1" = view ]; then\n  echo 'npm error code E404' >&2\n  exit 1\nfi\necho "unexpected npm write command: $*" >&2\nexit 70\n`,
+			);
+			chmodSync(fakeNpm, 0o755);
+
+			const output = execFileSync(
+				"node",
+				["publisher.mjs", "--manifest", "prepared-release.json"],
+				{
+					cwd: root,
+					encoding: "utf8",
+					env: {
+						...process.env,
+						NPM_LOG: npmLog,
+						PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+					},
+				},
+			);
+			expect(output).toMatch(/dry run complete/i);
+			const npmCalls = readFileSync(npmLog, "utf8").trim().split("\n");
+			expect(npmCalls).toHaveLength(COORDINATED_PACKAGE_NAMES.length * 2);
+			expect(npmCalls.every((call) => call.startsWith("view "))).toBe(true);
+			expect(npmCalls.join("\n")).not.toMatch(
+				/\b(?:publish|dist-tag|whoami)\b/,
+			);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

@@ -24,13 +24,18 @@ jobs:
       release-id: ${{ steps.release.outputs.release-id }}
       version: ${{ steps.release.outputs.version }}
     steps:
-      - name: Validate reviewed commit input
+      - name: Validate reviewed workflow source and commit input
         env:
           REVIEWED_COMMIT: ${{ inputs.commit_sha }}
+          WORKFLOW_COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
           [[ "$REVIEWED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
             echo "commit_sha must be a lowercase full 40-character commit SHA" >&2
+            exit 1
+          }
+          test "$WORKFLOW_COMMIT" = "$REVIEWED_COMMIT" || {
+            echo "workflow source $WORKFLOW_COMMIT is not reviewed commit $REVIEWED_COMMIT" >&2
             exit 1
           }
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -75,6 +80,7 @@ jobs:
         with:
           name: prepared-release-${{ steps.release.outputs.release-id }}
           path: .artifacts/release/
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
@@ -133,6 +139,7 @@ jobs:
         with:
           name: consumer-verification-${{ needs.candidate-upload.outputs.release-id }}
           path: .artifacts/verification/consumer-verification.json
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
@@ -180,7 +187,7 @@ jobs:
         with:
           name: prepared-release-${{ needs.preflight.outputs.release-id }}
           path: .artifacts/release
-      - name: Create exact tag and GitHub release
+      - name: Create or resume exact tag and GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -191,10 +198,42 @@ jobs:
           set -euo pipefail
           sha256sum --check SHA256SUMS
           test "$(jq -r .commit prepared-release.json)" = "$COMMIT_SHA"
-          gh release create "v$VERSION" \
+          tag="v$VERSION"
+
+          tag_exists=false
+          if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+            tag_exists=true
+            resolved_commit="$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha)"
+            test "$resolved_commit" = "$COMMIT_SHA" || {
+              echo "existing tag $tag points to $resolved_commit, expected $COMMIT_SHA" >&2
+              exit 1
+            }
+          fi
+
+          if existing_release_tag="$(gh release view "$tag" --repo "$GH_REPO" --json tagName --jq .tagName 2>/dev/null)"; then
+            test "$existing_release_tag" = "$tag" || {
+              echo "existing release uses tag $existing_release_tag, expected $tag" >&2
+              exit 1
+            }
+            test "$tag_exists" = true || {
+              echo "existing release $tag has no matching git tag" >&2
+              exit 1
+            }
+          else
+            gh release create "$tag" \
+              --repo "$GH_REPO" \
+              --target "$COMMIT_SHA" \
+              --title "$tag" \
+              --generate-notes
+          fi
+
+          resolved_commit="$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha)"
+          test "$resolved_commit" = "$COMMIT_SHA" || {
+            echo "release tag $tag points to $resolved_commit, expected $COMMIT_SHA" >&2
+            exit 1
+          }
+          gh release upload "$tag" \
             --repo "$GH_REPO" \
-            --target "$COMMIT_SHA" \
-            --title "v$VERSION" \
-            --generate-notes \
+            --clobber \
             prepared-release.json#prepared-release.json \
             SHA256SUMS#SHA256SUMS

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -17,6 +18,20 @@ const jobBody = (name: string): string => {
 	return workflow.slice(start, end);
 };
 
+const stepScript = (name: string): string => {
+	const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const match = workflow.match(
+		new RegExp(
+			`- name: ${escapedName}\\n[\\s\\S]*?run: \\|\\n((?: {10}.*(?:\\n|$))+)`,
+		),
+	);
+	expect(match, `missing shell for ${name}`).not.toBeNull();
+	return (match?.[1] ?? "")
+		.split("\n")
+		.map((line) => line.replace(/^ {10}/, ""))
+		.join("\n");
+};
+
 describe("approved npm publication workflow", () => {
 	it("is manual-only and requires an explicit full reviewed commit SHA", () => {
 		expect(workflow).toContain("workflow_dispatch:");
@@ -34,8 +49,37 @@ describe("approved npm publication workflow", () => {
 		for (const action of actions) expect(action).toMatch(/@[0-9a-f]{40}$/);
 	});
 
-	it("keeps preflight credential-free and binds artifacts to exact clean HEAD", () => {
+	it("rejects a workflow revision that differs from the reviewed commit before the dependent upload chain", () => {
+		const reviewed = "0123456789abcdef0123456789abcdef01234567";
+		const mismatch = "89abcdef0123456789abcdef0123456789abcdef";
+		const script = stepScript(
+			"Validate reviewed workflow source and commit input",
+		);
+		const accepted = spawnSync("bash", ["-c", script], {
+			env: {
+				...process.env,
+				REVIEWED_COMMIT: reviewed,
+				WORKFLOW_COMMIT: reviewed,
+			},
+		});
+		const rejected = spawnSync("bash", ["-c", script], {
+			env: {
+				...process.env,
+				REVIEWED_COMMIT: reviewed,
+				WORKFLOW_COMMIT: mismatch,
+			},
+		});
+		expect(accepted.status).toBe(0);
+		expect(rejected.status).not.toBe(0);
+		expect(rejected.stderr.toString()).toMatch(
+			/workflow source.*not reviewed/i,
+		);
+		expect(jobBody("candidate-upload")).toContain("needs: preflight");
+	});
+
+	it("keeps preflight credential-free and binds narrowly scoped artifacts to exact clean HEAD", () => {
 		const preflight = jobBody("preflight");
+		expect(preflight).toContain(`WORKFLOW_COMMIT: \${{ github.sha }}`);
 		expect(preflight).toContain(`ref: \${{ inputs.commit_sha }}`);
 		expect(preflight).toContain("git rev-parse HEAD");
 		expect(preflight).toContain("git status --porcelain");
@@ -44,6 +88,8 @@ describe("approved npm publication workflow", () => {
 		expect(preflight).toContain(".artifacts/release/prepared-release.json");
 		expect(preflight).toContain("SHA256SUMS");
 		expect(preflight).toContain("path: .artifacts/release/");
+		expect(preflight).toContain("include-hidden-files: true");
+		expect(preflight).not.toMatch(/^\s*path: \.artifacts\/$/m);
 		expect(preflight).not.toMatch(
 			/npm-production|NODE_AUTH_TOKEN|NPM_TOKEN|secrets\./,
 		);
@@ -83,7 +129,7 @@ describe("approved npm publication workflow", () => {
 		expect(promotion).toContain("consumer-verification.json");
 	});
 
-	it("creates the tag and GitHub release only after promotion at the exact commit", () => {
+	it("creates or resumes the tag and GitHub release only after promotion at the exact commit", () => {
 		const release = jobBody("github-release");
 		expect(release).toMatch(/needs:.*promote-latest/);
 		expect(release).toContain("contents: write");
@@ -91,6 +137,11 @@ describe("approved npm publication workflow", () => {
 			/NODE_AUTH_TOKEN|NPM_TOKEN|secrets\.|npm-production/,
 		);
 		expect(release).toContain('--target "$COMMIT_SHA"');
+		expect(release).toContain('gh api "repos/$GH_REPO/commits/$tag"');
+		expect(release).toContain('test "$resolved_commit" = "$COMMIT_SHA"');
+		expect(release).toContain("gh release view");
 		expect(release).toContain("gh release create");
+		expect(release).toContain("gh release upload");
+		expect(release).toContain("--clobber");
 	});
 });
