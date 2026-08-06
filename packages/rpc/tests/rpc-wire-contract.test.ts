@@ -6,7 +6,7 @@ import {
 	RpcServer,
 } from "effect/unstable/rpc";
 import { describe, expect, it } from "vitest";
-import { makeRpcGroup } from "../src/index.js";
+import { makeCollectionRpcs, makeRpcGroup } from "../src/index.js";
 import { makeRpcHandlers } from "../src/server.js";
 
 const BookSchema = Schema.Struct({
@@ -94,6 +94,25 @@ const makeSerializedTransport = Effect.gen(function* () {
 });
 
 describe("serialized RPC wire contract", () => {
+	it.each(["create", "createMany", "update", "upsert", "upsertMany"] as const)(
+		"encodes OperationError from %s instead of failing the RPC schema",
+		(operation) => {
+			const definitions = makeCollectionRpcs("books", BookSchema);
+			const rpc = definitions[operation];
+			const encoded = Schema.encodeUnknownSync(rpc.errorSchema)({
+				_tag: "OperationError",
+				operation,
+				reason: "read-only-source",
+				message: "Collection is read-only",
+			});
+			expect(encoded).toMatchObject({
+				_tag: "OperationError",
+				operation,
+				reason: "read-only-source",
+			});
+		},
+	);
+
 	it("JSON-encodes and decodes normal calls, typed failures, and stream chunks", async () => {
 		const result = await Effect.runPromise(
 			Effect.scoped(

@@ -51,6 +51,7 @@ const CreateErrorSchema = Schema.Union([
 	ForeignKeyErrorSchema,
 	HookErrorSchema,
 	UniqueConstraintErrorSchema,
+	OperationErrorSchema,
 	InvalidRpcRequestErrorSchema,
 ]);
 const UpdateErrorSchema = Schema.Union([
@@ -59,6 +60,7 @@ const UpdateErrorSchema = Schema.Union([
 	ForeignKeyErrorSchema,
 	HookErrorSchema,
 	UniqueConstraintErrorSchema,
+	OperationErrorSchema,
 	InvalidRpcRequestErrorSchema,
 ]);
 const DeleteErrorSchema = Schema.Union([
@@ -80,6 +82,7 @@ const UpsertErrorSchema = Schema.Union([
 	ForeignKeyErrorSchema,
 	HookErrorSchema,
 	UniqueConstraintErrorSchema,
+	OperationErrorSchema,
 	InvalidRpcRequestErrorSchema,
 ]);
 
