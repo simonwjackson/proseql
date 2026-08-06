@@ -9,7 +9,13 @@ default:
 test *args:
     bun test \
         ./bench/runner.test.ts \
+        ./packages/engine/tests/boundary-values.test.ts \
+        ./packages/engine/tests/browser-entry.test.ts \
+        ./packages/engine/tests/browser-persistence-concurrency.test.ts \
+        ./packages/engine/tests/engine-u8.test.ts \
+        ./packages/engine/tests/engine.test.ts \
         ./packages/engine/tests/loader.test.ts \
+        ./packages/engine/tests/materialized-projection.test.ts \
         ./packages/effect/tests/effect.test.ts \
         ./packages/browser/tests/browser-entry.test.ts \
         ./packages/rpc/tests/rpc-group.test.ts \
@@ -69,7 +75,7 @@ coverage-node:
 
 # Type check
 typecheck:
-    bunx tsc --build
+    bun run tsc --build
 
 # Verify npm packages include required built artifacts and browser smoke coverage
 verify-packages:
@@ -78,6 +84,13 @@ verify-packages:
 # Run the real-browser smoke suite against the built browser packages
 browser-smoke:
     bun run verify:browser
+
+# Capture and enforce fresh Chromium startup, memory, interaction, and WASM artifact budgets
+browser-budget:
+    rm -rf .artifacts/browser
+    mkdir -p .artifacts/browser
+    bun run bench/browser-runner.ts > .artifacts/browser/current.json
+    bun run scripts/verify-package-artifacts.ts --u2-browser-budget-gate --current-report .artifacts/browser/current.json --output .artifacts/browser/evidence.json
 
 # Run the first U9 parity corpus slice and emit a machine-readable report
 parity-corpus:
@@ -89,7 +102,7 @@ parity-examples:
 
 # Run the U9 parity gate end-to-end
 parity-gate:
-    bunx tsc --build
+    bun run tsc --build
     (cd packages/effect && bun run typecheck:tests)
     bun test packages/effect/tests/
     bun run packages/effect/scripts/run-corpus.mjs
@@ -124,7 +137,7 @@ build-release-artifacts:
     just clean
     bun run copy-license
     bun run --cwd packages/engine build:wasm
-    bunx tsc --build
+    bun run tsc --build
     chmod +x packages/cli/dist/main.js
 
 # Non-destructive release readiness: never publishes, pushes, tags, or requires npm credentials
@@ -144,6 +157,7 @@ release-check:
     mkdir -p .artifacts/release-check
     bun run scripts/verify-packed-packages.ts --skip-build --output .artifacts/release-check
     just browser-smoke
+    just browser-budget
 
 # Release a new version (auto-detects bump type, or pass patch/minor/major)
 release *bump:

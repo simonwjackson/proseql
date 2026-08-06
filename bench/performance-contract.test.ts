@@ -10,6 +10,7 @@ import {
 	validateFullReportContract,
 	validatePerformanceContract,
 } from "./performance-contract.js";
+import { BROWSER_WORKLOAD_INTERACTION_NAMES } from "./workloads.js";
 
 const makeComparison = (
 	overrides: Partial<PairedComparison> = {},
@@ -596,6 +597,32 @@ describe("validateBrowserPerformanceContract", () => {
 		).toBe(true);
 		expect(
 			validation.failures.some((failure) => failure.message.includes("50ms")),
+		).toBe(true);
+	});
+
+	it("rejects an interaction at exactly the strict 50ms p95 ceiling", () => {
+		const validation = validateBrowserPerformanceContract({
+			coldStartupMs: 100,
+			interactions: [
+				...[...BROWSER_WORKLOAD_INTERACTION_NAMES].map((name) => ({
+					name,
+					samples: Array.from({ length: 30 }, () => 10),
+					p50Ms: 10,
+					p95Ms: name === "create (single)" ? 50 : 20,
+					p99Ms: 50,
+					meanMs: 10,
+					observedCleanupCount: 10_000,
+				})),
+			],
+			jsHeapBytes: { status: "available", value: 2_048 },
+			wasmLinearMemoryBytes: { status: "available", value: 4_096 },
+		});
+
+		expect(validation.passed).toBe(false);
+		expect(
+			validation.failures.some(
+				(failure) => failure.caseName === "create (single)",
+			),
 		).toBe(true);
 	});
 

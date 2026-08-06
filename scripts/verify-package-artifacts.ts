@@ -649,6 +649,78 @@ function generateU2BrowserEvidence(options: U2BrowserEvidenceOptions = {}) {
 	};
 }
 
+type U2BrowserEvidenceGate = {
+	readonly currentBrowserContract: {
+		readonly passed: boolean;
+		readonly failures: ReadonlyArray<{ readonly message: string }>;
+	};
+	readonly artifact: {
+		readonly current: number | undefined;
+		readonly maxAllowed: number;
+		readonly passed: boolean;
+	};
+	readonly coldStartupMs: { readonly passed: boolean };
+	readonly jsHeapBytes: { readonly passed: boolean };
+	readonly wasmLinearMemoryBytes: { readonly passed: boolean };
+	readonly interactions: ReadonlyArray<{
+		readonly name: string;
+		readonly currentP95Ms: number | undefined;
+		readonly withinAbsoluteP95Budget: boolean;
+	}>;
+	readonly summary: {
+		readonly artifactAndRegressionBudgetsPassed: boolean;
+		readonly allInteractionP95Within50Ms: boolean;
+	};
+};
+
+export function assertU2BrowserEvidencePasses(
+	evidence: U2BrowserEvidenceGate,
+): void {
+	const failures: string[] = [];
+	if (!evidence.currentBrowserContract.passed) {
+		failures.push(
+			...evidence.currentBrowserContract.failures.map(
+				(failure) => `browser contract: ${failure.message}`,
+			),
+		);
+	}
+	const effectiveArtifactCeiling = Math.floor(evidence.artifact.maxAllowed);
+	if (
+		!evidence.artifact.passed ||
+		evidence.artifact.current === undefined ||
+		evidence.artifact.current > effectiveArtifactCeiling
+	) {
+		failures.push(
+			`browser WASM gzip ${String(evidence.artifact.current)} exceeds ${effectiveArtifactCeiling} bytes`,
+		);
+	}
+	for (const [name, metric] of [
+		["cold startup", evidence.coldStartupMs],
+		["JavaScript heap", evidence.jsHeapBytes],
+		["WASM linear memory", evidence.wasmLinearMemoryBytes],
+	] as const) {
+		if (!metric.passed) failures.push(`${name} budget failed`);
+	}
+	for (const interaction of evidence.interactions) {
+		if (!interaction.withinAbsoluteP95Budget) {
+			failures.push(
+				`${interaction.name} p95 ${String(interaction.currentP95Ms)}ms must be below 50ms`,
+			);
+		}
+	}
+	if (
+		!evidence.summary.artifactAndRegressionBudgetsPassed ||
+		!evidence.summary.allInteractionP95Within50Ms
+	) {
+		failures.push("browser budget summary failed");
+	}
+	if (failures.length > 0) {
+		throw new Error(
+			`Browser release budget failed:\n- ${failures.join("\n- ")}`,
+		);
+	}
+}
+
 function renderU2BrowserEvidence(evidence: unknown): string {
 	return `${JSON.stringify(evidence, null, 2)}\n`;
 }
@@ -680,7 +752,8 @@ if (import.meta.main) {
 	const cliArgs = process.argv.slice(2);
 	if (
 		cliArgs.includes("--u2-browser-evidence-write") ||
-		cliArgs.includes("--u2-browser-evidence-check")
+		cliArgs.includes("--u2-browser-evidence-check") ||
+		cliArgs.includes("--u2-browser-budget-gate")
 	) {
 		const evidenceOptions = {
 			currentBrowserReportPath: readArgValue(cliArgs, "--current-report"),
@@ -688,7 +761,20 @@ if (import.meta.main) {
 			buildReportPath: readArgValue(cliArgs, "--build-report"),
 			contractPath: readArgValue(cliArgs, "--contract"),
 		};
-		if (cliArgs.includes("--u2-browser-evidence-write")) {
+		if (cliArgs.includes("--u2-browser-budget-gate")) {
+			const evidence = generateU2BrowserEvidence(evidenceOptions);
+			writeFileSync(
+				resolve(
+					root,
+					evidenceOptions.outputPath ?? DEFAULT_EVIDENCE_OUTPUT_PATH,
+				),
+				renderU2BrowserEvidence(evidence),
+			);
+			assertU2BrowserEvidencePasses(evidence);
+			console.log(
+				`Browser release budget passed; wrote ${evidenceOptions.outputPath ?? DEFAULT_EVIDENCE_OUTPUT_PATH}`,
+			);
+		} else if (cliArgs.includes("--u2-browser-evidence-write")) {
 			writeCheckedInU2BrowserEvidence(evidenceOptions);
 			console.log(
 				`Wrote ${evidenceOptions.outputPath ?? DEFAULT_EVIDENCE_OUTPUT_PATH}`,

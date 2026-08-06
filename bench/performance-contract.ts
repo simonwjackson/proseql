@@ -358,7 +358,7 @@ export const validateBrowserPerformanceContract = (
 			});
 			continue;
 		}
-		if (interaction.p95Ms > NORMAL_INTERACTION_P95_BUDGET_MS) {
+		if (interaction.p95Ms >= NORMAL_INTERACTION_P95_BUDGET_MS) {
 			failures.push({
 				suite: "browser",
 				caseName: name,
@@ -453,7 +453,7 @@ export const evaluateBrowserBudget = (options: {
 		currentP95Ms: interaction.p95Ms,
 		withinAbsoluteP95Budget:
 			typeof interaction.p95Ms === "number" &&
-			interaction.p95Ms <= NORMAL_INTERACTION_P95_BUDGET_MS,
+			interaction.p95Ms < NORMAL_INTERACTION_P95_BUDGET_MS,
 	}));
 	return {
 		artifact,
