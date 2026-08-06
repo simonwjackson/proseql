@@ -66,9 +66,11 @@ jobs:
           set -euo pipefail
           sha256sum --check SHA256SUMS
           test "$(jq -r .commit prepared-release.json)" = "$REVIEWED_COMMIT"
-          echo "commit=$(jq -r .commit prepared-release.json)" >> "$GITHUB_OUTPUT"
-          echo "release-id=$(jq -r .releaseId prepared-release.json)" >> "$GITHUB_OUTPUT"
-          echo "version=$(jq -r .version prepared-release.json)" >> "$GITHUB_OUTPUT"
+          {
+            echo "commit=$(jq -r .commit prepared-release.json)"
+            echo "release-id=$(jq -r .releaseId prepared-release.json)"
+            echo "version=$(jq -r .version prepared-release.json)"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: prepared-release-${{ steps.release.outputs.release-id }}
@@ -101,7 +103,7 @@ jobs:
           export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/proseql-npmrc"
           trap 'rm -f "$NPM_CONFIG_USERCONFIG"' EXIT
           umask 077
-          printf '%s\n' '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' > "$NPM_CONFIG_USERCONFIG"
+          printf '%s\n' "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > "$NPM_CONFIG_USERCONFIG"
           sha256sum --check SHA256SUMS
           node publisher.mjs \
             --manifest prepared-release.json \
@@ -162,7 +164,7 @@ jobs:
           export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/proseql-npmrc"
           trap 'rm -f "$NPM_CONFIG_USERCONFIG"' EXIT
           umask 077
-          printf '%s\n' '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' > "$NPM_CONFIG_USERCONFIG"
+          printf '%s\n' "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > "$NPM_CONFIG_USERCONFIG"
           sha256sum --check SHA256SUMS
           node publisher.mjs \
             --manifest prepared-release.json \
