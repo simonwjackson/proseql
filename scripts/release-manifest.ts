@@ -17,9 +17,6 @@ export type CoordinatedPackageName = (typeof COORDINATED_PACKAGE_NAMES)[number];
 
 export const PUBLISH_ORDER: ReadonlyArray<CoordinatedPackageName> =
 	COORDINATED_PACKAGE_NAMES;
-export const PROMOTION_ORDER: ReadonlyArray<CoordinatedPackageName> = [
-	...COORDINATED_PACKAGE_NAMES,
-].reverse();
 
 export type ReleasePackageManifest = Readonly<Record<string, unknown>> & {
 	readonly name?: string;
@@ -44,18 +41,11 @@ export type PreparedRelease = {
 	readonly schemaVersion: 1;
 	readonly releaseId: string;
 	readonly version: string;
-	readonly candidateTag: string;
 	readonly commit: string;
 	readonly preparedAt: string;
 	readonly publishOrder: ReadonlyArray<CoordinatedPackageName>;
-	readonly promotionOrder: ReadonlyArray<CoordinatedPackageName>;
 	readonly artifacts: ReadonlyArray<PreparedArtifact>;
 };
-
-export function candidateTagFor(version: string): string {
-	assertSemver(version);
-	return `proseql-candidate-${version.replaceAll(".", "-")}`;
-}
 
 export function validateDependencyOrder(
 	manifests: ReadonlyMap<CoordinatedPackageName, ReleasePackageManifest>,
@@ -141,11 +131,9 @@ export function createPreparedRelease(input: {
 		manifests.set(artifact.packageName, artifact.manifest);
 	}
 	validateDependencyOrder(manifests);
-	const candidateTag = candidateTagFor(input.version);
 	const releaseIdentity = stableStringify({
 		version: input.version,
 		commit: input.commit,
-		candidateTag,
 		artifacts: input.artifacts.map(
 			({ name, version, tarball, sha256, integrity, sizeBytes, manifest }) => ({
 				name,
@@ -162,11 +150,9 @@ export function createPreparedRelease(input: {
 		schemaVersion: 1,
 		releaseId: createHash("sha256").update(releaseIdentity).digest("hex"),
 		version: input.version,
-		candidateTag,
 		commit: input.commit,
 		preparedAt: input.preparedAt,
 		publishOrder: PUBLISH_ORDER,
-		promotionOrder: PROMOTION_ORDER,
 		artifacts: input.artifacts,
 	};
 }

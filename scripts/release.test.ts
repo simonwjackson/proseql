@@ -34,7 +34,6 @@ import {
 import {
 	COORDINATED_PACKAGE_NAMES,
 	createPreparedRelease,
-	PROMOTION_ORDER,
 	type PreparedArtifact,
 	type PreparedRelease,
 	PUBLISH_ORDER,
@@ -43,7 +42,6 @@ import {
 import { verifyRegistryCandidates } from "./verify-registry-packages.js";
 
 const VERSION = "0.16.0";
-const TAG = "proseql-candidate-0-16-0";
 
 const packageManifest = (
 	packageName: (typeof COORDINATED_PACKAGE_NAMES)[number],
@@ -151,8 +149,7 @@ const executablePreparedRelease = (root: string): PreparedRelease => {
 class RecordingRegistry implements Registry {
 	readonly calls: string[] = [];
 	readonly versions = new Map<string, RegistryVersion>();
-	readonly tags = new Map<string, string>();
-	credentialError: Error | undefined;
+	readonly latestTags = new Map<string, string>();
 	artifactVerificationError: Error | undefined;
 	publishErrorAt: string | undefined;
 	visibilityFailures = new Map<string, number>();
@@ -166,6 +163,7 @@ class RecordingRegistry implements Registry {
 		if (this.artifactVerificationError) throw this.artifactVerificationError;
 	}
 
+	/** Pre-populate a package as already fully published at latest. */
 	seed(release: PreparedRelease, packageName: string): void {
 		const candidate = release.artifacts.find(
 			(item) => item.packageName === packageName,
@@ -175,16 +173,7 @@ class RecordingRegistry implements Registry {
 			manifest: candidate.manifest,
 			integrity: candidate.integrity,
 		});
-		this.tags.set(
-			`${candidate.name}:${release.candidateTag}`,
-			candidate.version,
-		);
-	}
-
-	async authenticate(): Promise<string> {
-		this.calls.push("authenticate");
-		if (this.credentialError) throw this.credentialError;
-		return "release-operator";
+		this.latestTags.set(candidate.name, candidate.version);
 	}
 
 	async getVersion(name: string, version: string) {
@@ -198,8 +187,13 @@ class RecordingRegistry implements Registry {
 		return this.versions.get(key);
 	}
 
-	async publishCandidate(candidate: PreparedArtifact, tag: string) {
-		this.calls.push(`publish:${candidate.packageName}:${tag}`);
+	async getLatestVersion(name: string) {
+		this.calls.push(`latest:${name}`);
+		return this.latestTags.get(name);
+	}
+
+	async publishToLatest(candidate: PreparedArtifact) {
+		this.calls.push(`publish:${candidate.packageName}`);
 		if (this.publishErrorAt === candidate.packageName) {
 			throw new Error("registry rejected upload");
 		}
@@ -207,22 +201,7 @@ class RecordingRegistry implements Registry {
 			manifest: candidate.manifest,
 			integrity: candidate.integrity,
 		});
-		this.tags.set(`${candidate.name}:${tag}`, candidate.version);
-	}
-
-	async getTag(name: string, tag: string) {
-		this.calls.push(`tag-read:${name}:${tag}`);
-		return this.tags.get(`${name}:${tag}`);
-	}
-
-	async setTag(name: string, version: string, tag: string) {
-		this.calls.push(`tag-set:${name}:${tag}`);
-		this.tags.set(`${name}:${tag}`, version);
-	}
-
-	async removeTag(name: string, tag: string) {
-		this.calls.push(`tag-remove:${name}:${tag}`);
-		this.tags.delete(`${name}:${tag}`);
+		this.latestTags.set(candidate.name, candidate.version);
 	}
 }
 
@@ -230,7 +209,6 @@ const verificationFor = (release: PreparedRelease): ConsumerVerification => ({
 	schemaVersion: 1,
 	releaseId: release.releaseId,
 	version: release.version,
-	candidateTag: release.candidateTag,
 	verifiedAt: "2026-08-05T13:00:00.000Z",
 	artifacts: release.artifacts.map(({ name, integrity }) => ({
 		name,
@@ -239,7 +217,7 @@ const verificationFor = (release: PreparedRelease): ConsumerVerification => ({
 });
 
 describe("coordinated release manifest", () => {
-	it("is the single dependency-safe package order and reverses latest promotion", () => {
+	it("is the single dependency-safe package order", () => {
 		expect(COORDINATED_PACKAGE_NAMES).toEqual([
 			"core",
 			"engine",
@@ -251,16 +229,25 @@ describe("coordinated release manifest", () => {
 			"rpc",
 		]);
 		expect(PUBLISH_ORDER).toEqual(COORDINATED_PACKAGE_NAMES);
-		expect(PROMOTION_ORDER).toEqual([
-			"rpc",
-			"browser",
-			"cli",
-			"effect",
-			"rest",
-			"node",
-			"engine",
-			"core",
-		]);
+	});
+
+	it("derives a deterministic release ID from version, commit, and artifact content", () => {
+		const release = preparedRelease();
+		expect(release.releaseId).toMatch(/^[a-f0-9]{64}$/);
+		const other = createPreparedRelease({
+			version: "0.16.1",
+			commit: release.commit,
+			preparedAt: release.preparedAt,
+			artifacts: COORDINATED_PACKAGE_NAMES.map((name) => ({
+				...artifact(name),
+				version: "0.16.1",
+				manifest: { ...packageManifest(name), version: "0.16.1" },
+			})),
+		});
+		expect(other.releaseId).not.toBe(release.releaseId);
+	});
+
+	it("enforces dependency-safe publish order across coordinated packages", () => {
 		const manifests = new Map(
 			COORDINATED_PACKAGE_NAMES.map((name) => [name, packageManifest(name)]),
 		);
@@ -548,7 +535,7 @@ describe("prepared publication artifacts", () => {
 				...release.artifacts.map(({ tarball }) => tarball),
 			]);
 			const publisher = readFileSync(join(root, "publisher.mjs"), "utf8");
-			expect(publisher).toContain("approve-candidate-upload");
+			expect(publisher).toContain("approve-publish");
 			expect(publisher).not.toContain("import.meta.main");
 			expect(publisher).not.toMatch(/from ["']\.\//);
 			const checksums = readFileSync(join(root, "SHA256SUMS"), "utf8");
@@ -591,7 +578,8 @@ describe("prepared publication artifacts", () => {
 			);
 			expect(output).toMatch(/dry run complete/i);
 			const npmCalls = readFileSync(npmLog, "utf8").trim().split("\n");
-			expect(npmCalls).toHaveLength(COORDINATED_PACKAGE_NAMES.length * 2);
+			// Dry run calls getVersion once per package (view @pkg@version)
+			expect(npmCalls).toHaveLength(COORDINATED_PACKAGE_NAMES.length);
 			expect(npmCalls.every((call) => call.startsWith("view "))).toBe(true);
 			expect(npmCalls.join("\n")).not.toMatch(
 				/\b(?:publish|dist-tag|whoami)\b/,
@@ -601,7 +589,7 @@ describe("prepared publication artifacts", () => {
 		}
 	});
 
-	it("ties no-secret registry verification to candidate tags and integrities", async () => {
+	it("ties no-secret registry verification to latest tags and integrities", async () => {
 		const release = preparedRelease();
 		const registry = new RecordingRegistry();
 		for (const candidate of release.artifacts) {
@@ -613,48 +601,51 @@ describe("prepared publication artifacts", () => {
 			() => new Date("2026-08-05T13:00:00.000Z"),
 		);
 		expect(verification).toEqual(verificationFor(release));
-		registry.tags.set(`@proseql/rpc:${release.candidateTag}`, "0.15.0");
+		// Mismatch: latest points to old version
+		registry.latestTags.set("@proseql/rpc", "0.15.0");
 		await expect(verifyRegistryCandidates(release, registry)).rejects.toThrow(
-			/candidate tag points to 0.15.0/,
+			/latest tag points to 0.15.0/,
 		);
 	});
 });
 
-describe("safe candidate publication", () => {
+describe("direct OIDC publication", () => {
 	it("is read-only by default and models credential-free dry runs", async () => {
 		const registry = new RecordingRegistry();
-		await publishPackages(preparedRelease(), registry, { mode: "dry-run" });
-		expect(
-			registry.calls.every(
-				(call) => call.startsWith("read:") || call.startsWith("tag-read:"),
-			),
-		).toBe(true);
-		expect(registry.calls).not.toContain("authenticate");
+		const release = preparedRelease();
+		await publishPackages(release, registry, { mode: "dry-run" });
+		expect(registry.calls).toHaveLength(COORDINATED_PACKAGE_NAMES.length);
+		expect(registry.calls.every((call) => call.startsWith("read:"))).toBe(true);
+		// No authenticate, no publish, no latest-tag writes
+		expect(registry.calls.some((call) => call === "authenticate")).toBe(false);
+		expect(registry.calls.some((call) => call.startsWith("publish:"))).toBe(
+			false,
+		);
 	});
 
-	it("requires protected approval before a destructive candidate upload", async () => {
+	it("requires protected approval before a destructive publish", async () => {
 		const registry = new RecordingRegistry();
 		await expect(
 			publishPackages(preparedRelease(), registry, {
-				mode: "candidate",
+				mode: "publish",
 				approval: undefined,
 			}),
 		).rejects.toThrow(/approval/i);
 		expect(registry.calls).toEqual([]);
 	});
 
-	it("rejects unknown runtime modes before authentication or registry access", async () => {
+	it("rejects unknown runtime modes before registry access", async () => {
 		const registry = new RecordingRegistry();
 		await expect(
 			publishPackages(preparedRelease(), registry, {
-				mode: "unexpected" as "candidate",
+				mode: "unexpected" as "publish",
 				approval: preparedRelease().releaseId,
 			}),
 		).rejects.toThrow(/unknown publication mode/i);
 		expect(registry.calls).toEqual([]);
 	});
 
-	it("re-inspects artifacts before authentication or registry access", async () => {
+	it("re-inspects artifacts before registry access", async () => {
 		const release = preparedRelease();
 		const registry = new RecordingRegistry();
 		registry.artifactVerificationError = new Error(
@@ -662,26 +653,31 @@ describe("safe candidate publication", () => {
 		);
 		await expect(
 			publishPackages(release, registry, {
-				mode: "candidate",
+				mode: "publish",
 				approval: release.releaseId,
 			}),
 		).rejects.toThrow(/embedded manifest mismatch/);
 		expect(registry.calls).toEqual(["verify-artifacts"]);
 	});
 
-	it("uses npm --tag semantics for a brand-new package without creating latest", async () => {
+	it("publishes directly to latest without candidate tags or dist-tag mutations", async () => {
 		const release = preparedRelease();
 		const registry = new RecordingRegistry();
 		await publishPackages(release, registry, {
-			mode: "candidate",
+			mode: "publish",
 			approval: release.releaseId,
 		});
 		for (const candidate of release.artifacts) {
-			expect(
-				registry.tags.get(`${candidate.name}:${release.candidateTag}`),
-			).toBe(VERSION);
-			expect(registry.tags.get(`${candidate.name}:latest`)).toBeUndefined();
+			expect(registry.latestTags.get(candidate.name)).toBe(VERSION);
 		}
+		// No dist-tag set/remove calls (OIDC publishes directly)
+		expect(
+			registry.calls.some(
+				(call) => call.startsWith("tag-set:") || call.startsWith("tag-remove:"),
+			),
+		).toBe(false);
+		// No authenticate call — OIDC handles auth transparently
+		expect(registry.calls.some((call) => call === "authenticate")).toBe(false);
 	});
 
 	it("publishes exact tarballs sequentially, waits boundedly, and fails fast", async () => {
@@ -691,7 +687,7 @@ describe("safe candidate publication", () => {
 		registry.publishErrorAt = "rest";
 		await expect(
 			publishPackages(release, registry, {
-				mode: "candidate",
+				mode: "publish",
 				approval: release.releaseId,
 				visibility: { attempts: 3, delayMs: 0 },
 			}),
@@ -699,63 +695,61 @@ describe("safe candidate publication", () => {
 		expect(
 			registry.calls.filter((call) => call.startsWith("publish:")),
 		).toEqual([
-			`publish:core:${TAG}`,
-			`publish:engine:${TAG}`,
-			`publish:node:${TAG}`,
-			`publish:rest:${TAG}`,
+			"publish:core",
+			"publish:engine",
+			"publish:node",
+			"publish:rest",
 		]);
-		expect(
-			registry.calls.some(
-				(call) => call.startsWith("tag-set:") && call.endsWith(":latest"),
-			),
-		).toBe(false);
 	});
 
-	it("resumes only matching candidates and refuses manifest or integrity mismatches", async () => {
+	it("skips already-published packages at latest and fails on registry mismatches", async () => {
 		const release = preparedRelease();
-		const registry = new RecordingRegistry();
-		registry.seed(release, "core");
-		registry.seed(release, "engine");
-		await publishPackages(release, registry, {
-			mode: "candidate",
+		// Pre-seed core and engine as fully published at latest
+		const resumed = new RecordingRegistry();
+		resumed.seed(release, "core");
+		resumed.seed(release, "engine");
+		await publishPackages(release, resumed, {
+			mode: "publish",
 			approval: release.releaseId,
 		});
-		expect(
-			registry.calls.filter((call) => call.startsWith("publish:"))[0],
-		).toBe(`publish:node:${TAG}`);
+		// core and engine are skipped; publication resumes in dependency order.
+		expect(resumed.calls.filter((call) => call.startsWith("publish:"))).toEqual(
+			[
+				"publish:node",
+				"publish:rest",
+				"publish:effect",
+				"publish:cli",
+				"publish:browser",
+				"publish:rpc",
+			],
+		);
 
-		const registryMetadata = new RecordingRegistry();
-		for (const name of COORDINATED_PACKAGE_NAMES) {
-			registryMetadata.seed(release, name);
-			const candidate = release.artifacts.find(
-				(artifact) => artifact.packageName === name,
-			);
-			if (!candidate) throw new Error(`missing ${name}`);
-			registryMetadata.versions.set(`${candidate.name}@${VERSION}`, {
-				manifest: {
-					...candidate.manifest,
-					_id: `${candidate.name}@${VERSION}`,
-				},
-				integrity: candidate.integrity,
-			});
-		}
-		await publishPackages(release, registryMetadata, {
-			mode: "candidate",
-			approval: release.releaseId,
-		});
-		expect(
-			registryMetadata.calls.some((call) => call.startsWith("publish:")),
-		).toBe(false);
+		// Version exists but latest points elsewhere: OIDC cannot fix with dist-tag
+		const stuck = new RecordingRegistry();
+		stuck.seed(release, "core"); // pre-sets latest to VERSION
+		stuck.latestTags.set("@proseql/core", "0.15.0"); // override to stale
+		await expect(
+			publishPackages(release, stuck, { mode: "dry-run" }),
+		).rejects.toThrow(/latest points to 0\.15\.0/i);
+		await expect(
+			publishPackages(release, stuck, {
+				mode: "publish",
+				approval: release.releaseId,
+			}),
+		).rejects.toThrow(
+			/latest points to 0\.15\.0.*repair latest with interactive npm authentication/i,
+		);
 
+		// Manifest mismatch on a live version
 		const mismatch = new RecordingRegistry();
-		mismatch.seed(release, "core");
 		mismatch.versions.set("@proseql/core@0.16.0", {
 			manifest: packageManifest("core", { "@proseql/rpc": "0.15.0" }),
 			integrity: release.artifacts[0]?.integrity ?? "",
 		});
+		mismatch.latestTags.set("@proseql/core", VERSION);
 		await expect(
 			publishPackages(release, mismatch, {
-				mode: "candidate",
+				mode: "publish",
 				approval: release.releaseId,
 			}),
 		).rejects.toThrow(
@@ -764,117 +758,6 @@ describe("safe candidate publication", () => {
 		expect(mismatch.calls.some((call) => call.startsWith("publish:"))).toBe(
 			false,
 		);
-	});
-
-	it("stops on credential failure and needs fresh approval to resume", async () => {
-		const release = preparedRelease();
-		const registry = new RecordingRegistry();
-		registry.credentialError = new Error("token expired");
-		await expect(
-			publishPackages(release, registry, {
-				mode: "candidate",
-				approval: release.releaseId,
-			}),
-		).rejects.toThrow(/token expired/);
-		expect(registry.calls).toEqual(["verify-artifacts", "authenticate"]);
-		registry.credentialError = undefined;
-		await expect(
-			publishPackages(release, registry, {
-				mode: "candidate",
-				approval: undefined,
-			}),
-		).rejects.toThrow(/approval/i);
-	});
-});
-
-describe("verified latest promotion", () => {
-	it("requires a matching full consumer verification signal", async () => {
-		const release = preparedRelease();
-		const registry = new RecordingRegistry();
-		for (const name of COORDINATED_PACKAGE_NAMES) registry.seed(release, name);
-		await expect(
-			publishPackages(release, registry, {
-				mode: "promote",
-				approval: release.releaseId,
-			}),
-		).rejects.toThrow(/consumer verification/i);
-		const wrong = { ...verificationFor(release), releaseId: "wrong" };
-		await expect(
-			publishPackages(release, registry, {
-				mode: "promote",
-				approval: release.releaseId,
-				consumerVerification: wrong,
-			}),
-		).rejects.toThrow(/does not match/i);
-	});
-
-	it("promotes in reverse order and retains candidate tags until every latest verifies", async () => {
-		const release = preparedRelease();
-		const registry = new RecordingRegistry();
-		for (const name of COORDINATED_PACKAGE_NAMES) registry.seed(release, name);
-		await publishPackages(release, registry, {
-			mode: "promote",
-			approval: release.releaseId,
-			consumerVerification: verificationFor(release),
-		});
-		expect(
-			registry.calls
-				.filter((call) => call.startsWith("tag-set:"))
-				.map((call) => call.split(":")[1]),
-		).toEqual(PROMOTION_ORDER.map((name) => `@proseql/${name}`));
-		const lastLatestRead = registry.calls.reduce(
-			(found, call, index) => (call.includes(":latest") ? index : found),
-			-1,
-		);
-		const firstRemove = registry.calls.findIndex((call) =>
-			call.startsWith("tag-remove:"),
-		);
-		expect(firstRemove).toBeGreaterThan(lastLatestRead);
-		expect(
-			registry.calls.filter((call) => call.startsWith("tag-remove:")),
-		).toHaveLength(8);
-	});
-
-	it("safely resumes an interrupted promotion without reuploading tarballs", async () => {
-		const release = preparedRelease();
-		const registry = new RecordingRegistry();
-		for (const name of COORDINATED_PACKAGE_NAMES) registry.seed(release, name);
-		for (const name of ["rpc", "browser", "cli"] as const) {
-			registry.tags.set(`@proseql/${name}:latest`, VERSION);
-		}
-		await publishPackages(release, registry, {
-			mode: "promote",
-			approval: release.releaseId,
-			consumerVerification: verificationFor(release),
-		});
-		expect(registry.calls.some((call) => call.startsWith("publish:"))).toBe(
-			false,
-		);
-		expect(
-			registry.calls
-				.filter((call) => call.startsWith("tag-set:"))
-				.map((call) => call.split(":")[1]),
-		).toEqual(PROMOTION_ORDER.slice(3).map((name) => `@proseql/${name}`));
-	});
-
-	it("resumes temporary-tag cleanup after every latest tag already verified", async () => {
-		const release = preparedRelease();
-		const registry = new RecordingRegistry();
-		for (const name of COORDINATED_PACKAGE_NAMES) {
-			registry.seed(release, name);
-			registry.tags.set(`@proseql/${name}:latest`, VERSION);
-		}
-		for (const name of COORDINATED_PACKAGE_NAMES.slice(0, 3)) {
-			registry.tags.delete(`@proseql/${name}:${TAG}`);
-		}
-		await publishPackages(release, registry, {
-			mode: "promote",
-			approval: release.releaseId,
-			consumerVerification: verificationFor(release),
-		});
-		expect(
-			registry.calls.filter((call) => call.startsWith("tag-remove:")),
-		).toHaveLength(5);
 	});
 });
 
@@ -934,42 +817,37 @@ describe("npm command safety", () => {
 		expect(result.stderr).toContain("timed out after 10ms");
 	});
 
-	it("uses read commands in dry runs and lifecycle-free writes only after orchestration approval", async () => {
+	it("uses read commands in dry runs and lifecycle-free writes without whoami or dist-tag", async () => {
 		const commands: Array<{ command: string; args: readonly string[] }> = [];
 		const runner: CommandRunner = async (
 			command,
 			args,
 		): Promise<CommandResult> => {
 			commands.push({ command, args });
-			if (
-				args[0] === "view" &&
-				args.some((arg) => arg.startsWith("dist-tags."))
-			) {
-				return { status: 0, stdout: "", stderr: "" };
-			}
 			if (args[0] === "view")
 				return { status: 1, stdout: "", stderr: "E404 Not Found" };
-			if (args[0] === "whoami")
-				return { status: 0, stdout: "operator\n", stderr: "" };
 			return { status: 0, stdout: "", stderr: "" };
 		};
 		const npm = new NpmRegistry(runner, "/prepared");
 		await npm.getVersion("@proseql/core", VERSION);
-		expect(await npm.getTag("@proseql/core", TAG)).toBeUndefined();
 		expect(commands[0]).toEqual(
 			expect.objectContaining({
 				command: "npm",
 				args: expect.arrayContaining(["view"]),
 			}),
 		);
-		expect(commands[0]?.args).not.toEqual(
-			expect.arrayContaining(["publish", "dist-tag"]),
-		);
-		await npm.publishCandidate(artifact("core"), TAG);
+		expect(commands[0]?.args).not.toEqual(expect.arrayContaining(["publish"]));
+		await npm.publishToLatest(artifact("core"));
 		const publish = commands.at(-1)?.args ?? [];
 		expect(publish).toEqual(
-			expect.arrayContaining(["publish", "--ignore-scripts", "--tag", TAG]),
+			expect.arrayContaining(["publish", "--ignore-scripts"]),
 		);
+		// No explicit --tag: defaults to latest via npm Trusted Publishing
+		expect(publish).not.toContain("--tag");
 		expect(publish).not.toContain("--force");
+		// No whoami or dist-tag mutations
+		expect(
+			commands.some((c) => c.args[0] === "whoami" || c.args[0] === "dist-tag"),
+		).toBe(false);
 	});
 });

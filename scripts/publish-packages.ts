@@ -33,22 +33,18 @@ export type RegistryVersion = {
 
 export interface Registry {
 	verifyPreparedArtifacts(release: PreparedRelease): Promise<void>;
-	authenticate(): Promise<string>;
 	getVersion(
 		name: string,
 		version: string,
 	): Promise<RegistryVersion | undefined>;
-	publishCandidate(candidate: PreparedArtifact, tag: string): Promise<void>;
-	getTag(name: string, tag: string): Promise<string | undefined>;
-	setTag(name: string, version: string, tag: string): Promise<void>;
-	removeTag(name: string, tag: string): Promise<void>;
+	getLatestVersion(name: string): Promise<string | undefined>;
+	publishToLatest(candidate: PreparedArtifact): Promise<void>;
 }
 
 export type ConsumerVerification = {
 	readonly schemaVersion: 1;
 	readonly releaseId: string;
 	readonly version: string;
-	readonly candidateTag: string;
 	readonly verifiedAt: string;
 	readonly artifacts: ReadonlyArray<{
 		readonly name: string;
@@ -57,9 +53,8 @@ export type ConsumerVerification = {
 };
 
 export type PublishOptions = {
-	readonly mode: "dry-run" | "candidate" | "promote";
+	readonly mode: "dry-run" | "publish";
 	readonly approval?: string;
-	readonly consumerVerification?: ConsumerVerification;
 	readonly visibility?: {
 		readonly attempts: number;
 		readonly delayMs: number;
@@ -113,14 +108,6 @@ export class NpmRegistry implements Registry {
 		}
 	}
 
-	async authenticate(): Promise<string> {
-		const result = await this.run("npm", ["whoami"]);
-		assertCommand(result, "npm credential check failed");
-		const identity = result.stdout.trim();
-		assert(identity.length > 0, "npm credential check returned no identity");
-		return identity;
-	}
-
 	async getVersion(
 		name: string,
 		version: string,
@@ -147,10 +134,22 @@ export class NpmRegistry implements Registry {
 		return { manifest, integrity };
 	}
 
-	async publishCandidate(
-		candidate: PreparedArtifact,
-		tag: string,
-	): Promise<void> {
+	async getLatestVersion(name: string): Promise<string | undefined> {
+		const result = await this.run("npm", [
+			"view",
+			name,
+			"dist-tags.latest",
+			"--json",
+		]);
+		if (isNotFound(result)) return undefined;
+		assertCommand(result, `could not read ${name} latest tag`);
+		const output = result.stdout.trim();
+		if (output.length === 0) return undefined;
+		const value = JSON.parse(output) as unknown;
+		return typeof value === "string" ? value : undefined;
+	}
+
+	async publishToLatest(candidate: PreparedArtifact): Promise<void> {
 		const tarball = isAbsolute(candidate.tarball)
 			? candidate.tarball
 			: join(this.preparedRoot, candidate.tarball);
@@ -160,40 +159,8 @@ export class NpmRegistry implements Registry {
 			"--ignore-scripts",
 			"--access",
 			"public",
-			"--tag",
-			tag,
 		]);
-		assertCommand(result, `candidate upload failed for ${candidate.name}`);
-	}
-
-	async getTag(name: string, tag: string): Promise<string | undefined> {
-		const result = await this.run("npm", [
-			"view",
-			name,
-			`dist-tags.${tag}`,
-			"--json",
-		]);
-		if (isNotFound(result)) return undefined;
-		assertCommand(result, `could not read ${name} dist-tag ${tag}`);
-		const output = result.stdout.trim();
-		if (output.length === 0) return undefined;
-		const value = JSON.parse(output) as unknown;
-		return typeof value === "string" ? value : undefined;
-	}
-
-	async setTag(name: string, version: string, tag: string): Promise<void> {
-		const result = await this.run("npm", [
-			"dist-tag",
-			"add",
-			`${name}@${version}`,
-			tag,
-		]);
-		assertCommand(result, `could not set ${name} dist-tag ${tag}`);
-	}
-
-	async removeTag(name: string, tag: string): Promise<void> {
-		const result = await this.run("npm", ["dist-tag", "rm", name, tag]);
-		assertCommand(result, `could not remove ${name} dist-tag ${tag}`);
+		assertCommand(result, `publication failed for ${candidate.name}`);
 	}
 }
 
@@ -204,13 +171,8 @@ export async function publishPackages(
 ): Promise<void> {
 	validatePreparedRelease(release);
 	const mode = options.mode as string;
-	switch (mode) {
-		case "dry-run":
-		case "candidate":
-		case "promote":
-			break;
-		default:
-			throw new Error(`unknown publication mode ${JSON.stringify(mode)}`);
+	if (mode !== "dry-run" && mode !== "publish") {
+		throw new Error(`unknown publication mode ${JSON.stringify(mode)}`);
 	}
 	const visibility = options.visibility ?? defaultVisibility;
 	assert(
@@ -225,53 +187,42 @@ export async function publishPackages(
 	if (mode === "dry-run") {
 		for (const candidate of release.artifacts) {
 			const live = await registry.getVersion(candidate.name, candidate.version);
-			if (live) assertMatchingCandidate(candidate, live);
-			await registry.getTag(candidate.name, release.candidateTag);
+			if (!live) continue;
+			assertMatchingCandidate(candidate, live);
+			const latestVersion = await registry.getLatestVersion(candidate.name);
+			assert(
+				latestVersion === candidate.version,
+				`${candidate.name}@${candidate.version} is already published but latest points to ${String(latestVersion)}`,
+			);
 		}
 		return;
 	}
 
+	// publish mode — requires explicit release-id approval
 	assert(
 		options.approval === release.releaseId,
 		`destructive publication requires approval ${release.releaseId}`,
 	);
-	if (mode === "promote") {
-		assertConsumerVerification(release, options.consumerVerification);
-	} else {
-		await registry.verifyPreparedArtifacts(release);
-	}
-	await registry.authenticate();
+	await registry.verifyPreparedArtifacts(release);
 
-	if (mode === "candidate") {
-		await publishCandidates(release, registry, visibility);
-		return;
-	}
-	await promoteLatest(release, registry, visibility);
-}
-
-async function publishCandidates(
-	release: PreparedRelease,
-	registry: Registry,
-	visibility: { readonly attempts: number; readonly delayMs: number },
-): Promise<void> {
 	for (const candidate of release.artifacts) {
 		const live = await registry.getVersion(candidate.name, candidate.version);
 		if (live) {
 			assertMatchingCandidate(candidate, live);
-			const tag = await registry.getTag(candidate.name, release.candidateTag);
-			if (tag === candidate.version) continue;
-			assert(
-				tag === undefined,
-				`${candidate.name}: candidate tag points to ${tag}, expected ${candidate.version}`,
+			const latestVersion = await registry.getLatestVersion(candidate.name);
+			if (latestVersion === candidate.version) {
+				// Already fully published and at latest — skip idempotently
+				continue;
+			}
+			// Version exists but latest doesn't point here; OIDC publish cannot
+			// retroactively move dist-tags. An authenticated operator must repair
+			// the tag before this exact release can resume.
+			throw new Error(
+				`${candidate.name}@${candidate.version} is already published but latest points to ${String(latestVersion)}; ` +
+					`cannot update dist-tags via OIDC — repair latest with interactive npm authentication before resuming`,
 			);
-			await registry.setTag(
-				candidate.name,
-				candidate.version,
-				release.candidateTag,
-			);
-		} else {
-			await registry.publishCandidate(candidate, release.candidateTag);
 		}
+		await registry.publishToLatest(candidate);
 		await waitFor(
 			async () => {
 				const visible = await registry.getVersion(
@@ -281,122 +232,14 @@ async function publishCandidates(
 				if (!visible) return false;
 				assertMatchingCandidate(candidate, visible);
 				return (
-					(await registry.getTag(candidate.name, release.candidateTag)) ===
+					(await registry.getLatestVersion(candidate.name)) ===
 					candidate.version
 				);
 			},
 			visibility,
-			`${candidate.name}@${candidate.version} candidate visibility`,
+			`${candidate.name}@${candidate.version} registry visibility`,
 		);
 	}
-}
-
-async function promoteLatest(
-	release: PreparedRelease,
-	registry: Registry,
-	visibility: { readonly attempts: number; readonly delayMs: number },
-): Promise<void> {
-	for (const candidate of release.artifacts) {
-		const live = await registry.getVersion(candidate.name, candidate.version);
-		assert(
-			live !== undefined,
-			`${candidate.name}@${candidate.version} is missing; candidate set is incomplete`,
-		);
-		assertMatchingCandidate(candidate, live);
-	}
-	const latestBefore = new Map<string, string | undefined>();
-	for (const candidate of release.artifacts) {
-		latestBefore.set(
-			candidate.name,
-			await registry.getTag(candidate.name, "latest"),
-		);
-	}
-	const allLatestAlreadyVerified = release.artifacts.every(
-		(candidate) => latestBefore.get(candidate.name) === candidate.version,
-	);
-	for (const candidate of release.artifacts) {
-		const candidateTag = await registry.getTag(
-			candidate.name,
-			release.candidateTag,
-		);
-		assert(
-			candidateTag === candidate.version ||
-				(allLatestAlreadyVerified && candidateTag === undefined),
-			`${candidate.name}: candidate tag is missing or does not match ${candidate.version}`,
-		);
-	}
-
-	for (const packageName of release.promotionOrder) {
-		const candidate = requiredArtifact(release, packageName);
-		if (
-			(await registry.getTag(candidate.name, "latest")) === candidate.version
-		) {
-			continue;
-		}
-		await registry.setTag(candidate.name, candidate.version, "latest");
-		await waitFor(
-			async () =>
-				(await registry.getTag(candidate.name, "latest")) === candidate.version,
-			visibility,
-			`${candidate.name} latest promotion`,
-		);
-	}
-
-	for (const candidate of release.artifacts) {
-		assert(
-			(await registry.getTag(candidate.name, "latest")) === candidate.version,
-			`${candidate.name}: latest did not verify at ${candidate.version}`,
-		);
-	}
-
-	for (const candidate of release.artifacts) {
-		const candidateTag = await registry.getTag(
-			candidate.name,
-			release.candidateTag,
-		);
-		if (candidateTag === undefined) continue;
-		assert(
-			candidateTag === candidate.version,
-			`${candidate.name}: candidate tag changed before cleanup`,
-		);
-		await registry.removeTag(candidate.name, release.candidateTag);
-		await waitFor(
-			async () =>
-				(await registry.getTag(candidate.name, release.candidateTag)) ===
-				undefined,
-			visibility,
-			`${candidate.name} candidate tag removal`,
-		);
-	}
-}
-
-function assertConsumerVerification(
-	release: PreparedRelease,
-	verification: ConsumerVerification | undefined,
-): void {
-	assert(
-		verification !== undefined,
-		"latest promotion requires consumer verification",
-	);
-	assert(
-		verification.schemaVersion === 1 &&
-			verification.releaseId === release.releaseId &&
-			verification.version === release.version &&
-			verification.candidateTag === release.candidateTag,
-		"consumer verification does not match the prepared release",
-	);
-	const expected = release.artifacts.map(({ name, integrity }) => ({
-		name,
-		integrity,
-	}));
-	assert(
-		JSON.stringify(verification.artifacts) === JSON.stringify(expected),
-		"consumer verification artifacts do not match the prepared release",
-	);
-	assert(
-		!Number.isNaN(Date.parse(verification.verifiedAt)),
-		"consumer verification timestamp is invalid",
-	);
 }
 
 function assertMatchingCandidate(
@@ -433,24 +276,10 @@ export function validatePreparedRelease(release: PreparedRelease): void {
 	});
 	assert(
 		rebuilt.releaseId === release.releaseId &&
-			rebuilt.candidateTag === release.candidateTag &&
 			JSON.stringify(rebuilt.publishOrder) ===
-				JSON.stringify(release.publishOrder) &&
-			JSON.stringify(rebuilt.promotionOrder) ===
-				JSON.stringify(release.promotionOrder),
+				JSON.stringify(release.publishOrder),
 		"prepared release manifest is inconsistent or has been modified",
 	);
-}
-
-function requiredArtifact(
-	release: PreparedRelease,
-	packageName: string,
-): PreparedArtifact {
-	const artifact = release.artifacts.find(
-		(candidate) => candidate.packageName === packageName,
-	);
-	assert(artifact !== undefined, `prepared release is missing ${packageName}`);
-	return artifact;
 }
 
 async function waitFor(
@@ -570,11 +399,9 @@ function assert(condition: boolean, message: string): asserts condition {
 function parseCli(args: ReadonlyArray<string>): {
 	readonly manifestPath: string;
 	readonly mode: PublishOptions["mode"];
-	readonly verificationPath?: string;
 } {
 	let manifestPath = ".artifacts/release/prepared-release.json";
 	let mode: PublishOptions["mode"] = "dry-run";
-	let verificationPath: string | undefined;
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index];
 		if (argument === "--manifest") {
@@ -582,28 +409,17 @@ function parseCli(args: ReadonlyArray<string>): {
 			assert(value !== undefined, "--manifest requires a path");
 			manifestPath = value;
 			index += 1;
-		} else if (argument === "--approve-candidate-upload") {
+		} else if (argument === "--approve-publish") {
 			assert(
 				mode === "dry-run",
 				"choose only one destructive publication mode",
 			);
-			mode = "candidate";
-		} else if (argument === "--approve-latest-promotion") {
-			assert(
-				mode === "dry-run",
-				"choose only one destructive publication mode",
-			);
-			mode = "promote";
-		} else if (argument === "--consumer-verification") {
-			const value = args[index + 1];
-			assert(value !== undefined, "--consumer-verification requires a path");
-			verificationPath = value;
-			index += 1;
+			mode = "publish";
 		} else {
 			throw new Error(`unknown argument ${String(argument)}`);
 		}
 	}
-	return { manifestPath: resolve(manifestPath), mode, verificationPath };
+	return { manifestPath: resolve(manifestPath), mode };
 }
 
 export async function runPublishCli(
@@ -613,11 +429,6 @@ export async function runPublishCli(
 	const release = loadPreparedRelease(cli.manifestPath);
 	const approval =
 		cli.mode === "dry-run" ? undefined : process.env.PROSEQL_PUBLISH_APPROVAL;
-	const consumerVerification = cli.verificationPath
-		? (JSON.parse(
-				readFileSync(resolve(cli.verificationPath), "utf8"),
-			) as ConsumerVerification)
-		: undefined;
 	const registry = new NpmRegistry(
 		defaultCommandRunner,
 		dirname(cli.manifestPath),
@@ -625,13 +436,12 @@ export async function runPublishCli(
 	await publishPackages(release, registry, {
 		mode: cli.mode,
 		approval,
-		consumerVerification,
 	});
 	if (cli.mode === "dry-run") {
 		console.log(
 			`Dry run complete for ${release.version}; no credentials or registry writes were used.`,
 		);
 	} else {
-		console.log(`${cli.mode} phase completed for ${release.version}`);
+		console.log(`publish phase completed for ${release.version}`);
 	}
 }

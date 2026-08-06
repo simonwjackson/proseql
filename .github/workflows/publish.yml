@@ -84,38 +84,36 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  candidate-upload:
+  oidc-publish:
     needs: preflight
     runs-on: ubuntu-latest
-    outputs:
-      release-id: ${{ needs.preflight.outputs.release-id }}
     timeout-minutes: 30
     environment: npm-production
-    permissions: {}
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: prepared-release-${{ needs.preflight.outputs.release-id }}
           path: .artifacts/release
-      - name: Verify and upload candidates sequentially
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Verify checksums and publish sequentially to latest
         working-directory: .artifacts/release
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           PROSEQL_PUBLISH_APPROVAL: ${{ needs.preflight.outputs.release-id }}
         run: |
           set -euo pipefail
-          test -n "$NODE_AUTH_TOKEN"
-          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/proseql-npmrc"
-          trap 'rm -f "$NPM_CONFIG_USERCONFIG"' EXIT
-          umask 077
-          printf '%s\n' "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > "$NPM_CONFIG_USERCONFIG"
           sha256sum --check SHA256SUMS
           node publisher.mjs \
             --manifest prepared-release.json \
-            --approve-candidate-upload
+            --approve-publish
 
   registry-consumer:
-    needs: candidate-upload
+    needs: [preflight, oidc-publish]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -127,57 +125,24 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: prepared-release-${{ needs.candidate-upload.outputs.release-id }}
+          name: prepared-release-${{ needs.preflight.outputs.release-id }}
           path: .artifacts/release
       - uses: DeterminateSystems/nix-installer-action@786fff0690178f1234e4e1fe9b536e94f5433196 # v20
       - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
       - name: Install verification tooling without lifecycle scripts
         run: nix develop --command bun install --frozen-lockfile --ignore-scripts
-      - name: Verify exact candidate versions as fresh registry consumers
+      - name: Verify exact published versions as fresh registry consumers
         run: nix develop --command bun run scripts/verify-registry-packages.ts --manifest .artifacts/release/prepared-release.json --output .artifacts/verification/consumer-verification.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: consumer-verification-${{ needs.candidate-upload.outputs.release-id }}
+          name: consumer-verification-${{ needs.preflight.outputs.release-id }}
           path: .artifacts/verification/consumer-verification.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
-  promote-latest:
-    needs: [preflight, registry-consumer]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: npm-production
-    permissions: {}
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: prepared-release-${{ needs.preflight.outputs.release-id }}
-          path: .artifacts/release
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: consumer-verification-${{ needs.preflight.outputs.release-id }}
-          path: .artifacts/verification
-      - name: Promote latest in reverse order and remove candidate tags
-        working-directory: .artifacts/release
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          PROSEQL_PUBLISH_APPROVAL: ${{ needs.preflight.outputs.release-id }}
-        run: |
-          set -euo pipefail
-          test -n "$NODE_AUTH_TOKEN"
-          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/proseql-npmrc"
-          trap 'rm -f "$NPM_CONFIG_USERCONFIG"' EXIT
-          umask 077
-          printf '%s\n' "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > "$NPM_CONFIG_USERCONFIG"
-          sha256sum --check SHA256SUMS
-          node publisher.mjs \
-            --manifest prepared-release.json \
-            --consumer-verification ../verification/consumer-verification.json \
-            --approve-latest-promotion
-
   github-release:
-    needs: [preflight, promote-latest]
+    needs: [preflight, registry-consumer]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -187,6 +152,10 @@ jobs:
         with:
           name: prepared-release-${{ needs.preflight.outputs.release-id }}
           path: .artifacts/release
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: consumer-verification-${{ needs.preflight.outputs.release-id }}
+          path: .artifacts/verification
       - name: Create or resume exact tag and GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -198,6 +167,11 @@ jobs:
           set -euo pipefail
           sha256sum --check SHA256SUMS
           test "$(jq -r .commit prepared-release.json)" = "$COMMIT_SHA"
+          jq -e --slurpfile verification ../verification/consumer-verification.json '
+            .releaseId == $verification[0].releaseId and
+            .version == $verification[0].version and
+            ([.artifacts[] | {name, integrity}] == $verification[0].artifacts)
+          ' prepared-release.json >/dev/null
           tag="v$VERSION"
 
           tag_exists=false
@@ -236,4 +210,5 @@ jobs:
             --repo "$GH_REPO" \
             --clobber \
             prepared-release.json#prepared-release.json \
-            SHA256SUMS#SHA256SUMS
+            SHA256SUMS#SHA256SUMS \
+            ../verification/consumer-verification.json#consumer-verification.json

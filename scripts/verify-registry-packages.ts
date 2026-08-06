@@ -37,7 +37,7 @@ const commandTimeoutMs = 10 * 60_000;
 
 export async function verifyRegistryCandidates(
 	release: PreparedRelease,
-	registry: Pick<Registry, "getVersion" | "getTag">,
+	registry: Pick<Registry, "getVersion" | "getLatestVersion">,
 	now: () => Date = () => new Date(),
 ): Promise<ConsumerVerification> {
 	for (const artifact of release.artifacts) {
@@ -51,20 +51,16 @@ export async function verifyRegistryCandidates(
 			live.integrity === artifact.integrity && differences.length === 0,
 			`${artifact.name}@${artifact.version} does not match prepared integrity and manifest`,
 		);
-		const candidate = await registry.getTag(
-			artifact.name,
-			release.candidateTag,
-		);
+		const latestVersion = await registry.getLatestVersion(artifact.name);
 		assert(
-			candidate === artifact.version,
-			`${artifact.name} candidate tag points to ${String(candidate)}, expected ${artifact.version}`,
+			latestVersion === artifact.version,
+			`${artifact.name} latest tag points to ${String(latestVersion)}, expected ${artifact.version}`,
 		);
 	}
 	return {
 		schemaVersion: 1,
 		releaseId: release.releaseId,
 		version: release.version,
-		candidateTag: release.candidateTag,
 		verifiedAt: now().toISOString(),
 		artifacts: release.artifacts.map(({ name, integrity }) => ({
 			name,

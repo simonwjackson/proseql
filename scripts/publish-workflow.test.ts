@@ -74,7 +74,7 @@ describe("approved npm publication workflow", () => {
 		expect(rejected.stderr.toString()).toMatch(
 			/workflow source.*not reviewed/i,
 		);
-		expect(jobBody("candidate-upload")).toContain("needs: preflight");
+		expect(jobBody("oidc-publish")).toContain("needs: preflight");
 	});
 
 	it("keeps preflight credential-free and binds narrowly scoped artifacts to exact clean HEAD", () => {
@@ -95,44 +95,52 @@ describe("approved npm publication workflow", () => {
 		);
 	});
 
-	it("isolates credentials in protected upload and promotion jobs without builds", () => {
-		for (const name of ["candidate-upload", "promote-latest"]) {
-			const body = jobBody(name);
-			expect(body).toContain("environment: npm-production");
-			expect(body).toContain("permissions: {}");
-			expect(body).toContain(`NODE_AUTH_TOKEN: \${{ secrets.NPM_TOKEN }}`);
-			expect(body).toContain('test -n "$NODE_AUTH_TOKEN"');
-			expect(body).toContain("actions/download-artifact@");
-			expect(body).toContain("sha256sum --check SHA256SUMS");
-			expect(body).not.toContain("actions/checkout@");
-			expect(body).not.toMatch(
-				/\b(?:bun|npm|pnpm|yarn)\s+(?:install|run|build|pack)\b/,
-			);
-			expect(body).not.toMatch(/prepublish|postinstall|lifecycle/);
-		}
-		expect(jobBody("candidate-upload")).toContain("--approve-candidate-upload");
-		expect(jobBody("promote-latest")).toContain("--approve-latest-promotion");
+	it("uses OIDC trusted publishing without secrets, whoami, or dist-tag mutations", () => {
+		const body = jobBody("oidc-publish");
+		expect(body).toContain("environment: npm-production");
+		expect(body).toContain("id-token: write");
+		expect(body).toContain("contents: read");
+		expect(body).toContain("actions/setup-node@");
+		expect(body).toContain("node-version: '24'");
+		expect(body).toContain("registry-url: 'https://registry.npmjs.org'");
+		expect(body).toContain("sha256sum --check SHA256SUMS");
+		expect(body).toContain("--approve-publish");
+		expect(body).toContain("actions/download-artifact@");
+		// No secrets or tokens
+		expect(body).not.toMatch(/NPM_TOKEN|NODE_AUTH_TOKEN|secrets\./);
+		// No source checkout, build, or install
+		expect(body).not.toContain("actions/checkout@");
+		expect(body).not.toMatch(
+			/\b(?:bun|npm|pnpm|yarn)\s+(?:install|run|build|pack)\b/,
+		);
+		expect(body).not.toMatch(/prepublish|postinstall|lifecycle/);
+		// No dist-tag mutations or whoami
+		expect(body).not.toMatch(/whoami|dist-tag/);
 	});
 
-	it("verifies the registry without secrets before promotion", () => {
-		const candidate = jobBody("candidate-upload");
+	it("verifies the registry without secrets after publish", () => {
+		const publish = jobBody("oidc-publish");
 		const consumer = jobBody("registry-consumer");
-		const promotion = jobBody("promote-latest");
-		expect(candidate).toContain("needs: preflight");
-		expect(consumer).toContain("needs: candidate-upload");
-		expect(promotion).toMatch(/needs:.*registry-consumer/);
+		const release = jobBody("github-release");
+		expect(publish).toContain("needs: preflight");
+		expect(consumer).toMatch(/needs:.*oidc-publish/);
+		expect(consumer).toMatch(/needs:.*preflight/);
+		expect(release).toMatch(/needs:.*registry-consumer/);
 		expect(consumer).toContain("verify-registry-packages.ts");
 		expect(consumer).toContain("consumer-verification.json");
 		expect(consumer).not.toMatch(
 			/NODE_AUTH_TOKEN|NPM_TOKEN|secrets\.|npm-production/,
 		);
-		expect(promotion).toContain("consumer-verification.json");
 	});
 
-	it("creates or resumes the tag and GitHub release only after promotion at the exact commit", () => {
+	it("creates or resumes the tag and GitHub release only after registry consumer at the exact commit", () => {
 		const release = jobBody("github-release");
-		expect(release).toMatch(/needs:.*promote-latest/);
+		expect(release).toMatch(/needs:.*registry-consumer/);
 		expect(release).toContain("contents: write");
+		expect(release).toContain("consumer-verification-");
+		expect(release).toContain("consumer-verification.json");
+		expect(release).toContain("$verification[0].releaseId");
+		expect(release).toContain("$verification[0].artifacts");
 		expect(release).not.toMatch(
 			/NODE_AUTH_TOKEN|NPM_TOKEN|secrets\.|npm-production/,
 		);
@@ -143,5 +151,14 @@ describe("approved npm publication workflow", () => {
 		expect(release).toContain("gh release create");
 		expect(release).toContain("gh release upload");
 		expect(release).toContain("--clobber");
+	});
+
+	it("has no candidate-upload or promote-latest jobs", () => {
+		expect(workflow).not.toContain("candidate-upload:");
+		expect(workflow).not.toContain("promote-latest:");
+		expect(workflow).not.toMatch(/candidateTag|candidate-tag/);
+		expect(workflow).not.toMatch(
+			/NPM_TOKEN|NODE_AUTH_TOKEN|secrets\.|npm whoami|npm dist-tag/,
+		);
 	});
 });
