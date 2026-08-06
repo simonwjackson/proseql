@@ -1,23 +1,5 @@
 # Set of Bun packages to install
 {
-  "@effect/platform" = {
-    out_path = "@effect/platform";
-    name = "@effect/platform@0.76.1";
-    url = "https://registry.npmjs.org/@effect/platform/-/platform-0.76.1.tgz";
-    hash = "sha512-r55Bq+hmuFqOBZ6cgYojWqrQmPM6JEnVZOgX3V4xDi+PfxnW3WEkQEHxb+pl8y36ooCRT/+8QlMuoFwUtz/pag==";
-  };
-  "@effect/platform/multipasta" = {
-    out_path = "@effect/platform/node_modules/multipasta";
-    name = "multipasta@0.2.7";
-    url = "https://registry.npmjs.org/multipasta/-/multipasta-0.2.7.tgz";
-    hash = "sha512-KPA58d68KgGil15oDqXjkUBEBYc00XvbPj5/X+dyzeo/lWm9Nc25pQRlf1D+gv4OpK7NM0J1odrbu9JNNGvynA==";
-  };
-  "@effect/rpc" = {
-    out_path = "@effect/rpc";
-    name = "@effect/rpc@0.51.1";
-    url = "https://registry.npmjs.org/@effect/rpc/-/rpc-0.51.1.tgz";
-    hash = "sha512-Fs6Pkbjx1xDzFEzpASuB4qAJJhaKTOgUu4YNCo+Q1Tu64lby7HOg5Q2RL95LdwTqHDM5cR2QvcPcVnTQFoFWKw==";
-  };
   "@esbuild/aix-ppc64" = {
     out_path = "@esbuild/aix-ppc64";
     name = "@esbuild/aix-ppc64@0.21.5";
@@ -222,6 +204,15 @@
     url = "https://registry.npmjs.org/@proseql/cli/-/cli-workspace:packages/cli.tgz";
     hash = "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
   };
+  "@proseql/cli/yaml" = {
+    out_path = "@proseql/cli/node_modules/yaml";
+    binaries = {
+      "yaml" = "../@proseql/cli/node_modules/yaml/bin.mjs";
+    };
+    name = "yaml@2.9.0";
+    url = "https://registry.npmjs.org/yaml/-/yaml-2.9.0.tgz";
+    hash = "sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==";
+  };
   "@proseql/core" = {
     out_path = "@proseql/core";
     name = "@proseql/core@workspace:packages/core";
@@ -233,9 +224,9 @@
     binaries = {
       "yaml" = "../@proseql/core/node_modules/yaml/bin.mjs";
     };
-    name = "yaml@2.8.4";
-    url = "https://registry.npmjs.org/yaml/-/yaml-2.8.4.tgz";
-    hash = "sha512-ml/JPOj9fOQK8RNnWojA67GbZ0ApXAUlN2UQclwv2eVgTgn7O9gg9o7paZWKMp4g0H3nTLtS9LVzhkpOFIKzog==";
+    name = "yaml@2.9.0";
+    url = "https://registry.npmjs.org/yaml/-/yaml-2.9.0.tgz";
+    hash = "sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==";
   };
   "@proseql/effect" = {
     out_path = "@proseql/effect";
@@ -464,6 +455,126 @@
     name = "@types/picomatch@4.0.3";
     url = "https://registry.npmjs.org/@types/picomatch/-/picomatch-4.0.3.tgz";
     hash = "sha512-iG0T6+nYJ9FAPmx9SsUlnwcq1ZVRuCXcVEvWnntoPlrOpwtSTKNDC9uVAxTsC3PUvJ+99n4RpAcNgBbHX3JSnQ==";
+  };
+  "@typescript/typescript-aix-ppc64" = {
+    out_path = "@typescript/typescript-aix-ppc64";
+    name = "@typescript/typescript-aix-ppc64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-aix-ppc64/-/typescript-aix-ppc64-7.0.2.tgz";
+    hash = "sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==";
+  };
+  "@typescript/typescript-darwin-arm64" = {
+    out_path = "@typescript/typescript-darwin-arm64";
+    name = "@typescript/typescript-darwin-arm64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-darwin-arm64/-/typescript-darwin-arm64-7.0.2.tgz";
+    hash = "sha512-gowzar9MwS/aRWp6f3a4KUqzRjAZjOsmGNCM6LcTgXum+dBfgsBVMN+AgvOCCbguXyick6LJhpBszxMebJ8syA==";
+  };
+  "@typescript/typescript-darwin-x64" = {
+    out_path = "@typescript/typescript-darwin-x64";
+    name = "@typescript/typescript-darwin-x64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-darwin-x64/-/typescript-darwin-x64-7.0.2.tgz";
+    hash = "sha512-SZ9xZInqApNlNGc9s0W1VSsktYSOe9cFqNOIqmN1Gs8SmkjKZYFt017G4VwPxASInODuAdbTW7sXiFUf893RgA==";
+  };
+  "@typescript/typescript-freebsd-arm64" = {
+    out_path = "@typescript/typescript-freebsd-arm64";
+    name = "@typescript/typescript-freebsd-arm64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-freebsd-arm64/-/typescript-freebsd-arm64-7.0.2.tgz";
+    hash = "sha512-W5NH4y/J0plIIS5b2xvTEkU7JFxyqdMAOgf+Ilhl0vHQXKO5dZoxd+C/jEtq56c4F3wk71RB4BMRQ2XdI+bwYQ==";
+  };
+  "@typescript/typescript-freebsd-x64" = {
+    out_path = "@typescript/typescript-freebsd-x64";
+    name = "@typescript/typescript-freebsd-x64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-freebsd-x64/-/typescript-freebsd-x64-7.0.2.tgz";
+    hash = "sha512-UMGDx5sTpzNw3WiPebH7l90IWfJggEd+egHt/q6p7/Cm3zqoV7VxkGXt+3DxPIw8CcmvAB0j3sVVfbhX+M4Tpw==";
+  };
+  "@typescript/typescript-linux-arm" = {
+    out_path = "@typescript/typescript-linux-arm";
+    name = "@typescript/typescript-linux-arm@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-linux-arm/-/typescript-linux-arm-7.0.2.tgz";
+    hash = "sha512-gffT3xPz9sR7j/YJExkyPntrI0P2EP9XbOyWzth2/Gs0RstK+90RBcO0ncXoXy/beYll1SXw846Nf2zdnEz0QQ==";
+  };
+  "@typescript/typescript-linux-arm64" = {
+    out_path = "@typescript/typescript-linux-arm64";
+    name = "@typescript/typescript-linux-arm64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-linux-arm64/-/typescript-linux-arm64-7.0.2.tgz";
+    hash = "sha512-Qh4eU4/y3yDjnfjjyPYihMj5/ODIlmt+Bzu17OI+fiSRDW57QmU5SiN63exPRNJPKUzcc1INa1NXdrJ+MqHjUQ==";
+  };
+  "@typescript/typescript-linux-loong64" = {
+    out_path = "@typescript/typescript-linux-loong64";
+    name = "@typescript/typescript-linux-loong64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-linux-loong64/-/typescript-linux-loong64-7.0.2.tgz";
+    hash = "sha512-uEHck9i8hoAzXPiYRib1O7miOnz23SxIeVl6F4LXox+qov1K35jHcEW6VHKvZI+pyvl7fZEP4MCU5LYvIq1GuQ==";
+  };
+  "@typescript/typescript-linux-mips64el" = {
+    out_path = "@typescript/typescript-linux-mips64el";
+    name = "@typescript/typescript-linux-mips64el@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-linux-mips64el/-/typescript-linux-mips64el-7.0.2.tgz";
+    hash = "sha512-R4KvAMnE43W5Qeqb0Ly56O3mWMWIAgsMyz36DCaycd5nbg/9kzm0liw3JocfRqyJY0KPmzFjbswozXyW0DnIYA==";
+  };
+  "@typescript/typescript-linux-ppc64" = {
+    out_path = "@typescript/typescript-linux-ppc64";
+    name = "@typescript/typescript-linux-ppc64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-linux-ppc64/-/typescript-linux-ppc64-7.0.2.tgz";
+    hash = "sha512-DORx5b3sd/4S7eayxm4FQv+A7CrkUIGRaHiwI8oiHTAI1fAPWhF4J0vAlkC8biAlHSVVwxMQ3tjZ2/DVbnQiiA==";
+  };
+  "@typescript/typescript-linux-riscv64" = {
+    out_path = "@typescript/typescript-linux-riscv64";
+    name = "@typescript/typescript-linux-riscv64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-linux-riscv64/-/typescript-linux-riscv64-7.0.2.tgz";
+    hash = "sha512-wf0jqEDOjrPRnKwYRyyJDRo11KMbvMFrU+q4zqKyChODBzvlkbhNQfKvLxQCcwTpdDaXSHZTVuh0JoCrKCUMHQ==";
+  };
+  "@typescript/typescript-linux-s390x" = {
+    out_path = "@typescript/typescript-linux-s390x";
+    name = "@typescript/typescript-linux-s390x@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-linux-s390x/-/typescript-linux-s390x-7.0.2.tgz";
+    hash = "sha512-IkwJc3L7yhytWd/ewjyxNDfOmswCm9GWMJT/ue/dU4aZNbwZeYAetq42VyLmsmSjvoX7z74X6ZaYCtzAr0EuGw==";
+  };
+  "@typescript/typescript-linux-x64" = {
+    out_path = "@typescript/typescript-linux-x64";
+    name = "@typescript/typescript-linux-x64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-linux-x64/-/typescript-linux-x64-7.0.2.tgz";
+    hash = "sha512-EYdf2cNg7rgCWJnxCdJ+F3V39O8ihb37eHAu1LK8oAFizgTQbPOK7zHHXbPt8rX24COqODXeI3sIf0fCXG7H/A==";
+  };
+  "@typescript/typescript-netbsd-arm64" = {
+    out_path = "@typescript/typescript-netbsd-arm64";
+    name = "@typescript/typescript-netbsd-arm64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-netbsd-arm64/-/typescript-netbsd-arm64-7.0.2.tgz";
+    hash = "sha512-+polYF4MF04aPpO5FTkHran9yUQDSXqy5GiSDKpsll5jy3l3+g9QLhpf39T+ePtefhXLOGrLl0QIjkQP6VnelA==";
+  };
+  "@typescript/typescript-netbsd-x64" = {
+    out_path = "@typescript/typescript-netbsd-x64";
+    name = "@typescript/typescript-netbsd-x64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-netbsd-x64/-/typescript-netbsd-x64-7.0.2.tgz";
+    hash = "sha512-8YIT0EHM/3dq10ZOVF/A7pc/YSMtbcecct4rWtexrnSCHOPcpC2KTLXfTCR6vDpnSiY12heNb1GiN/wu+T/FyA==";
+  };
+  "@typescript/typescript-openbsd-arm64" = {
+    out_path = "@typescript/typescript-openbsd-arm64";
+    name = "@typescript/typescript-openbsd-arm64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-openbsd-arm64/-/typescript-openbsd-arm64-7.0.2.tgz";
+    hash = "sha512-APT8+ClYnuYm1u9+kgGXoMj2VzWzcymwh2gNSQVySHfkRDGOTVkoWLjCmOQSaO+PoqQ57B0flRp9SA+7GnnkzQ==";
+  };
+  "@typescript/typescript-openbsd-x64" = {
+    out_path = "@typescript/typescript-openbsd-x64";
+    name = "@typescript/typescript-openbsd-x64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-openbsd-x64/-/typescript-openbsd-x64-7.0.2.tgz";
+    hash = "sha512-yX7s+Q0Dln0Dt9tEzZsAjXXR/+ytBM7AlglaqyeMPxQszJ1JhlJdZ6jLA+IzldHtflX81em7lDao1xXu+aRRkg==";
+  };
+  "@typescript/typescript-sunos-x64" = {
+    out_path = "@typescript/typescript-sunos-x64";
+    name = "@typescript/typescript-sunos-x64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-sunos-x64/-/typescript-sunos-x64-7.0.2.tgz";
+    hash = "sha512-dLJDGaLZ1D4HPQn62u1n8mBDkJREwMsAkCdkwd4Ieqw+x3TUyTsqY0YiBCtE6H6OzzgGk3iuZ3vFWRS+E8/d1g==";
+  };
+  "@typescript/typescript-win32-arm64" = {
+    out_path = "@typescript/typescript-win32-arm64";
+    name = "@typescript/typescript-win32-arm64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-win32-arm64/-/typescript-win32-arm64-7.0.2.tgz";
+    hash = "sha512-Gyl1Vy6OsWesLzmq+EP0Fb7b4Nid5232AvcA2SFcdYreldpNtYFFofPjnt62y9hQy7VTaZp65ICJjuAQRaVcIQ==";
+  };
+  "@typescript/typescript-win32-x64" = {
+    out_path = "@typescript/typescript-win32-x64";
+    name = "@typescript/typescript-win32-x64@7.0.2";
+    url = "https://registry.npmjs.org/@typescript/typescript-win32-x64/-/typescript-win32-x64-7.0.2.tgz";
+    hash = "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g==";
   };
   "@vitest/expect" = {
     out_path = "@vitest/expect";
@@ -1033,6 +1144,15 @@
     name = "type-detect@4.1.0";
     url = "https://registry.npmjs.org/type-detect/-/type-detect-4.1.0.tgz";
     hash = "sha512-Acylog8/luQ8L7il+geoSxhEkazvkslg7PSNKOX59mbB9cOveP5aq9h74Y7YU8yDpJwetzQQrfIwtf4Wp4LKcw==";
+  };
+  "typescript" = {
+    out_path = "typescript";
+    binaries = {
+      "tsc" = "../typescript/bin/tsc";
+    };
+    name = "typescript@7.0.2";
+    url = "https://registry.npmjs.org/typescript/-/typescript-7.0.2.tgz";
+    hash = "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==";
   };
   "ufo" = {
     out_path = "ufo";

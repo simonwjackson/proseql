@@ -4,7 +4,7 @@
 	"description": "Effect RPC integration for ProseQL type-safe in-memory database",
 	"type": "module",
 	"scripts": {
-		"build": "bunx tsc --build",
+		"build": "bun run tsc --build",
 		"clean": "rm -rf dist *.tsbuildinfo",
 		"prepublishOnly": "bun run build && bun test"
 	},

@@ -5,11 +5,11 @@
 	"type": "module",
 	"scripts": {
 		"build:wasm": "bun ./scripts/build-wasm.mjs",
-		"build": "bun run build:wasm && bunx tsc --build",
+		"build": "bun run build:wasm && bun run tsc --build",
 		"clean": "rm -rf build dist *.tsbuildinfo",
 		"prepublishOnly": "bun run build && bun test",
 		"test:node": "nix shell nixpkgs#nodejs -c node ./tests/node-smoke.mjs",
-		"typecheck:tests": "bunx tsc --build ../core ."
+		"typecheck:tests": "bun run tsc --build ../core ."
 	},
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",

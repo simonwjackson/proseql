@@ -17,7 +17,7 @@
 		"README.md"
 	],
 	"scripts": {
-		"build": "bunx tsc --build",
+		"build": "bun run tsc --build",
 		"clean": "rm -rf dist *.tsbuildinfo",
 		"prepublishOnly": "bun run build && bun test",
 		"smoke:browser": "nix shell nixpkgs#nodejs nixpkgs#chromium -c sh -lc 'CHROMIUM_EXECUTABLE_PATH=$(command -v chromium) node ./tests/browser-smoke.mjs'"

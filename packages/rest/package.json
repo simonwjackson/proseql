@@ -4,7 +4,7 @@
 	"description": "REST API handlers for ProseQL databases, framework-agnostic",
 	"type": "module",
 	"scripts": {
-		"build": "bunx tsc --build",
+		"build": "bun run tsc --build",
 		"clean": "rm -rf dist *.tsbuildinfo",
 		"prepublishOnly": "bun run build && bun test"
 	},

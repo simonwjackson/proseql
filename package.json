@@ -11,7 +11,7 @@
 		"bench:baseline": "bun run bench/baseline.ts",
 		"generate:u2-browser-evidence": "bun run scripts/verify-package-artifacts.ts --u2-browser-evidence-write",
 		"verify:u2-browser-evidence": "bun run scripts/verify-package-artifacts.ts --u2-browser-evidence-check",
-		"build": "bun run copy-license && bunx tsc --build && chmod +x packages/cli/dist/main.js",
+		"build": "bun run copy-license && bun run tsc --build && chmod +x packages/cli/dist/main.js",
 		"build:clean": "bun run clean && bun run build",
 		"clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo *.tsbuildinfo dist/**/*.tsbuildinfo",
 		"copy-license": "for dir in packages/*/; do cp LICENSE \"$dir\"; done",
@@ -42,6 +42,7 @@
 		"tinybench": "^3.0.8",
 		"vite": "^5.4.20",
 		"vitest": "^1.1.1",
-		"playwright": "^1.55.0"
+		"playwright": "^1.55.0",
+		"typescript": "7.0.2"
 	}
 }
