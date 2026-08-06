@@ -51,6 +51,7 @@ const CreateErrorSchema = Schema.Union([
 	ForeignKeyErrorSchema,
 	HookErrorSchema,
 	UniqueConstraintErrorSchema,
+	InvalidRpcRequestErrorSchema,
 ]);
 const UpdateErrorSchema = Schema.Union([
 	ValidationErrorSchema,
@@ -58,6 +59,7 @@ const UpdateErrorSchema = Schema.Union([
 	ForeignKeyErrorSchema,
 	HookErrorSchema,
 	UniqueConstraintErrorSchema,
+	InvalidRpcRequestErrorSchema,
 ]);
 const DeleteErrorSchema = Schema.Union([
 	NotFoundErrorSchema,

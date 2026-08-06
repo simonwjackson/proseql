@@ -172,13 +172,63 @@ const findWhereError = (
 			if (error) return error;
 			continue;
 		}
+		if (operatorKeys.length !== Object.keys(value).length) {
+			return invalid(
+				operation,
+				"filter objects cannot mix operators and nested fields",
+				currentPath,
+			);
+		}
 		for (const operator of operatorKeys) {
+			const operatorPath = `${currentPath}.${operator}`;
 			if (!fieldOperators.has(operator)) {
 				return invalid(
 					operation,
 					`unsupported filter operator ${operator}`,
-					`${currentPath}.${operator}`,
+					operatorPath,
 				);
+			}
+			const operand = value[operator];
+			if (
+				["$in", "$nin", "$all"].includes(operator) &&
+				!Array.isArray(operand)
+			) {
+				return invalid(
+					operation,
+					`${operator} requires an array`,
+					operatorPath,
+				);
+			}
+			if (
+				["$startsWith", "$endsWith", "$search"].includes(operator) &&
+				typeof operand !== "string"
+			) {
+				return invalid(
+					operation,
+					`${operator} requires a string`,
+					operatorPath,
+				);
+			}
+			if (
+				operator === "$size" &&
+				(!Number.isInteger(operand) || (operand as number) < 0)
+			) {
+				return invalid(
+					operation,
+					"$size requires a non-negative integer",
+					operatorPath,
+				);
+			}
+			if (["$some", "$every", "$none"].includes(operator)) {
+				if (!isRecord(operand)) {
+					return invalid(
+						operation,
+						`${operator} requires a filter object`,
+						operatorPath,
+					);
+				}
+				const error = findWhereError(operand, operation, operatorPath);
+				if (error) return error;
 			}
 		}
 	}
@@ -207,6 +257,17 @@ const validatePayload = (
 		? Effect.void
 		: Effect.fail(invalid(operation, "payload must contain only JSON values"));
 
+const validNestedConfig = (
+	value: unknown,
+	leaf: (value: unknown) => boolean,
+): boolean => {
+	if (leaf(value)) return true;
+	return (
+		isRecord(value) &&
+		Object.values(value).every((nested) => validNestedConfig(nested, leaf))
+	);
+};
+
 const validateQuery = (
 	operation: string,
 	payload: QueryPayload,
@@ -215,9 +276,62 @@ const validateQuery = (
 	Effect.gen(function* () {
 		yield* validatePayload(operation, payload);
 		yield* validateWhere(payload.where, operation);
+		if (
+			payload.sort !== undefined &&
+			Object.values(payload.sort).some(
+				(order) => order !== "asc" && order !== "desc",
+			)
+		) {
+			return yield* Effect.fail(
+				invalid(operation, "sort values must be asc or desc", "sort"),
+			);
+		}
+		if (
+			payload.select !== undefined &&
+			!(
+				(Array.isArray(payload.select) &&
+					payload.select.every((field) => typeof field === "string")) ||
+				validNestedConfig(payload.select, (value) => value === true)
+			)
+		) {
+			return yield* Effect.fail(
+				invalid(
+					operation,
+					"select must contain field names or true-valued fields",
+					"select",
+				),
+			);
+		}
+		if (
+			payload.populate !== undefined &&
+			!validNestedConfig(payload.populate, (value) => value === true)
+		) {
+			return yield* Effect.fail(
+				invalid(
+					operation,
+					"populate values must be true or nested populate objects",
+					"populate",
+				),
+			);
+		}
 		if (payload.cursor !== undefined && stream) {
 			return yield* Effect.fail(
 				invalid(operation, "cursor queries cannot be streamed", "cursor"),
+			);
+		}
+		if (
+			payload.cursor !== undefined &&
+			(!Number.isInteger(payload.cursor.limit) ||
+				payload.cursor.limit <= 0 ||
+				(payload.cursor.after !== undefined &&
+					payload.cursor.before !== undefined))
+		) {
+			return yield* Effect.fail(
+				invalid(
+					operation,
+					"cursor requires a positive integer limit and at most one boundary",
+					"cursor",
+				),
 			);
 		}
 		if (
@@ -242,6 +356,16 @@ const validateQuery = (
 				invalid(operation, "limit and offset must be non-negative integers"),
 			);
 		}
+	});
+
+const validateMutation = (
+	operation: string,
+	payload: unknown,
+	where?: RpcRecord,
+): Effect.Effect<void, InvalidRpcRequestError> =>
+	Effect.gen(function* () {
+		yield* validatePayload(operation, payload);
+		yield* validateWhere(where, operation);
 	});
 
 const dynamicCollections = <Config extends DatabaseConfig>(
@@ -280,44 +404,56 @@ const makeHandlerFunctions = <Config extends DatabaseConfig>(
 						collection.query(payload) as Stream.Stream<RpcRecord, RpcFailure>,
 				),
 			)) as never;
-		handlers[tag("create")] = (({ data }: CreatePayload) =>
-			collection.create(data)) as never;
-		handlers[tag("update")] = (({ id, updates }: UpdatePayload) =>
-			collection.update(id, updates)) as never;
+		handlers[tag("create")] = ((payload: CreatePayload) =>
+			Effect.andThen(
+				validateMutation(tag("create"), payload),
+				collection.create(payload.data),
+			)) as never;
+		handlers[tag("update")] = ((payload: UpdatePayload) =>
+			Effect.andThen(
+				validateMutation(tag("update"), payload),
+				collection.update(payload.id, payload.updates),
+			)) as never;
 		handlers[tag("delete")] = (({ id }: DeletePayload) =>
 			collection.delete(id)) as never;
 		handlers[tag("aggregate")] = ((payload: AggregatePayload) =>
 			Effect.andThen(
-				validateWhere(payload.where, tag("aggregate")),
+				validateMutation(tag("aggregate"), payload, payload.where),
 				collection.aggregate(payload),
 			)) as never;
-		handlers[tag("createMany")] = (({ data, options }: CreateManyPayload) =>
-			collection.createMany(data, options)) as never;
-		handlers[tag("updateMany")] = (({ where, updates }: UpdateManyPayload) =>
+		handlers[tag("createMany")] = ((payload: CreateManyPayload) =>
 			Effect.andThen(
-				validateWhere(where, tag("updateMany")),
-				collection.updateMany(where, updates),
+				validateMutation(tag("createMany"), payload),
+				collection.createMany(payload.data, payload.options),
 			)) as never;
-		handlers[tag("deleteMany")] = (({ where, options }: DeleteManyPayload) =>
+		handlers[tag("updateMany")] = ((payload: UpdateManyPayload) =>
 			Effect.andThen(
-				validateWhere(where, tag("deleteMany")),
-				collection.deleteMany(where, options),
+				validateMutation(tag("updateMany"), payload, payload.where),
+				collection.updateMany(payload.where, payload.updates),
+			)) as never;
+		handlers[tag("deleteMany")] = ((payload: DeleteManyPayload) =>
+			Effect.andThen(
+				validateMutation(tag("deleteMany"), payload, payload.where),
+				collection.deleteMany(payload.where, payload.options),
 			)) as never;
 		handlers[tag("upsert")] = ((payload: UpsertPayload) =>
 			Effect.andThen(
-				validateWhere(payload.where, tag("upsert")),
+				validateMutation(tag("upsert"), payload, payload.where),
 				collection.upsert(payload),
 			)) as never;
-		handlers[tag("upsertMany")] = (({ data }: UpsertManyPayload) =>
+		handlers[tag("upsertMany")] = ((payload: UpsertManyPayload) =>
 			Effect.andThen(
-				Effect.forEach(
-					data,
-					(item) => validateWhere(item.where, tag("upsertMany")),
-					{
-						discard: true,
-					},
+				Effect.andThen(
+					validatePayload(tag("upsertMany"), payload),
+					Effect.forEach(
+						payload.data,
+						(item) => validateWhere(item.where, tag("upsertMany")),
+						{
+							discard: true,
+						},
+					),
 				),
-				collection.upsertMany(data),
+				collection.upsertMany(payload.data),
 			)) as never;
 	}
 	return handlers;

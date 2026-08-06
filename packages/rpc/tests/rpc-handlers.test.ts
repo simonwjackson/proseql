@@ -256,6 +256,10 @@ describe("WASM-backed RPC handlers", () => {
 					updates: { genre: "changed" },
 				}).pipe(Effect.catchTag("InvalidRpcRequestError", Effect.succeed));
 				expect(error._tag).toBe("InvalidRpcRequestError");
+				const malformed = yield* client["books.deleteMany"]({
+					where: { year: { $in: "not-an-array" } },
+				}).pipe(Effect.catchTag("InvalidRpcRequestError", Effect.succeed));
+				expect(malformed.path).toBe("where.year.$in");
 				const rows = yield* client["books.query"]({});
 				expect(
 					Array.isArray(rows) && rows.every((row) => row.genre !== "changed"),
