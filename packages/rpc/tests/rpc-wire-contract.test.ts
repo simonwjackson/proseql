@@ -1,4 +1,4 @@
-import { Effect, Option, Queue, Schema, Stream } from "effect";
+import { Deferred, Effect, Option, Queue, Schema, Stream } from "effect";
 import {
 	Rpc,
 	RpcClient,
@@ -449,6 +449,7 @@ describe("serialized RPC wire contract", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const transport = yield* makeSerializedTransport;
+					const serverFinalized = yield* Deferred.make<void>();
 					const stream = Stream.unfold(0, (index) =>
 						Effect.sync(() => {
 							if (index >= 1_000) return undefined;
@@ -457,9 +458,12 @@ describe("serialized RPC wire contract", () => {
 						}),
 					).pipe(
 						Stream.ensuring(
-							Effect.sync(() => {
-								finalized += 1;
-							}),
+							Effect.andThen(
+								Effect.sync(() => {
+									finalized += 1;
+								}),
+								Deferred.succeed(serverFinalized, undefined),
+							),
 						),
 					);
 					yield* RpcServer.make(group).pipe(
@@ -473,7 +477,13 @@ describe("serialized RPC wire contract", () => {
 					const rows = yield* Stream.runCollect(
 						Stream.take(client["test.cancellable"]({}), 1),
 					);
-					yield* Effect.yieldNow;
+					// This wait occurs while the server scope is still live. If the server
+					// stream only finalizes during enclosing scope shutdown, the timeout
+					// fails the test instead of producing a false positive.
+					yield* Deferred.await(serverFinalized).pipe(
+						Effect.timeout("1 second"),
+					);
+					expect(finalized).toBe(1);
 					return rows;
 				}),
 			),
