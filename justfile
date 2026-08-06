@@ -189,9 +189,9 @@ publish-packages *args:
 rust-check:
     cargo check --manifest-path crates/Cargo.toml
 
-# Run the Rust engine test suite (includes conformance fixtures)
+# Run the Rust engine test suite with bounded, overrideable Cargo and libtest concurrency
 rust-test *args:
-    cargo test --manifest-path crates/Cargo.toml {{args}}
+    CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}" RUST_TEST_THREADS="${RUST_TEST_THREADS:-1}" cargo test --manifest-path crates/Cargo.toml {{args}}
 
 # Lint the Rust engine workspace (Clippy)
 rust-lint:

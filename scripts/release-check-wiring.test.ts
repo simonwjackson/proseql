@@ -64,6 +64,15 @@ describe("release readiness wiring", () => {
 		}
 	});
 
+	it("bounds Rust test concurrency while preserving explicit overrides", () => {
+		const justfile = readRootFile("justfile");
+		const boundedRustTest =
+			'CARGO_BUILD_JOBS="$' +
+			'{CARGO_BUILD_JOBS:-1}" RUST_TEST_THREADS="$' +
+			'{RUST_TEST_THREADS:-1}" cargo test --manifest-path crates/Cargo.toml';
+		expect(justfile).toContain(boundedRustTest);
+	});
+
 	it("composes the clean release gate without destructive release commands", () => {
 		const justfile = readRootFile("justfile");
 		const releaseCheck = justfile.slice(justfile.indexOf("release-check:"));
