@@ -32,17 +32,16 @@ Before preparing a release, confirm all of the following:
 
 - You can push the intended reviewed commit, but no tag or GitHub release for the version exists.
 - The coordinated version is unused for all eight package names.
-- The `@proseql` npm organization exists and npm Trusted Publishing is configured for each package:
-  - **Five existing packages** (`core`, `node`, `rest`, `cli`, `rpc`): configure each package on npmjs.com under Settings → Trusted Publisher for workflow `publish.yml`, environment `npm-production`.
-  - **Three new packages** (`engine`, `effect`, `browser`): no npm record exists yet. Create each package record through an explicitly reviewed, interactively authenticated first publication, then configure Trusted Publishing before the coordinated release. OIDC cannot create a package whose Trusted Publisher does not exist yet.
+- The `@proseql` npm organization contains all eight package records, and each package's Trusted Publisher is bound to repository `simonwjackson/proseql`, workflow `publish.yml`, environment `npm-production`, with publish permission.
+- The one-time bootstrap of `engine`, `effect`, and `browser` at `0.15.0` completed from release-checked tarballs on 2026-08-06. Their registry integrities were verified before preparing the coordinated release.
 - The `npm-production` GitHub environment exists, has required reviewers, restricts deployments to `main`, and contains **no npm secrets** (Trusted Publishing uses OIDC; no `NPM_TOKEN` is stored).
 - The GitHub-hosted runner's npm CLI version is ≥11.5.1 and Node version is ≥22.14.0 (the workflow pins Node 24). The optional `npm trust` setup commands require npm ≥11.15.0.
-- Release notes state the exact Effect beta, the three first-publish packages, the deferred AI release, and the browser async transaction limitation.
+- Release notes state the exact Effect beta, the three bootstrapped packages, the deferred AI release, and the browser async transaction limitation.
 - A named operator owns partial-failure recovery.
 
 ## Trusted Publishing setup per package
 
-For each of the five existing packages, run once (requires npm 2FA):
+For any package whose trusted configuration must be recreated, run (requires npm 2FA):
 
 ```sh
 npm trust github @proseql/<name> \
@@ -52,7 +51,7 @@ npm trust github @proseql/<name> \
   --allow-publish
 ```
 
-For the three new packages, create the record first from an exact reviewed tarball via `npm publish --access public` with interactive authentication and 2FA, then run `npm trust github` as above. This bootstrap is an explicit npm-side operation outside the OIDC workflow; do not publish placeholders or unreviewed bytes.
+All eight package records and trusted configurations now exist. Do not repeat the bootstrap publication. Future coordinated versions publish only through the protected OIDC workflow.
 
 ## Prepare and approve the release commit
 

@@ -1,6 +1,6 @@
 {
 	"name": "@proseql/browser",
-	"version": "0.15.0",
+	"version": "0.16.0",
 	"description": "Browser storage adapters and Rust/WASM database runtime for ProseQL",
 	"type": "module",
 	"main": "dist/index.js",

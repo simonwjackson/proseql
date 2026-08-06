@@ -1,6 +1,6 @@
 {
 	"name": "@proseql/effect",
-	"version": "0.15.0",
+	"version": "0.16.0",
 	"description": "Effect-first adapter over the proseQL WASM engine binding",
 	"type": "module",
 	"scripts": {

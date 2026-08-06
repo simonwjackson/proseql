@@ -1,6 +1,6 @@
 {
 	"name": "@proseql/engine",
-	"version": "0.15.0",
+	"version": "0.16.0",
 	"description": "Promise-first WASM engine binding for proseQL",
 	"type": "module",
 	"scripts": {

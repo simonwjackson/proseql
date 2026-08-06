@@ -43,7 +43,7 @@
     },
     "packages/browser": {
       "name": "@proseql/browser",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "dependencies": {
         "@proseql/core": "workspace:*",
         "@proseql/effect": "workspace:*",
@@ -55,7 +55,7 @@
     },
     "packages/cli": {
       "name": "@proseql/cli",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "bin": {
         "proseql": "dist/main.js",
       },
@@ -70,7 +70,7 @@
     },
     "packages/core": {
       "name": "@proseql/core",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "dependencies": {
         "@toon-format/toon": "^2.1.0",
         "effect": "4.0.0-beta.103",
@@ -87,7 +87,7 @@
     },
     "packages/effect": {
       "name": "@proseql/effect",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "dependencies": {
         "@proseql/core": "workspace:*",
         "@proseql/engine": "workspace:*",
@@ -98,7 +98,7 @@
     },
     "packages/engine": {
       "name": "@proseql/engine",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "dependencies": {
         "@proseql/core": "workspace:*",
       },
@@ -108,7 +108,7 @@
     },
     "packages/node": {
       "name": "@proseql/node",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "dependencies": {
         "@proseql/core": "workspace:*",
       },
@@ -118,7 +118,7 @@
     },
     "packages/rest": {
       "name": "@proseql/rest",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "dependencies": {
         "@proseql/core": "workspace:*",
       },
@@ -128,7 +128,7 @@
     },
     "packages/rpc": {
       "name": "@proseql/rpc",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "dependencies": {
         "@proseql/core": "workspace:*",
       },
