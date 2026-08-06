@@ -6,18 +6,15 @@ Type-safe in-memory database that persists to plain text files (JSON/YAML/TOML/e
 
 This is a Bun workspace monorepo with the following packages:
 
-- `@proseql/core` — runtime-agnostic database core (no Node imports)
-- `@proseql/node` — Node.js adapter, re-exports core + `NodeStorageLayer`
+- `@proseql/core` — shared types, schemas, errors, and the legacy TypeScript core
+- `@proseql/engine` — Promise-first Rust/WASM database engine
+- `@proseql/effect` — Effect adapter over the Rust/WASM engine
+- `@proseql/browser` — browser engine entry point and browser storage hosts
+- `@proseql/node` — Node.js storage adapter
 - `@proseql/rest` — REST API handlers (framework-agnostic)
-- `@proseql/rpc` — Effect RPC integration
+- `@proseql/rpc` — client-safe Effect 4 RPC definitions, with WASM-backed handlers under `@proseql/rpc/server`
 
-```
-packages/
-├── core/      @proseql/core
-├── node/      @proseql/node (depends on core)
-├── rest/      @proseql/rest (depends on core)
-└── rpc/       @proseql/rpc  (depends on core + @effect/rpc)
-```
+All Effect declarations are pinned to exactly `effect@4.0.0-beta.103`. RPC uses `effect/unstable/rpc`; the obsolete separate `@effect/rpc` package must not be reintroduced.
 
 ## IMPORTANT: Effect Reference Codebase
 
@@ -42,7 +39,7 @@ Commands via justfile:
 - **Test all:** `just test` or `bun test packages/*/tests/`
 - **Test core:** `just test-core` or `bun test packages/core/tests/`
 - **Test node:** `just test-node` or `bun test packages/node/tests/`
-- **Type check:** `just typecheck` or `bunx tsc --build`
+- **Type check:** `just typecheck` or `bun run tsc --build`
 - **Lint:** `just lint` or `biome check .`
 - **Format:** `just format` or `biome format --write .`
 - **Clean:** `just clean`
