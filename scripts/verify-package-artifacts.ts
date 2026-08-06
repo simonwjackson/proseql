@@ -248,32 +248,35 @@ function dryRunPack(packageDir: string): PackResult {
 	return result;
 }
 
+export const npmPackDryRunArguments = [
+	"pack",
+	"--dry-run",
+	"--json",
+	"--ignore-scripts",
+] as const;
+
+export const nixNpmPackDryRunArguments = (repositoryRoot: string) => [
+	"develop",
+	`${repositoryRoot}#tooling`,
+	"--command",
+	"npm",
+	...npmPackDryRunArguments,
+];
+
 function runPackCommand(packageDir: string): string {
 	try {
-		return execFileSync("npm", ["pack", "--dry-run", "--json"], {
+		return execFileSync("npm", npmPackDryRunArguments, {
 			cwd: packageDir,
 			encoding: "utf-8",
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 	} catch (error) {
 		if (!isMissingExecutable(error)) throw error;
-		return execFileSync(
-			"nix",
-			[
-				"develop",
-				`${root}#tooling`,
-				"--command",
-				"npm",
-				"pack",
-				"--dry-run",
-				"--json",
-			],
-			{
-				cwd: packageDir,
-				encoding: "utf-8",
-				stdio: ["ignore", "pipe", "pipe"],
-			},
-		);
+		return execFileSync("nix", nixNpmPackDryRunArguments(root), {
+			cwd: packageDir,
+			encoding: "utf-8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
 	}
 }
 
@@ -673,29 +676,31 @@ function validateCheckedInU2BrowserEvidence(
 	}
 }
 
-const cliArgs = process.argv.slice(2);
-if (
-	cliArgs.includes("--u2-browser-evidence-write") ||
-	cliArgs.includes("--u2-browser-evidence-check")
-) {
-	const evidenceOptions = {
-		currentBrowserReportPath: readArgValue(cliArgs, "--current-report"),
-		outputPath: readArgValue(cliArgs, "--output"),
-		buildReportPath: readArgValue(cliArgs, "--build-report"),
-		contractPath: readArgValue(cliArgs, "--contract"),
-	};
-	if (cliArgs.includes("--u2-browser-evidence-write")) {
-		writeCheckedInU2BrowserEvidence(evidenceOptions);
-		console.log(
-			`Wrote ${evidenceOptions.outputPath ?? DEFAULT_EVIDENCE_OUTPUT_PATH}`,
-		);
-	} else {
-		validateCheckedInU2BrowserEvidence(evidenceOptions);
-		console.log(
-			`Verified ${evidenceOptions.outputPath ?? DEFAULT_EVIDENCE_OUTPUT_PATH}`,
-		);
+if (import.meta.main) {
+	const cliArgs = process.argv.slice(2);
+	if (
+		cliArgs.includes("--u2-browser-evidence-write") ||
+		cliArgs.includes("--u2-browser-evidence-check")
+	) {
+		const evidenceOptions = {
+			currentBrowserReportPath: readArgValue(cliArgs, "--current-report"),
+			outputPath: readArgValue(cliArgs, "--output"),
+			buildReportPath: readArgValue(cliArgs, "--build-report"),
+			contractPath: readArgValue(cliArgs, "--contract"),
+		};
+		if (cliArgs.includes("--u2-browser-evidence-write")) {
+			writeCheckedInU2BrowserEvidence(evidenceOptions);
+			console.log(
+				`Wrote ${evidenceOptions.outputPath ?? DEFAULT_EVIDENCE_OUTPUT_PATH}`,
+			);
+		} else {
+			validateCheckedInU2BrowserEvidence(evidenceOptions);
+			console.log(
+				`Verified ${evidenceOptions.outputPath ?? DEFAULT_EVIDENCE_OUTPUT_PATH}`,
+			);
+		}
+		process.exit(0);
 	}
-	process.exit(0);
-}
 
-runPackageArtifactVerification();
+	runPackageArtifactVerification();
+}
