@@ -382,14 +382,6 @@ function transformCoreTest(source, fileName = "") {
 			"const db = await openPersistentDatabase(createPersistentEffectDatabase(config, { events: [] }).pipe(Effect.provide(layer)));",
 		);
 	}
-	if (fileName === "reactive-queries.test.ts") {
-		// The WASM adapter runs the same assertions with extra boundary work; keep
-		// collector fibers alive without changing the debounce intervals under test.
-		transformed = transformed.replaceAll(
-			'Effect.timeout("200 millis")',
-			'Effect.timeout("1 second")',
-		);
-	}
 	if (fileName === "lenient-validation.test.ts") {
 		transformed = transformed.replace(
 			/const db = await Effect\.runPromise\(\s*createPersistentEffectDatabase\(config\)\.pipe\(\s*Effect\.provide\(layer\),\s*Effect\.scoped,\s*\),\s*\);/g,
