@@ -1,431 +1,362 @@
-/**
- * RPC Handler Layer implementation.
- *
- * Creates an Effect Layer that provides handlers for all RPC procedures
- * derived from a DatabaseConfig. The layer internally creates an EffectDatabase
- * and wires each handler to the appropriate collection method.
- */
-
 import {
-	type ConfiguredCollections,
 	createEffectDatabase,
 	type DatabaseConfig,
 	type DatasetFor,
 	type GenerateDatabase,
-	type GenerateDatabaseWithPersistence,
 	getCollectionConfigs,
-	type MigrationError,
-	type PluginError,
-} from "@proseql/core";
-import { Context, Effect, Layer, Stream } from "effect";
+} from "@proseql/effect";
+import { Effect, Stream } from "effect";
+import type { Rpc, RpcGroup } from "effect/unstable/rpc";
+import type { InvalidRpcRequestError, RpcErrorSchema } from "./rpc-errors.js";
+import { makeRpcGroup, type RpcGroupFromConfig } from "./rpc-group.js";
+import type {
+	AggregatePayload,
+	CreateManyPayload,
+	CreatePayload,
+	DeleteManyPayload,
+	DeletePayload,
+	QueryPayload,
+	UpdateManyPayload,
+	UpdatePayload,
+	UpsertManyPayload,
+	UpsertPayload,
+} from "./rpc-schemas.js";
 
-// ============================================================================
-// DatabaseContext Service
-// ============================================================================
+type RpcFailure = typeof RpcErrorSchema.Type;
+type RpcRecord = Readonly<Record<string, unknown>>;
+type RpcRows = ReadonlyArray<RpcRecord>;
 
-/**
- * Service tag for providing the database instance to handlers.
- * This allows handlers to access the database without creating it themselves.
- */
-export interface DatabaseContext<Config extends DatabaseConfig> {
-	readonly db: GenerateDatabase<Config>;
-}
+type DynamicCollection = {
+	readonly findById: (id: string) => Effect.Effect<RpcRecord, RpcFailure>;
+	readonly query: (
+		config: QueryPayload,
+	) =>
+		| Stream.Stream<RpcRecord, RpcFailure>
+		| Effect.Effect<unknown, RpcFailure>;
+	readonly create: (data: RpcRecord) => Effect.Effect<RpcRecord, RpcFailure>;
+	readonly createMany: (
+		data: RpcRows,
+		options?: CreateManyPayload["options"],
+	) => Effect.Effect<unknown, RpcFailure>;
+	readonly update: (
+		id: string,
+		updates: RpcRecord,
+	) => Effect.Effect<RpcRecord, RpcFailure>;
+	readonly updateMany: (
+		where: RpcRecord,
+		updates: RpcRecord,
+	) => Effect.Effect<unknown, RpcFailure>;
+	readonly delete: (id: string) => Effect.Effect<RpcRecord, RpcFailure>;
+	readonly deleteMany: (
+		where: RpcRecord,
+		options?: DeleteManyPayload["options"],
+	) => Effect.Effect<unknown, RpcFailure>;
+	readonly aggregate: (
+		config: AggregatePayload,
+	) => Effect.Effect<unknown, RpcFailure>;
+	readonly upsert: (input: {
+		readonly where: RpcRecord;
+		readonly create: RpcRecord;
+		readonly update: RpcRecord;
+	}) => Effect.Effect<unknown, RpcFailure>;
+	readonly upsertMany: (
+		input: ReadonlyArray<{
+			readonly where: RpcRecord;
+			readonly create: RpcRecord;
+			readonly update: RpcRecord;
+		}>,
+	) => Effect.Effect<unknown, RpcFailure>;
+};
 
-/**
- * Create a Context.Tag for a specific database configuration.
- * Each config type gets its own unique service identifier.
- */
-export const makeDatabaseContextTag = <Config extends DatabaseConfig>() =>
-	Context.Service<DatabaseContext<Config>>("@proseql/rpc/DatabaseContext");
+const invalid = (
+	operation: string,
+	message: string,
+	path?: string,
+): InvalidRpcRequestError => ({
+	_tag: "InvalidRpcRequestError",
+	operation,
+	message,
+	...(path ? { path } : {}),
+});
 
-// ============================================================================
-// Handler Implementations
-// ============================================================================
+const isRecord = (value: unknown): value is RpcRecord =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
 
-/**
- * Internal function to create handlers for a single collection.
- * Returns an object with handler functions for each RPC operation.
- */
-const createCollectionHandlers = <Config extends DatabaseConfig>(
-	collectionName: keyof ConfiguredCollections<Config> & string,
+const isJsonValue = (value: unknown): boolean => {
+	if (value === null || typeof value === "string" || typeof value === "boolean")
+		return true;
+	if (typeof value === "number") return Number.isFinite(value);
+	if (Array.isArray(value)) return value.every(isJsonValue);
+	if (!isRecord(value)) return false;
+	return Object.values(value).every(isJsonValue);
+};
+
+const fieldOperators = new Set([
+	"$eq",
+	"$ne",
+	"$gt",
+	"$gte",
+	"$lt",
+	"$lte",
+	"$in",
+	"$nin",
+	"$startsWith",
+	"$endsWith",
+	"$contains",
+	"$search",
+	"$all",
+	"$size",
+	"$some",
+	"$every",
+	"$none",
+]);
+
+const findWhereError = (
+	where: RpcRecord,
+	operation: string,
+	path = "where",
+): InvalidRpcRequestError | undefined => {
+	for (const [key, value] of Object.entries(where)) {
+		const currentPath = `${path}.${key}`;
+		if (key === "$or" || key === "$and") {
+			if (!Array.isArray(value) || !value.every(isRecord)) {
+				return invalid(
+					operation,
+					`${key} must be an array of filter objects`,
+					currentPath,
+				);
+			}
+			for (const item of value) {
+				const error = findWhereError(item, operation, currentPath);
+				if (error) return error;
+			}
+			continue;
+		}
+		if (key === "$not") {
+			if (!isRecord(value)) {
+				return invalid(operation, "$not must be a filter object", currentPath);
+			}
+			const error = findWhereError(value, operation, currentPath);
+			if (error) return error;
+			continue;
+		}
+		if (key === "$search") {
+			if (
+				!isRecord(value) ||
+				typeof value.query !== "string" ||
+				(value.fields !== undefined &&
+					(!Array.isArray(value.fields) ||
+						!value.fields.every((field) => typeof field === "string")))
+			) {
+				return invalid(
+					operation,
+					"$search requires query and optional string fields",
+					currentPath,
+				);
+			}
+			continue;
+		}
+		if (key.startsWith("$")) {
+			return invalid(
+				operation,
+				`unsupported filter operator ${key}`,
+				currentPath,
+			);
+		}
+		if (!isRecord(value)) continue;
+		const operatorKeys = Object.keys(value).filter((candidate) =>
+			candidate.startsWith("$"),
+		);
+		if (operatorKeys.length === 0) {
+			const error = findWhereError(value, operation, currentPath);
+			if (error) return error;
+			continue;
+		}
+		for (const operator of operatorKeys) {
+			if (!fieldOperators.has(operator)) {
+				return invalid(
+					operation,
+					`unsupported filter operator ${operator}`,
+					`${currentPath}.${operator}`,
+				);
+			}
+		}
+	}
+	return undefined;
+};
+
+const validateWhere = (
+	where: RpcRecord | undefined,
+	operation: string,
+): Effect.Effect<void, InvalidRpcRequestError> => {
+	if (where === undefined) return Effect.void;
+	if (!isJsonValue(where)) {
+		return Effect.fail(
+			invalid(operation, "where must contain only JSON values", "where"),
+		);
+	}
+	const error = findWhereError(where, operation);
+	return error ? Effect.fail(error) : Effect.void;
+};
+
+const validatePayload = (
+	operation: string,
+	payload: unknown,
+): Effect.Effect<void, InvalidRpcRequestError> =>
+	isJsonValue(payload)
+		? Effect.void
+		: Effect.fail(invalid(operation, "payload must contain only JSON values"));
+
+const validateQuery = (
+	operation: string,
+	payload: QueryPayload,
+	stream: boolean,
+): Effect.Effect<void, InvalidRpcRequestError> =>
+	Effect.gen(function* () {
+		yield* validatePayload(operation, payload);
+		yield* validateWhere(payload.where, operation);
+		if (payload.cursor !== undefined && stream) {
+			return yield* Effect.fail(
+				invalid(operation, "cursor queries cannot be streamed", "cursor"),
+			);
+		}
+		if (
+			payload.cursor !== undefined &&
+			(payload.limit !== undefined || payload.offset !== undefined)
+		) {
+			return yield* Effect.fail(
+				invalid(
+					operation,
+					"cursor cannot be combined with limit or offset",
+					"cursor",
+				),
+			);
+		}
+		if (
+			(payload.limit !== undefined &&
+				(!Number.isInteger(payload.limit) || payload.limit < 0)) ||
+			(payload.offset !== undefined &&
+				(!Number.isInteger(payload.offset) || payload.offset < 0))
+		) {
+			return yield* Effect.fail(
+				invalid(operation, "limit and offset must be non-negative integers"),
+			);
+		}
+	});
+
+const dynamicCollections = <Config extends DatabaseConfig>(
+	db: GenerateDatabase<Config>,
+): Readonly<Record<string, DynamicCollection>> =>
+	db as unknown as Readonly<Record<string, DynamicCollection>>;
+
+const makeHandlerFunctions = <Config extends DatabaseConfig>(
+	config: Config,
+	db: GenerateDatabase<Config>,
+): Readonly<Record<string, (payload: never) => unknown>> => {
+	const handlers: Record<string, (payload: never) => unknown> = {};
+	const collections = dynamicCollections(db);
+	for (const collectionName of Object.keys(getCollectionConfigs(config))) {
+		const collection = collections[collectionName];
+		if (collection === undefined) {
+			throw new Error(
+				`Database is missing configured collection ${collectionName}`,
+			);
+		}
+		const tag = (operation: string) => `${collectionName}.${operation}`;
+		handlers[tag("findById")] = (({ id }: DeletePayload) =>
+			collection.findById(id)) as never;
+		handlers[tag("query")] = ((payload: QueryPayload) =>
+			Effect.flatMap(validateQuery(tag("query"), payload, false), () => {
+				const result = collection.query(payload);
+				return payload.cursor === undefined
+					? Stream.runCollect(result as Stream.Stream<RpcRecord, RpcFailure>)
+					: (result as Effect.Effect<unknown, RpcFailure>);
+			})) as never;
+		handlers[tag("queryStream")] = ((payload: QueryPayload) =>
+			Stream.unwrap(
+				Effect.map(
+					validateQuery(tag("queryStream"), payload, true),
+					() =>
+						collection.query(payload) as Stream.Stream<RpcRecord, RpcFailure>,
+				),
+			)) as never;
+		handlers[tag("create")] = (({ data }: CreatePayload) =>
+			collection.create(data)) as never;
+		handlers[tag("update")] = (({ id, updates }: UpdatePayload) =>
+			collection.update(id, updates)) as never;
+		handlers[tag("delete")] = (({ id }: DeletePayload) =>
+			collection.delete(id)) as never;
+		handlers[tag("aggregate")] = ((payload: AggregatePayload) =>
+			Effect.andThen(
+				validateWhere(payload.where, tag("aggregate")),
+				collection.aggregate(payload),
+			)) as never;
+		handlers[tag("createMany")] = (({ data, options }: CreateManyPayload) =>
+			collection.createMany(data, options)) as never;
+		handlers[tag("updateMany")] = (({ where, updates }: UpdateManyPayload) =>
+			Effect.andThen(
+				validateWhere(where, tag("updateMany")),
+				collection.updateMany(where, updates),
+			)) as never;
+		handlers[tag("deleteMany")] = (({ where, options }: DeleteManyPayload) =>
+			Effect.andThen(
+				validateWhere(where, tag("deleteMany")),
+				collection.deleteMany(where, options),
+			)) as never;
+		handlers[tag("upsert")] = ((payload: UpsertPayload) =>
+			Effect.andThen(
+				validateWhere(payload.where, tag("upsert")),
+				collection.upsert(payload),
+			)) as never;
+		handlers[tag("upsertMany")] = (({ data }: UpsertManyPayload) =>
+			Effect.andThen(
+				Effect.forEach(
+					data,
+					(item) => validateWhere(item.where, tag("upsertMany")),
+					{
+						discard: true,
+					},
+				),
+				collection.upsertMany(data),
+			)) as never;
+	}
+	return handlers;
+};
+
+type HandlerMap<Config extends DatabaseConfig> = RpcGroup.HandlersFrom<
+	RpcGroupFromConfig<Config> extends RpcGroup.RpcGroup<infer Rpcs>
+		? Rpcs
+		: never
+>;
+
+export const makeRpcHandlersFromDatabase = <Config extends DatabaseConfig>(
+	config: Config,
 	db: GenerateDatabase<Config>,
 ) => {
-	// biome-ignore lint/suspicious/noExplicitAny: Collection type is dynamic based on config
-	const collection = (db as Record<string, any>)[collectionName as string];
-
-	return {
-		findById: ({ id }: { readonly id: string }) => collection.findById(id),
-
-		query: (config: {
-			readonly where?: Record<string, unknown>;
-			readonly populate?: Record<string, unknown>;
-			readonly sort?: Record<string, "asc" | "desc">;
-			readonly select?: Record<string, unknown> | ReadonlyArray<string>;
-			readonly limit?: number;
-			readonly offset?: number;
-		}) => {
-			// Query returns a RunnableStream; collect it to an array for RPC response
-			const stream = collection.query(config);
-			// The stream is a Stream.Stream at runtime (RunnableStream wrapper)
-			return Stream.runCollect(
-				stream as Stream.Stream<Record<string, unknown>, unknown>,
-			);
-		},
-
-		queryStream: (config: {
-			readonly where?: Record<string, unknown>;
-			readonly populate?: Record<string, unknown>;
-			readonly sort?: Record<string, "asc" | "desc">;
-			readonly select?: Record<string, unknown> | ReadonlyArray<string>;
-			readonly limit?: number;
-			readonly offset?: number;
-			readonly streamingOptions?: {
-				readonly chunkSize?: number;
-				readonly bufferSize?: number;
-			};
-		}) => {
-			// Return the stream directly for incremental delivery over RPC transport
-			// The RPC layer will serialize stream items as they are emitted
-			const baseStream = collection.query(config) as Stream.Stream<
-				Record<string, unknown>,
-				unknown
-			>;
-
-			// Apply rechunking if streamingOptions.chunkSize is specified
-			// This batches items into chunks of the specified size before they are
-			// sent over the RPC transport, reducing overhead at the cost of increased
-			// latency to first item. The RPC layer transmits items in chunks, so this
-			// ensures each transmission contains up to `chunkSize` items.
-			//
-			// Note: bufferSize is a client-side hint that should be passed to the
-			// RPC client's streamBufferSize option when making the call.
-			const chunkSize = config.streamingOptions?.chunkSize;
-			if (chunkSize && chunkSize > 1) {
-				return Stream.rechunk(baseStream, chunkSize);
-			}
-
-			return baseStream;
-		},
-
-		create: ({ data }: { readonly data: Record<string, unknown> }) =>
-			// biome-ignore lint/suspicious/noExplicitAny: Data type is dynamic based on schema
-			collection.create(data as any),
-
-		createMany: ({
-			data,
-			options,
-		}: {
-			readonly data: ReadonlyArray<Record<string, unknown>>;
-			readonly options?: {
-				readonly skipDuplicates?: boolean;
-				readonly validateRelationships?: boolean;
-			};
-		}) =>
-			// biome-ignore lint/suspicious/noExplicitAny: Data type is dynamic based on schema
-			collection.createMany(data as any, options),
-
-		update: ({
-			id,
-			updates,
-		}: {
-			readonly id: string;
-			readonly updates: Record<string, unknown>;
-		}) =>
-			// biome-ignore lint/suspicious/noExplicitAny: Updates type is dynamic based on schema
-			collection.update(id, updates as any),
-
-		updateMany: ({
-			where,
-			updates,
-		}: {
-			readonly where: Record<string, unknown>;
-			readonly updates: Record<string, unknown>;
-		}) =>
-			collection.updateMany(
-				// For RPC we receive where clause, convert to predicate that matches records
-				// biome-ignore lint/suspicious/noExplicitAny: Dynamic predicate - entity type unknown at runtime
-				(entity: any) => {
-					for (const [key, value] of Object.entries(where)) {
-						if (entity[key] !== value) return false;
-					}
-					return true;
-				},
-				// biome-ignore lint/suspicious/noExplicitAny: Updates type is dynamic based on collection schema
-				updates as any,
-			),
-
-		delete: ({ id }: { readonly id: string }) => collection.delete(id),
-
-		deleteMany: ({
-			where,
-			options,
-		}: {
-			readonly where: Record<string, unknown>;
-			readonly options?: {
-				readonly limit?: number;
-			};
-		}) =>
-			// biome-ignore lint/suspicious/noExplicitAny: Predicate is dynamic
-			collection.deleteMany((entity: any) => {
-				for (const [key, value] of Object.entries(where)) {
-					if (entity[key] !== value) return false;
-				}
-				return true;
-			}, options),
-
-		aggregate: (config: {
-			readonly count?: boolean;
-			readonly sum?: string | ReadonlyArray<string>;
-			readonly avg?: string | ReadonlyArray<string>;
-			readonly min?: string | ReadonlyArray<string>;
-			readonly max?: string | ReadonlyArray<string>;
-			readonly groupBy?: string | ReadonlyArray<string>;
-			readonly where?: Record<string, unknown>;
-		}) =>
-			// biome-ignore lint/suspicious/noExplicitAny: Aggregate config is dynamic
-			collection.aggregate(config as any),
-
-		upsert: ({
-			where,
-			create: createData,
-			update: updateData,
-		}: {
-			readonly where: Record<string, unknown>;
-			readonly create: Record<string, unknown>;
-			readonly update: Record<string, unknown>;
-		}) =>
-			collection.upsert({
-				where,
-				create: createData,
-				update: updateData,
-				// biome-ignore lint/suspicious/noExplicitAny: Upsert data is dynamic - types unknown at runtime
-			} as any),
-
-		upsertMany: ({
-			data,
-		}: {
-			readonly data: ReadonlyArray<{
-				readonly where: Record<string, unknown>;
-				readonly create: Record<string, unknown>;
-				readonly update: Record<string, unknown>;
-			}>;
-		}) =>
-			// biome-ignore lint/suspicious/noExplicitAny: Upsert data is dynamic
-			collection.upsertMany(data as any),
-	};
+	const group = makeRpcGroup(config);
+	const handlers = makeHandlerFunctions(
+		config,
+		db,
+	) as unknown as HandlerMap<Config>;
+	return group.toLayer(handlers);
 };
 
-// ============================================================================
-// RPC Handler Layer Factory
-// ============================================================================
-
-/**
- * Handler type for the RPC layer.
- * This is the shape of handlers that need to be provided to the RpcGroup.
- */
-export type RpcHandlers<Config extends DatabaseConfig> = {
-	readonly [K in keyof ConfiguredCollections<Config> & string]: ReturnType<
-		typeof createCollectionHandlers<Config>
-	>;
-};
-
-/**
- * Create an Effect Layer that provides handlers for all RPC procedures.
- *
- * The layer:
- * 1. Creates an in-memory EffectDatabase from the config and optional initial data
- * 2. For each collection, wires handlers to the appropriate database methods
- * 3. Returns a Layer that provides the handler implementations
- *
- * @param config - The database configuration defining collections and schemas
- * @param initialData - Optional initial data to seed the database
- * @returns An Effect that produces the handler implementations for use with RpcGroup.toLayer
- *
- * @example
- * ```typescript
- * import { Layer } from "effect"
- * import { makeRpcHandlers, makeRpcGroup } from "@proseql/rpc"
- *
- * const config = {
- *   books: { schema: BookSchema, relationships: {} },
- * } as const
- *
- * const rpcs = makeRpcGroup(config)
- *
- * // Create handler implementations
- * const handlerEffect = makeRpcHandlers(config, {
- *   books: [{ id: "1", title: "Dune" }],
- * })
- *
- * // Use with RpcGroup.toLayer for the complete RPC server layer
- * ```
- */
 export const makeRpcHandlers = <Config extends DatabaseConfig>(
 	config: Config,
 	initialData?: Partial<DatasetFor<Config>>,
-): Effect.Effect<RpcHandlers<Config>, MigrationError | PluginError> =>
-	Effect.gen(function* () {
-		// Create the in-memory database with optional initial data
-		// biome-ignore lint/suspicious/noExplicitAny: DatasetFor type is complex and requires casting
-		const db = yield* createEffectDatabase(config, initialData as any);
-
-		// Build handlers for each collection
-		const handlers = {} as Record<
-			string,
-			ReturnType<typeof createCollectionHandlers>
-		>;
-		for (const collectionName of Object.keys(getCollectionConfigs(config))) {
-			handlers[collectionName] = createCollectionHandlers(collectionName, db);
-		}
-
-		return handlers as RpcHandlers<Config>;
-	});
-
-/**
- * Create an Effect Layer that provides RPC handlers for all collections.
- *
- * This is a convenience wrapper that combines makeRpcHandlers with makeRpcGroup
- * to produce a complete Layer ready for use with Effect RPC server.
- *
- * @param config - The database configuration
- * @param initialData - Optional initial data to seed the database
- * @returns A Layer providing all RPC handlers
- *
- * @example
- * ```typescript
- * import { Effect } from "effect"
- * import { makeRpcHandlersLayer } from "@proseql/rpc"
- *
- * const config = {
- *   books: { schema: BookSchema, relationships: {} },
- * } as const
- *
- * // Create handler layer (can be composed with other layers)
- * const handlersLayer = makeRpcHandlersLayer(config, {
- *   books: [{ id: "1", title: "Dune" }],
- * })
- * ```
- */
-export const makeRpcHandlersLayer = <Config extends DatabaseConfig>(
-	config: Config,
-	initialData?: Partial<DatasetFor<Config>>,
-): Layer.Layer<DatabaseContext<Config>, MigrationError | PluginError> => {
-	const DatabaseContextTag = makeDatabaseContextTag<Config>();
-
-	return Layer.effect(
-		DatabaseContextTag,
-		Effect.gen(function* () {
-			// biome-ignore lint/suspicious/noExplicitAny: DatasetFor type is complex and requires casting
-			const db = yield* createEffectDatabase(config, initialData as any);
-			return { db };
-		}),
+) => {
+	const group = makeRpcGroup(config);
+	return group.toLayer(
+		Effect.map(
+			createEffectDatabase(config, initialData as never),
+			(db) => makeHandlerFunctions(config, db) as unknown as HandlerMap<Config>,
+		),
 	);
 };
 
-// ============================================================================
-// Database-First Handler Factory
-// ============================================================================
-
-/**
- * Create RPC handlers from an existing database instance.
- *
- * This function accepts any EffectDatabase or EffectDatabaseWithPersistence
- * and wires handlers to delegate to the collection methods. When the database
- * is a persistent database (created via createPersistentEffectDatabase),
- * mutations automatically trigger persistence as normal.
- *
- * This is the recommended approach for production use cases where you need:
- * - File-based persistence with debounced writes
- * - Control over the database lifecycle
- * - Multiple transports (RPC, REST) sharing the same database instance
- *
- * @param config - The database configuration (used to enumerate collections)
- * @param db - An existing EffectDatabase or EffectDatabaseWithPersistence instance
- * @returns The RPC handler implementations
- *
- * @example
- * ```typescript
- * import { Effect, Layer } from "effect"
- * import { createPersistentEffectDatabase, NodeStorageLayer, makeSerializerLayer, jsonCodec } from "@proseql/node"
- * import { makeRpcHandlersFromDatabase } from "@proseql/rpc"
- *
- * const config = {
- *   books: {
- *     schema: BookSchema,
- *     file: "./data/books.json", // persistence enabled
- *     relationships: {},
- *   },
- * } as const
- *
- * const program = Effect.gen(function* () {
- *   // Create persistent database
- *   const db = yield* createPersistentEffectDatabase(config, { books: [] })
- *
- *   // Wire RPC handlers to the persistent database
- *   const handlers = makeRpcHandlersFromDatabase(config, db)
- *
- *   // Mutations through RPC now trigger persistence automatically
- *   yield* handlers.books.create({ data: { id: "1", title: "Dune" } })
- *
- *   // Flush to ensure data is written
- *   await db.flush()
- * })
- *
- * const PersistenceLayer = Layer.merge(
- *   NodeStorageLayer,
- *   makeSerializerLayer([jsonCodec()]),
- * )
- *
- * await Effect.runPromise(
- *   program.pipe(Effect.provide(PersistenceLayer), Effect.scoped),
- * )
- * ```
- */
-export const makeRpcHandlersFromDatabase = <Config extends DatabaseConfig>(
-	config: Config,
-	db: GenerateDatabase<Config> | GenerateDatabaseWithPersistence<Config>,
-): RpcHandlers<Config> => {
-	// Build handlers for each collection, delegating to the provided database
-	const handlers = {} as Record<
-		string,
-		ReturnType<typeof createCollectionHandlers>
-	>;
-	for (const collectionName of Object.keys(getCollectionConfigs(config))) {
-		handlers[collectionName] = createCollectionHandlers(collectionName, db);
-	}
-
-	return handlers as RpcHandlers<Config>;
-};
-
-/**
- * Create an Effect Layer that provides RPC handlers from an existing database.
- *
- * Similar to makeRpcHandlersLayer, but accepts an existing database instance
- * instead of creating one internally. This allows you to use a persistent
- * database with the RPC layer.
- *
- * @param db - An existing EffectDatabase or EffectDatabaseWithPersistence instance
- * @returns A Layer providing all RPC handlers via DatabaseContext
- *
- * @example
- * ```typescript
- * import { Effect, Layer } from "effect"
- * import { createPersistentEffectDatabase } from "@proseql/node"
- * import { makeRpcHandlersLayerFromDatabase, makeDatabaseContextTag } from "@proseql/rpc"
- *
- * const program = Effect.gen(function* () {
- *   const db = yield* createPersistentEffectDatabase(config, initialData)
- *   const handlerLayer = makeRpcHandlersLayerFromDatabase(db)
- *
- *   // Use the layer with your RPC server
- *   // ...
- * })
- * ```
- */
-export const makeRpcHandlersLayerFromDatabase = <Config extends DatabaseConfig>(
-	db: GenerateDatabase<Config> | GenerateDatabaseWithPersistence<Config>,
-): Layer.Layer<DatabaseContext<Config>> => {
-	const DatabaseContextTag = makeDatabaseContextTag<Config>();
-
-	return Layer.succeed(DatabaseContextTag, { db });
-};
+export type RpcHandlers<Config extends DatabaseConfig> = HandlerMap<Config>;
+export type RpcHandlerServices<Config extends DatabaseConfig> = Rpc.ToHandler<
+	RpcGroupFromConfig<Config> extends RpcGroup.RpcGroup<infer Rpcs>
+		? Rpcs
+		: never
+>;

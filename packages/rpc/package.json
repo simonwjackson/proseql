@@ -14,6 +14,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
     }
   },
   "files": [
@@ -44,7 +48,15 @@
     "@proseql/core": "workspace:*"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.60",
-    "@effect/rpc": "^0.51.0"
+    "@proseql/effect": "workspace:*",
+    "effect": "4.0.0-beta.103"
+  },
+  "peerDependenciesMeta": {
+    "@proseql/effect": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@proseql/effect": "workspace:*"
   }
 }
