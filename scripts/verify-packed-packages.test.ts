@@ -23,7 +23,11 @@ import {
 } from "./verify-packed-packages.js";
 
 const root = resolve(import.meta.dirname, "..");
-const coordinatedVersion = "0.15.0";
+const coordinatedVersion = (
+	JSON.parse(
+		readFileSync(join(root, "packages/core/package.json"), "utf8"),
+	) as { readonly version: string }
+).version;
 
 const dependenciesWithPackedVersions = (
 	dependencies: Readonly<Record<string, string>> | undefined,
@@ -152,7 +156,7 @@ describe("packed package contract", () => {
 		[
 			"wrong internal versions",
 			{ dependencies: { "@proseql/core": "0.14.0" } },
-			/must be 0\.15\.0/,
+			new RegExp(`must be ${coordinatedVersion.replaceAll(".", "\\.")}`),
 		],
 		[
 			"old RPC package",
