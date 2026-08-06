@@ -269,6 +269,60 @@ describe("safe package tarball extraction", () => {
 		});
 	});
 
+	it("clears nested destination symlinks before extracting files without directory members", () => {
+		withFixture((root, source) => {
+			writeFileSync(join(source, "index.js"), "safe package bytes");
+			const tarball = join(root, "valid.tgz");
+			execFileSync("tar", [
+				"-czf",
+				tarball,
+				"--transform=s#^index.js$#package/dist/index.js#",
+				"-C",
+				source,
+				"index.js",
+			]);
+
+			const outside = join(root, "outside");
+			const destination = join(root, "extract", "package");
+			mkdirSync(outside);
+			mkdirSync(destination, { recursive: true });
+			symlinkSync(outside, join(destination, "dist"));
+
+			inspectAndExtractTarball(tarball, destination);
+
+			expect(existsSync(join(outside, "index.js"))).toBe(false);
+			expect(readFileSync(join(destination, "dist", "index.js"), "utf8")).toBe(
+				"safe package bytes",
+			);
+		});
+	});
+
+	it.each([
+		"symlink",
+		"file",
+	] as const)("rejects a pre-existing %s extraction root", (kind) => {
+		withFixture((root, source) => {
+			writeFileSync(join(source, "index.js"), "safe package bytes");
+			const tarball = join(root, "valid-root.tgz");
+			execFileSync("tar", [
+				"-czf",
+				tarball,
+				"--transform=s#^index.js$#package/index.js#",
+				"-C",
+				source,
+				"index.js",
+			]);
+			const destination = join(root, "extract", "package");
+			mkdirSync(join(root, "extract"));
+			if (kind === "symlink") symlinkSync(source, destination);
+			else writeFileSync(destination, "not a directory");
+
+			expect(() => inspectAndExtractTarball(tarball, destination)).toThrow(
+				/extraction root must be a real directory/,
+			);
+		});
+	});
+
 	it("rejects absolute member paths", () => {
 		withFixture((root, source) => {
 			writeFileSync(join(source, "absolute.txt"), "owned");

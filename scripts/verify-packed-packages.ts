@@ -374,6 +374,40 @@ function buildFromCleanSource(): void {
 	chmodSync(join(repoRoot, "packages/cli/dist/main.js"), 0o755);
 }
 
+function prepareExtractionDirectory(destinationDirectory: string): string {
+	const root = resolve(destinationDirectory);
+	const parent = dirname(root);
+	assert(
+		root !== parent,
+		`${root}: extraction root cannot be a filesystem root`,
+	);
+	mkdirSync(parent, { recursive: true });
+	const parentEntry = lstatSync(parent);
+	assert(
+		parentEntry.isDirectory() && !parentEntry.isSymbolicLink(),
+		`${parent}: extraction parent must be a real directory`,
+	);
+
+	if (existsSync(root)) {
+		const rootEntry = lstatSync(root);
+		assert(
+			rootEntry.isDirectory() && !rootEntry.isSymbolicLink(),
+			`${root}: extraction root must be a real directory`,
+		);
+		rmSync(root, { recursive: true, force: false });
+	}
+	mkdirSync(root);
+
+	const realParent = realpathSync(parent);
+	const realRoot = realpathSync(root);
+	const expectedRoot = join(realParent, basename(root));
+	assert(
+		realRoot === expectedRoot && realRoot.startsWith(`${realParent}${sep}`),
+		`${root}: extraction root resolves outside its parent`,
+	);
+	return realRoot;
+}
+
 export function inspectAndExtractTarball(
 	tarballPath: string,
 	destinationDirectory: string,
@@ -443,7 +477,7 @@ export function inspectAndExtractTarball(
 		}
 	}
 
-	mkdirSync(root, { recursive: true });
+	const preparedRoot = prepareExtractionDirectory(root);
 	execFileSync(
 		"tar",
 		[
@@ -455,7 +489,7 @@ export function inspectAndExtractTarball(
 			"--delay-directory-restore",
 			"--no-overwrite-dir",
 			"-C",
-			root,
+			preparedRoot,
 		],
 		{ stdio: "inherit" },
 	);
