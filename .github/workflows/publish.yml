@@ -1,10 +1,200 @@
-name: Publish
+name: Publish reviewed npm packages
 
 on:
   workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Full SHA of the reviewed, versioned release commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proseql-npm-production
+  cancel-in-progress: false
 
 jobs:
-  note:
+  preflight:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      commit: ${{ steps.release.outputs.commit }}
+      release-id: ${{ steps.release.outputs.release-id }}
+      version: ${{ steps.release.outputs.version }}
     steps:
-      - run: echo "Package registry publication is disabled until the Rust-engine package set and release order are finalized."
+      - name: Validate reviewed commit input
+        env:
+          REVIEWED_COMMIT: ${{ inputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$REVIEWED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "commit_sha must be a lowercase full 40-character commit SHA" >&2
+            exit 1
+          }
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prove exact clean HEAD
+        env:
+          REVIEWED_COMMIT: ${{ inputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$REVIEWED_COMMIT"
+          git cat-file -e "$REVIEWED_COMMIT^{commit}"
+          git diff --quiet
+          git diff --cached --quiet
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - uses: DeterminateSystems/nix-installer-action@786fff0690178f1234e4e1fe9b536e94f5433196 # v20
+      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
+        with:
+          workspaces: crates -> crates/target
+      - name: Run full release gates and prepare exact tarballs
+        run: nix develop --command just release-finalize
+      - name: Prepare standalone audited publisher
+        run: nix develop --command bun run scripts/prepare-publisher-bundle.ts .artifacts/release/prepared-release.json
+      - name: Verify prepared checksums and release identity
+        id: release
+        env:
+          REVIEWED_COMMIT: ${{ inputs.commit_sha }}
+        working-directory: .artifacts/release
+        run: |
+          set -euo pipefail
+          sha256sum --check SHA256SUMS
+          test "$(jq -r .commit prepared-release.json)" = "$REVIEWED_COMMIT"
+          echo "commit=$(jq -r .commit prepared-release.json)" >> "$GITHUB_OUTPUT"
+          echo "release-id=$(jq -r .releaseId prepared-release.json)" >> "$GITHUB_OUTPUT"
+          echo "version=$(jq -r .version prepared-release.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: prepared-release-${{ steps.release.outputs.release-id }}
+          path: .artifacts/release/
+          if-no-files-found: error
+          retention-days: 7
+
+  candidate-upload:
+    needs: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      release-id: ${{ needs.preflight.outputs.release-id }}
+    timeout-minutes: 30
+    environment: npm-production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: prepared-release-${{ needs.preflight.outputs.release-id }}
+          path: .artifacts/release
+      - name: Verify and upload candidates sequentially
+        working-directory: .artifacts/release
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PROSEQL_PUBLISH_APPROVAL: ${{ needs.preflight.outputs.release-id }}
+        run: |
+          set -euo pipefail
+          test -n "$NODE_AUTH_TOKEN"
+          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/proseql-npmrc"
+          trap 'rm -f "$NPM_CONFIG_USERCONFIG"' EXIT
+          umask 077
+          printf '%s\n' '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' > "$NPM_CONFIG_USERCONFIG"
+          sha256sum --check SHA256SUMS
+          node publisher.mjs \
+            --manifest prepared-release.json \
+            --approve-candidate-upload
+
+  registry-consumer:
+    needs: candidate-upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.commit_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: prepared-release-${{ needs.candidate-upload.outputs.release-id }}
+          path: .artifacts/release
+      - uses: DeterminateSystems/nix-installer-action@786fff0690178f1234e4e1fe9b536e94f5433196 # v20
+      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
+      - name: Install verification tooling without lifecycle scripts
+        run: nix develop --command bun install --frozen-lockfile --ignore-scripts
+      - name: Verify exact candidate versions as fresh registry consumers
+        run: nix develop --command bun run scripts/verify-registry-packages.ts --manifest .artifacts/release/prepared-release.json --output .artifacts/verification/consumer-verification.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: consumer-verification-${{ needs.candidate-upload.outputs.release-id }}
+          path: .artifacts/verification/consumer-verification.json
+          if-no-files-found: error
+          retention-days: 7
+
+  promote-latest:
+    needs: [preflight, registry-consumer]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: npm-production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: prepared-release-${{ needs.preflight.outputs.release-id }}
+          path: .artifacts/release
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: consumer-verification-${{ needs.preflight.outputs.release-id }}
+          path: .artifacts/verification
+      - name: Promote latest in reverse order and remove candidate tags
+        working-directory: .artifacts/release
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PROSEQL_PUBLISH_APPROVAL: ${{ needs.preflight.outputs.release-id }}
+        run: |
+          set -euo pipefail
+          test -n "$NODE_AUTH_TOKEN"
+          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/proseql-npmrc"
+          trap 'rm -f "$NPM_CONFIG_USERCONFIG"' EXIT
+          umask 077
+          printf '%s\n' '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' > "$NPM_CONFIG_USERCONFIG"
+          sha256sum --check SHA256SUMS
+          node publisher.mjs \
+            --manifest prepared-release.json \
+            --consumer-verification ../verification/consumer-verification.json \
+            --approve-latest-promotion
+
+  github-release:
+    needs: [preflight, promote-latest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: prepared-release-${{ needs.preflight.outputs.release-id }}
+          path: .artifacts/release
+      - name: Create exact tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ needs.preflight.outputs.commit }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        working-directory: .artifacts/release
+        run: |
+          set -euo pipefail
+          sha256sum --check SHA256SUMS
+          test "$(jq -r .commit prepared-release.json)" = "$COMMIT_SHA"
+          gh release create "v$VERSION" \
+            --repo "$GH_REPO" \
+            --target "$COMMIT_SHA" \
+            --title "v$VERSION" \
+            --generate-notes \
+            prepared-release.json#prepared-release.json \
+            SHA256SUMS#SHA256SUMS

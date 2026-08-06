@@ -13,7 +13,7 @@ import {
 	type PreparedRelease,
 	type ReleasePackageManifest,
 } from "./release-manifest.js";
-import { inspectAndExtractTarball } from "./verify-packed-packages.js";
+import { inspectAndExtractTarball } from "./safe-tar.js";
 
 export type CommandResult = {
 	readonly status: number;
@@ -424,7 +424,7 @@ function formatManifestDiff(
 	return manifestContractDiff(expected, actual).slice(0, 4).join("; ");
 }
 
-function validatePreparedRelease(release: PreparedRelease): void {
+export function validatePreparedRelease(release: PreparedRelease): void {
 	const rebuilt = createPreparedRelease({
 		version: release.version,
 		commit: release.commit,
@@ -606,33 +606,39 @@ function parseCli(args: ReadonlyArray<string>): {
 	return { manifestPath: resolve(manifestPath), mode, verificationPath };
 }
 
+export async function runPublishCli(
+	args: ReadonlyArray<string> = process.argv.slice(2),
+): Promise<void> {
+	const cli = parseCli(args);
+	const release = loadPreparedRelease(cli.manifestPath);
+	const approval =
+		cli.mode === "dry-run" ? undefined : process.env.PROSEQL_PUBLISH_APPROVAL;
+	const consumerVerification = cli.verificationPath
+		? (JSON.parse(
+				readFileSync(resolve(cli.verificationPath), "utf8"),
+			) as ConsumerVerification)
+		: undefined;
+	const registry = new NpmRegistry(
+		defaultCommandRunner,
+		dirname(cli.manifestPath),
+	);
+	await publishPackages(release, registry, {
+		mode: cli.mode,
+		approval,
+		consumerVerification,
+	});
+	if (cli.mode === "dry-run") {
+		console.log(
+			`Dry run complete for ${release.version}; no credentials or registry writes were used.`,
+		);
+	} else {
+		console.log(`${cli.mode} phase completed for ${release.version}`);
+	}
+}
+
 if (import.meta.main) {
 	try {
-		const cli = parseCli(process.argv.slice(2));
-		const release = loadPreparedRelease(cli.manifestPath);
-		const approval =
-			cli.mode === "dry-run" ? undefined : process.env.PROSEQL_PUBLISH_APPROVAL;
-		const consumerVerification = cli.verificationPath
-			? (JSON.parse(
-					readFileSync(resolve(cli.verificationPath), "utf8"),
-				) as ConsumerVerification)
-			: undefined;
-		const registry = new NpmRegistry(
-			defaultCommandRunner,
-			dirname(cli.manifestPath),
-		);
-		await publishPackages(release, registry, {
-			mode: cli.mode,
-			approval,
-			consumerVerification,
-		});
-		if (cli.mode === "dry-run") {
-			console.log(
-				`Dry run complete for ${release.version}; no credentials or registry writes were used.`,
-			);
-		} else {
-			console.log(`${cli.mode} phase completed for ${release.version}`);
-		}
+		await runPublishCli();
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : String(error));
 		process.exitCode = 1;

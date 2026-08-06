@@ -27,6 +27,7 @@ test *args:
         ./scripts/verify-packed-packages.test.ts \
         ./scripts/release.test.ts \
         ./scripts/release-check-wiring.test.ts \
+        ./scripts/publish-workflow.test.ts \
         packages/core/tests/database-effect.test.ts \
         packages/core/tests/database-source-config.test.ts \
         packages/core/tests/database-document-graph.test.ts \
@@ -123,7 +124,8 @@ lint:
         tsconfig.base.json \
         biome.json \
         justfile \
-        .github/workflows/ci.yml
+        .github/workflows/ci.yml \
+        .github/workflows/publish.yml
 
 # Format
 format:

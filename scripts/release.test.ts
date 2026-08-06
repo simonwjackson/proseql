@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { preparePublisherBundle } from "./prepare-publisher-bundle.js";
 import {
 	type CommandResult,
 	type CommandRunner,
@@ -38,6 +39,7 @@ import {
 	PUBLISH_ORDER,
 	validateDependencyOrder,
 } from "./release-manifest.js";
+import { verifyRegistryCandidates } from "./verify-registry-packages.js";
 
 const VERSION = "0.16.0";
 const TAG = "proseql-candidate-0-16-0";
@@ -489,6 +491,53 @@ describe("reversible release preparation", () => {
 		const release = await finalizeRelease(services);
 		expect(release.version).toBe(VERSION);
 		expect(new Set(versions)).toEqual(new Set([VERSION]));
+	});
+});
+
+describe("prepared publication artifacts", () => {
+	it("builds one standalone publisher and checksums every approved input", async () => {
+		const root = mkdtempSync(join(tmpdir(), "proseql-publisher-bundle-"));
+		try {
+			const release = preparedRelease();
+			for (const candidate of release.artifacts) {
+				const path = join(root, candidate.tarball);
+				mkdirSync(join(path, ".."), { recursive: true });
+				writeFileSync(path, `tarball:${candidate.packageName}`);
+			}
+			const manifestPath = join(root, "prepared-release.json");
+			writeFileSync(manifestPath, `${JSON.stringify(release)}\n`);
+			const paths = await preparePublisherBundle(manifestPath);
+			expect(paths).toEqual([
+				"prepared-release.json",
+				"publisher.mjs",
+				...release.artifacts.map(({ tarball }) => tarball),
+			]);
+			const publisher = readFileSync(join(root, "publisher.mjs"), "utf8");
+			expect(publisher).toContain("approve-candidate-upload");
+			expect(publisher).not.toMatch(/from ["']\.\//);
+			const checksums = readFileSync(join(root, "SHA256SUMS"), "utf8");
+			for (const path of paths) expect(checksums).toContain(`  ${path}`);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("ties no-secret registry verification to candidate tags and integrities", async () => {
+		const release = preparedRelease();
+		const registry = new RecordingRegistry();
+		for (const candidate of release.artifacts) {
+			registry.seed(release, candidate.packageName);
+		}
+		const verification = await verifyRegistryCandidates(
+			release,
+			registry,
+			() => new Date("2026-08-05T13:00:00.000Z"),
+		);
+		expect(verification).toEqual(verificationFor(release));
+		registry.tags.set(`@proseql/rpc:${release.candidateTag}`, "0.15.0");
+		await expect(verifyRegistryCandidates(release, registry)).rejects.toThrow(
+			/candidate tag points to 0.15.0/,
+		);
 	});
 });
 
