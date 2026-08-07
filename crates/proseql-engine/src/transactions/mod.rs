@@ -286,16 +286,17 @@ impl Database {
         }
     }
 
-    pub(crate) fn snapshot_all_collection_states(
-        &self,
-    ) -> IndexMap<String, IndexMap<String, Value>> {
+    /// Snapshot every collection in insertion order for a host-managed durable commit.
+    pub fn snapshot_all_collection_states(&self) -> IndexMap<String, IndexMap<String, Value>> {
         self.collections
             .iter()
             .map(|(name, collection)| (name.clone(), collection.snapshot_state()))
             .collect()
     }
 
-    pub(crate) fn restore_all_collection_states(
+    /// Replace all named collection states after a host has validated a complete candidate.
+    /// Unknown names are ignored; host facades should validate the source shape first.
+    pub fn restore_all_collection_states(
         &mut self,
         snapshots: &IndexMap<String, IndexMap<String, Value>>,
     ) {
@@ -397,6 +398,15 @@ impl<'a> TransactionContext<'a> {
         updates: Value,
     ) -> Result<Value, EngineError> {
         self.run_mutation(|db| db.update(collection, id, updates))
+    }
+    pub fn update_if_revision(
+        &mut self,
+        collection: &str,
+        id: &str,
+        expected_revision: u64,
+        updates: Value,
+    ) -> Result<Value, EngineError> {
+        self.run_mutation(|db| db.update_if_revision(collection, id, expected_revision, updates))
     }
     pub fn update_many(
         &mut self,

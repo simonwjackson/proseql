@@ -243,6 +243,91 @@ fn scheduled(recorder: &Recorder) -> Vec<String> {
 }
 
 #[test]
+fn conditional_revision_update_succeeds_once_and_rejects_stale_reuse() {
+    // Use a collection whose schema explicitly carries an application revision.
+    let registry = Arc::new(CallbackRegistry::new());
+    let mut descriptor = base_descriptor(
+        "positions",
+        SchemaNode::Struct {
+            fields: vec![
+                StructField {
+                    name: "id".into(),
+                    schema: SchemaNode::Str,
+                },
+                StructField {
+                    name: "page".into(),
+                    schema: SchemaNode::Num,
+                },
+                StructField {
+                    name: "revision".into(),
+                    schema: SchemaNode::Num,
+                },
+                StructField {
+                    name: "createdAt".into(),
+                    schema: SchemaNode::Optional(Box::new(SchemaNode::Str)),
+                },
+                StructField {
+                    name: "updatedAt".into(),
+                    schema: SchemaNode::Optional(Box::new(SchemaNode::Str)),
+                },
+            ],
+        },
+    );
+    descriptor.id_strategy = IdStrategy::Provided;
+    let positions = seed(
+        Collection::new_with_clock(
+            "positions",
+            descriptor,
+            Arc::clone(&registry),
+            Box::new(SequentialGenerator::new("position")),
+            Box::new(FixedClock::new("2024-01-01T00:00:00.000Z")),
+        ),
+        vec![json!({"id":"book-1","page":3,"revision":7})],
+    );
+    let mut db = Database::new(IndexMap::from([("positions".into(), positions)]), registry);
+
+    let updated = db
+        .update_if_revision("positions", "book-1", 7, json!({"page":4,"revision":8}))
+        .unwrap();
+    assert_eq!(updated["revision"], json!(8));
+
+    for invalid in [
+        json!({"page":9}),
+        json!({"page":9,"revision":7}),
+        json!({"page":9,"revision":10}),
+    ] {
+        let rejected = db
+            .update_if_revision("positions", "book-1", 8, invalid)
+            .unwrap_err();
+        assert!(matches!(rejected, EngineError::Concurrency(_)));
+    }
+
+    let stale = db
+        .update_if_revision("positions", "book-1", 7, json!({"page":9,"revision":8}))
+        .unwrap_err();
+    assert!(matches!(stale, EngineError::Concurrency(_)));
+    assert_eq!(
+        db.collection("positions").unwrap().get("book-1").unwrap()["page"],
+        json!(4)
+    );
+    assert_eq!(
+        db.collection("positions").unwrap().get("book-1").unwrap()["revision"],
+        json!(8)
+    );
+
+    db.update("positions", "book-1", json!({"page":5,"revision":u64::MAX}))
+        .unwrap();
+    let overflow = db
+        .update_if_revision("positions", "book-1", u64::MAX, json!({"page":6}))
+        .unwrap_err();
+    assert!(matches!(overflow, EngineError::Concurrency(_)));
+    assert_eq!(
+        db.collection("positions").unwrap().get("book-1").unwrap()["page"],
+        json!(5)
+    );
+}
+
+#[test]
 fn manual_transaction_reads_own_writes_and_commit_persists() {
     let mut db = make_db();
     let recorder = Recorder::default();

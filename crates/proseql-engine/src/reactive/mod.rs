@@ -1819,6 +1819,19 @@ impl Database {
         Ok(())
     }
 
+    /// Validate a complete candidate snapshot against schemas and relationships
+    /// without publishing it or notifying reactive subscribers.
+    pub fn validate_snapshot_transaction(
+        &mut self,
+        collections: IndexMap<String, Vec<Value>>,
+    ) -> Result<(), EngineError> {
+        let snapshots = self.snapshot_all_collection_states();
+        let result = self.replace_collections_atomically_and_validate(collections);
+        self.restore_all_collection_states(&snapshots);
+        self.sync_reactive_snapshots();
+        result.map(|_| ())
+    }
+
     pub fn commit_snapshot_transaction(
         &mut self,
         collections: IndexMap<String, Vec<Value>>,

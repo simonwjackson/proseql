@@ -1,6 +1,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -10,10 +12,35 @@ use walkdir::WalkDir;
 
 use crate::host::{storage_error, StorageEvent, StorageEventKind, StorageHost, WatchHandle};
 use crate::path::normalize_path;
+use crate::persistence::DurableStorageHost;
+
+static STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DurabilityFaultPoint {
+    StageWrite,
+    FileSync,
+    PendingMarkerWrite,
+    PendingMarkerSync,
+    PendingMarkerDirectorySync,
+    AtomicReplace,
+    DirectorySync,
+    CommitMarkerWrite,
+    CommitMarkerSync,
+    Cleanup,
+    RollbackReplace,
+    RollbackDirectorySync,
+}
+
+/// Optional fault seam used by native durability conformance suites.
+pub trait DurabilityFaultInjector: Send + Sync {
+    fn check(&self, point: DurabilityFaultPoint) -> Result<(), EngineError>;
+}
 
 #[derive(Clone)]
 pub struct FsStorageHost {
     poll_interval: Duration,
+    durability_faults: Option<Arc<dyn DurabilityFaultInjector>>,
 }
 
 pub struct FsWatchHandle {
@@ -40,7 +67,171 @@ impl WatchHandle for FsWatchHandle {
 
 impl FsStorageHost {
     pub fn new_polling(poll_interval: Duration) -> Result<Self, EngineError> {
-        Ok(Self { poll_interval })
+        Ok(Self {
+            poll_interval,
+            durability_faults: None,
+        })
+    }
+
+    pub fn new_polling_with_fault_injector(
+        poll_interval: Duration,
+        faults: Arc<dyn DurabilityFaultInjector>,
+    ) -> Result<Self, EngineError> {
+        Ok(Self {
+            poll_interval,
+            durability_faults: Some(faults),
+        })
+    }
+
+    fn check_durability_fault(&self, point: DurabilityFaultPoint) -> Result<(), EngineError> {
+        match &self.durability_faults {
+            Some(faults) => faults.check(point),
+            None => Ok(()),
+        }
+    }
+
+    fn durable_artifacts(path: &str) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf), EngineError> {
+        let destination = PathBuf::from(path);
+        let parent = destination
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        let filename = destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                storage_error(
+                    path,
+                    StorageOperation::Write,
+                    "Invalid destination filename",
+                )
+            })?;
+        Ok((
+            destination,
+            parent.clone(),
+            parent.join(format!(".{filename}.proseql-backup")),
+            parent.join(format!(".{filename}.proseql-committed")),
+        ))
+    }
+
+    fn sync_directory(path: &str, parent: &Path) -> Result<(), EngineError> {
+        std::fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| {
+                storage_error(
+                    path,
+                    StorageOperation::Write,
+                    format!("Failed to sync containing directory for '{path}': {error}"),
+                )
+            })
+    }
+
+    /// Recover a prior durable replace before reading or starting another one.
+    pub fn recover_durable_path(&self, path: &str) -> Result<(), EngineError> {
+        let (destination, parent, backup, committed) = Self::durable_artifacts(path)?;
+        if committed.exists() {
+            let marker = std::fs::read(&committed).map_err(|error| {
+                storage_error(
+                    path,
+                    StorageOperation::Read,
+                    format!("Failed to read durable commit marker: {error}"),
+                )
+            })?;
+            if marker == b"C" {
+                // COMMITTED is written into an already-durable marker inode only
+                // after the candidate and containing directory are durable.
+                if backup.exists() {
+                    std::fs::remove_file(&backup).map_err(|error| {
+                        storage_error(
+                            path,
+                            StorageOperation::Write,
+                            format!("Failed to clean committed durable backup: {error}"),
+                        )
+                    })?;
+                    Self::sync_directory(path, &parent)?;
+                }
+                std::fs::remove_file(&committed).map_err(|error| {
+                    storage_error(
+                        path,
+                        StorageOperation::Write,
+                        format!("Failed to clean durable commit marker: {error}"),
+                    )
+                })?;
+                return Self::sync_directory(path, &parent);
+            }
+
+            // PENDING or malformed means no successful commit was acknowledged.
+            if backup.exists() {
+                let already_restored = match (std::fs::read(&destination), std::fs::read(&backup)) {
+                    (Ok(destination_bytes), Ok(backup_bytes)) => destination_bytes == backup_bytes,
+                    _ => false,
+                };
+                if already_restored {
+                    std::fs::remove_file(&backup).map_err(|error| {
+                        storage_error(
+                            path,
+                            StorageOperation::Write,
+                            format!("Failed to clean restored durable backup: {error}"),
+                        )
+                    })?;
+                } else {
+                    std::fs::rename(&backup, &destination).map_err(|error| {
+                        storage_error(
+                            path,
+                            StorageOperation::Write,
+                            format!("Failed to restore pending durable backup: {error}"),
+                        )
+                    })?;
+                }
+            } else if destination.exists() {
+                std::fs::remove_file(&destination).map_err(|error| {
+                    storage_error(
+                        path,
+                        StorageOperation::Write,
+                        format!("Failed to remove pending first-write candidate: {error}"),
+                    )
+                })?;
+            }
+            Self::sync_directory(path, &parent)?;
+            std::fs::remove_file(&committed).map_err(|error| {
+                storage_error(
+                    path,
+                    StorageOperation::Write,
+                    format!("Failed to clean pending durable marker: {error}"),
+                )
+            })?;
+            return Self::sync_directory(path, &parent);
+        }
+        if !backup.exists() {
+            return Ok(());
+        }
+        let unchanged_destination = if destination.exists() {
+            match (std::fs::read(&destination), std::fs::read(&backup)) {
+                (Ok(destination_bytes), Ok(backup_bytes)) => destination_bytes == backup_bytes,
+                _ => false,
+            }
+        } else {
+            false
+        };
+        if unchanged_destination {
+            std::fs::remove_file(&backup).map_err(|error| {
+                storage_error(
+                    path,
+                    StorageOperation::Write,
+                    format!("Failed to clean unchanged durable backup: {error}"),
+                )
+            })?;
+        } else {
+            std::fs::rename(&backup, &destination).map_err(|error| {
+                storage_error(
+                    path,
+                    StorageOperation::Write,
+                    format!("Failed to restore durable backup: {error}"),
+                )
+            })?;
+        }
+        Self::sync_directory(path, &parent)
     }
 
     fn ensure_parent(path: &str) -> Result<(), EngineError> {
@@ -131,8 +322,229 @@ impl FsStorageHost {
     }
 }
 
+impl DurableStorageHost for FsStorageHost {
+    fn replace_durable(&self, path: &str, data: &str) -> Result<(), EngineError> {
+        Self::ensure_parent(path)?;
+        self.recover_durable_path(path)?;
+        let (destination, parent, backup, committed) = Self::durable_artifacts(path)?;
+        let filename = destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("durable_artifacts validated filename");
+        let sequence = STAGING_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let staging = parent.join(format!(
+            ".{filename}.proseql-stage-{}-{sequence}",
+            std::process::id()
+        ));
+        let sync_parent = || Self::sync_directory(path, &parent);
+        let mut installed_candidate = false;
+        let mut commit_durable = false;
+
+        let result = (|| -> Result<(), EngineError> {
+            self.check_durability_fault(DurabilityFaultPoint::StageWrite)?;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&staging)
+                .map_err(|error| {
+                    storage_error(
+                        path,
+                        StorageOperation::Write,
+                        format!("Failed to create staging file: {error}"),
+                    )
+                })?;
+            file.write_all(data.as_bytes()).map_err(|error| {
+                storage_error(
+                    path,
+                    StorageOperation::Write,
+                    format!("Failed to write staging file: {error}"),
+                )
+            })?;
+            self.check_durability_fault(DurabilityFaultPoint::FileSync)?;
+            file.sync_all().map_err(|error| {
+                storage_error(
+                    path,
+                    StorageOperation::Write,
+                    format!("Failed to sync staging file: {error}"),
+                )
+            })?;
+            drop(file);
+
+            // Preserve the old inode before making the transaction marker
+            // durable. Therefore PENDING without a backup can only represent a
+            // first write and recovery may safely remove its candidate.
+            if destination.exists() {
+                std::fs::hard_link(&destination, &backup).map_err(|error| {
+                    storage_error(
+                        path,
+                        StorageOperation::Write,
+                        format!("Failed to preserve prior durable file: {error}"),
+                    )
+                })?;
+                sync_parent()?;
+            }
+
+            let mut marker = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&committed)
+                .map_err(|error| {
+                    storage_error(
+                        path,
+                        StorageOperation::Write,
+                        format!("Failed to create pending durable marker: {error}"),
+                    )
+                })?;
+            self.check_durability_fault(DurabilityFaultPoint::PendingMarkerWrite)?;
+            marker.write_all(b"P").map_err(|error| {
+                storage_error(
+                    path,
+                    StorageOperation::Write,
+                    format!("Failed to write pending durable marker: {error}"),
+                )
+            })?;
+            self.check_durability_fault(DurabilityFaultPoint::PendingMarkerSync)?;
+            marker.sync_all().map_err(|error| {
+                storage_error(
+                    path,
+                    StorageOperation::Write,
+                    format!("Failed to sync pending durable marker: {error}"),
+                )
+            })?;
+            self.check_durability_fault(DurabilityFaultPoint::PendingMarkerDirectorySync)?;
+            sync_parent()?;
+
+            self.check_durability_fault(DurabilityFaultPoint::AtomicReplace)?;
+            std::fs::rename(&staging, &destination).map_err(|error| {
+                storage_error(
+                    path,
+                    StorageOperation::Write,
+                    format!("Failed to atomically replace destination: {error}"),
+                )
+            })?;
+            installed_candidate = true;
+            self.check_durability_fault(DurabilityFaultPoint::DirectorySync)?;
+            sync_parent()?;
+
+            // The marker inode and directory entry are already durable. Only
+            // its one-byte state changes at the acknowledgement boundary.
+            self.check_durability_fault(DurabilityFaultPoint::CommitMarkerWrite)?;
+            marker.seek(SeekFrom::Start(0)).map_err(|error| {
+                storage_error(
+                    path,
+                    StorageOperation::Write,
+                    format!("Failed to seek durable commit marker: {error}"),
+                )
+            })?;
+            marker.write_all(b"C").map_err(|error| {
+                storage_error(
+                    path,
+                    StorageOperation::Write,
+                    format!("Failed to mark durable commit complete: {error}"),
+                )
+            })?;
+            marker.set_len(1).map_err(|error| {
+                storage_error(
+                    path,
+                    StorageOperation::Write,
+                    format!("Failed to truncate durable commit marker: {error}"),
+                )
+            })?;
+            self.check_durability_fault(DurabilityFaultPoint::CommitMarkerSync)?;
+            marker.sync_all().map_err(|error| {
+                storage_error(
+                    path,
+                    StorageOperation::Write,
+                    format!("Failed to sync committed durable marker: {error}"),
+                )
+            })?;
+            commit_durable = true;
+            drop(marker);
+
+            // Cleanup is outside the commit boundary. A COMMITTED marker makes
+            // every partial cleanup state safe for recovery and retry.
+            if self
+                .check_durability_fault(DurabilityFaultPoint::Cleanup)
+                .is_ok()
+            {
+                let backup_clean = !backup.exists()
+                    || (std::fs::remove_file(&backup).is_ok() && sync_parent().is_ok());
+                if backup_clean {
+                    let _ = std::fs::remove_file(&committed);
+                    let _ = sync_parent();
+                }
+            }
+            Ok(())
+        })();
+
+        if result.is_err() {
+            let _ = std::fs::remove_file(&staging);
+            if !commit_durable {
+                // Commit-marker sync can fail after C reached the page cache.
+                // Put the still-unacknowledged transaction back into PENDING
+                // before restoring the prior state.
+                if committed.exists() {
+                    if let Ok(mut marker) = std::fs::OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open(&committed)
+                    {
+                        let _ = marker.seek(SeekFrom::Start(0));
+                        let _ = marker.write_all(b"P");
+                        let _ = marker.set_len(1);
+                        let _ = marker.sync_all();
+                    }
+                }
+
+                if backup.exists() {
+                    if !installed_candidate {
+                        let _ = std::fs::remove_file(&backup);
+                        let _ = sync_parent();
+                        let _ = std::fs::remove_file(&committed);
+                        let _ = sync_parent();
+                    } else if self
+                        .check_durability_fault(DurabilityFaultPoint::RollbackReplace)
+                        .is_ok()
+                    {
+                        let rollback = parent.join(format!(
+                            ".{filename}.proseql-rollback-{}-{sequence}",
+                            std::process::id()
+                        ));
+                        let restored = std::fs::hard_link(&backup, &rollback)
+                            .and_then(|()| std::fs::rename(&rollback, &destination));
+                        if restored.is_ok()
+                            && self
+                                .check_durability_fault(DurabilityFaultPoint::RollbackDirectorySync)
+                                .and_then(|()| sync_parent())
+                                .is_ok()
+                        {
+                            let _ = std::fs::remove_file(&backup);
+                            let _ = sync_parent();
+                            let _ = std::fs::remove_file(&committed);
+                            let _ = sync_parent();
+                        } else {
+                            let _ = std::fs::remove_file(&rollback);
+                        }
+                    }
+                } else if installed_candidate {
+                    let _ = std::fs::remove_file(&destination);
+                    let _ = sync_parent();
+                    let _ = std::fs::remove_file(&committed);
+                    let _ = sync_parent();
+                } else if committed.exists() {
+                    let _ = std::fs::remove_file(&committed);
+                    let _ = sync_parent();
+                }
+            }
+        }
+        result
+    }
+}
+
 impl StorageHost for FsStorageHost {
     fn read(&self, path: &str) -> Result<String, EngineError> {
+        self.recover_durable_path(path)?;
         std::fs::read_to_string(path).map_err(|error| {
             storage_error(
                 path,
@@ -155,7 +567,6 @@ impl StorageHost for FsStorageHost {
 
     fn append(&self, path: &str, data: &str) -> Result<(), EngineError> {
         Self::ensure_parent(path)?;
-        use std::io::Write;
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -177,6 +588,7 @@ impl StorageHost for FsStorageHost {
     }
 
     fn exists(&self, path: &str) -> Result<bool, EngineError> {
+        self.recover_durable_path(path)?;
         Ok(Path::new(path).exists())
     }
 

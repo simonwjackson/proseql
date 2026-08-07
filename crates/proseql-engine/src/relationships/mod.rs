@@ -378,6 +378,22 @@ impl Database {
         Ok(entity)
     }
 
+    /// Update one entity only when its application-level revision matches.
+    /// The check and update occur under the same exclusive database borrow.
+    pub fn update_if_revision(
+        &mut self,
+        collection: &str,
+        id: &str,
+        expected_revision: u64,
+        updates: Value,
+    ) -> Result<Value, EngineError> {
+        self.collections
+            .get(collection)
+            .ok_or_else(|| col_nf(collection))?
+            .require_revision_advance(id, expected_revision, &updates)?;
+        self.update(collection, id, updates)
+    }
+
     /// Update an entity by id, validating Ref FK fields after schema mutation.
     ///
     /// If the schema-validated result would violate an FK constraint, the entity

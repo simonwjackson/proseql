@@ -3,7 +3,8 @@
   rustPlatform,
 }:
 
-# The Rust engine workspace: proseql-engine, proseql-formats, proseql-storage.
+# The Rust engine workspace: proseql-engine, proseql-formats, proseql-storage,
+# and the native durable runtime facade.
 #
 # A library workspace rather than a program, so the value here is not the
 # artifact but the check -- `cargo test` runs during the build, which is what
@@ -15,6 +16,7 @@ let
   workspaceMembers = [
     "--package=proseql-engine"
     "--package=proseql-formats"
+    "--package=proseql-native"
     "--package=proseql-storage"
   ];
 in
@@ -30,7 +32,7 @@ rustPlatform.buildRustPackage {
   cargoTestFlags = workspaceMembers;
 
   meta = {
-    description = "proseQL platform-blind engine, format codecs, and document storage";
+    description = "proseQL engine, format codecs, document storage, and native durable runtime";
     platforms = lib.platforms.all;
   };
 }

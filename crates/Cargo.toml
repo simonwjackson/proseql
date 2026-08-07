@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "proseql-engine",
     "proseql-formats",
+    "proseql-native",
     "proseql-storage",
     "proseql-wasm",
 ]

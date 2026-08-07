@@ -148,6 +148,12 @@ impl MemoryStorageHost {
     }
 }
 
+impl crate::persistence::DurableStorageHost for MemoryStorageHost {
+    fn replace_durable(&self, path: &str, data: &str) -> Result<(), EngineError> {
+        self.write(path, data)
+    }
+}
+
 impl StorageHost for MemoryStorageHost {
     fn read(&self, path: &str) -> Result<String, EngineError> {
         let path = normalize_path(path);

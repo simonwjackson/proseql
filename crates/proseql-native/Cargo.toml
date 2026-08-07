@@ -1,0 +1,15 @@
+[package]
+name = "proseql-native"
+version = "0.1.0"
+edition = "2021"
+description = "Durable long-running native runtime for proseQL"
+
+[dependencies]
+indexmap = { workspace = true }
+serde_json = { workspace = true }
+proseql-engine = { path = "../proseql-engine" }
+proseql-formats = { path = "../proseql-formats" }
+proseql-storage = { path = "../proseql-storage" }
+
+[dev-dependencies]
+tempfile = { workspace = true }

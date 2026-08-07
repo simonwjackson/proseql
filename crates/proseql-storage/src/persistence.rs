@@ -21,6 +21,15 @@ use serde_json::{Map, Value};
 use crate::host::StorageHost;
 use crate::path::{get_file_extension, normalize_path};
 
+/// Storage host capable of replacing one persisted source as a durable commit.
+///
+/// Implementations must not return success until the complete replacement is
+/// recoverable after process or machine interruption. On failure, callers may
+/// continue using the previously committed source.
+pub trait DurableStorageHost: StorageHost {
+    fn replace_durable(&self, path: &str, data: &str) -> Result<(), EngineError>;
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ValidationMode {
     #[default]
@@ -665,7 +674,7 @@ pub(crate) fn decode_entity_map(
                     .to_owned();
                 entries.insert(runtime_id, decoded);
             }
-            Err(error) if validation == ValidationMode::Lenient => {}
+            Err(_error) if validation == ValidationMode::Lenient => {}
             Err(error) => return Err(error),
         }
     }

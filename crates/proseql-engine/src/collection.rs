@@ -50,8 +50,8 @@ use crate::descriptor::{
     CollectionDescriptor, IdStrategy, SchemaNode, StructField, UniqueConstraintDescriptor,
 };
 use crate::errors::{
-    DuplicateKeyError, EngineError, HookError, HookOperation, NotFoundError, OperationError,
-    PluginError, UniqueConstraintError, ValidationError, ValidationIssue,
+    ConcurrencyError, DuplicateKeyError, EngineError, HookError, HookOperation, NotFoundError,
+    OperationError, PluginError, UniqueConstraintError, ValidationError, ValidationIssue,
 };
 use crate::hooks::{
     run_after_create_hooks, run_after_delete_hooks, run_after_update_hooks,
@@ -502,6 +502,46 @@ impl Collection {
     /// Get an entity by id, failing with `NotFoundError` if absent.
     pub fn get_or_fail(&self, id: &str) -> Result<&Value, EngineError> {
         self.state.get(id).ok_or_else(|| not_found(&self.name, id))
+    }
+
+    /// Require an entity's application-level `revision` field to match exactly.
+    ///
+    /// This check is intended to run while the caller holds exclusive mutation
+    /// ownership, immediately before the corresponding update.
+    pub fn require_revision_advance(
+        &self,
+        id: &str,
+        expected: u64,
+        updates: &Value,
+    ) -> Result<(), EngineError> {
+        let entity = self.get_or_fail(id)?;
+        let actual = entity.get("revision").and_then(Value::as_u64);
+        let required_next = expected.checked_add(1);
+        let supplied_next = updates.get("revision").and_then(Value::as_u64);
+        if let Some(required_next) = required_next {
+            if actual == Some(expected) && supplied_next == Some(required_next) {
+                return Ok(());
+            }
+        }
+        Err(EngineError::Concurrency(ConcurrencyError {
+            collection: self.name.clone(),
+            id: id.to_owned(),
+            message: format!(
+                "Conditional update for '{}:{}' expected current revision {} and next revision {}, found current {} and supplied {}",
+                self.name,
+                id,
+                expected,
+                required_next.map_or_else(|| "overflow".to_owned(), |value| value.to_string()),
+                actual.map_or_else(
+                    || "missing or non-integer".to_owned(),
+                    |value| value.to_string()
+                ),
+                supplied_next.map_or_else(
+                    || "missing or non-integer".to_owned(),
+                    |value| value.to_string()
+                )
+            ),
+        }))
     }
 
     /// Return all entities in insertion order.

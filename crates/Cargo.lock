@@ -379,6 +379,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "proseql-native"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "proseql-engine",
+ "proseql-formats",
+ "proseql-storage",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "proseql-storage"
 version = "0.1.0"
 dependencies = [
