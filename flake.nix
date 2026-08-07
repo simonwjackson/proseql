@@ -45,6 +45,9 @@
         name = "proseql-source";
         filter = sourceFilter;
       };
+      # The store-path prefix is derived from the complete filtered source NAR,
+      # not a declared revision string, and is emitted with browser bundles.
+      sourceIdentity = builtins.baseNameOf (builtins.toString source);
       wasmBindgenVersion = "0.2.126";
       wasmBindgenBinaryAssets = {
         x86_64-linux = {
@@ -141,7 +144,10 @@
               };
         in
         rec {
-          browser = pkgs.callPackage ./packages/browser/default.nix { inherit mkBunDerivation; };
+          browser = pkgs.callPackage ./packages/browser/default.nix {
+            inherit mkBunDerivation sourceIdentity;
+            wasmArtifacts = engine-wasm-artifacts;
+          };
           core = pkgs.callPackage ./packages/core/default.nix { inherit mkBunDerivation; };
           node = pkgs.callPackage ./packages/node/default.nix { inherit mkBunDerivation; };
           rest = pkgs.callPackage ./packages/rest/default.nix { inherit mkBunDerivation; };
@@ -262,12 +268,40 @@
         let
           mkBunDerivation = bun2nix.lib.${system}.mkBunDerivation;
           wasmArtifacts = self.packages.${system}.engine-wasm-artifacts;
+          browserBundle = self.packages.${system}.browser;
           chromiumPackage = chromiumPackageFor pkgs;
         in
         {
           # Building the crates runs their tests, so this gates the Rust side
           # of `nix flake check` alongside the TypeScript suite.
           rust = pkgs.callPackage ./crates/package.nix { };
+
+          browser-offline-consumer =
+            pkgs.runCommand "proseql-browser-offline-consumer"
+              {
+                nativeBuildInputs = [ pkgs.nodejs ];
+                PROSEQL_SOURCE_IDENTITY = sourceIdentity;
+              }
+              ''
+                export HOME=$(mktemp -d)
+                mkdir -p fixture
+                cp -a ${browserBundle}/closure/node_modules fixture/
+                cat > fixture/package.json <<'EOF'
+                {"private":true,"type":"module"}
+                EOF
+                cat > fixture/smoke.mjs <<'EOF'
+                import * as browser from "@proseql/browser";
+                import * as worker from "@proseql/browser/worker";
+                if (typeof browser.createPersistentEngineDatabase !== "function") throw new Error("missing browser database");
+                if (typeof worker.createServiceWorkerEngineDatabase !== "function") throw new Error("missing worker database");
+                process.exit(0);
+                EOF
+                (cd fixture && node --no-addons smoke.mjs)
+                test -f fixture/node_modules/@proseql/engine/dist/browser-wasm/proseql_wasm_bg.wasm
+                grep -F "$PROSEQL_SOURCE_IDENTITY" ${browserBundle}/source-identity.json
+                mkdir -p $out
+                cp ${browserBundle}/source-identity.json $out/
+              '';
 
           default = mkBunDerivation {
             pname = "proseql-checks";

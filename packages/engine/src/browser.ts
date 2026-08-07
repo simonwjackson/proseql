@@ -6,11 +6,13 @@ import {
 	type BrowserStorageHostConfig,
 	createIndexedDBEngineStorageHost,
 	createLocalStorageEngineStorageHost,
+	createServiceWorkerIndexedDBEngineStorageHost,
 	createSessionStorageEngineStorageHost,
 	createWebStorageEngineStorageHost,
 	DEFAULT_STORAGE_KEY_PREFIX,
 	type IndexedDBEngineHostConfig,
 	type LocalStorageEngineStorageHostConfig,
+	type ServiceWorkerIndexedDBEngineHostConfig,
 	type SessionStorageEngineStorageHostConfig,
 	type WebStorageEngineHostConfig,
 } from "./browser-storage-host.js";
@@ -40,6 +42,7 @@ import type {
 export { WasmEngineDefectError };
 export {
 	createIndexedDBEngineStorageHost,
+	createServiceWorkerIndexedDBEngineStorageHost,
 	createLocalStorageEngineStorageHost,
 	createSessionStorageEngineStorageHost,
 	createWebStorageEngineStorageHost,
@@ -47,6 +50,7 @@ export {
 	type BrowserEngineStorageHost,
 	type BrowserStorageHostConfig,
 	type IndexedDBEngineHostConfig,
+	type ServiceWorkerIndexedDBEngineHostConfig,
 	type LocalStorageEngineStorageHostConfig,
 	type SessionStorageEngineStorageHostConfig,
 	type WebStorageEngineHostConfig,

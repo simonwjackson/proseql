@@ -4,6 +4,7 @@ import {
 	initializeBrowserWasmBindings,
 	WASM_RUNTIME_ABI_METHODS,
 	WasmBindingsAbiError,
+	WasmInitializationError,
 } from "../src/loader.js";
 
 const syntheticBindings = (missing: ReadonlyArray<string> = []) => {
@@ -45,6 +46,21 @@ describe("generated WASM binding ABI guard", () => {
 		expect(() => assertWasmBindingsAbi({})).toThrowError(
 			/Stale or incompatible proseql-wasm bindings: missing WasmRuntime method\(s\): WasmRuntime constructor/,
 		);
+	});
+
+	it("surfaces fetch and compile failures as typed initialization errors", async () => {
+		const bindings = {
+			...syntheticBindings(),
+			default: async () => {
+				throw new TypeError("WebAssembly.compile failed");
+			},
+		};
+		await expect(
+			initializeBrowserWasmBindings(
+				bindings,
+				new URL("https://example.invalid/proseql_wasm_bg.wasm"),
+			),
+		).rejects.toBeInstanceOf(WasmInitializationError);
 	});
 
 	it("rejects stale browser bindings before invoking their WASM initializer", async () => {

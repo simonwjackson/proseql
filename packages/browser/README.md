@@ -48,11 +48,51 @@ The browser loader resolves the `.wasm` asset included in `@proseql/engine` thro
 
 Promise-first engine hosts are available for:
 
-| Factory | Storage |
-| --- | --- |
-| `createLocalStorageEngineStorageHost` | Persistent web storage with cross-tab storage events |
-| `createSessionStorageEngineStorageHost` | Storage scoped to the current tab/session |
-| `createIndexedDBEngineStorageHost` | IndexedDB for larger browser datasets |
+| Factory | Storage | Supported owners |
+| --- | --- | --- |
+| `createLocalStorageEngineStorageHost` | Persistent web storage with cross-tab storage events | Window |
+| `createSessionStorageEngineStorageHost` | Storage scoped to the current tab/session | Window |
+| `createIndexedDBEngineStorageHost` | IndexedDB for larger browser datasets | Window, dedicated worker |
+| `createServiceWorkerIndexedDBEngineStorageHost` | Explicitly named IndexedDB/channel namespace | Single service-worker owner |
+
+## Service-worker ownership
+
+Import the worker-specific entry point so the matching WASM glue is static rather
+than loaded with `import()`, which ServiceWorkerGlobalScope forbids:
+
+```ts
+import {
+  createServiceWorkerEngineDatabase,
+  createServiceWorkerIndexedDBEngineStorageHost,
+  initializeWorkerWasmBindings,
+} from "@proseql/browser/worker"
+
+await initializeWorkerWasmBindings()
+const storageHost = createServiceWorkerIndexedDBEngineStorageHost({
+  databaseName: "my-reader-v1",
+  storeName: "collections",
+  version: 1,
+  keyPrefix: "my-reader:",
+  channelName: "my-reader-proseql",
+  originId: "my-reader-worker-owner",
+})
+const db = await createServiceWorkerEngineDatabase(config, initialData, {
+  storageHost,
+})
+```
+
+The worker facade FIFO-serializes reads and writes. A mutation resolves only
+after the IndexedDB transaction completes. Persistence failure rejects the
+mutation, closes and quarantines the facade, and requires constructing a fresh
+facade before further access; reopening loads only the prior durable state.
+Pages must communicate with this owner through application messages and must
+not open the same writable database. Low-level watch subscriptions are withheld
+from this facade so they cannot expose a mutation before its durable flush;
+applications publish their own messages only after a mutating request resolves.
+
+`close()` waits for in-flight IndexedDB transactions, stops channels/watchers,
+and closes the cached connection. A later worker event creates a fresh host and
+database using the same explicit identity.
 
 ## Effect APIs and compatibility layers
 
@@ -71,7 +111,15 @@ Browser storage uses flat keys. `pathToKey("./data/books.yaml")` returns `"prose
 
 ## Known async transaction limitation
 
-Transaction-origin tracking is not reliable across asynchronous work yielded from inside a browser transaction. Avoid unrelated asynchronous work inside browser transactions when persistence or watch-driven updates may interleave. Keep transaction callbacks synchronous apart from the database operations they coordinate, and do not assume an external update can always be distinguished after an arbitrary `await`. This limitation is tracked separately and is not fixed by this release.
+Transaction-origin tracking is not reliable across arbitrary asynchronous work yielded from inside a multi-window browser transaction. Avoid unrelated asynchronous work inside those callbacks when persistence or watch-driven updates may interleave. The single-owner service-worker facade does not expose that race between independent callers because its complete operation stream is FIFO serialized.
+
+## Local Nix bundle
+
+`nix build .#browser` produces built `core`, `engine`, `effect`, and `browser`
+packages, the matching browser WASM, tarballs, the exact external dependency
+closure, and `source-identity.json`. The identity is derived from the complete
+filtered Nix source store path. `checks.browser-offline-consumer` imports both
+browser entry points from that closure without registry or network access.
 
 ## License
 

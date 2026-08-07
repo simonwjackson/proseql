@@ -1,7 +1,12 @@
 export type WasmBindingsModule = {
-	default?: (
-		input?: RequestInfo | URL | Response | BufferSource | WebAssembly.Module,
-	) => Promise<unknown>;
+	default?: (input?: {
+		module_or_path?:
+			| RequestInfo
+			| URL
+			| Response
+			| BufferSource
+			| WebAssembly.Module;
+	}) => Promise<unknown>;
 	__proseql_wasm_memory?: () => WebAssembly.Memory | undefined;
 	WasmRuntime: new (
 		setTimeoutFn: typeof globalThis.setTimeout,
@@ -227,6 +232,53 @@ export const assertWasmBindingsAbi: (
 
 let initPromise: Promise<WasmBindingsModule> | undefined;
 
+export type ProseqlRuntimeKind =
+	| "window"
+	| "service-worker"
+	| "worker"
+	| "node";
+
+export class WasmInitializationError extends Error {
+	constructor(message: string, cause: unknown) {
+		super(message, { cause });
+		this.name = "WasmInitializationError";
+	}
+}
+
+export class WorkerWasmInitializationError extends Error {
+	constructor(runtime: "service-worker" | "worker") {
+		super(
+			`The ${runtime} runtime must initialize the statically included browser WASM binding before opening a database. Use the '@proseql/engine/worker' entry and call initializeWorkerWasmBindings().`,
+		);
+		this.name = "WorkerWasmInitializationError";
+	}
+}
+
+export const detectProseqlRuntime = (
+	scope: Record<string, unknown> = globalThis as unknown as Record<
+		string,
+		unknown
+	>,
+): ProseqlRuntimeKind => {
+	if (
+		typeof scope.registration === "object" &&
+		typeof scope.clients === "object" &&
+		typeof scope.skipWaiting === "function"
+	) {
+		return "service-worker";
+	}
+	if (
+		typeof scope.importScripts === "function" &&
+		typeof scope.document === "undefined"
+	) {
+		return "worker";
+	}
+	if (typeof scope.window === "object" && typeof scope.document === "object") {
+		return "window";
+	}
+	return "node";
+};
+
 export const getLoadedWasmMemoryByteLength = async (): Promise<
 	number | undefined
 > => {
@@ -239,15 +291,36 @@ export const getLoadedWasmMemoryByteLength = async (): Promise<
 
 export const loadWasmBindings = async (): Promise<WasmBindingsModule> => {
 	if (!initPromise) {
-		initPromise = isBrowserRuntime()
-			? loadBrowserBindings()
-			: loadNodeBindings();
+		const runtime = detectProseqlRuntime();
+		if (runtime === "window") initPromise = loadBrowserBindings();
+		else if (runtime === "node") initPromise = loadNodeBindings();
+		else throw new WorkerWasmInitializationError(runtime);
 	}
 	return initPromise;
 };
 
-const isBrowserRuntime = (): boolean =>
-	typeof window !== "undefined" && typeof window.document !== "undefined";
+export const preloadBrowserWasmBindings = (
+	module: unknown,
+	wasmInput: RequestInfo | URL | Response | BufferSource | WebAssembly.Module,
+): Promise<WasmBindingsModule> => {
+	if (!initPromise) {
+		initPromise = (async () => {
+			assertWasmBindingsAbi(module);
+			if (typeof module.default === "function") {
+				try {
+					await module.default({ module_or_path: wasmInput });
+				} catch (error) {
+					throw new WasmInitializationError(
+						"Failed to compile or initialize the statically imported worker WASM binding.",
+						error,
+					);
+				}
+			}
+			return module;
+		})();
+	}
+	return initPromise;
+};
 
 export const initializeBrowserWasmBindings = async (
 	module: unknown,
@@ -255,7 +328,14 @@ export const initializeBrowserWasmBindings = async (
 ): Promise<WasmBindingsModule> => {
 	assertWasmBindingsAbi(module);
 	if (typeof module.default === "function") {
-		await module.default(wasmUrl);
+		try {
+			await module.default({ module_or_path: wasmUrl });
+		} catch (error) {
+			throw new WasmInitializationError(
+				`Failed to fetch, compile, or initialize browser WASM from '${wasmUrl}'.`,
+				error,
+			);
+		}
 	}
 	return module;
 };

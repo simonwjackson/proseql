@@ -3139,7 +3139,11 @@ function buildDatabaseFacade(
 						try {
 							await runtime.drop();
 						} finally {
-							persistence.lifecycle.status = "closed";
+							try {
+								await persistence.host.close?.();
+							} finally {
+								persistence.lifecycle.status = "closed";
+							}
 						}
 					}
 				});
@@ -3156,6 +3160,23 @@ function buildDatabaseFacade(
 			value: () => runtime.materializationDiagnostics(),
 			enumerable: false,
 		});
+		if (persistence) {
+			Object.defineProperty(facade, "__proseqlAbortPersistence", {
+				value: async () => {
+					if (persistence.lifecycle.status === "closed") return;
+					persistence.lifecycle.status = "closing";
+					await stopWatchers(persistence).catch(() => undefined);
+					await runtime.waitForTransaction().catch(() => undefined);
+					try {
+						await runtime.drop();
+					} finally {
+						await persistence.host.close?.().catch(() => undefined);
+						persistence.lifecycle.status = "closed";
+					}
+				},
+				enumerable: false,
+			});
+		}
 		return facade;
 	};
 	if (!persistence) {

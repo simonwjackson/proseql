@@ -26,6 +26,8 @@ export interface EngineStorageHost {
 		dirPath: string,
 		onChange: (event: EngineStorageWatchEvent) => void,
 	) => Promise<() => void>;
+	/** Wait for pending storage work and release cached browser resources. */
+	readonly close?: () => Promise<void>;
 }
 
 export const toEngineStorageError = (

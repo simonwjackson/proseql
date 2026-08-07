@@ -57,10 +57,21 @@ beforeAll(() => {
 		cwd: WORKTREE_ROOT,
 		stdio: "inherit",
 	});
-	execFileSync("bunx", ["tsc", "--build", "packages/core", "packages/engine", "packages/effect", "packages/browser"], {
-		cwd: WORKTREE_ROOT,
-		stdio: "inherit",
-	});
+	execFileSync(
+		"bunx",
+		[
+			"tsc",
+			"--build",
+			"packages/core",
+			"packages/engine",
+			"packages/effect",
+			"packages/browser",
+		],
+		{
+			cwd: WORKTREE_ROOT,
+			stdio: "inherit",
+		},
+	);
 }, 120_000);
 
 describe("@proseql/browser persistent effect factory", () => {
@@ -76,7 +87,11 @@ describe("@proseql/browser persistent effect factory", () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					const db = yield* createPersistentEffectDatabase(config, { books: [] }, { writeDebounce: 5 });
+					const db = yield* createPersistentEffectDatabase(
+						config,
+						{ books: [] },
+						{ writeDebounce: 5 },
+					);
 					yield* db.books.create({ id: "b1", title: "Dune" });
 					yield* Effect.tryPromise(() => db.flush());
 				}),
@@ -86,7 +101,11 @@ describe("@proseql/browser persistent effect factory", () => {
 		const rows = await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					const db = yield* createPersistentEffectDatabase(config, { books: [] }, { writeDebounce: 5 });
+					const db = yield* createPersistentEffectDatabase(
+						config,
+						{ books: [] },
+						{ writeDebounce: 5 },
+					);
 					return yield* Stream.runCollect(db.books.query());
 				}),
 			),
@@ -104,16 +123,17 @@ describe("@proseql/browser persistent effect factory", () => {
 
 		await expect(
 			Effect.runPromise(
-				Effect.scoped(
-					createPersistentEffectDatabase(config, { books: [] }),
-				),
+				Effect.scoped(createPersistentEffectDatabase(config, { books: [] })),
 			),
 		).rejects.toBeInstanceOf(OperationError);
 	});
 
 	it("publishes browser-safe effect and browser entrypoints with explicit browser subpath exports", async () => {
 		const effectPackage = JSON.parse(
-			readFileSync(resolve(WORKTREE_ROOT, "packages/effect/package.json"), "utf8"),
+			readFileSync(
+				resolve(WORKTREE_ROOT, "packages/effect/package.json"),
+				"utf8",
+			),
 		) as {
 			exports?: Record<string, { import?: string; types?: string }>;
 		};
@@ -122,11 +142,17 @@ describe("@proseql/browser persistent effect factory", () => {
 			types: "./dist/browser.d.ts",
 		});
 
-		const effectRoot = readFileSync(resolve(WORKTREE_ROOT, "packages/effect/dist/index.js"), "utf8");
+		const effectRoot = readFileSync(
+			resolve(WORKTREE_ROOT, "packages/effect/dist/index.js"),
+			"utf8",
+		);
 		expect(effectRoot).toContain("@proseql/engine");
 		expect(effectRoot).not.toContain("@proseql/engine/browser");
 
-		const effectBrowser = readFileSync(resolve(WORKTREE_ROOT, "packages/effect/dist/browser.js"), "utf8");
+		const effectBrowser = readFileSync(
+			resolve(WORKTREE_ROOT, "packages/effect/dist/browser.js"),
+			"utf8",
+		);
 		expect(effectBrowser).toContain("@proseql/engine/browser");
 		expect(effectBrowser).not.toContain("node:");
 
@@ -139,8 +165,28 @@ describe("@proseql/browser persistent effect factory", () => {
 		expect(engineLoader).not.toContain("browser-wasm-profile");
 		expect(engineLoader).not.toContain("wasm-profile");
 
-		const browserBuilt = readFileSync(resolve(WORKTREE_ROOT, "packages/browser/dist/index.js"), "utf8");
+		const browserBuilt = readFileSync(
+			resolve(WORKTREE_ROOT, "packages/browser/dist/index.js"),
+			"utf8",
+		);
 		expect(browserBuilt).toContain("@proseql/effect/browser");
 		expect(browserBuilt).not.toContain("node:");
+
+		const browserPackage = JSON.parse(
+			readFileSync(
+				resolve(WORKTREE_ROOT, "packages/browser/package.json"),
+				"utf8",
+			),
+		) as { exports?: Record<string, { import?: string; types?: string }> };
+		expect(browserPackage.exports?.["./worker"]).toEqual({
+			import: "./dist/worker.js",
+			types: "./dist/worker.d.ts",
+		});
+		const workerBuilt = readFileSync(
+			resolve(WORKTREE_ROOT, "packages/engine/dist/worker.js"),
+			"utf8",
+		);
+		expect(workerBuilt).toContain("./browser-wasm/proseql_wasm.js");
+		expect(workerBuilt).not.toContain("node:");
 	});
 });

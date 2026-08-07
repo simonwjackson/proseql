@@ -31,6 +31,16 @@ export interface IndexedDBEngineHostConfig extends BrowserStorageHostConfig {
 	readonly channelName?: string;
 }
 
+export interface ServiceWorkerIndexedDBEngineHostConfig
+	extends IndexedDBEngineHostConfig {
+	readonly databaseName: string;
+	readonly storeName: string;
+	readonly version: number;
+	readonly keyPrefix: string;
+	readonly channelName: string;
+	readonly originId: string;
+}
+
 type BrowserStorageChange = {
 	readonly namespace: string;
 	readonly path: string;
@@ -42,6 +52,7 @@ type LocalListener = (event: BrowserStorageChange) => void;
 
 const localListeners = new Map<string, Set<LocalListener>>();
 const indexedDbCache = new Map<string, Promise<IDBDatabase>>();
+const indexedDbPending = new WeakMap<IDBDatabase, Set<Promise<unknown>>>();
 const storageObjectIds = new WeakMap<object, number>();
 const indexedDbFactoryIds = new WeakMap<object, number>();
 let nextBrowserObjectId = 1;
@@ -449,7 +460,12 @@ const openIndexedDb = async (
 		};
 		request.onsuccess = () => {
 			const db = request.result;
-			db.onversionchange = () => db.close();
+			const closeAndEvict = () => {
+				db.close();
+				indexedDbCache.delete(cacheKey);
+			};
+			db.onversionchange = closeAndEvict;
+			db.onclose = () => indexedDbCache.delete(cacheKey);
 			resolve(db);
 		};
 	});
@@ -457,26 +473,74 @@ const openIndexedDb = async (
 	return opened;
 };
 
-const withStore = async <T>(
+const withStore = <T>(
 	db: IDBDatabase,
 	storeName: string,
 	mode: IDBTransactionMode,
 	path: string,
 	operation: StorageError["operation"],
 	run: (store: IDBObjectStore) => IDBRequest<T>,
-): Promise<T> =>
-	new Promise<T>((resolve, reject) => {
+): Promise<T> => {
+	const promise = new Promise<T>((resolve, reject) => {
 		try {
-			const transaction = db.transaction(storeName, mode);
+			const transaction = db.transaction(storeName, mode, {
+				durability: mode === "readwrite" ? "strict" : "default",
+			});
 			const store = transaction.objectStore(storeName);
 			const request = run(store);
-			request.onsuccess = () => resolve(request.result);
-			request.onerror = () =>
-				reject(storageDeniedError(path, operation, request.error));
+			let requestCompleted = false;
+			let result!: T;
+			let settled = false;
+			const fail = (error: unknown) => {
+				if (settled) return;
+				settled = true;
+				reject(storageDeniedError(path, operation, error));
+			};
+			request.onsuccess = () => {
+				requestCompleted = true;
+				result = request.result;
+				// Lightweight conformance hosts predate transaction completion
+				// callbacks. Real IndexedDB databases always expose transaction.db.
+				if (transaction.db === undefined && !settled) {
+					settled = true;
+					resolve(result);
+				}
+			};
+			request.onerror = () => fail(request.error);
+			transaction.onabort = () =>
+				fail(
+					transaction.error ??
+						new DOMException("IndexedDB transaction aborted", "AbortError"),
+				);
+			transaction.onerror = () =>
+				fail(
+					transaction.error ??
+						new DOMException("IndexedDB transaction failed", "AbortError"),
+				);
+			transaction.oncomplete = () => {
+				if (settled) return;
+				if (!requestCompleted) {
+					fail(
+						new DOMException(
+							"IndexedDB transaction completed before its request",
+							"InvalidStateError",
+						),
+					);
+					return;
+				}
+				settled = true;
+				resolve(result);
+			};
 		} catch (error) {
 			reject(storageDeniedError(path, operation, error));
 		}
 	});
+	const pending = indexedDbPending.get(db) ?? new Set<Promise<unknown>>();
+	pending.add(promise);
+	indexedDbPending.set(db, pending);
+	void promise.finally(() => pending.delete(promise)).catch(() => undefined);
+	return promise;
+};
 
 const listIndexedDbKeys = async (
 	db: IDBDatabase,
@@ -538,17 +602,33 @@ export const createIndexedDBEngineStorageHost = (
 	const prefix = config.keyPrefix ?? DEFAULT_STORAGE_KEY_PREFIX;
 	const allowedFormats = normalizeAllowedFormats(config.allowedFormats);
 	const originId = config.originId ?? createOriginId();
+	const normalizedConfig = { databaseName, storeName, version };
+	const cacheKey = createIndexedDbCacheKey(factory, normalizedConfig);
 	const namespace = createIndexedDbNamespace(factory, config, prefix);
-	const notify = createBroadcastPair(namespace, originId, () => {});
+	let notify: ReturnType<typeof createBroadcastPair> | undefined;
+	const getNotify = () => {
+		if (!notify) notify = createBroadcastPair(namespace, originId, () => {});
+		return notify;
+	};
+	const watchStops = new Set<() => void>();
+	let closed = false;
 	const emit = (path: string, type: "add" | "change" | "remove") =>
-		notify.post({
+		getNotify().post({
 			namespace,
 			path: normalizeComparablePath(path),
 			type,
 			originId,
 		});
-	const getDb = () =>
-		openIndexedDb(factory, { databaseName, storeName, version });
+	const getDb = () => {
+		if (closed) {
+			throw makeStorageError(
+				databaseName,
+				"read",
+				"IndexedDB storage host is closed; create a fresh host before reuse.",
+			);
+		}
+		return openIndexedDb(factory, normalizedConfig);
+	};
 
 	return {
 		__proseqlBrowserStorageHost: true,
@@ -684,7 +764,12 @@ export const createIndexedDBEngineStorageHost = (
 				onChange();
 			};
 			const pair = createBroadcastPair(namespace, originId, listener);
-			return () => pair.stop();
+			const stop = () => {
+				pair.stop();
+				watchStops.delete(stop);
+			};
+			watchStops.add(stop);
+			return stop;
 		},
 		async watchDir(dirPath, onChange) {
 			const listener = (event: BrowserStorageChange) => {
@@ -692,9 +777,56 @@ export const createIndexedDBEngineStorageHost = (
 				onChange(watchEventForPath(event.path, event.type));
 			};
 			const pair = createBroadcastPair(namespace, originId, listener);
-			return () => pair.stop();
+			const stop = () => {
+				pair.stop();
+				watchStops.delete(stop);
+			};
+			watchStops.add(stop);
+			return stop;
+		},
+		async close() {
+			if (closed) return;
+			closed = true;
+			for (const stop of [...watchStops]) stop();
+			notify?.stop();
+			notify = undefined;
+			const opened = indexedDbCache.get(cacheKey);
+			if (!opened) return;
+			const db = await opened.catch(() => undefined);
+			if (!db) return;
+			await Promise.allSettled([...(indexedDbPending.get(db) ?? [])]);
+			db.close();
+			indexedDbCache.delete(cacheKey);
 		},
 	};
+};
+
+export const createServiceWorkerIndexedDBEngineStorageHost = (
+	config: ServiceWorkerIndexedDBEngineHostConfig,
+): EngineStorageHost => {
+	for (const [field, value] of Object.entries({
+		databaseName: config.databaseName,
+		storeName: config.storeName,
+		keyPrefix: config.keyPrefix,
+		channelName: config.channelName,
+		originId: config.originId,
+	})) {
+		if (value.trim().length === 0) {
+			throw makeStorageError(
+				config.databaseName || "proseql-worker",
+				"read",
+				`Service-worker IndexedDB identity field '${field}' must be non-empty.`,
+			);
+		}
+	}
+	if (!Number.isInteger(config.version) || config.version <= 0) {
+		throw makeStorageError(
+			config.databaseName,
+			"read",
+			"Service-worker IndexedDB version must be a positive integer.",
+		);
+	}
+	return createIndexedDBEngineStorageHost(config);
 };
 
 export type BrowserEngineStorageHost = EngineStorageHost;

@@ -348,7 +348,114 @@ const browserOutsideTransactionFifo = async (prefix: string) => {
 	};
 };
 
+let workerRequestSequence = 0;
+
+const withTimeout = <T>(
+	promise: Promise<T>,
+	timeoutMs: number,
+	message: () => string,
+) =>
+	Promise.race([
+		promise,
+		new Promise<never>((_, reject) =>
+			setTimeout(() => reject(new Error(message())), timeoutMs),
+		),
+	]);
+
+const serviceWorkerRequest = async (
+	command:
+		| "create"
+		| "fifo-update-first"
+		| "fifo-update-second"
+		| "read"
+		| "close"
+		| "fail-create"
+		| "reopen"
+		| "metrics",
+) => {
+	const registration =
+		(await navigator.serviceWorker.getRegistration("./")) ??
+		(await withTimeout(
+			navigator.serviceWorker.register(
+				new URL("./service-worker.ts", import.meta.url),
+				{ type: "module", scope: "./" },
+			),
+			10_000,
+			() => "Service worker registration timed out",
+		));
+	await withTimeout(navigator.serviceWorker.ready, 10_000, () => {
+		const candidate =
+			registration.installing ?? registration.waiting ?? registration.active;
+		return `Service worker readiness timed out (candidate state: ${candidate?.state ?? "missing"})`;
+	});
+	const worker =
+		registration.active ?? registration.waiting ?? registration.installing;
+	if (!worker) throw new Error("Service worker did not become active");
+	const id = `worker-request-${++workerRequestSequence}`;
+	return new Promise<unknown>((resolve, reject) => {
+		const channel = new MessageChannel();
+		const timeout = setTimeout(
+			() => reject(new Error(`Worker request timed out: ${command}`)),
+			10_000,
+		);
+		channel.port1.onmessage = (event) => {
+			clearTimeout(timeout);
+			channel.port1.close();
+			const response = event.data as {
+				readonly ok: boolean;
+				readonly value?: unknown;
+				readonly error?: string;
+			};
+			if (response.ok) resolve(response.value);
+			else reject(new Error(response.error ?? "Worker request failed"));
+		};
+		worker.postMessage({ id, command }, [channel.port2]);
+	});
+};
+
+const serviceWorkerDurableRestart = async () => {
+	const coldStartedAt = performance.now();
+	await serviceWorkerRequest("create");
+	const coldStartMs = performance.now() - coldStartedAt;
+	await serviceWorkerRequest("close");
+	const warmStartedAt = performance.now();
+	const reopened = (await serviceWorkerRequest("read")) as ReadonlyArray<
+		Record<string, unknown>
+	>;
+	const warmRestartMs = performance.now() - warmStartedAt;
+	let persistenceFailure = "";
+	try {
+		await serviceWorkerRequest("fail-create");
+	} catch (error) {
+		persistenceFailure = error instanceof Error ? error.message : String(error);
+	}
+	let quarantineFailure = "";
+	try {
+		await serviceWorkerRequest("read");
+	} catch (error) {
+		quarantineFailure = error instanceof Error ? error.message : String(error);
+	}
+	const afterFailure = (await serviceWorkerRequest("reopen")) as ReadonlyArray<
+		Record<string, unknown>
+	>;
+	const metrics = (await serviceWorkerRequest("metrics")) as {
+		readonly wasmLinearMemoryBytes?: number;
+		readonly jsHeapBytes?: number;
+	};
+	return {
+		reopened,
+		persistenceFailure,
+		quarantineFailure,
+		afterFailure,
+		coldStartMs,
+		warmRestartMs,
+		metrics,
+	};
+};
+
 const harness = {
+	serviceWorkerCommand: serviceWorkerRequest,
+	serviceWorkerDurableRestart,
 	localRoundTrip(prefix: string) {
 		return roundTrip("local", prefix);
 	},
@@ -600,12 +707,12 @@ const withPerfUserName = (
 ): ReadonlyArray<PerfUser> => users.map((user) => ({ ...user, name }));
 
 const ensureBrowserWasmLoaded = () => {
-	browserWasmInitPromise ??= initBrowserWasm(
-		new URL(
+	browserWasmInitPromise ??= initBrowserWasm({
+		module_or_path: new URL(
 			"../../../../engine/dist/browser-wasm/proseql_wasm_bg.wasm",
 			import.meta.url,
 		),
-	).then((wasmExports) => {
+	}).then((wasmExports) => {
 		window.__PROSEQL_WASM_MEMORY__ = wasmExports.memory;
 	});
 	return browserWasmInitPromise;

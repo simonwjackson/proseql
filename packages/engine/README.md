@@ -43,6 +43,21 @@ import { createEngineDatabase } from "@proseql/engine/browser"
 
 A browser or bundler loads the included browser WASM asset through `import.meta.url`. Do not copy a WASM file from a different package version: the loader rejects stale generated bindings. Applications that also need browser persistence normally install `@proseql/browser`, which re-exports this browser engine and provides localStorage, sessionStorage, and IndexedDB hosts.
 
+### Workers
+
+`@proseql/engine/worker` statically imports the matching browser WASM glue and
+exports `initializeWorkerWasmBindings`. This is required for service workers
+because the platform forbids dynamic `import()` there. Runtime detection treats
+window, service-worker, dedicated-worker, and Node scopes explicitly; a worker
+that has not initialized the static binding receives
+`WorkerWasmInitializationError` and never attempts Node builtins.
+
+`createServiceWorkerEngineDatabase` is the supported single-writer worker
+facade. It serializes the full operation stream and does not acknowledge a
+mutation before persistent storage completes. A failed durable flush quarantines
+and drops the in-memory runtime so a clean reopen cannot observe the rejected
+mutation.
+
 ## Effect API
 
 Install `@proseql/effect` when application code should receive `Effect` and `Stream` values instead of Promises. It uses this same Rust/WASM engine and reconstructs public tagged errors for Effect error handling.
