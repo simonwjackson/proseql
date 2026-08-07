@@ -33,10 +33,13 @@ mkBunDerivation {
     # workspace links. Development tools and platform binaries are excluded.
     mkdir -p $out/closure/node_modules/@proseql $out/closure/node_modules/@toon-format
     cp -LR node_modules/effect $out/closure/node_modules/
+    # mkBunDerivation installs the deterministic dependency closure at the
+    # workspace root. Never read package-scoped node_modules from the source:
+    # dirty path builds can contain them while clean Git/Nix sources cannot.
     for package in hjson json5 jsonc-parser picomatch smol-toml yaml; do
-      cp -LR packages/core/node_modules/$package $out/closure/node_modules/
+      cp -LR node_modules/$package $out/closure/node_modules/
     done
-    cp -LR packages/core/node_modules/@toon-format/toon $out/closure/node_modules/@toon-format/
+    cp -LR node_modules/@toon-format/toon $out/closure/node_modules/@toon-format/
 
     for package in core engine effect browser; do
       mkdir -p $out/packages/$package
