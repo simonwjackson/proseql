@@ -268,6 +268,44 @@ impl FormatCodec for JsonlCodec {
     }
 }
 
+/// Opt-in JSONL decoder that retains valid rows and substitutes line markers
+/// for malformed rows. A graph transform must consume these markers and report
+/// warnings with its path context. The built-in JSONL codec remains strict.
+#[derive(Debug, Clone, Copy)]
+pub struct LenientJsonlCodec;
+
+pub fn lenient_jsonl_codec() -> LenientJsonlCodec {
+    LenientJsonlCodec
+}
+
+impl FormatCodec for LenientJsonlCodec {
+    fn name(&self) -> &str {
+        "lenient-jsonl"
+    }
+    fn extensions(&self) -> &[&str] {
+        &["jsonl", "ndjson"]
+    }
+    fn encode(&self, data: &Value, options: Option<FormatOptions>) -> Result<String, String> {
+        let mut content = jsonl_codec().encode(data, options)?;
+        if matches!(data, Value::Array(rows) if !rows.is_empty()) {
+            content.push('\n');
+        }
+        Ok(content)
+    }
+    fn decode(&self, raw: &str) -> Result<Value, String> {
+        Ok(Value::Array(
+            jsonl_decode_lines(raw)
+                .into_iter()
+                .map(|line| {
+                    line.parsed.unwrap_or_else(
+                        || serde_json::json!({"__jsonlParseError": true, "line": line.line_number}),
+                    )
+                })
+                .collect(),
+        ))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct HjsonCodec {
     indent: usize,

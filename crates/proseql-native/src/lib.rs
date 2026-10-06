@@ -1,9 +1,14 @@
 //! Durable, long-running native proseQL runtime.
 //!
-//! The runtime owns one multi-collection database and one persisted source. It
-//! serializes mutations, writes the complete candidate source durably, and only
-//! then publishes the engine transaction. Failed persistence is rolled back
-//! before another caller can observe it.
+//! The runtime owns one database backed by either a single file or configured
+//! document and graph sources. It serializes mutations and publishes them only
+//! after durable persistence. Source-mode batches replace files individually;
+//! a write-stage failure quarantines the runtime because a prefix can be durable.
+
+mod read_snapshot;
+mod sources;
+use sources::SourceState;
+pub use sources::{NativeSourceRuntimeConfig, NativeSourceRuntimeOptions};
 
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
@@ -52,9 +57,20 @@ pub struct NativeRuntimeConfig {
 /// reversible transaction journal.
 pub struct NativeMutation<'a> {
     database: &'a mut Database,
+    read_only: Option<&'a IndexMap<String, String>>,
 }
 
 impl NativeMutation<'_> {
+    fn require_writable(&self, collection: &str) -> Result<(), EngineError> {
+        if let Some(source) = self.read_only.and_then(|owners| owners.get(collection)) {
+            return Err(operation_error(
+                "read-only-source",
+                format!("Collection '{collection}' is read-only, owned by source '{source}'"),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn find_by_id(&self, collection: &str, id: &str) -> Result<Option<Value>, EngineError> {
         let collection = self.database.collection(collection).ok_or_else(|| {
             operation_error(
@@ -66,6 +82,7 @@ impl NativeMutation<'_> {
     }
 
     pub fn create(&mut self, collection: &str, data: Value) -> Result<Value, EngineError> {
+        self.require_writable(collection)?;
         self.database.create(collection, data)
     }
 
@@ -75,6 +92,7 @@ impl NativeMutation<'_> {
         id: &str,
         updates: Value,
     ) -> Result<Value, EngineError> {
+        self.require_writable(collection)?;
         self.database.update(collection, id, updates)
     }
 
@@ -85,11 +103,13 @@ impl NativeMutation<'_> {
         expected_revision: u64,
         updates: Value,
     ) -> Result<Value, EngineError> {
+        self.require_writable(collection)?;
         self.database
             .update_if_revision(collection, id, expected_revision, updates)
     }
 
     pub fn delete(&mut self, collection: &str, id: &str) -> Result<Value, EngineError> {
+        self.require_writable(collection)?;
         self.database.delete(collection, id)
     }
 }
@@ -107,10 +127,11 @@ struct RuntimeCore {
 
 struct RuntimeState {
     config: NativeRuntimeConfig,
+    sources: Option<SourceState>,
     database: Database,
     formats: FormatRegistry,
     host: Arc<dyn DurableStorageHost>,
-    watch: Option<Box<dyn WatchHandle>>,
+    watch: Vec<Box<dyn WatchHandle>>,
     last_persisted_content: Option<String>,
     last_reload_error: Option<EngineError>,
     quarantine_error: Option<EngineError>,
@@ -150,6 +171,59 @@ impl NativeRuntime {
         let loaded =
             load_collections_from_file(host.as_ref(), &formats, &config.path, &load_configs, None)?;
         let source_content = host.read(&config.path).ok();
+        Self::from_loaded(config, host, formats, loaded, source_content, None)
+    }
+
+    /// Open writable documents and read-only graphs with default native services.
+    pub fn open_sources(config: NativeSourceRuntimeConfig) -> Result<Self, EngineError> {
+        Self::open_sources_with_options(config, NativeSourceRuntimeOptions::default())
+    }
+
+    pub fn open_sources_with_options(
+        config: NativeSourceRuntimeConfig,
+        options: NativeSourceRuntimeOptions,
+    ) -> Result<Self, EngineError> {
+        let host = Arc::new(FsStorageHost::new_polling(Duration::from_secs(2))?);
+        Self::open_sources_with_host(config, host, options)
+    }
+
+    pub fn open_sources_with_host(
+        config: NativeSourceRuntimeConfig,
+        host: Arc<dyn DurableStorageHost>,
+        options: NativeSourceRuntimeOptions,
+    ) -> Result<Self, EngineError> {
+        let normalized = SourceState::normalize(&config)?;
+        let descriptors = SourceState::descriptor_config(config);
+        validate_config(&descriptors)?;
+        let sources = SourceState::load(
+            host.as_ref(),
+            &options.formats,
+            normalized,
+            options.transforms,
+        )?;
+        let loaded = sources.collections();
+        let runtime = Self::from_loaded(
+            descriptors,
+            host,
+            options.formats,
+            loaded,
+            None,
+            Some(sources),
+        )?;
+        if let Some(debounce) = options.watch_debounce {
+            runtime.start_managed_watch(debounce)?;
+        }
+        Ok(runtime)
+    }
+
+    fn from_loaded(
+        config: NativeRuntimeConfig,
+        host: Arc<dyn DurableStorageHost>,
+        formats: FormatRegistry,
+        loaded: IndexMap<String, IndexMap<String, Value>>,
+        source_content: Option<String>,
+        sources: Option<SourceState>,
+    ) -> Result<Self, EngineError> {
         let registry = Arc::new(CallbackRegistry::new());
         let mut collections = IndexMap::new();
         for collection in &config.collections {
@@ -171,10 +245,11 @@ impl NativeRuntime {
             inner: Arc::new(RuntimeCore {
                 state: Mutex::new(RuntimeState {
                     config,
+                    sources,
                     database,
                     formats,
                     host,
-                    watch: None,
+                    watch: Vec::new(),
                     last_persisted_content: source_content,
                     last_reload_error: None,
                     quarantine_error: None,
@@ -243,11 +318,17 @@ impl NativeRuntime {
         f: impl FnOnce(&mut NativeMutation<'_>) -> Result<R, EngineError>,
     ) -> Result<R, EngineError> {
         let mut state = self.lock_open()?;
+        let read_only = state
+            .sources
+            .as_ref()
+            .map(|sources| sources.graph.owned_collections.clone());
         let mut session = state.database.begin_owned_transaction()?;
-        let result = match state
-            .database
-            .transaction_step(&mut session, |database| f(&mut NativeMutation { database }))
-        {
+        let result = match state.database.transaction_step(&mut session, |database| {
+            f(&mut NativeMutation {
+                database,
+                read_only: read_only.as_ref(),
+            })
+        }) {
             Ok(result) => result,
             Err(error) => {
                 rollback_preserving_original(&self.inner, &mut state, session, &error);
@@ -255,6 +336,48 @@ impl NativeRuntime {
             }
         };
         let candidate = state.database.snapshot_all_collection_states();
+        if let Some(sources) = &state.sources {
+            let plan = sources.plan(&state.formats, &candidate).and_then(|plan| {
+                sources.check_conflicts(state.host.as_ref(), &plan.0)?;
+                for name in session.touched_collections() {
+                    if sources.graph.owned_collections.contains_key(name) {
+                        return Err(operation_error(
+                            "read-only-source",
+                            format!("Transaction changed read-only collection '{name}'"),
+                        ));
+                    }
+                }
+                Ok(plan)
+            });
+            let (writes, next) = match plan {
+                Ok(plan) => plan,
+                Err(error) => {
+                    rollback_preserving_original(&self.inner, &mut state, session, &error);
+                    return Err(error);
+                }
+            };
+            let mut completed = Vec::new();
+            for write in &writes {
+                if let Err(cause) = state.host.replace_durable(&write.path, &write.content) {
+                    let error = operation_error("source-write-failed", format!("Durable source write failed at '{}'; completed paths: {:?}; cause: {cause}. Reopen and inspect before retrying", write.path, completed));
+                    rollback_preserving_original(&self.inner, &mut state, session, &error);
+                    state.quarantine_error = Some(error.clone());
+                    return Err(error);
+                }
+                completed.push(write.path.clone());
+            }
+            if let Err(error) = state.database.commit_owned_transaction(session) {
+                state.quarantine_error = Some(error.clone());
+                return Err(error);
+            }
+            state.database.take_committed_changes();
+            let sources = state.sources.as_mut().expect("source mode remains active");
+            sources.documents = next;
+            for write in writes {
+                sources.contents.insert(write.path, write.content);
+            }
+            return Ok(result);
+        }
         let content = match serialize_candidate(&state.config, &state.formats, &candidate) {
             Ok(content) => content,
             Err(error) => {
@@ -276,12 +399,19 @@ impl NativeRuntime {
         Ok(result)
     }
 
-    /// Validate and durably replace every collection from this source at once.
+    /// Validate and durably replace every collection in single-file mode.
+    /// Source mode rejects bulk replacement; use guarded `mutate` instead.
     pub fn replace_all(
         &self,
         candidate: IndexMap<String, IndexMap<String, Value>>,
     ) -> Result<(), EngineError> {
         let mut state = self.lock_open()?;
+        if state.sources.is_some() {
+            return Err(operation_error(
+                "unsupported-operation",
+                "Use mutate for source-mode writes",
+            ));
+        }
         let content = serialize_candidate(&state.config, &state.formats, &candidate)?;
 
         // Round-trip through the strict loader before either disk or visible
@@ -321,22 +451,47 @@ impl NativeRuntime {
         Ok(state.last_reload_error.clone())
     }
 
-    /// Start one managed, debounced source watch. Self-write notifications are
-    /// suppressed by comparing the complete persisted source content.
+    /// Graph fragment diagnostics from the last accepted source snapshot.
+    /// Custom transforms report line warnings through their own injected sink.
+    pub fn document_graph_diagnostics(
+        &self,
+    ) -> Result<Vec<proseql_storage::document_graph::DocumentGraphDiagnostic>, EngineError> {
+        let state = self.lock_open()?;
+        Ok(state
+            .sources
+            .as_ref()
+            .map(|sources| sources.graph.diagnostics.clone())
+            .unwrap_or_default())
+    }
+
+    /// Start managed, debounced watches. Source mode watches source directories
+    /// and existing ancestors of missing optional roots. Unchanged reloads do
+    /// not publish collection changes.
     pub fn start_managed_watch(&self, debounce: Duration) -> Result<(), EngineError> {
         let mut state = self.lock_open()?;
-        if state.watch.is_some() {
+        if !state.watch.is_empty() {
             return Err(operation_error(
                 "watch-active",
                 "A managed watch is already active",
             ));
         }
-        let weak = Arc::downgrade(&self.inner);
-        let handle = state.host.watch(
-            &state.config.path,
-            Box::new(move |_| schedule_reload(&weak, debounce)),
-        )?;
-        state.watch = Some(handle);
+        let mut handles = Vec::new();
+        if let Some(sources) = &state.sources {
+            for root in sources.watch_roots(state.host.as_ref())? {
+                let weak = Arc::downgrade(&self.inner);
+                let handle = state
+                    .host
+                    .watch_dir(&root, Box::new(move |_| schedule_reload(&weak, debounce)))?;
+                handles.push(handle);
+            }
+        } else {
+            let weak = Arc::downgrade(&self.inner);
+            handles.push(state.host.watch(
+                &state.config.path,
+                Box::new(move |_| schedule_reload(&weak, debounce)),
+            )?);
+        }
+        state.watch = handles;
         Ok(())
     }
 
@@ -373,10 +528,14 @@ impl NativeRuntime {
             .lock()
             .map_err(|_| operation_error("poisoned", "Native runtime lock is poisoned"))?;
         let flush_result = persist_current(&mut state);
-        let stop_result = match state.watch.take() {
-            Some(handle) => handle.stop(),
-            None => Ok(()),
-        };
+        let mut stop_result = Ok(());
+        for handle in state.watch.drain(..) {
+            if let Err(error) = handle.stop() {
+                if stop_result.is_ok() {
+                    stop_result = Err(error);
+                }
+            }
+        }
         self.inner.lifecycle.store(CLOSED, Ordering::Release);
         flush_result.and(stop_result)
     }
@@ -424,7 +583,7 @@ fn schedule_reload(weak: &Weak<RuntimeCore>, debounce: Duration) {
             return;
         }
         if let Ok(mut state) = core.state.lock() {
-            if core.lifecycle.load(Ordering::Acquire) == OPEN {
+            if core.lifecycle.load(Ordering::Acquire) == OPEN && state.quarantine_error.is_none() {
                 let _ = reload_locked(&mut state, true);
             }
         };
@@ -433,6 +592,20 @@ fn schedule_reload(weak: &Weak<RuntimeCore>, debounce: Duration) {
 
 fn reload_locked(state: &mut RuntimeState, suppress_self_write: bool) -> Result<(), EngineError> {
     let result: Result<(), EngineError> = (|| {
+        if let Some(sources) = &state.sources {
+            let next = SourceState::load(
+                state.host.as_ref(),
+                &state.formats,
+                sources.config.clone(),
+                sources.transforms.clone(),
+            )?;
+            state
+                .database
+                .commit_snapshot_transaction(states_to_records(next.collections()))?;
+            state.database.take_committed_changes();
+            state.sources = Some(next);
+            return Ok(());
+        }
         let content = state.host.read(&state.config.path)?;
         if suppress_self_write && state.last_persisted_content.as_deref() == Some(&content) {
             return Ok(());
@@ -464,6 +637,9 @@ fn reload_locked(state: &mut RuntimeState, suppress_self_write: bool) -> Result<
 }
 
 fn persist_current(state: &mut RuntimeState) -> Result<(), EngineError> {
+    if state.sources.is_some() {
+        return Ok(());
+    }
     let snapshot = state.database.snapshot_all_collection_states();
     let content = serialize_candidate(&state.config, &state.formats, &snapshot)?;
     state.host.replace_durable(&state.config.path, &content)?;

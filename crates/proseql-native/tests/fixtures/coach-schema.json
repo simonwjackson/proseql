@@ -1,0 +1,4357 @@
+{
+  "legacySchemaSha256": "2bab302b8c52f5e859e8637d953c6e6193ee861ed0b5bbc7a51028139aed3bed",
+  "collections": [
+    {
+      "name": "settings",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "weekLabel",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "dateLabel",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "startDate",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "restSeconds",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "autoAdvance",
+            "schema": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "proteinTarget",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "fatBudget",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "baseBudget",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "stepsBonus",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "baseBudgetLabel",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "stepsLabel",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "budgetResultLabel",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "entryPlaceholder",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "activePlan",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "planAutonomy",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "literalUnion",
+                "values": [
+                  "propose",
+                  "auto"
+                ]
+              }
+            }
+          },
+          {
+            "name": "displayWeightUnit",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "literalUnion",
+                "values": [
+                  "kg",
+                  "lb"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "readiness",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "morning",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "rested",
+                "short sleep"
+              ]
+            }
+          },
+          {
+            "name": "heroLabel",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "heroDelta",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "heroCaption",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "footerLeft",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "footerRight",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "trimmedHeadline",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "trimmedRationale",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "trimmedEvidence",
+            "schema": {
+              "kind": "array",
+              "item": {
+                "kind": "struct",
+                "fields": [
+                  {
+                    "name": "statement",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "source",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "tone",
+                    "schema": {
+                      "kind": "literalUnion",
+                      "values": [
+                        "ring",
+                        "log",
+                        "talk"
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "reassurance",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "trim",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "array",
+                "item": {
+                  "kind": "struct",
+                  "fields": [
+                    {
+                      "name": "liftId",
+                      "schema": {
+                        "kind": "str"
+                      }
+                    },
+                    {
+                      "name": "sets",
+                      "schema": {
+                        "kind": "num"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "lifts",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "order",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "name",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "detailLabel",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "unit",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "kg",
+                "reps"
+              ]
+            }
+          },
+          {
+            "name": "current",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "tone",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "signal",
+                "grey",
+                "amber"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "deltaLabel",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "caption",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "note",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "equipmentKind",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "literalUnion",
+                "values": [
+                  "barbell"
+                ]
+              }
+            }
+          },
+          {
+            "name": "barId",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "startStyle",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "literalUnion",
+                "values": [
+                  "rack",
+                  "floor"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "series",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "points",
+            "schema": {
+              "kind": "array",
+              "item": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "splitFrom",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "gains",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "liftId",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "order",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "dateLabel",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "from",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "to",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "seriesIdx",
+            "schema": {
+              "kind": "num"
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [
+        [
+          "lift",
+          {
+            "kind": "ref",
+            "target": "lifts",
+            "foreign_key": "liftId"
+          }
+        ]
+      ],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "plans",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "order",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "morning",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "rested",
+                "short sleep"
+              ]
+            }
+          },
+          {
+            "name": "sessionLabel",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "title",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "meta",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "startLabel",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "items",
+            "schema": {
+              "kind": "array",
+              "item": {
+                "kind": "struct",
+                "fields": [
+                  {
+                    "name": "liftId",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "name",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "sets",
+                    "schema": {
+                      "kind": "num"
+                    }
+                  },
+                  {
+                    "name": "target",
+                    "schema": {
+                      "kind": "num"
+                    }
+                  },
+                  {
+                    "name": "load",
+                    "schema": {
+                      "kind": "num"
+                    }
+                  },
+                  {
+                    "name": "prescription",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "note",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "noteTone",
+                    "schema": {
+                      "kind": "literalUnion",
+                      "values": [
+                        "amber",
+                        "grey"
+                      ]
+                    }
+                  },
+                  {
+                    "name": "signal",
+                    "schema": {
+                      "kind": "bool"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "days",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "date",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "eatenP",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "eatenK",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "fatEaten",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "draftOpen",
+            "schema": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "draftTitle",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "draftStarted",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "draftConfirmTyped",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "fatCaption",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "fatNote",
+            "schema": {
+              "kind": "str"
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "draftItems",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "order",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "name",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "meta",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "amber",
+            "schema": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "p",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "k",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "f",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "presets",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "array",
+                "item": {
+                  "kind": "struct",
+                  "fields": [
+                    {
+                      "name": "label",
+                      "schema": {
+                        "kind": "str"
+                      }
+                    },
+                    {
+                      "name": "p",
+                      "schema": {
+                        "kind": "num"
+                      }
+                    },
+                    {
+                      "name": "k",
+                      "schema": {
+                        "kind": "num"
+                      }
+                    },
+                    {
+                      "name": "f",
+                      "schema": {
+                        "kind": "optional",
+                        "inner": {
+                          "kind": "num"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "foods",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "order",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "name",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "note",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "p",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "k",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "f",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "highlighted",
+            "schema": {
+              "kind": "bool"
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "recipes",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "typed",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "match",
+            "schema": {
+              "kind": "array",
+              "item": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "items",
+            "schema": {
+              "kind": "array",
+              "item": {
+                "kind": "struct",
+                "fields": [
+                  {
+                    "name": "name",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "meta",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "confident",
+                    "schema": {
+                      "kind": "bool"
+                    }
+                  },
+                  {
+                    "name": "p",
+                    "schema": {
+                      "kind": "num"
+                    }
+                  },
+                  {
+                    "name": "k",
+                    "schema": {
+                      "kind": "num"
+                    }
+                  },
+                  {
+                    "name": "f",
+                    "schema": {
+                      "kind": "optional",
+                      "inner": {
+                        "kind": "num"
+                      }
+                    }
+                  },
+                  {
+                    "name": "presets",
+                    "schema": {
+                      "kind": "optional",
+                      "inner": {
+                        "kind": "array",
+                        "item": {
+                          "kind": "struct",
+                          "fields": [
+                            {
+                              "name": "label",
+                              "schema": {
+                                "kind": "str"
+                              }
+                            },
+                            {
+                              "name": "p",
+                              "schema": {
+                                "kind": "num"
+                              }
+                            },
+                            {
+                              "name": "k",
+                              "schema": {
+                                "kind": "num"
+                              }
+                            },
+                            {
+                              "name": "f",
+                              "schema": {
+                                "kind": "optional",
+                                "inner": {
+                                  "kind": "num"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "name": "provenance",
+                    "schema": {
+                      "kind": "optional",
+                      "inner": {
+                        "kind": "struct",
+                        "fields": [
+                          {
+                            "name": "tier",
+                            "schema": {
+                              "kind": "literalUnion",
+                              "values": [
+                                "book",
+                                "cache",
+                                "fatsecret",
+                                "usda",
+                                "off",
+                                "estimate"
+                              ]
+                            }
+                          },
+                          {
+                            "name": "providerId",
+                            "schema": {
+                              "kind": "optional",
+                              "inner": {
+                                "kind": "str"
+                              }
+                            }
+                          },
+                          {
+                            "name": "servingLabel",
+                            "schema": {
+                              "kind": "optional",
+                              "inner": {
+                                "kind": "str"
+                              }
+                            }
+                          },
+                          {
+                            "name": "gramWeight",
+                            "schema": {
+                              "kind": "optional",
+                              "inner": {
+                                "kind": "num"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "voiceQueue",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "order",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "heard",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "name",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "short",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "time",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "meta",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "amber",
+            "schema": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "p",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "k",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "f",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "presets",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "array",
+                "item": {
+                  "kind": "struct",
+                  "fields": [
+                    {
+                      "name": "label",
+                      "schema": {
+                        "kind": "str"
+                      }
+                    },
+                    {
+                      "name": "p",
+                      "schema": {
+                        "kind": "num"
+                      }
+                    },
+                    {
+                      "name": "k",
+                      "schema": {
+                        "kind": "num"
+                      }
+                    },
+                    {
+                      "name": "f",
+                      "schema": {
+                        "kind": "optional",
+                        "inner": {
+                          "kind": "num"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "recomp",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kicker",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "title",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "body",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "methodology",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "drillLabel",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "stats",
+            "schema": {
+              "kind": "array",
+              "item": {
+                "kind": "struct",
+                "fields": [
+                  {
+                    "name": "value",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "label",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "tone",
+                    "schema": {
+                      "kind": "literalUnion",
+                      "values": [
+                        "signal",
+                        "grey",
+                        "amber"
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "proposals",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "at",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "kind",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "planChange",
+                "deload"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "open",
+                "accepted",
+                "dismissed"
+              ]
+            }
+          },
+          {
+            "name": "session",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "planId",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "liftId",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "liftName",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "fromLoad",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "toLoad",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "fromSets",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "toSets",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "note",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "rationale",
+            "schema": {
+              "kind": "str"
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "sessions",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "at",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "planId",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "planTitle",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "sessionLabel",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "trimmed",
+            "schema": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "items",
+            "schema": {
+              "kind": "array",
+              "item": {
+                "kind": "struct",
+                "fields": [
+                  {
+                    "name": "liftId",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "name",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "sets",
+                    "schema": {
+                      "kind": "num"
+                    }
+                  },
+                  {
+                    "name": "target",
+                    "schema": {
+                      "kind": "num"
+                    }
+                  },
+                  {
+                    "name": "load",
+                    "schema": {
+                      "kind": "num"
+                    }
+                  },
+                  {
+                    "name": "prescription",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "note",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "noteTone",
+                    "schema": {
+                      "kind": "literalUnion",
+                      "values": [
+                        "amber",
+                        "grey"
+                      ]
+                    }
+                  },
+                  {
+                    "name": "signal",
+                    "schema": {
+                      "kind": "bool"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "askedItems",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "array",
+                "item": {
+                  "kind": "struct",
+                  "fields": [
+                    {
+                      "name": "liftId",
+                      "schema": {
+                        "kind": "str"
+                      }
+                    },
+                    {
+                      "name": "name",
+                      "schema": {
+                        "kind": "str"
+                      }
+                    },
+                    {
+                      "name": "sets",
+                      "schema": {
+                        "kind": "num"
+                      }
+                    },
+                    {
+                      "name": "target",
+                      "schema": {
+                        "kind": "num"
+                      }
+                    },
+                    {
+                      "name": "load",
+                      "schema": {
+                        "kind": "num"
+                      }
+                    },
+                    {
+                      "name": "prescription",
+                      "schema": {
+                        "kind": "str"
+                      }
+                    },
+                    {
+                      "name": "note",
+                      "schema": {
+                        "kind": "str"
+                      }
+                    },
+                    {
+                      "name": "noteTone",
+                      "schema": {
+                        "kind": "literalUnion",
+                        "values": [
+                          "amber",
+                          "grey"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "signal",
+                      "schema": {
+                        "kind": "bool"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "name": "chosenLifts",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "array",
+                "item": {
+                  "kind": "str"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "setLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sessionId",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "liftId",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "liftName",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "setIdx",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "reps",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "target",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "load",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "effort",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "clean",
+                "grind",
+                "pain"
+              ]
+            }
+          },
+          {
+            "name": "at",
+            "schema": {
+              "kind": "num"
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "mealLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "name",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "source",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "meal",
+                "draft",
+                "suggestion"
+              ]
+            }
+          },
+          {
+            "name": "p",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "k",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "f",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "at",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "resolved",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "bool"
+              }
+            }
+          },
+          {
+            "name": "provenance",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "struct",
+                "fields": [
+                  {
+                    "name": "tier",
+                    "schema": {
+                      "kind": "literalUnion",
+                      "values": [
+                        "book",
+                        "cache",
+                        "fatsecret",
+                        "usda",
+                        "off",
+                        "estimate"
+                      ]
+                    }
+                  },
+                  {
+                    "name": "providerId",
+                    "schema": {
+                      "kind": "optional",
+                      "inner": {
+                        "kind": "str"
+                      }
+                    }
+                  },
+                  {
+                    "name": "servingLabel",
+                    "schema": {
+                      "kind": "optional",
+                      "inner": {
+                        "kind": "str"
+                      }
+                    }
+                  },
+                  {
+                    "name": "gramWeight",
+                    "schema": {
+                      "kind": "optional",
+                      "inner": {
+                        "kind": "num"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "bodyweightLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "at",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "kg",
+            "schema": {
+              "kind": "num"
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "waistLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "at",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "value",
+            "schema": {
+              "kind": "num"
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "recoveryLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "at",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "hrv",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "restingHeartRate",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "sleepHours",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "efficiency",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "tempDeviation",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "source",
+            "schema": {
+              "kind": "str"
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "withingsWeightLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "at",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "kg",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "day",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "sourceDay",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "sourceTimezone",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "attribution",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "deviceConfirmed"
+              ]
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraActivityLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "score",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "activeCalories",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "totalCalories",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "targetCalories",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "steps",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "equivalentWalkingDistance",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "sedentaryMinutes",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "lowActivityMinutes",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "mediumActivityMinutes",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "highActivityMinutes",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "nonWearMinutes",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "restingTimeMinutes",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraReadinessLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "score",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "temperatureDeviation",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "temperatureTrendDeviation",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "hrvBalance",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "previousDayActivity",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "previousNight",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "recoveryIndex",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "restingHeartRate",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "sleepBalance",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraDailySleepLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "score",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "deepSleep",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "efficiency",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "latency",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "remSleep",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "restfulness",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "timing",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "totalSleep",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraSleepNightLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "sourceId",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "bedtimeStart",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "bedtimeEnd",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "timezone",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "type",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "totalSleepSeconds",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "awakeSeconds",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "lightSleepSeconds",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "remSleepSeconds",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "deepSleepSeconds",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "efficiency",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "averageHeartRate",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "lowestHeartRate",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "averageHrv",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "readinessScoreDelta",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraSpo2Log",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "average",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "breathingDisturbanceIndex",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraStressLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "stressHighMinutes",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "stressMediumMinutes",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "stressLowMinutes",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "recoveryHighMinutes",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "daySummary",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraResilienceLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "level",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "score",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraCardioAgeLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "vascularAge",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraVo2MaxLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "vo2Max",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraWorkoutLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "at",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "activity",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "intensity",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "source",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "calories",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "distance",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "durationSeconds",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraSessionLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "startAt",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "endAt",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "type",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "mood",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "heartRateAverage",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraSleepTimeLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "status",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "dayTz",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "startOffset",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "endOffset",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraRestModeLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "startDay",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "endDay",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraTagLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "tag",
+                "enhanced_tag"
+              ]
+            }
+          },
+          {
+            "name": "at",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "day",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "text",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          },
+          {
+            "name": "tagTypeCode",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "str"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "ouraHeartRateDailyLog",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "resting",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "min",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "max",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "mean",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "awakeMean",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "sleepMean",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          },
+          {
+            "name": "samples",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "num"
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "weekReads",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "weekStart",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "text",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "at",
+            "schema": {
+              "kind": "num"
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "goals",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "metricId",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "startAt",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "startValue",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "targetValue",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "targetAt",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "status",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "active",
+                "complete",
+                "abandoned"
+              ]
+            }
+          },
+          {
+            "name": "phasePolicy",
+            "schema": {
+              "kind": "struct",
+              "fields": [
+                {
+                  "name": "calibrationWeeks",
+                  "schema": {
+                    "kind": "num"
+                  }
+                },
+                {
+                  "name": "workWeeks",
+                  "schema": {
+                    "kind": "num"
+                  }
+                },
+                {
+                  "name": "recoveryWeeks",
+                  "schema": {
+                    "kind": "num"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "confirmation",
+            "schema": {
+              "kind": "struct",
+              "fields": [
+                {
+                  "name": "confirmWeeks",
+                  "schema": {
+                    "kind": "num"
+                  }
+                },
+                {
+                  "name": "corroboratingMetricIds",
+                  "schema": {
+                    "kind": "array",
+                    "item": {
+                      "kind": "str"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "constraints",
+            "schema": {
+              "kind": "struct",
+              "fields": [
+                {
+                  "name": "minDailyIntake",
+                  "schema": {
+                    "kind": "num"
+                  }
+                },
+                {
+                  "name": "maxIntakeStep",
+                  "schema": {
+                    "kind": "num"
+                  }
+                },
+                {
+                  "name": "maxDailyDeficit",
+                  "schema": {
+                    "kind": "num"
+                  }
+                },
+                {
+                  "name": "maxWeeklyLossFraction",
+                  "schema": {
+                    "kind": "num"
+                  }
+                },
+                {
+                  "name": "minWeeksBetweenAdjustments",
+                  "schema": {
+                    "kind": "num"
+                  }
+                },
+                {
+                  "name": "minPlausibleMaintenancePerKg",
+                  "schema": {
+                    "kind": "num"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "minIntakeCoverage",
+            "schema": {
+              "kind": "num"
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "interventions",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "at",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "goalId",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "kind",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "collectEvidence",
+                "holdCourse",
+                "reduceIntake",
+                "addActivity",
+                "raiseIntake",
+                "recoveryBreak",
+                "auditAdherence",
+                "reviseGoal"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "open",
+                "accepted",
+                "dismissed"
+              ]
+            }
+          },
+          {
+            "name": "headline",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "rationale",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "change",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "struct",
+                "fields": [
+                  {
+                    "name": "label",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "from",
+                    "schema": {
+                      "kind": "num"
+                    }
+                  },
+                  {
+                    "name": "to",
+                    "schema": {
+                      "kind": "num"
+                    }
+                  },
+                  {
+                    "name": "unit",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [
+        [
+          "goal",
+          {
+            "kind": "ref",
+            "target": "goals",
+            "foreign_key": "goalId"
+          }
+        ]
+      ],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "barbellBars",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "name",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "weightKg",
+            "schema": {
+              "kind": "num"
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "barbellDiscs",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "denominationKg",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "count",
+            "schema": {
+              "kind": "num"
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "calibrations",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "at",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "changedAt",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "status",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "pending",
+                "ready",
+                "failed",
+                "consumed",
+                "cancelled"
+              ]
+            }
+          },
+          {
+            "name": "mode",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "automatic",
+                "explicitPartial"
+              ]
+            }
+          },
+          {
+            "name": "authority",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "system",
+                "brain",
+                "session-start",
+                "confirmed-user"
+              ]
+            }
+          },
+          {
+            "name": "activeSessionGroup",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "evidenceIdentity",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "recoveryState",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "Recovered",
+                "Mixed",
+                "UnderRecovered",
+                "MissingOrStale"
+              ]
+            }
+          },
+          {
+            "name": "sourcePlanIdentity",
+            "schema": {
+              "kind": "array",
+              "item": {
+                "kind": "struct",
+                "fields": [
+                  {
+                    "name": "id",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "session",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "morning",
+                    "schema": {
+                      "kind": "literalUnion",
+                      "values": [
+                        "rested",
+                        "short sleep"
+                      ]
+                    }
+                  },
+                  {
+                    "name": "items",
+                    "schema": {
+                      "kind": "array",
+                      "item": {
+                        "kind": "struct",
+                        "fields": [
+                          {
+                            "name": "liftId",
+                            "schema": {
+                              "kind": "str"
+                            }
+                          },
+                          {
+                            "name": "sets",
+                            "schema": {
+                              "kind": "num"
+                            }
+                          },
+                          {
+                            "name": "target",
+                            "schema": {
+                              "kind": "num"
+                            }
+                          },
+                          {
+                            "name": "load",
+                            "schema": {
+                              "kind": "num"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "resultingPlanIdentity",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "array",
+                "item": {
+                  "kind": "struct",
+                  "fields": [
+                    {
+                      "name": "id",
+                      "schema": {
+                        "kind": "str"
+                      }
+                    },
+                    {
+                      "name": "session",
+                      "schema": {
+                        "kind": "str"
+                      }
+                    },
+                    {
+                      "name": "morning",
+                      "schema": {
+                        "kind": "literalUnion",
+                        "values": [
+                          "rested",
+                          "short sleep"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "items",
+                      "schema": {
+                        "kind": "array",
+                        "item": {
+                          "kind": "struct",
+                          "fields": [
+                            {
+                              "name": "liftId",
+                              "schema": {
+                                "kind": "str"
+                              }
+                            },
+                            {
+                              "name": "sets",
+                              "schema": {
+                                "kind": "num"
+                              }
+                            },
+                            {
+                              "name": "target",
+                              "schema": {
+                                "kind": "num"
+                              }
+                            },
+                            {
+                              "name": "load",
+                              "schema": {
+                                "kind": "num"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "name": "result",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "struct",
+                "fields": [
+                  {
+                    "name": "outcome",
+                    "schema": {
+                      "kind": "literalUnion",
+                      "values": [
+                        "hold",
+                        "temporaryOverlay",
+                        "durableCorrection"
+                      ]
+                    }
+                  },
+                  {
+                    "name": "rationale",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "evidenceRefs",
+                    "schema": {
+                      "kind": "array",
+                      "item": {
+                        "kind": "str"
+                      }
+                    }
+                  },
+                  {
+                    "name": "overlayItems",
+                    "schema": {
+                      "kind": "optional",
+                      "inner": {
+                        "kind": "array",
+                        "item": {
+                          "kind": "struct",
+                          "fields": [
+                            {
+                              "name": "liftId",
+                              "schema": {
+                                "kind": "str"
+                              }
+                            },
+                            {
+                              "name": "sets",
+                              "schema": {
+                                "kind": "num"
+                              }
+                            },
+                            {
+                              "name": "target",
+                              "schema": {
+                                "kind": "num"
+                              }
+                            },
+                            {
+                              "name": "load",
+                              "schema": {
+                                "kind": "num"
+                              }
+                            },
+                            {
+                              "name": "note",
+                              "schema": {
+                                "kind": "optional",
+                                "inner": {
+                                  "kind": "str"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "name": "acceptedProposalIds",
+                    "schema": {
+                      "kind": "optional",
+                      "inner": {
+                        "kind": "array",
+                        "item": {
+                          "kind": "str"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "name": "planUpdateIds",
+                    "schema": {
+                      "kind": "optional",
+                      "inner": {
+                        "kind": "array",
+                        "item": {
+                          "kind": "str"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "failure",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "struct",
+                "fields": [
+                  {
+                    "name": "reason",
+                    "schema": {
+                      "kind": "literalUnion",
+                      "values": [
+                        "model",
+                        "timeout",
+                        "invalid",
+                        "stale",
+                        "interrupted"
+                      ]
+                    }
+                  },
+                  {
+                    "name": "message",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "fence",
+            "schema": {
+              "kind": "optional",
+              "inner": {
+                "kind": "struct",
+                "fields": [
+                  {
+                    "name": "at",
+                    "schema": {
+                      "kind": "num"
+                    }
+                  },
+                  {
+                    "name": "sessionId",
+                    "schema": {
+                      "kind": "str"
+                    }
+                  },
+                  {
+                    "name": "reason",
+                    "schema": {
+                      "kind": "literal",
+                      "value": "session-started"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    },
+    {
+      "name": "foodResolutionCache",
+      "schema": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "name",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "unit",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "tier",
+            "schema": {
+              "kind": "literalUnion",
+              "values": [
+                "fatsecret",
+                "usda",
+                "off"
+              ]
+            }
+          },
+          {
+            "name": "providerId",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "servingLabel",
+            "schema": {
+              "kind": "str"
+            }
+          },
+          {
+            "name": "gramWeight",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "protein",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "energy",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "fat",
+            "schema": {
+              "kind": "num"
+            }
+          },
+          {
+            "name": "fetchedAt",
+            "schema": {
+              "kind": "num"
+            }
+          }
+        ]
+      },
+      "id_strategy": {
+        "kind": "derivedFromKey"
+      },
+      "relationships": [],
+      "indexes": [],
+      "unique_fields": [],
+      "before_create_hooks": [],
+      "after_create_hooks": [],
+      "before_update_hooks": [],
+      "after_update_hooks": [],
+      "before_delete_hooks": [],
+      "after_delete_hooks": [],
+      "on_change_hooks": [],
+      "computed_fields": [],
+      "search_index": [],
+      "id_generator": null,
+      "version": null,
+      "migrations": [],
+      "append_only": false,
+      "validation_mode": "strict"
+    }
+  ],
+  "ouraFiles": {
+    "ouraActivityLog": "oura/activity.jsonl",
+    "ouraReadinessLog": "oura/readiness.jsonl",
+    "ouraDailySleepLog": "oura/daily-sleep.jsonl",
+    "ouraSleepNightLog": "oura/sleep-nights.jsonl",
+    "ouraSpo2Log": "oura/spo2.jsonl",
+    "ouraStressLog": "oura/stress.jsonl",
+    "ouraResilienceLog": "oura/resilience.jsonl",
+    "ouraCardioAgeLog": "oura/cardio-age.jsonl",
+    "ouraVo2MaxLog": "oura/vo2-max.jsonl",
+    "ouraWorkoutLog": "oura/workouts.jsonl",
+    "ouraSessionLog": "oura/sessions.jsonl",
+    "ouraSleepTimeLog": "oura/sleep-time.jsonl",
+    "ouraRestModeLog": "oura/rest-mode.jsonl",
+    "ouraTagLog": "oura/tags.jsonl",
+    "ouraHeartRateDailyLog": "oura/heart-rate-daily.jsonl"
+  }
+}

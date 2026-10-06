@@ -45,6 +45,43 @@ pub struct SaveDocumentSourceInput {
     pub documents: Vec<LoadedDocument>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlannedDocumentWrite {
+    pub path: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentSourceWritePlan {
+    pub writes: Vec<PlannedDocumentWrite>,
+    pub saved: SavedDocumentSource,
+}
+
+// Persistence compares structure, with JS Number semantics at scalar leaves.
+// serde_json's integer/float distinction must not turn 1 -> 1.0 into a rewrite.
+fn same_persisted_value(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Object(left), Value::Object(right)) => same_persisted_map(left, right),
+        (Value::Array(left), Value::Array(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(value, other)| same_persisted_value(value, other))
+        }
+        _ => proseql_engine::validator::js_eq(left, right),
+    }
+}
+
+fn same_persisted_map(left: &Map<String, Value>, right: &Map<String, Value>) -> bool {
+    left.len() == right.len()
+        && left.iter().all(|(key, value)| {
+            right
+                .get(key)
+                .is_some_and(|other| same_persisted_value(value, other))
+        })
+}
+
 fn origin_key(collection: &str, id: &str) -> String {
     format!("{collection}\u{0}{id}")
 }
@@ -357,6 +394,22 @@ pub fn save_document_source(
     input: SaveDocumentSourceInput,
     _migration_host: Option<&dyn MigrationHost>,
 ) -> Result<SavedDocumentSource, EngineError> {
+    let plan = plan_document_source(formats, input, None)?;
+    for write in plan.writes {
+        host.ensure_dir(&write.path)?;
+        host.write(&write.path, &write.content)?;
+    }
+    Ok(plan.saved)
+}
+
+/// Project a source without performing I/O. With a prior decoded snapshot,
+/// only net changed entities are encoded, retaining untouched raw payloads.
+/// All serialization completes before a caller can start writing.
+pub fn plan_document_source(
+    formats: &FormatRegistry,
+    input: SaveDocumentSourceInput,
+    previous: Option<&IndexMap<String, IndexMap<String, Value>>>,
+) -> Result<DocumentSourceWritePlan, EngineError> {
     let source = input
         .config
         .sources
@@ -385,7 +438,11 @@ pub fn save_document_source(
     {
         projected_by_path.insert(
             document.path.clone(),
-            clone_document_for_source(document, &source, &input.config),
+            if previous.is_some() {
+                document.data.clone()
+            } else {
+                clone_document_for_source(document, &source, &input.config)
+            },
         );
     }
 
@@ -426,6 +483,14 @@ pub fn save_document_source(
                 if existing_origin.source_id != source.id {
                     continue;
                 }
+            }
+            if previous
+                .and_then(|collections| collections.get(collection_name))
+                .and_then(|records| records.get(id))
+                .is_some_and(|before| same_persisted_value(before, entity))
+                && existing_origin.is_some()
+            {
+                continue;
             }
             let path = existing_origin
                 .map(|origin| origin.path.clone())
@@ -469,6 +534,7 @@ pub fn save_document_source(
         }
     }
 
+    let original_documents = input.documents.clone();
     let mut merged_documents = input
         .documents
         .into_iter()
@@ -476,6 +542,12 @@ pub fn save_document_source(
         .collect::<Vec<_>>();
     let writes = projected_by_path
         .iter()
+        .filter(|(path, data)| {
+            original_documents
+                .iter()
+                .find(|document| document.source_id == source.id && document.path == **path)
+                .is_none_or(|document| !same_persisted_map(&document.data, data))
+        })
         .map(|(path, data)| {
             formats
                 .serialize(&Value::Object(data.clone()), &source.format, None)
@@ -483,9 +555,7 @@ pub fn save_document_source(
                 .map_err(crate::persistence::format_error)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    for (path, raw, data) in writes {
-        host.ensure_dir(&path)?;
-        host.write(&path, &raw)?;
+    for (path, data) in projected_by_path {
         merged_documents.push(LoadedDocument {
             source_id: source.id.clone(),
             path,
@@ -494,8 +564,14 @@ pub fn save_document_source(
     }
     merged_documents.sort_by(|left, right| left.path.cmp(&right.path));
 
-    Ok(SavedDocumentSource {
-        origins: new_origins,
-        documents: merged_documents,
+    Ok(DocumentSourceWritePlan {
+        writes: writes
+            .into_iter()
+            .map(|(path, content, _)| PlannedDocumentWrite { path, content })
+            .collect(),
+        saved: SavedDocumentSource {
+            origins: new_origins,
+            documents: merged_documents,
+        },
     })
 }

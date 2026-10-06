@@ -297,7 +297,11 @@ impl FsStorageHost {
                     });
                 callback_for_watcher(&event, StorageEvent { filename, kind });
             },
-            Config::default().with_poll_interval(self.poll_interval),
+            // notify 6 compares modification times at second precision. Content
+            // comparison also detects replacements within the same second.
+            Config::default()
+                .with_poll_interval(self.poll_interval)
+                .with_compare_contents(true),
         )
         .map_err(|error| {
             storage_error(
