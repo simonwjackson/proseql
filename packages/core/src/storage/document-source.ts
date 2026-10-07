@@ -5,6 +5,7 @@ import {
 	DuplicatePhysicalFileError,
 	DuplicateRecordError,
 	InvalidDocumentSourceError,
+	SourceConfigError,
 	type SourceError,
 	UnknownCollectionError,
 } from "../errors/source-errors.js";
@@ -24,6 +25,7 @@ import {
 	stripDerivedIdField,
 } from "./derived-id.js";
 import { type OriginIndex, setOrigin } from "./origin-index.js";
+import { matchesPartitionPath } from "./partitioned-source.js";
 import {
 	matchesDocumentSourcePattern,
 	type NormalizedDocumentSourceConfig,
@@ -262,6 +264,16 @@ export const saveDocumentSource = (
 		const storage = yield* StorageAdapter;
 		const writes: Array<{ readonly path: string; readonly data: string }> = [];
 		for (const [path, document] of projectedByPath) {
+			for (const other of input.config.sources) {
+				if (other.kind === "partitioned" && matchesPartitionPath(other, path))
+					return yield* Effect.fail(
+						new SourceConfigError({
+							message: "Document path overlaps a partitioned source",
+							sourceId: source.id,
+							path,
+						}),
+					);
+			}
 			const data = yield* serializer.serialize(document, source.format);
 			writes.push({ path, data });
 		}

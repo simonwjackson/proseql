@@ -9,11 +9,13 @@ import {
 	getCollectionConfigs,
 	inferCodecsFromConfig,
 	isSourceOrientedDatabaseConfig,
+	type LoadedPartitions,
 	loadCollectionsFromFile,
 	loadData,
 	loadDataFromDirectory,
 	loadDocumentGraphSources,
 	loadDocumentSources,
+	loadPartitionedSource,
 	type Migration,
 	makeSerializerLayer,
 	mergeSerializerWithPluginCodecs,
@@ -31,6 +33,7 @@ import {
 	saveData,
 	saveDocumentSource,
 	saveEntityToDirectory,
+	savePartitionedSource,
 	TransactionError,
 	ValidationError,
 } from "@proseql/core";
@@ -171,6 +174,7 @@ type SourcePersistenceState = {
 	readonly normalizedConfig: NormalizedSourceConfig;
 	readonly writableSourceByCollection: Map<string, string>;
 	readonly readOnlyCollections: Set<string>;
+	readonly partitionStates: Map<string, LoadedPartitions>;
 	readonly documentsState: {
 		origins: any;
 		documents: ReadonlyArray<unknown>;
@@ -3976,8 +3980,19 @@ async function loadSourceOrientedCollections(
 				Effect.provide(loadDocumentGraphSources(normalizedConfig), layer),
 			)
 		: undefined;
+	const partitionStates = new Map<string, LoadedPartitions>();
+	const partitionCollections = new Map<string, LoadedPartitions>();
 	const writableSourceByCollection = new Map<string, string>();
 	for (const source of normalizedConfig.sources) {
+		if (source.kind === "partitioned") {
+			const loaded = await Effect.runPromise(
+				Effect.provide(loadPartitionedSource(normalizedConfig, source), layer),
+			);
+			partitionStates.set(source.id, loaded);
+			partitionCollections.set(source.collection, loaded);
+			writableSourceByCollection.set(source.collection, source.id);
+			continue;
+		}
 		if (source.kind !== "documents") continue;
 		for (const collection of source.collections) {
 			writableSourceByCollection.set(collection, source.id);
@@ -3988,6 +4003,7 @@ async function loadSourceOrientedCollections(
 	for (const collection of collections) {
 		const loaded =
 			loadedGraph?.collections[collection.name] ??
+			partitionCollections.get(collection.name)?.records ??
 			loadedDocuments?.collections[collection.name] ??
 			new Map<string, Record<string, unknown>>();
 		baselines[collection.name] = [...loaded.values()];
@@ -4001,6 +4017,7 @@ async function loadSourceOrientedCollections(
 		baselines,
 		sourceState: {
 			normalizedConfig,
+			partitionStates,
 			writableSourceByCollection,
 			readOnlyCollections: graphOwnedCollections,
 			documentsState: {
@@ -4356,6 +4373,36 @@ async function persistDocumentSourceState(
 			toEntityMap(rows),
 		]),
 	) as Record<string, ReadonlyMap<string, Record<string, unknown>>>;
+	const source = sourceState.normalizedConfig.sources.find(
+		(candidate) => candidate.id === sourceId,
+	);
+	if (source?.kind === "partitioned") {
+		const previous = sourceState.partitionStates.get(sourceId);
+		if (previous === undefined)
+			throw new SourceConfigError({
+				message: `Missing partition state '${sourceId}'`,
+				sourceId,
+			});
+		const records = new Map(
+			[...collections[source.collection]].map(([id, record]) => [
+				id,
+				{ ...record, id },
+			]),
+		);
+		const saved = await Effect.runPromise(
+			Effect.provide(
+				savePartitionedSource(
+					sourceState.normalizedConfig,
+					source,
+					previous,
+					records,
+				),
+				state.layer,
+			),
+		);
+		sourceState.partitionStates.set(sourceId, saved);
+		return;
+	}
 	const saved = await Effect.runPromise(
 		Effect.provide(
 			saveDocumentSource({
@@ -5054,6 +5101,30 @@ async function registerSourceWatchers(
 	const sourceState = persistence.sourceState;
 	if (!sourceState) return;
 	for (const source of sourceState.normalizedConfig.sources) {
+		if (source.kind === "partitioned") {
+			let root = source.root;
+			while (!(await persistence.host.exists(root))) {
+				const parent = dirnameComparable(root);
+				if (parent === root) break;
+				root = parent;
+			}
+			const stop = await persistence.host.watchDir(root, () => {
+				runBackgroundReload(persistence, async () => {
+					const loaded = await Effect.runPromise(
+						Effect.provide(
+							loadPartitionedSource(sourceState.normalizedConfig, source),
+							persistence.layer,
+						),
+					);
+					await reloadCollectionsAtomicallyIfChanged(runtime, {
+						[source.collection]: [...loaded.records.values()],
+					});
+					sourceState.partitionStates.set(source.id, loaded);
+				});
+			});
+			trackWatcherStop(persistence, stop);
+			continue;
+		}
 		if (source.kind === "documents") {
 			const stop = await persistence.host.watchDir(source.root, () => {
 				runBackgroundReload(persistence, async () => {

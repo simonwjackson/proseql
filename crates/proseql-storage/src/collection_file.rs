@@ -57,6 +57,38 @@ pub fn load_collection_file(
     })
 }
 
+/// Reject duplicate or missing array IDs before the normal loader builds a map.
+/// Object codecs already represent identity as unique keys.
+pub fn validate_collection_file_ids(
+    host: &dyn StorageHost,
+    formats: &FormatRegistry,
+    source: &NormalizedCollectionFileSourceConfig,
+) -> Result<(), EngineError> {
+    with_source_codec(formats, source, |formats| {
+        let raw = host.read(&source.path)?;
+        let decoded = formats
+            .deserialize(&raw, &source.format)
+            .map_err(crate::persistence::format_error)?;
+        if let Some(records) = decoded.as_array() {
+            let mut ids = std::collections::HashSet::new();
+            for record in records {
+                let id = record.get("id").and_then(Value::as_str);
+                if id.is_none() || !ids.insert(id.unwrap()) {
+                    return Err(EngineError::SourceConfig(Box::new(
+                        proseql_engine::errors::SourceConfigError {
+                            message: "Partition records need unique string IDs".into(),
+                            source_id: Some(source.id.clone()),
+                            collection: Some(source.collection.clone()),
+                            path: Some(source.path.clone()),
+                        },
+                    )));
+                }
+            }
+        }
+        Ok(())
+    })
+}
+
 /// Returns the complete file content for `records`. The caller owns the
 /// durable write.
 pub fn encode_collection_file(

@@ -79,11 +79,30 @@ pub struct CollectionFileSourceConfig {
     pub prose: Option<ProseCodecOptions>,
 }
 
+/// Select a string field, or its prefix before the first delimiter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PartitionKey {
+    Field { field: String },
+    Prefix { field: String, delimiter: String },
+}
+
+/// One collection distributed across flat `<root>/<key>.<format>` files.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PartitionedSourceConfig {
+    pub id: String,
+    pub collection: String,
+    pub root: String,
+    pub format: String,
+    pub partition_by: PartitionKey,
+    pub prose: Option<ProseCodecOptions>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum DatabaseSourceConfig {
     Documents(DocumentSourceConfig),
     DocumentGraph(DocumentGraphSourceConfig),
     CollectionFile(CollectionFileSourceConfig),
+    Partitioned(PartitionedSourceConfig),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -139,6 +158,7 @@ pub enum NormalizedDatabaseSourceConfig {
     Documents(NormalizedDocumentSourceConfig),
     DocumentGraph(NormalizedDocumentGraphSourceConfig),
     CollectionFile(NormalizedCollectionFileSourceConfig),
+    Partitioned(PartitionedSourceConfig),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -535,6 +555,77 @@ pub fn normalize_source_config(
                     },
                 ));
             }
+            DatabaseSourceConfig::Partitioned(mut source) => {
+                let error = |message: String| {
+                    source_config_error(
+                        message,
+                        Some(source.id.clone()),
+                        Some(source.collection.clone()),
+                        Some(source.root.clone()),
+                    )
+                };
+                if !source_ids.insert(source.id.clone()) {
+                    return Err(error(format!("Duplicate source id '{}'", source.id)));
+                }
+                if !collection_name_set.contains(&source.collection) {
+                    return Err(error(format!(
+                        "Source '{}' references undeclared collection '{}'",
+                        source.id, source.collection
+                    )));
+                }
+                if let Some(existing) = owners.insert(source.collection.clone(), source.id.clone())
+                {
+                    return Err(error(format!(
+                        "Collection '{}' is backed by both sources '{}' and '{}'",
+                        source.collection, existing, source.id
+                    )));
+                }
+                if source.root.trim().is_empty() {
+                    return Err(error("Partition root must not be empty".into()));
+                }
+                let field = match &source.partition_by {
+                    PartitionKey::Field { field } => field,
+                    PartitionKey::Prefix { field, delimiter } => {
+                        if delimiter.is_empty() {
+                            return Err(error("Partition delimiter must not be empty".into()));
+                        }
+                        field
+                    }
+                };
+                if field.is_empty() {
+                    return Err(error("Partition field must not be empty".into()));
+                }
+                if !crate::partitioned::safe_component(&source.format) {
+                    return Err(error(
+                        "Partition format must be a filename component".into(),
+                    ));
+                }
+                if matches!(source.format.as_str(), "prose" | "jsonl" | "ndjson")
+                    && input.collections[&source.collection].version.is_some()
+                {
+                    return Err(error(
+                        "Versioned partitions require an object-keyed format".into(),
+                    ));
+                }
+                match (&source.prose, source.format.as_str()) {
+                    (None, "prose") => {
+                        return Err(error("Prose partition source needs a template".into()))
+                    }
+                    (Some(options), "prose")
+                        if options.template.as_deref().is_none_or(str::is_empty) =>
+                    {
+                        return Err(error("Prose partition source needs a template".into()))
+                    }
+                    (Some(_), other) if other != "prose" => {
+                        return Err(error(format!(
+                            "Prose options are invalid for format '{other}'"
+                        )))
+                    }
+                    _ => {}
+                }
+                source.root = normalize_path(&source.root);
+                sources.push(NormalizedDatabaseSourceConfig::Partitioned(source));
+            }
             DatabaseSourceConfig::CollectionFile(source) => {
                 let error = |message: String| {
                     source_config_error(
@@ -607,6 +698,23 @@ pub fn normalize_source_config(
         }
     }
 
+    let mut partition_roots = std::collections::HashMap::new();
+    for source in &sources {
+        if let NormalizedDatabaseSourceConfig::Partitioned(source) = source {
+            if let Some(owner) = partition_roots.insert((&source.root, &source.format), &source.id)
+            {
+                return Err(source_config_error(
+                    format!(
+                        "Partition root '{}' with format '{}' is owned by both '{}' and '{}'",
+                        source.root, source.format, owner, source.id
+                    ),
+                    Some(source.id.clone()),
+                    Some(source.collection.clone()),
+                    Some(source.root.clone()),
+                ));
+            }
+        }
+    }
     Ok(NormalizedSourceConfig {
         collections: collection_names,
         collection_configs: input.collections,

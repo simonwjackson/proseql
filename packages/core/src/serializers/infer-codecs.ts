@@ -67,7 +67,7 @@ export const inferCodecsFromConfig = (
 		for (const source of config.sources ?? []) {
 			if (source.kind === "documents") {
 				addFormat(source.format ?? "yaml");
-			} else if (source.kind === "directory") {
+			} else if (source.kind === "directory" || source.kind === "partitioned") {
 				addFormat(source.format);
 			} else if (source.kind === "documentGraph") {
 				// A document graph is multi-format by definition: fragments are decoded

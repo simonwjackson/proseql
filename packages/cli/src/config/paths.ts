@@ -54,6 +54,8 @@ const resolveSourceConfigPaths = (
 				...source,
 				file: resolvePathFrom(configDir, source.file),
 			};
+		case "partitioned":
+			return { ...source, root: resolvePathFrom(configDir, source.root) };
 		case "directory":
 			return {
 				...source,
@@ -207,6 +209,14 @@ export const getCollectionPersistenceInfo = (
 					format: source.format ?? extensionToFormat(source.file),
 					sizeLabel: formatBytes(sizeBytes),
 					sizeBytes,
+				};
+			}
+			if (source.kind === "partitioned" && source.collection === collection) {
+				return {
+					file: path.relative(configDir, source.root) || source.root,
+					format: source.format,
+					sizeLabel: "(partitioned collection)",
+					sizeBytes: 0,
 				};
 			}
 			if (source.kind === "directory" && source.collection === collection) {

@@ -139,6 +139,36 @@ Node-backed persistent databases watch document-source roots. Add, change, and r
 
 Writes preserve semantic data and sibling collection sections, but YAML comments, exact ordering, and original formatting are not preserved.
 
+### Partitioned collections
+
+A `partitioned` source stores one collection across flat files. All files remain queryable through the same collection. This works with the Effect database and the Promise engine interface.
+
+```ts
+const config = {
+  collections: {
+    turns: {
+      schema: TurnSchema,
+      relationships: {},
+    },
+  },
+  sources: [{
+    id: "turns",
+    kind: "partitioned",
+    collection: "turns",
+    root: "./data/turns",
+    format: "prose",
+    partitionBy: { kind: "prefix", field: "id", delimiter: "." },
+    prose: { template: "[{id}] {speaker}: {text}", unmatchedLines: "error" },
+  }],
+} as const
+```
+
+`meeting-a.0001` goes into `data/turns/meeting-a.prose`. Use `{ kind: "field", field: "customer" }` to use a complete string field instead. Prefix delimiters must be nonempty and present. Keys use ASCII letters, digits, `_`, `-`, and internal dots. Unsafe keys, duplicate array IDs, and misrouted records fail.
+
+Missing roots load empty. Flush writes only changed partitions and leaves unchanged files intact. A partition-field update moves the record. Deletion leaves an empty file. Source templates are separate, so codecs do not share learned templates. Versioned partitions require an object-keyed format.
+
+Writes detect changes to affected files before replacement. After a conflict, reopen before retrying. Node writes still use the existing debounced persistence contract and per-file atomic rename. They do not gain the Rust native runtime's synchronization or quarantine guarantees. Multiple files are not one atomic transaction. Partitioning does not reduce aggregate memory or watch work.
+
 ### Read-only document graphs
 
 A `documentGraph` source assembles one effective, read-only collection graph from an ordered set of directory roots, merging many physical fragments into one logical read model (later fragments overlay earlier ones). It is the overlay counterpart to the writable `documents` source and never writes back.

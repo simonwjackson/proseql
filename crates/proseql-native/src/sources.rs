@@ -13,7 +13,11 @@ use proseql_storage::document_source::{
     SaveDocumentSourceInput,
 };
 use proseql_storage::host::StorageHost;
+use proseql_storage::partitioned::{
+    load_partitioned_source, matches_partition_path, plan_partitioned_source, LoadedPartitions,
+};
 use proseql_storage::persistence::CollectionStorageConfig;
+use proseql_storage::source_config::NormalizedDatabaseSourceConfig;
 use proseql_storage::source_config::{
     normalize_source_config, DatabaseSourceConfig, NormalizedSourceConfig, SourceConfigInput,
 };
@@ -52,6 +56,7 @@ pub(crate) struct SourcePlan {
     pub writes: Vec<PlannedDocumentWrite>,
     pub documents: LoadedDocumentSources,
     pub files: IndexMap<String, IndexMap<String, Value>>,
+    pub partitions: IndexMap<String, LoadedPartitions>,
 }
 
 pub(crate) struct SourceState {
@@ -59,6 +64,7 @@ pub(crate) struct SourceState {
     pub documents: LoadedDocumentSources,
     /// Records of each collection-file source, keyed by collection name.
     pub files: IndexMap<String, IndexMap<String, Value>>,
+    pub partitions: IndexMap<String, LoadedPartitions>,
     pub graph: LoadedDocumentGraph,
     pub transforms: Option<Arc<dyn DocumentGraphTransformHost>>,
     pub contents: IndexMap<String, String>,
@@ -109,6 +115,7 @@ impl SourceState {
                 proseql_storage::source_config::NormalizedDatabaseSourceConfig::CollectionFile(
                     source,
                 ) => &source.collection == name,
+                NormalizedDatabaseSourceConfig::Partitioned(source) => &source.collection == name,
             });
             if !owned {
                 return Err(crate::operation_error(
@@ -139,12 +146,22 @@ impl SourceState {
         owner: &str,
         path: &str,
     ) -> Result<(), EngineError> {
+        let contains = |root: &str| {
+            if root == "." {
+                !std::path::Path::new(path).is_absolute()
+                    && path != ".."
+                    && !path.starts_with("../")
+            } else {
+                std::path::Path::new(path).starts_with(root)
+            }
+        };
         for source in &config.sources {
             let conflicting = match source {
                 proseql_storage::source_config::NormalizedDatabaseSourceConfig::Documents(
                     source,
                 ) => {
                     source.id != owner
+                        && contains(&source.root)
                         && proseql_storage::source_config::matches_document_source_pattern(
                             source, path,
                         )
@@ -152,6 +169,9 @@ impl SourceState {
                 proseql_storage::source_config::NormalizedDatabaseSourceConfig::DocumentGraph(
                     source,
                 ) => source.roots.iter().any(|root| {
+                    if !contains(&root.root) {
+                        return false;
+                    }
                     let relative = proseql_storage::path::relative_to_root(&root.root, path);
                     proseql_storage::source_config::matches_any_glob(&relative, &root.include)
                         && !proseql_storage::source_config::matches_any_glob(
@@ -162,6 +182,9 @@ impl SourceState {
                 proseql_storage::source_config::NormalizedDatabaseSourceConfig::CollectionFile(
                     source,
                 ) => source.id != owner && source.path == path,
+                NormalizedDatabaseSourceConfig::Partitioned(source) => {
+                    source.id != owner && matches_partition_path(source, path)
+                }
             };
             if conflicting {
                 return Err(crate::operation_error(
@@ -199,6 +222,18 @@ impl SourceState {
                 }
             }
         }
+        for source in &config.sources {
+            if let NormalizedDatabaseSourceConfig::Partitioned(source) = source {
+                if host.exists(&source.root)? {
+                    for path in host.list_directory(&source.root)? {
+                        if matches_partition_path(source, &path) {
+                            Self::require_writable_path(&config, &source.id, &path)?;
+                            host.exists(&path)?;
+                        }
+                    }
+                }
+            }
+        }
         let snapshot = crate::read_snapshot::ReadSnapshot::new(host);
         let mut files = IndexMap::new();
         let mut file_contents = IndexMap::new();
@@ -226,6 +261,17 @@ impl SourceState {
                 load_collection_file(&snapshot, formats, source, collection)?,
             );
         }
+        let mut partitions = IndexMap::new();
+        for source in &config.sources {
+            if let NormalizedDatabaseSourceConfig::Partitioned(source) = source {
+                let collection = &config.collection_configs[&source.collection];
+                let loaded = load_partitioned_source(&snapshot, formats, source, collection)?;
+                for path in loaded.files.keys() {
+                    file_contents.insert(path.clone(), snapshot.read(path)?);
+                }
+                partitions.insert(source.collection.clone(), loaded);
+            }
+        }
         let documents = load_document_sources(&snapshot, formats, &config, None)?;
         let graph =
             load_document_graph_sources(&snapshot, formats, &config, None, transforms.as_deref())?;
@@ -243,6 +289,7 @@ impl SourceState {
             config,
             documents,
             files,
+            partitions,
             graph,
             transforms,
             contents,
@@ -252,6 +299,11 @@ impl SourceState {
     pub fn collections(&self) -> IndexMap<String, IndexMap<String, Value>> {
         let mut collections = self.documents.collections.clone();
         collections.extend(self.files.clone());
+        collections.extend(
+            self.partitions
+                .iter()
+                .map(|(name, partitions)| (name.clone(), partitions.records())),
+        );
         for (name, values) in &self.graph.collections {
             collections.insert(name.clone(), values.clone());
         }
@@ -266,6 +318,27 @@ impl SourceState {
         let mut next = self.documents.clone();
         let mut writes = Vec::new();
         let mut files = self.files.clone();
+        let mut partitions = self.partitions.clone();
+        for source in &self.config.sources {
+            if let NormalizedDatabaseSourceConfig::Partitioned(source) = source {
+                let records = candidate
+                    .get(&source.collection)
+                    .cloned()
+                    .unwrap_or_default();
+                let (loaded, planned) = plan_partitioned_source(
+                    formats,
+                    source,
+                    &self.config.collection_configs[&source.collection],
+                    &self.partitions[&source.collection],
+                    &records,
+                )?;
+                for write in &planned {
+                    Self::require_writable_path(&self.config, &source.id, &write.path)?;
+                }
+                writes.extend(planned);
+                partitions.insert(source.collection.clone(), loaded);
+            }
+        }
         for source in &self.config.sources {
             let proseql_storage::source_config::NormalizedDatabaseSourceConfig::CollectionFile(
                 source,
@@ -322,7 +395,7 @@ impl SourceState {
         }
         next.collections = candidate
             .iter()
-            .filter(|(name, _)| !files.contains_key(*name))
+            .filter(|(name, _)| !files.contains_key(*name) && !partitions.contains_key(*name))
             .map(|(name, records)| (name.clone(), records.clone()))
             .collect();
         writes.sort_by(|left, right| left.path.cmp(&right.path));
@@ -330,6 +403,7 @@ impl SourceState {
             writes,
             documents: next,
             files,
+            partitions,
         })
     }
 
@@ -375,6 +449,9 @@ impl SourceState {
                         .map(|parent| parent.to_string_lossy().into_owned())
                         .unwrap_or_else(|| ".".to_owned()),
                 ),
+                NormalizedDatabaseSourceConfig::Partitioned(source) => {
+                    roots.push(source.root.clone())
+                }
             }
         }
         for root in &mut roots {

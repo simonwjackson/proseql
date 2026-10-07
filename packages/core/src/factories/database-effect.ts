@@ -98,6 +98,11 @@ import {
 } from "../storage/document-source.js";
 import { emptyOriginIndex, type OriginIndex } from "../storage/origin-index.js";
 import {
+	type LoadedPartitions,
+	loadPartitionedSource,
+	savePartitionedSource,
+} from "../storage/partitioned-source.js";
+import {
 	createDirectoryWatcher,
 	createDocumentSourceWatcher,
 	createFileWatcher,
@@ -2030,6 +2035,20 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 						serviceLayer,
 					)
 				: undefined;
+		const partitionStates = new Map<string, LoadedPartitions>();
+		const partitionCollections: Record<string, ReadonlyMap<string, HasId>> = {};
+		for (const source of normalizedSourceConfig?.sources ?? []) {
+			if (source.kind !== "partitioned" || normalizedSourceConfig === undefined)
+				continue;
+			const loaded = yield* Effect.provide(
+				loadPartitionedSource(normalizedSourceConfig, source),
+				serviceLayer,
+			);
+			partitionStates.set(source.id, loaded);
+			partitionCollections[source.collection] = loaded.records;
+		}
+		const partitionStatesRef =
+			yield* Ref.make<ReadonlyMap<string, LoadedPartitions>>(partitionStates);
 		const documentOriginsRef = yield* Ref.make<OriginIndex>(
 			loadedDocumentSources?.origins ?? emptyOriginIndex(),
 		);
@@ -2094,6 +2113,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			// Load from file, directory, document sources, or a document graph.
 			let loadedData: ReadonlyMap<string, HasId> =
 				loadedDocumentGraph?.collections[collectionName] ??
+				partitionCollections[collectionName] ??
 				loadedDocumentSources?.collections[collectionName] ??
 				new Map();
 			if (dirPath && dirFormat && isCollectionDirectoryMode(collectionConfig)) {
@@ -2252,9 +2272,12 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 		for (const source of normalizedSourceConfig?.sources ?? []) {
 			// documentGraph sources are read-only: no save key is registered, so no
 			// persistence is ever scheduled for graph-owned collections.
-			if (source.kind !== "documents") continue;
+			if (source.kind !== "documents" && source.kind !== "partitioned")
+				continue;
 			const key = documentSourceKey(source.id);
-			for (const collectionName of source.collections) {
+			for (const collectionName of source.kind === "partitioned"
+				? [source.collection]
+				: source.collections) {
 				documentSourceKeysByCollection[collectionName] = [
 					...(documentSourceKeysByCollection[collectionName] ?? []),
 					key,
@@ -2272,6 +2295,23 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 							(candidate) => candidate.id === sourceId,
 						);
 						if (source === undefined) return;
+						if (source.kind === "partitioned") {
+							const states = yield* Ref.get(partitionStatesRef);
+							const previous = states.get(source.id);
+							if (previous === undefined) return;
+							const records = yield* Ref.get(typedRefs[source.collection]);
+							const saved = yield* savePartitionedSource(
+								normalizedSourceConfig,
+								source,
+								previous,
+								records,
+							);
+							yield* Ref.set(
+								partitionStatesRef,
+								new Map(states).set(source.id, saved),
+							);
+							return;
+						}
 						const currentCollections: Record<
 							string,
 							ReadonlyMap<string, HasId>
@@ -2499,7 +2539,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 					const source = normalizedSourceConfig.sources.find(
 						(candidate) => candidate.id === sourceId,
 					);
-					if (source === undefined) return;
+					if (source === undefined || source.kind !== "documents") return;
 
 					yield* Effect.promise(() => trigger.flush());
 
@@ -2636,6 +2676,60 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 				root: source.root,
 				onReload: reloadDocumentSources(source.id),
 			}).pipe(Effect.catch(() => Effect.void));
+		}
+
+		for (const source of normalizedSourceConfig?.sources ?? []) {
+			if (source.kind !== "partitioned" || normalizedSourceConfig === undefined)
+				continue;
+			const sourceConfig = normalizedSourceConfig;
+			const reload = Effect.provide(
+				Effect.gen(function* () {
+					yield* Effect.promise(() => trigger.flush());
+					const loaded = yield* loadPartitionedSource(sourceConfig, source);
+					const name = source.collection;
+					const items = [...loaded.records.values()];
+					const indexes = yield* buildIndexes(
+						normalizeIndexes(collectionConfigs[name].indexes),
+						items,
+					);
+					for (const [key, ref] of collectionIndexes[name]) {
+						const rebuilt = indexes.get(key);
+						if (rebuilt !== undefined)
+							yield* Ref.set(ref, yield* Ref.get(rebuilt));
+					}
+					const searchRef = searchIndexRefs[name],
+						fields = searchIndexFields[name];
+					if (searchRef !== undefined && fields !== undefined) {
+						const rebuilt = yield* buildSearchIndex(fields, items);
+						yield* Ref.set(searchRef, yield* Ref.get(rebuilt));
+					}
+					yield* Ref.set(typedRefs[name], loaded.records);
+					const states = yield* Ref.get(partitionStatesRef);
+					yield* Ref.set(
+						partitionStatesRef,
+						new Map(states).set(source.id, loaded),
+					);
+					yield* PubSub.publish(changePubSub, reloadEvent(name));
+				}),
+				serviceLayer,
+			).pipe(
+				Effect.catch((error) =>
+					Effect.logWarning(
+						`[proseql] Partition reload failed for '${source.id}', keeping last-known-good: ${String(error)}`,
+					),
+				),
+			);
+			let root = source.root;
+			while (!(yield* storageAdapter.exists(root))) {
+				const slash = root.lastIndexOf("/");
+				const parent =
+					slash < 0 ? "." : slash === 0 ? "/" : root.slice(0, slash);
+				if (parent === root) break;
+				root = parent;
+			}
+			yield* createDocumentSourceWatcher({ root, onReload: reload }).pipe(
+				Effect.catch(() => Effect.void),
+			);
 		}
 
 		// documentGraph sources: watch each startup-present root. Roots absent at

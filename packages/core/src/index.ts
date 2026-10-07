@@ -133,6 +133,11 @@ export {
 } from "./storage/document-source.js";
 export type { OriginIndex, RecordOrigin } from "./storage/origin-index.js";
 export { getOrigin } from "./storage/origin-index.js";
+export type { LoadedPartitions } from "./storage/partitioned-source.js";
+export {
+	loadPartitionedSource,
+	savePartitionedSource,
+} from "./storage/partitioned-source.js";
 export type {
 	DatabaseSourceConfig,
 	DocumentGraphFragmentErrorPolicy,
@@ -146,6 +151,8 @@ export type {
 	NormalizedDocumentGraphSourceConfig,
 	NormalizedDocumentSourceConfig,
 	NormalizedSourceConfig,
+	PartitionedSourceConfig,
+	PartitionKey,
 } from "./storage/source-config.js";
 export { normalizeSourceConfig } from "./storage/source-config.js";
 export type {

@@ -1,5 +1,6 @@
 import type { Result } from "effect";
 import { SourceConfigError } from "../errors/source-errors.js";
+import type { ProseCodecOptions } from "../serializers/codecs/prose.js";
 import type { CollectionConfig } from "../types/database-config-types.js";
 import { joinPath, normalizePath } from "../utils/path.js";
 
@@ -91,11 +92,30 @@ export interface DocumentGraphSourceConfig {
 	readonly onFragmentError?: DocumentGraphFragmentErrorPolicy;
 }
 
+export type PartitionKey =
+	| { readonly kind: "field"; readonly field: string }
+	| {
+			readonly kind: "prefix";
+			readonly field: string;
+			readonly delimiter: string;
+	  };
+
+export interface PartitionedSourceConfig {
+	readonly id: string;
+	readonly kind: "partitioned";
+	readonly collection: string;
+	readonly root: string;
+	readonly format: string;
+	readonly partitionBy: PartitionKey;
+	readonly prose?: ProseCodecOptions;
+}
+
 export type DatabaseSourceConfig =
 	| DocumentSourceConfig
 	| FileSourceConfig
 	| DirectorySourceConfig
 	| AppendOnlyLogSourceConfig
+	| PartitionedSourceConfig
 	| DocumentGraphSourceConfig;
 
 export interface NormalizedDocumentSourceConfig {
@@ -132,6 +152,7 @@ export interface NormalizedDocumentGraphSourceConfig {
 
 export type NormalizedDatabaseSourceConfig =
 	| NormalizedDocumentSourceConfig
+	| PartitionedSourceConfig
 	| NormalizedDocumentGraphSourceConfig;
 
 export interface SourceOrientedConfigInput {
@@ -351,6 +372,52 @@ export const normalizeSourceConfig = (
 			continue;
 		}
 
+		if (source.kind === "partitioned") {
+			const fail = (message: string): never => {
+				throw new SourceConfigError({
+					message,
+					sourceId: source.id,
+					collection: source.collection,
+					path: source.root,
+				});
+			};
+			if (!collectionNameSet.has(source.collection))
+				fail(
+					`Source '${source.id}' references undeclared collection '${source.collection}'`,
+				);
+			const owner = collectionSourceOwners.get(source.collection);
+			if (owner !== undefined)
+				fail(
+					`Collection '${source.collection}' is backed by both sources '${owner}' and '${source.id}'`,
+				);
+			collectionSourceOwners.set(source.collection, source.id);
+			if (!source.root.trim()) fail("Partition root must not be empty");
+			if (
+				!source.partitionBy.field ||
+				(source.partitionBy.kind !== "field" &&
+					source.partitionBy.kind !== "prefix") ||
+				(source.partitionBy.kind === "prefix" && !source.partitionBy.delimiter)
+			)
+				fail(
+					"Partition field and delimiter must not be empty and the key kind must be field or prefix",
+				);
+			if (!/^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/.test(source.format))
+				fail("Partition format must be a filename component");
+			if (
+				["prose", "jsonl", "ndjson"].includes(source.format) &&
+				config.collections[source.collection].version !== undefined
+			)
+				fail("Versioned partitions require an object-keyed format");
+			if (source.format === "prose" && !source.prose?.template)
+				fail("Prose partition source needs a template");
+			if (source.format !== "prose" && source.prose !== undefined)
+				fail(`Prose options are invalid for format '${source.format}'`);
+			sources.push({
+				...source,
+				root: normalizePath(source.root).replace(/\/$/, "") || "/",
+			});
+			continue;
+		}
 		if (source.kind !== "documents") {
 			const collection = source.collection;
 			if (!collectionNameSet.has(collection)) {
@@ -431,6 +498,20 @@ export const normalizeSourceConfig = (
 		sources.push(normalizedWithOutbox);
 	}
 
+	const partitionRoots = new Map<string, string>();
+	for (const source of sources) {
+		if (source.kind !== "partitioned") continue;
+		const key = JSON.stringify([source.root, source.format]);
+		const owner = partitionRoots.get(key);
+		if (owner !== undefined)
+			throw new SourceConfigError({
+				message: `Partition root '${source.root}' with format '${source.format}' is owned by both '${owner}' and '${source.id}'`,
+				sourceId: source.id,
+				collection: source.collection,
+				path: source.root,
+			});
+		partitionRoots.set(key, source.id);
+	}
 	return {
 		collections: collectionNames,
 		collectionConfigs: config.collections,

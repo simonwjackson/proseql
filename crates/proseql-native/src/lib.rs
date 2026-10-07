@@ -353,6 +353,7 @@ impl NativeRuntime {
                 writes,
                 documents: next,
                 files,
+                partitions,
             } = match plan {
                 Ok(plan) => plan,
                 Err(error) => {
@@ -378,6 +379,7 @@ impl NativeRuntime {
             let sources = state.sources.as_mut().expect("source mode remains active");
             sources.documents = next;
             sources.files = files;
+            sources.partitions = partitions;
             for write in writes {
                 sources.contents.insert(write.path, write.content);
             }
