@@ -2,6 +2,8 @@ use globset::{Glob, GlobSetBuilder};
 use indexmap::IndexMap;
 use proseql_engine::errors::{EngineError, SourceConfigError};
 
+use proseql_formats::prose::ProseCodecOptions;
+
 use crate::path::{join_path, normalize_path, relative_to_root};
 use crate::persistence::CollectionStorageConfig;
 
@@ -63,10 +65,25 @@ pub struct DocumentGraphSourceConfig {
     pub on_fragment_error: DocumentGraphFragmentErrorPolicy,
 }
 
+/// One collection stored in one file. Array formats (Prose, JSONL) hold one
+/// record per entry; object formats hold records keyed by id.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CollectionFileSourceConfig {
+    pub id: String,
+    pub collection: String,
+    pub path: String,
+    /// Codec extension. Inferred from `path` when absent.
+    pub format: Option<String>,
+    /// Required when the format is `prose`, and only allowed then. The
+    /// template must be set so a new file can be written.
+    pub prose: Option<ProseCodecOptions>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum DatabaseSourceConfig {
     Documents(DocumentSourceConfig),
     DocumentGraph(DocumentGraphSourceConfig),
+    CollectionFile(CollectionFileSourceConfig),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -109,9 +126,19 @@ pub struct NormalizedDocumentGraphSourceConfig {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct NormalizedCollectionFileSourceConfig {
+    pub id: String,
+    pub collection: String,
+    pub path: String,
+    pub format: String,
+    pub prose: Option<ProseCodecOptions>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum NormalizedDatabaseSourceConfig {
     Documents(NormalizedDocumentSourceConfig),
     DocumentGraph(NormalizedDocumentGraphSourceConfig),
+    CollectionFile(NormalizedCollectionFileSourceConfig),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -505,6 +532,75 @@ pub fn normalize_source_config(
                         collections: selected,
                         transform_callback_id: source.transform_callback_id,
                         on_fragment_error: source.on_fragment_error,
+                    },
+                ));
+            }
+            DatabaseSourceConfig::CollectionFile(source) => {
+                let error = |message: String| {
+                    source_config_error(
+                        message,
+                        Some(source.id.clone()),
+                        Some(source.collection.clone()),
+                        Some(source.path.clone()),
+                    )
+                };
+                if !source_ids.insert(source.id.clone()) {
+                    return Err(error(format!("Duplicate source id '{}'", source.id)));
+                }
+                if !collection_name_set.contains(&source.collection) {
+                    return Err(error(format!(
+                        "Source '{}' references undeclared collection '{}'",
+                        source.id, source.collection
+                    )));
+                }
+                if let Some(existing) = owners.insert(source.collection.clone(), source.id.clone())
+                {
+                    return Err(error(format!(
+                        "Collection '{}' is backed by both sources '{}' and '{}'",
+                        source.collection, existing, source.id
+                    )));
+                }
+                let path = normalize_path(&source.path);
+                let format = match &source.format {
+                    Some(format) => format.trim_start_matches('.').to_lowercase(),
+                    None => std::path::Path::new(&path)
+                        .extension()
+                        .map(|extension| extension.to_string_lossy().to_lowercase())
+                        .ok_or_else(|| {
+                            error(format!(
+                                "Collection file source '{}' has no format and its path has no extension",
+                                source.id
+                            ))
+                        })?,
+                };
+                match (&source.prose, format.as_str()) {
+                    (None, "prose") => {
+                        return Err(error(format!(
+                            "Collection file source '{}' uses Prose and needs a template",
+                            source.id
+                        )))
+                    }
+                    (Some(prose), "prose") if prose.template.is_none() => {
+                        return Err(error(format!(
+                            "Collection file source '{}' uses Prose and needs a template",
+                            source.id
+                        )))
+                    }
+                    (Some(_), other) if other != "prose" => {
+                        return Err(error(format!(
+                            "Collection file source '{}' has Prose options but format '{other}'",
+                            source.id
+                        )))
+                    }
+                    _ => {}
+                }
+                sources.push(NormalizedDatabaseSourceConfig::CollectionFile(
+                    NormalizedCollectionFileSourceConfig {
+                        id: source.id,
+                        collection: source.collection,
+                        path,
+                        format,
+                        prose: source.prose,
                     },
                 ));
             }

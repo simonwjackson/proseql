@@ -1,3 +1,4 @@
+pub mod collection_file;
 pub mod document_graph;
 pub mod document_source;
 pub mod host;

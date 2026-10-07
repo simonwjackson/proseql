@@ -4,6 +4,7 @@ use std::time::Duration;
 use indexmap::IndexMap;
 use proseql_engine::errors::EngineError;
 use proseql_formats::FormatRegistry;
+use proseql_storage::collection_file::{encode_collection_file, load_collection_file};
 use proseql_storage::document_graph::{
     load_document_graph_sources, DocumentGraphTransformHost, LoadedDocumentGraph,
 };
@@ -46,9 +47,18 @@ impl Default for NativeSourceRuntimeOptions {
     }
 }
 
+/// The writes for one mutation and the source state they produce.
+pub(crate) struct SourcePlan {
+    pub writes: Vec<PlannedDocumentWrite>,
+    pub documents: LoadedDocumentSources,
+    pub files: IndexMap<String, IndexMap<String, Value>>,
+}
+
 pub(crate) struct SourceState {
     pub config: NormalizedSourceConfig,
     pub documents: LoadedDocumentSources,
+    /// Records of each collection-file source, keyed by collection name.
+    pub files: IndexMap<String, IndexMap<String, Value>>,
     pub graph: LoadedDocumentGraph,
     pub transforms: Option<Arc<dyn DocumentGraphTransformHost>>,
     pub contents: IndexMap<String, String>,
@@ -96,6 +106,9 @@ impl SourceState {
                 proseql_storage::source_config::NormalizedDatabaseSourceConfig::DocumentGraph(
                     source,
                 ) => source.collections.contains(name),
+                proseql_storage::source_config::NormalizedDatabaseSourceConfig::CollectionFile(
+                    source,
+                ) => &source.collection == name,
             });
             if !owned {
                 return Err(crate::operation_error(
@@ -110,6 +123,12 @@ impl SourceState {
             ) = source
             {
                 Self::require_writable_path(&normalized, &source.id, &source.outbox)?;
+            }
+            if let proseql_storage::source_config::NormalizedDatabaseSourceConfig::CollectionFile(
+                source,
+            ) = source
+            {
+                Self::require_writable_path(&normalized, &source.id, &source.path)?;
             }
         }
         Ok(normalized)
@@ -140,6 +159,9 @@ impl SourceState {
                             &root.exclude,
                         )
                 }),
+                proseql_storage::source_config::NormalizedDatabaseSourceConfig::CollectionFile(
+                    source,
+                ) => source.id != owner && source.path == path,
             };
             if conflicting {
                 return Err(crate::operation_error(
@@ -178,10 +200,36 @@ impl SourceState {
             }
         }
         let snapshot = crate::read_snapshot::ReadSnapshot::new(host);
+        let mut files = IndexMap::new();
+        let mut file_contents = IndexMap::new();
+        for source in &config.sources {
+            let proseql_storage::source_config::NormalizedDatabaseSourceConfig::CollectionFile(
+                source,
+            ) = source
+            else {
+                continue;
+            };
+            if host.exists(&source.path)? {
+                file_contents.insert(source.path.clone(), snapshot.read(&source.path)?);
+            }
+            let collection = config
+                .collection_configs
+                .get(&source.collection)
+                .ok_or_else(|| {
+                    crate::operation_error(
+                        "unknown-collection",
+                        format!("Unknown collection '{}'", source.collection),
+                    )
+                })?;
+            files.insert(
+                source.collection.clone(),
+                load_collection_file(&snapshot, formats, source, collection)?,
+            );
+        }
         let documents = load_document_sources(&snapshot, formats, &config, None)?;
         let graph =
             load_document_graph_sources(&snapshot, formats, &config, None, transforms.as_deref())?;
-        let contents = documents
+        let mut contents = documents
             .documents
             .iter()
             .map(|document| {
@@ -189,10 +237,12 @@ impl SourceState {
                     .read(&document.path)
                     .map(|content| (document.path.clone(), content))
             })
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<IndexMap<_, _>, _>>()?;
+        contents.extend(file_contents);
         Ok(Self {
             config,
             documents,
+            files,
             graph,
             transforms,
             contents,
@@ -201,6 +251,7 @@ impl SourceState {
 
     pub fn collections(&self) -> IndexMap<String, IndexMap<String, Value>> {
         let mut collections = self.documents.collections.clone();
+        collections.extend(self.files.clone());
         for (name, values) in &self.graph.collections {
             collections.insert(name.clone(), values.clone());
         }
@@ -211,9 +262,40 @@ impl SourceState {
         &self,
         formats: &FormatRegistry,
         candidate: &IndexMap<String, IndexMap<String, Value>>,
-    ) -> Result<(Vec<PlannedDocumentWrite>, LoadedDocumentSources), EngineError> {
+    ) -> Result<SourcePlan, EngineError> {
         let mut next = self.documents.clone();
         let mut writes = Vec::new();
+        let mut files = self.files.clone();
+        for source in &self.config.sources {
+            let proseql_storage::source_config::NormalizedDatabaseSourceConfig::CollectionFile(
+                source,
+            ) = source
+            else {
+                continue;
+            };
+            let records = candidate
+                .get(&source.collection)
+                .cloned()
+                .unwrap_or_default();
+            if self.files.get(&source.collection) == Some(&records) {
+                continue;
+            }
+            let collection = self
+                .config
+                .collection_configs
+                .get(&source.collection)
+                .ok_or_else(|| {
+                    crate::operation_error(
+                        "unknown-collection",
+                        format!("Unknown collection '{}'", source.collection),
+                    )
+                })?;
+            writes.push(PlannedDocumentWrite {
+                path: source.path.clone(),
+                content: encode_collection_file(formats, source, collection, &records)?,
+            });
+            files.insert(source.collection.clone(), records);
+        }
         for source in &self.config.sources {
             let proseql_storage::source_config::NormalizedDatabaseSourceConfig::Documents(source) =
                 source
@@ -238,9 +320,17 @@ impl SourceState {
             next.origins = plan.saved.origins;
             next.documents = plan.saved.documents;
         }
-        next.collections = candidate.clone();
+        next.collections = candidate
+            .iter()
+            .filter(|(name, _)| !files.contains_key(*name))
+            .map(|(name, records)| (name.clone(), records.clone()))
+            .collect();
         writes.sort_by(|left, right| left.path.cmp(&right.path));
-        Ok((writes, next))
+        Ok(SourcePlan {
+            writes,
+            documents: next,
+            files,
+        })
     }
 
     pub fn check_conflicts(
@@ -277,6 +367,14 @@ impl SourceState {
                 proseql_storage::source_config::NormalizedDatabaseSourceConfig::DocumentGraph(
                     source,
                 ) => roots.extend(source.roots.iter().map(|root| root.root.clone())),
+                proseql_storage::source_config::NormalizedDatabaseSourceConfig::CollectionFile(
+                    source,
+                ) => roots.push(
+                    std::path::Path::new(&source.path)
+                        .parent()
+                        .map(|parent| parent.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| ".".to_owned()),
+                ),
             }
         }
         for root in &mut roots {

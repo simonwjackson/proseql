@@ -338,7 +338,7 @@ impl NativeRuntime {
         let candidate = state.database.snapshot_all_collection_states();
         if let Some(sources) = &state.sources {
             let plan = sources.plan(&state.formats, &candidate).and_then(|plan| {
-                sources.check_conflicts(state.host.as_ref(), &plan.0)?;
+                sources.check_conflicts(state.host.as_ref(), &plan.writes)?;
                 for name in session.touched_collections() {
                     if sources.graph.owned_collections.contains_key(name) {
                         return Err(operation_error(
@@ -349,7 +349,11 @@ impl NativeRuntime {
                 }
                 Ok(plan)
             });
-            let (writes, next) = match plan {
+            let sources::SourcePlan {
+                writes,
+                documents: next,
+                files,
+            } = match plan {
                 Ok(plan) => plan,
                 Err(error) => {
                     rollback_preserving_original(&self.inner, &mut state, session, &error);
@@ -373,6 +377,7 @@ impl NativeRuntime {
             state.database.take_committed_changes();
             let sources = state.sources.as_mut().expect("source mode remains active");
             sources.documents = next;
+            sources.files = files;
             for write in writes {
                 sources.contents.insert(write.path, write.content);
             }
