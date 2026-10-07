@@ -14,10 +14,19 @@ describe("encodeHeadline", () => {
 	describe("flat record encoding", () => {
 		it("encodes a simple record with string fields", () => {
 			const template = compileTemplate('#{id} "{title}" by {author}');
+			const record = { id: "b1", title: "Dune", author: "Frank Herbert" };
+
+			expect(encodeHeadline(record, template)).toBe(
+				'#b1 "Dune" by Frank Herbert',
+			);
+		});
+
+		it("quotes a string id that would read back as a number", () => {
+			const template = compileTemplate('#{id} "{title}" by {author}');
 			const record = { id: "1", title: "Dune", author: "Frank Herbert" };
 
 			expect(encodeHeadline(record, template)).toBe(
-				'#1 "Dune" by Frank Herbert',
+				'#"1" "Dune" by Frank Herbert',
 			);
 		});
 
@@ -119,11 +128,11 @@ describe("encodeHeadline", () => {
 		it("escapes quotes in quoted value", () => {
 			const template = compileTemplate('{id} "{title}" by {author}');
 			// title contains a quote which must be escaped when the value is quoted
-			const record = { id: "1", title: 'Say "hello"', author: "Test" };
+			const record = { id: "a", title: 'Say "hello"', author: "Test" };
 
 			// The title contains `"` but does NOT contain the delimiter `" by `
 			// so it is not quoted - the literal quotes around the field are from the template
-			expect(encodeHeadline(record, template)).toBe('1 "Say "hello"" by Test');
+			expect(encodeHeadline(record, template)).toBe('a "Say "hello"" by Test');
 		});
 
 		it("quotes value when delimiter is partial match", () => {
@@ -236,15 +245,13 @@ describe("encodeHeadline", () => {
 			expect(encodeHeadline(record, template)).toBe("★ Dune © 1965 ™");
 		});
 
-		it("handles array field that needs quoting", () => {
+		it("does not quote an array that contains the next delimiter", () => {
 			const template = compileTemplate("{tags} - {name}");
-			// Array element "a - b" contains comma so it gets quoted within the array
-			// but the array serialization doesn't quote elements containing " - "
-			// The serialized array is [a - b, c] which contains " - "
+			// The serialized array [a - b, c] contains " - ". Arrays end at their
+			// closing bracket, so they are never quoted; quoted text is a string.
 			const record = { tags: ["a - b", "c"], name: "test" };
 
-			// The serialized array [a - b, c] contains " - " so the whole value is quoted
-			expect(encodeHeadline(record, template)).toBe('"[a - b, c]" - test');
+			expect(encodeHeadline(record, template)).toBe("[a - b, c] - test");
 		});
 	});
 });

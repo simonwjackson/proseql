@@ -29,6 +29,13 @@ export interface ProseCodecOptions {
 	readonly template?: string;
 	/** Optional overflow templates for additional fields on indented lines */
 	readonly overflow?: ReadonlyArray<string>;
+	/**
+	 * What decoding does with a non-blank line that is not a record.
+	 * `"ignore"` (default) skips it, so Prose can sit inside Markdown; the line
+	 * is not written back on re-encode. `"error"` throws and names the line;
+	 * use it when the file is a database.
+	 */
+	readonly unmatchedLines?: "ignore" | "error";
 }
 
 // ============================================================================
@@ -207,13 +214,17 @@ export const serializeValue = (value: unknown): string => {
 	if (Array.isArray(value)) {
 		const elements = value.map((element) => {
 			const serialized = serializeValue(element);
-			// Quote elements that contain comma, closing bracket, or double quote
+			// Quote elements that contain a comma, closing bracket, or double
+			// quote, strings that would read as another type, and elements with
+			// leading or trailing whitespace (the parser trims bare elements).
 			if (
 				serialized.includes(",") ||
 				serialized.includes("]") ||
-				serialized.includes('"')
+				serialized.includes('"') ||
+				(typeof element === "string" && stringNeedsQuotes(serialized)) ||
+				serialized.trim() !== serialized
 			) {
-				return `"${serialized.replace(/"/g, '\\"')}"`;
+				return quoteValue(serialized);
 			}
 			return serialized;
 		});
@@ -299,7 +310,44 @@ export const deserializeValue = (text: string): unknown => {
  * @returns The quoted value with escaped inner quotes
  */
 const quoteValue = (value: string): string => {
-	return `"${value.replace(/"/g, '\\"')}"`;
+	return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+};
+
+/**
+ * A string is written in quotes when its bare text would read back as
+ * another value: a number, boolean, null, array, or a quoted string.
+ * Quoted text always decodes as a string.
+ */
+const stringNeedsQuotes = (text: string): boolean =>
+	text.startsWith('"') ||
+	text.startsWith("[") ||
+	typeof deserializeValue(text) !== "string";
+
+/**
+ * Writes one field. Strings are quoted when they would read as another type
+ * or contain the next literal. Arrays are bracket-delimited and never quoted.
+ * A number, boolean, or null that contains the next literal cannot be written
+ * unambiguously, so encoding throws.
+ */
+const encodeField = (
+	name: string,
+	value: unknown,
+	nextLiteral: string | null,
+): string => {
+	const serialized = serializeValue(value);
+	const containsDelimiter =
+		nextLiteral !== null && serialized.includes(nextLiteral);
+	if (typeof value === "string") {
+		return stringNeedsQuotes(value) || containsDelimiter
+			? quoteValue(value)
+			: serialized;
+	}
+	if (Array.isArray(value) || !containsDelimiter) {
+		return serialized;
+	}
+	throw new Error(
+		`Cannot encode field '${name}': value ${serialized} contains the literal ${JSON.stringify(nextLiteral)} that follows it in the template`,
+	);
 };
 
 /**
@@ -338,20 +386,11 @@ export const encodeHeadline = (
 		if (segment.type === "literal") {
 			result += segment.text;
 		} else {
-			// Field segment - serialize the value
-			const value = record[segment.name];
-			const serialized = serializeValue(value);
-
-			// Find the next literal after this field (if any)
-			const nextLiteral = findNextLiteral(segments, i);
-
-			// If this is not the last field (has a subsequent literal delimiter)
-			// and the serialized value contains that delimiter, quote it
-			if (nextLiteral !== null && serialized.includes(nextLiteral)) {
-				result += quoteValue(serialized);
-			} else {
-				result += serialized;
-			}
+			result += encodeField(
+				segment.name,
+				record[segment.name],
+				findNextLiteral(segments, i),
+			);
 		}
 	}
 
@@ -424,26 +463,26 @@ export const decodeHeadline = (
 			// Field segment - capture text until the next literal (or end of line)
 			const nextLiteralText = findNextLiteralText(segments, i);
 
-			let fieldValue: string;
-
 			if (nextLiteralText === null) {
-				// This is the last field - greedy capture to end of line
-				fieldValue = line.slice(pos);
+				// Last field: the rest of the line. Fully quoted text is a string.
+				const rest = line.slice(pos);
+				const quoted = rest.startsWith('"') ? scanQuotedValue(line, pos) : null;
+				result[segment.name] =
+					quoted !== null && quoted.endPos === line.length
+						? quoted.value
+						: deserializeValue(rest);
 				pos = line.length;
 			} else {
-				// Find the next literal delimiter, respecting quoted values
+				// Find the next literal delimiter, respecting quoted values and arrays
 				const captureResult = captureFieldValue(line, pos, nextLiteralText);
 
 				if (captureResult === null) {
 					return null; // Delimiter not found, no match
 				}
 
-				fieldValue = captureResult.value;
+				result[segment.name] = captureResult.value;
 				pos = captureResult.endPos;
 			}
-
-			// Deserialize the captured field value
-			result[segment.name] = deserializeFieldValue(fieldValue);
 		}
 	}
 
@@ -490,10 +529,9 @@ const captureFieldValue = (
 	line: string,
 	startPos: number,
 	delimiter: string,
-): { value: string; endPos: number } | null => {
-	// Check if the field value is quoted
+): { value: unknown; endPos: number } | null => {
+	// Quoted value: always a string
 	if (line[startPos] === '"') {
-		// Quoted value - scan for closing quote respecting escapes
 		const quoteResult = scanQuotedValue(line, startPos);
 		if (quoteResult === null) {
 			return null; // Unclosed quote
@@ -510,16 +548,48 @@ const captureFieldValue = (
 		};
 	}
 
-	// Unquoted value - find the next occurrence of the delimiter
+	// Array: runs to its closing bracket, so it may contain the delimiter
+	if (line[startPos] === "[") {
+		const arrayEnd = findArrayEnd(line, startPos);
+		if (arrayEnd !== null && line.startsWith(delimiter, arrayEnd)) {
+			return {
+				value: deserializeValue(line.slice(startPos, arrayEnd)),
+				endPos: arrayEnd,
+			};
+		}
+	}
+
+	// Bare value - find the next occurrence of the delimiter
 	const delimiterPos = line.indexOf(delimiter, startPos);
 	if (delimiterPos === -1) {
 		return null; // Delimiter not found
 	}
 
 	return {
-		value: line.slice(startPos, delimiterPos),
+		value: deserializeValue(line.slice(startPos, delimiterPos)),
 		endPos: delimiterPos, // Position where delimiter starts, not ends
 	};
+};
+
+/**
+ * Finds the position after the `]` that closes the array starting at
+ * `startPos`, skipping quoted elements.
+ */
+const findArrayEnd = (line: string, startPos: number): number | null => {
+	let pos = startPos + 1;
+	while (pos < line.length) {
+		const char = line[pos];
+		if (char === '"') {
+			const quoted = scanQuotedValue(line, pos);
+			if (quoted === null) return null;
+			pos = quoted.endPos;
+		} else if (char === "]") {
+			return pos + 1;
+		} else {
+			pos++;
+		}
+	}
+	return null;
 };
 
 /**
@@ -542,12 +612,11 @@ const scanQuotedValue = (
 		const char = line[pos];
 
 		if (char === "\\") {
-			// Escape sequence - check the next character
+			// Escape sequence: \" is a quote and \\ is a backslash
 			if (pos + 1 < line.length) {
 				const nextChar = line[pos + 1];
-				if (nextChar === '"') {
-					// Escaped quote - add the quote to value
-					value += '"';
+				if (nextChar === '"' || nextChar === "\\") {
+					value += nextChar;
 					pos += 2;
 					continue;
 				}
@@ -566,17 +635,6 @@ const scanQuotedValue = (
 
 	// Unclosed quote
 	return null;
-};
-
-/**
- * Deserializes a field value captured from a headline.
- * This is the same as deserializeValue but handles already-unquoted values.
- *
- * @param fieldValue - The raw field value string
- * @returns The deserialized value
- */
-const deserializeFieldValue = (fieldValue: string): unknown => {
-	return deserializeValue(fieldValue);
 };
 
 // ============================================================================
@@ -1232,6 +1290,53 @@ const compileProseCodecOptions = (
  * //   ~ A masterpiece of science fiction
  * ```
  */
+/**
+ * Throws on the first non-blank line that is neither a record headline nor an
+ * overflow or continuation line belonging to the record above it.
+ */
+const checkEveryLineIsARecord = (
+	lines: ReadonlyArray<string>,
+	directiveStart: number,
+	bodyStart: number,
+	headline: CompiledTemplate,
+	overflow: ReadonlyArray<CompiledTemplate>,
+): void => {
+	const unmatched = (index: number): never => {
+		throw new Error(
+			`line ${index + 1} does not match the @prose template: ${lines[index]}`,
+		);
+	};
+	for (let index = 0; index < directiveStart; index++) {
+		if (lines[index].trim() !== "") unmatched(index);
+	}
+	let inRecord = false;
+	let inOverflow = false;
+	for (let index = bodyStart; index < lines.length; index++) {
+		const line = lines[index];
+		if (line.trim() === "") {
+			inRecord = false;
+			inOverflow = false;
+			continue;
+		}
+		const indent = measureIndent(line);
+		if (indent === 0) {
+			if (decodeHeadline(line, headline) === null) unmatched(index);
+			inRecord = true;
+			inOverflow = false;
+		} else if (inRecord && indent === OVERFLOW_INDENT.length) {
+			const content = line.slice(indent);
+			if (
+				!overflow.some((template) => decodeHeadline(content, template) !== null)
+			) {
+				unmatched(index);
+			}
+			inOverflow = true;
+		} else if (!(inOverflow && indent > OVERFLOW_INDENT.length)) {
+			unmatched(index);
+		}
+	}
+};
+
 export const proseCodec = (options?: ProseCodecOptions): FormatCodec => {
 	// Mutable state: starts null if no template provided, populated on first decode
 	let compiled: CompiledProseCodec | null = options?.template
@@ -1303,6 +1408,15 @@ export const proseCodec = (options?: ProseCodecOptions): FormatCodec => {
 			const fileOverflowTemplates = compileOverflowTemplates(
 				directiveBlock.overflowTemplates,
 			);
+			if (options?.unmatchedLines === "error") {
+				checkEveryLineIsARecord(
+					lines,
+					scanResult.directiveStart,
+					directiveBlock.bodyStart,
+					fileHeadlineTemplate,
+					fileOverflowTemplates,
+				);
+			}
 
 			// Cache the template from the file for future encode calls
 			if (!compiled) {
@@ -1368,39 +1482,31 @@ export const proseCodec = (options?: ProseCodecOptions): FormatCodec => {
 const parseArrayElements = (inner: string): unknown[] => {
 	const elements: unknown[] = [];
 	let pos = 0;
-	let elementStart = 0;
-	let inQuotes = false;
 
-	while (pos <= inner.length) {
-		if (pos === inner.length || (!inQuotes && inner[pos] === ",")) {
-			// Extract and trim the element
-			const element = inner.slice(elementStart, pos).trim();
-
-			if (element !== "") {
-				// Handle quoted elements
-				if (element.startsWith('"') && element.endsWith('"')) {
-					// Remove quotes and unescape
-					const unquoted = element.slice(1, -1).replace(/\\"/g, '"');
-					elements.push(deserializeValue(unquoted));
-				} else {
-					elements.push(deserializeValue(element));
+	while (pos < inner.length) {
+		const elementStart = pos;
+		const leading =
+			inner.slice(pos).length - inner.slice(pos).trimStart().length;
+		// A quoted element is always a string
+		if (inner[pos + leading] === '"') {
+			const quoted = scanQuotedValue(inner, pos + leading);
+			if (quoted !== null) {
+				const after = inner.slice(quoted.endPos);
+				const next = quoted.endPos + (after.length - after.trimStart().length);
+				if (next === inner.length || inner[next] === ",") {
+					elements.push(quoted.value);
+					pos = next + 1;
+					continue;
 				}
 			}
-
-			elementStart = pos + 1;
-			pos++;
-			continue;
 		}
-
-		if (inner[pos] === '"' && (pos === 0 || inner[pos - 1] !== "\\")) {
-			// Check if this is at the start of an element (accounting for whitespace)
-			const elementSoFar = inner.slice(elementStart, pos).trim();
-			if (elementSoFar === "" || inQuotes) {
-				inQuotes = !inQuotes;
-			}
+		const comma = inner.indexOf(",", elementStart);
+		const end = comma === -1 ? inner.length : comma;
+		const element = inner.slice(elementStart, end).trim();
+		if (element !== "") {
+			elements.push(deserializeValue(element));
 		}
-
-		pos++;
+		pos = end + 1;
 	}
 
 	return elements;

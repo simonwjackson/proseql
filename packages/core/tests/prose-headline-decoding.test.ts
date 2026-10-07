@@ -248,13 +248,24 @@ describe("decodeHeadline", () => {
 			});
 		});
 
-		it("decodes quoted array value", () => {
+		it("decodes a bare array that contains the next delimiter", () => {
+			const template = compileTemplate("{tags} - {name}");
+			const line = "[a - b, c] - test";
+
+			const result = decodeHeadline(line, template);
+			expect(result).toEqual({
+				tags: ["a - b", "c"],
+				name: "test",
+			});
+		});
+
+		it("decodes quoted array-looking text as a string", () => {
 			const template = compileTemplate("{tags} - {name}");
 			const line = '"[a - b, c]" - test';
 
 			const result = decodeHeadline(line, template);
 			expect(result).toEqual({
-				tags: ["a - b", "c"],
+				tags: "[a - b, c]",
 				name: "test",
 			});
 		});
