@@ -102,11 +102,12 @@ fn open(root: &Path) -> NativeRuntime {
     .unwrap()
 }
 
+/// Turns 208-210 of the 2026-10-01 call with Daniela and 3 others.
 fn real_turns() -> Vec<Value> {
     vec![
-        json!({"id": "0208", "meeting": "2026-10-01-call", "t": "8:39", "speaker": "SV", "text": "What was the total for the quarter?"}),
-        json!({"id": "0209", "meeting": "2026-10-01-call", "t": "8:41", "speaker": "D", "text": "35143"}),
-        json!({"id": "0210", "meeting": "2026-10-01-call", "t": "8:44", "speaker": "L", "text": "Okay: \"35143\" - that matches."}),
+        json!({"id": "0208", "meeting": "2026-10-01-call", "t": "18:57", "speaker": "L", "text": "Ohh. What is it? Oh, yeah."}),
+        json!({"id": "0209", "meeting": "2026-10-01-call", "t": "19:00", "speaker": "SV", "text": "35143"}),
+        json!({"id": "0210", "meeting": "2026-10-01-call", "t": "19:03", "speaker": "L", "text": "Oh yeah, I thought you were doing the calculation"}),
     ]
 }
 
@@ -134,7 +135,7 @@ fn a_new_prose_collection_file_gets_its_template_header_and_reopens_exactly() {
         Some("@prose [{id}] {meeting} {t} {speaker}: {text}")
     );
     assert!(
-        file.contains("[0209] 2026-10-01-call 8:41 D: \"35143\""),
+        file.contains("[0209] 2026-10-01-call 19:00 SV: \"35143\""),
         "{file}"
     );
 
@@ -163,7 +164,7 @@ fn updating_one_record_rewrites_one_line() {
         .filter(|(left, right)| left != right)
         .collect();
     assert_eq!(changed.len(), 1, "{changed:?}");
-    assert_eq!(changed[0].1, "[0208] 2026-10-01-call 8:39 SV: What was Q3?");
+    assert_eq!(changed[0].1, "[0208] 2026-10-01-call 18:57 L: What was Q3?");
 }
 
 #[test]
@@ -200,7 +201,7 @@ fn a_hand_edit_that_breaks_the_template_stops_the_open_and_names_the_line() {
     let path = dir.path().join("turns.prose");
     let edited = fs::read_to_string(&path)
         .unwrap()
-        .replace("8:39 SV: What", "8:39 SV - What");
+        .replace("18:57 L: Ohh", "18:57 L - Ohh");
     fs::write(&path, edited).unwrap();
 
     let error = NativeRuntime::open_sources_with_options(

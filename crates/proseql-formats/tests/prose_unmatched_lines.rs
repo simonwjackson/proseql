@@ -17,11 +17,11 @@ fn strict() -> ProseCodec {
 
 #[test]
 fn a_hand_edit_that_breaks_the_template_fails_with_its_line_number() {
-    // A real turn from the 2026-06-10 call, edited so ": " became " - ".
+    // Turns 12-14 of the second 2026-06-10 call, turn 13 edited so ": " became " - ".
     let file = "@prose [{id}] {t} {speaker}: {text}\n\n\
-[0012] 2:13 D: Okay.\n\
-[0013] 2:25 SJ - On the left-hand side, you'll see a bunch of\n\
-[0014] 2:31 D: Yes.";
+[0012] 2:24 D: Okay.\n\
+[0013] 2:25 SJ - On the left-hand side, you'll see a bunch of icons.\n\
+[0014] 2:34 D: This, the database projects.";
     let error = strict().decode(file).unwrap_err();
     assert!(error.contains("line 4"), "{error}");
     assert!(error.contains("[0013] 2:25 SJ - On the left"), "{error}");

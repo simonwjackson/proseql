@@ -12,8 +12,8 @@ fn round_trip(template: &str, records: Value) -> Value {
 
 #[test]
 fn a_spoken_number_in_the_last_field_stays_a_string() {
-    // 2026-10-01 call, turn 209: Daniela reads out a booking total.
-    let records = json!([{"id": "t209", "t": "8:41", "speaker": "D", "text": "35143"}]);
+    // 2026-10-01 call, turn 209: Susan reads out a booking total.
+    let records = json!([{"id": "t209", "t": "19:00", "speaker": "SV", "text": "35143"}]);
     assert_eq!(
         round_trip("[{id}] {t} {speaker}: {text}", records.clone()),
         records
