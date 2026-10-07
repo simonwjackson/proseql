@@ -461,18 +461,99 @@ struct CompiledProseCodec {
 #[derive(Debug)]
 pub struct ProseCodec {
     compiled: Mutex<Result<Option<CompiledProseCodec>, String>>,
+    unmatched_lines: UnmatchedLines,
+}
+
+/// What decoding does with a non-blank line that is not a record.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum UnmatchedLines {
+    /// Skip the line. Prose can then sit inside Markdown. The line is not
+    /// written back when the file is re-encoded.
+    #[default]
+    Ignore,
+    /// Fail and name the line. Use this when the file is a database.
+    Error,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProseCodecOptions {
+    /// Template used to encode. Decoding always uses the file's own
+    /// `@prose` directive, so a file written with an older template still
+    /// loads and is rewritten with this one.
+    pub template: Option<String>,
+    pub overflow: Vec<String>,
+    pub unmatched_lines: UnmatchedLines,
 }
 
 impl ProseCodec {
     pub fn new(template: Option<String>, overflow: Vec<String>) -> Self {
-        let compiled = match template {
-            Some(template) => compile_prose_codec_options(template, overflow).map(Some),
+        Self::with_options(ProseCodecOptions {
+            template,
+            overflow,
+            unmatched_lines: UnmatchedLines::Ignore,
+        })
+    }
+
+    pub fn with_options(options: ProseCodecOptions) -> Self {
+        let compiled = match options.template {
+            Some(template) => compile_prose_codec_options(template, options.overflow).map(Some),
             None => Ok(None),
         };
         Self {
             compiled: Mutex::new(compiled),
+            unmatched_lines: options.unmatched_lines,
         }
     }
+}
+
+/// Rejects every non-blank line that is neither a record headline nor an
+/// overflow or continuation line that belongs to the record above it.
+fn check_every_line_is_a_record(
+    lines: &[String],
+    directive: &DirectiveBlock,
+    directive_start: usize,
+    headline: &CompiledTemplate,
+    overflow: &[CompiledTemplate],
+) -> Result<(), String> {
+    let unmatched = |index: usize, line: &str| {
+        Err(format!(
+            "line {} does not match the @prose template: {line}",
+            index + 1
+        ))
+    };
+    for (index, line) in lines.iter().enumerate().take(directive_start) {
+        if !line.trim().is_empty() {
+            return unmatched(index, line);
+        }
+    }
+    let mut in_record = false;
+    let mut in_overflow = false;
+    for (index, line) in lines.iter().enumerate().skip(directive.body_start) {
+        if line.trim().is_empty() {
+            in_record = false;
+            in_overflow = false;
+            continue;
+        }
+        let indent = measure_indent(line);
+        if indent == 0 {
+            if decode_headline(line, headline).is_none() {
+                return unmatched(index, line);
+            }
+            in_record = true;
+            in_overflow = false;
+        } else if in_record && indent == OVERFLOW_INDENT.len() {
+            if !overflow
+                .iter()
+                .any(|template| decode_headline(&line[indent..], template).is_some())
+            {
+                return unmatched(index, line);
+            }
+            in_overflow = true;
+        } else if !(in_overflow && indent > OVERFLOW_INDENT.len()) {
+            return unmatched(index, line);
+        }
+    }
+    Ok(())
 }
 
 impl FormatCodec for ProseCodec {
@@ -525,6 +606,15 @@ impl FormatCodec for ProseCodec {
         let directive = parse_directive_block(&lines, scan.directive_start);
         let file_headline_template = compile_template(&directive.headline_template)?;
         let file_overflow_templates = compile_overflow_templates(&directive.overflow_templates)?;
+        if self.unmatched_lines == UnmatchedLines::Error {
+            check_every_line_is_a_record(
+                &lines,
+                &directive,
+                scan.directive_start,
+                &file_headline_template,
+                &file_overflow_templates,
+            )?;
+        }
 
         {
             let mut compiled = self
