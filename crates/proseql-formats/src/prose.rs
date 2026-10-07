@@ -99,11 +99,14 @@ pub fn serialize_value(value: &Value) -> String {
                 .iter()
                 .map(|item| {
                     let serialized = serialize_value(item);
+                    let is_string = matches!(item, Value::String(_));
                     if serialized.contains(',')
                         || serialized.contains(']')
                         || serialized.contains('"')
+                        || (is_string && string_needs_quotes(&serialized))
+                        || serialized.trim() != serialized
                     {
-                        format!("\"{}\"", serialized.replace('"', r#"\""#))
+                        quote(&serialized)
                     } else {
                         serialized
                     }
@@ -141,28 +144,59 @@ pub fn deserialize_value(text: &str) -> Value {
     Value::String(text.to_owned())
 }
 
-pub fn encode_headline(record: &Map<String, Value>, template: &CompiledTemplate) -> String {
+/// A string is written in quotes when its bare text would read back as
+/// another value: a number, boolean, null, array, or a quoted string.
+/// Quoted text always decodes as a string.
+fn string_needs_quotes(text: &str) -> bool {
+    text.starts_with('"')
+        || text.starts_with('[')
+        || !matches!(deserialize_value(text), Value::String(_))
+}
+
+fn quote(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', r"\\").replace('"', r#"\""#))
+}
+
+/// Writes one field. Strings are quoted when they would read as another
+/// type or contain the next literal. Arrays are bracket-delimited and never
+/// quoted. A number, boolean, or null that contains the next literal cannot
+/// be written unambiguously, so encoding fails.
+fn encode_field(name: &str, value: &Value, next_literal: Option<&str>) -> Result<String, String> {
+    let serialized = serialize_value(value);
+    let contains_delimiter = next_literal.is_some_and(|literal| serialized.contains(literal));
+    match value {
+        Value::String(text) => {
+            if string_needs_quotes(text) || contains_delimiter {
+                Ok(quote(text))
+            } else {
+                Ok(serialized)
+            }
+        }
+        Value::Array(_) => Ok(serialized),
+        _ if contains_delimiter => Err(format!(
+            "Cannot encode field '{name}': value {serialized} contains the literal {:?} that follows it in the template",
+            next_literal.unwrap_or_default()
+        )),
+        _ => Ok(serialized),
+    }
+}
+
+pub fn encode_headline(
+    record: &Map<String, Value>,
+    template: &CompiledTemplate,
+) -> Result<String, String> {
     let mut result = String::new();
     for (index, segment) in template.segments.iter().enumerate() {
         match segment {
             ProseSegment::Literal { text } => result.push_str(text),
             ProseSegment::Field { name } => {
-                let serialized = serialize_value(record.get(name).unwrap_or(&Value::Null));
-                if let Some(next_literal) = find_next_literal(&template.segments, index) {
-                    if serialized.contains(next_literal) {
-                        result.push('"');
-                        result.push_str(&serialized.replace('"', r#"\""#));
-                        result.push('"');
-                    } else {
-                        result.push_str(&serialized);
-                    }
-                } else {
-                    result.push_str(&serialized);
-                }
+                let value = record.get(name).unwrap_or(&Value::Null);
+                let next_literal = find_next_literal(&template.segments, index);
+                result.push_str(&encode_field(name, value, next_literal)?);
             }
         }
     }
-    result
+    Ok(result)
 }
 
 pub fn decode_headline(line: &str, template: &CompiledTemplate) -> Option<Value> {
@@ -178,17 +212,22 @@ pub fn decode_headline(line: &str, template: &CompiledTemplate) -> Option<Value>
                 pos += text.len();
             }
             ProseSegment::Field { name } => {
-                let field_value =
-                    if let Some(next_literal) = find_next_literal(&template.segments, index) {
-                        let capture = capture_field_value(line, pos, next_literal)?;
-                        pos = capture.end_pos;
-                        capture.value
-                    } else {
-                        let value = line[pos..].to_owned();
-                        pos = line.len();
-                        value
-                    };
-                result.insert(name.clone(), deserialize_value(&field_value));
+                let value = if let Some(next_literal) = find_next_literal(&template.segments, index)
+                {
+                    let capture = capture_field_value(line, pos, next_literal)?;
+                    pos = capture.end_pos;
+                    capture.value
+                } else {
+                    let rest = &line[pos..];
+                    pos = line.len();
+                    match scan_quoted_value(line, line.len() - rest.len()) {
+                        Some(quoted) if rest.starts_with('"') && quoted.end_pos == line.len() => {
+                            Value::String(quoted.text)
+                        }
+                        _ => deserialize_value(rest),
+                    }
+                };
+                result.insert(name.clone(), value);
             }
         }
     }
@@ -206,19 +245,19 @@ const CONTINUATION_INDENT: &str = "    ";
 pub fn encode_overflow_lines(
     record: &Map<String, Value>,
     overflow_templates: &[CompiledTemplate],
-) -> Vec<String> {
+) -> Result<Vec<String>, String> {
     let mut lines = Vec::new();
     for template in overflow_templates {
         if let Some(field_name) = find_multi_line_field(record, &template.fields) {
-            lines.extend(encode_multi_line_overflow(record, template, &field_name));
+            lines.extend(encode_multi_line_overflow(record, template, &field_name)?);
         } else {
             lines.push(format!(
                 "{OVERFLOW_INDENT}{}",
-                encode_headline(record, template)
+                encode_headline(record, template)?
             ));
         }
     }
-    lines
+    Ok(lines)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -473,8 +512,8 @@ impl FormatCodec for ProseCodec {
             let record = record
                 .as_object()
                 .ok_or_else(|| "Prose codec expects an array of records to encode".to_owned())?;
-            lines.push(encode_headline(record, &compiled.headline_template));
-            lines.extend(encode_overflow_lines(record, &compiled.overflow_templates));
+            lines.push(encode_headline(record, &compiled.headline_template)?);
+            lines.extend(encode_overflow_lines(record, &compiled.overflow_templates)?);
         }
 
         Ok(lines.join("\n"))
@@ -548,42 +587,54 @@ fn compile_prose_codec_options(
     })
 }
 
+/// Splits array content on top-level commas. A quoted element is always a
+/// string; a bare element is read with [`deserialize_value`].
 fn parse_array_elements(inner: &str) -> Vec<Value> {
     let mut elements = Vec::new();
     let mut pos = 0usize;
-    let mut element_start = 0usize;
-    let mut in_quotes = false;
 
-    while pos <= inner.len() {
-        if pos == inner.len() || (!in_quotes && inner[pos..].starts_with(',')) {
-            let element = inner[element_start..pos].trim();
-            if !element.is_empty() {
-                if element.starts_with('"') && element.ends_with('"') && element.len() >= 2 {
-                    let unquoted = element[1..element.len() - 1].replace(r#"\""#, "\"");
-                    elements.push(deserialize_value(&unquoted));
-                } else {
-                    elements.push(deserialize_value(element));
-                }
-            }
-            element_start = pos + 1;
-            pos += 1;
-            continue;
-        }
-
-        let ch = inner[pos..].chars().next().unwrap_or_default();
-        if ch == '"' {
-            let element_so_far = inner[element_start..pos].trim();
-            if element_so_far.is_empty() || in_quotes {
-                let escaped = pos > 0 && inner[..pos].ends_with('\\');
-                if !escaped {
-                    in_quotes = !in_quotes;
+    while pos < inner.len() {
+        let element_start = pos;
+        let leading = inner[pos..].len() - inner[pos..].trim_start().len();
+        if inner[pos + leading..].starts_with('"') {
+            if let Some(quoted) = scan_quoted_value(inner, pos + leading) {
+                let after = &inner[quoted.end_pos..];
+                let trailing = after.len() - after.trim_start().len();
+                let next = quoted.end_pos + trailing;
+                if next == inner.len() || inner[next..].starts_with(',') {
+                    elements.push(Value::String(quoted.text));
+                    pos = next + 1;
+                    continue;
                 }
             }
         }
-        pos += ch.len_utf8();
+        let end = inner[element_start..]
+            .find(',')
+            .map(|offset| element_start + offset)
+            .unwrap_or(inner.len());
+        let element = inner[element_start..end].trim();
+        if !element.is_empty() {
+            elements.push(deserialize_value(element));
+        }
+        pos = end + 1;
     }
 
     elements
+}
+
+/// Finds the `]` that closes the array starting at `start_pos`, skipping
+/// quoted elements.
+fn find_array_end(line: &str, start_pos: usize) -> Option<usize> {
+    let mut pos = start_pos + 1;
+    while pos < line.len() {
+        let ch = line[pos..].chars().next()?;
+        match ch {
+            '"' => pos = scan_quoted_value(line, pos)?.end_pos,
+            ']' => return Some(pos + 1),
+            _ => pos += ch.len_utf8(),
+        }
+    }
+    None
 }
 
 fn find_next_literal(segments: &[ProseSegment], current_index: usize) -> Option<&str> {
@@ -597,33 +648,51 @@ fn find_next_literal(segments: &[ProseSegment], current_index: usize) -> Option<
 }
 
 fn capture_field_value(line: &str, start_pos: usize, delimiter: &str) -> Option<CapturedField> {
-    if line[start_pos..].starts_with('"') {
+    let rest = &line[start_pos..];
+    if rest.starts_with('"') {
         let quoted = scan_quoted_value(line, start_pos)?;
         if !starts_with_at(line, delimiter, quoted.end_pos) {
             return None;
         }
         return Some(CapturedField {
-            value: quoted.value,
+            value: Value::String(quoted.text),
             end_pos: quoted.end_pos,
         });
     }
 
-    let delimiter_pos = line[start_pos..]
-        .find(delimiter)
-        .map(|offset| start_pos + offset)?;
+    if rest.starts_with('[') {
+        if let Some(end_pos) = find_array_end(line, start_pos) {
+            if starts_with_at(line, delimiter, end_pos) {
+                return Some(CapturedField {
+                    value: deserialize_value(&line[start_pos..end_pos]),
+                    end_pos,
+                });
+            }
+        }
+    }
+
+    let delimiter_pos = rest.find(delimiter).map(|offset| start_pos + offset)?;
     Some(CapturedField {
-        value: line[start_pos..delimiter_pos].to_owned(),
+        value: deserialize_value(&line[start_pos..delimiter_pos]),
         end_pos: delimiter_pos,
     })
 }
 
 #[derive(Debug, Clone)]
 struct CapturedField {
-    value: String,
+    value: Value,
     end_pos: usize,
 }
 
-fn scan_quoted_value(line: &str, start_pos: usize) -> Option<CapturedField> {
+#[derive(Debug, Clone)]
+struct QuotedText {
+    text: String,
+    end_pos: usize,
+}
+
+/// Reads a quoted value. `\"` is a quote and `\\` is a backslash; any other
+/// backslash is kept as written.
+fn scan_quoted_value(line: &str, start_pos: usize) -> Option<QuotedText> {
     let mut pos = start_pos + 1;
     let mut value = String::new();
 
@@ -631,8 +700,8 @@ fn scan_quoted_value(line: &str, start_pos: usize) -> Option<CapturedField> {
         let ch = line[pos..].chars().next().unwrap_or_default();
         if ch == '\\' {
             if let Some(next_char) = line[pos + 1..].chars().next() {
-                if next_char == '"' {
-                    value.push('"');
+                if next_char == '"' || next_char == '\\' {
+                    value.push(next_char);
                     pos += 2;
                     continue;
                 }
@@ -640,8 +709,8 @@ fn scan_quoted_value(line: &str, start_pos: usize) -> Option<CapturedField> {
             value.push('\\');
             pos += 1;
         } else if ch == '"' {
-            return Some(CapturedField {
-                value,
+            return Some(QuotedText {
+                text: value,
                 end_pos: pos + 1,
             });
         } else {
@@ -666,14 +735,14 @@ fn encode_multi_line_overflow(
     record: &Map<String, Value>,
     template: &CompiledTemplate,
     multi_line_field: &str,
-) -> Vec<String> {
+) -> Result<Vec<String>, String> {
     let value = match record.get(multi_line_field) {
         Some(Value::String(value)) => value,
         _ => {
-            return vec![format!(
+            return Ok(vec![format!(
                 "{OVERFLOW_INDENT}{}",
-                encode_headline(record, template)
-            )]
+                encode_headline(record, template)?
+            )])
         }
     };
 
@@ -686,12 +755,12 @@ fn encode_multi_line_overflow(
 
     let mut lines = vec![format!(
         "{OVERFLOW_INDENT}{}",
-        encode_headline(&modified, template)
+        encode_headline(&modified, template)?
     )];
     for continuation in value_lines.into_iter().skip(1) {
         lines.push(format!("{CONTINUATION_INDENT}{continuation}"));
     }
-    lines
+    Ok(lines)
 }
 
 fn measure_indent(line: &str) -> usize {

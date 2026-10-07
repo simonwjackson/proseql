@@ -376,7 +376,7 @@ fn prose_encode_headline_quotes_only_when_delimiter_would_conflict() {
     let template = compile_template("#{id} \"{title}\" by {author}").unwrap();
     let record = json!({"id": 1, "title": "Say \"Hello\"", "author": "Tester"});
     assert_eq!(
-        encode_headline(record.as_object().unwrap(), &template),
+        encode_headline(record.as_object().unwrap(), &template).unwrap(),
         "#1 \"Say \"Hello\"\" by Tester"
     );
 }
@@ -393,7 +393,7 @@ fn prose_encode_overflow_lines_supports_multiline_values() {
     let templates = compile_overflow_templates(&["~ {description}".to_string()]).unwrap();
     let record = json!({"description": "Line one\nLine two\nLine three"});
     assert_eq!(
-        encode_overflow_lines(record.as_object().unwrap(), &templates),
+        encode_overflow_lines(record.as_object().unwrap(), &templates).unwrap(),
         vec!["  ~ Line one", "    Line two", "    Line three"]
     );
 }
