@@ -301,7 +301,14 @@ proseCodec({ template: '[{id}] "{title}" by {author} ({year}) — {genre}' })
 
 // or let it learn from the @prose directive
 proseCodec()
+
+// fail on any line that is not a record, instead of skipping it
+proseCodec({ template: "[{id}] {title}", unmatchedLines: "error" })
 ```
+
+Values keep their types. A string that would read back as a number, boolean, `~`, array, or quoted text is written in quotes, and quoted text always decodes as a string: the string `"1"` is written `"1"`, the number `1` is written `1`. Arrays end at their closing bracket and are never quoted.
+
+By default, lines that are not records are skipped, so Prose can sit inside Markdown. Those lines are not written back when the file is re-encoded. Use `unmatchedLines: "error"` when the file is a database.
 
 ### Format Override
 
