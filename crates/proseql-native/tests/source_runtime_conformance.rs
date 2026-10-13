@@ -1041,3 +1041,308 @@ fn opens_split_writable_documents_and_optional_read_only_graphs_together() {
     );
     runtime.close().unwrap();
 }
+
+#[test]
+fn saves_preserve_untouched_yaml_blocks_and_records_byte_for_byte() {
+    let prefix = "# TypeScript yaml output\nproposals:\n  plain:\n    notes: This is a long plain scalar that the TypeScript library wraps at a\n      different column from the Rust serializer and must keep its original bytes.\n\n\n";
+    let record =
+        "  untouched:\n    value: 4\n    notes: 'The coach said \"keep these bytes\" today.'\n\n";
+    let suffix = "\n# next collection\nweekReads:\n  folded:\n    notes: \"This double-quoted string is folded across\n      two lines in the original document.\"\n\ncalibrations:\n  quoted:\n    notes: 'The coach said \"keep these bytes\" today.'\n\n";
+    let original = format!("{prefix}sessions:\n{record}  old:\n    value: 1\n{suffix}");
+    for operation in ["insert", "update", "delete"] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("generated.yaml");
+        std::fs::write(&path, &original).unwrap();
+        let options = NativeSourceRuntimeOptions {
+            watch_debounce: None,
+            ..Default::default()
+        };
+        let mut config = config(temp.path().to_str().unwrap());
+        for name in ["proposals", "weekReads", "calibrations"] {
+            let mut collection = descriptor(name);
+            collection.schema = SchemaNode::Struct {
+                fields: vec![StructField {
+                    name: "notes".into(),
+                    schema: SchemaNode::Str,
+                }],
+            };
+            config
+                .collections
+                .push(NativeCollectionConfig::new(collection));
+        }
+        if let DatabaseSourceConfig::Documents(source) = &mut config.sources[0] {
+            source.collections = Some(SourceCollectionSelection::Named(vec![
+                "sessions".into(),
+                "proposals".into(),
+                "weekReads".into(),
+                "calibrations".into(),
+            ]));
+        }
+        let runtime = NativeRuntime::open_sources_with_options(config, options).unwrap();
+        match operation {
+            "insert" => {
+                runtime
+                    .mutate(|tx| tx.create("sessions", json!({"id":"new", "value":7})))
+                    .unwrap();
+            }
+            "update" => {
+                runtime
+                    .mutate(|tx| tx.update("sessions", "old", json!({"value":9})))
+                    .unwrap();
+            }
+            "delete" => {
+                runtime.mutate(|tx| tx.delete("sessions", "old")).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.starts_with(prefix), "{operation}: prefix changed");
+        assert!(saved.ends_with(suffix), "{operation}: suffix changed");
+        assert!(
+            saved.contains(record),
+            "{operation}: untouched record changed: {saved}"
+        );
+        let formats = proseql_formats::FormatRegistry::with_builtins();
+        let before = formats.deserialize(&original, "yaml").unwrap();
+        let after = formats.deserialize(&saved, "yaml").unwrap();
+        for name in ["proposals", "weekReads", "calibrations"] {
+            assert_eq!(before[name], after[name]);
+        }
+        let mut expected = before["sessions"].clone();
+        match operation {
+            "insert" => {
+                expected["new"] = json!({"value":7});
+            }
+            "update" => {
+                expected["old"] = json!({"value":9});
+            }
+            "delete" => {
+                expected.as_object_mut().unwrap().remove("old");
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(after["sessions"], expected);
+        runtime.flush().unwrap();
+        runtime.close().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+    }
+}
+
+#[test]
+fn unsupported_document_shape_rolls_back_before_any_file_is_written() {
+    let temp = tempfile::tempdir().unwrap();
+    let first = "# supported\nsessions:\n  a: {value: 1}\n";
+    let second = "{sessions: {b: {value: 2}}, neighbour: {notes: 'Leave \"this\" alone.'}}\n";
+    std::fs::write(temp.path().join("a.yaml"), first).unwrap();
+    std::fs::write(temp.path().join("b.yaml"), second).unwrap();
+    let runtime = NativeRuntime::open_sources_with_options(
+        config(temp.path().to_str().unwrap()),
+        NativeSourceRuntimeOptions {
+            watch_debounce: None,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    // No-op saves need not segment even an unsupported document.
+    runtime
+        .mutate(|tx| tx.update("sessions", "b", json!({"value":2})))
+        .unwrap();
+    let error = runtime
+        .mutate(|tx| {
+            tx.update("sessions", "a", json!({"value":11}))?;
+            tx.update("sessions", "b", json!({"value":22}))
+        })
+        .unwrap_err();
+    let proseql_engine::errors::EngineError::Operation(error) = error else {
+        panic!("Expected typed document-shape error");
+    };
+    assert_eq!(error.reason, "unsupported-document-shape");
+    assert!(error.message.contains("b.yaml"));
+    assert!(error.message.contains("cannot segment"));
+    assert_eq!(
+        runtime.find_by_id("sessions", "a").unwrap(),
+        Some(json!({"id":"a", "value":1}))
+    );
+    assert_eq!(
+        runtime.find_by_id("sessions", "b").unwrap(),
+        Some(json!({"id":"b", "value":2}))
+    );
+    runtime.flush().unwrap();
+    runtime.close().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(temp.path().join("a.yaml")).unwrap(),
+        first
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp.path().join("b.yaml")).unwrap(),
+        second
+    );
+    assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 2);
+}
+
+#[test]
+fn mismatched_document_splice_rolls_back_before_any_file_is_written() {
+    let temp = tempfile::tempdir().unwrap();
+    let first = "# first\nsessions:\n  a: {value: 1}\n";
+    let second = "# second\nsessions:\n  b:\n    value: 2\n\nneighbour: {keep: true}\n";
+    std::fs::write(temp.path().join("a.yaml"), first).unwrap();
+    std::fs::write(temp.path().join("b.yaml"), second).unwrap();
+    struct DocumentContextYaml;
+    impl proseql_formats::FormatCodec for DocumentContextYaml {
+        fn name(&self) -> &str {
+            "document-context-yaml"
+        }
+        fn extensions(&self) -> &[&str] {
+            &["yaml"]
+        }
+        fn encode(
+            &self,
+            data: &serde_json::Value,
+            options: Option<proseql_formats::FormatOptions>,
+        ) -> Result<String, String> {
+            let mut data = data.clone();
+            if data.get("b").is_some() {
+                data["b"]["value"] = json!(999);
+            }
+            proseql_formats::codecs::yaml_codec().encode(&data, options)
+        }
+        fn decode(&self, raw: &str) -> Result<serde_json::Value, String> {
+            proseql_formats::codecs::yaml_codec().decode(raw)
+        }
+    }
+    let runtime = NativeRuntime::open_sources_with_options(
+        config(temp.path().to_str().unwrap()),
+        NativeSourceRuntimeOptions {
+            formats: proseql_formats::FormatRegistry::new(vec![Box::new(DocumentContextYaml)]),
+            watch_debounce: None,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let error = runtime
+        .mutate(|tx| {
+            tx.update("sessions", "a", json!({"value":11}))?;
+            tx.update("sessions", "b", json!({"value":22}))
+        })
+        .unwrap_err();
+    let proseql_engine::errors::EngineError::Operation(error) = error else {
+        panic!("Expected typed document-shape error");
+    };
+    assert_eq!(error.reason, "unsupported-document-shape");
+    assert!(error.message.contains("b.yaml"));
+    assert!(error.message.contains("does not match"));
+    assert_eq!(
+        runtime.find_by_id("sessions", "a").unwrap(),
+        Some(json!({"id":"a", "value":1}))
+    );
+    assert_eq!(
+        runtime.find_by_id("sessions", "b").unwrap(),
+        Some(json!({"id":"b", "value":2}))
+    );
+    runtime.close().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(temp.path().join("a.yaml")).unwrap(),
+        first
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp.path().join("b.yaml")).unwrap(),
+        second
+    );
+    assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 2);
+}
+
+#[test]
+fn coach_settings_and_plan_load_updates_preserve_hand_edited_neighbour_blocks() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().to_str().unwrap();
+    let schema = serde_json::from_str(include_str!("fixtures/coach-schema.json")).unwrap();
+    let config = coach::config(root, &schema).unwrap();
+    let sample = |name: &str| {
+        schema_sample(
+            &config
+                .collections
+                .iter()
+                .find(|collection| collection.descriptor.name == name)
+                .unwrap()
+                .descriptor
+                .schema,
+        )
+    };
+    let formats = proseql_formats::FormatRegistry::with_builtins();
+    let emit = |name: &str, records: serde_json::Value| {
+        formats
+            .serialize(&json!({name: records}), "yaml", None)
+            .unwrap()
+    };
+    let settings = sample("settings");
+    let plans = sample("plans");
+    let readiness = emit("readiness", json!({"fixture":sample("readiness")}));
+    let app_suffix = format!("\n\n# preserve readiness and this blank line\n\n{readiness}");
+    let app = format!(
+        "# hand-edited app\n{}{app_suffix}",
+        emit("settings", json!({"fixture":settings.clone()}))
+    );
+    let training_prefix = format!(
+        "# hand-edited training\n{}\n# series\n{}\n\n# plans\n",
+        emit("lifts", json!({"fixture":sample("lifts")})),
+        emit("series", json!({"fixture":sample("series")}))
+    );
+    // The final untouched collection deliberately has no terminating newline.
+    let training_suffix = format!(
+        "\n# empty gains stays in flow style\ngains: {{}}\n\n# recomp\n{}",
+        emit("recomp", json!({"fixture":sample("recomp")})).trim_end_matches('\n')
+    );
+    let plan_records = emit(
+        "plans",
+        json!({"fixture":plans.clone(), "untouched":plans.clone()}),
+    );
+    let untouched_plan = plan_records[plan_records.find("  untouched:").unwrap()..].to_owned();
+    let training = format!("{training_prefix}{plan_records}{training_suffix}");
+    std::fs::write(temp.path().join("app.yaml"), &app).unwrap();
+    std::fs::write(temp.path().join("training.yaml"), &training).unwrap();
+    let mut options = coach::options(Arc::new(|_, _| {}));
+    options.watch_debounce = None;
+    let runtime = NativeRuntime::open_sources_with_options(config.clone(), options).unwrap();
+    runtime
+        .mutate(|tx| tx.update("settings", "fixture", json!({"restSeconds":2})))
+        .unwrap();
+    let mut items = plans["items"].clone();
+    items[0]["load"] = json!(2);
+    runtime
+        .mutate(|tx| tx.update("plans", "fixture", json!({"items":items.clone()})))
+        .unwrap();
+    runtime.close().unwrap();
+    let app_saved = std::fs::read_to_string(temp.path().join("app.yaml")).unwrap();
+    let training_saved = std::fs::read_to_string(temp.path().join("training.yaml")).unwrap();
+    assert!(app_saved.starts_with("# hand-edited app\nsettings:\n"));
+    assert!(app_saved.ends_with(&app_suffix));
+    assert!(training_saved.starts_with(&training_prefix));
+    assert!(training_saved.ends_with(&training_suffix));
+    assert!(training_saved.contains(&untouched_plan));
+    assert!(!training_saved.ends_with('\n'));
+    assert!(!temp.path().join("generated.yaml").exists());
+    let mut expected_app = formats.deserialize(&app, "yaml").unwrap();
+    expected_app["settings"]["fixture"]["restSeconds"] = json!(2);
+    assert_eq!(
+        formats.deserialize(&app_saved, "yaml").unwrap(),
+        expected_app
+    );
+    let mut expected_training = formats.deserialize(&training, "yaml").unwrap();
+    expected_training["plans"]["fixture"]["items"] = items.clone();
+    assert_eq!(
+        formats.deserialize(&training_saved, "yaml").unwrap(),
+        expected_training
+    );
+    let mut options = coach::options(Arc::new(|_, _| {}));
+    options.watch_debounce = None;
+    let reopened = NativeRuntime::open_sources_with_options(config, options).unwrap();
+    assert_eq!(
+        reopened.find_by_id("settings", "fixture").unwrap().unwrap()["restSeconds"],
+        2
+    );
+    assert_eq!(
+        reopened.find_by_id("plans", "fixture").unwrap().unwrap()["items"],
+        items
+    );
+    reopened.close().unwrap();
+}
