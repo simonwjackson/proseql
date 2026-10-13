@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use proseql_engine::errors::{
     DuplicatePhysicalFileError, DuplicateRecordError, EngineError, InvalidDocumentSourceError,
-    SourceConfigError, SourceRecordOrigin, UnknownCollectionError,
+    OperationError, SourceConfigError, SourceRecordOrigin, UnknownCollectionError,
 };
 use proseql_formats::FormatRegistry;
 use serde_json::{Map, Value};
@@ -21,6 +21,9 @@ pub struct LoadedDocument {
     pub source_id: String,
     pub path: String,
     pub data: Map<String, Value>,
+    /// The exact loaded (or last planned) bytes corresponding to `data`.
+    /// `None` is allowed for documents constructed without a text snapshot.
+    pub raw: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -59,7 +62,7 @@ pub struct DocumentSourceWritePlan {
 
 // Persistence compares structure, with JS Number semantics at scalar leaves.
 // serde_json's integer/float distinction must not turn 1 -> 1.0 into a rewrite.
-fn same_persisted_value(left: &Value, right: &Value) -> bool {
+pub(crate) fn same_persisted_value(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Object(left), Value::Object(right)) => same_persisted_map(left, right),
         (Value::Array(left), Value::Array(right)) => {
@@ -73,7 +76,7 @@ fn same_persisted_value(left: &Value, right: &Value) -> bool {
     }
 }
 
-fn same_persisted_map(left: &Map<String, Value>, right: &Map<String, Value>) -> bool {
+pub(crate) fn same_persisted_map(left: &Map<String, Value>, right: &Map<String, Value>) -> bool {
     left.len() == right.len()
         && left.iter().all(|(key, value)| {
             right
@@ -244,6 +247,7 @@ pub fn load_document_sources(
                     source_id: source.id.clone(),
                     path,
                     data: Map::new(),
+                    raw: Some(raw),
                 });
                 continue;
             }
@@ -377,6 +381,7 @@ pub fn load_document_sources(
                 source_id: source.id.clone(),
                 path,
                 data: document,
+                raw: Some(raw),
             });
         }
     }
@@ -549,17 +554,66 @@ pub fn plan_document_source(
                 .is_none_or(|document| !same_persisted_map(&document.data, data))
         })
         .map(|(path, data)| {
-            formats
+            // Codecs can validate the entire document. Keep that contract even
+            // when only entry-sized encodings will reach the filesystem.
+            let serialized = formats
                 .serialize(&Value::Object(data.clone()), &source.format, None)
-                .map(|raw| (path.clone(), raw, data.clone()))
-                .map_err(crate::persistence::format_error)
+                .map_err(crate::persistence::format_error)?;
+            Ok((path.clone(), serialized, data))
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, EngineError>>()?;
+    let writes = writes
+        .into_iter()
+        .map(|(path, serialized, data)| {
+            let shape_error = |reason: &str| {
+                EngineError::Operation(OperationError {
+                    operation: "save-document-source".into(),
+                    reason: "unsupported-document-shape".into(),
+                    message: format!("Cannot byte-preserve document '{path}': {reason}"),
+                })
+            };
+            let content = if let Some(document) = original_documents
+                .iter()
+                .find(|document| document.source_id == source.id && document.path == path)
+            {
+                let raw = document
+                    .raw
+                    .as_deref()
+                    .ok_or_else(|| shape_error("original text snapshot is missing"))?;
+                crate::yaml_splice::splice_document(
+                    formats,
+                    &source.format,
+                    raw,
+                    &document.data,
+                    data,
+                )
+                .map_err(shape_error)?
+            } else {
+                // A new file has no untouched blocks. Still verify its complete
+                // encoding before any caller can start durable replacement.
+                crate::yaml_splice::validate_document(formats, &source.format, &serialized, data)
+                    .map_err(shape_error)?;
+                serialized
+            };
+            Ok((path, content))
+        })
+        .collect::<Result<Vec<_>, EngineError>>()?;
     for (path, data) in projected_by_path {
+        let raw = writes
+            .iter()
+            .find(|(written_path, _)| written_path == &path)
+            .map(|(_, raw)| raw.clone())
+            .or_else(|| {
+                original_documents
+                    .iter()
+                    .find(|document| document.source_id == source.id && document.path == path)
+                    .and_then(|document| document.raw.clone())
+            });
         merged_documents.push(LoadedDocument {
             source_id: source.id.clone(),
             path,
             data,
+            raw,
         });
     }
     merged_documents.sort_by(|left, right| left.path.cmp(&right.path));
@@ -567,7 +621,7 @@ pub fn plan_document_source(
     Ok(DocumentSourceWritePlan {
         writes: writes
             .into_iter()
-            .map(|(path, content, _)| PlannedDocumentWrite { path, content })
+            .map(|(path, content)| PlannedDocumentWrite { path, content })
             .collect(),
         saved: SavedDocumentSource {
             origins: new_origins,

@@ -9,6 +9,7 @@ pub mod persistence;
 pub mod reload;
 pub mod source_config;
 pub mod writer;
+mod yaml_splice;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod fs;

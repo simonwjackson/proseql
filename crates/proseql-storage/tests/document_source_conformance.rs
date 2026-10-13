@@ -902,6 +902,7 @@ fn malformed_document_section_returns_invalid_document_source_not_panic() {
                     },
                 )]),
                 documents: vec![proseql_storage::document_source::LoadedDocument {
+                    raw: None,
                     source_id: "library".to_owned(),
                     path: "/config/base.yaml".to_owned(),
                     data: serde_json::Map::from_iter([(
@@ -985,4 +986,329 @@ fn optional_missing_root_is_allowed() {
     let formats = FormatRegistry::with_builtins();
     let loaded = load_document_sources(&host, &formats, &normalized, None).unwrap();
     assert!(loaded.collections["games"].is_empty());
+}
+
+fn edit_yaml_document(
+    raw: &str,
+    edit: impl FnOnce(&mut IndexMap<String, IndexMap<String, serde_json::Value>>),
+) -> (String, serde_json::Value) {
+    let formats = &FormatRegistry::with_builtins();
+    let host = MemoryStorageHost::default();
+    let config = config(UnknownCollectionPolicy::Preserve);
+    host.write("/config/generated.yaml", raw).unwrap();
+    let loaded = load_document_sources(&host, formats, &config, None).unwrap();
+    let mut collections = loaded.collections.clone();
+    edit(&mut collections);
+    let plan = proseql_storage::document_source::plan_document_source(
+        formats,
+        SaveDocumentSourceInput {
+            config,
+            source_id: "library".into(),
+            collections,
+            origins: loaded.origins,
+            documents: loaded.documents,
+        },
+        Some(&loaded.collections),
+    )
+    .unwrap();
+    assert_eq!(plan.writes.len(), 1);
+    let content = plan.writes[0].content.clone();
+    assert_eq!(
+        plan.saved.documents[0].raw.as_deref(),
+        Some(content.as_str())
+    );
+    let expected = serde_json::Value::Object(plan.saved.documents[0].data.clone());
+    assert_eq!(formats.deserialize(&content, "yaml").unwrap(), expected);
+    (content, expected)
+}
+
+#[test]
+fn yaml_splicing_appends_new_collections_without_reordering_or_changing_an_unterminated_block() {
+    let raw = "# authored\nunknown:\n  quoted: 'Leave \"this\" alone.'";
+    let (saved, _) = edit_yaml_document(raw, |collections| {
+        collections["games"].insert(
+            "new".into(),
+            json!({"id":"new", "name":"New", "systemId":"snes"}),
+        );
+    });
+    assert!(saved.starts_with(&format!("{raw}\ngames:\n")));
+}
+
+#[test]
+fn yaml_splicing_preserves_crlf_trivia_quoted_keys_and_nonstandard_record_indentation() {
+    let prefix = "# header\r\nunknown:\r\n  notes: 'Leave \"this\" alone.'\r\n\r\n";
+    let untouched = "    'untouched id':\r\n        name: 'Leave \"this\" alone.'\r\n        systemId: snes\r\n\r\n";
+    let suffix = "\r\n# footer\r\nother: {keep: true}\r\n";
+    let raw = format!("{prefix}games:\r\n{untouched}    changed:\r\n        name: Old\r\n        systemId: snes\r\n{suffix}");
+    let (saved, _) = edit_yaml_document(&raw, |collections| {
+        collections["games"]["changed"]["name"] = json!("New");
+    });
+    assert!(saved.starts_with(prefix));
+    assert!(saved.contains(untouched));
+    assert!(saved.ends_with(suffix));
+}
+
+#[test]
+fn yaml_splicing_deletes_the_last_record_without_turning_the_collection_into_null() {
+    let prefix = "unknown:\n  notes: 'Leave \"this\" alone.'\n\n";
+    let suffix = "\n# footer\nother: {keep: true}\n";
+    let raw = format!("{prefix}games:\n  old: {{name: Old, systemId: snes}}\n{suffix}");
+    let (saved, expected) = edit_yaml_document(&raw, |collections| {
+        collections["games"].clear();
+    });
+    assert!(saved.starts_with(prefix));
+    assert!(saved.ends_with(suffix));
+    assert_eq!(expected["games"], json!({}));
+    assert!(saved.contains("games: {}\n"));
+}
+
+#[test]
+fn yaml_splicing_fails_closed_for_root_flow_maps_document_markers_and_complex_keys() {
+    let formats = FormatRegistry::with_builtins();
+    for raw in [
+        "{games: {old: {name: Old, systemId: snes}}, unknown: {notes: 'Leave \"this\" alone.'}}\n",
+        "---\ngames:\n  old: {name: Old, systemId: snes}\nunknown: {notes: 'Leave \"this\" alone.'}\n",
+        "games:\n  old: {name: Old, systemId: snes}\n? unknown\n: {notes: 'Leave \"this\" alone.'}\n",
+        "  games:\n    old: {name: Old, systemId: snes}\n  unknown: {keep: true}\n",
+    ] {
+        assert_yaml_save_fails_closed(raw, &formats, |collections| {
+            collections["games"]["old"]["name"] = json!("New");
+        }, "cannot segment");
+    }
+}
+
+#[test]
+fn yaml_splicing_fails_closed_for_cross_collection_aliases() {
+    let raw = "unknown: &shared\n  old: {name: Old, systemId: snes}\ngames: *shared\n";
+    assert_yaml_save_fails_closed(
+        raw,
+        &FormatRegistry::with_builtins(),
+        |collections| {
+            collections["games"]["old"]["name"] = json!("New");
+        },
+        "cannot segment",
+    );
+}
+
+#[test]
+fn yaml_splicing_reserializes_cross_record_aliases_only_inside_the_changed_collection() {
+    let prefix = "unknown:\n  notes: 'Leave \"this\" alone.'\n\n";
+    let raw = format!(
+        "{prefix}games:\n  old: &shared {{name: Old, systemId: snes}}\n  untouched: *shared\n"
+    );
+    let (saved, expected) = edit_yaml_document(&raw, |collections| {
+        collections["games"]["old"]["name"] = json!("New");
+    });
+    assert!(saved.starts_with(prefix));
+    assert_eq!(expected["games"]["untouched"]["name"], "Old");
+}
+
+struct DocumentOnlyYaml {
+    malformed_entries: bool,
+}
+impl proseql_formats::FormatCodec for DocumentOnlyYaml {
+    fn name(&self) -> &str {
+        "document-only-yaml"
+    }
+    fn extensions(&self) -> &[&str] {
+        &["yaml"]
+    }
+    fn encode(
+        &self,
+        data: &serde_json::Value,
+        options: Option<proseql_formats::FormatOptions>,
+    ) -> Result<String, String> {
+        // A codec may require whole-document context. Entry-sized encoding can
+        // succeed yet produce a different value. The final check must catch it.
+        let mut data = data.clone();
+        if data.get("old").is_some() {
+            if self.malformed_entries {
+                return Ok("old: [\n".into());
+            }
+            data["old"]["name"] = json!("Wrong without document context");
+        }
+        proseql_formats::codecs::yaml_codec().encode(&data, options)
+    }
+    fn decode(&self, raw: &str) -> Result<serde_json::Value, String> {
+        proseql_formats::codecs::yaml_codec().decode(raw)
+    }
+}
+
+#[test]
+fn yaml_splicing_rejects_a_candidate_that_does_not_match_the_projected_document() {
+    let formats = FormatRegistry::new(vec![Box::new(DocumentOnlyYaml {
+        malformed_entries: false,
+    })]);
+    let raw = "games:\n  old:\n    name: Old\n    systemId: snes\n\nunknown: {notes: 'Leave \"this\" alone.'}\n";
+    assert_yaml_save_fails_closed(
+        raw,
+        &formats,
+        |collections| {
+            collections["games"]["old"]["name"] = json!("New");
+        },
+        "does not match",
+    );
+}
+
+fn assert_yaml_save_fails_closed(
+    raw: &str,
+    formats: &FormatRegistry,
+    edit: impl FnOnce(&mut IndexMap<String, IndexMap<String, serde_json::Value>>),
+    detail: &str,
+) {
+    let host = MemoryStorageHost::default();
+    let config = config(UnknownCollectionPolicy::Preserve);
+    let path = "/config/generated.yaml";
+    host.write(path, raw).unwrap();
+    let loaded = load_document_sources(&host, formats, &config, None).unwrap();
+    let mut collections = loaded.collections;
+    edit(&mut collections);
+    let error = save_document_source(
+        &host,
+        formats,
+        SaveDocumentSourceInput {
+            config,
+            source_id: "library".into(),
+            collections,
+            origins: loaded.origins,
+            documents: loaded.documents,
+        },
+        None,
+    )
+    .unwrap_err();
+    let EngineError::Operation(error) = error else {
+        panic!("Expected typed shape error");
+    };
+    assert_eq!(error.operation, "save-document-source");
+    assert_eq!(error.reason, "unsupported-document-shape");
+    assert!(error.message.contains(path));
+    assert!(error.message.contains(detail), "{}", error.message);
+    assert_eq!(host.read(path).unwrap(), raw);
+}
+
+#[test]
+fn yaml_splicing_fails_closed_if_the_spliced_document_cannot_parse() {
+    let formats = FormatRegistry::new(vec![Box::new(DocumentOnlyYaml {
+        malformed_entries: true,
+    })]);
+    let raw = "games:\n  old:\n    name: Old\n    systemId: snes\n\nunknown: {notes: 'Leave \"this\" alone.'}\n";
+    assert_yaml_save_fails_closed(
+        raw,
+        &formats,
+        |collections| {
+            collections["games"]["old"]["name"] = json!("New");
+        },
+        "does not parse",
+    );
+}
+
+#[test]
+fn yaml_splicing_keeps_comments_blank_lines_flow_collections_and_unterminated_neighbours() {
+    let prefix =
+        "# header\nreadiness:\n  notes: 'Leave \"this\" alone.'\n\n# between collections\n\n";
+    let suffix =
+        "\n# empty hand-edited collection\ngains: {}\n\n# final collection\nrecomp: {keep: true}";
+    let raw = format!("{prefix}games:\n  old: {{name: Old, systemId: snes}}\n{suffix}");
+    let (saved, _) = edit_yaml_document(&raw, |collections| {
+        collections["games"]["old"]["name"] = json!("New");
+    });
+    assert!(saved.starts_with(prefix));
+    assert!(saved.ends_with(suffix));
+    assert!(!saved.ends_with('\n'));
+}
+
+#[test]
+fn yaml_splicing_can_change_a_flow_collection_without_rewriting_its_neighbours() {
+    let prefix = "readiness: {keep: true}\n\n# between collections\n";
+    let suffix = "\n# next collection\ngains: {}\n";
+    let raw = format!("{prefix}games: {{}}\n{suffix}");
+    let (saved, expected) = edit_yaml_document(&raw, |collections| {
+        collections["games"].insert(
+            "new".into(),
+            json!({"id":"new", "name":"New", "systemId":"snes"}),
+        );
+    });
+    assert!(saved.starts_with(prefix));
+    assert!(saved.ends_with(suffix));
+    assert_eq!(expected["games"]["new"]["name"], "New");
+}
+
+#[test]
+fn yaml_splicing_fails_closed_if_the_codec_loses_a_changed_strings_trailing_newlines() {
+    let raw = "games:\n  old: {name: Old, systemId: snes}\n\nunknown: {keep: true}\n";
+    assert_yaml_save_fails_closed(
+        raw,
+        &FormatRegistry::with_builtins(),
+        |collections| {
+            collections["games"]["old"]["name"] = json!("New\n\n");
+        },
+        "does not match",
+    );
+}
+
+#[test]
+fn existing_documents_without_a_supported_editor_or_original_text_fail_closed() {
+    for (format, raw, retain_snapshot, detail) in [
+        ("json", "{\"games\":{\"old\":{\"name\":\"Old\",\"systemId\":\"snes\"}},\"unknown\":{\"keep\":true}}", true, "only supported for YAML"),
+        ("yaml", "games:\n  old: {name: Old, systemId: snes}\nunknown: {keep: true}\n", false, "snapshot is missing"),
+    ] {
+        let host = MemoryStorageHost::default();
+        let formats = FormatRegistry::with_builtins();
+        let mut config = config(UnknownCollectionPolicy::Preserve);
+        if let proseql_storage::source_config::NormalizedDatabaseSourceConfig::Documents(source) = &mut config.sources[0] {
+            source.format = format.into();
+        }
+        let path = "/config/generated.yaml";
+        host.write(path, raw).unwrap();
+        let mut loaded = load_document_sources(&host, &formats, &config, None).unwrap();
+        loaded.collections["games"]["old"]["name"] = json!("New");
+        if !retain_snapshot { loaded.documents[0].raw = None; }
+        let error = save_document_source(&host, &formats, SaveDocumentSourceInput {
+            config, source_id:"library".into(), collections:loaded.collections,
+            origins:loaded.origins, documents:loaded.documents,
+        }, None).unwrap_err();
+        let EngineError::Operation(error) = error else { panic!("Expected typed shape error"); };
+        assert_eq!(error.reason, "unsupported-document-shape");
+        assert!(error.message.contains(path));
+        assert!(error.message.contains(detail));
+        assert_eq!(host.read(path).unwrap(), raw);
+    }
+}
+
+#[test]
+fn a_new_document_is_not_written_when_complete_serialization_fails_the_state_check() {
+    let host = MemoryStorageHost::default();
+    let formats = FormatRegistry::with_builtins();
+    let config = config(UnknownCollectionPolicy::Preserve);
+    host.write("/config/untouched.yaml", "unknown: {keep: true}\n")
+        .unwrap();
+    let mut loaded = load_document_sources(&host, &formats, &config, None).unwrap();
+    loaded.collections["games"].insert(
+        "new".into(),
+        json!({"id":"new", "name":"New\n\n", "systemId":"snes"}),
+    );
+    let error = save_document_source(
+        &host,
+        &formats,
+        SaveDocumentSourceInput {
+            config,
+            source_id: "library".into(),
+            collections: loaded.collections,
+            origins: loaded.origins,
+            documents: loaded.documents,
+        },
+        None,
+    )
+    .unwrap_err();
+    let EngineError::Operation(error) = error else {
+        panic!("Expected typed shape error");
+    };
+    assert_eq!(error.reason, "unsupported-document-shape");
+    assert!(error.message.contains("/config/generated.yaml"));
+    assert!(error.message.contains("does not match"));
+    assert!(!host.exists("/config/generated.yaml").unwrap());
+    assert_eq!(
+        host.read("/config/untouched.yaml").unwrap(),
+        "unknown: {keep: true}\n"
+    );
 }
