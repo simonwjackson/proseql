@@ -85,6 +85,7 @@ fn base_descriptor(schema: SchemaNode) -> CollectionDescriptor {
         id_strategy: IdStrategy::Provided,
         relationships: vec![],
         indexes: vec![],
+        ordered_indexes: vec![],
         unique_fields: vec![],
         before_create_hooks: vec![],
         after_create_hooks: vec![],
@@ -2227,6 +2228,7 @@ fn make_indexed_collection() -> (Collection, Arc<CallbackRegistry>) {
         indexes: vec![proseql_engine::descriptor::IndexDescriptor::Single(
             "genre".to_string(),
         )],
+        ordered_indexes: vec![],
         unique_fields: vec![],
         before_create_hooks: vec![],
         after_create_hooks: vec![],

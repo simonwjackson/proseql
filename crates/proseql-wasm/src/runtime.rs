@@ -156,6 +156,9 @@ impl RuntimeCore {
     }
 
     pub fn create_database(&mut self, mut input: CreateDatabaseInput) -> Result<u32, EngineError> {
+        for descriptor in &input.descriptor.collections {
+            proseql_engine::descriptor::validate_collection_descriptor(descriptor)?;
+        }
         let registry = Arc::new(self.callbacks.build_registry());
         let mut collections = IndexMap::new();
         let mut collection_names = Vec::new();

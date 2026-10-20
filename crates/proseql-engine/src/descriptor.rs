@@ -574,6 +574,17 @@ pub struct CollectionDescriptor {
     /// Map of relationship name → descriptor.
     pub relationships: Vec<(String, RelationshipDescriptor)>,
     pub indexes: Vec<IndexDescriptor>,
+    /// Fields with an ordered (range) index, one field path per entry.
+    ///
+    /// The query planner uses an ordered index to narrow `$gt`/`$gte`/`$lt`/`$lte`
+    /// filters and to order single-field sorts on that field. Results are
+    /// identical to the unindexed path. Each entry must name a field declared in
+    /// the schema (dot paths through nested structs are allowed); see
+    /// [`validate_collection_descriptor`]. Empty by default and omitted from
+    /// serialized descriptors when empty, so older descriptor JSON round-trips
+    /// byte-identically.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ordered_indexes: Vec<String>,
     pub unique_fields: Vec<UniqueConstraintDescriptor>,
     // Hook callback ids (empty vec = no hooks for that lifecycle point)
     pub before_create_hooks: Vec<String>,
@@ -618,4 +629,90 @@ pub struct CollectionDescriptor {
 pub struct DatabaseDescriptor {
     pub collections: Vec<CollectionDescriptor>,
     pub sources: Vec<SourceDescriptor>,
+}
+
+// ── Descriptor validation ─────────────────────────────────────────────────────
+
+/// Validate the parts of a collection descriptor that the engine cannot accept
+/// silently. Runtimes call this once per collection before they build it, so a
+/// bad configuration fails at open time instead of producing wrong results.
+///
+/// Checks today:
+/// - every `ordered_indexes` entry names a field declared in the schema (dot
+///   paths through nested `Struct`s and `Record` values are allowed; `Optional`,
+///   `OptionalWithDefault` and `NullOr` wrappers are looked through), is not a
+///   computed field, and is not listed twice.
+///
+/// Returns a `ValidationError` with one issue per rejected entry.
+pub fn validate_collection_descriptor(
+    descriptor: &CollectionDescriptor,
+) -> Result<(), crate::errors::EngineError> {
+    use crate::errors::{EngineError, ValidationError, ValidationIssue};
+
+    let mut issues = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for field in &descriptor.ordered_indexes {
+        let problem = if !schema_declares_path(&descriptor.schema, field) {
+            Some("is not declared in the collection schema")
+        } else if descriptor.computed_fields.iter().any(|computed| {
+            computed.name == *field || field.split('.').next() == Some(computed.name.as_str())
+        }) {
+            Some("is a computed field; ordered indexes cover stored fields only")
+        } else if !seen.insert(field.as_str()) {
+            Some("is listed more than once")
+        } else {
+            None
+        };
+        if let Some(problem) = problem {
+            issues.push(ValidationIssue {
+                field: "ordered_indexes".to_owned(),
+                message: format!("Ordered index field '{field}' {problem}"),
+                value: Some(serde_json::Value::String(field.clone())),
+                expected: Some("a stored schema field path".to_owned()),
+                received: None,
+            });
+        }
+    }
+    if issues.is_empty() {
+        return Ok(());
+    }
+    Err(EngineError::Validation(ValidationError {
+        message: format!(
+            "Invalid ordered index configuration for collection '{}'",
+            descriptor.name
+        ),
+        issues,
+    }))
+}
+
+/// Whether `path` (dot notation) resolves to a declared field of `schema`.
+fn schema_declares_path(schema: &SchemaNode, path: &str) -> bool {
+    let mut node = schema;
+    for segment in path.split('.') {
+        if segment.is_empty() {
+            return false;
+        }
+        node = match unwrap_presence(node) {
+            SchemaNode::Struct { fields } => {
+                match fields.iter().find(|field| field.name == segment) {
+                    Some(field) => &field.schema,
+                    None => return false,
+                }
+            }
+            SchemaNode::Record { value, .. } => value,
+            _ => return false,
+        };
+    }
+    true
+}
+
+/// Look through wrappers that only change presence or nullability.
+fn unwrap_presence(mut node: &SchemaNode) -> &SchemaNode {
+    loop {
+        node = match node {
+            SchemaNode::Optional(inner) | SchemaNode::NullOr(inner) => inner,
+            SchemaNode::OptionalWithDefault { inner, .. } => inner,
+            other => return other,
+        };
+    }
 }

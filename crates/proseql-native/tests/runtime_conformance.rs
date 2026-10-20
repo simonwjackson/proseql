@@ -22,6 +22,7 @@ fn descriptor(name: &str, fields: Vec<StructField>) -> CollectionDescriptor {
         id_strategy: IdStrategy::Provided,
         relationships: vec![],
         indexes: vec![],
+        ordered_indexes: vec![],
         unique_fields: vec![],
         before_create_hooks: vec![],
         after_create_hooks: vec![],

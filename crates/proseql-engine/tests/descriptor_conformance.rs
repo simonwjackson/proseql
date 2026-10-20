@@ -8,8 +8,8 @@
 
 use proseql_engine::{
     descriptor::{
-        CollectionDescriptor, DatabaseDescriptor, IdStrategy, SchemaNode, StructField,
-        ValidationMode,
+        validate_collection_descriptor, CollectionDescriptor, DatabaseDescriptor, IdStrategy,
+        SchemaNode, StructField, ValidationMode,
     },
     errors::EngineError,
     validator::{decode_value, validate_value},
@@ -55,6 +55,7 @@ fn base_collection() -> CollectionDescriptor {
         id_strategy: IdStrategy::Provided,
         relationships: vec![],
         indexes: vec![],
+        ordered_indexes: vec![],
         unique_fields: vec![],
         before_create_hooks: vec![],
         after_create_hooks: vec![],
@@ -120,6 +121,111 @@ fn database_descriptor_round_trips_json() {
 }
 
 // ── validate conforming record ────────────────────────────────────────────────
+// ── ordered_indexes (native time-series step 4) ─────────────────────────────
+
+/// Descriptor JSON as written before `ordered_indexes` existed (commit 0e3666a).
+const DESCRIPTOR_JSON_WITHOUT_ORDERED_INDEXES: &str = r#"{"name":"users","schema":{"kind":"struct","fields":[{"name":"id","schema":{"kind":"str"}},{"name":"name","schema":{"kind":"str"}},{"name":"age","schema":{"kind":"num"}}]},"id_strategy":{"kind":"provided"},"relationships":[],"indexes":[],"unique_fields":[],"before_create_hooks":[],"after_create_hooks":[],"before_update_hooks":[],"after_update_hooks":[],"before_delete_hooks":[],"after_delete_hooks":[],"on_change_hooks":[],"computed_fields":[],"search_index":[],"migrations":[],"append_only":false,"validation_mode":"strict"}"#;
+
+#[test]
+fn descriptor_without_ordered_indexes_round_trips_byte_identically() {
+    let parsed: CollectionDescriptor =
+        serde_json::from_str(DESCRIPTOR_JSON_WITHOUT_ORDERED_INDEXES).expect("old JSON parses");
+    assert!(parsed.ordered_indexes.is_empty());
+    assert_eq!(parsed, base_collection());
+    assert_eq!(
+        serde_json::to_string(&parsed).expect("serialize"),
+        DESCRIPTOR_JSON_WITHOUT_ORDERED_INDEXES
+    );
+}
+
+#[test]
+fn descriptor_with_ordered_indexes_serializes_after_indexes_and_round_trips() {
+    let mut desc = base_collection();
+    desc.ordered_indexes = vec!["age".into()];
+    let json = serde_json::to_string(&desc).expect("serialize");
+    assert!(
+        json.contains(r#""indexes":[],"ordered_indexes":["age"],"unique_fields""#),
+        "{json}"
+    );
+    let back: CollectionDescriptor = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(back, desc);
+}
+
+fn ordered_index_issues(desc: &CollectionDescriptor) -> Vec<String> {
+    match validate_collection_descriptor(desc) {
+        Ok(()) => vec![],
+        Err(EngineError::Validation(error)) => {
+            assert!(error.message.contains("'users'"), "{}", error.message);
+            error
+                .issues
+                .into_iter()
+                .map(|issue| {
+                    assert_eq!(issue.field, "ordered_indexes");
+                    issue.message
+                })
+                .collect()
+        }
+        Err(other) => panic!("expected ValidationError, got {other:?}"),
+    }
+}
+
+#[test]
+fn ordered_index_on_declared_fields_is_valid() {
+    let mut desc = base_collection();
+    desc.schema = SchemaNode::Struct {
+        fields: vec![
+            StructField {
+                name: "id".into(),
+                schema: SchemaNode::Str,
+            },
+            StructField {
+                name: "meta".into(),
+                schema: SchemaNode::Optional(Box::new(SchemaNode::NullOr(Box::new(
+                    SchemaNode::Struct {
+                        fields: vec![StructField {
+                            name: "at".into(),
+                            schema: SchemaNode::Str,
+                        }],
+                    },
+                )))),
+            },
+            StructField {
+                name: "scores".into(),
+                schema: SchemaNode::Record {
+                    key: Box::new(SchemaNode::Str),
+                    value: Box::new(SchemaNode::Num),
+                },
+            },
+        ],
+    };
+    desc.ordered_indexes = vec!["id".into(), "meta.at".into(), "scores.math".into()];
+    assert_eq!(ordered_index_issues(&desc), Vec::<String>::new());
+}
+
+#[test]
+fn ordered_index_on_unknown_duplicate_or_computed_field_fails_closed() {
+    let mut desc = base_collection();
+    desc.computed_fields = vec![proseql_engine::descriptor::ComputedFieldDescriptor {
+        name: "label".into(),
+        callback_id: "users.computed.label".into(),
+    }];
+    desc.ordered_indexes = vec![
+        "age".into(),
+        "timestamp".into(),
+        "age".into(),
+        "name.first".into(),
+        "".into(),
+        "label".into(),
+    ];
+    let issues = ordered_index_issues(&desc);
+    assert_eq!(issues.len(), 5, "{issues:?}");
+    assert!(issues[0].contains("'timestamp' is not declared"));
+    assert!(issues[1].contains("'age' is listed more than once"));
+    assert!(issues[2].contains("'name.first' is not declared"));
+    assert!(issues[3].contains("'' is not declared"));
+    assert!(issues[4].contains("'label'"));
+}
+
 // Mirrors: packages/core/tests/schema-validation.test.ts ("decodes valid data")
 
 #[test]
