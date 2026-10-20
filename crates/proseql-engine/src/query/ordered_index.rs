@@ -26,14 +26,26 @@
 //!   all numbers) and, for strings, no collator is registered. Ties keep
 //!   insertion order, as Rust's stable sort does.
 //!
-//! Each entry is keyed by `(value, insertion ordinal)`, so iteration order is
-//! the stable-sort order and range results can be put back into insertion
-//! order cheaply.
+//! # Storage
+//!
+//! Entries live in a `BTreeSet<(u64, String)>`, the same type the equality
+//! index already uses, so the WASM build carries one B-tree instantiation
+//! (each extra key type costs several KB of gzipped code). An entry is
+//! `(region, key ++ ordinal ++ id)`:
+//!
+//! - `region` is 0 for numbers, 1 for strings and 2 for missing/null rows.
+//! - `key` is an order-preserving encoding of the value: 16 hex digits of the
+//!   `f64` bit pattern mapped to a total order (`-0` stored as `0`), or the
+//!   string with `\0` escaped as `\0\x01` and terminated by `\0\0`, or empty.
+//!   Byte order of encoded keys equals `f64::total_cmp` / `str::cmp` order of
+//!   the values, which are the comparisons the filter and the sort use.
+//! - `ordinal` is the row's insertion ordinal as 16 hex digits, so ties
+//!   iterate in insertion order.
+//! - `id` is the row id.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{btree_set, BTreeSet};
 use std::iter::Peekable;
 use std::ops::Bound;
-use std::sync::Arc;
 
 use serde_json::Value;
 
@@ -43,79 +55,93 @@ use crate::value::is_boundary_undefined;
 
 // ── Keys ──────────────────────────────────────────────────────────────────────
 
-/// An `f64` with a total order. `-0.0` is stored as `0.0` because the filter
-/// and the sort treat them as equal. JSON values cannot hold NaN.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct NumberKey(f64);
+const NUMBERS: u64 = 0;
+const STRINGS: u64 = 1;
+const ABSENT: u64 = 2;
+/// Hex digits of an encoded number or ordinal.
+const WIDTH: usize = 16;
 
-impl NumberKey {
-    pub(crate) fn new(value: f64) -> Self {
-        Self(if value == 0.0 { 0.0 } else { value })
-    }
-}
+type Entry = (u64, String);
 
-impl PartialEq for NumberKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.total_cmp(&other.0).is_eq()
-    }
-}
-impl Eq for NumberKey {}
-impl PartialOrd for NumberKey {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for NumberKey {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.total_cmp(&other.0)
-    }
+/// Encode a number so that byte order equals `f64::total_cmp` order, with
+/// `-0` and `0` equal (the filter and the sort treat them as equal).
+fn number_key(value: f64) -> String {
+    let bits = if value == 0.0 { 0.0f64 } else { value }.to_bits();
+    let ordered = if bits >> 63 == 1 {
+        !bits
+    } else {
+        bits | (1 << 63)
+    };
+    format!("{ordered:016x}")
 }
 
-/// How one row's field value takes part in ranges and sorts.
-#[derive(Debug, Clone, PartialEq)]
-enum OrderedKey {
-    Str(String),
-    Num(NumberKey),
-    /// Missing, `null` or boundary `undefined`: never in a range, sorts last.
-    Absent,
-    /// Booleans, arrays and objects: never in a range, blocks index sorts.
-    Other,
-}
-
-impl OrderedKey {
-    fn classify(value: Option<&Value>) -> Self {
-        match value {
-            None | Some(Value::Null) => Self::Absent,
-            Some(value) if is_boundary_undefined(value) => Self::Absent,
-            Some(Value::String(text)) => Self::Str(text.clone()),
-            Some(Value::Number(number)) => match number.as_f64() {
-                Some(value) => Self::Num(NumberKey::new(value)),
-                None => Self::Other,
-            },
-            Some(_) => Self::Other,
+/// Encode a string so that byte order equals `str::cmp` order and no encoded
+/// key is a prefix of another.
+fn string_key(value: &str) -> String {
+    let mut key = String::with_capacity(value.len() + 2);
+    for part in value.split('\0').enumerate() {
+        if part.0 > 0 {
+            key.push_str("\0\u{1}");
         }
+        key.push_str(part.1);
     }
+    key.push_str("\0\0");
+    key
+}
+
+/// `(region, encoded key)` of one row's value; `None` for booleans, arrays
+/// and objects, which never match a range and block index sorts.
+fn classify(value: Option<&Value>) -> Option<(u64, String)> {
+    match value {
+        None | Some(Value::Null) => Some((ABSENT, String::new())),
+        Some(value) if is_boundary_undefined(value) => Some((ABSENT, String::new())),
+        Some(Value::String(text)) => Some((STRINGS, string_key(text))),
+        Some(Value::Number(number)) => number.as_f64().map(|n| (NUMBERS, number_key(n))),
+        Some(_) => None,
+    }
+}
+
+/// Length of the encoded key at the start of an entry.
+fn key_len(entry: &Entry) -> usize {
+    match entry.0 {
+        NUMBERS => WIDTH,
+        STRINGS => entry.1.find("\0\0").map_or(0, |end| end + 2),
+        _ => 0,
+    }
+}
+
+/// Insertion ordinal and id of an entry.
+fn ordinal_and_id(entry: &Entry) -> (u64, &str) {
+    let rest = &entry.1[key_len(entry)..];
+    let ordinal = u64::from_str_radix(&rest[..WIDTH], 16).unwrap_or(u64::MAX);
+    (ordinal, &rest[WIDTH..])
+}
+
+fn id_of(entry: &Entry) -> &str {
+    ordinal_and_id(entry).1
 }
 
 // ── Range specification ───────────────────────────────────────────────────────
 
-/// Lower and upper bound on one value type.
+/// Lower and upper bound on the encoded keys of one region.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Interval<K> {
-    lower: Bound<K>,
-    upper: Bound<K>,
+pub(crate) struct Interval {
+    region: u64,
+    lower: Bound<String>,
+    upper: Bound<String>,
 }
 
-impl<K: Ord + Clone> Interval<K> {
-    fn unbounded() -> Self {
+impl Interval {
+    fn unbounded(region: u64) -> Self {
         Self {
+            region,
             lower: Bound::Unbounded,
             upper: Bound::Unbounded,
         }
     }
 
     /// Intersect with one `$gt`/`$gte`/`$lt`/`$lte` condition.
-    fn tighten(&mut self, operator: &str, key: K) {
+    fn tighten(&mut self, operator: &str, key: String) {
         let (current, candidate, is_lower) = match operator {
             "$gt" => (&mut self.lower, Bound::Excluded(key), true),
             "$gte" => (&mut self.lower, Bound::Included(key), true),
@@ -160,18 +186,21 @@ impl<K: Ord + Clone> Interval<K> {
         }
     }
 
-    /// Bounds over `(key, ordinal)` tuples that select every ordinal of the
-    /// keys inside the interval. Only valid when `!self.is_empty()`.
-    fn tuple_bounds(&self) -> (Bound<(K, u64)>, Bound<(K, u64)>) {
+    /// Set bounds that select every entry whose key is inside the interval.
+    /// `key ++ "g"` sorts after every `key ++ ordinal ++ id` (hex digits are
+    /// below `g`) and before every larger key (no key is a prefix of another).
+    fn entry_bounds(&self) -> (Bound<Entry>, Bound<Entry>) {
+        let region = self.region;
+        let after = |key: &String| (region, format!("{key}g"));
         let lower = match &self.lower {
-            Bound::Included(key) => Bound::Included((key.clone(), 0)),
-            Bound::Excluded(key) => Bound::Excluded((key.clone(), u64::MAX)),
-            Bound::Unbounded => Bound::Unbounded,
+            Bound::Included(key) => Bound::Included((region, key.clone())),
+            Bound::Excluded(key) => Bound::Included(after(key)),
+            Bound::Unbounded => Bound::Included((region, String::new())),
         };
         let upper = match &self.upper {
-            Bound::Included(key) => Bound::Included((key.clone(), u64::MAX)),
-            Bound::Excluded(key) => Bound::Excluded((key.clone(), 0)),
-            Bound::Unbounded => Bound::Unbounded,
+            Bound::Included(key) => Bound::Excluded(after(key)),
+            Bound::Excluded(key) => Bound::Excluded((region, key.clone())),
+            Bound::Unbounded => Bound::Excluded((region + 1, String::new())),
         };
         (lower, upper)
     }
@@ -182,8 +211,8 @@ impl<K: Ord + Clone> Interval<K> {
 /// number inside `numbers`.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RangeSpec {
-    strings: Interval<String>,
-    numbers: Interval<NumberKey>,
+    strings: Interval,
+    numbers: Interval,
 }
 
 impl RangeSpec {
@@ -197,8 +226,8 @@ impl RangeSpec {
     /// boundary `undefined`).
     pub(crate) fn extract(where_clause: &Value, field: &str) -> Option<Self> {
         let mut spec = Self {
-            strings: Interval::unbounded(),
-            numbers: Interval::unbounded(),
+            strings: Interval::unbounded(STRINGS),
+            numbers: Interval::unbounded(NUMBERS),
         };
         let mut found = false;
         if !spec.collect(where_clause, field, &mut found) || !found {
@@ -241,10 +270,10 @@ impl RangeSpec {
             *found = true;
             for operator in RANGE_OPERATORS {
                 match operators.get(operator) {
-                    Some(Value::String(bound)) => self.strings.tighten(operator, bound.clone()),
+                    Some(Value::String(bound)) => self.strings.tighten(operator, string_key(bound)),
                     Some(Value::Number(bound)) => {
                         if let Some(bound) = bound.as_f64() {
-                            self.numbers.tighten(operator, NumberKey::new(bound));
+                            self.numbers.tighten(operator, number_key(bound));
                         }
                     }
                     // Other operand types only require a string or number value,
@@ -255,6 +284,13 @@ impl RangeSpec {
         }
         true
     }
+
+    /// The non-empty intervals, strings first.
+    fn intervals(&self) -> impl Iterator<Item = &Interval> {
+        [&self.strings, &self.numbers]
+            .into_iter()
+            .filter(|interval| !interval.is_empty())
+    }
 }
 
 const RANGE_OPERATORS: [&str; 4] = ["$gt", "$gte", "$lt", "$lte"];
@@ -262,27 +298,36 @@ const RANGE_OPERATORS: [&str; 4] = ["$gt", "$gte", "$lt", "$lte"];
 // ── Index ─────────────────────────────────────────────────────────────────────
 
 /// Ordered index over one field path.
-#[derive(Debug)]
+///
+/// Like the equality index, maintenance relies on callers passing the row
+/// value that is currently indexed when they remove or replace a row.
 pub(crate) struct OrderedIndex {
     field: String,
-    strings: BTreeMap<(String, u64), Arc<str>>,
-    numbers: BTreeMap<(NumberKey, u64), Arc<str>>,
-    absent: BTreeMap<u64, Arc<str>>,
+    /// See "Storage" in the module docs.
+    entries: BTreeSet<Entry>,
+    strings: usize,
+    numbers: usize,
+    /// Rows whose value is a boolean, array or object (not in `entries`).
     other: usize,
-    /// Current key and insertion ordinal of every indexed row, so removal does
-    /// not depend on the caller passing the previous value.
-    entries: HashMap<Arc<str>, (OrderedKey, u64)>,
+}
+
+impl std::fmt::Debug for OrderedIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OrderedIndex")
+            .field("field", &self.field)
+            .field("len", &(self.entries.len() + self.other))
+            .finish()
+    }
 }
 
 impl OrderedIndex {
     pub(crate) fn new(field: impl Into<String>) -> Self {
         Self {
             field: field.into(),
-            strings: BTreeMap::new(),
-            numbers: BTreeMap::new(),
-            absent: BTreeMap::new(),
+            entries: BTreeSet::new(),
+            strings: 0,
+            numbers: 0,
             other: 0,
-            entries: HashMap::new(),
         }
     }
 
@@ -290,82 +335,72 @@ impl OrderedIndex {
         &self.field
     }
 
-    /// Add or replace the entry for `id`.
-    pub(crate) fn insert(&mut self, id: &str, ordinal: u64, entity: &Value) {
-        let key = OrderedKey::classify(get_nested_value(entity, &self.field));
-        if let Some((current, current_ordinal)) = self.entries.get(id) {
-            if *current == key && *current_ordinal == ordinal {
-                return;
-            }
-            self.remove(id);
-        }
-        let id: Arc<str> = Arc::from(id);
-        match &key {
-            OrderedKey::Str(text) => {
-                self.strings
-                    .insert((text.clone(), ordinal), Arc::clone(&id));
-            }
-            OrderedKey::Num(number) => {
-                self.numbers.insert((*number, ordinal), Arc::clone(&id));
-            }
-            OrderedKey::Absent => {
-                self.absent.insert(ordinal, Arc::clone(&id));
-            }
-            OrderedKey::Other => self.other += 1,
-        }
-        self.entries.insert(id, (key, ordinal));
+    /// The entry for a row, or `None` for a boolean, array or object value.
+    fn entry(&self, id: &str, ordinal: u64, entity: &Value) -> Option<Entry> {
+        classify(get_nested_value(entity, &self.field))
+            .map(|(region, key)| (region, format!("{key}{ordinal:016x}{id}")))
     }
 
-    pub(crate) fn remove(&mut self, id: &str) {
-        let Some((key, ordinal)) = self.entries.remove(id) else {
-            return;
+    fn counter(&mut self, region: Option<u64>) -> Option<&mut usize> {
+        match region {
+            Some(STRINGS) => Some(&mut self.strings),
+            Some(NUMBERS) => Some(&mut self.numbers),
+            Some(_) => None,
+            None => Some(&mut self.other),
+        }
+    }
+
+    /// Add the row `id` with insertion `ordinal`.
+    pub(crate) fn insert(&mut self, id: &str, ordinal: u64, entity: &Value) {
+        let entry = self.entry(id, ordinal, entity);
+        if let Some(counter) = self.counter(entry.as_ref().map(|entry| entry.0)) {
+            *counter += 1;
+        }
+        if let Some(entry) = entry {
+            self.entries.insert(entry);
+        }
+    }
+
+    /// Remove the row `id` indexed with `ordinal` and value `entity`.
+    pub(crate) fn remove(&mut self, id: &str, ordinal: u64, entity: &Value) {
+        let entry = self.entry(id, ordinal, entity);
+        let region = entry.as_ref().map(|entry| entry.0);
+        let removed = match &entry {
+            Some(entry) => self.entries.remove(entry),
+            None => self.other > 0,
         };
-        match key {
-            OrderedKey::Str(text) => {
-                self.strings.remove(&(text, ordinal));
+        if removed {
+            if let Some(counter) = self.counter(region) {
+                *counter -= 1;
             }
-            OrderedKey::Num(number) => {
-                self.numbers.remove(&(number, ordinal));
-            }
-            OrderedKey::Absent => {
-                self.absent.remove(&ordinal);
-            }
-            OrderedKey::Other => self.other -= 1,
         }
     }
 
     #[cfg(test)]
     fn len(&self) -> usize {
-        self.entries.len()
+        self.entries.len() + self.other
     }
 
     /// Ids of rows that can satisfy `spec`, in insertion order.
     pub(crate) fn range_ids(&self, spec: &RangeSpec) -> Vec<String> {
-        let mut hits: Vec<(u64, &Arc<str>)> = Vec::new();
-        if !spec.strings.is_empty() {
-            hits.extend(
-                self.strings
-                    .range(spec.strings.tuple_bounds())
-                    .map(|((_, ordinal), id)| (*ordinal, id)),
-            );
+        // Reorder by ordinal through the same set type, inserting one by one:
+        // a sort or `collect` into the set would add generic sort code.
+        let mut hits: BTreeSet<Entry> = BTreeSet::new();
+        for interval in spec.intervals() {
+            for entry in self.entries.range(interval.entry_bounds()) {
+                let (ordinal, id) = ordinal_and_id(entry);
+                hits.insert((ordinal, id.to_owned()));
+            }
         }
-        if !spec.numbers.is_empty() {
-            hits.extend(
-                self.numbers
-                    .range(spec.numbers.tuple_bounds())
-                    .map(|((_, ordinal), id)| (*ordinal, id)),
-            );
-        }
-        hits.sort_unstable_by_key(|(ordinal, _)| *ordinal);
-        hits.into_iter().map(|(_, id)| id.to_string()).collect()
+        hits.into_iter().map(|(_, id)| id).collect()
     }
 
     /// Whether [`Self::sorted_ids`] reproduces the stable sort on this field.
     /// `strings_bytewise` is false when a string collator is registered.
     pub(crate) fn can_sort(&self, strings_bytewise: bool) -> bool {
         self.other == 0
-            && (self.strings.is_empty() || self.numbers.is_empty())
-            && (self.strings.is_empty() || strings_bytewise)
+            && (self.strings == 0 || self.numbers == 0)
+            && (self.strings == 0 || strings_bytewise)
     }
 
     /// Row ids in the order a stable sort on the field produces: present
@@ -373,53 +408,47 @@ impl OrderedIndex {
     /// missing/null rows in insertion order. With `spec`, only rows that can
     /// satisfy it are returned (rows without a value never can).
     ///
-    /// Callers must check [`Self::can_sort`] first.
+    /// Callers must check [`Self::can_sort`] first, which guarantees that the
+    /// present values are all numbers or all strings.
     pub(crate) fn sorted_ids<'a>(
         &'a self,
         order: &SortOrder,
         spec: Option<&RangeSpec>,
     ) -> Box<dyn Iterator<Item = &'a str> + 'a> {
-        let strings = match spec {
-            Some(spec) if spec.strings.is_empty() => None,
-            Some(spec) => Some(self.strings.range(spec.strings.tuple_bounds())),
-            None => Some(self.strings.range::<(String, u64), _>(..)),
+        let ranges: Vec<btree_set::Range<'a, Entry>> = match spec {
+            Some(spec) => spec
+                .intervals()
+                .map(|interval| self.entries.range(interval.entry_bounds()))
+                .collect(),
+            None => vec![self
+                .entries
+                .range((Bound::Unbounded, Bound::Excluded((ABSENT, String::new()))))],
         };
-        let numbers = match spec {
-            Some(spec) if spec.numbers.is_empty() => None,
-            Some(spec) => Some(self.numbers.range(spec.numbers.tuple_bounds())),
-            None => Some(self.numbers.range::<(NumberKey, u64), _>(..)),
-        };
+        let present = ranges.into_iter().flatten();
         let absent = spec
             .is_none()
-            .then(|| self.absent.values().map(|id| &**id))
+            .then(|| {
+                self.entries
+                    .range((Bound::Included((ABSENT, String::new())), Bound::Unbounded))
+                    .map(id_of)
+            })
             .into_iter()
             .flatten();
-        // `can_sort` guarantees that at most one of strings/numbers is non-empty.
-        let present: Box<dyn Iterator<Item = &'a str> + 'a> = match order {
-            SortOrder::Asc => Box::new(
-                strings
-                    .into_iter()
-                    .flatten()
-                    .map(|(_, id)| &**id)
-                    .chain(numbers.into_iter().flatten().map(|(_, id)| &**id)),
-            ),
-            SortOrder::Desc => Box::new(
-                DescendingStable::new(strings.into_iter().flatten().rev())
-                    .chain(DescendingStable::new(numbers.into_iter().flatten().rev())),
-            ),
-        };
-        Box::new(present.chain(absent))
+        match order {
+            SortOrder::Asc => Box::new(present.map(id_of).chain(absent)),
+            SortOrder::Desc => Box::new(DescendingStable::new(present.rev()).chain(absent)),
+        }
     }
 }
 
-/// Walks `(key, ordinal)` entries in reverse order but emits rows with equal
-/// keys in ascending ordinal order, as a stable descending sort does.
-struct DescendingStable<'a, K: 'a, I: Iterator<Item = (&'a (K, u64), &'a Arc<str>)>> {
+/// Walks entries in reverse order but emits rows with equal keys in ascending
+/// ordinal order, as a stable descending sort does.
+struct DescendingStable<'a, I: Iterator<Item = &'a Entry>> {
     inner: Peekable<I>,
     run: Vec<&'a str>,
 }
 
-impl<'a, K: 'a, I: Iterator<Item = (&'a (K, u64), &'a Arc<str>)>> DescendingStable<'a, K, I> {
+impl<'a, I: Iterator<Item = &'a Entry>> DescendingStable<'a, I> {
     fn new(inner: I) -> Self {
         Self {
             inner: inner.peekable(),
@@ -428,11 +457,7 @@ impl<'a, K: 'a, I: Iterator<Item = (&'a (K, u64), &'a Arc<str>)>> DescendingStab
     }
 }
 
-impl<'a, K, I> Iterator for DescendingStable<'a, K, I>
-where
-    K: PartialEq + 'a,
-    I: Iterator<Item = (&'a (K, u64), &'a Arc<str>)>,
-{
+impl<'a, I: Iterator<Item = &'a Entry>> Iterator for DescendingStable<'a, I> {
     type Item = &'a str;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -441,13 +466,14 @@ where
         }
         // Entries with equal keys arrive with descending ordinals. Collect the
         // run and pop it from the end to emit ascending ordinals.
-        let ((key, _), id) = self.inner.next()?;
-        self.run.push(id);
-        while let Some(((next_key, _), next_id)) = self.inner.peek() {
-            if next_key != key {
+        let entry = self.inner.next()?;
+        let key = &entry.1[..key_len(entry)];
+        self.run.push(id_of(entry));
+        while let Some(next) = self.inner.peek() {
+            if next.0 != entry.0 || &next.1[..key_len(next)] != key {
                 break;
             }
-            self.run.push(next_id);
+            self.run.push(id_of(next));
             self.inner.next();
         }
         self.run.pop()
@@ -476,27 +502,29 @@ mod tests {
 
     #[test]
     fn tighten_keeps_the_strictest_bounds() {
-        let mut interval = Interval::<i32>::unbounded();
-        interval.tighten("$gte", 3);
-        interval.tighten("$gt", 3);
-        interval.tighten("$gte", 1);
-        interval.tighten("$lte", 9);
-        interval.tighten("$lt", 9);
-        interval.tighten("$lte", 12);
-        assert_eq!(interval.lower, Bound::Excluded(3));
-        assert_eq!(interval.upper, Bound::Excluded(9));
+        let num = number_key;
+        let mut interval = Interval::unbounded(NUMBERS);
+        interval.tighten("$gte", num(3.0));
+        interval.tighten("$gt", num(3.0));
+        interval.tighten("$gte", num(1.0));
+        interval.tighten("$lte", num(9.0));
+        interval.tighten("$lt", num(9.0));
+        interval.tighten("$lte", num(12.0));
+        assert_eq!(interval.lower, Bound::Excluded(num(3.0)));
+        assert_eq!(interval.upper, Bound::Excluded(num(9.0)));
         assert!(!interval.is_empty());
-        interval.tighten("$lt", 3);
+        interval.tighten("$lt", num(3.0));
         assert!(interval.is_empty());
     }
 
     #[test]
     fn point_interval_is_empty_unless_both_bounds_include_it() {
-        let mut interval = Interval::<i32>::unbounded();
-        interval.tighten("$gte", 5);
-        interval.tighten("$lte", 5);
+        let text = string_key;
+        let mut interval = Interval::unbounded(STRINGS);
+        interval.tighten("$gte", text("m"));
+        interval.tighten("$lte", text("m"));
         assert!(!interval.is_empty());
-        interval.tighten("$lt", 5);
+        interval.tighten("$lt", text("m"));
         assert!(interval.is_empty());
     }
 
@@ -507,9 +535,9 @@ mod tests {
             "$and": [{"at": {"$lt": "2021"}}, {"$and": [{"at": {"$gt": 4}}]}],
             "$or": [{"at": {"$lt": "1999"}}],
         }));
-        assert_eq!(spec.strings.lower, Bound::Included("2020".to_owned()));
-        assert_eq!(spec.strings.upper, Bound::Excluded("2021".to_owned()));
-        assert_eq!(spec.numbers.lower, Bound::Excluded(NumberKey::new(4.0)));
+        assert_eq!(spec.strings.lower, Bound::Included(string_key("2020")));
+        assert_eq!(spec.strings.upper, Bound::Excluded(string_key("2021")));
+        assert_eq!(spec.numbers.lower, Bound::Excluded(number_key(4.0)));
         assert_eq!(spec.numbers.upper, Bound::Unbounded);
     }
 
@@ -607,24 +635,86 @@ mod tests {
         assert!(!mixed.can_sort(true));
         let mut other = index(&[("n", json!({"at": 2})), ("b", json!({"at": false}))]);
         assert!(!other.can_sort(true));
-        other.remove("b");
+        other.remove("b", 1, &json!({"at": false}));
         assert!(other.can_sort(false), "numbers ignore the collator");
     }
 
     #[test]
-    fn insert_replaces_and_remove_forgets_the_previous_key() {
+    fn remove_and_insert_move_a_row_to_its_new_key() {
         let mut index = index(&[("x", json!({"at": 1})), ("y", json!({"at": 2}))]);
+        index.remove("x", 0, &json!({"at": 1}));
         index.insert("x", 0, &json!({"at": 3}));
         assert_eq!(
             index.sorted_ids(&SortOrder::Asc, None).collect::<Vec<_>>(),
             vec!["y", "x"]
         );
-        index.remove("y");
-        index.remove("y");
+        index.remove("y", 1, &json!({"at": 2}));
+        index.remove("y", 1, &json!({"at": 2}));
         assert_eq!(index.len(), 1);
         assert_eq!(
             index.range_ids(&spec(json!({"at": {"$lt": 10}}))),
             vec!["x"]
+        );
+    }
+
+    #[test]
+    fn encoded_keys_preserve_value_order() {
+        let numbers = [
+            f64::NEG_INFINITY,
+            -1e300,
+            -2.5,
+            -1.0,
+            -f64::MIN_POSITIVE,
+            0.0,
+            f64::MIN_POSITIVE,
+            0.5,
+            1.0,
+            2.0,
+            1e300,
+            f64::INFINITY,
+        ];
+        for pair in numbers.windows(2) {
+            assert!(number_key(pair[0]) < number_key(pair[1]), "{pair:?}");
+        }
+        assert_eq!(number_key(-0.0), number_key(0.0));
+        let strings = [
+            "",
+            "\0",
+            "\0\0",
+            "\0\u{1}",
+            "\u{1}",
+            "a",
+            "a\0",
+            "a\0b",
+            "a\u{1}",
+            "aa",
+            "b",
+            "é",
+            "\u{10000}",
+        ];
+        for pair in strings.windows(2) {
+            assert!(pair[0] < pair[1], "fixture order {pair:?}");
+            assert!(string_key(pair[0]) < string_key(pair[1]), "{pair:?}");
+            // `key ++ "g"` stays below the next key, so exclusive bounds hold.
+            assert!(format!("{}g", string_key(pair[0])) < string_key(pair[1]));
+        }
+    }
+
+    #[test]
+    fn ids_and_ordinals_round_trip_through_entries_with_nul_bytes() {
+        let index = index(&[
+            ("id-with-\0", json!({"at": "x\0y"})),
+            ("plain", json!({"at": "x"})),
+            ("n", json!({"at": 3})),
+            ("gone", json!({})),
+        ]);
+        assert_eq!(
+            index.sorted_ids(&SortOrder::Desc, None).collect::<Vec<_>>(),
+            vec!["id-with-\0", "plain", "n", "gone"]
+        );
+        assert_eq!(
+            index.range_ids(&spec(json!({"at": {"$gt": "x"}}))),
+            vec!["id-with-\0", "n"]
         );
     }
 }

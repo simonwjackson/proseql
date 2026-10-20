@@ -650,15 +650,14 @@ pub fn validate_collection_descriptor(
     use crate::errors::{EngineError, ValidationError, ValidationIssue};
 
     let mut issues = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for field in &descriptor.ordered_indexes {
+    for (position, field) in descriptor.ordered_indexes.iter().enumerate() {
         let problem = if !schema_declares_path(&descriptor.schema, field) {
             Some("is not declared in the collection schema")
         } else if descriptor.computed_fields.iter().any(|computed| {
             computed.name == *field || field.split('.').next() == Some(computed.name.as_str())
         }) {
             Some("is a computed field; ordered indexes cover stored fields only")
-        } else if !seen.insert(field.as_str()) {
+        } else if descriptor.ordered_indexes[..position].contains(field) {
             Some("is listed more than once")
         } else {
             None

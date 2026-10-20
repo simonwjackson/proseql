@@ -65,7 +65,7 @@ use super::sort::SortOrder;
 /// Which acceleration index a query used to find its candidate rows.
 ///
 /// Serialized as `"none"`, `"equality"`, `"ordered"` or `"search"`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum IndexUsed {
     /// Full scan in insertion order.
@@ -236,7 +236,7 @@ impl QueryIndexes {
             }
         }
         for index in &mut self.ordered {
-            index.remove(id);
+            index.remove(id, order, entity);
         }
     }
 
@@ -254,12 +254,13 @@ impl QueryIndexes {
     /// Used when a caller-mutated row is synchronized without a formal
     /// mutation. Equality and search postings keep their documented stale
     /// behaviour there, but an ordered index must never disagree with a scan.
-    pub(crate) fn refresh_ordered(&mut self, id: &str, entity: &Value) {
+    pub(crate) fn refresh_ordered(&mut self, id: &str, before: &Value, after: &Value) {
         let Some(order) = self.entity_order.get(id).copied() else {
             return;
         };
         for index in &mut self.ordered {
-            index.insert(id, order, entity);
+            index.remove(id, order, before);
+            index.insert(id, order, after);
         }
     }
 

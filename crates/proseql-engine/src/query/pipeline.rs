@@ -557,7 +557,7 @@ pub fn execute_grouped_aggregate(
 /// How a query reads its candidates, computed by the same planning functions
 /// the executors use. Native runtimes add their own fields (for example
 /// `partitions_loaded`) when they surface it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct QueryStats {
     /// The index that produced the candidates or their order.
     pub index_used: IndexUsed,

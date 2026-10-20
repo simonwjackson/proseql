@@ -1363,7 +1363,7 @@ impl Collection {
             .get(id)
             .expect("synchronized row remains live")
             .clone();
-        self.query_indexes.refresh_ordered(id, &after);
+        self.query_indexes.refresh_ordered(id, &before, &after);
         self.update_authorized_equality_cache(id, Some(&before), Some(&after));
         true
     }
