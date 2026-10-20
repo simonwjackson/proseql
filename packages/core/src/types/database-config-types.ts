@@ -106,6 +106,26 @@ export type CollectionConfig = {
 	readonly indexes?: ReadonlyArray<string | ReadonlyArray<string>>;
 
 	/**
+	 * Fields with an ordered (range) index, one field path per entry.
+	 *
+	 * The Rust engine (`@proseql/engine` and the native runtime) uses an ordered
+	 * index to narrow `$gt`/`$gte`/`$lt`/`$lte` filters and to order a sort on
+	 * that single field. Results are identical to the unindexed path. Each entry
+	 * must name a field declared in the schema (dot paths through nested structs
+	 * are allowed); otherwise the engine rejects the configuration with a
+	 * `ValidationError`.
+	 *
+	 * The legacy TypeScript core accepts this setting but does not use it for
+	 * query planning; results are the same.
+	 *
+	 * @example
+	 * ```ts
+	 * orderedIndexes: ["timestamp"]
+	 * ```
+	 */
+	readonly orderedIndexes?: ReadonlyArray<string>;
+
+	/**
 	 * Lifecycle hooks for this collection.
 	 * Hooks intercept CRUD operations for transformation, validation, or side effects.
 	 * Before-hooks can transform data or reject operations.

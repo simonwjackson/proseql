@@ -15,6 +15,7 @@ test *args:
         ./packages/engine/tests/browser-persistence-concurrency.test.ts \
         ./packages/engine/tests/engine-duplicate-ids.test.ts \
         ./packages/engine/tests/engine-time-bucket.test.ts \
+        ./packages/engine/tests/engine-ordered-index.test.ts \
         ./packages/engine/tests/engine-u8.test.ts \
         ./packages/engine/tests/engine.test.ts \
         ./packages/engine/tests/loader.test.ts \
@@ -42,6 +43,7 @@ test *args:
         packages/core/tests/file-watcher.test.ts \
         packages/core/tests/glob-match.test.ts \
         packages/core/tests/infer-codecs.test.ts \
+        packages/core/tests/ordered-indexes-config.test.ts \
         packages/core/tests/schema-validation.test.ts \
         packages/core/tests/schema-migrations.test.ts \
         packages/core/tests/serializer-service.test.ts \

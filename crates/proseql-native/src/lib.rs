@@ -805,6 +805,7 @@ fn persist_current(state: &mut RuntimeState) -> Result<(), EngineError> {
 
 fn validate_config(config: &NativeRuntimeConfig) -> Result<(), EngineError> {
     for collection in &config.collections {
+        proseql_engine::descriptor::validate_collection_descriptor(&collection.descriptor)?;
         let descriptor = &collection.descriptor;
         let has_callbacks = !descriptor.before_create_hooks.is_empty()
             || !descriptor.after_create_hooks.is_empty()

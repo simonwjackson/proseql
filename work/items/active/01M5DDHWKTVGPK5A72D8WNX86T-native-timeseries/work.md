@@ -18,9 +18,15 @@
   - Append median 0.54 ms at 140k and 0.58 ms at 1M (rewrite path: 1.2 s and 7.3 s). 127 bytes written per insert (the line), 4 KiB read (conflict-check tail), earlier bytes unchanged, all 1,000 inserts timed.
   - Time bucket: no `month` field; data 14% smaller, RSS after open 4.5% lower, append cost unchanged.
   - 10M: does not fit before lazy loading (OOM-killed in open). The harness RSS guard uses a limit fixed at start; on the shared machine the OOM killer acted first.
-- U4–U5 not started on this branch.
+- U4 (ordered index) done on branch `ts/index` from `ts/bench` (439ccd8). Results: `docs/benchmarks/timeseries.md`, "Step 4 ordered index". It ran on the baseline `Field { month }` key; steps 2 and 3 are on other branches.
+  - One-hour query: 134 ms to 1.5 µs at 140k; 1,141 ms to 21 µs at 1M; `index_used = ordered`, candidates = matching rows.
+  - Newest 100 (sort desc, limit 100): 219 ms to 65 µs at 140k; 2,017 ms to 96 µs at 1M.
+  - Cost: about 175 B RSS per row; open 7% to 14% longer. 10M still aborts in open at the memory limit (needs U5).
+  - WASM browser production size: 591,428 B gzip (ts/bench tip 578,760 B; budget 595,794 B).
+- Branch `ts/lazy` merges `ts/append` and `ts/index`; U5 (lazy partitions) is built there.
 
 ## Parity decisions (native only on purpose)
 
 - Partitioned append without rewrite: native only. The WASM engine keeps its rewrite path for partitioned sources. Its source-oriented configuration also rejects `appendOnly` as an old-style persistence field. Recorded in `docs/native-sources.md` ("Runtime parity").
 - Lazy partitions: native only.
+- Ordered index: native and WASM plan with it. In WASM it narrows ranges only, because the binding sorts through the host (`localeCompare`). The legacy TypeScript core accepts `orderedIndexes` and does not plan with it.

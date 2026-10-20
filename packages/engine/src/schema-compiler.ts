@@ -132,6 +132,10 @@ function compileCollectionDescriptor(
 			},
 		]),
 		indexes: collection.indexes ? [...collection.indexes] : [],
+		// Omitted when empty, matching the engine descriptor's serde default.
+		...(collection.orderedIndexes && collection.orderedIndexes.length > 0
+			? { ordered_indexes: [...collection.orderedIndexes] }
+			: {}),
 		unique_fields: collection.uniqueFields ? [...collection.uniqueFields] : [],
 		before_create_hooks: registerHookArray(
 			hooks.beforeCreate as

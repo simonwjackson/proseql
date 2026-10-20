@@ -122,6 +122,12 @@ impl CallbackRegistry {
         self.collator = Some(f);
     }
 
+    /// Whether a string collator is registered (string sorts then use it
+    /// instead of bytewise order).
+    pub fn has_collator(&self) -> bool {
+        self.collator.is_some()
+    }
+
     pub fn collate_strings(&self, a: &str, b: &str) -> Option<std::cmp::Ordering> {
         self.collator.as_ref().map(|f| f(a, b))
     }

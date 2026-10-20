@@ -27,6 +27,7 @@ fn descriptor(name: &str) -> CollectionDescriptor {
         id_strategy: IdStrategy::DerivedFromKey,
         relationships: vec![],
         indexes: vec![],
+        ordered_indexes: vec![],
         unique_fields: vec![],
         before_create_hooks: vec![],
         after_create_hooks: vec![],

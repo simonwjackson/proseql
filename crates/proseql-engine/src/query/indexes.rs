@@ -23,6 +23,14 @@
 //! and **all** queried fields are covered by the search index (mirrors
 //! `resolveWithSearchIndex` in `packages/core/src/indexes/search-index.ts`).
 //!
+//! ## Ordered indexes (`descriptor.ordered_indexes`)
+//!
+//! One `OrderedIndex` per declared field: `(value, insertion ordinal) → id`.
+//! Candidate narrowing extracts `$gt`/`$gte`/`$lt`/`$lte` conditions on the
+//! field (top level and `$and`) and returns the ids in range. The same index
+//! orders single-field sorts on the field. See `query/ordered_index.rs` for the
+//! exact type and tie semantics.
+//!
 //! ## Insertion order
 //!
 //! The narrowed candidate set is returned as an ordered `Vec<String>` whose
@@ -48,9 +56,27 @@ use serde_json::Value;
 use crate::descriptor::IndexDescriptor;
 
 use super::filter::get_nested_value;
+use super::ordered_index::{OrderedIndex, RangeSpec};
 use super::search::tokenize;
+use super::sort::SortOrder;
 
 // ── Index structures ──────────────────────────────────────────────────────────
+
+/// Which acceleration index a query used to find its candidate rows.
+///
+/// Serialized as `"none"`, `"equality"`, `"ordered"` or `"search"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IndexUsed {
+    /// Full scan in insertion order.
+    None,
+    /// Equality index (`indexes`).
+    Equality,
+    /// Ordered index (`ordered_indexes`), for a range filter or a sort.
+    Ordered,
+    /// Full-text search index (`search_index`).
+    Search,
+}
 
 /// Acceleration indexes for query candidate narrowing.
 ///
@@ -66,6 +92,8 @@ pub struct QueryIndexes {
     search: HashMap<String, HashSet<String>>,
     /// Fields covered by the search index.
     search_fields: Vec<String>,
+    /// Ordered (range) indexes, one per `ordered_indexes` entry.
+    ordered: Vec<OrderedIndex>,
     /// Stable collection insertion ordinal for each live entity.
     entity_order: HashMap<String, u64>,
     next_order: u64,
@@ -103,6 +131,7 @@ impl QueryIndexes {
         &mut self,
         index_descriptors: &[IndexDescriptor],
         search_fields: &[String],
+        ordered_fields: &[String],
     ) {
         self.equality = index_descriptors
             .iter()
@@ -116,6 +145,7 @@ impl QueryIndexes {
             .collect();
         self.search_fields = search_fields.to_vec();
         self.search.clear();
+        self.ordered = ordered_fields.iter().map(OrderedIndex::new).collect();
         self.entity_order.clear();
         self.next_order = 0;
     }
@@ -128,6 +158,12 @@ impl QueryIndexes {
                 .search_fields
                 .iter()
                 .any(|field| fields.contains(field))
+            // A patch replaces whole top-level fields, so a dot-path ordered
+            // field is touched when its root segment is patched.
+            || self.ordered.iter().any(|index| {
+                let root = index.field().split('.').next().unwrap_or_default();
+                fields.iter().any(|field| field == root)
+            })
     }
 
     /// Add one entity to every configured index.
@@ -156,6 +192,9 @@ impl QueryIndexes {
                     self.search.entry(token).or_default().insert(id.to_owned());
                 }
             }
+        }
+        for index in &mut self.ordered {
+            index.insert(id, order, entity);
         }
     }
 
@@ -196,6 +235,9 @@ impl QueryIndexes {
                 }
             }
         }
+        for index in &mut self.ordered {
+            index.remove(id, order, entity);
+        }
     }
 
     /// Replace one entity's postings without touching unrelated entries.
@@ -207,7 +249,23 @@ impl QueryIndexes {
         self.insert_postings(id, after);
     }
 
-    /// Rebuild all indexes from the current entity snapshot.
+    /// Re-key one entity in the ordered indexes only.
+    ///
+    /// Used when a caller-mutated row is synchronized without a formal
+    /// mutation. Equality and search postings keep their documented stale
+    /// behaviour there, but an ordered index must never disagree with a scan.
+    pub(crate) fn refresh_ordered(&mut self, id: &str, before: &Value, after: &Value) {
+        let Some(order) = self.entity_order.get(id).copied() else {
+            return;
+        };
+        for index in &mut self.ordered {
+            index.remove(id, order, before);
+            index.insert(id, order, after);
+        }
+    }
+
+    /// Rebuild the equality and search indexes from the current entity
+    /// snapshot (no ordered indexes; see [`Self::rebuild_all`]).
     ///
     /// `entities` is an ordered slice of `(id, entity_ref)` pairs in insertion order.
     pub fn rebuild(
@@ -216,7 +274,18 @@ impl QueryIndexes {
         index_descriptors: &[IndexDescriptor],
         search_fields: &[String],
     ) {
-        self.configure(index_descriptors, search_fields);
+        self.rebuild_all(entities, index_descriptors, search_fields, &[]);
+    }
+
+    /// Rebuild every index, including ordered indexes on `ordered_fields`.
+    pub(crate) fn rebuild_all(
+        &mut self,
+        entities: &[(String, &Value)],
+        index_descriptors: &[IndexDescriptor],
+        search_fields: &[String],
+        ordered_fields: &[String],
+    ) {
+        self.configure(index_descriptors, search_fields, ordered_fields);
         for (id, entity) in entities {
             self.insert(id, entity);
         }
@@ -345,6 +414,49 @@ impl QueryIndexes {
         }
 
         best.map(|(_, candidates)| candidates)
+    }
+
+    /// Try to narrow entity ids using an ordered index.
+    ///
+    /// Returns `Some(ids)` in insertion order when the where clause puts a
+    /// `$gt`/`$gte`/`$lt`/`$lte` condition on an ordered-indexed field (top
+    /// level or inside `$and`). When several ordered fields qualify, the
+    /// smallest candidate set wins. Returns `None` otherwise.
+    pub fn narrow_by_ordered(&self, where_clause: &Value) -> Option<Vec<String>> {
+        self.ordered
+            .iter()
+            .filter_map(|index| {
+                RangeSpec::extract(where_clause, index.field()).map(|spec| index.range_ids(&spec))
+            })
+            .min_by_key(Vec::len)
+    }
+
+    /// Whether `field` has an ordered index that can reproduce a stable sort.
+    pub(crate) fn can_sort_by(&self, field: &str, strings_bytewise: bool) -> bool {
+        self.ordered
+            .iter()
+            .any(|index| index.field() == field && index.can_sort(strings_bytewise))
+    }
+
+    /// Whether the where clause puts a range condition on the ordered `field`.
+    pub(crate) fn has_range_on(&self, where_clause: &Value, field: &str) -> bool {
+        self.ordered.iter().any(|index| index.field() == field)
+            && RangeSpec::extract(where_clause, field).is_some()
+    }
+
+    /// Ids in stable-sort order for a single-field sort on an ordered field,
+    /// limited to the where clause's range on that field when it has one.
+    /// Callers must check [`Self::can_sort_by`] first and still run the full
+    /// predicate on every id.
+    pub(crate) fn ordered_sort_ids<'a>(
+        &'a self,
+        field: &str,
+        order: &SortOrder,
+        where_clause: Option<&Value>,
+    ) -> Option<Box<dyn Iterator<Item = &'a str> + 'a>> {
+        let index = self.ordered.iter().find(|index| index.field() == field)?;
+        let spec = where_clause.and_then(|clause| RangeSpec::extract(clause, field));
+        Some(index.sorted_ids(order, spec.as_ref()))
     }
 
     /// Try to narrow entity ids using the full-text search index.
@@ -828,7 +940,7 @@ mod tests {
         let after = json!({"role":"admin","bio":"writes wasm"});
         let other = json!({"role":"admin","bio":"rust wasm"});
         let mut incremental = QueryIndexes::new();
-        incremental.configure(&descriptors, &["bio".to_string()]);
+        incremental.configure(&descriptors, &["bio".to_string()], &[]);
         incremental.insert("first", &before);
         incremental.insert("second", &other);
         incremental.replace("first", &before, &after);

@@ -540,6 +540,25 @@ impl Database {
         )
     }
 
+    /// Explain how [`Self::query`] (without `populate`) or [`Self::query_cursor`]
+    /// would read `collection` for `input`, without running it: which index
+    /// supplies the candidates (`index_used`), how many rows the predicate runs
+    /// on at most, and whether an ordered index supplies the sort order.
+    ///
+    /// This is the engine half of the native query stats API; native runtimes
+    /// add `partitions_loaded`.
+    pub fn explain_query(
+        &self,
+        collection: &str,
+        input: &QueryInput,
+    ) -> Result<crate::query::pipeline::QueryStats, EngineError> {
+        let col = self
+            .collections
+            .get(collection)
+            .ok_or_else(|| col_nf(collection))?;
+        crate::query::pipeline::explain_query(col, input, &self.registry)
+    }
+
     /// Resolve the exact foreign-key field used by population. Inverse
     /// relationships intentionally use the population-specific resolver rather
     /// than the CRUD fallback.

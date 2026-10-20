@@ -17,11 +17,23 @@
 //! Before step 1 the pipeline tries to narrow the candidate set via
 //! `collection.narrow_candidates()` (the stable contract that hides index internals):
 //! 1. Equality index (when where clause has equality conditions on indexed fields).
-//! 2. Full-text search index (when all queried fields are covered).
+//!
+//! 2. Ordered index (when the where clause has `$gt`/`$gte`/`$lt`/`$lte`
+//!    conditions on an ordered-indexed field, top level or inside `$and`).
+//! 3. Full-text search index (when all queried fields are covered).
 //!
 //! The full where-clause filter still runs on the candidate set — narrowing is
 //! a fast pre-filter that guarantees no false negatives (matches always pass the
 //! full filter).
+//!
+//! # Index-ordered sorts
+//!
+//! A single-field sort on an ordered-indexed field can read candidates already
+//! in sort order from the index ([`Collection::ordered_sort_candidate_ids`]).
+//! The pipeline then filters, skips and takes while it walks the index, so a
+//! sorted page with a limit does not clone or sort the collection. The index
+//! declines (and the ordinary sort runs) whenever it cannot reproduce the
+//! stable comparator exactly. [`explain_query`] reports which path a query takes.
 //!
 //! # Search relevance scoring
 //!
@@ -62,6 +74,7 @@ use super::aggregate::{
 use super::computed::{resolve_computed_for_all, should_resolve_computed};
 use super::cursor::{apply_cursor, CursorConfig, CursorPageResult};
 use super::filter::matches_where_with_registry;
+use super::indexes::IndexUsed;
 use super::paginate::paginate;
 use super::search::{compute_search_score, extract_search_config, resolve_score_fields, tokenize};
 use super::select::apply_selection;
@@ -131,6 +144,18 @@ pub fn execute_query(
         return execute_borrowed_query(collection, input, registry.as_ref());
     }
 
+    if let Some(ids) = index_sorted_candidates(collection, input, &input.sort, registry) {
+        let offset = input.offset.unwrap_or(0);
+        let limit = input.limit.unwrap_or(usize::MAX);
+        return Ok(
+            matching_rows(collection, ids, input.r#where.as_ref(), registry)
+                .skip(offset)
+                .take(limit)
+                .map(|entity| apply_selection(entity, input.select.as_ref()))
+                .collect(),
+        );
+    }
+
     execute_query_over_entities(
         collect_candidates(collection, &input.r#where),
         input,
@@ -171,6 +196,15 @@ pub fn execute_canonical_query_positions(
     }
     let offset = input.offset.unwrap_or(0);
     let limit = input.limit.unwrap_or(usize::MAX);
+    if let Some(ids) = index_sorted_candidates(collection, input, &input.sort, registry) {
+        return Ok(Some(
+            matching_ids(collection, ids, input.r#where.as_ref(), registry)
+                .filter_map(|id| collection.position_of(id))
+                .skip(offset)
+                .take(limit)
+                .collect(),
+        ));
+    }
     let mut positions: Vec<usize> = if let Some(where_clause) = input.r#where.as_ref() {
         if let Some((ids, posting_covers_where)) =
             collection.exact_equality_candidate_ids(where_clause)
@@ -353,10 +387,23 @@ pub fn execute_cursor_query(
     cursor_cfg: &CursorConfig,
     registry: &Arc<CallbackRegistry>,
 ) -> Result<CursorPageResult, EngineError> {
-    execute_cursor_query_over_entities(
+    let effective_sort = effective_cursor_sort(input, cursor_cfg)?;
+    if let Some(ids) = index_sorted_candidates(collection, input, &effective_sort, registry) {
+        let entities = ids.filter_map(|id| collection.get(id).cloned()).collect();
+        return cursor_page(
+            entities,
+            input,
+            cursor_cfg,
+            None,
+            &collection.descriptor.computed_fields,
+            registry,
+        );
+    }
+    cursor_page(
         collect_candidates(collection, &input.r#where),
         input,
         cursor_cfg,
+        Some(&effective_sort),
         &collection.descriptor.computed_fields,
         registry,
     )
@@ -395,28 +442,55 @@ pub fn execute_cursor_query_over_entities(
     computed_fields: &[ComputedFieldDescriptor],
     registry: &Arc<CallbackRegistry>,
 ) -> Result<CursorPageResult, EngineError> {
-    let effective_sort: Vec<SortEntry> = if input.sort.is_empty() {
-        vec![(cursor_cfg.key.clone(), SortOrder::Asc)]
-    } else {
-        let primary = &input.sort[0].0;
-        if primary != &cursor_cfg.key {
-            return Err(EngineError::Validation(ValidationError {
-                message: "Invalid cursor configuration".to_string(),
-                issues: vec![ValidationIssue {
-                    field: "cursor.key".to_string(),
-                    message: format!(
-                        "cursor key '{}' must match primary sort field '{}'",
-                        cursor_cfg.key, primary
-                    ),
-                    value: None,
-                    expected: None,
-                    received: None,
-                }],
-            }));
-        }
-        input.sort.clone()
-    };
+    let effective_sort = effective_cursor_sort(input, cursor_cfg)?;
+    cursor_page(
+        entities,
+        input,
+        cursor_cfg,
+        Some(&effective_sort),
+        computed_fields,
+        registry,
+    )
+}
 
+/// The sort a cursor query runs: the explicit sort (whose primary field must
+/// be the cursor key) or an implicit ascending sort on the cursor key.
+fn effective_cursor_sort(
+    input: &QueryInput,
+    cursor_cfg: &CursorConfig,
+) -> Result<Vec<SortEntry>, EngineError> {
+    if input.sort.is_empty() {
+        return Ok(vec![(cursor_cfg.key.clone(), SortOrder::Asc)]);
+    }
+    let primary = &input.sort[0].0;
+    if primary != &cursor_cfg.key {
+        return Err(EngineError::Validation(ValidationError {
+            message: "Invalid cursor configuration".to_string(),
+            issues: vec![ValidationIssue {
+                field: "cursor.key".to_string(),
+                message: format!(
+                    "cursor key '{}' must match primary sort field '{}'",
+                    cursor_cfg.key, primary
+                ),
+                value: None,
+                expected: None,
+                received: None,
+            }],
+        }));
+    }
+    Ok(input.sort.clone())
+}
+
+/// Filter, sort (unless `sort` is `None` because `entities` are already in
+/// sort order), cursor-paginate and select.
+fn cursor_page(
+    entities: Vec<Value>,
+    input: &QueryInput,
+    cursor_cfg: &CursorConfig,
+    sort: Option<&[SortEntry]>,
+    computed_fields: &[ComputedFieldDescriptor],
+    registry: &Arc<CallbackRegistry>,
+) -> Result<CursorPageResult, EngineError> {
     let with_computed = if should_resolve_computed(&input.select, computed_fields) {
         resolve_computed_for_all(&entities, computed_fields, registry)?
     } else {
@@ -431,7 +505,9 @@ pub fn execute_cursor_query_over_entities(
     };
     let filtered_with_scores = attach_search_scores(filtered, &input.r#where);
     let mut sorted = filtered_with_scores;
-    sort_entities_with_registry(&mut sorted, &effective_sort, Some(registry));
+    if let Some(sort) = sort {
+        sort_entities_with_registry(&mut sorted, sort, Some(registry));
+    }
     let mut cursor_result = apply_cursor(&sorted, cursor_cfg)?;
     cursor_result.items = cursor_result
         .items
@@ -476,6 +552,106 @@ pub fn execute_grouped_aggregate(
             .collect(),
     };
     Ok(compute_grouped_aggregates(&filtered, group_by, config))
+}
+
+/// How a query reads its candidates, computed by the same planning functions
+/// the executors use. Native runtimes add their own fields (for example
+/// `partitions_loaded`) when they surface it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct QueryStats {
+    /// The index that produced the candidates or their order.
+    pub index_used: IndexUsed,
+    /// Rows the full predicate runs on at most: the narrowed candidate count,
+    /// or every row for a scan. An index-ordered sort with a limit can stop
+    /// earlier.
+    pub candidate_rows: usize,
+    /// The ordered index also supplied the sort order (no sort step).
+    pub index_sorted: bool,
+}
+
+/// Explain a query without running it. Covers `execute_query` and
+/// `execute_cursor_query` (for a cursor query, the implicit or explicit
+/// cursor sort); aggregates use the same candidate narrowing.
+pub fn explain_query(
+    collection: &Collection,
+    input: &QueryInput,
+    registry: &Arc<CallbackRegistry>,
+) -> Result<QueryStats, EngineError> {
+    let sort = match &input.cursor {
+        Some(cursor_cfg) => effective_cursor_sort(input, cursor_cfg)?,
+        None => input.sort.clone(),
+    };
+    if let Some(ids) = index_sorted_candidates(collection, input, &sort, registry) {
+        return Ok(QueryStats {
+            index_used: IndexUsed::Ordered,
+            candidate_rows: ids.count(),
+            index_sorted: true,
+        });
+    }
+    let narrowed = input
+        .r#where
+        .as_ref()
+        .and_then(|where_clause| collection.narrow_candidates_with_index(where_clause));
+    Ok(match narrowed {
+        Some((ids, index_used)) => QueryStats {
+            index_used,
+            candidate_rows: ids.len(),
+            index_sorted: false,
+        },
+        None => QueryStats {
+            index_used: IndexUsed::None,
+            candidate_rows: collection.len(),
+            index_sorted: false,
+        },
+    })
+}
+
+/// Candidate ids in `sort` order from an ordered index, when the query shape
+/// lets the pipeline skip its sort step: no top-level `$search` (relevance
+/// scores) and no computed fields to materialize before filtering. The
+/// collection decides whether the index can reproduce the sort.
+fn index_sorted_candidates<'a>(
+    collection: &'a Collection,
+    input: &QueryInput,
+    sort: &[SortEntry],
+    registry: &CallbackRegistry,
+) -> Option<Box<dyn Iterator<Item = &'a str> + 'a>> {
+    if sort.is_empty()
+        || extract_search_config(&input.r#where).is_some()
+        || should_resolve_computed(&input.select, &collection.descriptor.computed_fields)
+    {
+        return None;
+    }
+    collection.ordered_sort_candidate_ids(input.r#where.as_ref(), sort, registry)
+}
+
+/// Ids from `ids` whose rows pass the full predicate, in the same order.
+fn matching_ids<'a>(
+    collection: &'a Collection,
+    ids: impl Iterator<Item = &'a str> + 'a,
+    where_clause: Option<&'a Value>,
+    registry: &'a CallbackRegistry,
+) -> impl Iterator<Item = &'a str> + 'a {
+    ids.filter(move |id| {
+        collection.get(id).is_some_and(|entity| {
+            where_clause
+                .is_none_or(|clause| matches_where_with_registry(entity, clause, Some(registry)))
+        })
+    })
+}
+
+/// Rows from `ids` that pass the full predicate, in the same order.
+fn matching_rows<'a>(
+    collection: &'a Collection,
+    ids: impl Iterator<Item = &'a str> + 'a,
+    where_clause: Option<&'a Value>,
+    registry: &'a CallbackRegistry,
+) -> impl Iterator<Item = &'a Value> + 'a {
+    ids.filter_map(|id| collection.get(id))
+        .filter(move |entity| {
+            where_clause
+                .is_none_or(|clause| matches_where_with_registry(entity, clause, Some(registry)))
+        })
 }
 
 /// Helper: build a `QueryInput` from individual params.
