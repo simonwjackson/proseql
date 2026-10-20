@@ -14,9 +14,15 @@
   - 1M rows: open 27 s, 5.6 GiB; insert median 7.3 s; one-hour query 1.5 s.
   - 10M rows: did not finish. Open was stopped at the 15.3 GiB RSS limit after 90 s. Linear extrapolation needs about 54 GiB through open (inferred), more than the 31 GiB machine.
   - The 600 s insert budget allowed 495 (140k) and 76 (1M) of the 1,000 inserts.
-- U2–U5 not started.
+- U4 (ordered index) done on branch `ts/index` from `ts/bench` (439ccd8). Results: `docs/benchmarks/timeseries.md`, "Step 4 ordered index". It ran on the baseline `Field { month }` key; steps 2 and 3 are on other branches.
+  - One-hour query: 134 ms to 1.5 µs at 140k; 1,141 ms to 21 µs at 1M; `index_used = ordered`, candidates = matching rows.
+  - Newest 100 (sort desc, limit 100): 219 ms to 65 µs at 140k; 2,017 ms to 96 µs at 1M.
+  - Cost: about 175 B RSS per row; open 7% to 14% longer. 10M still aborts in open at the memory limit (needs U5).
+  - WASM browser production size: 591,428 B gzip (ts/bench tip 578,760 B; budget 595,794 B).
+- U2, U3 and U5 not started on this branch.
 
 ## Parity decisions (native only on purpose)
 
 - Partitioned append without rewrite: native only. The WASM engine keeps its rewrite path for partitioned sources.
 - Lazy partitions: native only.
+- Ordered index: native and WASM plan with it. In WASM it narrows ranges only, because the binding sorts through the host (`localeCompare`). The legacy TypeScript core accepts `orderedIndexes` and does not plan with it.
