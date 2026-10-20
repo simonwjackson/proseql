@@ -46,6 +46,20 @@ The built-in JSONL codec remains strict. `proseql_formats::codecs::lenient_jsonl
 
 `document_graph_diagnostics()` returns fragment diagnostics from the last accepted graph snapshot. `last_reload_error()` reports a failed reload. Custom transform warnings are separate from fragment diagnostics.
 
+## Ordered indexes
+
+`CollectionDescriptor.ordered_indexes` lists fields that get an ordered (range) index, one field path per entry. Dot paths through nested structs are allowed. The TypeScript name is `orderedIndexes`. The field is omitted from serialized descriptors when empty, so older descriptor JSON keeps its bytes. Opening fails with `ValidationError` (issue field `ordered_indexes`) when an entry is not a declared schema field, is a computed field, or is listed twice.
+
+The planner uses the index for `$gt`, `$gte`, `$lt` and `$lte` on the field, at the top level of the where clause and inside `$and`, so `{ timestamp: { $gte: A, $lt: B } }` and `{ $and: [{ timestamp: { $gte: A } }, { timestamp: { $lt: B } }] }` both qualify. Other conditions in the same clause still run on every candidate. A comparison inside `$or` or `$not`, an equality, or a nested object shape does not use the index; that query scans as before. An equality index on the same clause wins.
+
+The index copies the engine's comparison rules, so results never change: a string operand bounds string values bytewise and does not constrain numbers, and a number operand bounds numbers and does not constrain strings. Null, missing fields, booleans, arrays and objects never match a comparison. Store one type per indexed field; a field that mixes strings and numbers returns the other type's rows for every range, as the scan does.
+
+A sort with one key on an indexed field reads rows in index order and stops at the limit, so newest-first pages do not sort the collection. Ties keep insertion order and null or missing values come last, as in the ordinary sort. The index does not order the sort when the field holds both strings and numbers, or booleans, arrays or objects; when a string collator is registered; when the host sorts (the WASM binding registers `localeCompare` as a host sort, so `@proseql/engine` uses ordered indexes for ranges only); with a top-level `$search`; or with computed fields to materialize. Those queries sort as before. Cursor queries and aggregates use the same candidates.
+
+`Database::explain_query(collection, &QueryInput)` returns `QueryStats { index_used, candidate_rows, index_sorted }` without running the query. `index_used` is `none`, `equality`, `ordered` or `search`. Native callers use `runtime.read(|db| db.explain_query("heartrate", &input))`; the WASM boundary method is `explainQuery`. Lazy partitions will add `partitions_loaded` to the native stats.
+
+Costs: each indexed row holds an encoded key, its insertion ordinal and its ID in a B-tree. The benchmark measured about 175 bytes of RSS per row for an ISO timestamp key (170 MiB at 1M rows). Opening builds the index after loading. Every insert, update and delete updates it in logarithmic time. Rollback, reload and snapshot restore rebuild it. Open took 7% to 14% longer in the benchmark; a one-hour query at 1M rows fell from 1.1 s to 21 µs. See `docs/benchmarks/timeseries.md` (Step 4). The legacy TypeScript core accepts `orderedIndexes` and ignores it for planning.
+
 ## Approved test boundaries
 
 Tests use the public native runtime, real files in temporary directories, custom codecs and graph transforms, and the filesystem durability fault interface. They observe record reads, mutation errors, reopened data, file contents, managed reload, and subprocess interruption. Tests do not call private runtime methods.

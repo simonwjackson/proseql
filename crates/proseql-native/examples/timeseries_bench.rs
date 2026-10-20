@@ -26,7 +26,8 @@ use proseql_engine::descriptor::{
     CollectionDescriptor, IdStrategy, SchemaNode, StructField, ValidationMode,
 };
 use proseql_engine::errors::EngineError;
-use proseql_engine::query::pipeline::QueryInput;
+use proseql_engine::query::pipeline::{QueryInput, QueryStats};
+use proseql_engine::query::SortOrder;
 use proseql_native::{
     NativeCollectionConfig, NativeRuntime, NativeSourceRuntimeConfig, NativeSourceRuntimeOptions,
 };
@@ -56,7 +57,9 @@ enum Mode {
     Append,
     /// Step 3: step 2 + `PartitionKey::TimeBucket { timestamp, Month }`.
     TimeBucket,
-    /// Step 4: step 3 + `ordered_indexes: ["timestamp"]`.
+    /// Step 4: step 3 + `ordered_indexes: ["timestamp"]`. Until step 3 lands
+    /// on the same branch, this runs on the step 2 configuration (partition
+    /// key `Field { month }`); the report's `partition_key` says which.
     Ordered,
     /// Step 5: step 4 + `lazy_partitions` for the heart-rate source.
     Lazy,
@@ -474,9 +477,9 @@ fn print_table(results: &[Value]) {
     };
     println!();
     println!(
-        "| rows | partitions | open ms | RSS after open MiB | peak RSS MiB | inserts | insert median ms | insert p95 ms | bytes written/insert | bytes read/insert | file growth/insert | prefix kept | 1h query median ms | rows | partitions loaded | index | status |"
+        "| rows | partitions | open ms | RSS after open MiB | peak RSS MiB | inserts | insert median ms | insert p95 ms | bytes written/insert | bytes read/insert | file growth/insert | prefix kept | 1h query median ms | rows | partitions loaded | index | newest-100 median ms | newest-100 index | status |"
     );
-    println!("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---|---|");
+    println!("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---|---:|---|---|");
     for report in results {
         let keys = [
             "rows",
@@ -495,6 +498,8 @@ fn print_table(results: &[Value]) {
             "query_rows",
             "query_partitions_loaded",
             "query_index_used",
+            "sorted_query_median_ms",
+            "sorted_query_index_used",
             "status",
         ];
         let cells: Vec<String> = keys.iter().map(|key| cell(report, key)).collect();
@@ -630,6 +635,13 @@ fn child(args: &Args, work: &Path) -> Result<(), BoxError> {
         proc_status_mb("VmHWM:")
     );
 
+    record(
+        &report,
+        "partition_key",
+        json!(partition_key_label(features)),
+    );
+    record(&report, "ordered_indexes", json!(ordered_indexes(features)));
+
     // One-hour range query, aligned to an hour in the middle of the data.
     set_phase(&report, "query");
     let from = (dataset.start_ms + dataset.span_ms / 2) / MS_PER_HOUR * MS_PER_HOUR;
@@ -652,7 +664,11 @@ fn child(args: &Args, work: &Path) -> Result<(), BoxError> {
         query_rows = result.len();
     }
     let queried = host.take();
-    let (partitions_loaded, index_used) = query_stats(features, &opened, &root);
+    let one_hour = QueryInput {
+        r#where: Some(filter.clone()),
+        ..QueryInput::default()
+    };
+    let (partitions_loaded, stats) = query_stats(&runtime, &one_hour, &opened, &root)?;
     record(&report, "query_reps", json!(args.query_reps));
     record(&report, "query_first_ms", json!(timings[0]));
     record(&report, "query_median_ms", json!(median(&mut timings)));
@@ -663,7 +679,43 @@ fn child(args: &Args, work: &Path) -> Result<(), BoxError> {
         "query_partition_reads",
         json!(queried.partition_paths(&root)),
     );
-    record(&report, "query_index_used", json!(index_used));
+    record(&report, "query_index_used", json!(stats.index_used));
+    record(&report, "query_candidate_rows", json!(stats.candidate_rows));
+
+    // Newest 100 samples: a sort on the timestamp with a limit, which an
+    // ordered index answers without sorting the collection.
+    let newest = QueryInput {
+        sort: vec![("timestamp".into(), SortOrder::Desc)],
+        limit: Some(100),
+        ..QueryInput::default()
+    };
+    let mut sorted_timings = Vec::with_capacity(args.query_reps);
+    for _ in 0..args.query_reps {
+        let started = Instant::now();
+        let rows = runtime
+            .read(|db| db.query(COLLECTION, newest.clone(), None))
+            .map_err(tag)?;
+        sorted_timings.push(ms(started.elapsed()));
+        if rows.len() != 100 {
+            return Err(format!("newest-100 query returned {} rows", rows.len()).into());
+        }
+    }
+    let (_, sorted_stats) = query_stats(&runtime, &newest, &opened, &root)?;
+    record(
+        &report,
+        "sorted_query_median_ms",
+        json!(median(&mut sorted_timings)),
+    );
+    record(
+        &report,
+        "sorted_query_index_used",
+        json!(sorted_stats.index_used),
+    );
+    record(
+        &report,
+        "sorted_query_index_sorted",
+        json!(sorted_stats.index_sorted),
+    );
 
     // Appends into the last (full-size) partition.
     set_phase(&report, "insert");
@@ -785,21 +837,44 @@ fn child(args: &Args, work: &Path) -> Result<(), BoxError> {
     Ok(())
 }
 
-/// Partitions resident for the query and the index the planner used. At this
-/// commit every partition is loaded at open and the planner has no ordered
-/// index. Steps 4 and 5 read these from the native query stats API instead.
-fn query_stats(_features: Features, opened: &Counters, root: &Path) -> (usize, &'static str) {
-    (opened.partition_paths(root), "none")
+/// Partitions resident for the query and the engine's plan for it. At this
+/// commit every partition is loaded at open, so "partitions loaded" counts the
+/// partition files read at open; step 5 reads it from the native query stats
+/// API. The plan (`index_used`, `candidate_rows`) comes from the engine's
+/// `Database::explain_query`, which shares the executor's planning functions.
+fn query_stats(
+    runtime: &NativeRuntime,
+    input: &QueryInput,
+    opened: &Counters,
+    root: &Path,
+) -> Result<(usize, QueryStats), BoxError> {
+    let stats = runtime
+        .read(|db| db.explain_query(COLLECTION, input))
+        .map_err(tag)?;
+    Ok((opened.partition_paths(root), stats))
+}
+
+/// Partition key used for this run. Step 3 (`PartitionKey::TimeBucket`) is
+/// not on this branch yet, so `ordered` keeps the `month` field key.
+fn partition_key_label(_features: Features) -> &'static str {
+    "field:month"
+}
+
+fn ordered_indexes(features: Features) -> Vec<String> {
+    if features.ordered_index {
+        vec!["timestamp".to_owned()]
+    } else {
+        vec![]
+    }
 }
 
 /// Each later step removes its check here and wires the feature into
-/// `runtime_config`, `runtime_options` and `query_stats`.
+/// `runtime_config`, `runtime_options` and `query_stats`. `--mode ordered`
+/// runs before step 3 is merged: it skips the time-bucket key (see
+/// `partition_key_label`) instead of failing.
 fn require_supported(features: Features) -> Result<(), BoxError> {
-    if features.time_bucket {
+    if features.time_bucket && !features.ordered_index {
         return Err("--mode timebucket needs PartitionKey::TimeBucket (step 3), which this commit does not have".into());
-    }
-    if features.ordered_index {
-        return Err("--mode ordered needs CollectionDescriptor.ordered_indexes (step 4), which this commit does not have".into());
     }
     if features.lazy {
         return Err("--mode lazy needs NativeSourceRuntimeOptions.lazy_partitions (step 5), which this commit does not have".into());
@@ -826,7 +901,7 @@ fn runtime_config(root: &Path, features: Features) -> Result<NativeSourceRuntime
         id_strategy: IdStrategy::Provided,
         relationships: vec![],
         indexes: vec![],
-        ordered_indexes: vec![],
+        ordered_indexes: ordered_indexes(features),
         unique_fields: vec![],
         before_create_hooks: vec![],
         after_create_hooks: vec![],
