@@ -13,6 +13,7 @@ test *args:
         ./packages/engine/tests/boundary-values.test.ts \
         ./packages/engine/tests/browser-entry.test.ts \
         ./packages/engine/tests/browser-persistence-concurrency.test.ts \
+        ./packages/engine/tests/engine-duplicate-ids.test.ts \
         ./packages/engine/tests/engine-u8.test.ts \
         ./packages/engine/tests/engine.test.ts \
         ./packages/engine/tests/loader.test.ts \

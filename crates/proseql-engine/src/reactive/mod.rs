@@ -1863,6 +1863,8 @@ impl Database {
             .get_mut(collection)
             .ok_or_else(|| col_nf(collection))?
             .create_many_internal(inputs, skip_duplicates)?;
+        let ignored = internal.ignored;
+        let accepted_ids = internal.accepted_ids;
         let mut result = internal.result;
 
         if skip_duplicates && !relationships.is_empty() {
@@ -1919,6 +1921,8 @@ impl Database {
         if !result.created.is_empty() {
             self.emit_owner_change_event(collection, ChangeOperation::Create);
         }
+        result.created =
+            crate::collection::merge_identical_creates(result.created, ignored, &accepted_ids);
         Ok(result)
     }
 

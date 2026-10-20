@@ -420,6 +420,7 @@ fn books_collection_descriptor() -> CollectionDescriptor {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     }
 }
@@ -534,6 +535,7 @@ fn users_collection_descriptor() -> CollectionDescriptor {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     }
 }
@@ -574,6 +576,7 @@ fn companies_collection_descriptor() -> CollectionDescriptor {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     }
 }

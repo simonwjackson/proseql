@@ -210,6 +210,20 @@ export type CollectionConfig = {
 	readonly appendOnly?: boolean;
 
 	/**
+	 * How `create()` and `createMany()` treat an ID that already exists.
+	 *
+	 * - `"error"` (default): every existing ID fails with `DuplicateKeyError`.
+	 * - `"ignoreIdentical"`: an identical payload (after schema decode and
+	 *   defaults, ignoring the engine-filled `createdAt`/`updatedAt`) succeeds,
+	 *   writes nothing and returns the stored record. A different payload still
+	 *   fails with `DuplicateKeyError`; one conflict in a batch writes nothing.
+	 *
+	 * Supported by the Rust engine (`@proseql/engine` and native). The legacy
+	 * TypeScript core runtime rejects this setting.
+	 */
+	readonly duplicateIds?: "error" | "ignoreIdentical";
+
+	/**
 	 * Validation mode for loading persisted data.
 	 *
 	 * - `"strict"` (default): Abort on the first entity that fails schema validation.

@@ -231,8 +231,27 @@ function compileCollectionDescriptor(
 			(migration, index) => compileMigration(name, migration, index, registrar),
 		),
 		append_only: collection.appendOnly ?? false,
+		...compileDuplicateIds(name, collection.duplicateIds),
 		validation_mode: collection.validation ?? "strict",
 	};
+}
+
+/** The engine default `error` is omitted, matching the Rust serde default. */
+function compileDuplicateIds(
+	collectionName: string,
+	policy: CollectionConfig["duplicateIds"],
+): Record<string, unknown> {
+	switch (policy) {
+		case undefined:
+		case "error":
+			return {};
+		case "ignoreIdentical":
+			return { duplicate_ids: "ignore_identical" };
+		default:
+			throw new Error(
+				`Collection '${collectionName}': unsupported duplicateIds '${String(policy)}'; use "error" or "ignoreIdentical"`,
+			);
+	}
 }
 
 function compileMigration(

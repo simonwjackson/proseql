@@ -939,6 +939,8 @@ class EngineRuntime {
 		string,
 		ReadonlySet<string>
 	>;
+	/** Collections whose identical re-creates return stored rows unchanged. */
+	private readonly ignoreIdenticalCollections: ReadonlySet<string>;
 	private readonly callbackFreeSortFields: ReadonlyMap<
 		string,
 		ReadonlySet<string>
@@ -1041,6 +1043,19 @@ class EngineRuntime {
 				return [[row.name, new Set(fields)] as const];
 			}),
 		);
+		this.ignoreIdenticalCollections = new Set(
+			descriptors.flatMap((descriptor) => {
+				if (typeof descriptor !== "object" || descriptor === null) return [];
+				const row = descriptor as {
+					readonly name?: unknown;
+					readonly duplicate_ids?: unknown;
+				};
+				return typeof row.name === "string" &&
+					row.duplicate_ids === "ignore_identical"
+					? [row.name]
+					: [];
+			}),
+		);
 		this.compactCreateManyFields = new Map(
 			descriptors.flatMap((descriptor) => {
 				if (typeof descriptor !== "object" || descriptor === null) return [];
@@ -1055,9 +1070,13 @@ class EngineRuntime {
 					readonly before_create_hooks?: unknown;
 					readonly after_create_hooks?: unknown;
 					readonly computed_fields?: unknown;
+					readonly duplicate_ids?: unknown;
 				};
+				// The compact path maps every input to one inserted row. An
+				// identical re-create under `ignore_identical` inserts nothing.
 				if (
 					typeof row.name !== "string" ||
+					row.duplicate_ids !== undefined ||
 					row.schema?.kind !== "struct" ||
 					!identityDecodedSchema(row.schema) ||
 					row.id_strategy?.kind !== "provided" ||
@@ -2245,6 +2264,28 @@ class EngineRuntime {
 		) => {
 			const rows = result[field];
 			if (!Array.isArray(rows)) return;
+			if (
+				field === "created" &&
+				this.ignoreIdenticalCollections.has(collection)
+			) {
+				// Stored rows of identical re-creates have no change. Match
+				// changes by ID only, so they never claim another row's change.
+				result[field] = rows.map((row) => {
+					const id = rowId(row);
+					const index =
+						id === undefined
+							? undefined
+							: consumeQueue(exactQueues.get(queueKey(false, id)));
+					if (index === undefined) {
+						return id === undefined
+							? row
+							: (projection.materializedValue(collection, id) ?? row);
+					}
+					claimedChanges.add(index);
+					return materializeStoredRow(row, ownerChanges[index]);
+				});
+				return;
+			}
 			result[field] = rows.map((row) =>
 				field === "deleted"
 					? materializeDeletedRow(row)
@@ -2514,6 +2555,45 @@ class EngineRuntime {
 			this.touchStrongStructureLease();
 			try {
 				return settledPromise(() => map(this.dispatch<T>(method, payload)));
+			} finally {
+				this.deferStrongStructureRelease();
+			}
+		};
+		return this.transactionBarrier ? this.transactionBarrier.then(run) : run();
+	}
+
+	/**
+	 * Dispatch a mutation in the same synchronous turn as a read of which of
+	 * `ids` already exist, so no other call can interleave between the two.
+	 */
+	invokeWithExistingIds<T>(
+		method: string,
+		payload: unknown,
+		collection: string,
+		ids: ReadonlyArray<string>,
+	): Promise<{ readonly value: T; readonly existing: ReadonlySet<string> }> {
+		try {
+			this.assertTransactionWaitAllowed();
+		} catch (error) {
+			return Promise.reject(error);
+		}
+		const run = () => {
+			this.touchStrongStructureLease();
+			try {
+				return settledPromise(() => {
+					const existing = new Set(
+						ids.filter((id) => {
+							try {
+								const found = this.dispatchFindById<unknown>(collection, id);
+								return found !== null && found !== undefined;
+							} catch (error) {
+								if (error instanceof NotFoundError) return false;
+								throw error;
+							}
+						}),
+					);
+					return { value: this.dispatch<T>(method, payload), existing };
+				});
 			} finally {
 				this.deferStrongStructureRelease();
 			}
@@ -3308,6 +3388,35 @@ function isAppendOnlyJsonLinesCollection(collection: CollectionRuntimeConfig) {
 	return format === "jsonl" || format === "ndjson";
 }
 
+function stringIds(inputs: ReadonlyArray<unknown>): ReadonlyArray<string> {
+	return inputs.flatMap((input) =>
+		typeof input === "object" &&
+		input !== null &&
+		typeof (input as { readonly id?: unknown }).id === "string"
+			? [(input as { readonly id: string }).id]
+			: [],
+	);
+}
+
+/**
+ * Records that a create actually inserted: IDs that did not exist before the
+ * call, each once. Identical re-creates (`duplicateIds: "ignoreIdentical"`)
+ * return stored records that are already on disk.
+ */
+function newlyCreated(
+	entities: ReadonlyArray<Record<string, unknown>>,
+	existing: ReadonlySet<string>,
+): ReadonlyArray<Record<string, unknown>> {
+	const seen = new Set<string>();
+	return entities.filter((entity) => {
+		const id = typeof entity.id === "string" ? entity.id : undefined;
+		if (id === undefined) return true;
+		if (existing.has(id) || seen.has(id)) return false;
+		seen.add(id);
+		return true;
+	});
+}
+
 async function appendAppendOnlyEntities(
 	persistence: PersistenceState | undefined,
 	collection: CollectionRuntimeConfig,
@@ -3613,6 +3722,25 @@ function buildCollectionFacade(
 				if (!isAppendOnlyJsonLinesCollection(collection)) {
 					return runtime.invokeMapped("create", payload, finish);
 				}
+				if (collection.raw.duplicateIds === "ignoreIdentical") {
+					// An identical re-create returns the stored record without a
+					// write; it must not append a second line.
+					return runtime
+						.invokeWithExistingIds<any>(
+							"create",
+							payload,
+							collection.name,
+							stringIds([input]),
+						)
+						.then(async ({ value, existing }) => {
+							await appendAppendOnlyEntities(
+								persistence,
+								collection,
+								newlyCreated([value], existing),
+							);
+							return finish(value);
+						});
+				}
 				return runtime.invoke<any>("create", payload).then(async (value) => {
 					await appendAppendOnlyEntities(persistence, collection, [value]);
 					return finish(value);
@@ -3620,16 +3748,30 @@ function buildCollectionFacade(
 			}),
 		createMany: async (inputs: ReadonlyArray<any>, options?: any) => {
 			ensureWritable("createMany");
-			const value = await runtime.invoke<any>("createMany", {
+			const payload = {
 				collection: collection.name,
 				items: [...inputs],
 				skipDuplicates: options?.skipDuplicates ?? false,
-			});
-			await appendAppendOnlyEntities(
-				persistence,
-				collection,
-				value.created ?? [],
-			);
+			};
+			let value: any;
+			let appended: ReadonlyArray<Record<string, unknown>>;
+			if (
+				isAppendOnlyJsonLinesCollection(collection) &&
+				collection.raw.duplicateIds === "ignoreIdentical"
+			) {
+				const result = await runtime.invokeWithExistingIds<any>(
+					"createMany",
+					payload,
+					collection.name,
+					stringIds(inputs),
+				);
+				value = result.value;
+				appended = newlyCreated(value.created ?? [], result.existing);
+			} else {
+				value = await runtime.invoke<any>("createMany", payload);
+				appended = value.created ?? [];
+			}
+			await appendAppendOnlyEntities(persistence, collection, appended);
 			applyFormalMutationToPersistenceMirror(
 				persistence,
 				collection.name,

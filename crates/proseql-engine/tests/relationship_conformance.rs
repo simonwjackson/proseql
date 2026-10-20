@@ -254,6 +254,7 @@ fn users_descriptor() -> CollectionDescriptor {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     }
 }
@@ -297,6 +298,7 @@ fn posts_descriptor() -> CollectionDescriptor {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     }
 }
@@ -330,6 +332,7 @@ fn companies_descriptor() -> CollectionDescriptor {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     }
 }
@@ -362,6 +365,7 @@ fn comments_descriptor() -> CollectionDescriptor {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     }
 }
@@ -2276,6 +2280,7 @@ fn population_inv_fk_fallback_singularizes_source_collection_ies_to_y() {
             version: None,
             migrations: vec![],
             append_only: false,
+            duplicate_ids: Default::default(),
             validation_mode: ValidationMode::Strict,
         },
         Arc::clone(&reg),
@@ -2329,6 +2334,7 @@ fn population_inv_fk_fallback_singularizes_source_collection_ies_to_y() {
             version: None,
             migrations: vec![],
             append_only: false,
+            duplicate_ids: Default::default(),
             validation_mode: ValidationMode::Strict,
         },
         Arc::clone(&reg),
@@ -2941,6 +2947,7 @@ fn delete_single_cascade_before_restrict_cascade_side_effects_persist() {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     };
 
@@ -2964,6 +2971,7 @@ fn delete_single_cascade_before_restrict_cascade_side_effects_persist() {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     };
 
@@ -2987,6 +2995,7 @@ fn delete_single_cascade_before_restrict_cascade_side_effects_persist() {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     };
 
@@ -3730,6 +3739,7 @@ fn inverse_create_no_fk_resolution_creates_child_without_injecting_fk() {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     };
 
@@ -3831,6 +3841,7 @@ fn inverse_update_connect_no_fk_resolution_skips_state_change() {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     };
 
@@ -4016,6 +4027,7 @@ fn fk_unknown_schema_numeric_fk_is_coerced_and_fails_foreign_key_error() {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     };
 

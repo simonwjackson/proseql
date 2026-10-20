@@ -460,6 +460,30 @@ pub enum ValidationMode {
     Lenient,
 }
 
+// ── Duplicate ID policy ───────────────────────────────────────────────────────
+
+/// How `create` and `createMany` treat an ID that already exists.
+///
+/// Mirrors `CollectionConfig.duplicateIds: "error" | "ignoreIdentical"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DuplicateIdPolicy {
+    /// Every existing ID is a `DuplicateKeyError` (default).
+    #[default]
+    Error,
+    /// An identical payload is a no-op success that returns the stored record.
+    /// A different payload is still a `DuplicateKeyError`.
+    IgnoreIdentical,
+}
+
+impl DuplicateIdPolicy {
+    /// `true` for the default; serde skips the default so old descriptor JSON
+    /// round-trips byte-identically.
+    pub fn is_error(&self) -> bool {
+        *self == Self::Error
+    }
+}
+
 // ── Migration descriptor ──────────────────────────────────────────────────────
 
 /// Descriptor for one migration step.
@@ -605,6 +629,10 @@ pub struct CollectionDescriptor {
     /// Ordered chain of migration steps.
     pub migrations: Vec<MigrationDescriptor>,
     pub append_only: bool,
+    /// Policy for a create whose ID already exists. Omitted from JSON when
+    /// it is the default `error`.
+    #[serde(default, skip_serializing_if = "DuplicateIdPolicy::is_error")]
+    pub duplicate_ids: DuplicateIdPolicy,
     pub validation_mode: ValidationMode,
 }
 

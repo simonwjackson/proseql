@@ -346,11 +346,16 @@ impl Database {
     ///  4. If FK fails → `delete_raw` the just-created entity, return `ForeignKeyError`.
     pub fn create(&mut self, collection: &str, data: Value) -> Result<Value, EngineError> {
         // Step 1 & 2: schema / defaults / decode.  Entity is created in state on success.
-        let entity = self
+        let (entity, inserted) = self
             .collections
             .get_mut(collection)
             .ok_or_else(|| col_nf(collection))?
-            .create_no_post_hooks(data)?;
+            .create_or_identical(data)?;
+        if !inserted {
+            // Identical re-create under `duplicate_ids: ignore_identical`:
+            // nothing was written, so there is nothing to validate or publish.
+            return Ok(entity);
+        }
 
         // Step 3: FK-validate the decoded entity.
         let rels = {

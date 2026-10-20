@@ -47,7 +47,8 @@ use crate::callbacks::CallbackRegistry;
 use crate::change_set::{ChangeSet, EntityChange};
 use crate::clock::Clock;
 use crate::descriptor::{
-    CollectionDescriptor, IdStrategy, SchemaNode, StructField, UniqueConstraintDescriptor,
+    CollectionDescriptor, DuplicateIdPolicy, IdStrategy, SchemaNode, StructField,
+    UniqueConstraintDescriptor,
 };
 use crate::errors::{
     ConcurrencyError, DuplicateKeyError, EngineError, HookError, HookOperation, NotFoundError,
@@ -143,7 +144,89 @@ pub(crate) struct InternalUpdateOutcome {
 
 #[derive(Debug, Clone)]
 pub(crate) struct InternalCreateManyOutcome {
+    /// `created` holds only newly inserted records.
     pub result: CreateManyResult,
+    /// Stored records returned for identical re-creates (`ignore_identical`).
+    pub ignored: Vec<Value>,
+    /// IDs of inserted and ignored inputs, in input order.
+    pub accepted_ids: Vec<String>,
+}
+
+impl InternalCreateManyOutcome {
+    /// Public result: inserted and identical records in input order.
+    pub(crate) fn into_result(self) -> CreateManyResult {
+        CreateManyResult {
+            created: merge_identical_creates(self.result.created, self.ignored, &self.accepted_ids),
+            skipped: self.result.skipped,
+        }
+    }
+}
+
+/// Merge newly inserted records with the stored records of identical
+/// re-creates, in input order. Inserted records missing from `created` (for
+/// example, removed by a later foreign-key check) are dropped.
+pub(crate) fn merge_identical_creates(
+    created: Vec<Value>,
+    ignored: Vec<Value>,
+    accepted_ids: &[String],
+) -> Vec<Value> {
+    if ignored.is_empty() {
+        return created;
+    }
+    let by_id = created
+        .into_iter()
+        .chain(ignored)
+        .map(|entity| {
+            let id = entity
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            (id, entity)
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    accepted_ids
+        .iter()
+        .filter_map(|id| by_id.get(id).cloned())
+        .collect()
+}
+
+/// Payload equality for `duplicate_ids: ignore_identical`: deep equality with
+/// JS number semantics, ignoring the engine-filled `createdAt`/`updatedAt`.
+fn same_create_payload(stored: &Value, candidate: &Value) -> bool {
+    const ENGINE_FILLED: [&str; 2] = ["createdAt", "updatedAt"];
+    match (stored, candidate) {
+        (Value::Object(left), Value::Object(right)) => {
+            let keys = |map: &Map<String, Value>| {
+                map.keys()
+                    .filter(|key| !ENGINE_FILLED.contains(&key.as_str()))
+                    .count()
+            };
+            keys(left) == keys(right)
+                && left
+                    .iter()
+                    .filter(|(key, _)| !ENGINE_FILLED.contains(&key.as_str()))
+                    .all(|(key, value)| {
+                        right.get(key).is_some_and(|other| js_deep_eq(value, other))
+                    })
+        }
+        _ => false,
+    }
+}
+
+fn js_deep_eq(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Array(left), Value::Array(right)) => {
+            left.len() == right.len() && left.iter().zip(right).all(|(a, b)| js_deep_eq(a, b))
+        }
+        (Value::Object(left), Value::Object(right)) => {
+            left.len() == right.len()
+                && left.iter().all(|(key, value)| {
+                    right.get(key).is_some_and(|other| js_deep_eq(value, other))
+                })
+        }
+        _ => js_eq(left, right),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -698,13 +781,28 @@ impl Collection {
     /// 7. Check for duplicate id → `DuplicateKeyError`
     /// 8. Check unique constraints → `UniqueConstraintError`
     /// 9. Insert into state
+    ///
+    /// With `duplicate_ids: ignore_identical`, step 7 returns the stored record
+    /// without a write or after-create hooks when the payload is identical.
     pub fn create(&mut self, input: Value) -> Result<Value, EngineError> {
-        let entity = self.create_no_post_hooks(input)?;
-        self.run_after_create_entity(&entity);
+        let (entity, inserted) = self.create_or_identical(input)?;
+        if inserted {
+            self.run_after_create_entity(&entity);
+        }
         Ok(entity)
     }
 
     pub(crate) fn create_no_post_hooks(&mut self, input: Value) -> Result<Value, EngineError> {
+        self.create_or_identical(input).map(|(entity, _)| entity)
+    }
+
+    /// Create without after-create hooks. The flag is `false` when an identical
+    /// record already exists under `duplicate_ids: ignore_identical`; the value
+    /// is then the stored record and nothing was written.
+    pub(crate) fn create_or_identical(
+        &mut self,
+        input: Value,
+    ) -> Result<(Value, bool), EngineError> {
         let mut obj = require_object(input, "create input")?;
 
         for name in &self.computed_field_names {
@@ -732,7 +830,12 @@ impl Collection {
             },
         )?;
 
-        if self.state.contains_key(&id) {
+        if let Some(existing) = self.state.get(&id) {
+            if self.descriptor.duplicate_ids == DuplicateIdPolicy::IgnoreIdentical
+                && same_create_payload(existing, &entity)
+            {
+                return Ok((existing.clone(), false));
+            }
             return Err(EngineError::DuplicateKey(Box::new(DuplicateKeyError {
                 collection: self.name.clone(),
                 field: "id".to_string(),
@@ -746,7 +849,7 @@ impl Collection {
         self.validate_post_hook_registrations(HookOperation::Create)?;
 
         self.insert_state(id, entity.clone());
-        Ok(entity)
+        Ok((entity, true))
     }
 
     pub(crate) fn create_unhooked(&mut self, input: Value) -> Result<Value, EngineError> {
@@ -795,7 +898,7 @@ impl Collection {
     ) -> Result<CreateManyResult, EngineError> {
         let outcome = self.create_many_internal(inputs, skip_duplicates)?;
         self.run_after_create_entities(&outcome.result.created);
-        Ok(outcome.result)
+        Ok(outcome.into_result())
     }
 
     // ── Update ────────────────────────────────────────────────────────────────
@@ -1748,7 +1851,12 @@ impl Collection {
     ) -> Result<InternalCreateManyOutcome, EngineError> {
         let now = self.clock.now_iso();
         let mut validated_entities: Vec<Value> = Vec::with_capacity(inputs.len());
-        let mut validated_ids = HashSet::with_capacity(inputs.len());
+        // Batch ID → position in `validated_entities`.
+        let mut validated_ids =
+            std::collections::HashMap::<String, usize>::with_capacity(inputs.len());
+        let ignore_identical = self.descriptor.duplicate_ids == DuplicateIdPolicy::IgnoreIdentical;
+        let mut ignored: Vec<Value> = vec![];
+        let mut accepted_ids: Vec<String> = vec![];
         let mut skipped: Vec<SkippedEntry> = vec![];
         let mut batch_constraint_index: Map<String, Value> = Map::new();
         let schema = self.descriptor.schema.clone();
@@ -1852,7 +1960,18 @@ impl Collection {
                 }
             };
             let state_contains_id = self.state.contains_key(&id);
-            if state_contains_id || validated_ids.contains(&id) {
+            if state_contains_id || validated_ids.contains_key(&id) {
+                if ignore_identical {
+                    let existing = match self.state.get(&id) {
+                        Some(existing) => existing,
+                        None => &validated_entities[validated_ids[&id]],
+                    };
+                    if same_create_payload(existing, &entity) {
+                        ignored.push(existing.clone());
+                        accepted_ids.push(id);
+                        continue;
+                    }
+                }
                 let error = EngineError::DuplicateKey(Box::new(DuplicateKeyError {
                     collection: self.name.clone(),
                     field: "id".to_string(),
@@ -1894,7 +2013,8 @@ impl Collection {
                 }
                 self.add_to_batch_constraint_index(&entity, &mut batch_constraint_index);
             }
-            validated_ids.insert(id);
+            validated_ids.insert(id.clone(), validated_entities.len());
+            accepted_ids.push(id);
             validated_entities.push(entity);
         }
 
@@ -1908,6 +2028,8 @@ impl Collection {
         }
         Ok(InternalCreateManyOutcome {
             result: CreateManyResult { created, skipped },
+            ignored,
+            accepted_ids,
         })
     }
 

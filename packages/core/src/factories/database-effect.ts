@@ -1608,6 +1608,34 @@ export interface EffectDatabaseOptions {
  * })
  * ```
  */
+/**
+ * Reject Rust-engine-only collection settings. The legacy core runtime fails
+ * closed instead of silently ignoring a setting that changes write semantics.
+ */
+const rejectEngineOnlySettings = (
+	collectionConfigs: Record<string, CollectionConfig>,
+): Effect.Effect<void, ValidationError> =>
+	Effect.gen(function* () {
+		for (const [collectionName, collectionConfig] of Object.entries(
+			collectionConfigs,
+		)) {
+			if (collectionConfig.duplicateIds !== undefined) {
+				return yield* Effect.fail(
+					new ValidationError({
+						message: `Collection '${collectionName}': 'duplicateIds' is supported only by the Rust engine (@proseql/engine or native)`,
+						issues: [
+							{
+								field: "duplicateIds",
+								message:
+									"The legacy core runtime does not implement 'duplicateIds'; use @proseql/engine",
+							},
+						],
+					}),
+				);
+			}
+		}
+	});
+
 export const createEffectDatabase = <Config extends DatabaseConfig>(
 	config: Config,
 	initialData?: {
@@ -1616,13 +1644,17 @@ export const createEffectDatabase = <Config extends DatabaseConfig>(
 		>;
 	},
 	options?: EffectDatabaseOptions,
-): Effect.Effect<GenerateDatabase<Config>, MigrationError | PluginError> =>
+): Effect.Effect<
+	GenerateDatabase<Config>,
+	MigrationError | PluginError | ValidationError
+> =>
 	Effect.gen(function* () {
 		const collectionConfigs = getCollectionConfigs(config) as Record<
 			string,
 			CollectionConfig
 		>;
 		const collectionNames = Object.keys(collectionConfigs);
+		yield* rejectEngineOnlySettings(collectionConfigs);
 		// 0. Validate migration registries for all versioned collections at startup
 		for (const collectionName of collectionNames) {
 			const collectionConfig = collectionConfigs[collectionName];
@@ -1824,6 +1856,7 @@ export const createPersistentEffectDatabase = <Config extends DatabaseConfig>(
 			CollectionConfig
 		>;
 		const collectionNames = Object.keys(collectionConfigs);
+		yield* rejectEngineOnlySettings(collectionConfigs);
 		const normalizedSourceConfig: NormalizedSourceConfig | undefined =
 			isSourceOrientedDatabaseConfig(config)
 				? normalizeSourceConfig(config)

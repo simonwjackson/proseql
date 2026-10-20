@@ -840,6 +840,7 @@ fn runtime_config(root: &Path, features: Features) -> Result<NativeSourceRuntime
         version: None,
         migrations: vec![],
         append_only: features.append_only,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     };
     Ok(NativeSourceRuntimeConfig {

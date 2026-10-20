@@ -42,6 +42,7 @@ fn config(root: &Path) -> NativeSourceRuntimeConfig {
             version: None,
             migrations: vec![],
             append_only: false,
+            duplicate_ids: Default::default(),
             validation_mode: ValidationMode::Strict,
         })],
         sources: vec![DatabaseSourceConfig::Partitioned(PartitionedSourceConfig {

@@ -41,6 +41,7 @@ fn descriptor(name: &str) -> CollectionDescriptor {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     }
 }

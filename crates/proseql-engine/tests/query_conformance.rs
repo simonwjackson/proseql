@@ -99,6 +99,7 @@ fn base_descriptor(schema: SchemaNode) -> CollectionDescriptor {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     }
 }
@@ -2241,6 +2242,7 @@ fn make_indexed_collection() -> (Collection, Arc<CallbackRegistry>) {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     };
     let reg = Arc::new(CallbackRegistry::new());

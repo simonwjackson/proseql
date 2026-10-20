@@ -66,6 +66,7 @@ fn descriptor() -> CollectionDescriptor {
         version: None,
         migrations: vec![],
         append_only: false,
+        duplicate_ids: Default::default(),
         validation_mode: ValidationMode::Strict,
     }
 }
@@ -208,6 +209,7 @@ fn make_company_db(
             version: None,
             migrations: vec![],
             append_only: false,
+            duplicate_ids: Default::default(),
             validation_mode: ValidationMode::Strict,
         },
         Arc::clone(&registry),
