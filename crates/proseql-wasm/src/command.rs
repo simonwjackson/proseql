@@ -44,6 +44,21 @@ pub(crate) fn dispatch(
                 command.populate,
             )?))
         }
+        "explainQuery" => {
+            // Same payload as "query"; reports how the engine would read the
+            // collection (`index_used`, `candidate_rows`, `index_sorted`).
+            let command: QueryCommand = parse_json(payload_json, "explainQuery")?;
+            let stats = context
+                .db
+                .explain_query(&command.collection, &to_query_input(command.query))?;
+            serde_json::to_value(stats).map_err(|error| {
+                EngineError::Operation(proseql_engine::errors::OperationError {
+                    operation: "explainQuery".to_owned(),
+                    reason: "serialization".to_owned(),
+                    message: error.to_string(),
+                })
+            })
+        }
         "queryCursor" => {
             let command: QueryCursorCommand = parse_json(payload_json, "queryCursor")?;
             Ok(cursor_page_value(context.db.query_cursor(
