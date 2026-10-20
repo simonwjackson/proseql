@@ -47,8 +47,8 @@ pub use indexes::IndexUsed;
 pub use paginate::paginate;
 pub use pipeline::{
     execute_aggregate, execute_cursor_query, execute_cursor_query_over_entities,
-    execute_grouped_aggregate, execute_query, execute_query_over_entities, query_input,
-    search_score, QueryInput,
+    execute_grouped_aggregate, execute_query, execute_query_over_entities, explain_query,
+    query_input, search_score, QueryInput, QueryStats,
 };
 pub use search::{compute_search_score, extract_search_config, tokenize, SearchConfig};
 pub use select::apply_selection;
