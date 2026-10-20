@@ -13,7 +13,7 @@ use crate::host::StorageHost;
 use crate::path::{join_path, normalize_path};
 use crate::persistence::CollectionStorageConfig;
 use crate::source_config::{
-    NormalizedCollectionFileSourceConfig, PartitionKey, PartitionedSourceConfig,
+    NormalizedCollectionFileSourceConfig, PartitionKey, PartitionedSourceConfig, TimeBucket,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -51,13 +51,59 @@ fn error(source: &PartitionedSourceConfig, path: &str, message: impl Into<String
     }))
 }
 
+/// The bucket key of a UTC timestamp `YYYY-MM-DDTHH:MM:SS(.f+)?Z`, or `None`
+/// when the value does not match the pattern or names an invalid date or time.
+pub fn time_bucket_key(value: &str, bucket: TimeBucket) -> Option<&str> {
+    let bytes = value.as_bytes();
+    let digits = |range: std::ops::Range<usize>| -> Option<u32> {
+        let part = bytes.get(range)?;
+        part.iter().all(u8::is_ascii_digit).then(|| {
+            part.iter()
+                .fold(0, |sum, digit| sum * 10 + u32::from(digit - b'0'))
+        })
+    };
+    let separators = [(4, b'-'), (7, b'-'), (10, b'T'), (13, b':'), (16, b':')];
+    if bytes.len() < 20
+        || separators
+            .iter()
+            .any(|(index, expected)| bytes[*index] != *expected)
+        || bytes[bytes.len() - 1] != b'Z'
+    {
+        return None;
+    }
+    let fraction = &bytes[19..bytes.len() - 1];
+    let fraction_ok = fraction.is_empty()
+        || (fraction.len() >= 2
+            && fraction[0] == b'.'
+            && fraction[1..].iter().all(u8::is_ascii_digit));
+    let year = digits(0..4)?;
+    let month = digits(5..7)?;
+    let day = digits(8..10)?;
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return None,
+    };
+    let valid = fraction_ok
+        && (1..=days).contains(&day)
+        && digits(11..13)? < 24
+        && digits(14..16)? < 60
+        && digits(17..19)? < 60;
+    valid.then(|| match bucket {
+        TimeBucket::Year => &value[..4],
+        TimeBucket::Month => &value[..7],
+        TimeBucket::Day => &value[..10],
+    })
+}
+
 pub fn partition_path(
     source: &PartitionedSourceConfig,
     record: &Value,
 ) -> Result<String, EngineError> {
-    let field = match &source.partition_by {
-        PartitionKey::Field { field } | PartitionKey::Prefix { field, .. } => field,
-    };
+    let field = source.partition_by.field();
     let value = record.get(field).and_then(Value::as_str).ok_or_else(|| {
         error(
             source,
@@ -67,6 +113,17 @@ pub fn partition_path(
     })?;
     let key = match &source.partition_by {
         PartitionKey::Field { .. } => value,
+        PartitionKey::TimeBucket { bucket, .. } => {
+            time_bucket_key(value, *bucket).ok_or_else(|| {
+                error(
+                    source,
+                    &source.root,
+                    format!(
+                        "Partition field '{field}' must be a UTC timestamp YYYY-MM-DDTHH:MM:SS(.fff)Z"
+                    ),
+                )
+            })?
+        }
         PartitionKey::Prefix { delimiter, .. } => value
             .split_once(delimiter)
             .map(|(prefix, _)| prefix)
@@ -164,7 +221,14 @@ pub fn load_partitioned_source_with(
                     format!("Duplicate partition record '{id}'"),
                 ));
             }
-            if partition_path(source, record)? != path {
+            let routed = partition_path(source, record).map_err(|cause| {
+                let message = match &cause {
+                    EngineError::SourceConfig(config) => config.message.clone(),
+                    other => other.to_string(),
+                };
+                error(source, &path, format!("Record '{id}': {message}"))
+            })?;
+            if routed != path {
                 return Err(error(
                     source,
                     &path,
@@ -214,4 +278,44 @@ pub fn plan_partitioned_source(
         });
     }
     Ok((next, writes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn time_bucket_keys_accept_only_utc_timestamps() {
+        let value = "2026-04-01T08:15:00.123Z";
+        assert_eq!(time_bucket_key(value, TimeBucket::Year), Some("2026"));
+        assert_eq!(time_bucket_key(value, TimeBucket::Month), Some("2026-04"));
+        assert_eq!(time_bucket_key(value, TimeBucket::Day), Some("2026-04-01"));
+        assert_eq!(
+            time_bucket_key("2024-02-29T23:59:59Z", TimeBucket::Day),
+            Some("2024-02-29")
+        );
+        for invalid in [
+            "2026-04-01T08:15:00.123+02:00",
+            "2026-04-01T08:15:00.123",
+            "2026-04-01 08:15:00Z",
+            "2026-04-01",
+            "2026-4-01T08:15:00Z",
+            "2026-13-01T08:15:00Z",
+            "2026-02-29T08:15:00Z",
+            "2026-04-31T08:15:00Z",
+            "2026-04-01T24:00:00Z",
+            "2026-04-01T08:60:00Z",
+            "2026-04-01T08:15:00.Z",
+            "2026-04-01T08:15:00.12aZ",
+            "+02026-04-01T08:15:00Z",
+            "2026-04-01T08:15:00z",
+            "",
+        ] {
+            assert_eq!(
+                time_bucket_key(invalid, TimeBucket::Month),
+                None,
+                "{invalid}"
+            );
+        }
+    }
 }

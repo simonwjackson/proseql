@@ -79,11 +79,46 @@ pub struct CollectionFileSourceConfig {
     pub prose: Option<ProseCodecOptions>,
 }
 
-/// Select a string field, or its prefix before the first delimiter.
+/// Select a string field, its prefix before the first delimiter, or the
+/// calendar bucket of a UTC timestamp field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PartitionKey {
-    Field { field: String },
-    Prefix { field: String, delimiter: String },
+    Field {
+        field: String,
+    },
+    Prefix {
+        field: String,
+        delimiter: String,
+    },
+    /// The field must be a UTC timestamp string `YYYY-MM-DDTHH:MM:SS(.f+)?Z`.
+    /// The key is `YYYY`, `YYYY-MM` or `YYYY-MM-DD`. Other values fail with
+    /// `SourceConfigError` on write and on load.
+    TimeBucket {
+        field: String,
+        bucket: TimeBucket,
+    },
+}
+
+impl PartitionKey {
+    /// The record field the key reads.
+    pub fn field(&self) -> &str {
+        match self {
+            Self::Field { field } | Self::Prefix { field, .. } | Self::TimeBucket { field, .. } => {
+                field
+            }
+        }
+    }
+}
+
+/// Calendar bucket of a [`PartitionKey::TimeBucket`] key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeBucket {
+    /// `YYYY`
+    Year,
+    /// `YYYY-MM`
+    Month,
+    /// `YYYY-MM-DD`
+    Day,
 }
 
 /// One collection distributed across flat `<root>/<key>.<format>` files.
@@ -583,15 +618,12 @@ pub fn normalize_source_config(
                 if source.root.trim().is_empty() {
                     return Err(error("Partition root must not be empty".into()));
                 }
-                let field = match &source.partition_by {
-                    PartitionKey::Field { field } => field,
-                    PartitionKey::Prefix { field, delimiter } => {
-                        if delimiter.is_empty() {
-                            return Err(error("Partition delimiter must not be empty".into()));
-                        }
-                        field
+                if let PartitionKey::Prefix { delimiter, .. } = &source.partition_by {
+                    if delimiter.is_empty() {
+                        return Err(error("Partition delimiter must not be empty".into()));
                     }
-                };
+                }
+                let field = source.partition_by.field();
                 if field.is_empty() {
                     return Err(error("Partition field must not be empty".into()));
                 }

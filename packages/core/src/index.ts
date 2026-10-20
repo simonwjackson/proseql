@@ -153,6 +153,7 @@ export type {
 	NormalizedSourceConfig,
 	PartitionedSourceConfig,
 	PartitionKey,
+	PartitionTimeBucket,
 } from "./storage/source-config.js";
 export { normalizeSourceConfig } from "./storage/source-config.js";
 export type {

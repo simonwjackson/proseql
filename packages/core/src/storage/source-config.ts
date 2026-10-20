@@ -92,12 +92,26 @@ export interface DocumentGraphSourceConfig {
 	readonly onFragmentError?: DocumentGraphFragmentErrorPolicy;
 }
 
+/** Calendar bucket of a `timeBucket` partition key. */
+export type PartitionTimeBucket = "year" | "month" | "day";
+
 export type PartitionKey =
 	| { readonly kind: "field"; readonly field: string }
 	| {
 			readonly kind: "prefix";
 			readonly field: string;
 			readonly delimiter: string;
+	  }
+	| {
+			/**
+			 * The field must be a UTC timestamp string
+			 * `YYYY-MM-DDTHH:MM:SS(.f+)?Z`. The key is `YYYY`, `YYYY-MM` or
+			 * `YYYY-MM-DD`. Other values fail with `SourceConfigError` on write
+			 * and on load.
+			 */
+			readonly kind: "timeBucket";
+			readonly field: string;
+			readonly bucket: PartitionTimeBucket;
 	  };
 
 export interface PartitionedSourceConfig {
@@ -395,11 +409,15 @@ export const normalizeSourceConfig = (
 			if (
 				!source.partitionBy.field ||
 				(source.partitionBy.kind !== "field" &&
-					source.partitionBy.kind !== "prefix") ||
-				(source.partitionBy.kind === "prefix" && !source.partitionBy.delimiter)
+					source.partitionBy.kind !== "prefix" &&
+					source.partitionBy.kind !== "timeBucket") ||
+				(source.partitionBy.kind === "prefix" &&
+					!source.partitionBy.delimiter) ||
+				(source.partitionBy.kind === "timeBucket" &&
+					!["year", "month", "day"].includes(source.partitionBy.bucket))
 			)
 				fail(
-					"Partition field and delimiter must not be empty and the key kind must be field or prefix",
+					"Partition field and delimiter must not be empty, the key kind must be field, prefix or timeBucket, and the bucket must be year, month or day",
 				);
 			if (!/^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/.test(source.format))
 				fail("Partition format must be a filename component");

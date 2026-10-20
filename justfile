@@ -14,6 +14,7 @@ test *args:
         ./packages/engine/tests/browser-entry.test.ts \
         ./packages/engine/tests/browser-persistence-concurrency.test.ts \
         ./packages/engine/tests/engine-duplicate-ids.test.ts \
+        ./packages/engine/tests/engine-time-bucket.test.ts \
         ./packages/engine/tests/engine-u8.test.ts \
         ./packages/engine/tests/engine.test.ts \
         ./packages/engine/tests/loader.test.ts \
@@ -45,6 +46,7 @@ test *args:
         packages/core/tests/schema-migrations.test.ts \
         packages/core/tests/serializer-service.test.ts \
         packages/core/tests/source-config.test.ts \
+        packages/core/tests/time-bucket-partitions.test.ts \
         packages/core/tests/transactions.test.ts \
         packages/node/tests/convenience.test.ts \
         packages/node/tests/derived-id-convenience.test.ts \

@@ -11,6 +11,7 @@ import {
 	matchesDocumentSourcePattern,
 	type NormalizedSourceConfig,
 	type PartitionedSourceConfig,
+	type PartitionTimeBucket,
 } from "./source-config.js";
 import { StorageAdapter } from "./storage-service.js";
 
@@ -32,6 +33,39 @@ const sourceError = (
 		message,
 	});
 
+const UTC_TIMESTAMP =
+	/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?Z$/;
+
+/**
+ * The bucket key of a UTC timestamp `YYYY-MM-DDTHH:MM:SS(.f+)?Z`, or
+ * `undefined` when the value does not match or names an invalid date or time.
+ * Matches the native `time_bucket_key`.
+ */
+export const timeBucketKey = (
+	value: string,
+	bucket: PartitionTimeBucket,
+): string | undefined => {
+	const match = UTC_TIMESTAMP.exec(value);
+	if (match === null) return undefined;
+	const [year, month, day, hour, minute, second] = match
+		.slice(1, 7)
+		.map(Number) as [number, number, number, number, number, number];
+	const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+	const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][
+		month - 1
+	];
+	if (
+		days === undefined ||
+		day < 1 ||
+		day > days ||
+		hour > 23 ||
+		minute > 59 ||
+		second > 59
+	)
+		return undefined;
+	return value.slice(0, bucket === "year" ? 4 : bucket === "month" ? 7 : 10);
+};
+
 export const partitionPath = (
 	source: PartitionedSourceConfig,
 	record: HasId,
@@ -44,6 +78,16 @@ export const partitionPath = (
 			`Partition field '${source.partitionBy.field}' must be a string`,
 		);
 	let key = value;
+	if (source.partitionBy.kind === "timeBucket") {
+		const bucketKey = timeBucketKey(value, source.partitionBy.bucket);
+		if (bucketKey === undefined)
+			throw sourceError(
+				source,
+				source.root,
+				`Partition field '${source.partitionBy.field}' must be a UTC timestamp YYYY-MM-DDTHH:MM:SS(.fff)Z`,
+			);
+		key = bucketKey;
+	}
 	if (source.partitionBy.kind === "prefix") {
 		const position = value.indexOf(source.partitionBy.delimiter);
 		if (position < 0)
