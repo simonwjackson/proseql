@@ -28,6 +28,59 @@ use crate::path::{get_file_extension, normalize_path};
 /// continue using the previously committed source.
 pub trait DurableStorageHost: StorageHost {
     fn replace_durable(&self, path: &str, data: &str) -> Result<(), EngineError>;
+
+    /// Truncate `path` to `keep_len` bytes, then append `data` durably.
+    ///
+    /// Creates the file when it is missing (`keep_len` must then be 0).
+    /// Success means the data and the new length are synchronized, and the
+    /// containing directory too when the file was created. On failure the
+    /// file can hold a prefix of `data`; callers must not publish the change.
+    ///
+    /// The default reads the file and replaces it with [`Self::replace_durable`],
+    /// which is durable but costs a full rewrite. Hosts with a real append
+    /// override it.
+    fn append_durable(&self, path: &str, keep_len: u64, data: &str) -> Result<(), EngineError> {
+        let mut content = if self.exists(path)? {
+            self.read(path)?
+        } else {
+            String::new()
+        };
+        let keep = usize::try_from(keep_len).unwrap_or(usize::MAX);
+        if keep > content.len() || !content.is_char_boundary(keep) {
+            return Err(crate::host::storage_error(
+                path,
+                StorageOperation::Write,
+                format!(
+                    "Cannot append to '{path}': kept length {keep_len} does not match the file"
+                ),
+            ));
+        }
+        content.truncate(keep);
+        content.push_str(data);
+        self.replace_durable(path, &content)
+    }
+
+    /// The byte length of `path` and up to `max_tail` of its final bytes, or
+    /// `None` when the file is missing. Used to check that an append target is
+    /// unchanged without reading the whole file.
+    fn read_tail(&self, path: &str, max_tail: usize) -> Result<Option<FileTail>, EngineError> {
+        if !self.exists(path)? {
+            return Ok(None);
+        }
+        let content = self.read(path)?.into_bytes();
+        let start = content.len().saturating_sub(max_tail);
+        Ok(Some(FileTail {
+            len: content.len() as u64,
+            tail: content[start..].to_vec(),
+        }))
+    }
+}
+
+/// The length and final bytes of a file. See [`DurableStorageHost::read_tail`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileTail {
+    pub len: u64,
+    pub tail: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

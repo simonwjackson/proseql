@@ -86,6 +86,17 @@ impl NativeMutation<'_> {
         self.database.create(collection, data)
     }
 
+    /// Create several records atomically. With `duplicate_ids: ignore_identical`,
+    /// identical re-creates return their stored records and write nothing.
+    pub fn create_many(
+        &mut self,
+        collection: &str,
+        data: Vec<Value>,
+    ) -> Result<proseql_engine::collection::CreateManyResult, EngineError> {
+        self.require_writable(collection)?;
+        self.database.create_many(collection, data, false)
+    }
+
     pub fn update(
         &mut self,
         collection: &str,
@@ -123,6 +134,9 @@ struct RuntimeCore {
     state: Mutex<RuntimeState>,
     lifecycle: AtomicU8,
     watch_generation: AtomicU64,
+    /// File basenames reported by the managed watcher since the last reload
+    /// (`None` when an event names no file).
+    watch_events: Mutex<Vec<Option<String>>>,
 }
 
 struct RuntimeState {
@@ -193,12 +207,14 @@ impl NativeRuntime {
         options: NativeSourceRuntimeOptions,
     ) -> Result<Self, EngineError> {
         let normalized = SourceState::normalize(&config)?;
+        let appendable = SourceState::appendable_collections(&config, &normalized);
         let descriptors = SourceState::descriptor_config(config);
         validate_config(&descriptors)?;
         let sources = SourceState::load(
             host.as_ref(),
             &options.formats,
             normalized,
+            appendable,
             options.transforms,
         )?;
         let loaded = sources.collections();
@@ -257,6 +273,7 @@ impl NativeRuntime {
                 }),
                 lifecycle: AtomicU8::new(OPEN),
                 watch_generation: AtomicU64::new(0),
+                watch_events: Mutex::new(Vec::new()),
             }),
         })
     }
@@ -335,56 +352,10 @@ impl NativeRuntime {
                 return Err(error);
             }
         };
-        let candidate = state.database.snapshot_all_collection_states();
-        if let Some(sources) = &state.sources {
-            let plan = sources.plan(&state.formats, &candidate).and_then(|plan| {
-                sources.check_conflicts(state.host.as_ref(), &plan.writes)?;
-                for name in session.touched_collections() {
-                    if sources.graph.owned_collections.contains_key(name) {
-                        return Err(operation_error(
-                            "read-only-source",
-                            format!("Transaction changed read-only collection '{name}'"),
-                        ));
-                    }
-                }
-                Ok(plan)
-            });
-            let sources::SourcePlan {
-                writes,
-                documents: next,
-                files,
-                partitions,
-            } = match plan {
-                Ok(plan) => plan,
-                Err(error) => {
-                    rollback_preserving_original(&self.inner, &mut state, session, &error);
-                    return Err(error);
-                }
-            };
-            let mut completed = Vec::new();
-            for write in &writes {
-                if let Err(cause) = state.host.replace_durable(&write.path, &write.content) {
-                    let error = operation_error("source-write-failed", format!("Durable source write failed at '{}'; completed paths: {:?}; cause: {cause}. Reopen and inspect before retrying", write.path, completed));
-                    rollback_preserving_original(&self.inner, &mut state, session, &error);
-                    state.quarantine_error = Some(error.clone());
-                    return Err(error);
-                }
-                completed.push(write.path.clone());
-            }
-            if let Err(error) = state.database.commit_owned_transaction(session) {
-                state.quarantine_error = Some(error.clone());
-                return Err(error);
-            }
-            state.database.take_committed_changes();
-            let sources = state.sources.as_mut().expect("source mode remains active");
-            sources.documents = next;
-            sources.files = files;
-            sources.partitions = partitions;
-            for write in writes {
-                sources.contents.insert(write.path, write.content);
-            }
-            return Ok(result);
+        if state.sources.is_some() {
+            return commit_source_mutation(&self.inner, &mut state, session, result);
         }
+        let candidate = state.database.snapshot_all_collection_states();
         let content = match serialize_candidate(&state.config, &state.formats, &candidate) {
             Ok(content) => content,
             Err(error) => {
@@ -450,7 +421,7 @@ impl NativeRuntime {
     /// and retained as a diagnostic while the current LKG remains visible.
     pub fn reload(&self) -> Result<(), EngineError> {
         let mut state = self.lock_open()?;
-        reload_locked(&mut state, false)
+        reload_locked(&mut state, false, None)
     }
 
     pub fn last_reload_error(&self) -> Result<Option<EngineError>, EngineError> {
@@ -471,6 +442,20 @@ impl NativeRuntime {
             .unwrap_or_default())
     }
 
+    /// Interrupted appends that the last load ignored: unterminated,
+    /// unparseable final lines of append-only JSONL files. The next append to
+    /// such a file removes the line first.
+    pub fn torn_line_diagnostics(
+        &self,
+    ) -> Result<Vec<proseql_storage::append::TornLineDiagnostic>, EngineError> {
+        let state = self.lock_open()?;
+        Ok(state
+            .sources
+            .as_ref()
+            .map(|sources| sources.torn.clone())
+            .unwrap_or_default())
+    }
+
     /// Start managed, debounced watches. Source mode watches source directories
     /// and existing ancestors of missing optional roots. Unchanged reloads do
     /// not publish collection changes.
@@ -486,9 +471,17 @@ impl NativeRuntime {
         if let Some(sources) = &state.sources {
             for root in sources.watch_roots(state.host.as_ref())? {
                 let weak = Arc::downgrade(&self.inner);
-                let handle = state
-                    .host
-                    .watch_dir(&root, Box::new(move |_| schedule_reload(&weak, debounce)))?;
+                let handle = state.host.watch_dir(
+                    &root,
+                    Box::new(move |event| {
+                        if let Some(core) = weak.upgrade() {
+                            if let Ok(mut events) = core.watch_events.lock() {
+                                events.push(event.filename);
+                            }
+                        }
+                        schedule_reload(&weak, debounce)
+                    }),
+                )?;
                 handles.push(handle);
             }
         } else {
@@ -548,6 +541,143 @@ impl NativeRuntime {
     }
 }
 
+/// Persist a source-mode transaction, then publish it.
+///
+/// Append-only collections on JSONL sources persist their new records from
+/// the transaction journal: only the new records are routed, encoded and
+/// conflict-checked, and only their lines are written. Other collections use
+/// the snapshot-and-rewrite plan, which skips append-only collections.
+fn commit_source_mutation<R>(
+    core: &RuntimeCore,
+    state: &mut RuntimeState,
+    session: proseql_engine::transactions::OwnedTransactionSession,
+    result: R,
+) -> Result<R, EngineError> {
+    let sources = state.sources.as_ref().expect("source mode");
+    let touched = session.touched_collections();
+    let needs_rewrite_plan = touched
+        .iter()
+        .any(|name| !sources.appendable.contains(name));
+    let plan = (|| {
+        for name in touched {
+            if sources.graph.owned_collections.contains_key(name) {
+                return Err(operation_error(
+                    "read-only-source",
+                    format!("Transaction changed read-only collection '{name}'"),
+                ));
+            }
+        }
+        let appends = sources.plan_appends(&state.formats, session.journal())?;
+        let rewrite = if needs_rewrite_plan {
+            let candidate = state
+                .database
+                .snapshot_collection_states_except(&sources.appendable);
+            let plan = sources.plan(&state.formats, &candidate)?;
+            sources.check_conflicts(state.host.as_ref(), &plan.writes)?;
+            Some(plan)
+        } else {
+            None
+        };
+        sources.check_append_conflicts(state.host.as_ref(), &appends.writes)?;
+        Ok((appends, rewrite))
+    })();
+    let (appends, rewrite) = match plan {
+        Ok(plan) => plan,
+        Err(error) => {
+            rollback_preserving_original(core, state, session, &error);
+            return Err(error);
+        }
+    };
+    enum Write<'a> {
+        Replace(&'a proseql_storage::document_source::PlannedDocumentWrite),
+        Append(&'a proseql_storage::append::PlannedAppend),
+    }
+    let mut writes = appends.writes.iter().map(Write::Append).collect::<Vec<_>>();
+    if let Some(rewrite) = &rewrite {
+        writes.extend(rewrite.writes.iter().map(Write::Replace));
+    }
+    let path_of = |write: &Write<'_>| match write {
+        Write::Replace(write) => write.path.clone(),
+        Write::Append(write) => write.path.clone(),
+    };
+    writes.sort_by_key(path_of);
+    let mut completed = Vec::new();
+    for write in &writes {
+        let outcome = match write {
+            Write::Replace(write) => state
+                .host
+                .replace_durable(&write.path, &write.content)
+                .map_err(|cause| {
+                    operation_error("source-write-failed", format!("Durable source write failed at '{}'; completed paths: {:?}; cause: {cause}. Reopen and inspect before retrying", write.path, completed))
+                }),
+            Write::Append(write) => state
+                .host
+                .append_durable(&write.path, write.keep_len, &write.data)
+                .map_err(|cause| append_failure(&write.path, &completed, cause)),
+        };
+        if let Err(error) = outcome {
+            rollback_preserving_original(core, state, session, &error);
+            state.quarantine_error = Some(error.clone());
+            return Err(error);
+        }
+        completed.push(path_of(write));
+    }
+    drop(writes);
+    if let Err(error) = state.database.commit_owned_transaction(session) {
+        state.quarantine_error = Some(error.clone());
+        return Err(error);
+    }
+    state.database.take_committed_changes();
+    let sources = state.sources.as_mut().expect("source mode remains active");
+    if let Some(sources::SourcePlan {
+        writes,
+        documents,
+        files,
+        partitions,
+    }) = rewrite
+    {
+        sources.documents = documents;
+        // The rewrite plan skips append-only collections; keep their state.
+        for (name, records) in files {
+            if !sources.appendable.contains(&name) {
+                sources.files.insert(name, records);
+            }
+        }
+        for (name, loaded) in partitions {
+            if !sources.appendable.contains(&name) {
+                sources.partitions.insert(name, loaded);
+            }
+        }
+        for write in writes {
+            sources.contents.insert(write.path, write.content);
+        }
+    }
+    sources.apply_appends(appends);
+    Ok(result)
+}
+
+/// A typed `StorageError` for a failed durable append, naming the completed
+/// paths per the crash rule.
+fn append_failure(path: &str, completed: &[String], cause: EngineError) -> EngineError {
+    let detail = format!(
+        "Durable append failed at '{path}'; completed paths: {completed:?}; cause: {cause}. Reopen and inspect before retrying"
+    );
+    match cause {
+        EngineError::Storage(storage) => {
+            EngineError::Storage(Box::new(proseql_engine::errors::StorageError {
+                message: detail,
+                ..*storage
+            }))
+        }
+        other => EngineError::Storage(Box::new(proseql_engine::errors::StorageError {
+            path: path.to_owned(),
+            operation: proseql_engine::errors::StorageOperation::Write,
+            message: detail,
+            cause: serde_json::to_value(&other).ok(),
+        })),
+    }
+}
+
 fn rollback_preserving_original(
     core: &RuntimeCore,
     state: &mut RuntimeState,
@@ -591,19 +721,38 @@ fn schedule_reload(weak: &Weak<RuntimeCore>, debounce: Duration) {
         }
         if let Ok(mut state) = core.state.lock() {
             if core.lifecycle.load(Ordering::Acquire) == OPEN && state.quarantine_error.is_none() {
-                let _ = reload_locked(&mut state, true);
+                let changed = core
+                    .watch_events
+                    .lock()
+                    .map(|mut events| std::mem::take(&mut *events))
+                    .ok();
+                let _ = reload_locked(&mut state, true, changed);
             }
         };
     });
 }
 
-fn reload_locked(state: &mut RuntimeState, suppress_self_write: bool) -> Result<(), EngineError> {
+/// Reload the source. With `suppress_self_write`, an unchanged single file or
+/// source files that only changed by this runtime's own appends (`changed`
+/// holds the watcher's file basenames) do not reload.
+fn reload_locked(
+    state: &mut RuntimeState,
+    suppress_self_write: bool,
+    changed: Option<Vec<Option<String>>>,
+) -> Result<(), EngineError> {
+    let changed = changed.filter(|_| suppress_self_write);
     let result: Result<(), EngineError> = (|| {
         if let Some(sources) = &state.sources {
+            if let Some(names) = &changed {
+                if sources.own_appends_explain(state.host.as_ref(), names)? {
+                    return Ok(());
+                }
+            }
             let next = SourceState::load(
                 state.host.as_ref(),
                 &state.formats,
                 sources.config.clone(),
+                sources.appendable.clone(),
                 sources.transforms.clone(),
             )?;
             state

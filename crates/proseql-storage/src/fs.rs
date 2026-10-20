@@ -30,6 +30,11 @@ pub enum DurabilityFaultPoint {
     Cleanup,
     RollbackReplace,
     RollbackDirectorySync,
+    /// Durable append: checked after the first half of the data is written and
+    /// before the rest, so a crash here leaves a torn final line.
+    AppendWrite,
+    /// Durable append: checked after all data is written, before the file sync.
+    AppendSync,
 }
 
 /// Optional fault seam used by native durability conformance suites.
@@ -327,6 +332,97 @@ impl FsStorageHost {
 }
 
 impl DurableStorageHost for FsStorageHost {
+    fn append_durable(&self, path: &str, keep_len: u64, data: &str) -> Result<(), EngineError> {
+        Self::ensure_parent(path)?;
+        self.recover_durable_path(path)?;
+        let destination = PathBuf::from(path);
+        let parent = destination
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        let created = !destination.exists();
+        let write_error = |message: String| storage_error(path, StorageOperation::Write, message);
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&destination)
+            .map_err(|error| write_error(format!("Failed to open '{path}' for append: {error}")))?;
+        let len = file
+            .metadata()
+            .map_err(|error| write_error(format!("Failed to stat '{path}': {error}")))?
+            .len();
+        if keep_len > len {
+            return Err(write_error(format!(
+                "Cannot append to '{path}': kept length {keep_len} exceeds file length {len}"
+            )));
+        }
+        let result = (|| -> Result<(), EngineError> {
+            if keep_len < len {
+                file.set_len(keep_len).map_err(|error| {
+                    write_error(format!(
+                        "Failed to truncate '{path}' before append: {error}"
+                    ))
+                })?;
+            }
+            file.seek(SeekFrom::Start(keep_len))
+                .map_err(|error| write_error(format!("Failed to seek '{path}': {error}")))?;
+            let bytes = data.as_bytes();
+            let (first, rest) = bytes.split_at(bytes.len() / 2);
+            file.write_all(first)
+                .map_err(|error| write_error(format!("Failed to append '{path}': {error}")))?;
+            self.check_durability_fault(DurabilityFaultPoint::AppendWrite)?;
+            file.write_all(rest)
+                .map_err(|error| write_error(format!("Failed to append '{path}': {error}")))?;
+            self.check_durability_fault(DurabilityFaultPoint::AppendSync)?;
+            file.sync_data()
+                .map_err(|error| write_error(format!("Failed to sync '{path}': {error}")))?;
+            if created {
+                Self::sync_directory(path, &parent)?;
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            // Best effort: drop the partial append. A crash before this point
+            // leaves a torn final line, which the append-only loader ignores.
+            if created && keep_len == 0 {
+                drop(file);
+                let _ = std::fs::remove_file(&destination);
+                let _ = Self::sync_directory(path, &parent);
+            } else if file.set_len(keep_len).is_ok() {
+                let _ = file.sync_data();
+            }
+        }
+        result
+    }
+
+    fn read_tail(
+        &self,
+        path: &str,
+        max_tail: usize,
+    ) -> Result<Option<crate::persistence::FileTail>, EngineError> {
+        self.recover_durable_path(path)?;
+        let read_error = |message: String| storage_error(path, StorageOperation::Read, message);
+        let mut file = match std::fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(read_error(format!("Failed to open '{path}': {error}"))),
+        };
+        let len = file
+            .metadata()
+            .map_err(|error| read_error(format!("Failed to stat '{path}': {error}")))?
+            .len();
+        let tail_len = len.min(max_tail as u64);
+        file.seek(SeekFrom::Start(len - tail_len))
+            .map_err(|error| read_error(format!("Failed to seek '{path}': {error}")))?;
+        let mut tail = vec![0; tail_len as usize];
+        std::io::Read::read_exact(&mut file, &mut tail)
+            .map_err(|error| read_error(format!("Failed to read '{path}': {error}")))?;
+        Ok(Some(crate::persistence::FileTail { len, tail }))
+    }
+
     fn replace_durable(&self, path: &str, data: &str) -> Result<(), EngineError> {
         Self::ensure_parent(path)?;
         self.recover_durable_path(path)?;

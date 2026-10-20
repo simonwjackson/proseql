@@ -67,6 +67,13 @@ impl OwnedTransactionSession {
         &self.touched_collections
     }
 
+    /// Net entity changes absorbed so far, in first-change order. Hosts use it
+    /// to persist only what a transaction changed (for example, append-only
+    /// inserts) before they commit.
+    pub fn journal(&self) -> &ChangeSet {
+        &self.journal
+    }
+
     fn ensure_active(&self, action: &str) -> Result<(), EngineError> {
         if self.active {
             return Ok(());
@@ -290,6 +297,19 @@ impl Database {
     pub fn snapshot_all_collection_states(&self) -> IndexMap<String, IndexMap<String, Value>> {
         self.collections
             .iter()
+            .map(|(name, collection)| (name.clone(), collection.snapshot_state()))
+            .collect()
+    }
+
+    /// Snapshot every collection except `skip`, in insertion order. Hosts that
+    /// persist some collections from the journal avoid cloning them.
+    pub fn snapshot_collection_states_except(
+        &self,
+        skip: &std::collections::HashSet<String>,
+    ) -> IndexMap<String, IndexMap<String, Value>> {
+        self.collections
+            .iter()
+            .filter(|(name, _)| !skip.contains(*name))
             .map(|(name, collection)| (name.clone(), collection.snapshot_state()))
             .collect()
     }

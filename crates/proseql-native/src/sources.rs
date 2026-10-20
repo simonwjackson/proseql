@@ -4,6 +4,10 @@ use std::time::Duration;
 use indexmap::IndexMap;
 use proseql_engine::errors::EngineError;
 use proseql_formats::FormatRegistry;
+use proseql_storage::append::{
+    encode_append_lines, is_append_format, load_append_file, plan_append, PlannedAppend,
+    TornLineDiagnostic,
+};
 use proseql_storage::collection_file::{encode_collection_file, load_collection_file};
 use proseql_storage::document_graph::{
     load_document_graph_sources, DocumentGraphTransformHost, LoadedDocumentGraph,
@@ -14,9 +18,11 @@ use proseql_storage::document_source::{
 };
 use proseql_storage::host::StorageHost;
 use proseql_storage::partitioned::{
-    load_partitioned_source, matches_partition_path, plan_partitioned_source, LoadedPartitions,
+    file_source, load_partitioned_source_with, matches_partition_path, partition_path,
+    plan_partitioned_source, LoadedPartitions,
 };
-use proseql_storage::persistence::CollectionStorageConfig;
+use proseql_storage::persistence::{CollectionStorageConfig, DurableStorageHost};
+use proseql_storage::source_config::NormalizedCollectionFileSourceConfig;
 use proseql_storage::source_config::NormalizedDatabaseSourceConfig;
 use proseql_storage::source_config::{
     normalize_source_config, DatabaseSourceConfig, NormalizedSourceConfig, SourceConfigInput,
@@ -59,8 +65,27 @@ pub(crate) struct SourcePlan {
     pub partitions: IndexMap<String, LoadedPartitions>,
 }
 
+/// Appends for one mutation of append-only collections, and the records they add.
+pub(crate) struct AppendPlan {
+    /// Sorted by path.
+    pub writes: Vec<PlannedAppend>,
+    /// `(collection, path, id, record)` in journal order.
+    pub records: Vec<(String, String, String, Value)>,
+}
+
+/// Bytes compared at the end of an append target before the append.
+const APPEND_CONFLICT_TAIL: usize = 4096;
+
 pub(crate) struct SourceState {
     pub config: NormalizedSourceConfig,
+    /// Append-only collections on JSONL/NDJSON collection-file or partitioned
+    /// sources. They persist creates by appending lines, never by rewriting.
+    pub appendable: std::collections::HashSet<String>,
+    /// Torn final lines ignored by the last load and not yet appended over.
+    pub torn: Vec<TornLineDiagnostic>,
+    /// Basenames of files this runtime appended to. The managed watcher skips
+    /// a reload when such a file still equals its stored content.
+    pub self_written: std::collections::HashSet<String>,
     pub documents: LoadedDocumentSources,
     /// Records of each collection-file source, keyed by collection name.
     pub files: IndexMap<String, IndexMap<String, Value>>,
@@ -141,6 +166,38 @@ impl SourceState {
         Ok(normalized)
     }
 
+    /// Collections that persist creates by appending lines.
+    pub fn appendable_collections(
+        config: &NativeSourceRuntimeConfig,
+        normalized: &NormalizedSourceConfig,
+    ) -> std::collections::HashSet<String> {
+        let append_only = config
+            .collections
+            .iter()
+            .filter(|collection| collection.descriptor.append_only)
+            .map(|collection| collection.descriptor.name.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        normalized
+            .sources
+            .iter()
+            .filter_map(|source| match source {
+                NormalizedDatabaseSourceConfig::CollectionFile(source)
+                    if is_append_format(&source.format) =>
+                {
+                    Some(&source.collection)
+                }
+                NormalizedDatabaseSourceConfig::Partitioned(source)
+                    if is_append_format(&source.format) =>
+                {
+                    Some(&source.collection)
+                }
+                _ => None,
+            })
+            .filter(|collection| append_only.contains(collection.as_str()))
+            .cloned()
+            .collect()
+    }
+
     fn require_writable_path(
         config: &NormalizedSourceConfig,
         owner: &str,
@@ -200,6 +257,7 @@ impl SourceState {
         host: &dyn StorageHost,
         formats: &FormatRegistry,
         config: NormalizedSourceConfig,
+        appendable: std::collections::HashSet<String>,
         transforms: Option<Arc<dyn DocumentGraphTransformHost>>,
     ) -> Result<Self, EngineError> {
         // FsStorageHost::exists recovers per-file markers. Do this before the
@@ -235,6 +293,7 @@ impl SourceState {
             }
         }
         let snapshot = crate::read_snapshot::ReadSnapshot::new(host);
+        let mut torn = Vec::new();
         let mut files = IndexMap::new();
         let mut file_contents = IndexMap::new();
         for source in &config.sources {
@@ -256,16 +315,27 @@ impl SourceState {
                         format!("Unknown collection '{}'", source.collection),
                     )
                 })?;
-            files.insert(
-                source.collection.clone(),
-                load_collection_file(&snapshot, formats, source, collection)?,
-            );
+            let records = if appendable.contains(&source.collection) {
+                let loaded = load_append_file(&snapshot, formats, source, collection, false)?;
+                torn.extend(loaded.torn);
+                loaded.records
+            } else {
+                load_collection_file(&snapshot, formats, source, collection)?
+            };
+            files.insert(source.collection.clone(), records);
         }
         let mut partitions = IndexMap::new();
         for source in &config.sources {
             if let NormalizedDatabaseSourceConfig::Partitioned(source) = source {
                 let collection = &config.collection_configs[&source.collection];
-                let loaded = load_partitioned_source(&snapshot, formats, source, collection)?;
+                let (loaded, partition_torn) = load_partitioned_source_with(
+                    &snapshot,
+                    formats,
+                    source,
+                    collection,
+                    appendable.contains(&source.collection),
+                )?;
+                torn.extend(partition_torn);
                 for path in loaded.files.keys() {
                     file_contents.insert(path.clone(), snapshot.read(path)?);
                 }
@@ -287,6 +357,9 @@ impl SourceState {
         contents.extend(file_contents);
         Ok(Self {
             config,
+            appendable,
+            torn,
+            self_written: std::collections::HashSet::new(),
             documents,
             files,
             partitions,
@@ -321,6 +394,9 @@ impl SourceState {
         let mut partitions = self.partitions.clone();
         for source in &self.config.sources {
             if let NormalizedDatabaseSourceConfig::Partitioned(source) = source {
+                if self.appendable.contains(&source.collection) {
+                    continue;
+                }
                 let records = candidate
                     .get(&source.collection)
                     .cloned()
@@ -346,6 +422,9 @@ impl SourceState {
             else {
                 continue;
             };
+            if self.appendable.contains(&source.collection) {
+                continue;
+            }
             let records = candidate
                 .get(&source.collection)
                 .cloned()
@@ -405,6 +484,214 @@ impl SourceState {
             files,
             partitions,
         })
+    }
+
+    /// The file and collection-file view an append-only record is written to.
+    fn append_target(
+        &self,
+        collection: &str,
+        record: &Value,
+    ) -> Result<(String, NormalizedCollectionFileSourceConfig), EngineError> {
+        for source in &self.config.sources {
+            match source {
+                NormalizedDatabaseSourceConfig::CollectionFile(source)
+                    if source.collection == collection =>
+                {
+                    return Ok((source.path.clone(), source.clone()));
+                }
+                NormalizedDatabaseSourceConfig::Partitioned(source)
+                    if source.collection == collection =>
+                {
+                    let path = partition_path(source, record)?;
+                    Self::require_writable_path(&self.config, &source.id, &path)?;
+                    let file = file_source(source, &path);
+                    return Ok((path, file));
+                }
+                _ => {}
+            }
+        }
+        Err(crate::operation_error(
+            "unowned-collection",
+            format!("Collection '{collection}' has no source owner"),
+        ))
+    }
+
+    /// Plan appends for the journal's changes to append-only collections. Only
+    /// the new records are routed and encoded; no collection is snapshotted.
+    pub fn plan_appends(
+        &self,
+        formats: &FormatRegistry,
+        journal: &proseql_engine::change_set::ChangeSet,
+    ) -> Result<AppendPlan, EngineError> {
+        let mut by_path: IndexMap<
+            String,
+            (
+                String,
+                NormalizedCollectionFileSourceConfig,
+                IndexMap<String, Value>,
+            ),
+        > = IndexMap::new();
+        let mut records = Vec::new();
+        for change in journal.entities() {
+            if !self.appendable.contains(&change.collection) {
+                continue;
+            }
+            let (None, Some(record)) = (&change.before, &change.after) else {
+                return Err(crate::operation_error(
+                    "append-only",
+                    format!(
+                        "Append-only collection '{}' can only add records; '{}' changed",
+                        change.collection, change.id
+                    ),
+                ));
+            };
+            let (path, file) = self.append_target(&change.collection, record)?;
+            by_path
+                .entry(path.clone())
+                .or_insert_with(|| (change.collection.clone(), file, IndexMap::new()))
+                .2
+                .insert(change.id.clone(), record.clone());
+            records.push((
+                change.collection.clone(),
+                path,
+                change.id.clone(),
+                record.clone(),
+            ));
+        }
+        let mut writes = Vec::with_capacity(by_path.len());
+        for (path, (collection, file, batch)) in &by_path {
+            let lines = encode_append_lines(
+                formats,
+                file,
+                &self.config.collection_configs[collection],
+                batch,
+            )?;
+            let current = self.contents.get(path).map(String::as_str).unwrap_or("");
+            writes.push(plan_append(path, current, lines));
+        }
+        writes.sort_by(|left, right| left.path.cmp(&right.path));
+        Ok(AppendPlan { writes, records })
+    }
+
+    /// Reject an append when its target changed since load. Compares the file
+    /// length and its final bytes only, so the cost does not grow with the file.
+    pub fn check_append_conflicts(
+        &self,
+        host: &dyn DurableStorageHost,
+        writes: &[PlannedAppend],
+    ) -> Result<(), EngineError> {
+        for write in writes {
+            let current = host.read_tail(&write.path, APPEND_CONFLICT_TAIL)?;
+            let unchanged = match (current, self.contents.get(&write.path)) {
+                (None, None) => true,
+                (Some(tail), Some(stored)) => {
+                    tail.len == stored.len() as u64 && stored.as_bytes().ends_with(&tail.tail)
+                }
+                _ => false,
+            };
+            if !unchanged {
+                return Err(crate::operation_error(
+                    "source-changed",
+                    format!(
+                        "File '{}' changed since load; reload before retrying",
+                        write.path
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Record durable appends in the stored file state and source records.
+    pub fn apply_appends(&mut self, plan: AppendPlan) {
+        for write in &plan.writes {
+            let content = self.contents.entry(write.path.clone()).or_default();
+            content.truncate(write.keep_len as usize);
+            content.push_str(&write.data);
+            self.torn.retain(|torn| torn.path != write.path);
+            if let Some(name) = std::path::Path::new(&write.path)
+                .file_name()
+                .and_then(|name| name.to_str())
+            {
+                self.self_written.insert(name.to_owned());
+            }
+        }
+        for (collection, path, id, record) in plan.records {
+            if let Some(partitions) = self.partitions.get_mut(&collection) {
+                partitions.files.entry(path).or_default().insert(id, record);
+            } else if let Some(records) = self.files.get_mut(&collection) {
+                records.insert(id, record);
+            }
+        }
+    }
+
+    /// `true` when the watcher events in `names` (file basenames) are fully
+    /// explained by this runtime's own appends: every file with such a name
+    /// under the watch roots is a stored file that still equals its content.
+    pub fn own_appends_explain(
+        &self,
+        host: &dyn StorageHost,
+        names: &[Option<String>],
+    ) -> Result<bool, EngineError> {
+        if names.is_empty() {
+            // An earlier debounced pass already handled every event.
+            return Ok(true);
+        }
+        let mut wanted = std::collections::HashSet::new();
+        for name in names {
+            match name {
+                Some(name) if self.self_written.contains(name) => {
+                    wanted.insert(name.as_str());
+                }
+                _ => return Ok(false),
+            }
+        }
+        let basename = |path: &str| {
+            std::path::Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+        };
+        let graph_roots = self
+            .config
+            .sources
+            .iter()
+            .filter_map(|source| match source {
+                NormalizedDatabaseSourceConfig::DocumentGraph(source) => Some(source),
+                _ => None,
+            })
+            .flat_map(|source| source.roots.iter().map(|root| root.root.clone()))
+            .collect::<Vec<_>>();
+        let mut candidates = std::collections::BTreeSet::new();
+        for root in self.watch_roots(host)? {
+            // A graph file under the same watch root can share the basename;
+            // its change cannot be told apart, so reload.
+            if graph_roots.iter().any(|graph| {
+                std::path::Path::new(graph).starts_with(&root)
+                    || std::path::Path::new(&root).starts_with(graph)
+            }) {
+                return Ok(false);
+            }
+            for path in host.list_recursive(&root)? {
+                if basename(&path).is_some_and(|name| wanted.contains(name.as_str())) {
+                    candidates.insert(path);
+                }
+            }
+        }
+        for path in self.contents.keys() {
+            if basename(path).is_some_and(|name| wanted.contains(name.as_str())) {
+                candidates.insert(path.clone());
+            }
+        }
+        for path in candidates {
+            let Some(stored) = self.contents.get(&path) else {
+                return Ok(false);
+            };
+            if !host.exists(&path)? || &host.read(&path)? != stored {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     pub fn check_conflicts(

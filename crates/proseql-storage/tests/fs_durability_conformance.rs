@@ -223,3 +223,125 @@ fn failed_rollback_preserves_backup_for_required_next_read_recovery() {
         assert!(!backup.exists());
     }
 }
+
+#[test]
+fn durable_append_truncates_to_the_kept_length_and_creates_missing_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let host = FsStorageHost::new_polling(Duration::from_secs(2)).unwrap();
+    let path = temp.path().join("nested/log.jsonl");
+    let path = path.to_str().unwrap();
+
+    host.append_durable(path, 0, "{\"a\":1}\n").unwrap();
+    std::fs::write(path, "{\"a\":1}\n{\"b\"").unwrap();
+    host.append_durable(path, 8, "{\"c\":3}\n").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "{\"a\":1}\n{\"c\":3}\n"
+    );
+
+    let tail = host.read_tail(path, 4).unwrap().unwrap();
+    assert_eq!(tail.len, 16);
+    assert_eq!(tail.tail, b":3}\n");
+    assert!(host
+        .read_tail(temp.path().join("missing.jsonl").to_str().unwrap(), 4)
+        .unwrap()
+        .is_none());
+    assert!(host.append_durable(path, 99, "x\n").is_err());
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "{\"a\":1}\n{\"c\":3}\n"
+    );
+}
+
+#[test]
+fn failed_durable_append_restores_the_kept_bytes() {
+    for point in [
+        DurabilityFaultPoint::AppendWrite,
+        DurabilityFaultPoint::AppendSync,
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let existing = temp.path().join("log.jsonl");
+        std::fs::write(&existing, "{\"a\":1}\n").unwrap();
+        let fresh = temp.path().join("fresh.jsonl");
+        let host = FsStorageHost::new_polling_with_fault_injector(
+            Duration::from_secs(2),
+            Arc::new(FailAt(point)),
+        )
+        .unwrap();
+        assert!(host
+            .append_durable(existing.to_str().unwrap(), 8, "{\"b\":2}\n")
+            .is_err());
+        assert_eq!(std::fs::read_to_string(&existing).unwrap(), "{\"a\":1}\n");
+        assert!(host
+            .append_durable(fresh.to_str().unwrap(), 0, "{\"b\":2}\n")
+            .is_err());
+        assert!(!fresh.exists(), "{point:?}");
+    }
+}
+
+/// A host without its own append uses the durable full-replace default.
+struct ReplaceOnly(FsStorageHost);
+
+impl DurableStorageHost for ReplaceOnly {
+    fn replace_durable(&self, path: &str, data: &str) -> Result<(), EngineError> {
+        self.0.replace_durable(path, data)
+    }
+}
+
+impl StorageHost for ReplaceOnly {
+    fn read(&self, path: &str) -> Result<String, EngineError> {
+        self.0.read(path)
+    }
+    fn write(&self, path: &str, data: &str) -> Result<(), EngineError> {
+        self.0.write(path, data)
+    }
+    fn append(&self, path: &str, data: &str) -> Result<(), EngineError> {
+        self.0.append(path, data)
+    }
+    fn exists(&self, path: &str) -> Result<bool, EngineError> {
+        self.0.exists(path)
+    }
+    fn remove(&self, path: &str) -> Result<(), EngineError> {
+        self.0.remove(path)
+    }
+    fn ensure_dir(&self, path: &str) -> Result<(), EngineError> {
+        self.0.ensure_dir(path)
+    }
+    fn list_directory(&self, path: &str) -> Result<Vec<String>, EngineError> {
+        self.0.list_directory(path)
+    }
+    fn list_recursive(&self, path: &str) -> Result<Vec<String>, EngineError> {
+        self.0.list_recursive(path)
+    }
+    fn watch(
+        &self,
+        path: &str,
+        on_change: Box<dyn Fn(proseql_storage::host::StorageEvent) + Send + Sync>,
+    ) -> Result<Box<dyn proseql_storage::host::WatchHandle>, EngineError> {
+        self.0.watch(path, on_change)
+    }
+    fn watch_dir(
+        &self,
+        path: &str,
+        on_change: Box<dyn Fn(proseql_storage::host::StorageEvent) + Send + Sync>,
+    ) -> Result<Box<dyn proseql_storage::host::WatchHandle>, EngineError> {
+        self.0.watch_dir(path, on_change)
+    }
+}
+
+#[test]
+fn default_durable_append_matches_the_filesystem_append() {
+    let temp = tempfile::tempdir().unwrap();
+    let host = ReplaceOnly(FsStorageHost::new_polling(Duration::from_secs(2)).unwrap());
+    let path = temp.path().join("log.jsonl");
+    let path = path.to_str().unwrap();
+    host.append_durable(path, 0, "{\"a\":1}\n").unwrap();
+    std::fs::write(path, "{\"a\":1}\n{\"b\"").unwrap();
+    host.append_durable(path, 8, "{\"c\":3}\n").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "{\"a\":1}\n{\"c\":3}\n"
+    );
+    let tail = host.read_tail(path, 4).unwrap().unwrap();
+    assert_eq!((tail.len, tail.tail), (16, b":3}\n".to_vec()));
+}

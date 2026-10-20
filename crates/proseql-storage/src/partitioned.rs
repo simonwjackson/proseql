@@ -4,6 +4,7 @@ use proseql_engine::errors::{EngineError, SourceConfigError};
 use proseql_formats::FormatRegistry;
 use serde_json::Value;
 
+use crate::append::{is_append_format, load_append_file, TornLineDiagnostic};
 use crate::collection_file::{
     encode_collection_file, load_collection_file, validate_collection_file_ids,
 };
@@ -100,7 +101,8 @@ pub fn matches_partition_path(source: &PartitionedSourceConfig, path: &str) -> b
     })
 }
 
-fn file_source(
+/// The collection-file view of one partition file.
+pub fn file_source(
     source: &PartitionedSourceConfig,
     path: &str,
 ) -> NormalizedCollectionFileSourceConfig {
@@ -119,10 +121,25 @@ pub fn load_partitioned_source(
     source: &PartitionedSourceConfig,
     collection: &CollectionStorageConfig,
 ) -> Result<LoadedPartitions, EngineError> {
+    load_partitioned_source_with(host, formats, source, collection, false).map(|(loaded, _)| loaded)
+}
+
+/// Load every partition. With `append_only` on a JSONL source, a torn final
+/// line in a partition is ignored and returned as a diagnostic (see
+/// [`crate::append`]); all other checks are unchanged.
+pub fn load_partitioned_source_with(
+    host: &dyn StorageHost,
+    formats: &FormatRegistry,
+    source: &PartitionedSourceConfig,
+    collection: &CollectionStorageConfig,
+    append_only: bool,
+) -> Result<(LoadedPartitions, Vec<TornLineDiagnostic>), EngineError> {
     let mut loaded = LoadedPartitions::default();
+    let mut torn = Vec::new();
     if !host.exists(&source.root)? {
-        return Ok(loaded);
+        return Ok((loaded, torn));
     }
+    let tolerate_torn = append_only && is_append_format(&source.format);
     let mut paths = host.list_directory(&source.root)?;
     paths.sort();
     let mut seen = std::collections::HashSet::new();
@@ -131,8 +148,14 @@ pub fn load_partitioned_source(
             continue;
         }
         let file = file_source(source, &path);
-        validate_collection_file_ids(host, formats, &file)?;
-        let records = load_collection_file(host, formats, &file, collection)?;
+        let records = if tolerate_torn {
+            let file = load_append_file(host, formats, &file, collection, true)?;
+            torn.extend(file.torn);
+            file.records
+        } else {
+            validate_collection_file_ids(host, formats, &file)?;
+            load_collection_file(host, formats, &file, collection)?
+        };
         for (id, record) in &records {
             if !seen.insert(id.clone()) {
                 return Err(error(
@@ -151,7 +174,7 @@ pub fn load_partitioned_source(
         }
         loaded.files.insert(path, records);
     }
-    Ok(loaded)
+    Ok((loaded, torn))
 }
 
 pub fn plan_partitioned_source(
