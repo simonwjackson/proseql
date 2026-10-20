@@ -212,3 +212,7 @@ rust-wasm-check:
 # Build a release artifact for the Rust engine
 rust-build:
     cargo build --release --manifest-path crates/Cargo.toml
+
+# Benchmark a partitioned JSONL time series at 140k/1M/10M synthetic rows (data cached under /var/tmp; later flags override)
+bench-timeseries *args:
+    cargo run --release --manifest-path crates/Cargo.toml -p proseql-native --example timeseries_bench -- --rows 140000,1000000,10000000 --years 10 {{args}}
