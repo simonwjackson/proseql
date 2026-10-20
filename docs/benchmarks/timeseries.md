@@ -37,7 +37,7 @@ Later flags override earlier ones. Run `--help` for every option.
 - **Insert**: one `runtime.mutate(|db| db.create(..))` per sample, timestamps after the last generated row and inside the last month, so every insert targets an existing full-size partition. Up to `--inserts` (default 1,000), stopping after `--insert-budget-secs` (default 600 s per size). "Bytes written" and "bytes read" are counted at the storage host for each insert. "File growth" is the size change of the target file. "Prefix kept" checks that the final target file starts with its original bytes.
 - **Memory guard**: a watchdog thread polls `VmRSS` every 10 ms. Above `--max-rss-mb` (default: `MemAvailable` − 1024 MiB at start) the child prints its partial numbers with `"status":"aborted"` and exits, so a size that does not fit never drives the machine into swap or the OOM killer.
 - **Output**: one `TSBENCH {json}` line per size, then a Markdown table.
-- **Modes**: `--mode baseline|append|timebucket|ordered|lazy` selects cumulative feature sets. `append` sets `append_only: true` (it still rewrites at this commit). `timebucket`, `ordered` and `lazy` fail before generating data until their step adds the configuration. Each step removes its check in `require_supported` and wires the feature into `runtime_config`, `runtime_options` and `query_stats`.
+- **Modes**: `--mode baseline|append|timebucket|ordered|lazy` selects cumulative feature sets. `append` sets `append_only: true` and `duplicate_ids: ignore_identical`, so creates use the native append path (since commit `741ddbf`). `timebucket` adds `PartitionKey::TimeBucket { timestamp, Month }` and generates rows without the `month` field (cache key suffix `-nomonth`, same file names). `ordered` and `lazy` fail before generating data until their step adds the configuration. The counting host forwards `append_durable` and `read_tail`, so appends count the bytes they write and the conflict-check tail they read. Each step removes its check in `require_supported` and wires the feature into `runtime_config`, `runtime_options` and `query_stats`.
 
 ## Step 1 baseline (commit 0e3666a)
 
@@ -96,11 +96,74 @@ With the same 140k rows in 8 partitions of about 2.1 MB instead of 120 partition
 
 ## Step 2 append
 
-Not run yet. Run `just bench-timeseries --mode append` and add the results here, with a baseline rerun under the same machine load.
+### Run
+
+| Item | Value |
+|---|---|
+| Runtime and harness | branch `ts/append`, commit `741ddbf` |
+| Command | `./crates/target/release/examples/timeseries_bench --rows 140000,1000000 --years 10 --mode append --inserts 1000` (release build, inside `nix develop`) |
+| Date | 2026-10-20, 23:05–23:07 UTC (append and time bucket); baseline rerun 23:13–23:17 UTC |
+| Machine | same as step 1 |
+| Machine load | One-minute load average 13 at start, 8.5 at the end; another worker ran its own benchmark at the same time. The step 1 baseline ran at 19–43, so the baseline was rerun at 140k under this load (below). Treat timings as ±50%. |
+| Memory limit | `--max-rss-mb 13162` (default from `MemAvailable` at start) |
+
+### Results
+
+| Rows | Mode | Open | RSS after open (peak) | Peak RSS | Inserts timed | Insert median | Insert p95 | Bytes written / insert | Bytes read / insert | File growth / insert | Prefix kept | 1 h query median | Status |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|
+| 140,000 | baseline (step 1, load 19–43) | 4.50 s | 780 MiB | 1,124 MiB | 495 of 1,000 | 1,071 ms | 1,943 ms | 179,509 B | 179,382 B | 127 B | yes | 170 ms | ok |
+| 140,000 | baseline rerun (load 11–17, 180 s budget) | 2.36 s | 781 MiB | 1,137 MiB | 143 of 1,000 | 1,208 ms | 1,668 ms | 157,163 B | 157,036 B | 127 B | yes | 185 ms | ok |
+| 140,000 | **append** | 1.81 s | 781 MiB | 781 MiB | 1,000 of 1,000 | **0.54 ms** | 0.77 ms | **127 B** | 4,096 B | 127 B | yes | 156 ms | ok |
+| 1,000,000 | baseline (step 1) | 27.2 s | 5,574 MiB | 8,198 MiB | 76 of 1,000 | 7,279 ms | 11,688 ms | 1,062,710 B | 1,062,583 B | 127 B | yes | 1,538 ms | ok |
+| 1,000,000 | **append** | 19.0 s | 5,562 MiB | 5,562 MiB | 1,000 of 1,000 | **0.58 ms** | 1.28 ms | **127 B** | 4,096 B | 127 B | yes | 1,145 ms | ok |
+| 10,000,000 | append | — | — | — | 0 | — | — | — | — | — | — | — | does not fit before lazy loading (OOM-killed in open) |
+
+The 1M baseline was not rerun: its peak RSS (8.2 GiB) did not fit safely beside the other worker's benchmark. The 140k rerun shows the step 1 numbers hold under this lighter load (1.2 s against 1.1 s per insert).
+
+```text
+TSBENCH {"mode":"append","rows":140000,"years":10.0,"seed":20261020,"max_rss_mb":13162,"status":"ok","partitions":120,"data_bytes":17780235,"rss_before_open_mb":3,"phase":"done","phase_started_ms":6113.127315,"open_ms":1810.657526,"rss_after_open_mb":781,"rss_resident_after_open_mb":591,"records_loaded":140000,"open_partitions_read":120,"open_bytes_read":17780235,"query_from":"2020-12-31T05:00:00.000Z","query_reps":20,"query_first_ms":148.911325,"query_median_ms":155.956837,"query_rows":1,"query_partitions_loaded":120,"query_partition_reads":0,"query_index_used":"none","inserts_done":1000,"insert_median_ms":0.542295,"inserts_requested":1000,"insert_budget_secs":600.0,"insert_budget_hit":false,"insert_target":"2025-12.jsonl","insert_target_bytes_before":148024,"insert_paths_written":1,"insert_p95_ms":0.773996,"insert_min_ms":0.449929,"insert_max_ms":3.8696960000000002,"insert_bytes_written_median":127.0,"insert_bytes_read_median":4096.0,"insert_file_growth_median":127.0,"insert_line_bytes_median":127.0,"insert_prefix_preserved":true,"peak_rss_mb":781}
+TSBENCH {"mode":"append","rows":1000000,"years":10.0,"seed":20261020,"max_rss_mb":13162,"status":"ok","partitions":120,"data_bytes":127005405,"rss_before_open_mb":3,"phase":"done","phase_started_ms":43802.738785,"open_ms":18978.861299999997,"rss_after_open_mb":5562,"rss_resident_after_open_mb":4034,"records_loaded":1000000,"open_partitions_read":120,"open_bytes_read":127005405,"query_from":"2020-12-31T05:00:00.000Z","query_reps":20,"query_first_ms":1504.564352,"query_median_ms":1145.096362,"query_rows":11,"query_partitions_loaded":120,"query_partition_reads":0,"query_index_used":"none","inserts_done":1000,"insert_median_ms":0.5757155,"inserts_requested":1000,"insert_budget_secs":600.0,"insert_budget_hit":false,"insert_target":"2025-12.jsonl","insert_target_bytes_before":1057831,"insert_paths_written":1,"insert_p95_ms":1.2846909999999998,"insert_min_ms":0.455768,"insert_max_ms":3.34628,"insert_bytes_written_median":127.0,"insert_bytes_read_median":4096.0,"insert_file_growth_median":127.0,"insert_line_bytes_median":127.0,"insert_prefix_preserved":true,"peak_rss_mb":5562}
+TSBENCH {"mode":"baseline","rows":140000,"years":10.0,"seed":20261020,"max_rss_mb":4555,"status":"ok","partitions":120,"data_bytes":17780235,"rss_before_open_mb":3,"phase":"done","phase_started_ms":186182.780409,"open_ms":2364.481191,"rss_after_open_mb":781,"rss_resident_after_open_mb":591,"records_loaded":140000,"open_partitions_read":120,"open_bytes_read":17780235,"query_from":"2020-12-31T05:00:00.000Z","query_reps":20,"query_first_ms":190.716378,"query_median_ms":184.846474,"query_rows":1,"query_partitions_loaded":120,"query_partition_reads":0,"query_index_used":"none","inserts_done":143,"insert_median_ms":1207.942988,"inserts_requested":1000,"insert_budget_secs":180.0,"insert_budget_hit":true,"insert_target":"2025-12.jsonl","insert_target_bytes_before":148024,"insert_paths_written":1,"insert_p95_ms":1667.6945220000002,"insert_min_ms":855.455512,"insert_max_ms":2695.641744,"insert_bytes_written_median":157163.0,"insert_bytes_read_median":157036.0,"insert_file_growth_median":127.0,"insert_line_bytes_median":127.0,"insert_prefix_preserved":true,"peak_rss_mb":1137}
+```
+
+### Reading step 2
+
+- **Insert cost no longer follows total rows.** The append median is 0.54 ms at 140k and 0.58 ms at 1M (1.07×), against 1.2 s and 7.3 s for the rewrite path: about 2,200× and 12,600× faster. All 1,000 inserts ran in about one second per size.
+- **Bytes written equal the line.** Each insert writes 127 bytes: the 126-byte line and its newline. The first append to the rewritten file also writes the missing final newline (128 bytes). File growth equals bytes written, and the earlier bytes of the target file are unchanged ("prefix kept").
+- **Bytes read are a constant 4 KiB.** The conflict check reads the file length and its final 4 KiB instead of the whole partition (157 KB and 1.06 MB before).
+- **Inserts no longer raise peak RSS.** Peak RSS equals RSS after open (781 MiB and 5,562 MiB). The rewrite path snapshotted every record per insert and peaked at 1,137 MiB and 8,198 MiB.
+- **Open and query are unchanged.** Every partition still loads at open and the range query still scans; those are steps 4 and 5. The open-time difference against step 1 is machine load (the 140k rerun opened in 2.4 s).
+- **10M: does not fit before lazy loading.** The run was OOM-killed in open. The machine had 9.8 GB available at start and another benchmark was running; the harness guard limit was 8,682 MiB and the child never reported crossing it (see "Harness note"). Step 1 already showed that open alone needs about 54 GiB at 10M (inferred). The size was not reduced and was not retried in this stage.
+
+### Harness note
+
+The RSS guard limit is fixed at start (`MemAvailable` − 1 GiB). On a shared machine other processes can use the remaining memory while the child grows, so the kernel or systemd OOM killer can act before the child's own RSS reaches the limit. That is what happened at 10M: the child printed no abort line. A guard that also checks `MemAvailable` at each poll would abort first. This is left for the lazy-loading stage, which reuses the harness.
 
 ## Step 3 time bucket
 
-Not run yet. Run `just bench-timeseries --mode timebucket`.
+### Run
+
+Same machine, commit and session as step 2, 23:06–23:07 UTC, one-minute load average 8.5 to 8.7. Command: `./crates/target/release/examples/timeseries_bench --rows 140000,1000000 --years 10 --mode timebucket --inserts 1000`. Memory limit 12,508 MiB. Rows have no `month` field; the partition key is `PartitionKey::TimeBucket { field: "timestamp", bucket: TimeBucket::Month }`, which produces the same 120 file names.
+
+### Results
+
+| Rows | Data | Open | RSS after open (peak) | Peak RSS | Inserts timed | Insert median | Insert p95 | Bytes written / insert | Bytes read / insert | File growth / insert | Prefix kept | 1 h query median | Status |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|
+| 140,000 | 15.3 MB | 1.85 s | 745 MiB | 745 MiB | 1,000 of 1,000 | 0.59 ms | 0.90 ms | 109 B | 4,096 B | 109 B | yes | 156 ms | ok |
+| 1,000,000 | 109.0 MB | 16.8 s | 5,312 MiB | 5,312 MiB | 1,000 of 1,000 | 0.56 ms | 0.76 ms | 109 B | 4,096 B | 109 B | yes | 1,201 ms | ok |
+| 10,000,000 | — | — | — | — | 0 | — | — | — | — | — | — | — | not run: does not fit before lazy loading (see step 2) |
+
+```text
+TSBENCH {"mode":"timebucket","rows":140000,"years":10.0,"seed":20261020,"max_rss_mb":12508,"status":"ok","partitions":120,"data_bytes":15260235,"rss_before_open_mb":3,"phase":"done","phase_started_ms":5800.164801,"open_ms":1846.145991,"rss_after_open_mb":745,"rss_resident_after_open_mb":563,"records_loaded":140000,"open_partitions_read":120,"open_bytes_read":15260235,"query_from":"2020-12-31T05:00:00.000Z","query_reps":20,"query_first_ms":225.263788,"query_median_ms":156.175926,"query_rows":1,"query_partitions_loaded":120,"query_partition_reads":0,"query_index_used":"none","inserts_done":1000,"insert_median_ms":0.593769,"inserts_requested":1000,"insert_budget_secs":600.0,"insert_budget_hit":false,"insert_target":"2025-12.jsonl","insert_target_bytes_before":127036,"insert_paths_written":1,"insert_p95_ms":0.896194,"insert_min_ms":0.448321,"insert_max_ms":5.292438,"insert_bytes_written_median":109.0,"insert_bytes_read_median":4096.0,"insert_file_growth_median":109.0,"insert_line_bytes_median":109.0,"insert_prefix_preserved":true,"peak_rss_mb":745}
+TSBENCH {"mode":"timebucket","rows":1000000,"years":10.0,"seed":20261020,"max_rss_mb":12508,"status":"ok","partitions":120,"data_bytes":109005405,"rss_before_open_mb":3,"phase":"done","phase_started_ms":42221.049872,"open_ms":16751.645795,"rss_after_open_mb":5312,"rss_resident_after_open_mb":3846,"records_loaded":1000000,"open_partitions_read":120,"open_bytes_read":109005405,"query_from":"2020-12-31T05:00:00.000Z","query_reps":20,"query_first_ms":1562.248821,"query_median_ms":1200.5893525000001,"query_rows":11,"query_partitions_loaded":120,"query_partition_reads":0,"query_index_used":"none","inserts_done":1000,"insert_median_ms":0.5554475,"inserts_requested":1000,"insert_budget_secs":600.0,"insert_budget_hit":false,"insert_target":"2025-12.jsonl","insert_target_bytes_before":907891,"insert_paths_written":1,"insert_p95_ms":0.759128,"insert_min_ms":0.474467,"insert_max_ms":4.411359999999999,"insert_bytes_written_median":109.0,"insert_bytes_read_median":4096.0,"insert_file_growth_median":109.0,"insert_line_bytes_median":109.0,"insert_prefix_preserved":true,"peak_rss_mb":5312}
+```
+
+### Reading step 3
+
+- **The redundant field is gone.** Each line is 18 bytes shorter (108 + newline against 126 + newline), so the data is 14% smaller (15.3 MB against 17.8 MB at 140k; 109 MB against 127 MB at 1M).
+- **Smaller records use less memory.** RSS after open falls by 4.5% (745 against 781 MiB at 140k; 5,312 against 5,562 MiB at 1M).
+- **Routing costs nothing measurable.** The append median stays at about 0.56–0.59 ms; deriving and validating the bucket from the timestamp is not visible next to the file sync.
+- Open, query and the 10M limit are unchanged from step 2.
 
 ## Step 4 ordered index
 
