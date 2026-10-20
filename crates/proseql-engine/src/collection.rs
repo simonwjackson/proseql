@@ -63,7 +63,8 @@ use crate::id_gen::IdGenerator;
 use crate::operators::{
     deep_merge_updates, update_touches_unique_fields, validate_immutable_fields,
 };
-use crate::query::indexes::QueryIndexes;
+use crate::query::indexes::{IndexUsed, QueryIndexes};
+use crate::query::sort::SortEntry;
 use crate::validator::{decode_owned_value, decode_value, js_eq, validate_value};
 
 // ── Result types ──────────────────────────────────────────────────────────────
@@ -292,7 +293,11 @@ impl Collection {
             (id_gen, None)
         };
         let mut query_indexes = QueryIndexes::new();
-        query_indexes.configure(&descriptor.indexes, &descriptor.search_index);
+        query_indexes.configure(
+            &descriptor.indexes,
+            &descriptor.search_index,
+            &descriptor.ordered_indexes,
+        );
         Self {
             name: name.into(),
             descriptor,
@@ -318,10 +323,11 @@ impl Collection {
         self.authorized_equality_cache = None;
         let entity_refs: Vec<(String, &Value)> =
             self.state.iter().map(|(id, v)| (id.clone(), v)).collect();
-        self.query_indexes.rebuild(
+        self.query_indexes.rebuild_all(
             &entity_refs,
             &self.descriptor.indexes,
             &self.descriptor.search_index,
+            &self.descriptor.ordered_indexes,
         );
     }
 
@@ -484,12 +490,62 @@ impl Collection {
     }
 
     pub fn narrow_candidates(&self, where_clause: &Value) -> Option<Vec<String>> {
+        self.narrow_candidates_with_index(where_clause)
+            .map(|(candidates, _)| candidates)
+    }
+
+    /// [`Self::narrow_candidates`] plus the index that produced the candidates.
+    ///
+    /// Order of preference: equality index, ordered (range) index, search index.
+    pub fn narrow_candidates_with_index(
+        &self,
+        where_clause: &Value,
+    ) -> Option<(Vec<String>, IndexUsed)> {
         if let Some(candidates) = self.query_indexes.narrow_by_equality(where_clause, &[]) {
-            return Some(candidates);
+            return Some((candidates, IndexUsed::Equality));
+        }
+        if let Some(candidates) = self.query_indexes.narrow_by_ordered(where_clause) {
+            return Some((candidates, IndexUsed::Ordered));
         }
         let insertion_order = self.insertion_order();
         self.query_indexes
             .narrow_by_search(where_clause, &insertion_order)
+            .map(|candidates| (candidates, IndexUsed::Search))
+    }
+
+    /// Candidate ids already in the order of `sort`, read from an ordered
+    /// index, or `None` when the index cannot reproduce the sort exactly.
+    ///
+    /// Applies when `sort` has one entry on an ordered-indexed field, the host
+    /// does not sort, every present value of the field has one type (strings
+    /// only when no collator is registered), and either the where clause has a
+    /// range on that field or no other index narrows it. The caller still runs
+    /// the full predicate on each id; rows the range excludes are skipped.
+    pub fn ordered_sort_candidate_ids<'a>(
+        &'a self,
+        where_clause: Option<&Value>,
+        sort: &[SortEntry],
+        registry: &CallbackRegistry,
+    ) -> Option<Box<dyn Iterator<Item = &'a str> + 'a>> {
+        let [(field, order)] = sort else {
+            return None;
+        };
+        if registry.has_host_sort()
+            || !self
+                .query_indexes
+                .can_sort_by(field, !registry.has_collator())
+        {
+            return None;
+        }
+        if let Some(where_clause) = where_clause {
+            if !self.query_indexes.has_range_on(where_clause, field)
+                && self.narrow_candidates_with_index(where_clause).is_some()
+            {
+                return None;
+            }
+        }
+        self.query_indexes
+            .ordered_sort_ids(field, order, where_clause)
     }
 
     // ── Public read API ───────────────────────────────────────────────────────
@@ -1307,6 +1363,7 @@ impl Collection {
             .get(id)
             .expect("synchronized row remains live")
             .clone();
+        self.query_indexes.refresh_ordered(id, &after);
         self.update_authorized_equality_cache(id, Some(&before), Some(&after));
         true
     }

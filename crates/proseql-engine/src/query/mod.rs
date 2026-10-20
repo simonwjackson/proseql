@@ -15,7 +15,8 @@
 //! - **Aggregation** ([`aggregate`]) — count/sum/avg/min/max + groupBy;
 //!   `GroupResult` is flat (`{ group, count?, sum?, … }`).
 //! - **Computed fields** ([`computed`]) — callback materialisation before filter/sort.
-//! - **Indexes** ([`indexes`]) — equality and full-text acceleration indexes.
+//! - **Indexes** ([`indexes`]) — equality, ordered (range) and full-text
+//!   acceleration indexes (`ordered_index` holds the ordered index).
 //! - **Pipeline** ([`pipeline`]) — `execute_query`, `execute_cursor_query`,
 //!   `execute_aggregate`, `execute_grouped_aggregate`.
 //!
@@ -31,6 +32,7 @@ pub mod computed;
 pub mod cursor;
 pub mod filter;
 pub mod indexes;
+pub(crate) mod ordered_index;
 pub mod paginate;
 pub mod pipeline;
 pub mod search;
@@ -41,6 +43,7 @@ pub mod sort;
 pub use aggregate::{AggregateConfig, AggregateResult, GroupResult};
 pub use cursor::{apply_cursor, CursorConfig, CursorPageInfo, CursorPageResult};
 pub use filter::{matches_where, matches_where_with_registry};
+pub use indexes::IndexUsed;
 pub use paginate::paginate;
 pub use pipeline::{
     execute_aggregate, execute_cursor_query, execute_cursor_query_over_entities,
