@@ -31,7 +31,7 @@
   - The first append into an unloaded partition loads it for the ID check: 1.2 s and 9.2 MB read for an 83,000-row month at 10M.
   - The harness memory guard now also aborts when `MemAvailable` falls below 1 GiB.
   - Conformance: `crates/proseql-native/tests/lazy_partitions_runtime.rs` (15 tests, every result compared with an eager runtime on the same files), `crates/proseql-engine/tests/resident_conformance.rs`, unit tests in `crates/proseql-storage/src/partition_prune.rs`.
-  - Seam: the native runtime decides which partitions are resident; the engine gains only `Database::load_resident_records` / `unload_resident_records` / `refresh_reactive_snapshot`, which the WASM engine never calls. Recorded in `docs/native-sources.md` ("Lazy partitions") and the openspec design.
+  - Runtime boundary: the native runtime decides which partitions are resident; the engine gains only `Database::load_resident_records` / `unload_resident_records` / `refresh_reactive_snapshot`, which the WASM engine never calls. Recorded in `docs/native-sources.md` ("Lazy partitions") and the openspec design.
   - Contract deviations: `NativeSourceRuntimeOptions.lazy_watch_interval` added (poll interval of the lazy watcher; not in the contract). Pinned partitions do not count against `max_loaded_partitions`.
   - Coach: `coach_compatibility` ran against an empty synthetic directory with the schema-only fixture and opened all 42 collections without a mutation. It was not run through `scripts/check-coach-copy.py`, because that script copies `~/.local/share/coach/`, which this stage must not read or copy. Coach's own server tests (27) pass against `24d79a6` in a `/tmp` copy of `coach/server` and `coach/contract` with only the pinned rev changed; Coach itself was not changed.
 

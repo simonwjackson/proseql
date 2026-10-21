@@ -64,7 +64,7 @@ Coach pins `proseql-native`, `-engine`, `-storage` and `-formats` at `0e3666a`. 
 - The file watcher hashes only loaded partitions and checks the directory listing for new or removed files.
 - A native query stats API returns `partitions_loaded` and `index_used`.
 
-### Where the lazy seam goes (step 5 decision)
+### Where the lazy runtime boundary goes (step 5 decision)
 
 The engine assumes that a collection holds every record a query can match. Two places could change that assumption:
 
@@ -73,7 +73,7 @@ The engine assumes that a collection holds every record a query can match. Two p
 | Engine: a partition provider behind `Collection` | query, aggregate, populate, transactions, reactive snapshots and indexes learn about unloaded records; the engine calls back into a loader during a query | large change in shared code; WASM size budget (about 2.5 KB of headroom); every engine path needs a lazy variant |
 | **Native runtime (chosen)** | before an operation, the runtime makes every partition the filter can touch resident; after it, the runtime evicts | the engine gains three small methods that move records in and out without a mutation; operations must go through `NativeRuntime` methods, and `read(|db| ..)` sees loaded partitions only |
 
-The runtime layer keeps the engine's assumption true for each operation: the resident set always contains every partition that can hold a match, so the engine's query, index, sort, aggregate, transaction and watch code is unchanged and shared with WASM. The engine methods are `Database::load_resident_records`, `unload_resident_records` and `refresh_reactive_snapshot`; the WASM crate never calls them, so the linker drops them (browser production stayed at 593,179 B gzip). The preconditions (no relationships, no unique fields) are what make the runtime seam sound: no query reads another collection's lazy records, and the only cross-record check on create is the ID, which the target partition covers.
+The runtime layer keeps the engine's assumption true for each operation: the resident set always contains every partition that can hold a match, so the engine's query, index, sort, aggregate, transaction and watch code is unchanged and shared with WASM. The engine methods are `Database::load_resident_records`, `unload_resident_records` and `refresh_reactive_snapshot`; the WASM crate never calls them, so the linker drops them (browser production stayed at 593,179 B gzip). The preconditions (no relationships, no unique fields) are what make the runtime boundary sound: no query reads another collection's lazy records, and the only cross-record check on create is the ID, which the target partition covers.
 
 Pruning lives in `proseql-storage` (`partition_prune.rs`, next to the partition keys). The lazy state (listing, resident partitions, LRU clock, watch pins) lives in the native `SourceState`. The managed watch polls lazy roots itself (listing plus loaded partitions only) instead of the host's recursive content-hashing poller.
 

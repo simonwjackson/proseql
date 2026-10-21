@@ -1,6 +1,6 @@
 //! Lazy partitions: a `Partitioned` JSONL source whose files load on demand.
 //!
-//! # Where the seam is
+//! # Where the runtime boundary is
 //!
 //! The engine assumes that a collection holds every record a query can match.
 //! This module keeps that assumption true at the runtime layer instead of

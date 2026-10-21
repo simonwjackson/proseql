@@ -179,7 +179,7 @@ The harness now also times a "newest 100" query (`sort: timestamp desc, limit: 1
 | Command | `nix develop -c cargo run --release --manifest-path crates/Cargo.toml -p proseql-native --example timeseries_bench -- --mode baseline\|ordered --rows 140000,1000000 --years 10 --insert-budget-secs 120`, then `--mode ordered --rows 10000000` |
 | Date | 2026-10-20, 23:05–23:18 UTC |
 | Machine | Same as step 1 (i9-11900H, 31 GiB, NVMe, btrfs, Linux 6.18.17, rustc 1.92.0) |
-| Machine load | Shared. One-minute load average 11 to 48 during the runs (other sessions were compiling). Baseline and ordered ran back to back under the same conditions. Treat timings as ±50%; the query ratios are far larger than that. |
+| Machine load | Shared. One-minute load average 11 to 48 during the runs (other sessions were compiling). Baseline and ordered ran consecutively under the same conditions. Treat timings as ±50%; the query ratios are far larger than that. |
 | Memory limit | default (`MemAvailable` − 1024 MiB): 13,700 MiB baseline, 13,175 MiB ordered, 10,002 MiB for the 10M run |
 | Insert budget | 120 s per size (not 600 s); the index does not change the rewrite cost |
 
@@ -276,6 +276,8 @@ TSBENCH {"mode":"lazy","rows":10000000,"years":10.0,"seed":20261020,"max_rss_mb"
 | One-hour query: `partitions_loaded = 1` | 1 | 1 | — | met |
 | One-hour query: `index_used = ordered` | ordered | ordered | — | met |
 | One-hour query time ≤ 2× | 0.0090 ms | 0.287 ms | **31.7×** (repeat 35.2×) | **not met** |
+
+The handoff's own definition of done for this query ("reads only one partition and uses the ordered index") is met; the ≤ 2× time bound is an addition of the approved contract, and that bound is the target missed here.
 
 ### Reading step 5
 
