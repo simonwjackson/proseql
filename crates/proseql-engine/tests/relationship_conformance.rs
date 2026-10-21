@@ -4559,3 +4559,19 @@ fn relationship_many_hard_delete_bypasses_append_only_on_owner() {
     assert_eq!(result.deleted[0]["id"], "user1");
     assert!(db.collection("users").unwrap().get("user1").is_none());
 }
+
+#[test]
+fn populate_unknown_collection_is_collection_not_found() {
+    let db = seeded_db();
+    let error = db
+        .query(
+            "unknown",
+            QueryInput::default(),
+            Some(json!({"author": true})),
+        )
+        .expect_err("populate must reject an unknown owner collection");
+    match error {
+        EngineError::CollectionNotFound(error) => assert_eq!(error.collection, "unknown"),
+        other => panic!("expected CollectionNotFound, got {other:?}"),
+    }
+}
