@@ -32,7 +32,7 @@ use crate::query::{
 };
 use crate::relationships::{
     helpers::{
-        col_nf, fk_field_names, payload_touches_fk_field, validate_fk, validate_fk_with_owner_ids,
+        col_nf, fk_field_names, payload_touches_fk_field, validate_fk, validate_fk_with_owner_ids, validate_delete_constraints,
     },
     Database,
 };
@@ -2078,6 +2078,12 @@ impl Database {
         soft: bool,
         limit: Option<usize>,
     ) -> Result<DeleteManyResult, EngineError> {
+        if !soft {
+            let owner = self.collections.get(collection).ok_or_else(|| col_nf(collection))?;
+            for row in owner.list().into_iter().filter(|row| matches_where_with_registry(row, &where_clause, Some(self.registry.as_ref()))).take(limit.unwrap_or(usize::MAX)) {
+                if let Some(id) = row.get("id").and_then(Value::as_str) { validate_delete_constraints(collection, id, &self.collections)?; }
+            }
+        }
         let result = self
             .collections
             .get_mut(collection)

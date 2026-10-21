@@ -346,3 +346,17 @@ pub(super) fn require_obj(v: Value, context: &str) -> Result<Map<String, Value>,
         _ => Err(op_err(context, "input must be a JSON object")),
     }
 }
+
+pub(crate) fn validate_delete_constraints(collection: &str, id: &str, collections: &IndexMap<String, Collection>) -> Result<(), EngineError> {
+    for (name, source) in collections {
+        for (relationship, descriptor) in &source.descriptor.relationships {
+            if descriptor.kind != RelationshipKind::Ref || descriptor.target != collection { continue; }
+            let field = ref_fk(relationship, &descriptor.foreign_key);
+            let count = source.list().iter().filter(|row| row.get(&field).and_then(Value::as_str) == Some(id)).count();
+            if count > 0 {
+                return Err(EngineError::ForeignKey(Box::new(ForeignKeyError { collection: collection.to_owned(), field, value: id.to_owned(), target_collection: name.clone(), message: format!("Cannot delete: {count} {name} entities reference this {collection}") })));
+            }
+        }
+    }
+    Ok(())
+}

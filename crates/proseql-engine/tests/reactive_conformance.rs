@@ -2047,3 +2047,13 @@ fn create_many_can_disable_relationship_validation_explicitly() {
     assert_eq!(result.created.len(), 1);
     assert!(db.collection("people").unwrap().get("a").is_some());
 }
+
+#[test]
+fn plain_deletes_reject_incoming_references_atomically() {
+    let (mut db, _) = make_people_db_with_scheduler(vec![]);
+    db.create("people", json!({"id":"boss","name":"Boss"})).unwrap();
+    db.create("people", json!({"id":"worker","name":"Worker","managerId":"boss"})).unwrap();
+    assert!(matches!(db.delete("people", "boss"), Err(EngineError::ForeignKey(_))));
+    assert!(matches!(db.delete_many("people", json!({}), false, None), Err(EngineError::ForeignKey(_))));
+    assert_eq!(db.collection("people").unwrap().list().len(), 2);
+}
