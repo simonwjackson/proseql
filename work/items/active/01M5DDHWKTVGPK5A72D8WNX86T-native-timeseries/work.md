@@ -35,6 +35,8 @@
   - Contract deviations: `NativeSourceRuntimeOptions.lazy_watch_interval` added (poll interval of the lazy watcher; not in the contract). Pinned partitions do not count against `max_loaded_partitions`.
   - Coach: `coach_compatibility` ran against an empty synthetic directory with the schema-only fixture and opened all 42 collections without a mutation. It was not run through `scripts/check-coach-copy.py`, because that script copies `~/.local/share/coach/`, which this stage must not read or copy. Coach's own server tests (27) pass against `24d79a6` in a `/tmp` copy of `coach/server` and `coach/contract` with only the pinned rev changed; Coach itself was not changed.
 
+- Review round 1 fixes on `ts/lazy`: reload kept lazy records (`76092a5`), torn JSONL tails classified before UTF-8 decoding (`c215dce`), failed watched partitions retried (`a86a7f6`), `full_scan: Error` independent of residency (`17429c2`), `skipDuplicates` cannot skip an `ignore_identical` conflict (`60c8d15`), own appends explained by changed path under shared graph roots (`032aa65`), `just bench-timeseries` runs lazy mode (`994e554`), typed TS results and ValidationError (`8f307e9`, `0e460fc`, `65b5b01`). Lazy rerun after the fixes: append 1.17×, open 0.43×, one-hour query 22.5× (still not met).
+
 ## Parity decisions (native only on purpose)
 
 - Partitioned append without rewrite: native only. The WASM engine keeps its rewrite path for partitioned sources. Its source-oriented configuration also rejects `appendOnly` as an old-style persistence field. Recorded in `docs/native-sources.md` ("Runtime parity").
