@@ -1002,13 +1002,15 @@ impl NativeRuntime {
         // state is promoted. This also rejects malformed and unknown shapes.
         let memory = MemoryStorageHost::default();
         memory.write(&state.config.path, &content)?;
-        let validated = states_to_records(load_collections_from_file(
+        let mut loaded = load_collections_from_file(
             &memory,
             &state.formats,
             &state.config.path,
             &load_configs(&state.config),
             None,
-        )?);
+        )?;
+        decode_loaded_collections(&state.config, &mut loaded, &state.callbacks)?;
+        let validated = states_to_records(loaded);
         state
             .database
             .validate_snapshot_transaction(validated.clone())?;
@@ -1683,13 +1685,14 @@ fn load_single_file(
         staged.write(&config.path, content)?;
     }
     let migrations = CallbackRegistryMigrationHost::new(callbacks);
-    let loaded = load_collections_from_file(
+    let mut loaded = load_collections_from_file(
         &staged,
         formats,
         &config.path,
         &load_configs(config),
         Some(&migrations),
     )?;
+    decode_loaded_collections(config, &mut loaded, callbacks)?;
     let migrated_content = if staged.exists(&config.path)? {
         Some(staged.read(&config.path)?).filter(|next| Some(next) != content.as_ref())
     } else {
@@ -1700,6 +1703,25 @@ fn load_single_file(
         content,
         migrated_content,
     })
+}
+
+fn decode_loaded_collections(
+    config: &NativeRuntimeConfig,
+    loaded: &mut IndexMap<String, IndexMap<String, Value>>,
+    callbacks: &CallbackRegistry,
+) -> Result<(), EngineError> {
+    for collection in &config.collections {
+        let descriptor = &collection.descriptor;
+        if let Some(records) = loaded.get_mut(&descriptor.name) {
+            schema_checks::decode_loaded_records(
+                &descriptor.schema,
+                &descriptor.id_strategy,
+                records,
+                callbacks,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn states_to_records(

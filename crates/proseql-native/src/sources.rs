@@ -328,9 +328,9 @@ impl SourceState {
                 }
             }
         }
-        // Decode without host checks in the codec layer, which has no registry.
-        // Keep `config` unchanged: engine snapshots/resident loads validate its
-        // original schema with this same registry before publishing records.
+        // The codec layer has no callback registry. Host-checked collections
+        // stage raw payloads; decode them with the original engine schema below,
+        // before storing or publishing any loaded records.
         let mut decode_config = config.clone();
         for collection in decode_config.collection_configs.values_mut() {
             collection.schema = crate::schema_checks::storage_decode_schema(&collection.schema);
@@ -451,15 +451,39 @@ impl SourceState {
         }
         let migrations =
             proseql_storage::persistence::CallbackRegistryMigrationHost::new(callbacks);
-        let documents =
+        let mut documents =
             load_document_sources(&snapshot, formats, &decode_config, Some(&migrations))?;
-        let graph = load_document_graph_sources(
+        let mut graph = load_document_graph_sources(
             &snapshot,
             formats,
             &decode_config,
             Some(&migrations),
             transforms.as_deref(),
         )?;
+        decode_source_collections(&config, &mut documents.collections, callbacks)?;
+        decode_source_collections(&config, &mut files, callbacks)?;
+        decode_source_collections(&config, &mut graph.collections, callbacks)?;
+        for source in &config.sources {
+            let NormalizedDatabaseSourceConfig::Partitioned(source) = source else {
+                continue;
+            };
+            let Some(partitions) = partitions.get_mut(&source.collection) else {
+                continue; // Lazy partitions decode on demand.
+            };
+            let collection = &config.collection_configs[&source.collection];
+            for (path, records) in &mut partitions.files {
+                crate::schema_checks::decode_loaded_records(
+                    &collection.schema,
+                    &collection.id_strategy,
+                    records,
+                    callbacks,
+                )?;
+                // Routing must see the decoded/filtered value, not raw input.
+                for (id, record) in records {
+                    proseql_storage::partitioned::check_partition_record(source, path, id, record)?;
+                }
+            }
+        }
         let mut contents = documents
             .documents
             .iter()
@@ -984,4 +1008,21 @@ fn load_migrating_file(
         },
         Some(&CallbackRegistryMigrationHost::new(callbacks)),
     )
+}
+
+fn decode_source_collections(
+    config: &NormalizedSourceConfig,
+    collections: &mut IndexMap<String, IndexMap<String, Value>>,
+    callbacks: &CallbackRegistry,
+) -> Result<(), EngineError> {
+    for (name, records) in collections {
+        let collection = &config.collection_configs[name];
+        crate::schema_checks::decode_loaded_records(
+            &collection.schema,
+            &collection.id_strategy,
+            records,
+            callbacks,
+        )?;
+    }
+    Ok(())
 }

@@ -66,6 +66,24 @@ fn descriptor() -> CollectionDescriptor {
     }
 }
 
+fn scores_field(value: SchemaNode) -> StructField {
+    StructField {
+        name: "scores".into(),
+        schema: SchemaNode::Record {
+            key: Box::new(SchemaNode::Checked {
+                inner: Box::new(SchemaNode::Str),
+                checks: vec![SchemaCheck::new(
+                    "custom/safe-key",
+                    json!(null),
+                    "a safe key",
+                    Some("safe-key".into()),
+                )],
+            }),
+            value: Box::new(value),
+        },
+    }
+}
+
 fn callbacks(calls: &Arc<AtomicUsize>) -> CallbackRegistry {
     let mut callbacks = CallbackRegistry::new();
     let calls = Arc::clone(calls);
@@ -186,11 +204,13 @@ fn source_and_lazy_reload_validate_host_checks_before_replacing_last_known_good(
             "allowed.json"
         };
         let path = temp.path().join(file);
-        let content = |name: &str| {
-            let records = json!({"allowed.one":{"id":"allowed.one","name":name}});
+        let content = |name: &str, score: &str| {
+            // Rejected keys must be dropped before their values are decoded.
+            let record = json!({"id":"allowed.one","name":name,"scores":{"unsafe":{"invalid":"number"},"ok":score}});
+            let records = json!({"allowed.one":record});
             match mode {
                 "documents" | "graph" => json!({"items":records}).to_string(),
-                "lazy" => format!("{}\n", json!({"id":"allowed.one","name":name})),
+                "lazy" => format!("{record}\n"),
                 _ => records.to_string(),
             }
         };
@@ -243,16 +263,21 @@ fn source_and_lazy_reload_validate_host_checks_before_replacing_last_known_good(
         };
         let mut descriptor = descriptor();
         descriptor.append_only = mode == "lazy";
+        if let SchemaNode::Struct { fields } = &mut descriptor.schema {
+            fields.push(scores_field(SchemaNode::NumFromStr));
+        }
         let config = NativeSourceRuntimeConfig {
             collections: vec![NativeCollectionConfig::new(descriptor)],
             sources: vec![source],
         };
-        std::fs::write(&path, content("allowed")).unwrap();
+        std::fs::write(&path, content("allowed", "2")).unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
+        let mut callbacks = callbacks(&calls);
+        callbacks.register_predicate("safe-key", Box::new(|value| value == "ok"));
         let runtime = NativeRuntime::open_sources_with_options(
             config,
             NativeSourceRuntimeOptions {
-                callbacks: callbacks(&calls),
+                callbacks,
                 watch_debounce: None,
                 lazy_partitions: if mode == "lazy" {
                     IndexMap::from([("source".into(), LazyPartitionPolicy::new(1))])
@@ -268,8 +293,13 @@ fn source_and_lazy_reload_validate_host_checks_before_replacing_last_known_good(
             "allowed",
             "{mode}"
         );
+        assert_eq!(
+            runtime.find_by_id("items", "allowed.one").unwrap().unwrap()["scores"],
+            json!({"ok":2}),
+            "{mode}"
+        );
         assert!(calls.load(Ordering::SeqCst) > 0, "{mode}");
-        std::fs::write(&path, content("blocked")).unwrap();
+        std::fs::write(&path, content("blocked", "3")).unwrap();
         let error = runtime.reload().unwrap_err();
         assert_predicate_rejection(&error);
         assert_eq!(
@@ -278,6 +308,14 @@ fn source_and_lazy_reload_validate_host_checks_before_replacing_last_known_good(
             "{mode}"
         );
         assert!(runtime.last_reload_error().unwrap().is_some(), "{mode}");
+        std::fs::write(&path, content("allowed", "4")).unwrap();
+        runtime.reload().unwrap();
+        assert_eq!(
+            runtime.find_by_id("items", "allowed.one").unwrap().unwrap()["scores"],
+            json!({"ok":4}),
+            "{mode}"
+        );
+        assert!(runtime.last_reload_error().unwrap().is_none(), "{mode}");
     }
 }
 
@@ -355,7 +393,6 @@ fn nested_host_checks_receive_decoded_values_and_keep_builtin_checks() {
 }
 
 #[test]
-#[ignore = "needs engine Record key validation (correctness)"]
 fn record_key_host_predicate_drops_invalid_keys_on_create_update_and_reload() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("db.json");
@@ -366,27 +403,13 @@ fn record_key_host_predicate_drops_invalid_keys_on_create_update_and_reload() {
                 name: "id".into(),
                 schema: SchemaNode::Str,
             },
-            StructField {
-                name: "scores".into(),
-                schema: SchemaNode::Record {
-                    key: Box::new(SchemaNode::Checked {
-                        inner: Box::new(SchemaNode::Str),
-                        checks: vec![SchemaCheck::new(
-                            "custom/safe-key",
-                            json!(null),
-                            "a safe key",
-                            Some("safe-key".into()),
-                        )],
-                    }),
-                    value: Box::new(SchemaNode::Num),
-                },
-            },
+            scores_field(SchemaNode::Num),
         ],
     };
     let mut callbacks = CallbackRegistry::new();
     callbacks.register_predicate("safe-key", Box::new(|value| value == "ok"));
     let runtime = NativeRuntime::open_with_options(
-        config,
+        config.clone(),
         NativeRuntimeOptions {
             callbacks,
             ..Default::default()
@@ -420,4 +443,71 @@ fn record_key_host_predicate_drops_invalid_keys_on_create_update_and_reload() {
         json!({"ok":4})
     );
     assert!(runtime.last_reload_error().unwrap().is_none());
+    let mut callbacks = CallbackRegistry::new();
+    callbacks.register_predicate("safe-key", Box::new(|value| value == "ok"));
+    let reopened = NativeRuntime::open_with_options(
+        config,
+        NativeRuntimeOptions {
+            callbacks,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        reopened.find_by_id("items", "one").unwrap().unwrap()["scores"],
+        json!({"ok":4})
+    );
+}
+
+#[test]
+fn derived_ids_and_number_from_string_survive_host_key_filtering_and_bulk_loads() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("db.json");
+    let mut config = single_config(path.to_str().unwrap());
+    config.collections[0].descriptor.id_strategy = IdStrategy::DerivedFromKey;
+    config.collections[0].descriptor.schema = SchemaNode::Struct {
+        fields: vec![scores_field(SchemaNode::NumFromStr)],
+    };
+    let mut callbacks = CallbackRegistry::new();
+    callbacks.register_predicate("safe-key", Box::new(|value| value == "ok"));
+    std::fs::write(
+        &path,
+        json!({"items":{"one":{"scores":{"unsafe":{},"ok":"2"}}}}).to_string(),
+    )
+    .unwrap();
+    let runtime = NativeRuntime::open_with_options(
+        config,
+        NativeRuntimeOptions {
+            callbacks,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        runtime.find_by_id("items", "one").unwrap().unwrap(),
+        json!({"id":"one","scores":{"ok":2}})
+    );
+    std::fs::write(
+        &path,
+        json!({"items":{"one":{"scores":{"unsafe":{},"ok":"4"}}}}).to_string(),
+    )
+    .unwrap();
+    runtime.reload().unwrap();
+    assert_eq!(
+        runtime.find_by_id("items", "one").unwrap().unwrap(),
+        json!({"id":"one","scores":{"ok":4}})
+    );
+    runtime
+        .replace_all(IndexMap::from([(
+            "items".into(),
+            IndexMap::from([(
+                "one".into(),
+                json!({"id":"one","scores":{"unsafe":12,"ok":6}}),
+            )]),
+        )]))
+        .unwrap();
+    assert_eq!(
+        runtime.find_by_id("items", "one").unwrap().unwrap(),
+        json!({"id":"one","scores":{"ok":6}})
+    );
 }

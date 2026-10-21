@@ -504,14 +504,14 @@ impl SourceState {
         let config = &self.config.collection_configs[&lazy.collection];
         let mut decode_config = config.clone();
         decode_config.schema = crate::schema_checks::storage_decode_schema(&config.schema);
-        let loaded = load_append_file(&snapshot, formats, &file, &decode_config, true)?;
-        if decode_config.schema != config.schema {
-            crate::schema_checks::validate_loaded_records(
-                config,
-                loaded.records.values(),
-                &self.callbacks,
-            )?;
-        }
+        let mut loaded = load_append_file(&snapshot, formats, &file, &decode_config, true)?;
+        // Decode/filter before removing any last-known-good resident records.
+        crate::schema_checks::decode_loaded_records(
+            &config.schema,
+            &config.id_strategy,
+            &mut loaded.records,
+            &self.callbacks,
+        )?;
         for (id, record) in &loaded.records {
             check_partition_record(&lazy.source, path, id, record)?;
         }
