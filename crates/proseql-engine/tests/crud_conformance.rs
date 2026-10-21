@@ -2804,3 +2804,14 @@ fn upsert_issue_names_received_and_valid_fields() {
     assert!(error.issues[0].message.contains("email"));
     assert!(error.issues[0].message.contains("id"));
 }
+
+#[test]
+fn soft_delete_replaces_explicit_undefined_timestamp() {
+    let mut descriptor = descriptor_with_schema(soft_delete_user_schema());
+    if let SchemaNode::Struct { fields } = &mut descriptor.schema { fields.iter_mut().find(|field| field.name == "deletedAt").unwrap().schema = SchemaNode::Optional(Box::new(SchemaNode::Unknown)); }
+    let mut col = Collection::new("users", descriptor, Arc::new(CallbackRegistry::new()), Box::new(SequentialGenerator::new("u")));
+    col.create(json!({"id":"u1","name":"Alice","email":"a@x.com","age":1,"companyId":"c","deletedAt":{"__proseqlInternalUndefined__":1}})).unwrap();
+    col.update("u1", json!({"deletedAt": {"$set": {"__proseqlInternalUndefined__":1}}})).unwrap();
+    let result = col.delete_many(|_| true, true, None).unwrap();
+    assert!(result.deleted[0]["deletedAt"].is_string());
+}

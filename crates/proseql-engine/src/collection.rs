@@ -1068,7 +1068,7 @@ impl Collection {
 
             let already_deleted = soft_deleted
                 .get("deletedAt")
-                .map(|v| !v.is_null())
+                .map(|v| !v.is_null() && !crate::value::is_boundary_undefined(v))
                 .unwrap_or(false);
             if !already_deleted {
                 soft_deleted.insert("deletedAt".to_string(), Value::String(now.clone()));
@@ -1289,7 +1289,7 @@ impl Collection {
 
                 let already_deleted = soft_deleted
                     .get("deletedAt")
-                    .map(|v| !v.is_null())
+                    .map(|v| !v.is_null() && !crate::value::is_boundary_undefined(v))
                     .unwrap_or(false);
                 if !already_deleted {
                     soft_deleted.insert("deletedAt".to_string(), Value::String(now.clone()));
