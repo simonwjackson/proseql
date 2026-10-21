@@ -20,8 +20,8 @@ use serde_json::Value;
 use crate::callbacks::CallbackRegistry;
 use crate::change_set::ChangeSet;
 use crate::collection::{
-    Collection, CreateManyResult, DeleteManyResult, SkippedEntry, UpdateManyResult, UpsertAction,
-    UpsertManyResult, UpsertOutcome,
+    delete_many_limit, Collection, CreateManyResult, DeleteManyResult, SkippedEntry,
+    UpdateManyResult, UpsertAction, UpsertManyResult, UpsertOutcome,
 };
 use crate::descriptor::ComputedFieldDescriptor;
 use crate::errors::{CollectionNotFoundError, EngineError, OperationError};
@@ -2086,6 +2086,7 @@ impl Database {
         soft: bool,
         limit: Option<usize>,
     ) -> Result<DeleteManyResult, EngineError> {
+        let limit = delete_many_limit(limit);
         if !soft {
             let owner = self
                 .collections

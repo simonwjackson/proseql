@@ -117,6 +117,11 @@ pub struct DeleteManyResult {
     pub deleted: Vec<Value>,
 }
 
+/// Delete limits cap the selection only when positive; zero means unlimited.
+pub(crate) fn delete_many_limit(limit: Option<usize>) -> Option<usize> {
+    limit.filter(|limit| *limit > 0)
+}
+
 /// Result of an `upsertMany` operation.
 ///
 /// Mirrors `UpsertManyResult<T>` from `packages/core/src/types/crud-types.ts`.
@@ -1248,10 +1253,8 @@ impl Collection {
         //       matchingEntities = matchingEntities.slice(0, options.limit);
         //   }
         // limit = 0 means "no cap" (same as no limit at all).
-        if let Some(lim) = limit {
-            if lim > 0 {
-                matching_ids.truncate(lim);
-            }
+        if let Some(limit) = delete_many_limit(limit) {
+            matching_ids.truncate(limit);
         }
 
         if matching_ids.is_empty() {

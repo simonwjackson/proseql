@@ -2148,3 +2148,33 @@ fn single_soft_delete_rejects_missing_field_before_inbound_references() {
         Err(EngineError::NotFound(_))
     ));
 }
+
+#[test]
+fn delete_many_limit_zero_checks_all_inbound_refs_before_any_mutation() {
+    let initial = vec![
+        json!({"id":"free","name":"Free"}),
+        json!({"id":"boss","name":"Boss"}),
+        json!({"id":"worker","name":"Worker","managerId":"boss"}),
+    ];
+    for limit in [Some(0), None, Some(2)] {
+        let (mut db, _) = make_people_db_with_scheduler(initial.clone());
+        let before = db
+            .collection("people")
+            .unwrap()
+            .list()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert!(
+            matches!(
+                db.delete_many("people", json!({}), false, limit),
+                Err(EngineError::ForeignKey(_))
+            ),
+            "limit {limit:?} must validate every selected record before mutation"
+        );
+        assert_eq!(
+            db.collection("people").unwrap().list(),
+            before.iter().collect::<Vec<_>>()
+        );
+    }
+}
