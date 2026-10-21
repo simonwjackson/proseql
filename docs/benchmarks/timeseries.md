@@ -223,7 +223,7 @@ TSBENCH {"mode":"ordered","rows":1000000,"years":10.0,"seed":20261020,"max_rss_m
 
 | Item | Value |
 |---|---|
-| Code | branch `ts/lazy`, runtime at `c1cbe86`, harness at `6d29c55` |
+| Code | branch `ts/lazy`, commit `6d29c55` (runtime last changed in `03d0dbc`, where `NativeRuntime::query` stopped computing stats) |
 | Commands | `./crates/target/release/examples/timeseries_bench --rows 140000,1000000,10000000 --years 10 --mode lazy --inserts 1000`, then `--rows 140000,1000000 --mode ordered --inserts 1000` (release build, inside `nix develop`) |
 | Date | 2026-10-21, 00:30–00:32 UTC; an earlier lazy run at 00:28 UTC (harness `03d0dbc`, no one-slot query) is listed as a repeat |
 | Machine | Same as step 1 (i9-11900H, 31 GiB, NVMe, btrfs, Linux 6.18.17, rustc 1.92.0) |
