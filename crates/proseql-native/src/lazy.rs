@@ -115,6 +115,10 @@ pub(crate) struct LazyCollection {
     pub known: BTreeMap<String, String>,
     /// Loaded partitions by path.
     pub resident: BTreeMap<String, Resident>,
+    /// Listed partitions that a watch covers but that failed to load, with
+    /// the `(length, hash)` of the bytes that failed. The watcher retries
+    /// them when those bytes change.
+    pending: BTreeMap<String, Option<(usize, u64)>>,
     clock: u64,
     pins: HashMap<u64, Pin>,
     next_pin: u64,
@@ -146,6 +150,7 @@ impl LazyCollection {
             clock: 0,
             pins: HashMap::new(),
             next_pin: 1,
+            pending: BTreeMap::new(),
         }
     }
 
@@ -169,6 +174,7 @@ impl LazyCollection {
             });
         resident.ids.push(id);
         resident.hash = None;
+        self.pending.remove(path);
         if !self.known.contains_key(path) {
             if let Some(key) = partition_key_of_path(&self.source, path) {
                 for pin in self.pins.values_mut() {
@@ -316,6 +322,7 @@ pub(crate) fn configure_lazy(
                 clock: 0,
                 pins: HashMap::new(),
                 next_pin: 1,
+                pending: BTreeMap::new(),
             },
         );
     }
@@ -356,6 +363,19 @@ pub(crate) struct LazyFingerprint {
     known: BTreeSet<String>,
     /// Resident path → `(length, hash)` of the stored content (`None`: no file).
     resident: Vec<(String, Option<(usize, u64)>)>,
+    /// Pending path → `(length, hash)` of the bytes that failed to load.
+    pending: Vec<(String, Option<(usize, u64)>)>,
+}
+
+fn file_fingerprint(
+    host: &dyn StorageHost,
+    path: &str,
+) -> Result<Option<(usize, u64)>, EngineError> {
+    if !host.exists(path)? {
+        return Ok(None);
+    }
+    let content = host.read_bytes(path)?;
+    Ok(Some((content.len(), content_hash(&content))))
 }
 
 fn content_hash(content: &[u8]) -> u64 {
@@ -375,14 +395,8 @@ pub(crate) fn disk_differs(
         if !listed.keys().eq(fingerprint.known.iter()) {
             return Ok(true);
         }
-        for (path, stored) in &fingerprint.resident {
-            let current = if host.exists(path)? {
-                let content = host.read_bytes(path)?;
-                Some((content.len(), content_hash(&content)))
-            } else {
-                None
-            };
-            if &current != stored {
+        for (path, stored) in fingerprint.resident.iter().chain(&fingerprint.pending) {
+            if &file_fingerprint(host, path)? != stored {
                 return Ok(true);
             }
         }
@@ -529,6 +543,18 @@ impl SourceState {
         };
         for path in missing {
             let lazy = self.lazy_ref(collection)?;
+            // A live watch that covers this partition but does not pin it yet
+            // (a file found later, or one that failed to load) joins it now,
+            // and sees the records as a change.
+            let joining = partition_key_of_path(&lazy.source, &path)
+                .map(|key| {
+                    lazy.pins
+                        .iter()
+                        .filter(|(_, pin)| pin.filter.matches(&key) && !pin.paths.contains(&path))
+                        .map(|(id, _)| *id)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             let partition = self.read_partition(host, formats, lazy, &path)?;
             let ids = partition.records.keys().cloned().collect::<Vec<_>>();
             let position = Self::lazy_position(lazy, database, &path);
@@ -538,7 +564,7 @@ impl SourceState {
                     collection,
                     partition.records.into_values().collect(),
                     position,
-                    publish,
+                    publish || !joining.is_empty(),
                 )
                 .map_err(|error| match error {
                     EngineError::DuplicateKey(duplicate) => config_error(
@@ -561,6 +587,12 @@ impl SourceState {
             if let Some(key) = partition_key_of_path(&lazy.source, &path) {
                 lazy.known.insert(path.clone(), key);
             }
+            for id in joining {
+                if let Some(pin) = lazy.pins.get_mut(&id) {
+                    pin.paths.insert(path.clone());
+                }
+            }
+            lazy.pending.remove(&path);
             lazy.resident.insert(
                 path,
                 Resident {
@@ -701,6 +733,7 @@ impl SourceState {
             lazy.pins = std::mem::take(&mut old.pins);
             lazy.clock = old.clock;
             lazy.next_pin = old.next_pin;
+            lazy.pending = std::mem::take(&mut old.pending);
             for path in lazy.resident.keys() {
                 if let Some(content) = previous.contents.get(path) {
                     self.contents.insert(path.clone(), content.clone());
@@ -762,9 +795,14 @@ impl SourceState {
                 }
             }
             let lazy = self.lazy.get_mut(&name).expect("lazy collection");
+            // New files a watch covers, plus earlier ones that failed to load.
+            lazy.pending.retain(|path, _| listed.contains_key(path));
             let added = listed
                 .iter()
-                .filter(|(path, _)| !lazy.known.contains_key(*path))
+                .filter(|(path, _)| {
+                    lazy.pending.contains_key(*path) || !lazy.known.contains_key(*path)
+                })
+                .filter(|(path, _)| !lazy.resident.contains_key(*path))
                 .filter(|(_, key)| lazy.pins.values().any(|pin| pin.filter.matches(key)))
                 .map(|(path, _)| path.clone())
                 .collect::<Vec<_>>();
@@ -775,25 +813,14 @@ impl SourceState {
                 }
             }
             lazy.known = known;
-            if !added.is_empty() {
-                match self.lazy_ensure(database, host, formats, &name, &added, true) {
-                    Ok(_) => {
-                        let lazy = self.lazy.get_mut(&name).expect("lazy collection");
-                        for pin in lazy.pins.values_mut() {
-                            for path in &added {
-                                if lazy
-                                    .known
-                                    .get(path)
-                                    .is_some_and(|key| pin.filter.matches(key))
-                                {
-                                    pin.paths.insert(path.clone());
-                                }
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        first_error.get_or_insert(error);
-                    }
+            for path in added {
+                if let Err(error) =
+                    self.lazy_ensure(database, host, formats, &name, &[path.clone()], true)
+                {
+                    let failed = file_fingerprint(host, &path).ok().flatten();
+                    let lazy = self.lazy.get_mut(&name).expect("lazy collection");
+                    lazy.pending.insert(path, failed);
+                    first_error.get_or_insert(error);
                 }
             }
         }
@@ -873,6 +900,11 @@ impl SourceState {
                         });
                         (path.clone(), stored)
                     })
+                    .collect(),
+                pending: lazy
+                    .pending
+                    .iter()
+                    .map(|(path, failed)| (path.clone(), *failed))
                     .collect(),
             })
             .collect()

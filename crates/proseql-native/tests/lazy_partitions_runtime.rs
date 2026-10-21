@@ -175,7 +175,10 @@ fn write_partition(dir: &Path, month: &str, records: &[Value]) -> PathBuf {
         .iter()
         .map(|record| serde_json::to_string(record).unwrap())
         .collect::<Vec<_>>();
-    fs::write(&path, lines.join("\n")).unwrap();
+    // Write and rename, so a polling watcher never reads half a file.
+    let staged = root(dir).join(format!(".{month}.jsonl.tmp"));
+    fs::write(&staged, lines.join("\n")).unwrap();
+    fs::rename(&staged, &path).unwrap();
     path
 }
 
@@ -1158,4 +1161,73 @@ fn unchanged_reload_keeps_loaded_records_and_identical_retries_write_nothing() {
     lazy.mutate(|db| db.create("heartrate", stored.clone()))
         .unwrap();
     assert_eq!(fs::read(&january).unwrap(), bytes, "identical retry wrote");
+}
+
+fn watched_runtime(dir: &Path) -> NativeRuntime {
+    NativeRuntime::open_sources_with_options(
+        config(dir),
+        NativeSourceRuntimeOptions {
+            watch_debounce: Some(Duration::from_millis(20)),
+            lazy_watch_interval: Duration::from_millis(50),
+            lazy_partitions: IndexMap::from([(
+                SOURCE.to_owned(),
+                policy(2, FullScanPolicy::Error),
+            )]),
+            ..Default::default()
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_watched_new_partition_that_fails_to_load_is_retried_after_it_is_corrected() {
+    let dir = tempfile::tempdir().unwrap();
+    seed(dir.path());
+    let lazy = watched_runtime(dir.path());
+    let watch = lazy
+        .watch(
+            "heartrate",
+            WatchQueryConfig {
+                r#where: Some(json!({"timestamp": {"$gte": "2026-06", "$lt": "2026-07"}})),
+                ..WatchQueryConfig::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(watch.recv().unwrap(), json!([]));
+    // A June file that holds a July record: wrong partition, so it cannot load.
+    write_partition(
+        dir.path(),
+        "2026-06",
+        &[
+            sample("2026-06-02T00:00:00Z", 1),
+            sample("2026-07-02T00:00:00Z", 2),
+        ],
+    );
+    wait_until("the load error", || {
+        lazy.last_reload_error()
+            .unwrap()
+            .is_some_and(|error| error.to_string().contains("wrong partition"))
+    });
+    assert!(!loaded(&lazy).contains(&"2026-06".to_owned()));
+    // The corrected file loads and reaches the watch.
+    write_partition(
+        dir.path(),
+        "2026-06",
+        &[
+            sample("2026-06-02T00:00:00Z", 1),
+            sample("2026-06-03T00:00:00Z", 2),
+        ],
+    );
+    wait_until("the corrected partition in the watch", || {
+        watch
+            .try_recv()
+            .is_ok_and(|value| value.as_array().is_some_and(|rows| rows.len() == 2))
+    });
+    assert!(lazy.last_reload_error().unwrap().is_none());
+    let status = lazy.lazy_partition_status(SOURCE).unwrap().unwrap();
+    assert!(status
+        .pinned
+        .iter()
+        .any(|path| path.ends_with("2026-06.jsonl")));
+    lazy.close().unwrap();
 }
