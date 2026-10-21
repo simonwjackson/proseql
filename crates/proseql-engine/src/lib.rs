@@ -58,4 +58,5 @@ pub mod reactive;
 pub mod hooks;
 pub mod migrations;
 pub mod plugins;
+mod resident;
 pub mod transactions;

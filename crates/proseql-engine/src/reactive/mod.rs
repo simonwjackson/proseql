@@ -982,6 +982,19 @@ impl ReactiveHub {
         )
     }
 
+    /// Replace a retained watch snapshot with the collection's current state.
+    /// Does nothing when no watch retains a snapshot of `name`.
+    pub(crate) fn refresh_collection_snapshot(&self, name: &str, collection: &Collection) {
+        let retained = self
+            .state
+            .lock()
+            .map(|state| state.snapshots.contains_key(name))
+            .unwrap_or(false);
+        if retained {
+            self.set_collection_snapshot(name, collection);
+        }
+    }
+
     fn set_collection_snapshot(&self, name: &str, collection: &Collection) {
         if let Ok(mut state) = self.state.lock() {
             let snapshot = snapshot_collection(collection);

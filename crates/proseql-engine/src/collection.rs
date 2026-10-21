@@ -1632,6 +1632,138 @@ impl Collection {
         }
     }
 
+    /// Make stored records resident without a mutation.
+    ///
+    /// Native lazy partitions use this to load one partition into a collection
+    /// that holds only some of its stored records. Each record is validated
+    /// like a reload. An id that is already resident, or repeats in `records`,
+    /// fails with `DuplicateKeyError` and inserts nothing. `position` places
+    /// the block in insertion order; `None` (or a position at the end)
+    /// appends and updates the indexes incrementally, any other position
+    /// rebuilds them once. With `publish`, the inserts are recorded as entity
+    /// changes; without it, change tracking does not see them (no hooks, no
+    /// reactive deltas, no committed changes). Returns the number inserted.
+    pub fn load_resident_records(
+        &mut self,
+        records: Vec<Value>,
+        position: Option<usize>,
+        publish: bool,
+    ) -> Result<usize, EngineError> {
+        let mut block = Vec::with_capacity(records.len());
+        let mut seen = HashSet::with_capacity(records.len());
+        for record in records {
+            let id = record
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| {
+                    EngineError::Validation(ValidationError {
+                        message: "Loaded record is missing required field 'id'".to_string(),
+                        issues: vec![ValidationIssue {
+                            field: "id".to_string(),
+                            message: "Expected string, got absent".to_string(),
+                            value: None,
+                            expected: Some("string".to_string()),
+                            received: Some("absent".to_string()),
+                        }],
+                    })
+                })?
+                .to_owned();
+            self.validate_loaded_entity(&record, &id)?;
+            if self.state.contains_key(&id) || !seen.insert(id.clone()) {
+                return Err(EngineError::DuplicateKey(Box::new(DuplicateKeyError {
+                    collection: self.name.clone(),
+                    field: "id".to_string(),
+                    value: id.clone(),
+                    existing_id: id.clone(),
+                    message: format!("Duplicate value for field 'id': \"{id}\" (resident)"),
+                })));
+            }
+            block.push((id, record));
+        }
+        let count = block.len();
+        if count == 0 {
+            return Ok(0);
+        }
+        self.authorized_equality_cache = None;
+        match position.filter(|position| *position < self.state.len()) {
+            None => {
+                for (id, entity) in block {
+                    self.query_indexes.insert(&id, &entity);
+                    if publish {
+                        self.pending_changes.record(EntityChange {
+                            collection: self.name.clone(),
+                            id: id.clone(),
+                            before: None,
+                            after: Some(entity.clone()),
+                            before_position: None,
+                            after_position: Some(self.state.len()),
+                        });
+                    }
+                    self.state.insert(id, entity);
+                }
+            }
+            Some(at) => {
+                let mut next = IndexMap::with_capacity(self.state.len() + count);
+                let mut previous = std::mem::take(&mut self.state).into_iter();
+                next.extend(previous.by_ref().take(at));
+                for (offset, (id, entity)) in block.into_iter().enumerate() {
+                    if publish {
+                        self.pending_changes.record(EntityChange {
+                            collection: self.name.clone(),
+                            id: id.clone(),
+                            before: None,
+                            after: Some(entity.clone()),
+                            before_position: None,
+                            after_position: Some(at + offset),
+                        });
+                    }
+                    next.insert(id, entity);
+                }
+                next.extend(previous);
+                self.state = next;
+                self.rebuild_indexes();
+            }
+        }
+        self.revision = self.revision.saturating_add(1);
+        Ok(count)
+    }
+
+    /// Drop resident records without a mutation (the inverse of
+    /// [`Self::load_resident_records`]). Unknown ids are skipped. Index
+    /// postings are removed incrementally; the remaining records keep their
+    /// order. With `publish`, the removals are recorded as entity changes.
+    /// Returns the number removed.
+    pub fn unload_resident_records(&mut self, ids: &[String], publish: bool) -> usize {
+        let mut removing = HashSet::with_capacity(ids.len());
+        for id in ids {
+            let Some((position, _, entity)) = self.state.get_full(id.as_str()) else {
+                continue;
+            };
+            if !removing.insert(id.as_str()) {
+                continue;
+            }
+            self.query_indexes.remove(id, entity);
+            if publish {
+                self.pending_changes.record(EntityChange {
+                    collection: self.name.clone(),
+                    id: id.clone(),
+                    before: Some(entity.clone()),
+                    after: None,
+                    before_position: Some(position),
+                    after_position: None,
+                });
+            }
+        }
+        if removing.is_empty() {
+            return 0;
+        }
+        self.authorized_equality_cache = None;
+        self.state.retain(|id, _| !removing.contains(id.as_str()));
+        self.revision = self.revision.saturating_add(1);
+        removing.len()
+    }
+
     /// Directly replace the entity with `id` with `snapshot`, bypassing
     /// all validation.  If `snapshot` is `None`, the entity is removed.
     ///
