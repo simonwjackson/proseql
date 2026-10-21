@@ -45,6 +45,14 @@ pub struct NativeSourceRuntimeOptions {
     pub transforms: Option<Arc<dyn DocumentGraphTransformHost>>,
     /// `None` disables automatic watching; explicit reload remains available.
     pub watch_debounce: Option<Duration>,
+    /// Lazy partition policies by source ID (native only). Each named source
+    /// must be a `Partitioned` JSONL source of an `append_only` collection
+    /// without `unique_fields` or relationships; open fails with
+    /// `SourceConfigError` otherwise. See `docs/native-sources.md`.
+    pub lazy_partitions: IndexMap<String, crate::lazy::LazyPartitionPolicy>,
+    /// How often the managed watch compares lazy sources with the disk (the
+    /// directory listing and the loaded partitions only).
+    pub lazy_watch_interval: Duration,
 }
 
 impl Default for NativeSourceRuntimeOptions {
@@ -53,6 +61,8 @@ impl Default for NativeSourceRuntimeOptions {
             formats: FormatRegistry::with_builtins(),
             transforms: None,
             watch_debounce: Some(Duration::from_millis(50)),
+            lazy_partitions: IndexMap::new(),
+            lazy_watch_interval: Duration::from_secs(2),
         }
     }
 }
@@ -93,6 +103,10 @@ pub(crate) struct SourceState {
     pub graph: LoadedDocumentGraph,
     pub transforms: Option<Arc<dyn DocumentGraphTransformHost>>,
     pub contents: IndexMap<String, String>,
+    /// Lazy partitioned collections by collection name. Their records are not
+    /// in `partitions`; the engine collection holds the loaded partitions.
+    pub lazy: IndexMap<String, crate::lazy::LazyCollection>,
+    pub lazy_watch_interval: Duration,
 }
 
 impl SourceState {
@@ -253,12 +267,15 @@ impl SourceState {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn load(
         host: &dyn StorageHost,
         formats: &FormatRegistry,
         config: NormalizedSourceConfig,
         appendable: std::collections::HashSet<String>,
         transforms: Option<Arc<dyn DocumentGraphTransformHost>>,
+        lazy: &IndexMap<String, crate::lazy::LazyCollection>,
+        lazy_watch_interval: Duration,
     ) -> Result<Self, EngineError> {
         // FsStorageHost::exists recovers per-file markers. Do this before the
         // loader lists files: recovery can remove an uncommitted first write.
@@ -325,8 +342,16 @@ impl SourceState {
             files.insert(source.collection.clone(), records);
         }
         let mut partitions = IndexMap::new();
+        let mut lazy_state = IndexMap::new();
         for source in &config.sources {
             if let NormalizedDatabaseSourceConfig::Partitioned(source) = source {
+                if let Some(lazy) = lazy.get(&source.collection) {
+                    // Lazy: list file names only; partitions load on demand.
+                    let mut state = lazy.skeleton();
+                    state.known = crate::lazy::list_partitions(host, source)?;
+                    lazy_state.insert(source.collection.clone(), state);
+                    continue;
+                }
                 let collection = &config.collection_configs[&source.collection];
                 let (loaded, partition_torn) = load_partitioned_source_with(
                     &snapshot,
@@ -366,6 +391,8 @@ impl SourceState {
             graph,
             transforms,
             contents,
+            lazy: lazy_state,
+            lazy_watch_interval,
         })
     }
 
@@ -546,6 +573,20 @@ impl SourceState {
                 ));
             };
             let (path, file) = self.append_target(&change.collection, record)?;
+            if let Some(lazy) = self.lazy.get(&change.collection) {
+                // The engine's ID check covered the resident partitions; an
+                // append into a partition that is not resident was not checked.
+                if !lazy.resident.contains_key(&path) {
+                    return Err(crate::operation_error(
+                        "lazy-partition-not-loaded",
+                        format!(
+                            "Record '{}' routes to partition '{path}', which was not loaded for the ID check; include the partition field '{}' in the create input",
+                            change.id,
+                            lazy.source.partition_by.field()
+                        ),
+                    ));
+                }
+            }
             by_path
                 .entry(path.clone())
                 .or_insert_with(|| (change.collection.clone(), file, IndexMap::new()))
@@ -617,7 +658,9 @@ impl SourceState {
             }
         }
         for (collection, path, id, record) in plan.records {
-            if let Some(partitions) = self.partitions.get_mut(&collection) {
+            if let Some(lazy) = self.lazy.get_mut(&collection) {
+                lazy.record_append(&path, id);
+            } else if let Some(partitions) = self.partitions.get_mut(&collection) {
                 partitions.files.entry(path).or_default().insert(id, record);
             } else if let Some(records) = self.files.get_mut(&collection) {
                 records.insert(id, record);
@@ -736,6 +779,10 @@ impl SourceState {
                         .map(|parent| parent.to_string_lossy().into_owned())
                         .unwrap_or_else(|| ".".to_owned()),
                 ),
+                // Lazy sources are polled by the runtime's own watcher, which
+                // reads only the listing and the loaded partitions.
+                NormalizedDatabaseSourceConfig::Partitioned(source)
+                    if self.lazy.contains_key(&source.collection) => {}
                 NormalizedDatabaseSourceConfig::Partitioned(source) => {
                     roots.push(source.root.clone())
                 }

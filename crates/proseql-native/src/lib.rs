@@ -5,12 +5,15 @@
 //! after durable persistence. Source-mode batches replace files individually;
 //! a write-stage failure quarantines the runtime because a prefix can be durable.
 
+mod lazy;
 mod read_snapshot;
 mod sources;
+pub use lazy::{FullScanPolicy, LazyPartitionPolicy, LazyPartitionStatus, NativeQueryStats};
 use sources::SourceState;
 pub use sources::{NativeSourceRuntimeConfig, NativeSourceRuntimeOptions};
 
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
@@ -20,6 +23,11 @@ use proseql_engine::collection::Collection;
 use proseql_engine::descriptor::CollectionDescriptor;
 use proseql_engine::errors::{EngineError, OperationError};
 use proseql_engine::id_gen::NanoIdGenerator;
+use proseql_engine::query::aggregate::{
+    compute_aggregates, compute_grouped_aggregates, AggregateConfig, AggregateResult, GroupResult,
+};
+use proseql_engine::query::pipeline::QueryInput;
+use proseql_engine::reactive::{CallbackSubscription, ValueSubscription, WatchQueryConfig};
 use proseql_engine::relationships::Database;
 use proseql_formats::FormatRegistry;
 use proseql_storage::fs::FsStorageHost;
@@ -56,8 +64,85 @@ pub struct NativeRuntimeConfig {
 /// database private ensures every exposed write participates in the engine's
 /// reversible transaction journal.
 pub struct NativeMutation<'a> {
-    database: &'a mut Database,
+    inner: RefCell<MutationInner<'a>>,
     read_only: Option<&'a IndexMap<String, String>>,
+}
+
+struct MutationInner<'a> {
+    database: &'a mut Database,
+    /// Present when the runtime has lazy partitioned collections.
+    lazy: Option<LazyAccess<'a>>,
+}
+
+struct LazyAccess<'a> {
+    sources: &'a mut SourceState,
+    host: &'a dyn DurableStorageHost,
+    formats: &'a FormatRegistry,
+}
+
+impl MutationInner<'_> {
+    /// Load the partitions `records` route to before the engine checks IDs.
+    fn prepare_creates<'v>(
+        &mut self,
+        collection: &str,
+        records: impl IntoIterator<Item = &'v Value>,
+    ) -> Result<(), EngineError> {
+        let Some(lazy) = self
+            .lazy
+            .as_mut()
+            .filter(|lazy| lazy.sources.is_lazy(collection))
+        else {
+            return Ok(());
+        };
+        for record in records {
+            lazy.sources.lazy_ensure_for_record(
+                self.database,
+                lazy.host,
+                lazy.formats,
+                collection,
+                record,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn find_by_id(&mut self, collection: &str, id: &str) -> Result<Option<Value>, EngineError> {
+        let found = self
+            .database
+            .collection(collection)
+            .ok_or_else(|| {
+                operation_error(
+                    "unknown-collection",
+                    format!("Unknown collection '{collection}'"),
+                )
+            })?
+            .get(id)
+            .cloned();
+        let Some(lazy) = self
+            .lazy
+            .as_mut()
+            .filter(|lazy| lazy.sources.is_lazy(collection))
+        else {
+            return Ok(found);
+        };
+        if found.is_some() {
+            return Ok(found);
+        }
+        // An ID does not name its partition: a miss is a full scan.
+        let paths = lazy.sources.lazy_full_scope(collection, "findById")?;
+        lazy.sources.lazy_ensure(
+            self.database,
+            lazy.host,
+            lazy.formats,
+            collection,
+            &paths,
+            false,
+        )?;
+        Ok(self
+            .database
+            .collection(collection)
+            .and_then(|collection| collection.get(id).cloned()))
+    }
 }
 
 impl NativeMutation<'_> {
@@ -71,19 +156,19 @@ impl NativeMutation<'_> {
         Ok(())
     }
 
+    /// Find a record by ID. For a lazy collection, a miss among the loaded
+    /// partitions is a full scan (see `FullScanPolicy`).
     pub fn find_by_id(&self, collection: &str, id: &str) -> Result<Option<Value>, EngineError> {
-        let collection = self.database.collection(collection).ok_or_else(|| {
-            operation_error(
-                "unknown-collection",
-                format!("Unknown collection '{collection}'"),
-            )
-        })?;
-        Ok(collection.get(id).cloned())
+        self.inner.borrow_mut().find_by_id(collection, id)
     }
 
+    /// Create a record. For a lazy collection, the partition the record routes
+    /// to is loaded first, so the ID check and `duplicate_ids` see it.
     pub fn create(&mut self, collection: &str, data: Value) -> Result<Value, EngineError> {
         self.require_writable(collection)?;
-        self.database.create(collection, data)
+        let inner = self.inner.get_mut();
+        inner.prepare_creates(collection, [&data])?;
+        inner.database.create(collection, data)
     }
 
     /// Create several records atomically. With `duplicate_ids: ignore_identical`,
@@ -94,7 +179,9 @@ impl NativeMutation<'_> {
         data: Vec<Value>,
     ) -> Result<proseql_engine::collection::CreateManyResult, EngineError> {
         self.require_writable(collection)?;
-        self.database.create_many(collection, data, false)
+        let inner = self.inner.get_mut();
+        inner.prepare_creates(collection, &data)?;
+        inner.database.create_many(collection, data, false)
     }
 
     pub fn update(
@@ -104,7 +191,10 @@ impl NativeMutation<'_> {
         updates: Value,
     ) -> Result<Value, EngineError> {
         self.require_writable(collection)?;
-        self.database.update(collection, id, updates)
+        self.inner
+            .get_mut()
+            .database
+            .update(collection, id, updates)
     }
 
     pub fn update_if_revision(
@@ -115,13 +205,61 @@ impl NativeMutation<'_> {
         updates: Value,
     ) -> Result<Value, EngineError> {
         self.require_writable(collection)?;
-        self.database
+        self.inner
+            .get_mut()
+            .database
             .update_if_revision(collection, id, expected_revision, updates)
     }
 
     pub fn delete(&mut self, collection: &str, id: &str) -> Result<Value, EngineError> {
         self.require_writable(collection)?;
-        self.database.delete(collection, id)
+        self.inner.get_mut().database.delete(collection, id)
+    }
+}
+
+/// A live watch on a native runtime. Dereferences to the engine subscription.
+/// For a lazy collection it pins the partitions the watch filter touches until
+/// it is dropped.
+pub struct NativeWatch<S> {
+    subscription: S,
+    _pin: Option<PinGuard>,
+}
+
+impl<S> std::ops::Deref for NativeWatch<S> {
+    type Target = S;
+
+    fn deref(&self) -> &S {
+        &self.subscription
+    }
+}
+
+struct PinGuard {
+    core: Weak<RuntimeCore>,
+    collection: String,
+    id: u64,
+}
+
+impl Drop for PinGuard {
+    fn drop(&mut self) {
+        // Released at the next lazy operation; dropping must not take the
+        // runtime lock, which the dropping thread may hold.
+        if let Some(core) = self.core.upgrade() {
+            if let Ok(mut pending) = core.pending_unpins.lock() {
+                pending.push((std::mem::take(&mut self.collection), self.id));
+            }
+        }
+    }
+}
+
+/// Stops the lazy-source poller of a managed watch.
+struct LazyPollHandle {
+    stop: Arc<AtomicBool>,
+}
+
+impl WatchHandle for LazyPollHandle {
+    fn stop(&self) -> Result<(), EngineError> {
+        self.stop.store(true, Ordering::Release);
+        Ok(())
     }
 }
 
@@ -137,6 +275,8 @@ struct RuntimeCore {
     /// File basenames reported by the managed watcher since the last reload
     /// (`None` when an event names no file).
     watch_events: Mutex<Vec<Option<String>>>,
+    /// Watch pins released by dropped `NativeWatch` values: `(collection, pin)`.
+    pending_unpins: Mutex<Vec<(String, u64)>>,
 }
 
 struct RuntimeState {
@@ -208,6 +348,7 @@ impl NativeRuntime {
     ) -> Result<Self, EngineError> {
         let normalized = SourceState::normalize(&config)?;
         let appendable = SourceState::appendable_collections(&config, &normalized);
+        let lazy = lazy::configure_lazy(&config, &normalized, &options.lazy_partitions)?;
         let descriptors = SourceState::descriptor_config(config);
         validate_config(&descriptors)?;
         let sources = SourceState::load(
@@ -216,6 +357,8 @@ impl NativeRuntime {
             normalized,
             appendable,
             options.transforms,
+            &lazy,
+            options.lazy_watch_interval,
         )?;
         let loaded = sources.collections();
         let runtime = Self::from_loaded(
@@ -274,6 +417,7 @@ impl NativeRuntime {
                 lifecycle: AtomicU8::new(OPEN),
                 watch_generation: AtomicU64::new(0),
                 watch_events: Mutex::new(Vec::new()),
+                pending_unpins: Mutex::new(Vec::new()),
             }),
         })
     }
@@ -313,15 +457,309 @@ impl NativeRuntime {
         f(&state.database)
     }
 
+    /// Find a record by ID. For a lazy collection, a miss among the loaded
+    /// partitions is a full scan (see `FullScanPolicy`).
     pub fn find_by_id(&self, collection: &str, id: &str) -> Result<Option<Value>, EngineError> {
-        self.read(|database| {
-            let collection = database.collection(collection).ok_or_else(|| {
-                operation_error(
-                    "unknown-collection",
-                    format!("Unknown collection '{collection}'"),
-                )
-            })?;
-            Ok(collection.get(id).cloned())
+        let mut state = self.lock_open()?;
+        if !state
+            .sources
+            .as_ref()
+            .is_some_and(|sources| sources.is_lazy(collection))
+        {
+            drop(state);
+            return self.read(|database| {
+                let collection = database.collection(collection).ok_or_else(|| {
+                    operation_error(
+                        "unknown-collection",
+                        format!("Unknown collection '{collection}'"),
+                    )
+                })?;
+                Ok(collection.get(id).cloned())
+            });
+        }
+        self.drain_unpins(&mut state);
+        let state = &mut *state;
+        let sources = state.sources.as_mut().expect("source mode");
+        let found = MutationInner {
+            database: &mut state.database,
+            lazy: Some(LazyAccess {
+                sources,
+                host: state.host.as_ref(),
+                formats: &state.formats,
+            }),
+        }
+        .find_by_id(collection, id);
+        let trimmed = sources_trim(state);
+        let found = found?;
+        trimmed?;
+        Ok(found)
+    }
+
+    /// Run a query. For a lazy collection, the partitions the filter can touch
+    /// are loaded first (see `query_with_stats`). For other collections this
+    /// equals `read(|db| db.query(..))`.
+    pub fn query(
+        &self,
+        collection: &str,
+        input: QueryInput,
+        populate: Option<Value>,
+    ) -> Result<Vec<Value>, EngineError> {
+        self.query_with_stats(collection, input, populate)
+            .map(|(rows, _)| rows)
+    }
+
+    /// Run a query and report what it read: the partitions it needed loaded
+    /// and read, and the index the engine used (`Database::explain_query`).
+    ///
+    /// For a lazy collection, the conditions on the partition field select
+    /// the partitions to load. A filter that does not prune is a full scan:
+    /// every partition loads for this query (`FullScanPolicy::Allow`) or the
+    /// query fails with `OperationError` reason `lazy-full-scan` and loads
+    /// nothing (`FullScanPolicy::Error`). Afterwards the least recently used
+    /// unpinned partitions are evicted down to `max_loaded_partitions`.
+    pub fn query_with_stats(
+        &self,
+        collection: &str,
+        input: QueryInput,
+        populate: Option<Value>,
+    ) -> Result<(Vec<Value>, NativeQueryStats), EngineError> {
+        let where_clause = input.r#where.clone();
+        self.with_scope(collection, where_clause.as_ref(), "query", |database| {
+            let stats = database.explain_query(collection, &input)?;
+            let rows = database.query(collection, input, populate)?;
+            Ok((rows, stats))
+        })
+        .map(|((rows, stats), scope)| {
+            (
+                rows,
+                NativeQueryStats {
+                    partitions_loaded: scope.loaded,
+                    partitions_read: scope.read,
+                    partitions_resident: scope.resident,
+                    index_used: stats.index_used,
+                    candidate_rows: stats.candidate_rows,
+                    index_sorted: stats.index_sorted,
+                },
+            )
+        })
+    }
+
+    /// Cursor-paginated query, loading partitions like `query_with_stats`.
+    pub fn query_cursor(
+        &self,
+        collection: &str,
+        input: QueryInput,
+        cursor: &proseql_engine::query::CursorConfig,
+        populate: Option<Value>,
+    ) -> Result<proseql_engine::query::CursorPageResult, EngineError> {
+        self.with_scope(collection, input.r#where.as_ref(), "query", |database| {
+            database.query_cursor(collection, &input, cursor, populate)
+        })
+        .map(|(page, _)| page)
+    }
+
+    /// Scalar aggregates over the records matching `where_clause`, loading
+    /// partitions like `query_with_stats`.
+    pub fn aggregate(
+        &self,
+        collection: &str,
+        where_clause: Option<Value>,
+        config: &AggregateConfig,
+    ) -> Result<AggregateResult, EngineError> {
+        let rows = self.query(
+            collection,
+            QueryInput {
+                r#where: where_clause,
+                ..QueryInput::default()
+            },
+            None,
+        )?;
+        Ok(compute_aggregates(&rows, config))
+    }
+
+    /// Grouped aggregates over the records matching `where_clause`, loading
+    /// partitions like `query_with_stats`.
+    pub fn aggregate_grouped(
+        &self,
+        collection: &str,
+        where_clause: Option<Value>,
+        group_by: &[String],
+        config: &AggregateConfig,
+    ) -> Result<Vec<GroupResult>, EngineError> {
+        let rows = self.query(
+            collection,
+            QueryInput {
+                r#where: where_clause,
+                ..QueryInput::default()
+            },
+            None,
+        )?;
+        Ok(compute_grouped_aggregates(&rows, group_by, config))
+    }
+
+    /// Watch a query. For a lazy collection, the partitions the watch filter
+    /// touches load and stay pinned (never evicted) until the returned value
+    /// is dropped; partitions that appear later and match the filter join the
+    /// pin. A filter that does not prune pins every partition, or fails under
+    /// `FullScanPolicy::Error`.
+    pub fn watch(
+        &self,
+        collection: &str,
+        config: WatchQueryConfig,
+    ) -> Result<NativeWatch<ValueSubscription>, EngineError> {
+        let filter = config.r#where.clone();
+        self.watch_scoped(collection, filter.as_ref(), move |database| {
+            database.watch(collection, config)
+        })
+    }
+
+    /// Like [`Self::watch`], delivering results to `callback`.
+    pub fn watch_with_callback(
+        &self,
+        collection: &str,
+        config: WatchQueryConfig,
+        callback: Box<dyn Fn(Value) + Send + Sync>,
+    ) -> Result<NativeWatch<CallbackSubscription>, EngineError> {
+        let filter = config.r#where.clone();
+        self.watch_scoped(collection, filter.as_ref(), move |database| {
+            database.watch_with_callback(collection, config, callback)
+        })
+    }
+
+    /// The lazy state of `source_id`, or `None` when that source is not lazy.
+    pub fn lazy_partition_status(
+        &self,
+        source_id: &str,
+    ) -> Result<Option<LazyPartitionStatus>, EngineError> {
+        let mut state = self.lock_open()?;
+        self.drain_unpins(&mut state);
+        Ok(state
+            .sources
+            .as_ref()
+            .and_then(|sources| sources.lazy_status(source_id)))
+    }
+
+    /// Release pins of dropped watches.
+    fn drain_unpins(&self, state: &mut RuntimeState) {
+        let pending = self
+            .inner
+            .pending_unpins
+            .lock()
+            .map(|mut pending| std::mem::take(&mut *pending))
+            .unwrap_or_default();
+        if let Some(sources) = state.sources.as_mut() {
+            for (collection, id) in pending {
+                sources.lazy_unpin(&collection, id);
+            }
+        }
+    }
+
+    /// Load the partitions `where_clause` can touch (lazy collections), run
+    /// `f`, then evict down to the bound.
+    fn with_scope<R>(
+        &self,
+        collection: &str,
+        where_clause: Option<&Value>,
+        operation: &str,
+        f: impl FnOnce(&Database) -> Result<R, EngineError>,
+    ) -> Result<(R, ScopeStats), EngineError> {
+        let mut state = self.lock_open()?;
+        self.drain_unpins(&mut state);
+        let state = &mut *state;
+        let Some(sources) = state
+            .sources
+            .as_mut()
+            .filter(|sources| sources.is_lazy(collection))
+        else {
+            let loaded = state
+                .sources
+                .as_ref()
+                .map_or(0, |sources| sources.eager_partition_count(collection));
+            let result = f(&state.database)?;
+            return Ok((
+                result,
+                ScopeStats {
+                    loaded,
+                    read: 0,
+                    resident: loaded,
+                },
+            ));
+        };
+        let (_, paths) = sources.lazy_scope(collection, where_clause, operation)?;
+        let read = sources.lazy_ensure(
+            &mut state.database,
+            state.host.as_ref(),
+            &state.formats,
+            collection,
+            &paths,
+            false,
+        );
+        let result = read.and_then(|read| f(&state.database).map(|result| (result, read)));
+        let trimmed = sources_trim(state);
+        let (result, read) = result?;
+        trimmed?;
+        let resident = state
+            .sources
+            .as_ref()
+            .map_or(0, |sources| sources.lazy_resident_count(collection));
+        Ok((
+            result,
+            ScopeStats {
+                loaded: paths.len(),
+                read,
+                resident,
+            },
+        ))
+    }
+
+    fn watch_scoped<S>(
+        &self,
+        collection: &str,
+        where_clause: Option<&Value>,
+        subscribe: impl FnOnce(&Database) -> Result<S, EngineError>,
+    ) -> Result<NativeWatch<S>, EngineError> {
+        let mut state = self.lock_open()?;
+        self.drain_unpins(&mut state);
+        let state = &mut *state;
+        let Some(sources) = state
+            .sources
+            .as_mut()
+            .filter(|sources| sources.is_lazy(collection))
+        else {
+            return Ok(NativeWatch {
+                subscription: subscribe(&state.database)?,
+                _pin: None,
+            });
+        };
+        let (filter, paths) = sources.lazy_scope(collection, where_clause, "watch")?;
+        let loaded = sources.lazy_ensure(
+            &mut state.database,
+            state.host.as_ref(),
+            &state.formats,
+            collection,
+            &paths,
+            false,
+        );
+        let pin = loaded.map(|_| sources.lazy_pin(collection, filter, &paths));
+        let subscription = pin
+            .as_ref()
+            .map_err(Clone::clone)
+            .and_then(|_| subscribe(&state.database));
+        if let (Ok(pin), Err(_)) = (&pin, &subscription) {
+            if let Some(sources) = state.sources.as_mut() {
+                sources.lazy_unpin(collection, *pin);
+            }
+        }
+        let trimmed = sources_trim(state);
+        let subscription = subscription?;
+        trimmed?;
+        Ok(NativeWatch {
+            subscription,
+            _pin: pin.ok().map(|id| PinGuard {
+                core: Arc::downgrade(&self.inner),
+                collection: collection.to_owned(),
+                id,
+            }),
         })
     }
 
@@ -335,25 +773,53 @@ impl NativeRuntime {
         f: impl FnOnce(&mut NativeMutation<'_>) -> Result<R, EngineError>,
     ) -> Result<R, EngineError> {
         let mut state = self.lock_open()?;
+        self.drain_unpins(&mut state);
         let read_only = state
             .sources
             .as_ref()
             .map(|sources| sources.graph.owned_collections.clone());
+        let lazy = state
+            .sources
+            .as_ref()
+            .is_some_and(|sources| !sources.lazy.is_empty());
         let mut session = state.database.begin_owned_transaction()?;
-        let result = match state.database.transaction_step(&mut session, |database| {
-            f(&mut NativeMutation {
+        let stepped = {
+            let RuntimeState {
                 database,
-                read_only: read_only.as_ref(),
+                sources,
+                formats,
+                host,
+                ..
+            } = &mut *state;
+            let lazy = sources.as_mut().filter(|_| lazy).map(|sources| LazyAccess {
+                sources,
+                host: host.as_ref(),
+                formats,
+            });
+            database.transaction_step(&mut session, |database| {
+                f(&mut NativeMutation {
+                    inner: RefCell::new(MutationInner { database, lazy }),
+                    read_only: read_only.as_ref(),
+                })
             })
-        }) {
+        };
+        let result = match stepped {
             Ok(result) => result,
             Err(error) => {
                 rollback_preserving_original(&self.inner, &mut state, session, &error);
+                if lazy && state.quarantine_error.is_none() {
+                    // The original error matters more than an eviction failure.
+                    let _ = sources_trim(&mut state);
+                }
                 return Err(error);
             }
         };
         if state.sources.is_some() {
-            return commit_source_mutation(&self.inner, &mut state, session, result);
+            let committed = commit_source_mutation(&self.inner, &mut state, session, result);
+            if lazy && state.quarantine_error.is_none() {
+                sources_trim(&mut state)?;
+            }
+            return committed;
         }
         let candidate = state.database.snapshot_all_collection_states();
         let content = match serialize_candidate(&state.config, &state.formats, &candidate) {
@@ -467,8 +933,17 @@ impl NativeRuntime {
                 "A managed watch is already active",
             ));
         }
-        let mut handles = Vec::new();
+        let mut handles: Vec<Box<dyn WatchHandle>> = Vec::new();
         if let Some(sources) = &state.sources {
+            if !sources.lazy.is_empty() {
+                let stop = Arc::new(AtomicBool::new(false));
+                start_lazy_poller(
+                    Arc::downgrade(&self.inner),
+                    sources.lazy_watch_interval,
+                    Arc::clone(&stop),
+                )?;
+                handles.push(Box::new(LazyPollHandle { stop }));
+            }
             for root in sources.watch_roots(state.host.as_ref())? {
                 let weak = Arc::downgrade(&self.inner);
                 let handle = state.host.watch_dir(
@@ -538,6 +1013,21 @@ impl NativeRuntime {
         }
         self.inner.lifecycle.store(CLOSED, Ordering::Release);
         flush_result.and(stop_result)
+    }
+}
+
+/// What one scoped operation loaded.
+struct ScopeStats {
+    loaded: usize,
+    read: usize,
+    resident: usize,
+}
+
+/// Evict lazy partitions down to their bounds.
+fn sources_trim(state: &mut RuntimeState) -> Result<(), EngineError> {
+    match state.sources.as_mut() {
+        Some(sources) if !sources.lazy.is_empty() => sources.lazy_trim(&mut state.database),
+        _ => Ok(()),
     }
 }
 
@@ -748,19 +1238,24 @@ fn reload_locked(
                     return Ok(());
                 }
             }
-            let next = SourceState::load(
+            let mut next = SourceState::load(
                 state.host.as_ref(),
                 &state.formats,
                 sources.config.clone(),
                 sources.appendable.clone(),
                 sources.transforms.clone(),
+                &sources.lazy,
+                sources.lazy_watch_interval,
             )?;
             state
                 .database
                 .commit_snapshot_transaction(states_to_records(next.collections()))?;
             state.database.take_committed_changes();
+            if let Some(previous) = state.sources.as_mut() {
+                next.lazy_adopt(previous);
+            }
             state.sources = Some(next);
-            return Ok(());
+            return refresh_lazy_locked(state);
         }
         let content = state.host.read(&state.config.path)?;
         if suppress_self_write && state.last_persisted_content.as_deref() == Some(&content) {
@@ -790,6 +1285,86 @@ fn reload_locked(
             Err(error)
         }
     }
+}
+
+/// Compare lazy sources with the disk (listing and loaded partitions only)
+/// and publish what changed.
+fn refresh_lazy_locked(state: &mut RuntimeState) -> Result<(), EngineError> {
+    let RuntimeState {
+        database,
+        sources,
+        formats,
+        host,
+        ..
+    } = state;
+    match sources.as_mut() {
+        Some(sources) if !sources.lazy.is_empty() => {
+            sources.lazy_refresh(database, host.as_ref(), formats)?;
+            database.take_committed_changes();
+            sources.lazy_trim(database)
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Poll lazy sources: compare the listing and the loaded partitions with the
+/// stored state outside the runtime lock, and refresh only on a difference.
+/// The runtime's own appends update the stored state, so they never refresh.
+fn start_lazy_poller(
+    weak: Weak<RuntimeCore>,
+    interval: Duration,
+    stop: Arc<AtomicBool>,
+) -> Result<(), EngineError> {
+    std::thread::Builder::new()
+        .name("proseql-lazy-watch".into())
+        .spawn(move || loop {
+            std::thread::sleep(interval);
+            if stop.load(Ordering::Acquire) {
+                return;
+            }
+            let Some(core) = weak.upgrade() else {
+                return;
+            };
+            if core.lifecycle.load(Ordering::Acquire) != OPEN {
+                return;
+            }
+            let snapshot = {
+                let Ok(mut state) = core.state.lock() else {
+                    return;
+                };
+                if state.quarantine_error.is_some() {
+                    continue;
+                }
+                let host = Arc::clone(&state.host);
+                state
+                    .sources
+                    .as_mut()
+                    .map(|sources| (host, sources.lazy_fingerprints()))
+            };
+            let Some((host, fingerprints)) = snapshot else {
+                return;
+            };
+            let host: &dyn StorageHost = host.as_ref();
+            if !lazy::disk_differs(host, &fingerprints).unwrap_or(true) {
+                continue;
+            }
+            if let Ok(mut state) = core.state.lock() {
+                if core.lifecycle.load(Ordering::Acquire) == OPEN
+                    && state.quarantine_error.is_none()
+                    && !stop.load(Ordering::Acquire)
+                {
+                    let result = refresh_lazy_locked(&mut state);
+                    state.last_reload_error = result.err();
+                }
+            };
+        })
+        .map(|_| ())
+        .map_err(|error| {
+            operation_error(
+                "watch-start",
+                format!("Cannot start the lazy watcher: {error}"),
+            )
+        })
 }
 
 fn persist_current(state: &mut RuntimeState) -> Result<(), EngineError> {
