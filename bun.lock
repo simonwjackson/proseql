@@ -5,12 +5,12 @@
     "": {
       "name": "plan-text-db",
       "dependencies": {
-        "@proseql/browser": "workspace:*",
-        "@proseql/cli": "workspace:*",
-        "@proseql/core": "workspace:*",
-        "@proseql/effect": "workspace:*",
-        "@proseql/engine": "workspace:*",
-        "@proseql/node": "workspace:*",
+        "@proseql/browser": "workspace:1.0.0",
+        "@proseql/cli": "workspace:1.0.0",
+        "@proseql/core": "workspace:1.0.0",
+        "@proseql/effect": "workspace:1.0.0",
+        "@proseql/engine": "workspace:1.0.0",
+        "@proseql/node": "workspace:1.0.0",
         "@toon-format/toon": "^2.1.0",
         "effect": "4.0.0-beta.103",
         "hjson": "^3.2.2",
@@ -33,7 +33,7 @@
     },
     "packages/ai": {
       "name": "@proseql/ai",
-      "version": "0.5.0",
+      "version": "1.0.0",
       "dependencies": {
         "@proseql/effect": "workspace:*",
       },
@@ -43,7 +43,7 @@
     },
     "packages/browser": {
       "name": "@proseql/browser",
-      "version": "0.16.0",
+      "version": "1.0.0",
       "dependencies": {
         "@proseql/core": "workspace:*",
         "@proseql/effect": "workspace:*",
@@ -55,7 +55,7 @@
     },
     "packages/cli": {
       "name": "@proseql/cli",
-      "version": "0.16.0",
+      "version": "1.0.0",
       "bin": {
         "proseql": "dist/main.js",
       },
@@ -70,27 +70,23 @@
     },
     "packages/core": {
       "name": "@proseql/core",
-      "version": "0.16.0",
+      "version": "1.0.0",
       "dependencies": {
         "@toon-format/toon": "^2.1.0",
         "effect": "4.0.0-beta.103",
         "hjson": "^3.2.2",
         "json5": "^2.2.3",
         "jsonc-parser": "^3.3.1",
-        "picomatch": "^4.0.4",
         "smol-toml": "^1.6.0",
         "yaml": "^2.3.4",
-      },
-      "devDependencies": {
-        "@types/picomatch": "^4.0.3",
       },
     },
     "packages/effect": {
       "name": "@proseql/effect",
-      "version": "0.16.0",
+      "version": "1.0.0",
       "dependencies": {
-        "@proseql/core": "workspace:*",
-        "@proseql/engine": "workspace:*",
+        "@proseql/core": "workspace:1.0.0",
+        "@proseql/engine": "workspace:1.0.0",
       },
       "peerDependencies": {
         "effect": "4.0.0-beta.103",
@@ -98,9 +94,13 @@
     },
     "packages/engine": {
       "name": "@proseql/engine",
-      "version": "0.16.0",
+      "version": "1.0.0",
       "dependencies": {
-        "@proseql/core": "workspace:*",
+        "@proseql/core": "workspace:1.0.0",
+        "picomatch": "^4.0.4",
+      },
+      "devDependencies": {
+        "@types/picomatch": "^4.0.3",
       },
       "peerDependencies": {
         "effect": "4.0.0-beta.103",
@@ -108,7 +108,7 @@
     },
     "packages/node": {
       "name": "@proseql/node",
-      "version": "0.16.0",
+      "version": "1.0.0",
       "dependencies": {
         "@proseql/effect": "workspace:*",
         "@proseql/engine": "workspace:*",
@@ -119,7 +119,7 @@
     },
     "packages/rest": {
       "name": "@proseql/rest",
-      "version": "0.16.0",
+      "version": "1.0.0",
       "dependencies": {
         "@proseql/effect": "workspace:*",
       },
@@ -129,15 +129,15 @@
     },
     "packages/rpc": {
       "name": "@proseql/rpc",
-      "version": "0.16.0",
+      "version": "1.0.0",
       "dependencies": {
-        "@proseql/core": "workspace:*",
+        "@proseql/core": "workspace:1.0.0",
       },
       "devDependencies": {
-        "@proseql/effect": "workspace:*",
+        "@proseql/effect": "workspace:1.0.0",
       },
       "peerDependencies": {
-        "@proseql/effect": "workspace:*",
+        "@proseql/effect": "workspace:1.0.0",
         "effect": "4.0.0-beta.103",
       },
       "optionalPeers": [

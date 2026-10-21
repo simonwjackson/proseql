@@ -10,12 +10,6 @@ import type {
 	StorageError,
 	UnsupportedFormatError,
 } from "../errors/storage-errors.js";
-import type {
-	DocumentGraphMetadata,
-	EffectCollection,
-	RunnableEffect,
-	RunnableStream,
-} from "../factories/database-effect.js";
 import type { DryRunResult } from "../migrations/migration-types.js";
 import type {
 	AggregateConfig,
@@ -29,6 +23,12 @@ import type {
 import type { MinimalEntity, TransactionContext } from "./crud-types.js";
 import type { CursorConfig, RunnableCursorPage } from "./cursor-types.js";
 import type { ConfiguredCollections } from "./database-config-types.js";
+import type {
+	DocumentGraphMetadata,
+	EffectCollection,
+	RunnableEffect,
+	RunnableStream,
+} from "./database-types.js";
 import type { SearchConfig } from "./search-types.js";
 
 // ============================================================================
@@ -166,12 +166,12 @@ type _GetRelationshipTargetCollection<R> =
 
 // Helper to extract nested object field paths (for dot notation) - limited to 2 levels deep to avoid infinite recursion
 type ExtractNestedPaths<T> = {
-	[K in keyof T]: T[K] extends Record<string, unknown>
+	[K in keyof T]: NonNullable<T[K]> extends Record<string, unknown>
 		?
 				| `${K & string}`
 				| {
-						[NK in keyof T[K]]: `${K & string}.${NK & string}`;
-				  }[keyof T[K]]
+						[NK in keyof NonNullable<T[K]>]: `${K & string}.${NK & string}`;
+				  }[keyof NonNullable<T[K]>]
 		: `${K & string}`;
 }[keyof T];
 
@@ -181,7 +181,9 @@ type ExtractNestedPaths<T> = {
 export type WhereClause<T, Relations, DB> = {
 	[K in keyof T]?: FieldFilter<T[K]>;
 } & {
-	[K in keyof Relations]?: Relations[K] extends RelationshipDef<
+	[K in keyof Relations as [Relations[K]] extends [never]
+		? never
+		: K]?: Relations[K] extends RelationshipDef<
 		infer _,
 		"ref",
 		infer TargetColl
@@ -241,7 +243,9 @@ type _NestedObjectSelectConfig<T> = {
 export type ObjectSelectConfig<T, Relations, DB> = {
 	[K in keyof T]?: true | Record<string, true | Record<string, true>>;
 } & {
-	[K in keyof Relations]?: Relations[K] extends RelationshipDef<
+	[K in keyof Relations as [Relations[K]] extends [never]
+		? never
+		: K]?: Relations[K] extends RelationshipDef<
 		infer _,
 		infer Type,
 		infer TargetColl
@@ -283,7 +287,7 @@ type ApplyNestedObjectSelect<T, Config> =
 				[K in keyof Config & keyof T]: Config[K] extends true
 					? T[K]
 					: Config[K] extends Record<string, unknown>
-						? T[K] extends Record<string, unknown>
+						? NonNullable<T[K]> extends Record<string, unknown>
 							? ApplyNestedObjectSelect<T[K], Config[K]>
 							: never
 						: never;

@@ -1,6 +1,6 @@
 {
 	"name": "@proseql/cli",
-	"version": "0.16.0",
+	"version": "1.0.0",
 	"description": "Command-line interface for ProseQL databases. Query, create, update, and manage plain text database files from the terminal.",
 	"type": "module",
 	"scripts": {
@@ -50,9 +50,9 @@
 	},
 	"sideEffects": false,
 	"dependencies": {
-		"@proseql/node": "workspace:*",
+		"@proseql/node": "workspace:1.0.0",
 		"yaml": "^2.3.4",
-		"@proseql/effect": "workspace:*"
+		"@proseql/effect": "workspace:1.0.0"
 	},
 	"peerDependencies": {
 		"effect": "4.0.0-beta.103"

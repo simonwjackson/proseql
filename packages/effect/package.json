@@ -1,17 +1,15 @@
 {
 	"name": "@proseql/effect",
-	"version": "0.16.0",
+	"version": "1.0.0",
 	"description": "Effect-first adapter over the proseQL WASM engine binding",
 	"type": "module",
 	"scripts": {
 		"build": "bun run tsc --build",
-		"clean": "rm -rf dist *.tsbuildinfo reports/*.json",
+		"clean": "rm -rf dist *.tsbuildinfo",
 		"prepublishOnly": "bun run build && bun test",
 		"test:node": "nix shell nixpkgs#nodejs -c node ./tests/node-smoke.mjs",
 		"typecheck:tests": "bun run tsc --build ../core ../engine .",
-		"corpus": "bun ./scripts/run-corpus.mjs",
-		"examples": "bun ./scripts/run-examples.mjs",
-		"validate:reports": "bun ./scripts/validate-parity-reports.mjs"
+		"examples": "bun ./scripts/run-examples.mjs"
 	},
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -53,8 +51,8 @@
 	},
 	"sideEffects": false,
 	"dependencies": {
-		"@proseql/core": "workspace:*",
-		"@proseql/engine": "workspace:*"
+		"@proseql/core": "workspace:1.0.0",
+		"@proseql/engine": "workspace:1.0.0"
 	},
 	"peerDependencies": {
 		"effect": "4.0.0-beta.103"

@@ -1,7 +1,7 @@
 {
 	"name": "@proseql/rpc",
-	"version": "0.16.0",
-	"description": "Effect RPC integration for ProseQL type-safe in-memory database",
+	"version": "1.0.0",
+	"description": "Client-safe Effect RPC contracts and handlers for the Rust/WASM proseQL engine",
 	"type": "module",
 	"scripts": {
 		"build": "bun run tsc --build",
@@ -49,10 +49,10 @@
 	},
 	"sideEffects": false,
 	"dependencies": {
-		"@proseql/core": "workspace:*"
+		"@proseql/core": "workspace:1.0.0"
 	},
 	"peerDependencies": {
-		"@proseql/effect": "workspace:*",
+		"@proseql/effect": "workspace:1.0.0",
 		"effect": "4.0.0-beta.103"
 	},
 	"peerDependenciesMeta": {
@@ -61,6 +61,6 @@
 		}
 	},
 	"devDependencies": {
-		"@proseql/effect": "workspace:*"
+		"@proseql/effect": "workspace:1.0.0"
 	}
 }

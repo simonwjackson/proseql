@@ -109,4 +109,4 @@ const program = Effect.gen(function* () {
 	console.log("Created EarthBound in:", join(dataRoot, "generated.yaml"));
 });
 
-Effect.runPromise(Effect.scoped(program)).catch(console.error);
+Effect.runPromise(Effect.scoped(program)).catch((error) => { console.error(error); process.exitCode = 1; });

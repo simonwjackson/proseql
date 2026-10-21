@@ -1,6 +1,6 @@
 {
 	"name": "@proseql/rest",
-	"version": "0.16.0",
+	"version": "1.0.0",
 	"description": "REST API handlers for ProseQL databases, framework-agnostic",
 	"type": "module",
 	"scripts": {
@@ -45,7 +45,7 @@
 	},
 	"sideEffects": false,
 	"dependencies": {
-		"@proseql/effect": "workspace:*"
+		"@proseql/effect": "workspace:1.0.0"
 	},
 	"peerDependencies": {
 		"effect": "4.0.0-beta.103"

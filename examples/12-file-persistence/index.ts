@@ -190,7 +190,7 @@ const config = {
 
 // Helper: collect a query stream into an array
 const collect = <A, E>(stream: Stream.Stream<A, E, never>) =>
-	Stream.runCollect(stream).pipe(Effect.map(Chunk.toReadonlyArray));
+	Stream.runCollect(stream).pipe(Effect.map((items) => items));
 
 // ============================================================================
 // Layer — auto-inferred from config file extensions (handles all 9 formats)
@@ -397,4 +397,4 @@ const program = Effect.gen(function* () {
 // Run with persistence layer + scope for managed lifecycle
 Effect.runPromise(
 	program.pipe(Effect.provide(PersistenceLayer), Effect.scoped),
-).catch(console.error);
+).catch((error) => { console.error(error); process.exitCode = 1; });

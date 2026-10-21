@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.0
+
+### Breaking changes
+- Rust is the only database engine. `@proseql/core` now contains shared contracts, errors, schemas, configuration and codecs, not a database runtime. Import `createEffectDatabase` and `createPersistentEffectDatabase` from `@proseql/effect`. Use `@proseql/node` and `createNodeDatabase` for files, `@proseql/engine` for Promises, or `@proseql/browser` for browser storage.
+- The old standalone core ID generator utilities are removed. Omit `id` on `create`, or use a named plugin generator for custom IDs.
+- Function-valued `$remove` is rejected with `ValidationError` before mutation and removed from the TS contract. Use a concrete value or an explicit `$set` array instead. Atomic host predicate removal remains a follow-up.
+- All nine packages, including `@proseql/ai`, now share version 1.0.0.
+
+### Engine and host contracts
+- Enforce Effect Schema checks: native Rust built-ins and WASM host predicates. Invalid `Record` keys are dropped, as Effect drops them.
+- Add the native `CallbackRegistry` of Rust closures and export `EngineStorageHost`. See `docs/storage-hosts.md` and `docs/native-sources.md`.
+- Move TypeScript persistence orchestration into the engine host layer. Remove the TS database engine and run its behaviour tests directly against Rust/WASM.
+- Fix explicit-undefined operators and optional fields, createMany relationship validation, delete referential integrity, upsert diagnostics and stale query projections.
+- Raise the provisional browser WASM gzip cap from 598,000 B (commit `74fd613`) to 599,000 B in a separate, size-audited coordinator decision. The parity fixes produced 598,896 B before the single-soft-delete correction. That final correction produces 599,090 B: the size gate is blocked by 90 B. The original 567,423 B baseline is unchanged. The user must confirm both provisional raises at landing.
+
+
 ## v0.16.0 (2026-08-06)
 
 This coordinated release promotes the newly bootstrapped `@proseql/engine`, `@proseql/effect`, and `@proseql/browser` packages through the protected OIDC release path, with Rust/WASM as the browser query and mutation authority. Packages that use Effect require exactly `effect@4.0.0-beta.103`. `@proseql/ai` remains independently versioned and is intentionally deferred.

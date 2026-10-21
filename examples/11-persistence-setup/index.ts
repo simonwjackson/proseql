@@ -155,7 +155,7 @@ const program = Effect.gen(function* () {
 // 4. Run — Effect.scoped closes the scope and flushes pending writes
 // ============================================================================
 
-Effect.runPromise(Effect.scoped(program)).catch(console.error);
+Effect.runPromise(Effect.scoped(program)).catch((error) => { console.error(error); process.exitCode = 1; });
 
 // ============================================================================
 // Alternative Approaches (for reference)
@@ -176,7 +176,7 @@ Effect.runPromise(Effect.scoped(program)).catch(console.error);
 //
 // Effect.runPromise(
 //   programB.pipe(Effect.provide(PersistenceLayer), Effect.scoped),
-// ).catch(console.error)
+// ).catch((error) => { console.error(error); process.exitCode = 1; })
 
 // --- Approach C: Manual Layer.merge() for full control ---
 // When you need custom codec options, plugin codecs, etc.
@@ -191,4 +191,4 @@ Effect.runPromise(Effect.scoped(program)).catch(console.error);
 //
 // Effect.runPromise(
 //   programB.pipe(Effect.provide(ManualLayer), Effect.scoped),
-// ).catch(console.error)
+// ).catch((error) => { console.error(error); process.exitCode = 1; })

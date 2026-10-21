@@ -131,10 +131,11 @@ pub fn matches_where_with_registry(
                 if arr.is_empty() {
                     return false;
                 }
-                if !arr
-                    .iter()
-                    .any(|cond| cond.is_object() && !is_boundary_undefined(cond) && matches_where_with_registry(entity, cond, registry))
-                {
+                if !arr.iter().any(|cond| {
+                    cond.is_object()
+                        && !is_boundary_undefined(cond)
+                        && matches_where_with_registry(entity, cond, registry)
+                }) {
                     return false;
                 }
             }
@@ -145,10 +146,11 @@ pub fn matches_where_with_registry(
                     Some(a) => a,
                     None => return false,
                 };
-                if !arr
-                    .iter()
-                    .all(|cond| cond.is_object() && !is_boundary_undefined(cond) && matches_where_with_registry(entity, cond, registry))
-                {
+                if !arr.iter().all(|cond| {
+                    cond.is_object()
+                        && !is_boundary_undefined(cond)
+                        && matches_where_with_registry(entity, cond, registry)
+                }) {
                     return false;
                 }
             }
@@ -445,7 +447,10 @@ fn evaluate_operators(
                 results.push(s.as_str() <= op_str);
             }
         }
-    } else if matches!(value, Value::Null) || matches!(value, Value::Bool(_)) || is_boundary_undefined(value) {
+    } else if matches!(value, Value::Null)
+        || matches!(value, Value::Bool(_))
+        || is_boundary_undefined(value)
+    {
         // Non-string values: string operators fail
         if ops.contains_key("$startsWith")
             || ops.contains_key("$endsWith")
@@ -856,10 +861,18 @@ mod tests {
     #[test]
     fn undefined_rejects_array_operators() {
         let row = json!({"tags": {"__proseqlInternalUndefined__": 1}});
-        for filter in [json!({"$all": ["a"]}), json!({"$all": []}), json!({"$contains": "a"}), json!({"$size": 0})] {
+        for filter in [
+            json!({"$all": ["a"]}),
+            json!({"$all": []}),
+            json!({"$contains": "a"}),
+            json!({"$size": 0}),
+        ] {
             assert!(!matches_where(&row, &json!({"tags": filter})));
         }
-        assert!(matches_where(&row, &json!({"tags": {"$in": [{"__proseqlInternalUndefined__": 1}]}})));
+        assert!(matches_where(
+            &row,
+            &json!({"tags": {"$in": [{"__proseqlInternalUndefined__": 1}]}})
+        ));
     }
 
     #[test]
@@ -877,5 +890,4 @@ mod tests {
         assert!(!matches_where(&row, &json!({"$and":[null, {"id":"a"}]})));
         assert!(matches_where(&row, &json!({"$or":[null, {"id":"a"}]})));
     }
-
 }

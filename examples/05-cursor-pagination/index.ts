@@ -5,7 +5,7 @@
  * with pageInfo.endCursor and hasNextPage.
  */
 
-import { createEffectDatabase } from "@proseql/core";
+import { createEffectDatabase } from "@proseql/effect";
 import { Effect, Schema } from "effect";
 
 // ============================================================================
@@ -133,4 +133,4 @@ async function main() {
 	console.log(`  hasNextPage: ${filtered.pageInfo.hasNextPage}`);
 }
 
-main().catch(console.error);
+main().catch((error) => { console.error(error); process.exitCode = 1; });

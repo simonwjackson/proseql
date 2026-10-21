@@ -139,7 +139,6 @@
         "verify-packages"
         "browser-smoke"
         "browser-budget"
-        "parity-corpus"
         "parity-examples"
         "parity-gate"
         "workflow-lint"
@@ -190,69 +189,35 @@
               bun test \
                 ./bench/browser-runner.test.ts \
                 ./bench/runner.test.ts \
-                ./packages/engine/tests/boundary-values.test.ts \
-                ./packages/engine/tests/browser-entry.test.ts \
-                ./packages/engine/tests/browser-persistence-concurrency.test.ts \
-                ./packages/engine/tests/engine-duplicate-ids.test.ts \
-                ./packages/engine/tests/engine-time-bucket.test.ts \
-                ./packages/engine/tests/engine-ordered-index.test.ts \
-                ./packages/engine/tests/engine-u8.test.ts \
-                ./packages/engine/tests/engine.test.ts \
-                ./packages/engine/tests/loader.test.ts \
-                ./packages/engine/tests/node-storage-retry.test.ts \
-                ./packages/engine/tests/materialized-projection.test.ts \
-                ./packages/effect/tests/effect.test.ts \
-                ./packages/browser/tests/browser-entry.test.ts \
-                ./packages/rpc/tests/rpc-group.test.ts \
-                ./packages/rpc/tests/rpc-handlers.test.ts \
-                ./packages/rpc/tests/rpc-streaming.test.ts \
-                ./packages/rpc/tests/multi-collection-namespacing.test.ts \
-                ./packages/rpc/tests/rpc-wire-contract.test.ts \
-                ./scripts/verify-package-artifacts.test.ts \
-                ./scripts/verify-packed-packages.test.ts \
-                ./scripts/release.test.ts \
-                ./scripts/release-check-wiring.test.ts \
-                ./scripts/publish-workflow.test.ts \
-                packages/core/tests/database-effect.test.ts \
-                packages/core/tests/database-source-config.test.ts \
-                packages/core/tests/database-document-graph.test.ts \
-                packages/core/tests/debounced-writer.test.ts \
-                packages/core/tests/deep-merge.test.ts \
-                packages/core/tests/derived-id.test.ts \
-                packages/core/tests/document-graph-config.test.ts \
-                packages/core/tests/document-graph-source.test.ts \
-                packages/core/tests/file-watcher.test.ts \
-                packages/core/tests/glob-match.test.ts \
-                packages/core/tests/infer-codecs.test.ts \
-                packages/core/tests/ordered-indexes-config.test.ts \
-                packages/core/tests/schema-validation.test.ts \
-                packages/core/tests/schema-migrations.test.ts \
-                packages/core/tests/serializer-service.test.ts \
-                packages/core/tests/source-config.test.ts \
-                packages/core/tests/time-bucket-partitions.test.ts \
-                packages/core/tests/transactions.test.ts \
+                packages/core/tests/ \
+                packages/core/src/context-tag.test.ts \
+                packages/engine/tests/ \
+                packages/effect/tests/ \
+                packages/browser/tests/ \
+                packages/rpc/tests/ \
                 packages/node/tests/ \
                 packages/node/src/convenience.test.ts \
                 packages/cli/tests/ \
                 packages/rest/tests/ \
                 packages/ai/tests/ \
+                ./scripts/ \
                 "$@"
             }
 
             # Test one package only
-            task_test_core() { bun test packages/core/tests/ "$@"; }
+            task_test_core() { bun run tsc -p packages/core/tsconfig.tests.json; bun test packages/core/tests/ packages/core/src/context-tag.test.ts "$@"; }
             task_test_node() { bun run --cwd packages/engine build:wasm; bun test packages/node/tests/ "$@"; }
             task_test_cli() { bun run --cwd packages/engine build:wasm; bun test packages/cli/tests/ "$@"; }
             task_test_rest() { bun run --cwd packages/engine build:wasm; bun test packages/rest/tests/ "$@"; }
             task_test_ai() { bun run --cwd packages/engine build:wasm; bun test packages/ai/tests/ "$@"; }
-            task_test_effect() { bun test packages/effect/tests/ "$@"; }
+            task_test_effect() { bun run --cwd packages/engine build:wasm; bun test packages/effect/tests/ "$@"; }
 
             # Test with coverage
             task_coverage() { bun test --coverage packages/*/tests/; }
             task_coverage_core() { bun test --coverage packages/core/tests/; }
             task_coverage_node() { bun test --coverage packages/node/tests/; }
 
-            task_typecheck() { bun run tsc --build; }
+            task_typecheck() { bun run tsc --build; bun run tsc -p packages/core/tsconfig.tests.json; bun run tsc -p packages/effect/tsconfig.support.json; }
 
             # Verify npm packages include required built artifacts and browser smoke coverage
             task_verify_packages() { bun run verify:packages; }
@@ -268,20 +233,16 @@
               bun run scripts/verify-package-artifacts.ts --u2-browser-budget-gate --current-report .artifacts/browser/current.json --output .artifacts/browser/evidence.json
             }
 
-            # Run the first U9 parity corpus slice and emit a machine-readable report
-            task_parity_corpus() { bun run packages/effect/scripts/run-corpus.mjs; }
-
-            # Run examples 01-16 where compatible and emit a machine-readable report
+            # Execute every example directly against the Rust-backed public APIs.
             task_parity_examples() { bun run packages/effect/scripts/run-examples.mjs; }
 
-            # Run the U9 parity gate end-to-end
+            # Compatibility gate: shared type assertions, direct Effect tests, and examples.
             task_parity_gate() {
-              bun run tsc --build
+              task_typecheck
+              bun run --cwd packages/engine build:wasm
               (cd packages/effect && bun run typecheck:tests)
               bun test packages/effect/tests/
-              bun run packages/effect/scripts/run-corpus.mjs
-              bun run packages/effect/scripts/run-examples.mjs
-              bun run packages/effect/scripts/validate-parity-reports.mjs
+              task_parity_examples
             }
 
             # Validate GitHub Actions structure and every embedded shell script

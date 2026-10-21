@@ -1,10 +1,12 @@
 import { Effect, type Schema } from "effect";
-import {
-	type CollectionConfig,
-	createEffectDatabase as createCoreEffectDatabase,
-	type EffectDatabase,
+import type {
+	CollectionConfig,
+	EffectDatabase,
 } from "../packages/core/src/index.js";
-import { createEffectDatabase as createWasmEffectDatabase } from "../packages/effect/src/index.js";
+import {
+	createEffectDatabase as createCoreEffectDatabase,
+	createEffectDatabase as createWasmEffectDatabase,
+} from "../packages/effect/src/index.js";
 import type { EngineId } from "./comparison.js";
 
 export type BenchSchemaConfig = Record<
@@ -186,7 +188,7 @@ const createWasmDatabase = async <T extends BenchSchemaConfig>(
 
 export const typescriptBenchEngine: BenchEngine = {
 	id: "typescript",
-	label: "TypeScript @proseql/core",
+	label: "Effect/Rust (legacy benchmark ID)",
 	createDatabase: createCoreDatabase,
 };
 

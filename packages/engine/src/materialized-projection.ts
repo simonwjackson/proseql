@@ -370,7 +370,12 @@ export class MaterializedProjection {
 		| { readonly revision: number; readonly rows: ReadonlyArray<T> }
 		| undefined {
 		const cached = this.canonicalRowsByCollection.get(collection);
-		if (cached === undefined || cached.rows.length !== this.rustSlotByCollectionPosition.get(collection)?.length) return undefined;
+		if (
+			cached === undefined ||
+			cached.rows.length !==
+				this.rustSlotByCollectionPosition.get(collection)?.length
+		)
+			return undefined;
 		const end = Math.min(
 			cached.rows.length,
 			offset + (limit ?? cached.rows.length),
@@ -431,8 +436,13 @@ export class MaterializedProjection {
 		collection: string,
 	): ReadonlyArray<T> | undefined {
 		const canonical = this.canonicalRowsByCollection.get(collection);
-		if (canonical !== undefined && canonical.rows.length === this.rustSlotByCollectionPosition.get(collection)?.length) return canonical.rows as ReadonlyArray<T>;
-        this.canonicalRowsByCollection.delete(collection);
+		if (
+			canonical !== undefined &&
+			canonical.rows.length ===
+				this.rustSlotByCollectionPosition.get(collection)?.length
+		)
+			return canonical.rows as ReadonlyArray<T>;
+		this.canonicalRowsByCollection.delete(collection);
 		const positions = this.rustSlotByCollectionPosition.get(collection);
 		if (positions === undefined) return undefined;
 		const rows = new Array<T>(positions.length);
@@ -1051,7 +1061,7 @@ export class MaterializedProjection {
 					: undefined;
 			if (
 				cachedCanonical?.revision === descriptor.v &&
-                cachedCanonical.rows.length === descriptor.t &&
+				cachedCanonical.rows.length === descriptor.t &&
 				descriptor.a === undefined
 			) {
 				value = cachedCanonical.rows.slice();

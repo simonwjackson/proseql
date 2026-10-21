@@ -1,4 +1,3 @@
-import { createEffectDatabase as createCoreDatabase } from "@proseql/core";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { createEngineDatabase } from "../src/index.js";
@@ -12,16 +11,8 @@ const schema = Schema.Struct({
 });
 const config = { users: { schema, relationships: {} } } as const;
 
-const coreError = async (input: Schema.Schema.Type<typeof schema>) => {
-	const db = await Effect.runPromise(createCoreDatabase(config));
-	const result = await Effect.runPromise(Effect.result(db.users.create(input)));
-	if (result._tag !== "Failure")
-		throw new Error("Expected core to reject input");
-	return result.failure;
-};
-
 describe("schema checks at the engine boundary", () => {
-	it("matches core issues on create and update, including optional nested fields", async () => {
+	it("reports schema issues on create and update, including optional nested fields", async () => {
 		const db = await createEngineDatabase(config);
 		try {
 			await db.users.create({ id: "u1", name: "Alice", profile: {} });
@@ -29,7 +20,32 @@ describe("schema checks at the engine boundary", () => {
 				{ id: "u2", name: "ab", profile: {} },
 				{ id: "u2", name: "Alice", profile: { alias: "ab" } },
 			]) {
-				const expected = await coreError(input);
+				const expected = [
+					{
+						message:
+							'Expected a value with a length of at least 3\n  at ["name"]',
+						issues: [
+							{
+								field: "(root)",
+								message:
+									'Expected a value with a length of at least 3\n  at ["name"]',
+							},
+						],
+						_tag: "ValidationError",
+					},
+					{
+						message:
+							'Expected a value with a length of at least 3\n  at ["profile"]["alias"]',
+						issues: [
+							{
+								field: "(root)",
+								message:
+									'Expected a value with a length of at least 3\n  at ["profile"]["alias"]',
+							},
+						],
+						_tag: "ValidationError",
+					},
+				][input.name === "ab" ? 0 : 1];
 				await expect(db.users.create(input)).rejects.toMatchObject(expected);
 				await expect(
 					db.users.update("u1", { name: input.name, profile: input.profile }),

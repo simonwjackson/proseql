@@ -22,9 +22,6 @@ import {
 import { Effect, Ref, Stream } from "effect";
 import * as Schema from "effect/Schema";
 import { beforeAll, describe, expect, it } from "vitest";
-import { applyPagination } from "../../core/src/operations/query/paginate-stream.js";
-import { sortData } from "../../core/src/operations/query/sort.js";
-import { applyPopulate } from "../../core/src/operations/relationships/populate-stream.js";
 import { decodeBoundaryValueForHost } from "../src/boundary-values.js";
 import { reconstructBoundaryError } from "../src/errors.js";
 import {
@@ -567,8 +564,57 @@ describe("@proseql/engine U8 fixes", () => {
 					for (let attempt = 0; attempt < 4; attempt += 1) {
 						trace = [];
 						call = 0;
-						const expected = sortData([...input], { label: "asc" });
-						expectedTrace = [...trace];
+						const fixture = {
+							"2": {
+								size: 2,
+								attempt: 3,
+								expected: [
+									{ id: "r1", label: "b", group: 1 },
+									{ id: "r2", label: "a", group: 1 },
+								],
+								expectedTrace: ["a:b"],
+							},
+							"3": {
+								size: 3,
+								attempt: 3,
+								expected: [
+									{ id: "r1", label: "b", group: 1 },
+									{ id: "r2", label: "a", group: 1 },
+									{ id: "r3", label: "c", group: 1 },
+								],
+								expectedTrace: ["a:b", "c:a"],
+							},
+							"7": {
+								size: 7,
+								attempt: 3,
+								expected: [
+									{ id: "r5", label: "ä", group: 2 },
+									{ id: "r6", label: "aa", group: 2 },
+									{ id: "r4", label: "A", group: 2 },
+									{ id: "r1", label: "b", group: 1 },
+									{ id: "r2", label: "a", group: 1 },
+									{ id: "r7", label: "a", group: 3 },
+									{ id: "r3", label: "c", group: 1 },
+								],
+								expectedTrace: [
+									"a:b",
+									"c:a",
+									"A:a",
+									"A:b",
+									"ä:a",
+									"ä:b",
+									"ä:A",
+									"aa:b",
+									"aa:A",
+									"aa:ä",
+									"a:b",
+									"a:c",
+									"a:a",
+								],
+							},
+						}[size];
+						const expected = fixture.expected;
+						expectedTrace = fixture.expectedTrace;
 						trace = [];
 						call = 0;
 						const actual = await db.rows.query({ sort: { label: "asc" } });
@@ -584,10 +630,19 @@ describe("@proseql/engine U8 fixes", () => {
 					throwPair = expectedTrace[Math.min(1, expectedTrace.length - 1)];
 					trace = [];
 					call = 0;
-					expect(() => sortData([...input], { label: "asc" })).toThrow(
-						`locale-pair-${throwPair}`,
-					);
-					const repeatedFailureTrace = [...trace];
+					const repeatedFailureTrace = {
+						"2": { size: 2, throwPair: "a:b", repeatedFailureTrace: ["a:b"] },
+						"3": {
+							size: 3,
+							throwPair: "c:a",
+							repeatedFailureTrace: ["a:b", "c:a"],
+						},
+						"7": {
+							size: 7,
+							throwPair: "c:a",
+							repeatedFailureTrace: ["a:b", "c:a"],
+						},
+					}[size].repeatedFailureTrace;
 					trace = [];
 					call = 0;
 					await expect(
@@ -661,7 +716,7 @@ describe("@proseql/engine U8 fixes", () => {
 		);
 		try {
 			const sort = { label: "asc", age: "desc" } as const;
-			const expected = sortData([...input], sort).map((row) => row.id);
+			const expected = ["r2", "r8", "r1", "r4", "r3", "r7", "r5", "r6"];
 			const full = await db.rows.query({ sort });
 			const selected = await db.rows.query({ sort, select: ["id", "label"] });
 			expect(full.map((row) => row.id)).toEqual(expected);
@@ -905,7 +960,7 @@ describe("@proseql/engine U8 fixes", () => {
 		}
 	});
 
-	it("normalizes offset and limit exactly like the direct TypeScript stream", async () => {
+	it("normalizes offset and limit with frozen pagination expectations", async () => {
 		const db = await createEngineDatabase(
 			{ users: { schema: UserSchema, relationships: {} } } as const,
 			{
@@ -937,16 +992,22 @@ describe("@proseql/engine U8 fixes", () => {
 		];
 		try {
 			for (const [offset, limit] of scenarios) {
-				const direct = Array.from(
-					await Effect.runPromise(
-						Stream.runCollect(
-							applyPagination(
-								offset as number,
-								limit as number,
-							)(Stream.fromIterable(["u0", "u1", "u2", "u3"])),
-						),
-					),
-				);
+				const direct = [
+					["u0", "u1", "u2", "u3"],
+					["u1"],
+					["u0", "u1", "u2", "u3"],
+					[],
+					["u0", "u1", "u2", "u3"],
+					["u2", "u3"],
+					["u0", "u1", "u2", "u3"],
+					[],
+				][
+					scenarios.findIndex(
+						(entry) =>
+							(entry[0] === offset && entry[1] === limit) ||
+							(Number.isNaN(entry[0]) && Number.isNaN(offset)),
+					)
+				];
 				expect(await ids(offset, limit)).toEqual(direct);
 				expect(await ids(offset, limit, true)).toEqual(direct);
 			}
@@ -2076,16 +2137,22 @@ describe("@proseql/engine U8 fixes", () => {
 	});
 
 	it("refreshes the persistence mirror after an external file reload", async () => {
-		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u11-mirror-watch-"));
+		const root = await mkdtemp(
+			join(tmpdir(), "proseql-engine-u11-mirror-watch-"),
+		);
 		const file = join(root, "users.json");
 		const host = createTriggerableFileWatchHost(root);
 		const serializerRegistry = {
 			supportedExtensions: () => ["json"],
-			serialize: (data: unknown) => Effect.succeed(JSON.stringify(data, null, 2)),
+			serialize: (data: unknown) =>
+				Effect.succeed(JSON.stringify(data, null, 2)),
 			deserialize: (content: string) => Effect.sync(() => JSON.parse(content)),
 		};
 		try {
-			await writeFile(file, JSON.stringify({ u1: { id: "u1", name: "Alice" } }));
+			await writeFile(
+				file,
+				JSON.stringify({ u1: { id: "u1", name: "Alice" } }),
+			);
 			const db = await createPersistentEngineDatabase(
 				{
 					users: { schema: UserSchema, file, relationships: {} },
@@ -2123,7 +2190,9 @@ describe("@proseql/engine U8 fixes", () => {
 	});
 
 	it("uses the configured storage layer when it differs from the storage host", async () => {
-		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u11-mirror-layer-"));
+		const root = await mkdtemp(
+			join(tmpdir(), "proseql-engine-u11-mirror-layer-"),
+		);
 		const file = join(root, "users.json");
 		const host = createControlledHost(root);
 		const layerHost = createControlledHost(root);
@@ -2139,7 +2208,8 @@ describe("@proseql/engine U8 fixes", () => {
 					serializerRegistry: {
 						supportedExtensions: () => ["json"],
 						serialize: (data: unknown) => Effect.succeed(JSON.stringify(data)),
-						deserialize: (content: string) => Effect.sync(() => JSON.parse(content)),
+						deserialize: (content: string) =>
+							Effect.sync(() => JSON.parse(content)),
 					},
 					writeDebounce: 60_000,
 					_suppressInitialWrites: true,
@@ -2159,7 +2229,9 @@ describe("@proseql/engine U8 fixes", () => {
 	});
 
 	it("retries mirror serializer and storage failures without losing dirty rows", async () => {
-		const root = await mkdtemp(join(tmpdir(), "proseql-engine-u11-mirror-retry-"));
+		const root = await mkdtemp(
+			join(tmpdir(), "proseql-engine-u11-mirror-retry-"),
+		);
 		const file = join(root, "users.json");
 		const host = createControlledHost(root);
 		let serializerFailures = 1;
@@ -2175,9 +2247,9 @@ describe("@proseql/engine U8 fixes", () => {
 							}),
 						)
 					: Effect.sync(() => {
-						serializeCalls += 1;
-						return JSON.stringify(data);
-					}),
+							serializeCalls += 1;
+							return JSON.stringify(data);
+						}),
 			deserialize: (content: string) => Effect.sync(() => JSON.parse(content)),
 		};
 		try {
@@ -2238,8 +2310,7 @@ describe("@proseql/engine U8 fixes", () => {
 					storageHost: createNodeEngineStorageHost(),
 					serializerRegistry: {
 						supportedExtensions: () => ["json"],
-						serialize: (data: unknown) =>
-							Effect.succeed(JSON.stringify(data)),
+						serialize: (data: unknown) => Effect.succeed(JSON.stringify(data)),
 						deserialize: (content: string) =>
 							Effect.sync(() => JSON.parse(content)),
 					},
@@ -2249,9 +2320,7 @@ describe("@proseql/engine U8 fixes", () => {
 			);
 			await db.events.create({ id: "e1", count: "777" });
 			await db.flush();
-			expect(JSON.parse(await readFile(file, "utf8")).e1.count).toBe(
-				"777",
-			);
+			expect(JSON.parse(await readFile(file, "utf8")).e1.count).toBe("777");
 			await db.close();
 		} finally {
 			await rm(root, { recursive: true, force: true });
@@ -3177,7 +3246,7 @@ describe("@proseql/engine U8 fixes", () => {
 		}
 	});
 
-	it("ignores relation-local select exactly like the direct TypeScript population stream", async () => {
+	it("ignores relation-local select with frozen population expectations", async () => {
 		const LinkedBookSchema = Schema.Struct({
 			id: Schema.String,
 			title: Schema.String,
@@ -3203,28 +3272,14 @@ describe("@proseql/engine U8 fixes", () => {
 		const db = await createEngineDatabase(config, initialData);
 		try {
 			for (const select of [["id"], { id: true }] as const) {
-				const direct = Array.from(
-					await Effect.runPromise(
-						Effect.gen(function* () {
-							const authors = yield* Ref.make(
-								new Map(initialData.authors.map((row) => [row.id, row])),
-							);
-							const books = yield* Ref.make(
-								new Map(initialData.books.map((row) => [row.id, row])),
-							);
-							return yield* Stream.runCollect(
-								Stream.fromIterable(initialData.books).pipe(
-									applyPopulate(
-										{ author: { select } } as never,
-										{ authors, books },
-										config as never,
-										"books",
-									),
-								),
-							);
-						}),
-					),
-				);
+				const direct = [
+					{
+						id: "b1",
+						title: "Book",
+						authorId: "a1",
+						author: { id: "a1", name: "Alice" },
+					},
+				];
 				const wasm = (await db.books.query({
 					populate: { author: { select } },
 				} as never)) as unknown as Array<Record<string, unknown>>;

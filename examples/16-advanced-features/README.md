@@ -6,14 +6,7 @@ Demonstrates advanced proseql features: ID generation, indexing (including neste
 
 ### 1. ID Generation
 
-Built-in ID generators available out of the box:
-
-- `generateUUID` -- Standard UUID v4
-- `generateNanoId` -- Compact, URL-safe NanoID
-- `generateULID` -- Sortable, timestamp-prefixed ULID
-- `generateTimestampId` -- Millisecond-precision timestamp ID
-- `generatePrefixedId` -- Prefixed with a collection name (e.g. `book_abc123`)
-- `generateTypedId` -- Type-safe prefixed ID
+Omit `id` on `create` to let the Rust-backed database assign it. Supply `id` explicitly when importing existing records. The plugin section shows a named custom ID generator. The old core's standalone ID generator utilities are not part of the 1.0 contract.
 
 ### 2. Indexing
 
@@ -82,6 +75,6 @@ bun run document-sources.ts
 
 ## Dependencies
 
-- `@proseql/core`
+- `@proseql/effect`
 - `@proseql/node` (for `document-sources.ts`)
 - `effect`

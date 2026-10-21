@@ -6,8 +6,8 @@
  * are never persisted and have zero overhead when not selected.
  */
 
-import type { ComputedFieldsConfig } from "@proseql/core";
-import { createEffectDatabase } from "@proseql/core";
+import type { ComputedFieldsConfig } from "@proseql/effect";
+import { createEffectDatabase } from "@proseql/effect";
 import { Effect, Schema } from "effect";
 
 // ============================================================================
@@ -124,4 +124,4 @@ async function main() {
 	}
 }
 
-main().catch(console.error);
+main().catch((error) => { console.error(error); process.exitCode = 1; });

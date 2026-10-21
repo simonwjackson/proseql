@@ -2,11 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	createPersistentEffectDatabase as createCoreDatabase,
-	jsonCodec,
-	makeSerializerLayer,
-} from "@proseql/core";
+import { jsonCodec, makeSerializerLayer } from "@proseql/core";
 import { Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { createPersistentEffectDatabase as createEffectDatabase } from "../../effect/src/index.js";
@@ -32,7 +28,7 @@ const cases = [
 
 describe("Record key checks", () => {
 	for (const entry of cases) {
-		it(`matches core returned, stored and persisted records with ${entry.name}`, async () => {
+		it(`checks returned, stored and persisted records with ${entry.name}`, async () => {
 			const root = await mkdtemp(join(tmpdir(), "proseql-record-keys-"));
 			const schema = Schema.Struct({
 				id: Schema.String,
@@ -48,7 +44,6 @@ describe("Record key checks", () => {
 			try {
 				const results = [];
 				for (const [runtime, create] of [
-					["core", createCoreDatabase],
 					["effect", createEffectDatabase],
 				] as const) {
 					const file = join(root, `${runtime}.json`);
@@ -90,7 +85,13 @@ describe("Record key checks", () => {
 					await db.close();
 				}
 				for (const result of results) {
-					expect(result).toEqual(results[0]);
+					expect(result).toEqual({
+						created: { id: "u1", data: { okay: 2, ok_two: 3 } },
+						stored: { id: "u1", data: { okay: 2, ok_two: 3, ok_end: 5 } },
+						persisted: {
+							u1: { id: "u1", data: { okay: 2, ok_two: 3, ok_end: 5 } },
+						},
+					});
 					expect(result.created.data).toEqual({ okay: 2, ok_two: 3 });
 					expect(Object.keys(result.created.data)).toEqual(["okay", "ok_two"]);
 					expect(result.stored.data).not.toHaveProperty("bad");

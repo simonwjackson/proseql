@@ -86,7 +86,7 @@ const program = Effect.gen(function* () {
 	console.log("\n=== Append-Only Restrictions ===");
 
 	yield* db.events.update(evt1.id, { type: "tap" }).pipe(
-		Effect.catchAll((err) => {
+		Effect.catch((err) => {
 			console.log(`  Update blocked: ${err.message}`);
 			return Effect.void;
 		}),
@@ -94,7 +94,7 @@ const program = Effect.gen(function* () {
 
 	// === Delete throws OperationError ===
 	yield* db.events.delete(evt1.id).pipe(
-		Effect.catchAll((err) => {
+		Effect.catch((err) => {
 			console.log(`  Delete blocked: ${err.message}`);
 			return Effect.void;
 		}),
@@ -105,4 +105,4 @@ const program = Effect.gen(function* () {
 	console.log("\n  Flushed — open examples/data/events.jsonl to see the log");
 });
 
-Effect.runPromise(Effect.scoped(program)).catch(console.error);
+Effect.runPromise(Effect.scoped(program)).catch((error) => { console.error(error); process.exitCode = 1; });

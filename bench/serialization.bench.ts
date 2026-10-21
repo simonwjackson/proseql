@@ -2,14 +2,13 @@ import { Effect, Exit, Layer, Schema, Scope } from "effect";
 import { Bench } from "tinybench";
 import {
 	type CollectionConfig,
-	createPersistentEffectDatabase as createCorePersistentEffectDatabase,
 	jsonCodec,
 	makeSerializerLayer,
 	type ProseQLPlugin,
 	StorageAdapterService,
 	type StorageAdapterShape,
 } from "../packages/core/src/index.js";
-import { createPersistentEffectDatabase as createWasmPersistentEffectDatabase } from "../packages/effect/src/index.js";
+import { createPersistentEffectDatabase as createWasmPersistentEffectDatabase, createPersistentEffectDatabase as createCorePersistentEffectDatabase } from "../packages/effect/src/index.js";
 import {
 	attachTaskMetadata,
 	type BenchmarkCaseType,

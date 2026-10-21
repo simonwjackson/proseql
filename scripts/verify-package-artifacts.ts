@@ -76,7 +76,17 @@ function runPackageArtifactVerification(): void {
 	const packageNames =
 		requestedPackageNames && requestedPackageNames.length > 0
 			? requestedPackageNames
-			: ["core", "engine", "node", "rest", "effect", "cli", "browser", "rpc"];
+			: [
+					"core",
+					"engine",
+					"node",
+					"rest",
+					"effect",
+					"cli",
+					"browser",
+					"rpc",
+					"ai",
+				];
 
 	let failed = false;
 

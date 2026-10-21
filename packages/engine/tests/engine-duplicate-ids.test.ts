@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-	createEffectDatabase,
 	DuplicateKeyError,
 	NotFoundError,
 	ValidationError,
@@ -181,21 +180,5 @@ describe("duplicateIds", () => {
 		expect((error as ValidationError).issues[0]?.field).toBe(
 			"heartrate.duplicateIds",
 		);
-	});
-
-	it("is rejected by the legacy core runtime (fail closed)", async () => {
-		const error = await Effect.runPromise(
-			Effect.flip(
-				createEffectDatabase({
-					heartrate: {
-						schema: SampleSchema,
-						relationships: {},
-						duplicateIds: "ignoreIdentical",
-					},
-				} as const),
-			),
-		);
-		expect(error).toBeInstanceOf(ValidationError);
-		expect((error as ValidationError).issues[0]?.field).toBe("duplicateIds");
 	});
 });

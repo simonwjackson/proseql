@@ -7,8 +7,8 @@ import type {
 	OperationError,
 	ValidationError,
 } from "../src/errors/crud-errors";
-import type { CrudMethods } from "../src/factories/crud-factory";
-import type { CrudMethodsWithRelationships } from "../src/factories/crud-factory-with-relationships";
+import type { CrudMethods } from "../src/types/crud-factory";
+import type { CrudMethodsWithRelationships } from "../src/types/crud-factory-with-relationships";
 import type { RelationshipDef } from "../src/types/types";
 
 // ============================================================================

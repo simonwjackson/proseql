@@ -100,6 +100,25 @@ export function updateWorkspaceForRelease(input: {
 		const source = requiredFile(input.files, path);
 		const manifest = parseObject(source, path);
 		manifest.version = input.nextVersion;
+		for (const section of [
+			"dependencies",
+			"devDependencies",
+			"peerDependencies",
+			"optionalDependencies",
+		]) {
+			const dependencies = manifest[section];
+			if (
+				typeof dependencies !== "object" ||
+				dependencies === null ||
+				Array.isArray(dependencies)
+			)
+				continue;
+			for (const [name, version] of Object.entries(dependencies)) {
+				if (name.startsWith("@proseql/") && typeof version === "string")
+					(dependencies as Record<string, unknown>)[name] =
+						`workspace:${input.nextVersion}`;
+			}
+		}
 		updated.set(path, `${JSON.stringify(manifest, null, 2)}\n`);
 	}
 	const lockPath = "bun.lock";
@@ -115,15 +134,6 @@ export function updateWorkspaceForRelease(input: {
 		lock = lock.replace(pattern, `$1${input.nextVersion}$2`);
 	}
 	updated.set(lockPath, lock);
-
-	const aiPath = "packages/ai/package.json";
-	const aiSource = requiredFile(input.files, aiPath);
-	const aiVersion = parseObject(aiSource, aiPath).version;
-	assert(
-		typeof aiVersion === "string",
-		"packages/ai/package.json is missing its independent version",
-	);
-	updated.set(aiPath, aiSource);
 
 	const cliPath = "packages/cli/src/main.ts";
 	const cliSource = requiredFile(input.files, cliPath);

@@ -6,7 +6,7 @@
  * .runPromise convenience API.
  */
 
-import { createEffectDatabase } from "@proseql/core";
+import { createEffectDatabase } from "@proseql/effect";
 import { Chunk, Effect, Schema, Stream } from "effect";
 
 // ============================================================================
@@ -256,7 +256,7 @@ async function main() {
 	console.log("\n=== Using Effect directly with Stream.runCollect ===");
 	const stream = db.posts.query({ where: { published: true } });
 	const results = await Effect.runPromise(
-		Stream.runCollect(stream).pipe(Effect.map(Chunk.toReadonlyArray)),
+		Stream.runCollect(stream).pipe(Effect.map((items) => items)),
 	);
 	console.log(
 		`  Found ${results.length} published posts via Stream.runCollect`,
@@ -276,4 +276,4 @@ async function main() {
 	}
 }
 
-main().catch(console.error);
+main().catch((error) => { console.error(error); process.exitCode = 1; });

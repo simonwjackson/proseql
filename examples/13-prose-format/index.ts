@@ -112,4 +112,4 @@ const program = Effect.gen(function* () {
 	// or when you want to override the file's template.
 });
 
-Effect.runPromise(Effect.scoped(program)).catch(console.error);
+Effect.runPromise(Effect.scoped(program)).catch((error) => { console.error(error); process.exitCode = 1; });

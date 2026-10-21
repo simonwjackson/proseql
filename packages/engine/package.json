@@ -1,6 +1,6 @@
 {
 	"name": "@proseql/engine",
-	"version": "0.16.0",
+	"version": "1.0.0",
 	"description": "Promise-first WASM engine binding for proseQL",
 	"type": "module",
 	"scripts": {
@@ -96,9 +96,13 @@
 	},
 	"sideEffects": false,
 	"dependencies": {
-		"@proseql/core": "workspace:*"
+		"@proseql/core": "workspace:1.0.0",
+		"picomatch": "^4.0.4"
 	},
 	"peerDependencies": {
 		"effect": "4.0.0-beta.103"
+	},
+	"devDependencies": {
+		"@types/picomatch": "^4.0.3"
 	}
 }

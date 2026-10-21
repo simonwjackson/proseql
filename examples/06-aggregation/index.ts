@@ -5,7 +5,7 @@
  * filtered aggregation with where, and groupBy.
  */
 
-import { createEffectDatabase } from "@proseql/core";
+import { createEffectDatabase } from "@proseql/effect";
 import { Effect, Schema } from "effect";
 
 // ============================================================================
@@ -159,4 +159,4 @@ async function main() {
 	}
 }
 
-main().catch(console.error);
+main().catch((error) => { console.error(error); process.exitCode = 1; });

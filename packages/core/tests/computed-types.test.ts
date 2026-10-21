@@ -47,13 +47,9 @@ const dbConfigWithComputed = {
 type DBWithComputed = GenerateDatabase<typeof dbConfigWithComputed>;
 
 // Extract the entity type from the collection (includes computed fields)
-type BookWithComputed = DBWithComputed["books"] extends {
-	query<C>(config?: C): infer R;
-}
-	? R extends { runPromise: Promise<ReadonlyArray<infer T>> }
-		? T
-		: never
-	: never;
+type BookWithComputed = Awaited<
+	ReturnType<DBWithComputed["books"]["findById"]>["runPromise"]
+>;
 
 // Verify the entity type includes computed fields
 type _checkEntityHasDisplayName = Assert<
@@ -376,13 +372,9 @@ describe("Computed Field Types Integration", () => {
 
 		it("should still work correctly without computed config", () => {
 			// Extract entity type from collection without computed fields
-			type BookWithoutComputed = DBWithoutComputed["books"] extends {
-				query<C>(config?: C): infer R;
-			}
-				? R extends { runPromise: Promise<ReadonlyArray<infer T>> }
-					? T
-					: never
-				: never;
+			type BookWithoutComputed = Awaited<
+				ReturnType<DBWithoutComputed["books"]["findById"]>["runPromise"]
+			>;
 
 			// Verify entity has stored fields
 			type _checkHasTitle = Assert<

@@ -1,42 +1,8 @@
-/**
- * Main entry point for the proseql library.
- *
- * Exports the Effect-based API: typed errors, Schema validation,
- * Stream query pipeline, Ref state, Service/Layer persistence.
- */
+/** Shared contracts, errors, configuration and codecs. No database runtime. */
 
-// ============================================================================
-// Effect-Based Database Factory
-// ============================================================================
-
-export type {
-	DocumentGraphMetadata,
-	EffectCollection,
-	EffectDatabase,
-	EffectDatabaseOptions,
-	EffectDatabasePersistenceConfig,
-	EffectDatabaseWithPersistence,
-	RunnableEffect,
-	RunnableStream,
-} from "./factories/database-effect.js";
-export {
-	createEffectDatabase,
-	createPersistentEffectDatabase,
-} from "./factories/database-effect.js";
-
-// ============================================================================
-// CRUD Method Types
-// ============================================================================
-
-export type { CrudMethods } from "./factories/crud-factory.js";
-export type { CrudMethodsWithRelationships } from "./factories/crud-factory-with-relationships.js";
-
-// ============================================================================
-// Error Types (Effect TaggedError)
-// ============================================================================
-
+export { Schema } from "effect";
+export { makeProseQLTag } from "./context-tag.js";
 export type { CrudError } from "./errors/crud-errors.js";
-// CRUD errors
 export {
 	ConcurrencyError,
 	DuplicateKeyError,
@@ -48,14 +14,13 @@ export {
 	UniqueConstraintError,
 	ValidationError,
 } from "./errors/crud-errors.js";
-// Union type
 export type { DatabaseError } from "./errors/index.js";
 export type { MigrationErrors } from "./errors/migration-errors.js";
-
-// Migration errors
 export { MigrationError } from "./errors/migration-errors.js";
+export { PluginError } from "./errors/plugin-errors.js";
+
 export type { QueryError } from "./errors/query-errors.js";
-// Query errors
+
 export {
 	CollectionNotFoundError,
 	DanglingReferenceError,
@@ -66,6 +31,7 @@ export type {
 	SourceError,
 	SourceRecordOrigin,
 } from "./errors/source-errors.js";
+
 export {
 	DocumentGraphSourceError,
 	DuplicatePhysicalFileError,
@@ -76,30 +42,12 @@ export {
 } from "./errors/source-errors.js";
 
 export type { PersistenceError } from "./errors/storage-errors.js";
-// Storage errors
+
 export {
 	SerializationError,
 	StorageError,
 	UnsupportedFormatError,
 } from "./errors/storage-errors.js";
-
-// ============================================================================
-// Schema Types
-// ============================================================================
-
-export { Schema } from "effect";
-
-export type {
-	EntitySchema,
-	InferEncoded,
-	InferEntity,
-} from "./types/schema-types.js";
-
-// ============================================================================
-// Migration Types
-// ============================================================================
-
-export { dryRunMigrations } from "./migrations/migration-runner.js";
 export type {
 	DryRunCollectionResult,
 	DryRunMigration,
@@ -107,37 +55,57 @@ export type {
 	DryRunStatus,
 	Migration,
 } from "./migrations/migration-types.js";
-
-// ============================================================================
-// Context Tag Factory
-// ============================================================================
-
-export { makeProseQLTag } from "./context-tag.js";
-
-// ============================================================================
-// Core Types and Configurations
-// ============================================================================
-
+export type {
+	CustomIdGenerator,
+	CustomOperator,
+	GlobalHooksConfig,
+	PluginRegistry,
+	ProseQLPlugin,
+} from "./plugins/plugin-types.js";
+export {
+	validateDependencies,
+	validateOperatorConflicts,
+	validatePlugin,
+} from "./plugins/plugin-validation.js";
+export { hjsonCodec } from "./serializers/codecs/hjson.js";
+export { jsonCodec } from "./serializers/codecs/json.js";
+export { json5Codec } from "./serializers/codecs/json5.js";
+export { jsoncCodec } from "./serializers/codecs/jsonc.js";
+export type { ParsedLine } from "./serializers/codecs/jsonl.js";
+export { jsonlCodec, jsonlDecodeLines } from "./serializers/codecs/jsonl.js";
+export type {
+	CompiledTemplate,
+	ProseCodecOptions,
+	ProseSegment,
+} from "./serializers/codecs/prose.js";
+export { proseCodec } from "./serializers/codecs/prose.js";
+export { tomlCodec } from "./serializers/codecs/toml.js";
+export { toonCodec } from "./serializers/codecs/toon.js";
+export { yamlCodec } from "./serializers/codecs/yaml.js";
+export type {
+	FormatCodec,
+	FormatOptions,
+} from "./serializers/format-codec.js";
+export {
+	makeSerializerLayer,
+	mergeSerializerWithPluginCodecs,
+} from "./serializers/format-codec.js";
+export { inferCodecsFromConfig } from "./serializers/infer-codecs.js";
+export {
+	AllTextFormatsLayer,
+	DefaultSerializerLayer,
+} from "./serializers/presets.js";
+export type { SerializerRegistryShape } from "./serializers/serializer-service.js";
+export {
+	getSupportedExtensions,
+	SerializerRegistry as SerializerRegistryService,
+} from "./serializers/serializer-service.js";
 export type {
 	DocumentGraphDiagnostic,
 	DocumentGraphDiagnosticAction,
 	DocumentGraphRecordContribution,
 	DocumentGraphRecordProvenance,
-	LoadedDocumentGraph,
-} from "./storage/document-graph-source.js";
-export { loadDocumentGraphSources } from "./storage/document-graph-source.js";
-export type { LoadedDocumentSources } from "./storage/document-source.js";
-export {
-	loadDocumentSources,
-	saveDocumentSource,
-} from "./storage/document-source.js";
-export type { OriginIndex, RecordOrigin } from "./storage/origin-index.js";
-export { getOrigin } from "./storage/origin-index.js";
-export type { LoadedPartitions } from "./storage/partitioned-source.js";
-export {
-	loadPartitionedSource,
-	savePartitionedSource,
-} from "./storage/partitioned-source.js";
+} from "./storage/document-types.js";
 export type {
 	DatabaseSourceConfig,
 	DocumentGraphFragmentErrorPolicy,
@@ -155,7 +123,60 @@ export type {
 	PartitionKey,
 	PartitionTimeBucket,
 } from "./storage/source-config.js";
-export { normalizeSourceConfig } from "./storage/source-config.js";
+export {
+	matchesDocumentSourcePattern,
+	normalizeSourceConfig,
+	relativeToRoot,
+} from "./storage/source-config.js";
+export type {
+	StorageAdapterShape,
+	StorageReadWriteError,
+} from "./storage/storage-service.js";
+export { StorageAdapter as StorageAdapterService } from "./storage/storage-service.js";
+export type {
+	AggregateConfig,
+	AggregateResult,
+	GroupedAggregateConfig,
+	GroupedAggregateResult,
+	GroupResult,
+	InferAggregateResult,
+	ScalarAggregateConfig,
+} from "./types/aggregate-types.js";
+export { isGroupedAggregateConfig } from "./types/aggregate-types.js";
+export type {
+	ComputedFieldDefinition,
+	ComputedFieldKeys,
+	ComputedFieldsConfig,
+	InferComputedFields,
+	WithComputed,
+} from "./types/computed-types.js";
+export type { CrudMethods } from "./types/crud-factory.js";
+export type { CrudMethodsWithRelationships } from "./types/crud-factory-with-relationships.js";
+export type {
+	CreateWithRelationshipsInput,
+	DeleteWithRelationshipsOptions,
+	DeleteWithRelationshipsResult,
+	UpdateWithRelationshipsInput,
+} from "./types/crud-relationship-types.js";
+export type {
+	CreateInput,
+	CreateManyOptions,
+	CreateManyResult,
+	DeleteManyResult,
+	MinimalEntity,
+	TransactionContext,
+	UpdateManyResult,
+	UpdateWithOperators,
+	UpsertInput,
+	UpsertManyResult,
+	UpsertResult,
+} from "./types/crud-types.js";
+export type {
+	CursorConfig,
+	CursorPageInfo,
+	CursorPageResult,
+	RunnableCursorPage,
+} from "./types/cursor-types.js";
 export type {
 	CollectionConfig,
 	ConfiguredCollections,
@@ -172,89 +193,15 @@ export {
 	isSourceOrientedDatabaseConfig,
 } from "./types/database-config-types.js";
 export type {
-	ApplyPopulateObject,
-	ApplySelectAndPopulate,
-	ApplySelectConfig,
-	DatasetFor,
-	GenerateDatabase,
-	GenerateDatabaseWithPersistence,
-	PopulateConfig,
-	QueryConfig,
-	QueryReturnType,
-	RelationshipDef,
-	ResolveRelationships,
-	RuntimeEntityFromCollection,
-	SelectConfig,
-	SmartCollection,
-	SortConfig,
-	WhereClause,
-} from "./types/types.js";
-
-// ============================================================================
-// Aggregate Types
-// ============================================================================
-
-export type {
-	AggregateConfig,
-	AggregateResult,
-	GroupedAggregateConfig,
-	GroupedAggregateResult,
-	GroupResult,
-	InferAggregateResult,
-	ScalarAggregateConfig,
-} from "./types/aggregate-types.js";
-
-export { isGroupedAggregateConfig } from "./types/aggregate-types.js";
-
-// ============================================================================
-// Reactive Query Types
-// ============================================================================
-
-export type {
-	ChangeEvent,
-	WatchByIdMethod,
-	WatchConfig,
-	WatchMethod,
-} from "./types/reactive-types.js";
-
-// ============================================================================
-// Reactive Query Functions
-// ============================================================================
-
-export { createChangeEvent, reloadEvent } from "./reactive/change-event.js";
-export { createChangePubSub } from "./reactive/change-pubsub.js";
-export type { EvaluateQueryConfig } from "./reactive/evaluate-query.js";
-export { evaluateQuery } from "./reactive/evaluate-query.js";
-export type { WatchQueryConfig } from "./reactive/watch.js";
-export { watch } from "./reactive/watch.js";
-export { watchById } from "./reactive/watch-by-id.js";
-
-// ============================================================================
-// Cursor Pagination Types
-// ============================================================================
-
-export type {
-	CursorConfig,
-	CursorPageInfo,
-	CursorPageResult,
-	RunnableCursorPage,
-} from "./types/cursor-types.js";
-
-// ============================================================================
-// Index Types
-// ============================================================================
-
-export type {
-	CollectionIndexes,
-	IndexMap,
-	IndexRef,
-	NormalizedIndex,
-} from "./types/index-types.js";
-
-// ============================================================================
-// Lifecycle Hook Types
-// ============================================================================
-
+	DocumentGraphMetadata,
+	EffectCollection,
+	EffectDatabase,
+	EffectDatabaseOptions,
+	EffectDatabasePersistenceConfig,
+	EffectDatabaseWithPersistence,
+	RunnableEffect,
+	RunnableStream,
+} from "./types/database-types.js";
 export type {
 	// After hook contexts
 	AfterCreateContext,
@@ -280,293 +227,46 @@ export type {
 	OnChangeHook,
 	OnChangeUpdateContext,
 } from "./types/hook-types.js";
-
-// ============================================================================
-// Transaction Types
-// ============================================================================
-
-export type { TransactionContext } from "./types/crud-types.js";
-
-// ============================================================================
-// CRUD Result Types
-// ============================================================================
-
 export type {
-	CreateInput,
-	CreateManyOptions,
-	CreateManyResult,
-	DeleteManyResult,
-	MinimalEntity,
-	UpdateManyResult,
-	UpdateWithOperators,
-	UpsertInput,
-	UpsertManyResult,
-	UpsertResult,
-} from "./types/crud-types.js";
-
-// ============================================================================
-// Transaction Functions
-// ============================================================================
-
-export { $transaction, createTransaction } from "./transactions/transaction.js";
+	CollectionIndexes,
+	IndexMap,
+	IndexRef,
+	NormalizedIndex,
+} from "./types/index-types.js";
 export type {
-	CreateWithRelationshipsInput,
-	DeleteWithRelationshipsOptions,
-	DeleteWithRelationshipsResult,
-	UpdateWithRelationshipsInput,
-} from "./types/crud-relationship-types.js";
-
-// ============================================================================
-// Index Functions
-// ============================================================================
-
-export { resolveWithIndex } from "./indexes/index-lookup.js";
-export {
-	addManyToIndex,
-	addToIndex,
-	buildIndexes,
-	normalizeIndexes,
-	removeFromIndex,
-	removeManyFromIndex,
-	updateInIndex,
-} from "./indexes/index-manager.js";
-
-// ============================================================================
-// Schema Validation
-// ============================================================================
-
-export { encodeEntity, validateEntity } from "./validators/schema-validator.js";
-
-// ============================================================================
-// State Management (Ref-based)
-// ============================================================================
-
-export { createCollectionState } from "./state/collection-state.js";
-
-export {
-	getAllEntities,
-	getEntity,
-	getEntityOrFail,
-	removeEntity,
-	setEntity,
-	updateEntity,
-} from "./state/state-operations.js";
-
-// ============================================================================
-// Query Pipeline (Stream-based)
-// ============================================================================
-
-// Non-stream filter utility (for direct array filtering)
-export { filterData } from "./operations/query/filter.js";
-export { applyFilter } from "./operations/query/filter-stream.js";
-export { applyPagination } from "./operations/query/paginate-stream.js";
-// Object-based field selection utilities
-export {
-	applyObjectSelection,
-	applySelectionSafe,
-	applySelectionToArray,
-	createFieldSelector,
-	mergeObjectFieldSelections,
-} from "./operations/query/select.js";
-export { applySelect } from "./operations/query/select-stream.js";
-export { applySort } from "./operations/query/sort-stream.js";
-export { applyPopulate } from "./operations/relationships/populate-stream.js";
-
-// ============================================================================
-// Storage Services (Effect Layer)
-// ============================================================================
-
-// In-memory adapter (for testing)
-export {
-	InMemoryStorageLayer,
-	makeInMemoryStorageLayer,
-} from "./storage/in-memory-adapter-layer.js";
+	ChangeEvent,
+	WatchByIdMethod,
+	WatchConfig,
+	WatchMethod,
+} from "./types/reactive-types.js";
 export type {
-	DebouncedWriter,
-	DirectoryWatcherConfig,
-	FileWatcher,
-	FileWatcherConfig,
-	LoadCollectionConfig,
-	LoadDataFromDirectoryOptions,
-	LoadDataOptions,
-	SaveCollectionConfig,
-	SaveDataOptions,
-	StreamCollectionEntry,
-} from "./storage/persistence-effect.js";
-// Persistence utilities
-export {
-	createDebouncedWriter,
-	createDirectoryWatcher,
-	createFileWatcher,
-	createFileWatchers,
-	loadCollectionsFromFile,
-	loadData,
-	loadDataFromDirectory,
-	removeEntityFromDirectory,
-	saveCollectionsToFile,
-	saveData,
-	saveEntityToDirectory,
-	streamCollectionFromDirectory,
-} from "./storage/persistence-effect.js";
-// Standalone document reader
-export type { ReadDocumentOptions } from "./storage/read-document.js";
-export { readDocument } from "./storage/read-document.js";
-export type {
-	StorageAdapterShape,
-	StorageReadWriteError,
-} from "./storage/storage-service.js";
-// Storage adapter service
-export { StorageAdapter as StorageAdapterService } from "./storage/storage-service.js";
-
-// ============================================================================
-// Serializer Services (Effect Layer)
-// ============================================================================
-
-export { hjsonCodec } from "./serializers/codecs/hjson.js";
-// Individual codec factories
-export { jsonCodec } from "./serializers/codecs/json.js";
-export { json5Codec } from "./serializers/codecs/json5.js";
-export { jsoncCodec } from "./serializers/codecs/jsonc.js";
-export type { ParsedLine } from "./serializers/codecs/jsonl.js";
-export { jsonlCodec, jsonlDecodeLines } from "./serializers/codecs/jsonl.js";
-export type {
-	CompiledTemplate,
-	ProseCodecOptions,
-	ProseSegment,
-} from "./serializers/codecs/prose.js";
-export { proseCodec } from "./serializers/codecs/prose.js";
-export { tomlCodec } from "./serializers/codecs/toml.js";
-export { toonCodec } from "./serializers/codecs/toon.js";
-export { yamlCodec } from "./serializers/codecs/yaml.js";
-export type {
-	FormatCodec,
-	FormatOptions,
-} from "./serializers/format-codec.js";
-// FormatCodec compositor and types
-export {
-	makeSerializerLayer,
-	mergeSerializerWithPluginCodecs,
-} from "./serializers/format-codec.js";
-// Codec inference from config
-export { inferCodecsFromConfig } from "./serializers/infer-codecs.js";
-// Preset Layers
-export {
-	AllTextFormatsLayer,
-	DefaultSerializerLayer,
-} from "./serializers/presets.js";
-export type { SerializerRegistryShape } from "./serializers/serializer-service.js";
-// Serializer registry service
-export {
-	getSupportedExtensions,
-	SerializerRegistry as SerializerRegistryService,
-} from "./serializers/serializer-service.js";
-
-// ============================================================================
-// Data Transformation Utilities
-// ============================================================================
-
-export {
-	arrayToMap,
-	arrayToObject,
-	extractCollectionsForFile,
-	extractCollectionsFromMaps,
-	getConfigFilePaths,
-	groupByFile,
-	isCollectionPersistent,
-	mapToArray,
-	mapToObject,
-	mergeFileDataIntoDataset,
-	mergeFileDataIntoMaps,
-	objectToArray,
-	objectToMap,
-} from "./storage/transforms.js";
-
-// ============================================================================
-// Path Utilities
-// ============================================================================
-
-export { getFileExtension } from "./utils/path.js";
-
-// ============================================================================
-// Computed Field Types
-// ============================================================================
-
-// Computed field resolution functions
-export {
-	hasSelectedComputedFields,
-	resolveComputedFields,
-	resolveComputedStream,
-	resolveComputedStreamWithLazySkip,
-	stripComputedFields,
-} from "./operations/query/resolve-computed.js";
-export type {
-	ComputedFieldDefinition,
-	ComputedFieldKeys,
-	ComputedFieldsConfig,
-	InferComputedFields,
-	WithComputed,
-} from "./types/computed-types.js";
-
-// ============================================================================
-// Search Types
-// ============================================================================
-
-// Search index functions
-export {
-	addToSearchIndex,
-	buildSearchIndex,
-	lookupSearchIndex,
-	removeFromSearchIndex,
-	resolveWithSearchIndex,
-	updateInSearchIndex,
-} from "./indexes/search-index.js";
+	EntitySchema,
+	InferEncoded,
+	InferEntity,
+} from "./types/schema-types.js";
 export type {
 	SearchConfig,
 	SearchIndexMap,
 	SearchScore,
 } from "./types/search-types.js";
 export { SEARCH_SCORE_KEY, STOP_WORDS } from "./types/search-types.js";
-
-// ============================================================================
-// ID Generation Utilities
-// ============================================================================
-
-export type { IdGeneratorConfig } from "./utils/id-generator.js";
-export {
-	CollectionIdGenerators,
-	compareIds,
-	createIdGenerator,
-	defaultIdConfig,
-	extractTimestamp,
-	extractType,
-	generateId,
-	generateNanoId,
-	generatePrefixedId,
-	generateTimestampId,
-	generateTypedId,
-	generateULID,
-	generateUUID,
-	isValidId,
-	isValidIdFormat,
-} from "./utils/id-generator.js";
-
-// ============================================================================
-// Plugin System Types
-// ============================================================================
-
-// Plugin errors
-export { PluginError } from "./errors/plugin-errors.js";
 export type {
-	CustomIdGenerator,
-	CustomOperator,
-	GlobalHooksConfig,
-	PluginRegistry,
-	ProseQLPlugin,
-} from "./plugins/plugin-types.js";
-
-// Plugin validation
-export {
-	validateDependencies,
-	validateOperatorConflicts,
-	validatePlugin,
-} from "./plugins/plugin-validation.js";
+	ApplyPopulateObject,
+	ApplySelectAndPopulate,
+	ApplySelectConfig,
+	DatasetFor,
+	GenerateDatabase,
+	GenerateDatabaseWithPersistence,
+	PopulateConfig,
+	QueryConfig,
+	QueryReturnType,
+	RelationshipDef,
+	ResolveRelationships,
+	RuntimeEntityFromCollection,
+	SelectConfig,
+	SmartCollection,
+	SortConfig,
+	WhereClause,
+} from "./types/types.js";
+export type { IdGeneratorConfig } from "./utils/id-generator.js";
+export { getFileExtension, joinPath, normalizePath } from "./utils/path.js";

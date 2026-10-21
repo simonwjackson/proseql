@@ -1,16 +1,18 @@
 # Project: proseql
 
-Type-safe in-memory database that persists to plain text files (JSON/YAML/TOML/etc.), built on Effect.
+Rust-first type-safe database with plain-text persistence. Rust is the only database engine. The Promise API uses Rust/WASM; the Effect API adapts that engine. Native Rust applications use proseql-native.
 
 ## Workspace Structure
 
 This is a Bun workspace monorepo with the following packages:
 
-- `@proseql/core` — shared types, schemas, errors, and the legacy TypeScript core
+- `@proseql/core` — shared contracts, schemas, errors, configuration normalization and codecs; no database runtime
 - `@proseql/engine` — Promise-first Rust/WASM database engine
 - `@proseql/effect` — Effect adapter over the Rust/WASM engine
 - `@proseql/browser` — browser engine entry point and browser storage hosts
 - `@proseql/node` — Node.js storage adapter
+- `@proseql/ai` — AI tool definitions and executor over the Rust-backed Effect API
+- `@proseql/cli` — command-line queries and persistence through the Effect API
 - `@proseql/rest` — REST API handlers (framework-agnostic)
 - `@proseql/rpc` — client-safe Effect 4 RPC definitions, with WASM-backed handlers under `@proseql/rpc/server`
 
@@ -18,19 +20,12 @@ All Effect declarations are pinned to exactly `effect@4.0.0-beta.103`. RPC uses 
 
 ## IMPORTANT: Effect Reference Codebase
 
-A local clone of the Effect library lives at `./effect/`. **You MUST explore this codebase before implementing any task.** Do not rely on your training data for Effect APIs — the library evolves rapidly and your knowledge may be stale.
+`./effect/` is an old Effect **3.19.16** reference clone. It is not the API used by this project. Read the installed `node_modules/effect/src/` for the pinned **4.0.0-beta.103** before implementing Effect code.
 
-Before writing any Effect code:
-
-1. **Search the real source** in `./effect/packages/effect/src/` for the modules you plan to use (e.g., `Schema.ts`, `Stream.ts`, `Ref.ts`, `Data.ts`, `Context.ts`, `Layer.ts`)
-2. **Read the actual type signatures** — do not guess parameter order, generic constraints, or method names
-3. **Check `./effect/packages/effect/test/`** for usage examples of the APIs you need
-4. **Verify imports** — everything should import from `"effect"` (single package in Effect 3.x)
-
-Key source paths:
-- `./effect/packages/effect/src/` — core module source (Schema, Stream, Ref, Data, Effect, Layer, Context, etc.)
-- `./effect/packages/effect/test/` — test files with real usage patterns
-- `./effect/packages/effect/src/internal/` — internal implementations (useful for understanding behavior)
+1. Search the real module source in `node_modules/effect/src/` (for example `Effect.ts`, `Schema.ts`, `Stream.ts`, `Scope.ts`, `Context.ts`, `Layer.ts`).
+2. Read the actual signatures. Do not guess parameter order, constraints or names.
+3. Read the examples in that source and the project's tests. The old clone's tests are not beta.103 examples.
+4. Import public APIs from `"effect"`; RPC uses `"effect/unstable/rpc"`.
 
 ## Build & Test
 
@@ -54,26 +49,29 @@ task name become underscores) and add the name to `taskNames`.
 ## Important Files
 
 Core package (`packages/core/src/`):
-- `index.ts` — main exports
-- `factories/database.ts` — database factory
-- `types/types.ts` — type system
-- `types/database-config-types.ts` — config types
-- `operations/` — query and CRUD operations
-- `storage/` — persistence layer (adapters, storage service)
-- `serializers/` — JSON/YAML/TOML/JSON5/JSONC/Hjson/TOON codecs
-- `errors/` — tagged error types
-- `indexes/` — index management
-- `migrations/` — schema migration system
-- `transactions/` — transaction support
-- `hooks/` — lifecycle hooks
+- `index.ts` — shared public contract only
+- `types/` — database, query, CRUD, relationship and configuration types
+- `storage/source-config.ts` — source types and normalization
+- `storage/document-types.ts` — graph diagnostics and provenance contracts
+- `storage/storage-service.ts` — storage adapter tag and Shape
+- `serializers/` — codecs, serializer registry tag, layers and inference
+- `errors/` — exact tagged error classes
+- `plugins/` — plugin contracts and pure configuration validation
 
-Node package (`packages/node/src/`):
-- `index.ts` — re-exports core + Node-specific exports
-- `node-adapter-layer.ts` — Node.js file system adapter
+Runtime packages:
+- `packages/engine/src/database.ts` — Promise boundary over Rust/WASM
+- `packages/engine/src/host/` — host-side load/save, source assembly and migration orchestration, not a database engine
+- `packages/effect/src/database.ts` — Effect and Stream adapter
+- `packages/node/src/node-adapter-layer.ts` — thin adapter over the engine's Node storage host
 
 Tests:
-- `packages/core/tests/` — core tests (~1590 tests)
-- `packages/node/tests/` — Node adapter tests
+- `packages/core/tests/` — shared codecs, configuration and type contracts
+- `packages/core/tsconfig.tests.json` — compile-time suites, including the former corpus type-only skips
+- `packages/effect/tests/` — runtime behaviour and property tests directly on Rust/WASM
+- `packages/engine/tests/` — Promise boundary, projection and host orchestration tests
+- `packages/{node,browser,cli,rest,rpc,ai}/tests/` — integration contracts
+- `packages/effect/tests/MIGRATED-TESTS.md` — exact test migration and removal ledger; use current runner output for counts
+- `nix run .#parity-gate` — shared typecheck, direct Effect tests and all examples; no transformed corpus, xfails or skip list
 
 ## Conventions
 
@@ -82,7 +80,7 @@ Tests:
 - Use `Effect.gen(function* () { ... })` with `yield*`
 - Errors extend `Data.TaggedError("Name")<{ fields }>`
 - Schemas use `Schema.Struct({ ... })` not `Schema.Class`
-- State uses `Ref<ReadonlyMap<string, T>>`
+- Rust owns database state. Do not add a TypeScript database engine.
 - All fields are `readonly`
 
 ## Nix Development
@@ -109,9 +107,10 @@ implementation layer for the proseQL engine rewrite (see
 crates/
 ├── Cargo.toml                    # workspace root
 ├── proseql-engine/               # platform-blind core: descriptor, value, errors, validator
-├── proseql-formats/              # codec crates (JSON/YAML/TOML/etc.) — added in U5
-├── proseql-storage/              # storage-host trait + native fs/notify — added in U5
-└── proseql-wasm/                 # wasm-bindgen boundary crate — added in U8
+├── proseql-formats/              # codec crates (JSON/YAML/TOML/etc.)
+├── proseql-storage/              # storage-host trait + native fs/notify
+├── proseql-native/               # native database runtime, source hosts and callback registry
+└── proseql-wasm/                 # wasm-bindgen boundary crate
 ```
 
 ### Key design rules for the Rust codebase
@@ -119,7 +118,7 @@ crates/
 **TS types are the contract; Rust implements the semantics.**
 The TypeScript type layer in `packages/core/src/types/` is the compile-time
 contract for all consumers.  The Rust engine's observable behaviour must match
-that contract, as verified by the conformance test corpus (U9 parity gate).
+that contract, as verified by Rust conformance tests and direct engine/Effect tests.
 Any divergence is a bug in the Rust implementation, not a re-definition of the
 type surface.
 
@@ -135,7 +134,7 @@ type surface.
   `Unknown` are represented as `SchemaNode::Unsupported { reason }` and rejected
   loudly at runtime.
 - **`optional` ≠ `null`** — `Schema.optional(T)` expands to `T | undefined`
-  (source: `effect/packages/effect/src/Schema.ts`, `optional()` function);
+  (source: `node_modules/effect/src/Schema.ts`, `optional()` function);
   JSON `null` is NOT equivalent to absent.  The engine rejects `null` for
   `Optional(T)` fields unless `T` itself is `NullOr(...)`.
 - **`cause` fields use `Option<serde_json::Value>`** — mirrors TS `cause?: unknown`;

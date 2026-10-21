@@ -16,6 +16,20 @@ describe("release readiness wiring", () => {
 		);
 	});
 
+	it("builds and coordinates the AI package at 1.0.0", () => {
+		const config = JSON.parse(readRootFile("tsconfig.json")) as {
+			readonly references: ReadonlyArray<{ readonly path: string }>;
+		};
+		expect(config.references.map(({ path }) => path)).toContain(
+			"./packages/ai",
+		);
+		const manifest = JSON.parse(readRootFile("packages/ai/package.json")) as {
+			readonly version: string;
+		};
+		expect(manifest.version).toBe("1.0.0");
+		expect(readRootFile("scripts/release-manifest.ts")).toContain('"ai"');
+	});
+
 	it("pins the compiler and never delegates TypeScript selection to bunx", () => {
 		const manifest = JSON.parse(readRootFile("package.json")) as {
 			readonly devDependencies: Readonly<Record<string, string>>;
@@ -44,24 +58,16 @@ describe("release readiness wiring", () => {
 	it("runs first-release behavior and package contracts in the normal test gate", () => {
 		const flake = readRootFile("flake.nix");
 		for (const path of [
-			"packages/engine/tests/boundary-values.test.ts",
-			"packages/engine/tests/browser-entry.test.ts",
-			"packages/engine/tests/browser-persistence-concurrency.test.ts",
-			"packages/engine/tests/engine-u8.test.ts",
-			"packages/engine/tests/engine.test.ts",
-			"packages/engine/tests/loader.test.ts",
-			"packages/engine/tests/materialized-projection.test.ts",
-			"packages/effect/tests/effect.test.ts",
-			"packages/browser/tests/browser-entry.test.ts",
-			"packages/rpc/tests/rpc-group.test.ts",
-			"packages/rpc/tests/rpc-handlers.test.ts",
-			"packages/rpc/tests/rpc-streaming.test.ts",
-			"scripts/verify-package-artifacts.test.ts",
-			"scripts/verify-packed-packages.test.ts",
-			"scripts/release.test.ts",
-		]) {
+			"packages/core/tests/",
+			"packages/engine/tests/",
+			"packages/effect/tests/",
+			"packages/browser/tests/",
+			"packages/rpc/tests/",
+			"./scripts/",
+		])
 			expect(flake).toContain(path);
-		}
+		expect(flake).not.toContain("run-corpus.mjs");
+		expect(flake).toContain("packages/core/tsconfig.tests.json");
 	});
 
 	it("builds WASM before running every engine-backed integration suite", () => {
@@ -140,7 +146,8 @@ describe("release readiness wiring", () => {
 		]) {
 			expect(workflow).toContain(`  ${job}`);
 		}
-		expect(workflow).toContain("packages/effect/reports/corpus-report.json");
+		expect(workflow).not.toContain("corpus-report.json");
+		expect(workflow).toContain("nix run .#parity-gate");
 		expect(workflow).toContain("packages/engine/build/wasm-build-report.json");
 		expect(workflow).toContain(".artifacts/packages/tarballs/*.tgz");
 		expect(workflow).toContain("nix run .#browser-budget");

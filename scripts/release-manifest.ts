@@ -5,12 +5,13 @@ import { createHash } from "node:crypto";
 export const COORDINATED_PACKAGE_NAMES = [
 	"core",
 	"engine",
+	"effect",
 	"node",
 	"rest",
-	"effect",
 	"cli",
 	"browser",
 	"rpc",
+	"ai",
 ] as const;
 
 export type CoordinatedPackageName = (typeof COORDINATED_PACKAGE_NAMES)[number];

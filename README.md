@@ -27,7 +27,7 @@
 **prose** /prōz/ *n.* — written language in its ordinary form.
 **SQL** /ˈsiːkwəl/ *n.* — the language of relational databases.
 
-A type-safe relational database that persists to plain text files. No server. No binary blobs. Just files you can read, edit, `git diff`, and actually understand.
+A Rust-first, type-safe relational database that persists to plain text files. Rust is the only database engine. No server. No binary blobs. Just files you can read, edit, `git diff`, and actually understand.
 
 ```
 your-project/
@@ -42,7 +42,11 @@ your-project/
 ## Install
 
 ```sh
-npm install @proseql/core effect@4.0.0-beta.103
+npm install @proseql/effect effect@4.0.0-beta.103
+# For a Promise API over Rust/WASM:
+npm install @proseql/engine
+# For browser storage:
+npm install @proseql/browser effect@4.0.0-beta.103
 # For file persistence (Node.js):
 npm install @proseql/node effect@4.0.0-beta.103
 ```
@@ -137,13 +141,13 @@ Existing records write back to their origin file. New records without an origin 
 
 Document sources are strict by default: duplicate `(collection, id)` records across files and unknown top-level collection keys fail loudly. Use `unknownCollections: "preserve"` only when non-ProseQL top-level data must survive rewrites. YAML writes preserve data and sibling collection sections, not comments or exact original formatting. Node-backed document sources support watcher-driven whole-source reloads for normal `watch()` and `watchById()` subscribers.
 
-Need the opposite shape — many fragments merged into one read-only view rather than independent write targets? A `documentGraph` source overlays an ordered set of directory roots into one effective, read-only collection graph (later fragments win, mixed formats by extension, reload with last-known-good). See the [`@proseql/core`](packages/core/README.md) and [`@proseql/node`](packages/node/README.md) READMEs for details.
+Need the opposite shape — many fragments merged into one read-only view rather than independent write targets? A `documentGraph` source overlays an ordered set of directory roots into one effective, read-only collection graph (later fragments win, mixed formats by extension, reload with last-known-good). See the [storage-host guide](docs/storage-hosts.md) and [`@proseql/node`](packages/node/README.md) README for details.
 
 ## Packages
 
 | Package | Description |
 |---------|-------------|
-| [`@proseql/core`](packages/core/README.md) | Shared TypeScript schemas, types, and the original runtime-agnostic database APIs. |
+| [`@proseql/core`](packages/core/README.md) | Shared contracts, schemas, errors, configuration and codecs. No database runtime. |
 | [`@proseql/engine`](packages/engine/README.md) | Promise-first database execution in Rust/WASM for Node and browsers. |
 | [`@proseql/effect`](packages/effect/README.md) | Effect and Stream APIs over the Rust/WASM engine. |
 | [`@proseql/node`](packages/node/README.md) | Node.js file persistence. File formats, debounced writes, append-only collections. |
@@ -151,6 +155,10 @@ Need the opposite shape — many fragments merged into one read-only view rather
 | [`@proseql/cli`](packages/cli/README.md) | Command-line interface. Query, create, update, delete, migrate, convert formats. |
 | [`@proseql/rest`](packages/rest/README.md) | Framework-agnostic REST API handlers. Route generation, query parsing, error mapping. |
 | [`@proseql/rpc`](packages/rpc/README.md) | Client-safe Effect RPC definitions at the root and Rust/WASM-backed handlers under `./server`; transport and access control stay in the application. |
+
+| [`@proseql/ai`](packages/ai/README.md) | AI tool definitions and execution over the Rust-backed Effect API. |
+
+Core is a shared contract package. Import database factories from `@proseql/effect`, not `@proseql/core`. Native Rust applications use [`crates/proseql-native`](docs/native-sources.md).
 
 ## Examples
 

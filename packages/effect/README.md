@@ -29,7 +29,7 @@ const program = Effect.gen(function* () {
   const db = yield* createEffectDatabase(config, { books: [] })
   yield* db.books.create({ id: "1", title: "Dune" })
   const books = yield* Stream.runCollect(db.books.query())
-  yield* db.close()
+  yield* Effect.promise(() => db.close())
   return Array.from(books)
 })
 

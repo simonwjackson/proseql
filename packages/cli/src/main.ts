@@ -29,7 +29,7 @@ import { discoverConfig } from "./config/discovery.js";
 import { loadConfig } from "./config/loader.js";
 import { format, type OutputFormat } from "./output/formatter.js";
 
-const VERSION = "0.16.0";
+const VERSION = "1.0.0";
 
 /**
  * Parsed CLI arguments

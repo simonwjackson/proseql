@@ -32,7 +32,8 @@ use crate::query::{
 };
 use crate::relationships::{
     helpers::{
-        col_nf, fk_field_names, payload_touches_fk_field, validate_fk, validate_fk_with_owner_ids, validate_delete_constraints,
+        col_nf, fk_field_names, payload_touches_fk_field, validate_delete_constraints, validate_fk,
+        validate_fk_with_owner_ids,
     },
     Database,
 };
@@ -1872,8 +1873,15 @@ impl Database {
         skip_duplicates: bool,
         validate_relationships: bool,
     ) -> Result<CreateManyResult, EngineError> {
-        let owner = self.collections.get(collection).ok_or_else(|| col_nf(collection))?;
-        let relationships = if validate_relationships { owner.descriptor.relationships.clone() } else { vec![] };
+        let owner = self
+            .collections
+            .get(collection)
+            .ok_or_else(|| col_nf(collection))?;
+        let relationships = if validate_relationships {
+            owner.descriptor.relationships.clone()
+        } else {
+            vec![]
+        };
         let owner_ids = owner_ids_for_fk(collection, &relationships, &self.collections);
 
         let internal = self
@@ -2079,9 +2087,20 @@ impl Database {
         limit: Option<usize>,
     ) -> Result<DeleteManyResult, EngineError> {
         if !soft {
-            let owner = self.collections.get(collection).ok_or_else(|| col_nf(collection))?;
-            for row in owner.list().into_iter().filter(|row| matches_where_with_registry(row, &where_clause, Some(self.registry.as_ref()))).take(limit.unwrap_or(usize::MAX)) {
-                if let Some(id) = row.get("id").and_then(Value::as_str) { validate_delete_constraints(collection, id, &self.collections)?; }
+            let owner = self
+                .collections
+                .get(collection)
+                .ok_or_else(|| col_nf(collection))?;
+            for (_, row) in owner
+                .entries()
+                .filter(|(_, row)| {
+                    matches_where_with_registry(row, &where_clause, Some(self.registry.as_ref()))
+                })
+                .take(limit.unwrap_or(usize::MAX))
+            {
+                if let Some(id) = row.get("id").and_then(Value::as_str) {
+                    validate_delete_constraints(collection, id, &self.collections)?;
+                }
             }
         }
         let result = self

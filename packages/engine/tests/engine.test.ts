@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import {
 	DuplicateKeyError,
 	HookError,
-	createPersistentEffectDatabase,
 	inferCodecsFromConfig,
 	makeSerializerLayer,
 } from "@proseql/core";
@@ -73,7 +72,7 @@ beforeAll(() => {
 }, 60_000);
 
 describe("@proseql/engine", () => {
-	it("round-trips a quickstart flow and matches active TS file bytes for json + yaml", async () => {
+	it("round-trips a quickstart flow and matches frozen file bytes for json + yaml", async () => {
 		const engineDir = await mkdtemp(join(tmpdir(), "proseql-engine-wasm-"));
 		const referenceDir = await mkdtemp(join(tmpdir(), "proseql-engine-ref-"));
 		try {
@@ -87,55 +86,27 @@ describe("@proseql/engine", () => {
 					schema: BookSchema,
 					file: join(engineDir, "books.json"),
 					relationships: {
-						author: { type: "ref" as const, target: "authors", foreignKey: "authorId" },
+						author: {
+							type: "ref" as const,
+							target: "authors",
+							foreignKey: "authorId",
+						},
 					},
 				},
 			} as const;
-			const referenceConfig = {
-				authors: {
-					schema: AuthorSchema,
-					file: join(referenceDir, "authors.yaml"),
-					relationships: {},
-				},
-				books: {
-					schema: BookSchema,
-					file: join(referenceDir, "books.json"),
-					relationships: {
-						author: { type: "ref" as const, target: "authors", foreignKey: "authorId" },
-					},
-				},
-			} as const;
+			const referenceFiles = {
+				authors: "a1:\n  id: a1\n  name: Frank Herbert\n",
+				books:
+					'{\n  "b1": {\n    "id": "b1",\n    "title": "Dune",\n    "year": 1966,\n    "authorId": "a1"\n  }\n}',
+			};
 
-			const referenceLayer = Layer.merge(
-				makeNodeEngineStorageLayer(),
-				makeSerializerLayer(inferCodecsFromConfig(referenceConfig)),
+			const engineDb = await createPersistentEngineDatabase(
+				engineConfig,
+				undefined,
+				{
+					writeDebounce: 5,
+				},
 			);
-			const referenceFiles = await Effect.runPromise(
-				Effect.scoped(
-					Effect.gen(function* () {
-						const referenceDb = yield* createPersistentEffectDatabase(referenceConfig, undefined, {
-							writeDebounce: 5,
-						});
-						yield* referenceDb.authors.create({ id: "a1", name: "Frank Herbert" });
-						yield* referenceDb.books.create({
-							id: "b1",
-							title: "Dune",
-							year: 1965,
-							authorId: "a1",
-						});
-						yield* referenceDb.books.update("b1", { year: { $increment: 1 } });
-						yield* Effect.tryPromise(() => referenceDb.flush());
-						return yield* Effect.all({
-							authors: Effect.tryPromise(() => readFile(join(referenceDir, "authors.yaml"), "utf8")),
-							books: Effect.tryPromise(() => readFile(join(referenceDir, "books.json"), "utf8")),
-						});
-					}),
-				).pipe(Effect.provide(referenceLayer)),
-			);
-
-			const engineDb = await createPersistentEngineDatabase(engineConfig, undefined, {
-				writeDebounce: 5,
-			});
 			await engineDb.authors.create({ id: "a1", name: "Frank Herbert" });
 			await engineDb.books.create({
 				id: "b1",
@@ -148,10 +119,16 @@ describe("@proseql/engine", () => {
 				populate: { author: true },
 				select: { title: true, author: { name: true } },
 			});
-			expect(engineQuery).toEqual([{ title: "Dune", author: { name: "Frank Herbert" } }]);
+			expect(engineQuery).toEqual([
+				{ title: "Dune", author: { name: "Frank Herbert" } },
+			]);
 			await engineDb.flush();
-			expect(await readFile(join(engineDir, "authors.yaml"), "utf8")).toBe(referenceFiles.authors);
-			expect(await readFile(join(engineDir, "books.json"), "utf8")).toBe(referenceFiles.books);
+			expect(await readFile(join(engineDir, "authors.yaml"), "utf8")).toBe(
+				referenceFiles.authors,
+			);
+			expect(await readFile(join(engineDir, "books.json"), "utf8")).toBe(
+				referenceFiles.books,
+			);
 			await engineDb.close();
 		} finally {
 			await rm(engineDir, { recursive: true, force: true });
@@ -161,7 +138,9 @@ describe("@proseql/engine", () => {
 
 	it("round-trips reserved boundary sentinel shapes through create/query/update/persistence and preserves undefined where semantics", async () => {
 		const engineDir = await mkdtemp(join(tmpdir(), "proseql-engine-boundary-"));
-		const referenceDir = await mkdtemp(join(tmpdir(), "proseql-engine-boundary-ref-"));
+		const referenceDir = await mkdtemp(
+			join(tmpdir(), "proseql-engine-boundary-ref-"),
+		);
 		const created = {
 			id: "r1",
 			sentinel: { __proseqlUndefined__: 1 },
@@ -181,8 +160,14 @@ describe("@proseql/engine", () => {
 				sentinel: { __proseqlUndefined__: 12 },
 				escaped: { __proseqlEscaped__: "nested-update" },
 			},
-			sentinelArray: [{ __proseqlUndefined__: 13 }, { __proseqlUndefined__: 14 }],
-			escapedArray: [{ __proseqlEscaped__: "beta" }, { __proseqlEscaped__: "gamma" }],
+			sentinelArray: [
+				{ __proseqlUndefined__: 13 },
+				{ __proseqlUndefined__: 14 },
+			],
+			escapedArray: [
+				{ __proseqlEscaped__: "beta" },
+				{ __proseqlEscaped__: "gamma" },
+			],
 		} as const;
 		const presentOptional = {
 			id: "r2",
@@ -204,20 +189,20 @@ describe("@proseql/engine", () => {
 					relationships: {},
 				},
 			} as const;
-			const referenceConfig = {
-				records: {
-					schema: BoundaryRecordSchema,
-					file: join(referenceDir, "records.json"),
-					relationships: {},
-				},
-			} as const;
 
-			const engineDb = await createPersistentEngineDatabase(engineConfig, undefined, { writeDebounce: 5 });
+			const engineDb = await createPersistentEngineDatabase(
+				engineConfig,
+				undefined,
+				{ writeDebounce: 5 },
+			);
 			await engineDb.records.create(created);
 			await engineDb.records.create(presentOptional);
-			expect(await engineDb.records.query({ where: { optional: { $eq: undefined } }, sort: { id: "asc" } })).toEqual([
-				created,
-			]);
+			expect(
+				await engineDb.records.query({
+					where: { optional: { $eq: undefined } },
+					sort: { id: "asc" },
+				}),
+			).toEqual([created]);
 			await engineDb.records.update("r1", {
 				sentinel: { $set: updated.sentinel },
 				escaped: { $set: updated.escaped },
@@ -229,38 +214,25 @@ describe("@proseql/engine", () => {
 			await engineDb.flush();
 			await engineDb.close();
 
-			const reopened = await createPersistentEngineDatabase(engineConfig, undefined, { writeDebounce: 5 });
+			const reopened = await createPersistentEngineDatabase(
+				engineConfig,
+				undefined,
+				{ writeDebounce: 5 },
+			);
 			expect(await reopened.records.findById("r1")).toEqual(updated);
-			expect(await reopened.records.query({ where: { optional: { $eq: undefined } }, sort: { id: "asc" } })).toEqual([
-				updated,
-			]);
+			expect(
+				await reopened.records.query({
+					where: { optional: { $eq: undefined } },
+					sort: { id: "asc" },
+				}),
+			).toEqual([updated]);
 			await reopened.close();
 
-			const referenceLayer = Layer.merge(
-				makeNodeEngineStorageLayer(),
-				makeSerializerLayer(inferCodecsFromConfig(referenceConfig)),
+			const referenceBytes =
+				'{\n  "r1": {\n    "id": "r1",\n    "sentinel": {\n      "__proseqlUndefined__": 11\n    },\n    "escaped": {\n      "__proseqlEscaped__": "update"\n    },\n    "nested": {\n      "sentinel": {\n        "__proseqlUndefined__": 12\n      },\n      "escaped": {\n        "__proseqlEscaped__": "nested-update"\n      }\n    },\n    "sentinelArray": [\n      {\n        "__proseqlUndefined__": 13\n      },\n      {\n        "__proseqlUndefined__": 14\n      }\n    ],\n    "escapedArray": [\n      {\n        "__proseqlEscaped__": "beta"\n      },\n      {\n        "__proseqlEscaped__": "gamma"\n      }\n    ]\n  },\n  "r2": {\n    "id": "r2",\n    "sentinel": {\n      "__proseqlUndefined__": 21\n    },\n    "escaped": {\n      "__proseqlEscaped__": "other"\n    },\n    "nested": {\n      "sentinel": {\n        "__proseqlUndefined__": 22\n      },\n      "escaped": {\n        "__proseqlEscaped__": "nested-other"\n      }\n    },\n    "sentinelArray": [\n      {\n        "__proseqlUndefined__": 23\n      }\n    ],\n    "escapedArray": [\n      {\n        "__proseqlEscaped__": "delta"\n      }\n    ],\n    "optional": "present"\n  }\n}';
+			expect(await readFile(join(engineDir, "records.json"), "utf8")).toBe(
+				referenceBytes,
 			);
-			const referenceBytes = await Effect.runPromise(
-				Effect.scoped(
-					Effect.gen(function* () {
-						const referenceDb = yield* createPersistentEffectDatabase(referenceConfig, undefined, {
-							writeDebounce: 5,
-						});
-						yield* referenceDb.records.create(created);
-						yield* referenceDb.records.create(presentOptional);
-						yield* referenceDb.records.update("r1", {
-							sentinel: { $set: updated.sentinel },
-							escaped: { $set: updated.escaped },
-							nested: { $set: updated.nested },
-							sentinelArray: { $set: updated.sentinelArray },
-							escapedArray: { $set: updated.escapedArray },
-						});
-						yield* Effect.tryPromise(() => referenceDb.flush());
-						return yield* Effect.tryPromise(() => readFile(join(referenceDir, "records.json"), "utf8"));
-					}),
-				).pipe(Effect.provide(referenceLayer)),
-			);
-			expect(await readFile(join(engineDir, "records.json"), "utf8")).toBe(referenceBytes);
 		} finally {
 			await rm(engineDir, { recursive: true, force: true });
 			await rm(referenceDir, { recursive: true, force: true });
@@ -275,7 +247,9 @@ describe("@proseql/engine", () => {
 					name: "$prefix",
 					types: ["string"] as const,
 					evaluate: (fieldValue: unknown, operand: unknown) =>
-						typeof fieldValue === "string" && typeof operand === "string" && fieldValue.startsWith(operand),
+						typeof fieldValue === "string" &&
+						typeof operand === "string" &&
+						fieldValue.startsWith(operand),
 				},
 			],
 			idGenerators: [
@@ -303,12 +277,16 @@ describe("@proseql/engine", () => {
 												reason: "underage",
 												message: "Too young",
 											}),
-									  )
-									: Effect.succeed({ ...ctx.data, role: ctx.data.role.toUpperCase() }),
+										)
+									: Effect.succeed({
+											...ctx.data,
+											role: ctx.data.role.toUpperCase(),
+										}),
 						],
 					},
 					computed: {
-						displayName: (user: typeof UserSchema.Type) => `${user.name}:${user.role}`,
+						displayName: (user: typeof UserSchema.Type) =>
+							`${user.name}:${user.role}`,
 					},
 				},
 			} as const,
@@ -316,10 +294,14 @@ describe("@proseql/engine", () => {
 			{ plugins: [plugin] },
 		);
 
-		await expect(db.users.create({ name: "Kid", role: "guest", age: 10 })).rejects.toBeInstanceOf(
-			HookError,
-		);
-		const created = await db.users.create({ name: "Alice", role: "admin", age: 30 });
+		await expect(
+			db.users.create({ name: "Kid", role: "guest", age: 10 }),
+		).rejects.toBeInstanceOf(HookError);
+		const created = await db.users.create({
+			name: "Alice",
+			role: "admin",
+			age: 30,
+		});
 		expect(created.id).toBe("user-1");
 		expect(created.role).toBe("ADMIN");
 		const queried = await db.users.query({
@@ -332,7 +314,16 @@ describe("@proseql/engine", () => {
 	it("emits debounced watch updates and cleans up on unsubscribe", async () => {
 		const db = await createEngineDatabase(
 			{
-				books: { schema: BookSchema, relationships: { author: { type: "ref" as const, target: "authors", foreignKey: "authorId" } } },
+				books: {
+					schema: BookSchema,
+					relationships: {
+						author: {
+							type: "ref" as const,
+							target: "authors",
+							foreignKey: "authorId",
+						},
+					},
+				},
 				authors: { schema: AuthorSchema, relationships: {} },
 			} as const,
 			{
@@ -354,11 +345,13 @@ describe("@proseql/engine", () => {
 	});
 
 	it("reconstructs tagged boundary errors for CRUD failures", async () => {
-		const db = await createEngineDatabase({ users: { schema: UserSchema, relationships: {} } } as const);
+		const db = await createEngineDatabase({
+			users: { schema: UserSchema, relationships: {} },
+		} as const);
 		await db.users.create({ id: "u1", name: "Alice", role: "admin", age: 30 });
-		await expect(db.users.create({ id: "u1", name: "Alice", role: "admin", age: 30 })).rejects.toBeInstanceOf(
-			DuplicateKeyError,
-		);
+		await expect(
+			db.users.create({ id: "u1", name: "Alice", role: "admin", age: 30 }),
+		).rejects.toBeInstanceOf(DuplicateKeyError);
 	});
 
 	it("provides a recursive Node/Bun storage host watcher", async () => {
@@ -366,11 +359,18 @@ describe("@proseql/engine", () => {
 		try {
 			const host = createNodeEngineStorageHost();
 			const events: Array<string | null> = [];
-			const stop = await host.watchDir(root, (event) => events.push(event.filename));
+			const stop = await host.watchDir(root, (event) =>
+				events.push(event.filename),
+			);
 			await host.write(join(root, "nested", "file.txt"), "hello");
 			await new Promise((resolve) => setTimeout(resolve, 150));
 			stop();
-			expect(events.some((filename) => filename?.endsWith("nested") || filename?.endsWith("file.txt"))).toBe(true);
+			expect(
+				events.some(
+					(filename) =>
+						filename?.endsWith("nested") || filename?.endsWith("file.txt"),
+				),
+			).toBe(true);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}

@@ -5,8 +5,8 @@
  * afterDelete, onChange, and hook rejection with HookError.
  */
 
-import type { HooksConfig } from "@proseql/core";
-import { createEffectDatabase, HookError } from "@proseql/core";
+import type { HooksConfig } from "@proseql/effect";
+import { createEffectDatabase, HookError } from "@proseql/effect";
 import { Effect, Schema } from "effect";
 
 // ============================================================================
@@ -186,4 +186,4 @@ async function main() {
 	}
 }
 
-main().catch(console.error);
+main().catch((error) => { console.error(error); process.exitCode = 1; });

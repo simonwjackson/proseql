@@ -41,7 +41,7 @@ import {
 } from "./release-manifest.js";
 import { verifyRegistryCandidates } from "./verify-registry-packages.js";
 
-const VERSION = "0.16.0";
+const VERSION = "1.0.0";
 
 const packageManifest = (
 	packageName: (typeof COORDINATED_PACKAGE_NAMES)[number],
@@ -58,9 +58,7 @@ const workspaceLock = (version: string): string =>
 	`${COORDINATED_PACKAGE_NAMES.map(
 		(name) =>
 			`"packages/${name}": { "name": "@proseql/${name}", "version": "${version}" },`,
-	).join(
-		"\n",
-	)}\n"packages/ai": { "name": "@proseql/ai", "version": "0.5.0" },\n`;
+	).join("\n")}\n`;
 
 const workspaceFiles = (
 	version: string,
@@ -73,10 +71,6 @@ const workspaceFiles = (
 			`${JSON.stringify({ ...packageManifest(name), version })}\n`,
 		);
 	}
-	files.set(
-		"packages/ai/package.json",
-		'{"name":"@proseql/ai","version":"0.5.0"}\n',
-	);
 	files.set("packages/cli/src/main.ts", `const VERSION = "${version}";\n`);
 	files.set("bun.lock", workspaceLock(version));
 	files.set(
@@ -221,12 +215,13 @@ describe("coordinated release manifest", () => {
 		expect(COORDINATED_PACKAGE_NAMES).toEqual([
 			"core",
 			"engine",
+			"effect",
 			"node",
 			"rest",
-			"effect",
 			"cli",
 			"browser",
 			"rpc",
+			"ai",
 		]);
 		expect(PUBLISH_ORDER).toEqual(COORDINATED_PACKAGE_NAMES);
 	});
@@ -297,10 +292,11 @@ describe("reversible release preparation", () => {
 		expect(
 			computeBumpType(["fix: repair"], "BREAKING CHANGE: wire format"),
 		).toBe("major");
-		expect(incrementVersion("0.15.0", "minor")).toBe(VERSION);
+		expect(incrementVersion("0.15.0", "major")).toBe(VERSION);
+		expect(incrementVersion("1.0.0", "minor")).toBe("1.1.0");
 	});
 
-	it("updates all eight versions, changelog, and CLI while retaining AI's version", () => {
+	it("updates all nine versions, changelog, and CLI together", () => {
 		const files = new Map<string, string>();
 		for (const name of COORDINATED_PACKAGE_NAMES) {
 			files.set(
@@ -308,10 +304,6 @@ describe("reversible release preparation", () => {
 				`${JSON.stringify(packageManifest(name))}\n`,
 			);
 		}
-		files.set(
-			"packages/ai/package.json",
-			`${JSON.stringify({ name: "@proseql/ai", version: "0.5.0" })}\n`,
-		);
 		files.set("packages/cli/src/main.ts", 'const VERSION = "0.15.0";\n');
 		files.set("bun.lock", workspaceLock("0.15.0"));
 		files.set("CHANGELOG.md", "# Changelog\n\nold\n");
@@ -328,7 +320,7 @@ describe("reversible release preparation", () => {
 		}
 		expect(
 			JSON.parse(updated.get("packages/ai/package.json") ?? "").version,
-		).toBe("0.5.0");
+		).toBe(VERSION);
 		expect(updated.get("packages/cli/src/main.ts")).toContain(
 			`VERSION = "${VERSION}"`,
 		);
@@ -336,7 +328,7 @@ describe("reversible release preparation", () => {
 			`"packages/rpc": { "name": "@proseql/rpc", "version": "${VERSION}" }`,
 		);
 		expect(updated.get("bun.lock")).toContain(
-			'"packages/ai": { "name": "@proseql/ai", "version": "0.5.0" }',
+			`"packages/ai": { "name": "@proseql/ai", "version": "${VERSION}" }`,
 		);
 		expect(updated.get("CHANGELOG.md")).toContain(
 			`## v${VERSION} (2026-08-05)`,
@@ -368,13 +360,13 @@ describe("reversible release preparation", () => {
 			now: () => new Date("2026-08-05T12:00:00.000Z"),
 		};
 		await expect(
-			prepareReleaseVersion({ bump: "minor" }, services),
+			prepareReleaseVersion({ bump: "major" }, services),
 		).rejects.toThrow(/partial write failed/);
 		expect(writes).toEqual([VERSION, "0.15.0"]);
 		expect(
 			JSON.parse(files.get("packages/core/package.json") ?? "").version,
 		).toBe("0.15.0");
-		const retry = await prepareReleaseVersion({ bump: "minor" }, services);
+		const retry = await prepareReleaseVersion({ bump: "major" }, services);
 		expect(retry.version).toBe(VERSION);
 		expect(
 			JSON.parse(files.get("packages/core/package.json") ?? "").version,
@@ -411,7 +403,7 @@ describe("reversible release preparation", () => {
 		expect(release.commit).toBe(commit);
 		expect(
 			events.filter((event) => event.startsWith("available:")),
-		).toHaveLength(8);
+		).toHaveLength(9);
 		expect(events.filter((event) => event === "clean")).toHaveLength(3);
 		expect(events.indexOf("preflight")).toBeGreaterThan(
 			events.lastIndexOf(`available:@proseql/rpc@${VERSION}`),
@@ -683,7 +675,7 @@ describe("direct OIDC publication", () => {
 	it("publishes exact tarballs sequentially, waits boundedly, and fails fast", async () => {
 		const release = preparedRelease();
 		const registry = new RecordingRegistry();
-		registry.visibilityFailures.set("@proseql/core@0.16.0", 2);
+		registry.visibilityFailures.set("@proseql/core@1.0.0", 2);
 		registry.publishErrorAt = "rest";
 		await expect(
 			publishPackages(release, registry, {
@@ -694,12 +686,12 @@ describe("direct OIDC publication", () => {
 		).rejects.toThrow(/registry rejected upload/);
 		expect(
 			registry.calls.filter((call) => call.startsWith("publish:")),
-		).toEqual([
-			"publish:core",
-			"publish:engine",
-			"publish:node",
-			"publish:rest",
-		]);
+		).toEqual(
+			COORDINATED_PACKAGE_NAMES.slice(
+				0,
+				COORDINATED_PACKAGE_NAMES.indexOf("rest") + 1,
+			).map((name) => `publish:${name}`),
+		);
 	});
 
 	it("skips already-published packages at latest and fails on registry mismatches", async () => {
@@ -714,14 +706,7 @@ describe("direct OIDC publication", () => {
 		});
 		// core and engine are skipped; publication resumes in dependency order.
 		expect(resumed.calls.filter((call) => call.startsWith("publish:"))).toEqual(
-			[
-				"publish:node",
-				"publish:rest",
-				"publish:effect",
-				"publish:cli",
-				"publish:browser",
-				"publish:rpc",
-			],
+			COORDINATED_PACKAGE_NAMES.slice(2).map((name) => `publish:${name}`),
 		);
 
 		// Version exists but latest points elsewhere: OIDC cannot fix with dist-tag
@@ -742,7 +727,7 @@ describe("direct OIDC publication", () => {
 
 		// Manifest mismatch on a live version
 		const mismatch = new RecordingRegistry();
-		mismatch.versions.set("@proseql/core@0.16.0", {
+		mismatch.versions.set("@proseql/core@1.0.0", {
 			manifest: packageManifest("core", { "@proseql/rpc": "0.15.0" }),
 			integrity: release.artifacts[0]?.integrity ?? "",
 		});

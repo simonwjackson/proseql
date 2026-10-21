@@ -254,7 +254,7 @@ export type CollectionConfig = {
 };
 
 /**
- * Legacy collection map shape retained internally while factories migrate to
+ * Collection-oriented configuration remains a shared contract alongside
  * source-oriented configuration.
  */
 export type LegacyDatabaseConfig = Record<string, CollectionConfig>;
@@ -283,13 +283,11 @@ export type DatabaseConfig =
 export type ConfiguredCollections<Config> = Config extends {
 	readonly collections: infer Collections extends Record<
 		string,
-		CollectionConfig
+		{ readonly schema: Schema.Top }
 	>;
 }
 	? Collections
-	: Config extends Record<string, CollectionConfig>
-		? Config
-		: never;
+	: Config;
 
 export const isSourceOrientedDatabaseConfig = (
 	config: DatabaseConfig,

@@ -2,6 +2,8 @@
 
 The Rust engine is the database engine. A storage host supplies runtime I/O, not query or mutation logic. TypeScript runtimes use `EngineStorageHost`; native Rust runtimes use [`StorageHost` and `DurableStorageHost`](native-sources.md#write-a-rust-storage-host). Browser storage is one implementation of this boundary.
 
+TypeScript hosts use the internal orchestration layer in `packages/engine/src/host/` for file load/save, document and documentGraph assembly, partitions, codecs and migration previews. The WASM engine plugs into that layer through `EngineStorageHost`. The Rust `proseql-storage` crate implements the same responsibilities natively, with `proseql-native` composing the native runtime. This duplicates persistence orchestration; routing WASM persistence through Rust `proseql-storage` remains a follow-up. Neither host layer owns query, CRUD, index, reactive or transaction execution.
+
 ## TypeScript contract
 
 Import the public types from `@proseql/engine` or `@proseql/engine/browser`:

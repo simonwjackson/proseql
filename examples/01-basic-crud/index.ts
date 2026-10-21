@@ -6,7 +6,7 @@
  * with Effect.catchTag.
  */
 
-import { createEffectDatabase, NotFoundError } from "@proseql/core";
+import { createEffectDatabase, NotFoundError } from "@proseql/effect";
 import { Effect, Schema } from "effect";
 
 // ============================================================================
@@ -188,4 +188,4 @@ async function main() {
 	console.log("Caught with catchTag:", result);
 }
 
-main().catch(console.error);
+main().catch((error) => { console.error(error); process.exitCode = 1; });

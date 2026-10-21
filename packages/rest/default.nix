@@ -4,7 +4,7 @@
 }:
 mkBunDerivation {
   pname = "proseql-rest";
-  version = "0.0.0";
+  version = (builtins.fromJSON (builtins.readFile ./package.json)).version;
   src = ../../.;
   bunNix = ../../bun.nix;
 

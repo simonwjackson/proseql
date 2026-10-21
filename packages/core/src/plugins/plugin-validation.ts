@@ -7,11 +7,6 @@
 import { Effect } from "effect";
 import { PluginError } from "../errors/plugin-errors.js";
 import type { FormatCodec } from "../serializers/format-codec.js";
-import {
-	type CollectionConfig,
-	type DatabaseConfig,
-	getCollectionConfigs,
-} from "../types/database-config-types.js";
 import type {
 	CustomIdGenerator,
 	CustomOperator,
@@ -338,43 +333,3 @@ export const validateOperatorConflicts = (
 // ============================================================================
 // ID Generator Reference Validation
 // ============================================================================
-
-/**
- * Validates that all collection-configured `idGenerator` names exist in the plugin registry.
- * Called at init time to ensure fast failure with clear error messages.
- *
- * @param config - The database configuration with collection configs
- * @param idGenerators - Map of ID generator names to generators from the plugin registry
- * @returns Effect<void, PluginError> - Succeeds if all references are valid, fails with PluginError listing the missing generator
- */
-export const validateIdGeneratorReferences = (
-	config: DatabaseConfig,
-	idGenerators: Map<string, CustomIdGenerator>,
-): Effect.Effect<void, PluginError> => {
-	return Effect.gen(function* () {
-		const collectionConfigs = getCollectionConfigs(config) as Record<
-			string,
-			CollectionConfig
-		>;
-		for (const collectionName of Object.keys(collectionConfigs)) {
-			const collectionConfig = collectionConfigs[collectionName];
-			const idGeneratorName = collectionConfig.idGenerator;
-
-			// Skip collections without idGenerator configured
-			if (idGeneratorName === undefined) {
-				continue;
-			}
-
-			// Check if the referenced generator exists in the registry
-			if (!idGenerators.has(idGeneratorName)) {
-				return yield* Effect.fail(
-					new PluginError({
-						plugin: "(collection config)",
-						reason: "missing_id_generator",
-						message: `Collection '${collectionName}' references idGenerator '${idGeneratorName}' which is not registered by any plugin`,
-					}),
-				);
-			}
-		}
-	});
-};

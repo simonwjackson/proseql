@@ -148,6 +148,18 @@ describe("packed package contract", () => {
 		}
 	});
 
+	it("rejects stale TS database runtime files in the smaller core package", () => {
+		const contract = validContract("core");
+		const files = new Map(contract.files);
+		files.set(
+			"dist/operations/query/filter.js",
+			"export const filterData = () => [];",
+		);
+		expect(() => validatePackedPackage({ ...contract, files })).toThrow(
+			/removed database runtime artifact/,
+		);
+	});
+
 	it.each([
 		[
 			"workspace references",

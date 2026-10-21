@@ -195,13 +195,12 @@ describe("Nested Schema Type Safety", () => {
 		});
 
 		it("should reject invalid nested field names", () => {
-			// @ts-expect-error - 'nonexistent' is not a valid nested field
 			const _invalid1: WhereClause<Book, {}, DB> = {
+				// @ts-expect-error - 'nonexistent' is not a valid nested field
 				metadata: { nonexistent: 100 },
 			};
-
-			// @ts-expect-error - 'invalid' is not a valid field on author
 			const _invalid2: WhereClause<Book, {}, DB> = {
+				// @ts-expect-error - 'invalid' is not a valid field on author
 				author: { invalid: "value" },
 			};
 
@@ -209,13 +208,12 @@ describe("Nested Schema Type Safety", () => {
 		});
 
 		it("should reject wrong types for nested field operators", () => {
-			// @ts-expect-error - views is a number, can't use $startsWith
 			const _invalid1: WhereClause<Book, {}, DB> = {
+				// @ts-expect-error - views is a number, can't use $startsWith
 				metadata: { views: { $startsWith: "100" } },
 			};
-
-			// @ts-expect-error - rating is a number, can't use $contains
 			const _invalid2: WhereClause<Book, {}, DB> = {
+				// @ts-expect-error - rating is a number, can't use $contains
 				metadata: { rating: { $contains: "5" } },
 			};
 
@@ -329,13 +327,12 @@ describe("Nested Schema Type Safety", () => {
 		});
 
 		it("should reject invalid nested field names in updates", () => {
-			// @ts-expect-error - 'nonexistent' is not a valid nested field
 			const _invalid1: UpdateWithOperators<Book> = {
+				// @ts-expect-error - 'nonexistent' is not a valid nested field
 				metadata: { nonexistent: 100 },
 			};
-
-			// @ts-expect-error - 'invalid' is not a valid field on author
 			const _invalid2: UpdateWithOperators<Book> = {
+				// @ts-expect-error - 'invalid' is not a valid field on author
 				author: { invalid: "value" },
 			};
 
@@ -343,18 +340,16 @@ describe("Nested Schema Type Safety", () => {
 		});
 
 		it("should reject invalid operators for nested field types", () => {
-			// @ts-expect-error - $increment not valid for strings
 			const _invalid1: UpdateWithOperators<Book> = {
+				// @ts-expect-error - $increment not valid for strings
 				metadata: { description: { $increment: 1 } },
 			};
-
-			// @ts-expect-error - $toggle not valid for numbers
 			const _invalid2: UpdateWithOperators<Book> = {
+				// @ts-expect-error - $toggle not valid for numbers
 				metadata: { views: { $toggle: true } },
 			};
-
-			// @ts-expect-error - $append string not valid for booleans
 			const _invalid3: UpdateWithOperators<Book> = {
+				// @ts-expect-error - $append string not valid for booleans
 				metadata: { featured: { $append: "true" } },
 			};
 

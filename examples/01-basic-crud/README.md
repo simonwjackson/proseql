@@ -29,5 +29,5 @@ bun run index.ts
 
 ## Dependencies
 
-- `@proseql/core`
+- `@proseql/effect`
 - `effect`

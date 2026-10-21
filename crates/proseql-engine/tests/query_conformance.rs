@@ -2269,6 +2269,16 @@ fn equality_index_narrows_candidates_correctly() {
             json!({"id":"b3","genre":"sci-fi","title":"Foundation","year":1951}),
         ],
     );
+    let plan = proseql_engine::query::explain_query(
+        &col,
+        &query_input(Some(json!({"genre":"sci-fi"})), vec![], None, None, None),
+        &reg,
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(plan).unwrap(),
+        json!({"index_used":"equality","candidate_rows":2,"index_sorted":false})
+    );
     // Query uses indexed field "genre" with equality
     let result = run_query(
         &col,
@@ -2290,6 +2300,22 @@ fn search_index_narrows_candidates_for_covered_fields() {
             json!({"id":"b2","genre":"fantasy","title":"Neuromancer","year":1984}),
             json!({"id":"b3","genre":"sci-fi","title":"Foundation","year":1951}),
         ],
+    );
+    let plan = proseql_engine::query::explain_query(
+        &col,
+        &query_input(
+            Some(json!({"$search":{"query":"dune","fields":["title"]}})),
+            vec![],
+            None,
+            None,
+            None,
+        ),
+        &reg,
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(plan).unwrap(),
+        json!({"index_used":"search","candidate_rows":1,"index_sorted":false})
     );
     // $search on "title" — covered by search_index → uses inverted index
     let result = run_query(

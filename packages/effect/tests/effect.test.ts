@@ -1,3 +1,4 @@
+import { makeInMemoryStorageLayer } from "../../engine/src/host/in-memory-adapter-layer.js";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -12,13 +13,18 @@ import {
 	TransactionError,
 	ValidationError,
 	jsonCodec,
-	makeInMemoryStorageLayer,
 	makeSerializerLayer,
 } from "@proseql/core";
 import { Cause, Data, Effect, Fiber, Layer, Schema, Stream } from "effect";
 import { beforeAll, describe, expect, it } from "vitest";
-import { unsafeSubscriptionEffectToStreamForTests, unsafeLiftPromiseForTests } from "../src/database.js";
-import { createEffectDatabase, createPersistentEffectDatabase } from "../src/index.js";
+import {
+	unsafeSubscriptionEffectToStreamForTests,
+	unsafeLiftPromiseForTests,
+} from "../src/database.js";
+import {
+	createEffectDatabase,
+	createPersistentEffectDatabase,
+} from "../src/index.js";
 import { repoRootFromImportMetaUrl } from "../src/repo-root.js";
 import { WasmEngineDefectError } from "@proseql/engine";
 
@@ -27,7 +33,7 @@ const root = repoRootFromImportMetaUrl(import.meta.url);
 beforeAll(() => {
 	execFileSync("bun", ["packages/engine/scripts/build-wasm.mjs"], {
 		cwd: root,
-		stdio: "inherit"
+		stdio: "inherit",
 	});
 }, 60_000);
 
@@ -37,14 +43,14 @@ const UserSchema = Schema.Struct({
 	age: Schema.Number,
 	companyId: Schema.String,
 	createdAt: Schema.optional(Schema.String),
-	updatedAt: Schema.optional(Schema.String)
+	updatedAt: Schema.optional(Schema.String),
 });
 
 const CompanySchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
 	createdAt: Schema.optional(Schema.String),
-	updatedAt: Schema.optional(Schema.String)
+	updatedAt: Schema.optional(Schema.String),
 });
 
 const BookSchema = Schema.Struct({
@@ -53,24 +59,28 @@ const BookSchema = Schema.Struct({
 	year: Schema.Number,
 	genre: Schema.String,
 	createdAt: Schema.optional(Schema.String),
-	updatedAt: Schema.optional(Schema.String)
+	updatedAt: Schema.optional(Schema.String),
 });
 
 const config = {
 	users: {
 		schema: UserSchema,
 		relationships: {
-			company: { type: "ref" as const, target: "companies", foreignKey: "companyId" }
-		}
+			company: {
+				type: "ref" as const,
+				target: "companies",
+				foreignKey: "companyId",
+			},
+		},
 	},
 	companies: {
 		schema: CompanySchema,
-		relationships: {}
+		relationships: {},
 	},
 	books: {
 		schema: BookSchema,
-		relationships: {}
-	}
+		relationships: {},
+	},
 } as const;
 
 class TestBusinessError extends Data.TaggedError("TestBusinessError")<{
@@ -158,7 +168,7 @@ describe("@proseql/effect", () => {
 						unsubscribeCalls += 1;
 						resolveNext?.({ value: undefined, done: true });
 					}
-				}
+				},
 			};
 		});
 
@@ -169,8 +179,8 @@ describe("@proseql/effect", () => {
 					const stream = yield* watch;
 					expect(activeSubscriptions).toBe(1);
 					void stream;
-				})
-			)
+				}),
+			),
 		);
 		expect(activeSubscriptions).toBe(0);
 		expect(unsubscribeCalls).toBe(1);
@@ -179,30 +189,36 @@ describe("@proseql/effect", () => {
 	it("unsubscribes watchById subscriptions when interrupted after acquisition and before consumption", async () => {
 		let activeSubscriptions = 0;
 		let unsubscribeCalls = 0;
-		const watchById = unsafeSubscriptionEffectToStreamForTests<string | null>(() => {
-			activeSubscriptions += 1;
-			let closed = false;
-			let resolveNext: ((value: IteratorResult<string | null>) => void) | undefined;
-			return {
-				[Symbol.asyncIterator]() {
-					return this;
-				},
-				next: async () => {
-					if (closed) return { value: undefined, done: true } as const;
-					return await new Promise<IteratorResult<string | null>>((resolve) => {
-						resolveNext = resolve;
-					});
-				},
-				unsubscribe: async () => {
-					if (!closed) {
-						closed = true;
-						activeSubscriptions -= 1;
-						unsubscribeCalls += 1;
-						resolveNext?.({ value: undefined, done: true });
-					}
-				}
-			};
-		});
+		const watchById = unsafeSubscriptionEffectToStreamForTests<string | null>(
+			() => {
+				activeSubscriptions += 1;
+				let closed = false;
+				let resolveNext:
+					| ((value: IteratorResult<string | null>) => void)
+					| undefined;
+				return {
+					[Symbol.asyncIterator]() {
+						return this;
+					},
+					next: async () => {
+						if (closed) return { value: undefined, done: true } as const;
+						return await new Promise<IteratorResult<string | null>>(
+							(resolve) => {
+								resolveNext = resolve;
+							},
+						);
+					},
+					unsubscribe: async () => {
+						if (!closed) {
+							closed = true;
+							activeSubscriptions -= 1;
+							unsubscribeCalls += 1;
+							resolveNext?.({ value: undefined, done: true });
+						}
+					},
+				};
+			},
+		);
 
 		expect(activeSubscriptions).toBe(0);
 		await Effect.runPromiseExit(
@@ -211,8 +227,8 @@ describe("@proseql/effect", () => {
 					yield* watchById;
 					expect(activeSubscriptions).toBe(1);
 					return yield* Effect.interrupt;
-				})
-			)
+				}),
+			),
 		);
 		expect(activeSubscriptions).toBe(0);
 		expect(unsubscribeCalls).toBe(1);
@@ -221,19 +237,23 @@ describe("@proseql/effect", () => {
 	it("trusts initial data during bootstrap but still validates normal writes", async () => {
 		const db = await Effect.runPromise(
 			createEffectDatabase(config, {
-				users: [{ id: "u1", name: "Alice", age: "thirty", companyId: "c1" } as any],
+				users: [
+					{ id: "u1", name: "Alice", age: "thirty", companyId: "c1" } as any,
+				],
 				companies: [{ id: "c1", name: "Acme" }],
-				books: []
-			})
+				books: [],
+			}),
 		);
 		expect(await db.users.findById("u1").runPromise).toEqual({
 			id: "u1",
 			name: "Alice",
 			age: "thirty",
-			companyId: "c1"
+			companyId: "c1",
 		});
 		const failure = await Effect.runPromise(
-			db.users.create({ id: "u2", name: "Bob", age: "forty", companyId: "c1" } as any).pipe(Effect.flip)
+			db.users
+				.create({ id: "u2", name: "Bob", age: "forty", companyId: "c1" } as any)
+				.pipe(Effect.flip),
 		);
 		expect(failure).toBeInstanceOf(ValidationError);
 	});
@@ -304,7 +324,9 @@ describe("@proseql/effect", () => {
 						expect(Object.is(queried.negativeZero, -0)).toBe(true);
 						expect(queried.unsafeInteger).toBe(9007199254740992);
 						expect(Object.is(queried.nestedNumbers[0]?.[0], -0)).toBe(true);
-						expect(queried.escapedFloat64Object).toEqual(record.escapedFloat64Object);
+						expect(queried.escapedFloat64Object).toEqual(
+							record.escapedFloat64Object,
+						);
 						yield* Effect.tryPromise(() => db.flush());
 					}),
 				),
@@ -333,7 +355,9 @@ describe("@proseql/effect", () => {
 			expect(Object.is(reopened.nestedNumbers[0]?.[0], 0)).toBe(true);
 			expect(reopened.unsafeInteger).toBe(9007199254740992);
 			expect(reopened.nestedNumbers[1]).toEqual(record.nestedNumbers[1]);
-			expect(reopened.escapedFloat64Object).toEqual(record.escapedFloat64Object);
+			expect(reopened.escapedFloat64Object).toEqual(
+				record.escapedFloat64Object,
+			);
 		} finally {
 			await rm(tmp, { recursive: true, force: true });
 		}
@@ -407,14 +431,23 @@ describe("@proseql/effect", () => {
 				const db = yield* createEffectDatabase(config, {
 					users: [],
 					companies: [{ id: "c1", name: "Acme" }],
-					books: []
+					books: [],
 				});
 
-				yield* db.users.create({ id: "u1", name: "Alice", age: 30, companyId: "c1" });
-				return yield* db.users.create({ id: "u1", name: "Again", age: 31, companyId: "c1" }).pipe(
-					Effect.catchTag("DuplicateKeyError", (error) => Effect.succeed(`${error._tag}:${error.existingId}`))
-				);
-			})
+				yield* db.users.create({
+					id: "u1",
+					name: "Alice",
+					age: 30,
+					companyId: "c1",
+				});
+				return yield* db.users
+					.create({ id: "u1", name: "Again", age: 31, companyId: "c1" })
+					.pipe(
+						Effect.catchTag("DuplicateKeyError", (error) =>
+							Effect.succeed(`${error._tag}:${error.existingId}`),
+						),
+					);
+			}),
 		);
 
 		expect(result).toBe("DuplicateKeyError:u1");
@@ -429,22 +462,30 @@ describe("@proseql/effect", () => {
 						companies: [],
 						books: [
 							{ id: "b1", title: "Dune", year: 1965, genre: "sci-fi" },
-							{ id: "b2", title: "The Hobbit", year: 1937, genre: "fantasy" }
-						]
+							{ id: "b2", title: "The Hobbit", year: 1937, genre: "fantasy" },
+						],
 					});
 
-					const initial = yield* Stream.runCollect(db.books.query({ sort: { year: "asc" } }));
+					const initial = yield* Stream.runCollect(
+						db.books.query({ sort: { year: "asc" } }),
+					);
 					expect(initial.map((book) => book.id)).toEqual(["b2", "b1"]);
 
-					const stream = yield* db.books.watch({ sort: { year: "asc" }, debounceMs: 20 });
-					const fiber = yield* Stream.take(stream, 2).pipe(Stream.runCollect, Effect.forkChild);
+					const stream = yield* db.books.watch({
+						sort: { year: "asc" },
+						debounceMs: 20,
+					});
+					const fiber = yield* Stream.take(stream, 2).pipe(
+						Stream.runCollect,
+						Effect.forkChild,
+					);
 
 					yield* db.books.update("b1", { year: 1966 });
 					yield* db.books.update("b1", { year: 1967 });
 
 					return yield* Fiber.join(fiber);
-				})
-			)
+				}),
+			),
 		);
 
 		expect(emissions).toHaveLength(2);
@@ -512,7 +553,9 @@ describe("@proseql/effect", () => {
 				}
 			).deleteMany({ genre: "missing" }).runPromise;
 			expect(diagnostics().hotDeleteBulkIdsCached).toBe(false);
-			expect(diagnostics().strongStructureLeaseGeneration).toBeGreaterThan(firstGeneration);
+			expect(diagnostics().strongStructureLeaseGeneration).toBeGreaterThan(
+				firstGeneration,
+			);
 			expect(diagnostics().retainedStrongRows).toBe(100);
 
 			await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -751,15 +794,15 @@ describe("@proseql/effect", () => {
 					expect(yield* db.books.findById("b2")).toMatchObject({
 						genre: "nonmatching predicate side effect",
 					});
-				// Direct mutable-reference writes deliberately do not repair indexes.
-				const staleIndex = yield* Stream.runCollect(
-					db.books.query({
-						where: { genre: "nonmatching predicate side effect" },
-					}),
-				);
-				const formalIndex = yield* Stream.runCollect(
-					db.books.query({ where: { genre: "formal update" } }),
-				);
+					// Direct mutable-reference writes deliberately do not repair indexes.
+					const staleIndex = yield* Stream.runCollect(
+						db.books.query({
+							where: { genre: "nonmatching predicate side effect" },
+						}),
+					);
+					const formalIndex = yield* Stream.runCollect(
+						db.books.query({ where: { genre: "formal update" } }),
+					);
 					expect(staleIndex).toEqual([]);
 					expect(formalIndex.map((book) => book.id)).toEqual(["b1"]);
 
@@ -809,7 +852,9 @@ describe("@proseql/effect", () => {
 				expect(book).toBe(canonical[Number(book.id.slice(1))]);
 				if (book.id === "b0") book.genre = "predicate-mutated";
 				if (book.id === "b1") {
-					expect((book as typeof book & { predicateMarker: string }).predicateMarker).toBe("b1");
+					expect(
+						(book as typeof book & { predicateMarker: string }).predicateMarker,
+					).toBe("b1");
 				}
 				if (book.id === "b2") throw defect;
 				return book.id === "b1";
@@ -846,10 +891,9 @@ describe("@proseql/effect", () => {
 				inheritedSetterCalls.push(value);
 			},
 		});
-		const updated = await db.books.updateMany(
-			(book) => book.id === "b2",
-			{ genre: "canonical-fallback" },
-		).runPromise;
+		const updated = await db.books.updateMany((book) => book.id === "b2", {
+			genre: "canonical-fallback",
+		}).runPromise;
 		expect(updated.updated).toHaveLength(1);
 		expect(updated.updated[0]).toMatchObject({
 			id: "b2",
@@ -860,7 +904,8 @@ describe("@proseql/effect", () => {
 			"canonical-fallback",
 		);
 
-		const deleted = await db.books.deleteMany((book) => book.id === "b1").runPromise;
+		const deleted = await db.books.deleteMany((book) => book.id === "b1")
+			.runPromise;
 		expect(deleted.deleted).toEqual([canonical[1]]);
 		expect(deleted.deleted[0]).toBe(canonical[1]);
 		await db.close();
@@ -884,9 +929,12 @@ describe("@proseql/effect", () => {
 			const directDefect = new TypeError(`direct ${method} predicate defect`);
 			const directOperation =
 				method === "updateMany"
-					? directDb.books.updateMany(() => {
-							throw directDefect;
-						}, { genre: "updated" })
+					? directDb.books.updateMany(
+							() => {
+								throw directDefect;
+							},
+							{ genre: "updated" },
+						)
 					: directDb.books.deleteMany(() => {
 							throw directDefect;
 						});
@@ -897,9 +945,12 @@ describe("@proseql/effect", () => {
 			const effectDefect = new TypeError(`effect ${method} predicate defect`);
 			const effectOperation =
 				method === "updateMany"
-					? effectDb.books.updateMany(() => {
-							throw effectDefect;
-						}, { genre: "updated" })
+					? effectDb.books.updateMany(
+							() => {
+								throw effectDefect;
+							},
+							{ genre: "updated" },
+						)
 					: effectDb.books.deleteMany(() => {
 							throw effectDefect;
 						});
@@ -907,7 +958,9 @@ describe("@proseql/effect", () => {
 			expect(exit._tag).toBe("Failure");
 			if (exit._tag === "Failure") {
 				const reason = exit.cause.reasons[0];
-				expect(reason === undefined ? false : Cause.isDieReason(reason)).toBe(true);
+				expect(reason === undefined ? false : Cause.isDieReason(reason)).toBe(
+					true,
+				);
 				if (reason !== undefined && Cause.isDieReason(reason)) {
 					expect(reason.defect).toBe(effectDefect);
 				}
@@ -1036,7 +1089,7 @@ describe("@proseql/effect", () => {
 				const db = yield* createEffectDatabase(config, {
 					users: [{ id: "u1", name: "Alice", age: 30, companyId: "c1" }],
 					companies: [{ id: "c1", name: "Acme" }],
-					books: []
+					books: [],
 				});
 
 				const commitSummary = yield* db.$transaction((tx) =>
@@ -1046,8 +1099,18 @@ describe("@proseql/effect", () => {
 						expect(tx.isActive).toBe(true);
 						expect([...tx.mutatedCollections]).toEqual([]);
 
-						yield* tx.users.create({ id: "u2", name: "Bob", age: 25, companyId: "c1" });
-						yield* tx.books.create({ id: "b1", title: "Dune", year: 1965, genre: "sci-fi" });
+						yield* tx.users.create({
+							id: "u2",
+							name: "Bob",
+							age: 25,
+							companyId: "c1",
+						});
+						yield* tx.books.create({
+							id: "b1",
+							title: "Dune",
+							year: 1965,
+							genre: "sci-fi",
+						});
 						expect([...tx.mutatedCollections]).toEqual(["users", "books"]);
 
 						const streamConstructedWhileActive = tx.users.query({
@@ -1066,7 +1129,9 @@ describe("@proseql/effect", () => {
 							.pipe(Effect.flip);
 						expect(inactiveCreate).toBeInstanceOf(TransactionError);
 						if (inactiveCreate instanceof TransactionError) {
-							expect(inactiveCreate.reason).toBe("transaction is no longer active");
+							expect(inactiveCreate.reason).toBe(
+								"transaction is no longer active",
+							);
 						}
 
 						const inactiveStreamQuery = yield* Stream.runCollect(
@@ -1076,17 +1141,19 @@ describe("@proseql/effect", () => {
 							_tag: "TransactionError",
 							operation: "begin",
 							reason: "transaction is no longer active",
-							message: "Cannot perform operation: transaction is no longer active",
+							message:
+								"Cannot perform operation: transaction is no longer active",
 						});
-						const inactiveCursorQuery = yield* cursorConstructedWhileActive.pipe(
-							Effect.flip,
-						);
+						const inactiveCursorQuery =
+							yield* cursorConstructedWhileActive.pipe(Effect.flip);
 						expect(inactiveCursorQuery).toMatchObject({
 							_tag: "TransactionError",
 							operation: "begin",
 							reason: "transaction is no longer active",
 						});
-						const inactiveFind = yield* tx.users.findById("u1").pipe(Effect.flip);
+						const inactiveFind = yield* tx.users
+							.findById("u1")
+							.pipe(Effect.flip);
 						expect(inactiveFind).toMatchObject({
 							_tag: "TransactionError",
 							reason: "transaction is no longer active",
@@ -1103,57 +1170,77 @@ describe("@proseql/effect", () => {
 						expect(secondCommit).toBeInstanceOf(TransactionError);
 						if (secondCommit instanceof TransactionError) {
 							expect(secondCommit.operation).toBe("commit");
-							expect(secondCommit.reason).toBe("transaction is no longer active");
+							expect(secondCommit.reason).toBe(
+								"transaction is no longer active",
+							);
 						}
 
 						const rollbackAfterCommit = yield* tx.rollback().pipe(Effect.flip);
 						expect(rollbackAfterCommit).toBeInstanceOf(TransactionError);
 						if (rollbackAfterCommit instanceof TransactionError) {
 							expect(rollbackAfterCommit.operation).toBe("rollback");
-							expect(rollbackAfterCommit.reason).toBe("transaction is no longer active");
+							expect(rollbackAfterCommit.reason).toBe(
+								"transaction is no longer active",
+							);
 						}
 
-						return { isActive: tx.isActive, mutated: [...tx.mutatedCollections] };
-					})
+						return {
+							isActive: tx.isActive,
+							mutated: [...tx.mutatedCollections],
+						};
+					}),
 				);
 
-				const rollbackFailure = yield* db.$transaction((tx) =>
-					Effect.gen(function* () {
-						expect(tx.isActive).toBe(true);
-						yield* tx.users.create({ id: "u4", name: "Dana", age: 33, companyId: "c1" });
-						expect([...tx.mutatedCollections]).toEqual(["users"]);
-						const streamConstructedWhileActive = tx.users.query();
-						const cursorConstructedWhileActive = tx.users.query({
-							cursor: { key: "id", limit: 1 },
-						});
-						const explicitRollback = yield* tx.rollback().pipe(Effect.flip);
-						const inactiveStreamQuery = yield* Stream.runCollect(
-							streamConstructedWhileActive,
-						).pipe(Effect.flip);
-						expect(inactiveStreamQuery).toMatchObject({
-							_tag: "TransactionError",
-							operation: "begin",
-							reason: "transaction is no longer active",
-						});
-						const inactiveCursorQuery = yield* cursorConstructedWhileActive.pipe(
-							Effect.flip,
-						);
-						expect(inactiveCursorQuery).toMatchObject({
-							_tag: "TransactionError",
-							operation: "begin",
-							reason: "transaction is no longer active",
-						});
-						return yield* Effect.fail(explicitRollback);
-					})
-				).pipe(Effect.flip);
+				const rollbackFailure = yield* db
+					.$transaction((tx) =>
+						Effect.gen(function* () {
+							expect(tx.isActive).toBe(true);
+							yield* tx.users.create({
+								id: "u4",
+								name: "Dana",
+								age: 33,
+								companyId: "c1",
+							});
+							expect([...tx.mutatedCollections]).toEqual(["users"]);
+							const streamConstructedWhileActive = tx.users.query();
+							const cursorConstructedWhileActive = tx.users.query({
+								cursor: { key: "id", limit: 1 },
+							});
+							const explicitRollback = yield* tx.rollback().pipe(Effect.flip);
+							const inactiveStreamQuery = yield* Stream.runCollect(
+								streamConstructedWhileActive,
+							).pipe(Effect.flip);
+							expect(inactiveStreamQuery).toMatchObject({
+								_tag: "TransactionError",
+								operation: "begin",
+								reason: "transaction is no longer active",
+							});
+							const inactiveCursorQuery =
+								yield* cursorConstructedWhileActive.pipe(Effect.flip);
+							expect(inactiveCursorQuery).toMatchObject({
+								_tag: "TransactionError",
+								operation: "begin",
+								reason: "transaction is no longer active",
+							});
+							return yield* Effect.fail(explicitRollback);
+						}),
+					)
+					.pipe(Effect.flip);
 
-				const users = yield* Stream.runCollect(db.users.query({ sort: { id: "asc" } }));
-				const books = yield* Stream.runCollect(db.books.query({ sort: { id: "asc" } }));
+				const users = yield* Stream.runCollect(
+					db.users.query({ sort: { id: "asc" } }),
+				);
+				const books = yield* Stream.runCollect(
+					db.books.query({ sort: { id: "asc" } }),
+				);
 				return { commitSummary, rollbackFailure, users, books };
-			})
+			}),
 		);
 
-		expect(result.commitSummary).toEqual({ isActive: false, mutated: ["users", "books"] });
+		expect(result.commitSummary).toEqual({
+			isActive: false,
+			mutated: ["users", "books"],
+		});
 		expect(result.rollbackFailure).toBeInstanceOf(TransactionError);
 		if (result.rollbackFailure instanceof TransactionError) {
 			expect(result.rollbackFailure.operation).toBe("rollback");
@@ -1187,50 +1274,79 @@ describe("@proseql/effect", () => {
 				}),
 			),
 		);
-		expect(
-			(await Effect.runPromise(db.companies.findById("c1"))).name,
-		).toBe("Committed");
+		expect((await Effect.runPromise(db.companies.findById("c1"))).name).toBe(
+			"Committed",
+		);
 	});
 
 	it("preserves arbitrary callback errors through $transaction and rolls back", async () => {
-		const customTagged = { _tag: "CustomTransactionFailure", detail: "rollback-tag" } as const;
+		const customTagged = {
+			_tag: "CustomTransactionFailure",
+			detail: "rollback-tag",
+		} as const;
 		const program = Effect.gen(function* () {
 			const db = yield* createEffectDatabase(config, {
 				users: [{ id: "u1", name: "Alice", age: 30, companyId: "c1" }],
 				companies: [{ id: "c1", name: "Acme" }],
-				books: []
+				books: [],
 			});
 
-			const typedFailure = yield* db.$transaction((tx) =>
-				Effect.gen(function* () {
-					yield* tx.users.create({ id: "u2", name: "Bob", age: 25, companyId: "c1" });
-					return yield* Effect.fail(new TestBusinessError({ message: "rollback" }));
-				})
-			).pipe(Effect.flip);
-
-			const stringRecovered = yield* db.$transaction((tx) =>
-				Effect.gen(function* () {
-					yield* tx.users.create({ id: "u3", name: "Cara", age: 20, companyId: "c1" });
-					return yield* Effect.fail("rollback-string");
-				})
-			).pipe(
-				Effect.catchIf((error): error is string => typeof error === "string", (error) =>
-					Effect.succeed(`caught:${error}`)
+			const typedFailure = yield* db
+				.$transaction((tx) =>
+					Effect.gen(function* () {
+						yield* tx.users.create({
+							id: "u2",
+							name: "Bob",
+							age: 25,
+							companyId: "c1",
+						});
+						return yield* Effect.fail(
+							new TestBusinessError({ message: "rollback" }),
+						);
+					}),
 				)
-			);
+				.pipe(Effect.flip);
 
-			const taggedRecovered = yield* db.$transaction((tx) =>
-				Effect.gen(function* () {
-					yield* tx.users.create({ id: "u4", name: "Dana", age: 27, companyId: "c1" });
-					return yield* Effect.fail(customTagged);
-				})
-			).pipe(
-				Effect.catchTag("CustomTransactionFailure", (error) =>
-					Effect.succeed(`caught-tag:${error.detail}`)
+			const stringRecovered = yield* db
+				.$transaction((tx) =>
+					Effect.gen(function* () {
+						yield* tx.users.create({
+							id: "u3",
+							name: "Cara",
+							age: 20,
+							companyId: "c1",
+						});
+						return yield* Effect.fail("rollback-string");
+					}),
 				)
-			);
+				.pipe(
+					Effect.catchIf(
+						(error): error is string => typeof error === "string",
+						(error) => Effect.succeed(`caught:${error}`),
+					),
+				);
 
-			const users = yield* Stream.runCollect(db.users.query({ sort: { id: "asc" } }));
+			const taggedRecovered = yield* db
+				.$transaction((tx) =>
+					Effect.gen(function* () {
+						yield* tx.users.create({
+							id: "u4",
+							name: "Dana",
+							age: 27,
+							companyId: "c1",
+						});
+						return yield* Effect.fail(customTagged);
+					}),
+				)
+				.pipe(
+					Effect.catchTag("CustomTransactionFailure", (error) =>
+						Effect.succeed(`caught-tag:${error.detail}`),
+					),
+				);
+
+			const users = yield* Stream.runCollect(
+				db.users.query({ sort: { id: "asc" } }),
+			);
 			return { typedFailure, stringRecovered, taggedRecovered, users };
 		});
 
@@ -1242,11 +1358,13 @@ describe("@proseql/effect", () => {
 	});
 
 	it("turns unexpected WasmEngineDefectError into an Effect defect, not a typed failure", async () => {
-		const effect = unsafeLiftPromiseForTests(() => Promise.reject(new WasmEngineDefectError("boom")));
+		const effect = unsafeLiftPromiseForTests(() =>
+			Promise.reject(new WasmEngineDefectError("boom")),
+		);
 		await expect(
 			Effect.runPromise(
-				effect.pipe(Effect.catch(() => Effect.succeed("typed-recovery")))
-			)
+				effect.pipe(Effect.catch(() => Effect.succeed("typed-recovery"))),
+			),
 		).rejects.toBeInstanceOf(WasmEngineDefectError);
 	});
 
@@ -1266,14 +1384,14 @@ describe("@proseql/effect", () => {
 		};
 		const layer = Layer.merge(
 			makeInMemoryStorageLayer(store),
-			makeSerializerLayer([customCodec])
+			makeSerializerLayer([customCodec]),
 		);
 		const PersistentUserSchema = Schema.Struct({
 			id: Schema.String,
 			name: Schema.String,
 			age: Schema.Number,
 			createdAt: Schema.optional(Schema.String),
-			updatedAt: Schema.optional(Schema.String)
+			updatedAt: Schema.optional(Schema.String),
 		});
 		await Effect.runPromise(
 			Effect.scoped(
@@ -1283,24 +1401,24 @@ describe("@proseql/effect", () => {
 							users: {
 								schema: PersistentUserSchema,
 								file,
-								relationships: {}
-							}
+								relationships: {},
+							},
 						} as const,
 						undefined,
-						{ writeDebounce: 5 }
+						{ writeDebounce: 5 },
 					);
 					const existing = yield* db.users.findById("u1");
 					expect(existing).toEqual({ id: "u1", name: "Alice", age: 30 });
 					yield* db.users.create({ id: "u2", name: "Bob", age: 25 } as any);
 					yield* Effect.tryPromise(() => db.flush());
-				})
-			).pipe(Effect.provide(layer))
+				}),
+			).pipe(Effect.provide(layer)),
 		);
 		const persisted = store.get(file);
 		expect(persisted?.startsWith("CJSON:")).toBe(true);
 		expect(JSON.parse(persisted!.slice("CJSON:".length))).toEqual({
 			u1: { id: "u1", name: "Alice", age: 30 },
-			u2: expect.objectContaining({ id: "u2", name: "Bob", age: 25 })
+			u2: expect.objectContaining({ id: "u2", name: "Bob", age: 25 }),
 		});
 	});
 
@@ -1393,7 +1511,13 @@ describe("@proseql/effect", () => {
 				}),
 			listDirectory: () => Effect.succeed([] as ReadonlyArray<string>),
 			listRecursive: () => Effect.succeed([] as ReadonlyArray<string>),
-			watchDir: (_path: string, _onChange: (event: { readonly filename: string | null; readonly type: "add" | "change" | "remove" }) => void) =>
+			watchDir: (
+				_path: string,
+				_onChange: (event: {
+					readonly filename: string | null;
+					readonly type: "add" | "change" | "remove";
+				}) => void,
+			) =>
 				Effect.sync(() => {
 					dirWatchCalls += 1;
 					let stopped = false;
@@ -1405,7 +1529,10 @@ describe("@proseql/effect", () => {
 					};
 				}),
 		};
-		const layer = Layer.merge(Layer.succeed(StorageAdapter, adapter), makeSerializerLayer([jsonCodec()]));
+		const layer = Layer.merge(
+			Layer.succeed(StorageAdapter, adapter),
+			makeSerializerLayer([jsonCodec()]),
+		);
 		const plugin = {
 			name: "scope-close-plugin",
 			initialize: () =>
@@ -1437,7 +1564,7 @@ describe("@proseql/effect", () => {
 						} as const,
 						undefined,
 						{ writeDebounce: 5 },
-						{ plugins: [plugin] }
+						{ plugins: [plugin] },
 					);
 					leakedDb = db;
 					yield* db.users.create({ id: "u1", name: "Alice", age: 30 } as any);
@@ -1450,12 +1577,18 @@ describe("@proseql/effect", () => {
 		expect(shutdownCount).toBe(1);
 		expect(fileWatchStops + dirWatchStops).toBe(fileWatchCalls + dirWatchCalls);
 
-		const closable = leakedDb as typeof leakedDb & { close: () => Promise<void> };
+		const closable = leakedDb as typeof leakedDb & {
+			close: () => Promise<void>;
+		};
 		await expect(closable.close()).resolves.toBeUndefined();
 		expect(shutdownCount).toBe(1);
 		expect(fileWatchStops + dirWatchStops).toBe(fileWatchCalls + dirWatchCalls);
-		await expect(Effect.runPromise(leakedDb!.users.findById("u1"))).rejects.toBeInstanceOf(OperationError);
-		await expect(Effect.runPromise(leakedDb!.users.findById("u1"))).rejects.toMatchObject({ reason: "unknown-handle" });
+		await expect(
+			Effect.runPromise(leakedDb!.users.findById("u1")),
+		).rejects.toBeInstanceOf(OperationError);
+		await expect(
+			Effect.runPromise(leakedDb!.users.findById("u1")),
+		).rejects.toMatchObject({ reason: "unknown-handle" });
 	});
 
 	it("defaults persistent root imports to the real Node storage host", async () => {
@@ -1466,7 +1599,7 @@ describe("@proseql/effect", () => {
 			name: Schema.String,
 			age: Schema.Number,
 			createdAt: Schema.optional(Schema.String),
-			updatedAt: Schema.optional(Schema.String)
+			updatedAt: Schema.optional(Schema.String),
 		});
 		try {
 			await Effect.runPromise(
@@ -1477,16 +1610,16 @@ describe("@proseql/effect", () => {
 								users: {
 									schema: PersistentUserSchema,
 									file,
-									relationships: {}
-								}
+									relationships: {},
+								},
 							} as const,
 							{ users: [] },
-							{ writeDebounce: 5 }
+							{ writeDebounce: 5 },
 						);
 						yield* db.users.create({ id: "u1", name: "Alice", age: 30 } as any);
 						yield* Effect.tryPromise(() => db.flush());
-					})
-				)
+					}),
+				),
 			);
 			expect(existsSync(file)).toBe(true);
 			expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({
@@ -1500,15 +1633,17 @@ describe("@proseql/effect", () => {
 								users: {
 									schema: PersistentUserSchema,
 									file,
-									relationships: {}
-								}
+									relationships: {},
+								},
 							} as const,
 							undefined,
-							{ writeDebounce: 5 }
+							{ writeDebounce: 5 },
 						);
-						return yield* Stream.runCollect(db.users.query({ sort: { id: "asc" } }));
-					})
-				)
+						return yield* Stream.runCollect(
+							db.users.query({ sort: { id: "asc" } }),
+						);
+					}),
+				),
 			);
 			expect([...reopened]).toEqual([
 				expect.objectContaining({ id: "u1", name: "Alice", age: 30 }),
@@ -1523,14 +1658,14 @@ describe("@proseql/effect", () => {
 		const file = join(tmp, "users.json");
 		const layer = Layer.merge(
 			makeInMemoryStorageLayer(new Map()),
-			makeSerializerLayer([jsonCodec()])
+			makeSerializerLayer([jsonCodec()]),
 		);
 		const PersistentUserSchema = Schema.Struct({
 			id: Schema.String,
 			name: Schema.String,
 			age: Schema.Number,
 			createdAt: Schema.optional(Schema.String),
-			updatedAt: Schema.optional(Schema.String)
+			updatedAt: Schema.optional(Schema.String),
 		});
 		try {
 			await Effect.runPromise(
@@ -1541,19 +1676,21 @@ describe("@proseql/effect", () => {
 								users: {
 									schema: PersistentUserSchema,
 									file,
-									relationships: {}
-								}
+									relationships: {},
+								},
 							} as const,
 							{ users: [] },
-							{ writeDebounce: 5 }
+							{ writeDebounce: 5 },
 						);
 						yield* db.users.create({ id: "u1", name: "Alice", age: 30 } as any);
 						yield* Effect.tryPromise(() => db.flush());
 						const report = yield* db.$dryRunMigrations();
 						expect(Array.isArray(report.collections)).toBe(true);
-						expect(typeof (db as typeof db & { close: () => Promise<void> }).close).toBe("function");
-					})
-				).pipe(Effect.provide(layer))
+						expect(
+							typeof (db as typeof db & { close: () => Promise<void> }).close,
+						).toBe("function");
+					}),
+				).pipe(Effect.provide(layer)),
 			);
 		} finally {
 			await rm(tmp, { recursive: true, force: true });

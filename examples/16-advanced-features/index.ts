@@ -11,18 +11,12 @@ import type {
 	CustomOperator,
 	Migration,
 	ProseQLPlugin,
-} from "@proseql/core";
+} from "@proseql/effect";
 import {
 	createEffectDatabase,
 	ForeignKeyError,
-	generateNanoId,
-	generatePrefixedId,
-	generateTimestampId,
-	generateTypedId,
-	generateULID,
-	generateUUID,
 	UniqueConstraintError,
-} from "@proseql/core";
+} from "@proseql/effect";
 import { Effect, Schema } from "effect";
 
 // ============================================================================
@@ -30,13 +24,12 @@ import { Effect, Schema } from "effect";
 // ============================================================================
 
 async function idGenerationExample() {
-	console.log("=== ID Generation ===");
-	console.log(`  UUID:        ${generateUUID()}`);
-	console.log(`  NanoId:      ${generateNanoId()}`);
-	console.log(`  ULID:        ${generateULID()}`);
-	console.log(`  Timestamp:   ${generateTimestampId()}`);
-	console.log(`  Prefixed:    ${generatePrefixedId("book")}`);
-	console.log(`  Typed:       ${generateTypedId("book")}`);
+ console.log("=== ID Generation ===");
+ const db = await Effect.runPromise(createEffectDatabase({ books: { schema:Schema.Struct({id:Schema.String,title:Schema.String}),relationships:{} } }));
+ try {
+  const book = await db.books.create({title:"Dune"}).runPromise;
+  console.log(`  Engine-assigned ID: ${book.id}`);
+ } finally { await db.close(); }
 }
 
 // ============================================================================
@@ -257,7 +250,7 @@ async function transactionsExample() {
 			}),
 		)
 		.pipe(
-			Effect.catchAll(() => Effect.succeed("rolled back")),
+			Effect.catch(() => Effect.succeed("rolled back")),
 			Effect.runPromise,
 		);
 	console.log(`  Transaction failed: ${result}`);
@@ -489,4 +482,4 @@ async function main() {
 	await foreignKeyExample();
 }
 
-main().catch(console.error);
+main().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -1,0 +1,17 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"composite": false,
+		"declaration": false,
+		"declarationMap": false
+	},
+	"include": [
+		"src/**/*.d.ts",
+		"tests/computed-types.test.ts",
+		"tests/crud-methods-types.test.ts",
+		"tests/nested-type-safety.test.ts",
+		"tests/query-config-types.test.ts",
+		"../effect/tests/crud/type-safety.test.ts"
+	]
+}

@@ -5,17 +5,9 @@ import {
 	type DocumentGraphDiagnostic,
 	type DocumentGraphRecordProvenance,
 	type DryRunResult,
-	dryRunMigrations,
 	getCollectionConfigs,
 	inferCodecsFromConfig,
 	isSourceOrientedDatabaseConfig,
-	type LoadedPartitions,
-	loadCollectionsFromFile,
-	loadData,
-	loadDataFromDirectory,
-	loadDocumentGraphSources,
-	loadDocumentSources,
-	loadPartitionedSource,
 	type Migration,
 	makeSerializerLayer,
 	mergeSerializerWithPluginCodecs,
@@ -25,15 +17,9 @@ import {
 	OperationError,
 	PluginError,
 	type PluginRegistry,
-	removeEntityFromDirectory,
 	SerializerRegistryService,
 	type SerializerRegistryShape,
 	SourceConfigError,
-	saveCollectionsToFile,
-	saveData,
-	saveDocumentSource,
-	saveEntityToDirectory,
-	savePartitionedSource,
 	TransactionError,
 	ValidationError,
 } from "@proseql/core";
@@ -45,6 +31,26 @@ import {
 	serializeBoundaryValue,
 } from "./boundary-values.js";
 import { reconstructBoundaryError, WasmEngineDefectError } from "./errors.js";
+import { loadDocumentGraphSources } from "./host/document-graph-source.js";
+import {
+	loadDocumentSources,
+	saveDocumentSource,
+} from "./host/document-source.js";
+import { dryRunMigrations } from "./host/migration-runner.js";
+import {
+	type LoadedPartitions,
+	loadPartitionedSource,
+	savePartitionedSource,
+} from "./host/partitioned-source.js";
+import {
+	loadCollectionsFromFile,
+	loadData,
+	loadDataFromDirectory,
+	removeEntityFromDirectory,
+	saveCollectionsToFile,
+	saveData,
+	saveEntityToDirectory,
+} from "./host/persistence-effect.js";
 import { loadWasmBindings, type WasmRuntimeBinding } from "./loader.js";
 import {
 	isCompactMaterializedResultDescriptor,
@@ -1485,7 +1491,7 @@ class EngineRuntime {
 	}
 
 	dispatch<T>(method: string, payload?: unknown): T {
-        assertSupportedUpdateOperators(payload);
+		assertSupportedUpdateOperators(payload);
 		if (!MUTATION_METHODS.has(method))
 			return this.dispatchInternal(method, payload);
 		this.callbackRegistrar.beginMutationDispatch();
@@ -1532,7 +1538,10 @@ class EngineRuntime {
 			Array.isArray(payload.items) &&
 			payload.items.length !== 1 &&
 			!("skipDuplicates" in payload && payload.skipDuplicates === true) &&
-            !("validateRelationships" in payload && payload.validateRelationships === false)
+			!(
+				"validateRelationships" in payload &&
+				payload.validateRelationships === false
+			)
 		) {
 			const fields = this.compactCreateManyFields.get(payload.collection);
 			if (payload.items.every((item) => compactIdentitySource(item, fields))) {
@@ -2654,7 +2663,7 @@ class EngineRuntime {
 		onCommittedFormalMutation?: (value: T) => void,
 	): Promise<T> {
 		try {
-            assertSupportedUpdateOperators(data);
+			assertSupportedUpdateOperators(data);
 			this.assertTransactionWaitAllowed();
 		} catch (error) {
 			return Promise.reject(error);
@@ -3787,7 +3796,7 @@ function buildCollectionFacade(
 				collection: collection.name,
 				items: [...inputs],
 				skipDuplicates: options?.skipDuplicates ?? false,
-                validateRelationships: options?.validateRelationships ?? true,
+				validateRelationships: options?.validateRelationships ?? true,
 			};
 			let value: CreateManyWireResult;
 			let appended: ReadonlyArray<EngineRecord>;
@@ -5562,14 +5571,14 @@ function buildTransactionCollectionFacade(
 				collection: collection.name,
 				items,
 				skipDuplicates: options?.skipDuplicates ?? false,
-                validateRelationships: options?.validateRelationships ?? true,
+				validateRelationships: options?.validateRelationships ?? true,
 			});
 			push({
 				kind: "createMany",
 				collection: collection.name,
 				items,
 				skipDuplicates: options?.skipDuplicates ?? false,
-                validateRelationships: options?.validateRelationships ?? true,
+				validateRelationships: options?.validateRelationships ?? true,
 			});
 			return value;
 		},
@@ -6085,11 +6094,21 @@ function parseBridgeResponse<T>(raw: string): T {
 }
 
 function assertSupportedUpdateOperators(value: unknown): void {
-    if (typeof value !== "object" || value === null) return;
-    for (const [key, item] of Object.entries(value)) {
-        if (key === "$remove" && typeof item === "function") {
-            throw new ValidationError({ message: "Function-valued $remove is not supported by the Rust engine", issues: [{ field: "$remove", message: "Use a concrete value or an explicit $set array instead of a function", value: item }] });
-        }
-        assertSupportedUpdateOperators(item);
-    }
+	if (typeof value !== "object" || value === null) return;
+	for (const [key, item] of Object.entries(value)) {
+		if (key === "$remove" && typeof item === "function") {
+			throw new ValidationError({
+				message: "Function-valued $remove is not supported by the Rust engine",
+				issues: [
+					{
+						field: "$remove",
+						message:
+							"Use a concrete value or an explicit $set array instead of a function",
+						value: item,
+					},
+				],
+			});
+		}
+		assertSupportedUpdateOperators(item);
+	}
 }

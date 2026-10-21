@@ -107,6 +107,23 @@ export function validatePackedPackage({
 		manifest.sideEffects === false,
 		`${expectedName}: sideEffects must be false`,
 	);
+	if (packageName === "core") {
+		for (const path of files.keys()) {
+			assert(
+				!/^dist\/(factories|operations|state|indexes|reactive|transactions|hooks|validators)\//.test(
+					path,
+				),
+				`@proseql/core: removed database runtime artifact ${path}`,
+			);
+			assert(
+				!/^dist\/(storage\/(?:persistence-effect|document-source|document-graph-source|partitioned-source)|migrations\/migration-runner)\./.test(
+					path,
+				),
+				`@proseql/core: removed host runtime artifact ${path}`,
+			);
+		}
+	}
+
 	validateRepository(packageName, manifest.repository);
 	validatePackageFiles(expectedName, manifest.files, files);
 	validatePublicEntries(expectedName, manifest, files);
@@ -729,21 +746,23 @@ export function nodeConsumerSmokeSource(coordinatedVersion: string): string {
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createEffectDatabase } from "@proseql/core";
+import * as coreContract from "@proseql/core";
+import { createEffectDatabase } from "@proseql/effect";
 import { createEngineDatabase } from "@proseql/engine";
 import { createEffectDatabase as createWasmEffectDatabase } from "@proseql/effect";
 import { createNodeDatabase } from "@proseql/node";
 import { createRestHandlers } from "@proseql/rest";
 import { makeRpcGroup } from "@proseql/rpc";
 import { makeRpcHandlers } from "@proseql/rpc/server";
+import { makeReadOnlyTools } from "@proseql/ai";
 import { Effect, Option, Queue, Schema, Stream } from "effect";
 import { RpcClient, RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 const Book = Schema.Struct({ id: Schema.String, title: Schema.String });
 const config = { books: { schema: Book, relationships: {} } };
 const initial = { books: [{ id: "1", title: "Dune" }] };
-const core = await Effect.runPromise(createEffectDatabase(config, initial));
-if ((await Effect.runPromise(Stream.runCollect(core.books.query()))).length !== 1) throw new Error("core failed");
+if ("createEffectDatabase" in coreContract || "createPersistentEffectDatabase" in coreContract) throw new Error("core contains a database runtime");
+if (!(new coreContract.NotFoundError({collection:"books", id:"missing", message:"missing"}) instanceof Error)) throw new Error("core errors failed");
 const engine = await createEngineDatabase(config, initial);
 if ((await engine.books.query()).length !== 1) throw new Error("engine failed");
 await engine.close();
@@ -760,6 +779,7 @@ await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
 })));
 if (!readFileSync(join(dataDir, "books.json"), "utf8").includes("Node")) throw new Error("node persistence failed");
 const restDb = await Effect.runPromise(createEffectDatabase(config, initial));
+if (makeReadOnlyTools(restDb, config).definitions.length === 0) throw new Error("AI tools failed");
 const route = createRestHandlers(config, restDb).find((candidate) => candidate.method === "GET" && candidate.path === "/books");
 if (!route || (await route.handler({ params: {}, query: {} })).status !== 200) throw new Error("REST failed");
 const cli = execFileSync(join(process.cwd(), "node_modules/.bin/proseql"), ["--version"], { encoding: "utf8" });

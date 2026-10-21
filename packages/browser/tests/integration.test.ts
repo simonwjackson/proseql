@@ -1,5 +1,5 @@
+import { createPersistentEffectDatabase } from "@proseql/effect";
 import {
-	createPersistentEffectDatabase,
 	jsonCodec,
 	makeSerializerLayer,
 	StorageAdapterService as StorageAdapter,

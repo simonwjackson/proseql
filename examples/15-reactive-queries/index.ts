@@ -6,7 +6,7 @@
  * Uses Effect.scoped + Fiber to run watch in background while mutating.
  */
 
-import { createEffectDatabase } from "@proseql/core";
+import { createEffectDatabase } from "@proseql/effect";
 import { Chunk, Effect, Fiber, Schema, Stream } from "effect";
 
 // ============================================================================
@@ -77,7 +77,7 @@ const watchFilteredExample = Effect.gen(function* () {
 	// Run the watcher in a background fiber
 	const fiber = yield* Stream.take(stream, 3).pipe(
 		Stream.runCollect,
-		Effect.fork,
+		Effect.forkChild,
 	);
 
 	// Mutate — add a sci-fi book (triggers emission)
@@ -116,7 +116,7 @@ const watchByIdExample = Effect.gen(function* () {
 	// Take 3 emissions: initial + update + delete
 	const fiber = yield* Stream.take(stream, 3).pipe(
 		Stream.runCollect,
-		Effect.fork,
+		Effect.forkChild,
 	);
 
 	// Update the book (triggers emission with updated entity)
@@ -147,4 +147,4 @@ const program = Effect.gen(function* () {
 	yield* watchByIdExample;
 });
 
-Effect.runPromise(Effect.scoped(program)).catch(console.error);
+Effect.runPromise(Effect.scoped(program)).catch((error) => { console.error(error); process.exitCode = 1; });
