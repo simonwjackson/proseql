@@ -680,7 +680,8 @@ fn populate_then_select_projects_named_fields() {
 fn populate_dangling_ref_is_dangling_reference_error() {
     let mut db = seeded_db();
 
-    db.delete("users", "user1").expect("delete user1");
+    db.delete_with_relationships("users", "user1", DeleteRelationshipsOptions::default())
+        .expect("delete user1");
 
     let error = db
         .query(
@@ -757,7 +758,8 @@ fn populate_with_empty_selection_keeps_populated_fields() {
 #[test]
 fn populate_validates_filtered_out_rows_before_query_pipeline() {
     let mut db = seeded_db();
-    db.delete("users", "user1").expect("delete user1");
+    db.delete_with_relationships("users", "user1", DeleteRelationshipsOptions::default())
+        .expect("delete user1");
 
     let error = db
         .query(
@@ -3207,7 +3209,8 @@ fn ref_update_missing_target_entity_still_validates_parent_fk_at_step_ten() {
     .unwrap();
 
     // Delete the user that post1 references (dangling FK on post1)
-    db.delete("users", "u1").unwrap();
+    db.delete_with_relationships("users", "u1", DeleteRelationshipsOptions::default())
+        .unwrap();
 
     // Now try to $update the (gone) author from post1
     let result = db.update_with_relationships(

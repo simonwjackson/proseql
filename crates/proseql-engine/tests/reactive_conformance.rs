@@ -1658,7 +1658,9 @@ fn batch_fk_validation_uses_pre_batch_state_for_self_refs() {
 #[test]
 fn fk_validation_gates_match_ts_for_singular_updates_but_not_upsert_many_updates() {
     let (mut db, scheduler) = make_relationship_db_with_scheduler();
-    db.delete("users", "u1").unwrap();
+    // Explicit preserve creates the intentional dangling fixture; plain delete must reject references.
+    db.delete_with_relationships("users", "u1", DeleteRelationshipsOptions::default())
+        .unwrap();
     let watch = db.watch("posts", WatchQueryConfig::default()).unwrap();
     assert_eq!(watch.try_recv().unwrap().as_array().unwrap().len(), 1);
 
@@ -1688,7 +1690,9 @@ fn fk_validation_gates_match_ts_for_singular_updates_but_not_upsert_many_updates
     let touched = db.update_many("posts", json!({"id":"p1"}), json!({"authorId":"u1"}));
     assert!(touched.is_ok());
 
-    db.delete("users", "u1").unwrap();
+    // Explicit preserve creates the intentional dangling fixture; plain delete must reject references.
+    db.delete_with_relationships("users", "u1", DeleteRelationshipsOptions::default())
+        .unwrap();
     let no_touch_upsert = db
         .upsert(
             "posts",
@@ -1710,7 +1714,9 @@ fn fk_validation_gates_match_ts_for_singular_updates_but_not_upsert_many_updates
     );
     assert!(touch_upsert.is_ok());
 
-    db.delete("users", "u1").unwrap();
+    // Explicit preserve creates the intentional dangling fixture; plain delete must reject references.
+    db.delete_with_relationships("users", "u1", DeleteRelationshipsOptions::default())
+        .unwrap();
     let many_failure = db.upsert_many(
         "posts",
         vec![
@@ -2042,8 +2048,13 @@ fn native_thread_scheduler_smoke_delivers_debounced_watch_updates() {
 fn create_many_can_disable_relationship_validation_explicitly() {
     let (mut db, _) = make_people_db_with_scheduler(vec![]);
     let rows = vec![json!({"id":"a","name":"Alice","managerId":"missing"})];
-    assert!(matches!(db.create_many("people", rows.clone(), false), Err(EngineError::ForeignKey(_))));
-    let result = db.create_many_with_validation("people", rows, false, false).unwrap();
+    assert!(matches!(
+        db.create_many("people", rows.clone(), false),
+        Err(EngineError::ForeignKey(_))
+    ));
+    let result = db
+        .create_many_with_validation("people", rows, false, false)
+        .unwrap();
     assert_eq!(result.created.len(), 1);
     assert!(db.collection("people").unwrap().get("a").is_some());
 }
@@ -2051,9 +2062,20 @@ fn create_many_can_disable_relationship_validation_explicitly() {
 #[test]
 fn plain_deletes_reject_incoming_references_atomically() {
     let (mut db, _) = make_people_db_with_scheduler(vec![]);
-    db.create("people", json!({"id":"boss","name":"Boss"})).unwrap();
-    db.create("people", json!({"id":"worker","name":"Worker","managerId":"boss"})).unwrap();
-    assert!(matches!(db.delete("people", "boss"), Err(EngineError::ForeignKey(_))));
-    assert!(matches!(db.delete_many("people", json!({}), false, None), Err(EngineError::ForeignKey(_))));
+    db.create("people", json!({"id":"boss","name":"Boss"}))
+        .unwrap();
+    db.create(
+        "people",
+        json!({"id":"worker","name":"Worker","managerId":"boss"}),
+    )
+    .unwrap();
+    assert!(matches!(
+        db.delete("people", "boss"),
+        Err(EngineError::ForeignKey(_))
+    ));
+    assert!(matches!(
+        db.delete_many("people", json!({}), false, None),
+        Err(EngineError::ForeignKey(_))
+    ));
     assert_eq!(db.collection("people").unwrap().list().len(), 2);
 }
