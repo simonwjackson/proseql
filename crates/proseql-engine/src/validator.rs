@@ -41,6 +41,8 @@
 
 use serde_json::Map as JsonMap;
 
+use crate::callbacks::CallbackRegistry;
+
 use crate::{
     descriptor::SchemaNode,
     errors::{EngineError, ValidationError, ValidationIssue},
@@ -101,11 +103,28 @@ pub fn js_eq(a: &Value, b: &Value) -> bool {
 /// `NumFromStr` accepts `"42"` *and* `42`).  Does **not** transform the value.
 /// Use `decode_value` when the input is the wire (encoded) form.
 pub fn validate_value(schema: &SchemaNode, value: &Value) -> Result<(), EngineError> {
-    validate_at(schema, value, "(root)")
+    validate_value_with_callbacks(schema, value, None)
 }
 
-fn validate_at(schema: &SchemaNode, value: &Value, path: &str) -> Result<(), EngineError> {
+pub fn validate_value_with_callbacks(
+    schema: &SchemaNode,
+    value: &Value,
+    callbacks: Option<&CallbackRegistry>,
+) -> Result<(), EngineError> {
+    validate_at(schema, value, "(root)", callbacks).map_err(normalize_check_error)
+}
+
+fn validate_at(
+    schema: &SchemaNode,
+    value: &Value,
+    path: &str,
+    callbacks: Option<&CallbackRegistry>,
+) -> Result<(), EngineError> {
     match schema {
+        SchemaNode::Checked { inner, checks } => {
+            validate_at(inner, value, path, callbacks)?;
+            crate::schema_checks::validate_checks(checks, value, callbacks)
+        }
         SchemaNode::Unsupported { reason } => Err(EngineError::Validation(ValidationError {
             message: format!("Unsupported schema combinator: {reason}"),
             issues: vec![ValidationIssue {
@@ -180,12 +199,12 @@ fn validate_at(schema: &SchemaNode, value: &Value, path: &str) -> Result<(), Eng
         // When validate_at is called with Optional, a value IS present.
         // null is NOT the same as absent: Schema.optional(T) = T | undefined
         // (source: effect/packages/effect/src/Schema.ts, `optional` fn → UndefinedOr(self).ast)
-        SchemaNode::Optional(inner) => validate_at(inner, value, path),
-        SchemaNode::OptionalWithDefault { inner, .. } => validate_at(inner, value, path),
+        SchemaNode::Optional(inner) => validate_at(inner, value, path, callbacks),
+        SchemaNode::OptionalWithDefault { inner, .. } => validate_at(inner, value, path, callbacks),
 
         SchemaNode::NullOr(inner) => match value {
             Value::Null => Ok(()),
-            _ => validate_at(inner, value, path),
+            _ => validate_at(inner, value, path, callbacks),
         },
 
         SchemaNode::Array { item } => match value {
@@ -193,8 +212,9 @@ fn validate_at(schema: &SchemaNode, value: &Value, path: &str) -> Result<(), Eng
                 let mut issues: Vec<ValidationIssue> = vec![];
                 for (i, elem) in arr.iter().enumerate() {
                     let ep = format!("{path}[{i}]");
-                    if let Err(EngineError::Validation(v)) = validate_at(item, elem, &ep) {
-                        issues.extend(v.issues);
+                    if let Err(EngineError::Validation(v)) = validate_at(item, elem, &ep, callbacks)
+                    {
+                        append_issues(&mut issues, v.issues, CheckPathPart::Index(i));
                     }
                 }
                 if issues.is_empty() {
@@ -216,8 +236,10 @@ fn validate_at(schema: &SchemaNode, value: &Value, path: &str) -> Result<(), Eng
                 let mut issues: Vec<ValidationIssue> = vec![];
                 for (k, v) in map {
                     let fp = format!("{path}.{k}");
-                    if let Err(EngineError::Validation(ve)) = validate_at(val_schema, v, &fp) {
-                        issues.extend(ve.issues);
+                    if let Err(EngineError::Validation(ve)) =
+                        validate_at(val_schema, v, &fp, callbacks)
+                    {
+                        append_issues(&mut issues, ve.issues, CheckPathPart::Field(k));
                     }
                 }
                 if issues.is_empty() {
@@ -232,7 +254,7 @@ fn validate_at(schema: &SchemaNode, value: &Value, path: &str) -> Result<(), Eng
             _ => Err(type_mismatch(path, "object", value)),
         },
 
-        SchemaNode::Struct { fields } => validate_struct(fields, value, path),
+        SchemaNode::Struct { fields } => validate_struct(fields, value, path, callbacks),
     }
 }
 
@@ -240,6 +262,7 @@ fn validate_struct(
     fields: &[crate::descriptor::StructField],
     value: &Value,
     path: &str,
+    callbacks: Option<&CallbackRegistry>,
 ) -> Result<(), EngineError> {
     let obj = match value {
         Value::Object(m) => m,
@@ -267,9 +290,10 @@ fn validate_struct(
 
         if let Some(inner_schema) = optional_inner {
             if let Some(v) = obj.get(&field.name) {
-                if let Err(EngineError::Validation(ve)) = validate_at(inner_schema, v, &field_path)
+                if let Err(EngineError::Validation(ve)) =
+                    validate_at(inner_schema, v, &field_path, callbacks)
                 {
-                    issues.extend(ve.issues);
+                    append_issues(&mut issues, ve.issues, CheckPathPart::Field(&field.name));
                 }
             }
         } else {
@@ -285,9 +309,9 @@ fn validate_struct(
                 }
                 Some(v) => {
                     if let Err(EngineError::Validation(ve)) =
-                        validate_at(&field.schema, v, &field_path)
+                        validate_at(&field.schema, v, &field_path, callbacks)
                     {
-                        issues.extend(ve.issues);
+                        append_issues(&mut issues, ve.issues, CheckPathPart::Field(&field.name));
                     }
                 }
             }
@@ -326,7 +350,15 @@ fn validate_struct(
 /// `Schema.decodeUnknownEffect(NumberFromString)("42")` → `42`
 /// `Schema.decodeUnknownEffect(NumberFromString)(42)`   → ParseError (wrong encoded type)
 pub fn decode_value(schema: &SchemaNode, value: &Value) -> Result<Value, EngineError> {
-    decode_at(schema, value, "(root)")
+    decode_value_with_callbacks(schema, value, None)
+}
+
+pub fn decode_value_with_callbacks(
+    schema: &SchemaNode,
+    value: &Value,
+    callbacks: Option<&CallbackRegistry>,
+) -> Result<Value, EngineError> {
+    decode_at(schema, value, "(root)", callbacks).map_err(normalize_check_error)
 }
 
 /// Decode an owned boundary value while reusing its strings, arrays and object
@@ -334,11 +366,29 @@ pub fn decode_value(schema: &SchemaNode, value: &Value) -> Result<Value, EngineE
 /// moving the payload avoids a complete clone per entity without changing
 /// schema decode semantics.
 pub fn decode_owned_value(schema: &SchemaNode, value: Value) -> Result<Value, EngineError> {
-    decode_owned_at(schema, value, "(root)")
+    decode_owned_value_with_callbacks(schema, value, None)
 }
 
-fn decode_owned_at(schema: &SchemaNode, value: Value, path: &str) -> Result<Value, EngineError> {
+pub fn decode_owned_value_with_callbacks(
+    schema: &SchemaNode,
+    value: Value,
+    callbacks: Option<&CallbackRegistry>,
+) -> Result<Value, EngineError> {
+    decode_owned_at(schema, value, "(root)", callbacks).map_err(normalize_check_error)
+}
+
+fn decode_owned_at(
+    schema: &SchemaNode,
+    value: Value,
+    path: &str,
+    callbacks: Option<&CallbackRegistry>,
+) -> Result<Value, EngineError> {
     match schema {
+        SchemaNode::Checked { inner, checks } => {
+            let value = decode_owned_at(inner, value, path, callbacks)?;
+            crate::schema_checks::validate_checks(checks, &value, callbacks)?;
+            Ok(value)
+        }
         SchemaNode::Struct { fields } => {
             let Value::Object(mut object) = value else {
                 return Err(type_mismatch(path, "object", &value));
@@ -371,11 +421,13 @@ fn decode_owned_at(schema: &SchemaNode, value: Value, path: &str) -> Result<Valu
                     }
                     other => other,
                 };
-                match decode_owned_at(field_schema, field_value, field_path) {
+                match decode_owned_at(field_schema, field_value, field_path, callbacks) {
                     Ok(value) => {
                         decoded.insert(field.name.clone(), value);
                     }
-                    Err(EngineError::Validation(error)) => issues.extend(error.issues),
+                    Err(EngineError::Validation(error)) => {
+                        append_issues(&mut issues, error.issues, CheckPathPart::Field(&field.name))
+                    }
                     Err(error) => return Err(error),
                 }
             }
@@ -395,9 +447,11 @@ fn decode_owned_at(schema: &SchemaNode, value: Value, path: &str) -> Result<Valu
             let mut decoded = Vec::with_capacity(values.len());
             let mut issues = Vec::new();
             for (index, value) in values.into_iter().enumerate() {
-                match decode_owned_at(item, value, &format!("{path}[{index}]")) {
+                match decode_owned_at(item, value, &format!("{path}[{index}]"), callbacks) {
                     Ok(value) => decoded.push(value),
-                    Err(EngineError::Validation(error)) => issues.extend(error.issues),
+                    Err(EngineError::Validation(error)) => {
+                        append_issues(&mut issues, error.issues, CheckPathPart::Index(index))
+                    }
                     Err(error) => return Err(error),
                 }
             }
@@ -417,11 +471,13 @@ fn decode_owned_at(schema: &SchemaNode, value: Value, path: &str) -> Result<Valu
             let mut decoded = JsonMap::with_capacity(values.len());
             let mut issues = Vec::new();
             for (key, value) in values {
-                match decode_owned_at(schema, value, &format!("{path}.{key}")) {
+                match decode_owned_at(schema, value, &format!("{path}.{key}"), callbacks) {
                     Ok(value) => {
                         decoded.insert(key, value);
                     }
-                    Err(EngineError::Validation(error)) => issues.extend(error.issues),
+                    Err(EngineError::Validation(error)) => {
+                        append_issues(&mut issues, error.issues, CheckPathPart::Field(&key))
+                    }
                     Err(error) => return Err(error),
                 }
             }
@@ -456,20 +512,30 @@ fn decode_owned_at(schema: &SchemaNode, value: Value, path: &str) -> Result<Valu
             )),
         },
         SchemaNode::Optional(inner) | SchemaNode::OptionalWithDefault { inner, .. } => {
-            decode_owned_at(inner, value, path)
+            decode_owned_at(inner, value, path, callbacks)
         }
         SchemaNode::NullOr(inner) if value.is_null() => Ok(value),
-        SchemaNode::NullOr(inner) => decode_owned_at(inner, value, path),
-        SchemaNode::Unsupported { .. } => decode_at(schema, &value, path),
+        SchemaNode::NullOr(inner) => decode_owned_at(inner, value, path, callbacks),
+        SchemaNode::Unsupported { .. } => decode_at(schema, &value, path, callbacks),
         _ => {
-            validate_at(schema, &value, path)?;
+            validate_at(schema, &value, path, callbacks)?;
             Ok(value)
         }
     }
 }
 
-fn decode_at(schema: &SchemaNode, value: &Value, path: &str) -> Result<Value, EngineError> {
+fn decode_at(
+    schema: &SchemaNode,
+    value: &Value,
+    path: &str,
+    callbacks: Option<&CallbackRegistry>,
+) -> Result<Value, EngineError> {
     match schema {
+        SchemaNode::Checked { inner, checks } => {
+            let value = decode_at(inner, value, path, callbacks)?;
+            crate::schema_checks::validate_checks(checks, &value, callbacks)?;
+            Ok(value)
+        }
         SchemaNode::Unsupported { reason } => Err(EngineError::Validation(ValidationError {
             message: format!("Unsupported schema combinator: {reason}"),
             issues: vec![ValidationIssue {
@@ -553,12 +619,12 @@ fn decode_at(schema: &SchemaNode, value: &Value, path: &str) -> Result<Value, En
 
         // Optional: if value is present, decode against inner.
         // Absence is handled by decode_struct; here a value IS present.
-        SchemaNode::Optional(inner) => decode_at(inner, value, path),
-        SchemaNode::OptionalWithDefault { inner, .. } => decode_at(inner, value, path),
+        SchemaNode::Optional(inner) => decode_at(inner, value, path, callbacks),
+        SchemaNode::OptionalWithDefault { inner, .. } => decode_at(inner, value, path, callbacks),
 
         SchemaNode::NullOr(inner) => match value {
             Value::Null => Ok(Value::Null),
-            _ => decode_at(inner, value, path),
+            _ => decode_at(inner, value, path, callbacks),
         },
 
         SchemaNode::Array { item } => match value {
@@ -567,9 +633,11 @@ fn decode_at(schema: &SchemaNode, value: &Value, path: &str) -> Result<Value, En
                 let mut issues: Vec<ValidationIssue> = vec![];
                 for (i, elem) in arr.iter().enumerate() {
                     let ep = format!("{path}[{i}]");
-                    match decode_at(item, elem, &ep) {
+                    match decode_at(item, elem, &ep, callbacks) {
                         Ok(v) => decoded.push(v),
-                        Err(EngineError::Validation(v)) => issues.extend(v.issues),
+                        Err(EngineError::Validation(v)) => {
+                            append_issues(&mut issues, v.issues, CheckPathPart::Index(i))
+                        }
                         Err(e) => return Err(e),
                     }
                 }
@@ -593,11 +661,13 @@ fn decode_at(schema: &SchemaNode, value: &Value, path: &str) -> Result<Value, En
                 let mut issues: Vec<ValidationIssue> = vec![];
                 for (k, v) in map {
                     let fp = format!("{path}.{k}");
-                    match decode_at(val_schema, v, &fp) {
+                    match decode_at(val_schema, v, &fp, callbacks) {
                         Ok(dv) => {
                             decoded_map.insert(k.clone(), dv);
                         }
-                        Err(EngineError::Validation(ve)) => issues.extend(ve.issues),
+                        Err(EngineError::Validation(ve)) => {
+                            append_issues(&mut issues, ve.issues, CheckPathPart::Field(k))
+                        }
                         Err(e) => return Err(e),
                     }
                 }
@@ -613,7 +683,7 @@ fn decode_at(schema: &SchemaNode, value: &Value, path: &str) -> Result<Value, En
             _ => Err(type_mismatch(path, "object", value)),
         },
 
-        SchemaNode::Struct { fields } => decode_struct(fields, value, path),
+        SchemaNode::Struct { fields } => decode_struct(fields, value, path, callbacks),
     }
 }
 
@@ -628,6 +698,7 @@ fn decode_struct(
     fields: &[crate::descriptor::StructField],
     value: &Value,
     path: &str,
+    callbacks: Option<&CallbackRegistry>,
 ) -> Result<Value, EngineError> {
     let obj = match value {
         Value::Object(m) => m,
@@ -648,11 +719,13 @@ fn decode_struct(
             // Optional-like: field may be absent; absent stays absent.
             SchemaNode::Optional(inner) | SchemaNode::OptionalWithDefault { inner, .. } => {
                 if let Some(v) = obj.get(&field.name) {
-                    match decode_at(inner, v, &field_path) {
+                    match decode_at(inner, v, &field_path, callbacks) {
                         Ok(decoded) => {
                             decoded_map.insert(field.name.clone(), decoded);
                         }
-                        Err(EngineError::Validation(ve)) => issues.extend(ve.issues),
+                        Err(EngineError::Validation(ve)) => {
+                            append_issues(&mut issues, ve.issues, CheckPathPart::Field(&field.name))
+                        }
                         Err(e) => return Err(e),
                     }
                 }
@@ -669,11 +742,13 @@ fn decode_struct(
                         received: Some("missing".into()),
                     });
                 }
-                Some(v) => match decode_at(schema, v, &field_path) {
+                Some(v) => match decode_at(schema, v, &field_path, callbacks) {
                     Ok(decoded) => {
                         decoded_map.insert(field.name.clone(), decoded);
                     }
-                    Err(EngineError::Validation(ve)) => issues.extend(ve.issues),
+                    Err(EngineError::Validation(ve)) => {
+                        append_issues(&mut issues, ve.issues, CheckPathPart::Field(&field.name))
+                    }
                     Err(e) => return Err(e),
                 },
             },
@@ -767,6 +842,50 @@ fn value_kind_name(value: &Value) -> &'static str {
         Value::Array(_) => "array",
         Value::Object(_) => "object",
     }
+}
+
+enum CheckPathPart<'a> {
+    Field(&'a str),
+    Index(usize),
+}
+
+fn append_issues(
+    issues: &mut Vec<ValidationIssue>,
+    mut incoming: Vec<ValidationIssue>,
+    part: CheckPathPart<'_>,
+) {
+    for issue in &mut incoming {
+        if issue.field == "(root)" && issue.expected.is_none() && issue.received.is_none() {
+            let segment = match part {
+                CheckPathPart::Field(name) => format!("[{}]", serde_json::to_string(name).unwrap()),
+                CheckPathPart::Index(index) => format!("[{index}]"),
+            };
+            if issue.message.contains("\n  at ") {
+                issue.message = issue
+                    .message
+                    .replace("\n  at ", &format!("\n  at {segment}"));
+            } else {
+                issue.message.push_str("\n  at ");
+                issue.message.push_str(&segment);
+            }
+        }
+    }
+    issues.extend(incoming);
+}
+
+// Core exposes the first SchemaIssue as one root issue, including its path.
+fn normalize_check_error(error: EngineError) -> EngineError {
+    if let EngineError::Validation(ref validation) = error {
+        if let Some(issue) = validation.issues.iter().find(|issue| {
+            issue.field == "(root)" && issue.expected.is_none() && issue.received.is_none()
+        }) {
+            return EngineError::Validation(ValidationError {
+                message: issue.message.clone(),
+                issues: vec![issue.clone()],
+            });
+        }
+    }
+    error
 }
 
 #[cfg(test)]

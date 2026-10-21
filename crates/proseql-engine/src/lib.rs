@@ -60,3 +60,5 @@ pub mod migrations;
 pub mod plugins;
 mod resident;
 pub mod transactions;
+
+pub mod schema_checks;

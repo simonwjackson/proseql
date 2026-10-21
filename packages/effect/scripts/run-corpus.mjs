@@ -74,6 +74,9 @@ const runnableFiles = new Set([
 	"object-select.test.ts",
 	"ordered-indexes-config.test.ts",
 	"pagination.test.ts",
+	"partitioned-runtime.test.ts",
+	"schema-checks.test.ts",
+	"schema-check-builtins.test.ts",
 	"persistence-computed-exclusion.test.ts",
 	"persistence-effect.test.ts",
 	"persistence-format-override.test.ts",
@@ -115,17 +118,7 @@ const runnableFiles = new Set([
 	"yaml-serializer.test.ts",
 ]);
 
-const expectedXfails = new Map([
-	[
-		"partitioned-runtime.test.ts",
-		{
-			category: "known-divergence",
-			owner: "effect-adapter",
-			reason:
-				"7 of 11 pass. The 4 failing cases (unsafe routing x3, external partition at flush) assert that the database scope closes cleanly after flush() rejected. The adapter's flush() rejects correctly and writes nothing, but closing the scope retries the save and fails again with the same SourceConfigError, so the test's Effect.scoped rejects. The adapter fails closed on close where core does not.",
-		},
-	],
-]);
+const expectedXfails = new Map();
 const explicitSkips = new Map();
 
 mkdirSync(reportDir, { recursive: true });

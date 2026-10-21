@@ -66,7 +66,11 @@ use crate::operators::{
 };
 use crate::query::indexes::{IndexUsed, QueryIndexes};
 use crate::query::sort::SortEntry;
-use crate::validator::{decode_owned_value, decode_value, js_eq, validate_value};
+use crate::validator::{
+    decode_owned_value_with_callbacks as decode_owned_value,
+    decode_value_with_callbacks as decode_value, js_eq,
+    validate_value_with_callbacks as validate_value,
+};
 
 // ── Result types ──────────────────────────────────────────────────────────────
 
@@ -2654,6 +2658,9 @@ impl Collection {
         obj: &mut Map<String, Value>,
         schema: &SchemaNode,
     ) -> Result<(), EngineError> {
+        if let SchemaNode::Checked { inner, .. } = schema {
+            return self.apply_defaults(obj, inner);
+        }
         if let SchemaNode::Struct { fields } = schema {
             for StructField {
                 name,
@@ -2691,13 +2698,10 @@ impl Collection {
                         // Field present (even null): leave as-is; validator will check it.
                         // Recurse into inner struct if the field is now present
                         if let Some(Value::Object(nested)) = obj.get_mut(name) {
-                            if let SchemaNode::Struct { .. } = inner.as_ref() {
-                                let inner_clone = inner.as_ref().clone();
-                                self.apply_defaults(nested, &inner_clone)?;
-                            }
+                            self.apply_defaults(nested, inner)?;
                         }
                     }
-                    SchemaNode::Struct { .. } => {
+                    SchemaNode::Struct { .. } | SchemaNode::Checked { .. } => {
                         // Recurse into nested struct
                         if let Some(Value::Object(nested)) = obj.get_mut(name) {
                             let schema_clone = field_schema.clone();
@@ -2737,30 +2741,34 @@ impl Collection {
 
         if is_derived {
             let stripped = strip_id_field(entity);
-            let decoded = decode_value(&self.descriptor.schema, &stripped)?;
+            let decoded = decode_value(&self.descriptor.schema, &stripped, Some(&self.callbacks))?;
             let mut obj = decoded.as_object().cloned().unwrap_or_default();
             obj.insert("id".to_string(), Value::String(id.to_string()));
             Ok(Value::Object(obj))
         } else {
-            decode_value(&self.descriptor.schema, &entity)
+            decode_value(&self.descriptor.schema, &entity, Some(&self.callbacks))
         }
     }
 
     fn validate_entity_owned(&self, entity: Value, id: &str) -> Result<Value, EngineError> {
         if matches!(self.descriptor.id_strategy, IdStrategy::DerivedFromKey) {
-            let decoded = decode_owned_value(&self.descriptor.schema, strip_id_field(entity))?;
+            let decoded = decode_owned_value(
+                &self.descriptor.schema,
+                strip_id_field(entity),
+                Some(&self.callbacks),
+            )?;
             let mut object = decoded.as_object().cloned().unwrap_or_default();
             object.insert("id".to_owned(), Value::String(id.to_owned()));
             Ok(Value::Object(object))
         } else {
-            decode_owned_value(&self.descriptor.schema, entity)
+            decode_owned_value(&self.descriptor.schema, entity, Some(&self.callbacks))
         }
     }
 
     fn validate_loaded_entity(&self, entity: &Value, id: &str) -> Result<(), EngineError> {
         if matches!(self.descriptor.id_strategy, IdStrategy::DerivedFromKey) {
             let stripped = strip_id_field(entity.clone());
-            validate_value(&self.descriptor.schema, &stripped)?;
+            validate_value(&self.descriptor.schema, &stripped, Some(&self.callbacks))?;
             if entity.get("id").and_then(Value::as_str) != Some(id) {
                 return Err(EngineError::Validation(ValidationError {
                     message: "Reloaded record id does not match derived key".to_string(),
@@ -2775,7 +2783,7 @@ impl Collection {
             }
             Ok(())
         } else {
-            validate_value(&self.descriptor.schema, entity)
+            validate_value(&self.descriptor.schema, entity, Some(&self.callbacks))
         }
     }
 
@@ -3205,6 +3213,9 @@ fn strip_computed(value: &Value, names: &HashSet<String>) -> Value {
 
 /// Detect whether the schema declares a top-level `deletedAt` optional field.
 fn schema_has_deleted_at(schema: &SchemaNode) -> bool {
+    if let SchemaNode::Checked { inner, .. } = schema {
+        return schema_has_deleted_at(inner);
+    }
     if let SchemaNode::Struct { fields } = schema {
         fields.iter().any(|f| {
             f.name == "deletedAt"

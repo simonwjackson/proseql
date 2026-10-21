@@ -94,6 +94,11 @@ pub struct StructField {
 /// The wire format uses a `{"kind": "...", ...}` flat object.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SchemaNode {
+    /// Checks run after the inner schema has decoded successfully.
+    Checked {
+        inner: Box<SchemaNode>,
+        checks: Vec<SchemaCheck>,
+    },
     /// `Schema.String` — string-typed field.
     Str,
     /// `Schema.Number` — number-typed field (JS f64 semantics).
@@ -145,6 +150,50 @@ pub enum SchemaNode {
     /// this variant.  `reason` carries a human-readable description of which
     /// combinator was used so the caller knows what to replace.
     Unsupported { reason: String },
+}
+
+/// Effect beta.103's persisted check representation, or a named host predicate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SchemaCheck(serde_json::Value);
+
+impl SchemaCheck {
+    pub fn new(
+        id: impl Into<String>,
+        payload: serde_json::Value,
+        expected: impl Into<String>,
+        callback_id: Option<String>,
+    ) -> Self {
+        let mut value =
+            serde_json::json!({"id":id.into(),"payload":payload,"expected":expected.into()});
+        if let Some(id) = callback_id {
+            value["callback_id"] = id.into();
+        }
+        Self(value)
+    }
+    pub fn id(&self) -> &str {
+        self.0["id"].as_str().unwrap_or("")
+    }
+    pub fn payload(&self) -> &serde_json::Value {
+        &self.0["payload"]
+    }
+    pub fn expected(&self) -> &str {
+        self.0["expected"].as_str().unwrap_or("")
+    }
+    pub fn callback_id(&self) -> Option<&str> {
+        self.0["callback_id"].as_str()
+    }
+    fn to_json(&self) -> serde_json::Value {
+        self.0.clone()
+    }
+    fn from_json(value: &serde_json::Value) -> Result<Self, String> {
+        if value["id"].as_str().is_none()
+            || value["expected"].as_str().is_none()
+            || value.get("callback_id").is_some_and(|id| !id.is_string())
+        {
+            return Err("Invalid schema check representation".into());
+        }
+        Ok(Self(value.clone()))
+    }
 }
 
 // Manual serde impls for SchemaNode (and the dependent StructField) to avoid
@@ -199,6 +248,13 @@ impl SchemaNode {
         #[allow(unused_imports)]
         use serde_json::{json, Value};
         match self {
+            SchemaNode::Checked { inner, checks } => {
+                if checks.is_empty() {
+                    inner.to_json()
+                } else {
+                    json!({"kind":"checked", "inner":inner.to_json(), "checks":checks.iter().map(SchemaCheck::to_json).collect::<Vec<_>>()})
+                }
+            }
             SchemaNode::Str => json!({"kind": "str"}),
             SchemaNode::Num => json!({"kind": "num"}),
             SchemaNode::Bool => json!({"kind": "bool"}),
@@ -253,6 +309,18 @@ impl SchemaNode {
             .and_then(|k| k.as_str())
             .ok_or_else(|| "SchemaNode missing 'kind' field".to_string())?;
         match kind {
+            "checked" => Ok(SchemaNode::Checked {
+                inner: Box::new(Self::from_json(
+                    obj.get("inner").ok_or("checked missing inner")?,
+                )?),
+                checks: obj
+                    .get("checks")
+                    .and_then(serde_json::Value::as_array)
+                    .ok_or("checked missing checks array")?
+                    .iter()
+                    .map(SchemaCheck::from_json)
+                    .collect::<Result<Vec<_>, _>>()?,
+            }),
             "str" => Ok(SchemaNode::Str),
             "num" => Ok(SchemaNode::Num),
             "bool" => Ok(SchemaNode::Bool),
@@ -737,7 +805,9 @@ fn schema_declares_path(schema: &SchemaNode, path: &str) -> bool {
 fn unwrap_presence(mut node: &SchemaNode) -> &SchemaNode {
     loop {
         node = match node {
-            SchemaNode::Optional(inner) | SchemaNode::NullOr(inner) => inner,
+            SchemaNode::Checked { inner, .. }
+            | SchemaNode::Optional(inner)
+            | SchemaNode::NullOr(inner) => inner,
             SchemaNode::OptionalWithDefault { inner, .. } => inner,
             other => return other,
         };

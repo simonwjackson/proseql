@@ -7,7 +7,7 @@ description = "Durable long-running native runtime for proseQL"
 [dependencies]
 indexmap = { workspace = true }
 serde_json = { workspace = true }
-proseql-engine = { path = "../proseql-engine" }
+proseql-engine = { path = "../proseql-engine", features = ["native-checks", "ecmascript-regex"] }
 proseql-formats = { path = "../proseql-formats" }
 proseql-storage = { path = "../proseql-storage" }
 

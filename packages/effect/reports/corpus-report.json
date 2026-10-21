@@ -1,20 +1,20 @@
 {
   "phase": "phase-2-gate",
   "summary": {
-    "totalFiles": 103,
-    "executedFiles": 84,
-    "runnableFiles": 83,
+    "totalFiles": 105,
+    "executedFiles": 86,
+    "runnableFiles": 86,
     "skippedFiles": 19,
-    "xfailedFiles": 1,
+    "xfailedFiles": 0,
     "xpassedFiles": 0,
-    "passedFiles": 83,
+    "passedFiles": 86,
     "failedFiles": 0,
-    "coverageRate": 0.8155339805825242,
-    "executedFraction": 0.8155339805825242,
+    "coverageRate": 0.819047619047619,
+    "executedFraction": 0.819047619047619,
     "slicePassRate": 1,
-    "totalAssertions": 2400,
-    "passedAssertions": 2396,
-    "failedAssertions": 4
+    "totalAssertions": 2433,
+    "passedAssertions": 2433,
+    "failedAssertions": 0
   },
   "results": [
     {
@@ -555,17 +555,13 @@
     },
     {
       "test": "partitioned-runtime.test.ts",
-      "expectation": "xfail",
-      "status": "xfailed",
-      "category": "known-divergence",
+      "expectation": "pass",
+      "status": "passed",
       "owner": "effect-adapter",
-      "reason": "7 of 11 pass. The 4 failing cases (unsafe routing x3, external partition at flush) assert that the database scope closes cleanly after flush() rejected. The adapter's flush() rejects correctly and writes nothing, but closing the scope retries the save and fails again with the same SourceConfigError, so the test's Effect.scoped rejects. The adapter fails closed on close where core does not.",
-      "exitCode": 1,
+      "exitCode": 0,
       "tests": 11,
-      "passedTests": 7,
-      "failedTests": 4,
-      "stdout": "bun test v1.3.9 (cf6cdbbb)",
-      "stderr": "packages/effect/.tmp/corpus/partitioned-runtime.test.ts:\n24 | const sourceError = (\n25 | \tsource: PartitionedSourceConfig,\n26 | \tpath: string,\n27 | \tmessage: string,\n28 | ) =>\n29 | \tnew SourceConfigError({\n      ^\nerror: SourceConfigError: Unsafe partition key ''\n   sourceId: \"turns\",\n collection: \"turns\",\n       path: \"/tmp/proseql-partition-unsafe-AWn4pY/turns\",\n       _tag: \"SourceConfigError\",\n\n      at sourceError (<repo>/packages/core/src/storage/partitioned-source.ts:29:2)\n      at ~effect/Utils/internal (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/Utils.js:85:16)\n      at <anonymous> (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:733:19)\n      at runLoop (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:461:98)\n      at evaluate (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:421:23)\n      at <anonymous> (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:2260:9)\n      at <anonymous> (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:2312:19)\n      at <anonymous> (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:2323:31)\n      at persistDocumentSourceState (<repo>/packages/engine/src/database.ts:4547:30)\n      at async persistCollectionState (<repo>/packages/engine/src/database.ts:4295:9)\n      at async <anonymous> (<repo>/packages/engine/src/database.ts:4269:10)\n      at async <anonymous> (<repo>/packages/engine/src/database.ts:343:16)\n      at async startSave (<repo>/packages/engine/src/database.ts:366:9)\n      at async flushLane (<repo>/packages/engine/src/database.ts:319:15)\n      at async flush (<repo>/packages/engine/src/database.ts:301:17)\n      at async <anonymous> (<repo>/packages/engine/src/database.ts:3279:28)\n      at async <anonymous> (<repo>/packages/effect/src/database.ts:267:12)\n(fail) rejects unsafe routing for ../escape.0001 before writing [47.00ms]\n24 | const sourceError = (\n25 | \tsource: PartitionedSourceConfig,\n26 | \tpath: string,\n27 | \tmessage: string,\n28 | ) =>\n29 | \tnew SourceConfigError({\n      ^\nerror: SourceConfigError: Unsafe partition key 'a/b'\n   sourceId: \"turns\",\n collection: \"turns\",\n       path: \"/tmp/proseql-partition-unsafe-82wk1k/turns\",\n       _tag: \"SourceConfigError\",\n\n      at sourceError (<repo>/packages/core/src/storage/partitioned-source.ts:29:2)\n      at ~effect/Utils/internal (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/Utils.js:85:16)\n      at <anonymous> (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:733:19)\n      at runLoop (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:461:98)\n      at evaluate (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:421:23)\n      at <anonymous> (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:2260:9)\n      at <anonymous> (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:2312:19)\n      at <anonymous> (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:2323:31)\n      at persistDocumentSourceState (<repo>/packages/engine/src/database.ts:4547:30)\n      at async persistCollectionState (<repo>/packages/engine/src/database.ts:4295:9)\n      at async <anonymous> (<repo>/packages/engine/src/database.ts:4269:10)\n      at async <anonymous> (<repo>/packages/engine/src/database.ts:343:16)\n      at async startSave (<repo>/packages/engine/src/database.ts:366:9)\n      at async flushLane (<repo>/packages/engine/src/database.ts:319:15)\n      at async flush (<repo>/packages/engine/src/database.ts:301:17)\n      at async <anonymous> (<repo>/packages/engine/src/database.ts:3279:28)\n      at async <anonymous> (<repo>/packages/effect/src/database.ts:267:12)\n(fail) rejects unsafe routing for a/b.0001 before writing [5.00ms]\n24 | const sourceError = (\n25 | \tsource: PartitionedSourceConfig,\n26 | \tpath: string,\n27 | \tmessage: string,\n28 | ) =>\n29 | \tnew SourceConfigError({\n      ^\nerror: SourceConfigError: Partition field 'id' has no delimiter '.'\n   sourceId: \"turns\",\n collection: \"turns\",\n       path: \"/tmp/proseql-partition-unsafe-BqxCDh/turns\",\n       _tag: \"SourceConfigError\",\n\n      at sourceError (<repo>/packages/core/src/storage/partitioned-source.ts:29:2)\n      at ~effect/Utils/internal (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/Utils.js:85:16)\n      at <anonymous> (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:733:19)\n      at runLoop (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:461:98)\n      at evaluate (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:421:23)\n      at <anonymous> (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:2260:9)\n      at <anonymous> (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:2312:19)\n      at <anonymous> (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:2323:31)\n      at persistDocumentSourceState (<repo>/packages/engine/src/database.ts:4547:30)\n      at async persistCollectionState (<repo>/packages/engine/src/database.ts:4295:9)\n      at async <anonymous> (<repo>/packages/engine/src/database.ts:4269:10)\n      at async <anonymous> (<repo>/packages/engine/src/database.ts:343:16)\n      at async startSave (<repo>/packages/engine/src/database.ts:366:9)\n      at async flushLane (<repo>/packages/engine/src/database.ts:319:15)\n      at async flush (<repo>/packages/engine/src/database.ts:301:17)\n      at async <anonymous> (<repo>/packages/engine/src/database.ts:3279:28)\n      at async <anonymous> (<repo>/packages/effect/src/database.ts:267:12)\n(fail) rejects unsafe routing for missing-delimiter before writing [4.00ms]\n(pass) updates and deletes only rewrite the changed partition [16.00ms]\n(pass) moves a record when its partition field changes [16.00ms]\n24 | const sourceError = (\n25 | \tsource: PartitionedSourceConfig,\n26 | \tpath: string,\n27 | \tmessage: string,\n28 | ) =>\n29 | \tnew SourceConfigError({\n      ^\nerror: Partition file changed since load; reopen before retrying\n   sourceId: \"turns\",\n collection: \"turns\",\n       path: \"/tmp/proseql-partition-conflict-ta9P3l/turns/a.prose\",\n       _tag: \"SourceConfigError\",\n\n      at sourceError (<repo>/packages/core/src/storage/partitioned-source.ts:29:2)\n      at <anonymous> (<repo>/packages/core/src/storage/partitioned-source.ts:323:6)\n      at ~effect/Effect/successCont (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:927:26)\n      at runLoop (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:461:98)\n      at evaluate (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:421:23)\n      at <anonymous> (<repo>/node_modules/.bun/effect@4.0.0-beta.103/node_modules/effect/dist/internal/effect.js:780:15)\n(fail) does not overwrite an externally-created partition at flush [6.00ms]\n(pass) rejects duplicate partition data when opening [1.00ms]\n(pass) rejects misrouted partition data when opening [1.00ms]\n(pass) rejects malformed partition data when opening [2.00ms]\n(pass) creates partition files and queries them as one collection after reopen [12.00ms]\n(pass) reloads external partition changes through the managed watcher [15.00ms]\n\n 7 pass\n 4 fail\n 23 expect() calls\nRan 11 tests across 1 file. [339.00ms]"
+      "passedTests": 11,
+      "failedTests": 0
     },
     {
       "test": "persistence-computed-exclusion.test.ts",
@@ -781,6 +777,26 @@
       "exitCode": 0,
       "tests": 3,
       "passedTests": 3,
+      "failedTests": 0
+    },
+    {
+      "test": "schema-check-builtins.test.ts",
+      "expectation": "pass",
+      "status": "passed",
+      "owner": "effect-adapter",
+      "exitCode": 0,
+      "tests": 24,
+      "passedTests": 24,
+      "failedTests": 0
+    },
+    {
+      "test": "schema-checks.test.ts",
+      "expectation": "pass",
+      "status": "passed",
+      "owner": "effect-adapter",
+      "exitCode": 0,
+      "tests": 9,
+      "passedTests": 9,
       "failedTests": 0
     },
     {
@@ -1015,15 +1031,7 @@
     }
   ],
   "failures": [],
-  "xfails": [
-    {
-      "test": "partitioned-runtime.test.ts",
-      "category": "known-divergence",
-      "owner": "effect-adapter",
-      "reason": "7 of 11 pass. The 4 failing cases (unsafe routing x3, external partition at flush) assert that the database scope closes cleanly after flush() rejected. The adapter's flush() rejects correctly and writes nothing, but closing the scope retries the save and fails again with the same SourceConfigError, so the test's Effect.scoped rejects. The adapter fails closed on close where core does not.",
-      "status": "xfailed"
-    }
-  ],
+  "xfails": [],
   "skipList": [
     {
       "test": "array-operators.test.ts",

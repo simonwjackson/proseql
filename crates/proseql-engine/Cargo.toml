@@ -12,3 +12,12 @@ indexmap = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+
+[features]
+native-checks = []
+ecmascript-regex = ["native-checks", "dep:regress"]
+
+[dependencies.regress]
+version = "0.11"
+optional = true
+features = ["utf16"]

@@ -11,9 +11,14 @@ import {
 	ValidationError,
 } from "@proseql/core";
 import type { Schema } from "effect";
-import { Effect } from "effect";
+import { Effect, type SchemaAST, SchemaIssue } from "effect";
 
 export interface CallbackRegistrar {
+	registerPredicate(
+		callback: (value: unknown) => boolean,
+		prefix: string,
+		failureMessage?: () => string | undefined,
+	): string;
 	registerDefault(callback: () => unknown, prefix: string): string;
 	registerComputed(
 		callback: (entity: unknown) => unknown,
@@ -346,23 +351,14 @@ function compileStructLikeSchema(
 	path: string,
 	registrar: CallbackRegistrar,
 ): Record<string, unknown> {
-	const anySchema = schema as any;
-	const ast = anySchema.ast;
-	if (ast?._tag === "Objects" && anySchema.fields) {
-		return compileTypeLiteralFields(anySchema.fields, path, registrar);
-	}
 	if (
-		ast?._tag === "Transformation" &&
-		ast.from?._tag === "TypeLiteral" &&
-		ast.to?._tag === "TypeLiteral"
+		schema.ast._tag === "Objects" &&
+		schema.ast.indexSignatures.length === 0
 	) {
-		return compileTypeLiteralFields(anySchema.fields ?? {}, path, registrar);
-	}
-	if (ast?._tag === "TypeLiteral" && anySchema.fields) {
-		return compileTypeLiteralFields(anySchema.fields, path, registrar);
+		return compileSchemaNode(schema, path, registrar);
 	}
 	throw new Error(
-		`Unsupported root schema at '${path}': expected Schema.Struct, got ${describeAst(ast)}`,
+		`Unsupported root schema at '${path}': expected Schema.Struct, got ${describeAst(schema.ast)}`,
 	);
 }
 
@@ -398,7 +394,7 @@ function compileTypeLiteralAstFields(
 		fields: propertySignatures.map((propertySignature) => {
 			const name = String(propertySignature.name);
 			const compiled = compileSchemaNode(
-				{ ast: propertySignature.type },
+				{ ast: propertySignature.type as SchemaAST.AST },
 				`${path}.${name}`,
 				registrar,
 			);
@@ -468,6 +464,51 @@ function compileFieldSchema(
 }
 
 function compileSchemaNode(
+	schema: Schema.Top | { readonly ast: SchemaAST.AST },
+	path: string,
+	registrar: CallbackRegistrar,
+): Record<string, unknown> {
+	const inner = compileUncheckedSchemaNode(schema, path, registrar);
+	const ast = schema.ast;
+	const filters = (
+		checks: ReadonlyArray<SchemaAST.Check<unknown>>,
+	): ReadonlyArray<SchemaAST.Filter<unknown>> =>
+		checks.flatMap((check) =>
+			check._tag === "FilterGroup" ? filters(check.checks) : [check],
+		);
+	const checks = filters(ast.checks ?? []).map((check, index) => {
+		const representation = check.annotations?.representation;
+		const id = representation?.id ?? "host";
+		const expected =
+			check.annotations?.expected ?? "a value satisfying the schema check";
+		// The boolean predicate seam is synchronous. Preserve its failure
+		// issue for the immediately following message callback, without running
+		// user filters a second time (filters may have side effects).
+		let failureMessage: string | undefined;
+		return {
+			id,
+			payload: representation?.payload ?? null,
+			expected,
+			// WASM checks stay at the host boundary. Native descriptors use
+			// native-checks, with ecmascript-regex for regular expressions.
+			callback_id: registrar.registerPredicate(
+				(value) => {
+					const issue = check.run(value, ast, {});
+					failureMessage =
+						issue === undefined
+							? undefined
+							: String(new SchemaIssue.Filter(check, issue));
+					return issue === undefined;
+				},
+				`${path}.check.${index}`,
+				() => failureMessage,
+			),
+		};
+	});
+	return checks.length === 0 ? inner : { kind: "checked", inner, checks };
+}
+
+function compileUncheckedSchemaNode(
 	schema: any,
 	path: string,
 	registrar: CallbackRegistrar,

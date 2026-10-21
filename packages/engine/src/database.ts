@@ -456,6 +456,24 @@ class RuntimeCallbackRegistrar implements CallbackRegistrar {
 		return id;
 	}
 
+	registerPredicate(
+		callback: (value: unknown) => boolean,
+		prefix: string,
+		failureMessage?: () => string | undefined,
+	): string {
+		const id = this.makeId(prefix);
+		this.runtime.register_predicate(id, (payloadJson) =>
+			serializeBoundaryValue(callback(parseBoundaryJson(payloadJson))),
+		);
+		// Schema predicates optionally pair with a default callback of the same
+		// id to carry their last failure message across the boolean-only seam.
+		if (failureMessage)
+			this.runtime.register_default(id, () =>
+				serializeBoundaryValue(failureMessage()),
+			);
+		return id;
+	}
+
 	registerComputed(
 		callback: (entity: unknown) => unknown,
 		prefix: string,

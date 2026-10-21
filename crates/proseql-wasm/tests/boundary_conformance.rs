@@ -2381,3 +2381,58 @@ fn authorized_native_bulk_requires_current_materialized_handles_and_is_atomic_on
         3
     );
 }
+
+#[test]
+fn schema_host_predicates_must_exist_before_open_even_without_rows() {
+    let (mut runtime, _) = make_runtime();
+    let schema = SchemaNode::Checked {
+        inner: Box::new(SchemaNode::Str),
+        checks: vec![proseql_engine::descriptor::SchemaCheck::new(
+            "custom",
+            Value::Null,
+            "an allowed name",
+            Some("nameCheck".into()),
+        )],
+    };
+    let descriptor = base_collection(
+        "users",
+        SchemaNode::Struct {
+            fields: vec![
+                StructField {
+                    name: "id".into(),
+                    schema: SchemaNode::Str,
+                },
+                StructField {
+                    name: "name".into(),
+                    schema,
+                },
+            ],
+        },
+    );
+    let request =
+        json!({"descriptor":{"collections":[descriptor.clone()],"sources":[]}}).to_string();
+    let error = expect_error_tag(&runtime.create_database_json(&request), "ValidationError");
+    assert!(error["message"].as_str().unwrap().contains("nameCheck"));
+    runtime
+        .callbacks_mut()
+        .register_predicate("nameCheck", |value| value == "allowed");
+    let handle = create_database(&mut runtime, vec![descriptor], json!({}));
+    let error = expect_error_tag(
+        &runtime.dispatch_json(
+            handle,
+            "create",
+            Some(r#"{"collection":"users","data":{"id":"u1","name":"blocked"}}"#),
+        ),
+        "ValidationError",
+    );
+    assert_eq!(
+        error["issues"],
+        json!([{"field":"(root)","message":"Expected an allowed name\n  at [\"name\"]"}])
+    );
+    dispatch(
+        &mut runtime,
+        handle,
+        "create",
+        json!({"collection":"users","data":{"id":"u1","name":"allowed"}}),
+    );
+}

@@ -160,6 +160,9 @@ impl RuntimeCore {
             proseql_engine::descriptor::validate_collection_descriptor(descriptor)?;
         }
         let registry = Arc::new(self.callbacks.build_registry());
+        for descriptor in &input.descriptor.collections {
+            proseql_engine::schema_checks::validate_schema_checks(&descriptor.schema, &registry)?;
+        }
         let mut collections = IndexMap::new();
         let mut collection_names = Vec::new();
 

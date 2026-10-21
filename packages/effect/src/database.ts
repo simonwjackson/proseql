@@ -1298,9 +1298,7 @@ const createPersistentEffectDatabaseWithLoader =
 				() => baseDb.flush(),
 			);
 			const db = Object.assign(baseDb, { close });
-			yield* Effect.addFinalizer(() =>
-				Effect.promise(() => close()).pipe(Effect.orDie),
-			);
+			yield* Effect.addFinalizer(() => ignoreCloseError(() => close()));
 			return db;
 		}) as unknown as Effect.Effect<
 			GenerateDatabaseWithPersistence<Config>,
