@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use indexmap::IndexMap;
 use proseql_engine::descriptor::{
     CollectionDescriptor, DuplicateIdPolicy, IdStrategy, SchemaNode, StructField, ValidationMode,
 };
@@ -29,7 +30,8 @@ use proseql_engine::errors::EngineError;
 use proseql_engine::query::pipeline::{QueryInput, QueryStats};
 use proseql_engine::query::SortOrder;
 use proseql_native::{
-    NativeCollectionConfig, NativeRuntime, NativeSourceRuntimeConfig, NativeSourceRuntimeOptions,
+    FullScanPolicy, LazyPartitionPolicy, NativeCollectionConfig, NativeRuntime,
+    NativeSourceRuntimeConfig, NativeSourceRuntimeOptions,
 };
 use proseql_storage::fs::FsStorageHost;
 use proseql_storage::host::{StorageEvent, StorageHost, WatchHandle};
@@ -122,6 +124,8 @@ struct Args {
     query_reps: usize,
     data_dir: PathBuf,
     max_rss_mb: u64,
+    min_available_mb: u64,
+    max_loaded_partitions: usize,
     keep: bool,
     child_work: Option<PathBuf>,
 }
@@ -139,6 +143,9 @@ Usage: timeseries_bench [options]
   --data-dir PATH            cache and work root (default $PROSEQL_BENCH_DATA_DIR,
                              else /var/tmp/proseql-timeseries-bench, else $TMPDIR/...)
   --max-rss-mb N             abort a size whose RSS exceeds N MiB (default MemAvailable - 1024)
+  --min-available-mb N       abort a size when the machine's MemAvailable drops below N MiB
+                             (default 1024), whoever uses the memory
+  --max-loaded-partitions N  lazy mode: LazyPartitionPolicy.max_loaded_partitions (default 4)
   --keep                     keep the per-size work copies";
 
 fn parse_args() -> Result<Args, BoxError> {
@@ -153,6 +160,8 @@ fn parse_args() -> Result<Args, BoxError> {
         query_reps: 20,
         data_dir: default_data_dir(),
         max_rss_mb: 0,
+        min_available_mb: 1024,
+        max_loaded_partitions: 4,
         keep: false,
         child_work: None,
     };
@@ -175,6 +184,8 @@ fn parse_args() -> Result<Args, BoxError> {
             "--query-reps" => args.query_reps = value()?.parse()?,
             "--data-dir" => args.data_dir = PathBuf::from(value()?),
             "--max-rss-mb" => args.max_rss_mb = value()?.parse()?,
+            "--min-available-mb" => args.min_available_mb = value()?.parse()?,
+            "--max-loaded-partitions" => args.max_loaded_partitions = value()?.parse()?,
             "--keep" => args.keep = true,
             "--child-work" => args.child_work = Some(PathBuf::from(value()?)),
             "-h" | "--help" => {
@@ -433,6 +444,10 @@ fn parent(args: &Args) -> Result<(), BoxError> {
             args.query_reps.to_string(),
             "--max-rss-mb".into(),
             args.max_rss_mb.to_string(),
+            "--min-available-mb".into(),
+            args.min_available_mb.to_string(),
+            "--max-loaded-partitions".into(),
+            args.max_loaded_partitions.to_string(),
             "--child-work".into(),
         ];
         child_args.push(work.to_string_lossy().into_owned());
@@ -551,30 +566,40 @@ fn emit(report: &Report) {
     let _ = std::io::stdout().flush();
 }
 
-/// Abort the child with partial numbers when RSS passes the limit, so a size
-/// that does not fit never pushes the machine into the OOM killer.
-fn start_rss_watchdog(report: Report, limit_mb: u64) {
+/// Abort the child with partial numbers when RSS passes the limit, or when
+/// the machine's `MemAvailable` drops below the floor. The floor matters on a
+/// shared machine: other processes can use the memory the RSS limit assumed
+/// was free, and the kernel OOM killer would act before the RSS limit fires.
+fn start_rss_watchdog(report: Report, limit_mb: u64, floor_mb: u64) {
     std::thread::spawn(move || loop {
-        if let Some(rss) = proc_status_mb("VmRSS:") {
-            if rss > limit_mb {
-                let mut map = report.lock().expect("report lock");
-                map.insert("status".into(), json!("aborted"));
-                map.insert(
-                    "reason".into(),
-                    json!(format!("rss {rss} MiB exceeded --max-rss-mb {limit_mb}")),
-                );
-                map.insert("peak_rss_mb".into(), json!(proc_status_mb("VmHWM:")));
-                let now = elapsed_ms();
-                let phase_started = map
-                    .get("phase_started_ms")
-                    .and_then(Value::as_f64)
-                    .unwrap_or(0.0);
-                map.insert("elapsed_ms".into(), json!(now));
-                map.insert("phase_elapsed_ms".into(), json!(now - phase_started));
-                println!("{LINE_PREFIX}{}", Value::Object(map.clone()));
-                let _ = std::io::stdout().flush();
-                std::process::exit(3);
-            }
+        let rss = proc_status_mb("VmRSS:");
+        let available = mem_available_mb();
+        let reason = match (rss, available) {
+            (Some(rss), _) if rss > limit_mb => Some(format!(
+                "rss {rss} MiB exceeded --max-rss-mb {limit_mb}"
+            )),
+            (rss, Some(available)) if available < floor_mb => Some(format!(
+                "MemAvailable {available} MiB fell below --min-available-mb {floor_mb} (rss {} MiB)",
+                rss.unwrap_or(0)
+            )),
+            _ => None,
+        };
+        if let Some(reason) = reason {
+            let mut map = report.lock().expect("report lock");
+            map.insert("status".into(), json!("aborted"));
+            map.insert("reason".into(), json!(reason));
+            map.insert("peak_rss_mb".into(), json!(proc_status_mb("VmHWM:")));
+            map.insert("mem_available_at_abort_mb".into(), json!(available));
+            let now = elapsed_ms();
+            let phase_started = map
+                .get("phase_started_ms")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            map.insert("elapsed_ms".into(), json!(now));
+            map.insert("phase_elapsed_ms".into(), json!(now - phase_started));
+            println!("{LINE_PREFIX}{}", Value::Object(map.clone()));
+            let _ = std::io::stdout().flush();
+            std::process::exit(3);
         }
         std::thread::sleep(Duration::from_millis(10));
     });
@@ -593,8 +618,14 @@ fn child(args: &Args, work: &Path) -> Result<(), BoxError> {
     record(&report, "years", json!(args.years));
     record(&report, "seed", json!(args.seed));
     record(&report, "max_rss_mb", json!(args.max_rss_mb));
+    record(&report, "min_available_mb", json!(args.min_available_mb));
+    record(
+        &report,
+        "mem_available_at_start_mb",
+        json!(mem_available_mb()),
+    );
     record(&report, "status", json!("running"));
-    start_rss_watchdog(Arc::clone(&report), args.max_rss_mb);
+    start_rss_watchdog(Arc::clone(&report), args.max_rss_mb, args.min_available_mb);
 
     let mut partition_paths: Vec<PathBuf> = fs::read_dir(&root)?
         .map(|entry| entry.map(|entry| entry.path()))
@@ -616,7 +647,7 @@ fn child(args: &Args, work: &Path) -> Result<(), BoxError> {
     set_phase(&report, "open");
     let host = Arc::new(CountingHost::new()?);
     let config = runtime_config(&root, features)?;
-    let options = runtime_options(features)?;
+    let options = runtime_options(features, args)?;
     let started = Instant::now();
     let runtime =
         NativeRuntime::open_sources_with_host(config, host.clone(), options).map_err(tag)?;
@@ -671,9 +702,7 @@ fn child(args: &Args, work: &Path) -> Result<(), BoxError> {
             ..QueryInput::default()
         };
         let started = Instant::now();
-        let result = runtime
-            .read(|db| db.query(COLLECTION, input, None))
-            .map_err(tag)?;
+        let result = run_query(&runtime, features, input)?;
         timings.push(ms(started.elapsed()));
         query_rows = result.len();
     }
@@ -682,7 +711,7 @@ fn child(args: &Args, work: &Path) -> Result<(), BoxError> {
         r#where: Some(filter.clone()),
         ..QueryInput::default()
     };
-    let (partitions_loaded, stats) = query_stats(&runtime, &one_hour, &opened, &root)?;
+    let (partitions_loaded, stats) = query_stats(&runtime, features, &one_hour, &opened, &root)?;
     record(&report, "query_reps", json!(args.query_reps));
     record(&report, "query_first_ms", json!(timings[0]));
     record(&report, "query_median_ms", json!(median(&mut timings)));
@@ -697,8 +726,14 @@ fn child(args: &Args, work: &Path) -> Result<(), BoxError> {
     record(&report, "query_candidate_rows", json!(stats.candidate_rows));
 
     // Newest 100 samples: a sort on the timestamp with a limit, which an
-    // ordered index answers without sorting the collection.
+    // ordered index answers without sorting the collection. Lazy mode refuses
+    // full scans, so there it is limited to the last month of data.
+    let newest_filter = features.lazy.then(
+        || json!({"timestamp": {"$gte": format_iso_ms(month_start_ms(dataset.end_ms() - 1))}}),
+    );
+    record(&report, "sorted_query_filter", json!(newest_filter));
     let newest = QueryInput {
+        r#where: newest_filter,
         sort: vec![("timestamp".into(), SortOrder::Desc)],
         limit: Some(100),
         ..QueryInput::default()
@@ -706,15 +741,19 @@ fn child(args: &Args, work: &Path) -> Result<(), BoxError> {
     let mut sorted_timings = Vec::with_capacity(args.query_reps);
     for _ in 0..args.query_reps {
         let started = Instant::now();
-        let rows = runtime
-            .read(|db| db.query(COLLECTION, newest.clone(), None))
-            .map_err(tag)?;
+        let rows = run_query(&runtime, features, newest.clone())?;
         sorted_timings.push(ms(started.elapsed()));
         if rows.len() != 100 {
             return Err(format!("newest-100 query returned {} rows", rows.len()).into());
         }
     }
-    let (_, sorted_stats) = query_stats(&runtime, &newest, &opened, &root)?;
+    let (sorted_partitions, sorted_stats) =
+        query_stats(&runtime, features, &newest, &opened, &root)?;
+    record(
+        &report,
+        "sorted_query_partitions_loaded",
+        json!(sorted_partitions),
+    );
     record(
         &report,
         "sorted_query_median_ms",
@@ -802,6 +841,23 @@ fn child(args: &Args, work: &Path) -> Result<(), BoxError> {
     );
     record(&report, "insert_target_bytes_before", json!(original.len()));
     record(&report, "insert_paths_written", json!(targets.len()));
+    if let (Some(first), Some(read_first)) = (insert_ms.first(), read.first()) {
+        // In lazy mode the first append loads the target partition for the
+        // ID check; later appends find it loaded.
+        record(&report, "insert_first_ms", json!(first));
+        record(&report, "insert_first_bytes_read", json!(read_first));
+    }
+    if features.lazy {
+        let status = runtime
+            .lazy_partition_status(COLLECTION)
+            .map_err(tag)?
+            .ok_or("lazy source has no status")?;
+        record(
+            &report,
+            "partitions_resident_at_end",
+            json!(status.loaded.len()),
+        );
+    }
     if !insert_ms.is_empty() {
         record(&report, "insert_median_ms", json!(median(&mut insert_ms)));
         record(
@@ -843,6 +899,44 @@ fn child(args: &Args, work: &Path) -> Result<(), BoxError> {
         json!(after.starts_with(&original)),
     );
 
+    let runtime = if features.lazy {
+        // Cold append: reopen, then append into the (now unloaded) target
+        // partition. The partition loads for the ID check.
+        set_phase(&report, "cold-append");
+        runtime.close().map_err(tag)?;
+        drop(runtime);
+        host.take();
+        let started = Instant::now();
+        let reopened = NativeRuntime::open_sources_with_host(
+            runtime_config(&root, features)?,
+            host.clone(),
+            runtime_options(features, args)?,
+        )
+        .map_err(tag)?;
+        record(&report, "reopen_ms", json!(ms(started.elapsed())));
+        host.take();
+        let last = stamps
+            .get(insert_ms.len().saturating_sub(1))
+            .copied()
+            .unwrap_or(last_ms);
+        let row = synthetic_row(last + 1, &mut rng, dataset.month_field);
+        let started = Instant::now();
+        reopened
+            .mutate(|db| db.create(COLLECTION, row))
+            .map_err(tag)?;
+        let cold = host.take();
+        record(&report, "cold_append_ms", json!(ms(started.elapsed())));
+        record(&report, "cold_append_bytes_read", json!(cold.bytes_read));
+        record(
+            &report,
+            "cold_append_bytes_written",
+            json!(cold.bytes_written),
+        );
+        reopened
+    } else {
+        runtime
+    };
+
     set_phase(&report, "done");
     record(&report, "peak_rss_mb", json!(proc_status_mb("VmHWM:")));
     record(&report, "status", json!("ok"));
@@ -851,17 +945,48 @@ fn child(args: &Args, work: &Path) -> Result<(), BoxError> {
     Ok(())
 }
 
-/// Partitions resident for the query and the engine's plan for it. At this
-/// commit every partition is loaded at open, so "partitions loaded" counts the
-/// partition files read at open; step 5 reads it from the native query stats
-/// API. The plan (`index_used`, `candidate_rows`) comes from the engine's
-/// `Database::explain_query`, which shares the executor's planning functions.
+/// Run one timed query: through the lazy-aware runtime API in lazy mode,
+/// through the engine directly (as in steps 1–4) otherwise.
+fn run_query(
+    runtime: &NativeRuntime,
+    features: Features,
+    input: QueryInput,
+) -> Result<Vec<Value>, BoxError> {
+    if features.lazy {
+        runtime.query(COLLECTION, input, None).map_err(tag)
+    } else {
+        runtime
+            .read(|db| db.query(COLLECTION, input, None))
+            .map_err(tag)
+    }
+}
+
+/// Partitions the query needed loaded and the engine's plan for it. Lazy
+/// mode reads both from the native query stats API
+/// (`NativeRuntime::query_with_stats`). Eager modes load every partition at
+/// open, so "partitions loaded" counts the partition files read at open; the
+/// plan (`index_used`, `candidate_rows`) comes from `Database::explain_query`,
+/// which shares the executor's planning functions.
 fn query_stats(
     runtime: &NativeRuntime,
+    features: Features,
     input: &QueryInput,
     opened: &Counters,
     root: &Path,
 ) -> Result<(usize, QueryStats), BoxError> {
+    if features.lazy {
+        let (_, stats) = runtime
+            .query_with_stats(COLLECTION, input.clone(), None)
+            .map_err(tag)?;
+        return Ok((
+            stats.partitions_loaded,
+            QueryStats {
+                index_used: stats.index_used,
+                candidate_rows: stats.candidate_rows,
+                index_sorted: stats.index_sorted,
+            },
+        ));
+    }
     let stats = runtime
         .read(|db| db.explain_query(COLLECTION, input))
         .map_err(tag)?;
@@ -887,10 +1012,7 @@ fn ordered_indexes(features: Features) -> Vec<String> {
 
 /// Each later step removes its check here and wires the feature into
 /// `runtime_config`, `runtime_options` and `query_stats`.
-fn require_supported(features: Features) -> Result<(), BoxError> {
-    if features.lazy {
-        return Err("--mode lazy needs NativeSourceRuntimeOptions.lazy_partitions (step 5), which this commit does not have".into());
-    }
+fn require_supported(_features: Features) -> Result<(), BoxError> {
     Ok(())
 }
 
@@ -958,9 +1080,24 @@ fn runtime_config(root: &Path, features: Features) -> Result<NativeSourceRuntime
     })
 }
 
-fn runtime_options(_features: Features) -> Result<NativeSourceRuntimeOptions, BoxError> {
+fn runtime_options(
+    features: Features,
+    args: &Args,
+) -> Result<NativeSourceRuntimeOptions, BoxError> {
+    let mut lazy_partitions = IndexMap::new();
+    if features.lazy {
+        // Full scans fail: every timed operation must prune.
+        lazy_partitions.insert(
+            COLLECTION.to_owned(),
+            LazyPartitionPolicy {
+                max_loaded_partitions: args.max_loaded_partitions,
+                full_scan: FullScanPolicy::Error,
+            },
+        );
+    }
     Ok(NativeSourceRuntimeOptions {
         watch_debounce: None,
+        lazy_partitions,
         ..NativeSourceRuntimeOptions::default()
     })
 }
@@ -1190,6 +1327,11 @@ fn format_iso_ms(ms: i64) -> String {
         rem / 1000 % 60,
         rem % 1000
     )
+}
+
+fn month_start_ms(ms: i64) -> i64 {
+    let (year, month, _) = civil_from_days(ms.div_euclid(MS_PER_DAY));
+    days_from_civil(year, month, 1) * MS_PER_DAY
 }
 
 fn month_end_ms(ms: i64) -> i64 {

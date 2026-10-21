@@ -504,8 +504,11 @@ impl NativeRuntime {
         input: QueryInput,
         populate: Option<Value>,
     ) -> Result<Vec<Value>, EngineError> {
-        self.query_with_stats(collection, input, populate)
-            .map(|(rows, _)| rows)
+        let where_clause = input.r#where.clone();
+        self.with_scope(collection, where_clause.as_ref(), "query", |database| {
+            database.query(collection, input, populate)
+        })
+        .map(|(rows, _)| rows)
     }
 
     /// Run a query and report what it read: the partitions it needed loaded
