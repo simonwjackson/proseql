@@ -46,7 +46,7 @@ import type {
 	GenerateEngineDatabase,
 	GenerateEngineDatabaseWithPersistence,
 } from "@proseql/engine";
-import { Effect, Layer, Queue, Stream } from "effect";
+import { Effect, Layer, Queue, type Scope, Stream } from "effect";
 
 const SYNCHRONOUS_AFTER_HOOK_FIND_BY_ID = Symbol.for(
 	"@proseql/engine/synchronous-after-hook-find-by-id",
@@ -1258,7 +1258,7 @@ const createPersistentEffectDatabaseWithLoader =
 		| InvalidDocumentSourceError
 		| DocumentGraphSourceError
 		| PluginError,
-		typeof StorageAdapter | typeof SerializerRegistryService
+		StorageAdapterShape | SerializerRegistryShape | Scope.Scope
 	> => {
 		const collectionNames = collectionNamesFromConfig(config);
 		let defectConstructor:
@@ -1316,7 +1316,7 @@ const createPersistentEffectDatabaseWithLoader =
 			| InvalidDocumentSourceError
 			| DocumentGraphSourceError
 			| PluginError,
-			typeof StorageAdapter | typeof SerializerRegistryService
+			StorageAdapterShape | SerializerRegistryShape | Scope.Scope
 		>;
 	};
 
