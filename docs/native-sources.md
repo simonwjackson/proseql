@@ -6,13 +6,140 @@ The native source runtime opens writable document sources and read-only document
 
 Use `NativeRuntime::open_sources(NativeSourceRuntimeConfig { collections, sources })` for built-in codecs and graphs without transforms. Each collection uses the same `NativeCollectionConfig` descriptor as single-file mode. Sources use the existing `proseql_storage::source_config::DatabaseSourceConfig` types.
 
-Use `open_sources_with_options` to provide a format registry and graph transform host. Use `open_sources_with_host` to provide a durable storage host too. The options default to built-in codecs, no transform host, and a 50 ms watch debounce. The default filesystem host polls every two seconds. Set `watch_debounce` to `None` for explicit reload only.
+Use `open_sources_with_options` to provide a callback registry, plugin codecs, a format registry and graph transform host. Use `open_sources_with_host` to provide a durable storage host too. The options default to built-in codecs, no transform host, and a 50 ms watch debounce. The default filesystem host polls every two seconds. Set `watch_debounce` to `None` for explicit reload only.
 
 Every declared collection must have exactly one source owner. Source mode rejects overlapping writable and graph file patterns for discovered files and outboxes. Use `UnknownCollectionPolicy::Preserve` on writable sources when the runtime declares only part of the database. Select only declared collections in those sources. A partial runtime must also declare the relationship targets its records need.
 
-Source mode rejects `replace_all`; use `mutate` for app-owned changes. Single-file `replace_all` remains unchanged. Callback hooks, migrations, and named ID-generator registrations retain the single-file runtime's existing restrictions.
+Source mode rejects `replace_all`; use `mutate` for app-owned changes. Single-file `replace_all` remains available. Both modes accept registered callbacks through their options (see "Native callbacks"). Existing `NativeRuntimeConfig { path, collections }` values and `open`, `open_with_host`, and `open_with_dyn_host` calls need no changes; they use an empty callback registry.
 
 The consumer example at `crates/proseql-native/examples/support/coach.rs` maps the legacy Coach source configuration. It declares one writable source, two YAML graph sources, and one graph with fifteen JSONL roots. It supplies a custom transform and an opt-in lenient JSONL codec. Coach-specific names do not enter the library implementation.
+
+## Native callbacks
+
+`NativeRuntimeOptions` and `NativeSourceRuntimeOptions` accept a `callbacks: CallbackRegistry` (empty by default). Register Rust closures before opening. The runtime consumes the registry and shares it with the engine; there is no second callback implementation or JavaScript dependency. `CallbackRegistry` is re-exported by `proseql-native`.
+
+For single-file mode use `open_with_options(config, options)`, `open_with_host_and_options(config, host, options)`, or `open_with_dyn_host_and_options(config, host, options)`. Source mode uses the existing `open_sources_with_options` or `open_sources_with_host` methods.
+
+```rust
+use proseql_native::{CallbackRegistry, NativeRuntime, NativeRuntimeOptions};
+use proseql_engine::descriptor::ComputedFieldDescriptor;
+use proseql_engine::id_gen::SequentialGenerator;
+
+// `config` is an existing NativeRuntimeConfig with a users collection.
+config.collections[0].descriptor.before_create_hooks.push("trim-name".into());
+config.collections[0].descriptor.computed_fields.push(ComputedFieldDescriptor {
+    name: "displayName".into(), callback_id: "display-name".into(),
+});
+config.collections[0].descriptor.id_generator = Some("user-sequence".into());
+
+let mut callbacks = CallbackRegistry::new();
+callbacks.register_before_create_hook("trim-name", Box::new(|context| {
+    let mut data = context.data.clone();
+    if let Some(name) = data.get("name").and_then(serde_json::Value::as_str) {
+        data["name"] = serde_json::json!(name.trim());
+    }
+    Ok(data)
+}));
+callbacks.register_computed("display-name", Box::new(|record| record["name"].clone()));
+callbacks.register_id_generator("user-sequence", Box::new(|| {
+    Box::new(SequentialGenerator::new("user"))
+}));
+let runtime = NativeRuntime::open_with_options(config, NativeRuntimeOptions {
+    callbacks, ..Default::default()
+})?;
+```
+
+A sequential generator is an example, not a persistent ID counter. It restarts when the runtime reopens. Use a generator whose IDs remain unique across restarts for production data.
+
+| Registration | Descriptor or use | Closure contract |
+|---|---|---|
+| `register_before_create_hook` | `before_create_hooks` IDs | context contains input `data`; return replacement data or `EngineError` |
+| `register_before_update_hook` | `before_update_hooks` IDs | context contains `existing` and `update`; return replacement updates or `EngineError` |
+| `register_before_delete_hook` | `before_delete_hooks` IDs | inspect entity and ID; return `Result<(), EngineError>` |
+| `register_after_create_hook`, `register_after_update_hook`, `register_after_delete_hook` | corresponding after-hook IDs | observe successful changes; returned errors do not veto them |
+| `register_on_change_hook` | `on_change_hooks` IDs | receives `OnChangeContext::{Create, Update, Delete}` |
+| `register_computed` | `computed_fields: Vec<ComputedFieldDescriptor>` | derive a JSON value from a record on query; computed values are not persisted |
+| `register_migration` | `migrations: Vec<MigrationDescriptor>` and `version` | transform a collection's ID-keyed JSON object; return a map or `EngineError` |
+| `register_id_generator` | `id_generator: Some(name)` | factory produces a fresh `Box<dyn IdGenerator>` per collection |
+| `register_custom_operator` | query field operators, for example `$multipleOf` | declare supported types; evaluate field value and operand as a boolean |
+| `register_codec_encode`, `register_codec_decode` | `plugin_codecs: Vec<PluginCodecMetadata>` in options | convert boundary values to/from text, or return `EngineError` |
+| `register_default`, `register_predicate` | engine schema/query callback IDs | synchronous JSON default or boolean predicate, respectively |
+
+Collection and global hook IDs, computed IDs, migration IDs and generator names must resolve at open. A missing registration returns `OperationError` with reason `missing-callback`, naming the collection and ID. Plugin codec metadata is also checked; its error names the codec and callback ID. Registration does not execute a callback at validation time. Default/predicate callback signatures and the supported schema subset remain the engine's contract.
+
+Custom operators use the engine's existing behavior: unregistered or type-incompatible query operators are ignored. Register an operator before querying it; do not treat an unknown operator as a validation boundary. Built-in operator names and plugin naming rules remain defined by `proseql_engine::plugins`.
+
+### Callback ordering and failure
+
+`mutate` serializes engine mutations, synchronous before-hooks, encoding and durable writes. A before-hook error, schema failure, migration failure during loading, codec error, or persistence error does not publish the candidate. A failed mutation rolls memory back; a failed source write also quarantines under the crash rule. Callback bodies must not panic. Rust callbacks such as computed fields, operators, defaults and ID generators have infallible return signatures; they cannot return an `EngineError` through those signatures.
+
+Native after-hooks and `onChange` deliberately differ from WASM timing: native defers them so no callback can observe or cause effects from an uncommitted, non-durable write. The engine enqueues their contexts during a mutation. Native dispatches them in the original event order, once, after durable persistence and engine commit, **after releasing the mutation lock**. A callback may read or mutate this runtime without deadlocking. Returned hook errors are swallowed, as in WASM. The mutation caller gets success even when an after-hook returns an error.
+
+A rollback, codec failure or failed durable write discards all queued after-hooks and `onChange` events. This includes creates earlier in a multi-operation `mutate` that later fails. Events retain their operation-time record snapshots even when a later operation in the same transaction changes that record again. Reentrant or concurrent mutations can interleave callback delivery between batches. This is not an exactly-once external messaging protocol: a crash after persistence but before callback delivery loses that delivery.
+
+Before-hooks and other synchronous callbacks still run under the runtime lock. Do not call this runtime from them. Use pure transformations where possible: rollback restores database state, not arbitrary external side effects that a callback already performed. Use after-hooks for post-commit effects.
+
+### Migrations and plugin codecs
+
+A migration receives the whole collection map, not one record. `MigrationDescriptor { from, to, description, callback_id }` references a registered closure. The existing engine migration chain validation and version rules apply. A migration error fails open or reload; it does not overwrite the source. Single-file migration writeback is staged in memory, validated as a complete database, then written with `replace_durable` before open succeeds. Source-mode migrations do not write during open: migrated records persist when the owning file next changes. Read-only graph sources are never written. Until then, a reopen or reload runs their migrations again; make migrations deterministic. Versioned array formats still cannot hold a version envelope.
+
+For callback-backed codecs, register the encode/decode closures in the same `callbacks` registry and supply metadata:
+
+```rust
+use proseql_engine::plugins::PluginCodecMetadata;
+
+let codec = PluginCodecMetadata {
+    name: "custom-json".into(),
+    extensions: vec!["custom".into()],
+    encode_callback_id: "custom-encode".into(),
+    decode_callback_id: "custom-decode".into(),
+};
+// Register both closures before open. Their aliases match the metadata IDs.
+callbacks.register_codec_encode("custom-encode", Box::new(|value, _indent| {
+    Ok(value.to_string())
+}));
+callbacks.register_codec_decode("custom-decode", Box::new(|raw| {
+    serde_json::from_str(raw).map_err(|error| {
+        proseql_engine::errors::EngineError::Serialization(Box::new(
+            proseql_engine::errors::SerializationError {
+                format: "custom-json".into(), message: error.to_string(), cause: None,
+            },
+        ))
+    })
+}));
+let options = NativeRuntimeOptions {
+    callbacks, plugin_codecs: vec![codec], ..Default::default()
+};
+```
+
+`formats` still accepts native `FormatCodec` implementations. Callback codecs register after that registry; the last codec for an extension wins. Callback codecs use the same shared registry as the engine. Each codec must preserve the format's supported database shape and surface failures, not silently drop records. Existing non-YAML document sources still reject changes to an existing document because native byte-preserving edits support YAML only. Use a collection-file source for another whole-file codec, or a new document outbox where appropriate.
+
+## Write a Rust storage host
+
+Implement `proseql_storage::host::StorageHost: Send + Sync` for runtime I/O, not database behavior. The engine remains platform-blind. For `NativeRuntime`, also implement `proseql_storage::persistence::DurableStorageHost`. Supply an `Arc<H>` to `open_with_host` / `open_with_host_and_options`, or an `Arc<dyn DurableStorageHost>` to `open_with_dyn_host` / source-mode `open_sources_with_host`.
+
+| Surface | Required behavior |
+|---|---|
+| `read`, `read_bytes` | complete file contents; missing reads fail. Override `read_bytes` for files that can end inside a UTF-8 sequence, including torn JSONL lines. |
+| `write`, `append`, `remove`, `exists` | explicit `Result` failures; do not report failed work as success. These ordinary methods alone do not promise crash durability. |
+| `ensure_dir(path)` | prepare the parent of the supplied **file path**, not a directory named after it |
+| `list_directory`, `list_recursive` | complete file paths, not bare names or directory entries; direct children vs all descendants; stable ordering where possible |
+| `watch`, `watch_dir` | return a `WatchHandle`; stop releases the subscription. Report replacement, creation and removal, including descendants for directory watches. |
+| `replace_durable(path, data)` | success only when the complete new file is recoverable after process/machine interruption; recover or retain the committed state on failure |
+| `append_durable(path, keep_len, data)` | truncate the torn suffix to `keep_len`, append, synchronize bytes and length, and synchronize the directory when newly created |
+| `read_tail(path, max_tail)` | return byte length plus up to `max_tail` final bytes, or `None` when absent; do not decode a partial UTF-8 tail |
+
+Use consistent path identifiers in storage, listings and watch events. `StorageEvent` contains optional `filename`, `kind: StorageEventKind::{Add, Change, Remove}`, and optional `path`. Supply `path` when known so native reload can distinguish its own append from an unrelated file with the same basename. Notifications can coalesce; the runtime reloads the authoritative contents. Do not invoke watch callbacks while holding a host lock that a callback needs for I/O. Managed watches must release their resources on stop/close.
+
+Return `EngineError::Storage(Box<StorageError>)` for I/O failures with the original path, operation and optional structured JSON cause. Its wire tag is exactly `StorageError`; never rename `_tag` or coerce a structured cause to text. Preserve other typed engine errors when forwarding. Host paths are trusted configuration. Add sandboxing in the host when untrusted callers can choose paths.
+
+`FsStorageHost` is the worked native implementation: it stages a replacement, synchronizes the file and directory, and uses per-file recovery markers. Native checks aggregate validation before it writes and publishes memory only after durable success. A host that returns early from `replace_durable` breaks that guarantee. Do not implement durability by calling an unsynchronized ordinary `write`.
+
+`append_durable` and `read_tail` have correct defaults that read and replace a whole file. Override them for bounded append I/O. A wrapper around `FsStorageHost` must forward both methods as well as `replace_durable`, or appends fall back to full rewrites. `MemoryStorageHost` implements the contracts for in-process tests but does not survive process exit.
+
+One runtime must own writable paths. Hosts do not implicitly supply cross-process locking, multi-file atomic commits, transactional watch delivery or backup. A remote host must state which acknowledgement is durable and how it recovers interrupted writes. Source conflict checks still have a race with another writer. See "Crash rule" below before implementing retries.
+
+Test against the real backend: missing files, full path listings, byte reads, replace/reopen, file and directory sync failures, interrupted replacement/append, torn UTF-8 final lines, watch stop/replacement/removal, and writes to multiple files with a failure partway through. The conformance tests use temporary files and the filesystem durability fault interface; no live Coach directory is needed.
 
 ## Collection files
 
@@ -100,6 +227,7 @@ The policy is separate from `append_only`, so existing append-only users see no 
 
 | Feature | Native | WASM (`packages/engine`) | Legacy core (`packages/core` runtime) |
 |---|---|---|---|
+| After-hooks and `onChange` | deferred until durable commit, then dispatched outside the mutation lock | immediate, including inside transactions; errors swallowed | immediate; errors swallowed |
 | `duplicate_ids` | yes | yes (engine) | rejected (fail closed) |
 | Partitioned append without rewrite | yes | no, on purpose: partitioned sources keep the rewrite path | no |
 | Torn-line recovery and durable append | yes | no; single-file `appendOnly` JSONL appends without a file sync and relies on the debounced canonical save | no |
@@ -148,7 +276,7 @@ NativeSourceRuntimeOptions {
 
 The default is an empty map, so every existing configuration stays eager. `NativeSourceRuntimeOptions.lazy_watch_interval` (default 2 s) sets how often the managed watch polls lazy sources.
 
-**Preconditions.** The source must be a `Partitioned` JSONL or NDJSON source. Its collection must have `append_only: true`, no `unique_fields`, no relationships, and no other collection may have a relationship to it. Otherwise open fails with `SourceConfigError` naming the source. `max_loaded_partitions` must be at least 1. Hooks, computed fields and migrations are already refused by the native runtime.
+**Preconditions.** The source must be a `Partitioned` JSONL or NDJSON source. Its collection must have `append_only: true`, no `unique_fields`, no relationships, and no other collection may have a relationship to it. Otherwise open fails with `SourceConfigError` naming the source. `max_loaded_partitions` must be at least 1. Lazy collections must have no hooks, computed fields or migrations, even when the callbacks are registered. Global hooks are also refused when a runtime has lazy sources. Eager collections support these callbacks.
 
 **Open.** Open lists the partition file names. It reads and decodes no partition, so open time and memory do not grow with history.
 

@@ -24,7 +24,6 @@ import { WasmEngineDefectError } from "./errors.js";
 import {
 	createEngineStorageAdapter,
 	type EngineStorageHost,
-	type EngineStorageWatchEvent,
 	makeEngineStorageLayer,
 } from "./storage-host-shared.js";
 import type {
@@ -55,12 +54,11 @@ export {
 	type SessionStorageEngineStorageHostConfig,
 	type WebStorageEngineHostConfig,
 };
-export {
-	createEngineStorageAdapter,
-	makeEngineStorageLayer,
-	type EngineStorageHost,
-	type EngineStorageWatchEvent,
-};
+export { createEngineStorageAdapter, makeEngineStorageLayer };
+export type {
+	EngineStorageHost,
+	EngineStorageWatchEvent,
+} from "./storage-host-shared.js";
 export type {
 	EngineCollection,
 	EngineDatabaseOptions,

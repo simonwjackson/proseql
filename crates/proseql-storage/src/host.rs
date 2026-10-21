@@ -21,6 +21,27 @@ pub trait WatchHandle: Send + Sync {
     fn stop(&self) -> Result<(), EngineError>;
 }
 
+/// Synchronous platform I/O boundary for the Rust engine's storage layer.
+///
+/// Paths are host-owned identifiers. Use one consistent representation for
+/// reads, listings and events; listings contain complete file paths, not bare
+/// names. `list_directory` lists immediate files and `list_recursive` lists all
+/// descendant files. Neither includes directories. `ensure_dir` receives a
+/// *file* path and prepares its parent directory; key/value hosts may do nothing.
+/// Missing reads fail, `exists` reports absence, and I/O failures use
+/// `EngineError::Storage` with the original path and operation.
+///
+/// Watch callbacks report additions, changes and removals, including atomic
+/// replacement. They must not run while holding a host lock needed by reads or
+/// writes. The returned handle releases the subscription when stopped. Supply
+/// `StorageEvent::path` when possible to distinguish equal filenames in different
+/// directories. Consumers must tolerate coalesced notifications and reload.
+///
+/// `write` and `append` alone promise no crash durability. Native runtime hosts
+/// also implement [`crate::persistence::DurableStorageHost`]. A successful
+/// durable replacement must be recoverable after interruption; never silently
+/// substitute an ordinary write. See `docs/native-sources.md` for ownership,
+/// synchronization, watch lifecycle and crash rules.
 pub trait StorageHost: Send + Sync {
     fn read(&self, path: &str) -> Result<String, EngineError>;
     /// Read a file's raw bytes. Append-only JSONL loading uses it so that an

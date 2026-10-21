@@ -13,6 +13,10 @@ export {
 	type NodeEngineStorageHostConfig,
 } from "./storage-host.js";
 export type {
+	EngineStorageHost,
+	EngineStorageWatchEvent,
+} from "./storage-host-shared.js";
+export type {
 	EngineCollection,
 	EngineDatabaseOptions,
 	EngineInitialData,

@@ -68,6 +68,8 @@ These collection options reach the Rust engine through this package:
 
 Partitioned append without rewrite and lazy partition loading are native Rust runtime features only, on purpose. See `docs/native-sources.md` in the ProseQL repository.
 
+[Write a storage host](../../docs/storage-hosts.md) for another runtime.
+
 ## Effect API
 
 Install `@proseql/effect` when application code should receive `Effect` and `Stream` values instead of Promises. It uses this same Rust/WASM engine and reconstructs public tagged errors for Effect error handling.
