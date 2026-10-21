@@ -1,18 +1,24 @@
 import { randomBytes } from "node:crypto";
 import { promises as fs, watch as fsWatch } from "node:fs";
 import { dirname, join } from "node:path";
+import type { StorageAdapterService } from "@proseql/core";
+import { Effect, type Layer, Schedule } from "effect";
 import {
 	type EngineStorageHost,
 	makeEngineStorageLayer,
 } from "./storage-host-shared.js";
 
 export interface NodeEngineStorageHostConfig {
+	readonly maxRetries?: number;
+	readonly baseDelay?: number;
 	readonly createMissingDirectories?: boolean;
 	readonly fileMode?: number;
 	readonly dirMode?: number;
 }
 
 const defaultConfig: Required<NodeEngineStorageHostConfig> = {
+	maxRetries: 3,
+	baseDelay: 100,
 	createMissingDirectories: true,
 	fileMode: 0o644,
 	dirMode: 0o755,
@@ -24,31 +30,46 @@ export const createNodeEngineStorageHost = (
 	config: NodeEngineStorageHostConfig = {},
 ): NodeEngineStorageHost => {
 	const resolved = { ...defaultConfig, ...config };
+	// Match the Node adapter contract: retry every failure of read, write,
+	// append, remove and ensureDir, but not existence checks, lists or watches.
+	const retry = <A>(operation: () => Promise<A>): Promise<A> =>
+		Effect.runPromise(
+			Effect.tryPromise({ try: operation, catch: (error) => error }).pipe(
+				Effect.retry(
+					Schedule.exponential(`${resolved.baseDelay} millis`).pipe(
+						Schedule.upTo({ times: resolved.maxRetries }),
+					),
+				),
+			),
+		);
 	const ensureParent = async (path: string) => {
 		if (!resolved.createMissingDirectories) return;
 		await fs.mkdir(dirname(path), { recursive: true, mode: resolved.dirMode });
 	};
 	return {
-		read: (path) => fs.readFile(path, "utf8"),
+		read: (path) => retry(() => fs.readFile(path, "utf8")),
 		write: async (path, data) => {
-			await ensureParent(path);
 			const tempPath = `${path}.tmp.${randomBytes(8).toString("hex")}`;
-			try {
-				await fs.writeFile(tempPath, data, { mode: resolved.fileMode });
-				await fs.rename(tempPath, path);
-			} catch (error) {
+			return retry(async () => {
+				await ensureParent(path);
 				try {
-					await fs.unlink(tempPath);
-				} catch {
-					// best-effort temp file cleanup
+					await fs.writeFile(tempPath, data, { mode: resolved.fileMode });
+					await fs.rename(tempPath, path);
+				} catch (error) {
+					try {
+						await fs.unlink(tempPath);
+					} catch {
+						// best-effort temp file cleanup
+					}
+					throw error;
 				}
-				throw error;
-			}
+			});
 		},
-		append: async (path, data) => {
-			await ensureParent(path);
-			await fs.appendFile(path, data, { mode: resolved.fileMode });
-		},
+		append: (path, data) =>
+			retry(async () => {
+				await ensureParent(path);
+				await fs.appendFile(path, data, { mode: resolved.fileMode });
+			}),
 		exists: async (path) => {
 			try {
 				await fs.access(path);
@@ -57,17 +78,14 @@ export const createNodeEngineStorageHost = (
 				return false;
 			}
 		},
-		remove: async (path) => {
-			await fs.unlink(path).catch((error: NodeJS.ErrnoException) => {
-				if (error.code !== "ENOENT") throw error;
-			});
-		},
-		ensureDir: async (path) => {
-			await fs.mkdir(dirname(path), {
-				recursive: true,
-				mode: resolved.dirMode,
-			});
-		},
+		remove: (path) => retry(() => fs.unlink(path)),
+		ensureDir: (path) =>
+			retry(async () => {
+				await fs.mkdir(dirname(path), {
+					recursive: true,
+					mode: resolved.dirMode,
+				});
+			}),
 		listDirectory: async (dirPath) => {
 			try {
 				const entries = await fs.readdir(dirPath, { withFileTypes: true });
@@ -161,5 +179,5 @@ export { makeEngineStorageLayer } from "./storage-host-shared.js";
 
 export const makeNodeEngineStorageLayer = (
 	config: NodeEngineStorageHostConfig = {},
-): import("effect").Layer.Layer<any> =>
+): Layer.Layer<StorageAdapterService> =>
 	makeEngineStorageLayer(createNodeEngineStorageHost(config));
