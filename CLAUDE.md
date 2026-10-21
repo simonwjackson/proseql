@@ -128,11 +128,15 @@ type surface.
 - **Error tags must match TS `_tag` fields exactly** — `EngineError::tag()`
   returns the TS `_tag` string; the binding adapter uses it to reconstruct
   `TaggedError` classes for `Effect.catchTag`.
-- **SchemaNode covers only the audited Effect Schema subset** — combinators
-  beyond `Struct`, `String`, `Number`, `Boolean`, `Array`, `optional`,
-  `optionalWith { default }`, `NullOr`, `NumberFromString`, `Record`, `mutable`,
-  `Unknown` are represented as `SchemaNode::Unsupported { reason }` and rejected
-  loudly at runtime.
+- **SchemaNode covers only the audited Effect Schema subset** — `Struct`,
+  `String`, `Number`, `Boolean`, `Array`, `optional`, `optionalWith { default }`,
+  `NullOr`, `NumberFromString`, `Record`, `mutable`, `Unknown`, and schema checks
+  (`Schema.check` / filters) via `SchemaNode::Checked` are supported. Combinators
+  outside this subset become `SchemaNode::Unsupported { reason }` and fail loudly.
+  Built-in check ids are enforced in Rust in native builds (`native-checks`).
+  Every check is enforced as a registered JS host predicate in WASM. Unknown
+  checks need a registered predicate; otherwise database open fails. `Record`
+  keys that fail their key schema are dropped, as Effect drops them.
 - **`optional` ≠ `null`** — `Schema.optional(T)` expands to `T | undefined`
   (source: `node_modules/effect/src/Schema.ts`, `optional()` function);
   JSON `null` is NOT equivalent to absent.  The engine rejects `null` for
