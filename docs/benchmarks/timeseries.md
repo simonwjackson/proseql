@@ -5,18 +5,18 @@ This file records the native time-series benchmark before and after each step of
 ## How to run
 
 ```sh
-just bench-timeseries            # --rows 140000,1000000,10000000 --years 10
-just bench-timeseries --mode baseline --inserts 1000 --insert-budget-secs 600
+just bench-timeseries            # --rows 140000,1000000,10000000 --years 10 --mode lazy
+just bench-timeseries --mode baseline --rows 140000,1000000 --inserts 1000 --insert-budget-secs 600
 ```
 
 The recipe runs:
 
 ```sh
 cargo run --release --manifest-path crates/Cargo.toml -p proseql-native \
-  --example timeseries_bench -- --rows 140000,1000000,10000000 --years 10
+  --example timeseries_bench -- --rows 140000,1000000,10000000 --years 10 --mode lazy
 ```
 
-Later flags override earlier ones. Run `--help` for every option.
+Later flags override earlier ones, so `just bench-timeseries --mode baseline` runs the baseline. The harness itself defaults to `--mode baseline`; the recipe passes `--mode lazy` first because the acceptance check (contract section 6) is a lazy run. Never run an eager mode at 10M rows on a machine with less than about 64 GiB of RAM (step 1). Run `--help` for every option.
 
 ### Data
 
@@ -46,7 +46,7 @@ Later flags override earlier ones. Run `--help` for every option.
 | Item | Value |
 |---|---|
 | Runtime code | `0e3666a` (unchanged); harness from branch `ts/bench` commit `f28910c` |
-| Command | `nix develop -c just bench-timeseries` (defaults: `--mode baseline --inserts 1000 --insert-budget-secs 600 --query-reps 20 --seed 20261020`) |
+| Command | `nix develop -c just bench-timeseries` (defaults: `--mode baseline --inserts 1000 --insert-budget-secs 600 --query-reps 20 --seed 20261020`). The recipe has passed `--mode lazy` since step 5; to repeat this run, add `--mode baseline`. |
 | Date | 2026-10-20, 19:58–20:21 UTC |
 | CPU | 11th Gen Intel Core i9-11900H, 8 cores / 16 threads, 2.5 GHz base, 4.9 GHz max |
 | RAM | 31 GiB (32,588,248 kB); 15.7 of 15.9 GiB swap in use at start |
@@ -82,7 +82,7 @@ TSBENCH {"mode":"baseline","rows":10000000,"years":10.0,"seed":20261020,"max_rss
 
 ### Reference: today's layout (140k rows, 8 months)
 
-Command: `nix develop -c just bench-timeseries --rows 140000 --years 0.66 --start 2026-01-01 --insert-budget-secs 300`, 20:22–20:28 UTC, one-minute load average 4.8 to 5.4, same machine and commit.
+Command: `nix develop -c just bench-timeseries --rows 140000 --years 0.66 --start 2026-01-01 --insert-budget-secs 300` (baseline mode at that commit; today add `--mode baseline`), 20:22–20:28 UTC, one-minute load average 4.8 to 5.4, same machine and commit.
 
 | Rows | Partitions | Open | RSS after open (peak) | Peak RSS | Inserts timed | Insert median | Insert p95 | Bytes written / insert | File growth / insert | Prefix kept | 1 h query median | Rows returned | Partitions loaded | Index |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---|
@@ -224,7 +224,7 @@ TSBENCH {"mode":"ordered","rows":1000000,"years":10.0,"seed":20261020,"max_rss_m
 | Item | Value |
 |---|---|
 | Code | branch `ts/lazy`, commit `6d29c55` (runtime last changed in `03d0dbc`, where `NativeRuntime::query` stopped computing stats) |
-| Commands | `./crates/target/release/examples/timeseries_bench --rows 140000,1000000,10000000 --years 10 --mode lazy --inserts 1000`, then `--rows 140000,1000000 --mode ordered --inserts 1000` (release build, inside `nix develop`) |
+| Commands | `./crates/target/release/examples/timeseries_bench --rows 140000,1000000,10000000 --years 10 --mode lazy --inserts 1000` (equal to `just bench-timeseries`), then `--rows 140000,1000000 --mode ordered --inserts 1000` (release build, inside `nix develop`) |
 | Date | 2026-10-21, 00:30–00:32 UTC; an earlier lazy run at 00:28 UTC (harness `03d0dbc`, no one-slot query) is listed as a repeat |
 | Machine | Same as step 1 (i9-11900H, 31 GiB, NVMe, btrfs, Linux 6.18.17, rustc 1.92.0) |
 | Machine load | Shared. One-minute load average 26 to 40 during the runs, 13.8 to 15.4 GiB swap in use, 9.8 to 11.6 GiB `MemAvailable` at start. Treat timings as ±50%. |

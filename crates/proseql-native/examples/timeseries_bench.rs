@@ -136,7 +136,8 @@ Usage: timeseries_bench [options]
   --years Y                  span of the data in years, fractional allowed (default 10)
   --start YYYY-MM-DD         first timestamp, UTC midnight (default 2016-01-01)
   --seed S                   generator seed (default 20261020)
-  --mode M                   baseline|append|timebucket|ordered|lazy (default baseline)
+  --mode M                   baseline|append|timebucket|ordered|lazy (default baseline;
+                             `just bench-timeseries` passes --mode lazy first)
   --inserts N                appends to time per size (default 1000)
   --insert-budget-secs S     stop appending after S seconds per size (default 600)
   --query-reps N             repetitions of the one-hour range query (default 20)
