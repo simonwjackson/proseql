@@ -272,9 +272,8 @@ struct RuntimeCore {
     state: Mutex<RuntimeState>,
     lifecycle: AtomicU8,
     watch_generation: AtomicU64,
-    /// File basenames reported by the managed watcher since the last reload
-    /// (`None` when an event names no file).
-    watch_events: Mutex<Vec<Option<String>>>,
+    /// Events reported by the managed watcher since the last reload.
+    watch_events: Mutex<Vec<proseql_storage::host::StorageEvent>>,
     /// Watch pins released by dropped `NativeWatch` values: `(collection, pin)`.
     pending_unpins: Mutex<Vec<(String, u64)>>,
 }
@@ -954,7 +953,7 @@ impl NativeRuntime {
                     Box::new(move |event| {
                         if let Some(core) = weak.upgrade() {
                             if let Ok(mut events) = core.watch_events.lock() {
-                                events.push(event.filename);
+                                events.push(event);
                             }
                         }
                         schedule_reload(&weak, debounce)
@@ -1233,7 +1232,7 @@ fn schedule_reload(weak: &Weak<RuntimeCore>, debounce: Duration) {
 fn reload_locked(
     state: &mut RuntimeState,
     suppress_self_write: bool,
-    changed: Option<Vec<Option<String>>>,
+    changed: Option<Vec<proseql_storage::host::StorageEvent>>,
 ) -> Result<(), EngineError> {
     let changed = changed.filter(|_| suppress_self_write);
     let result: Result<(), EngineError> = (|| {

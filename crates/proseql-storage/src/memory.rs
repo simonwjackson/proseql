@@ -112,6 +112,7 @@ impl MemoryStorageHost {
                 callback(StorageEvent {
                     filename: filename.clone(),
                     kind,
+                    path: Some(normalized.clone()),
                 });
             }
         }

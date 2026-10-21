@@ -23,8 +23,9 @@ use proseql_storage::fs::{DurabilityFaultInjector, DurabilityFaultPoint, FsStora
 use proseql_storage::host::{StorageEvent, StorageHost, WatchHandle};
 use proseql_storage::persistence::{CollectionStorageConfig, DurableStorageHost, FileTail};
 use proseql_storage::source_config::{
-    CollectionFileSourceConfig, DatabaseSourceConfig, NormalizedCollectionFileSourceConfig,
-    PartitionKey, PartitionedSourceConfig,
+    CollectionFileSourceConfig, DatabaseSourceConfig, DocumentGraphFragmentErrorPolicy,
+    DocumentGraphRootConfig, DocumentGraphSourceConfig, NormalizedCollectionFileSourceConfig,
+    PartitionKey, PartitionedSourceConfig, SourceCollectionSelection,
 };
 use serde_json::{json, Value};
 
@@ -841,5 +842,73 @@ fn the_managed_watcher_does_not_reload_after_the_runtimes_own_append() {
     runtime
         .mutate(|db| db.create("heartrate", sample("2026-04", 4, 74)))
         .unwrap();
+    runtime.close().unwrap();
+}
+
+#[test]
+fn own_appends_do_not_reload_when_a_graph_root_shares_the_watch_root() {
+    let dir = tempfile::tempdir().unwrap();
+    seed(dir.path(), "2026-04", &[sample("2026-04", 0, 70)]);
+    seed(dir.path(), "2026-03", &[sample("2026-03", 0, 60)]);
+    let other_path = partition(dir.path(), "2026-03")
+        .to_string_lossy()
+        .into_owned();
+    // A read-only graph whose root is the parent of the partition root.
+    let mut config = config(dir.path());
+    config
+        .collections
+        .push(NativeCollectionConfig::new(descriptor("catalog", false)));
+    config.sources.push(DatabaseSourceConfig::DocumentGraph(
+        DocumentGraphSourceConfig {
+            id: "catalog".into(),
+            roots: vec![DocumentGraphRootConfig {
+                id: Some("catalog".into()),
+                root: dir.path().to_string_lossy().into_owned(),
+                optional: true,
+                include: Some(vec!["catalog.yaml".into()]),
+                exclude: vec![],
+                collections: Some(SourceCollectionSelection::Named(vec!["catalog".into()])),
+            }],
+            collections: Some(SourceCollectionSelection::Named(vec!["catalog".into()])),
+            include: None,
+            exclude: vec![],
+            transform_callback_id: None,
+            on_fragment_error: DocumentGraphFragmentErrorPolicy::Error,
+        },
+    ));
+    let (host, io) = CountingHost::new(Duration::from_millis(20));
+    let runtime = NativeRuntime::open_sources_with_host(
+        config,
+        host,
+        NativeSourceRuntimeOptions {
+            watch_debounce: Some(Duration::from_millis(10)),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let reads_of_other = || {
+        io.lock()
+            .unwrap()
+            .reads
+            .get(&other_path)
+            .copied()
+            .unwrap_or(0)
+    };
+    let baseline = reads_of_other();
+    for minute in 1..=3 {
+        runtime
+            .mutate(|db| db.create("heartrate", sample("2026-04", minute, 70 + minute)))
+            .unwrap();
+    }
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(reads_of_other(), baseline, "own appends must not reload");
+    // A change to another file under the shared root still reloads.
+    fs::write(
+        dir.path().join("catalog.yaml"),
+        "catalog:\n  c1:\n    id: c1\n    timestamp: t\n    bpm: 1\n    source: s\n    month: m\n",
+    )
+    .unwrap();
+    wait_until(|| runtime.find_by_id("catalog", "c1").unwrap().is_some());
+    assert!(reads_of_other() > baseline);
     runtime.close().unwrap();
 }

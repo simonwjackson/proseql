@@ -690,20 +690,11 @@ impl SourceState {
     pub fn own_appends_explain(
         &self,
         host: &dyn StorageHost,
-        names: &[Option<String>],
+        events: &[proseql_storage::host::StorageEvent],
     ) -> Result<bool, EngineError> {
-        if names.is_empty() {
+        if events.is_empty() {
             // An earlier debounced pass already handled every event.
             return Ok(true);
-        }
-        let mut wanted = std::collections::HashSet::new();
-        for name in names {
-            match name {
-                Some(name) if self.self_written.contains(name) => {
-                    wanted.insert(name.as_str());
-                }
-                _ => return Ok(false),
-            }
         }
         let basename = |path: &str| {
             std::path::Path::new(path)
@@ -711,6 +702,43 @@ impl SourceState {
                 .and_then(|name| name.to_str())
                 .map(str::to_owned)
         };
+        if events.iter().all(|event| event.path.is_some()) {
+            // Exact paths: every changed file must be one this runtime
+            // appended to and still equal its stored bytes. A same-named file
+            // elsewhere (for example under an overlapping graph root) has
+            // another path and reloads.
+            for event in events {
+                let changed =
+                    proseql_storage::path::normalize_path(event.path.as_deref().unwrap_or(""));
+                let Some((path, stored)) = self
+                    .contents
+                    .iter()
+                    .find(|(path, _)| proseql_storage::path::normalize_path(path) == changed)
+                else {
+                    return Ok(false);
+                };
+                if !basename(path).is_some_and(|name| self.self_written.contains(&name))
+                    || !host.exists(path)?
+                    || &host.read_bytes(path)? != stored
+                {
+                    return Ok(false);
+                }
+            }
+            return Ok(true);
+        }
+        let names = events
+            .iter()
+            .map(|event| event.filename.clone())
+            .collect::<Vec<_>>();
+        let mut wanted = std::collections::HashSet::new();
+        for name in &names {
+            match name {
+                Some(name) if self.self_written.contains(name) => {
+                    wanted.insert(name.as_str());
+                }
+                _ => return Ok(false),
+            }
+        }
         let graph_roots = self
             .config
             .sources
@@ -723,8 +751,8 @@ impl SourceState {
             .collect::<Vec<_>>();
         let mut candidates = std::collections::BTreeSet::new();
         for root in self.watch_roots(host)? {
-            // A graph file under the same watch root can share the basename;
-            // its change cannot be told apart, so reload.
+            // Without paths, a graph file under the same watch root can share
+            // the basename; its change cannot be told apart, so reload.
             if graph_roots.iter().any(|graph| {
                 std::path::Path::new(graph).starts_with(&root)
                     || std::path::Path::new(&root).starts_with(graph)

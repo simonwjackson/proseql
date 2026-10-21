@@ -285,22 +285,30 @@ impl FsStorageHost {
                     return;
                 };
                 let kind = Self::map_event_kind(&event.kind);
-                let filename = event
+                let changed = event
                     .paths
                     .iter()
                     .rev()
-                    .find_map(|path| {
-                        path.file_name()
-                            .and_then(|name| name.to_str())
-                            .map(str::to_owned)
-                    })
+                    .find(|path| path.file_name().and_then(|name| name.to_str()).is_some());
+                let path = changed.map(|path| path.to_string_lossy().into_owned());
+                let filename = changed
+                    .and_then(|path| path.file_name())
+                    .and_then(|name| name.to_str())
+                    .map(str::to_owned)
                     .or_else(|| {
                         watch_root_for_handler
                             .file_name()
                             .and_then(|name| name.to_str())
                             .map(str::to_owned)
                     });
-                callback_for_watcher(&event, StorageEvent { filename, kind });
+                callback_for_watcher(
+                    &event,
+                    StorageEvent {
+                        filename,
+                        kind,
+                        path,
+                    },
+                );
             },
             // notify 6 compares modification times at second precision. Content
             // comparison also detects replacements within the same second.

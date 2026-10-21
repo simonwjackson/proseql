@@ -11,6 +11,10 @@ pub enum StorageEventKind {
 pub struct StorageEvent {
     pub filename: Option<String>,
     pub kind: StorageEventKind,
+    /// The changed path as the host reports it, when known. Lets a runtime
+    /// tell its own writes apart from a same-named file elsewhere under a
+    /// watched directory.
+    pub path: Option<String>,
 }
 
 pub trait WatchHandle: Send + Sync {
