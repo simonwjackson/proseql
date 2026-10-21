@@ -4,6 +4,7 @@ pub mod document_graph;
 pub mod document_source;
 pub mod host;
 pub mod memory;
+pub mod partition_prune;
 pub mod partitioned;
 pub mod path;
 pub mod persistence;
