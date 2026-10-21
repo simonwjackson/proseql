@@ -19,3 +19,8 @@ it("does not match explicit undefined with string operators", async () => {
   }
  } finally { await db.close(); }
 });
+
+it("includes newly inserted upsert rows after a query has been cached", async () => {
+ const db = await createEngineDatabase({rows:{schema:Schema.Struct({id:Schema.String,name:Schema.String}),relationships:{}}},{rows:[{id:"a",name:"A"}]});
+ try { await db.rows.query(); await db.rows.upsert({where:{id:"b"},create:{id:"b",name:"B"},update:{name:"B"}}); expect((await db.rows.query()).map(row=>row.id)).toEqual(["a","b"]); } finally { await db.close(); }
+});
