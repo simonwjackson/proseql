@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as Schema from "effect/Schema";
+import { Schema } from "effect";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createEngineDatabase } from "../src/index.js";
 
