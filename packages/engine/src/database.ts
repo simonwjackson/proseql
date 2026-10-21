@@ -2116,6 +2116,10 @@ class EngineRuntime {
 				? this.measureQueryCrossing(payloadJson, dispatch)
 				: dispatch();
 		const parsed = JSON.parse(raw) as BridgeResponse<unknown>;
+		if (parsed.kind === "defect") {
+			this.invalidateProjection();
+			parseBridgeResponseValue(parsed, raw);
+		}
 		let mutationSync: ProjectionSync | undefined;
 		if (MUTATION_METHODS.has(method)) {
 			if (parsed.projection === undefined) {
