@@ -548,78 +548,90 @@ describe("reversible release preparation", () => {
 	});
 });
 
+// Both tests bundle the publisher with Bun.build. That takes milliseconds
+// locally but has exceeded Bun's 5 s default on a loaded CI runner.
+const PUBLISHER_BUNDLE_TIMEOUT_MS = 60_000;
+
 describe("prepared publication artifacts", () => {
-	it("builds one standalone publisher and checksums every approved input", async () => {
-		const root = mkdtempSync(join(tmpdir(), "proseql-publisher-bundle-"));
-		try {
-			const release = preparedRelease();
-			for (const candidate of release.artifacts) {
-				const path = join(root, candidate.tarball);
-				mkdirSync(join(path, ".."), { recursive: true });
-				writeFileSync(path, `tarball:${candidate.packageName}`);
+	it(
+		"builds one standalone publisher and checksums every approved input",
+		async () => {
+			const root = mkdtempSync(join(tmpdir(), "proseql-publisher-bundle-"));
+			try {
+				const release = preparedRelease();
+				for (const candidate of release.artifacts) {
+					const path = join(root, candidate.tarball);
+					mkdirSync(join(path, ".."), { recursive: true });
+					writeFileSync(path, `tarball:${candidate.packageName}`);
+				}
+				const manifestPath = join(root, "prepared-release.json");
+				writeFileSync(manifestPath, `${JSON.stringify(release)}\n`);
+				const paths = await preparePublisherBundle(manifestPath);
+				expect(paths).toEqual([
+					"prepared-release.json",
+					"publisher.mjs",
+					...release.artifacts.map(({ tarball }) => tarball),
+				]);
+				const publisher = readFileSync(join(root, "publisher.mjs"), "utf8");
+				expect(publisher).toContain("approve-publish");
+				expect(publisher).not.toContain("import.meta.main");
+				expect(publisher).not.toMatch(/from ["']\.\//);
+				const checksums = readFileSync(join(root, "SHA256SUMS"), "utf8");
+				for (const path of paths) expect(checksums).toContain(`  ${path}`);
+			} finally {
+				rmSync(root, { recursive: true, force: true });
 			}
-			const manifestPath = join(root, "prepared-release.json");
-			writeFileSync(manifestPath, `${JSON.stringify(release)}\n`);
-			const paths = await preparePublisherBundle(manifestPath);
-			expect(paths).toEqual([
-				"prepared-release.json",
-				"publisher.mjs",
-				...release.artifacts.map(({ tarball }) => tarball),
-			]);
-			const publisher = readFileSync(join(root, "publisher.mjs"), "utf8");
-			expect(publisher).toContain("approve-publish");
-			expect(publisher).not.toContain("import.meta.main");
-			expect(publisher).not.toMatch(/from ["']\.\//);
-			const checksums = readFileSync(join(root, "SHA256SUMS"), "utf8");
-			for (const path of paths) expect(checksums).toContain(`  ${path}`);
-		} finally {
-			rmSync(root, { recursive: true, force: true });
-		}
-	});
+		},
+		PUBLISHER_BUNDLE_TIMEOUT_MS,
+	);
 
-	it("executes the generated publisher under Node in dry-run mode without npm writes", async () => {
-		const root = mkdtempSync(join(tmpdir(), "proseql-publisher-exec-"));
-		try {
-			const release = executablePreparedRelease(root);
-			const manifestPath = join(root, "prepared-release.json");
-			writeFileSync(manifestPath, `${JSON.stringify(release)}\n`);
-			await preparePublisherBundle(manifestPath);
+	it(
+		"executes the generated publisher under Node in dry-run mode without npm writes",
+		async () => {
+			const root = mkdtempSync(join(tmpdir(), "proseql-publisher-exec-"));
+			try {
+				const release = executablePreparedRelease(root);
+				const manifestPath = join(root, "prepared-release.json");
+				writeFileSync(manifestPath, `${JSON.stringify(release)}\n`);
+				await preparePublisherBundle(manifestPath);
 
-			const fakeBin = join(root, "bin");
-			const npmLog = join(root, "npm.log");
-			mkdirSync(fakeBin);
-			const fakeNpm = join(fakeBin, "npm");
-			writeFileSync(
-				fakeNpm,
-				`#!/bin/sh\nprintf '%s\\n' "$*" >> "$NPM_LOG"\nif [ "$1" = view ]; then\n  echo 'npm error code E404' >&2\n  exit 1\nfi\necho "unexpected npm write command: $*" >&2\nexit 70\n`,
-			);
-			chmodSync(fakeNpm, 0o755);
+				const fakeBin = join(root, "bin");
+				const npmLog = join(root, "npm.log");
+				mkdirSync(fakeBin);
+				const fakeNpm = join(fakeBin, "npm");
+				writeFileSync(
+					fakeNpm,
+					`#!/bin/sh\nprintf '%s\\n' "$*" >> "$NPM_LOG"\nif [ "$1" = view ]; then\n  echo 'npm error code E404' >&2\n  exit 1\nfi\necho "unexpected npm write command: $*" >&2\nexit 70\n`,
+				);
+				chmodSync(fakeNpm, 0o755);
 
-			const output = execFileSync(
-				"node",
-				["publisher.mjs", "--manifest", "prepared-release.json"],
-				{
-					cwd: root,
-					encoding: "utf8",
-					env: {
-						...process.env,
-						NPM_LOG: npmLog,
-						PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+				const output = execFileSync(
+					"node",
+					["publisher.mjs", "--manifest", "prepared-release.json"],
+					{
+						cwd: root,
+						encoding: "utf8",
+						env: {
+							...process.env,
+							NPM_LOG: npmLog,
+							PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+						},
 					},
-				},
-			);
-			expect(output).toMatch(/dry run complete/i);
-			const npmCalls = readFileSync(npmLog, "utf8").trim().split("\n");
-			// Dry run calls getVersion once per package (view @pkg@version)
-			expect(npmCalls).toHaveLength(COORDINATED_PACKAGE_NAMES.length);
-			expect(npmCalls.every((call) => call.startsWith("view "))).toBe(true);
-			expect(npmCalls.join("\n")).not.toMatch(
-				/\b(?:publish|dist-tag|whoami)\b/,
-			);
-		} finally {
-			rmSync(root, { recursive: true, force: true });
-		}
-	});
+				);
+				expect(output).toMatch(/dry run complete/i);
+				const npmCalls = readFileSync(npmLog, "utf8").trim().split("\n");
+				// Dry run calls getVersion once per package (view @pkg@version)
+				expect(npmCalls).toHaveLength(COORDINATED_PACKAGE_NAMES.length);
+				expect(npmCalls.every((call) => call.startsWith("view "))).toBe(true);
+				expect(npmCalls.join("\n")).not.toMatch(
+					/\b(?:publish|dist-tag|whoami)\b/,
+				);
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
+		},
+		PUBLISHER_BUNDLE_TIMEOUT_MS,
+	);
 
 	it("ties no-secret registry verification to latest tags and integrities", async () => {
 		const release = preparedRelease();
