@@ -385,7 +385,8 @@ fn indexed_fk_rollback_restores_earlier_insertion_order_and_recreate_moves_to_en
         Some(vec!["u1".into(), "u2".into(), "u3".into()])
     );
 
-    db.delete("users", "u1").unwrap();
+    db.delete_with_relationships("users", "u1", DeleteRelationshipsOptions::default())
+        .unwrap();
     db.create(
         "users",
         json!({"id":"u1","name":"Alice New","companyId":"c1"}),
@@ -413,8 +414,10 @@ fn rollback_preserves_snapshot_order_across_repeated_multi_entity_shifts() {
         .unwrap();
     db.transaction_step(&mut session, |db| db.delete("users", "u4"))
         .unwrap();
-    db.transaction_step(&mut session, |db| db.delete("users", "u1"))
-        .unwrap();
+    db.transaction_step(&mut session, |db| {
+        db.delete_with_relationships("users", "u1", DeleteRelationshipsOptions::default())
+    })
+    .unwrap();
     db.rollback_owned_transaction(session).unwrap();
 
     assert_eq!(
@@ -432,7 +435,8 @@ fn rollback_preserves_snapshot_order_across_repeated_multi_entity_shifts() {
 fn caught_invalid_recreate_after_delete_does_not_resurrect_prior_entity() {
     let mut db = make_db();
     let mut tx = db.begin_transaction(None).unwrap();
-    tx.delete("users", "u1").unwrap();
+    tx.delete_with_relationships("users", "u1", DeleteRelationshipsOptions::default())
+        .unwrap();
     let error = tx
         .create(
             "users",
@@ -459,7 +463,8 @@ fn caught_invalid_recreate_after_delete_does_not_resurrect_prior_entity() {
 fn caught_invalid_batch_recreate_after_delete_does_not_resurrect_prior_entity() {
     let mut db = make_db();
     let mut tx = db.begin_transaction(None).unwrap();
-    tx.delete("users", "u1").unwrap();
+    tx.delete_with_relationships("users", "u1", DeleteRelationshipsOptions::default())
+        .unwrap();
     assert!(matches!(
         tx.create_many(
             "users",
@@ -476,7 +481,8 @@ fn caught_invalid_batch_recreate_after_delete_does_not_resurrect_prior_entity() 
 fn caught_invalid_upsert_recreate_after_delete_does_not_resurrect_prior_entity() {
     let mut db = make_db();
     let mut tx = db.begin_transaction(None).unwrap();
-    tx.delete("users", "u1").unwrap();
+    tx.delete_with_relationships("users", "u1", DeleteRelationshipsOptions::default())
+        .unwrap();
     assert!(matches!(
         tx.upsert(
             "users",
@@ -502,7 +508,8 @@ fn committed_transaction_deltas_report_final_positions_after_earlier_deletes() {
     let mut tx = db.begin_transaction(None).unwrap();
     tx.update("users", "u2", json!({"name":"Bob Updated"}))
         .unwrap();
-    tx.delete("users", "u1").unwrap();
+    tx.delete_with_relationships("users", "u1", DeleteRelationshipsOptions::default())
+        .unwrap();
     tx.commit().unwrap();
 
     let changes = db.take_committed_changes();
@@ -535,7 +542,8 @@ fn transaction_commit_publishes_final_order_to_active_watch() {
     let mut tx = db.begin_transaction(None).unwrap();
     tx.update("users", "u2", json!({"name":"Bob Updated"}))
         .unwrap();
-    tx.delete("users", "u1").unwrap();
+    tx.delete_with_relationships("users", "u1", DeleteRelationshipsOptions::default())
+        .unwrap();
     tx.create("users", json!({"id":"u4","name":"Dana","companyId":"c1"}))
         .unwrap();
     tx.commit().unwrap();
