@@ -9,8 +9,7 @@ import {
 	NotFoundError,
 	ValidationError,
 } from "@proseql/core";
-import { Effect } from "effect";
-import * as Schema from "effect/Schema";
+import { Effect, Schema } from "effect";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
 	createEngineDatabase,
@@ -164,16 +163,24 @@ describe("duplicateIds", () => {
 		}
 	});
 
-	it("rejects an unknown policy at the descriptor boundary", async () => {
-		await expect(
-			createEngineDatabase({
-				heartrate: {
-					schema: SampleSchema,
-					relationships: {},
-					duplicateIds: "ignore_identical" as never,
-				},
-			} as const),
-		).rejects.toThrow(/unsupported duplicateIds/);
+	it("rejects an unknown policy at the descriptor boundary with ValidationError", async () => {
+		const error = await createEngineDatabase({
+			heartrate: {
+				schema: SampleSchema,
+				relationships: {},
+				duplicateIds: "ignore_identical" as never,
+			},
+		} as const).then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+		expect(error).toBeInstanceOf(ValidationError);
+		expect((error as ValidationError).message).toMatch(
+			/unsupported duplicateIds/,
+		);
+		expect((error as ValidationError).issues[0]?.field).toBe(
+			"heartrate.duplicateIds",
+		);
 	});
 
 	it("is rejected by the legacy core runtime (fail closed)", async () => {

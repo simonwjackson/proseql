@@ -8,6 +8,7 @@ import type {
 import {
 	getCollectionConfigs,
 	isSourceOrientedDatabaseConfig,
+	ValidationError,
 } from "@proseql/core";
 import type { Schema } from "effect";
 import { Effect } from "effect";
@@ -252,9 +253,18 @@ function compileDuplicateIds(
 		case "ignoreIdentical":
 			return { duplicate_ids: "ignore_identical" };
 		default:
-			throw new Error(
-				`Collection '${collectionName}': unsupported duplicateIds '${String(policy)}'; use "error" or "ignoreIdentical"`,
-			);
+			throw new ValidationError({
+				message: `Collection '${collectionName}': unsupported duplicateIds '${String(policy)}'; use "error" or "ignoreIdentical"`,
+				issues: [
+					{
+						field: `${collectionName}.duplicateIds`,
+						message: 'expected "error" or "ignoreIdentical"',
+						value: policy,
+						expected: '"error" | "ignoreIdentical"',
+						received: String(policy),
+					},
+				],
+			});
 	}
 }
 
