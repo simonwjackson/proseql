@@ -347,14 +347,32 @@ pub(super) fn require_obj(v: Value, context: &str) -> Result<Map<String, Value>,
     }
 }
 
-pub(crate) fn validate_delete_constraints(collection: &str, id: &str, collections: &IndexMap<String, Collection>) -> Result<(), EngineError> {
+#[inline(never)]
+pub(crate) fn validate_delete_constraints(
+    collection: &str,
+    id: &str,
+    collections: &IndexMap<String, Collection>,
+) -> Result<(), EngineError> {
     for (name, source) in collections {
         for (relationship, descriptor) in &source.descriptor.relationships {
-            if descriptor.kind != RelationshipKind::Ref || descriptor.target != collection { continue; }
+            if descriptor.kind != RelationshipKind::Ref || descriptor.target != collection {
+                continue;
+            }
             let field = ref_fk(relationship, &descriptor.foreign_key);
-            let count = source.list().iter().filter(|row| row.get(&field).and_then(Value::as_str) == Some(id)).count();
+            let count = source
+                .entries()
+                .filter(|(_, row)| row.get(&field).and_then(Value::as_str) == Some(id))
+                .count();
             if count > 0 {
-                return Err(EngineError::ForeignKey(Box::new(ForeignKeyError { collection: collection.to_owned(), field, value: id.to_owned(), target_collection: name.clone(), message: format!("Cannot delete: {count} {name} entities reference this {collection}") })));
+                return Err(EngineError::ForeignKey(Box::new(ForeignKeyError {
+                    collection: collection.to_owned(),
+                    field,
+                    value: id.to_owned(),
+                    target_collection: name.clone(),
+                    message: format!(
+                        "Cannot delete: {count} {name} entities reference this {collection}"
+                    ),
+                })));
             }
         }
     }
