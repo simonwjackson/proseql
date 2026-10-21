@@ -84,7 +84,7 @@ use serde_json::Value;
 
 use self::helpers::{
     col_nf, fk_field_names, payload_touches_fk_field, ref_fk, resolve_inv_fk_population,
-    validate_fk, validate_delete_constraints,
+    validate_delete_constraints, validate_fk,
 };
 use self::populate::{apply_populate_borrowed, validate_populate_borrowed};
 use crate::callbacks::CallbackRegistry;
@@ -459,13 +459,30 @@ impl Database {
 
     /// Hard-delete an entity by id (no cascade).
     pub fn delete(&mut self, collection: &str, id: &str) -> Result<Value, EngineError> {
-        if self.collections.get(collection).ok_or_else(|| col_nf(collection))?.get(id).is_none() { return Err(helpers::ent_nf(collection, id)); }
+        self.delete_with_options(collection, id, false)
+    }
+
+    pub fn delete_with_options(
+        &mut self,
+        collection: &str,
+        id: &str,
+        soft: bool,
+    ) -> Result<Value, EngineError> {
+        if self
+            .collections
+            .get(collection)
+            .ok_or_else(|| col_nf(collection))?
+            .get(id)
+            .is_none()
+        {
+            return Err(helpers::ent_nf(collection, id));
+        }
         validate_delete_constraints(collection, id, &self.collections)?;
         let deleted = self
             .collections
             .get_mut(collection)
             .ok_or_else(|| col_nf(collection))?
-            .delete(id)?;
+            .delete_with_options(id, soft)?;
         self.sync_reactive_snapshots();
         self.emit_owner_change_event(collection, ChangeOperation::Delete);
         Ok(deleted)

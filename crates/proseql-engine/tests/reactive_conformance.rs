@@ -2079,3 +2079,37 @@ fn plain_deletes_reject_incoming_references_atomically() {
     ));
     assert_eq!(db.collection("people").unwrap().list().len(), 2);
 }
+
+#[test]
+fn single_soft_delete_checks_inbound_refs_but_batch_soft_delete_preserves_them() {
+    let registry = Arc::new(CallbackRegistry::new());
+    let mut descriptor = people_descriptor();
+    if let SchemaNode::Struct { fields } = &mut descriptor.schema {
+        fields.push(StructField {
+            name: "deletedAt".into(),
+            schema: SchemaNode::Optional(Box::new(SchemaNode::Str)),
+        });
+    }
+    let people = seed(
+        Collection::new(
+            "people",
+            descriptor,
+            Arc::clone(&registry),
+            Box::new(SequentialGenerator::new("p")),
+        ),
+        vec![
+            json!({"id":"boss","name":"Boss"}),
+            json!({"id":"worker","name":"Worker","managerId":"boss"}),
+        ],
+    );
+    let mut db = Database::new(IndexMap::from([("people".into(), people)]), registry);
+    assert!(matches!(
+        db.delete_with_options("people", "boss", true),
+        Err(EngineError::ForeignKey(_))
+    ));
+    let result = db
+        .delete_many("people", json!({"id":"boss"}), true, None)
+        .unwrap();
+    assert_eq!(result.count, 1);
+    assert!(db.collection("people").unwrap().get("boss").unwrap()["deletedAt"].is_string());
+}

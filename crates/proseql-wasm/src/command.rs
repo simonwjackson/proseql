@@ -144,7 +144,9 @@ pub(crate) fn dispatch(
         }
         "delete" => {
             let command: DeleteCommand = parse_json(payload_json, "delete")?;
-            context.db.delete(&command.collection, &command.id)
+            context
+                .db
+                .delete_with_options(&command.collection, &command.id, command.soft)
         }
         "deleteMany" => {
             let command: DeleteManyCommand = parse_json(payload_json, "deleteMany")?;
@@ -348,11 +350,13 @@ fn run_transaction(
                 } => TransactionOperationOutput::UpdateMany {
                     value: update_many_result_value(tx.update_many(&collection, r#where, data)?),
                 },
-                TransactionOperationInput::Delete { collection, id } => {
-                    TransactionOperationOutput::Value {
-                        value: tx.delete(&collection, &id)?,
-                    }
-                }
+                TransactionOperationInput::Delete {
+                    collection,
+                    id,
+                    soft,
+                } => TransactionOperationOutput::Value {
+                    value: tx.delete_with_options(&collection, &id, soft)?,
+                },
                 TransactionOperationInput::DeleteMany {
                     collection,
                     r#where,

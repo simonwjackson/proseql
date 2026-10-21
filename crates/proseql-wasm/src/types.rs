@@ -139,6 +139,8 @@ pub(crate) struct UpdateManyCommand {
 pub(crate) struct DeleteCommand {
     pub collection: String,
     pub id: String,
+    #[serde(default)]
+    pub soft: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -300,6 +302,8 @@ pub(crate) enum TransactionOperationInput {
     Delete {
         collection: String,
         id: String,
+        #[serde(default)]
+        soft: bool,
     },
     DeleteMany {
         collection: String,
@@ -618,4 +622,6 @@ fn skipped_entry_value(entry: SkippedEntry) -> Value {
     json!({"data": entry.data, "reason": entry.reason})
 }
 
-fn default_validate_relationships() -> bool { true }
+fn default_validate_relationships() -> bool {
+    true
+}

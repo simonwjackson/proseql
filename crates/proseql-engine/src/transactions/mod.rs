@@ -409,7 +409,7 @@ impl<'a> TransactionContext<'a> {
         inputs: Vec<Value>,
         skip_duplicates: bool,
     ) -> Result<CreateManyResult, EngineError> {
-        self.run_mutation(|db| db.create_many(collection, inputs, skip_duplicates))
+        self.create_many_with_validation(collection, inputs, skip_duplicates, true)
     }
     pub fn create_many_with_validation(
         &mut self,
@@ -418,7 +418,14 @@ impl<'a> TransactionContext<'a> {
         skip_duplicates: bool,
         validate_relationships: bool,
     ) -> Result<CreateManyResult, EngineError> {
-        self.run_mutation(|db| db.create_many_with_validation(collection, inputs, skip_duplicates, validate_relationships))
+        self.run_mutation(|db| {
+            db.create_many_with_validation(
+                collection,
+                inputs,
+                skip_duplicates,
+                validate_relationships,
+            )
+        })
     }
     pub fn update(
         &mut self,
@@ -446,7 +453,15 @@ impl<'a> TransactionContext<'a> {
         self.run_mutation(|db| db.update_many(collection, where_clause, updates))
     }
     pub fn delete(&mut self, collection: &str, id: &str) -> Result<Value, EngineError> {
-        self.run_mutation(|db| db.delete(collection, id))
+        self.delete_with_options(collection, id, false)
+    }
+    pub fn delete_with_options(
+        &mut self,
+        collection: &str,
+        id: &str,
+        soft: bool,
+    ) -> Result<Value, EngineError> {
+        self.run_mutation(|db| db.delete_with_options(collection, id, soft))
     }
     pub fn delete_many(
         &mut self,

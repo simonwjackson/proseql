@@ -3855,39 +3855,25 @@ function buildCollectionFacade(
 		},
 		delete: async (id: string, options?: any) => {
 			ensureWritable("delete");
+			const value = await runtime.invoke<any>("delete", {
+				collection: collection.name,
+				id,
+				soft: options?.soft ?? false,
+			});
 			if (options?.soft) {
-				const value = await runtime.invoke<any>("deleteMany", {
-					collection: collection.name,
-					where: { id },
-					soft: true,
-					limit: 1,
-				});
-				if (!value.deleted?.[0]) {
-					throw new NotFoundError({
-						collection: collection.name,
-						id,
-						message: `Entity with id "${id}" not found in collection "${collection.name}"`,
-					});
-				}
-				if (!mirrorUpsertRows(persistence, collection.name, value.deleted))
+				if (!mirrorUpsertRows(persistence, collection.name, [value]))
 					invalidatePersistenceMirror(
 						persistence,
 						collection.name,
 						"soft-delete",
 					);
-				scheduleWrite();
-				return value.deleted[0];
-			}
-			const value = await runtime.invoke<any>("delete", {
-				collection: collection.name,
-				id,
-			});
-			applyFormalMutationToPersistenceMirror(
-				persistence,
-				collection.name,
-				"delete",
-				value,
-			);
+			} else
+				applyFormalMutationToPersistenceMirror(
+					persistence,
+					collection.name,
+					"delete",
+					value,
+				);
 			scheduleWrite();
 			return value;
 		},
@@ -5609,34 +5595,17 @@ function buildTransactionCollectionFacade(
 		},
 		delete: async (id: string, options?: any) => {
 			ensureWritable("delete");
-			if (options?.soft) {
-				const value = await runtime.invoke<any>("deleteMany", {
-					collection: collection.name,
-					where: { id },
-					soft: true,
-					limit: 1,
-				});
-				if (!value.deleted?.[0]) {
-					throw new NotFoundError({
-						collection: collection.name,
-						id,
-						message: `Entity with id "${id}" not found in collection "${collection.name}"`,
-					});
-				}
-				push({
-					kind: "deleteMany",
-					collection: collection.name,
-					where: { id },
-					soft: true,
-					limit: 1,
-				});
-				return value.deleted[0];
-			}
 			const value = await runtime.invoke<any>("delete", {
 				collection: collection.name,
 				id,
+				soft: options?.soft ?? false,
 			});
-			push({ kind: "delete", collection: collection.name, id });
+			push({
+				kind: "delete",
+				collection: collection.name,
+				id,
+				soft: options?.soft ?? false,
+			});
 			return value;
 		},
 		deleteMany: async (where: any, options?: any) => {
