@@ -43,3 +43,19 @@ The runtime SHALL keep at most `max_loaded_partitions` partitions loaded, except
 #### Scenario: Uniqueness limit
 - **WHEN** a record is created
 - **THEN** the ID uniqueness check covers the target partition; wrong-partition and duplicate checks run when a partition loads
+
+#### Scenario: Append into an unloaded partition
+- **WHEN** a record is created whose partition file exists but is not loaded
+- **THEN** that partition loads for the ID check, exactly the record's line is appended, and the earlier bytes of the file are unchanged
+
+#### Scenario: Append into a new partition
+- **WHEN** a record is created whose partition file does not exist
+- **THEN** no partition file is read and the new file holds exactly the record's line
+
+### Requirement: Lazy file watching
+
+The managed watch SHALL compare only the directory listing and the loaded partitions of a lazy source with the disk, and SHALL NOT refresh after the runtime's own appends.
+
+#### Scenario: External file
+- **WHEN** a partition file appears while the runtime is open
+- **THEN** it is listed without being decoded, and it loads when a live watch's filter covers it

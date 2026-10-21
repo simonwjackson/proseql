@@ -40,7 +40,19 @@ Prose partitions require `ProseCodecOptions` with a template, just like collecti
 
 A mutation groups the candidate records, then encodes only net changed partitions. Updates to the partition field move records between files. Deletes leave empty files with their format header or empty collection. Unchanged files, no-op mutations, flush, and close remain unchanged. Source overlap and intervening edits fail before durable replacement. The existing crash rule applies, including partial commits and quarantine after write failure.
 
-Partitioning reduces write size. It does not reduce aggregate memory use, grouping work, or recursive watch polling. Managed reload discovers new partition files, including creation under an initially absent root. Append-only collections skip the grouping work; see the next section.
+Partitioning reduces write size. On its own it does not reduce aggregate memory use, grouping work, or recursive watch polling. Managed reload discovers new partition files, including creation under an initially absent root. Append-only collections skip the grouping work (see "Append-only collections"). Lazy partitions load only the partitions an operation can touch and poll only loaded partitions (see "Lazy partitions").
+
+## Time-series settings
+
+| Setting | Where | Default | Native | Cost |
+|---|---|---|---|---|
+| Append-only | `CollectionDescriptor.append_only: true` on a JSONL/NDJSON `CollectionFile` or `Partitioned` source | `false` | creates append lines; update, delete and upsert are refused | one line, a 4 KiB tail read and one file sync per create |
+| Duplicate IDs | `CollectionDescriptor.duplicate_ids: DuplicateIdPolicy` (`"error"`, `"ignore_identical"`) | `"error"` | identical re-creates write nothing | one stored-record comparison per create |
+| Time bucket | `PartitionKey::TimeBucket { field, bucket: TimeBucket::{Year, Month, Day} }` | — | key `YYYY`, `YYYY-MM` or `YYYY-MM-DD` from a UTC timestamp | none measurable |
+| Ordered index | `CollectionDescriptor.ordered_indexes: Vec<String>` | empty | ranges and single-field sorts use the index | about 175 B of memory per row; longer open |
+| Lazy partitions | `NativeSourceRuntimeOptions.lazy_partitions: IndexMap<source id, LazyPartitionPolicy { max_loaded_partitions, full_scan }>` and `lazy_watch_interval` | empty map (eager), 2 s | open lists names; operations load the partitions they can touch; LRU eviction | first access to a partition reads and decodes it |
+
+The new descriptor fields are omitted from serialized descriptors at their defaults, so existing descriptor JSON keeps its bytes. Every setting is opt-in. The sections below give the rules and limits.
 
 ## Append-only collections
 
@@ -54,7 +66,7 @@ A mutation persists append-only collections from the engine transaction journal:
 4. One durable append per file, in sorted path order, writes the complete `\n`-terminated lines and synchronizes the file (`fdatasync`), and its directory when the file is new.
 5. The runtime publishes the engine state and records the new length and bytes as the stored file state.
 
-No collection is snapshotted, regrouped or compared. One create therefore costs the encoding of its line, a 4 KiB tail read, one append and one file sync, whatever the size of the collection or the partition. Memory use does not change: every partition still loads at open. A transaction that also changes other collections uses the rewrite plan for those collections only.
+No collection is snapshotted, regrouped or compared. One create therefore costs the encoding of its line, a 4 KiB tail read, one append and one file sync, whatever the size of the collection or the partition. Memory use does not change: every partition still loads at open, unless the source is lazy. A transaction that also changes other collections uses the rewrite plan for those collections only.
 
 The rewrite encoder ends a JSONL file without a final newline. The first append to such a file writes the missing `\n` first. Record lines are byte-identical to the lines a full rewrite produces, so a later rewrite differs only by the final newline.
 
@@ -92,6 +104,11 @@ The policy is separate from `append_only`, so existing append-only users see no 
 | Partitioned append without rewrite | yes | no, on purpose: partitioned sources keep the rewrite path | no |
 | Torn-line recovery and durable append | yes | no; single-file `appendOnly` JSONL appends without a file sync and relies on the debounced canonical save | no |
 | `TimeBucket` partition key | yes | yes (shared `partitioned-source.ts`) | yes |
+| Ordered index | yes (ranges and sorts) | yes (engine; ranges only, because the binding sorts through the host) | accepted, not used for planning; same results |
+| Lazy partitions | yes | no, on purpose | no |
+| Native query stats (`partitions_loaded`) | yes | no (`explainQuery` gives `index_used` and `candidate_rows`) | no |
+
+Lazy partitions are native only on purpose: the approved time-series contract keeps the WASM engine and the legacy core fully in memory, and lazy loading needs a host that can read single files on demand during a query.
 
 Partitioned append is native only on purpose: the approved time-series contract keeps the rewrite path for partitioned sources in the WASM engine. Its source-oriented configuration also rejects `appendOnly` as an old-style persistence field, so a TypeScript partitioned collection cannot be append-only today.
 
@@ -111,9 +128,93 @@ The index copies the engine's comparison rules, so results never change: a strin
 
 A sort with one key on an indexed field reads rows in index order and stops at the limit, so newest-first pages do not sort the collection. Ties keep insertion order and null or missing values come last, as in the ordinary sort. The index does not order the sort when the field holds both strings and numbers, or booleans, arrays or objects; when a string collator is registered; when the host sorts (the WASM binding registers `localeCompare` as a host sort, so `@proseql/engine` uses ordered indexes for ranges only); with a top-level `$search`; or with computed fields to materialize. Those queries sort as before. Cursor queries and aggregates use the same candidates.
 
-`Database::explain_query(collection, &QueryInput)` returns `QueryStats { index_used, candidate_rows, index_sorted }` without running the query. `index_used` is `none`, `equality`, `ordered` or `search`. Native callers use `runtime.read(|db| db.explain_query("heartrate", &input))`; the WASM boundary method is `explainQuery`. Lazy partitions will add `partitions_loaded` to the native stats.
+`Database::explain_query(collection, &QueryInput)` returns `QueryStats { index_used, candidate_rows, index_sorted }` without running the query. `index_used` is `none`, `equality`, `ordered` or `search`. Native callers use `runtime.read(|db| db.explain_query("heartrate", &input))`, or `NativeRuntime::query_with_stats`, which runs the query and adds `partitions_loaded` (see "Lazy partitions"); the WASM boundary method is `explainQuery`.
 
 Costs: each indexed row holds an encoded key, its insertion ordinal and its ID in a B-tree. The benchmark measured about 175 bytes of RSS per row for an ISO timestamp key (170 MiB at 1M rows). Opening builds the index after loading. Every insert, update and delete updates it in logarithmic time. Rollback, reload and snapshot restore rebuild it. Open took 7% to 14% longer in the benchmark; a one-hour query at 1M rows fell from 1.1 s to 21 µs. See `docs/benchmarks/timeseries.md` (Step 4). The legacy TypeScript core accepts `orderedIndexes` and ignores it for planning.
+
+## Lazy partitions
+
+Native only. Set `NativeSourceRuntimeOptions.lazy_partitions` to map a source ID to a policy:
+
+```rust
+NativeSourceRuntimeOptions {
+    lazy_partitions: IndexMap::from([(
+        "heartrate".to_owned(),
+        LazyPartitionPolicy { max_loaded_partitions: 4, full_scan: FullScanPolicy::Error },
+    )]),
+    ..Default::default()
+}
+```
+
+The default is an empty map, so every existing configuration stays eager. `NativeSourceRuntimeOptions.lazy_watch_interval` (default 2 s) sets how often the managed watch polls lazy sources.
+
+**Preconditions.** The source must be a `Partitioned` JSONL or NDJSON source. Its collection must have `append_only: true`, no `unique_fields`, no relationships, and no other collection may have a relationship to it. Otherwise open fails with `SourceConfigError` naming the source. `max_loaded_partitions` must be at least 1. Hooks, computed fields and migrations are already refused by the native runtime.
+
+**Open.** Open lists the partition file names. It reads and decodes no partition, so open time and memory do not grow with history.
+
+**Which partitions an operation loads.** `NativeRuntime::query`, `query_with_stats`, `query_cursor`, `aggregate`, `aggregate_grouped`, `find_by_id` and `watch` first compute the partitions the filter can touch, load them, and then run the engine's normal query. The runtime reads the conditions on the partition field: a direct value, `$eq`, `$in`, `$gt`, `$gte`, `$lt`, `$lte` and `$startsWith` with string operands, at the top level and through `$and` and `$or`. For a `TimeBucket` key, each bound is cut to the bucket length (`2026-04-10T05:00:00.000Z` → `2026-04`), which keeps the string order, so a range of timestamps maps to a range of file keys. For a `Field` key the value is the key. A `Prefix` key prunes on equality and `$in` only, because the prefix does not keep the string order.
+
+Pruning compares string intervals and is conservative: it never skips a partition that can hold a match. The cost is that edges can load one more partition than the data needs. Timestamps may carry any number of fraction digits, so `2026-05-01T00:00:00.0000Z` sorts before `2026-05-01T00:00:00.000Z`; a query `{ $gte: "2026-04-01T00:00:00.000Z", $lt: "2026-05-01T00:00:00.000Z" }` therefore loads April and May. An upper bound at or below the first possible timestamp of a bucket excludes it: `$lt: "2026-05-01T00:00:00"` loads only April. Records live only in the file of their own key, because loading rejects wrong-partition records.
+
+**Unfiltered operations.** A filter without a usable partition-field condition (none, `{ bpm: 60 }`, `$not`, `$ne`, `$nin`, an `$or` with one unfiltered branch) cannot prune. With `FullScanPolicy::Allow` it loads every partition for that operation; the bound applies again afterwards. With `FullScanPolicy::Error` it fails with `OperationError` (operation `query`, `watch` or `findById`, reason `lazy-full-scan`) and loads nothing. `find_by_id` cannot know a record's partition from its ID: a hit among the loaded partitions returns at once, and a miss is a full scan. Query by the partition field instead when IDs derive from it.
+
+**Eviction.** After each operation, the runtime evicts least recently used partitions until at most `max_loaded_partitions` partitions that no watch pins stay loaded. Pinned partitions do not count against the bound. Eviction drops the records, their index postings and the stored file contents; a later operation reads and decodes the file again with the same result.
+
+**Results.** Loaded records keep the order of an eager open: partition path order, then file order. Queries, sorts, pages, cursors and aggregates over the loaded records therefore equal the eager results; the conformance tests compare every lazy result with an eager runtime on the same files. Records created in the current session follow the engine's insertion order (the end of the collection) until their partition loads again, as in an eager session.
+
+**Indexes.** Equality, ordered and search indexes cover the loaded records only. Loading a partition adds its records to the indexes (incrementally when it loads after every loaded partition, with one rebuild otherwise); eviction removes them. `NativeQueryStats.index_used` comes from `Database::explain_query`.
+
+**Relationships.** None, by precondition. Population never reaches a lazy collection, so queries on other collections are unchanged.
+
+**Aggregates.** `NativeRuntime::aggregate` and `aggregate_grouped` run the filtered query and aggregate its rows, so they load like the query. An aggregate without a partition-field filter is a full scan.
+
+**Unique and duplicate checks.** A create loads the partition its record routes to, so the engine's ID check and the `duplicate_ids: ignore_identical` comparison see that partition (and any other loaded partitions). An ID that also exists in an unloaded partition is not found. This is a documented limit: derive IDs from the partition field (for example `heartrate:<timestamp>`), so the same ID cannot route to two partitions. Wrong-partition records and duplicate IDs across loaded partitions fail with `SourceConfigError` when the partition loads; the operation fails and the loaded state stays as it was. `unique_fields` are refused at open.
+
+**Appends.** The first create into a partition that is not loaded reads and decodes that partition once (in the benchmark: 240 KB and 28 ms for a 1,200-row month, 9.2 MB and 1.2 s for an 83,000-row month; see `docs/benchmarks/timeseries.md`, Step 5). Later creates into the loaded partition cost the same as an eager append: one line, a 4 KiB tail read and one file sync. A create into a partition file that does not exist yet reads nothing. A create whose input does not contain the partition field cannot be routed before the ID check; it fails (`ValidationError` when the schema requires the field, otherwise `OperationError` reason `lazy-partition-not-loaded`) and writes nothing.
+
+**Watches.** `NativeRuntime::watch` and `watch_with_callback` load the partitions the watch filter touches and pin them until the returned `NativeWatch` is dropped. Appends into pinned partitions reach the watch as usual. A new partition file that matches a pinned filter (written by this runtime or found by the watcher) joins the pin and loads. A watch without a partition-field filter pins every partition, or fails under `FullScanPolicy::Error`. `Database::watch` through `read` sees only the loaded records and pins nothing; use the runtime methods.
+
+**`read`.** `NativeRuntime::read` exposes the engine database with the loaded partitions only. Use it for engine calls on eager collections, or after a runtime method has loaded what you need.
+
+**File watcher.** The host's recursive poller does not watch a lazy root; it hashes every file, which would read all history. The managed watch polls lazy sources itself every `lazy_watch_interval`: it lists the directory and hashes only the loaded partitions, outside the runtime lock. Only a difference refreshes: a removed file is dropped, a changed loaded partition is decoded again (the old records stay when the new content fails, and `last_reload_error` reports it), and a new file is listed, and loaded when a watch covers it. Changes found this way are published to watches and change subscribers. The runtime's own appends update the stored contents, so they never cause a refresh. A lazy root inside another source's watch root is still polled by that source's watcher. `NativeRuntime::reload` does the same refresh after reloading the other sources.
+
+**Stats.** `NativeRuntime::query_with_stats` returns the rows and `NativeQueryStats { partitions_loaded, partitions_read, partitions_resident, index_used, candidate_rows, index_sorted }`. `partitions_loaded` is the number of partitions the query needed loaded (every partition file for an eager partitioned source). `partitions_read` counts files this query read. `NativeRuntime::lazy_partition_status(source_id)` lists known, loaded and pinned partition files.
+
+**Costs.** Memory follows the loaded partitions, not total history: in the benchmark, open took 3 to 11 ms and 5 MiB at 140k, 1M and 10M rows, and peak RSS with two loaded partitions was 11 MiB, 36 MiB and 324 MiB (about 2 KB per loaded row). The first operation on a partition pays its read and decode (1.4 s for an 83,000-row month). Each lazy query adds about 5 µs for pruning and eviction. Query time then follows the rows returned (about 2.2 to 2.5 µs per row), not history size. Choose the bucket so that a partition decodes quickly (a month of one-minute samples is about 44,000 rows) and set `max_loaded_partitions` to the working set, for example the current month plus the months that dashboards read.
+
+**Where the seam is.** The engine assumes that a collection holds every record a query can match. Lazy partitions keep that assumption at the native runtime layer instead of teaching the engine about files: before an operation, the runtime makes every partition that can match resident with `Database::load_resident_records`; after it, the runtime evicts with `unload_resident_records`. These engine methods are not mutations: no hooks, no journal entries, no change events unless the runtime publishes an external change. The engine's query, index, sort, aggregate, transaction and watch code is unchanged, and the WASM engine never calls the new methods. The preconditions make this sound: without relationships, no query reads another collection's lazy records; without unique fields, the only cross-record check on create is the ID, which the target partition covers.
+
+### Configuration for a monthly heart-rate collection
+
+```rust
+let descriptor = CollectionDescriptor {
+    name: "heartrate".into(),
+    // id, timestamp, bpm, source
+    append_only: true,
+    duplicate_ids: DuplicateIdPolicy::IgnoreIdentical,
+    ordered_indexes: vec!["timestamp".into()],
+    unique_fields: vec![],
+    relationships: vec![],
+    ..
+};
+let source = DatabaseSourceConfig::Partitioned(PartitionedSourceConfig {
+    id: "heartrate".into(),
+    collection: "heartrate".into(),
+    root: "/data/oura/heartrate".into(),
+    format: "jsonl".into(),
+    partition_by: PartitionKey::TimeBucket { field: "timestamp".into(), bucket: TimeBucket::Month },
+    prose: None,
+});
+let options = NativeSourceRuntimeOptions {
+    lazy_partitions: IndexMap::from([(
+        "heartrate".to_owned(),
+        LazyPartitionPolicy { max_loaded_partitions: 4, full_scan: FullScanPolicy::Error },
+    )]),
+    ..Default::default()
+};
+```
+
+Use IDs `heartrate:<timestamp>`. Query with a `timestamp` range through `NativeRuntime::query_with_stats` or `query`, and append with `mutate(|db| db.create_many("heartrate", samples))`; retries of the same samples write nothing.
 
 ## Approved test boundaries
 
@@ -155,7 +256,7 @@ Writable sources require one runtime owner. Before a write, the runtime compares
 
 Source-mode opening starts a managed directory watch by default. Reload is eventual, after the filesystem polling interval and debounce. A reload validates the aggregate database before publishing its records, origins and document metadata together. A malformed reload retains the last valid database and exposes `last_reload_error`.
 
-The filesystem poller compares contents because notify 6 timestamps have only second precision. It recursively hashes watched files, including ignored files under the source root. This adds polling I/O. Large raw-shard directories benefit from a longer polling interval through `open_sources_with_host`, a different host, or explicit reload. Source patterns still limit which files the loaders decode.
+The filesystem poller compares contents because notify 6 timestamps have only second precision. It recursively hashes watched files, including ignored files under the source root. This adds polling I/O. Lazy partitioned roots are not watched by this poller; the runtime polls them itself and reads only loaded partitions (see "Lazy partitions"). Large raw-shard directories benefit from a longer polling interval through `open_sources_with_host`, a different host, or explicit reload. Source patterns still limit which files the loaders decode.
 
 Optional missing roots and unmatched optional file patterns produce empty collections. Creation, replacement and removal of provider files trigger reload. Graph-owned collections reject mutations with `OperationError` reason `read-only-source`. They never participate in write projection.
 

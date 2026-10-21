@@ -64,6 +64,19 @@ Coach pins `proseql-native`, `-engine`, `-storage` and `-formats` at `0e3666a`. 
 - The file watcher hashes only loaded partitions and checks the directory listing for new or removed files.
 - A native query stats API returns `partitions_loaded` and `index_used`.
 
+### Where the lazy seam goes (step 5 decision)
+
+The engine assumes that a collection holds every record a query can match. Two places could change that assumption:
+
+| Option | What changes | Cost |
+|---|---|---|
+| Engine: a partition provider behind `Collection` | query, aggregate, populate, transactions, reactive snapshots and indexes learn about unloaded records; the engine calls back into a loader during a query | large change in shared code; WASM size budget (about 2.5 KB of headroom); every engine path needs a lazy variant |
+| **Native runtime (chosen)** | before an operation, the runtime makes every partition the filter can touch resident; after it, the runtime evicts | the engine gains three small methods that move records in and out without a mutation; operations must go through `NativeRuntime` methods, and `read(|db| ..)` sees loaded partitions only |
+
+The runtime layer keeps the engine's assumption true for each operation: the resident set always contains every partition that can hold a match, so the engine's query, index, sort, aggregate, transaction and watch code is unchanged and shared with WASM. The engine methods are `Database::load_resident_records`, `unload_resident_records` and `refresh_reactive_snapshot`; the WASM crate never calls them, so the linker drops them (browser production stayed at 593,179 B gzip). The preconditions (no relationships, no unique fields) are what make the runtime seam sound: no query reads another collection's lazy records, and the only cross-record check on create is the ID, which the target partition covers.
+
+Pruning lives in `proseql-storage` (`partition_prune.rs`, next to the partition keys). The lazy state (listing, resident partitions, LRU clock, watch pins) lives in the native `SourceState`. The managed watch polls lazy roots itself (listing plus loaded partitions only) instead of the host's recursive content-hashing poller.
+
 ### Parity
 
 | Feature | Native | WASM (`packages/engine`) | Legacy core (`packages/core` runtime) |
@@ -96,6 +109,9 @@ crates/proseql-storage/src/source_config.rs            (step 3: TimeBucket)
 crates/proseql-storage/src/partitioned.rs              (steps 2, 3, 5)
 crates/proseql-storage/src/persistence.rs              (step 2: append_data wiring, torn-line handling)
 crates/proseql-native/src/lib.rs, sources.rs           (steps 2, 5)
+crates/proseql-native/src/lazy.rs                      (step 5: lazy state, eviction, watcher)
+crates/proseql-storage/src/partition_prune.rs          (step 5: filter → partition keys)
+crates/proseql-engine/src/resident.rs                  (step 5: resident records)
 packages/core/src/storage/source-config.ts, partitioned-source.ts   (step 3)
 packages/engine/src/…                                  (steps 2, 3, 4: config mapping)
 docs/native-sources.md                                 (steps 2–5)

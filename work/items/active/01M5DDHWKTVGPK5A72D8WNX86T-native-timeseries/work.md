@@ -23,10 +23,19 @@
   - Newest 100 (sort desc, limit 100): 219 ms to 65 µs at 140k; 2,017 ms to 96 µs at 1M.
   - Cost: about 175 B RSS per row; open 7% to 14% longer. 10M still aborts in open at the memory limit (needs U5).
   - WASM browser production size: 591,428 B gzip (ts/bench tip 578,760 B; budget 595,794 B).
-- Branch `ts/lazy` merges `ts/append` and `ts/index`; U5 (lazy partitions) is built there.
+- Branch `ts/lazy` merges `ts/append` and `ts/index` (merge `3bbc08a`; browser WASM production 593,245 B gzip after the merge, 593,179 B after U5; budget 595,794 B). `--mode ordered` is now cumulative.
+- U5 (lazy partitions) done on branch `ts/lazy` (`b36cddc` engine resident records, `96fcdb9` storage pruning, `c1cbe86` native runtime, `03d0dbc` and `6d29c55` harness). Results: `docs/benchmarks/timeseries.md`, "Step 5 lazy" and "Before and after".
+  - Lazy open: 3 to 11 ms and 5 MiB at 140k, 1M and 10M rows (eager cumulative: 4.1 s / 769 MiB at 140k, 24 s / 5.5 GiB at 1M).
+  - Append median over 1,000 appends: 0.78 ms (140k) and 0.85 ms (10M); 109 B written = line length; earlier bytes unchanged.
+  - One-hour query: `partitions_loaded = 1`, `index_used = ordered` at every size; 0.0090 ms at 140k, 0.287 ms at 10M (31.7×). **Acceptance target "time ≤ 2×" not met**: the hour holds 1 row at 140k and 114 at 10M, and the cost is about 2.2 to 2.5 µs per returned row. A one-slot window (about one row at every size) takes 8.5 µs at 140k and 8.3 µs at 10M.
+  - The first append into an unloaded partition loads it for the ID check: 1.2 s and 9.2 MB read for an 83,000-row month at 10M.
+  - The harness memory guard now also aborts when `MemAvailable` falls below 1 GiB.
+  - Conformance: `crates/proseql-native/tests/lazy_partitions_runtime.rs` (15 tests, every result compared with an eager runtime on the same files), `crates/proseql-engine/tests/resident_conformance.rs`, unit tests in `crates/proseql-storage/src/partition_prune.rs`.
+  - Seam: the native runtime decides which partitions are resident; the engine gains only `Database::load_resident_records` / `unload_resident_records` / `refresh_reactive_snapshot`, which the WASM engine never calls. Recorded in `docs/native-sources.md` ("Lazy partitions") and the openspec design.
+  - Contract deviations: `NativeSourceRuntimeOptions.lazy_watch_interval` added (poll interval of the lazy watcher; not in the contract). The coach_compatibility example was not run against Coach data in this stage, because the task forbids reading or copying `~/.local/share/coach/`; it builds, and the byte-preservation tests pass.
 
 ## Parity decisions (native only on purpose)
 
 - Partitioned append without rewrite: native only. The WASM engine keeps its rewrite path for partitioned sources. Its source-oriented configuration also rejects `appendOnly` as an old-style persistence field. Recorded in `docs/native-sources.md` ("Runtime parity").
-- Lazy partitions: native only.
+- Lazy partitions: native only, on purpose. The WASM engine and the legacy core stay fully in memory. Recorded in `docs/native-sources.md` ("Runtime parity").
 - Ordered index: native and WASM plan with it. In WASM it narrows ranges only, because the binding sorts through the host (`localeCompare`). The legacy TypeScript core accepts `orderedIndexes` and does not plan with it.

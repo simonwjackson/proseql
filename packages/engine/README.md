@@ -58,6 +58,16 @@ mutation before persistent storage completes. A failed durable flush quarantines
 and drops the in-memory runtime so a clean reopen cannot observe the rejected
 mutation.
 
+## Time-series options
+
+These collection options reach the Rust engine through this package:
+
+- `duplicateIds: "error" | "ignoreIdentical"` (default `"error"`). With `"ignoreIdentical"`, `create` and `createMany` accept a record whose ID exists with an identical payload, write nothing and return the stored record; a different payload is still a `DuplicateKeyError`. Importers that retry can use it.
+- `orderedIndexes: ["timestamp"]` builds an ordered index. The engine uses it for `$gt`, `$gte`, `$lt` and `$lte` filters on the field. Results do not change. This package sorts through the host string collator, so the index narrows ranges but does not order sorts here.
+- A partitioned source can use `{ kind: "timeBucket", field, bucket: "year" | "month" | "day" }` as its key; the field must be a UTC timestamp ending in `Z`.
+
+Partitioned append without rewrite and lazy partition loading are native Rust runtime features only, on purpose. See `docs/native-sources.md` in the ProseQL repository.
+
 ## Effect API
 
 Install `@proseql/effect` when application code should receive `Effect` and `Stream` values instead of Promises. It uses this same Rust/WASM engine and reconstructs public tagged errors for Effect error handling.
