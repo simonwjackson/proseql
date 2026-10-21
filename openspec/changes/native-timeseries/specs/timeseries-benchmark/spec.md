@@ -2,7 +2,7 @@
 
 ### Requirement: Repeatable time-series benchmark
 
-The repository SHALL provide `just bench-timeseries`, which runs the `timeseries_bench` example of `proseql-native` in release mode with `--rows 140000,1000000,10000000 --years 10`. The benchmark SHALL use synthetic data only.
+The repository SHALL provide `nix run .#bench-timeseries`, which runs the `timeseries_bench` example of `proseql-native` in release mode with `--rows 140000,1000000,10000000 --years 10`. The benchmark SHALL use synthetic data only.
 
 #### Scenario: Synthetic data with a fixed seed
 - **WHEN** the benchmark runs twice with the same `--rows`, `--years` and `--seed`

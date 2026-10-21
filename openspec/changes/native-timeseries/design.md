@@ -91,7 +91,7 @@ The "on purpose" rows are recorded in the work item and in `docs/native-sources.
 
 ### Benchmark harness
 
-- `crates/proseql-native/examples/timeseries_bench.rs`, run by `just bench-timeseries`. It is an example rather than a Criterion bench because it measures one process per size (peak RSS from `/proc/self/status` `VmHWM`) and durable filesystem writes, and needs no new dependency.
+- `crates/proseql-native/examples/timeseries_bench.rs`, run by `nix run .#bench-timeseries`. It is an example rather than a Criterion bench because it measures one process per size (peak RSS from `/proc/self/status` `VmHWM`) and durable filesystem writes, and needs no new dependency.
 - Synthetic rows `{"id":"heartrate:<iso>","timestamp":"<iso ms Z>","bpm":<int>,"source":"…","month":"YYYY-MM"}` are generated with a fixed seed into the system temp directory, never into git, and cached by size, span and seed.
 - Each size runs in a fresh child process on a fresh copy of the cached data. A storage-host wrapper counts bytes read and written per operation.
 - `--mode baseline|append|timebucket|ordered|lazy` selects cumulative feature sets. Each later step switches on its mode without changing the harness.

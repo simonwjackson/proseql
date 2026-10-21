@@ -34,15 +34,22 @@ Key source paths:
 
 ## Build & Test
 
-Commands via justfile:
+Tasks are flake apps defined in `flake.nix` (`taskNames` and `taskRunnerFor`). There is no justfile.
+Run a task with `nix run .#<task>`, and pass arguments after `--`. Inside `nix develop`,
+`proseql-task <task> [args]` runs the same task without evaluating the flake again.
+`nix run .` lists every task.
 
-- **Test all:** `just test` or `bun test packages/*/tests/`
-- **Test core:** `just test-core` or `bun test packages/core/tests/`
-- **Test node:** `just test-node` or `bun test packages/node/tests/`
-- **Type check:** `just typecheck` or `bun run tsc --build`
-- **Lint:** `just lint` or `biome check .`
-- **Format:** `just format` or `biome format --write .`
-- **Clean:** `just clean`
+- **Test all:** `nix run .#test` or `bun test packages/*/tests/`
+- **Test core:** `nix run .#test-core` or `bun test packages/core/tests/`
+- **Test node:** `nix run .#test-node` or `bun test packages/node/tests/`
+- **Type check:** `nix run .#typecheck` or `bun run tsc --build`
+- **Lint:** `nix run .#lint` or `biome check .`
+- **Format:** `nix run .#format` or `biome format --write .`
+- **Clean:** `nix run .#clean`
+- **Release gate:** `nix run .#release-check`
+
+To add a task, add a `task_<name>` shell function in `taskRunnerFor` (dashes in the
+task name become underscores) and add the name to `taskNames`.
 
 ## Important Files
 
@@ -150,11 +157,11 @@ type surface.
 ### Rust build & test commands
 
 ```bash
-just rust-check    # cargo check
-just rust-test     # cargo test (includes conformance fixtures)
-just rust-lint     # cargo clippy -D warnings
-just rust-format   # cargo fmt
-just rust-build    # cargo build --release
+nix run .#rust-check    # cargo check
+nix run .#rust-test     # cargo test (includes conformance fixtures)
+nix run .#rust-lint     # cargo clippy -D warnings
+nix run .#rust-format   # cargo fmt
+nix run .#rust-build    # cargo build --release
 ```
 
 Or run cargo directly: `cargo test --manifest-path crates/Cargo.toml`

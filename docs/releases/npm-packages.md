@@ -56,11 +56,11 @@ All eight package records and trusted configurations now exist. Do not repeat th
 ## Prepare and approve the release commit
 
 1. Start from a clean branch and inspect registry availability.
-2. Run `just release-prepare patch`, `minor`, or `major` as appropriate. This only edits source files; it does not commit or push.
+2. Run `nix run .#release-prepare -- patch`, `minor`, or `major` as appropriate. This only edits source files; it does not commit or push.
 3. Review all eight package versions, `bun.lock`, the CLI version, and `CHANGELOG.md`. AI must retain its independent package version.
-4. Run `just release-check`. It is non-destructive and credential-free.
+4. Run `nix run .#release-check`. It is non-destructive and credential-free.
 5. Commit the reviewed version and changelog edits.
-6. Run `just release-finalize` from that clean commit. Record:
+6. Run `nix run .#release-finalize` from that clean commit. Record:
    - the full `git rev-parse HEAD` SHA;
    - coordinated version;
    - release ID;
@@ -88,7 +88,7 @@ The jobs run in this order:
 
 ### 1. No-secret preflight
 
-The workflow checks out the supplied SHA, proves that it is exact and clean, and runs `just release-finalize`, including the full TypeScript, Rust, parity, package, browser, and packed-consumer gates. It creates one retained `prepared-release-<releaseId>` artifact containing:
+The workflow checks out the supplied SHA, proves that it is exact and clean, and runs `nix run .#release-finalize`, including the full TypeScript, Rust, parity, package, browser, and packed-consumer gates. It creates one retained `prepared-release-<releaseId>` artifact containing:
 
 - the exact eight tarballs;
 - `prepared-release.json`, bound to the commit SHA and package integrities;
@@ -139,7 +139,7 @@ Only after the registry consumer succeeds, a job with `contents: write` verifies
 
 Approve publication only when all of these are true:
 
-- Local `just release-check` and clean-commit `just release-finalize` passed.
+- Local `nix run .#release-check` and clean-commit `nix run .#release-finalize` passed.
 - Remote no-secret preflight passed for the same full SHA.
 - All eight versions and first-publish names were available before upload.
 - Packed manifests contain concrete coordinated dependency versions, exact beta.103, no `workspace:*`, and no `@effect/rpc`.

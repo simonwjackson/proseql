@@ -59,7 +59,7 @@ jobs:
         with:
           workspaces: crates -> crates/target
       - name: Run full release gates and prepare exact tarballs
-        run: nix develop --command just release-finalize
+        run: nix run .#release-finalize
       - name: Prepare standalone audited publisher
         run: nix develop --command bun run scripts/prepare-publisher-bundle.ts .artifacts/release/prepared-release.json
       - name: Verify prepared checksums and release identity

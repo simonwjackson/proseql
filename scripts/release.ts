@@ -341,7 +341,10 @@ function createDefaultServices(
 		checkVersionAvailable: async (name, version) =>
 			checkNpmVersionAvailable(root, name, version),
 		runPreflight: async () => {
-			execFileSync("just", ["release-check"], { cwd: root, stdio: "inherit" });
+			execFileSync("nix", ["run", ".#release-check"], {
+				cwd: root,
+				stdio: "inherit",
+			});
 		},
 		prepareArtifacts: async (version) => prepareArtifacts(root, version),
 		writePreparedRelease: async (release) => {

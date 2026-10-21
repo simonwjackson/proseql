@@ -23,7 +23,7 @@ describe("release readiness wiring", () => {
 		expect(manifest.devDependencies.typescript).toBe("7.0.2");
 		for (const path of [
 			"package.json",
-			"justfile",
+			"flake.nix",
 			"scripts/verify-packed-packages.ts",
 			...[
 				"ai",
@@ -42,7 +42,7 @@ describe("release readiness wiring", () => {
 	});
 
 	it("runs first-release behavior and package contracts in the normal test gate", () => {
-		const justfile = readRootFile("justfile");
+		const flake = readRootFile("flake.nix");
 		for (const path of [
 			"packages/engine/tests/boundary-values.test.ts",
 			"packages/engine/tests/browser-entry.test.ts",
@@ -60,35 +60,41 @@ describe("release readiness wiring", () => {
 			"scripts/verify-packed-packages.test.ts",
 			"scripts/release.test.ts",
 		]) {
-			expect(justfile).toContain(path);
+			expect(flake).toContain(path);
 		}
 	});
 
 	it("bounds Rust test concurrency while preserving explicit overrides", () => {
-		const justfile = readRootFile("justfile");
+		const flake = readRootFile("flake.nix");
+		// flake.nix escapes shell `${` as `''${` inside Nix strings.
 		const boundedRustTest =
-			'CARGO_BUILD_JOBS="$' +
-			'{CARGO_BUILD_JOBS:-1}" RUST_TEST_THREADS="$' +
-			'{RUST_TEST_THREADS:-1}" cargo test --manifest-path crates/Cargo.toml';
-		expect(justfile).toContain(boundedRustTest);
+			`CARGO_BUILD_JOBS="''$` +
+			`{CARGO_BUILD_JOBS:-1}" RUST_TEST_THREADS="''$` +
+			`{RUST_TEST_THREADS:-1}" cargo test --manifest-path crates/Cargo.toml`;
+		expect(flake).toContain(boundedRustTest);
 	});
 
 	it("composes the clean release gate without destructive release commands", () => {
-		const justfile = readRootFile("justfile");
-		const releaseCheck = justfile.slice(justfile.indexOf("release-check:"));
+		const flake = readRootFile("flake.nix");
+		const start = flake.indexOf("task_release_check() {");
+		expect(start).toBeGreaterThan(-1);
+		// Keep the newline before the closing brace so every call ends in "\n".
+		const end = flake.indexOf("\n            }\n", start);
+		expect(end).toBeGreaterThan(start);
+		const releaseCheck = flake.slice(start, end + 1);
 		for (const required of [
 			"bun install --frozen-lockfile --ignore-scripts",
-			"just build-release-artifacts",
-			"just test",
-			"just rust-format-check",
-			"just rust-check",
-			"just rust-test",
-			"just rust-lint",
-			"just rust-wasm-check",
-			"just parity-gate",
+			"task_build_release_artifacts\n",
+			"task_test\n",
+			"task_rust_format_check\n",
+			"task_rust_check\n",
+			"task_rust_test\n",
+			"task_rust_lint\n",
+			"task_rust_wasm_check\n",
+			"task_parity_gate\n",
 			"verify-packed-packages.ts --skip-build",
-			"just browser-smoke",
-			"just browser-budget",
+			"task_browser_smoke\n",
+			"task_browser_budget\n",
 		]) {
 			expect(releaseCheck).toContain(required);
 		}
@@ -118,7 +124,7 @@ describe("release readiness wiring", () => {
 		expect(workflow).toContain("packages/effect/reports/corpus-report.json");
 		expect(workflow).toContain("packages/engine/build/wasm-build-report.json");
 		expect(workflow).toContain(".artifacts/packages/tarballs/*.tgz");
-		expect(workflow).toContain("just browser-budget");
+		expect(workflow).toContain("nix run .#browser-budget");
 		expect(workflow).toContain(".artifacts/browser/current.json");
 		expect(workflow).toContain(".artifacts/browser/evidence.json");
 		expect(workflow).not.toMatch(

@@ -19,9 +19,9 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@786fff0690178f1234e4e1fe9b536e94f5433196 # v20
       - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39 # v13
       - run: nix develop --command bun install --frozen-lockfile --ignore-scripts
-      - run: nix develop --command just workflow-lint
-      - run: nix develop --command just typecheck
-      - run: nix develop --command just lint
+      - run: nix run .#workflow-lint
+      - run: nix run .#typecheck
+      - run: nix run .#lint
 
   tests:
     runs-on: ubuntu-latest
@@ -34,8 +34,8 @@ jobs:
         with:
           workspaces: crates -> crates/target
       - run: nix develop --command bun install --frozen-lockfile --ignore-scripts
-      - run: nix develop --command just build-release-artifacts
-      - run: nix develop --command just test
+      - run: nix run .#build-release-artifacts
+      - run: nix run .#test
 
   rust:
     runs-on: ubuntu-latest
@@ -47,11 +47,11 @@ jobs:
       - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
         with:
           workspaces: crates -> crates/target
-      - run: nix develop --command just rust-format-check
-      - run: nix develop --command just rust-check
-      - run: nix develop --command just rust-test
-      - run: nix develop --command just rust-lint
-      - run: nix develop --command just rust-wasm-check
+      - run: nix run .#rust-format-check
+      - run: nix run .#rust-check
+      - run: nix run .#rust-test
+      - run: nix run .#rust-lint
+      - run: nix run .#rust-wasm-check
 
   parity:
     runs-on: ubuntu-latest
@@ -64,8 +64,8 @@ jobs:
         with:
           workspaces: crates -> crates/target
       - run: nix develop --command bun install --frozen-lockfile --ignore-scripts
-      - run: nix develop --command just build-release-artifacts
-      - run: nix develop --command just parity-gate
+      - run: nix run .#build-release-artifacts
+      - run: nix run .#parity-gate
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
@@ -87,7 +87,7 @@ jobs:
         with:
           workspaces: crates -> crates/target
       - run: nix develop --command bun install --frozen-lockfile --ignore-scripts
-      - run: nix develop --command just build-release-artifacts
+      - run: nix run .#build-release-artifacts
       - run: nix develop --command bun run scripts/verify-packed-packages.ts --skip-build --output .artifacts/packages
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
@@ -112,9 +112,9 @@ jobs:
         with:
           workspaces: crates -> crates/target
       - run: nix develop --command bun install --frozen-lockfile --ignore-scripts
-      - run: nix develop --command just build-release-artifacts
-      - run: nix develop --command just browser-smoke
-      - run: nix develop --command just browser-budget
+      - run: nix run .#build-release-artifacts
+      - run: nix run .#browser-smoke
+      - run: nix run .#browser-budget
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:

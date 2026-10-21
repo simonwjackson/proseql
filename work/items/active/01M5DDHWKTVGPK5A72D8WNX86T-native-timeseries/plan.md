@@ -3,7 +3,7 @@ title: "feat: Native time-series collections (append, time buckets, ordered inde
 type: feat
 status: active
 date: 2026-10-20
-verify_command: "just rust-test && just rust-lint && just test && just typecheck && just lint && just bench-timeseries"
+verify_command: "nix run .#rust-test && nix run .#rust-lint && nix run .#test && nix run .#typecheck && nix run .#lint && nix run .#bench-timeseries"
 ---
 
 # feat: Native time-series collections
@@ -28,7 +28,7 @@ The first consumer is a headless health-data store that links `proseql-native` t
 
 ## Requirements
 
-- R1. A repeatable benchmark (`just bench-timeseries`) measures open time, peak RSS, insert cost, bytes written per insert and one-hour range-query cost at 140k, 1M and 10M synthetic rows over 10 years, before and after each step.
+- R1. A repeatable benchmark (`nix run .#bench-timeseries`) measures open time, peak RSS, insert cost, bytes written per insert and one-hour range-query cost at 140k, 1M and 10M synthetic rows over 10 years, before and after each step.
 - R2. In native source mode, `append_only: true` collections on JSONL/NDJSON `CollectionFile` and `Partitioned` sources append complete lines and never encode the file again. Write failures reach the caller as `StorageError`, roll back and quarantine. Memory never goes ahead of disk.
 - R3. `duplicate_ids: "ignore_identical"` makes an identical re-create a no-op success and a different payload a `DuplicateKeyError`, in the engine for native and WASM. A batch conflict writes nothing.
 - R4. `PartitionKey::TimeBucket { field, bucket: Year | Month | Day }` derives the key from a UTC `Z` timestamp and rejects other values on write and load.
@@ -155,7 +155,7 @@ flowchart TB
 
 ## Acceptance
 
-Command: `just bench-timeseries` (`--rows 140000,1000000,10000000 --years 10`). At 10M rows versus 140k rows:
+Command: `nix run .#bench-timeseries` (`--rows 140000,1000000,10000000 --years 10`). At 10M rows versus 140k rows:
 
 | Measure | Target |
 |---|---|

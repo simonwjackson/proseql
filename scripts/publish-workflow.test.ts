@@ -83,7 +83,7 @@ describe("approved npm publication workflow", () => {
 		expect(preflight).toContain(`ref: \${{ inputs.commit_sha }}`);
 		expect(preflight).toContain("git rev-parse HEAD");
 		expect(preflight).toContain("git status --porcelain");
-		expect(preflight).toContain("just release-finalize");
+		expect(preflight).toContain("nix run .#release-finalize");
 		expect(preflight).toContain("prepare-publisher-bundle.ts");
 		expect(preflight).toContain(".artifacts/release/prepared-release.json");
 		expect(preflight).toContain("SHA256SUMS");

@@ -4,7 +4,7 @@ type: feat
 status: completed
 date: 2026-08-06
 deepened: 2026-08-06
-verify_command: "just release-check"
+verify_command: "nix run .#release-check"
 ---
 
 # feat: Publish the Rust/WASM package set
@@ -399,7 +399,7 @@ flowchart TB
 
 **Patterns to follow:**
 - Existing separate jobs in `.github/workflows/ci.yml`
-- Existing `just parity-gate`, `just verify-packages`, and `just browser-smoke` boundaries
+- Existing `nix run .#parity-gate`, `nix run .#verify-packages`, and `nix run .#browser-smoke` boundaries
 
 **Test scenarios:**
 - Happy path: a clean CI checkout builds WASM and completes every release-readiness gate without cached `dist` files.
