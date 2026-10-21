@@ -10,3 +10,12 @@ it("does not match explicit undefined with array operators", async () => {
   }
  } finally { await db.close(); }
 });
+
+it("does not match explicit undefined with string operators", async () => {
+ const db = await createEngineDatabase({rows:{schema:Schema.Struct({id:Schema.String,name:Schema.optional(Schema.String)}),relationships:{}}}, {rows:[{id:"missing",name:undefined},{id:"present",name:"a"}]});
+ try {
+  for (const operator of ["$startsWith", "$endsWith", "$contains", "$search"]) {
+   expect((await db.rows.query({where:{name:{[operator]:"a"}}})).map(row=>row.id)).toEqual(["present"]);
+  }
+ } finally { await db.close(); }
+});

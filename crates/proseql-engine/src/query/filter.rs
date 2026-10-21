@@ -445,7 +445,7 @@ fn evaluate_operators(
                 results.push(s.as_str() <= op_str);
             }
         }
-    } else if matches!(value, Value::Null) || matches!(value, Value::Bool(_)) {
+    } else if matches!(value, Value::Null) || matches!(value, Value::Bool(_)) || is_boundary_undefined(value) {
         // Non-string values: string operators fail
         if ops.contains_key("$startsWith")
             || ops.contains_key("$endsWith")
@@ -860,6 +860,14 @@ mod tests {
             assert!(!matches_where(&row, &json!({"tags": filter})));
         }
         assert!(matches_where(&row, &json!({"tags": {"$in": [{"__proseqlInternalUndefined__": 1}]}})));
+    }
+
+    #[test]
+    fn undefined_rejects_string_operators() {
+        let row = json!({"name": {"__proseqlInternalUndefined__": 1}});
+        for operator in ["$startsWith", "$endsWith", "$contains", "$search"] {
+            assert!(!matches_where(&row, &json!({"name": {operator: "a"}})));
+        }
     }
 
 }
