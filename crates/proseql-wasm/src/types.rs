@@ -114,6 +114,8 @@ pub(crate) struct CollectionManyCommand {
     pub items: Vec<Value>,
     #[serde(default)]
     pub skip_duplicates: bool,
+    #[serde(default = "default_validate_relationships")]
+    pub validate_relationships: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -282,6 +284,8 @@ pub(crate) enum TransactionOperationInput {
         items: Vec<Value>,
         #[serde(default)]
         skip_duplicates: bool,
+        #[serde(default = "default_validate_relationships")]
+        validate_relationships: bool,
     },
     Update {
         collection: String,
@@ -613,3 +617,5 @@ pub(crate) fn dry_run_report_value(input: DryRunInput) -> Value {
 fn skipped_entry_value(entry: SkippedEntry) -> Value {
     json!({"data": entry.data, "reason": entry.reason})
 }
+
+fn default_validate_relationships() -> bool { true }

@@ -120,10 +120,11 @@ pub(crate) fn dispatch(
         }
         "createMany" => {
             let command: CollectionManyCommand = parse_json(payload_json, "createMany")?;
-            let result = context.db.create_many(
+            let result = context.db.create_many_with_validation(
                 &command.collection,
                 command.items,
                 command.skip_duplicates,
+                command.validate_relationships,
             )?;
             Ok(create_many_result_value(result))
         }
@@ -324,11 +325,13 @@ fn run_transaction(
                     collection,
                     items,
                     skip_duplicates,
+                    validate_relationships,
                 } => TransactionOperationOutput::CreateMany {
-                    value: create_many_result_value(tx.create_many(
+                    value: create_many_result_value(tx.create_many_with_validation(
                         &collection,
                         items,
                         skip_duplicates,
+                        validate_relationships,
                     )?),
                 },
                 TransactionOperationInput::Update {

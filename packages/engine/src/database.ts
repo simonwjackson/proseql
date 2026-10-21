@@ -1530,7 +1530,8 @@ class EngineRuntime {
 			"items" in payload &&
 			Array.isArray(payload.items) &&
 			payload.items.length !== 1 &&
-			!("skipDuplicates" in payload && payload.skipDuplicates === true)
+			!("skipDuplicates" in payload && payload.skipDuplicates === true) &&
+            !("validateRelationships" in payload && payload.validateRelationships === false)
 		) {
 			const fields = this.compactCreateManyFields.get(payload.collection);
 			if (payload.items.every((item) => compactIdentitySource(item, fields))) {
@@ -3783,6 +3784,7 @@ function buildCollectionFacade(
 				collection: collection.name,
 				items: [...inputs],
 				skipDuplicates: options?.skipDuplicates ?? false,
+                validateRelationships: options?.validateRelationships ?? true,
 			};
 			let value: CreateManyWireResult;
 			let appended: ReadonlyArray<EngineRecord>;
@@ -5571,12 +5573,14 @@ function buildTransactionCollectionFacade(
 				collection: collection.name,
 				items,
 				skipDuplicates: options?.skipDuplicates ?? false,
+                validateRelationships: options?.validateRelationships ?? true,
 			});
 			push({
 				kind: "createMany",
 				collection: collection.name,
 				items,
 				skipDuplicates: options?.skipDuplicates ?? false,
+                validateRelationships: options?.validateRelationships ?? true,
 			});
 			return value;
 		},

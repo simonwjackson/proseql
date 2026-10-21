@@ -1862,13 +1862,18 @@ impl Database {
         inputs: Vec<Value>,
         skip_duplicates: bool,
     ) -> Result<CreateManyResult, EngineError> {
-        let relationships = self
-            .collections
-            .get(collection)
-            .ok_or_else(|| col_nf(collection))?
-            .descriptor
-            .relationships
-            .clone();
+        self.create_many_with_validation(collection, inputs, skip_duplicates, true)
+    }
+
+    pub fn create_many_with_validation(
+        &mut self,
+        collection: &str,
+        inputs: Vec<Value>,
+        skip_duplicates: bool,
+        validate_relationships: bool,
+    ) -> Result<CreateManyResult, EngineError> {
+        let owner = self.collections.get(collection).ok_or_else(|| col_nf(collection))?;
+        let relationships = if validate_relationships { owner.descriptor.relationships.clone() } else { vec![] };
         let owner_ids = owner_ids_for_fk(collection, &relationships, &self.collections);
 
         let internal = self

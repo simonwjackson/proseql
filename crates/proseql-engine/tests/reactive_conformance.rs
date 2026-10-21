@@ -2037,3 +2037,13 @@ fn native_thread_scheduler_smoke_delivers_debounced_watch_updates() {
     std::thread::sleep(Duration::from_millis(50));
     assert_eq!(sub.try_recv().unwrap().as_array().unwrap().len(), 4);
 }
+
+#[test]
+fn create_many_can_disable_relationship_validation_explicitly() {
+    let (mut db, _) = make_people_db_with_scheduler(vec![]);
+    let rows = vec![json!({"id":"a","name":"Alice","managerId":"missing"})];
+    assert!(matches!(db.create_many("people", rows.clone(), false), Err(EngineError::ForeignKey(_))));
+    let result = db.create_many_with_validation("people", rows, false, false).unwrap();
+    assert_eq!(result.created.len(), 1);
+    assert!(db.collection("people").unwrap().get("a").is_some());
+}

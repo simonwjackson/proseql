@@ -411,6 +411,15 @@ impl<'a> TransactionContext<'a> {
     ) -> Result<CreateManyResult, EngineError> {
         self.run_mutation(|db| db.create_many(collection, inputs, skip_duplicates))
     }
+    pub fn create_many_with_validation(
+        &mut self,
+        collection: &str,
+        inputs: Vec<Value>,
+        skip_duplicates: bool,
+        validate_relationships: bool,
+    ) -> Result<CreateManyResult, EngineError> {
+        self.run_mutation(|db| db.create_many_with_validation(collection, inputs, skip_duplicates, validate_relationships))
+    }
     pub fn update(
         &mut self,
         collection: &str,
