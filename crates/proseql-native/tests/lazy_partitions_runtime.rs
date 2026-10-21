@@ -1231,3 +1231,41 @@ fn a_watched_new_partition_that_fails_to_load_is_retried_after_it_is_corrected()
         .any(|path| path.ends_with("2026-06.jsonl")));
     lazy.close().unwrap();
 }
+
+#[test]
+fn full_scan_error_applies_to_empty_and_fully_loaded_collections() {
+    // Empty: no partition files at all.
+    let empty = tempfile::tempdir().unwrap();
+    let lazy = open_lazy(empty.path(), policy(2, FullScanPolicy::Error));
+    let error = lazy
+        .query("heartrate", QueryInput::default(), None)
+        .unwrap_err();
+    assert_eq!(operation_reason(&error), "lazy-full-scan");
+    let error = lazy.find_by_id("heartrate", "heartrate:none").unwrap_err();
+    assert_eq!(operation_reason(&error), "lazy-full-scan");
+    assert!(lazy_query(&lazy, month("2026-01")).is_empty());
+
+    // Fully loaded: every partition resident through filtered queries.
+    let dir = tempfile::tempdir().unwrap();
+    seed(dir.path());
+    let lazy = open_lazy(dir.path(), policy(MONTHS.len(), FullScanPolicy::Error));
+    for (prefix, _) in MONTHS {
+        lazy_query(&lazy, month(prefix));
+    }
+    assert_eq!(loaded(&lazy).len(), MONTHS.len());
+    for input in [QueryInput::default(), filtered(json!({"bpm": 60}))] {
+        let error = lazy.query("heartrate", input, None).unwrap_err();
+        assert_eq!(operation_reason(&error), "lazy-full-scan");
+    }
+    let error = lazy
+        .aggregate("heartrate", None, &AggregateConfig::count())
+        .unwrap_err();
+    assert_eq!(operation_reason(&error), "lazy-full-scan");
+    let error = lazy.find_by_id("heartrate", "heartrate:none").unwrap_err();
+    assert_eq!(operation_reason(&error), "lazy-full-scan");
+    let error = lazy
+        .watch("heartrate", WatchQueryConfig::default())
+        .err()
+        .unwrap();
+    assert_eq!(operation_reason(&error), "lazy-full-scan");
+}

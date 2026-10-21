@@ -429,10 +429,9 @@ impl SourceState {
     ) -> Result<(PartitionFilter, Vec<String>), EngineError> {
         let lazy = self.lazy_ref(collection)?;
         let filter = PartitionFilter::from_where(where_clause, &lazy.source.partition_by);
-        if filter.is_all()
-            && lazy.policy.full_scan == FullScanPolicy::Error
-            && lazy.resident.len() < lazy.known.len()
-        {
+        // The policy refuses every operation that cannot prune, whatever
+        // happens to be loaded, so behaviour does not depend on history.
+        if filter.is_all() && lazy.policy.full_scan == FullScanPolicy::Error {
             return Err(EngineError::Operation(OperationError {
                 operation: operation.to_owned(),
                 reason: "lazy-full-scan".to_owned(),
