@@ -2794,3 +2794,13 @@ fn committed_entity_deltas_preserve_before_images_and_insertion_positions() {
     assert_eq!(recreated[0].before_position, Some(0));
     assert_eq!(recreated[0].after_position, Some(1));
 }
+
+#[test]
+fn upsert_issue_names_received_and_valid_fields() {
+    let mut col = upsert_unique_col();
+    let error = col.upsert(json!({"name": "Alice"}), json!({"name": "Alice"}), json!({})).unwrap_err();
+    let EngineError::Validation(error) = error else { panic!("expected validation error") };
+    assert!(error.issues[0].message.contains("Received fields: name"));
+    assert!(error.issues[0].message.contains("email"));
+    assert!(error.issues[0].message.contains("id"));
+}

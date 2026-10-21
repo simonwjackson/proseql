@@ -3110,13 +3110,18 @@ impl Collection {
             }
         }
 
+        let mut valid_fields: Vec<String> = self.descriptor.unique_fields.iter().map(|constraint| match constraint {
+            UniqueConstraintDescriptor::Single(field) => field.clone(),
+            UniqueConstraintDescriptor::Compound(fields) => format!("({})", fields.join(", ")),
+        }).collect();
+        valid_fields.push("id".to_string());
         Err(EngineError::Validation(ValidationError {
             message: "Upsert where clause must target a unique field or id".to_string(),
             issues: vec![ValidationIssue {
                 field: "where".to_string(),
                 message: format!(
-                    "Where clause does not match any declared unique field in collection '{}'",
-                    self.name
+                    "Where clause does not match any declared unique field in collection '{}'. Received fields: {}. Valid unique fields: {}",
+                    self.name, where_keys.join(", "), valid_fields.join(", ")
                 ),
                 value: Some(Value::Object(where_obj.clone())),
                 expected: None,
