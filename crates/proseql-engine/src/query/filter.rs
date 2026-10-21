@@ -521,8 +521,8 @@ fn evaluate_operators(
                 results.push(false);
             }
         }
-    } else if matches!(value, Value::Null) {
-        // null value with array operators → fail
+    } else if matches!(value, Value::Null) || is_boundary_undefined(value) {
+        // null/undefined values with array operators → fail
         if ops.contains_key("$contains") || ops.contains_key("$all") || ops.contains_key("$size") {
             return false;
         }
@@ -853,4 +853,13 @@ mod tests {
             &json!({"createdAt": {"$gt": "2024-12-31"}})
         ));
     }
+    #[test]
+    fn undefined_rejects_array_operators() {
+        let row = json!({"tags": {"__proseqlInternalUndefined__": 1}});
+        for filter in [json!({"$all": ["a"]}), json!({"$all": []}), json!({"$contains": "a"}), json!({"$size": 0})] {
+            assert!(!matches_where(&row, &json!({"tags": filter})));
+        }
+        assert!(matches_where(&row, &json!({"tags": {"$in": [{"__proseqlInternalUndefined__": 1}]}})));
+    }
+
 }
