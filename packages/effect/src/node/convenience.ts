@@ -5,7 +5,8 @@
  * and format overrides, so users don't need to manually select and wire codecs.
  */
 
-import type { PluginError } from "@proseql/effect";
+import { type Context, Effect, Layer, type Scope } from "effect";
+import type { PluginError } from "../index.js";
 import {
 	type ConfiguredCollections,
 	createPersistentEffectDatabase,
@@ -24,8 +25,7 @@ import {
 	type StorageError,
 	type UnsupportedFormatError,
 	type ValidationError,
-} from "@proseql/effect";
-import { type Context, Effect, Layer, type Scope } from "effect";
+} from "../index.js";
 import { NodeStorageLayer } from "./node-adapter-layer.js";
 
 /**
@@ -103,7 +103,7 @@ export const createNodeDatabase = <Config extends DatabaseConfig>(
  *
  * @example
  * ```typescript
- * import { makeProseQLTag, makeProseQLLayer } from "@proseql/node"
+ * import { makeProseQLTag, makeProseQLLayer } from "@proseql/effect/node"
  *
  * const dbConfig = {
  *   books: { schema: BookSchema, file: "./data/books.json", relationships: {} },

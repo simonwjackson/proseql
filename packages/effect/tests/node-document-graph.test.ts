@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { OperationError } from "@proseql/effect";
 import { Effect, Result, Schema, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createNodeDatabase } from "../src/convenience.js";
+import { createNodeDatabase } from "../src/node.js";
 
 const FoodSchema = Schema.Struct({
 	name: Schema.String,
@@ -45,7 +45,7 @@ const graphConfig = (rootA: string, rootB: string) =>
 		],
 	}) as const;
 
-describe("documentGraph through @proseql/node", () => {
+describe("documentGraph through @proseql/effect/node", () => {
 	it("loads a graph from nested real files across two roots without manual codecs", async () => {
 		const rootA = join(tempDir, "a");
 		const rootB = join(tempDir, "b");

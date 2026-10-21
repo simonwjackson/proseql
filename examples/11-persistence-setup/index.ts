@@ -9,7 +9,7 @@
  */
 
 import { mkdir } from "node:fs/promises";
-import { createNodeDatabase } from "@proseql/node";
+import { createNodeDatabase } from "@proseql/effect/node";
 import { Effect, Schema } from "effect";
 
 // ============================================================================
@@ -182,7 +182,7 @@ Effect.runPromise(Effect.scoped(program)).catch((error) => { console.error(error
 // When you need custom codec options, plugin codecs, etc.
 //
 // import { Layer } from "effect"
-// import { NodeStorageLayer, makeSerializerLayer, yamlCodec } from "@proseql/node"
+// import { NodeStorageLayer, makeSerializerLayer, yamlCodec } from "@proseql/effect/node"
 //
 // const ManualLayer = Layer.merge(
 //   NodeStorageLayer,

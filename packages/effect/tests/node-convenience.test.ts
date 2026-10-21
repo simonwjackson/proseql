@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
 	createNodeDatabase,
 	makeNodePersistenceLayer,
-} from "../src/convenience.js";
+} from "../src/node.js";
 
 const BookSchema = Schema.Struct({
 	id: Schema.String,

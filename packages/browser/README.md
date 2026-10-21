@@ -1,5 +1,14 @@
 # @proseql/browser
 
+> **Deprecated:** Use `@proseql/effect/browser`. Version 1.0.0 is the final compatibility shim release. It preserves all existing exports.
+
+| Old import | New import |
+|---|---|
+| `@proseql/browser` | `@proseql/effect/browser` |
+| `@proseql/browser/worker` | `@proseql/effect/browser/worker` |
+
+Install `@proseql/effect` instead. The examples below use the replacement.
+
 Browser-safe ProseQL entry points and persistence hosts for the Rust/WebAssembly engine.
 
 The package re-exports the browser build of `@proseql/effect`, the Promise-first `@proseql/engine/browser` facade, and adapters for localStorage, sessionStorage, and IndexedDB. Queries and mutations run in Rust/WASM; storage remains at the browser boundary.
@@ -7,7 +16,7 @@ The package re-exports the browser build of `@proseql/effect`, the Promise-first
 ## Install
 
 ```sh
-npm install @proseql/browser effect@4.0.0-beta.103
+npm install @proseql/effect effect@4.0.0-beta.103
 ```
 
 This release is tested with exactly `effect@4.0.0-beta.103`.
@@ -19,7 +28,7 @@ import { Schema } from "effect"
 import {
   createLocalStorageEngineStorageHost,
   createPersistentEngineDatabase,
-} from "@proseql/browser"
+} from "@proseql/effect/browser"
 
 const config = {
   books: {
@@ -65,7 +74,7 @@ import {
   createServiceWorkerEngineDatabase,
   createServiceWorkerIndexedDBEngineStorageHost,
   initializeWorkerWasmBindings,
-} from "@proseql/browser/worker"
+} from "@proseql/effect/browser/worker"
 
 await initializeWorkerWasmBindings()
 const storageHost = createServiceWorkerIndexedDBEngineStorageHost({

@@ -4,7 +4,7 @@ import {
 } from "@proseql/core";
 import { Effect, Layer } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { makeWebStorageAdapter } from "../src/adapters/web-storage-adapter.js";
+import { makeWebStorageAdapter } from "../src/browser/adapters/web-storage-adapter.js";
 
 class MockStorage implements Storage {
 	private store = new Map<string, string>();

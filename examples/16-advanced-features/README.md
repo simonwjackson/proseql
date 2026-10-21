@@ -76,5 +76,5 @@ bun run document-sources.ts
 ## Dependencies
 
 - `@proseql/effect`
-- `@proseql/node` (for `document-sources.ts`)
+- `@proseql/effect/node` (for `document-sources.ts`)
 - `effect`

@@ -2,7 +2,7 @@ import {
 	createIndexedDBEngineStorageHost,
 	createLocalStorageEngineStorageHost,
 	createPersistentEngineDatabase,
-} from "@proseql/browser";
+} from "@proseql/effect/browser";
 import { createEffectDatabase } from "@proseql/effect/browser";
 import { Effect, Schema } from "effect";
 import {

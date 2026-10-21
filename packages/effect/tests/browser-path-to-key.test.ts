@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_STORAGE_KEY_PREFIX, pathToKey } from "../src/path-to-key.js";
+import { DEFAULT_STORAGE_KEY_PREFIX, pathToKey } from "../src/browser/path-to-key.js";
 
 // ============================================================================
 // pathToKey - Basic functionality

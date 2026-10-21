@@ -2,9 +2,9 @@ import { StorageAdapterService as StorageAdapter } from "@proseql/core";
 import { Effect, Layer } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-	makeSessionStorageAdapter,
-	makeSessionStorageLayer,
-} from "../src/adapters/session-storage-adapter.js";
+	makeLocalStorageAdapter,
+	makeLocalStorageLayer,
+} from "../src/browser/adapters/local-storage-adapter.js";
 
 // ============================================================================
 // Mock Storage Implementation
@@ -65,7 +65,7 @@ class MockStorage implements Storage {
 // ============================================================================
 
 const createTestAdapter = (storage: MockStorage, config = {}) => {
-	const adapter = makeSessionStorageAdapter(storage, config);
+	const adapter = makeLocalStorageAdapter(storage, config);
 	const layer = Layer.succeed(StorageAdapter, adapter);
 	return {
 		adapter,
@@ -79,7 +79,7 @@ const createTestAdapter = (storage: MockStorage, config = {}) => {
 // Tests
 // ============================================================================
 
-describe("SessionStorageAdapter", () => {
+describe("LocalStorageAdapter", () => {
 	let mockStorage: MockStorage;
 
 	beforeEach(() => {
@@ -87,7 +87,7 @@ describe("SessionStorageAdapter", () => {
 	});
 
 	// ========================================================================
-	// 12.2: Test write/read round-trip
+	// 11.2: Test write then read round-trip
 	// ========================================================================
 	describe("write/read round-trip", () => {
 		it("stores data and retrieves it correctly", async () => {
@@ -148,53 +148,7 @@ describe("SessionStorageAdapter", () => {
 	});
 
 	// ========================================================================
-	// 12.3: Test watch returns a no-op unsubscribe function
-	// ========================================================================
-	describe("watch (no-op)", () => {
-		it("returns a no-op unsubscribe function", async () => {
-			const { run } = createTestAdapter(mockStorage);
-
-			const unsubscribe = await run(
-				Effect.gen(function* () {
-					const adapter = yield* StorageAdapter;
-					return yield* adapter.watch("./file.txt", () => {
-						// This should never be called since sessionStorage has no cross-tab events
-					});
-				}),
-			);
-
-			// The unsubscribe function should exist and be callable
-			expect(typeof unsubscribe).toBe("function");
-
-			// Calling unsubscribe should not throw
-			expect(() => unsubscribe()).not.toThrow();
-		});
-
-		it("does not call onChange when data is written", async () => {
-			const { run } = createTestAdapter(mockStorage);
-			let changeCalled = false;
-
-			await run(
-				Effect.gen(function* () {
-					const adapter = yield* StorageAdapter;
-
-					// Set up watch
-					yield* adapter.watch("./file.txt", () => {
-						changeCalled = true;
-					});
-
-					// Write data - should NOT trigger onChange for sessionStorage
-					yield* adapter.write("./file.txt", "new data");
-				}),
-			);
-
-			// onChange should not have been called (no cross-tab events for sessionStorage)
-			expect(changeCalled).toBe(false);
-		});
-	});
-
-	// ========================================================================
-	// 12.4: Test exists, remove, ensureDir behave identically to localStorage
+	// 11.3: Test exists returns false for missing key, true after write
 	// ========================================================================
 	describe("exists", () => {
 		it("returns false for missing key", async () => {
@@ -228,6 +182,9 @@ describe("SessionStorageAdapter", () => {
 		});
 	});
 
+	// ========================================================================
+	// 11.4: Test remove deletes the key, subsequent exists returns false
+	// ========================================================================
 	describe("remove", () => {
 		it("deletes an existing key", async () => {
 			const { run } = createTestAdapter(mockStorage);
@@ -257,23 +214,9 @@ describe("SessionStorageAdapter", () => {
 		});
 	});
 
-	describe("ensureDir", () => {
-		it("succeeds without side effects (no-op)", async () => {
-			const { run } = createTestAdapter(mockStorage);
-			const initialSize = mockStorage.length;
-
-			await run(
-				Effect.gen(function* () {
-					const adapter = yield* StorageAdapter;
-					yield* adapter.ensureDir("./some/deep/path");
-				}),
-			);
-
-			// No new entries should be created
-			expect(mockStorage.length).toBe(initialSize);
-		});
-	});
-
+	// ========================================================================
+	// 11.5: Test read on missing key fails with StorageError
+	// ========================================================================
 	describe("read missing key", () => {
 		it("fails with StorageError when key does not exist", async () => {
 			const { layer } = createTestAdapter(mockStorage);
@@ -301,6 +244,29 @@ describe("SessionStorageAdapter", () => {
 		});
 	});
 
+	// ========================================================================
+	// 11.6: Test ensureDir is a no-op (succeeds without side effects)
+	// ========================================================================
+	describe("ensureDir", () => {
+		it("succeeds without side effects (no-op)", async () => {
+			const { run } = createTestAdapter(mockStorage);
+			const initialSize = mockStorage.length;
+
+			await run(
+				Effect.gen(function* () {
+					const adapter = yield* StorageAdapter;
+					yield* adapter.ensureDir("./some/deep/path");
+				}),
+			);
+
+			// No new entries should be created
+			expect(mockStorage.length).toBe(initialSize);
+		});
+	});
+
+	// ========================================================================
+	// 11.7: Test write with quota exceeded throws StorageError
+	// ========================================================================
 	describe("quota exceeded", () => {
 		it("throws StorageError when storage quota is exceeded", async () => {
 			const { layer } = createTestAdapter(mockStorage);
@@ -336,22 +302,22 @@ describe("SessionStorageAdapter", () => {
 	// ========================================================================
 	// Layer factory tests
 	// ========================================================================
-	describe("makeSessionStorageLayer", () => {
+	describe("makeLocalStorageLayer", () => {
 		it("creates a Layer that provides StorageAdapter", async () => {
-			// Note: This test uses a global mock since makeSessionStorageLayer
-			// accesses globalThis.sessionStorage by default
+			// Note: This test uses a global mock since makeLocalStorageLayer
+			// accesses globalThis.localStorage by default
 			const mockGlobalStorage = new MockStorage();
 
-			// Temporarily replace globalThis.sessionStorage
-			const originalSessionStorage = globalThis.sessionStorage;
-			Object.defineProperty(globalThis, "sessionStorage", {
+			// Temporarily replace globalThis.localStorage
+			const originalLocalStorage = globalThis.localStorage;
+			Object.defineProperty(globalThis, "localStorage", {
 				value: mockGlobalStorage,
 				writable: true,
 				configurable: true,
 			});
 
 			try {
-				const layer = makeSessionStorageLayer({ keyPrefix: "test:" });
+				const layer = makeLocalStorageLayer({ keyPrefix: "test:" });
 
 				await Effect.runPromise(
 					Effect.provide(
@@ -365,9 +331,9 @@ describe("SessionStorageAdapter", () => {
 
 				expect(mockGlobalStorage.getStore().has("test:file.txt")).toBe(true);
 			} finally {
-				// Restore original sessionStorage
-				Object.defineProperty(globalThis, "sessionStorage", {
-					value: originalSessionStorage,
+				// Restore original localStorage
+				Object.defineProperty(globalThis, "localStorage", {
+					value: originalLocalStorage,
 					writable: true,
 					configurable: true,
 				});

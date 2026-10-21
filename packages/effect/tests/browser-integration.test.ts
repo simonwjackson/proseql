@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	makeIndexedDBAdapter,
 	makeLocalStorageAdapter,
-} from "../src/browser-adapter-layer.js";
+} from "../src/browser/browser-adapter-layer.js";
 
 // ============================================================================
 // Mock Storage Implementations

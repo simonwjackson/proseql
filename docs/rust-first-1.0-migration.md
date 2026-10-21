@@ -4,17 +4,17 @@
 
 Production imports are listed below. Re-export-all entry points are package contracts. Host implementations move to engine/host with approval. Tests using the old runtime are retargeted.
 
-- `packages/browser/src/adapters/indexeddb-adapter.ts`: `StorageAdapterService as StorageAdapter` from `@proseql/core`.
-- `packages/browser/src/adapters/local-storage-adapter.ts`: `StorageAdapterService as StorageAdapter` from `@proseql/core`.
-- `packages/browser/src/adapters/session-storage-adapter.ts`: `StorageAdapterService as StorageAdapter` from `@proseql/core`.
-- `packages/browser/src/format-validation.ts`: `UnsupportedFormatError` from `@proseql/core`.
-- `packages/browser/tests/browser-entry.test.ts`: `OperationError` from `@proseql/core`.
-- `packages/browser/tests/cross-tab-sync.test.ts`: `StorageAdapterService as StorageAdapter` from `@proseql/core`.
-- `packages/browser/tests/indexeddb-adapter.test.ts`: `StorageAdapterService as StorageAdapter` from `@proseql/core`.
-- `packages/browser/tests/integration.test.ts`: `createPersistentEffectDatabase, jsonCodec, makeSerializerLayer, StorageAdapterService as StorageAdapter, yamlCodec` from `@proseql/core`.
-- `packages/browser/tests/local-storage-adapter.test.ts`: `StorageAdapterService as StorageAdapter` from `@proseql/core`.
-- `packages/browser/tests/session-storage-adapter.test.ts`: `StorageAdapterService as StorageAdapter` from `@proseql/core`.
-- `packages/browser/tests/web-storage-adapter.test.ts`: `StorageAdapterService as StorageAdapter, UnsupportedFormatError` from `@proseql/core`.
+- `packages/effect/src/browser/adapters/indexeddb-adapter.ts`: `StorageAdapterService as StorageAdapter` from `@proseql/core`.
+- `packages/effect/src/browser/adapters/local-storage-adapter.ts`: `StorageAdapterService as StorageAdapter` from `@proseql/core`.
+- `packages/effect/src/browser/adapters/session-storage-adapter.ts`: `StorageAdapterService as StorageAdapter` from `@proseql/core`.
+- `packages/effect/src/browser/format-validation.ts`: `UnsupportedFormatError` from `@proseql/core`.
+- `packages/effect/tests/browser-entry.test.ts`: `OperationError` from `@proseql/core`.
+- `packages/effect/tests/browser-cross-tab-sync.test.ts`: `StorageAdapterService as StorageAdapter` from `@proseql/core`.
+- `packages/effect/tests/browser-indexeddb-adapter.test.ts`: `StorageAdapterService as StorageAdapter` from `@proseql/core`.
+- `packages/effect/tests/browser-integration.test.ts`: `createPersistentEffectDatabase, jsonCodec, makeSerializerLayer, StorageAdapterService as StorageAdapter, yamlCodec` from `@proseql/core`.
+- `packages/effect/tests/browser-local-storage-adapter.test.ts`: `StorageAdapterService as StorageAdapter` from `@proseql/core`.
+- `packages/effect/tests/browser-session-storage-adapter.test.ts`: `StorageAdapterService as StorageAdapter` from `@proseql/core`.
+- `packages/effect/tests/browser-web-storage-adapter.test.ts`: `StorageAdapterService as StorageAdapter, UnsupportedFormatError` from `@proseql/core`.
 - `packages/effect/src/browser.ts`: `*` from `@proseql/core`.
 - `packages/effect/src/database.ts`: `CollectionNotFoundError, DocumentGraphSourceError, DuplicateKeyError, DuplicatePhysicalFileError, DuplicateRecordError, ForeignKeyError, getCollectionConfigs, HookError, InvalidDocumentSourceError, MigrationError, NotFoundError, OperationError, PluginError, PopulationError, SerializationError, SerializerRegistryService, SourceConfigError, StorageAdapterService as StorageAdapter, StorageError, TransactionError, UniqueConstraintError, UnknownCollectionError, UnsupportedFormatError, ValidationError` from `@proseql/core`.
 - `packages/effect/src/index.ts`: `*` from `@proseql/core`.

@@ -8,9 +8,9 @@ This is a Bun workspace monorepo with the following packages:
 
 - `@proseql/core` — shared contracts, schemas, errors, configuration normalization and codecs; no database runtime
 - `@proseql/engine` — Promise-first Rust/WASM database engine
-- `@proseql/effect` — Effect adapter over the Rust/WASM engine
-- `@proseql/browser` — browser engine entry point and browser storage hosts
-- `@proseql/node` — Node.js storage adapter
+- `@proseql/effect` — Effect adapter over the Rust/WASM engine, with Node helpers at `./node`, browser hosts and compatibility layers at `./browser`, and `./browser/worker`
+- `@proseql/browser` — deprecated 1.0.0 re-export shim; use `@proseql/effect/browser`
+- `@proseql/node` — deprecated 1.0.0 re-export shim; use `@proseql/effect/node`
 - `@proseql/ai` — AI tool definitions and executor over the Rust-backed Effect API
 - `@proseql/cli` — command-line queries and persistence through the Effect API
 - `@proseql/rest` — REST API handlers (framework-agnostic)
@@ -62,14 +62,15 @@ Runtime packages:
 - `packages/engine/src/database.ts` — Promise boundary over Rust/WASM
 - `packages/engine/src/host/` — host-side load/save, source assembly and migration orchestration, not a database engine
 - `packages/effect/src/database.ts` — Effect and Stream adapter
-- `packages/node/src/node-adapter-layer.ts` — thin adapter over the engine's Node storage host
+- `packages/effect/src/node/node-adapter-layer.ts` — thin adapter over the engine's Node storage host
 
 Tests:
 - `packages/core/tests/` — shared codecs, configuration and type contracts
 - `packages/core/tsconfig.tests.json` — compile-time suites, including the former corpus type-only skips
 - `packages/effect/tests/` — runtime behaviour and property tests directly on Rust/WASM
 - `packages/engine/tests/` — Promise boundary, projection and host orchestration tests
-- `packages/{node,browser,cli,rest,rpc,ai}/tests/` — integration contracts
+- `packages/{node,browser}/tests/` — deprecated shim identity smoke tests
+- `packages/{cli,rest,rpc,ai}/tests/` — integration contracts
 - `packages/effect/tests/MIGRATED-TESTS.md` — exact test migration and removal ledger; use current runner output for counts
 - `nix run .#parity-gate` — shared typecheck, direct Effect tests and all examples; no transformed corpus, xfails or skip list
 

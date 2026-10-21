@@ -4,18 +4,32 @@ This runbook covers the first coordinated publication of the Rust/WASM package s
 
 ## What is published
 
-One coordinated version is used for these eight packages:
+The release manifest (`scripts/release-manifest.ts`) coordinates these nine packages at 1.0.0, in dependency order:
 
 1. `@proseql/core`
 2. `@proseql/engine`
-3. `@proseql/node`
-4. `@proseql/rest`
-5. `@proseql/effect`
+3. `@proseql/effect`
+4. `@proseql/node` — **deprecated shim**, message: `Use @proseql/effect/node`
+5. `@proseql/rest`
 6. `@proseql/cli`
-7. `@proseql/browser`
+7. `@proseql/browser` — **deprecated shim**, message: `Use @proseql/effect/browser`
 8. `@proseql/rpc`
+9. `@proseql/ai` — unchanged from the existing release manifest
 
-Every package that declares Effect requires exactly `effect@4.0.0-beta.103`. `@proseql/ai` is not in this release. Its source is aligned with beta.103, but the older version already on npm is not compatible with this coordinated package set. Publish AI later under its own version after it has registry-consumer coverage.
+Every package that declares Effect requires exactly `effect@4.0.0-beta.103`. Node and browser each publish one final 1.0.0 with all existing exports, implemented only as re-exports. Prepared artifacts record their `deprecated` messages. The publisher never runs `npm deprecate`.
+
+Packed consumers verify the new `@proseql/effect/node` persistence API in Node and `@proseql/effect/browser` persistence in real Chromium. They check every shim runtime export by identity, including `@proseql/browser/worker` against `@proseql/effect/browser/worker`.
+
+## Manual deprecation after 1.0.0 publication
+
+After publication and registry-consumer verification succeed, an authorized operator runs these commands manually. They cover the already-published 0.x releases as well as the final shim. Do not run them before 1.0.0 is available:
+
+```sh
+npm deprecate '@proseql/node@*' 'Use @proseql/effect/node'
+npm deprecate '@proseql/browser@*' 'Use @proseql/effect/browser'
+```
+
+In the next release, remove `node` and `browser` from `COORDINATED_PACKAGE_NAMES`, `PUBLISH_ORDER`, and `DEPRECATED_SHIMS`. Remove their workspace release/version updates and packed/registry shim consumers together. Keep coverage for the Effect subpaths. Do not publish newer shim versions or delete existing npm versions. The shims then remain available only as deprecated 1.0.0 compatibility packages.
 
 ## Two separate approvals
 
@@ -31,12 +45,12 @@ Do not treat approval of the commit as approval to publish. Do not approve `npm-
 Before preparing a release, confirm all of the following:
 
 - You can push the intended reviewed commit, but no tag or GitHub release for the version exists.
-- The coordinated version is unused for all eight package names.
-- The `@proseql` npm organization contains all eight package records, and each package's Trusted Publisher is bound to repository `simonwjackson/proseql`, workflow `publish.yml`, environment `npm-production`, with publish permission.
+- The coordinated version is unused for all nine package names.
+- The `@proseql` npm organization contains all nine package records, and each package's Trusted Publisher is bound to repository `simonwjackson/proseql`, workflow `publish.yml`, environment `npm-production`, with publish permission.
 - The one-time bootstrap of `engine`, `effect`, and `browser` at `0.15.0` completed from release-checked tarballs on 2026-08-06. Their registry integrities were verified before preparing the coordinated release.
 - The `npm-production` GitHub environment exists, has required reviewers, restricts deployments to `main`, and contains **no npm secrets** (Trusted Publishing uses OIDC; no `NPM_TOKEN` is stored).
 - The GitHub-hosted runner's npm CLI version is ≥11.5.1 and Node version is ≥22.14.0 (the workflow pins Node 24). The optional `npm trust` setup commands require npm ≥11.15.0.
-- Release notes state the exact Effect beta, the three bootstrapped packages, the deferred AI release, and the browser async transaction limitation.
+- Release notes state the exact Effect beta, the three bootstrapped packages, the final deprecated shims, and the browser async transaction limitation.
 - A named operator owns partial-failure recovery.
 
 ## Trusted Publishing setup per package
@@ -51,13 +65,13 @@ npm trust github @proseql/<name> \
   --allow-publish
 ```
 
-All eight package records and trusted configurations now exist. Do not repeat the bootstrap publication. Future coordinated versions publish only through the protected OIDC workflow.
+Confirm package records and trusted configurations for every release-manifest entry before publication. Do not repeat the bootstrap publication. Future coordinated versions publish only through the protected OIDC workflow.
 
 ## Prepare and approve the release commit
 
 1. Start from a clean branch and inspect registry availability.
 2. Run `nix run .#release-prepare -- patch`, `minor`, or `major` as appropriate. This only edits source files; it does not commit or push.
-3. Review all eight package versions, `bun.lock`, the CLI version, and `CHANGELOG.md`. AI must retain its independent package version.
+3. Review all nine package versions, `bun.lock`, the CLI version, and `CHANGELOG.md`. Keep the existing coordinated AI decision unchanged.
 4. Run `nix run .#release-check`. It is non-destructive and credential-free.
 5. Commit the reviewed version and changelog edits.
 6. Run `nix run .#release-finalize` from that clean commit. Record:
@@ -90,7 +104,7 @@ The jobs run in this order:
 
 The workflow checks out the supplied SHA, proves that it is exact and clean, and runs `nix run .#release-finalize`, including the full TypeScript, Rust, parity, package, browser, and packed-consumer gates. It creates one retained `prepared-release-<releaseId>` artifact containing:
 
-- the exact eight tarballs;
+- the exact nine tarballs;
 - `prepared-release.json`, bound to the commit SHA and package integrities;
 - `SHA256SUMS` for the manifest, publisher, and every tarball;
 - a standalone `publisher.mjs` bundle.
@@ -108,7 +122,7 @@ Review the preflight artifact and approve `npm-production`. The publish job:
 - npm's OIDC token exchange happens automatically — no `NPM_TOKEN`, no stored npm credential, and no `npm whoami`;
 - publishes each tarball sequentially in dependency order directly to `latest`:
 
-  `core → engine → node → rest → effect → cli → browser → rpc`
+  `core → engine → effect → node → rest → cli → browser → rpc → ai`
 
 - waits for each published version and its `latest` tag to become visible before continuing;
 - skips packages already published at the coordinated version and already tagged `latest` (idempotent resume);
@@ -120,7 +134,7 @@ This job never checks out source, builds, packs, installs dependencies, or runs 
 
 A fresh consumer installs the exact coordinated versions from npm with lifecycle scripts disabled. It proves:
 
-- all eight packages are the intended version and tagged `latest`;
+- all nine packages are the intended version and tagged `latest`;
 - exactly one `effect@4.0.0-beta.103` is installed;
 - the CLI executes;
 - REST handlers behave correctly;
@@ -129,7 +143,7 @@ A fresh consumer installs the exact coordinated versions from npm with lifecycle
 - a real Chromium page loads browser WASM and persists data;
 - serialized RPC normal calls, typed errors, and streams work through public exports.
 
-It also confirms every registry manifest and integrity against the prepared release. Its `consumer-verification.json` is bound to the release ID and the eight integrities. This job has no npm or GitHub write credential.
+It also confirms every registry manifest and integrity against the prepared release. Its `consumer-verification.json` is bound to the release ID and the nine integrities. This job has no npm or GitHub write credential.
 
 ### 4. GitHub release
 
@@ -141,12 +155,12 @@ Approve publication only when all of these are true:
 
 - Local `nix run .#release-check` and clean-commit `nix run .#release-finalize` passed.
 - Remote no-secret preflight passed for the same full SHA.
-- All eight versions and first-publish names were available before upload.
+- All nine versions and first-publish names were available before upload.
 - Packed manifests contain concrete coordinated dependency versions, exact beta.103, no `workspace:*`, and no `@effect/rpc`.
 - WASM artifacts and browser measurements remain within their existing budgets.
 - Tarball SHA-256 values, npm integrity values, package order, release ID, and release notes were reviewed.
-- Trusted Publishing is configured for all eight packages and the `npm-production` environment has required reviewers.
-- The AI incompatibility and browser limitation are disclosed.
+- Trusted Publishing is configured for all nine packages and the `npm-production` environment has required reviewers.
+- The deprecated shims and browser limitation are disclosed.
 
 If any item is false or uncertain, choose **No-Go**. Do not approve the environment and do not work around a gate.
 
@@ -181,12 +195,12 @@ Do not create a GitHub release. If the failure is registry propagation, use the 
 
 ### GitHub release failed after registry consumer
 
-Do not republish npm packages. Verify all eight `latest` tags and integrities again, then re-run only the GitHub release job for the same release ID and commit. Never point the release tag at a different commit.
+Do not republish npm packages. Verify all nine `latest` tags and integrities again, then re-run only the GitHub release job for the same release ID and commit. Never point the release tag at a different commit.
 
 ## Known release limitations
 
 - OIDC cannot mutate dist-tags, so this workflow publishes sequentially to `latest`. During publication, consumers can briefly observe a mixed coordinated version, and the full registry consumer runs after the versions are live. The protected preflight and exact packed-consumer gates are therefore the final pre-publication behavior checks.
-- `@proseql/ai` is intentionally deferred. Its older npm release must not be presented as compatible with this beta.103 package set.
+- The release manifest remains the source of truth for the AI release decision. This shim migration does not change that decision.
 - In browsers, transaction-origin tracking does not remain reliable across asynchronous work inside a transaction. Avoid yielding to unrelated asynchronous work inside browser transactions when persistence/watch updates may interleave. This release does not claim to fix that limitation.
 - `@proseql/rpc` defines calls and WASM-backed handlers, not a network server or security boundary. Applications choose a transport and must authenticate and authorize requests before they reach mutation handlers.
 - npm Trusted Publishing requires GitHub-hosted runners. Self-hosted runners are not supported. The `oidc-publish` job uses `ubuntu-latest` on GitHub-hosted infrastructure.

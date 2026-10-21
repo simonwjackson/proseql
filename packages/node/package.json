@@ -1,7 +1,7 @@
 {
 	"name": "@proseql/node",
 	"version": "1.0.0",
-	"description": "Node.js storage for the Rust/WASM ProseQL engine, re-exports @proseql/effect",
+	"description": "Deprecated: Use @proseql/effect/node; compatibility re-export shim",
 	"type": "module",
 	"scripts": {
 		"build": "bun run tsc --build",
@@ -48,8 +48,7 @@
 	},
 	"sideEffects": false,
 	"dependencies": {
-		"@proseql/effect": "workspace:1.0.0",
-		"@proseql/engine": "workspace:1.0.0"
+		"@proseql/effect": "workspace:1.0.0"
 	},
 	"peerDependencies": {
 		"effect": "4.0.0-beta.103"

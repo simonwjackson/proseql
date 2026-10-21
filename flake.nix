@@ -196,7 +196,6 @@
                 packages/browser/tests/ \
                 packages/rpc/tests/ \
                 packages/node/tests/ \
-                packages/node/src/convenience.test.ts \
                 packages/cli/tests/ \
                 packages/rest/tests/ \
                 packages/ai/tests/ \
@@ -206,7 +205,7 @@
 
             # Test one package only
             task_test_core() { bun run tsc -p packages/core/tsconfig.tests.json; bun test packages/core/tests/ packages/core/src/context-tag.test.ts "$@"; }
-            task_test_node() { bun run --cwd packages/engine build:wasm; bun test packages/node/tests/ "$@"; }
+            task_test_node() { bun run --cwd packages/engine build:wasm; bun test packages/node/tests/ packages/effect/tests/node-*.test.ts "$@"; }
             task_test_cli() { bun run --cwd packages/engine build:wasm; bun test packages/cli/tests/ "$@"; }
             task_test_rest() { bun run --cwd packages/engine build:wasm; bun test packages/rest/tests/ "$@"; }
             task_test_ai() { bun run --cwd packages/engine build:wasm; bun test packages/ai/tests/ "$@"; }
@@ -215,7 +214,7 @@
             # Test with coverage
             task_coverage() { bun test --coverage packages/*/tests/; }
             task_coverage_core() { bun test --coverage packages/core/tests/; }
-            task_coverage_node() { bun test --coverage packages/node/tests/; }
+            task_coverage_node() { bun test --coverage packages/node/tests/ packages/effect/tests/node-*.test.ts; }
 
             task_typecheck() { bun run tsc --build; bun run tsc -p packages/core/tsconfig.tests.json; bun run tsc -p packages/effect/tsconfig.support.json; }
 

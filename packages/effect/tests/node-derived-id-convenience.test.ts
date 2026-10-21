@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { createNodeDatabase } from "../src/convenience.js";
+import { createNodeDatabase } from "../src/node.js";
 
 const GameMetadata = Schema.Struct({
 	name: Schema.String,

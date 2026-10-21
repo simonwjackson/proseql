@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	makeIndexedDBAdapter,
 	makeIndexedDBStorageLayer,
-} from "../src/adapters/indexeddb-adapter.js";
+} from "../src/browser/adapters/indexeddb-adapter.js";
 
 // ============================================================================
 // Mock IndexedDB Implementation

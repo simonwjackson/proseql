@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer, Schema, Stream } from "effect";
 import { expect, it } from "vitest";
-import { makeNodeStorageLayer } from "../../node/src/node-adapter-layer.ts";
+import { makeNodeStorageLayer } from "../src/node.ts";
 import { createPersistentEffectDatabase } from "@proseql/effect";
 import { makeSerializerLayer } from "../../core/src/serializers/format-codec.js";
 

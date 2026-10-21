@@ -6,7 +6,7 @@
  * rewriting the file. Updates and deletes throw OperationError.
  */
 
-import { createNodeDatabase } from "@proseql/node";
+import { createNodeDatabase } from "@proseql/effect/node";
 import { Effect, Schema } from "effect";
 
 // ============================================================================

@@ -5,12 +5,10 @@
     "": {
       "name": "plan-text-db",
       "dependencies": {
-        "@proseql/browser": "workspace:1.0.0",
         "@proseql/cli": "workspace:1.0.0",
         "@proseql/core": "workspace:1.0.0",
         "@proseql/effect": "workspace:1.0.0",
         "@proseql/engine": "workspace:1.0.0",
-        "@proseql/node": "workspace:1.0.0",
         "@toon-format/toon": "^2.1.0",
         "effect": "4.0.0-beta.103",
         "hjson": "^3.2.2",
@@ -45,9 +43,7 @@
       "name": "@proseql/browser",
       "version": "1.0.0",
       "dependencies": {
-        "@proseql/core": "workspace:*",
-        "@proseql/effect": "workspace:*",
-        "@proseql/engine": "workspace:*",
+        "@proseql/effect": "workspace:1.0.0",
       },
       "peerDependencies": {
         "effect": "4.0.0-beta.103",
@@ -60,8 +56,7 @@
         "proseql": "dist/main.js",
       },
       "dependencies": {
-        "@proseql/effect": "workspace:*",
-        "@proseql/node": "workspace:*",
+        "@proseql/effect": "workspace:1.0.0",
         "yaml": "^2.3.4",
       },
       "peerDependencies": {
@@ -110,8 +105,7 @@
       "name": "@proseql/node",
       "version": "1.0.0",
       "dependencies": {
-        "@proseql/effect": "workspace:*",
-        "@proseql/engine": "workspace:*",
+        "@proseql/effect": "workspace:1.0.0",
       },
       "peerDependencies": {
         "effect": "4.0.0-beta.103",

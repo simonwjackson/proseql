@@ -9,7 +9,8 @@
 		"prepublishOnly": "bun run build && bun test",
 		"test:node": "nix shell nixpkgs#nodejs -c node ./tests/node-smoke.mjs",
 		"typecheck:tests": "bun run tsc --build ../core ../engine .",
-		"examples": "bun ./scripts/run-examples.mjs"
+		"examples": "bun ./scripts/run-examples.mjs",
+		"smoke:browser": "nix shell nixpkgs#nodejs nixpkgs#chromium -c sh -lc 'CHROMIUM_EXECUTABLE_PATH=$(command -v chromium) node ./tests/browser-smoke.mjs'"
 	},
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -21,6 +22,14 @@
 		"./browser": {
 			"types": "./dist/browser.d.ts",
 			"import": "./dist/browser.js"
+		},
+		"./node": {
+			"types": "./dist/node.d.ts",
+			"import": "./dist/node.js"
+		},
+		"./browser/worker": {
+			"types": "./dist/browser/worker.d.ts",
+			"import": "./dist/browser/worker.js"
 		}
 	},
 	"files": [

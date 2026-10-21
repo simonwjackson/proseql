@@ -14,10 +14,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+	browserConsumerSource,
 	COORDINATED_PACKAGE_NAMES,
 	type CoordinatedPackageName,
 	EFFECT_VERSION,
 	inspectAndExtractTarball,
+	nodeConsumerSmokeSource,
 	type PackedPackageContract,
 	type PackedPackageJson,
 	validatePackedPackage,
@@ -145,6 +147,41 @@ describe("packed package contract", () => {
 					coordinatedVersion,
 				}),
 			).not.toThrow();
+		}
+	});
+
+	it("checks new Effect subpaths and shim identities in real Node and Chromium consumers", () => {
+		const node = nodeConsumerSmokeSource(coordinatedVersion);
+		expect(node).toContain('from "@proseql/effect/node"');
+		expect(node).toContain('from "@proseql/node"');
+		expect(node).toContain("nodeShim[name] !== nodeEntry[name]");
+		const browser = browserConsumerSource();
+		for (const entry of [
+			"@proseql/effect/browser",
+			"@proseql/effect/browser/worker",
+			"@proseql/browser",
+			"@proseql/browser/worker",
+		]) {
+			expect(browser).toContain(`from "${entry}"`);
+		}
+		expect(browser).toContain("shim[name] !== entry[name]");
+		expect(browser).toContain("makeLocalStorageLayer");
+		expect(browser).toContain("Effect browser persistence failed");
+	});
+
+	it("rejects implementation leftovers packed in deprecated shims", () => {
+		for (const packageName of ["node", "browser"] as const) {
+			const manifest = readPackedEquivalentManifest(packageName);
+			const files = filesForManifest(manifest);
+			files.set("dist/convenience.js", "export {};");
+			expect(() =>
+				validatePackedPackage({
+					packageName,
+					manifest,
+					files,
+					coordinatedVersion,
+				}),
+			).toThrow(/deprecated shim contains implementation artifact/);
 		}
 	});
 

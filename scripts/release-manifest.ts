@@ -16,6 +16,14 @@ export const COORDINATED_PACKAGE_NAMES = [
 
 export type CoordinatedPackageName = (typeof COORDINATED_PACKAGE_NAMES)[number];
 
+/** Final 1.0.0 compatibility releases; remove these shims from the next release set. */
+export const DEPRECATED_SHIMS: Readonly<
+	Partial<Record<CoordinatedPackageName, string>>
+> = {
+	node: "Use @proseql/effect/node",
+	browser: "Use @proseql/effect/browser",
+};
+
 export const PUBLISH_ORDER: ReadonlyArray<CoordinatedPackageName> =
 	COORDINATED_PACKAGE_NAMES;
 
@@ -29,6 +37,8 @@ export type ReleasePackageManifest = Readonly<Record<string, unknown>> & {
 
 export type PreparedArtifact = {
 	readonly packageName: CoordinatedPackageName;
+	/** Manual post-publication deprecation message, not an npm command. */
+	readonly deprecated?: string;
 	readonly name: `@proseql/${CoordinatedPackageName}`;
 	readonly version: string;
 	readonly tarball: string;
@@ -93,13 +103,21 @@ export function createPreparedRelease(input: {
 	readonly artifacts: ReadonlyArray<PreparedArtifact>;
 }): PreparedRelease {
 	assertSemver(input.version);
-	const artifactOrder = input.artifacts.map(({ packageName }) => packageName);
+	const artifacts = input.artifacts.map((artifact): PreparedArtifact => {
+		const deprecated = DEPRECATED_SHIMS[artifact.packageName];
+		assert(
+			artifact.deprecated === undefined || artifact.deprecated === deprecated,
+			`${artifact.name}: incorrect deprecated shim message`,
+		);
+		return { ...artifact, ...(deprecated === undefined ? {} : { deprecated }) };
+	});
+	const artifactOrder = artifacts.map(({ packageName }) => packageName);
 	assert(
 		JSON.stringify(artifactOrder) === JSON.stringify(PUBLISH_ORDER),
 		`prepared artifact order must be ${PUBLISH_ORDER.join(" -> ")}`,
 	);
 	const manifests = new Map<CoordinatedPackageName, ReleasePackageManifest>();
-	for (const artifact of input.artifacts) {
+	for (const artifact of artifacts) {
 		assert(
 			artifact.name === `@proseql/${artifact.packageName}`,
 			`${artifact.packageName}: artifact package name mismatch`,
@@ -135,8 +153,18 @@ export function createPreparedRelease(input: {
 	const releaseIdentity = stableStringify({
 		version: input.version,
 		commit: input.commit,
-		artifacts: input.artifacts.map(
-			({ name, version, tarball, sha256, integrity, sizeBytes, manifest }) => ({
+		artifacts: artifacts.map(
+			({
+				name,
+				version,
+				tarball,
+				sha256,
+				integrity,
+				sizeBytes,
+				manifest,
+				deprecated,
+			}) => ({
+				deprecated,
 				name,
 				version,
 				tarball,
@@ -154,7 +182,7 @@ export function createPreparedRelease(input: {
 		commit: input.commit,
 		preparedAt: input.preparedAt,
 		publishOrder: PUBLISH_ORDER,
-		artifacts: input.artifacts,
+		artifacts,
 	};
 }
 

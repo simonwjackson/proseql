@@ -45,13 +45,10 @@ your-project/
 npm install @proseql/effect effect@4.0.0-beta.103
 # For a Promise API over Rust/WASM:
 npm install @proseql/engine
-# For browser storage:
-npm install @proseql/browser effect@4.0.0-beta.103
-# For file persistence (Node.js):
-npm install @proseql/node effect@4.0.0-beta.103
+# The Effect package includes ./node and ./browser storage entry points.
 ```
 
-The Effect-facing packages are tested with exactly `effect@4.0.0-beta.103`. The Promise-first `@proseql/engine` package runs queries and mutations in Rust compiled to WebAssembly. `@proseql/effect` adds Effect and Stream APIs over that engine, and `@proseql/browser` supplies the browser entry point and storage hosts.
+The Effect-facing packages are tested with exactly `effect@4.0.0-beta.103`. The Promise-first `@proseql/engine` package runs queries and mutations in Rust compiled to WebAssembly. `@proseql/effect` adds Effect and Stream APIs over that engine, and its `./browser` entry supplies browser compatibility layers and engine storage hosts.
 
 ## Quick Start
 
@@ -81,7 +78,7 @@ Query and mutate with type-safe APIs:
 
 ```ts
 import { Effect, Schema } from "effect"
-import { createNodeDatabase } from "@proseql/node"
+import { createNodeDatabase } from "@proseql/effect/node"
 
 const GamePayload = Schema.Struct({
   title: Schema.String,
@@ -141,7 +138,7 @@ Existing records write back to their origin file. New records without an origin 
 
 Document sources are strict by default: duplicate `(collection, id)` records across files and unknown top-level collection keys fail loudly. Use `unknownCollections: "preserve"` only when non-ProseQL top-level data must survive rewrites. YAML writes preserve data and sibling collection sections, not comments or exact original formatting. Node-backed document sources support watcher-driven whole-source reloads for normal `watch()` and `watchById()` subscribers.
 
-Need the opposite shape — many fragments merged into one read-only view rather than independent write targets? A `documentGraph` source overlays an ordered set of directory roots into one effective, read-only collection graph (later fragments win, mixed formats by extension, reload with last-known-good). See the [storage-host guide](docs/storage-hosts.md) and [`@proseql/node`](packages/node/README.md) README for details.
+Need the opposite shape — many fragments merged into one read-only view rather than independent write targets? A `documentGraph` source overlays an ordered set of directory roots into one effective, read-only collection graph (later fragments win, mixed formats by extension, reload with last-known-good). See the [storage-host guide](docs/storage-hosts.md) and [`@proseql/effect/node`](packages/node/README.md) guide for details.
 
 ## Packages
 
@@ -149,9 +146,9 @@ Need the opposite shape — many fragments merged into one read-only view rather
 |---------|-------------|
 | [`@proseql/core`](packages/core/README.md) | Shared contracts, schemas, errors, configuration and codecs. No database runtime. |
 | [`@proseql/engine`](packages/engine/README.md) | Promise-first database execution in Rust/WASM for Node and browsers. |
-| [`@proseql/effect`](packages/effect/README.md) | Effect and Stream APIs over the Rust/WASM engine. |
-| [`@proseql/node`](packages/node/README.md) | Node.js file persistence. File formats, debounced writes, append-only collections. |
-| [`@proseql/browser`](packages/browser/README.md) | Browser-safe WASM entry points plus localStorage, sessionStorage, and IndexedDB hosts. |
+| [`@proseql/effect`](packages/effect/README.md) | `./node` and `./browser` storage helpers. Effect and Stream APIs over the Rust/WASM engine. |
+| [`@proseql/node`](packages/node/README.md) | Deprecated shim. Use `@proseql/effect/node` for Node file persistence. |
+| [`@proseql/browser`](packages/browser/README.md) | Deprecated shim. Use `@proseql/effect/browser` for browser storage, or `@proseql/engine/browser` for Promises. |
 | [`@proseql/cli`](packages/cli/README.md) | Command-line interface. Query, create, update, delete, migrate, convert formats. |
 | [`@proseql/rest`](packages/rest/README.md) | Framework-agnostic REST API handlers. Route generation, query parsing, error mapping. |
 | [`@proseql/rpc`](packages/rpc/README.md) | Client-safe Effect RPC definitions at the root and Rust/WASM-backed handlers under `./server`; transport and access control stay in the application. |

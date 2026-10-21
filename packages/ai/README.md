@@ -35,7 +35,7 @@ const result = await tools.execute("proseql_query", {
 // result is a JSON string containing the matching records.
 ```
 
-Use `createNodeDatabase` from `@proseql/node` for persistent files. Both factories use the Rust/WASM engine.
+Use `createNodeDatabase` from `@proseql/effect/node` for persistent files. Both factories use the Rust/WASM engine.
 
 ## API
 

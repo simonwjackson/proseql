@@ -11,7 +11,7 @@
 import {
 	createPersistentEffectDatabase,
 	makeNodePersistenceLayer,
-} from "@proseql/node";
+} from "@proseql/effect/node";
 import { Chunk, Effect, Schema, Stream } from "effect";
 
 // ============================================================================

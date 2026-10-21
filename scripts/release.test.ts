@@ -21,6 +21,7 @@ import {
 	publishPackages,
 	type Registry,
 	type RegistryVersion,
+	validatePreparedRelease,
 } from "./publish-packages.js";
 import {
 	computeBumpType,
@@ -34,6 +35,7 @@ import {
 import {
 	COORDINATED_PACKAGE_NAMES,
 	createPreparedRelease,
+	DEPRECATED_SHIMS,
 	type PreparedArtifact,
 	type PreparedRelease,
 	PUBLISH_ORDER,
@@ -224,6 +226,44 @@ describe("coordinated release manifest", () => {
 			"ai",
 		]);
 		expect(PUBLISH_ORDER).toEqual(COORDINATED_PACKAGE_NAMES);
+	});
+
+	it("marks only the final Node and browser releases as deprecated shims", () => {
+		const release = preparedRelease();
+		expect(
+			release.artifacts
+				.filter(({ deprecated }) => deprecated)
+				.map(({ packageName, deprecated }) => ({ packageName, deprecated })),
+		).toEqual([
+			{ packageName: "node", deprecated: "Use @proseql/effect/node" },
+			{ packageName: "browser", deprecated: "Use @proseql/effect/browser" },
+		]);
+		expect(DEPRECATED_SHIMS).toEqual({
+			node: "Use @proseql/effect/node",
+			browser: "Use @proseql/effect/browser",
+		});
+	});
+
+	it("rejects tampering with a prepared shim deprecation message", () => {
+		const release = preparedRelease();
+		expect(() =>
+			validatePreparedRelease({
+				...release,
+				artifacts: release.artifacts.map((artifact) =>
+					artifact.packageName === "node"
+						? { ...artifact, deprecated: "wrong replacement" }
+						: artifact,
+				),
+			}),
+		).toThrow(/deprecated shim message/);
+		expect(() =>
+			validatePreparedRelease({
+				...release,
+				artifacts: release.artifacts.map(
+					({ deprecated, ...artifact }) => artifact,
+				),
+			}),
+		).toThrow(/modified/);
 	});
 
 	it("derives a deterministic release ID from version, commit, and artifact content", () => {
@@ -832,7 +872,12 @@ describe("npm command safety", () => {
 		expect(publish).not.toContain("--force");
 		// No whoami or dist-tag mutations
 		expect(
-			commands.some((c) => c.args[0] === "whoami" || c.args[0] === "dist-tag"),
+			commands.some(
+				(c) =>
+					c.args[0] === "whoami" ||
+					c.args[0] === "dist-tag" ||
+					c.args[0] === "deprecate",
+			),
 		).toBe(false);
 	});
 });

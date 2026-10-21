@@ -1,11 +1,19 @@
 # @proseql/node
 
+> **Deprecated:** Use `@proseql/effect/node`. Version 1.0.0 is the final compatibility shim release. It preserves all existing exports.
+
+| Old import | New import |
+|---|---|
+| `@proseql/node` | `@proseql/effect/node` |
+
+Install `@proseql/effect` instead. The examples below use the replacement.
+
 Node.js file persistence for ProseQL. Re-exports the Rust/WASM-backed API from `@proseql/effect` and uses the engine's single Node.js storage host.
 
 ## Install
 
 ```sh
-npm install @proseql/node
+npm install @proseql/effect
 ```
 
 ## Quick Start
@@ -13,7 +21,7 @@ npm install @proseql/node
 ```ts
 import { mkdir } from "node:fs/promises"
 import { Effect, Schema } from "effect"
-import { createNodeDatabase } from "@proseql/node"
+import { createNodeDatabase } from "@proseql/effect/node"
 
 const BookPayload = Schema.Struct({
   title: Schema.String,
@@ -196,7 +204,7 @@ const db = yield* createNodeDatabase({
 })
 ```
 
-Through `@proseql/node`, a graph reads from the real filesystem with codecs inferred automatically (a graph registers all base codecs, since fragments are decoded by extension). Discovery uses real glob semantics across nested directories; each startup-present root is watched, and a valid fragment change rebuilds the graph while an invalid reload keeps the last-known-good graph. Graph-owned collections reject every mutation with `OperationError` (`reason: "read-only-source"`), including inside `$transaction`, and `initialData` for a graph-owned collection fails database creation. See the [`@proseql/effect` README](https://www.npmjs.com/package/@proseql/effect) for Effect database usage.
+Through `@proseql/effect/node`, a graph reads from the real filesystem with codecs inferred automatically (a graph registers all base codecs, since fragments are decoded by extension). Discovery uses real glob semantics across nested directories; each startup-present root is watched, and a valid fragment change rebuilds the graph while an invalid reload keeps the last-known-good graph. Graph-owned collections reject every mutation with `OperationError` (`reason: "read-only-source"`), including inside `$transaction`, and `initialData` for a graph-owned collection fails database creation. See the [`@proseql/effect` README](https://www.npmjs.com/package/@proseql/effect) for Effect database usage.
 
 ## Persistence Approaches
 
@@ -208,7 +216,7 @@ Codecs are inferred from source formats, source paths, and file extensions. No m
 
 ```ts
 import { Effect } from "effect"
-import { createNodeDatabase } from "@proseql/node"
+import { createNodeDatabase } from "@proseql/effect/node"
 
 const program = Effect.gen(function* () {
   const db = yield* createNodeDatabase(config, initialData, {
@@ -231,7 +239,7 @@ import { Effect } from "effect"
 import {
   createPersistentEffectDatabase,
   makeNodePersistenceLayer,
-} from "@proseql/node"
+} from "@proseql/effect/node"
 
 const PersistenceLayer = makeNodePersistenceLayer(config)
 
@@ -257,7 +265,7 @@ import {
   makeSerializerLayer,
   jsonCodec,
   yamlCodec,
-} from "@proseql/node"
+} from "@proseql/effect/node"
 
 const ManualLayer = Layer.merge(
   NodeStorageLayer,
@@ -324,7 +332,7 @@ Prose files are self-describing. The `@prose` directive contains the template:
 The codec learns the template from the file automatically. For explicit control:
 
 ```ts
-import { proseCodec, makeSerializerLayer } from "@proseql/node"
+import { proseCodec, makeSerializerLayer } from "@proseql/effect/node"
 
 // explicit template
 proseCodec({ template: '[{id}] "{title}" by {author} ({year}) — {genre}' })
@@ -406,7 +414,7 @@ console.log(`Pending writes: ${db.pendingCount()}`)  // → 0
 The `NodeStorageLayer` provides atomic writes (temp file + rename) with retry and exponential backoff.
 
 ```ts
-import { makeNodeStorageLayer, NodeStorageLayer } from "@proseql/node"
+import { makeNodeStorageLayer, NodeStorageLayer } from "@proseql/effect/node"
 
 // default configuration
 NodeStorageLayer
@@ -423,7 +431,7 @@ const CustomStorageLayer = makeNodeStorageLayer({
 
 ## API Reference
 
-### Exports from `@proseql/node`
+### Exports from `@proseql/effect/node`
 
 Everything from `@proseql/effect` is re-exported, plus:
 
@@ -437,7 +445,7 @@ Everything from `@proseql/effect` is re-exported, plus:
 ### Types
 
 ```ts
-import type { NodeAdapterConfig } from "@proseql/node"
+import type { NodeAdapterConfig } from "@proseql/effect/node"
 
 interface NodeAdapterConfig {
   readonly maxRetries?: number       // default: 3

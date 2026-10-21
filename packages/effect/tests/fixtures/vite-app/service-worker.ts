@@ -6,7 +6,7 @@ import {
 	getLoadedWasmMemoryByteLength,
 	initializeWorkerWasmBindings,
 	workerWasmUrl,
-} from "@proseql/browser/worker";
+} from "@proseql/effect/browser/worker";
 import { Schema } from "effect";
 
 declare const self: ServiceWorkerGlobalScope;

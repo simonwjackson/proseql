@@ -277,7 +277,9 @@ export function validatePreparedRelease(release: PreparedRelease): void {
 	assert(
 		rebuilt.releaseId === release.releaseId &&
 			JSON.stringify(rebuilt.publishOrder) ===
-				JSON.stringify(release.publishOrder),
+				JSON.stringify(release.publishOrder) &&
+			JSON.stringify(rebuilt.artifacts.map(({ deprecated }) => deprecated)) ===
+				JSON.stringify(release.artifacts.map(({ deprecated }) => deprecated)),
 		"prepared release manifest is inconsistent or has been modified",
 	);
 }

@@ -1,8 +1,8 @@
 import { StorageAdapterService as StorageAdapter } from "@proseql/core";
 import { Effect, Layer } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { makeLocalStorageAdapter } from "../src/adapters/local-storage-adapter.js";
-import { makeWebStorageAdapter } from "../src/adapters/web-storage-adapter.js";
+import { makeLocalStorageAdapter } from "../src/browser/adapters/local-storage-adapter.js";
+import { makeWebStorageAdapter } from "../src/browser/adapters/web-storage-adapter.js";
 
 // ============================================================================
 // Mock Storage Implementation

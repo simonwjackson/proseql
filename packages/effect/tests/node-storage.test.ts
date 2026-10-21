@@ -14,7 +14,7 @@ import {
 } from "@proseql/effect";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
-import { makeNodeStorageLayer } from "../src/node-adapter-layer.js";
+import { makeNodeStorageLayer } from "../src/node.js";
 
 // ============================================================================
 // Codec-based serializer layers

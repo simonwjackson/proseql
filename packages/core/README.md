@@ -2,6 +2,8 @@
 
 Shared TypeScript contracts for proseQL 1.0.0. **This package is not a database engine.** Rust is the only database engine.
 
+Applications do not install core directly. Install `@proseql/engine` or `@proseql/effect`; they include the shared contract.
+
 Core provides:
 
 - Database, collection, query, CRUD, relationship, hook, migration and plugin types.
@@ -19,8 +21,8 @@ All Effect-facing packages use exactly `effect@4.0.0-beta.103`.
 |---|---|
 | [`@proseql/effect`](../effect/README.md) | Effect factories, CRUD Effects, query and watch Streams. |
 | [`@proseql/engine`](../engine/README.md) | Promise API over the Rust/WASM engine. |
-| [`@proseql/node`](../node/README.md) | Node file persistence with inferred codecs and a Node storage host. |
-| [`@proseql/browser`](../browser/README.md) | Browser entry points and localStorage, sessionStorage and IndexedDB hosts. |
+| [`@proseql/effect/node`](../effect/README.md#node-persistence) | Node file persistence with inferred codecs and a Node storage host. |
+| [`@proseql/effect/browser`](../effect/README.md#browser-loading) | Browser entry points and localStorage, sessionStorage and IndexedDB hosts. |
 | [`proseql-native`](../../docs/native-sources.md) | Native Rust storage and callbacks. |
 
 ## Migrate from 0.x
@@ -29,7 +31,7 @@ All Effect-facing packages use exactly `effect@4.0.0-beta.103`.
 // Before: import { createEffectDatabase } from "@proseql/core"
 import { createEffectDatabase } from "@proseql/effect"
 // For files:
-import { createNodeDatabase } from "@proseql/node"
+import { createNodeDatabase } from "@proseql/effect/node"
 ```
 
 `createPersistentEffectDatabase` also comes from `@proseql/effect`. Core no longer exports factories, query/CRUD operations, Ref state, indexes, reactive execution or transaction implementations. Replace calls to private TS helpers with the database's public methods.

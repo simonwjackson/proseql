@@ -30,7 +30,7 @@ for (const packageName of packageNames) {
 const smokeScript = join(
 	repoRoot,
 	"packages",
-	"browser",
+	"effect",
 	"tests",
 	"browser-smoke.mjs",
 );

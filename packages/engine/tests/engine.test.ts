@@ -9,7 +9,7 @@ import {
 	inferCodecsFromConfig,
 	makeSerializerLayer,
 } from "@proseql/core";
-import { createNodeDatabase } from "@proseql/node";
+import { createNodeDatabase } from "@proseql/effect/node";
 import { Effect, Layer } from "effect";
 import * as Schema from "effect/Schema";
 import { beforeAll, describe, expect, it } from "vitest";

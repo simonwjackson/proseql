@@ -76,7 +76,7 @@ export interface BrowserPerformanceJsonOutput {
 }
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const viteRoot = join(repoRoot, "packages/browser/tests/fixtures/vite-app");
+const viteRoot = join(repoRoot, "packages/effect/tests/fixtures/vite-app");
 
 const logBrowserProgress = (message: string): void => {
 	if (PROGRESS_ENABLED) {

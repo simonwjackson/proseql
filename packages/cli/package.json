@@ -50,7 +50,6 @@
 	},
 	"sideEffects": false,
 	"dependencies": {
-		"@proseql/node": "workspace:1.0.0",
 		"yaml": "^2.3.4",
 		"@proseql/effect": "workspace:1.0.0"
 	},

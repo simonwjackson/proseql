@@ -92,3 +92,9 @@ For a new backend, implement the same interface directly and pass it through `pe
 A host is not a second database. Do not implement schema decoding, computed fields, query filtering, or hooks in it. Ordinary Promise persistence does not imply native file/directory synchronization, cross-file atomicity, exactly-once event delivery, or a multi-writer lock. IndexedDB transaction completion is stronger than request completion, but it does not turn localStorage or a remote transport into native durable storage. Browser storage can be evicted and is not suitable for secrets without an application security policy.
 
 Exercise a new host against real storage: missing reads, read/write/append/remove round trips, namespace isolation, immediate and recursive listings, watch add/change/remove and stop, reopen, quota/permission/transport failure, and close with pending writes. Check failed writes never acknowledge partial data. The existing browser tests in `packages/engine/tests/` provide examples. For serialized, acknowledged worker writes, use the service-worker facade rather than assuming ordinary debounced persistence acknowledges each write durably.
+
+## TypeScript storage imports in 1.0.0
+
+Use `@proseql/effect/node` for `createNodeDatabase` and Node compatibility layers. Use `@proseql/effect/browser` for browser compatibility layers and path/format helpers, or `@proseql/engine/browser` for the Promise API and browser hosts. Service workers use `@proseql/effect/browser/worker`.
+
+`@proseql/node` and `@proseql/browser` are deprecated re-export shims. Version 1.0.0 is their final coordinated release. See the [migration table](../packages/effect/README.md#migrate-imports).

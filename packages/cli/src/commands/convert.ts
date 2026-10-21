@@ -16,7 +16,7 @@ import {
 	SerializerRegistryService,
 	StorageAdapterService,
 } from "@proseql/effect";
-import { NodeStorageLayer } from "@proseql/node";
+import { NodeStorageLayer } from "@proseql/effect/node";
 import { Effect, Layer } from "effect";
 import { getCliCollectionConfig, resolveConfigPaths } from "../config/paths.js";
 

@@ -3,10 +3,14 @@
 ## v1.0.0
 
 ### Breaking changes
-- Rust is the only database engine. `@proseql/core` now contains shared contracts, errors, schemas, configuration and codecs, not a database runtime. Import `createEffectDatabase` and `createPersistentEffectDatabase` from `@proseql/effect`. Use `@proseql/node` and `createNodeDatabase` for files, `@proseql/engine` for Promises, or `@proseql/browser` for browser storage.
+- Rust is the only database engine. `@proseql/core` now contains shared contracts, errors, schemas, configuration and codecs, not a database runtime. Import `createEffectDatabase` and `createPersistentEffectDatabase` from `@proseql/effect`. Use `@proseql/effect/node` and `createNodeDatabase` for files, `@proseql/engine` for Promises, or `@proseql/effect/browser` for browser storage.
 - The old standalone core ID generator utilities are removed. Omit `id` on `create`, or use a named plugin generator for custom IDs.
 - Function-valued `$remove` is rejected with `ValidationError` before mutation and removed from the TS contract. Use a concrete value or an explicit `$set` array instead. Atomic host predicate removal remains a follow-up.
 - All nine packages, including `@proseql/ai`, now share version 1.0.0.
+
+### Package consolidation
+- Add `@proseql/effect/node` for Node convenience functions and storage layers. Move browser compatibility layers and path/format helpers to `@proseql/effect/browser`, and mirror the worker entry at `@proseql/effect/browser/worker`.
+- Deprecate `@proseql/node` and `@proseql/browser`. Their final 1.0.0 releases are pure re-export shims with all existing export names and types. Migrate imports to the Effect subpaths; the shims leave the coordinated release set in the next release.
 
 ### Engine and host contracts
 - Fix REST CRUD, query, aggregate and relationship route generation for source-oriented `{ collections, sources }` configs.

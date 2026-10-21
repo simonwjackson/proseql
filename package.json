@@ -28,10 +28,8 @@
 		"@toon-format/toon": "^2.1.0",
 		"hjson": "^3.2.2",
 		"@proseql/core": "workspace:1.0.0",
-		"@proseql/node": "workspace:1.0.0",
 		"@proseql/engine": "workspace:1.0.0",
 		"@proseql/effect": "workspace:1.0.0",
-		"@proseql/browser": "workspace:1.0.0",
 		"@proseql/cli": "workspace:1.0.0"
 	},
 	"devDependencies": {

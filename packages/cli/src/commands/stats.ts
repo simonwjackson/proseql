@@ -11,7 +11,7 @@ import {
 	createPersistentEffectDatabase,
 	type DatabaseConfig,
 } from "@proseql/effect";
-import { NodeStorageLayer } from "@proseql/node";
+import { NodeStorageLayer } from "@proseql/effect/node";
 import { Effect, Layer, Stream } from "effect";
 import {
 	getCollectionPersistenceInfo,

@@ -41,7 +41,7 @@ Import the browser-safe loader from `@proseql/engine/browser`:
 import { createEngineDatabase } from "@proseql/engine/browser"
 ```
 
-A browser or bundler loads the included browser WASM asset through `import.meta.url`. Do not copy a WASM file from a different package version: the loader rejects stale generated bindings. Applications that also need browser persistence normally install `@proseql/browser`, which re-exports this browser engine and provides localStorage, sessionStorage, and IndexedDB hosts.
+A browser or bundler loads the included browser WASM asset through `import.meta.url`. Do not copy a WASM file from a different package version: the loader rejects stale generated bindings. Use `@proseql/engine/browser` for Promise-based browser persistence with localStorage, sessionStorage and IndexedDB hosts. For Effect APIs and compatibility storage layers, install `@proseql/effect` and import `@proseql/effect/browser`.
 
 ### Workers
 

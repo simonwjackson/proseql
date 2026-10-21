@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { OperationError } from "@proseql/core";
 import { Effect, Schema, Stream } from "effect";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createPersistentEffectDatabase } from "../src/index.js";
+import { createPersistentEffectDatabase } from "../src/browser.js";
 
 class MockStorage implements Storage {
 	private store = new Map<string, string>();
@@ -58,8 +58,9 @@ beforeAll(() => {
 		stdio: "inherit",
 	});
 	execFileSync(
-		"bunx",
+		"bun",
 		[
+			"run",
 			"tsc",
 			"--build",
 			"packages/core",
@@ -74,7 +75,7 @@ beforeAll(() => {
 	);
 }, 120_000);
 
-describe("@proseql/browser persistent effect factory", () => {
+describe("@proseql/effect/browser persistent effect factory", () => {
 	beforeEach(() => {
 		Object.defineProperty(globalThis, "localStorage", {
 			value: new MockStorage(),

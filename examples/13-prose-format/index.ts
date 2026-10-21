@@ -6,7 +6,7 @@
  * codec initialization, explicit templates, and format overrides.
  */
 
-import { createNodeDatabase } from "@proseql/node";
+import { createNodeDatabase } from "@proseql/effect/node";
 import { Effect, Schema } from "effect";
 
 // ============================================================================

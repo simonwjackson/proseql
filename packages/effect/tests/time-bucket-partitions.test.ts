@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { makeNodeStorageLayer } from "../../node/src/node-adapter-layer.ts";
+import { makeNodeStorageLayer } from "../src/node.ts";
 import { SourceConfigError } from "../../core/src/errors/source-errors.js";
 import { createPersistentEffectDatabase } from "@proseql/effect";
 import { jsonlCodec } from "../../core/src/serializers/codecs/jsonl.js";

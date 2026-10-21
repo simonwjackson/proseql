@@ -8,7 +8,7 @@
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createNodeDatabase } from "@proseql/node";
+import { createNodeDatabase } from "@proseql/effect/node";
 import { Effect, Schema } from "effect";
 
 const GamePayload = Schema.Struct({

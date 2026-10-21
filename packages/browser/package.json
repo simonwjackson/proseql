@@ -1,7 +1,7 @@
 {
 	"name": "@proseql/browser",
 	"version": "1.0.0",
-	"description": "Browser storage adapters and Rust/WASM database runtime for ProseQL",
+	"description": "Deprecated: Use @proseql/effect/browser; compatibility re-export shim",
 	"type": "module",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -23,8 +23,7 @@
 	"scripts": {
 		"build": "bun run tsc --build",
 		"clean": "rm -rf dist *.tsbuildinfo",
-		"prepublishOnly": "bun run build && bun test",
-		"smoke:browser": "nix shell nixpkgs#nodejs nixpkgs#chromium -c sh -lc 'CHROMIUM_EXECUTABLE_PATH=$(command -v chromium) node ./tests/browser-smoke.mjs'"
+		"prepublishOnly": "bun run build && bun test"
 	},
 	"license": "MIT",
 	"author": "Simon W. Jackson",
@@ -50,9 +49,7 @@
 	},
 	"sideEffects": false,
 	"dependencies": {
-		"@proseql/core": "workspace:1.0.0",
-		"@proseql/effect": "workspace:1.0.0",
-		"@proseql/engine": "workspace:1.0.0"
+		"@proseql/effect": "workspace:1.0.0"
 	},
 	"peerDependencies": {
 		"effect": "4.0.0-beta.103"

@@ -20,6 +20,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import {
 	COORDINATED_PACKAGE_NAMES,
 	type CoordinatedPackageName,
+	DEPRECATED_SHIMS,
 } from "./release-manifest.js";
 import { inspectAndExtractTarball } from "./safe-tar.js";
 
@@ -120,6 +121,26 @@ export function validatePackedPackage({
 					path,
 				),
 				`@proseql/core: removed host runtime artifact ${path}`,
+			);
+		}
+	}
+
+	const deprecated = DEPRECATED_SHIMS[packageName];
+	if (deprecated !== undefined) {
+		assert(
+			manifest.description?.startsWith("Deprecated:") === true &&
+				manifest.description.includes(deprecated.slice("Use ".length)),
+			`${expectedName}: deprecated shim description must name its replacement`,
+		);
+		assert(
+			Object.keys(manifest.dependencies ?? {}).join() === "@proseql/effect",
+			`${expectedName}: deprecated shim must depend only on @proseql/effect`,
+		);
+		for (const path of files.keys()) {
+			assert(
+				!path.startsWith("dist/") ||
+					/^dist\/(index|worker)\.(js|d\.ts)(\.map)?$/.test(path),
+				`${expectedName}: deprecated shim contains implementation artifact ${path}`,
 			);
 		}
 	}
@@ -750,7 +771,17 @@ import * as coreContract from "@proseql/core";
 import { createEffectDatabase } from "@proseql/effect";
 import { createEngineDatabase } from "@proseql/engine";
 import { createEffectDatabase as createWasmEffectDatabase } from "@proseql/effect";
-import { createNodeDatabase } from "@proseql/node";
+import { createNodeDatabase } from "@proseql/effect/node";
+import * as nodeEntry from "@proseql/effect/node";
+import * as nodeShim from "@proseql/node";
+import * as effectRoot from "@proseql/effect";
+for (const name of Object.keys(nodeEntry)) {
+ if (!(name in nodeShim) || nodeShim[name] !== nodeEntry[name]) throw new Error("Node shim mismatch: " + name);
+}
+if (Object.keys(nodeShim).length !== Object.keys(nodeEntry).length) throw new Error("Node shim exports changed");
+for (const name of ["createNodeDatabase", "makeProseQLLayer", "makeNodePersistenceLayer", "NodeStorageLayer", "makeNodeStorageLayer"]) {
+ if (name in effectRoot) throw new Error("Node helper leaked into Effect root: " + name);
+}
 import { createRestHandlers } from "@proseql/rest";
 import { makeRpcGroup } from "@proseql/rpc";
 import { makeRpcHandlers } from "@proseql/rpc/server";
@@ -825,8 +856,18 @@ if (rpcResult.created.id !== "2" || rpcResult.failure._tag !== "NotFoundError" |
 }
 
 export function browserConsumerSource(): string {
-	return `import { createLocalStorageEngineStorageHost, createPersistentEngineDatabase } from "@proseql/browser";
-import { Schema } from "effect";
+	return `import { createLocalStorageEngineStorageHost, createPersistentEngineDatabase, createPersistentEffectDatabase, makeLocalStorageLayer, makeSerializerLayer, jsonCodec } from "@proseql/effect/browser";
+import * as browserEntry from "@proseql/effect/browser";
+import * as browserShim from "@proseql/browser";
+import * as workerEntry from "@proseql/effect/browser/worker";
+import * as workerShim from "@proseql/browser/worker";
+import { Effect, Layer, Schema } from "effect";
+for (const [shim, entry] of [[browserShim, browserEntry], [workerShim, workerEntry]]) {
+ if (Object.keys(shim).length !== Object.keys(entry).length) throw new Error("Browser shim exports changed");
+ for (const name of Object.keys(entry)) {
+  if (!(name in shim) || shim[name] !== entry[name]) throw new Error("Browser shim mismatch: " + name);
+ }
+}
 const config = { books: { schema: Schema.Struct({ id: Schema.String, title: Schema.String }), file: "books.json", relationships: {} } };
 const prefix = "packed-browser:";
 localStorage.clear();
@@ -837,6 +878,17 @@ await first.close();
 const second = await createPersistentEngineDatabase(config, { books: [] }, { writeDebounce: 1, storageHost: createLocalStorageEngineStorageHost({ keyPrefix: prefix }) });
 const rows = await second.books.query();
 await second.close();
+const persistenceLayer = Layer.merge(makeLocalStorageLayer({ keyPrefix: prefix + "effect:" }), makeSerializerLayer([jsonCodec()]));
+await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+ const db = yield* createPersistentEffectDatabase(config, { books: [] }, { writeDebounce: 1 });
+ yield* db.books.create({ id: "e1", title: "Effect browser" });
+ yield* Effect.promise(() => db.flush());
+}).pipe(Effect.provide(persistenceLayer))));
+await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+ const db = yield* createPersistentEffectDatabase(config, { books: [] }, { writeDebounce: 1 });
+ const book = yield* db.books.findById("e1");
+ if (book.title !== "Effect browser") throw new Error("Effect browser persistence failed");
+}).pipe(Effect.provide(persistenceLayer))));
 window.__PROSEQL_PACKED_RESULT__ = rows.map((row) => ({ ...row }));
 `;
 }
