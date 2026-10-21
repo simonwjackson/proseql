@@ -141,3 +141,7 @@ Native-only lazy partition loading and durable append remain native-only. Do not
 ## Single-soft-delete follow-up
 
 Main rejects unsupported soft deletes at `delete.ts:115-123`, before inbound validation at `126-133`. The follow-up preserves that priority and uses the existing bulk-delete materialization helper for single-delete result identity. No other optimisation is included. Browser production WASM gzip is **599,089 B**, 1 B below `040dc99` and the requested 599,090 B ceiling. The full normal TS run passes 4,067 tests with two unchanged Chromium skips; Rust passes 1,142 with two unchanged subprocess-helper ignores. The normal TS run uses an uncommitted temporary 599,090 B allowance. The source cap stays 599,000 B, so that original gate still blocks by 89 B.
+
+## Final budget decision
+
+After review, the `deleteMany` zero-limit fix brought the browser production WASM gzip to **599,063 B**. The user confirmed raising the cap to **600,000 B** (`browserProductionWasmGzipMaxGrowthRatio` 1.0574121951348465 over the unchanged 567,423 B baseline). The size gate now passes; the earlier "blocked" notes above record the state before that decision.

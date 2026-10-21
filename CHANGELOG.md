@@ -13,7 +13,7 @@
 - Add the native `CallbackRegistry` of Rust closures and export `EngineStorageHost`. See `docs/storage-hosts.md` and `docs/native-sources.md`.
 - Move TypeScript persistence orchestration into the engine host layer. Remove the TS database engine and run its behaviour tests directly against Rust/WASM.
 - Fix explicit-undefined operators and optional fields, createMany relationship validation, delete referential integrity, upsert diagnostics and stale query projections.
-- Raise the provisional browser WASM gzip cap from 598,000 B (commit `74fd613`) to 599,000 B in a separate, size-audited coordinator decision. The parity fixes produced 598,896 B before the single-soft-delete correction. That final correction produces 599,090 B: the size gate is blocked by 90 B. The original 567,423 B baseline is unchanged. The user must confirm both provisional raises at landing.
+- Raise the browser WASM gzip cap from 595,794 B to 600,000 B, confirmed by the user. Schema checks and the engine parity fixes grew the artifact; the 1.0.0 build is 599,063 B. The 567,423 B baseline is unchanged.
 
 
 ## v0.16.0 (2026-08-06)
