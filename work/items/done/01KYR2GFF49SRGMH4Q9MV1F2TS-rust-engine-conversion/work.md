@@ -9,4 +9,4 @@
 
 ## Outcome
 
-Closed on 2026-10-21. `@proseql/engine`, `@proseql/effect` and `@proseql/browser` shipped on the Rust/WASM engine in v0.16.0, and the release gate runs the Rust/WASM parity corpus. This plan recorded no per-unit status, so U1–U10 were not checked one by one when it was closed. Follow-up performance work is in `work/items/active/01KYWNNC4EQSMDE3GESRS837J3-wasm-engine-optimization/`.
+Closed on 2026-10-21. `@proseql/engine`, `@proseql/effect` and `@proseql/browser` shipped on the Rust/WASM engine in v0.16.0, and the release gate runs the Rust/WASM parity corpus. This plan recorded no per-unit status, so U1–U10 were not checked one by one when it was closed. Follow-up performance work is in issue #2.

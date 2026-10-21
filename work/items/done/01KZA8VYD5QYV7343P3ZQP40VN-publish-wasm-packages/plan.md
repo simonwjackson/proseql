@@ -52,7 +52,7 @@ The existing release path is not ready for these packages: it omits engine and e
 ### Deferred to Follow-Up Work
 
 - Replace first-publish npm credentials with npm trusted publishing after the new package records exist and can be configured safely.
-- Address browser async transaction-origin tracking under backlog item `01KZ0KEZGPGESNCEZX5DKQSVR7`; document the limitation in this release until then.
+- Address browser async transaction-origin tracking in issue #3; document the limitation in this release until then.
 - Add transport-specific RPC convenience packages only after a concrete consumer requires one.
 - Publish the beta.103-aligned `@proseql/ai` independent version in a separate release after its own consumer checks are defined.
 
@@ -561,8 +561,8 @@ flowchart TB
 ## Sources & References
 
 - Related conversion plan: `work/items/done/01KYR2GFF49SRGMH4Q9MV1F2TS-rust-engine-conversion/plan.md`
-- Related optimization plan: `work/items/active/01KYWNNC4EQSMDE3GESRS837J3-wasm-engine-optimization/plan.md`
-- Browser transaction follow-up: `work/items/parking-lot/01KZ0KEZGPGESNCEZX5DKQSVR7-add-browser-async-transaction-origin-tracking.md`
+- Related optimization work: issue #2
+- Browser transaction follow-up: issue #3
 - Effect migration learning: `docs/solutions/build-errors/effect-v4-foundation-migration-2026-05-06.md`
 - Current release script: `scripts/release.ts`
 - Current package verifier: `scripts/verify-package-artifacts.ts`
