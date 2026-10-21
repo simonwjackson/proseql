@@ -16,10 +16,18 @@ import { Effect, Option, Schema, Stream, Layer } from "effect";
 
 type Row = { readonly id: string; readonly [key: string]: unknown };
 type Rows = ReadonlyMap<string, Row>;
+type Binding = {
+	readonly database: GenerateDatabase<FixtureConfig>;
+	readonly name: string;
+};
 type Handle = {
 	readonly initial: Rows;
-	database?: GenerateDatabase<FixtureConfig>;
-	name?: string;
+	readonly database?: GenerateDatabase<FixtureConfig>;
+	readonly name?: string;
+	readonly bind: (
+		database: GenerateDatabase<FixtureConfig>,
+		name: string,
+	) => void;
 };
 type Handles = Record<string, Handle>;
 type FixtureConfig = Record<
@@ -32,14 +40,29 @@ type FixtureConfig = Record<
 type RefOperations = {
 	readonly make: (initial: Rows) => Effect.Effect<Handle>;
 	readonly get: (handle: Handle) => Effect.Effect<Rows, unknown>;
-	set: (handle: Handle, rows: Rows) => Effect.Effect<void, unknown>;
-	update: (
+	readonly set: (handle: Handle, rows: Rows) => Effect.Effect<void, unknown>;
+	readonly update: (
 		handle: Handle,
 		update: (rows: Rows) => Rows,
 	) => Effect.Effect<void, unknown>;
 };
 export const TestRef: RefOperations = {
-	make: (initial: Rows): Effect.Effect<Handle> => Effect.succeed({ initial }),
+	make: (initial: Rows): Effect.Effect<Handle> =>
+		Effect.sync(() => {
+			let binding: Binding | undefined;
+			return {
+				initial,
+				get database() {
+					return binding?.database;
+				},
+				get name() {
+					return binding?.name;
+				},
+				bind: (database, name) => {
+					binding = { database, name };
+				},
+			};
+		}),
 	get: (handle: Handle): Effect.Effect<Rows, unknown> =>
 		handle.database && handle.name
 			? Stream.runCollect(
@@ -133,12 +156,8 @@ const setup = (
 			),
 		);
 		for (const [key, value] of Object.entries(all)) {
-			value.database = db;
-			value.name = key;
-			if (handles[key]) {
-				handles[key].database = db;
-				handles[key].name = key;
-			}
+			value.bind(db, key);
+			handles[key]?.bind(db, key);
 		}
 		return collection(handle);
 	});
