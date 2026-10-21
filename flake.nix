@@ -321,7 +321,7 @@
             }
 
             task_rust_lint() { cargo clippy --manifest-path crates/Cargo.toml --all-targets -- -D warnings; }
-            task_rust_format() { cargo fmt --manifest-path crates/Cargo.toml; }
+            task_rust_format() { cargo fmt --manifest-path crates/Cargo.toml --all; }
             task_rust_format_check() { cargo fmt --manifest-path crates/Cargo.toml --all --check; }
 
             # Check the WASM boundary crate for its production target
