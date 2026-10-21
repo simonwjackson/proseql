@@ -1485,6 +1485,7 @@ class EngineRuntime {
 	}
 
 	dispatch<T>(method: string, payload?: unknown): T {
+        assertSupportedUpdateOperators(payload);
 		if (!MUTATION_METHODS.has(method))
 			return this.dispatchInternal(method, payload);
 		this.callbackRegistrar.beginMutationDispatch();
@@ -2653,6 +2654,7 @@ class EngineRuntime {
 		onCommittedFormalMutation?: (value: T) => void,
 	): Promise<T> {
 		try {
+            assertSupportedUpdateOperators(data);
 			this.assertTransactionWaitAllowed();
 		} catch (error) {
 			return Promise.reject(error);
@@ -2782,6 +2784,7 @@ class EngineRuntime {
 					projectionSnapshotFromHandles(handles),
 				);
 			}
+			assertSupportedUpdateOperators(payload);
 			this.synchronizeTransactionProjection(session);
 			if (method === "updateMany" || method === "deleteMany") {
 				this.diagnostics.bulkMutationDispatches += 1;
@@ -6110,4 +6113,14 @@ function parseBridgeResponseValue<T>(
 
 function parseBridgeResponse<T>(raw: string): T {
 	return parseBridgeResponseValue(JSON.parse(raw) as BridgeResponse<T>, raw);
+}
+
+function assertSupportedUpdateOperators(value: unknown): void {
+    if (typeof value !== "object" || value === null) return;
+    for (const [key, item] of Object.entries(value)) {
+        if (key === "$remove" && typeof item === "function") {
+            throw new ValidationError({ message: "Function-valued $remove is not supported by the Rust engine", issues: [{ field: "$remove", message: "Use a concrete value or an explicit $set array instead of a function", value: item }] });
+        }
+        assertSupportedUpdateOperators(item);
+    }
 }

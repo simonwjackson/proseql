@@ -76,11 +76,11 @@ export type UpdateOperatorValue<T> = T extends number
 				$append?: string;
 				$prepend?: string;
 			}
-		: T extends unknown[]
+		: T extends readonly unknown[]
 			? {
-					$append?: T extends (infer U)[] ? U | U[] : never;
-					$prepend?: T extends (infer U)[] ? U | U[] : never;
-					$remove?: T extends (infer U)[] ? U | ((item: U) => boolean) : never;
+					$append?: T extends readonly (infer U)[] ? U | U[] : never;
+					$prepend?: T extends readonly (infer U)[] ? U | U[] : never;
+					$remove?: T extends readonly (infer U)[] ? U : never;
 					$set?: T;
 				}
 			: T extends boolean
