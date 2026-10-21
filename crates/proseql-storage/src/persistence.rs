@@ -484,6 +484,10 @@ pub(crate) fn encode_value(
     path: &str,
 ) -> Result<Value, EngineError> {
     match schema {
+        // Collection writes have already passed the engine validator, including
+        // host predicates. Encoding only changes the persisted representation;
+        // decoding uses decode_value below and applies checks again.
+        SchemaNode::Checked { inner, .. } => encode_value(inner, value, path),
         SchemaNode::Str => match value {
             Value::String(_) => Ok(value.clone()),
             _ => Err(type_mismatch(path, "string", value)),
