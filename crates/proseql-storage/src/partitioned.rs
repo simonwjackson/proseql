@@ -221,24 +221,36 @@ pub fn load_partitioned_source_with(
                     format!("Duplicate partition record '{id}'"),
                 ));
             }
-            let routed = partition_path(source, record).map_err(|cause| {
-                let message = match &cause {
-                    EngineError::SourceConfig(config) => config.message.clone(),
-                    other => other.to_string(),
-                };
-                error(source, &path, format!("Record '{id}': {message}"))
-            })?;
-            if routed != path {
-                return Err(error(
-                    source,
-                    &path,
-                    format!("Record '{id}' is in the wrong partition"),
-                ));
-            }
+            check_partition_record(source, &path, id, record)?;
         }
         loaded.files.insert(path, records);
     }
     Ok((loaded, torn))
+}
+
+/// Check that a record loaded from the partition file `path` routes to that
+/// file: its partition field is valid and gives the file's key.
+pub fn check_partition_record(
+    source: &PartitionedSourceConfig,
+    path: &str,
+    id: &str,
+    record: &Value,
+) -> Result<(), EngineError> {
+    let routed = partition_path(source, record).map_err(|cause| {
+        let message = match &cause {
+            EngineError::SourceConfig(config) => config.message.clone(),
+            other => other.to_string(),
+        };
+        error(source, path, format!("Record '{id}': {message}"))
+    })?;
+    if routed != path {
+        return Err(error(
+            source,
+            path,
+            format!("Record '{id}' is in the wrong partition"),
+        ));
+    }
+    Ok(())
 }
 
 pub fn plan_partitioned_source(

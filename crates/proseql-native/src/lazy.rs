@@ -33,7 +33,9 @@ use proseql_formats::FormatRegistry;
 use proseql_storage::append::{is_append_format, load_append_file, TornLineDiagnostic};
 use proseql_storage::host::StorageHost;
 use proseql_storage::partition_prune::{partition_key_of_path, PartitionFilter};
-use proseql_storage::partitioned::{file_source, matches_partition_path, partition_path};
+use proseql_storage::partitioned::{
+    check_partition_record, file_source, matches_partition_path, partition_path,
+};
 use proseql_storage::source_config::{
     NormalizedDatabaseSourceConfig, NormalizedSourceConfig, PartitionedSourceConfig,
 };
@@ -474,26 +476,7 @@ impl SourceState {
         let config = &self.config.collection_configs[&lazy.collection];
         let loaded = load_append_file(&snapshot, formats, &file, config, true)?;
         for (id, record) in &loaded.records {
-            let routed = partition_path(&lazy.source, record).map_err(|cause| {
-                let message = match &cause {
-                    EngineError::SourceConfig(config) => config.message.clone(),
-                    other => other.to_string(),
-                };
-                config_error(
-                    format!("Record '{id}': {message}"),
-                    &lazy.source_id,
-                    Some(&lazy.collection),
-                    Some(path),
-                )
-            })?;
-            if routed != path {
-                return Err(config_error(
-                    format!("Record '{id}' is in the wrong partition"),
-                    &lazy.source_id,
-                    Some(&lazy.collection),
-                    Some(path),
-                ));
-            }
+            check_partition_record(&lazy.source, path, id, record)?;
         }
         let content = if host.exists(path)? {
             Some(snapshot.read_bytes(path)?)
@@ -813,9 +796,14 @@ impl SourceState {
             }
             lazy.known = known;
             for path in added {
-                if let Err(error) =
-                    self.lazy_ensure(database, host, formats, &name, &[path.clone()], true)
-                {
+                if let Err(error) = self.lazy_ensure(
+                    database,
+                    host,
+                    formats,
+                    &name,
+                    std::slice::from_ref(&path),
+                    true,
+                ) {
                     let failed = file_fingerprint(host, &path).ok().flatten();
                     let lazy = self.lazy.get_mut(&name).expect("lazy collection");
                     lazy.pending.insert(path, failed);

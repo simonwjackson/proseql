@@ -79,8 +79,17 @@ pub(crate) struct SourcePlan {
 pub(crate) struct AppendPlan {
     /// Sorted by path.
     pub writes: Vec<PlannedAppend>,
-    /// `(collection, path, id, record)` in journal order.
-    pub records: Vec<(String, String, String, Value)>,
+    /// New records in journal order.
+    pub records: Vec<AppendedRecord>,
+}
+
+/// One record an append plan writes.
+pub(crate) struct AppendedRecord {
+    pub collection: String,
+    /// The file the record's line goes to.
+    pub path: String,
+    pub id: String,
+    pub record: Value,
 }
 
 /// Bytes compared at the end of an append target before the append.
@@ -608,12 +617,12 @@ impl SourceState {
                 .or_insert_with(|| (change.collection.clone(), file, IndexMap::new()))
                 .2
                 .insert(change.id.clone(), record.clone());
-            records.push((
-                change.collection.clone(),
+            records.push(AppendedRecord {
+                collection: change.collection.clone(),
                 path,
-                change.id.clone(),
-                record.clone(),
-            ));
+                id: change.id.clone(),
+                record: record.clone(),
+            });
         }
         let mut writes = Vec::with_capacity(by_path.len());
         for (path, (collection, file, batch)) in &by_path {
@@ -673,7 +682,13 @@ impl SourceState {
                 self.self_written.insert(name.to_owned());
             }
         }
-        for (collection, path, id, record) in plan.records {
+        for AppendedRecord {
+            collection,
+            path,
+            id,
+            record,
+        } in plan.records
+        {
             if let Some(lazy) = self.lazy.get_mut(&collection) {
                 lazy.record_append(&path, id);
             } else if let Some(partitions) = self.partitions.get_mut(&collection) {
