@@ -193,6 +193,22 @@ impl FormatRegistry {
         }
     }
 
+    /// Register a codec. The last codec for each extension wins.
+    pub fn register(&mut self, codec: Box<dyn FormatCodec>) {
+        let index = self.codecs.len();
+        for extension in codec.extensions() {
+            if !self
+                .supported_extensions
+                .iter()
+                .any(|value| value == extension)
+            {
+                self.supported_extensions.push((*extension).to_owned());
+            }
+            self.extension_map.insert((*extension).to_owned(), index);
+        }
+        self.codecs.push(codec);
+    }
+
     pub fn with_builtins() -> Self {
         Self::new(vec![
             Box::new(codecs::json_codec()),
@@ -262,5 +278,48 @@ impl FormatRegistry {
                     },
                 })
             })
+    }
+}
+
+#[cfg(test)]
+mod registration_tests {
+    use super::*;
+
+    struct TextCodec;
+    impl FormatCodec for TextCodec {
+        fn name(&self) -> &str {
+            "text"
+        }
+        fn extensions(&self) -> &[&str] {
+            &["txt", "json"]
+        }
+        fn encode(&self, data: &Value, _: Option<FormatOptions>) -> Result<String, String> {
+            Ok(data.to_string())
+        }
+        fn decode(&self, raw: &str) -> Result<Value, String> {
+            Ok(Value::String(raw.to_owned()))
+        }
+    }
+
+    #[test]
+    fn register_adds_extensions_and_overrides_without_duplicate_supported_extensions() {
+        let mut registry = FormatRegistry::new(vec![Box::new(codecs::json_codec())]);
+        assert_eq!(registry.supported_extensions(), &["json"]);
+        registry.register(Box::new(TextCodec));
+        assert_eq!(
+            registry.deserialize("hello", "txt").unwrap(),
+            Value::String("hello".into())
+        );
+        assert_eq!(
+            registry.deserialize("hello", "json").unwrap(),
+            Value::String("hello".into())
+        );
+        assert_eq!(registry.supported_extensions(), &["json", "txt"]);
+        registry.register(Box::new(codecs::json_codec()));
+        assert_eq!(
+            registry.deserialize("123", "json").unwrap(),
+            Value::from(123)
+        );
+        assert_eq!(registry.supported_extensions(), &["json", "txt"]);
     }
 }
