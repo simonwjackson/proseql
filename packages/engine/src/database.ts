@@ -3388,6 +3388,15 @@ function isAppendOnlyJsonLinesCollection(collection: CollectionRuntimeConfig) {
 	return format === "jsonl" || format === "ndjson";
 }
 
+/** One record as the engine returns it across the WASM boundary. */
+type EngineRecord = Record<string, unknown>;
+
+/** The engine's `createMany` result as it crosses the WASM boundary. */
+type CreateManyWireResult = {
+	readonly created?: EngineRecord[];
+	readonly skipped?: unknown[];
+};
+
 function stringIds(inputs: ReadonlyArray<unknown>): ReadonlyArray<string> {
 	return inputs.flatMap((input) =>
 		typeof input === "object" &&
@@ -3726,7 +3735,7 @@ function buildCollectionFacade(
 					// An identical re-create returns the stored record without a
 					// write; it must not append a second line.
 					return runtime
-						.invokeWithExistingIds<any>(
+						.invokeWithExistingIds<EngineRecord>(
 							"create",
 							payload,
 							collection.name,
@@ -3753,22 +3762,26 @@ function buildCollectionFacade(
 				items: [...inputs],
 				skipDuplicates: options?.skipDuplicates ?? false,
 			};
-			let value: any;
-			let appended: ReadonlyArray<Record<string, unknown>>;
+			let value: CreateManyWireResult;
+			let appended: ReadonlyArray<EngineRecord>;
 			if (
 				isAppendOnlyJsonLinesCollection(collection) &&
 				collection.raw.duplicateIds === "ignoreIdentical"
 			) {
-				const result = await runtime.invokeWithExistingIds<any>(
-					"createMany",
-					payload,
-					collection.name,
-					stringIds(inputs),
-				);
+				const result =
+					await runtime.invokeWithExistingIds<CreateManyWireResult>(
+						"createMany",
+						payload,
+						collection.name,
+						stringIds(inputs),
+					);
 				value = result.value;
 				appended = newlyCreated(value.created ?? [], result.existing);
 			} else {
-				value = await runtime.invoke<any>("createMany", payload);
+				value = await runtime.invoke<CreateManyWireResult>(
+					"createMany",
+					payload,
+				);
 				appended = value.created ?? [];
 			}
 			await appendAppendOnlyEntities(persistence, collection, appended);
