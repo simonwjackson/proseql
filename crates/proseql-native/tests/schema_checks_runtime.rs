@@ -356,7 +356,7 @@ fn nested_host_checks_receive_decoded_values_and_keep_builtin_checks() {
 
 #[test]
 #[ignore = "needs engine Record key validation (correctness)"]
-fn record_key_host_predicate_is_enforced_on_create_update_and_reload() {
+fn record_key_host_predicate_drops_nonmatching_keys_on_create_update_and_reload() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("db.json");
     let mut config = single_config(path.to_str().unwrap());
@@ -396,26 +396,32 @@ fn record_key_host_predicate_is_enforced_on_create_update_and_reload() {
         },
     )
     .unwrap();
-    let error = runtime
-        .mutate(|db| db.create("items", json!({"id":"bad","scores":{"unsafe":1}})))
-        .unwrap_err();
-    assert!(error.to_string().contains("a safe key"), "{error}");
-    runtime
-        .mutate(|db| db.create("items", json!({"id":"one","scores":{"safe-key":1}})))
+    let created = runtime
+        .mutate(|db| {
+            db.create(
+                "items",
+                json!({"id":"one","scores":{"unsafe":1,"safe-key":2}}),
+            )
+        })
         .unwrap();
-    let error = runtime
-        .mutate(|db| db.update("items", "one", json!({"scores":{"unsafe":2}})))
-        .unwrap_err();
-    assert!(error.to_string().contains("a safe key"), "{error}");
-    std::fs::write(
-        &path,
-        json!({"items":{"one":{"id":"one","scores":{"unsafe":3}}}}).to_string(),
-    )
-    .unwrap();
-    let error = runtime.reload().unwrap_err();
-    assert!(error.to_string().contains("a safe key"), "{error}");
+    assert_eq!(created["scores"], json!({"safe-key":2}));
     assert_eq!(
         runtime.find_by_id("items", "one").unwrap().unwrap()["scores"],
-        json!({"safe-key":1})
+        json!({"safe-key":2})
     );
+    let updated = runtime
+        .mutate(|db| db.update("items", "one", json!({"scores":{"unsafe":2,"safe-key":3}})))
+        .unwrap();
+    assert_eq!(updated["scores"], json!({"safe-key":3}));
+    std::fs::write(
+        &path,
+        json!({"items":{"one":{"id":"one","scores":{"unsafe":3,"safe-key":4}}}}).to_string(),
+    )
+    .unwrap();
+    runtime.reload().unwrap();
+    assert_eq!(
+        runtime.find_by_id("items", "one").unwrap().unwrap()["scores"],
+        json!({"safe-key":4})
+    );
+    assert!(runtime.last_reload_error().unwrap().is_none());
 }
