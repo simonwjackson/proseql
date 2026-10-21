@@ -312,6 +312,7 @@ fn validate_struct(
 
         if let Some(inner_schema) = optional_inner {
             if let Some(v) = obj.get(&field.name) {
+                if is_boundary_undefined(v) { continue; }
                 if let Err(EngineError::Validation(ve)) =
                     validate_at(inner_schema, v, &field_path, callbacks)
                 {
@@ -443,6 +444,7 @@ fn decode_owned_at(
                     }
                     other => other,
                 };
+                if optional && is_boundary_undefined(&field_value) { decoded.insert(field.name.clone(), field_value); continue; }
                 match decode_owned_at(field_schema, field_value, field_path, callbacks) {
                     Ok(value) => {
                         decoded.insert(field.name.clone(), value);
@@ -751,6 +753,7 @@ fn decode_struct(
             // Optional-like: field may be absent; absent stays absent.
             SchemaNode::Optional(inner) | SchemaNode::OptionalWithDefault { inner, .. } => {
                 if let Some(v) = obj.get(&field.name) {
+                    if is_boundary_undefined(v) { decoded_map.insert(field.name.clone(), v.clone()); continue; }
                     match decode_at(inner, v, &field_path, callbacks) {
                         Ok(decoded) => {
                             decoded_map.insert(field.name.clone(), decoded);

@@ -274,6 +274,7 @@ fn validate_fk_with_exists(
         let fk_field = ref_fk(rel_name, &rel_desc.foreign_key);
         let fk_val = match obj.get(&fk_field) {
             None | Some(Value::Null) => continue,
+            Some(v) if crate::value::is_boundary_undefined(v) => continue,
             Some(v) => v,
         };
         let tid = value_to_js_string(fk_val);

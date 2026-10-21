@@ -2815,3 +2815,11 @@ fn soft_delete_replaces_explicit_undefined_timestamp() {
     let result = col.delete_many(|_| true, true, None).unwrap();
     assert!(result.deleted[0]["deletedAt"].is_string());
 }
+
+#[test]
+fn create_many_accepts_explicit_undefined_optional_fields() {
+    let mut col = soft_delete_col();
+    let result = col.create_many(vec![json!({"id":"u1","name":"Alice","email":"a@x.com","age":1,"companyId":"c","deletedAt":{"__proseqlInternalUndefined__":1}})], false).unwrap();
+    assert_eq!(result.created.len(), 1);
+    assert!(proseql_engine::value::is_boundary_undefined(&result.created[0]["deletedAt"]));
+}
