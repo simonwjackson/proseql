@@ -502,7 +502,16 @@ impl SourceState {
         let snapshot = crate::read_snapshot::ReadSnapshot::new(host);
         let file = file_source(&lazy.source, path);
         let config = &self.config.collection_configs[&lazy.collection];
-        let loaded = load_append_file(&snapshot, formats, &file, config, true)?;
+        let mut decode_config = config.clone();
+        decode_config.schema = crate::schema_checks::storage_decode_schema(&config.schema);
+        let loaded = load_append_file(&snapshot, formats, &file, &decode_config, true)?;
+        if decode_config.schema != config.schema {
+            crate::schema_checks::validate_loaded_records(
+                config,
+                loaded.records.values(),
+                &self.callbacks,
+            )?;
+        }
         for (id, record) in &loaded.records {
             check_partition_record(&lazy.source, path, id, record)?;
         }

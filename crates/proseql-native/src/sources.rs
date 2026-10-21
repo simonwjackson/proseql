@@ -124,6 +124,7 @@ pub(crate) struct SourceState {
     /// in `partitions`; the engine collection holds the loaded partitions.
     pub lazy: IndexMap<String, crate::lazy::LazyCollection>,
     pub lazy_watch_interval: Duration,
+    pub callbacks: Arc<CallbackRegistry>,
 }
 
 impl SourceState {
@@ -293,7 +294,7 @@ impl SourceState {
         transforms: Option<Arc<dyn DocumentGraphTransformHost>>,
         lazy: &IndexMap<String, crate::lazy::LazyCollection>,
         lazy_watch_interval: Duration,
-        callbacks: &CallbackRegistry,
+        callbacks: &Arc<CallbackRegistry>,
     ) -> Result<Self, EngineError> {
         // FsStorageHost::exists recovers per-file markers. Do this before the
         // loader lists files: recovery can remove an uncommitted first write.
@@ -327,6 +328,13 @@ impl SourceState {
                 }
             }
         }
+        // Decode without host checks in the codec layer, which has no registry.
+        // Keep `config` unchanged: engine snapshots/resident loads validate its
+        // original schema with this same registry before publishing records.
+        let mut decode_config = config.clone();
+        for collection in decode_config.collection_configs.values_mut() {
+            collection.schema = crate::schema_checks::storage_decode_schema(&collection.schema);
+        }
         let snapshot = crate::read_snapshot::ReadSnapshot::new(host);
         let mut torn = Vec::new();
         let mut files = IndexMap::new();
@@ -348,7 +356,7 @@ impl SourceState {
                 };
                 file_contents.insert(source.path.clone(), content);
             }
-            let collection = config
+            let collection = decode_config
                 .collection_configs
                 .get(&source.collection)
                 .ok_or_else(|| {
@@ -379,7 +387,7 @@ impl SourceState {
                     lazy_state.insert(source.collection.clone(), state);
                     continue;
                 }
-                let collection = &config.collection_configs[&source.collection];
+                let collection = &decode_config.collection_configs[&source.collection];
                 let (loaded, partition_torn) = if collection.migrations.is_empty() {
                     load_partitioned_source_with(
                         &snapshot,
@@ -443,11 +451,12 @@ impl SourceState {
         }
         let migrations =
             proseql_storage::persistence::CallbackRegistryMigrationHost::new(callbacks);
-        let documents = load_document_sources(&snapshot, formats, &config, Some(&migrations))?;
+        let documents =
+            load_document_sources(&snapshot, formats, &decode_config, Some(&migrations))?;
         let graph = load_document_graph_sources(
             &snapshot,
             formats,
-            &config,
+            &decode_config,
             Some(&migrations),
             transforms.as_deref(),
         )?;
@@ -474,6 +483,7 @@ impl SourceState {
             contents,
             lazy: lazy_state,
             lazy_watch_interval,
+            callbacks: Arc::clone(callbacks),
         })
     }
 

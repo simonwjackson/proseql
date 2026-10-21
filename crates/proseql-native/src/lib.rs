@@ -8,6 +8,7 @@
 mod callbacks;
 mod lazy;
 mod read_snapshot;
+mod schema_checks;
 mod sources;
 pub use lazy::{FullScanPolicy, LazyPartitionPolicy, LazyPartitionStatus, NativeQueryStats};
 use sources::SourceState;
@@ -1567,6 +1568,14 @@ fn validate_config(
     for collection in &config.collections {
         let descriptor = &collection.descriptor;
         proseql_engine::descriptor::validate_collection_descriptor(descriptor)?;
+        proseql_engine::schema_checks::validate_schema_checks(&descriptor.schema, callbacks)
+            .map_err(|error| match error {
+                EngineError::Validation(mut error) => {
+                    error.message = format!("Collection '{}': {}", descriptor.name, error.message);
+                    EngineError::Validation(error)
+                }
+                other => other,
+            })?;
         let require = |id: &str, present: bool| {
             if present {
                 Ok(())
@@ -1708,7 +1717,7 @@ fn load_configs(config: &NativeRuntimeConfig) -> Vec<LoadCollectionConfig> {
         .iter()
         .map(|collection| LoadCollectionConfig {
             name: collection.descriptor.name.clone(),
-            schema: collection.descriptor.schema.clone(),
+            schema: schema_checks::storage_decode_schema(&collection.descriptor.schema),
             id_strategy: collection.descriptor.id_strategy.clone(),
             version: collection.descriptor.version,
             migrations: migration_steps(&collection.descriptor),
