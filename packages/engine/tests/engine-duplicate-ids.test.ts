@@ -121,6 +121,49 @@ describe("duplicateIds", () => {
 		}
 	});
 
+	it("refuses a conflicting batch with skipDuplicates and writes nothing to the JSONL file", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "proseql-engine-dupids-skip-"));
+		try {
+			const file = join(dir, "heartrate.jsonl");
+			const db = await createPersistentEngineDatabase(
+				{
+					heartrate: {
+						schema: SampleSchema,
+						relationships: {},
+						file,
+						appendOnly: true,
+						duplicateIds: "ignoreIdentical",
+					},
+				} as const,
+				undefined,
+				{ writeDebounce: 5 },
+			);
+			await db.heartrate.create(sample("hr:1", 81));
+			const before = await readFile(file, "utf8");
+			await expect(
+				db.heartrate.createMany([sample("hr:2", 90), sample("hr:1", 82)], {
+					skipDuplicates: true,
+				}),
+			).rejects.toBeInstanceOf(DuplicateKeyError);
+			expect(await readFile(file, "utf8")).toBe(before);
+			await expect(db.heartrate.findById("hr:2")).rejects.toBeInstanceOf(
+				NotFoundError,
+			);
+			const identical = await db.heartrate.createMany(
+				[sample("hr:1", 81), sample("hr:3", 70)],
+				{ skipDuplicates: true },
+			);
+			expect(identical.created.map((record) => record.id)).toEqual([
+				"hr:1",
+				"hr:3",
+			]);
+			await db.flush();
+			await db.close();
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("rejects an unknown policy at the descriptor boundary", async () => {
 		await expect(
 			createEngineDatabase({

@@ -282,6 +282,39 @@ fn one_conflict_in_a_batch_writes_nothing() {
 }
 
 #[test]
+fn skip_duplicates_does_not_skip_a_conflicting_payload() {
+    for in_batch in [false, true] {
+        let mut db = database(DuplicateIdPolicy::IgnoreIdentical);
+        db.create("heartrate", sample("hr:1", json!(81))).unwrap();
+        db.take_committed_changes();
+        let batch = if in_batch {
+            vec![sample("hr:2", json!(90)), sample("hr:2", json!(91))]
+        } else {
+            vec![
+                sample("hr:2", json!(90)),
+                sample("hr:1", json!(82)),
+                sample("hr:3", json!(95)),
+            ]
+        };
+        let error = db.create_many("heartrate", batch, true).unwrap_err();
+        assert_eq!(error.tag(), "DuplicateKeyError", "in_batch={in_batch}");
+        assert_eq!(db.collection("heartrate").unwrap().len(), 1);
+        assert!(db.take_committed_changes().is_empty());
+        // Identical payloads are still accepted with the flag.
+        let result = db
+            .create_many(
+                "heartrate",
+                vec![sample("hr:1", json!(81)), sample("hr:4", json!(70))],
+                true,
+            )
+            .unwrap();
+        assert_eq!(result.created.len(), 2);
+        assert!(result.skipped.is_empty());
+        db.take_committed_changes();
+    }
+}
+
+#[test]
 fn database_create_and_create_many_publish_only_new_records() {
     let mut database = database(DuplicateIdPolicy::IgnoreIdentical);
     let stored = database

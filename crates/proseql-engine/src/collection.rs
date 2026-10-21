@@ -2172,7 +2172,10 @@ impl Collection {
                         format!("Duplicate value for field 'id': \"{id}\" (in batch)")
                     },
                 }));
-                if skip_duplicates {
+                // Under `ignore_identical` a different payload for an existing
+                // ID is a conflict, not a duplicate to skip: the whole batch
+                // fails and writes nothing, whatever `skip_duplicates` says.
+                if skip_duplicates && !ignore_identical {
                     skipped.push(SkippedEntry {
                         data: skip_data.expect("skip data exists"),
                         reason: format!("Duplicate ID: {id}"),
