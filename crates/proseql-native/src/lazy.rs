@@ -118,9 +118,9 @@ pub(crate) struct LazyCollection {
     /// Loaded partitions by path.
     pub resident: BTreeMap<String, Resident>,
     /// Listed partitions that a watch covers but that failed to load, with
-    /// the `(length, hash)` of the bytes that failed. The watcher retries
+    /// the fingerprint of the bytes that failed. The watcher retries
     /// them when those bytes change.
-    pending: BTreeMap<String, Option<(usize, u64)>>,
+    pending: BTreeMap<String, Option<FileFingerprint>>,
     clock: u64,
     pins: HashMap<u64, Pin>,
     next_pin: u64,
@@ -131,7 +131,7 @@ pub(crate) struct Resident {
     pub ids: Vec<String>,
     last_used: u64,
     /// Hash of the stored content, computed by the watcher when needed.
-    hash: Option<(usize, u64)>,
+    hash: Option<FileFingerprint>,
 }
 
 struct Pin {
@@ -363,21 +363,37 @@ struct LoadedPartition {
 pub(crate) struct LazyFingerprint {
     source: PartitionedSourceConfig,
     known: BTreeSet<String>,
-    /// Resident path → `(length, hash)` of the stored content (`None`: no file).
-    resident: Vec<(String, Option<(usize, u64)>)>,
-    /// Pending path → `(length, hash)` of the bytes that failed to load.
-    pending: Vec<(String, Option<(usize, u64)>)>,
+    /// Resident path → fingerprint of the stored content (`None`: no file).
+    resident: Vec<(String, Option<FileFingerprint>)>,
+    /// Pending path → fingerprint of the bytes that failed to load.
+    pending: Vec<(String, Option<FileFingerprint>)>,
 }
 
 fn file_fingerprint(
     host: &dyn StorageHost,
     path: &str,
-) -> Result<Option<(usize, u64)>, EngineError> {
+) -> Result<Option<FileFingerprint>, EngineError> {
     if !host.exists(path)? {
         return Ok(None);
     }
     let content = host.read_bytes(path)?;
-    Ok(Some((content.len(), content_hash(&content))))
+    Ok(Some(FileFingerprint::of(&content)))
+}
+
+/// Length and hash of a file's bytes, as the lazy watcher compares them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FileFingerprint {
+    len: usize,
+    hash: u64,
+}
+
+impl FileFingerprint {
+    fn of(content: &[u8]) -> Self {
+        Self {
+            len: content.len(),
+            hash: content_hash(content),
+        }
+    }
 }
 
 fn content_hash(content: &[u8]) -> u64 {
@@ -892,7 +908,7 @@ impl SourceState {
                         let stored = contents.get(path).map(|content| {
                             *resident
                                 .hash
-                                .get_or_insert_with(|| (content.len(), content_hash(content)))
+                                .get_or_insert_with(|| FileFingerprint::of(content))
                         });
                         (path.clone(), stored)
                     })
