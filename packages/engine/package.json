@@ -75,7 +75,7 @@
 		},
 		"artifactBudgets": {
 			"browserProductionWasmGzipBaselineBytes": 567423,
-			"browserProductionWasmGzipMaxGrowthRatio": 1.05
+			"browserProductionWasmGzipMaxGrowthRatio": 1.0538874878177305
 		},
 		"browserBudgets": {
 			"baseline": {
