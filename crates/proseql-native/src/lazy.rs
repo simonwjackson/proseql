@@ -698,9 +698,21 @@ impl SourceState {
         id
     }
 
+    /// Drop a watch pin. Pending retries that no remaining watch covers are
+    /// dropped too: nothing needs them, and the watcher stops reading them.
     pub fn lazy_unpin(&mut self, collection: &str, id: u64) {
         if let Some(lazy) = self.lazy.get_mut(collection) {
-            lazy.pins.remove(&id);
+            let LazyCollection {
+                pins,
+                pending,
+                source,
+                ..
+            } = lazy;
+            pins.remove(&id);
+            pending.retain(|path, _| {
+                partition_key_of_path(source, path)
+                    .is_some_and(|key| pins.values().any(|pin| pin.filter.matches(&key)))
+            });
         }
     }
 

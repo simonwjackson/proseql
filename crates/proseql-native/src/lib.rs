@@ -643,17 +643,7 @@ impl NativeRuntime {
 
     /// Release pins of dropped watches.
     fn drain_unpins(&self, state: &mut RuntimeState) {
-        let pending = self
-            .inner
-            .pending_unpins
-            .lock()
-            .map(|mut pending| std::mem::take(&mut *pending))
-            .unwrap_or_default();
-        if let Some(sources) = state.sources.as_mut() {
-            for (collection, id) in pending {
-                sources.lazy_unpin(&collection, id);
-            }
-        }
+        drain_unpins(&self.inner, state);
     }
 
     /// Load the partitions `where_clause` can touch (lazy collections), run
@@ -1018,6 +1008,21 @@ impl NativeRuntime {
     }
 }
 
+/// Release pins of dropped watches (`NativeWatch` queues them because a drop
+/// must not take the runtime lock).
+fn drain_unpins(core: &RuntimeCore, state: &mut RuntimeState) {
+    let pending = core
+        .pending_unpins
+        .lock()
+        .map(|mut pending| std::mem::take(&mut *pending))
+        .unwrap_or_default();
+    if let Some(sources) = state.sources.as_mut() {
+        for (collection, id) in pending {
+            sources.lazy_unpin(&collection, id);
+        }
+    }
+}
+
 /// What one scoped operation loaded.
 struct ScopeStats {
     loaded: usize,
@@ -1339,6 +1344,9 @@ fn start_lazy_poller(
                 if state.quarantine_error.is_some() {
                     continue;
                 }
+                // Dropped watches release their pins (and pending retries)
+                // here too, so the poller stops reading files no watch needs.
+                drain_unpins(&core, &mut state);
                 let host = Arc::clone(&state.host);
                 state
                     .sources

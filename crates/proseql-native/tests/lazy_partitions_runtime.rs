@@ -1481,3 +1481,54 @@ fn a_conflicting_cold_append_rolls_back_and_keeps_the_loaded_partition() {
         .find_by_id("heartrate", fresh["id"].as_str().unwrap())
         .is_err_and(|error| operation_reason(&error) == "lazy-full-scan"));
 }
+
+#[test]
+fn dropping_the_last_covering_watch_stops_retrying_a_failed_partition() {
+    let dir = tempfile::tempdir().unwrap();
+    seed(dir.path());
+    let (host, reads) = CountingHost::new();
+    let lazy = NativeRuntime::open_sources_with_host(
+        config(dir.path()),
+        host,
+        NativeSourceRuntimeOptions {
+            watch_debounce: Some(Duration::from_millis(20)),
+            lazy_watch_interval: Duration::from_millis(30),
+            lazy_partitions: IndexMap::from([(
+                SOURCE.to_owned(),
+                policy(2, FullScanPolicy::Error),
+            )]),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let first = june_watch(&lazy);
+    let second = june_watch(&lazy);
+    // A June file that cannot load: it stays pending for the watches.
+    let june = write_partition(
+        dir.path(),
+        "2026-06",
+        &[june_sample(2, 1), sample("2026-07-02T00:00:00Z", 2)],
+    )
+    .to_string_lossy()
+    .into_owned();
+    wait_until("the load error", || {
+        lazy.last_reload_error()
+            .unwrap()
+            .is_some_and(|error| error.to_string().contains("wrong partition"))
+    });
+    let reads_of_june = || reads.lock().unwrap().get(&june).copied().unwrap_or(0);
+    // While a watch covers June, the watcher keeps checking the file.
+    drop(first);
+    let before = reads_of_june();
+    wait_until("the watcher to read the pending file again", || {
+        reads_of_june() > before
+    });
+    // After the last covering watch is gone, it never reads the file again.
+    drop(second);
+    std::thread::sleep(Duration::from_millis(150));
+    let settled = reads_of_june();
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(reads_of_june(), settled, "the poller still reads June");
+    assert!(!loaded(&lazy).contains(&"2026-06".to_owned()));
+    lazy.close().unwrap();
+}
