@@ -725,6 +725,34 @@ fn child(args: &Args, work: &Path) -> Result<(), BoxError> {
     record(&report, "query_index_used", json!(stats.index_used));
     record(&report, "query_candidate_rows", json!(stats.candidate_rows));
 
+    // Supplementary: a window of one sample slot (span / rows) at the same
+    // start, so every size returns about one row. The one-hour window returns
+    // more rows as density grows; this one separates per-row cost from
+    // history size.
+    let slot_filter = json!({"timestamp": {"$gte": format_iso_ms(from), "$lt": format_iso_ms(from + dataset.interval_ms())}});
+    let mut slot_timings = Vec::with_capacity(args.query_reps);
+    let mut slot_rows = 0;
+    for _ in 0..args.query_reps {
+        let input = QueryInput {
+            r#where: Some(slot_filter.clone()),
+            ..QueryInput::default()
+        };
+        let started = Instant::now();
+        slot_rows = run_query(&runtime, features, input)?.len();
+        slot_timings.push(ms(started.elapsed()));
+    }
+    record(
+        &report,
+        "slot_query_window_ms",
+        json!(dataset.interval_ms()),
+    );
+    record(
+        &report,
+        "slot_query_median_ms",
+        json!(median(&mut slot_timings)),
+    );
+    record(&report, "slot_query_rows", json!(slot_rows));
+
     // Newest 100 samples: a sort on the timestamp with a limit, which an
     // ordered index answers without sorting the collection. Lazy mode refuses
     // full scans, so there it is limited to the last month of data.
