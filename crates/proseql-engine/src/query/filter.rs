@@ -133,7 +133,7 @@ pub fn matches_where_with_registry(
                 }
                 if !arr
                     .iter()
-                    .any(|cond| matches_where_with_registry(entity, cond, registry))
+                    .any(|cond| cond.is_object() && !is_boundary_undefined(cond) && matches_where_with_registry(entity, cond, registry))
                 {
                     return false;
                 }
@@ -147,7 +147,7 @@ pub fn matches_where_with_registry(
                 };
                 if !arr
                     .iter()
-                    .all(|cond| matches_where_with_registry(entity, cond, registry))
+                    .all(|cond| cond.is_object() && !is_boundary_undefined(cond) && matches_where_with_registry(entity, cond, registry))
                 {
                     return false;
                 }
@@ -868,6 +868,14 @@ mod tests {
         for operator in ["$startsWith", "$endsWith", "$contains", "$search"] {
             assert!(!matches_where(&row, &json!({"name": {operator: "a"}})));
         }
+    }
+
+    #[test]
+    fn logical_arrays_reject_invalid_conditions() {
+        let row = json!({"id":"a"});
+        assert!(!matches_where(&row, &json!({"$or":[null, {"id":"b"}]})));
+        assert!(!matches_where(&row, &json!({"$and":[null, {"id":"a"}]})));
+        assert!(matches_where(&row, &json!({"$or":[null, {"id":"a"}]})));
     }
 
 }
