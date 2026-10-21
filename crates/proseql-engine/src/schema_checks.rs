@@ -27,12 +27,19 @@ pub fn validate_schema_checks(
     schema: &SchemaNode,
     callbacks: &CallbackRegistry,
 ) -> Result<(), EngineError> {
+    validate_schema_checks_with_callbacks(schema, Some(callbacks))
+}
+
+pub(crate) fn validate_schema_checks_with_callbacks(
+    schema: &SchemaNode,
+    callbacks: Option<&CallbackRegistry>,
+) -> Result<(), EngineError> {
     match schema {
         SchemaNode::Checked { inner, checks } => {
-            validate_schema_checks(inner, callbacks)?;
+            validate_schema_checks_with_callbacks(inner, callbacks)?;
             for check in checks {
                 if let Some(id) = check.callback_id() {
-                    if !callbacks.has_predicate(id) {
+                    if !callbacks.is_some_and(|registry| registry.has_predicate(id)) {
                         return Err(unsupported(format!(
                             "Schema check predicate '{id}' is not registered"
                         )));
@@ -44,18 +51,23 @@ pub fn validate_schema_checks(
         }
         SchemaNode::Struct { fields } => {
             for field in fields {
-                validate_schema_checks(&field.schema, callbacks)?;
+                validate_schema_checks_with_callbacks(&field.schema, callbacks)?;
             }
         }
         SchemaNode::Array { item: inner }
         | SchemaNode::Optional(inner)
         | SchemaNode::NullOr(inner)
         | SchemaNode::OptionalWithDefault { inner, .. } => {
-            validate_schema_checks(inner, callbacks)?
+            validate_schema_checks_with_callbacks(inner, callbacks)?
         }
         SchemaNode::Record { key, value } => {
-            validate_schema_checks(key, callbacks)?;
-            validate_schema_checks(value, callbacks)?;
+            validate_schema_checks_with_callbacks(key, callbacks)?;
+            validate_schema_checks_with_callbacks(value, callbacks)?;
+        }
+        SchemaNode::Unsupported { reason } => {
+            return Err(unsupported(format!(
+                "Unsupported schema combinator: {reason}"
+            )))
         }
         _ => {}
     }

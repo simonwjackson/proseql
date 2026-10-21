@@ -190,4 +190,29 @@ describe("Effect Schema checks", () => {
 			],
 		});
 	});
+	for (const [name, key] of [
+		["built-in", Schema.String.check(Schema.isMinLength(4))],
+		[
+			"host predicate",
+			Schema.String.check(
+				Schema.makeFilter((key: string) => key.startsWith("ok")),
+			),
+		],
+	] as const) {
+		it(`drops Record keys rejected by a ${name} check`, async () => {
+			const schema = Schema.Struct({
+				id: Schema.String,
+				data: Schema.Record(key, Schema.Number),
+			});
+			const db = await Effect.runPromise(
+				createEffectDatabase({ users: { schema, relationships: {} } }),
+			);
+			const created = await Effect.runPromise(
+				db.users.create({ id: "u1", data: { bad: 1, okay: 2, ok_two: 3 } }),
+			);
+			expect(created.data).toEqual({ okay: 2, ok_two: 3 });
+			expect(Object.keys(created.data)).toEqual(["okay", "ok_two"]);
+			expect(await Effect.runPromise(db.users.findById("u1"))).toEqual(created);
+		});
+	}
 });

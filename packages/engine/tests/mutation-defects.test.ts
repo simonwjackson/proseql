@@ -36,11 +36,9 @@ it("surfaces mutation defects and refreshes projection state before a later read
 	);
 	try {
 		expect(await db.users.query({ sort: { id: "asc" } })).toEqual(committed);
+		const selector = { name: { $ne: "Nobody", $abortMutation: true } };
 		await expect(
-			db.users.deleteManyWithRelationships(
-				{ name: { $abortMutation: true } },
-				{},
-			),
+			db.users.deleteManyWithRelationships(selector, {}),
 		).rejects.toBeInstanceOf(WasmEngineDefectError);
 		// The selector aborted before writes. Reads must refresh projection
 		// state and return the data that remains committed in Rust.

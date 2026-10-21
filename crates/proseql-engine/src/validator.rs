@@ -21,6 +21,7 @@
 //! - `Struct`: strips excess properties (matching Effect's default
 //!   `onExcessProperty: "ignore"`) and recursively decodes declared fields.
 //! - `Array` / `Record`: recursively decode elements / values.
+//!   Invalid `Record` keys are dropped, as Effect Schema drops them, not rejected.
 //! - `Optional` / `OptionalWithDefault`: absent fields remain absent; present
 //!   values are decoded against the inner schema.
 //! - `NullOr`: `null` is preserved; non-null values are decoded.
@@ -230,11 +231,15 @@ fn validate_at(
         },
 
         SchemaNode::Record {
-            value: val_schema, ..
+            key: key_schema,
+            value: val_schema,
         } => match value {
             Value::Object(map) => {
                 let mut issues: Vec<ValidationIssue> = vec![];
                 for (k, v) in map {
+                    if !record_key_matches(key_schema, k, callbacks)? {
+                        continue;
+                    }
                     let fp = format!("{path}.{k}");
                     if let Err(EngineError::Validation(ve)) =
                         validate_at(val_schema, v, &fp, callbacks)
@@ -256,6 +261,23 @@ fn validate_at(
 
         SchemaNode::Struct { fields } => validate_struct(fields, value, path, callbacks),
     }
+}
+
+#[inline(never)]
+fn record_key_matches(
+    schema: &SchemaNode,
+    key: &str,
+    callbacks: Option<&CallbackRegistry>,
+) -> Result<bool, EngineError> {
+    if matches!(schema, SchemaNode::Str | SchemaNode::Unknown) {
+        return Ok(true);
+    }
+    // A missing host predicate or unsupported check is a configuration error,
+    // not an ordinary nonmatching key. Do not silently filter these failures.
+    crate::schema_checks::validate_schema_checks_with_callbacks(schema, callbacks)?;
+    // After preflight, this validator can only return ordinary validation
+    // failures. Host predicate panics/defects unwind past this call.
+    Ok(validate_at(schema, &Value::String(key.to_owned()), "(root)", callbacks).is_ok())
 }
 
 fn validate_struct(
@@ -464,13 +486,19 @@ fn decode_owned_at(
                 }))
             }
         }
-        SchemaNode::Record { value: schema, .. } => {
+        SchemaNode::Record {
+            key: key_schema,
+            value: schema,
+        } => {
             let Value::Object(values) = value else {
                 return Err(type_mismatch(path, "object", &value));
             };
             let mut decoded = JsonMap::with_capacity(values.len());
             let mut issues = Vec::new();
             for (key, value) in values {
+                if !record_key_matches(key_schema, &key, callbacks)? {
+                    continue;
+                }
                 match decode_owned_at(schema, value, &format!("{path}.{key}"), callbacks) {
                     Ok(value) => {
                         decoded.insert(key, value);
@@ -654,12 +682,16 @@ fn decode_at(
         },
 
         SchemaNode::Record {
-            value: val_schema, ..
+            key: key_schema,
+            value: val_schema,
         } => match value {
             Value::Object(map) => {
                 let mut decoded_map = JsonMap::new();
                 let mut issues: Vec<ValidationIssue> = vec![];
                 for (k, v) in map {
+                    if !record_key_matches(key_schema, k, callbacks)? {
+                        continue;
+                    }
                     let fp = format!("{path}.{k}");
                     match decode_at(val_schema, v, &fp, callbacks) {
                         Ok(dv) => {
@@ -920,6 +952,157 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&owned).unwrap()["message"],
             "2 decoding issue(s)"
+        );
+    }
+    fn assert_record_key_filter(key: SchemaNode, callbacks: Option<&CallbackRegistry>) {
+        let schema = SchemaNode::Record {
+            key: Box::new(key),
+            value: Box::new(SchemaNode::Num),
+        };
+        // A rejected key's value must not be decoded or validated.
+        let input = json!({"bad":"ignored", "okay":2, "ok_two":3});
+        let expected = json!({"okay":2, "ok_two":3});
+        assert_eq!(
+            decode_value_with_callbacks(&schema, &input, callbacks).unwrap(),
+            expected
+        );
+        let owned = decode_owned_value_with_callbacks(&schema, input.clone(), callbacks).unwrap();
+        assert_eq!(owned, expected);
+        assert_eq!(
+            owned
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["okay", "ok_two"]
+        );
+        validate_value_with_callbacks(&schema, &input, callbacks).unwrap();
+        assert!(decode_value_with_callbacks(&schema, &json!({"okay":"wrong"}), callbacks).is_err());
+        assert!(
+            decode_owned_value_with_callbacks(&schema, json!({"okay":"wrong"}), callbacks).is_err()
+        );
+        assert!(
+            validate_value_with_callbacks(&schema, &json!({"okay":"wrong"}), callbacks).is_err()
+        );
+    }
+
+    #[cfg(feature = "native-checks")]
+    #[test]
+    fn record_keys_apply_builtin_checks_and_drop_nonmatching_entries() {
+        assert_record_key_filter(
+            SchemaNode::Checked {
+                inner: Box::new(SchemaNode::Str),
+                checks: vec![crate::descriptor::SchemaCheck::new(
+                    "effect/schema/isMinLength",
+                    json!({"minLength":4}),
+                    "a value with a length of at least 4",
+                    None,
+                )],
+            },
+            None,
+        );
+    }
+
+    #[test]
+    fn record_keys_apply_host_predicates_and_drop_nonmatching_entries() {
+        let mut callbacks = CallbackRegistry::new();
+        callbacks.register_predicate(
+            "key",
+            Box::new(|value| value.as_str().is_some_and(|key| key.starts_with("ok"))),
+        );
+        assert_record_key_filter(
+            SchemaNode::Checked {
+                inner: Box::new(SchemaNode::Str),
+                checks: vec![crate::descriptor::SchemaCheck::new(
+                    "custom",
+                    Value::Null,
+                    "an allowed key",
+                    Some("key".into()),
+                )],
+            },
+            Some(&callbacks),
+        );
+    }
+
+    #[test]
+    fn record_keys_apply_the_key_type() {
+        let schema = SchemaNode::Record {
+            key: Box::new(SchemaNode::Literal {
+                value: json!("okay"),
+            }),
+            value: Box::new(SchemaNode::Num),
+        };
+        let input = json!({"bad":"ignored", "okay":2});
+        assert_eq!(decode_value(&schema, &input).unwrap(), json!({"okay":2}));
+        assert_eq!(
+            decode_owned_value(&schema, input.clone()).unwrap(),
+            json!({"okay":2})
+        );
+        validate_value(&schema, &input).unwrap();
+    }
+    #[test]
+    fn record_key_predicates_must_be_registered_instead_of_silently_dropping_keys() {
+        let schema = SchemaNode::Record {
+            key: Box::new(SchemaNode::Checked {
+                inner: Box::new(SchemaNode::Str),
+                checks: vec![crate::descriptor::SchemaCheck::new(
+                    "custom",
+                    Value::Null,
+                    "an allowed key",
+                    Some("missing".into()),
+                )],
+            }),
+            value: Box::new(SchemaNode::Num),
+        };
+        assert!(decode_value(&schema, &json!({"okay":1})).is_err());
+        assert!(decode_owned_value(&schema, json!({"okay":1})).is_err());
+        assert!(validate_value(&schema, &json!({"okay":1})).is_err());
+    }
+    #[test]
+    fn record_key_predicate_aborts_are_not_filtered_as_validation_failures() {
+        let mut callbacks = CallbackRegistry::new();
+        callbacks.register_predicate(
+            "abort",
+            Box::new(|_| panic!("record key predicate aborted")),
+        );
+        let schema = SchemaNode::Record {
+            key: Box::new(SchemaNode::Checked {
+                inner: Box::new(SchemaNode::Str),
+                checks: vec![crate::descriptor::SchemaCheck::new(
+                    "custom",
+                    Value::Null,
+                    "an allowed key",
+                    Some("abort".into()),
+                )],
+            }),
+            value: Box::new(SchemaNode::Num),
+        };
+        let input = json!({"okay":1});
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| decode_value_with_callbacks(
+                &schema,
+                &input,
+                Some(&callbacks)
+            )))
+            .is_err()
+        );
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| decode_owned_value_with_callbacks(
+                &schema,
+                input.clone(),
+                Some(&callbacks)
+            )))
+            .is_err()
+        );
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| validate_value_with_callbacks(
+                &schema,
+                &input,
+                Some(&callbacks)
+            )))
+            .is_err()
         );
     }
 }

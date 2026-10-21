@@ -12,8 +12,8 @@
     "coverageRate": 0.819047619047619,
     "executedFraction": 0.819047619047619,
     "slicePassRate": 1,
-    "totalAssertions": 2433,
-    "passedAssertions": 2433,
+    "totalAssertions": 2435,
+    "passedAssertions": 2435,
     "failedAssertions": 0
   },
   "results": [
@@ -795,8 +795,8 @@
       "status": "passed",
       "owner": "effect-adapter",
       "exitCode": 0,
-      "tests": 9,
-      "passedTests": 9,
+      "tests": 11,
+      "passedTests": 11,
       "failedTests": 0
     },
     {
