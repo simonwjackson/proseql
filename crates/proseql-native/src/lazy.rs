@@ -728,13 +728,10 @@ impl SourceState {
                     .filter(|torn| lazy.resident.contains_key(&torn.path))
                     .cloned(),
             );
-            // The listing just taken does not know files this runtime created
-            // after the previous listing; resident paths stay known.
-            for path in lazy.resident.keys() {
-                if let Some(key) = partition_key_of_path(&lazy.source, path) {
-                    lazy.known.entry(path.clone()).or_insert(key);
-                }
-            }
+            // Keep the previous listing: `lazy_refresh` diffs the fresh
+            // listing against it, which is how it finds new files that a
+            // watch covers. It then stores the fresh listing.
+            lazy.known = std::mem::take(&mut old.known);
         }
     }
 

@@ -193,7 +193,7 @@ fn duplicates_and_invalid_records_insert_nothing() {
 }
 
 #[test]
-fn unpublished_moves_record_no_changes_and_published_ones_do() {
+fn unpublished_moves_are_invisible_and_published_ones_reach_watches_only() {
     let mut db = database();
     let events = db.subscribe_change_events();
     db.load_resident_records("samples", block("a", 3), None, false)
@@ -215,7 +215,8 @@ fn unpublished_moves_record_no_changes_and_published_ones_do() {
     assert_eq!(watch.recv().unwrap(), json!([]));
     db.load_resident_records("samples", block("b", 3), None, true)
         .unwrap();
-    assert_eq!(db.take_committed_changes().len(), 3);
+    // Published moves are not mutations: no committed changes, but an event.
+    assert!(db.take_committed_changes().is_empty());
     assert!(events.try_recv().is_ok());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
@@ -231,4 +232,80 @@ fn unpublished_moves_record_no_changes_and_published_ones_do() {
         .unwrap();
     db.refresh_reactive_snapshot("samples").unwrap();
     assert_eq!(db.reactive_snapshot_count(), 1);
+}
+
+fn wait_for(watch: &proseql_engine::reactive::ValueSubscription, expected: Value) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut last = None;
+    while std::time::Instant::now() < deadline {
+        if let Ok(value) = watch.try_recv() {
+            if value == expected {
+                return;
+            }
+            last = Some(value);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("watch never delivered {expected}; last {last:?}");
+}
+
+#[test]
+fn published_moves_inside_a_transaction_stay_out_of_the_journal() {
+    let mut db = database();
+    let watch = db
+        .watch(
+            "samples",
+            WatchQueryConfig {
+                r#where: Some(json!({"tag": "red"})),
+                ..WatchQueryConfig::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(watch.recv().unwrap(), json!([]));
+    let stored = block("a", 3);
+    let created = json!({"id": "n-1", "at": "z-1", "tag": "red"});
+
+    // Rollback: the loaded records stay, the create goes.
+    let mut session = db.begin_owned_transaction().unwrap();
+    db.transaction_step(&mut session, |db| {
+        db.load_resident_records("samples", stored.clone(), None, true)?;
+        db.create("samples", created.clone())
+    })
+    .unwrap();
+    let journal = session
+        .journal()
+        .entities()
+        .map(|c| c.id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(journal, ["n-1"], "loaded records entered the journal");
+    // Watches see the stored record, never the uncommitted create.
+    wait_for(&watch, json!([stored[0].clone()]));
+    db.rollback_owned_transaction(session).unwrap();
+    let collection = db.collection("samples").unwrap();
+    assert_eq!(collection.len(), 3);
+    assert!(collection.get("n-1").is_none());
+    assert_eq!(
+        db.query("samples", QueryInput::default(), None).unwrap(),
+        stored
+    );
+
+    // Commit: only the create is committed.
+    let more = block("b", 3);
+    let mut session = db.begin_owned_transaction().unwrap();
+    db.transaction_step(&mut session, |db| {
+        db.load_resident_records("samples", more.clone(), None, true)?;
+        db.create("samples", created.clone())
+    })
+    .unwrap();
+    db.commit_owned_transaction(session).unwrap();
+    let committed = db
+        .take_committed_changes()
+        .entities()
+        .map(|c| c.id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(committed, ["n-1"]);
+    wait_for(
+        &watch,
+        json!([stored[0].clone(), more[0].clone(), created.clone()]),
+    );
 }

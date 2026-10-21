@@ -1269,3 +1269,215 @@ fn full_scan_error_applies_to_empty_and_fully_loaded_collections() {
         .unwrap();
     assert_eq!(operation_reason(&error), "lazy-full-scan");
 }
+
+// ── Loads during a mutation (review round 2) ─────────────────────────────────
+//
+// No managed watch runs in these tests (`watch_debounce: None`), so the lazy
+// watcher never polls: the only load of the new June file is the one the
+// mutation itself triggers.
+
+fn line(record: &Value) -> String {
+    serde_json::to_string(record).unwrap()
+}
+
+fn june_watch(
+    lazy: &NativeRuntime,
+) -> proseql_native::NativeWatch<proseql_engine::reactive::ValueSubscription> {
+    let watch = lazy
+        .watch(
+            "heartrate",
+            WatchQueryConfig {
+                r#where: Some(json!({"timestamp": {"$gte": "2026-06", "$lt": "2026-07"}})),
+                sort: vec![("timestamp".to_owned(), SortOrder::Asc)],
+                ..WatchQueryConfig::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(watch.recv().unwrap(), json!([]));
+    watch
+}
+
+fn wait_for_watch(
+    watch: &proseql_native::NativeWatch<proseql_engine::reactive::ValueSubscription>,
+    expected: &[Value],
+) {
+    let expected = Value::Array(expected.to_vec());
+    let mut last = None;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if let Ok(value) = watch.try_recv() {
+            if value == expected {
+                return;
+            }
+            last = Some(value);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("watch never delivered {expected}; last delivery {last:?}");
+}
+
+fn june_sample(day: u32, n: usize) -> Value {
+    sample(&format!("2026-06-{day:02}T00:00:00Z"), n)
+}
+
+#[test]
+fn a_create_into_a_new_watched_partition_writes_only_the_new_record() {
+    let dir = tempfile::tempdir().unwrap();
+    seed(dir.path());
+    let lazy = open_lazy(dir.path(), policy(2, FullScanPolicy::Error));
+    let watch = june_watch(&lazy);
+    let (a, b) = (june_sample(2, 1), june_sample(3, 2));
+    let june = write_partition(dir.path(), "2026-06", std::slice::from_ref(&a));
+
+    let created = lazy.mutate(|db| db.create("heartrate", b.clone())).unwrap();
+    assert_eq!(created, b);
+    assert_eq!(
+        fs::read_to_string(&june).unwrap(),
+        format!("{}\n{}\n", line(&a), line(&b)),
+        "the loaded record must not be written again"
+    );
+    assert_eq!(
+        lazy_query(&lazy, month("2026-06")),
+        vec![a.clone(), b.clone()]
+    );
+    wait_for_watch(&watch, &[a.clone(), b.clone()]);
+    lazy.close().unwrap();
+    let eager = open_eager(dir.path());
+    assert_eq!(eager_query(&eager, month("2026-06")), vec![a, b]);
+}
+
+#[test]
+fn an_identical_retry_into_a_new_watched_partition_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    seed(dir.path());
+    let lazy = open_lazy(dir.path(), policy(2, FullScanPolicy::Error));
+    let watch = june_watch(&lazy);
+    let a = june_sample(2, 1);
+    let june = write_partition(dir.path(), "2026-06", std::slice::from_ref(&a));
+    let bytes = fs::read(&june).unwrap();
+
+    assert_eq!(
+        lazy.mutate(|db| db.create("heartrate", a.clone())).unwrap(),
+        a
+    );
+    assert_eq!(fs::read(&june).unwrap(), bytes, "identical retry wrote");
+    assert_eq!(lazy_query(&lazy, month("2026-06")), vec![a.clone()]);
+    wait_for_watch(&watch, std::slice::from_ref(&a));
+    lazy.close().unwrap();
+    assert_eq!(fs::read(&june).unwrap(), bytes);
+}
+
+#[test]
+fn a_conflicting_create_into_a_new_watched_partition_rolls_back_and_keeps_its_records() {
+    let dir = tempfile::tempdir().unwrap();
+    seed(dir.path());
+    let lazy = open_lazy(dir.path(), policy(2, FullScanPolicy::Error));
+    let watch = june_watch(&lazy);
+    let a = june_sample(2, 1);
+    let june = write_partition(dir.path(), "2026-06", std::slice::from_ref(&a));
+    let bytes = fs::read(&june).unwrap();
+
+    let mut conflicting = a.clone();
+    conflicting["bpm"] = json!(1);
+    let error = lazy
+        .mutate(|db| db.create("heartrate", conflicting.clone()))
+        .unwrap_err();
+    assert!(matches!(error, EngineError::DuplicateKey(_)), "{error:?}");
+    assert_eq!(fs::read(&june).unwrap(), bytes);
+    assert_eq!(lazy_query(&lazy, month("2026-06")), vec![a.clone()]);
+    assert_eq!(
+        lazy.find_by_id("heartrate", a["id"].as_str().unwrap())
+            .unwrap(),
+        Some(a.clone())
+    );
+    wait_for_watch(&watch, std::slice::from_ref(&a));
+    lazy.close().unwrap();
+    assert_eq!(fs::read(&june).unwrap(), bytes);
+    let eager = open_eager(dir.path());
+    assert_eq!(eager_query(&eager, month("2026-06")), vec![a.clone()]);
+    let reopened = open_lazy(dir.path(), policy(2, FullScanPolicy::Error));
+    assert_eq!(lazy_query(&reopened, month("2026-06")), vec![a]);
+}
+
+#[test]
+fn a_find_by_id_scan_inside_a_mutation_loads_a_watched_partition_without_writing_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let all = seed(dir.path());
+    let lazy = open_lazy(dir.path(), policy(1, FullScanPolicy::Allow));
+    let watch = june_watch(&lazy);
+    // June is listed but not loaded: its first content cannot load (a July
+    // record in it), so a reload leaves it pending for the watch.
+    write_partition(
+        dir.path(),
+        "2026-06",
+        &[june_sample(2, 1), sample("2026-07-01T00:00:00Z", 9)],
+    );
+    let error = lazy.reload().unwrap_err();
+    assert!(
+        source_config_message(&error).contains("wrong partition"),
+        "{error:?}"
+    );
+    assert!(!loaded(&lazy).contains(&"2026-06".to_owned()));
+    let a = june_sample(2, 1);
+    let june = write_partition(dir.path(), "2026-06", std::slice::from_ref(&a));
+    let june_bytes = fs::read(&june).unwrap();
+    let april = root(dir.path()).join("2026-04.jsonl");
+    let april_bytes = fs::read(&april).unwrap();
+    let b = sample("2026-04-20T00:00:00Z", 2);
+
+    lazy.mutate(|db| {
+        // A miss among loaded partitions is a full scan: every partition,
+        // including the new June file, loads inside the transaction.
+        assert_eq!(
+            db.find_by_id("heartrate", a["id"].as_str().unwrap())?,
+            Some(a.clone())
+        );
+        db.create("heartrate", b.clone())
+    })
+    .unwrap();
+    assert_eq!(fs::read(&june).unwrap(), june_bytes, "June was rewritten");
+    let mut expected_april = april_bytes.clone();
+    expected_april.extend_from_slice(format!("\n{}\n", line(&b)).as_bytes());
+    assert_eq!(fs::read(&april).unwrap(), expected_april);
+    assert_eq!(lazy_query(&lazy, month("2026-06")), vec![a.clone()]);
+    wait_for_watch(&watch, std::slice::from_ref(&a));
+
+    // The same scan in a mutation that fails keeps every loaded record.
+    let mut conflicting = all[0].clone();
+    conflicting["bpm"] = json!(1);
+    let error = lazy
+        .mutate(|db| {
+            db.find_by_id("heartrate", "heartrate:none")?;
+            db.create("heartrate", conflicting.clone())
+        })
+        .unwrap_err();
+    assert!(matches!(error, EngineError::DuplicateKey(_)), "{error:?}");
+    assert_eq!(lazy_query(&lazy, month("2026-06")), vec![a]);
+    assert_eq!(lazy_query(&lazy, month("2025-11")).len(), 11);
+    assert_eq!(fs::read(&june).unwrap(), june_bytes);
+}
+
+#[test]
+fn a_conflicting_cold_append_rolls_back_and_keeps_the_loaded_partition() {
+    let dir = tempfile::tempdir().unwrap();
+    let all = seed(dir.path());
+    let lazy = open_lazy(dir.path(), policy(1, FullScanPolicy::Error));
+    let january = root(dir.path()).join("2026-01.jsonl");
+    let bytes = fs::read(&january).unwrap();
+    let mut conflicting = all[25].clone();
+    conflicting["bpm"] = json!(1);
+    let fresh = sample("2026-01-21T00:00:00Z", 3);
+    // The batch loads January for the ID check, then fails on the conflict.
+    let error = lazy
+        .mutate(|db| db.create_many("heartrate", vec![fresh.clone(), conflicting.clone()]))
+        .unwrap_err();
+    assert!(matches!(error, EngineError::DuplicateKey(_)), "{error:?}");
+    assert_eq!(fs::read(&january).unwrap(), bytes);
+    assert_eq!(loaded(&lazy), ["2026-01"]);
+    let rows = lazy_query(&lazy, month("2026-01"));
+    assert_eq!(rows.len(), 11);
+    assert!(rows.contains(&all[25]));
+    assert!(lazy
+        .find_by_id("heartrate", fresh["id"].as_str().unwrap())
+        .is_err_and(|error| operation_reason(&error) == "lazy-full-scan"));
+}

@@ -1640,15 +1640,17 @@ impl Collection {
     /// fails with `DuplicateKeyError` and inserts nothing. `position` places
     /// the block in insertion order; `None` (or a position at the end)
     /// appends and updates the indexes incrementally, any other position
-    /// rebuilds them once. With `publish`, the inserts are recorded as entity
-    /// changes; without it, change tracking does not see them (no hooks, no
-    /// reactive deltas, no committed changes). Returns the number inserted.
+    /// rebuilds them once. Change tracking never sees the inserts: no hooks,
+    /// no pending changes, so no transaction journal entry, no rollback and
+    /// no write plan. With `describe`, the inserts are returned as entity
+    /// changes so the caller can show them to watches. Returns the number
+    /// inserted and those changes.
     pub fn load_resident_records(
         &mut self,
         records: Vec<Value>,
         position: Option<usize>,
-        publish: bool,
-    ) -> Result<usize, EngineError> {
+        describe: bool,
+    ) -> Result<(usize, Vec<EntityChange>), EngineError> {
         let mut block = Vec::with_capacity(records.len());
         let mut seen = HashSet::with_capacity(records.len());
         for record in records {
@@ -1682,16 +1684,17 @@ impl Collection {
             block.push((id, record));
         }
         let count = block.len();
+        let mut changes = Vec::new();
         if count == 0 {
-            return Ok(0);
+            return Ok((0, changes));
         }
         self.authorized_equality_cache = None;
         match position.filter(|position| *position < self.state.len()) {
             None => {
                 for (id, entity) in block {
                     self.query_indexes.insert(&id, &entity);
-                    if publish {
-                        self.pending_changes.record(EntityChange {
+                    if describe {
+                        changes.push(EntityChange {
                             collection: self.name.clone(),
                             id: id.clone(),
                             before: None,
@@ -1708,8 +1711,8 @@ impl Collection {
                 let mut previous = std::mem::take(&mut self.state).into_iter();
                 next.extend(previous.by_ref().take(at));
                 for (offset, (id, entity)) in block.into_iter().enumerate() {
-                    if publish {
-                        self.pending_changes.record(EntityChange {
+                    if describe {
+                        changes.push(EntityChange {
                             collection: self.name.clone(),
                             id: id.clone(),
                             before: None,
@@ -1726,16 +1729,22 @@ impl Collection {
             }
         }
         self.revision = self.revision.saturating_add(1);
-        Ok(count)
+        Ok((count, changes))
     }
 
     /// Drop resident records without a mutation (the inverse of
     /// [`Self::load_resident_records`]). Unknown ids are skipped. Index
     /// postings are removed incrementally; the remaining records keep their
-    /// order. With `publish`, the removals are recorded as entity changes.
-    /// Returns the number removed.
-    pub fn unload_resident_records(&mut self, ids: &[String], publish: bool) -> usize {
+    /// order. Change tracking never sees the removals; with `describe` they
+    /// are returned as entity changes. Returns the number removed and those
+    /// changes.
+    pub fn unload_resident_records(
+        &mut self,
+        ids: &[String],
+        describe: bool,
+    ) -> (usize, Vec<EntityChange>) {
         let mut removing = HashSet::with_capacity(ids.len());
+        let mut changes = Vec::new();
         for id in ids {
             let Some((position, _, entity)) = self.state.get_full(id.as_str()) else {
                 continue;
@@ -1744,8 +1753,8 @@ impl Collection {
                 continue;
             }
             self.query_indexes.remove(id, entity);
-            if publish {
-                self.pending_changes.record(EntityChange {
+            if describe {
+                changes.push(EntityChange {
                     collection: self.name.clone(),
                     id: id.clone(),
                     before: Some(entity.clone()),
@@ -1756,12 +1765,12 @@ impl Collection {
             }
         }
         if removing.is_empty() {
-            return 0;
+            return (0, changes);
         }
         self.authorized_equality_cache = None;
         self.state.retain(|id, _| !removing.contains(id.as_str()));
         self.revision = self.revision.saturating_add(1);
-        removing.len()
+        (removing.len(), changes)
     }
 
     /// Directly replace the entity with `id` with `snapshot`, bypassing
