@@ -18,6 +18,10 @@ const coreSrcDir = resolveFromRepo(repoRoot, "packages/core/src").replaceAll(
 	"\\",
 	"/",
 );
+const nodeSrcDir = resolveFromRepo(repoRoot, "packages/node/src").replaceAll(
+	"\\",
+	"/",
+);
 const effectIndex = resolveFromRepo(
 	repoRoot,
 	"packages/effect/src/index.ts",
@@ -68,6 +72,7 @@ const runnableFiles = new Set([
 	"multi-field-search.test.ts",
 	"nested-schema.test.ts",
 	"object-select.test.ts",
+	"ordered-indexes-config.test.ts",
 	"pagination.test.ts",
 	"persistence-computed-exclusion.test.ts",
 	"persistence-effect.test.ts",
@@ -84,6 +89,8 @@ const runnableFiles = new Set([
 	"prose-overflow-encoding.test.ts",
 	"prose-round-trip.test.ts",
 	"prose-template-compilation.test.ts",
+	"prose-typed-values.test.ts",
+	"prose-unmatched-lines.test.ts",
 	"prose-value-serialization.test.ts",
 	"reactive-queries.test.ts",
 	"relevance-sort.test.ts",
@@ -99,6 +106,7 @@ const runnableFiles = new Set([
 	"source-config.test.ts",
 	"state.test.ts",
 	"storage-services.test.ts",
+	"time-bucket-partitions.test.ts",
 	"toml-nulls.test.ts",
 	"transactions.test.ts",
 	"unique-constraints.test.ts",
@@ -107,7 +115,17 @@ const runnableFiles = new Set([
 	"yaml-serializer.test.ts",
 ]);
 
-const expectedXfails = new Map();
+const expectedXfails = new Map([
+	[
+		"partitioned-runtime.test.ts",
+		{
+			category: "known-divergence",
+			owner: "effect-adapter",
+			reason:
+				"7 of 11 pass. The 4 failing cases (unsafe routing x3, external partition at flush) assert that the database scope closes cleanly after flush() rejected. The adapter's flush() rejects correctly and writes nothing, but closing the scope retries the save and fails again with the same SourceConfigError, so the test's Effect.scoped rejects. The adapter fails closed on close where core does not.",
+		},
+	],
+]);
 const explicitSkips = new Map();
 
 mkdirSync(reportDir, { recursive: true });
@@ -315,6 +333,12 @@ function transformCoreTest(source, fileName = "") {
 				}
 				return `${quote}${coreSrcDir}/${subpath}.ts${quote}`;
 			},
+		)
+		// Suites that read real files import the Node storage layer from the
+		// sibling package; the copied test sits two levels deeper.
+		.replace(
+			/(["'])\.\.\/\.\.\/node\/src\/([^"']+?)(?:\.js)?\1/g,
+			(_match, quote, subpath) => `${quote}${nodeSrcDir}/${subpath}.ts${quote}`,
 		)
 		.replace(
 			/const (\w+) =\s*\n\s*([A-Za-z0-9_]+),\s*\n\s*\[0\]\s*(?:_as|as)\s*([^;]+);/g,
