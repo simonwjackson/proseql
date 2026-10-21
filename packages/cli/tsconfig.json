@@ -5,5 +5,5 @@
 		"outDir": "dist"
 	},
 	"include": ["src"],
-	"references": [{ "path": "../core" }, { "path": "../node" }]
+	"references": [{ "path": "../effect" }, { "path": "../node" }]
 }

@@ -2,7 +2,7 @@
  * Tool dispatch: routes tool calls to the appropriate database operations.
  */
 
-import type { DatabaseConfig } from "@proseql/core";
+import type { DatabaseConfig } from "@proseql/effect";
 import { describeConfig } from "./introspect.js";
 
 type AnyDb = Record<

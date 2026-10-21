@@ -1,6 +1,6 @@
 # @proseql/node
 
-Node.js file persistence for ProseQL. Re-exports everything from `@proseql/core` plus filesystem storage adapters.
+Node.js file persistence for ProseQL. Re-exports the Rust/WASM-backed API from `@proseql/effect` and uses the engine's single Node.js storage host.
 
 ## Install
 
@@ -60,7 +60,7 @@ const program = Effect.gen(function* () {
 await Effect.runPromise(Effect.scoped(program))
 ```
 
-For the full query and mutation API, see [`@proseql/core`](https://www.npmjs.com/package/@proseql/core).
+For Effect database usage, see [`@proseql/effect`](https://www.npmjs.com/package/@proseql/effect).
 
 ## Document Sources
 
@@ -196,7 +196,7 @@ const db = yield* createNodeDatabase({
 })
 ```
 
-Through `@proseql/node`, a graph reads from the real filesystem with codecs inferred automatically (a graph registers all base codecs, since fragments are decoded by extension). Discovery uses real glob semantics across nested directories; each startup-present root is watched, and a valid fragment change rebuilds the graph while an invalid reload keeps the last-known-good graph. Graph-owned collections reject every mutation with `OperationError` (`reason: "read-only-source"`), including inside `$transaction`, and `initialData` for a graph-owned collection fails database creation. See the [`@proseql/core` README](https://www.npmjs.com/package/@proseql/core) for the full merge, transform, and migration semantics.
+Through `@proseql/node`, a graph reads from the real filesystem with codecs inferred automatically (a graph registers all base codecs, since fragments are decoded by extension). Discovery uses real glob semantics across nested directories; each startup-present root is watched, and a valid fragment change rebuilds the graph while an invalid reload keeps the last-known-good graph. Graph-owned collections reject every mutation with `OperationError` (`reason: "read-only-source"`), including inside `$transaction`, and `initialData` for a graph-owned collection fails database creation. See the [`@proseql/effect` README](https://www.npmjs.com/package/@proseql/effect) for Effect database usage.
 
 ## Persistence Approaches
 
@@ -425,7 +425,7 @@ const CustomStorageLayer = makeNodeStorageLayer({
 
 ### Exports from `@proseql/node`
 
-Everything from `@proseql/core` is re-exported, plus:
+Everything from `@proseql/effect` is re-exported, plus:
 
 | Export | Description |
 |--------|-------------|

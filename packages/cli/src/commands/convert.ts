@@ -13,10 +13,10 @@ import {
 	type DatabaseConfig,
 	getFileExtension,
 	isSourceOrientedDatabaseConfig,
-	NodeStorageLayer,
 	SerializerRegistryService,
 	StorageAdapterService,
-} from "@proseql/node";
+} from "@proseql/effect";
+import { NodeStorageLayer } from "@proseql/node";
 import { Effect, Layer } from "effect";
 import { getCliCollectionConfig, resolveConfigPaths } from "../config/paths.js";
 

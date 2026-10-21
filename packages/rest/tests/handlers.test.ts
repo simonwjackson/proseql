@@ -4,8 +4,8 @@
  * Task 11.7: Test GET collection returns all entities.
  */
 
-import { createEffectDatabase } from "@proseql/core";
-import { Effect, Schema } from "effect";
+import { createEffectDatabase } from "@proseql/effect";
+import { Effect, Schema, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import type { RestRequest } from "../src/handlers.js";
 import { createRestHandlers } from "../src/handlers.js";
@@ -950,10 +950,9 @@ describe("REST handlers — POST with invalid data returns 400 (task 11.12)", ()
 		expect(body._tag).toBe("ValidationError");
 	});
 
-	it("should return 500 when body is null (unrecoverable defect)", async () => {
-		// Note: Passing null to create causes a Die (crash) in the core library
-		// because it tries to access properties on null before validation.
-		// This is treated as a programmer error, not a validation error.
+	it("should reject a null body with 400 and leave the collection unchanged", async () => {
+		// The Rust engine validates null instead of crashing on property access
+		// as the legacy TypeScript engine did.
 		const db = await Effect.runPromise(
 			createEffectDatabase(config, { books: [] }),
 		);
@@ -964,8 +963,34 @@ describe("REST handlers — POST with invalid data returns 400 (task 11.12)", ()
 		const request = createRequest({ body: null });
 		const response = await postBooks?.handler(request);
 
-		// Returns 500 because this is an unexpected defect, not a validation error
+		expect(response.status).toBe(400);
+		expect(response.body).toMatchObject({ _tag: "ValidationError" });
+		expect(
+			await Effect.runPromise(Stream.runCollect(db.books.query())),
+		).toEqual([]);
+	});
+
+	it("should return 500 when a before-create hook dies", async () => {
+		const defectConfig = {
+			books: {
+				...config.books,
+				hooks: {
+					beforeCreate: [() => Effect.die(new Error("create hook defect"))],
+				},
+			},
+		} as const;
+		const db = await Effect.runPromise(createEffectDatabase(defectConfig));
+		const routes = createRestHandlers(defectConfig, db);
+		const postBooks = findRoute(routes, "POST", "/books");
+		const response = await postBooks?.handler(
+			createRequest({ body: initialBooks[0] }),
+		);
+
 		expect(response.status).toBe(500);
+		expect(response.body).toEqual({ error: "Internal server error" });
+		expect(
+			await Effect.runPromise(Stream.runCollect(db.books.query())),
+		).toEqual([]);
 	});
 
 	it("should return 400 when body is an empty object", async () => {

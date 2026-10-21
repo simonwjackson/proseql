@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { DatabaseConfig } from "@proseql/core";
+import type { DatabaseConfig } from "@proseql/effect";
 import { Effect, Schema } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {

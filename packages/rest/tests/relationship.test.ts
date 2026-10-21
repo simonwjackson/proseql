@@ -1,4 +1,4 @@
-import { createEffectDatabase } from "@proseql/core";
+import { createEffectDatabase } from "@proseql/effect";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {

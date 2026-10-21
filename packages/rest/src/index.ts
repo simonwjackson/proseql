@@ -8,7 +8,7 @@
  * @example
  * ```ts
  * import { createRestHandlers } from "@proseql/rest"
- * import { createEffectDatabase } from "@proseql/core"
+ * import { createEffectDatabase } from "@proseql/effect"
  *
  * const handlers = createRestHandlers(config, db)
  *

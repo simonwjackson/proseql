@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { DatabaseConfig } from "@proseql/core";
-import { createEffectDatabase } from "@proseql/core";
+import type { DatabaseConfig } from "@proseql/effect";
+import { createEffectDatabase } from "@proseql/effect";
 import { Effect, Schema } from "effect";
 import { describeConfig, makeReadOnlyTools, makeTools } from "../src/index.js";
 

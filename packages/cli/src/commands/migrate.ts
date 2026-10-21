@@ -14,10 +14,10 @@ import {
 	type DryRunResult,
 	type DryRunStatus,
 	getFileExtension,
-	NodeStorageLayer,
 	SerializerRegistryService,
 	StorageAdapterService,
-} from "@proseql/node";
+} from "@proseql/effect";
+import { NodeStorageLayer } from "@proseql/node";
 import { Effect, Layer } from "effect";
 import {
 	getCliCollectionConfigs,

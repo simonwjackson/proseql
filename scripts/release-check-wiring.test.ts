@@ -64,6 +64,25 @@ describe("release readiness wiring", () => {
 		}
 	});
 
+	it("builds WASM before running every engine-backed integration suite", () => {
+		const flake = readRootFile("flake.nix");
+		const start = flake.indexOf("task_test() {");
+		const end = flake.indexOf("\n            }", start);
+		const task = flake.slice(start, end);
+		expect(
+			task.indexOf("bun run --cwd packages/engine build:wasm"),
+		).toBeLessThan(task.indexOf("bun test"));
+		for (const name of ["node", "cli", "rest", "ai"]) {
+			expect(task).toContain(`packages/${name}/tests/`);
+			expect(flake).toContain(
+				`task_test_${name}() { bun run --cwd packages/engine build:wasm; bun test packages/${name}/tests/`,
+			);
+		}
+		expect(readRootFile(".github/workflows/ci.yml")).toContain(
+			"run: nix run .#test",
+		);
+	});
+
 	it("bounds Rust test concurrency while preserving explicit overrides", () => {
 		const flake = readRootFile("flake.nix");
 		// flake.nix escapes shell `${` as `''${` inside Nix strings.

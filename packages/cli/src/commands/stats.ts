@@ -10,8 +10,8 @@ import {
 	AllTextFormatsLayer,
 	createPersistentEffectDatabase,
 	type DatabaseConfig,
-	NodeStorageLayer,
-} from "@proseql/node";
+} from "@proseql/effect";
+import { NodeStorageLayer } from "@proseql/node";
 import { Effect, Layer, Stream } from "effect";
 import {
 	getCollectionPersistenceInfo,

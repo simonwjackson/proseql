@@ -23,7 +23,7 @@ import {
 	UniqueConstraintError,
 	UnsupportedFormatError,
 	ValidationError,
-} from "@proseql/core";
+} from "@proseql/effect";
 import { describe, expect, it } from "vitest";
 import { mapErrorToResponse } from "../src/error-mapping.js";
 

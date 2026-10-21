@@ -11,7 +11,7 @@ import type {
 	DatabaseConfig,
 	GenerateDatabase,
 	GenerateDatabaseWithPersistence,
-} from "@proseql/core";
+} from "@proseql/effect";
 import { Effect, Stream } from "effect";
 import { parseAggregateParams, parseQueryParams } from "./query-params.js";
 
@@ -113,7 +113,7 @@ export interface RouteDescriptor {
  * @example
  * ```typescript
  * import { createRestHandlers } from "@proseql/rest"
- * import { createEffectDatabase } from "@proseql/core"
+ * import { createEffectDatabase } from "@proseql/effect"
  *
  * const config = {
  *   books: { schema: BookSchema, relationships: {} },

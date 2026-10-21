@@ -11,7 +11,7 @@ import {
 	makeSerializerLayer,
 	SerializerRegistryService as SerializerRegistry,
 	StorageAdapterService as StorageAdapter,
-} from "@proseql/core";
+} from "@proseql/effect";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import { makeNodeStorageLayer } from "../src/node-adapter-layer.js";

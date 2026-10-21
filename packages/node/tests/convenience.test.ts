@@ -75,7 +75,7 @@ describe("makeNodePersistenceLayer", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const { createPersistentEffectDatabase } = yield* Effect.promise(
-						() => import("@proseql/core"),
+						() => import("@proseql/effect"),
 					);
 					const db = yield* createPersistentEffectDatabase(config);
 					yield* db.books.create({ id: "1", title: "Dune", year: 1965 });

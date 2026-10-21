@@ -5,7 +5,7 @@
  * and format overrides, so users don't need to manually select and wire codecs.
  */
 
-import type { PluginError } from "@proseql/core";
+import type { PluginError } from "@proseql/effect";
 import {
 	type ConfiguredCollections,
 	createPersistentEffectDatabase,
@@ -24,7 +24,7 @@ import {
 	type StorageError,
 	type UnsupportedFormatError,
 	type ValidationError,
-} from "@proseql/core";
+} from "@proseql/effect";
 import { type Context, Effect, Layer, type Scope } from "effect";
 import { NodeStorageLayer } from "./node-adapter-layer.js";
 

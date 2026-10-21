@@ -7,7 +7,7 @@ import {
 	type CollectionConfig,
 	type DatabaseConfig,
 	getCollectionConfigs,
-} from "@proseql/core";
+} from "@proseql/effect";
 import type { Schema } from "effect";
 import type { AST } from "effect/SchemaAST";
 import type { CollectionDescription, SchemaDescription } from "./types.js";

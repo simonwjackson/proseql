@@ -5,14 +5,14 @@ Framework-agnostic REST API handlers for ProseQL databases. Generate HTTP endpoi
 ## Install
 
 ```sh
-npm install @proseql/rest
+npm install @proseql/rest @proseql/effect effect@4.0.0-beta.103
 ```
 
 ## Quick Start
 
 ```ts
 import { Effect, Schema } from "effect"
-import { createEffectDatabase } from "@proseql/core"
+import { createEffectDatabase } from "@proseql/effect"
 import { createRestHandlers } from "@proseql/rest"
 
 const BookSchema = Schema.Struct({
@@ -43,7 +43,7 @@ const program = Effect.gen(function* () {
 await Effect.runPromise(program)
 ```
 
-For the full query and mutation API, see [`@proseql/core`](https://www.npmjs.com/package/@proseql/core).
+For the Rust/WASM-backed Effect database API, see [`@proseql/effect`](https://www.npmjs.com/package/@proseql/effect).
 
 ## Handler Generation
 

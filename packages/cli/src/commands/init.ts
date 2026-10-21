@@ -150,7 +150,7 @@ function generateConfigContent(format: string): string {
 	const extension =
 		format === "yaml" ? "yaml" : format === "toml" ? "toml" : "json";
 
-	return `import { Schema, type DatabaseConfig } from "@proseql/core"
+	return `import { Schema, type DatabaseConfig } from "@proseql/effect"
 
 /**
  * Example schema for a notes collection.

@@ -128,6 +128,9 @@
         "test"
         "test-core"
         "test-node"
+        "test-cli"
+        "test-rest"
+        "test-ai"
         "test-effect"
         "coverage"
         "coverage-core"
@@ -181,8 +184,9 @@
             )}
             cd "$(git rev-parse --show-toplevel)"
 
-            # Test Korri-ready foundation paths (accepts extra bun test args)
+            # Test the WASM engine and its integration packages (accepts extra bun test args)
             task_test() {
+              bun run --cwd packages/engine build:wasm
               bun test \
                 ./bench/browser-runner.test.ts \
                 ./bench/runner.test.ts \
@@ -195,6 +199,7 @@
                 ./packages/engine/tests/engine-u8.test.ts \
                 ./packages/engine/tests/engine.test.ts \
                 ./packages/engine/tests/loader.test.ts \
+                ./packages/engine/tests/node-storage-retry.test.ts \
                 ./packages/engine/tests/materialized-projection.test.ts \
                 ./packages/effect/tests/effect.test.ts \
                 ./packages/browser/tests/browser-entry.test.ts \
@@ -226,17 +231,20 @@
                 packages/core/tests/source-config.test.ts \
                 packages/core/tests/time-bucket-partitions.test.ts \
                 packages/core/tests/transactions.test.ts \
-                packages/node/tests/convenience.test.ts \
-                packages/node/tests/derived-id-convenience.test.ts \
-                packages/node/tests/document-graph.test.ts \
-                packages/rest/tests/handlers.test.ts \
+                packages/node/tests/ \
+                packages/node/src/convenience.test.ts \
                 packages/cli/tests/ \
+                packages/rest/tests/ \
+                packages/ai/tests/ \
                 "$@"
             }
 
             # Test one package only
             task_test_core() { bun test packages/core/tests/ "$@"; }
-            task_test_node() { bun test packages/node/tests/ "$@"; }
+            task_test_node() { bun run --cwd packages/engine build:wasm; bun test packages/node/tests/ "$@"; }
+            task_test_cli() { bun run --cwd packages/engine build:wasm; bun test packages/cli/tests/ "$@"; }
+            task_test_rest() { bun run --cwd packages/engine build:wasm; bun test packages/rest/tests/ "$@"; }
+            task_test_ai() { bun run --cwd packages/engine build:wasm; bun test packages/ai/tests/ "$@"; }
             task_test_effect() { bun test packages/effect/tests/ "$@"; }
 
             # Test with coverage
@@ -285,12 +293,12 @@
                 bench/browser-aggregation.ts \
                 bench/browser-runner.ts \
                 bench/browser-runner.test.ts \
-                packages/{core,engine,node,rest,effect,cli,browser,rpc}/src \
+                packages/{core,engine,node,rest,effect,cli,browser,rpc,ai}/src \
                 packages/{engine,effect}/scripts \
                 scripts \
                 package.json \
-                packages/{core,engine,node,rest,effect,cli,browser,rpc}/package.json \
-                packages/{core,engine,node,rest,effect,cli,browser,rpc}/tsconfig.json \
+                packages/{core,engine,node,rest,effect,cli,browser,rpc,ai}/package.json \
+                packages/{core,engine,node,rest,effect,cli,browser,rpc,ai}/tsconfig.json \
                 tsconfig.json \
                 tsconfig.base.json \
                 biome.json \

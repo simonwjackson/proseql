@@ -124,7 +124,7 @@ describe("Init Command", () => {
 
 			// Should contain schema import
 			expect(content).toContain(
-				'import { Schema, type DatabaseConfig } from "@proseql/core"',
+				'import { Schema, type DatabaseConfig } from "@proseql/effect"',
 			);
 			// Should contain DatabaseConfig type
 			expect(content).toContain("DatabaseConfig");

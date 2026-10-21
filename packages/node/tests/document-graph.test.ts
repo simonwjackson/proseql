@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { OperationError } from "@proseql/core";
+import { OperationError } from "@proseql/effect";
 import { Effect, Result, Schema, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createNodeDatabase } from "../src/convenience.js";

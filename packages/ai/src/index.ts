@@ -18,7 +18,7 @@ export type {
 	ToolDefinition,
 } from "./types.js";
 
-import type { DatabaseConfig } from "@proseql/core";
+import type { DatabaseConfig } from "@proseql/effect";
 import {
 	buildFullDefinitions,
 	buildReadOnlyDefinitions,

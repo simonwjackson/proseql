@@ -6,7 +6,7 @@
  * relationships, and constraints.
  */
 
-import type { CollectionConfig, DatabaseConfig } from "@proseql/core";
+import type { CollectionConfig, DatabaseConfig } from "@proseql/effect";
 import { Effect, type Schema } from "effect";
 import {
 	getCliCollectionConfig,

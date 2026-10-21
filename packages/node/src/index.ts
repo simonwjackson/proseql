@@ -1,11 +1,11 @@
 /**
  * @proseql/node - Node.js adapter for ProseQL
  *
- * Re-exports everything from @proseql/core plus Node.js filesystem storage.
+ * Re-exports everything from @proseql/effect plus Node.js filesystem storage.
  */
 
-// Re-export everything from core
-export * from "@proseql/core";
+// Re-export the engine-backed Effect API
+export * from "@proseql/effect";
 // Convenience wrappers (config-driven, no manual layer wiring)
 export {
 	createNodeDatabase,

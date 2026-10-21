@@ -35,7 +35,8 @@ jobs:
           workspaces: crates -> crates/target
       - run: nix develop --command bun install --frozen-lockfile --ignore-scripts
       - run: nix run .#build-release-artifacts
-      - run: nix run .#test
+      - name: Test WASM engine and engine-backed node, CLI, REST and AI packages
+        run: nix run .#test
 
   rust:
     runs-on: ubuntu-latest

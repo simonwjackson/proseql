@@ -6,7 +6,7 @@
  * Entry point: parses top-level flags and dispatches to command handlers.
  */
 
-import type { DatabaseConfig } from "@proseql/core";
+import type { DatabaseConfig } from "@proseql/effect";
 import { Effect } from "effect";
 import { handleCollections as handleCollectionsCommand } from "./commands/collections.js";
 import {

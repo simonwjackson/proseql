@@ -143,7 +143,7 @@ const ERROR_MESSAGES: Record<string, string> = {
  * @example
  * ```typescript
  * import { mapErrorToResponse } from "@proseql/rest"
- * import { NotFoundError } from "@proseql/core"
+ * import { NotFoundError } from "@proseql/effect"
  *
  * const error = new NotFoundError({
  *   collection: "books",

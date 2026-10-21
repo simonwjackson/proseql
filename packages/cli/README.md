@@ -1,6 +1,6 @@
 # @proseql/cli
 
-Command-line interface for ProseQL databases. Query, create, update, and manage your plain text database files from the terminal.
+Command-line interface for Rust/WASM-backed ProseQL databases. Query, create, update, and manage your plain text database files from the terminal.
 
 ## Install
 
@@ -36,7 +36,7 @@ proseql delete books abc123 --force
 New ProseQL configs use top-level `collections` plus `sources`. Collections define schemas and identity policy; sources define where the CLI reads and writes documents. Relative source paths are resolved relative to the config file. Document-source `outbox` paths are resolved under the source root.
 
 ```ts
-import { Schema, type DatabaseConfig } from "@proseql/core"
+import { Schema, type DatabaseConfig } from "@proseql/effect"
 
 const BookPayload = Schema.Struct({
   title: Schema.String,

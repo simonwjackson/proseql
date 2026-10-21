@@ -1,7 +1,7 @@
 /**
  * ProseQL CLI - YAML Output Formatter
  *
- * Formats records as YAML using the same YAML library as @proseql/core.
+ * Formats records as YAML using the same YAML library as @proseql/effect.
  */
 
 import YAML from "yaml";

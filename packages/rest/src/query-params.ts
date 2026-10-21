@@ -7,7 +7,7 @@
  * @module
  */
 
-import type { AggregateConfig } from "@proseql/core";
+import type { AggregateConfig } from "@proseql/effect";
 
 // ============================================================================
 // Types

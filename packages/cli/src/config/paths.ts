@@ -3,11 +3,11 @@ import type {
 	CollectionConfig,
 	DatabaseConfig,
 	DatabaseSourceConfig,
-} from "@proseql/core";
+} from "@proseql/effect";
 import {
 	getCollectionConfigs,
 	isSourceOrientedDatabaseConfig,
-} from "@proseql/core";
+} from "@proseql/effect";
 
 const resolvePathFrom = (baseDir: string, filePath: string): string =>
 	path.isAbsolute(filePath) ? filePath : path.resolve(baseDir, filePath);

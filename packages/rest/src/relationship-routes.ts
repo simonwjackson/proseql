@@ -17,7 +17,7 @@ import type {
 	DatabaseConfig,
 	GenerateDatabase,
 	GenerateDatabaseWithPersistence,
-} from "@proseql/core";
+} from "@proseql/effect";
 import { Effect, Stream } from "effect";
 import type { RestHandler, RestResponse, RouteDescriptor } from "./handlers.js";
 

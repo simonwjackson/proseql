@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { makeProseQLTag } from "@proseql/core";
+import { makeProseQLTag } from "@proseql/effect";
 import { Context, type Effect, Schema } from "effect";
 import { type createNodeDatabase, makeProseQLLayer } from "./convenience.js";
 

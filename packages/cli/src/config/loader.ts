@@ -1,12 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DatabaseConfig } from "@proseql/core";
+import type { DatabaseConfig } from "@proseql/effect";
 import {
 	getCollectionConfigs,
 	isSourceOrientedDatabaseConfig,
 	normalizeSourceConfig,
-} from "@proseql/core";
+} from "@proseql/effect";
 import { Data, Effect } from "effect";
 
 /**
@@ -99,7 +99,7 @@ function loadModuleConfig(
 	return Effect.tryPromise({
 		try: async () => {
 			// Prepend the CLI's own node_modules to NODE_PATH so that config files
-			// can resolve packages (e.g. `effect`, `@proseql/core`) that ship with
+			// can resolve packages (e.g. `effect`, `@proseql/effect`) that ship with
 			// the CLI, even when the config lives in a project that doesn't have
 			// those packages installed locally.
 			const existing = process.env.NODE_PATH ?? "";
@@ -125,7 +125,7 @@ function loadModuleConfig(
 				errorMessage.includes("Cannot find package") ||
 				errorMessage.includes("Cannot find module");
 			const hint = isModuleNotFound
-				? "\n\nHint: If the config file imports packages like 'effect' or '@proseql/core', " +
+				? "\n\nHint: If the config file imports packages like 'effect' or '@proseql/effect', " +
 					"ensure they are installed in your project, or use 'bunx' which resolves " +
 					"dependencies from the CLI's own node_modules."
 				: "";

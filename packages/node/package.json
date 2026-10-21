@@ -1,7 +1,7 @@
 {
 	"name": "@proseql/node",
 	"version": "0.16.0",
-	"description": "Node.js file system adapter for ProseQL, re-exports core plus NodeStorageLayer",
+	"description": "Node.js storage for the Rust/WASM ProseQL engine, re-exports @proseql/effect",
 	"type": "module",
 	"scripts": {
 		"build": "bun run tsc --build",
@@ -48,7 +48,8 @@
 	},
 	"sideEffects": false,
 	"dependencies": {
-		"@proseql/core": "workspace:*"
+		"@proseql/effect": "workspace:*",
+		"@proseql/engine": "workspace:*"
 	},
 	"peerDependencies": {
 		"effect": "4.0.0-beta.103"
