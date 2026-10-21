@@ -436,6 +436,34 @@ impl CallbackRegistry {
     pub fn global_on_change_hooks(&self) -> &[String] {
         &self.global_on_change_hooks
     }
+    // Lookups and extraction used by the native runtime
+    pub fn has_computed(&self, id: &str) -> bool {
+        self.computed.contains_key(id)
+    }
+
+    /// Removes a callback for native durable post-commit dispatch.
+    /// The WASM boundary must not call this method.
+    pub fn take_after_create_hook(&mut self, id: &str) -> Option<AfterCreateHookCallback> {
+        self.after_create_hooks.remove(id)
+    }
+
+    /// Removes a callback for native durable post-commit dispatch.
+    /// The WASM boundary must not call this method.
+    pub fn take_after_update_hook(&mut self, id: &str) -> Option<AfterUpdateHookCallback> {
+        self.after_update_hooks.remove(id)
+    }
+
+    /// Removes a callback for native durable post-commit dispatch.
+    /// The WASM boundary must not call this method.
+    pub fn take_after_delete_hook(&mut self, id: &str) -> Option<AfterDeleteHookCallback> {
+        self.after_delete_hooks.remove(id)
+    }
+
+    /// Removes a callback for native durable post-commit dispatch.
+    /// The WASM boundary must not call this method.
+    pub fn take_on_change_hook(&mut self, id: &str) -> Option<OnChangeHookCallback> {
+        self.on_change_hooks.remove(id)
+    }
 }
 
 #[cfg(test)]
@@ -557,5 +585,45 @@ mod tests {
             entity: json!({"id":"u1"}),
         };
         assert!(registry.on_change_hook("track").unwrap()(&ctx).is_ok());
+    }
+
+    #[test]
+    fn computed_lookup_does_not_invoke_callback() {
+        let mut registry = CallbackRegistry::new();
+        assert!(!registry.has_computed("computed"));
+        registry.register_computed("computed", Box::new(|_| panic!("lookup invoked callback")));
+        assert!(registry.has_computed("computed"));
+    }
+
+    #[test]
+    fn take_after_create_returns_callback_once() {
+        let mut registry = CallbackRegistry::new();
+        registry.register_after_create_hook("hook", Box::new(|_| Ok(())));
+        assert!(registry.take_after_create_hook("hook").is_some());
+        assert!(registry.take_after_create_hook("hook").is_none());
+    }
+
+    #[test]
+    fn take_after_update_returns_callback_once() {
+        let mut registry = CallbackRegistry::new();
+        registry.register_after_update_hook("hook", Box::new(|_| Ok(())));
+        assert!(registry.take_after_update_hook("hook").is_some());
+        assert!(registry.take_after_update_hook("hook").is_none());
+    }
+
+    #[test]
+    fn take_after_delete_returns_callback_once() {
+        let mut registry = CallbackRegistry::new();
+        registry.register_after_delete_hook("hook", Box::new(|_| Ok(())));
+        assert!(registry.take_after_delete_hook("hook").is_some());
+        assert!(registry.take_after_delete_hook("hook").is_none());
+    }
+
+    #[test]
+    fn take_on_change_returns_callback_once() {
+        let mut registry = CallbackRegistry::new();
+        registry.register_on_change_hook("hook", Box::new(|_| Ok(())));
+        assert!(registry.take_on_change_hook("hook").is_some());
+        assert!(registry.take_on_change_hook("hook").is_none());
     }
 }
