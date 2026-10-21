@@ -396,7 +396,7 @@ The rows below are explicit exceptions to assertion preservation. A new API shap
 
 ### Native dangling-fixture corrections (assertions unchanged)
 
-Main proves that plain deletion was invalid setup, not a permitted way to create dangling state. Main `delete.ts:126-133` calls `checkDeleteConstraintsEffect` before its soft branch at line 136. `foreign-key.ts:144-174` checks every inbound `ref`, using the explicit foreignKey or `<relationshipName>Id`. In contrast, `delete-with-relationships.ts:232-236` defaults the cascade to `"preserve"`, and `383-386` removes directly without the inbound checker. Batch soft deletes deliberately bypass it (`delete.ts:302-312`).
+Main proves that plain deletion was invalid setup, not a permitted way to create dangling state. Main first rejects unsupported soft deletes at `delete.ts:115-123`, then calls `checkDeleteConstraintsEffect` at `126-133`, before its soft branch at line 136. `foreign-key.ts:144-174` checks every inbound `ref`, using the explicit foreignKey or `<relationshipName>Id`. In contrast, `delete-with-relationships.ts:232-236` defaults the cascade to `"preserve"`, and `383-386` removes directly without the inbound checker. Batch soft deletes deliberately bypass it (`delete.ts:302-312`).
 
 A real run of the old core produced:
 
@@ -432,3 +432,8 @@ Equality/search index assertions are now checked explicitly through Rust's publi
 Effect 4 call-shape changes applied during movement: `Effect.either`/Left assertions become `Effect.result`/Failure; fork and Scope APIs use beta.103 names/signatures; Stream collections are arrays. Persisted database scopes stay alive until suite cleanup. Tagged database error `_tag` fields and business assertions remain unchanged.
 
 An isolated clean core tarball was also inspected and imported: version 1.0.0, 89,462 B, 188 dist files, 58 exports, no database factories or stale TS engine module directories. The full packed nine-package consumer gate was not run; its clean build is blocked by the WASM size limit.
+
+
+### Single-soft-delete follow-up
+
+The complete post-fix normal TS run passes 4,067 tests, with the same two Chromium skips (4,069 total). Rust passes 1,142 tests, with the same two subprocess-only helper ignores. This corrects the unsupported-soft-delete error priority and single-result identity missed by the earlier partial post-soft run. Existing TS assertions are unchanged; a new Rust test checks unsupported-field priority and non-mutation. Browser production WASM gzip is 599,089 B. The normal TS run uses a temporary 599,090 B allowance, not a committed cap increase; the unchanged 599,000 B source cap still blocks the standard build by 89 B.

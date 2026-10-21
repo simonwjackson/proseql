@@ -136,3 +136,8 @@ Known follow-ups remain: route WASM persistence through Rust proseql-storage; RE
 An isolated clean core build and `bun pm pack --ignore-scripts` produced an **89,462 B** 1.0.0 tarball (188 dist files). Importing the extracted tarball itself exposed 58 exports and neither database factory. Inspection found no factories/operations/state/indexes/reactive/transactions/hooks/validators runtime paths. This is actual packed-core evidence, not a source-only proxy. The nine-package packed consumer/release gate remains unverified because the production WASM build is size-blocked.
 
 Native-only lazy partition loading and durable append remain native-only. Do not infer those capabilities from the WASM facade. Nothing was published, tagged or pushed.
+
+
+## Single-soft-delete follow-up
+
+Main rejects unsupported soft deletes at `delete.ts:115-123`, before inbound validation at `126-133`. The follow-up preserves that priority and uses the existing bulk-delete materialization helper for single-delete result identity. No other optimisation is included. Browser production WASM gzip is **599,089 B**, 1 B below `040dc99` and the requested 599,090 B ceiling. The full normal TS run passes 4,067 tests with two unchanged Chromium skips; Rust passes 1,142 with two unchanged subprocess-helper ignores. The normal TS run uses an uncommitted temporary 599,090 B allowance. The source cap stays 599,000 B, so that original gate still blocks by 89 B.

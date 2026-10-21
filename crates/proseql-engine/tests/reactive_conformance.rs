@@ -2113,3 +2113,38 @@ fn single_soft_delete_checks_inbound_refs_but_batch_soft_delete_preserves_them()
     assert_eq!(result.count, 1);
     assert!(db.collection("people").unwrap().get("boss").unwrap()["deletedAt"].is_string());
 }
+
+#[test]
+fn single_soft_delete_rejects_missing_field_before_inbound_references() {
+    let (mut db, _) = make_people_db_with_scheduler(vec![
+        json!({"id":"boss","name":"Boss"}),
+        json!({"id":"worker","name":"Worker","managerId":"boss"}),
+    ]);
+    let before = db
+        .collection("people")
+        .unwrap()
+        .list()
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    match db.delete_with_options("people", "boss", true) {
+        Err(EngineError::Operation(error)) => {
+            assert_eq!(error.operation, "soft delete");
+            assert_eq!(error.reason, "Entity does not have a deletedAt field");
+        }
+        other => panic!("expected unsupported soft delete, got {other:?}"),
+    }
+    assert_eq!(
+        db.collection("people")
+            .unwrap()
+            .list()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+        before
+    );
+    assert!(matches!(
+        db.delete_with_options("people", "missing", true),
+        Err(EngineError::NotFound(_))
+    ));
+}

@@ -1024,6 +1024,10 @@ impl Collection {
         self.delete_with_options(id, false)
     }
 
+    pub(crate) fn supports_soft_delete(&self) -> bool {
+        self.supports_soft_delete
+    }
+
     /// Delete with explicit soft-delete option.
     pub fn delete_with_options(&mut self, id: &str, soft: bool) -> Result<Value, EngineError> {
         if self.descriptor.append_only {

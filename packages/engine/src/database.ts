@@ -2348,17 +2348,7 @@ class EngineRuntime {
 				) ?? ownerChanges.find((candidate) => !candidate.deleted);
 			result = materializeStoredRow(value, change);
 		} else if (method === "delete") {
-			const preparedId =
-				typeof prepared === "object" &&
-				prepared !== null &&
-				"id" in prepared &&
-				typeof (prepared as { readonly id?: unknown }).id === "string"
-					? (prepared as { readonly id: string }).id
-					: undefined;
-			result =
-				(preparedId === undefined
-					? undefined
-					: priorMaterialized.get(preparedId)) ?? value;
+			result = materializeDeletedRow(value);
 		} else if (
 			typeof result === "object" &&
 			result !== null &&

@@ -468,16 +468,17 @@ impl Database {
         id: &str,
         soft: bool,
     ) -> Result<Value, EngineError> {
-        if self
+        let target = self
             .collections
             .get(collection)
-            .ok_or_else(|| col_nf(collection))?
-            .get(id)
-            .is_none()
-        {
+            .ok_or_else(|| col_nf(collection))?;
+        if target.get(id).is_none() {
             return Err(helpers::ent_nf(collection, id));
         }
-        validate_delete_constraints(collection, id, &self.collections)?;
+        // Unsupported soft deletes fail in Collection before checking inbound refs.
+        if target.supports_soft_delete() || !soft {
+            validate_delete_constraints(collection, id, &self.collections)?;
+        }
         let deleted = self
             .collections
             .get_mut(collection)
