@@ -12,6 +12,7 @@ import type {
 	GenerateDatabase,
 	GenerateDatabaseWithPersistence,
 } from "@proseql/effect";
+import { getCollectionConfigs } from "@proseql/effect";
 import { Effect, Stream } from "effect";
 import { parseAggregateParams, parseQueryParams } from "./query-params.js";
 
@@ -142,7 +143,7 @@ export const createRestHandlers = <Config extends DatabaseConfig>(
 	const routes: Array<RouteDescriptor> = [];
 
 	// Generate routes for each collection
-	for (const collectionName of Object.keys(config)) {
+	for (const collectionName of Object.keys(getCollectionConfigs(config))) {
 		// biome-ignore lint/suspicious/noExplicitAny: Collection type is dynamic based on config
 		const collection = (db as Record<string, any>)[collectionName];
 

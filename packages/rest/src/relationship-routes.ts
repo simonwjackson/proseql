@@ -18,6 +18,7 @@ import type {
 	GenerateDatabase,
 	GenerateDatabaseWithPersistence,
 } from "@proseql/effect";
+import { getCollectionConfigs } from "@proseql/effect";
 import { Effect, Stream } from "effect";
 import type { RestHandler, RestResponse, RouteDescriptor } from "./handlers.js";
 
@@ -64,7 +65,9 @@ export const extractRelationships = <Config extends DatabaseConfig>(
 ): ReadonlyArray<RelationshipRouteInfo> => {
 	const relationships: Array<RelationshipRouteInfo> = [];
 
-	for (const [collectionName, collectionConfig] of Object.entries(config)) {
+	for (const [collectionName, collectionConfig] of Object.entries(
+		getCollectionConfigs(config),
+	)) {
 		const collectionRelationships = collectionConfig.relationships;
 		if (!collectionRelationships) continue;
 

@@ -9,6 +9,7 @@
 - All nine packages, including `@proseql/ai`, now share version 1.0.0.
 
 ### Engine and host contracts
+- Fix REST CRUD, query, aggregate and relationship route generation for source-oriented `{ collections, sources }` configs.
 - Enforce Effect Schema checks: native Rust built-ins and WASM host predicates. Invalid `Record` keys are dropped, as Effect drops them.
 - Add the native `CallbackRegistry` of Rust closures and export `EngineStorageHost`. See `docs/storage-hosts.md` and `docs/native-sources.md`.
 - Move TypeScript persistence orchestration into the engine host layer. Remove the TS database engine and run its behaviour tests directly against Rust/WASM.
