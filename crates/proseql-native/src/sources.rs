@@ -407,6 +407,9 @@ impl SourceState {
         for (name, values) in &self.graph.collections {
             collections.insert(name.clone(), values.clone());
         }
+        // Lazy collections hold their loaded partitions in the engine only;
+        // a snapshot replacement must leave them alone (see `lazy_refresh`).
+        collections.retain(|name, _| !self.lazy.contains_key(name));
         collections
     }
 

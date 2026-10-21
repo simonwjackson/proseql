@@ -1134,3 +1134,28 @@ fn explicit_reload_drops_removed_files_and_lists_new_ones() {
     assert!(lazy_query(&lazy, month("2026-01")).is_empty());
     assert_eq!(lazy_query(&lazy, month("2026-07")).len(), 1);
 }
+
+// ── Review regressions ───────────────────────────────────────────────────────
+
+#[test]
+fn unchanged_reload_keeps_loaded_records_and_identical_retries_write_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let all = seed(dir.path());
+    let lazy = open_lazy(dir.path(), policy(2, FullScanPolicy::Error));
+    let before = lazy_query(&lazy, month("2026-01"));
+    assert_eq!(before.len(), 11);
+    lazy.reload().unwrap();
+    assert_eq!(resident_len(&lazy), 11, "reload dropped the loaded records");
+    assert_eq!(lazy_query(&lazy, month("2026-01")), before);
+    // An identical retry of a stored record must not append a duplicate ID.
+    let january = root(dir.path()).join("2026-01.jsonl");
+    let bytes = fs::read(&january).unwrap();
+    let stored = all[25].clone();
+    lazy.mutate(|db| db.create("heartrate", stored.clone()))
+        .unwrap();
+    assert_eq!(fs::read(&january).unwrap(), bytes, "identical retry wrote");
+    lazy.reload().unwrap();
+    lazy.mutate(|db| db.create("heartrate", stored.clone()))
+        .unwrap();
+    assert_eq!(fs::read(&january).unwrap(), bytes, "identical retry wrote");
+}
