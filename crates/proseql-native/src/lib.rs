@@ -5,6 +5,7 @@
 //! after durable persistence. Source-mode batches replace files individually;
 //! a write-stage failure quarantines the runtime because a prefix can be durable.
 
+mod callbacks;
 mod lazy;
 mod read_snapshot;
 mod sources;
@@ -18,11 +19,12 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use indexmap::IndexMap;
-use proseql_engine::callbacks::CallbackRegistry;
+pub use proseql_engine::callbacks::CallbackRegistry;
 use proseql_engine::collection::Collection;
 use proseql_engine::descriptor::CollectionDescriptor;
 use proseql_engine::errors::{EngineError, OperationError};
 use proseql_engine::id_gen::NanoIdGenerator;
+use proseql_engine::plugins::PluginCodecMetadata;
 use proseql_engine::query::aggregate::{
     compute_aggregates, compute_grouped_aggregates, AggregateConfig, AggregateResult, GroupResult,
 };
@@ -34,8 +36,8 @@ use proseql_storage::fs::FsStorageHost;
 use proseql_storage::host::{StorageHost, WatchHandle};
 use proseql_storage::memory::MemoryStorageHost;
 use proseql_storage::persistence::{
-    load_collections_from_file, save_collections_to_file, DurableStorageHost, LoadCollectionConfig,
-    SaveCollectionConfig,
+    load_collections_from_file, save_collections_to_file, CallbackRegistryMigrationHost,
+    DurableStorageHost, LoadCollectionConfig, MigrationStep, SaveCollectionConfig,
 };
 use serde_json::Value;
 
@@ -58,6 +60,79 @@ impl NativeCollectionConfig {
 pub struct NativeRuntimeConfig {
     pub path: String,
     pub collections: Vec<NativeCollectionConfig>,
+}
+
+/// Host callbacks and codecs for single-file mode. Existing `open*` methods
+/// use empty callbacks and built-in codecs. Source mode has equivalent options.
+pub struct NativeRuntimeOptions {
+    /// Registered Rust closures. Consumed and shared with engine collections.
+    pub callbacks: CallbackRegistry,
+    pub formats: FormatRegistry,
+    /// Callback codecs appended after `formats`; the last extension wins.
+    pub plugin_codecs: Vec<PluginCodecMetadata>,
+}
+
+impl Default for NativeRuntimeOptions {
+    fn default() -> Self {
+        Self {
+            callbacks: CallbackRegistry::new(),
+            formats: FormatRegistry::with_builtins(),
+            plugin_codecs: Vec::new(),
+        }
+    }
+}
+
+struct RuntimeServices {
+    callbacks: Arc<CallbackRegistry>,
+    dispatch: Arc<callbacks::Dispatch>,
+    formats: FormatRegistry,
+}
+
+impl RuntimeServices {
+    fn new(
+        config: &NativeRuntimeConfig,
+        mut options: NativeRuntimeOptions,
+    ) -> Result<Self, EngineError> {
+        validate_config(config, &options.callbacks)?;
+        for codec in &options.plugin_codecs {
+            for (id, present) in [
+                (
+                    &codec.encode_callback_id,
+                    options
+                        .callbacks
+                        .has_codec_encode(&codec.encode_callback_id),
+                ),
+                (
+                    &codec.decode_callback_id,
+                    options
+                        .callbacks
+                        .has_codec_decode(&codec.decode_callback_id),
+                ),
+            ] {
+                if !present {
+                    return Err(operation_error(
+                        "missing-callback",
+                        format!("Codec '{}' callback '{}' is not registered", codec.name, id),
+                    ));
+                }
+            }
+        }
+        let dispatch = callbacks::Dispatch::install(config, &mut options.callbacks);
+        let callbacks = Arc::new(options.callbacks);
+        for codec in options.plugin_codecs {
+            options
+                .formats
+                .register(Box::new(proseql_formats::plugin_codec(
+                    Arc::clone(&callbacks),
+                    &codec,
+                )));
+        }
+        Ok(Self {
+            callbacks,
+            dispatch,
+            formats: options.formats,
+        })
+    }
 }
 
 /// Restricted mutation view used by [`NativeRuntime::mutate`]. Keeping the raw
@@ -282,6 +357,8 @@ struct RuntimeState {
     config: NativeRuntimeConfig,
     sources: Option<SourceState>,
     database: Database,
+    callbacks: Arc<CallbackRegistry>,
+    dispatch: Arc<callbacks::Dispatch>,
     formats: FormatRegistry,
     host: Arc<dyn DurableStorageHost>,
     watch: Vec<Box<dyn WatchHandle>>,
@@ -318,13 +395,57 @@ impl NativeRuntime {
         config: NativeRuntimeConfig,
         host: Arc<dyn DurableStorageHost>,
     ) -> Result<Self, EngineError> {
-        validate_config(&config)?;
-        let formats = FormatRegistry::with_builtins();
-        let load_configs = load_configs(&config);
-        let loaded =
-            load_collections_from_file(host.as_ref(), &formats, &config.path, &load_configs, None)?;
-        let source_content = host.read(&config.path).ok();
-        Self::from_loaded(config, host, formats, loaded, source_content, None)
+        Self::open_with_dyn_host_and_options(config, host, NativeRuntimeOptions::default())
+    }
+
+    pub fn open_with_options(
+        config: NativeRuntimeConfig,
+        options: NativeRuntimeOptions,
+    ) -> Result<Self, EngineError> {
+        let host = Arc::new(FsStorageHost::new_polling(Duration::from_secs(2))?);
+        Self::open_with_dyn_host_and_options(config, host, options)
+    }
+
+    pub fn open_with_host_and_options<H>(
+        config: NativeRuntimeConfig,
+        host: Arc<H>,
+        options: NativeRuntimeOptions,
+    ) -> Result<Self, EngineError>
+    where
+        H: DurableStorageHost + 'static,
+    {
+        Self::open_with_dyn_host_and_options(config, host, options)
+    }
+
+    pub fn open_with_dyn_host_and_options(
+        config: NativeRuntimeConfig,
+        host: Arc<dyn DurableStorageHost>,
+        options: NativeRuntimeOptions,
+    ) -> Result<Self, EngineError> {
+        let services = RuntimeServices::new(&config, options)?;
+        let loaded = load_single_file(
+            host.as_ref(),
+            &services.formats,
+            &config,
+            &services.callbacks,
+        )?;
+        let runtime = Self::from_loaded(
+            config,
+            host,
+            services,
+            loaded.collections,
+            loaded.content,
+            None,
+        )?;
+        // The storage loader's migration writeback stays in memory until the
+        // aggregate database is valid. Preserve undeclared sections
+        // at the value level rather than serializing only declared collections.
+        if let Some(content) = loaded.migrated_content {
+            let mut state = runtime.lock_open()?;
+            state.host.replace_durable(&state.config.path, &content)?;
+            state.last_persisted_content = Some(content);
+        }
+        Ok(runtime)
     }
 
     /// Open writable documents and read-only graphs with default native services.
@@ -348,26 +469,33 @@ impl NativeRuntime {
         let normalized = SourceState::normalize(&config)?;
         let appendable = SourceState::appendable_collections(&config, &normalized);
         let lazy = lazy::configure_lazy(&config, &normalized, &options.lazy_partitions)?;
+        if !lazy.is_empty() && has_global_hooks(&options.callbacks) {
+            return Err(operation_error(
+                "unsupported-descriptor",
+                "Lazy sources do not support global hooks",
+            ));
+        }
         let descriptors = SourceState::descriptor_config(config);
-        validate_config(&descriptors)?;
+        let services = RuntimeServices::new(
+            &descriptors,
+            NativeRuntimeOptions {
+                callbacks: options.callbacks,
+                formats: options.formats,
+                plugin_codecs: options.plugin_codecs,
+            },
+        )?;
         let sources = SourceState::load(
             host.as_ref(),
-            &options.formats,
+            &services.formats,
             normalized,
             appendable,
             options.transforms,
             &lazy,
             options.lazy_watch_interval,
+            &services.callbacks,
         )?;
         let loaded = sources.collections();
-        let runtime = Self::from_loaded(
-            descriptors,
-            host,
-            options.formats,
-            loaded,
-            None,
-            Some(sources),
-        )?;
+        let runtime = Self::from_loaded(descriptors, host, services, loaded, None, Some(sources))?;
         if let Some(debounce) = options.watch_debounce {
             runtime.start_managed_watch(debounce)?;
         }
@@ -377,12 +505,16 @@ impl NativeRuntime {
     fn from_loaded(
         config: NativeRuntimeConfig,
         host: Arc<dyn DurableStorageHost>,
-        formats: FormatRegistry,
+        services: RuntimeServices,
         loaded: IndexMap<String, IndexMap<String, Value>>,
         source_content: Option<String>,
         sources: Option<SourceState>,
     ) -> Result<Self, EngineError> {
-        let registry = Arc::new(CallbackRegistry::new());
+        let RuntimeServices {
+            callbacks: registry,
+            dispatch,
+            formats,
+        } = services;
         let mut collections = IndexMap::new();
         for collection in &config.collections {
             let name = collection.descriptor.name.clone();
@@ -392,11 +524,16 @@ impl NativeRuntime {
                     name,
                     collection.descriptor.clone(),
                     Arc::clone(&registry),
-                    Box::new(NanoIdGenerator),
+                    collection
+                        .descriptor
+                        .id_generator
+                        .as_ref()
+                        .and_then(|name| registry.instantiate_id_generator(name))
+                        .unwrap_or_else(|| Box::new(NanoIdGenerator)),
                 ),
             );
         }
-        let mut database = Database::new(collections, registry);
+        let mut database = Database::new(collections, Arc::clone(&registry));
         database.commit_snapshot_transaction(states_to_records(loaded))?;
         database.take_committed_changes();
         Ok(Self {
@@ -405,6 +542,8 @@ impl NativeRuntime {
                     config,
                     sources,
                     database,
+                    callbacks: registry,
+                    dispatch,
                     formats,
                     host,
                     watch: Vec::new(),
@@ -765,6 +904,7 @@ impl NativeRuntime {
         f: impl FnOnce(&mut NativeMutation<'_>) -> Result<R, EngineError>,
     ) -> Result<R, EngineError> {
         let mut state = self.lock_open()?;
+        let callbacks = state.dispatch.batch();
         self.drain_unpins(&mut state);
         let read_only = state
             .sources
@@ -811,7 +951,11 @@ impl NativeRuntime {
             if lazy && state.quarantine_error.is_none() {
                 sources_trim(&mut state)?;
             }
-            return committed;
+            let result = committed?;
+            let replay = callbacks.finish();
+            drop(state);
+            replay();
+            return Ok(result);
         }
         let candidate = state.database.snapshot_all_collection_states();
         let content = match serialize_candidate(&state.config, &state.formats, &candidate) {
@@ -832,6 +976,9 @@ impl NativeRuntime {
         }
         state.database.take_committed_changes();
         state.last_persisted_content = Some(content);
+        let replay = callbacks.finish();
+        drop(state);
+        replay();
         Ok(result)
     }
 
@@ -1255,6 +1402,7 @@ fn reload_locked(
                 sources.transforms.clone(),
                 &sources.lazy,
                 sources.lazy_watch_interval,
+                &state.callbacks,
             )?;
             state
                 .database
@@ -1270,18 +1418,30 @@ fn reload_locked(
         if suppress_self_write && state.last_persisted_content.as_deref() == Some(&content) {
             return Ok(());
         }
-        let loaded = load_collections_from_file(
+        let loaded = load_single_file(
             state.host.as_ref(),
             &state.formats,
-            &state.config.path,
-            &load_configs(&state.config),
-            None,
+            &state.config,
+            &state.callbacks,
         )?;
-        state
-            .database
-            .commit_snapshot_transaction(states_to_records(loaded))?;
+        let records = states_to_records(loaded.collections);
+        if let Some(migrated) = &loaded.migrated_content {
+            state
+                .database
+                .validate_snapshot_transaction(records.clone())?;
+            state.host.replace_durable(&state.config.path, migrated)?;
+        }
+        if let Err(error) = state.database.commit_snapshot_transaction(records) {
+            // Ordinary invalid reloads keep the last valid database usable.
+            // Only an unexpected failure after durable migration writeback
+            // makes the visible state unsafe to use.
+            if loaded.migrated_content.is_some() {
+                state.quarantine_error = Some(error.clone());
+            }
+            return Err(error);
+        }
         state.database.take_committed_changes();
-        state.last_persisted_content = Some(content);
+        state.last_persisted_content = Some(loaded.migrated_content.unwrap_or(content));
         Ok(())
     })();
     match result {
@@ -1390,29 +1550,147 @@ fn persist_current(state: &mut RuntimeState) -> Result<(), EngineError> {
     Ok(())
 }
 
-fn validate_config(config: &NativeRuntimeConfig) -> Result<(), EngineError> {
+fn has_global_hooks(callbacks: &CallbackRegistry) -> bool {
+    !callbacks.global_before_create_hooks().is_empty()
+        || !callbacks.global_before_update_hooks().is_empty()
+        || !callbacks.global_before_delete_hooks().is_empty()
+        || !callbacks.global_after_create_hooks().is_empty()
+        || !callbacks.global_after_update_hooks().is_empty()
+        || !callbacks.global_after_delete_hooks().is_empty()
+        || !callbacks.global_on_change_hooks().is_empty()
+}
+
+fn validate_config(
+    config: &NativeRuntimeConfig,
+    callbacks: &CallbackRegistry,
+) -> Result<(), EngineError> {
     for collection in &config.collections {
-        proseql_engine::descriptor::validate_collection_descriptor(&collection.descriptor)?;
         let descriptor = &collection.descriptor;
-        let has_callbacks = !descriptor.before_create_hooks.is_empty()
-            || !descriptor.after_create_hooks.is_empty()
-            || !descriptor.before_update_hooks.is_empty()
-            || !descriptor.after_update_hooks.is_empty()
-            || !descriptor.before_delete_hooks.is_empty()
-            || !descriptor.after_delete_hooks.is_empty()
-            || !descriptor.on_change_hooks.is_empty()
-            || !descriptor.computed_fields.is_empty();
-        if has_callbacks || !descriptor.migrations.is_empty() || descriptor.id_generator.is_some() {
-            return Err(operation_error(
-                "unsupported-descriptor",
-                format!(
-                    "Collection '{}' requires callbacks, migrations, or a named ID generator; register-capable native configuration is not yet supported",
-                    descriptor.name
-                ),
-            ));
+        proseql_engine::descriptor::validate_collection_descriptor(descriptor)?;
+        let require = |id: &str, present: bool| {
+            if present {
+                Ok(())
+            } else {
+                Err(operation_error(
+                    "missing-callback",
+                    format!(
+                        "Collection '{}' callback or ID generator '{}' is not registered",
+                        descriptor.name, id
+                    ),
+                ))
+            }
+        };
+        macro_rules! hooks {
+            ($field:ident, $global:ident, $lookup:ident) => {
+                for id in descriptor.$field.iter().chain(callbacks.$global()) {
+                    require(id, callbacks.$lookup(id).is_some())?;
+                }
+            };
+        }
+        hooks!(
+            before_create_hooks,
+            global_before_create_hooks,
+            before_create_hook
+        );
+        hooks!(
+            before_update_hooks,
+            global_before_update_hooks,
+            before_update_hook
+        );
+        hooks!(
+            before_delete_hooks,
+            global_before_delete_hooks,
+            before_delete_hook
+        );
+        hooks!(
+            after_create_hooks,
+            global_after_create_hooks,
+            after_create_hook
+        );
+        hooks!(
+            after_update_hooks,
+            global_after_update_hooks,
+            after_update_hook
+        );
+        hooks!(
+            after_delete_hooks,
+            global_after_delete_hooks,
+            after_delete_hook
+        );
+        hooks!(on_change_hooks, global_on_change_hooks, on_change_hook);
+        for field in &descriptor.computed_fields {
+            require(
+                &field.callback_id,
+                callbacks.has_computed(&field.callback_id),
+            )?;
+        }
+        for step in &descriptor.migrations {
+            require(
+                &step.callback_id,
+                callbacks.has_migration(&step.callback_id),
+            )?;
+        }
+        if let Some(name) = &descriptor.id_generator {
+            require(name, callbacks.has_id_generator(name))?;
         }
     }
     Ok(())
+}
+
+fn migration_steps(descriptor: &CollectionDescriptor) -> Vec<MigrationStep> {
+    descriptor
+        .migrations
+        .iter()
+        .map(|step| MigrationStep {
+            from: step.from,
+            to: step.to,
+            description: step.description.clone(),
+            callback_id: step.callback_id.clone(),
+        })
+        .collect()
+}
+
+/// Load and migrate in memory. The storage loader's ordinary writeback must
+/// never bypass the native runtime's durable replacement and validation.
+struct SingleFileLoad {
+    collections: IndexMap<String, IndexMap<String, Value>>,
+    content: Option<String>,
+    migrated_content: Option<String>,
+}
+
+fn load_single_file(
+    host: &dyn DurableStorageHost,
+    formats: &FormatRegistry,
+    config: &NativeRuntimeConfig,
+    callbacks: &CallbackRegistry,
+) -> Result<SingleFileLoad, EngineError> {
+    let staged = MemoryStorageHost::default();
+    let content = if host.exists(&config.path)? {
+        Some(host.read(&config.path)?)
+    } else {
+        None
+    };
+    if let Some(content) = &content {
+        staged.write(&config.path, content)?;
+    }
+    let migrations = CallbackRegistryMigrationHost::new(callbacks);
+    let loaded = load_collections_from_file(
+        &staged,
+        formats,
+        &config.path,
+        &load_configs(config),
+        Some(&migrations),
+    )?;
+    let migrated_content = if staged.exists(&config.path)? {
+        Some(staged.read(&config.path)?).filter(|next| Some(next) != content.as_ref())
+    } else {
+        None
+    };
+    Ok(SingleFileLoad {
+        collections: loaded,
+        content,
+        migrated_content,
+    })
 }
 
 fn states_to_records(
@@ -1433,7 +1711,7 @@ fn load_configs(config: &NativeRuntimeConfig) -> Vec<LoadCollectionConfig> {
             schema: collection.descriptor.schema.clone(),
             id_strategy: collection.descriptor.id_strategy.clone(),
             version: collection.descriptor.version,
-            migrations: vec![],
+            migrations: migration_steps(&collection.descriptor),
         })
         .collect()
 }

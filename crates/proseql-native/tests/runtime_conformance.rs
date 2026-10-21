@@ -586,7 +586,7 @@ fn managed_watch_debounces_external_changes_suppresses_self_writes_and_stops_on_
 }
 
 #[test]
-fn unsupported_descriptor_callbacks_migrations_and_generators_fail_open_typed() {
+fn unregistered_descriptor_callbacks_migrations_and_generators_fail_open_typed() {
     for mutate_descriptor in [
         |descriptor: &mut CollectionDescriptor| descriptor.before_create_hooks.push("hook".into()),
         |descriptor: &mut CollectionDescriptor| {
@@ -604,7 +604,7 @@ fn unsupported_descriptor_callbacks_migrations_and_generators_fail_open_typed() 
         let error =
             NativeRuntime::open_with_host(candidate, Arc::new(MemoryStorageHost::default()))
                 .err()
-                .expect("unsupported descriptor should fail");
+                .expect("unregistered callback should fail");
         assert!(matches!(error, EngineError::Operation(_)));
     }
 }

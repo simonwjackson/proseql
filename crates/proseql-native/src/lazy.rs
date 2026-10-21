@@ -285,6 +285,18 @@ pub(crate) fn configure_lazy(
                 "Lazy partitions need append_only: true on collection '{name}'"
             )));
         }
+        if !descriptor.before_create_hooks.is_empty()
+            || !descriptor.after_create_hooks.is_empty()
+            || !descriptor.before_update_hooks.is_empty()
+            || !descriptor.after_update_hooks.is_empty()
+            || !descriptor.before_delete_hooks.is_empty()
+            || !descriptor.after_delete_hooks.is_empty()
+            || !descriptor.on_change_hooks.is_empty()
+            || !descriptor.computed_fields.is_empty()
+            || !descriptor.migrations.is_empty()
+        {
+            return Err(fail(format!("Lazy partitions do not support hooks, computed fields or migrations on collection '{name}'")));
+        }
         if !descriptor.unique_fields.is_empty() {
             return Err(fail(format!(
                 "Lazy partitions do not support unique_fields on collection '{name}'"

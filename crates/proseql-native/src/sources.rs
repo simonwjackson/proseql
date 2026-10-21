@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use indexmap::IndexMap;
+use proseql_engine::callbacks::CallbackRegistry;
 use proseql_engine::errors::EngineError;
 use proseql_formats::FormatRegistry;
 use proseql_storage::append::{
@@ -38,9 +39,13 @@ pub struct NativeSourceRuntimeConfig {
     pub sources: Vec<DatabaseSourceConfig>,
 }
 
-/// Native codec and graph-transform services. Later codec registrations override
+/// Native callback, codec and graph-transform services. Later codec registrations override
 /// earlier registrations for the same extension.
 pub struct NativeSourceRuntimeOptions {
+    /// Registered Rust closures; empty by default.
+    pub callbacks: CallbackRegistry,
+    /// Callback codecs appended after `formats`; the last extension wins.
+    pub plugin_codecs: Vec<proseql_engine::plugins::PluginCodecMetadata>,
     pub formats: FormatRegistry,
     pub transforms: Option<Arc<dyn DocumentGraphTransformHost>>,
     /// `None` disables automatic watching; explicit reload remains available.
@@ -58,6 +63,8 @@ pub struct NativeSourceRuntimeOptions {
 impl Default for NativeSourceRuntimeOptions {
     fn default() -> Self {
         Self {
+            callbacks: CallbackRegistry::new(),
+            plugin_codecs: Vec::new(),
             formats: FormatRegistry::with_builtins(),
             transforms: None,
             watch_debounce: Some(Duration::from_millis(50)),
@@ -144,7 +151,7 @@ impl SourceState {
                         schema: descriptor.schema.clone(),
                         id_strategy: descriptor.id_strategy.clone(),
                         version: descriptor.version,
-                        migrations: vec![],
+                        migrations: crate::migration_steps(descriptor),
                     },
                 )
             })
@@ -286,6 +293,7 @@ impl SourceState {
         transforms: Option<Arc<dyn DocumentGraphTransformHost>>,
         lazy: &IndexMap<String, crate::lazy::LazyCollection>,
         lazy_watch_interval: Duration,
+        callbacks: &CallbackRegistry,
     ) -> Result<Self, EngineError> {
         // FsStorageHost::exists recovers per-file markers. Do this before the
         // loader lists files: recovery can remove an uncommitted first write.
@@ -349,7 +357,9 @@ impl SourceState {
                         format!("Unknown collection '{}'", source.collection),
                     )
                 })?;
-            let records = if appendable.contains(&source.collection) {
+            let records = if !collection.migrations.is_empty() {
+                load_migrating_file(&snapshot, formats, source, collection, callbacks)?
+            } else if appendable.contains(&source.collection) {
                 let loaded = load_append_file(&snapshot, formats, source, collection, false)?;
                 torn.extend(loaded.torn);
                 loaded.records
@@ -370,13 +380,55 @@ impl SourceState {
                     continue;
                 }
                 let collection = &config.collection_configs[&source.collection];
-                let (loaded, partition_torn) = load_partitioned_source_with(
-                    &snapshot,
-                    formats,
-                    source,
-                    collection,
-                    appendable.contains(&source.collection),
-                )?;
+                let (loaded, partition_torn) = if collection.migrations.is_empty() {
+                    load_partitioned_source_with(
+                        &snapshot,
+                        formats,
+                        source,
+                        collection,
+                        appendable.contains(&source.collection),
+                    )?
+                } else {
+                    let mut loaded = LoadedPartitions::default();
+                    let mut seen = std::collections::HashSet::new();
+                    let mut paths = if snapshot.exists(&source.root)? {
+                        snapshot.list_directory(&source.root)?
+                    } else {
+                        Vec::new()
+                    };
+                    paths.sort();
+                    for path in paths {
+                        if !matches_partition_path(source, &path) || !snapshot.exists(&path)? {
+                            continue;
+                        }
+                        let records = load_migrating_file(
+                            &snapshot,
+                            formats,
+                            &file_source(source, &path),
+                            collection,
+                            callbacks,
+                        )?;
+                        for (id, record) in &records {
+                            if !seen.insert(id.clone()) {
+                                return Err(EngineError::SourceConfig(Box::new(
+                                    proseql_engine::errors::SourceConfigError {
+                                        message: format!(
+                                            "Duplicate partition record '{id}' at '{path}'"
+                                        ),
+                                        source_id: Some(source.id.clone()),
+                                        collection: Some(source.collection.clone()),
+                                        path: Some(path.clone()),
+                                    },
+                                )));
+                            }
+                            proseql_storage::partitioned::check_partition_record(
+                                source, &path, id, record,
+                            )?;
+                        }
+                        loaded.files.insert(path, records);
+                    }
+                    (loaded, Vec::new())
+                };
                 torn.extend(partition_torn);
                 for path in loaded.files.keys() {
                     let content = if appendable.contains(&source.collection) {
@@ -389,9 +441,16 @@ impl SourceState {
                 partitions.insert(source.collection.clone(), loaded);
             }
         }
-        let documents = load_document_sources(&snapshot, formats, &config, None)?;
-        let graph =
-            load_document_graph_sources(&snapshot, formats, &config, None, transforms.as_deref())?;
+        let migrations =
+            proseql_storage::persistence::CallbackRegistryMigrationHost::new(callbacks);
+        let documents = load_document_sources(&snapshot, formats, &config, Some(&migrations))?;
+        let graph = load_document_graph_sources(
+            &snapshot,
+            formats,
+            &config,
+            Some(&migrations),
+            transforms.as_deref(),
+        )?;
         let mut contents = documents
             .documents
             .iter()
@@ -876,4 +935,43 @@ impl SourceState {
             collections: config.collections,
         }
     }
+}
+
+/// Collection-file loader without the storage layer's immediate migration
+/// writeback. Source mode persists migrated records on the next changed write.
+fn load_migrating_file(
+    host: &dyn StorageHost,
+    formats: &FormatRegistry,
+    source: &NormalizedCollectionFileSourceConfig,
+    collection: &CollectionStorageConfig,
+    callbacks: &CallbackRegistry,
+) -> Result<IndexMap<String, Value>, EngineError> {
+    use proseql_storage::persistence::{
+        load_data, CallbackRegistryMigrationHost, LoadDataOptions, ValidationMode,
+    };
+    let staged = proseql_storage::memory::MemoryStorageHost::default();
+    if host.exists(&source.path)? {
+        staged.write(&source.path, &host.read(&source.path)?)?;
+    }
+    let local_formats = source.prose.as_ref().map(|options| {
+        FormatRegistry::new(vec![Box::new(
+            proseql_formats::prose::ProseCodec::with_options(options.clone()),
+        )])
+    });
+    load_data(
+        &staged,
+        local_formats.as_ref().unwrap_or(formats),
+        &source.path,
+        &collection.schema,
+        LoadDataOptions {
+            version: collection.version,
+            migrations: collection.migrations.clone(),
+            collection_name: Some(collection.name.clone()),
+            format: Some(source.format.clone()),
+            path: None,
+            validation: ValidationMode::Strict,
+            id_strategy: Some(collection.id_strategy.clone()),
+        },
+        Some(&CallbackRegistryMigrationHost::new(callbacks)),
+    )
 }
