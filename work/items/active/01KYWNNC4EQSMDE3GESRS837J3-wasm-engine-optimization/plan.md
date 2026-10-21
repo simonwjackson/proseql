@@ -761,7 +761,7 @@ Unit IDs remain stable because U1 and U2 are already committed; execute the depe
 
 ## Sources & References
 
-- Related conversion plan: `work/items/active/01KYR2GFF49SRGMH4Q9MV1F2TS-rust-engine-conversion/plan.md`
+- Related conversion plan: `work/items/done/01KYR2GFF49SRGMH4Q9MV1F2TS-rust-engine-conversion/plan.md`
 - Current boundary: `packages/engine/src/boundary-values.ts`, `crates/proseql-wasm/src/bridge.rs`
 - Current transaction paths: `packages/engine/src/database.ts`, `crates/proseql-engine/src/transactions/mod.rs`
 - Current benchmarks: `bench/runner.ts`, `bench/crud.bench.ts`, `bench/transactions.bench.ts`

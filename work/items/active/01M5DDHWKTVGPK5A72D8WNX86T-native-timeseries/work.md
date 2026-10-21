@@ -9,6 +9,7 @@
 
 ## Current status
 
+- All step branches (`ts/bench`, `ts/append`, `ts/index`, `ts/lazy`) are merged into `main`. The branch names below record where each step was first made.
 - U1 (baseline benchmark) done on branch `ts/bench` from `0e3666a`. Results: `docs/benchmarks/timeseries.md`.
   - 140k rows: open 4.5 s, 780 MiB; insert median 1.07 s (rewrites the whole partition); one-hour query 170 ms over all 120 partitions.
   - 1M rows: open 27 s, 5.6 GiB; insert median 7.3 s; one-hour query 1.5 s.

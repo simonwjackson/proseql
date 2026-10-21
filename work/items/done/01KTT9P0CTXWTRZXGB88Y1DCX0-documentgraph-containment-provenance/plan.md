@@ -1,7 +1,7 @@
 ---
 title: "feat: Extend documentGraph containment, root policy, and provenance"
 type: feat
-status: active
+status: completed
 date: 2026-06-10
 verify_command: "bunx tsc --build && bun test packages/core/tests/document-graph-config.test.ts packages/core/tests/document-graph-source.test.ts packages/core/tests/database-document-graph.test.ts packages/node/tests/document-graph.test.ts && biome check ."
 ---
@@ -65,7 +65,7 @@ Korri now consumes ProseQL's `documentGraph` as its config graph, including remo
 
 - `docs/plans/2026-05-21-001-feat-multi-collection-document-source-plan.md` established key source-system rules: keep matching policy in core, traversal/watching in adapters; represent origin/projection state as first-class source state; prefer whole-source rediscovery for watcher correctness; default to strict behavior and require explicit leniency.
 - `docs/handoffs/korri-config-graph-document-source-handoff.md` established documentGraph product semantics: roots are ordered, fragment formats are syntax only, partial overlays validate after merge, root order is the overlay boundary, and read fragments must not become write targets.
-- The shipped documentGraph plan at `work/items/active/01KTSB42V2YV0DFYXP9NGC1A7J-documentgraph-overlay-source/plan.md` intentionally deferred public provenance and lifecycle APIs; this plan reopens only the provenance slice plus containment/root-policy extensions.
+- The shipped documentGraph plan at `work/items/done/01KTSB42V2YV0DFYXP9NGC1A7J-documentgraph-overlay-source/plan.md` intentionally deferred public provenance and lifecycle APIs; this plan reopens only the provenance slice plus containment/root-policy extensions.
 
 ### External References
 
@@ -397,7 +397,7 @@ flowchart TD
 
 - Input handoff: [HANDOFF.md](HANDOFF.md)
 - Original Korri documentGraph handoff: [docs/handoffs/korri-config-graph-document-source-handoff.md](docs/handoffs/korri-config-graph-document-source-handoff.md)
-- Shipped documentGraph plan: [work/items/active/01KTSB42V2YV0DFYXP9NGC1A7J-documentgraph-overlay-source/plan.md](work/items/active/01KTSB42V2YV0DFYXP9NGC1A7J-documentgraph-overlay-source/plan.md)
+- Shipped documentGraph plan: [work/items/done/01KTSB42V2YV0DFYXP9NGC1A7J-documentgraph-overlay-source/plan.md](work/items/done/01KTSB42V2YV0DFYXP9NGC1A7J-documentgraph-overlay-source/plan.md)
 - Prior document source architecture plan: [docs/plans/2026-05-21-001-feat-multi-collection-document-source-plan.md](docs/plans/2026-05-21-001-feat-multi-collection-document-source-plan.md)
 - Related code: `packages/core/src/storage/source-config.ts`
 - Related code: `packages/core/src/storage/document-graph-source.ts`

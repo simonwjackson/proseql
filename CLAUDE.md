@@ -101,7 +101,7 @@ Run checks: `nix flake check`
 
 A Rust workspace lives at `crates/` alongside `packages/`. It is the
 implementation layer for the proseQL engine rewrite (see
-`work/items/active/01KYR2GFF49SRGMH4Q9MV1F2TS-rust-engine-conversion/plan.md`).
+`work/items/done/01KYR2GFF49SRGMH4Q9MV1F2TS-rust-engine-conversion/plan.md`).
 
 ### Layout
 

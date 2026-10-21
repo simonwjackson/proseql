@@ -560,7 +560,7 @@ flowchart TB
 
 ## Sources & References
 
-- Related conversion plan: `work/items/active/01KYR2GFF49SRGMH4Q9MV1F2TS-rust-engine-conversion/plan.md`
+- Related conversion plan: `work/items/done/01KYR2GFF49SRGMH4Q9MV1F2TS-rust-engine-conversion/plan.md`
 - Related optimization plan: `work/items/active/01KYWNNC4EQSMDE3GESRS837J3-wasm-engine-optimization/plan.md`
 - Browser transaction follow-up: `work/items/parking-lot/01KZ0KEZGPGESNCEZX5DKQSVR7-add-browser-async-transaction-origin-tracking.md`
 - Effect migration learning: `docs/solutions/build-errors/effect-v4-foundation-migration-2026-05-06.md`

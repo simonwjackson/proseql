@@ -8,7 +8,7 @@
 
 ## Current status
 
-- The optimization series is integrated on local `main` through `dc28300 perf(storage): mirror validated persistence state` and remains unpushed.
+- The optimization series is integrated on local `main` through `dc28300 perf(storage): mirror validated persistence state` and is pushed to `origin/main`.
 - The user approved an explicit absolute browser JavaScript heap ceiling of `50,000,000` bytes. The historical `11,739,108`-byte baseline remains recorded and is not rebased.
 - Three-trial evidence passes the required CRUD, query, scaling, and transaction throughput cases; explicit persistence flush also meets paired TypeScript throughput.
 - The required persistence case with 100 separately awaited creates remains at approximately 55–60% of direct TypeScript throughput and continues to block completion unless the user explicitly reclassifies it.
