@@ -2798,20 +2798,41 @@ fn committed_entity_deltas_preserve_before_images_and_insertion_positions() {
 #[test]
 fn upsert_issue_names_received_and_valid_fields() {
     let mut col = upsert_unique_col();
-    let error = col.upsert(json!({"name": "Alice"}), json!({"name": "Alice"}), json!({})).unwrap_err();
-    let EngineError::Validation(error) = error else { panic!("expected validation error") };
-    assert!(error.issues[0].message.contains("Received fields: name"));
-    assert!(error.issues[0].message.contains("email"));
-    assert!(error.issues[0].message.contains("id"));
+    let error = col
+        .upsert(
+            json!({"name": "Alice"}),
+            json!({"name": "Alice"}),
+            json!({}),
+        )
+        .unwrap_err();
+    let EngineError::Validation(error) = error else {
+        panic!("expected validation error")
+    };
+    assert_eq!(error.issues[0].message, "Where clause does not match any declared unique field in collection 'test'. Received fields: name. Valid unique fields: email, username, id");
 }
 
 #[test]
 fn soft_delete_replaces_explicit_undefined_timestamp() {
     let mut descriptor = descriptor_with_schema(soft_delete_user_schema());
-    if let SchemaNode::Struct { fields } = &mut descriptor.schema { fields.iter_mut().find(|field| field.name == "deletedAt").unwrap().schema = SchemaNode::Optional(Box::new(SchemaNode::Unknown)); }
-    let mut col = Collection::new("users", descriptor, Arc::new(CallbackRegistry::new()), Box::new(SequentialGenerator::new("u")));
+    if let SchemaNode::Struct { fields } = &mut descriptor.schema {
+        fields
+            .iter_mut()
+            .find(|field| field.name == "deletedAt")
+            .unwrap()
+            .schema = SchemaNode::Optional(Box::new(SchemaNode::Unknown));
+    }
+    let mut col = Collection::new(
+        "users",
+        descriptor,
+        Arc::new(CallbackRegistry::new()),
+        Box::new(SequentialGenerator::new("u")),
+    );
     col.create(json!({"id":"u1","name":"Alice","email":"a@x.com","age":1,"companyId":"c","deletedAt":{"__proseqlInternalUndefined__":1}})).unwrap();
-    col.update("u1", json!({"deletedAt": {"$set": {"__proseqlInternalUndefined__":1}}})).unwrap();
+    col.update(
+        "u1",
+        json!({"deletedAt": {"$set": {"__proseqlInternalUndefined__":1}}}),
+    )
+    .unwrap();
     let result = col.delete_many(|_| true, true, None).unwrap();
     assert!(result.deleted[0]["deletedAt"].is_string());
 }
@@ -2821,5 +2842,34 @@ fn create_many_accepts_explicit_undefined_optional_fields() {
     let mut col = soft_delete_col();
     let result = col.create_many(vec![json!({"id":"u1","name":"Alice","email":"a@x.com","age":1,"companyId":"c","deletedAt":{"__proseqlInternalUndefined__":1}})], false).unwrap();
     assert_eq!(result.created.len(), 1);
-    assert!(proseql_engine::value::is_boundary_undefined(&result.created[0]["deletedAt"]));
+    assert!(proseql_engine::value::is_boundary_undefined(
+        &result.created[0]["deletedAt"]
+    ));
+}
+
+#[test]
+fn upsert_issue_compound_and_empty_field_messages_are_exact() {
+    for (constraints, fields) in [
+        (
+            vec![UniqueConstraintDescriptor::Compound(vec![
+                "email".into(),
+                "username".into(),
+            ])],
+            "(email, username), id",
+        ),
+        (vec![], "id"),
+    ] {
+        let mut col = collection_with_unique(
+            unique_user_schema(),
+            constraints,
+            SequentialGenerator::new("u"),
+        );
+        let error = col
+            .upsert(json!({"name":"Alice"}), json!({}), json!({}))
+            .unwrap_err();
+        let EngineError::Validation(error) = error else {
+            panic!("expected validation error")
+        };
+        assert_eq!(error.issues[0].message, format!("Where clause does not match any declared unique field in collection 'test'. Received fields: name. Valid unique fields: {fields}"));
+    }
 }
