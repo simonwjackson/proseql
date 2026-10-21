@@ -102,7 +102,8 @@ pub(crate) struct SourceState {
     pub partitions: IndexMap<String, LoadedPartitions>,
     pub graph: LoadedDocumentGraph,
     pub transforms: Option<Arc<dyn DocumentGraphTransformHost>>,
-    pub contents: IndexMap<String, String>,
+    /// Stored bytes of every loaded file, the conflict baseline.
+    pub contents: IndexMap<String, Vec<u8>>,
     /// Lazy partitioned collections by collection name. Their records are not
     /// in `partitions`; the engine collection holds the loaded partitions.
     pub lazy: IndexMap<String, crate::lazy::LazyCollection>,
@@ -321,7 +322,14 @@ impl SourceState {
                 continue;
             };
             if host.exists(&source.path)? {
-                file_contents.insert(source.path.clone(), snapshot.read(&source.path)?);
+                // Append-only files keep raw bytes: a torn final line can end
+                // inside a UTF-8 sequence. Other files stay strict text.
+                let content = if appendable.contains(&source.collection) {
+                    snapshot.read_bytes(&source.path)?
+                } else {
+                    snapshot.read(&source.path)?.into_bytes()
+                };
+                file_contents.insert(source.path.clone(), content);
             }
             let collection = config
                 .collection_configs
@@ -362,7 +370,12 @@ impl SourceState {
                 )?;
                 torn.extend(partition_torn);
                 for path in loaded.files.keys() {
-                    file_contents.insert(path.clone(), snapshot.read(path)?);
+                    let content = if appendable.contains(&source.collection) {
+                        snapshot.read_bytes(path)?
+                    } else {
+                        snapshot.read(path)?.into_bytes()
+                    };
+                    file_contents.insert(path.clone(), content);
                 }
                 partitions.insert(source.collection.clone(), loaded);
             }
@@ -376,7 +389,7 @@ impl SourceState {
             .map(|document| {
                 snapshot
                     .read(&document.path)
-                    .map(|content| (document.path.clone(), content))
+                    .map(|content| (document.path.clone(), content.into_bytes()))
             })
             .collect::<Result<IndexMap<_, _>, _>>()?;
         contents.extend(file_contents);
@@ -610,7 +623,7 @@ impl SourceState {
                 &self.config.collection_configs[collection],
                 batch,
             )?;
-            let current = self.contents.get(path).map(String::as_str).unwrap_or("");
+            let current = self.contents.get(path).map(Vec::as_slice).unwrap_or(&[]);
             writes.push(plan_append(path, current, lines));
         }
         writes.sort_by(|left, right| left.path.cmp(&right.path));
@@ -629,7 +642,7 @@ impl SourceState {
             let unchanged = match (current, self.contents.get(&write.path)) {
                 (None, None) => true,
                 (Some(tail), Some(stored)) => {
-                    tail.len == stored.len() as u64 && stored.as_bytes().ends_with(&tail.tail)
+                    tail.len == stored.len() as u64 && stored.ends_with(&tail.tail)
                 }
                 _ => false,
             };
@@ -651,7 +664,7 @@ impl SourceState {
         for write in &plan.writes {
             let content = self.contents.entry(write.path.clone()).or_default();
             content.truncate(write.keep_len as usize);
-            content.push_str(&write.data);
+            content.extend_from_slice(write.data.as_bytes());
             self.torn.retain(|torn| torn.path != write.path);
             if let Some(name) = std::path::Path::new(&write.path)
                 .file_name()
@@ -733,7 +746,7 @@ impl SourceState {
             let Some(stored) = self.contents.get(&path) else {
                 return Ok(false);
             };
-            if !host.exists(&path)? || &host.read(&path)? != stored {
+            if !host.exists(&path)? || &host.read_bytes(&path)? != stored {
                 return Ok(false);
             }
         }
@@ -747,7 +760,7 @@ impl SourceState {
     ) -> Result<(), EngineError> {
         for write in writes {
             let current = if host.exists(&write.path)? {
-                Some(host.read(&write.path)?)
+                Some(host.read(&write.path)?.into_bytes())
             } else {
                 None
             };

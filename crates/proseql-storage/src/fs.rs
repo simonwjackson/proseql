@@ -654,6 +654,17 @@ impl StorageHost for FsStorageHost {
         })
     }
 
+    fn read_bytes(&self, path: &str) -> Result<Vec<u8>, EngineError> {
+        self.recover_durable_path(path)?;
+        std::fs::read(path).map_err(|error| {
+            storage_error(
+                path,
+                StorageOperation::Read,
+                format!("Failed to read '{path}': {error}"),
+            )
+        })
+    }
+
     fn write(&self, path: &str, data: &str) -> Result<(), EngineError> {
         Self::ensure_parent(path)?;
         std::fs::write(path, data).map_err(|error| {

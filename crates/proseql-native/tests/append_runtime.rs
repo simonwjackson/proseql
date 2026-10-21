@@ -679,6 +679,50 @@ fn a_crash_mid_append_leaves_a_torn_line_that_reopen_ignores_and_the_next_append
 }
 
 #[test]
+fn a_torn_final_line_that_stops_inside_a_utf8_sequence_is_ignored_with_a_diagnostic() {
+    let dir = tempfile::tempdir().unwrap();
+    let existing = sample("2026-04", 0, 70);
+    let before = format!("{}\n", line(&existing));
+    fs::create_dir_all(root(dir.path())).unwrap();
+    // An interrupted append of `"source":"café"` that stopped after the
+    // first byte of `é` (0xC3 0xA9).
+    let mut torn = before.clone().into_bytes();
+    torn.extend_from_slice(b"{\"id\":\"heartrate:x\",\"source\":\"caf\xC3");
+    fs::write(partition(dir.path(), "2026-04"), &torn).unwrap();
+
+    let runtime = open(dir.path());
+    let diagnostics = runtime.torn_line_diagnostics().unwrap();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].line, 2);
+    assert_eq!(diagnostics[0].bytes, torn.len() - before.len());
+    assert!(runtime
+        .find_by_id("heartrate", existing["id"].as_str().unwrap())
+        .unwrap()
+        .is_some());
+    let next = sample("2026-04", 1, 71);
+    runtime
+        .mutate(|db| db.create("heartrate", next.clone()))
+        .unwrap();
+    assert_eq!(
+        read(&partition(dir.path(), "2026-04")),
+        format!("{before}{}\n", line(&next))
+    );
+    assert!(runtime.torn_line_diagnostics().unwrap().is_empty());
+
+    // Invalid UTF-8 on an earlier, complete line stays a strict error.
+    let strict = tempfile::tempdir().unwrap();
+    fs::create_dir_all(root(strict.path())).unwrap();
+    let mut content = b"{\"id\":\"heartrate:y\",\"source\":\"caf\xC3\"}\n".to_vec();
+    content.extend_from_slice(before.as_bytes());
+    content.extend_from_slice(b"{\"id\"");
+    fs::write(partition(strict.path(), "2026-04"), content).unwrap();
+    let error = NativeRuntime::open_sources_with_options(config(strict.path()), options())
+        .err()
+        .expect("strict error");
+    assert!(matches!(error, EngineError::Storage(_)), "{error:?}");
+}
+
+#[test]
 fn an_unterminated_parseable_final_line_is_a_record() {
     let dir = tempfile::tempdir().unwrap();
     let last = sample("2026-04", 1, 71);

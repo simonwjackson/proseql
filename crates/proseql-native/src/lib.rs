@@ -1142,7 +1142,9 @@ fn commit_source_mutation<R>(
             }
         }
         for write in writes {
-            sources.contents.insert(write.path, write.content);
+            sources
+                .contents
+                .insert(write.path, write.content.into_bytes());
         }
     }
     sources.apply_appends(appends);

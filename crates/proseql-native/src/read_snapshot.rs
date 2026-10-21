@@ -7,7 +7,9 @@ use std::sync::Mutex;
 
 pub(crate) struct ReadSnapshot<'a> {
     host: &'a dyn StorageHost,
-    contents: Mutex<IndexMap<String, String>>,
+    /// Raw bytes of every file read, so text and byte reads of one file see
+    /// the same snapshot.
+    contents: Mutex<IndexMap<String, Vec<u8>>>,
 }
 
 impl<'a> ReadSnapshot<'a> {
@@ -30,9 +32,29 @@ impl StorageHost for ReadSnapshot<'_> {
             .lock()
             .map_err(|_| crate::operation_error("poisoned", "Read snapshot lock is poisoned"))?;
         if let Some(content) = contents.get(path) {
+            return String::from_utf8(content.clone()).map_err(|error| {
+                EngineError::Storage(Box::new(proseql_engine::errors::StorageError {
+                    path: path.to_owned(),
+                    operation: proseql_engine::errors::StorageOperation::Read,
+                    message: format!("Failed to read '{path}': {error}"),
+                    cause: None,
+                }))
+            });
+        }
+        // Text reads keep the host's own strict decoding and errors.
+        let content = self.host.read(path)?;
+        contents.insert(path.into(), content.clone().into_bytes());
+        Ok(content)
+    }
+    fn read_bytes(&self, path: &str) -> Result<Vec<u8>, EngineError> {
+        let mut contents = self
+            .contents
+            .lock()
+            .map_err(|_| crate::operation_error("poisoned", "Read snapshot lock is poisoned"))?;
+        if let Some(content) = contents.get(path) {
             return Ok(content.clone());
         }
-        let content = self.host.read(path)?;
+        let content = self.host.read_bytes(path)?;
         contents.insert(path.into(), content.clone());
         Ok(content)
     }

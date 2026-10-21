@@ -47,17 +47,28 @@ pub enum JsonlTail {
 
 /// Classify the final line of `raw`.
 pub fn jsonl_tail(raw: &str) -> JsonlTail {
-    if raw.is_empty() || raw.ends_with('\n') {
+    jsonl_tail_bytes(raw.as_bytes())
+}
+
+/// Classify the final line of raw file bytes. The final line is examined
+/// before any UTF-8 decoding, so an interrupted append that stops inside a
+/// multi-byte sequence is `Torn`, not a read error.
+pub fn jsonl_tail_bytes(raw: &[u8]) -> JsonlTail {
+    if raw.is_empty() || raw.ends_with(b"\n") {
         return JsonlTail::Complete;
     }
-    let keep = raw.rfind('\n').map_or(0, |index| index + 1);
-    let last = &raw[keep..];
-    if !last.trim().is_empty() && serde_json::from_str::<Value>(last).is_ok() {
+    let keep = raw
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |index| index + 1);
+    let parses = std::str::from_utf8(&raw[keep..])
+        .is_ok_and(|last| !last.trim().is_empty() && serde_json::from_str::<Value>(last).is_ok());
+    if parses {
         return JsonlTail::Unterminated;
     }
     JsonlTail::Torn {
         keep,
-        line: raw[..keep].matches('\n').count() + 1,
+        line: raw[..keep].iter().filter(|byte| **byte == b'\n').count() + 1,
     }
 }
 
@@ -73,7 +84,7 @@ pub struct TornLineDiagnostic {
 }
 
 impl TornLineDiagnostic {
-    fn new(path: &str, raw: &str, keep: usize, line: usize) -> Self {
+    fn new(path: &str, raw: &[u8], keep: usize, line: usize) -> Self {
         let bytes = raw.len() - keep;
         Self {
             path: path.to_owned(),
@@ -105,11 +116,11 @@ pub fn load_append_file(
     validate_ids: bool,
 ) -> Result<LoadedAppendFile, EngineError> {
     let raw = if host.exists(&source.path)? {
-        host.read(&source.path)?
+        host.read_bytes(&source.path)?
     } else {
-        String::new()
+        Vec::new()
     };
-    let JsonlTail::Torn { keep, line } = jsonl_tail(&raw) else {
+    let JsonlTail::Torn { keep, line } = jsonl_tail_bytes(&raw) else {
         if validate_ids {
             validate_collection_file_ids(host, formats, source)?;
         }
@@ -118,8 +129,17 @@ pub fn load_append_file(
             torn: None,
         });
     };
+    // Every line before the torn one stays strict, including its encoding.
+    let complete = std::str::from_utf8(&raw[..keep]).map_err(|error| {
+        EngineError::Storage(Box::new(proseql_engine::errors::StorageError {
+            path: source.path.clone(),
+            operation: proseql_engine::errors::StorageOperation::Read,
+            message: format!("Failed to read '{}': {error}", source.path),
+            cause: None,
+        }))
+    })?;
     let trimmed = MemoryStorageHost::default();
-    trimmed.write(&source.path, &raw[..keep])?;
+    trimmed.write(&source.path, complete)?;
     if validate_ids {
         validate_collection_file_ids(&trimmed, formats, source)?;
     }
@@ -162,9 +182,9 @@ pub struct PlannedAppend {
     pub data: String,
 }
 
-/// Plan an append of complete `lines` after the loaded content `current`.
-pub fn plan_append(path: &str, current: &str, lines: String) -> PlannedAppend {
-    let (keep_len, data) = match jsonl_tail(current) {
+/// Plan an append of complete `lines` after the loaded bytes `current`.
+pub fn plan_append(path: &str, current: &[u8], lines: String) -> PlannedAppend {
+    let (keep_len, data) = match jsonl_tail_bytes(current) {
         JsonlTail::Complete => (current.len(), lines),
         JsonlTail::Unterminated => (current.len(), format!("\n{lines}")),
         JsonlTail::Torn { keep, .. } => (keep, lines),
@@ -199,11 +219,21 @@ mod tests {
     #[test]
     fn plans_newline_and_truncation() {
         let lines = "{\"id\":\"c\"}\n".to_owned();
-        assert_eq!(plan_append("f", "", lines.clone()).data, lines);
-        let unterminated = plan_append("f", "{\"id\":\"a\"}", lines.clone());
+        assert_eq!(plan_append("f", b"", lines.clone()).data, lines);
+        let unterminated = plan_append("f", b"{\"id\":\"a\"}", lines.clone());
         assert_eq!(unterminated.keep_len, 10);
         assert_eq!(unterminated.data, format!("\n{lines}"));
-        let torn = plan_append("f", "{\"id\":\"a\"}\n{\"id", lines.clone());
+        let torn = plan_append("f", b"{\"id\":\"a\"}\n{\"id", lines.clone());
+        assert_eq!(torn.keep_len, 11);
+        // A torn line that stops inside a UTF-8 sequence.
+        let mut raw = b"{\"id\":\"a\"}\n{\"id\":\"\xC3".to_vec();
+        assert_eq!(
+            jsonl_tail_bytes(&raw),
+            JsonlTail::Torn { keep: 11, line: 2 }
+        );
+        raw.push(b'\n');
+        assert_eq!(jsonl_tail_bytes(&raw), JsonlTail::Complete);
+        let torn = plan_append("f", b"{\"id\":\"a\"}\n{\"id\":\"\xC3", lines.clone());
         assert_eq!(torn.keep_len, 11);
         assert_eq!(torn.data, lines);
     }

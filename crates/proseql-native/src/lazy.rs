@@ -345,8 +345,8 @@ pub(crate) fn list_partitions(
 /// One decoded partition file.
 struct LoadedPartition {
     records: IndexMap<String, Value>,
-    /// `None` when the file does not exist.
-    content: Option<String>,
+    /// Raw bytes; `None` when the file does not exist.
+    content: Option<Vec<u8>>,
     torn: Option<TornLineDiagnostic>,
 }
 
@@ -377,8 +377,8 @@ pub(crate) fn disk_differs(
         }
         for (path, stored) in &fingerprint.resident {
             let current = if host.exists(path)? {
-                let content = host.read(path)?;
-                Some((content.len(), content_hash(content.as_bytes())))
+                let content = host.read_bytes(path)?;
+                Some((content.len(), content_hash(&content)))
             } else {
                 None
             };
@@ -483,7 +483,7 @@ impl SourceState {
             }
         }
         let content = if host.exists(path)? {
-            Some(snapshot.read(path)?)
+            Some(snapshot.read_bytes(path)?)
         } else {
             None
         };
@@ -751,7 +751,7 @@ impl SourceState {
                     }
                     continue;
                 }
-                let current = host.read(&path)?;
+                let current = host.read_bytes(&path)?;
                 if self.contents.get(&path) == Some(&current) {
                     continue;
                 }
@@ -867,9 +867,9 @@ impl SourceState {
                     .iter_mut()
                     .map(|(path, resident)| {
                         let stored = contents.get(path).map(|content| {
-                            *resident.hash.get_or_insert_with(|| {
-                                (content.len(), content_hash(content.as_bytes()))
-                            })
+                            *resident
+                                .hash
+                                .get_or_insert_with(|| (content.len(), content_hash(content)))
                         });
                         (path.clone(), stored)
                     })

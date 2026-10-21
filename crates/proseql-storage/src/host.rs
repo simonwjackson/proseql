@@ -19,6 +19,13 @@ pub trait WatchHandle: Send + Sync {
 
 pub trait StorageHost: Send + Sync {
     fn read(&self, path: &str) -> Result<String, EngineError>;
+    /// Read a file's raw bytes. Append-only JSONL loading uses it so that an
+    /// interrupted final line that ends inside a UTF-8 sequence can still be
+    /// classified as torn. The default reads text; hosts that can hold
+    /// non-UTF-8 bytes should override it.
+    fn read_bytes(&self, path: &str) -> Result<Vec<u8>, EngineError> {
+        self.read(path).map(String::into_bytes)
+    }
     fn write(&self, path: &str, data: &str) -> Result<(), EngineError>;
     fn append(&self, path: &str, data: &str) -> Result<(), EngineError>;
     fn exists(&self, path: &str) -> Result<bool, EngineError>;
