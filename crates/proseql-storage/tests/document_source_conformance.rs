@@ -1151,7 +1151,8 @@ fn yaml_splicing_rejects_a_candidate_that_does_not_match_the_projected_document(
 }
 
 /// The built-in YAML codec used to drop a string's trailing line breaks.
-/// It no longer does. This codec keeps the old loss, so the document
+/// It no longer does. This codec keeps the old loss and does not claim an
+/// exact round trip, so the registry's write check skips it and the document
 /// planner's own parse-and-state check is what must stop the save.
 struct LossyYaml;
 

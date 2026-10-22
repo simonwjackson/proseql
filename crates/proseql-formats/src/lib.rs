@@ -18,6 +18,19 @@ pub trait FormatCodec: Send + Sync {
     fn extensions(&self) -> &[&str];
     fn encode(&self, data: &Value, options: Option<FormatOptions>) -> Result<String, String>;
     fn decode(&self, raw: &str) -> Result<Value, String>;
+
+    /// Whether `decode(encode(value))` must give `value` back.
+    ///
+    /// When this is true and the registry's write check is on,
+    /// [`FormatRegistry::serialize`] decodes every encoding before it
+    /// returns it, and refuses an encoding that does not read back to the
+    /// same value. Every durable write of a codec's output goes through
+    /// `serialize`, so a broken encoder cannot leave a file that this codec
+    /// cannot open. Lossy codecs (TOML drops nulls, Prose keeps a template)
+    /// keep the default `false`.
+    fn round_trips_exactly(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -30,6 +43,7 @@ pub struct FormatRegistry {
     codecs: Vec<Box<dyn FormatCodec>>,
     extension_map: indexmap::IndexMap<String, usize>,
     supported_extensions: Vec<String>,
+    write_check: bool,
 }
 
 struct CallbackFormatCodec {
@@ -111,6 +125,10 @@ impl FormatCodec for OwnedExtensionsCodec {
     fn decode(&self, raw: &str) -> Result<Value, String> {
         self.inner.decode(raw)
     }
+
+    fn round_trips_exactly(&self) -> bool {
+        self.inner.round_trips_exactly()
+    }
 }
 
 pub fn plugin_codec(
@@ -190,7 +208,23 @@ impl FormatRegistry {
             codecs,
             extension_map,
             supported_extensions,
+            write_check: true,
         }
+    }
+
+    /// Turn the write check off or on. It is on by default.
+    ///
+    /// With the check on, [`Self::serialize`] decodes the output of every
+    /// codec that [round-trips exactly](FormatCodec::round_trips_exactly)
+    /// and refuses output that does not decode to the input. This costs one
+    /// decode per write. Turn it off only when a caller already decodes and
+    /// compares the exact bytes it writes.
+    pub fn set_write_check(&mut self, enabled: bool) {
+        self.write_check = enabled;
+    }
+
+    pub fn write_check(&self) -> bool {
+        self.write_check
     }
 
     /// Register a codec. The last codec for each extension wins.
@@ -234,13 +268,17 @@ impl FormatRegistry {
         options: Option<FormatOptions>,
     ) -> Result<String, FormatRegistryError> {
         let codec = self.codec_for(extension)?;
-        codec.encode(data, options).map_err(|message| {
+        let encoded = codec.encode(data, options).map_err(|message| {
             FormatRegistryError::Serialization(SerializationError {
                 format: codec.name().to_owned(),
                 message: format!("Failed to serialize data to {}: {message}", codec.name()),
                 cause: Some(Value::String(message)),
             })
-        })
+        })?;
+        if self.write_check && codec.round_trips_exactly() {
+            check_round_trip(codec, data, &encoded)?;
+        }
+        Ok(encoded)
     }
 
     pub fn deserialize(
@@ -278,6 +316,86 @@ impl FormatRegistry {
                     },
                 })
             })
+    }
+}
+
+/// Reason in the `cause` of a [`SerializationError`] from the write check.
+pub const ROUND_TRIP_MISMATCH: &str = "round-trip-mismatch";
+
+/// Decode `encoded` and compare it with `data` (JS number semantics, key
+/// order ignored). The error names the first differing location as a JSON
+/// pointer. It never includes values, because they can be private.
+fn check_round_trip(
+    codec: &dyn FormatCodec,
+    data: &Value,
+    encoded: &str,
+) -> Result<(), FormatRegistryError> {
+    let refuse = |detail: String, pointer: Option<String>| {
+        let mut cause = serde_json::Map::new();
+        cause.insert("reason".into(), Value::from(ROUND_TRIP_MISMATCH));
+        if let Some(pointer) = pointer {
+            cause.insert("pointer".into(), Value::from(pointer));
+        }
+        cause.insert("detail".into(), Value::from(detail.clone()));
+        FormatRegistryError::Serialization(SerializationError {
+            format: codec.name().to_owned(),
+            message: format!(
+                "Refused to write {}: the encoded text does not decode to the data being written ({detail})",
+                codec.name()
+            ),
+            cause: Some(Value::Object(cause)),
+        })
+    };
+    let decoded = codec
+        .decode(encoded)
+        .map_err(|error| refuse(format!("decode failed: {error}"), None))?;
+    match first_difference(data, &decoded, &mut String::new()) {
+        None => Ok(()),
+        Some(pointer) => Err(refuse(
+            if pointer.is_empty() {
+                "the root value differs".to_owned()
+            } else {
+                format!("first difference at '{pointer}'")
+            },
+            Some(pointer),
+        )),
+    }
+}
+
+/// JSON pointer of the first place where `left` and `right` differ.
+fn first_difference(left: &Value, right: &Value, pointer: &mut String) -> Option<String> {
+    let child = |pointer: &mut String, segment: &str, left: &Value, right: &Value| {
+        let length = pointer.len();
+        pointer.push('/');
+        pointer.push_str(&segment.replace('~', "~0").replace('/', "~1"));
+        let found = first_difference(left, right, pointer);
+        pointer.truncate(length);
+        found
+    };
+    match (left, right) {
+        (Value::Object(left), Value::Object(right)) => {
+            for (key, value) in left {
+                let Some(other) = right.get(key) else {
+                    return Some(format!(
+                        "{pointer}/{}",
+                        key.replace('~', "~0").replace('/', "~1")
+                    ));
+                };
+                if let Some(found) = child(pointer, key, value, other) {
+                    return Some(found);
+                }
+            }
+            (left.len() != right.len()).then(|| pointer.clone())
+        }
+        (Value::Array(left), Value::Array(right)) => {
+            for (index, (value, other)) in left.iter().zip(right).enumerate() {
+                if let Some(found) = child(pointer, &index.to_string(), value, other) {
+                    return Some(found);
+                }
+            }
+            (left.len() != right.len()).then(|| pointer.clone())
+        }
+        _ => (!proseql_engine::validator::js_eq(left, right)).then(|| pointer.clone()),
     }
 }
 

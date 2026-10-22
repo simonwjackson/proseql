@@ -79,6 +79,10 @@ impl FormatCodec for YamlCodec {
     fn decode(&self, raw: &str) -> Result<Value, String> {
         serde_yaml::from_str(raw).map_err(|error| error.to_string())
     }
+
+    fn round_trips_exactly(&self) -> bool {
+        true
+    }
 }
 
 /// TOML remains object-rooted like the active smol-toml codec.
@@ -1090,7 +1094,13 @@ fn should_use_plain_yaml_scalar(value: &str) -> bool {
 /// that starts like a number pays for the parse. The parse puts the value
 /// after a key, as the encoder does, so `...` and `---` stay plain there.
 fn resolves_to_non_string(value: &str) -> bool {
-    if !value.starts_with(|ch: char| ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.')) {
+    // Every YAML number, `.inf` and `.nan` form uses only these characters.
+    let could_be_number = value
+        .starts_with(|ch: char| ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.'))
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() || b"+-._xXoOiInNtTyY".contains(&byte));
+    if !could_be_number {
         return false;
     }
     let decoded = serde_yaml::from_str::<serde_yaml::Mapping>(&format!("k: {value}"));
