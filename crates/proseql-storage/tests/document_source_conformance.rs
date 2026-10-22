@@ -1130,7 +1130,7 @@ impl proseql_formats::FormatCodec for DocumentOnlyYaml {
         proseql_formats::codecs::yaml_codec().encode(&data, options)
     }
     fn decode(&self, raw: &str) -> Result<serde_json::Value, String> {
-        proseql_formats::codecs::yaml_codec().decode(raw)
+        proseql_formats::FormatCodec::decode(&proseql_formats::codecs::yaml_codec(), raw)
     }
 }
 
@@ -1148,6 +1148,54 @@ fn yaml_splicing_rejects_a_candidate_that_does_not_match_the_projected_document(
         },
         "does not match",
     );
+}
+
+/// The built-in YAML codec used to drop a string's trailing line breaks.
+/// It no longer does. This codec keeps the old loss, so the document
+/// planner's own parse-and-state check is what must stop the save.
+struct LossyYaml;
+
+impl proseql_formats::FormatCodec for LossyYaml {
+    fn name(&self) -> &str {
+        "yaml"
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &["yaml", "yml"]
+    }
+
+    fn encode(
+        &self,
+        data: &serde_json::Value,
+        options: Option<proseql_formats::FormatOptions>,
+    ) -> Result<String, String> {
+        fn strip(value: &serde_json::Value) -> serde_json::Value {
+            match value {
+                serde_json::Value::String(text) => json!(text.trim_end_matches('\n')),
+                serde_json::Value::Array(items) => items.iter().map(strip).collect(),
+                serde_json::Value::Object(map) => map
+                    .iter()
+                    .map(|(key, value)| (key.clone(), strip(value)))
+                    .collect(),
+                other => other.clone(),
+            }
+        }
+        proseql_formats::FormatCodec::encode(
+            &proseql_formats::codecs::yaml_codec(),
+            &strip(data),
+            options,
+        )
+    }
+
+    fn decode(&self, raw: &str) -> Result<serde_json::Value, String> {
+        proseql_formats::FormatCodec::decode(&proseql_formats::codecs::yaml_codec(), raw)
+    }
+}
+
+fn lossy_yaml_registry() -> FormatRegistry {
+    let mut formats = FormatRegistry::with_builtins();
+    formats.register(Box::new(LossyYaml));
+    formats
 }
 
 fn assert_yaml_save_fails_closed(
@@ -1238,7 +1286,7 @@ fn yaml_splicing_fails_closed_if_the_codec_loses_a_changed_strings_trailing_newl
     let raw = "games:\n  old: {name: Old, systemId: snes}\n\nunknown: {keep: true}\n";
     assert_yaml_save_fails_closed(
         raw,
-        &FormatRegistry::with_builtins(),
+        &lossy_yaml_registry(),
         |collections| {
             collections["games"]["old"]["name"] = json!("New\n\n");
         },
@@ -1278,7 +1326,7 @@ fn existing_documents_without_a_supported_editor_or_original_text_fail_closed() 
 #[test]
 fn a_new_document_is_not_written_when_complete_serialization_fails_the_state_check() {
     let host = MemoryStorageHost::default();
-    let formats = FormatRegistry::with_builtins();
+    let formats = lossy_yaml_registry();
     let config = config(UnknownCollectionPolicy::Preserve);
     host.write("/config/untouched.yaml", "unknown: {keep: true}\n")
         .unwrap();

@@ -44,10 +44,20 @@ impl FormatCodec for JsonCodec {
 #[derive(Debug, Clone)]
 pub struct YamlCodec {
     indent: usize,
+    line_width: usize,
 }
 
+/// Plain scalars longer than this fold onto continuation lines.
+pub const YAML_DEFAULT_LINE_WIDTH: usize = 80;
+
 pub fn yaml_codec() -> YamlCodec {
-    YamlCodec { indent: 2 }
+    yaml_codec_with(2, YAML_DEFAULT_LINE_WIDTH)
+}
+
+/// A YAML codec with a default indent and a line width for folding plain
+/// scalars. `FormatOptions::indent` still overrides the indent per call.
+pub fn yaml_codec_with(indent: usize, line_width: usize) -> YamlCodec {
+    YamlCodec { indent, line_width }
 }
 
 impl FormatCodec for YamlCodec {
@@ -63,7 +73,7 @@ impl FormatCodec for YamlCodec {
         let indent = options
             .and_then(|value| value.indent)
             .unwrap_or(self.indent);
-        Ok(encode_yaml_document(data, indent, 80))
+        Ok(encode_yaml_document(data, indent, self.line_width))
     }
 
     fn decode(&self, raw: &str) -> Result<Value, String> {
@@ -598,6 +608,9 @@ enum YamlInlineScalar {
 }
 
 fn encode_yaml_document(value: &Value, indent: usize, line_width: usize) -> String {
+    // A list item's keys sit after `- `, so an indent below 2 cannot align
+    // them with the item's other keys.
+    let indent = indent.max(2);
     let lines = encode_yaml_lines(value, indent, line_width, 0);
     let mut output = lines.join("\n");
     output.push('\n');
@@ -613,8 +626,16 @@ fn encode_yaml_lines(
     match value {
         Value::Object(map) => encode_yaml_object_lines(map, indent, line_width, current_indent),
         Value::Array(items) => encode_yaml_array_lines(items, indent, line_width, current_indent),
+        // At column zero `---` and `...` are document markers.
+        Value::String(text)
+            if current_indent == 0 && (text.starts_with("---") || text.starts_with("...")) =>
+        {
+            vec![format!("\"{}\"", escape_yaml_double_quoted(text))]
+        }
+        // A root scalar continues one level in: block scalar content and
+        // folded lines at column zero do not parse.
         other => encode_yaml_prefixed_scalar_lines(
-            " ".repeat(current_indent),
+            " ".repeat(current_indent + indent),
             scalar_prefix(current_indent),
             other,
             indent,
@@ -689,14 +710,14 @@ fn encode_yaml_array_lines(
                 let mut iter = map.iter();
                 let (first_key, first_value) = iter.next().expect("non-empty map");
                 let first_key_repr = encode_yaml_key(first_key);
-                let first_prefix = format!("{}- {}: ", " ".repeat(current_indent), first_key_repr);
+                // The item's keys share one column, `current_indent + indent`.
+                // Pad the sequence marker so the first key lands there too:
+                // `- key` at indent 2, `-   key` at indent 4.
+                let marker = format!("{}-{}", " ".repeat(current_indent), " ".repeat(indent - 1));
+                let first_prefix = format!("{marker}{first_key_repr}: ");
                 match first_value {
                     Value::Object(child) if !child.is_empty() => {
-                        lines.push(format!(
-                            "{}- {}:",
-                            " ".repeat(current_indent),
-                            first_key_repr
-                        ));
+                        lines.push(format!("{marker}{first_key_repr}:"));
                         lines.extend(encode_yaml_object_lines(
                             child,
                             indent,
@@ -705,11 +726,7 @@ fn encode_yaml_array_lines(
                         ));
                     }
                     Value::Array(child) if !child.is_empty() => {
-                        lines.push(format!(
-                            "{}- {}:",
-                            " ".repeat(current_indent),
-                            first_key_repr
-                        ));
+                        lines.push(format!("{marker}{first_key_repr}:"));
                         lines.extend(encode_yaml_array_lines(
                             child,
                             indent,
@@ -795,10 +812,7 @@ fn encode_yaml_prefixed_scalar_lines(
 ) -> Vec<String> {
     match value {
         Value::String(text) if text.contains('\n') => {
-            if text
-                .chars()
-                .any(|ch| ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
-            {
+            if !is_safe_yaml_literal_block(text) {
                 return vec![format!("{}\"{}\"", prefix, escape_yaml_double_quoted(text))];
             }
             let mut lines = vec![format!("{}|-", prefix)];
@@ -810,7 +824,7 @@ fn encode_yaml_prefixed_scalar_lines(
         }
         _ => match encode_yaml_inline_scalar(value) {
             Some(YamlInlineScalar::Plain(text)) => {
-                wrap_yaml_plain_scalar_with_width(&prefix, &text, line_width)
+                wrap_yaml_plain_scalar_with_width(&prefix, &continuation_indent, &text, line_width)
                     .split('\n')
                     .map(str::to_owned)
                     .collect()
@@ -845,6 +859,28 @@ fn encode_yaml_prefixed_scalar_lines(
     }
 }
 
+/// Whether `|-` with auto-detected indentation reads `text` back unchanged.
+///
+/// The literal style is kept for readable multi-line text. Every other
+/// multi-line string is double-quoted:
+/// - `|-` strips trailing line breaks, so text ending in `\n` would lose them;
+/// - the first non-empty line sets the block's indentation, so a leading
+///   space or tab there would be read as indentation, not content;
+/// - `\r` and the YAML 1.1 breaks (NEL, LS, PS) are line breaks to the
+///   parser and would turn into `\n`;
+/// - other control characters cannot appear in a literal block.
+fn is_safe_yaml_literal_block(text: &str) -> bool {
+    !text.ends_with('\n')
+        && !text
+            .split('\n')
+            .find(|line| !line.is_empty())
+            .is_some_and(|line| line.starts_with([' ', '\t']))
+        && !text.chars().any(|ch| {
+            matches!(ch, '\r' | '\u{2028}' | '\u{2029}' | '\u{feff}')
+                || (ch.is_control() && !matches!(ch, '\n' | '\t'))
+        })
+}
+
 fn encode_yaml_inline_scalar(value: &Value) -> Option<YamlInlineScalar> {
     match value {
         Value::Null => Some(YamlInlineScalar::Raw("null".to_owned())),
@@ -868,6 +904,26 @@ fn encode_yaml_inline_scalar(value: &Value) -> Option<YamlInlineScalar> {
     }
 }
 
+/// Split `value` at the spaces where a plain scalar may fold.
+///
+/// Folding trims the whitespace around a line break and reads the break as
+/// one space. So a fold is safe only at a single space between two
+/// non-blank characters. Runs of spaces and tabs stay inside a word.
+fn yaml_fold_words(value: &str) -> Vec<&str> {
+    let bytes = value.as_bytes();
+    let is_blank = |byte: u8| byte == b' ' || byte == b'\t';
+    let mut words = Vec::new();
+    let mut start = 0;
+    for index in 1..bytes.len().saturating_sub(1) {
+        if bytes[index] == b' ' && !is_blank(bytes[index - 1]) && !is_blank(bytes[index + 1]) {
+            words.push(&value[start..index]);
+            start = index + 1;
+        }
+    }
+    words.push(&value[start..]);
+    words
+}
+
 fn encode_yaml_key(value: &str) -> String {
     if should_use_plain_yaml_key(value) {
         value.to_owned()
@@ -876,17 +932,27 @@ fn encode_yaml_key(value: &str) -> String {
     }
 }
 
-fn wrap_yaml_plain_scalar_with_width(prefix: &str, value: &str, line_width: usize) -> String {
+/// Fold a plain scalar over several lines.
+///
+/// `continuation_prefix` comes from the caller, which knows the column of the
+/// key or sequence entry that owns the scalar. It must be deeper than that
+/// column. Do not derive it from `prefix`: for `- key: ` the key starts after
+/// the sequence marker, not after the leading spaces.
+fn wrap_yaml_plain_scalar_with_width(
+    prefix: &str,
+    continuation_prefix: &str,
+    value: &str,
+    line_width: usize,
+) -> String {
     if prefix.len() + value.len() <= line_width || !value.contains(' ') {
         return format!("{prefix}{value}");
     }
 
-    let continuation_prefix = " ".repeat(prefix.chars().take_while(|ch| *ch == ' ').count() + 2);
     let mut lines = Vec::new();
     let mut current = String::new();
     let mut current_width = line_width.saturating_sub(prefix.len());
 
-    for word in value.split(' ') {
+    for word in yaml_fold_words(value) {
         let pending_len = if current.is_empty() {
             word.len()
         } else {
@@ -915,7 +981,7 @@ fn wrap_yaml_plain_scalar_with_width(prefix: &str, value: &str, line_width: usiz
     output.push_str(&lines[0]);
     for line in lines.iter().skip(1) {
         output.push('\n');
-        output.push_str(&continuation_prefix);
+        output.push_str(continuation_prefix);
         output.push_str(line);
     }
     output
@@ -984,16 +1050,26 @@ fn decode_simple_escaped_scalar(input: &str) -> String {
 }
 
 fn should_use_plain_yaml_key(value: &str) -> bool {
-    should_use_plain_yaml_scalar(value) && !value.contains(':')
+    // Root keys sit at column zero, where `---` and `...` are document markers.
+    should_use_plain_yaml_scalar(value)
+        && !value.contains(':')
+        && !value.starts_with("---")
+        && !value.starts_with("...")
 }
 
 fn should_use_plain_yaml_scalar(value: &str) -> bool {
     if value.is_empty()
         || value.contains('\n')
-        || value.starts_with(' ')
-        || value.ends_with(' ')
+        // Plain scalars lose leading and trailing blanks.
+        || value.starts_with([' ', '\t'])
+        || value.ends_with([' ', '\t'])
         || value.contains(": ")
-        || value.chars().any(|ch| ch.is_control() && ch != '\t')
+        || value.contains(":\t")
+        // `key: value:` ends in a mapping indicator.
+        || value.ends_with(':')
+        || value
+            .chars()
+            .any(|ch| (ch.is_control() && ch != '\t') || matches!(ch, '\u{2028}' | '\u{2029}' | '\u{feff}'))
         || starts_with_yaml_indicator_hazard(value)
         || contains_yaml_comment_hazard(value)
     {
@@ -1005,7 +1081,23 @@ fn should_use_plain_yaml_scalar(value: &str) -> bool {
         return false;
     }
 
-    value.parse::<i64>().is_err() && value.parse::<f64>().is_err()
+    value.parse::<i64>().is_err() && value.parse::<f64>().is_err() && !resolves_to_non_string(value)
+}
+
+/// Whether the decoder reads `value` as a number (or other non-string) when
+/// it is written plain. Rust's own number parsers miss YAML forms such as
+/// `0x1A`, `0o17`, `+.inf` and `.NaN`, so ask the decoder itself. Only text
+/// that starts like a number pays for the parse. The parse puts the value
+/// after a key, as the encoder does, so `...` and `---` stay plain there.
+fn resolves_to_non_string(value: &str) -> bool {
+    if !value.starts_with(|ch: char| ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.')) {
+        return false;
+    }
+    let decoded = serde_yaml::from_str::<serde_yaml::Mapping>(&format!("k: {value}"));
+    !matches!(
+        decoded.as_ref().ok().and_then(|map| map.get("k")),
+        Some(serde_yaml::Value::String(decoded)) if decoded == value
+    )
 }
 
 fn starts_with_yaml_indicator_hazard(value: &str) -> bool {
@@ -1024,9 +1116,9 @@ fn starts_with_yaml_indicator_hazard(value: &str) -> bool {
         || value.starts_with('`')
         || value.starts_with('"')
         || value.starts_with('\'')
-        || value.starts_with("- ")
-        || value.starts_with("? ")
-        || value.starts_with(": ")
+        // `-`, `?` and `:` are indicators when a blank or the end follows.
+        || (value.starts_with(['-', '?', ':'])
+            && matches!(value.as_bytes().get(1), None | Some(b' ' | b'\t')))
         || value.starts_with('%')
 }
 
@@ -1048,7 +1140,11 @@ fn escape_yaml_double_quoted(value: &str) -> String {
             '\n' => output.push_str("\\n"),
             '\r' => output.push_str("\\r"),
             '\t' => output.push_str("\\t"),
-            ch if ch.is_control() => output.push_str(&format!("\\u{:04x}", ch as u32)),
+            // The parser folds raw LS and PS like line breaks, and a raw BOM
+            // inside a document is not allowed.
+            ch if ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}' | '\u{feff}') => {
+                output.push_str(&format!("\\u{:04x}", ch as u32))
+            }
             ch => output.push(ch),
         }
     }
