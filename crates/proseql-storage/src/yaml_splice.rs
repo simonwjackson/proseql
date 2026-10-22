@@ -226,10 +226,34 @@ fn segment_map(
         }
         let mut body_end = *start;
         let mut line_end = *start;
+        let mut line_ends = Vec::new();
         for line in raw[*start..end].split_inclusive('\n') {
             line_end += line.len();
+            line_ends.push(line_end);
             if !is_trivia(line) {
                 body_end = line_end;
+            }
+        }
+        // A line that looks like trivia (blank, or starting with `#`) can
+        // still be content of a block scalar at the end of the entry. The
+        // body is the shortest prefix that decodes to the entry's value.
+        // The whole span decodes to it, so the search always ends.
+        if body_end < end {
+            let decodes_alone = |body_end: usize| {
+                unindent(&raw[*start..body_end], indent)
+                    .and_then(|text| formats.deserialize(&text, format).ok())
+                    .is_some_and(|parsed| {
+                        parsed
+                            .get(key)
+                            .is_some_and(|value| same_persisted_value(value, &before[key]))
+                    })
+            };
+            if !decodes_alone(body_end) {
+                body_end = line_ends
+                    .into_iter()
+                    .filter(|line_end| *line_end > body_end)
+                    .find(|line_end| decodes_alone(*line_end))
+                    .unwrap_or(end);
             }
         }
         entries.push(Entry {
