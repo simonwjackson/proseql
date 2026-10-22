@@ -235,6 +235,7 @@ The policy is separate from `append_only`, so existing append-only users see no 
 | Ordered index | yes (ranges and sorts) | yes (engine; ranges only, because the binding sorts through the host) | accepted, not used for planning; same results |
 | Lazy partitions | yes | no, on purpose | no |
 | Native query stats (`partitions_loaded`) | yes | no (`explainQuery` gives `index_used` and `candidate_rows`) | no |
+| YAML encoder | Rust codec (`proseql-formats`) with the write check | TypeScript `yaml` package through `@proseql/core` | TypeScript `yaml` package |
 
 Lazy partitions are native only on purpose: the approved time-series contract keeps the WASM engine and the legacy core fully in memory, and lazy loading needs a host that can read single files on demand during a query.
 
@@ -366,7 +367,7 @@ Only files containing net changed records are rewritten. Existing records return
 
 Undeclared collection values and unchanged record payloads remain intact. Existing section and record positions remain intact. New records append. Re-encoded record fields follow descriptor order. Unchanged files remain byte-for-byte unchanged.
 
-For YAML document sources, the loader retains the original text in `LoadedDocument.raw`. On a save, a line-based scan finds top-level collection blocks at column zero. Each block must decode independently to its loaded value. The planner copies unchanged blocks byte-for-byte, including quoting, wrapping, comments and blank-line separators. Changed blocks stay in their original order. New collections append at the end. Within a changed block-style collection, the same scan preserves unchanged record bodies at their original indentation. Separators stay in place when an adjacent record changes or is deleted. Changed records use the codec's quoting and wrapping.
+For YAML document sources, the loader retains the original text in `LoadedDocument.raw`. On a save, a line-based scan finds top-level collection blocks at column zero. Each block must decode independently to its loaded value. The planner copies unchanged blocks byte-for-byte, including quoting, wrapping, comments and blank-line separators. Changed blocks stay in their original order. New collections append at the end. Within a changed block-style collection, the same scan preserves unchanged record bodies at their original indentation. Separators stay in place when an adjacent record changes or is deleted. A record's body is the shortest span that decodes to its loaded value, so a block-scalar line that looks like a blank line or a `#` comment stays with its record. Changed records use the codec's quoting and wrapping (see "YAML writes").
 
 This scan is not a YAML lexer. Root flow maps, indented root maps, complex or multiline collection keys, document markers/directives, and aliases across collections cannot be segmented safely. Changing an existing document with any such shape fails closed. The error is `OperationError`, with operation `save-document-source`, reason `unsupported-document-shape`, and a message containing the file path and the failure detail. No file is written. A document with no changed collections does not need segmentation and remains untouched.
 
@@ -379,6 +380,45 @@ The planner still serializes the complete candidate before splicing, so custom w
 Preserving an undeclared collection does not preserve excess fields inside an updated declared record. Use a complete schema for each declared collection.
 
 Writable sources require one runtime owner. Before a write, the runtime compares affected files with loaded content and rejects intervening edits. This is conflict detection, not a filesystem lock. Another writer can still race the comparison and replacement.
+
+## YAML writes
+
+Every YAML file that the native runtime writes must read back to the value it wrote. Two parts enforce this: the encoder rules below, and a write check that refuses any output that does not read back.
+
+**Write check.** `FormatRegistry::serialize` decodes the output of every codec whose `FormatCodec::round_trips_exactly` is true and compares it with the input. Numbers compare with JS number semantics (`1` equals `1.0`); key order does not matter. The built-in YAML codec returns true. Other built-in codecs, plugin codecs and custom codecs return the default `false` and are not checked. Every durable write of codec output goes through `serialize`: collection files, partitions, document sources, single-file mode and migration write-back.
+
+A mismatch returns `SerializationError` with `format: "yaml"`, a message that starts with `Refused to write yaml`, and `cause: { reason: "round-trip-mismatch", pointer?, detail }`. `pointer` is the JSON pointer of the first difference, such as `/2026.meal-0001/items/0/food`; it is absent when the output does not parse. The error names the location, never the values. Planning encodes every changed file before the first write, so a refused write rolls the mutation back with no file touched. Because nothing reached disk, the runtime is not quarantined and the next mutation can proceed (see "Crash rule").
+
+The check is on by default. `FormatRegistry::set_write_check(false)` turns it off for a registry passed in `NativeSourceRuntimeOptions::formats` or `NativeRuntimeOptions::formats`. Turn it off only when the caller already decodes and compares the exact bytes it writes. Document sources run their own parse-and-state check on the spliced file in addition (see "Rewrite effects"), so a changed YAML document is decoded twice.
+
+**Cost.** The check costs one decode of each written file. Measured with `cargo run --release -p proseql-native --example yaml_write_check_bench -- --lines 8000 --runs 100` on a synthetic partition of 800 meals (8,346 lines, 287 KB), on a 16-core machine under other load (load average about 16):
+
+| Operation | Check off (median) | Check on (median) |
+|---|---|---|
+| `serialize` of the partition | 4.7 ms | 13.0 ms |
+| One `create` into the partition (encode, durable replace with fsync) | 21.8 ms | 30.2 ms |
+
+The check adds about 8 ms per write of that size, about 40% of a durable create. The default stays on: a write that cannot be opened again costs a restart loop and manual repair, which is worse than 8 ms per write. Write cost already grows with file size because a changed partition or file is encoded again in full.
+
+**Encoder rules.** The codec writes block-style YAML with a default indent of 2 and folds long plain scalars at 80 columns (`yaml_codec_with(indent, line_width)` sets both). Output at indent 2 is unchanged for every value that already read back, except that keys starting with `---` or `...` and strings containing a BOM (U+FEFF) are now quoted. Only records that are written again get the new bytes. These rules changed after the 2026-10-21 failure:
+
+- A folded plain scalar continues at the indent that its caller gives: one level deeper than its key. The first key of a list item (`- food: ...`) used to continue at its own column, which does not parse.
+- A fold happens only at a single space between two non-blank characters. Text with runs of spaces or tabs keeps them.
+- Multi-line text uses `|-` only when that reads back exactly. Text that ends with a line break, whose first non-empty line starts with a space or tab, or that contains `\r`, NEL, LS, PS, BOM or another control character is double-quoted instead.
+- These strings are double-quoted: strings that the decoder reads as non-strings (`0x1A`, `0o17`, `0b101`, `+.inf`, `.NaN`, as well as the earlier `true`, `null`, `1e5` and similar), a lone `-`, `?` or `:`, strings that start with `-`, `?` or `:` and a tab, strings that end with `:` or a tab, strings that start with a tab, and strings with `:` and a tab. LS, PS and BOM are escaped inside quotes.
+- At indent 4, a list item's keys share one column: `-   key: value`. Previously its later keys sat two columns to the right of the first key.
+- Root keys that start with `---` or `...` are quoted.
+
+**Files written before this change.** The decoder did not change, so every file that parses still opens with the same values. The old encoder wrote files that do not parse when:
+
+- the first key of a list item held a plain string, with spaces, longer than the line width (the 2026-10-21 failure);
+- a string value was a lone `-`, `?` or `:`, or ended with `:`;
+- a string contained LS (U+2028) or PS (U+2029), which the parser reads as a line break;
+- a multi-line string's first non-empty line started with a space or tab.
+
+Open fails on such a file with `SerializationError` and a line and column; repair the named line by hand. The old encoder also wrote files that parse but changed some strings: `0x1A`-style text read back as a number and `.inf`/`.nan`-style text as `null` (a `String` field then fails validation on open), trailing line breaks were dropped, `\r\n` inside multi-line text became `\n`, leading and trailing tabs were dropped, and a fold next to a run of spaces could drop spaces. Those changes are already on disk and cannot be detected from the file.
+
+These classes were checked by encoding with the encoder at `b7202d4` and decoding with the current decoder. For example, `0x1A` read back as `26` and `.inf` as `null`.
 
 ## Reload
 
