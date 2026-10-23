@@ -29,8 +29,23 @@ formula misses in all three modes. Five actual fresh-runtime single-file 43k
 loads exceed 500 ms. The report preserves the initial scan wall regression and
 adds repeat wall/CPU ranges. The retained public canonical payload floor is
 1651 B; a compact structured/borrowed API is a separate compatibility redesign,
-not proven impossible. Phase-local requested heap is measured; local RSS peaks
-remain unmeasured. Existing time-series controls all complete with append and
+not proven impossible. Phase-local requested heap is measured. The later independent Linux self-HWM
+reset observer supplies actual phase-local RSS peaks with nested regression
+proof; original acceptance runs remain unchanged. Existing time-series controls all complete with append and
 ordered-index assertions intact. Focused checks pass. Track E stays unchecked:
 the coordinator owns the one combined full suite, final SHA and synthetic
 consumer build. No consumer pin, disk layout or service changed in this child.
+
+
+### RSS proof and coordinator source verification follow-up
+
+The separate benchmark-only `phase-rss` role closes the kernel-local RSS gap.
+Pinned baseline/AFTER source archives verify every production file unchanged;
+enter/exit samples propagate kernel peaks to all active parents before reset.
+Two real transient-memory regressions pass and the deliberately reset-first
+control fails. See `lazy-memory-phase-rss-manifest.json` for the raw proof.
+The coordinator's exact `e9f75a8` combined run passes all default Rust/static/
+WASM/parity checks, TS 4093 pass / 2 existing skips / 0 fail, the separate real
+Chromium budget task, 42-collection synthetic compatibility and 27 consumer
+tests. Track E remains open only for the final rebased-source combined pass;
+no production behavior changed in the RSS proof/reproducer follow-up.

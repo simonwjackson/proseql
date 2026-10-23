@@ -95,7 +95,7 @@
     "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/metadata-follow-up.stderr"
   ],
   "source_note": "Final docs/report-runner descendant changes no crates or packages from measured source. No full suite or consumer deployment/publication was run by the child.",
-  "phase_local_rss_peak": "unmeasured; proof incomplete for this measurement",
+  "phase_local_rss_peak": "Original four roles did not measure local RSS. Separate actual kernel phase peaks are now in lazy-memory-phase-rss-manifest.json; unprofiled acceptance results remain immutable.",
   "measurement_modes": [
     "unprofiled wall+CPU+RSS",
     "checkpoint-only inclusive wall",
@@ -1109,5 +1109,7 @@
       "bytes": 2968,
       "sha256": "a996e0bdac6e399faa9dd63a49790e13591f7a4f0b5ee04c9eaacf19c75f3bd6"
     }
-  ]
+  ],
+  "phase_rss_manifest": "lazy-memory-phase-rss-manifest.json",
+  "coordinator_verified_source_sha": "e9f75a84a65d4b4fcdbeb3473943206fbbf3f3eb"
 }

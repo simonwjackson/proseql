@@ -218,8 +218,10 @@ zeroing, growth, free and nested peaks.
 
 `max_endpoint_excess_bytes` is the largest per-span peak minus that span's
 larger endpoint. It is not an ownership attribution. RSS observations remain
-begin/end samples and a cumulative process high-water mark. **True phase-local
-RSS peaks remain unmeasured; that part of the proof is incomplete.** A separate
+begin/end samples and a cumulative process high-water mark in these original
+four roles. **Correction: this kernel supports resetting its own VmHWM. The
+separate RSS-only process below now measures actual phase-local RSS peaks.**
+The original checkpoint/DHAT values are not relabelled as local peaks. A separate
 end-of-scan `mallinfo2`/`malloc_trim` diagnostic explains allocator-held space;
 it does not improve primary timings or acceptance RSS numbers.
 
@@ -278,7 +280,7 @@ The first one-month zero-result query read 2 physical files and took 900.3 ms. E
 
 ### Phase costs and true local heap peaks
 
-Wall columns use checkpoint-only processes. Heap columns use independent System-meter processes. All spans are inclusive. Local RSS peaks remain **unmeasured**. Start/end/peak are process requested heap while a span is active, not ownership of that phase. Excess is peak minus the larger endpoint for each sample, then maximum. Normalized excess divides by one 43k-row partition, not the number of all query matches.
+Wall columns use checkpoint-only processes. Heap columns use independent System-meter processes. All spans are inclusive. This allocation table did not measure local RSS; the separate kernel-RSS table below now supplies it. Start/end/peak are process requested heap while a span is active, not ownership of that phase. Excess is peak minus the larger endpoint for each sample, then maximum. Normalized excess divides by one 43k-row partition, not the number of all query matches.
 
 | Mode / phase | Calls | Inclusive wall ms | True local heap peak MiB | Max endpoint excess MiB | Excess B / 43k normalization |
 |---|---:|---:|---:|---:|---:|
@@ -386,9 +388,147 @@ The original time-series benchmark used the unchanged 140k / 1M / 10M, 10-year, 
 
 The unchanged 1024-B/row and transient feedback thresholds pass the real eager-ID control and correctly fail the monthly fixture (exit 1). The latter is not a green monthly target. Boundary unit tests independently exercise green, resident-red and transient-red cases. Sparse Struct and filtered Record allocator regressions failed at 11,677 B and now retain 161 B for one field. The strict UTF-8 regression failed at line-relative 7 and now preserves file-global 18.
 
-Focused engine descriptor/query/resident/ordered/streaming tests, native lazy/append/schema/source/YAML/payload-lifetime tests, format/storage regressions, benchmark meter/capacity tests, Rust WASM boundary, cargo check, clippy, formatter, whole-project TS build/typecheck and an explicit changed-test typecheck passed. Three focused TS/WASM tests pass. The full artifact build produces browser WASM gzip 597304 B under the unchanged 600000-B budget. An initial cold existing test hook timed out at 60 s; an explicit full artifact build plus the supported prebuilt-artifact test path passed. No full suite or consumer publication/deploy runs in this child; the coordinator owns combined verification.
+Focused engine descriptor/query/resident/ordered/streaming tests, native lazy/append/schema/source/YAML/payload-lifetime tests, format/storage regressions, benchmark meter/capacity tests, Rust WASM boundary, cargo check, clippy, formatter, whole-project TS build/typecheck and an explicit changed-test typecheck passed. Three focused TS/WASM tests pass. The full artifact build produces browser WASM gzip 597304 B under the unchanged 600000-B budget. An initial cold existing test hook timed out at 60 s; an explicit full artifact build plus the supported prebuilt-artifact test path passed. No full suite or consumer publication/deploy ran in the implementation child; the coordinator's exact-source combined verification is recorded below.
 
 Call-site adoption remains necessary for bounded multi-month records. Legacy methods keep their old full-scope/watch/mutation contracts. The bound excludes matching-row output/workspace, exact ID workspace, pinned/watch snapshots, caller values, other collections and mutation/failure staging. Whole-file watcher fingerprints retain a 64-bit collision risk; append conflicts still use exact length/tail bytes. Logbook monthly JSONL layout does not change. Follow-ups are compact structured storage with a borrowed API, lower index/identity overhead and allocation/allocator-retention work; each needs new parity and lifetime evidence.
 
 
 Raw artifacts and SHA-256 values: `lazy-memory-after-manifest.json`. Every file in the original BEFORE manifest was verified unchanged. Runtime/example source remains byte-identical to the measured commit; the final report-runner correction invokes Python directly so Nix startup output cannot contaminate derived JSON.
+
+
+## Actual kernel phase-local RSS evidence
+
+Sample own VmHWM and VmRSS before every nested enter/exit; propagate max to all active spans; reset own VmHWM via /proc/self/clear_refs=5; push/pop fixed stack. Child resets cannot discard parent peaks.
+
+Independent RSS-only process. No DHAT or allocation meter. GNU time/reset HWM values are NOT process acceptance peaks.
+
+| Mode / phase | BEFORE peak MiB | AFTER peak MiB | BEFORE endpoint excess MiB | AFTER endpoint excess MiB |
+|---|---:|---:|---:|---:|
+| zero / `open` | 5.91 | 6.16 | 0.00 | 0.00 |
+| zero / `filesystem_read_bytes_including_recovery` | 344.20 | 248.43 | 0.00 | 0.00 |
+| zero / `decode_id_validation_including_drop` | 369.99 | — | 99.46 | — |
+| zero / `decode_storage` | 369.99 | 248.43 | 0.00 | 0.00 |
+| zero / `schema_decode_map_construction_including_input_drop` | 369.99 | 248.43 | 0.00 | 3.75 |
+| zero / `partition_read_decode_validate` | 369.99 | 248.43 | 27.43 | 16.71 |
+| zero / `resident_validation_record_and_index_build` | 344.20 | — | 0.00 | — |
+| zero / `query_engine_including_explain_when_requested` | 344.20 | 248.43 | 1.78 | 0.00 |
+| zero / `eviction` | 344.20 | 248.43 | 2.03 | 0.00 |
+| zero / `query_total` | 369.99 | 248.43 | 38.09 | 0.00 |
+| zero / `decoded_id_validation` | — | 248.43 | — | 1.35 |
+| zero / `resident_validation_transient_block` | — | 109.47 | — | 0.00 |
+| zero / `query_partition_filter_accumulate` | — | 248.43 | — | 0.00 |
+| zero / `resident_validation_replacement_and_index_build` | — | 248.43 | — | 0.00 |
+| zero / `query_global_finalize` | — | 248.43 | — | 0.00 |
+| ascending / `open` | 5.91 | 6.16 | 0.00 | 0.00 |
+| ascending / `filesystem_read_bytes_including_recovery` | 598.63 | 555.76 | 0.00 | 0.00 |
+| ascending / `decode_id_validation_including_drop` | 598.63 | — | 98.85 | — |
+| ascending / `decode_storage` | 598.63 | 555.76 | 0.00 | 0.00 |
+| ascending / `schema_decode_map_construction_including_input_drop` | 598.63 | 555.76 | 0.00 | 4.12 |
+| ascending / `partition_read_decode_validate` | 598.63 | 555.76 | 30.06 | 17.08 |
+| ascending / `resident_validation_record_and_index_build` | 598.63 | — | 0.00 | — |
+| ascending / `query_engine_including_explain_when_requested` | 819.05 | 555.76 | 0.00 | 0.00 |
+| ascending / `eviction` | 820.12 | 555.76 | 0.00 | 0.00 |
+| ascending / `query_total` | 820.12 | 555.76 | 0.00 | 0.00 |
+| ascending / `decoded_id_validation` | — | 555.76 | — | 1.46 |
+| ascending / `resident_validation_transient_block` | — | 555.76 | — | 0.00 |
+| ascending / `query_partition_filter_accumulate` | — | 555.76 | — | 0.00 |
+| ascending / `resident_validation_replacement_and_index_build` | — | 542.81 | — | 0.00 |
+| ascending / `query_global_finalize` | — | 555.76 | — | 0.00 |
+| scan / `open` | 5.92 | 6.16 | 0.00 | 0.00 |
+| scan / `filesystem_read_bytes_including_recovery` | 1200.30 | 153.63 | 0.00 | 0.00 |
+| scan / `decode_id_validation_including_drop` | 1311.76 | — | 106.81 | — |
+| scan / `decode_storage` | 1310.60 | 153.63 | 0.00 | 0.00 |
+| scan / `schema_decode_map_construction_including_input_drop` | 1318.76 | 153.63 | 0.00 | 3.91 |
+| scan / `partition_read_decode_validate` | 1318.76 | 153.63 | 25.92 | 16.88 |
+| scan / `resident_validation_record_and_index_build` | 1325.33 | — | 0.00 | — |
+| scan / `query_engine_including_explain_when_requested` | 1325.33 | — | 0.00 | — |
+| scan / `eviction` | 1325.33 | 153.63 | 0.00 | 0.00 |
+| scan / `query_total` | 1325.33 | 153.63 | 0.00 | 0.00 |
+| scan / `decoded_id_validation` | — | 153.63 | — | 1.26 |
+| scan / `resident_validation_transient_block` | — | 153.63 | — | 0.00 |
+| scan / `query_partition_filter_accumulate` | — | 153.63 | — | 0.00 |
+| scan / `resident_validation_replacement_and_index_build` | — | 153.63 | — | 0.00 |
+| scan / `query_global_finalize` | — | 153.63 | — | 0.00 |
+| eager-id / `filesystem_read_bytes_including_recovery` | 5.86 | 5.91 | 0.00 | 0.00 |
+| eager-id / `decode_storage` | 12.92 | 11.57 | 0.00 | 0.00 |
+| eager-id / `schema_decode_map_construction_including_input_drop` | 14.05 | 13.38 | 0.60 | 0.86 |
+| eager-id / `open` | 32.76 | 30.23 | 6.52 | 3.07 |
+
+Endpoint excess is per-span peak minus its larger endpoint, then the maximum across calls. It is not ownership. No phase peaks are added. Exact begin/end/peak values and inclusive observer wall time remain in the JSON samples.
+
+### RSS observer caveats
+
+- Kernel RSS/HWM accounting is approximate and can be batched. Values are kernel counters, not ownership or allocator attribution.
+- Observer status reads, resets, mutex/stack, code pages and stderr formatting contribute overhead. Direct formatting avoids per-event serde Value trees.
+- Peaks are inclusive of nested and any concurrent process-thread work. Benchmark watch threads are disabled; cross-thread span nesting is rejected.
+- Sampling current RSS together with HWM uses the larger value to tolerate accounting snapshots. Reset intervals are joined by maxima, not added.
+- Wall times here include observation overhead and shared-host scheduling; original unprofiled acceptance results remain unchanged.
+
+### Permanent RSS-only reproducer and regression proof
+
+```sh
+./scripts/profile-lazy-memory.sh build ARTIFACT_DIR
+./scripts/profile-lazy-memory.sh rss ARTIFACT_DIR
+```
+
+`build` makes a separate `bin/rss` executable with `--features phase-rss`.
+`rss` reads the same v1 fixtures and writes only `phase-rss/` diagnostic logs.
+It refuses to overwrite its evidence directory. The default `after` timing,
+DHAT and allocation-meter roles do not reset their HWM. When profiler features
+are combined, heap/allocation profilers take precedence and disable the RSS
+reset observer. Normal default benchmark HWM fields stay unchanged; in the
+RSS-only role, acceptance HWM fields are null rather than misleading reset
+values. Do not use GNU time's maximum from this observer process as the
+unprofiled process acceptance peak.
+
+The observer uses fixed stack/buffer state, reads `/proc/self/status`, then
+writes only `5\n` to its own `/proc/self/clear_refs`. It samples the old HWM
+**before** clearing it, propagates the maximum to **all** active parents, and
+pushes/pops nested spans. It rejects cross-thread span nesting and malformed
+span exits. Output uses direct formatting instead of allocating serde trees.
+Observer code pages, stack, mutex, proc I/O and logging remain overhead; kernel
+RSS/HWM counters use approximate/batched accounting. This measures inclusive
+process RSS during a span, not bytes owned exclusively by that phase.
+
+Two real-System-memory regressions touch and free 64/96/128 MiB blocks. One
+observes a 137076736-B parent peak and 70012928-B child peak despite both
+endpoints being 2961408 B. The second preserves a 103567360-B grandchild peak
+in every active parent after intervening resets, with 3039232-B endpoints.
+The correct observer passes both tests; a deliberately reset-first control
+fails both (exit 101). Permanent benchmark tests also pass these regressions.
+These are kernel peaks over freed allocations, not endpoint maxima.
+
+Both baseline `941978d0fb22f5b0b66b7ef40d8e6fb6d00584bb` and measured AFTER
+`11174f90488bad79e0f39cd7a76af28b9a097406` were exported to artifact-only source
+archives. Only benchmark Cargo/observer code differs: 869 BEFORE and 883 AFTER
+original files were hash-verified unchanged, including all production source.
+All 11 immutable fixture hashes match. Source archives, observer code, exact
+benchmark patches, regression controls, commands, per-span samples and hashes
+are in `lazy-memory-phase-rss-manifest.json`. No original BEFORE or unprofiled
+acceptance result was overwritten. The RSS observer rows supplement the
+allocation-origin and true requested-heap evidence; they do not change the
+missed 500-ms, resident-byte or literal all-match RSS targets above.
+
+## Coordinator verification at the implementation source
+
+The coordinator ran one combined verification at exact source
+`e9f75a84a65d4b4fcdbeb3473943206fbbf3f3eb`, using a fresh independent frozen
+dependency install. Its `verification-implementation/results.json` records
+exit 0 for all default Rust tests, format/check/lint/WASM checks, TS suite,
+typecheck, lint, parity gate, synthetic Coach compatibility and consumer tests.
+
+| Check | Exact result at `e9f75a8` |
+|---|---|
+| TypeScript default suite | 4093 pass, 2 existing browser-performance skips, 0 fail; 4095 tests / 190 files |
+| Real Chromium budget task | Passed separately; covers the two default-suite browser-performance skips without counting skips as passes |
+| Coach source-override consumer | 27 tests pass |
+| Synthetic legacy open | 42 collections; input hashes unchanged |
+| Browser production artifact in real-browser evidence | 596381 gzip B; unchanged 600000-B budget passes |
+
+The earlier focused artifact build measured 597304 gzip B; the coordinator's
+fresh exact-source artifact is reported separately, not substituted silently.
+Browser evidence is preserved under
+`verification-implementation/browser-budget/{current,evidence}.json` and
+`browser-budget.log`. No real health data, consumer pin, disk layout, service
+or publication changed. This later benchmark-only RSS reproducer receives
+focused checks; the coordinator still owns the final rebased combined pass.
