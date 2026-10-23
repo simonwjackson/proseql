@@ -383,7 +383,7 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
                 "LM_QUERY {}",
                 json!({"month": month, "width": end-month,
                 "elapsed_ms": elapsed_ms, "returned": result.len(),
-                "partition_scope": end-month, "heap_with_results": snapshot,
+                "requested_months": end-month, "heap_with_results": snapshot,
                 "rss": proc_bytes("VmRSS:"), "rss_hwm": proc_bytes("VmHWM:")})
             );
             drop(result);
@@ -407,15 +407,16 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
             resident,
             final_heap["peak"].as_u64().unwrap_or(0),
             opened["live"].as_u64().unwrap_or(0),
-            args.rows,
+            resident_rows,
         );
+    let resident_measurement = PROFILING.load(Ordering::Relaxed).then_some(resident);
     println!(
         "LM_SUMMARY {}",
         json!({"mode": args.mode, "rows_per_month": args.rows,
         "id_rows": args.ids, "data_bytes": MONTHS * args.rows * ROW_BYTES,
         "open_ms": open_ms, "open_rss": open_rss, "opened_heap": opened,
-        "first_resident_heap_delta": resident, "resident_rows": resident_rows,
-        "resident_bytes_per_row": resident as f64 / resident_rows as f64,
+        "first_resident_heap_delta": resident_measurement, "resident_rows": resident_rows,
+        "resident_bytes_per_row": resident_measurement.map(|bytes| bytes as f64 / resident_rows as f64),
         "id_data_bytes": fs::metadata(args.root.join("ids.jsonl"))?.len(),
         "final_heap": final_heap, "rss": proc_bytes("VmRSS:"), "rss_hwm": proc_bytes("VmHWM:"),
         "check_failed": failed, "instrumented": cfg!(feature="bench-observe"), "profiled": PROFILING.load(Ordering::Relaxed)})

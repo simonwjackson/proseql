@@ -61,6 +61,7 @@ case "$action" in
     for mode in zero ascending scan eager-id; do
       jq --arg mode "$mode" '. as $p | {mode: $mode, total_bytes: ([.pps[].tb]|add), peak_bytes: ([.pps[].gb]|add), end_bytes: ([.pps[].eb]|add), sites: [.pps[] | . + {frames: [.fs[] as $i | $p.ftbl[$i]]}]}' "$out/$mode-dhat.json" > "$out/$mode-sites.json"
       jq '{mode, total_bytes, peak_bytes, end_bytes, top_peak_sites: (.sites | sort_by(-.gb) | .[:20] | map({tb,gb,eb,tbk,tl,mean_lifetime_us: (.tl / .tbk),frames}))}' "$out/$mode-sites.json" > "$out/$mode-top-sites.json"
+      jq -f scripts/summarize-lazy-sites.jq "$out/$mode-sites.json" > "$out/$mode-allocation-split.json"
       jq -R -s -f scripts/summarize-lazy-phases.jq "$out/$mode-dhat.stderr" > "$out/$mode-heap-phases.json"
       jq -R -s -f scripts/summarize-lazy-phases.jq "$out/$mode-checkpoints.stderr" > "$out/$mode-wall-phases.json"
     done
