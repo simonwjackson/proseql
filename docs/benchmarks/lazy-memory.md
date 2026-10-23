@@ -53,6 +53,132 @@ Phase boundaries are inclusive and nested. Do not sum them. Read includes filesy
 
 Heap high-water and RSS high-water are cumulative at each checkpoint, not phase-local maxima. Live-byte deltas are not ownership attribution. DHAT stacks provide sites and `gb` bytes live at global peak, `eb` bytes live at profile end, total allocation bytes/counts and summed lifetimes. The profiler stops before runtime close while resident data is alive. End-live lifetimes are right-censored. DHAT metadata and allocator retention are not tracked as application bytes, so profiled RSS is not directly comparable to default RSS. Diagnostic callback allocations are tracked and visible as their own sites.
 
-## Evidence
+## Evidence identity
 
-The workflow's BEFORE results and manifest are recorded below after the actual run. The production-source baseline is `61a128b5a53c9721f01301990745745c79c139a4`. No production optimization belongs in this benchmark commit.
+Production-source baseline: `61a128b5a53c9721f01301990745745c79c139a4`. Measured benchmark/instrumentation commit: `941978d0fb22f5b0b66b7ef40d8e6fb6d00584bb`. Current harness metadata/analysis follow-up: `b15d6ed5331546352893be5d6c046a90a67081fb`. Full profiles were not rerun for those metadata-only corrections. No production optimization is included. `docs/benchmarks/lazy-memory-before-manifest.json` pins file hashes and commands.
+
+Raw BEFORE root:
+
+```text
+/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/
+```
+
+`environment.log` records the clean measured SHA, executable hashes, pinned rustc 1.92.0, Linux 6.18.17, i9-11900H (8 cores /16 threads), 32,588,476 KiB RAM, btrfs on `/dev/nvme0n1p2`, load average 10.64 and 9,136,104 KiB MemAvailable at capture start. The host was shared and swap was almost full. These are single-run observations, not confidence intervals.
+
+### Scope interpretation
+
+`width` and the legacy `partition_scope` output field mean **requested timestamp months**, not actual partition reads. The current string-based conservative pruner includes the next bucket for an exclusive `.000Z` boundary. The checkpoint trace shows that the first `zero` query loads two files, eight subsequent queries load one each, and October is already resident for the final query. A requested 3-month window can load four files. This is preserved baseline behavior. Do not call the last warm query a one-month cold-load result. Tightening pruning requires proving lexical comparison parity for valid timestamps with different fractional precision, not assuming normalized chronological ordering.
+
+Heap-derived resident fields from unprofiled logs are zero placeholders in the measured `941978d` harness and are not measurements. The evidence follow-up changes these fields to null, renames `partition_scope` to `requested_months`, and applies explicit check budgets to the actual resident row count; it does not change the profiled query paths or production behavior. Use only DHAT live-byte fields for allocation claims. GNU time's maximum RSS includes profiler shutdown; phase/status RSS checkpoints can be smaller.
+
+### BEFORE workload results
+
+Peak RSS below is GNU time's whole-process maximum in KiB. Query wall excludes outer reporting and close. Heap bytes come from DHAT, not the unprofiled process. All mode result/residency assertions passed.
+
+| Mode | Queries / total rows returned | Files loaded (checkpoint trace) | Default open ms | Default query wall s | Default peak RSS KiB | DHAT global heap peak B | DHAT end-live B |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `zero` | 10 /0 | 10 | 1.235 | 18.630 | 391,964 | 268,721,978 | 126,103,904 |
+| `ascending` | 10 /774,000 (overlapping windows) | 19 | 23.599 | 33.242 | 839,008 | 702,480,733 | 123,120,980 |
+| `scan` | 1 /0 | 10 | 3.518 | 17.562 | 1,356,556 | 1,151,283,630 | 174,076,980 |
+| `eager-id` | 0 /0; 10,000 IDs at open | 1 eager file | 104.487 | — | 33,588 | 27,152,041 | 12,454,086 |
+
+The `scan` query retains zero result rows yet peaks near **1.29 GiB RSS** and **1.07 GiB tracked heap**. Its global-peak record schema allocations are **719,239,500 B = nine monthly payloads**, while the tenth file is staged. Other global-peak sites include 163,056,370 B source snapshots/text, 101,849,108 B JSONL parse/staging, 64,868,553 B ordered indexes, 60,168,816 B collection identity/capacity, 25,041,592 B general query-index metadata and 17,034,441 B native partition validation/staging. This is direct allocator evidence of scope-wide overlap, not an inference from post-trim status.
+
+After scan eviction, one partition remains but tracked live bytes still reach 174.08 MB (4047.83 B/row above open), including retained collection/index capacity. The ordinary `zero` first resident sample is 2831.60 B/row; the eager ID-only control is **1244.89 tracked resident B/ID above pre-open heap**. Eager default RSS after open is 27,414,528 B. Those two measures are not interchangeable. None of these results establishes the requested memory or time target.
+
+#### Instrumentation/profiler separation
+
+| Mode | Default process wall s /CPU s | Checkpoint-only process wall s /CPU s | DHAT process wall s /CPU s | DHAT peak RSS KiB |
+|---|---:|---:|---:|---:|
+| `zero` | 19.14 /18.33 | 19.32 /18.76 | 984.76 /377.90 | 522,088 |
+| `ascending` | 34.75 /32.70 | 24.45 /23.92 | 909.60 /852.90 | 1,578,824 |
+| `scan` | 17.95 /16.48 | 16.77 /16.21 | 832.05 /493.28 | 1,802,780 |
+| `eager-id` | 0.15 /0.10 | 0.13 /0.10 | 6.69 /4.55 | 118,800 |
+
+CPU is user plus system time. Checkpoint-only being faster in some separate runs shows why these single-run differences are not causal overhead estimates. DHAT introduces substantial tracked-allocation bookkeeping and untracked profiler memory. The scan DHAT run incurred 396,299 major page faults; the corresponding default run incurred one. Keep optimized default timings as baseline and report profiled lifetimes only as profiled lifetimes.
+
+#### Existing time-series control
+
+The unchanged original example ran `--mode lazy --rows 140000,1000000,10000000 --years 10 --inserts 1000 --query-reps 20`, with its original lazy max=4 and 120 partitions. Raw files are `original-timeseries.log` and `.stderr`.
+
+| Rows | Open ms | Peak RSS MiB | 1h query median ms | Appends completed | Status |
+|---|---:|---:|---:|---:|---|
+| 140,000 | 23.046 | 12 | 0.008468 | 1000 | ok |
+| 1,000,000 | 25.653 | 37 | 0.033971 | 700 | **aborted**: shared-host MemAvailable fell to 1022 MiB, below the existing 1024 MiB guard |
+| 10,000,000 | 51.049 | 322 | 0.273331 | 1000 | ok |
+
+The original harness's parent exited 0 despite its 1M child reporting an abort. This is a partial baseline, not a passing full original workload. Do not lower its memory guard or hide the aborted row. Both completed sizes wrote 109 B/append, read 4096 B/append, kept the previous file prefix and used the ordered index. A quiet-host 1M repeat remains a follow-up.
+
+### Verified zero-result allocation evidence
+
+The completed `zero-dhat.json` profile records **6,727,932,771 bytes allocated**, **268,721,978 bytes live at global peak**, and **126,103,904 bytes live at profile end**. The first post-eviction partition costs **121,758,604 bytes above open**, or **2,831.60 B/row**. Final live bytes also include retained collection/index capacity. The profile end occurs before close.
+
+The resident schema-decoded record payload is exactly 79,915,500 bytes. Its four allocation sites divide as follows:
+
+| Allocation site | End-live bytes | Bytes /43k rows | Mean block lifetime in profiled run |
+|---|---:|---:|---:|
+| `validator::decode_struct` → IndexMap entry vectors | 62,608,000 | 1456 | 39.558 s |
+| `validator::decode_struct` → object hash tables | 6,880,000 | 160 | 39.558 s |
+| `validator::decode_at` → string value clones | 7,503,500 | 174.5 | 118.674 s |
+| `validator::decode_struct` → field name clones | 2,924,000 | 68 | 118.673 s |
+
+These are actual allocation stacks, not RSS estimates. Entry vectors alone exceed the 1024 B/row target. Field-name interning alone cannot reach that target for this representation. The lifetime averages include intermediate growth allocations and are distorted by profiler overhead; blocks still live at the end are right-censored.
+
+Disjoint call-stack buckets from `scripts/summarize-lazy-sites.jq` give the following split. Labels identify observed allocation stacks, not exclusive execution phases. DHAT 0.3.3 charges reallocations to the original allocation stack, even when the reallocation runs in another phase; origin totals therefore need not equal phase-counter deltas. The script retains unmatched sites rather than assigning them a guessed owner.
+
+| Stack bucket | Total allocated bytes | Live at global peak | Live at profile end |
+|---|---:|---:|---:|
+| JSONL parse/staging | 3,387,315,600 | 101,849,108 | 0 |
+| Storage schema-decoded records | 1,535,102,480 | 79,915,500 | 79,915,500 |
+| Source snapshots/text, including initial file buffers | 679,443,330 | 54,352,370 | 13,588,000 |
+| Collection identity/capacity | 101,078,364 | 13,967,216 | 13,967,216 |
+| General query-index metadata | 25,901,716 | 9,510,840 | 9,510,840 |
+| Ordered index | 197,289,625 | 7,206,841 | 7,206,009 |
+| Native partition validation/staging | 613,609,200 | 1,895,317 | 1,893,486 |
+| Other/harness | 10,251,908 | 23,093 | 20,321 |
+| Benchmark checkpoints | 2,143,948 | 1,688 | 2,532 |
+| Storage load staging | 139,670,000 | 5 | 0 |
+| Engine validation temporaries | 29,240,000 | 0 | 0 |
+| Query workspace/results | 6,886,600 | 0 | 0 |
+
+Source bytes account for four month-sized buffers at the global peak, but only one month-sized buffer at the end. They matter; they are not the largest resident component. The zero-result run ends with no query output, so output DTOs cannot explain these allocations. The default executable reaches 391,964 KiB peak RSS. DHAT reaches 522,088 KiB including profiler shutdown, takes 984.76 s wall and 377.90 s CPU versus the default's 19.14 s wall and 18.33 s CPU, and has 3,974 major page faults versus zero. Do not treat that 51.5× wall ratio as allocator overhead alone: CPU availability and paging differ. These profile timings do not measure production decode speed.
+
+### Zero-result phase checkpoints
+
+Wall/RSS columns below come from the **checkpoint-only** run. Heap columns come from the **separate DHAT** run. Values are totals or maxima over ten loaded partitions, not one partition's peak. Each before/after maximum can belong to a different invocation. The two parent rows include their children: do not sum rows. Remaining work between boundaries is deliberately unattributed. Raw logs preserve every individual checkpoint and DHAT-instrumented wall time.
+
+| Boundary | Count | Inclusive wall ms | Allocated within spans B | Max live before / after B (DHAT) | Cumulative heap high-water B (DHAT) | Cumulative RSS high-water B (checkpoint-only) |
+|---|---:|---:|---:|---:|---:|---:|
+| Open | 1 | 0.844 | 129,683 | 4,603 /20,292 | 21,932 | 6,017,024 |
+| Filesystem read, including recovery | 10 | 78.956 | 136,004,430 | 126,108,483 /139,696,483 | 264,396,602 | 365,969,408 |
+| ID validation decode, including temporary destruction | 10 | 4344.535 | 1,851,932,930 | 153,284,853 /153,284,853 | 268,721,961 | 366,137,344 |
+| Storage decode | 10 | 2663.754 | 1,693,768,760 | 166,872,870 /255,176,946 | 268,721,978 | 366,137,344 |
+| Schema decode + map construction + input destruction (inseparable) | 10 | 2666.364 | 1,475,576,210 | 254,201,993 /254,201,993 | 268,721,978 | 366,137,344 |
+| Resident validation + record insertion + index maintenance (inseparable) | 10 | 2857.905 | 332,762,464 | 228,916,210 /230,429,890 | 268,721,978 | 365,969,408 |
+| Engine query, including its planner | 10 | 1046.763 | 6,997,870 | 230,429,753 /230,428,548 | 268,721,978 | 365,969,408 |
+| Eviction | 10 | 2801.866 | 90,636,432 | 230,428,548 /126,105,452 | 268,721,978 | 365,969,408 |
+| Whole partition read/decode/validate (parent) | 10 | 11961.872 | 6,277,547,740 | 126,107,087 /227,024,203 | 268,721,978 | 365,969,408 |
+| Whole query/load/trim (parent) | 10 | 18943.588 | 6,727,476,026 | 126,105,097 /126,103,892 | 268,721,978 | 365,969,408 |
+
+The checkpoint-only partition-read and resident-build boundaries together average 1.482 s per loaded 43k-row file (34.46 µs/row). ID validation decode averages 10.10 µs/row; storage decode averages 6.19 µs/row. These inclusive boundary measurements do not isolate index build from validation, or schema construction from input destruction. They are not the default binary's timing and are not a measured lower bound for a different implementation.
+
+The zero-result heap peak above open plus the **first** resident partition is 146,943,082 B, or 3417.28 B/row. This is a defined checkpoint difference, not an ownership attribution or per-phase transient maximum. At the global peak and at profile end, the allocation-site table gives the actual live-byte split. Neither these checkpoints nor DHAT's per-site aggregates retain a true local peak for every phase or every allocation's individual lifetime. Those details remain unmeasured. The raw profile retains actual allocation stacks, per-site total lifetimes, global-peak live bytes and end-live bytes; do not invent phase-local peaks from cumulative high-water values.
+
+### Focused verification and feedback
+
+`./scripts/profile-lazy-memory.sh check ARTIFACT_DIR` passed: two benchmark unit tests, one diagnostic nesting/error test, 24 existing native lazy-runtime tests, native example `cargo check`, native/storage library/example `clippy -D warnings`, workspace Rust formatting check and Bash syntax check. No full Rust or TypeScript suite was run in this stage. The metadata follow-up also ran the real optimized 10×1000-row zero-result workload and checked that unknown resident metrics are null and requested-month labels do not claim physical partition counts.
+
+The minimal `feedback` command ran against real files, preserved `feedback.log` and `feedback-dhat.json`, and exited **1 as intended**. It measured 2975.206 resident B/row against the 1024 limit, with 6,252,357 B tracked heap peak. Its small transient allowance did not fail; unit boundary tests independently prove that an excessive transient value returns failure. This is not a green target claim.
+
+The initial capture wrapper returned 2 after all measured subprocesses completed; the raw `capture.log` retains that error. The runner was edited to add summary analysis while its long capture was active (a plausible wrapper error cause, not proven). Summarization, all stack-bucket sum checks, feedback and hashing were then finalized separately. Do not edit an executing runner. The original benchmark's 1M abort remains separate and visible above.
+
+### Ranked falsifiable hypotheses (not fixes)
+
+| Rank | Hypothesis and evidence | Falsifiable next check | Cost / what it does not solve |
+|---|---|---|---|
+| 1 | Bound whole native query scopes, not only post-query cache status. Source code loads every scoped file before querying and trimming. | Count actual live records/heap during the 10-month zero-result scope; a replacement protocol must preserve results and errors while limiting residency. | Must preserve duplicate detection, pinning, failure/last-known-good semantics, callback order, lexical time filtering and floating-point aggregation order. Output rows still cost memory. |
+| 2 | Remove the redundant JSONL validation decode and materialized per-line staging. JSONL stacks allocate 3.39 GB in the zero-result run; checkpoint-only ID/decode spans each run ten times. | Same fixtures and error corpus, one parse per line, lower allocation count/bytes and unprofiled load wall. | Must keep duplicate/missing IDs, strict malformed lines, torn-tail recovery and diagnostics. Does not remove resident map capacity. |
+| 3 | Change resident object layout/capacity, not merely field-name storage. Entry vectors alone cost 1456 B/row; full schema records cost 1858.5 B/row. | Preserve inspectable fields and native/WASM parity while reducing these exact `eb` sites and total resident bytes below 1024 B/row. | Shared engine change has high parity and maintenance cost. Interned names alone save only 68 B/row here. |
+| 4 | Move owned decoded schema values instead of reconstructing them, while retaining validation. Storage-schema stacks allocate 1.54 GB over the run. | Equivalent schema/default/check/migration fixtures with fewer allocations and lower checkpoint-only schema wall. | Does not automatically compact the final record or eliminate engine validation. Borrowed APIs may still need their old contract. |
+| 5 | Replace retained full-file append baselines and eliminate snapshot/text copies where safe. Source buffer stacks retain 13.59 MB and peak at 54.35 MB. | Preserve append conflict, torn-line, external-edit and last-known-good tests while reducing these exact live-byte sites. | Length plus tail alone needs a documented conflict contract; do not silently weaken change detection. Does not solve the dominant record/index cost. |
+| 6 | Reduce retained collection/index capacity and duplicated identity metadata. These stacks retain 30.68 MB excluding native staging. | Repeated ascending scopes show lower post-eviction `eb` and stable index/query semantics. | Must preserve ordered-index speed and mutation/rollback behavior. RSS may remain higher than live heap due to allocator retention; that cause remains unproved. |
