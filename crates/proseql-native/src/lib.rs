@@ -826,7 +826,11 @@ impl NativeRuntime {
             &paths,
             false,
         );
-        let result = read.and_then(|read| f(&state.database).map(|result| (result, read)));
+        let result = read.and_then(|read| {
+            let _phase =
+                proseql_storage::diagnostics::span("query_engine_including_explain_when_requested");
+            f(&state.database).map(|result| (result, read))
+        });
         let trimmed = sources_trim(state);
         let (result, read) = result?;
         trimmed?;

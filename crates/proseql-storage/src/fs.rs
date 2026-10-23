@@ -652,6 +652,7 @@ impl DurableStorageHost for FsStorageHost {
 
 impl StorageHost for FsStorageHost {
     fn read(&self, path: &str) -> Result<String, EngineError> {
+        let _phase = crate::diagnostics::span("filesystem_read_text_including_recovery");
         self.recover_durable_path(path)?;
         std::fs::read_to_string(path).map_err(|error| {
             storage_error(
@@ -663,6 +664,7 @@ impl StorageHost for FsStorageHost {
     }
 
     fn read_bytes(&self, path: &str) -> Result<Vec<u8>, EngineError> {
+        let _phase = crate::diagnostics::span("filesystem_read_bytes_including_recovery");
         self.recover_durable_path(path)?;
         std::fs::read(path).map_err(|error| {
             storage_error(

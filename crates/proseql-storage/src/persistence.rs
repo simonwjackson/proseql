@@ -714,6 +714,7 @@ pub(crate) fn decode_entity_map(
     entity_map: Map<String, Value>,
     validation: ValidationMode,
 ) -> Result<IndexMap<String, Value>, EngineError> {
+    let _phase = crate::diagnostics::span("schema_decode_map_construction_including_input_drop");
     let mut entries = IndexMap::new();
     for (id, value) in entity_map {
         let attempt = || -> Result<Value, EngineError> {
@@ -771,7 +772,10 @@ pub fn load_data(
             entity_map.insert(id, Value::Object(record));
         }
     } else {
-        let parsed = formats.deserialize(&raw, &ext).map_err(format_error)?;
+        let parsed = {
+            let _phase = crate::diagnostics::span("decode_storage");
+            formats.deserialize(&raw, &ext).map_err(format_error)?
+        };
         let enclosing_version = if options.path.is_some() {
             parsed
                 .as_object()

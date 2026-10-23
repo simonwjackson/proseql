@@ -1,5 +1,6 @@
 pub mod append;
 pub mod collection_file;
+pub mod diagnostics;
 pub mod document_graph;
 pub mod document_source;
 pub mod host;

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "proseQL storage hosts, persistence helpers, document sources, and document graph loader"
 
+[features]
+bench-observe = []
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }

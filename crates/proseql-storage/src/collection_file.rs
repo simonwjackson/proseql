@@ -64,6 +64,7 @@ pub fn validate_collection_file_ids(
     formats: &FormatRegistry,
     source: &NormalizedCollectionFileSourceConfig,
 ) -> Result<(), EngineError> {
+    let _phase = crate::diagnostics::span("decode_id_validation_including_drop");
     with_source_codec(formats, source, |formats| {
         let raw = host.read(&source.path)?;
         let decoded = formats

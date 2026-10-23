@@ -499,6 +499,7 @@ impl SourceState {
         lazy: &LazyCollection,
         path: &str,
     ) -> Result<LoadedPartition, EngineError> {
+        let _phase = proseql_storage::diagnostics::span("partition_read_decode_validate");
         let snapshot = crate::read_snapshot::ReadSnapshot::new(host);
         let file = file_source(&lazy.source, path);
         let config = &self.config.collection_configs[&lazy.collection];
@@ -578,6 +579,8 @@ impl SourceState {
             let ids = partition.records.keys().cloned().collect::<Vec<_>>();
             let position = Self::lazy_position(lazy, database, &path);
             let source_id = lazy.source_id.clone();
+            let record_phase =
+                proseql_storage::diagnostics::span("resident_validation_record_and_index_build");
             database
                 .load_resident_records(
                     collection,
@@ -594,6 +597,7 @@ impl SourceState {
                     ),
                     other => other,
                 })?;
+            drop(record_phase);
             read += usize::from(partition.content.is_some());
             if let Some(content) = partition.content {
                 self.contents.insert(path.clone(), content);
@@ -672,6 +676,7 @@ impl SourceState {
     /// `max_loaded_partitions` unpinned partitions stay loaded. Pinned
     /// partitions do not count against the bound.
     pub fn lazy_trim(&mut self, database: &mut Database) -> Result<(), EngineError> {
+        let _phase = proseql_storage::diagnostics::span("eviction");
         for name in self.lazy.keys().cloned().collect::<Vec<_>>() {
             let mut evicted = false;
             loop {

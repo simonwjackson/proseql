@@ -25,6 +25,11 @@ tempfile = "3"
 notify = "6"
 unicode-ident = "1"
 
+# Optimized native benchmark with allocation-site symbols; no LTO changes.
+[profile.memory-profile]
+inherits = "release"
+debug = 1
+
 [profile.wasm-production]
 inherits = "release"
 opt-level = 2
