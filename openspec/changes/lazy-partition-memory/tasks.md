@@ -16,9 +16,9 @@
 
 ## 5. Track E — Combined verification and consumer handoff (blocked by Track A + B + C + D)
 
-- [ ] 5.1 On the combined source run all Rust and TypeScript suites, typecheck, lint and formatting, native/WASM parity checks and synthetic Coach compatibility (never the script's default real-data copy), build the pinned consumer using a target override without editing Coach, rerun the original benchmark and all new optimized unprofiled/profiled workloads at the measured hardware shape, compare BEFORE/AFTER allocation profiles and per-phase timing/RSS/resident/transient costs against unchanged targets, test the minimal memory feedback command both green and deliberately red, document remaining limits and publication/deployment availability, and publish the exact tested source SHA, benchmark SHA, evidence manifest and consumer pin/configuration guidance; coordinator owns this full verification, not Track A.
+- [x] 5.1 On the combined source run all Rust and TypeScript suites, typecheck, lint and formatting, native/WASM parity checks and synthetic Coach compatibility (never the script's default real-data copy), build the pinned consumer using a target override without editing Coach, rerun the original benchmark and all new optimized unprofiled/profiled workloads at the measured hardware shape, compare BEFORE/AFTER allocation profiles and per-phase timing/RSS/resident/transient costs against unchanged targets, test the minimal memory feedback command both green and deliberately red, document remaining limits and publication/deployment availability, and publish the exact tested source SHA, benchmark SHA, evidence manifest and consumer pin/configuration guidance; coordinator owns this full verification, not Track A.
 
-## Implementation evidence and remaining coordinator gate
+## Implementation evidence and target limits
 
 Tracks B/C/D: measured runtime/example `11174f90488bad79e0f39cd7a76af28b9a097406`;
 see `docs/benchmarks/lazy-memory.md` and `lazy-memory-after-manifest.json`.
@@ -32,9 +32,11 @@ adds repeat wall/CPU ranges. The retained public canonical payload floor is
 not proven impossible. Phase-local requested heap is measured. The later independent Linux self-HWM
 reset observer supplies actual phase-local RSS peaks with nested regression
 proof; original acceptance runs remain unchanged. Existing time-series controls all complete with append and
-ordered-index assertions intact. Focused checks pass. Track E stays unchecked:
-the coordinator owns the one combined full suite, final SHA and synthetic
-consumer build. No consumer pin, disk layout or service changed in this child.
+ordered-index assertions intact. The coordinator completed Track E at tested
+source `9a11d3665bcc881c568ee1d77d81596543c6ac07`, then fast-forwarded local
+main to that exact source. The original performance targets are not all met;
+the measured floors and alternatives above remain the consumer acceptance
+limits. No consumer pin, disk layout or service changed.
 
 
 ### RSS proof and coordinator source verification follow-up
@@ -47,5 +49,16 @@ control fails. See `lazy-memory-phase-rss-manifest.json` for the raw proof.
 The coordinator's exact `e9f75a8` combined run passes all default Rust/static/
 WASM/parity checks, TS 4093 pass / 2 existing skips / 0 fail, the separate real
 Chromium budget task, 42-collection synthetic compatibility and 27 consumer
-tests. Track E remains open only for the final rebased-source combined pass;
-no production behavior changed in the RSS proof/reproducer follow-up.
+tests. The final reviewed source adds only a deterministic correction to an
+existing reactive-test collector lifetime race; production remains unchanged.
+At exact `9a11d3665bcc881c568ee1d77d81596543c6ac07`, Rust/static/WASM/parity,
+real Chromium budgets, synthetic compatibility and 27 consumer tests pass.
+The unchanged full TypeScript task passes 4094 tests, with two existing skips
+and no failures. Earlier publisher-bundle timeouts remain in the coordinator
+logs; no timeout or assertion was weakened. Exact-source final filesystem
+benchmarks and fixture-byte checks pass. Evidence and the consumer report are
+under `/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/`.
+The tested consumer pin is `9a11d3665bcc881c568ee1d77d81596543c6ac07`.
+Logbook needs no layout change; bounded reads require call-site adoption.
+No consumer deployment or publication ran. This completion note changes only
+task metadata and is not a replacement source pin.
