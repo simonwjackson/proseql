@@ -110,6 +110,20 @@ pub struct QueryInput {
     pub select: Option<Value>,
 }
 
+/// Validate the non-cursor query entry point before evaluating callbacks.
+pub fn validate_regular_query(input: &QueryInput) -> Result<(), EngineError> {
+    if input.cursor.is_some() {
+        return Err(EngineError::Operation(OperationError {
+            operation: "query".to_string(),
+            reason: "cursor pagination requires execute_cursor_query".to_string(),
+            message: "A cursor was provided to execute_query. Use execute_cursor_query for cursor \
+                 pagination."
+                .to_string(),
+        }));
+    }
+    Ok(())
+}
+
 // ── Query on Collection ───────────────────────────────────────────────────────
 
 /// Execute a synchronous query over a `Collection`.
@@ -121,16 +135,7 @@ pub fn execute_query(
     input: &QueryInput,
     registry: &Arc<CallbackRegistry>,
 ) -> Result<Vec<Value>, EngineError> {
-    // Guard: cursor pagination needs execute_cursor_query
-    if input.cursor.is_some() {
-        return Err(EngineError::Operation(OperationError {
-            operation: "query".to_string(),
-            reason: "cursor pagination requires execute_cursor_query".to_string(),
-            message: "A cursor was provided to execute_query. Use execute_cursor_query for cursor \
-                 pagination."
-                .to_string(),
-        }));
-    }
+    validate_regular_query(input)?;
 
     // The common unsorted path does not need owned intermediate rows. Keeping
     // candidates borrowed until after filtering and pagination avoids cloning
@@ -422,16 +427,60 @@ pub fn execute_query_over_entities(
     };
     let filtered: Vec<Value> = match &input.r#where {
         None => with_computed,
-        Some(w) => with_computed
+        Some(clause) => with_computed
             .into_iter()
-            .filter(|e| matches_where_with_registry(e, w, Some(registry.as_ref())))
+            .filter(|row| matches_where_with_registry(row, clause, Some(registry)))
             .collect(),
     };
-    let sorted = sort_with_scoring(filtered, &input.r#where, &input.sort, Some(registry));
-    let paginated = paginate(&sorted, input.offset, input.limit);
-    Ok(paginated
+    finish_query_matches(filtered, input, registry)
+}
+
+/// Filter partition candidates once, then finish one global query. Hosts must
+/// supply candidates in natural collection order and resolve computed fields
+/// before this seam. Only matching rows are retained, as inspectable Values.
+pub struct QueryMatches {
+    input: QueryInput,
+    registry: Arc<CallbackRegistry>,
+    rows: Vec<Value>,
+}
+impl QueryMatches {
+    pub fn new(input: QueryInput, registry: Arc<CallbackRegistry>) -> Self {
+        Self {
+            input,
+            registry,
+            rows: Vec::new(),
+        }
+    }
+    fn matches(&self, row: &Value) -> bool {
+        self.input
+            .r#where
+            .as_ref()
+            .is_none_or(|clause| matches_where_with_registry(row, clause, Some(&self.registry)))
+    }
+    pub fn push(&mut self, row: &Value) {
+        if self.matches(row) {
+            self.rows.push(row.clone());
+        }
+    }
+    pub fn finish(self) -> Result<Vec<Value>, EngineError> {
+        validate_regular_query(&self.input)?;
+        finish_query_matches(self.rows, &self.input, &self.registry)
+    }
+    pub fn finish_cursor(self, cursor: &CursorConfig) -> Result<CursorPageResult, EngineError> {
+        let sort = effective_cursor_sort(&self.input, cursor)?;
+        finish_cursor_matches(self.rows, &self.input, cursor, Some(&sort), &self.registry)
+    }
+}
+
+fn finish_query_matches(
+    rows: Vec<Value>,
+    input: &QueryInput,
+    registry: &Arc<CallbackRegistry>,
+) -> Result<Vec<Value>, EngineError> {
+    let sorted = sort_with_scoring(rows, &input.r#where, &input.sort, Some(registry));
+    Ok(paginate(&sorted, input.offset, input.limit)
         .iter()
-        .map(|e| apply_selection(e, input.select.as_ref()))
+        .map(|row| apply_selection(row, input.select.as_ref()))
         .collect())
 }
 
@@ -503,6 +552,16 @@ fn cursor_page(
             .filter(|e| matches_where_with_registry(e, w, Some(registry.as_ref())))
             .collect(),
     };
+    finish_cursor_matches(filtered, input, cursor_cfg, sort, registry)
+}
+
+fn finish_cursor_matches(
+    filtered: Vec<Value>,
+    input: &QueryInput,
+    cursor_cfg: &CursorConfig,
+    sort: Option<&[SortEntry]>,
+    registry: &Arc<CallbackRegistry>,
+) -> Result<CursorPageResult, EngineError> {
     let filtered_with_scores = attach_search_scores(filtered, &input.r#where);
     let mut sorted = filtered_with_scores;
     if let Some(sort) = sort {

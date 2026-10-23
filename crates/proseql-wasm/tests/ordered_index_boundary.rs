@@ -125,3 +125,37 @@ fn an_ordered_index_on_an_undeclared_field_is_rejected_at_create_database() {
         json!("ordered_indexes")
     );
 }
+
+#[test]
+fn shared_memory_fixture_keeps_float_order_groups_and_comparable_objects() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../proseql-engine/tests/fixtures/lazy-memory.json"
+    ))
+    .unwrap();
+    let mut runtime = Runtime::new();
+    let mut config = descriptor(None);
+    config["descriptor"]["collections"][0]["schema"] = json!({"kind":"struct","fields":[
+        {"name":"id","schema":{"kind":"str"}},
+        {"name":"group","schema":{"kind":"optional","inner":{"kind":"unknown"}}},
+        {"name":"value","schema":{"kind":"num"}},
+        {"name":"comparable","schema":{"kind":"unknown"}},
+        {"name":"object","schema":{"kind":"optional","inner":{"kind":"unknown"}}}
+    ]});
+    let handle = ok(&runtime.create_database_json(&config.to_string()))
+        .as_u64()
+        .unwrap() as u32;
+    for row in fixture["rows"].as_array().unwrap() {
+        ok(&runtime.dispatch_json(
+            handle,
+            "create",
+            Some(&json!({"collection":"samples","data":row}).to_string()),
+        ));
+    }
+    let config = json!({"count":true,"sum":["value"],"avg":["value"],"min":["comparable","object"],"max":["comparable","object"]});
+    let result = ok(&runtime.dispatch_json(
+        handle,
+        "aggregate",
+        Some(&json!({"collection":"samples","config":config}).to_string()),
+    ));
+    assert_eq!(result, fixture["expected"]);
+}

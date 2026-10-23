@@ -27,3 +27,9 @@ A cache bound is not currently a bound on the working set of a multi-month query
 ## Feedback cost
 
 A 10×1,000-row DHAT run checks resident and transient allocated-byte limits. It is deliberately red on the original implementation if the measured cost exceeds the target. It is not a replacement for the 43k workload, RSS verification, profiles, correctness tests or full final verification. The heap check uses a 50 MiB absolute transient allowance, so small-scale runs mostly detect resident regressions; full-size runs detect the intended transient budget.
+
+## Implemented protocol (issue #11)
+
+The opt-in methods and exact exceptions are specified in `specs/bounded-native-reads/spec.md` and `docs/native-sources.md`. This explicitly extends, rather than silently replaces, native-timeseries' intentional full-scope and pinned-watch exceptions. Each bounded read visits path/file order, loads one candidate against the accepted cache, consumes its rows, then trims before the next load. A scope-wide identity set preserves duplicate checks across evicted partitions. Query matches remain canonical Values and finish once in the shared engine. Scalar/group accumulators accept individual rows, never monthly partial sums. Search aggregates buffer relevance-ordered matches to preserve the existing native accumulation order. Pin counts and watch memory are additional, explicit costs.
+
+The allocator regression first failed on the old full-scope seam with 40 live 8192-byte record payloads against an N=1 allowance of 8 (4 rows/partition). The bounded method passes the same real-filesystem allocation test. It checks alloc/realloc/dealloc lifetimes of actual Value strings, not a partition counter. Committed watch snapshots discard unpinned records without reconstructing another whole resident snapshot.

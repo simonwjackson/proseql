@@ -5,6 +5,8 @@
 //! after durable persistence. Source-mode batches replace files individually;
 //! a write-stage failure quarantines the runtime because a prefix can be durable.
 
+mod bounded;
+pub use bounded::BoundedQueryStats;
 mod callbacks;
 mod lazy;
 mod read_snapshot;

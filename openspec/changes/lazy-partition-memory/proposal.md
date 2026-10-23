@@ -15,4 +15,4 @@ The synthetic consumer handoff reports excessive transient memory and slow month
 
 Targets remain ≤1024 resident heap bytes/row, peak RSS ≤open RSS + twice one month's resident size +50 MiB, and ≤0.5 s/month on this i9-class host. Allocated heap and RSS are distinct; allocator retention is not proved by a difference alone. Multi-month query output and pinned watches require an explicit bound and must not be silently discarded. The profiling feature adds synchronous callback and allocator overhead; its timings are not baseline timings.
 
-No real health data or consumer files enter the fixture. No consumer repository changes. External work-item filing is pending coordinator authority. Read-only search found no matching memory/decode issue; issue #1 covers a different time-series acceptance target.
+No real health data or consumer files enter the fixture. No consumer repository changes. Work item: [#11](https://github.com/simonwjackson/proseql/issues/11). Issue #1 covers a different time-series acceptance target. Bounded reads are opt-in methods, not a silent replacement of the earlier full-scope/watch contract.

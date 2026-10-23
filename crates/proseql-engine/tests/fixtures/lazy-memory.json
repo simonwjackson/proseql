@@ -1,0 +1,16 @@
+{
+  "rows": [
+    {"id":"a","group":"z","value":10000000000000000,"comparable":[3,4],"object":{"first":true}},
+    {"id":"b","group":"a","value":-10000000000000000,"comparable":[1,2],"object":{"second":true}},
+    {"id":"c","group":"z","value":1,"comparable":null,"object":null},
+    {"id":"d","value":0,"comparable":null},
+    {"id":"e","group":null,"value":0,"comparable":null}
+  ],
+  "expected": {
+    "count": 5,
+    "sum": {"value":1.0},
+    "avg": {"value":0.2},
+    "min": {"comparable":[1,2],"object":{"first":true}},
+    "max": {"comparable":[3,4],"object":{"first":true}}
+  }
+}

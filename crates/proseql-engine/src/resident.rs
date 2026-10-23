@@ -83,6 +83,22 @@ impl Database {
         });
     }
 
+    /// Drop snapshot records that no host-managed watch scope needs. Unlike
+    /// refresh, this does not clone resident records into another full snapshot.
+    /// Hosts must include every ID that any live watch can match.
+    pub fn retain_reactive_snapshot_records(
+        &self,
+        collection: &str,
+        ids: &std::collections::HashSet<&str>,
+    ) -> Result<(), EngineError> {
+        if !self.collections.contains_key(collection) {
+            return Err(col_nf(collection));
+        }
+        self.reactive
+            .retain_collection_snapshot_records(collection, ids);
+        Ok(())
+    }
+
     /// Replace the snapshot that live watches evaluate for `collection` with
     /// the current resident state, so records dropped without publishing are
     /// not retained by the watch machinery. Publishes nothing.

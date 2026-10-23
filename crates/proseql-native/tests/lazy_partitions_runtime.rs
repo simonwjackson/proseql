@@ -1532,3 +1532,197 @@ fn dropping_the_last_covering_watch_stops_retrying_a_failed_partition() {
     assert!(!loaded(&lazy).contains(&"2026-06".to_owned()));
     lazy.close().unwrap();
 }
+
+// ── Opt-in bounded reads: one global query, not monthly pages/aggregates ──────
+
+#[test]
+fn bounded_queries_keep_global_natural_sort_page_cursor_search_and_selection_semantics() {
+    let dir = tempfile::tempdir().unwrap();
+    seed(dir.path());
+    let eager = open_eager(dir.path());
+    for bound in [1, 2, 3] {
+        let lazy = open_lazy(dir.path(), policy(bound, FullScanPolicy::Allow));
+        for filter in [
+            None,
+            Some(json!({"bpm":{"$gte":80}})),
+            Some(json!({"timestamp":{"$gte":"2025-12", "$lt":"2026-03"}})),
+            Some(json!({"$search":{"query":"rest", "fields":["source"]}})),
+        ] {
+            for sort in [
+                vec![],
+                vec![("timestamp".into(), SortOrder::Desc)],
+                vec![("bpm".into(), SortOrder::Asc)],
+            ] {
+                for select in [None, Some(json!(["id", "bpm"])), Some(json!({"id":true}))] {
+                    let input = QueryInput {
+                        r#where: filter.clone(),
+                        sort: sort.clone(),
+                        offset: Some(3),
+                        limit: Some(9),
+                        select,
+                        ..Default::default()
+                    };
+                    let (rows, stats) = lazy
+                        .query_bounded_with_stats("heartrate", input.clone())
+                        .unwrap();
+                    assert_eq!(rows, eager_query(&eager, input.clone()), "{input:?}");
+                    assert!(stats.partitions_resident <= bound);
+                    assert_eq!(stats.pinned_partitions, 0);
+                    assert_eq!(stats.retained_partition_limit, bound);
+                }
+            }
+        }
+        for cursor in [
+            proseql_engine::query::CursorConfig {
+                key: "timestamp".into(),
+                after: None,
+                before: None,
+                limit: 7,
+            },
+            proseql_engine::query::CursorConfig {
+                key: "timestamp".into(),
+                after: Some("2026-01-01T00:00:00.000Z".into()),
+                before: None,
+                limit: 8,
+            },
+            proseql_engine::query::CursorConfig {
+                key: "timestamp".into(),
+                after: None,
+                before: Some("2026-02-10T05:00:00.000Z".into()),
+                limit: 6,
+            },
+        ] {
+            let input = QueryInput {
+                select: Some(json!(["id"])),
+                ..Default::default()
+            };
+            assert_eq!(
+                lazy.query_cursor_bounded("heartrate", input.clone(), &cursor)
+                    .unwrap(),
+                eager
+                    .query_cursor("heartrate", input, &cursor, None)
+                    .unwrap()
+            );
+        }
+    }
+}
+
+#[test]
+fn bounded_aggregates_accumulate_individual_rows_in_eager_order() {
+    let dir = tempfile::tempdir().unwrap();
+    for (index, (month, _)) in MONTHS.iter().enumerate() {
+        let mut rows = vec![sample(&format!("{month}-01T00:00:00Z"), index)];
+        rows[0]["bpm"] = json!([1e16, -1e16, 1.0, 1e16, -1e16, 1.0][index]);
+        if index == 1 {
+            let mut row = sample(&format!("{month}-02T00:00:00Z"), 9);
+            row["bpm"] = json!(1.0);
+            rows.push(row);
+        }
+        write_partition(dir.path(), month, &rows);
+    }
+    let eager = open_eager(dir.path());
+    let lazy = open_lazy(dir.path(), policy(1, FullScanPolicy::Allow));
+    let aggregate = AggregateConfig {
+        count: true,
+        sum: vec!["bpm".into()],
+        avg: vec!["bpm".into()],
+        min: vec!["bpm".into(), "source".into()],
+        max: vec!["bpm".into(), "source".into()],
+    };
+    for filter in [
+        None,
+        Some(json!({"timestamp":{"$gte":"2025-12", "$lt":"2026-04"}})),
+        Some(json!({"$search":{"query":"rest", "fields":["source"]}})),
+    ] {
+        assert_eq!(
+            lazy.aggregate_bounded("heartrate", filter.clone(), &aggregate)
+                .unwrap(),
+            eager
+                .aggregate("heartrate", filter.clone(), &aggregate)
+                .unwrap()
+        );
+        let groups = ["source".into()];
+        assert_eq!(
+            lazy.aggregate_grouped_bounded("heartrate", filter.clone(), &groups, &aggregate)
+                .unwrap(),
+            eager
+                .aggregate_grouped("heartrate", filter, &groups, &aggregate)
+                .unwrap()
+        );
+    }
+}
+
+#[test]
+fn bounded_load_errors_pins_and_duplicates_across_evicted_partitions_are_not_hidden() {
+    let dir = tempfile::tempdir().unwrap();
+    seed(dir.path());
+    let lazy = open_lazy(dir.path(), policy(1, FullScanPolicy::Allow));
+    let watch = lazy
+        .watch(
+            "heartrate",
+            WatchQueryConfig {
+                r#where: month("2025-11").r#where,
+                select: Some(json!(["id"])),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let (_, stats) = lazy
+        .query_bounded_with_stats("heartrate", QueryInput::default())
+        .unwrap();
+    assert_eq!(stats.pinned_partitions, 1);
+    assert_eq!(stats.partitions_resident, 2);
+    drop(watch);
+    let (_, stats) = lazy
+        .query_bounded_with_stats("heartrate", QueryInput::default())
+        .unwrap();
+    assert_eq!(stats.pinned_partitions, 0);
+    assert_eq!(stats.partitions_resident, 1);
+    let last = loaded(&lazy)[0].clone();
+    let path = root(dir.path()).join(format!("{last}.jsonl"));
+    fs::write(&path, "broken\n").unwrap();
+    assert!(lazy.reload().is_err());
+    assert!(
+        !lazy
+            .query_bounded("heartrate", month(&last))
+            .unwrap()
+            .is_empty(),
+        "failed reload keeps last known good"
+    );
+    // A malformed *incoming* partition must fail even for a zero-result filter.
+    let bad = root(dir.path()).join("2025-11.jsonl");
+    fs::write(&bad, "broken\n").unwrap();
+    assert_eq!(
+        lazy.query_bounded("heartrate", filtered(json!({"bpm":{"$lt":-1}})))
+            .unwrap_err()
+            .tag(),
+        "SerializationError"
+    );
+    assert_eq!(loaded(&lazy), [last]);
+    lazy.close().unwrap();
+    seed(dir.path());
+    let mut a = sample("2025-11-01T00:00:00Z", 1);
+    a["id"] = json!("same-id");
+    let mut b = sample("2026-04-01T00:00:00Z", 1);
+    b["id"] = json!("same-id");
+    write_partition(dir.path(), "2025-11", &[a]);
+    write_partition(dir.path(), "2026-04", &[b]);
+    let duplicate = open_lazy(dir.path(), policy(1, FullScanPolicy::Allow));
+    assert_eq!(
+        duplicate
+            .query_bounded("heartrate", filtered(json!({"bpm":{"$lt":-1}})))
+            .unwrap_err()
+            .tag(),
+        "SourceConfigError"
+    );
+    let refused = open_lazy(dir.path(), policy(1, FullScanPolicy::Error));
+    assert_eq!(
+        operation_reason(
+            &refused
+                .query_bounded("heartrate", QueryInput::default())
+                .unwrap_err()
+        ),
+        "lazy-full-scan"
+    );
+    assert!(loaded(&refused).is_empty());
+}

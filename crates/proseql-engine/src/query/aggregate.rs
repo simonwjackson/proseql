@@ -31,7 +31,7 @@
 //! So `count`, `sum`, etc. are at the same level as `group`, not nested under
 //! an `aggregate` field.
 
-use std::collections::{HashMap, LinkedList};
+use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 
@@ -130,30 +130,56 @@ const UNDEFINED_SENTINEL: &str = "__PTDB_UNDEFINED__";
 ///
 /// Mirrors `computeAggregates` from `packages/core/src/operations/query/aggregate.ts`.
 pub fn compute_aggregates(entities: &[Value], config: &AggregateConfig) -> AggregateResult {
-    let mut count: u64 = 0;
-    let mut sum_acc: HashMap<String, f64> = config.sum.iter().map(|f| (f.clone(), 0.0)).collect();
-    let mut avg_acc: HashMap<String, (f64, u64)> =
-        config.avg.iter().map(|f| (f.clone(), (0.0, 0))).collect();
-    // Use Option<Value> to distinguish "no value yet" from "null".
-    // When the option stays None, the field is omitted from output.
-    let mut min_acc: HashMap<String, Option<Value>> =
-        config.min.iter().map(|f| (f.clone(), None)).collect();
-    let mut max_acc: HashMap<String, Option<Value>> =
-        config.max.iter().map(|f| (f.clone(), None)).collect();
-
+    let mut accumulator = AggregateAccumulator::new(config);
     for entity in entities {
+        accumulator.push(entity);
+    }
+    accumulator.finish()
+}
+
+/// Row-at-a-time aggregation. Each f64 addition and min/max comparison runs
+/// in input order. There is deliberately no merge-partial-aggregates method.
+pub struct AggregateAccumulator<'a> {
+    config: &'a AggregateConfig,
+    count: u64,
+    sum_acc: HashMap<String, f64>,
+    avg_acc: HashMap<String, (f64, u64)>,
+    min_acc: HashMap<String, Option<Value>>,
+    max_acc: HashMap<String, Option<Value>>,
+}
+impl<'a> AggregateAccumulator<'a> {
+    pub fn new(config: &'a AggregateConfig) -> Self {
+        Self {
+            config,
+            count: 0,
+            sum_acc: config.sum.iter().map(|f| (f.clone(), 0.0)).collect(),
+            avg_acc: config.avg.iter().map(|f| (f.clone(), (0.0, 0))).collect(),
+            min_acc: config.min.iter().map(|f| (f.clone(), None)).collect(),
+            max_acc: config.max.iter().map(|f| (f.clone(), None)).collect(),
+        }
+    }
+    pub fn push(&mut self, entity: &Value) {
+        let Self {
+            config,
+            count,
+            sum_acc,
+            avg_acc,
+            min_acc,
+            max_acc,
+        } = self;
+
         if config.count {
-            count += 1;
+            *count += 1;
         }
 
         for field in &config.sum {
             if let Some(n) = get_nested_value(entity, field).and_then(|v| v.as_f64()) {
-                *sum_acc.entry(field.clone()).or_insert(0.0) += n;
+                *sum_acc.get_mut(field).expect("configured sum field") += n;
             }
         }
         for field in &config.avg {
             if let Some(n) = get_nested_value(entity, field).and_then(|v| v.as_f64()) {
-                let (s, c) = avg_acc.entry(field.clone()).or_insert((0.0, 0));
+                let (s, c) = avg_acc.get_mut(field).expect("configured avg field");
                 *s += n;
                 *c += 1;
             }
@@ -189,44 +215,54 @@ pub fn compute_aggregates(entities: &[Value], config: &AggregateConfig) -> Aggre
             }
         }
     }
+    pub fn finish(self) -> AggregateResult {
+        let Self {
+            config,
+            count,
+            sum_acc,
+            avg_acc,
+            min_acc,
+            max_acc,
+        } = self;
 
-    AggregateResult {
-        count: if config.count { Some(count) } else { None },
-        sum: if !config.sum.is_empty() {
-            Some(sum_acc)
-        } else {
-            None
-        },
-        avg: if !config.avg.is_empty() {
-            let result = avg_acc
-                .into_iter()
-                .map(|(f, (s, c))| (f, if c > 0 { Some(s / c as f64) } else { None }))
-                .collect();
-            Some(result)
-        } else {
-            None
-        },
-        min: if !config.min.is_empty() {
-            // Omit fields with no value (stay None) → field absent from HashMap
-            Some(
-                min_acc
+        AggregateResult {
+            count: if config.count { Some(count) } else { None },
+            sum: if !config.sum.is_empty() {
+                Some(sum_acc)
+            } else {
+                None
+            },
+            avg: if !config.avg.is_empty() {
+                let result = avg_acc
                     .into_iter()
-                    .filter_map(|(f, v)| v.map(|val| (f, val)))
-                    .collect(),
-            )
-        } else {
-            None
-        },
-        max: if !config.max.is_empty() {
-            Some(
-                max_acc
-                    .into_iter()
-                    .filter_map(|(f, v)| v.map(|val| (f, val)))
-                    .collect(),
-            )
-        } else {
-            None
-        },
+                    .map(|(f, (s, c))| (f, if c > 0 { Some(s / c as f64) } else { None }))
+                    .collect();
+                Some(result)
+            } else {
+                None
+            },
+            min: if !config.min.is_empty() {
+                // Omit fields with no value (stay None) → field absent from HashMap
+                Some(
+                    min_acc
+                        .into_iter()
+                        .filter_map(|(f, v)| v.map(|val| (f, val)))
+                        .collect(),
+                )
+            } else {
+                None
+            },
+            max: if !config.max.is_empty() {
+                Some(
+                    max_acc
+                        .into_iter()
+                        .filter_map(|(f, v)| v.map(|val| (f, val)))
+                        .collect(),
+                )
+            } else {
+                None
+            },
+        }
     }
 }
 
@@ -249,67 +285,78 @@ pub fn compute_grouped_aggregates(
     group_by: &[String],
     config: &AggregateConfig,
 ) -> Vec<GroupResult> {
-    // Preserve insertion order with a linked-list-of-keys approach.
-    let mut key_order: LinkedList<String> = LinkedList::new();
-    let mut groups: HashMap<String, Vec<Value>> = HashMap::new();
-
+    let mut accumulator = GroupedAggregateAccumulator::new(group_by, config);
     for entity in entities {
-        let group_values: Vec<String> = group_by
+        accumulator.push(entity);
+    }
+    accumulator.finish()
+}
+
+/// Groups keep first-encounter order; each group accumulates individual rows.
+pub struct GroupedAggregateAccumulator<'a> {
+    group_by: &'a [String],
+    config: &'a AggregateConfig,
+    positions: HashMap<String, usize>,
+    groups: Vec<(String, AggregateAccumulator<'a>)>,
+}
+impl<'a> GroupedAggregateAccumulator<'a> {
+    pub fn new(group_by: &'a [String], config: &'a AggregateConfig) -> Self {
+        Self {
+            group_by,
+            config,
+            positions: HashMap::new(),
+            groups: Vec::new(),
+        }
+    }
+    pub fn push(&mut self, entity: &Value) {
+        let key = self
+            .group_by
             .iter()
-            .map(|f| {
-                let v = get_nested_value(entity, f);
-                match v {
-                    // Absent field → sentinel (not the same as null)
-                    None => UNDEFINED_SENTINEL.to_string(),
-                    // Null field → serialize as JSON "null"
-                    Some(Value::Null) => "null".to_string(),
-                    Some(v) => serde_json::to_string(v).unwrap_or_default(),
+            .map(|field| match get_nested_value(entity, field) {
+                None => UNDEFINED_SENTINEL.to_owned(),
+                Some(value) => serde_json::to_string(value).unwrap_or_default(),
+            })
+            .collect::<Vec<_>>()
+            .join("\x00");
+        let index = match self.positions.get(&key) {
+            Some(index) => *index,
+            None => {
+                let index = self.groups.len();
+                self.positions.insert(key.clone(), index);
+                self.groups
+                    .push((key, AggregateAccumulator::new(self.config)));
+                index
+            }
+        };
+        self.groups[index].1.push(entity);
+    }
+    pub fn finish(self) -> Vec<GroupResult> {
+        self.groups
+            .into_iter()
+            .map(|(key, accumulator)| {
+                let values: Vec<&str> = key.split('\x00').collect();
+                let mut group = Map::new();
+                for (index, field) in self.group_by.iter().enumerate() {
+                    let raw = values.get(index).copied().unwrap_or(UNDEFINED_SENTINEL);
+                    if raw != UNDEFINED_SENTINEL {
+                        group.insert(
+                            field.clone(),
+                            serde_json::from_str(raw).unwrap_or(Value::Null),
+                        );
+                    }
+                }
+                let result = accumulator.finish();
+                GroupResult {
+                    group,
+                    count: result.count,
+                    sum: result.sum,
+                    avg: result.avg,
+                    min: result.min,
+                    max: result.max,
                 }
             })
-            .collect();
-        let group_key = group_values.join("\x00");
-
-        if !groups.contains_key(&group_key) {
-            key_order.push_back(group_key.clone());
-        }
-        groups.entry(group_key).or_default().push(entity.clone());
+            .collect()
     }
-
-    key_order
-        .iter()
-        .map(|group_key| {
-            let group_entities = groups.get(group_key).unwrap();
-            let group_values: Vec<&str> = group_key.split('\x00').collect();
-
-            let mut group_map = Map::new();
-            for (i, field) in group_by.iter().enumerate() {
-                let raw = group_values.get(i).copied().unwrap_or(UNDEFINED_SENTINEL);
-                if raw == UNDEFINED_SENTINEL {
-                    // Absent field: omit from group map (undefined at TS boundary)
-                    continue;
-                }
-                // "null" sentinel → Value::Null; otherwise parse
-                let v: Value = if raw == "null" {
-                    Value::Null
-                } else {
-                    serde_json::from_str(raw).unwrap_or(Value::Null)
-                };
-                group_map.insert(field.clone(), v);
-            }
-
-            let aggregate = compute_aggregates(group_entities, config);
-
-            // Flatten: same fields at GroupResult top level (TS `{ group, ...aggregates }`)
-            GroupResult {
-                group: group_map,
-                count: aggregate.count,
-                sum: aggregate.sum,
-                avg: aggregate.avg,
-                min: aggregate.min,
-                max: aggregate.max,
-            }
-        })
-        .collect()
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

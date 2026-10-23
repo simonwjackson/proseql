@@ -631,6 +631,74 @@ impl SourceState {
         Ok(read)
     }
 
+    /// Visit one partition at a time. A failed load leaves the previous cache
+    /// intact. The ID set detects duplicates even after their partition was
+    /// evicted; it retains identities, never record payloads.
+    #[allow(clippy::too_many_arguments)]
+    pub fn lazy_visit(
+        &mut self,
+        database: &mut Database,
+        host: &dyn StorageHost,
+        formats: &FormatRegistry,
+        collection: &str,
+        paths: &[String],
+        mut visit: impl FnMut(&Value) -> Result<(), EngineError>,
+    ) -> Result<usize, EngineError> {
+        self.lazy_trim(database)?;
+        let mut seen = HashSet::new();
+        let mut read = 0;
+        for path in paths {
+            read += self.lazy_ensure(
+                database,
+                host,
+                formats,
+                collection,
+                std::slice::from_ref(path),
+                false,
+            )?;
+            {
+                let lazy = self.lazy_ref(collection)?;
+                let records = database.collection(collection).expect("lazy collection");
+                for id in &lazy.resident[path].ids {
+                    if !seen.insert(id.clone()) {
+                        return Err(config_error(
+                            format!("Duplicate partition record '{id}'"),
+                            &lazy.source_id,
+                            Some(collection),
+                            Some(path),
+                        ));
+                    }
+                    if let Some(row) = records.get(id) {
+                        visit(row)?;
+                    }
+                }
+            }
+            self.lazy_trim(database)?;
+        }
+        Ok(read)
+    }
+
+    pub fn lazy_read_stats(
+        &self,
+        collection: &str,
+        visited: usize,
+        read: usize,
+    ) -> crate::BoundedQueryStats {
+        let lazy = &self.lazy[collection];
+        let pinned = lazy.pinned();
+        crate::BoundedQueryStats {
+            partitions_visited: visited,
+            partitions_read: read,
+            partitions_resident: lazy.resident.len(),
+            pinned_partitions: lazy
+                .resident
+                .keys()
+                .filter(|path| pinned.contains(path.as_str()))
+                .count(),
+            retained_partition_limit: lazy.policy.max_loaded_partitions,
+        }
+    }
+
     /// Make the partition a new record routes to resident, so the engine's ID
     /// check and `duplicate_ids` comparison see that partition. A partition
     /// file that does not exist yet becomes resident and empty without a read.
@@ -674,7 +742,6 @@ impl SourceState {
     pub fn lazy_trim(&mut self, database: &mut Database) -> Result<(), EngineError> {
         let _phase = proseql_storage::diagnostics::span("eviction");
         for name in self.lazy.keys().cloned().collect::<Vec<_>>() {
-            let mut evicted = false;
             loop {
                 let lazy = &self.lazy[&name];
                 let pinned = lazy.pinned();
@@ -696,10 +763,17 @@ impl SourceState {
                     break;
                 };
                 self.lazy_evict(database, &name, &path, false)?;
-                evicted = true;
             }
-            if evicted && database.watch_subscription_count() > 0 {
-                database.refresh_reactive_snapshot(&name)?;
+            if database.watch_subscription_count() > 0 {
+                let lazy = &self.lazy[&name];
+                let pinned = lazy.pinned();
+                let ids = lazy
+                    .resident
+                    .iter()
+                    .filter(|(path, _)| pinned.contains(path.as_str()))
+                    .flat_map(|(_, resident)| resident.ids.iter().map(String::as_str))
+                    .collect();
+                database.retain_reactive_snapshot_records(&name, &ids)?;
             }
         }
         Ok(())

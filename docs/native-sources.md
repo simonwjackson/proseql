@@ -313,6 +313,28 @@ Pruning compares string intervals and is conservative: it never skips a partitio
 
 **Where the runtime boundary is.** The engine assumes that a collection holds every record a query can match. Lazy partitions keep that assumption at the native runtime layer instead of teaching the engine about files: before an operation, the runtime makes every partition that can match resident with `Database::load_resident_records`; after it, the runtime evicts with `unload_resident_records`. These engine methods are not mutations: no hooks and no journal entries, also when a partition loads inside `mutate` (for the ID check of a create, or a `find_by_id` scan). A loaded record therefore never enters the append plan or a rollback. When watches must see loaded records (a partition that a watch covers but did not pin yet, or an external change), the runtime applies them directly to the committed watch snapshot and notifies; a transaction's own uncommitted changes stay invisible until it commits. The engine's query, index, sort, aggregate, transaction and watch code is unchanged, and the WASM engine never calls the new methods. The preconditions make this sound: without relationships, no query reads another collection's lazy records; without unique fields, the only cross-record check on create is the ID, which the target partition covers.
 
+### Opt-in bounded reads
+
+Issue [#11](https://github.com/simonwjackson/proseql/issues/11) adds these methods without changing configuration structs:
+
+| Method | Behavior |
+|---|---|
+| `query_bounded(collection, input)` | Visit lazy partitions one at a time; return one globally ordered/selected page |
+| `query_bounded_with_stats(collection, input)` | Same results, plus visited/read/resident/pinned partition counts and the retained limit |
+| `query_cursor_bounded(collection, input, cursor)` | One global cursor page |
+| `aggregate_bounded(collection, where_clause, config)` | Accumulate individual rows in natural order |
+| `aggregate_grouped_bounded(collection, where_clause, group_by, config)` | Same order, groups in first-encounter order |
+
+For a lazy source with limit N, bounded reads hold at most **N unpinned cached partitions plus one incoming partition's records**. A load validates the incoming candidate before it evicts the previous cache. An invalid incoming file therefore leaves the last accepted cache intact. A bounded query never concatenates monthly pages or drops matches to meet the cache limit. The shared engine filters rows and applies global stable sort, search scoring, pagination/cursors and selection once.
+
+The bound is **per lazy collection during these bounded read methods**, not a total process-memory limit. Other collections, active full-scope operations, mutation sessions, `find_by_id`, watch creation/reload and callers' retained values are not covered by a universal N+1 claim. Existing APIs keep working and may exceed it. Query workspace grows with matching rows, including rows later removed by pagination or selection. Duplicate detection keeps an ID set across the entire visited scope, including evicted partitions; that metadata grows with examined rows. Pinned partitions remain resident **in addition to N**, and stats report them separately. Committed snapshots retain only records covered by watch pins after trimming. Watch evaluation, error diagnostics and delivered results also cost memory; a consumer can retain delivered values indefinitely. These costs must not be counted as zero merely because the cache reports N.
+
+Ordinary aggregates keep only accumulator/group state and process each row in the same order as the existing native query-then-aggregate path. They do not merge monthly sums: f64 addition is not associative. Top-level search is an explicit exception: the existing native path relevance-sorts before aggregation, so bounded aggregates buffer and globally sort matching search rows to preserve f64 results. Min/max still use the engine's comparable-value rules for arrays/objects and keep the first value on ties.
+
+`FullScanPolicy::Error` still refuses an unprunable bounded read before loading anything. Existing `query`, `query_with_stats`, `query_cursor`, mutation reads and watches keep the full-scope contract above. They can exceed N during an operation; they are **not** a transient-memory guarantee. `read(|db| ...)` still sees only resident records. For non-lazy collections the bounded methods use the ordinary engine path. Bounded lazy methods do not offer population: qualifying lazy collections cannot have relationships.
+
+The cost is explicit opt-in at the read call site, O(matching rows) query workspace, and O(visited IDs) duplicate-check metadata. Logbook's on-disk monthly JSONL layout does not need to change. Existing callers benefit from the decode changes automatically; callers need the bounded methods for multi-month transient bounds. Performance and the canonical-value resident floor are measured in `docs/benchmarks/lazy-memory.md`.
+
 ### Configuration for a monthly heart-rate collection
 
 ```rust

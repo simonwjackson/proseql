@@ -996,6 +996,33 @@ impl ReactiveHub {
         }
     }
 
+    pub(crate) fn retain_collection_snapshot_records(
+        &self,
+        name: &str,
+        ids: &std::collections::HashSet<&str>,
+    ) {
+        if let Ok(mut state) = self.state.lock() {
+            let Some(snapshot) = state.snapshots.get_mut(name) else {
+                return;
+            };
+            snapshot.retain(|row| {
+                row.get("id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| ids.contains(id))
+            });
+            let positions = snapshot
+                .iter()
+                .enumerate()
+                .filter_map(|(position, row)| {
+                    row.get("id")
+                        .and_then(Value::as_str)
+                        .map(|id| (id.to_owned(), position))
+                })
+                .collect();
+            state.snapshot_positions.insert(name.to_owned(), positions);
+        }
+    }
+
     fn set_collection_snapshot(&self, name: &str, collection: &Collection) {
         if let Ok(mut state) = self.state.lock() {
             let snapshot = snapshot_collection(collection);
