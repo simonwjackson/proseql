@@ -182,3 +182,68 @@ The initial capture wrapper returned 2 after all measured subprocesses completed
 | 4 | Move owned decoded schema values instead of reconstructing them, while retaining validation. Storage-schema stacks allocate 1.54 GB over the run. | Equivalent schema/default/check/migration fixtures with fewer allocations and lower checkpoint-only schema wall. | Does not automatically compact the final record or eliminate engine validation. Borrowed APIs may still need their old contract. |
 | 5 | Replace retained full-file append baselines and eliminate snapshot/text copies where safe. Source buffer stacks retain 13.59 MB and peak at 54.35 MB. | Preserve append conflict, torn-line, external-edit and last-known-good tests while reducing these exact live-byte sites. | Length plus tail alone needs a documented conflict contract; do not silently weaken change detection. Does not solve the dominant record/index cost. |
 | 6 | Reduce retained collection/index capacity and duplicated identity metadata. These stacks retain 30.68 MB excluding native staging. | Repeated ascending scopes show lower post-eviction `eb` and stable index/query semantics. | Must preserve ordered-index speed and mutation/rollback behavior. RSS may remain higher than live heap due to allocator retention; that cause remains unproved. |
+
+
+## AFTER measurement method
+
+Issue: <https://github.com/simonwjackson/proseql/issues/11>. The BEFORE artifacts
+and tables above remain the captured baseline. AFTER uses the identical v1
+synthetic bytes and unchanged targets. It requests the opt-in bounded native
+methods; a separate legacy-method control keeps the adoption cost visible.
+
+```sh
+./scripts/profile-lazy-memory.sh build /var/tmp/proseql-lazy-memory-after
+./scripts/profile-lazy-memory.sh after /var/tmp/proseql-lazy-memory-after
+./scripts/profile-lazy-memory.sh summarize /var/tmp/proseql-lazy-memory-after
+```
+
+Use a fresh output directory. `after` refuses an existing `environment.log`.
+The existing time-series benchmark remains a separate, unchanged workload.
+
+| Executable | Purpose | Not a claim about |
+|---|---|---|
+| `unprofiled` | Real query wall time, RSS endpoints and process high-water RSS | Phase-local peaks |
+| `checkpoints` | Inclusive phase wall time and RSS boundaries | Production timing or local RSS peaks |
+| `meter` | Actual phase-local live requested-byte maxima on every successful allocation/reallocation/free | Allocator padding, C allocator internals, or RSS |
+| `dhat` | Allocation origins, cumulative totals, live/peak sites and censored lifetimes | Phase-local peaks or production timing |
+
+The System meter and DHAT run in **separate processes**. Wrapping DHAT would
+also count its deliberately untracked profiler metadata. The meter uses fixed,
+nonallocating phase state and serial accounting. Nested phases include child
+work. Observer JSON/output is paused and excluded from phase attribution. Its
+`allocated_requested` counts full successful realloc destination requests;
+DHAT uses a different cumulative convention. Do not compare those totals as
+identical quantities. A real System-allocator unit test exercises allocation,
+zeroing, growth, free and nested peaks.
+
+`max_endpoint_excess_bytes` is the largest per-span peak minus that span's
+larger endpoint. It is not an ownership attribution. RSS observations remain
+begin/end samples and a cumulative process high-water mark. **True phase-local
+RSS peaks remain unmeasured; that part of the proof is incomplete.** A separate
+end-of-scan `mallinfo2`/`malloc_trim` diagnostic explains allocator-held space;
+it does not improve primary timings or acceptance RSS numbers.
+
+The literal RSS acceptance formula is evaluated separately for zero results,
+one full ten-month zero-result scan, and all-match ascending 1–3-month output.
+It has **no output allowance**. A cache bound does not make a formula failure
+pass: matching-row buffers, exact ID workspace, pins, watch values and allocator
+retention still consume process memory. Output explains an all-match miss; it
+does not remove the miss from the target table.
+
+The native 64-bit layout probe measures a 1651-byte canonical payload for one
+fixture row, before engine/source/index metadata. Each `(String, Value)` pair
+occupies 96 bytes; 12 pairs alone need 1152 bytes. This is a floor for the
+**retained public canonical representation**, not proof that every engine
+design must exceed 1024 B/row. A compact structured/columnar store with borrowed
+record views could reduce that cost. It would need a new borrowed-view and
+materialization contract, compatibility work for existing `&Value` access,
+and query/mutation/watch parity tests. That redesign is not implemented here;
+opaque blobs and disabling insertion ordering are not substitutes.
+
+For supplemental local BEFORE peaks, a source archive is pinned to captured
+`941978d0fb22f5b0b66b7ef40d8e6fb6d00584bb`, outside every worktree. Its manifest
+verifies 124 original crates files unchanged; only the benchmark checkpoint
+function, benchmark Cargo feature and new System meter differ. Eleven fixture
+hashes match BEFORE. Original BEFORE logs/profiles are not overwritten. This
+counter-only run supplies missing local allocation peaks, not replacement
+production timings.

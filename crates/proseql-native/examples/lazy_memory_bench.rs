@@ -24,6 +24,9 @@ use proseql_storage::source_config::{
 };
 use serde_json::{json, Value};
 
+#[path = "lazy_memory/allocator_os.rs"]
+mod allocator_os;
+
 type Error = Box<dyn std::error::Error + Send + Sync>;
 fn tag(error: EngineError) -> Error {
     format!("{}: {error}", error.tag()).into()
@@ -35,9 +38,16 @@ const ROW_BYTES: usize = 316;
 static START: OnceLock<Instant> = OnceLock::new();
 static PROFILING: AtomicBool = AtomicBool::new(false);
 
+#[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
+#[path = "lazy_memory/meter.rs"]
+mod meter;
+
 #[cfg(feature = "heap-profile")]
 #[global_allocator]
 static ALLOCATOR: dhat::Alloc = dhat::Alloc;
+#[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
+#[global_allocator]
+static ALLOCATOR: meter::Meter<std::alloc::System> = meter::Meter::new(std::alloc::System);
 
 #[derive(Debug)]
 struct Args {
@@ -48,6 +58,9 @@ struct Args {
     prepare: bool,
     profile: Option<PathBuf>,
     check: bool,
+    bounded: bool,
+    layout: bool,
+    trim_end: bool,
 }
 
 fn parse_args() -> Result<Args, Error> {
@@ -59,6 +72,9 @@ fn parse_args() -> Result<Args, Error> {
         prepare: false,
         profile: None,
         check: false,
+        bounded: false,
+        layout: false,
+        trim_end: false,
     };
     let mut iter = std::env::args().skip(1);
     while let Some(flag) = iter.next() {
@@ -74,6 +90,9 @@ fn parse_args() -> Result<Args, Error> {
             "--prepare-only" => args.prepare = true,
             "--heap-profile" => args.profile = Some(value()?.into()),
             "--check" => args.check = true,
+            "--bounded" => args.bounded = true,
+            "--layout-only" => args.layout = true,
+            "--trim-end" => args.trim_end = true,
             _ => {
                 return Err(
                     format!("unknown argument {flag}; see docs/benchmarks/lazy-memory.md").into(),
@@ -293,15 +312,37 @@ fn heap() -> Value {
 }
 
 fn checkpoint(phase: &'static str, begin: bool) {
-    // Capture before diagnostic output allocations. Heap peak is cumulative,
-    // not a phase-local peak; phase boundaries are not ownership attribution.
+    #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
+    let mut active = ALLOCATOR.pause();
+    #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
+    let local = if begin {
+        None
+    } else {
+        ALLOCATOR.end(phase, &mut active)
+    };
+    #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
+    let local = local.map(|sample| json!({"start_live":sample.start_live,"end_live":sample.end_live,
+        "peak_live":sample.peak_live,"allocated_requested":sample.allocated,
+        "peak_over_start":sample.peak_live.saturating_sub(sample.start_live),
+        "peak_over_endpoints":sample.peak_live.saturating_sub(sample.start_live.max(sample.end_live))}));
+    #[cfg(any(not(feature = "allocation-meter"), feature = "heap-profile"))]
+    let local: Option<Value> = None;
+    #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
+    let meter = Some(ALLOCATOR.live_and_peak());
+    #[cfg(any(not(feature = "allocation-meter"), feature = "heap-profile"))]
+    let meter: Option<(usize, usize)> = None;
     let heap = heap();
     eprintln!(
         "LM_PHASE {}",
-        json!({"phase": phase, "begin": begin,
-        "elapsed_us": START.get_or_init(Instant::now).elapsed().as_micros(),
-        "heap": heap, "rss": proc_bytes("VmRSS:"), "rss_hwm": proc_bytes("VmHWM:")})
+        json!({"phase": phase,"begin":begin,
+        "elapsed_us":START.get_or_init(Instant::now).elapsed().as_micros(),
+        "heap":heap,"rss":proc_bytes("VmRSS:"),"rss_hwm":proc_bytes("VmHWM:"),
+        "local_heap":local,"meter_live_and_global_peak":meter})
     );
+    drop(heap);
+    drop(local);
+    #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
+    ALLOCATOR.resume(phase, begin, active);
 }
 
 fn over_budget(resident: u64, peak: u64, open: u64, rows: usize) -> bool {
@@ -360,7 +401,16 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
             };
             checkpoint("query_total", true);
             let start = Instant::now();
-            let result = runtime.query(COLLECTION, input, None).map_err(tag)?;
+            let (result, scope) = if args.bounded {
+                runtime
+                    .query_bounded_with_stats(COLLECTION, input)
+                    .map(|(rows, stats)| (rows, Some(stats)))
+            } else {
+                runtime
+                    .query(COLLECTION, input, None)
+                    .map(|rows| (rows, None))
+            }
+            .map_err(tag)?;
             let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
             checkpoint("query_total", false);
             let expected = if args.mode == "ascending" {
@@ -383,7 +433,8 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
                 "LM_QUERY {}",
                 json!({"month": month, "width": end-month,
                 "elapsed_ms": elapsed_ms, "returned": result.len(),
-                "requested_months": end-month, "heap_with_results": snapshot,
+                "requested_months": end-month, "partitions_read":scope.as_ref().map(|stats|stats.partitions_read),
+                "partitions_visited":scope.as_ref().map(|stats|stats.partitions_visited), "heap_with_results": snapshot,
                 "rss": proc_bytes("VmRSS:"), "rss_hwm": proc_bytes("VmHWM:")})
             );
             drop(result);
@@ -412,15 +463,26 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
     let resident_measurement = PROFILING.load(Ordering::Relaxed).then_some(resident);
     println!(
         "LM_SUMMARY {}",
-        json!({"mode": args.mode, "rows_per_month": args.rows,
+        json!({"mode": args.mode, "bounded": args.bounded, "rows_per_month": args.rows,
         "id_rows": args.ids, "data_bytes": MONTHS * args.rows * ROW_BYTES,
         "open_ms": open_ms, "open_rss": open_rss, "opened_heap": opened,
         "first_resident_heap_delta": resident_measurement, "resident_rows": resident_rows,
         "resident_bytes_per_row": resident_measurement.map(|bytes| bytes as f64 / resident_rows as f64),
         "id_data_bytes": fs::metadata(args.root.join("ids.jsonl"))?.len(),
         "final_heap": final_heap, "rss": proc_bytes("VmRSS:"), "rss_hwm": proc_bytes("VmHWM:"),
-        "check_failed": failed, "instrumented": cfg!(feature="bench-observe"), "profiled": PROFILING.load(Ordering::Relaxed)})
+        "allocator": allocator_os::stats(), "check_failed": failed, "instrumented": cfg!(feature="bench-observe"), "profiled": PROFILING.load(Ordering::Relaxed)})
     );
+    if args.trim_end {
+        let before_rss = proc_bytes("VmRSS:");
+        let before_allocator = allocator_os::stats();
+        let released = allocator_os::trim();
+        println!(
+            "LM_ALLOCATOR_TRIM {}",
+            json!({"released":released,"before_rss":before_rss,
+            "after_rss":proc_bytes("VmRSS:"),"before_allocator":before_allocator,
+            "after_allocator":allocator_os::stats(),"peak_unchanged":proc_bytes("VmHWM:")})
+        );
+    }
     // End profile while the last partition (or eager IDs) is live, so DHAT eb
     // describes resident allocations. Their lifetimes are right-censored here.
     PROFILING.store(false, Ordering::Relaxed);
@@ -436,6 +498,30 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
     Ok(())
 }
 
+fn layout_probe() -> Result<(), Error> {
+    let schema = descriptor(false).schema;
+    #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
+    let before = ALLOCATOR.live_and_peak().0;
+    let row = proseql_engine::validator::decode_owned_value(&schema, synthetic_row(1, 0, 43_000))
+        .map_err(tag)?;
+    #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
+    let row_payload_bytes = Some(ALLOCATOR.live_and_peak().0 - before);
+    #[cfg(any(not(feature = "allocation-meter"), feature = "heap-profile"))]
+    let row_payload_bytes: Option<usize> = None;
+    let object = row.as_object().expect("fixture object");
+    println!(
+        "LM_LAYOUT {}",
+        json!({"canonical_value_bytes":std::mem::size_of::<Value>(),
+        "map_header_bytes":std::mem::size_of::<serde_json::Map<String,Value>>(),
+        "field_pair_bytes_without_indexmap_hash":std::mem::size_of::<(String,Value)>(),
+        "fields":object.len(),"field_name_bytes":object.keys().map(String::len).sum::<usize>(),
+        "string_value_bytes":object.values().filter_map(Value::as_str).map(str::len).sum::<usize>(),
+        "row_payload_requested_heap_bytes":row_payload_bytes,
+        "resident_target_bytes":1024,"target_met_by_payload_alone":row_payload_bytes.map(|bytes|bytes<=1024)})
+    );
+    Ok(())
+}
+
 fn main() {
     if let Err(error) = main_result() {
         eprintln!("lazy_memory_bench: {error}");
@@ -447,6 +533,9 @@ fn main_result() -> Result<(), Error> {
     let args = parse_args()?;
     if args.prepare {
         return prepare(&args);
+    }
+    if args.layout {
+        return layout_probe();
     }
     START.get_or_init(Instant::now);
     #[cfg(feature = "heap-profile")]
@@ -465,6 +554,57 @@ fn main_result() -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
+    #[test]
+    fn sparse_schema_does_not_allocate_slots_for_absent_optional_fields() {
+        let mut fields = vec![StructField {
+            name: "id".into(),
+            schema: SchemaNode::Str,
+        }];
+        fields.extend((0..100).map(|index| StructField {
+            name: format!("optional{index}"),
+            schema: SchemaNode::Optional(Box::new(SchemaNode::Str)),
+        }));
+        let schema = SchemaNode::Struct { fields };
+        let before = ALLOCATOR.live_and_peak().0;
+        let value =
+            proseql_engine::validator::decode_owned_value(&schema, json!({"id":"row"})).unwrap();
+        let payload = ALLOCATOR.live_and_peak().0 - before;
+        drop(value);
+        eprintln!("CAPACITY_PROOF sparse_struct_live_bytes={payload}");
+        assert!(
+            payload < 256,
+            "one present field retained {payload} bytes instead of a compact object"
+        );
+    }
+
+    #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
+    #[test]
+    fn filtered_record_does_not_retain_slots_for_rejected_keys() {
+        let schema = SchemaNode::Record {
+            key: Box::new(SchemaNode::Literal {
+                value: json!("keep"),
+            }),
+            value: Box::new(SchemaNode::Str),
+        };
+        let before = ALLOCATOR.live_and_peak().0;
+        let input = Value::Object(
+            (0..100)
+                .map(|index| (format!("drop{index}"), json!(false)))
+                .chain(std::iter::once(("keep".into(), json!("v"))))
+                .collect(),
+        );
+        let value = proseql_engine::validator::decode_owned_value(&schema, input).unwrap();
+        let payload = ALLOCATOR.live_and_peak().0 - before;
+        assert_eq!(value, json!({"keep":"v"}));
+        drop(value);
+        eprintln!("CAPACITY_PROOF filtered_record_live_bytes={payload}");
+        assert!(
+            payload < 256,
+            "one retained Record key kept {payload} bytes of capacity"
+        );
+    }
 
     #[test]
     fn fixed_shape_is_synthetic_flat_deterministic_and_utc() {
