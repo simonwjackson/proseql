@@ -6,9 +6,9 @@
  * proper integration with CRUD operations that trigger change events.
  */
 
-import { Effect, Exit, Fiber, Schema, Scope, Stream } from "effect";
-import { describe, expect, it } from "vitest";
 import { createEffectDatabase } from "@proseql/effect";
+import { Deferred, Effect, Exit, Fiber, Schema, Scope, Stream } from "effect";
+import { describe, expect, it } from "vitest";
 
 // ============================================================================
 // Test Schemas
@@ -96,8 +96,8 @@ const initialData = {
  */
 const runWithDb = <A>(
 	program: (
-		db: Awaited<ReturnType<typeof createEffectDatabase<typeof config>>>,
-	) => Effect.Effect<A, unknown, never>,
+		db: Effect.Success<ReturnType<typeof createEffectDatabase<typeof config>>>,
+	) => Effect.Effect<A, unknown, Scope.Scope>,
 ) =>
 	Effect.runPromise(
 		Effect.scoped(
@@ -1418,7 +1418,9 @@ describe("reactive queries - irrelevant mutations", () => {
 
 describe("reactive queries - transactions", () => {
 	describe("no emissions during transaction (15.1)", () => {
-		it("transaction: no emissions during transaction (intermediate states suppressed)", async () => {
+		it.each([
+			0, 250,
+		])("transaction: no emissions during transaction (intermediate states suppressed; commit pause %i ms)", async (commitPauseMs) => {
 			await runWithDb((db) =>
 				Effect.gen(function* () {
 					// Watch sci-fi books
@@ -1430,19 +1432,27 @@ describe("reactive queries - transactions", () => {
 					// Track all emissions received
 					const emissions: Array<ReadonlyArray<Book>> = [];
 
-					// Fork collection with a timeout
-					const collectedFiber = yield* Stream.runForEach(stream, (emission) =>
-						Effect.sync(() => {
-							emissions.push(emission);
-						}),
-					).pipe(
-						Effect.timeout("200 millis"),
-						Effect.catch(() => Effect.void),
+					const initialEmission = yield* Deferred.make<void>();
+					const committedEmission = yield* Deferred.make<void>();
+					// Stay subscribed until the final snapshot, retaining every preceding
+					// emission so the exact-count assertion still detects intermediate states.
+					const collectedFiber = yield* stream.pipe(
+						Stream.takeUntil((emission) => emission.length === 4),
+						Stream.runForEach((emission) =>
+							Effect.gen(function* () {
+								emissions.push(emission);
+								if (emissions.length === 1) {
+									yield* Deferred.succeed(initialEmission, undefined);
+								}
+								if (emission.length === 4) {
+									yield* Deferred.succeed(committedEmission, undefined);
+								}
+							}),
+						),
 						Effect.forkChild,
 					);
 
-					// Wait for initial emission to be processed
-					yield* Effect.sleep("30 millis");
+					yield* Deferred.await(initialEmission);
 
 					// Start a transaction and perform multiple mutations
 					// These should NOT trigger emissions during the transaction
@@ -1456,14 +1466,19 @@ describe("reactive queries - transactions", () => {
 								genre: "sci-fi",
 							});
 
+							// Force the slow case past the old 200 ms collector deadline.
+							yield* Effect.sleep(commitPauseMs);
+
 							// Wait to see if any emission happens (it shouldn't)
 							yield* Effect.sleep("30 millis");
+							expect(emissions).toHaveLength(1);
 
 							// Update an existing book
 							yield* tx.books.update("1", { year: 1966 });
 
 							// Wait again
 							yield* Effect.sleep("30 millis");
+							expect(emissions).toHaveLength(1);
 
 							// Create another book
 							yield* tx.books.create({
@@ -1475,14 +1490,13 @@ describe("reactive queries - transactions", () => {
 
 							// Wait one more time inside the transaction
 							yield* Effect.sleep("30 millis");
+							expect(emissions).toHaveLength(1);
 						}),
 					);
 
-					// Wait for any emissions after commit
-					yield* Effect.sleep("50 millis");
-
-					// Interrupt the fiber
-					yield* Fiber.interrupt(collectedFiber);
+					yield* Deferred.await(committedEmission);
+					// Join rather than swallowing collector failures or interrupting early.
+					yield* Fiber.join(collectedFiber);
 
 					// Should have exactly 2 emissions:
 					// 1. Initial emission (2 sci-fi books: Dune 1965, Neuromancer 1984)
@@ -1507,7 +1521,11 @@ describe("reactive queries - transactions", () => {
 					]);
 					// Verify Dune's year was updated
 					expect(emissions[1].find((b) => b.id === "1")?.year).toBe(1966);
-				}),
+				}).pipe(
+					// Missing emissions must fail the whole protocol, never silently
+					// end a collector. This is below the unchanged 5 s runner deadline.
+					Effect.timeout("4 seconds"),
+				),
 			);
 		});
 
@@ -2072,9 +2090,9 @@ describe("reactive queries - transactions", () => {
 // Tests - File Changes (16.1 - 16.2)
 // ============================================================================
 
+import { createPersistentEffectDatabase } from "@proseql/effect";
 import { Layer } from "effect";
 import { StorageError } from "../../core/src/errors/storage-errors.js";
-import { createPersistentEffectDatabase } from "@proseql/effect";
 import { jsonCodec } from "../../core/src/serializers/codecs/json.js";
 import { makeSerializerLayer } from "../../core/src/serializers/format-codec.js";
 import {
