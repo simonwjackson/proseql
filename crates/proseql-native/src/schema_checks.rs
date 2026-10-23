@@ -50,7 +50,7 @@ pub(crate) fn decode_loaded_records(
         return Ok(());
     }
     for (id, record) in records {
-        let mut payload = record.clone();
+        let mut payload = std::mem::take(record);
         let derived = matches!(id_strategy, IdStrategy::DerivedFromKey);
         if derived {
             if let Some(object) = payload.as_object_mut() {

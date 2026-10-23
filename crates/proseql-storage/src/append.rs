@@ -19,11 +19,8 @@ use proseql_engine::errors::{EngineError, SerializationError};
 use proseql_formats::FormatRegistry;
 use serde_json::Value;
 
-use crate::collection_file::{
-    encode_collection_file, load_collection_file, validate_collection_file_ids,
-};
+use crate::collection_file::encode_collection_file;
 use crate::host::StorageHost;
-use crate::memory::MemoryStorageHost;
 use crate::persistence::CollectionStorageConfig;
 use crate::source_config::NormalizedCollectionFileSourceConfig;
 
@@ -115,38 +112,78 @@ pub fn load_append_file(
     collection: &CollectionStorageConfig,
     validate_ids: bool,
 ) -> Result<LoadedAppendFile, EngineError> {
-    let raw = if host.exists(&source.path)? {
-        host.read_bytes(&source.path)?
-    } else {
-        Vec::new()
-    };
-    let JsonlTail::Torn { keep, line } = jsonl_tail_bytes(&raw) else {
-        if validate_ids {
-            validate_collection_file_ids(host, formats, source)?;
-        }
-        return Ok(LoadedAppendFile {
-            records: load_collection_file(host, formats, source, collection)?,
-            torn: None,
-        });
-    };
-    // Every line before the torn one stays strict, including its encoding.
-    let complete = std::str::from_utf8(&raw[..keep]).map_err(|error| {
+    if !host.exists(&source.path)? {
+        return Ok(LoadedAppendFile::default());
+    }
+    let raw = host.read_bytes(&source.path)?;
+    let read_error = |error: std::str::Utf8Error| {
         EngineError::Storage(Box::new(proseql_engine::errors::StorageError {
             path: source.path.clone(),
             operation: proseql_engine::errors::StorageOperation::Read,
             message: format!("Failed to read '{}': {error}", source.path),
             cause: None,
         }))
-    })?;
-    let trimmed = MemoryStorageHost::default();
-    trimmed.write(&source.path, complete)?;
+    };
+    let (parsed, torn) = {
+        let _phase = crate::diagnostics::span("decode_storage");
+        if let Some(decoded) = formats.deserialize_append_jsonl(&raw, &source.format) {
+            let decoded = decoded.map_err(|error| match error {
+                proseql_formats::codecs::AppendJsonlError::Utf8(error) => read_error(error),
+                proseql_formats::codecs::AppendJsonlError::Parse(message) => {
+                    crate::persistence::format_error(
+                        proseql_formats::FormatRegistryError::Serialization(SerializationError {
+                            format: "jsonl".into(),
+                            message: format!("Failed to deserialize jsonl data: {message}"),
+                            cause: Some(Value::String(message)),
+                        }),
+                    )
+                }
+            })?;
+            (
+                decoded.value,
+                decoded
+                    .torn
+                    .map(|(keep, line)| TornLineDiagnostic::new(&source.path, &raw, keep, line)),
+            )
+        } else {
+            // Custom codecs keep their whole-file interface. Tail recovery is
+            // independent of their decode result; no built-in codec is substituted.
+            let (keep, torn) = match jsonl_tail_bytes(&raw) {
+                JsonlTail::Torn { keep, line } => (
+                    keep,
+                    Some(TornLineDiagnostic::new(&source.path, &raw, keep, line)),
+                ),
+                _ => (raw.len(), None),
+            };
+            let complete = std::str::from_utf8(&raw[..keep]).map_err(read_error)?;
+            (
+                formats
+                    .deserialize(complete, &source.format)
+                    .map_err(crate::persistence::format_error)?,
+                torn,
+            )
+        }
+    };
     if validate_ids {
-        validate_collection_file_ids(&trimmed, formats, source)?;
+        crate::collection_file::validate_decoded_ids(&parsed, source)?;
     }
-    Ok(LoadedAppendFile {
-        records: load_collection_file(&trimmed, formats, source, collection)?,
-        torn: Some(TornLineDiagnostic::new(&source.path, &raw, keep, line)),
-    })
+    let records = crate::persistence::load_decoded_data(
+        host,
+        formats,
+        &source.path,
+        &collection.schema,
+        crate::persistence::LoadDataOptions {
+            version: collection.version,
+            migrations: collection.migrations.clone(),
+            collection_name: Some(collection.name.clone()),
+            format: Some(source.format.clone()),
+            path: None,
+            validation: crate::persistence::ValidationMode::Strict,
+            id_strategy: Some(collection.id_strategy.clone()),
+        },
+        parsed,
+    )?;
+    Ok(LoadedAppendFile { records, torn })
 }
 
 /// Encode `records` as complete `\n`-terminated lines with the rewrite encoder.

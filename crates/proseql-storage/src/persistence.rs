@@ -13,7 +13,7 @@ use proseql_engine::migrations::{
     validate_migration_registry as engine_validate_migration_registry,
 };
 pub use proseql_engine::migrations::{DryRunMigration, DryRunStatus};
-use proseql_engine::validator::{decode_value, js_eq};
+use proseql_engine::validator::{decode_owned_value, js_eq};
 use proseql_formats::codecs::jsonl_decode_lines;
 use proseql_formats::{FormatOptions, FormatRegistry, FormatRegistryError};
 use serde_json::{Map, Value};
@@ -719,7 +719,7 @@ pub(crate) fn decode_entity_map(
     for (id, value) in entity_map {
         let attempt = || -> Result<Value, EngineError> {
             assert_no_physical_derived_id(&id, &value, id_strategy, file_path)?;
-            let decoded = decode_value(schema, &value)?;
+            let decoded = decode_owned_value(schema, value)?;
             require_hydratable_payload(&id, &decoded, id_strategy, file_path)?;
             Ok(hydrate_derived_id(&id, decoded, id_strategy))
         };
@@ -747,11 +747,56 @@ pub fn load_data(
     options: LoadDataOptions,
     migration_host: Option<&dyn MigrationHost>,
 ) -> Result<IndexMap<String, Value>, EngineError> {
+    load_data_impl(
+        host,
+        formats,
+        file_path,
+        schema,
+        options,
+        migration_host,
+        None,
+    )
+}
+
+/// Reuse a codec result after source-level ID checks. All migrations, schema
+/// transforms and error mapping still belong to the ordinary persistence path.
+pub(crate) fn load_decoded_data(
+    host: &dyn StorageHost,
+    formats: &FormatRegistry,
+    file_path: &str,
+    schema: &SchemaNode,
+    options: LoadDataOptions,
+    parsed: Value,
+) -> Result<IndexMap<String, Value>, EngineError> {
+    load_data_impl(
+        host,
+        formats,
+        file_path,
+        schema,
+        options,
+        None,
+        Some(parsed),
+    )
+}
+
+fn load_data_impl(
+    host: &dyn StorageHost,
+    formats: &FormatRegistry,
+    file_path: &str,
+    schema: &SchemaNode,
+    options: LoadDataOptions,
+    migration_host: Option<&dyn MigrationHost>,
+    parsed: Option<Value>,
+) -> Result<IndexMap<String, Value>, EngineError> {
     let ext = resolve_extension(file_path, options.format.as_deref())?;
-    if !host.exists(file_path)? {
-        return Ok(IndexMap::new());
-    }
-    let raw = host.read(file_path)?;
+    let raw = if parsed.is_some() {
+        String::new()
+    } else {
+        if !host.exists(file_path)? {
+            return Ok(IndexMap::new());
+        }
+        host.read(file_path)?
+    };
     let is_jsonl = matches!(ext.as_str(), "jsonl" | "ndjson");
     let mut entity_map = Map::new();
     let mut file_version = 0_u32;
@@ -774,7 +819,10 @@ pub fn load_data(
     } else {
         let parsed = {
             let _phase = crate::diagnostics::span("decode_storage");
-            formats.deserialize(&raw, &ext).map_err(format_error)?
+            match parsed {
+                Some(parsed) => parsed,
+                None => formats.deserialize(&raw, &ext).map_err(format_error)?,
+            }
         };
         let enclosing_version = if options.path.is_some() {
             parsed

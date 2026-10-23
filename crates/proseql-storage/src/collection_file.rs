@@ -70,24 +70,31 @@ pub fn validate_collection_file_ids(
         let decoded = formats
             .deserialize(&raw, &source.format)
             .map_err(crate::persistence::format_error)?;
-        if let Some(records) = decoded.as_array() {
-            let mut ids = std::collections::HashSet::new();
-            for record in records {
-                let id = record.get("id").and_then(Value::as_str);
-                if id.is_none() || !ids.insert(id.unwrap()) {
-                    return Err(EngineError::SourceConfig(Box::new(
-                        proseql_engine::errors::SourceConfigError {
-                            message: "Partition records need unique string IDs".into(),
-                            source_id: Some(source.id.clone()),
-                            collection: Some(source.collection.clone()),
-                            path: Some(source.path.clone()),
-                        },
-                    )));
-                }
+        validate_decoded_ids(&decoded, source)
+    })
+}
+
+pub(crate) fn validate_decoded_ids(
+    decoded: &Value,
+    source: &NormalizedCollectionFileSourceConfig,
+) -> Result<(), EngineError> {
+    if let Some(records) = decoded.as_array() {
+        let mut ids = std::collections::HashSet::new();
+        for record in records {
+            let id = record.get("id").and_then(Value::as_str);
+            if id.is_none() || !ids.insert(id.unwrap()) {
+                return Err(EngineError::SourceConfig(Box::new(
+                    proseql_engine::errors::SourceConfigError {
+                        message: "Partition records need unique string IDs".into(),
+                        source_id: Some(source.id.clone()),
+                        collection: Some(source.collection.clone()),
+                        path: Some(source.path.clone()),
+                    },
+                )));
             }
         }
-        Ok(())
-    })
+    }
+    Ok(())
 }
 
 /// Returns the complete file content for `records`. The caller owns the

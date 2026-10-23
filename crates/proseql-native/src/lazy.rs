@@ -516,11 +516,7 @@ impl SourceState {
         for (id, record) in &loaded.records {
             check_partition_record(&lazy.source, path, id, record)?;
         }
-        let content = if host.exists(path)? {
-            Some(snapshot.read_bytes(path)?)
-        } else {
-            None
-        };
+        let content = snapshot.take_bytes(path)?;
         Ok(LoadedPartition {
             records: loaded.records,
             content,

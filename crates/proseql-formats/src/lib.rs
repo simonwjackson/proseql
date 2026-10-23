@@ -19,6 +19,15 @@ pub trait FormatCodec: Send + Sync {
     fn encode(&self, data: &Value, options: Option<FormatOptions>) -> Result<String, String>;
     fn decode(&self, raw: &str) -> Result<Value, String>;
 
+    /// Optional single-pass JSONL append recovery. Overrides that do not
+    /// implement this retain the ordinary whole-file decode contract.
+    fn decode_append_jsonl(
+        &self,
+        _raw: &[u8],
+    ) -> Option<Result<codecs::AppendJsonl, codecs::AppendJsonlError>> {
+        None
+    }
+
     /// Whether `decode(encode(value))` must give `value` back.
     ///
     /// When this is true and the registry's write check is on,
@@ -294,6 +303,14 @@ impl FormatRegistry {
                 cause: Some(Value::String(message)),
             })
         })
+    }
+
+    pub fn deserialize_append_jsonl(
+        &self,
+        raw: &[u8],
+        extension: &str,
+    ) -> Option<Result<codecs::AppendJsonl, codecs::AppendJsonlError>> {
+        self.codec_for(extension).ok()?.decode_append_jsonl(raw)
     }
 
     fn codec_for(&self, extension: &str) -> Result<&dyn FormatCodec, FormatRegistryError> {

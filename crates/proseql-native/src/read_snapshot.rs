@@ -13,6 +13,14 @@ pub(crate) struct ReadSnapshot<'a> {
 }
 
 impl<'a> ReadSnapshot<'a> {
+    pub fn take_bytes(&self, path: &str) -> Result<Option<Vec<u8>>, EngineError> {
+        Ok(self
+            .contents
+            .lock()
+            .map_err(|_| crate::operation_error("poisoned", "Read snapshot lock is poisoned"))?
+            .shift_remove(path))
+    }
+
     pub fn new(host: &'a dyn StorageHost) -> Self {
         Self {
             host,

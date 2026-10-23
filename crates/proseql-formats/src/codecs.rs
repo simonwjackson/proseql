@@ -247,6 +247,65 @@ pub fn jsonl_decode_lines(raw: &str) -> Vec<ParsedLine> {
         .collect()
 }
 
+/// Decoded records and the byte offset / physical line of an ignored torn tail.
+pub struct AppendJsonl {
+    pub value: Value,
+    pub torn: Option<(usize, usize)>,
+}
+
+pub enum AppendJsonlError {
+    Utf8(std::str::Utf8Error),
+    Parse(String),
+}
+
+fn decode_append_lines(
+    raw: &[u8],
+    mut parse: impl FnMut(&str) -> Result<Value, serde_json::Error>,
+) -> Result<AppendJsonl, AppendJsonlError> {
+    let mut rows = Vec::new();
+    let mut offset = 0;
+    for (index, bytes) in raw.split(|byte| *byte == b'\n').enumerate() {
+        let final_unterminated = offset + bytes.len() == raw.len() && !bytes.is_empty();
+        let line = match std::str::from_utf8(bytes) {
+            Ok(line) => line,
+            Err(_) if final_unterminated => {
+                return Ok(AppendJsonl {
+                    value: Value::Array(rows),
+                    torn: Some((offset, index + 1)),
+                })
+            }
+            Err(error) => return Err(AppendJsonlError::Utf8(error)),
+        };
+        if !line.trim().is_empty() {
+            match parse(line) {
+                Ok(row) => rows.push(row),
+                Err(_) if final_unterminated => {
+                    return Ok(AppendJsonl {
+                        value: Value::Array(rows),
+                        torn: Some((offset, index + 1)),
+                    })
+                }
+                Err(error) => {
+                    return Err(AppendJsonlError::Parse(format!(
+                        "JSONL parse error on line {}: {error}",
+                        index + 1
+                    )))
+                }
+            }
+        } else if final_unterminated {
+            return Ok(AppendJsonl {
+                value: Value::Array(rows),
+                torn: Some((offset, index + 1)),
+            });
+        }
+        offset += bytes.len() + 1;
+    }
+    Ok(AppendJsonl {
+        value: Value::Array(rows),
+        torn: None,
+    })
+}
+
 impl FormatCodec for JsonlCodec {
     fn name(&self) -> &str {
         "jsonl"
@@ -267,18 +326,20 @@ impl FormatCodec for JsonlCodec {
         }
     }
 
+    fn decode_append_jsonl(&self, raw: &[u8]) -> Option<Result<AppendJsonl, AppendJsonlError>> {
+        Some(decode_append_lines(raw, |line| serde_json::from_str(line)))
+    }
+
     fn decode(&self, raw: &str) -> Result<Value, String> {
-        let parsed = jsonl_decode_lines(raw);
-        if let Some(line) = parsed.iter().find(|line| line.parse_error.is_some()) {
-            return Err(format!(
-                "JSONL parse error on line {}: {}",
-                line.line_number,
-                line.parse_error.as_deref().unwrap_or("Unknown error")
-            ));
-        }
-        Ok(Value::Array(
-            parsed.into_iter().filter_map(|line| line.parsed).collect(),
-        ))
+        raw.split('\n')
+            .enumerate()
+            .filter(|(_, line)| !line.trim().is_empty())
+            .map(|(index, line)| {
+                serde_json::from_str(line)
+                    .map_err(|error| format!("JSONL parse error on line {}: {error}", index + 1))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array)
     }
 }
 
@@ -1275,5 +1336,28 @@ fn strip_nulls(value: &Value) -> Option<Value> {
                 .collect(),
         )),
         _ => Some(value.clone()),
+    }
+}
+
+#[cfg(test)]
+mod append_decode_tests {
+    use super::*;
+
+    #[test]
+    fn parses_each_line_once_including_the_unterminated_tail() {
+        for tail in [b"".as_slice(), b"\n", b"\n{broken}", b"\n\xc3", b"\n  "] {
+            let mut raw = b"{\"id\":\"a\"}\n{\"id\":\"b\"}".to_vec();
+            raw.extend_from_slice(tail);
+            let mut calls = 0;
+            let decoded = decode_append_lines(&raw, |line| {
+                calls += 1;
+                serde_json::from_str(line)
+            })
+            .ok()
+            .unwrap();
+            assert_eq!(decoded.value.as_array().unwrap().len(), 2);
+            assert_eq!(calls, if tail == b"\n{broken}" { 3 } else { 2 });
+            assert_eq!(decoded.torn.is_some(), tail.len() > 1);
+        }
     }
 }
