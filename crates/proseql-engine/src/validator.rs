@@ -294,11 +294,8 @@ fn validate_struct(
     let mut issues: Vec<ValidationIssue> = vec![];
 
     for field in fields {
-        let field_path = if path == "(root)" {
-            field.name.clone()
-        } else {
-            format!("{}.{}", path, field.name)
-        };
+        let nested_path = (path != "(root)").then(|| format!("{path}.{}", field.name));
+        let field_path = nested_path.as_deref().unwrap_or(&field.name);
 
         // Optional and OptionalWithDefault: field may be absent.
         // If present (including null), validate against inner schema.
@@ -316,7 +313,7 @@ fn validate_struct(
                     continue;
                 }
                 if let Err(EngineError::Validation(ve)) =
-                    validate_at(inner_schema, v, &field_path, callbacks)
+                    validate_at(inner_schema, v, field_path, callbacks)
                 {
                     append_issues(&mut issues, ve.issues, CheckPathPart::Field(&field.name));
                 }
@@ -325,7 +322,7 @@ fn validate_struct(
             match obj.get(&field.name) {
                 None => {
                     issues.push(ValidationIssue {
-                        field: field_path,
+                        field: field_path.to_owned(),
                         message: format!("Missing key or index \"{}\"", field.name),
                         value: None,
                         expected: None,
@@ -334,7 +331,7 @@ fn validate_struct(
                 }
                 Some(v) => {
                     if let Err(EngineError::Validation(ve)) =
-                        validate_at(&field.schema, v, &field_path, callbacks)
+                        validate_at(&field.schema, v, field_path, callbacks)
                     {
                         append_issues(&mut issues, ve.issues, CheckPathPart::Field(&field.name));
                     }
@@ -402,6 +399,27 @@ pub fn decode_owned_value_with_callbacks(
     decode_owned_at(schema, value, "(root)", callbacks).map_err(normalize_check_error)
 }
 
+fn struct_capacity(
+    fields: &[crate::descriptor::StructField],
+    object: &JsonMap<String, Value>,
+) -> usize {
+    // Successful all-required structs contain every declared field. Sparse
+    // optional schemas must not reserve slots for fields that are absent.
+    if fields.iter().all(|field| {
+        !matches!(
+            field.schema,
+            SchemaNode::Optional(_) | SchemaNode::OptionalWithDefault { .. }
+        )
+    }) {
+        fields.len()
+    } else {
+        fields
+            .iter()
+            .filter(|field| object.contains_key(&field.name))
+            .count()
+    }
+}
+
 fn decode_owned_at(
     schema: &SchemaNode,
     value: Value,
@@ -418,7 +436,7 @@ fn decode_owned_at(
             let Value::Object(mut object) = value else {
                 return Err(type_mismatch(path, "object", &value));
             };
-            let mut decoded = JsonMap::with_capacity(fields.len());
+            let mut decoded = JsonMap::with_capacity(struct_capacity(fields, &object));
             let mut issues = Vec::new();
             for field in fields {
                 let nested_field_path =
@@ -500,7 +518,8 @@ fn decode_owned_at(
             let Value::Object(values) = value else {
                 return Err(type_mismatch(path, "object", &value));
             };
-            let mut decoded = JsonMap::with_capacity(values.len());
+            let original_len = values.len();
+            let mut decoded = JsonMap::with_capacity(original_len);
             let mut issues = Vec::new();
             for (key, value) in values {
                 if !record_key_matches(key_schema, &key, callbacks)? {
@@ -517,6 +536,15 @@ fn decode_owned_at(
                 }
             }
             if issues.is_empty() {
+                // Key predicates can discard almost the whole input. Move the
+                // kept entries into an exact-size map; do not retain raw width.
+                if decoded.len() < original_len {
+                    let mut compact = JsonMap::with_capacity(decoded.len());
+                    for (key, value) in decoded {
+                        compact.insert(key, value);
+                    }
+                    decoded = compact;
+                }
                 Ok(Value::Object(decoded))
             } else {
                 Err(EngineError::Validation(ValidationError {
@@ -744,7 +772,7 @@ fn decode_struct(
         _ => return Err(type_mismatch(path, "object", value)),
     };
 
-    let mut decoded_map = JsonMap::new();
+    let mut decoded_map = JsonMap::with_capacity(struct_capacity(fields, obj));
     let mut issues: Vec<ValidationIssue> = vec![];
 
     for field in fields {

@@ -75,9 +75,8 @@ use super::computed::{resolve_computed_for_all, should_resolve_computed};
 use super::cursor::{apply_cursor, CursorConfig, CursorPageResult};
 use super::filter::matches_where_with_registry;
 use super::indexes::IndexUsed;
-use super::paginate::paginate;
 use super::search::{compute_search_score, extract_search_config, resolve_score_fields, tokenize};
-use super::select::apply_selection;
+use super::select::{apply_owned_selection, apply_selection};
 use super::sort::{sort_entities_with_registry, SortEntry, SortOrder};
 
 /// Metadata key attached to entities during search scoring.
@@ -515,9 +514,11 @@ fn finish_query_matches(
     registry: &Arc<CallbackRegistry>,
 ) -> Result<Vec<Value>, EngineError> {
     let sorted = sort_with_scoring(rows, &input.r#where, &input.sort, Some(registry));
-    Ok(paginate(&sorted, input.offset, input.limit)
-        .iter()
-        .map(|row| apply_selection(row, input.select.as_ref()))
+    Ok(sorted
+        .into_iter()
+        .skip(input.offset.unwrap_or(0))
+        .take(input.limit.unwrap_or(usize::MAX))
+        .map(|row| apply_owned_selection(row, input.select.as_ref()))
         .collect())
 }
 
@@ -855,9 +856,12 @@ fn attach_search_scores(entities: Vec<Value>, where_clause: &Option<Value>) -> V
         .map(|e| {
             let fields = resolve_score_fields(&e, &sc.fields);
             let score = compute_search_score(&e, &query_tokens, &fields);
-            let mut obj = e.as_object().cloned().unwrap_or_default();
-            obj.insert(SEARCH_SCORE_KEY.to_string(), serde_json::Value::from(score));
-            Value::Object(obj)
+            let mut object = match e {
+                Value::Object(object) => object,
+                _ => serde_json::Map::new(),
+            };
+            object.insert(SEARCH_SCORE_KEY.to_string(), serde_json::Value::from(score));
+            Value::Object(object)
         })
         .collect()
 }

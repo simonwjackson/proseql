@@ -66,8 +66,9 @@ use crate::operators::{
 };
 use crate::query::indexes::{IndexUsed, QueryIndexes};
 use crate::query::sort::SortEntry;
+#[cfg(feature = "owned-mutations")]
+use crate::validator::decode_owned_value_with_callbacks as decode_owned_value;
 use crate::validator::{
-    decode_owned_value_with_callbacks as decode_owned_value,
     decode_value_with_callbacks as decode_value, js_eq,
     validate_value_with_callbacks as validate_value,
 };
@@ -1662,7 +1663,27 @@ impl Collection {
         position: Option<usize>,
         describe: bool,
     ) -> Result<(usize, Vec<EntityChange>), EngineError> {
-        let mut block = Vec::with_capacity(records.len());
+        self.validate_resident_block(&records)?;
+        Ok(self.insert_resident_block(records, position, describe))
+    }
+
+    /// Validate the whole incoming block against the accepted state before
+    /// dropping anything. After that point, eviction and insertion cannot fail.
+    /// `before_id` is resolved after eviction, so surviving row order is stable.
+    pub fn replace_resident_records(
+        &mut self,
+        records: Vec<Value>,
+        removing: &[String],
+        before_id: Option<&str>,
+        describe: bool,
+    ) -> Result<(usize, Vec<EntityChange>), EngineError> {
+        self.validate_resident_block(&records)?;
+        self.unload_resident_records(removing, false);
+        let position = before_id.and_then(|id| self.position_of(id));
+        Ok(self.insert_resident_block(records, position, describe))
+    }
+
+    pub(crate) fn validate_resident_block(&self, records: &[Value]) -> Result<(), EngineError> {
         let mut seen = HashSet::with_capacity(records.len());
         for record in records {
             let id = record
@@ -1680,28 +1701,45 @@ impl Collection {
                             received: Some("absent".to_string()),
                         }],
                     })
-                })?
-                .to_owned();
-            self.validate_loaded_entity(&record, &id)?;
-            if self.state.contains_key(&id) || !seen.insert(id.clone()) {
+                })?;
+            self.validate_loaded_entity(record, id)?;
+            if self.state.contains_key(id) || !seen.insert(id) {
                 return Err(EngineError::DuplicateKey(Box::new(DuplicateKeyError {
                     collection: self.name.clone(),
                     field: "id".to_string(),
-                    value: id.clone(),
-                    existing_id: id.clone(),
+                    value: id.to_owned(),
+                    existing_id: id.to_owned(),
                     message: format!("Duplicate value for field 'id': \"{id}\" (resident)"),
                 })));
             }
-            block.push((id, record));
         }
-        let count = block.len();
+        drop(seen);
+        Ok(())
+    }
+
+    fn insert_resident_block(
+        &mut self,
+        records: Vec<Value>,
+        position: Option<usize>,
+        describe: bool,
+    ) -> (usize, Vec<EntityChange>) {
+        let count = records.len();
+        let block = records.into_iter().map(|record| {
+            let id = record
+                .get("id")
+                .and_then(Value::as_str)
+                .expect("validated resident ID")
+                .to_owned();
+            (id, record)
+        });
         let mut changes = Vec::new();
         if count == 0 {
-            return Ok((0, changes));
+            return (0, changes);
         }
         self.authorized_equality_cache = None;
         match position.filter(|position| *position < self.state.len()) {
             None => {
+                self.state.reserve(count);
                 for (id, entity) in block {
                     self.query_indexes.insert(&id, &entity);
                     if describe {
@@ -1740,7 +1778,7 @@ impl Collection {
             }
         }
         self.revision = self.revision.saturating_add(1);
-        Ok((count, changes))
+        (count, changes)
     }
 
     /// Drop resident records without a mutation (the inverse of
@@ -1754,6 +1792,22 @@ impl Collection {
         ids: &[String],
         describe: bool,
     ) -> (usize, Vec<EntityChange>) {
+        if !describe && ids.len() >= self.state.len() && !self.state.is_empty() {
+            let removing: HashSet<&str> = ids.iter().map(String::as_str).collect();
+            if self.state.keys().all(|id| removing.contains(id.as_str())) {
+                let count = self.state.len();
+                self.state = IndexMap::new();
+                self.query_indexes = QueryIndexes::new();
+                self.query_indexes.configure(
+                    &self.descriptor.indexes,
+                    &self.descriptor.search_index,
+                    &self.descriptor.ordered_indexes,
+                );
+                self.authorized_equality_cache = None;
+                self.revision = self.revision.saturating_add(1);
+                return (count, Vec::new());
+            }
+        }
         let mut removing = HashSet::with_capacity(ids.len());
         let mut changes = Vec::new();
         for id in ids {
@@ -2757,6 +2811,12 @@ impl Collection {
         }
     }
 
+    #[cfg(not(feature = "owned-mutations"))]
+    fn validate_entity_owned(&self, entity: Value, id: &str) -> Result<Value, EngineError> {
+        self.validate_entity(entity, id)
+    }
+
+    #[cfg(feature = "owned-mutations")]
     fn validate_entity_owned(&self, entity: Value, id: &str) -> Result<Value, EngineError> {
         if matches!(self.descriptor.id_strategy, IdStrategy::DerivedFromKey) {
             let decoded = decode_owned_value(

@@ -80,6 +80,16 @@ pub fn apply_selection(entity: &Value, selection: Option<&Value>) -> Value {
     }
 }
 
+/// Consume a row when selection is an identity operation. Projection still
+/// uses the same borrowed selector, including nested/dot-path semantics.
+pub(crate) fn apply_owned_selection(entity: Value, selection: Option<&Value>) -> Value {
+    match selection {
+        Some(Value::Array(fields)) if !fields.is_empty() => apply_selection(&entity, selection),
+        Some(Value::Object(fields)) if !fields.is_empty() => apply_selection(&entity, selection),
+        _ => entity,
+    }
+}
+
 fn apply_object_selection(entity: &Value, sel: &Map<String, Value>) -> Value {
     let obj = match entity.as_object() {
         Some(m) => m,

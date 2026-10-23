@@ -47,6 +47,42 @@ impl Database {
         Ok(loaded)
     }
 
+    /// Validate a transient canonical Value block with exactly the resident
+    /// loader's schema/callback/ID checks, without storing it or building indexes.
+    pub fn validate_resident_records(
+        &self,
+        collection: &str,
+        records: &[Value],
+    ) -> Result<(), EngineError> {
+        self.collections
+            .get(collection)
+            .ok_or_else(|| col_nf(collection))?
+            .validate_resident_block(records)
+    }
+
+    /// Atomically validate an incoming block, silently evict `removing`, then
+    /// insert before a surviving ID (or append). Outgoing IDs still participate
+    /// in duplicate checks. An error leaves every accepted record unchanged.
+    /// Hosts must never evict records that a live watch can match.
+    pub fn replace_resident_records(
+        &mut self,
+        collection: &str,
+        records: Vec<Value>,
+        removing: &[String],
+        before_id: Option<&str>,
+        publish: bool,
+    ) -> Result<usize, EngineError> {
+        let (loaded, changes) = self
+            .collections
+            .get_mut(collection)
+            .ok_or_else(|| col_nf(collection))?
+            .replace_resident_records(records, removing, before_id, publish)?;
+        if publish && loaded > 0 {
+            self.publish_resident_move(collection, changes);
+        }
+        Ok(loaded)
+    }
+
     /// Drop resident records from `collection` (see
     /// [`crate::collection::Collection::unload_resident_records`]), with the
     /// same journal and publication rules as [`Self::load_resident_records`].

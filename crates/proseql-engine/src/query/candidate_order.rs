@@ -3,7 +3,7 @@
 //! except when an eligible ordered-index sort takes authority instead.
 use super::{
     filter::get_nested_value,
-    indexes::{equality_candidate_spec, equality_key},
+    indexes::{canonical_equality_key, equality_candidate_spec, equality_key},
     ordered_index::RangeSpec,
     pipeline::QueryInput,
     search::extract_search_config,
@@ -62,7 +62,8 @@ impl CandidateOrder {
         )?;
         let fields = spec.fields.to_vec();
         let mut ranks = HashMap::new();
-        for key in spec.keys {
+        for combination in spec.combinations {
+            let key = canonical_equality_key(combination);
             let rank = ranks.len();
             ranks.entry(key).or_insert(rank);
         }

@@ -14,6 +14,8 @@ indexmap = { workspace = true }
 serde_json = { workspace = true }
 
 [features]
+# Native opts into owned CRUD decoding; other hosts keep the existing path.
+owned-mutations = []
 native-checks = []
 ecmascript-regex = ["native-checks", "dep:regress"]
 

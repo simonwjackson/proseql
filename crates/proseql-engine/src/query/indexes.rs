@@ -168,6 +168,9 @@ impl QueryIndexes {
 
     /// Add one entity to every configured index.
     pub(crate) fn insert(&mut self, id: &str, entity: &Value) {
+        if self.equality.is_empty() && self.search_fields.is_empty() && self.ordered.is_empty() {
+            return;
+        }
         if !self.entity_order.contains_key(id) {
             self.entity_order.insert(id.to_owned(), self.next_order);
             self.next_order = self.next_order.saturating_add(1);
@@ -362,7 +365,8 @@ impl QueryIndexes {
         let index = &self.equality[spec.index];
         let mut candidates = Vec::new();
         let mut seen = HashSet::new();
-        for key in spec.keys {
+        for combination in spec.combinations {
+            let key = canonical_equality_key(combination);
             if let Some(ids) = index.map.get(&key) {
                 for (_, id) in ids {
                     if seen.insert(id.clone()) {
@@ -489,16 +493,16 @@ impl QueryIndexes {
 /// same key — JSON integers and floats have the same JS identity (`1 === 1.0`).
 /// One source of truth for equality-index choice and condition-value union
 /// order. Streaming hosts use the same keys without retaining all postings.
-pub(super) struct EqualityCandidateSpec<'a> {
+pub(super) struct EqualityCandidateSpec<'a, 'v> {
     pub index: usize,
     pub fields: &'a [String],
-    pub keys: Vec<String>,
+    pub combinations: Vec<Vec<&'v Value>>,
 }
 
-pub(super) fn equality_candidate_spec<'a>(
-    where_clause: &Value,
+pub(super) fn equality_candidate_spec<'a, 'v>(
+    where_clause: &'v Value,
     indexes: impl Iterator<Item = &'a [String]>,
-) -> Option<EqualityCandidateSpec<'a>> {
+) -> Option<EqualityCandidateSpec<'a, 'v>> {
     let where_obj = where_clause.as_object()?;
     if ["$or", "$and", "$not"]
         .iter()
@@ -537,30 +541,25 @@ pub(super) fn equality_candidate_spec<'a>(
         }
         combinations = next;
     }
-    let keys = combinations
-        .into_iter()
-        .map(|combination| {
-            combination
-                .into_iter()
-                .map(canonical_index_part)
-                .collect::<Vec<_>>()
-                .join("\x00")
-        })
-        .collect();
     Some(EqualityCandidateSpec {
         index,
         fields,
-        keys,
+        combinations,
     })
+}
+
+pub(super) fn canonical_equality_key(combination: Vec<&Value>) -> String {
+    combination
+        .into_iter()
+        .map(canonical_index_part)
+        .collect::<Vec<_>>()
+        .join("\x00")
 }
 
 pub(super) fn equality_key(entity: &Value, fields: &[String]) -> Option<String> {
     let parts: Option<Vec<String>> = fields
         .iter()
-        .map(|f| {
-            let v = get_nested_value(entity, f)?;
-            Some(canonical_index_part(v))
-        })
+        .map(|field| Some(canonical_index_part(get_nested_value(entity, field)?)))
         .collect();
     Some(parts?.join("\x00"))
 }
