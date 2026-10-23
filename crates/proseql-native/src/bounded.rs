@@ -28,6 +28,18 @@ pub struct BoundedQueryStats {
     pub retained_partition_limit: usize,
 }
 
+#[derive(Clone, Copy)]
+enum CachedRead {
+    IndexedQuery,
+    StreamingFold,
+}
+
+struct ReadScope<'a> {
+    collection: &'a str,
+    filter: Option<&'a Value>,
+    cached_read: CachedRead,
+}
+
 impl NativeRuntime {
     /// Read lazy partitions one at a time in path/file order. At most N cached
     /// unpinned partitions plus one incoming partition's records coexist.
@@ -51,8 +63,11 @@ impl NativeRuntime {
     ) -> Result<(Vec<Value>, BoundedQueryStats), EngineError> {
         proseql_engine::query::pipeline::validate_regular_query(&input)?;
         self.bounded_fold(
-            collection,
-            input.r#where.as_ref(),
+            ReadScope {
+                collection,
+                filter: input.r#where.as_ref(),
+                cached_read: CachedRead::IndexedQuery,
+            },
             |callbacks, records| {
                 QueryMatches::for_collection(input.clone(), callbacks, records, None)
             },
@@ -72,8 +87,11 @@ impl NativeRuntime {
         cursor: &CursorConfig,
     ) -> Result<CursorPageResult, EngineError> {
         self.bounded_fold(
-            collection,
-            input.r#where.as_ref(),
+            ReadScope {
+                collection,
+                filter: input.r#where.as_ref(),
+                cached_read: CachedRead::IndexedQuery,
+            },
             |callbacks, records| {
                 QueryMatches::for_collection(input.clone(), callbacks, records, Some(cursor))
             },
@@ -97,8 +115,11 @@ impl NativeRuntime {
         config: &AggregateConfig,
     ) -> Result<AggregateResult, EngineError> {
         self.bounded_fold(
-            collection,
-            filter.as_ref(),
+            ReadScope {
+                collection,
+                filter: filter.as_ref(),
+                cached_read: CachedRead::StreamingFold,
+            },
             |callbacks, records| {
                 (
                     AggregateAccumulator::new(config),
@@ -154,8 +175,11 @@ impl NativeRuntime {
         config: &AggregateConfig,
     ) -> Result<Vec<GroupResult>, EngineError> {
         self.bounded_fold(
-            collection,
-            filter.as_ref(),
+            ReadScope {
+                collection,
+                filter: filter.as_ref(),
+                cached_read: CachedRead::StreamingFold,
+            },
             |callbacks, records| {
                 (
                     GroupedAggregateAccumulator::new(group_by, config),
@@ -211,13 +235,17 @@ impl NativeRuntime {
 
     fn bounded_fold<A, R>(
         &self,
-        collection: &str,
-        filter: Option<&Value>,
+        scope: ReadScope<'_>,
         make: impl FnOnce(Arc<CallbackRegistry>, &proseql_engine::collection::Collection) -> A,
         mut visit: impl FnMut(&mut A, &Value) -> Result<(), EngineError>,
         finish: impl FnOnce(A) -> Result<R, EngineError>,
         eager: impl FnOnce(&Database) -> Result<R, EngineError>,
     ) -> Result<(R, BoundedQueryStats), EngineError> {
+        let ReadScope {
+            collection,
+            filter,
+            cached_read,
+        } = scope;
         let mut state = self.lock_open()?;
         self.drain_unpins(&mut state);
         let state = &mut *state;
@@ -244,6 +272,16 @@ impl NativeRuntime {
             });
         };
         let (_, paths) = sources.lazy_scope(collection, filter, "query")?;
+        sources.lazy_trim(&mut state.database)?;
+        if matches!(cached_read, CachedRead::IndexedQuery)
+            && sources.lazy_scope_is_resident(collection, &paths)
+        {
+            sources.lazy_touch(collection, &paths);
+            let stats = sources.lazy_read_stats(collection, paths.len(), 0);
+            let _phase =
+                proseql_storage::diagnostics::span("query_engine_including_explain_when_requested");
+            return eager(&state.database).map(|result| (result, stats));
+        }
         let mut accumulator = make(
             Arc::clone(&sources.callbacks),
             state
@@ -264,6 +302,7 @@ impl NativeRuntime {
         trimmed?;
         let sources = state.sources.as_ref().expect("source runtime");
         let status = sources.lazy_read_stats(collection, paths.len(), read);
+        let _phase = proseql_storage::diagnostics::span("query_global_finalize");
         finish(accumulator).map(|result| (result, status))
     }
 }

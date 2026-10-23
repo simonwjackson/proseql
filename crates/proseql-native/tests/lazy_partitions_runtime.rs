@@ -1728,3 +1728,65 @@ fn bounded_load_errors_pins_and_duplicates_across_evicted_partitions_are_not_hid
     );
     assert!(loaded(&refused).is_empty());
 }
+
+#[test]
+fn bounded_windows_read_each_file_at_most_once_and_warm_hits_keep_lru_and_indexes() {
+    let dir = tempfile::tempdir().unwrap();
+    seed(dir.path());
+    let eager = open_eager(dir.path());
+    let (host, reads) = CountingHost::new();
+    let lazy = NativeRuntime::open_sources_with_host(
+        config(dir.path()),
+        host,
+        lazy_options(policy(1, FullScanPolicy::Allow)),
+    )
+    .unwrap();
+    lazy.query_bounded("heartrate", month("2026-02")).unwrap();
+    reads.lock().unwrap().clear();
+    let input = filtered(
+        json!({"timestamp":{"$gte":"2026-01-01T00:00:00Z","$lte":"2026-03-31T23:59:59Z"}}),
+    );
+    let (rows, stats) = lazy
+        .query_bounded_with_stats("heartrate", input.clone())
+        .unwrap();
+    assert_eq!(rows, eager_query(&eager, input));
+    assert_eq!(stats.partitions_read, 2);
+    assert_eq!(reads.lock().unwrap().len(), 2);
+    assert!(reads.lock().unwrap().values().all(|count| *count == 1));
+    assert_eq!(loaded(&lazy), ["2026-03"]);
+    let warm = open_lazy(dir.path(), policy(2, FullScanPolicy::Allow));
+    warm.query_bounded("heartrate", month("2025-11")).unwrap();
+    warm.query_bounded("heartrate", month("2025-12")).unwrap();
+    let (_, stats) = warm
+        .query_bounded_with_stats("heartrate", month("2025-11"))
+        .unwrap();
+    assert_eq!(stats.partitions_read, 0);
+    warm.query_bounded("heartrate", month("2026-01")).unwrap();
+    assert_eq!(loaded(&warm), ["2025-11", "2026-01"]);
+    let (_, stats) = warm
+        .query_with_stats("heartrate", month("2026-01"), None)
+        .unwrap();
+    assert_eq!(stats.index_used, IndexUsed::Ordered);
+    assert_eq!(stats.partitions_read, 0);
+}
+
+#[test]
+fn bounded_id_checks_include_the_initial_cache_outside_the_query_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let all = seed(dir.path());
+    let lazy = open_lazy(dir.path(), policy(2, FullScanPolicy::Allow));
+    lazy.query_bounded(
+        "heartrate",
+        filtered(json!({"timestamp":{"$gte":"2025-11","$lt":"2025-12-31T23:59:59.999999Z"}})),
+    )
+    .unwrap();
+    assert_eq!(loaded(&lazy), ["2025-11", "2025-12"]);
+    let mut row = sample("2026-04-15T00:00:00Z", 1);
+    row["id"] = all[0]["id"].clone();
+    write_partition(dir.path(), "2026-04", &[row]);
+    let input = filtered(json!({"timestamp":{"$gte":"2026-01","$lt":"2026-05"}}));
+    assert_eq!(
+        lazy.query_bounded("heartrate", input).unwrap_err().tag(),
+        "SourceConfigError"
+    );
+}

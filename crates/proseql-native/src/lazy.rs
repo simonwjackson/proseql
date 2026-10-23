@@ -30,7 +30,9 @@ use proseql_engine::errors::{EngineError, OperationError, SourceConfigError};
 use proseql_engine::query::indexes::IndexUsed;
 use proseql_engine::relationships::Database;
 use proseql_formats::FormatRegistry;
-use proseql_storage::append::{is_append_format, load_append_file, TornLineDiagnostic};
+use proseql_storage::append::{
+    decode_append_bytes, is_append_format, LoadedAppendFile, TornLineDiagnostic,
+};
 use proseql_storage::host::StorageHost;
 use proseql_storage::partition_prune::{partition_key_of_path, PartitionFilter};
 use proseql_storage::partitioned::{
@@ -130,8 +132,12 @@ pub(crate) struct Resident {
     /// Record IDs in file order, then in append order.
     pub ids: Vec<String>,
     last_used: u64,
-    /// Hash of the stored content, computed by the watcher when needed.
-    hash: Option<FileFingerprint>,
+}
+
+#[derive(Clone, Copy)]
+struct BoundedLoad<'a> {
+    seen: &'a HashSet<Box<str>>,
+    retain: &'a BTreeSet<String>,
 }
 
 struct Pin {
@@ -172,10 +178,8 @@ impl LazyCollection {
             .or_insert_with(|| Resident {
                 ids: Vec::new(),
                 last_used: 0,
-                hash: None,
             });
         resident.ids.push(id);
-        resident.hash = None;
         self.pending.remove(path);
         if !self.known.contains_key(path) {
             if let Some(key) = partition_key_of_path(&self.source, path) {
@@ -187,6 +191,12 @@ impl LazyCollection {
                 self.known.insert(path.to_owned(), key);
             }
         }
+    }
+
+    fn watch_covers(&self, path: &str) -> bool {
+        self.pins.values().any(|pin| pin.paths.contains(path))
+            || partition_key_of_path(&self.source, path)
+                .is_some_and(|key| self.pins.values().any(|pin| pin.filter.matches(&key)))
     }
 
     pub fn status(&self) -> LazyPartitionStatus {
@@ -367,7 +377,7 @@ pub(crate) fn list_partitions(
 struct LoadedPartition {
     records: IndexMap<String, Value>,
     /// Raw bytes; `None` when the file does not exist.
-    content: Option<Vec<u8>>,
+    content: Option<crate::stored_file::StoredFile>,
     torn: Option<TornLineDiagnostic>,
 }
 
@@ -400,7 +410,10 @@ pub(crate) struct FileFingerprint {
 }
 
 impl FileFingerprint {
-    fn of(content: &[u8]) -> Self {
+    pub(crate) fn from_hash(len: usize, hash: u64) -> Self {
+        Self { len, hash }
+    }
+    pub(crate) fn of(content: &[u8]) -> Self {
         Self {
             len: content.len(),
             hash: content_hash(content),
@@ -500,12 +513,19 @@ impl SourceState {
         path: &str,
     ) -> Result<LoadedPartition, EngineError> {
         let _phase = proseql_storage::diagnostics::span("partition_read_decode_validate");
-        let snapshot = crate::read_snapshot::ReadSnapshot::new(host);
+        let content = if host.exists(path)? {
+            Some(host.read_bytes(path)?)
+        } else {
+            None
+        };
         let file = file_source(&lazy.source, path);
         let config = &self.config.collection_configs[&lazy.collection];
         let mut decode_config = config.clone();
         decode_config.schema = crate::schema_checks::storage_decode_schema(&config.schema);
-        let mut loaded = load_append_file(&snapshot, formats, &file, &decode_config, true)?;
+        let mut loaded = match content.as_deref() {
+            Some(bytes) => decode_append_bytes(host, formats, &file, &decode_config, bytes, true)?,
+            None => LoadedAppendFile::default(),
+        };
         // Decode/filter before removing any last-known-good resident records.
         crate::schema_checks::decode_loaded_records(
             &config.schema,
@@ -516,10 +536,10 @@ impl SourceState {
         for (id, record) in &loaded.records {
             check_partition_record(&lazy.source, path, id, record)?;
         }
-        let content = snapshot.take_bytes(path)?;
         Ok(LoadedPartition {
             records: loaded.records,
-            content,
+            content: content
+                .map(|bytes| crate::stored_file::StoredFile::append(&bytes, loaded.torn.as_ref())),
             torn: loaded.torn,
         })
     }
@@ -548,6 +568,20 @@ impl SourceState {
         paths: &[String],
         publish: bool,
     ) -> Result<usize, EngineError> {
+        self.lazy_ensure_impl(database, host, formats, collection, paths, publish, None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn lazy_ensure_impl(
+        &mut self,
+        database: &mut Database,
+        host: &dyn StorageHost,
+        formats: &FormatRegistry,
+        collection: &str,
+        paths: &[String],
+        publish: bool,
+        reclaim: Option<BoundedLoad<'_>>,
+    ) -> Result<usize, EngineError> {
         let mut read = 0;
         let missing = {
             let lazy = self.lazy_ref(collection)?;
@@ -572,28 +606,105 @@ impl SourceState {
                 })
                 .unwrap_or_default();
             let partition = self.read_partition(host, formats, lazy, &path)?;
+            if let Some(context) = reclaim {
+                if let Some(id) = partition
+                    .records
+                    .keys()
+                    .find(|id| context.seen.contains(id.as_str()))
+                {
+                    return Err(config_error(
+                        format!("Duplicate partition record '{id}'"),
+                        &lazy.source_id,
+                        Some(collection),
+                        Some(&path),
+                    ));
+                }
+            }
+            let incoming_pinned = lazy.watch_covers(&path);
+            let evictions = if let Some(context) = reclaim {
+                let pinned = lazy.pinned();
+                let unpinned_count = lazy
+                    .resident
+                    .keys()
+                    .filter(|path| !pinned.contains(path.as_str()))
+                    .count();
+                let mut candidates = lazy
+                    .resident
+                    .iter()
+                    .filter(|(path, _)| {
+                        !pinned.contains(path.as_str()) && !context.retain.contains(*path)
+                    })
+                    .map(|(path, resident)| (path.clone(), resident.last_used))
+                    .collect::<Vec<_>>();
+                let count = (unpinned_count + usize::from(!incoming_pinned))
+                    .saturating_sub(lazy.policy.max_loaded_partitions);
+                candidates.sort_by(|(left_path, left), (right_path, right)| {
+                    left.cmp(right).then_with(|| left_path.cmp(right_path))
+                });
+                candidates
+                    .into_iter()
+                    .take(count)
+                    .map(|(path, _)| path)
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            let before_id = lazy
+                .resident
+                .range::<str, _>((
+                    std::ops::Bound::Excluded(path.as_str()),
+                    std::ops::Bound::Unbounded,
+                ))
+                .filter(|(path, _)| !evictions.contains(path))
+                .find_map(|(_, resident)| resident.ids.first())
+                .cloned();
+            let removing = evictions
+                .iter()
+                .flat_map(|path| lazy.resident[path].ids.iter().cloned())
+                .collect::<Vec<_>>();
             let ids = partition.records.keys().cloned().collect::<Vec<_>>();
             let position = Self::lazy_position(lazy, database, &path);
             let source_id = lazy.source_id.clone();
-            let record_phase =
-                proseql_storage::diagnostics::span("resident_validation_record_and_index_build");
-            database
-                .load_resident_records(
+            let record_phase = proseql_storage::diagnostics::span(if reclaim.is_some() {
+                "resident_validation_replacement_and_index_build"
+            } else {
+                "resident_validation_record_and_index_build"
+            });
+            let records = partition.records.into_values().collect();
+            let loaded = if evictions.is_empty() {
+                database.load_resident_records(
                     collection,
-                    partition.records.into_values().collect(),
+                    records,
                     position,
-                    publish || !joining.is_empty(),
+                    publish || !joining.is_empty() || (reclaim.is_some() && incoming_pinned),
                 )
-                .map_err(|error| match error {
-                    EngineError::DuplicateKey(duplicate) => config_error(
-                        format!("Duplicate partition record '{}'", duplicate.value),
-                        &source_id,
-                        Some(collection),
-                        Some(&path),
-                    ),
-                    other => other,
-                })?;
+            } else {
+                database.replace_resident_records(
+                    collection,
+                    records,
+                    &removing,
+                    before_id.as_deref(),
+                    publish || !joining.is_empty() || (reclaim.is_some() && incoming_pinned),
+                )
+            };
+            loaded.map_err(|error| match error {
+                EngineError::DuplicateKey(duplicate) => config_error(
+                    format!("Duplicate partition record '{}'", duplicate.value),
+                    &source_id,
+                    Some(collection),
+                    Some(&path),
+                ),
+                other => other,
+            })?;
             drop(record_phase);
+            for evicted in evictions {
+                self.lazy
+                    .get_mut(collection)
+                    .expect("lazy collection")
+                    .resident
+                    .remove(&evicted);
+                self.contents.shift_remove(&evicted);
+            }
             read += usize::from(partition.content.is_some());
             if let Some(content) = partition.content {
                 self.contents.insert(path.clone(), content);
@@ -612,15 +723,13 @@ impl SourceState {
                 }
             }
             lazy.pending.remove(&path);
-            lazy.resident.insert(
-                path,
-                Resident {
-                    ids,
-                    last_used: 0,
-                    hash: None,
-                },
-            );
+            lazy.resident.insert(path, Resident { ids, last_used: 0 });
         }
+        self.lazy_touch(collection, paths);
+        Ok(read)
+    }
+
+    pub fn lazy_touch(&mut self, collection: &str, paths: &[String]) {
         let lazy = self.lazy.get_mut(collection).expect("lazy collection");
         lazy.clock += 1;
         for path in paths {
@@ -628,7 +737,6 @@ impl SourceState {
                 resident.last_used = lazy.clock;
             }
         }
-        Ok(read)
     }
 
     /// Visit one partition at a time. A failed load leaves the previous cache
@@ -644,23 +752,97 @@ impl SourceState {
         paths: &[String],
         mut visit: impl FnMut(&Value) -> Result<(), EngineError>,
     ) -> Result<usize, EngineError> {
-        self.lazy_trim(database)?;
-        let mut seen = HashSet::new();
+        let lazy = self.lazy_ref(collection)?;
+        // Protect the final cache and any already-cached future scope file.
+        // Otherwise an ascending multi-month query can evict a future file
+        // before visiting it and decode that same file twice in one operation.
+        let retain = paths
+            .iter()
+            .rev()
+            .filter(|path| !lazy.watch_covers(path))
+            .take(lazy.policy.max_loaded_partitions)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let requested = paths.iter().map(String::as_str).collect::<HashSet<_>>();
+        // Preserve the initial cache's cross-resident ID check even if a file
+        // outside this scope is evicted before a later incoming file loads.
+        let mut seen = lazy
+            .resident
+            .iter()
+            .filter(|(path, _)| !requested.contains(path.as_str()))
+            .flat_map(|(_, resident)| resident.ids.iter().map(|id| Box::<str>::from(id.as_str())))
+            .collect::<HashSet<_>>();
         let mut read = 0;
         for path in paths {
-            read += self.lazy_ensure(
-                database,
-                host,
-                formats,
-                collection,
-                std::slice::from_ref(path),
-                false,
-            )?;
+            let lazy = self.lazy_ref(collection)?;
+            if !lazy.resident.contains_key(path)
+                && !retain.contains(path)
+                && !lazy.watch_covers(path)
             {
+                let partition = self.read_partition(host, formats, lazy, path)?;
+                if let Some(id) = partition
+                    .records
+                    .keys()
+                    .find(|id| seen.contains(id.as_str()))
+                {
+                    return Err(config_error(
+                        format!("Duplicate partition record '{id}'"),
+                        &lazy.source_id,
+                        Some(collection),
+                        Some(path),
+                    ));
+                }
+                let source_id = lazy.source_id.clone();
+                let rows = partition.records.into_values().collect::<Vec<_>>();
+                {
+                    let _phase =
+                        proseql_storage::diagnostics::span("resident_validation_transient_block");
+                    database
+                        .validate_resident_records(collection, &rows)
+                        .map_err(|error| match error {
+                            EngineError::DuplicateKey(duplicate) => config_error(
+                                format!("Duplicate partition record '{}'", duplicate.value),
+                                &source_id,
+                                Some(collection),
+                                Some(path),
+                            ),
+                            other => other,
+                        })?;
+                }
+                read += usize::from(partition.content.is_some());
+                if let Some(torn) = partition.torn {
+                    self.torn.retain(|old| old.path != *path);
+                    self.torn.push(torn);
+                }
+                let _phase =
+                    proseql_storage::diagnostics::span("query_partition_filter_accumulate");
+                for row in &rows {
+                    let id = row
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .expect("validated transient ID");
+                    seen.insert(Box::<str>::from(id));
+                    visit(row)?;
+                }
+            } else {
+                read += self.lazy_ensure_impl(
+                    database,
+                    host,
+                    formats,
+                    collection,
+                    std::slice::from_ref(path),
+                    false,
+                    Some(BoundedLoad {
+                        seen: &seen,
+                        retain: &retain,
+                    }),
+                )?;
                 let lazy = self.lazy_ref(collection)?;
                 let records = database.collection(collection).expect("lazy collection");
+                let _phase =
+                    proseql_storage::diagnostics::span("query_partition_filter_accumulate");
                 for id in &lazy.resident[path].ids {
-                    if !seen.insert(id.clone()) {
+                    if !seen.insert(Box::<str>::from(id.as_str())) {
                         return Err(config_error(
                             format!("Duplicate partition record '{id}'"),
                             &lazy.source_id,
@@ -673,9 +855,14 @@ impl SourceState {
                     }
                 }
             }
-            self.lazy_trim(database)?;
         }
         Ok(read)
+    }
+
+    pub fn lazy_scope_is_resident(&self, collection: &str, paths: &[String]) -> bool {
+        paths
+            .iter()
+            .all(|path| self.lazy[collection].resident.contains_key(path))
     }
 
     pub fn lazy_read_stats(
@@ -727,7 +914,6 @@ impl SourceState {
                 Resident {
                     ids: Vec::new(),
                     last_used: lazy.clock,
-                    hash: None,
                 },
             );
             return Ok(());
@@ -888,7 +1074,11 @@ impl SourceState {
                     continue;
                 }
                 let current = host.read_bytes(&path)?;
-                if self.contents.get(&path) == Some(&current) {
+                if self
+                    .contents
+                    .get(&path)
+                    .is_some_and(|stored| stored.matches(&current))
+                {
                     continue;
                 }
                 if let Err(error) =
@@ -983,7 +1173,6 @@ impl SourceState {
         let lazy = self.lazy.get_mut(collection).expect("lazy collection");
         if let Some(resident) = lazy.resident.get_mut(path) {
             resident.ids = ids;
-            resident.hash = None;
         }
         Ok(())
     }
@@ -1000,12 +1189,8 @@ impl SourceState {
                 resident: lazy
                     .resident
                     .iter_mut()
-                    .map(|(path, resident)| {
-                        let stored = contents.get(path).map(|content| {
-                            *resident
-                                .hash
-                                .get_or_insert_with(|| FileFingerprint::of(content))
-                        });
+                    .map(|(path, _resident)| {
+                        let stored = contents.get(path).map(|content| content.fingerprint());
                         (path.clone(), stored)
                     })
                     .collect(),

@@ -274,7 +274,13 @@ fn decode_append_lines(
                     torn: Some((offset, index + 1)),
                 })
             }
-            Err(error) => return Err(AppendJsonlError::Utf8(error)),
+            Err(error) => {
+                // Keep the original file-global UTF-8 error offset, not the
+                // current line's relative offset. This extra scan is error-only.
+                return Err(AppendJsonlError::Utf8(
+                    std::str::from_utf8(raw).err().unwrap_or(error),
+                ));
+            }
         };
         if !line.trim().is_empty() {
             match parse(line) {
@@ -1342,6 +1348,16 @@ fn strip_nulls(value: &Value) -> Option<Value> {
 #[cfg(test)]
 mod append_decode_tests {
     use super::*;
+
+    #[test]
+    fn strict_utf8_errors_keep_the_file_global_offset() {
+        let raw = b"{\"id\":\"a\"}\n{\"id\":\"\xc3\"}\n".to_vec();
+        let expected = std::str::from_utf8(&raw).err().unwrap().valid_up_to();
+        match decode_append_lines(&raw, |line| serde_json::from_str(line)) {
+            Err(AppendJsonlError::Utf8(error)) => assert_eq!(error.valid_up_to(), expected),
+            _ => panic!("invalid complete line must retain a strict UTF-8 read error"),
+        }
+    }
 
     #[test]
     fn parses_each_line_once_including_the_unterminated_tail() {

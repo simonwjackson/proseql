@@ -715,7 +715,7 @@ pub(crate) fn decode_entity_map(
     validation: ValidationMode,
 ) -> Result<IndexMap<String, Value>, EngineError> {
     let _phase = crate::diagnostics::span("schema_decode_map_construction_including_input_drop");
-    let mut entries = IndexMap::new();
+    let mut entries = IndexMap::with_capacity(entity_map.len());
     for (id, value) in entity_map {
         let attempt = || -> Result<Value, EngineError> {
             assert_no_physical_derived_id(&id, &value, id_strategy, file_path)?;
@@ -817,11 +817,11 @@ fn load_data_impl(
             entity_map.insert(id, Value::Object(record));
         }
     } else {
-        let parsed = {
-            let _phase = crate::diagnostics::span("decode_storage");
-            match parsed {
-                Some(parsed) => parsed,
-                None => formats.deserialize(&raw, &ext).map_err(format_error)?,
+        let parsed = match parsed {
+            Some(parsed) => parsed,
+            None => {
+                let _phase = crate::diagnostics::span("decode_storage");
+                formats.deserialize(&raw, &ext).map_err(format_error)?
             }
         };
         let enclosing_version = if options.path.is_some() {
@@ -849,6 +849,7 @@ fn load_data_impl(
                 if options.path.is_some() {
                     file_version = enclosing_version;
                 }
+                entity_map = Map::with_capacity(items.len());
                 for (index, item) in items.into_iter().enumerate() {
                     if let Value::Object(record) = item {
                         let id = record

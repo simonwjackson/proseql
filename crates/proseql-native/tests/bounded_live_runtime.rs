@@ -237,16 +237,46 @@ fn scoped_queries_never_retain_more_than_n_partitions_plus_one_incoming_payload(
         }
         let january = root.join("2025-01.jsonl");
         let good = fs::read(&january).unwrap();
-        fs::write(&january, "broken\n").unwrap();
-        PEAK.store(LIVE.load(Ordering::SeqCst), Ordering::SeqCst);
-        assert!(runtime
-            .query_bounded("samples", QueryInput::default())
-            .is_err());
-        assert!(PEAK.load(Ordering::SeqCst) <= (bound + 1) * ROWS);
-        assert!(
-            LIVE.load(Ordering::SeqCst) <= bound * ROWS,
-            "failed incoming decode dropped all candidate payloads"
-        );
+        let good_text = std::str::from_utf8(&good).unwrap();
+        let before_error = runtime
+            .lazy_partition_status("samples")
+            .unwrap()
+            .unwrap()
+            .loaded;
+        for bad in [
+            "broken\n".to_owned(),
+            good_text.replace("\"value\":3", "\"value\":\"invalid\""),
+            good_text.replace("\"id\":\"1-3\"", "\"id\":\"\""),
+            good_text.replace("2025-01-", "2025-02-"),
+            good_text.replace("\"id\":\"1-3\"", "\"id\":\"1-0\""),
+            good_text.replace("\"id\":\"1-3\"", "\"id\":\"10-0\""),
+        ] {
+            assert_ne!(bad, good_text);
+            fs::write(&january, bad).unwrap();
+            PEAK.store(LIVE.load(Ordering::SeqCst), Ordering::SeqCst);
+            assert!(runtime
+                .query_bounded("samples", QueryInput::default())
+                .is_err());
+            assert!(
+                PEAK.load(Ordering::SeqCst) <= (bound + 1) * ROWS,
+                "failed candidate payload peak {}",
+                PEAK.load(Ordering::SeqCst)
+            );
+            assert_eq!(
+                LIVE.load(Ordering::SeqCst),
+                bound * ROWS,
+                "failed candidate payloads were actually freed"
+            );
+            assert_eq!(
+                runtime
+                    .lazy_partition_status("samples")
+                    .unwrap()
+                    .unwrap()
+                    .loaded,
+                before_error,
+                "validation must precede replacement eviction"
+            );
+        }
         fs::write(&january, good).unwrap();
         let watch=runtime.watch("samples",proseql_engine::reactive::WatchQueryConfig {r#where:Some(json!({"timestamp":{"$gte":"2025-01-01T00:00:00Z","$lt":"2025-01-31T23:59:59Z"}})),select:Some(json!(["id"])),..Default::default()}).unwrap();
         let status = runtime.lazy_partition_status("samples").unwrap().unwrap();

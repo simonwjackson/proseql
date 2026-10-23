@@ -99,8 +99,7 @@ pub(crate) struct AppendedRecord {
     pub record: Value,
 }
 
-/// Bytes compared at the end of an append target before the append.
-const APPEND_CONFLICT_TAIL: usize = 4096;
+use crate::stored_file::{StoredFile, APPEND_CONFLICT_TAIL};
 
 pub(crate) struct SourceState {
     pub config: NormalizedSourceConfig,
@@ -118,8 +117,8 @@ pub(crate) struct SourceState {
     pub partitions: IndexMap<String, LoadedPartitions>,
     pub graph: LoadedDocumentGraph,
     pub transforms: Option<Arc<dyn DocumentGraphTransformHost>>,
-    /// Stored bytes of every loaded file, the conflict baseline.
-    pub contents: IndexMap<String, Vec<u8>>,
+    /// Exact bytes for rewrite sources; compact baselines for lazy append files.
+    pub contents: IndexMap<String, StoredFile>,
     /// Lazy partitioned collections by collection name. Their records are not
     /// in `partitions`; the engine collection holds the loaded partitions.
     pub lazy: IndexMap<String, crate::lazy::LazyCollection>,
@@ -494,6 +493,10 @@ impl SourceState {
             })
             .collect::<Result<IndexMap<_, _>, _>>()?;
         contents.extend(file_contents);
+        let contents = contents
+            .into_iter()
+            .map(|(path, bytes)| (path, StoredFile::from(bytes)))
+            .collect();
         Ok(Self {
             config,
             appendable,
@@ -725,8 +728,10 @@ impl SourceState {
                 &self.config.collection_configs[collection],
                 batch,
             )?;
-            let current = self.contents.get(path).map(Vec::as_slice).unwrap_or(&[]);
-            writes.push(plan_append(path, current, lines));
+            writes.push(match self.contents.get(path) {
+                Some(stored) => stored.plan(path, lines),
+                None => plan_append(path, &[], lines),
+            });
         }
         writes.sort_by(|left, right| left.path.cmp(&right.path));
         Ok(AppendPlan { writes, records })
@@ -764,9 +769,18 @@ impl SourceState {
     /// Record durable appends in the stored file state and source records.
     pub fn apply_appends(&mut self, plan: AppendPlan) {
         for write in &plan.writes {
-            let content = self.contents.entry(write.path.clone()).or_default();
-            content.truncate(write.keep_len as usize);
-            content.extend_from_slice(write.data.as_bytes());
+            let lazy = self
+                .lazy
+                .values()
+                .any(|lazy| lazy.resident.contains_key(&write.path));
+            let content = self.contents.entry(write.path.clone()).or_insert_with(|| {
+                if lazy {
+                    StoredFile::append(&[], None)
+                } else {
+                    StoredFile::default()
+                }
+            });
+            content.apply(write);
             self.torn.retain(|torn| torn.path != write.path);
             if let Some(name) = std::path::Path::new(&write.path)
                 .file_name()
@@ -827,7 +841,7 @@ impl SourceState {
                 };
                 if !basename(path).is_some_and(|name| self.self_written.contains(&name))
                     || !host.exists(path)?
-                    || &host.read_bytes(path)? != stored
+                    || !stored.matches(&host.read_bytes(path)?)
                 {
                     return Ok(false);
                 }
@@ -882,7 +896,7 @@ impl SourceState {
             let Some(stored) = self.contents.get(&path) else {
                 return Ok(false);
             };
-            if !host.exists(&path)? || &host.read_bytes(&path)? != stored {
+            if !host.exists(&path)? || !stored.matches(&host.read_bytes(&path)?) {
                 return Ok(false);
             }
         }
@@ -900,7 +914,12 @@ impl SourceState {
             } else {
                 None
             };
-            if current.as_ref() != self.contents.get(&write.path) {
+            let unchanged = match (current.as_ref(), self.contents.get(&write.path)) {
+                (None, None) => true,
+                (Some(current), Some(stored)) => stored.matches(current),
+                _ => false,
+            };
+            if !unchanged {
                 return Err(crate::operation_error(
                     "source-changed",
                     format!(

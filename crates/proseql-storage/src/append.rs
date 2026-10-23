@@ -102,7 +102,7 @@ pub struct LoadedAppendFile {
 }
 
 /// Load an append-only JSONL collection file. A torn final line is ignored and
-/// reported; everything else follows [`load_collection_file`]. When
+/// reported; everything else follows [`crate::collection_file::load_collection_file`]. When
 /// `validate_ids` is set, array IDs must be present and unique, as for
 /// partition files.
 pub fn load_append_file(
@@ -116,6 +116,19 @@ pub fn load_append_file(
         return Ok(LoadedAppendFile::default());
     }
     let raw = host.read_bytes(&source.path)?;
+    decode_append_bytes(host, formats, source, collection, &raw, validate_ids)
+}
+
+/// Decode the caller's exact captured bytes, without another host read or
+/// snapshot copy. The caller owns conflict-baseline publication after success.
+pub fn decode_append_bytes(
+    host: &dyn StorageHost,
+    formats: &FormatRegistry,
+    source: &NormalizedCollectionFileSourceConfig,
+    collection: &CollectionStorageConfig,
+    raw: &[u8],
+    validate_ids: bool,
+) -> Result<LoadedAppendFile, EngineError> {
     let read_error = |error: std::str::Utf8Error| {
         EngineError::Storage(Box::new(proseql_engine::errors::StorageError {
             path: source.path.clone(),
@@ -126,7 +139,7 @@ pub fn load_append_file(
     };
     let (parsed, torn) = {
         let _phase = crate::diagnostics::span("decode_storage");
-        if let Some(decoded) = formats.deserialize_append_jsonl(&raw, &source.format) {
+        if let Some(decoded) = formats.deserialize_append_jsonl(raw, &source.format) {
             let decoded = decoded.map_err(|error| match error {
                 proseql_formats::codecs::AppendJsonlError::Utf8(error) => read_error(error),
                 proseql_formats::codecs::AppendJsonlError::Parse(message) => {
@@ -143,15 +156,15 @@ pub fn load_append_file(
                 decoded.value,
                 decoded
                     .torn
-                    .map(|(keep, line)| TornLineDiagnostic::new(&source.path, &raw, keep, line)),
+                    .map(|(keep, line)| TornLineDiagnostic::new(&source.path, raw, keep, line)),
             )
         } else {
             // Custom codecs keep their whole-file interface. Tail recovery is
             // independent of their decode result; no built-in codec is substituted.
-            let (keep, torn) = match jsonl_tail_bytes(&raw) {
+            let (keep, torn) = match jsonl_tail_bytes(raw) {
                 JsonlTail::Torn { keep, line } => (
                     keep,
-                    Some(TornLineDiagnostic::new(&source.path, &raw, keep, line)),
+                    Some(TornLineDiagnostic::new(&source.path, raw, keep, line)),
                 ),
                 _ => (raw.len(), None),
             };
@@ -165,6 +178,7 @@ pub fn load_append_file(
         }
     };
     if validate_ids {
+        let _phase = crate::diagnostics::span("decoded_id_validation");
         crate::collection_file::validate_decoded_ids(&parsed, source)?;
     }
     let records = crate::persistence::load_decoded_data(

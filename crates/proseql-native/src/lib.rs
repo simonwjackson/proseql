@@ -12,6 +12,7 @@ mod lazy;
 mod read_snapshot;
 mod schema_checks;
 mod sources;
+mod stored_file;
 pub use lazy::{FullScanPolicy, LazyPartitionPolicy, LazyPartitionStatus, NativeQueryStats};
 use sources::SourceState;
 pub use sources::{NativeSourceRuntimeConfig, NativeSourceRuntimeOptions};
@@ -1304,7 +1305,7 @@ fn commit_source_mutation<R>(
         for write in writes {
             sources
                 .contents
-                .insert(write.path, write.content.into_bytes());
+                .insert(write.path, write.content.into_bytes().into());
         }
     }
     sources.apply_appends(appends);

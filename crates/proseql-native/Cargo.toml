@@ -6,13 +6,14 @@ description = "Durable long-running native runtime for proseQL"
 
 [features]
 bench-observe = ["proseql-storage/bench-observe"]
+allocation-meter = ["bench-observe"]
 heap-profile = ["bench-observe", "dep:dhat"]
 
 [dependencies]
 dhat = { version = "0.3.3", optional = true }
 indexmap = { workspace = true }
 serde_json = { workspace = true }
-proseql-engine = { path = "../proseql-engine", features = ["native-checks", "ecmascript-regex"] }
+proseql-engine = { path = "../proseql-engine", features = ["native-checks", "ecmascript-regex", "owned-mutations"] }
 proseql-formats = { path = "../proseql-formats" }
 proseql-storage = { path = "../proseql-storage" }
 
