@@ -5,6 +5,8 @@ edition = "2021"
 description = "Durable long-running native runtime for proseQL"
 
 [features]
+# Separate benchmark process; heap/allocation profilers take precedence.
+phase-rss = ["bench-observe"]
 bench-observe = ["proseql-storage/bench-observe"]
 allocation-meter = ["bench-observe"]
 heap-profile = ["bench-observe", "dep:dhat"]

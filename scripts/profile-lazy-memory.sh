@@ -20,6 +20,8 @@ case "$action" in
     cp crates/target/memory-profile/examples/lazy_memory_bench "$out/bin/meter"
     nix develop --command cargo build --manifest-path crates/Cargo.toml -p proseql-native --profile memory-profile --features heap-profile --example lazy_memory_bench
     cp crates/target/memory-profile/examples/lazy_memory_bench "$out/bin/dhat"
+    nix develop --command cargo build --manifest-path crates/Cargo.toml -p proseql-native --profile memory-profile --features phase-rss --example lazy_memory_bench
+    cp crates/target/memory-profile/examples/lazy_memory_bench "$out/bin/rss"
     ;;
   check)
     if [[ ${PROSEQL_IN_DEV_SHELL:-0} != 1 ]]; then
@@ -28,6 +30,7 @@ case "$action" in
     cargo fmt --manifest-path crates/Cargo.toml --all
     cargo test --manifest-path crates/Cargo.toml -p proseql-native --example lazy_memory_bench --features heap-profile -- --test-threads=1
     cargo test --manifest-path crates/Cargo.toml -p proseql-native --example lazy_memory_bench --features allocation-meter -- --test-threads=1
+    cargo test --manifest-path crates/Cargo.toml -p proseql-native --example lazy_memory_bench --features phase-rss -- --test-threads=1
     cargo test --manifest-path crates/Cargo.toml -p proseql-storage --lib --features bench-observe diagnostics::tests
     cargo test --manifest-path crates/Cargo.toml -p proseql-native --test lazy_partitions_runtime --features bench-observe
     cargo check --manifest-path crates/Cargo.toml -p proseql-native --examples --features heap-profile
@@ -88,6 +91,18 @@ case "$action" in
     echo "AFTER unchanged original time-series workload"
     command time -v "$out/bin/timeseries_bench" --data-dir "$out/original-data" --mode lazy --rows 140000,1000000,10000000 --years 10 --inserts 1000 --query-reps 20 > "$out/original-timeseries.log" 2> "$out/original-timeseries.stderr"
     ;;
+  rss)
+    # Independent process role. Resetting its HWM must never replace default
+    # unprofiled acceptance peaks or run inside DHAT/allocation-meter processes.
+    test -x "$out/bin/rss"
+    mkdir -p "$out/phase-rss"
+    test ! -e "$out/phase-rss/environment.log" || { echo "Refusing to overwrite RSS evidence" >&2; exit 2; }
+    { date -u --iso-8601=seconds; git rev-parse HEAD; uname -a; sha256sum "$out/bin/rss"; } > "$out/phase-rss/environment.log"
+    for mode in zero ascending scan eager-id; do
+      "$out/bin/rss" --data-dir "$out/data" --mode "$mode" --bounded > "$out/phase-rss/$mode.log" 2> "$out/phase-rss/$mode.stderr"
+      python3 scripts/summarize-lazy-rss.py "$out/phase-rss/$mode.stderr" > "$out/phase-rss/$mode.json"
+    done
+    ;;
   feedback)
     "$out/bin/unprofiled" --data-dir "$out/feedback-data" --rows-per-month 1000 --id-rows 100 --prepare-only
     "$out/bin/dhat" --data-dir "$out/feedback-data" --rows-per-month 1000 --id-rows 100 --mode zero --bounded --heap-profile "$out/feedback-dhat.json" --check
@@ -106,7 +121,7 @@ case "$action" in
     done
     ;;
   *)
-    echo "Usage: $0 build|check|before|after|feedback|summarize [artifact-directory]" >&2
+    echo "Usage: $0 build|check|before|after|rss|feedback|summarize [artifact-directory]" >&2
     exit 2
     ;;
 esac

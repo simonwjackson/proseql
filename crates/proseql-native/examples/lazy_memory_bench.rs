@@ -27,6 +27,18 @@ use serde_json::{json, Value};
 #[path = "lazy_memory/allocator_os.rs"]
 mod allocator_os;
 
+#[cfg(all(
+    feature = "phase-rss",
+    not(any(feature = "heap-profile", feature = "allocation-meter"))
+))]
+#[path = "lazy_memory/rss_peak.rs"]
+mod rss_peak;
+#[cfg(all(
+    feature = "phase-rss",
+    not(any(feature = "heap-profile", feature = "allocation-meter"))
+))]
+static RSS_PEAK: std::sync::OnceLock<rss_peak::Tracker> = std::sync::OnceLock::new();
+
 type Error = Box<dyn std::error::Error + Send + Sync>;
 fn tag(error: EngineError) -> Error {
     format!("{}: {error}", error.tag()).into()
@@ -290,6 +302,14 @@ fn config(args: &Args) -> (NativeSourceRuntimeConfig, NativeSourceRuntimeOptions
 }
 
 fn proc_bytes(key: &str) -> Option<u64> {
+    #[cfg(all(
+        feature = "phase-rss",
+        not(any(feature = "heap-profile", feature = "allocation-meter"))
+    ))]
+    if key == "VmHWM:" {
+        // A reset segment is not the process acceptance high-water mark.
+        return None;
+    }
     fs::read_to_string("/proc/self/status")
         .ok()?
         .lines()
@@ -311,6 +331,31 @@ fn heap() -> Value {
     Value::Null
 }
 
+#[cfg(all(
+    feature = "phase-rss",
+    not(any(feature = "heap-profile", feature = "allocation-meter"))
+))]
+fn checkpoint(phase: &'static str, begin: bool) {
+    let tracker = RSS_PEAK.get_or_init(|| {
+        let tracker = rss_peak::Tracker::new().expect("kernel RSS reset observer initialization");
+        eprintln!("LM_RSS_OBSERVER {{\"schema\":\"proseql.phase-rss.v1\",\"pid\":{},\"reset\":\"/proc/self/clear_refs=5\",\"whole_process_acceptance_peak\":null,\"includes_observer_overhead\":true}}",std::process::id());
+        tracker
+    });
+    let boundary = tracker
+        .boundary(phase, begin)
+        .expect("kernel phase RSS measurement");
+    rss_peak::emit(
+        phase,
+        begin,
+        START.get_or_init(Instant::now).elapsed().as_micros(),
+        boundary,
+    );
+}
+
+#[cfg(not(all(
+    feature = "phase-rss",
+    not(any(feature = "heap-profile", feature = "allocation-meter"))
+)))]
 fn checkpoint(phase: &'static str, begin: bool) {
     #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
     let mut active = ALLOCATOR.pause();
