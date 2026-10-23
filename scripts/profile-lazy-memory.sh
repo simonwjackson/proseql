@@ -1,5 +1,5 @@
 #!/usr/bin/env nix-shell
-#!nix-shell -i bash -p bash coreutils jq time
+#!nix-shell -i bash -p bash coreutils jq time python3
 # Run from any directory. All data and logs stay outside the checkout.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
@@ -100,8 +100,8 @@ case "$action" in
       jq -R -s -f scripts/summarize-lazy-phases.jq "$out/$mode-dhat.stderr" > "$out/$mode-heap-phases.json"
       jq -R -s -f scripts/summarize-lazy-phases.jq "$out/$mode-checkpoints.stderr" > "$out/$mode-wall-phases.json"
       if [[ -f "$out/$mode-meter.stderr" ]]; then
-        ./scripts/summarize-lazy-local.py "$out/$mode-meter.stderr" > "$out/$mode-local-peaks.json"
-        ./scripts/summarize-lazy-local.py "$out/$mode-dhat.stderr" > "$out/$mode-dhat-local-peaks.json"
+        python3 scripts/summarize-lazy-local.py "$out/$mode-meter.stderr" > "$out/$mode-local-peaks.json"
+        python3 scripts/summarize-lazy-local.py "$out/$mode-dhat.stderr" > "$out/$mode-dhat-local-peaks.json"
       fi
     done
     ;;

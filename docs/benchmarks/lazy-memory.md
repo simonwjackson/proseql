@@ -247,3 +247,148 @@ function, benchmark Cargo feature and new System meter differ. Eleven fixture
 hashes match BEFORE. Original BEFORE logs/profiles are not overwritten. This
 counter-only run supplies missing local allocation peaks, not replacement
 production timings.
+
+
+## Final AFTER results
+
+Measured source: `11174f90488bad79e0f39cd7a76af28b9a097406`. Hardware and load are recorded in `after/environment.log`. These are shared-host runs, not Celeron measurements.
+
+| Workload | BEFORE process wall s | AFTER process wall s | BEFORE/AFTER wall ratio | BEFORE peak RSS MiB | AFTER peak RSS MiB | AFTER resident requested B/row |
+|---|---:|---:|---:|---:|---:|---:|
+| zero | 19.140 | 7.110 | 2.69× | 382.8 | 248.0 | 2105.1 |
+| ascending | 34.750 | 19.060 | 1.82× | 819.3 | 554.8 | 2105.1 |
+| scan | 17.950 | 19.520 | 0.92× | 1324.8 | 153.4 | 2105.1 |
+| eager-id | 0.150 | 0.100 | 1.50× | 32.8 | 29.8 | 917.7 |
+
+The initial scan pair is **not a wall-time speedup**. Its query wall is 18.977 s AFTER versus 17.562 s BEFORE. Shared-host scheduling is material: report process user+system CPU alongside wall time, and retain repeated final runs rather than replacing this pair.
+
+
+The resident value is DHAT live requested bytes after dropping the first query output, minus open live bytes. It is not RSS. The process peak is GNU time maximum RSS. Profiler overhead does not enter these wall/RSS columns.
+
+| Monthly target / mode | Measured peak RSS MiB | open RSS + 2 × retained requested heap + 50 MiB | Literal formula | 1024-B/row-sized formula |
+|---|---:|---:|---|---|
+| zero | 248.0 | 228.7 | **missed** | **missed** (140.0 MiB) |
+| scan | 153.4 | 228.9 | met | **missed** (140.2 MiB) |
+| ascending | 554.8 | 228.7 | **missed** | **missed** (140.0 MiB) |
+
+`R` in this calculation is the retained requested-heap reference, not an RSS ownership measurement. Allocator padding/free space remains in RSS and is not added as an allowance. Ascending output is not exempt: its matching-row buffers and returned canonical Values explain a miss, but do not turn it into a pass.
+
+The first one-month zero-result query read 2 physical files and took 900.3 ms. Existing conservative time-bucket pruning includes the next boundary bucket. Queries with one physical read took 710.3–864.6 ms (median 733.3 ms); the last cached query is excluded. The ≤500 ms loading target is **not established by these query measurements**. Checkpoint-only per-file phase costs below are diagnostic, not replacement acceptance timings. No rakku result is inferred.
+
+
+### Phase costs and true local heap peaks
+
+Wall columns use checkpoint-only processes. Heap columns use independent System-meter processes. All spans are inclusive. Local RSS peaks remain **unmeasured**. Start/end/peak are process requested heap while a span is active, not ownership of that phase. Excess is peak minus the larger endpoint for each sample, then maximum. Normalized excess divides by one 43k-row partition, not the number of all query matches.
+
+| Mode / phase | Calls | Inclusive wall ms | True local heap peak MiB | Max endpoint excess MiB | Excess B / 43k normalization |
+|---|---:|---:|---:|---:|---:|
+| zero / `eviction` | 19 | 16.8 | 86.3 | 0.0 | 0.0 |
+| zero / `filesystem_read_bytes_including_recovery` | 10 | 37.7 | 101.2 | 0.0 | 0.0 |
+| zero / `decode_storage` | 10 | 1011.9 | 181.9 | 0.0 | 0.0 |
+| zero / `decoded_id_validation` | 10 | 259.5 | 183.5 | 1.6 | 38.9 |
+| zero / `schema_decode_map_construction_including_input_drop` | 10 | 938.2 | 187.9 | 4.8 | 117.7 |
+| zero / `partition_read_decode_validate` | 10 | 3198.0 | 187.9 | 26.3 | 641.6 |
+| zero / `resident_validation_transient_block` | 1 | 29.9 | 73.0 | 1.1 | 25.9 |
+| zero / `query_partition_filter_accumulate` | 18 | 1107.3 | 90.6 | 0.5 | 12.6 |
+| zero / `resident_validation_replacement_and_index_build` | 9 | 1806.7 | 165.2 | 4.3 | 104.0 |
+| zero / `query_global_finalize` | 9 | 0.8 | 86.3 | 0.0 | 0.0 |
+| zero / `query_total` | 10 | 6530.8 | 187.9 | 101.5 | 2475.9 |
+| zero / `query_engine_including_explain_when_requested` | 1 | 64.7 | 86.3 | 0.0 | 0.0 |
+| ascending / `eviction` | 19 | 138.8 | 324.0 | 0.0 | 0.0 |
+| ascending / `filesystem_read_bytes_including_recovery` | 19 | 111.4 | 343.7 | 0.0 | 0.0 |
+| ascending / `decode_storage` | 19 | 3094.3 | 424.4 | 0.0 | 0.0 |
+| ascending / `decoded_id_validation` | 19 | 655.3 | 426.0 | 1.6 | 38.9 |
+| ascending / `schema_decode_map_construction_including_input_drop` | 19 | 2790.6 | 430.3 | 4.8 | 117.7 |
+| ascending / `partition_read_decode_validate` | 19 | 9185.7 | 430.3 | 26.3 | 641.6 |
+| ascending / `resident_validation_transient_block` | 11 | 732.2 | 324.6 | 1.1 | 25.9 |
+| ascending / `query_partition_filter_accumulate` | 25 | 3515.1 | 402.7 | 1.9 | 45.2 |
+| ascending / `resident_validation_replacement_and_index_build` | 8 | 2700.2 | 407.6 | 4.3 | 104.0 |
+| ascending / `query_global_finalize` | 9 | 436.8 | 331.6 | 7.6 | 186.0 |
+| ascending / `query_total` | 10 | 18478.7 | 430.3 | 106.4 | 2593.7 |
+| ascending / `query_engine_including_explain_when_requested` | 1 | 179.4 | 167.1 | 0.0 | 0.0 |
+| scan / `eviction` | 2 | 8.0 | 86.3 | 0.0 | 0.0 |
+| scan / `filesystem_read_bytes_including_recovery` | 10 | 3104.4 | 28.9 | 0.0 | 0.0 |
+| scan / `decode_storage` | 10 | 6618.3 | 109.6 | 0.0 | 0.0 |
+| scan / `decoded_id_validation` | 10 | 1159.0 | 111.2 | 1.6 | 38.9 |
+| scan / `schema_decode_map_construction_including_input_drop` | 10 | 6763.6 | 115.6 | 4.8 | 117.7 |
+| scan / `partition_read_decode_validate` | 10 | 33650.8 | 115.6 | 26.3 | 641.6 |
+| scan / `resident_validation_transient_block` | 9 | 2276.8 | 88.1 | 1.1 | 25.9 |
+| scan / `query_partition_filter_accumulate` | 10 | 3055.1 | 103.0 | 3.7 | 90.3 |
+| scan / `resident_validation_replacement_and_index_build` | 1 | 394.6 | 106.5 | 4.3 | 104.0 |
+| scan / `query_global_finalize` | 1 | 2778.5 | 86.3 | 0.0 | 0.0 |
+| scan / `query_total` | 1 | 49729.6 | 115.6 | 29.2 | 712.3 |
+
+Each `*-local-peaks.json` retains all per-span begin/end requested heap, actual local peak, RSS boundaries and explicitly labelled cumulative HWM. Decode/schema/validation/record/index boundaries remain combined where the instrumented implementation combines them; they are not invented exclusive allocations. `after-analysis.json` contains all query samples and target calculations.
+
+
+### Shared-host repeat range and cold-file control
+
+The initial pair above remains authoritative evidence, including the scan wall regression. Three additional fresh-process unprofiled runs per mode use the same binary and bytes. CPU means GNU time user + system; process wall includes open/close/logging. Ranges do not replace the initial result. Per-run machine load is retained.
+
+| Mode | Initial AFTER wall / CPU s | Three repeat wall s (min / median / max) | Repeat CPU s (min / median / max) | Repeat peak RSS MiB range |
+|---|---:|---:|---:|---:|
+| zero | 7.110 / 6.840 | 9.840 / 10.080 / 10.750 | 9.550 / 9.690 / 10.490 | 247.9–253.8 |
+| ascending | 19.060 / 18.500 | 21.120 / 21.350 / 25.060 | 20.100 / 20.430 / 23.410 | 550.4–555.8 |
+| scan | 19.520 / 9.420 | 6.370 / 7.850 / 7.940 | 6.300 / 7.630 / 7.680 | 153.3–153.3 |
+| eager-id | 0.100 / 0.080 | 0.050 / 0.050 / 0.110 | 0.040 / 0.050 / 0.080 | 29.7–29.8 |
+
+A separate control copies the measured example's exact configuration/schema into an artifact-only driver and opens a fresh empty runtime for each trial. It requests October, which has no known November neighbor. Every run asserts **one file read, one file visited, 43,000 resident rows, zero output rows**. The OS file cache is not cleared. Native/engine/storage code and dependencies match the measured source; the driver and dependency lock are hashed.
+
+| Cold 43k-row operation | Trial elapsed ms | Target |
+|---|---|---|
+| Fresh-runtime October load + zero-result query | 596.2, 648.8, 686.9, 798.2, 749.8 | **missed**: 5/5 exceed 500 ms |
+
+Cold-file min / median / max: 596.2 / 686.9 / 798.2 ms. This is measured end-to-end cold-file work, not a warm no-read query divided by months. CPU seconds per trial: 0.680, 0.730, 0.790, 0.860, 0.860. It includes the retained ordered-index build and filtering, but excludes open and reporting. No Celeron time is inferred.
+
+
+### Allocation origins and remaining cost
+
+Disjoint stack buckets are origins, not exclusive phases. `eb` is live at profiler end while one partition remains accepted. The JSONL bucket includes retained string values moved into canonical records; it is not all removable staging. `other_and_harness` remains unclassified. Mean lifetimes are profiler-distorted and surviving blocks are censored.
+
+| Full-zero scan origin | BEFORE allocated MiB | AFTER allocated MiB | AFTER end live B / retained row |
+|---|---:|---:|---:|
+| `jsonl_parse_staging` | 3230.4 | 1336.0 | 174.5 |
+| `other_and_harness` | 9.7 | 650.2 | 0.5 |
+| `native_partition_validation_and_staging` | 585.2 | 71.2 | 44.0 |
+| `storage_load_staging` | 133.2 | 56.5 | 0.0 |
+| `storage_schema_records` | 1464.0 | 704.4 | 1476.0 |
+| `benchmark_checkpoints` | 1.4 | 1.9 | 0.1 |
+| `query_workspace_or_results` | 6.6 | 6.6 | 0.0 |
+| `query_index_metadata` | 41.2 | 4.9 | 70.3 |
+| `ordered_index` | 188.2 | 11.1 | 167.6 |
+| `collection_identity_and_capacity` | 171.4 | 17.7 | 172.4 |
+| `compact_append_baselines` | — | 0.1 | 0.2 |
+
+Actual local BEFORE/AFTER peaks use the same System meter. The supplemental baseline changes no production source. Peak requested bytes are not RSS and do not include profiler metadata.
+
+| Phase / full-zero scan | BEFORE actual local heap peak MiB | AFTER actual local heap peak MiB | AFTER inclusive checkpoint wall µs / decoded row |
+|---|---:|---:|---:|
+| `filesystem_read_bytes_including_recovery` | 974.9 | 28.9 | 7.219 |
+| `decode_storage` | 1097.9 | 109.6 | 15.391 |
+| `decoded_id_validation` | — | 111.2 | 2.695 |
+| `schema_decode_map_construction_including_input_drop` | 1089.8 | 115.6 | 15.729 |
+| `partition_read_decode_validate` | 1097.9 | 115.6 | 78.258 |
+| `resident_validation_replacement_and_index_build` | — | 106.5 | — |
+| `query_total` | 1097.9 | 115.6 | — |
+
+The zero sequence ends with 108.0 MiB in-use arena space and 134.4 MiB allocator-held free arena space. Its requested retained partition is 86.3 MiB. These are different accounting layers, not additive phase ownership. The separate full-scan diagnostic drops RSS from 154.3 to 128.5 MiB with end-only `malloc_trim`; the primary peak and acceptance results remain unchanged. Free-space retention/fragmentation is measured at endpoints; its exact contribution at the historical RSS maximum remains unmeasured.
+
+
+### Original control, feedback and verification
+
+The original time-series benchmark used the unchanged 140k / 1M / 10M, 10-year, 1000-append, 20-query workload. The historical BEFORE 1M abort remains in the table above.
+
+| AFTER rows | Status | Appends | Median write / read / growth bytes | Prefix kept | Ordered query used | Peak RSS MiB |
+|---|---|---|---|---|---|---:|
+| 140000 | ok | 1000 | 109 / 4096 / 109 | true | true | 11 |
+| 1000000 | ok | 1000 | 109 / 4096 / 109 | true | true | 31 |
+| 10000000 | ok | 1000 | 109 / 4096 / 109 | true | true | 240 |
+
+The unchanged 1024-B/row and transient feedback thresholds pass the real eager-ID control and correctly fail the monthly fixture (exit 1). The latter is not a green monthly target. Boundary unit tests independently exercise green, resident-red and transient-red cases. Sparse Struct and filtered Record allocator regressions failed at 11,677 B and now retain 161 B for one field. The strict UTF-8 regression failed at line-relative 7 and now preserves file-global 18.
+
+Focused engine descriptor/query/resident/ordered/streaming tests, native lazy/append/schema/source/YAML/payload-lifetime tests, format/storage regressions, benchmark meter/capacity tests, Rust WASM boundary, cargo check, clippy, formatter, whole-project TS build/typecheck and an explicit changed-test typecheck passed. Three focused TS/WASM tests pass. The full artifact build produces browser WASM gzip 597304 B under the unchanged 600000-B budget. An initial cold existing test hook timed out at 60 s; an explicit full artifact build plus the supported prebuilt-artifact test path passed. No full suite or consumer publication/deploy runs in this child; the coordinator owns combined verification.
+
+Call-site adoption remains necessary for bounded multi-month records. Legacy methods keep their old full-scope/watch/mutation contracts. The bound excludes matching-row output/workspace, exact ID workspace, pinned/watch snapshots, caller values, other collections and mutation/failure staging. Whole-file watcher fingerprints retain a 64-bit collision risk; append conflicts still use exact length/tail bytes. Logbook monthly JSONL layout does not change. Follow-ups are compact structured storage with a borrowed API, lower index/identity overhead and allocation/allocator-retention work; each needs new parity and lifetime evidence.
+
+
+Raw artifacts and SHA-256 values: `lazy-memory-after-manifest.json`. Every file in the original BEFORE manifest was verified unchanged. Runtime/example source remains byte-identical to the measured commit; the final report-runner correction invokes Python directly so Nix startup output cannot contaminate derived JSON.

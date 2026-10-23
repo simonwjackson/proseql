@@ -1,0 +1,1113 @@
+{
+  "schema_version": "proseql.lazy-memory-after.v1",
+  "workflow": "aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe",
+  "issue": "https://github.com/simonwjackson/proseql/issues/11",
+  "measured_source_sha": "11174f90488bad79e0f39cd7a76af28b9a097406",
+  "production_baseline_sha": "61a128b5a53c9721f01301990745745c79c139a4",
+  "captured_before_sha": "941978d0fb22f5b0b66b7ef40d8e6fb6d00584bb",
+  "artifact_root": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe",
+  "before_original_artifacts_hash_verified": [
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/ascending-allocation-split.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/ascending-checkpoints.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/ascending-checkpoints.stderr",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/ascending-dhat.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/ascending-dhat.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/ascending-dhat.stderr",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/ascending-heap-phases.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/ascending-sites.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/ascending-top-sites.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/ascending-unprofiled.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/ascending-unprofiled.stderr",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/ascending-wall-phases.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/build.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/capture.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/data.sha256",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/eager-id-allocation-split.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/eager-id-checkpoints.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/eager-id-checkpoints.stderr",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/eager-id-dhat.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/eager-id-dhat.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/eager-id-dhat.stderr",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/eager-id-heap-phases.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/eager-id-sites.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/eager-id-top-sites.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/eager-id-unprofiled.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/eager-id-unprofiled.stderr",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/eager-id-wall-phases.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/environment.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/feedback-dhat.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/feedback-exit.txt",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/feedback.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/original-timeseries.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/original-timeseries.stderr",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/prepare.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/report.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/scan-allocation-split.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/scan-checkpoints.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/scan-checkpoints.stderr",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/scan-dhat.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/scan-dhat.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/scan-dhat.stderr",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/scan-heap-phases.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/scan-sites.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/scan-top-sites.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/scan-unprofiled.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/scan-unprofiled.stderr",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/scan-wall-phases.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/summarize.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/zero-allocation-split.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/zero-checkpoints.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/zero-checkpoints.stderr",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/zero-dhat.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/zero-dhat.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/zero-dhat.stderr",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/zero-heap-phases.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/zero-inspected.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/zero-sites.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/zero-top-sites.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/zero-unprofiled.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/zero-unprofiled.stderr",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/zero-wall-phases.json",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/bin/checkpoints",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/bin/dhat",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/bin/timeseries_bench",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/bin/unprofiled",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/data/samples/2025-01.jsonl",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/data/samples/2025-02.jsonl",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/data/samples/2025-03.jsonl",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/data/samples/2025-04.jsonl",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/data/samples/2025-05.jsonl",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/data/samples/2025-06.jsonl",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/data/samples/2025-07.jsonl",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/data/samples/2025-08.jsonl",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/data/samples/2025-09.jsonl",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/data/samples/2025-10.jsonl",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before/data/ids.jsonl",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/analyze-before.sh",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/capture-before.sh",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/finalize-before.sh",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/manifest-before.sh",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/report-before.sh",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/verify-before.sh",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/focused-checks-evidence.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/metadata-smoke.sh",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/metadata-follow-up.log",
+    "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/metadata-follow-up.stderr"
+  ],
+  "source_note": "Final docs/report-runner descendant changes no crates or packages from measured source. No full suite or consumer deployment/publication was run by the child.",
+  "phase_local_rss_peak": "unmeasured; proof incomplete for this measurement",
+  "measurement_modes": [
+    "unprofiled wall+CPU+RSS",
+    "checkpoint-only inclusive wall",
+    "System requested-allocation local peaks",
+    "separate DHAT origins/live/lifetimes",
+    "counter-only pinned baseline export",
+    "three additional unprofiled runs per mode",
+    "five fresh-runtime one-file 43k October controls"
+  ],
+  "commands": [
+    "bash scripts/profile-lazy-memory.sh build ARTIFACT/after",
+    "bash scripts/profile-lazy-memory.sh after ARTIFACT/after",
+    "bash scripts/profile-lazy-memory.sh summarize ARTIFACT/after",
+    "bash ARTIFACT/baseline-local-peaks.sh build",
+    "bash ARTIFACT/baseline-local-peaks.sh run",
+    "bash ARTIFACT/repeat-unprofiled.sh"
+  ],
+  "files": [
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/allocator-diagnostic.log",
+      "bytes": 1464,
+      "sha256": "0cb09c3a1cee6be2937d7dfaa8c78477011d04fecabd4857055e601ffeeedfc4"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/allocator-diagnostic.stderr",
+      "bytes": 42594,
+      "sha256": "c6316f494ad93aed8becb0737c0c6b21c0683b50fc69cee97e98d10741bc64ff"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-allocation-split.json",
+      "bytes": 2460,
+      "sha256": "6f0427c268753aefb5f82d4f8bba964bfb8db39b4033eb930ae1524cde740919"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-checkpoints.log",
+      "bytes": 2653,
+      "sha256": "610497c788f45089199f45397b76b4e09c8b658a8244b9148b5e0737dae5b208"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-checkpoints.stderr",
+      "bytes": 67436,
+      "sha256": "6159653dbcf7bf0830a90f1e0f023b5046637494c3152365e3b45de522c7363b"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-dhat-local-peaks.json",
+      "bytes": 53789,
+      "sha256": "025600403f97bca72048c18c40d32eb29c8ac2d5307c8e6a0d0967feeed47106"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-dhat.json",
+      "bytes": 689084,
+      "sha256": "a0436062c7624cfb2dc211cbb6d713c2f620cbb1fe4cca23f62f9e2aa2cffbd0"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-dhat.log",
+      "bytes": 3569,
+      "sha256": "dbb36074741e4a73f7645bfbef30ff0530ff1cab369a67afb182badd62dd4e7d"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-dhat.stderr",
+      "bytes": 95817,
+      "sha256": "8c2235f17d2b5e93891778b1092373b318afed656c236b16de337368c00bec9e"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-heap-phases.json",
+      "bytes": 3592,
+      "sha256": "f1eab6760ea25de7e23a829d5313502ed7042000751c7ba1bb9106cd393a7dbb"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-legacy-unprofiled.log",
+      "bytes": 2708,
+      "sha256": "7fd9ef4dd8c5ed22ec1d1509d8ee14efc7178ffc8689a048fe575a7555555a10"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-legacy-unprofiled.stderr",
+      "bytes": 4874,
+      "sha256": "196cf092c4aa75dda56045caefe68514db75cbe365eb7d84872e35977e16dd3e"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-local-peaks.json",
+      "bytes": 97117,
+      "sha256": "7adbc453dc6e615d0e14bffbbc26f4721757e14276a64d572532b684b8a3758d"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-meter.log",
+      "bytes": 2651,
+      "sha256": "aaa7be56cb6e497c46e497ec166b85a873cfa3af3a5234b3f73c0376ee6cf3bd"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-meter.stderr",
+      "bytes": 99679,
+      "sha256": "267f3d12f9311f2496eb795a1034cfc0110e3fcf8866a95d175dba08fd672265"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-sites.json",
+      "bytes": 4878625,
+      "sha256": "7da32721240f44877d3bf306136d294fceaad8a20c839ddd28634e4374bde719"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-top-sites.json",
+      "bytes": 62946,
+      "sha256": "1d95837d6eb4a90e561b726d1b3402534d8b53dd8e301b9a2d4a76d1074ceed2"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-unprofiled.log",
+      "bytes": 2660,
+      "sha256": "95c84308b269e082d1cb13744ecdb5f529df57dc30f6dc1a0df3aa261f5a6f84"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-unprofiled.stderr",
+      "bytes": 4869,
+      "sha256": "ea304fb584592c9c52f8e8ce15fa3eb33a30df53b3a75a3f770d742afb9c090d"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/ascending-wall-phases.json",
+      "bytes": 3339,
+      "sha256": "d3d93f3bfbcba520fd50a965d6a897ef0471b0f729a95ed603d19a64c5f4f11b"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/bin/checkpoints",
+      "bytes": 51325288,
+      "sha256": "3d50a2473c8bff03d330be5d1d1e96aeafd0e3d68b823e1f398f2c16c1e619f1"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/bin/dhat",
+      "bytes": 53803336,
+      "sha256": "99f9d732ac509cd3b7f28cb8295b70a131b8f4ae8a419c12306debffe9b50b38"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/bin/meter",
+      "bytes": 51352688,
+      "sha256": "d06d7e264c64ec755d79c511ee7ae96e89d8db38f430ad5e99e20f3d84a48da4"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/bin/timeseries_bench",
+      "bytes": 52840904,
+      "sha256": "100ffcdb4f6a878a44990192cb5d30c4b0572b6aa605f3878d73b3176e9f8225"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/bin/unprofiled",
+      "bytes": 51294312,
+      "sha256": "4f5ef9a986a02304dd77c4fc47058a50602992c4787fcb6b69d8e2baead68d60"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/data/complete.json",
+      "bytes": 82,
+      "sha256": "44634fce3636446c59af31b410d386b18967b3a80f74ee063dca6c0242a15c96"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/data/ids.jsonl",
+      "bytes": 300000,
+      "sha256": "042c48ff4f6c0b8c42cf852b657d0e3be8408ad288439075cd8d9d7859000c2f"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/data/samples/2025-01.jsonl",
+      "bytes": 13588000,
+      "sha256": "be5f264bd45aa93ebccafbf029a0566298670e783cf6c20e6b2e5bca2d8d8cef"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/data/samples/2025-02.jsonl",
+      "bytes": 13588000,
+      "sha256": "38aac62646de090a8fae371ff578df983c8476e96efcc536cbacc6ed09dac55e"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/data/samples/2025-03.jsonl",
+      "bytes": 13588000,
+      "sha256": "706833c3fec3eda135c67b334ec1347634a98ccda4759a8ba1aefda9f1f0d28a"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/data/samples/2025-04.jsonl",
+      "bytes": 13588000,
+      "sha256": "7cac1818972c9976cd1134f2f2c0f7ad920d494a0209825cb1668c6b0162e40d"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/data/samples/2025-05.jsonl",
+      "bytes": 13588000,
+      "sha256": "48ad632212a5f938c9bd5d8ef7032860439cee9475e5c6623e4240727a8b2e21"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/data/samples/2025-06.jsonl",
+      "bytes": 13588000,
+      "sha256": "d1f2bdf054942424337e96c56536d3134a53198956fd0bc499a82396bab2058b"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/data/samples/2025-07.jsonl",
+      "bytes": 13588000,
+      "sha256": "a267ce8469a80bd7b900ae9e16687c3aedf00156350cfdfa4cc595851c382211"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/data/samples/2025-08.jsonl",
+      "bytes": 13588000,
+      "sha256": "8efbdf945e31e015ad87470c0dcbf1a7fa4d531bc222d03abbdcad305c52eac1"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/data/samples/2025-09.jsonl",
+      "bytes": 13588000,
+      "sha256": "505ab3e3024a4954ee9997a256693000cc9318b151f988959444d3ff96d08ab8"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/data/samples/2025-10.jsonl",
+      "bytes": 13588000,
+      "sha256": "9c61a44645623e4dc2057546120b1fd83c3d54d84035ff7101fc08a36c34f29e"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-allocation-split.json",
+      "bytes": 1347,
+      "sha256": "a35ded3d044743b2920f75f87278ea251551345eb803e3d4ea9d954bf46ab9d9"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-checkpoints.log",
+      "bytes": 641,
+      "sha256": "9246df1b6a7e391f1437ccf255282293195a82610026c74fe4c9ffeb32d3691e"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-checkpoints.stderr",
+      "bytes": 2448,
+      "sha256": "3be8f87bfeb656f6a121da3dccc1ff759c26f3afb948b127415aa727e7dacf0c"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-dhat-local-peaks.json",
+      "bytes": 4040,
+      "sha256": "5643afe60acc4f7db5f50ce22fcb39f5c870ce6630025faeabb6633114e71975"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-dhat.json",
+      "bytes": 322404,
+      "sha256": "a77626326fa2ea17541e56596406dcaa9c223029d7566aa45c5cc9d8185000bc"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-dhat.log",
+      "bytes": 791,
+      "sha256": "dd19f327f79f597540f211aec22eed45e39126c61192e3e5b1269e3966ce1b53"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-dhat.stderr",
+      "bytes": 3483,
+      "sha256": "24be78ebcceb437d5199c6eac6dab2690096c6a7fcb0d0128f71d9dad9fdee2f"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-heap-phases.json",
+      "bytes": 1046,
+      "sha256": "0a73170c0ac7a9c33150fe2a43d28b9360111098804b0a29de8a453d6deb39e3"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-legacy-unprofiled.log",
+      "bytes": 651,
+      "sha256": "9f02e0ed75ee00d55ed67e3d6c5d1df201715a3c37c5dc8b1349f9f8f4a506c7"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-legacy-unprofiled.stderr",
+      "bytes": 1318,
+      "sha256": "c3dccb4faedbcce5f1d28b82433f1b6e9a23d58a624d005ed5ef04e8eb344157"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-local-peaks.json",
+      "bytes": 5015,
+      "sha256": "1e0d372706bd25e1e3f932e325c5465995ab1395052599fec4c89fd014bccb78"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-meter.log",
+      "bytes": 641,
+      "sha256": "3cacf241d3b2ce91825e11d70a3069b760592979912bcd938915b3df037048f8"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-meter.stderr",
+      "bytes": 3083,
+      "sha256": "f7c393f4488fd92bd01147aaf5288f5fd070b6d040c9f790a53b3f095819b239"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-sites.json",
+      "bytes": 1343873,
+      "sha256": "df303bc8618b801320213e0e81aaffc9bdf981e685f7e0e5b02a5f9e5fb21971"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-top-sites.json",
+      "bytes": 82076,
+      "sha256": "07d7ffd6888988a3ecefa30e2d025069131c0f76f675bbf2bb0fda6abbb9447c"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-unprofiled.log",
+      "bytes": 642,
+      "sha256": "9e18731ff3332c4e76b29c318e6f05d0594829866f9b64d7c4a28822d151ef06"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-unprofiled.stderr",
+      "bytes": 1329,
+      "sha256": "65ba0881da3094bb34ec15d61db04088274eb20655a53d6dc3c92fb9d87346ee"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/eager-id-wall-phases.json",
+      "bytes": 1000,
+      "sha256": "d01b3e4d42af77d86ed1d8453106fc42cc71b6605e12e595043f6433e363bc54"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/environment.log",
+      "bytes": 32444,
+      "sha256": "0128349756f2611c4a125472317802c78a28c5bc14b2538829b55268b22bfdbb"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/feedback-eager-id-dhat.json",
+      "bytes": 321427,
+      "sha256": "29bf479750d07e7831a5e545542bbc54ecf0159919b13c13fabff1ab42aaa869"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/feedback-eager-id.log",
+      "bytes": 747,
+      "sha256": "4cb0b9ce652b87509c51637d2a761f63ed4d73c21e7abef437bb7374e9b48c3f"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/feedback-eager-id.stderr",
+      "bytes": 2254,
+      "sha256": "aba111a66d6f33a8f2faf34ab5f5fcf8feebf9612a10527fc79f9fe4a4c16a79"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/feedback-monthly-dhat.json",
+      "bytes": 669229,
+      "sha256": "dad654e97e9251815cde89e892be31eea780f33f2681a73a227c9965d03fc820"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/feedback-monthly.log",
+      "bytes": 3382,
+      "sha256": "b7d03db2f77771c671cc9dfc8ea3e62e20e3c119760b2ab3733c741067e48d92"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/feedback-monthly.stderr",
+      "bytes": 59452,
+      "sha256": "7b8f8ba35c112a86eb41419ad1c0e499fa7667cddc54cba78ba41f43f2e31aaa"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/feedback-prepare.log",
+      "bytes": 88,
+      "sha256": "262a3063b9b06c42e2f8f51b91fb155ea8522cb6cfc372f904d9f698e10baa60"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/feedback-status.log",
+      "bytes": 70,
+      "sha256": "15e00110e840502c94ccbb78e18ddfbbd1d129ef33e4488bb05647679c57fe80"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/layout.log",
+      "bytes": 269,
+      "sha256": "f379c6d448b99d5a71215932cda9234597fccf1004daa7e06e3584f6420cc5f6"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/original-timeseries.log",
+      "bytes": 5986,
+      "sha256": "d31ed5f8ab2adc0132fa486ac73f8e1d742490ab629d5fa9bf54833684e00143"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/original-timeseries.stderr",
+      "bytes": 5437,
+      "sha256": "b816b15d3ca1fdcf2eea8aa98c65f5ebdb773c34043aa7aa1e6cdd2047d90182"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/prepare.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/ascending-1.environment",
+      "bytes": 65,
+      "sha256": "176fb838140acf733711fab4083e25f182b36e646d572bae2bb957721a0b3c1c"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/ascending-1.log",
+      "bytes": 2644,
+      "sha256": "d85e202714d75a8566d95cb19a8e83ff14cd97a912edc7860cef281ab75c90c2"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/ascending-1.stderr",
+      "bytes": 4878,
+      "sha256": "32e2b0d2cd5d0af7a8dc0fe4d6c9cec426b6ab5590b92433d5e426a23466824d"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/ascending-2.environment",
+      "bytes": 65,
+      "sha256": "3d80039904fbd1f180211f9a839577db266f9b99807946ba3b8ec764a46af227"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/ascending-2.log",
+      "bytes": 2638,
+      "sha256": "bda0fbf747d862b797b631f2b9f1eb533d742cd44ec62074f1252f7b89436300"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/ascending-2.stderr",
+      "bytes": 4874,
+      "sha256": "a35fae885a528aece54f7240a63694d4da4bccabaf373874504a5bb27b74a4ab"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/ascending-3.environment",
+      "bytes": 65,
+      "sha256": "8ce0e6e495f8107d98c0dcc2e94b5c97f997267c84c5006a98a81ba4b6f8034a"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/ascending-3.log",
+      "bytes": 2659,
+      "sha256": "30798cb860caf5e442a4d87e6b3ccde8542f794309872bf4aef9e3edee9aae97"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/ascending-3.stderr",
+      "bytes": 4873,
+      "sha256": "924057275a9103cf405ac37d8ebe289688faf6c5536dada2270ca53e68934d71"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-1.environment",
+      "bytes": 64,
+      "sha256": "c501a50897ed86932a67a433506fe800e2eb9ee8608e58458d65b2168dfb9ace"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-1.log",
+      "bytes": 179,
+      "sha256": "8c3e932d580b9190e4ad7fc4e8a6cfaa88d0eaceab13c3c4dfec013de4190362"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-1.stderr",
+      "bytes": 1000,
+      "sha256": "1c06a8723c6beec73ce2303414f8bbf5232ac0d9f17f2eda5b3ba73e14bda236"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-2.environment",
+      "bytes": 65,
+      "sha256": "a605315657606e2be966a9e4442aa5b6f8f83611169296b9e75256aa10eeed2d"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-2.log",
+      "bytes": 180,
+      "sha256": "12b146032072929e3374c3b13df508119e443f65505c3a2929169a0ecdc416a8"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-2.stderr",
+      "bytes": 997,
+      "sha256": "a9b68b35e1310410c7a7ba7698dba783dd4c1fb408bc92a54c8b4b420ade6a44"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-3.environment",
+      "bytes": 65,
+      "sha256": "902cfabbeb99c3c8a716e730bc49626427f6d856adf0736c7163ecce98d4b997"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-3.log",
+      "bytes": 187,
+      "sha256": "453aab6985784835b2a8fb3bb44143547ec0775a691de78ad443c1c14b9032e3"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-3.stderr",
+      "bytes": 997,
+      "sha256": "6ccca9694fc4d2709983faba5c5098627d09f7e23613483867212bb55838ec7b"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-4.environment",
+      "bytes": 65,
+      "sha256": "f2d9b852b3f136781b1ef0b4f0dfdc2dedd98aa0f549c613b14bed581ace490a"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-4.log",
+      "bytes": 180,
+      "sha256": "0c234e41b6b579e8ad69c14bd581e64159701f0eacc2b6eaaa3c14378409af4b"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-4.stderr",
+      "bytes": 998,
+      "sha256": "cb471810d5b9d74185591b5ff069346f23194e66f788d9b0a41e37b961ef0cbe"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-5.environment",
+      "bytes": 65,
+      "sha256": "d4c6267861f08bbf9d4ad37ddcebac727e9f6230081ab5b6a0774a08e3e0bd42"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-5.log",
+      "bytes": 187,
+      "sha256": "7515ff639e4358913317fb17faa31fc77f0cdefe39a726f3f8eb115955a470cf"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/cold-month-5.stderr",
+      "bytes": 998,
+      "sha256": "79d58e8b8bcc63266336712d320de95c19e95de8061a36f7154a65a9b4801f6f"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/eager-id-1.environment",
+      "bytes": 64,
+      "sha256": "4741b3c78e1937c0cd9e234609017d89bcd2af488402e5b6ead7981c2c9ff692"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/eager-id-1.log",
+      "bytes": 642,
+      "sha256": "0ec116f87275059fdac6b538c80580d8196134776fa2be7822b79356c8ea206a"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/eager-id-1.stderr",
+      "bytes": 1327,
+      "sha256": "9473c8f1fd58eb74f43be9f7fac204ba92aa7c1ec8fb3f661e621565e65300e4"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/eager-id-2.environment",
+      "bytes": 65,
+      "sha256": "84339f6e731e7c911dd3966fcffd2c0908ef490b9be74fdfd092f86607f202a4"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/eager-id-2.log",
+      "bytes": 642,
+      "sha256": "5576b92efc21331555eee113755271603984b22b4c9235932cd4a8a63cd9c78c"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/eager-id-2.stderr",
+      "bytes": 1330,
+      "sha256": "a5b6225321afda862b767191b02b84678b4d44bc466ca13e48fca0de6a20f424"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/eager-id-3.environment",
+      "bytes": 64,
+      "sha256": "11e804bb5b8d820a5f6eed0bcd6a2a6beee208356495795717a6b93b8092d293"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/eager-id-3.log",
+      "bytes": 642,
+      "sha256": "806cab58046845226f42645328fb42869da9f61dc64f585af51b1515fe8c7f58"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/eager-id-3.stderr",
+      "bytes": 1326,
+      "sha256": "7eac444863fae4d4e68b17abcaa1fe87db940265ac77ceb5f3bdebb9223af8bf"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/environment.log",
+      "bytes": 552,
+      "sha256": "105da61f2a790d21496a9f46ce9f9eba37b91b457c3393551188c64a22838d53"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/scan-1.environment",
+      "bytes": 65,
+      "sha256": "d471b1fbd3e117f59e56740fb2697686e26095082fb229a55839ee57905e96e9"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/scan-1.log",
+      "bytes": 844,
+      "sha256": "f1cdaaa23411c5d69a734f58d51f62d297e0f3e545cff75e11ac7c6a9f71dc97"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/scan-1.stderr",
+      "bytes": 1843,
+      "sha256": "79aeb60d753689f264d59503702b8cc2bc08d74ab1d77c2730f15e3ddef22201"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/scan-2.environment",
+      "bytes": 65,
+      "sha256": "9565b5a16aebdc045bbf45fa894176cfa72b140ba35f3f962836a855aabf31cc"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/scan-2.log",
+      "bytes": 834,
+      "sha256": "3d7a0c4233e29de19529dfc3f0c01b6df6915e95ba87529f179a8f2e205e85e1"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/scan-2.stderr",
+      "bytes": 1838,
+      "sha256": "7d60c84e02d6b8ce1d2685ed0f9aca2794f5d8cdeab15c01de602614e6a2dcd2"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/scan-3.environment",
+      "bytes": 65,
+      "sha256": "b303f52cb06a037cea5c11f74efacbd1e1b587b66c59b2026a7032773ece9e14"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/scan-3.log",
+      "bytes": 834,
+      "sha256": "945613ca9dce3a731ef340f63615857e82c145bcafd14591e34ea55679880897"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/scan-3.stderr",
+      "bytes": 1837,
+      "sha256": "d949cd141e168acbe87e67aca3e56c63c9ebde52a2e65e9cd1d68cc5ee991291"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/zero-1.environment",
+      "bytes": 65,
+      "sha256": "04537ef303a9cc48bed45295be3be6e237bb7d2d4d05ebd531e82b07ff601578"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/zero-1.log",
+      "bytes": 2607,
+      "sha256": "6a3a645c3b6497e21fbb85d6464e0496831a2b9e3ca8aedb49685c3e75f8f0cc"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/zero-1.stderr",
+      "bytes": 4860,
+      "sha256": "ad546817b6b450d9786877c7a4576fe127b9f9621e199640d930c67c739331f4"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/zero-2.environment",
+      "bytes": 64,
+      "sha256": "29c73dfe604fc72bd1100f57b499e23f3ea7241d73e602ace50bdbd0aed53e78"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/zero-2.log",
+      "bytes": 2579,
+      "sha256": "d818c741e91e224157fe049a4932d160f114881d835c172cf72512d0ae8d11aa"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/zero-2.stderr",
+      "bytes": 4853,
+      "sha256": "5ad8a0467b32c4322d68945356766ab26cb4c208f87840d526b74fc981b01c84"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/zero-3.environment",
+      "bytes": 65,
+      "sha256": "2911017a748730d7bf40e58ae98dcac83052466ac748e85204ddf73512fbd95b"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/zero-3.log",
+      "bytes": 2612,
+      "sha256": "746b1a0a646c9f0b33c364c3f90605f65ef0ea7a2c795bceecaa4e7af25f43e6"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/repeats-v1/zero-3.stderr",
+      "bytes": 4857,
+      "sha256": "59719edfa9fd3ee1a3d66b63fb014a5a84f0f8a5237b39857588f752214c3333"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-allocation-split.json",
+      "bytes": 2415,
+      "sha256": "f1396f4d5e9f8f1b322eaf3c8e578af14bfddd7a2d497445f768518d01a8f876"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-checkpoints.log",
+      "bytes": 833,
+      "sha256": "dfff13910000970cbf4b1d431236f4b093347f0067583f0971fb915852e53817"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-checkpoints.stderr",
+      "bytes": 29359,
+      "sha256": "7c4f54b48d139a1563d468d383517128a5f4c7e7cbbf4e045ec20cf73f1b7b6a"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-dhat-local-peaks.json",
+      "bytes": 26477,
+      "sha256": "5f6f2f18f2ea510d5ade549f163c512fce06e7ee0fb21f7bfdd2b3f518422211"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-dhat.json",
+      "bytes": 636131,
+      "sha256": "55634dab0f895611922f841f3502811db7b4acf35f6d3cb5d26a7cafd3b251ce"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-dhat.log",
+      "bytes": 1070,
+      "sha256": "b1b631ac6b49db298a00a22d0a3a550fcc1eeccd407bf55588a9e98c1174e8ef"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-dhat.stderr",
+      "bytes": 41318,
+      "sha256": "a133c2ed1530072e6bad61a996178167a1ad741d62d31e963f31f80baa79cca9"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-heap-phases.json",
+      "bytes": 3277,
+      "sha256": "2c7bdaa956ce5b60b2e9e90dcec5a1d1109b583daf386c512ba99f05395de07e"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-legacy-unprofiled.log",
+      "bytes": 857,
+      "sha256": "e5f3573a385b0d7ba3d6bdfa18e598a7f9e05e1f39db8431fab59d555bd45b8a"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-legacy-unprofiled.stderr",
+      "bytes": 1844,
+      "sha256": "edd423fc5148f5681b0021559d8c7413fed60fcdc0e93ffbe393686245e250c8"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-local-peaks.json",
+      "bytes": 44688,
+      "sha256": "05be14b67585d4309d08e75f93f1a58b9426de2abc735ef55273ad072f51b8ef"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-meter.log",
+      "bytes": 834,
+      "sha256": "6c2851a10da71adfb170f948eb55351501e3967c1a04830d3a6f9c37744bf3c2"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-meter.stderr",
+      "bytes": 42627,
+      "sha256": "14f484a67fa13d6c2d3413346db54395dc65aab61e5a9b3553d9773568e41c71"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-sites.json",
+      "bytes": 4516255,
+      "sha256": "74920ddf60addcec4d10e866ebcd40598141c811c111102ef792ba6ff709db07"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-top-sites.json",
+      "bytes": 56479,
+      "sha256": "a2e43f2be0e89034195c7328ee2da3984f76ef2fa521bd66f857b41e00e84634"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-unprofiled.log",
+      "bytes": 841,
+      "sha256": "ceed7df7c19b23ea98fe1615f361b36a045c4b13c7f1d8e6dc526cccc7d63415"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-unprofiled.stderr",
+      "bytes": 1844,
+      "sha256": "55547e80101d25c0f032046521f37d12ef768c1198ff0359daca6e806b694855"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/scan-wall-phases.json",
+      "bytes": 3068,
+      "sha256": "75f2332a4f638a739f4c801045da501505fc8b401ffd9046f5136f4761d43e49"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-allocation-split.json",
+      "bytes": 2451,
+      "sha256": "a0265106f64acaf4578882a32f87ac2d2560d9fd8f48f69de147b65dba43300f"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-checkpoints.log",
+      "bytes": 2616,
+      "sha256": "d0833e105388931399f7dd02cb20a9d7eda38c5d352eb9287b37d171bb3f3723"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-checkpoints.stderr",
+      "bytes": 44262,
+      "sha256": "a744131a4e827dc64b6df77cfd3de8deae4866d601d8b3fd02656c94edfa4209"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-dhat-local-peaks.json",
+      "bytes": 37980,
+      "sha256": "e543c292b93088123fc61c455d5556f171e259020096db088e188a6dcce0f31e"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-dhat.json",
+      "bytes": 668196,
+      "sha256": "087d0e787dc59fe52dd3cb9be7cdee3fbc15644cc6c6d0a52001698df4ec63a7"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-dhat.log",
+      "bytes": 3529,
+      "sha256": "95b9de1f5fdc5a17300d2d7baff836dd4f2358eb8b15748b5cb1b0ae1ce5f84a"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-dhat.stderr",
+      "bytes": 62988,
+      "sha256": "ca1b3194d9b5a05f8aec1bf569181c8a9f328e7d85c4461ff96dcce4c085ff8e"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-heap-phases.json",
+      "bytes": 3547,
+      "sha256": "08ba266bd59d01ddcf3dcb2504bfe1107f2670d2a1752f5f1c492763710c27c7"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-legacy-unprofiled.log",
+      "bytes": 2649,
+      "sha256": "a28decb35fc9276121b46370846fc9ed24034082328b3c1bae7fd4fb55a67ef1"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-legacy-unprofiled.stderr",
+      "bytes": 4848,
+      "sha256": "d8f1d74a69532b569652ec3ef941ba7b586e4de572fd90e89c4cd734fe43804d"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-local-peaks.json",
+      "bytes": 66213,
+      "sha256": "9468ff4080112b556e42c9d921c5f751539065adc21b55710e30ac8324853714"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-meter.log",
+      "bytes": 2600,
+      "sha256": "41ab382b47a4b7bb0453feaae1764130147d1b02ddba6dc13d81cfb872adaf8a"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-meter.stderr",
+      "bytes": 64951,
+      "sha256": "11712ad09df5bdba435d0ab74370ea77f8dcd0b303a622abf8f7df56382548fc"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-sites.json",
+      "bytes": 4796373,
+      "sha256": "cedce7daf2f4f3f6e239b1a07c941acdd2ef0007fa3829629035d763134d9fc1"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-top-sites.json",
+      "bytes": 60587,
+      "sha256": "538db254e61a9fc607322df0770572d2cd6fdff739bd3040b893c708b369f493"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-unprofiled.log",
+      "bytes": 2572,
+      "sha256": "f9519e63f07f7793f20af1f9ce21e27bb31dabe51d00c7ba1be30ed5d8de955b"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-unprofiled.stderr",
+      "bytes": 4853,
+      "sha256": "66d2daf9087a27c2b76c88d370e35f6c06d43c695311a5d62430796e2062988d"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after/zero-wall-phases.json",
+      "bytes": 3334,
+      "sha256": "c7a9e75cfb0e13c99b2348b7ac12c2bd5682457e0d2587a8f0f72570976424cd"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/ascending-local-peaks.json",
+      "bytes": 79383,
+      "sha256": "62699981492fda21b3e82d7c9fa6fe97727e7589759fdf473420b7553ef2ee27"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/ascending.stderr",
+      "bytes": 82940,
+      "sha256": "77014ba55488b931703deca37e679394925c89730867c01f40186d5f9589513a"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/ascending.stdout",
+      "bytes": 1938,
+      "sha256": "32a10f81c2be69850aae414176a9dff4de0e7efaf33a1f27d4b8740ef975f73a"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/bin/baseline-meter",
+      "bytes": 49664816,
+      "sha256": "dedf6ee624d08e3b087a06c3e344c960830df133c0d840f251686f1ccfc690e6"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/binary.sha256",
+      "bytes": 227,
+      "sha256": "a8118f079a2f88abd09b0a05ef1fb72ac8a8da10f2e86c3dc5930a437d98d2e8"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/captured-source.tar",
+      "bytes": 10987520,
+      "sha256": "67aff65e1e4030caf3ddf5e7a519c6b32369f00dab4ea14be9746ba64a3ec699"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/eager-id-local-peaks.json",
+      "bytes": 5044,
+      "sha256": "7837242b5ab0f3bfcfecce0d02911b39beace054a1fe1dfd202d05fe77c95116"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/eager-id.stderr",
+      "bytes": 3106,
+      "sha256": "c24e7717311a3be5a7181783756eed2554154f333ad2710e9a9fb25f5180fe7d"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/eager-id.stdout",
+      "bytes": 365,
+      "sha256": "6116534dcb6f4abfaa71c1a0a8986af5645d586ce6c46eaa25ca042f80220d2e"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/environment.log",
+      "bytes": 530,
+      "sha256": "ea576e6be29c3605b8516ab7042131fe7b33b5253481ff75006f5552f8b1ca31"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/failed-time-path/environment.log",
+      "bytes": 530,
+      "sha256": "c1fc4a797460cb025363d0d8395cf93c270018de2f43651151bbe8c73f3ff8a0"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/failed-time-path/reason.txt",
+      "bytes": 137,
+      "sha256": "645cfeada7cce83ffe36498c4d960941dd1d57041ce2792991c3a83789b90082"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/failed-time-path/zero.stderr",
+      "bytes": 192,
+      "sha256": "58efa22d1c7103b8c8a5150746b2a45ecd7fc7a251b67f9ba61fd43bdbd601e3"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/failed-time-path/zero.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/instrumentation.patch",
+      "bytes": 3126,
+      "sha256": "de98dd07a2bfa48a5a16e4d335d29058c28b49930b7d8267f7b588e70395878e"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/scan-local-peaks.json",
+      "bytes": 38721,
+      "sha256": "024be25c13ed959f197ef850326a4329ee7eac70226381acbfba201d1cc18d0a"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/scan.stderr",
+      "bytes": 37551,
+      "sha256": "efe21278e3e3d7ddc896655cd0be1c605f3e63f6068f976f8d6a08f8ba948acb"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/scan.stdout",
+      "bytes": 519,
+      "sha256": "2db048de37f411b9b2ba1fd0ebc94154874fdd2f446f8815e0b21790c51c62a0"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/source-manifest.json",
+      "bytes": 9874,
+      "sha256": "a68c874fef54788d1b4343e8f2915bf1bcc5eea169f0897e1dddd3d121d53f10"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/zero-local-peaks.json",
+      "bytes": 52053,
+      "sha256": "30f9de83743e3f388593cac7e3c8e96c6047a6f3358d8bb566d76e12a6d0f51c"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/zero.stderr",
+      "bytes": 51940,
+      "sha256": "46f40b6ba7f881f071eaa29a4b325108f89f562d275459a44952ac6cb74c27af"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/before-extra-local-peaks/zero.stdout",
+      "bytes": 1900,
+      "sha256": "3b547bfddd8de56b38a8f9cc02ad1fad527235dc8f7b6171f80556b328104cb2"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/cold-control/Cargo.lock",
+      "bytes": 17997,
+      "sha256": "4b6cec5f422ff7fb0be09d387065c757581cab50ed2bdf0ee185118fafd69e9d"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/cold-control/Cargo.toml",
+      "bytes": 737,
+      "sha256": "5de430c0dfecee2606f21a9fd81972a372dd3613d180e866c02554b378e331e1"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/cold-control/bin/control",
+      "bytes": 50868576,
+      "sha256": "d1ad1cb8089ff1a2576c55ebd22d6927daa1a2cc1f12c6d86eda848caf0a7c29"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/cold-control/source-manifest.json",
+      "bytes": 474,
+      "sha256": "cae8899fe61e66afa97c67cc0834ef244b5c99b6b4afad8da62be13d043e5d6d"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after-analysis.json",
+      "bytes": 21756,
+      "sha256": "8f960fe174400c36adbe1df2ce20b1bbb4106ec24678f14c4e59eebd83b8746b"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/repeat-and-cost-analysis.json",
+      "bytes": 46933,
+      "sha256": "48da31386aee69da4906e972aa6baf44d2c1ea47420d1cc8d6e3a5eb90139768"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after-results.md",
+      "bytes": 12709,
+      "sha256": "c76e9c22957c5e1919664866aabb23151ce9b6d2b7a4edf96b5d6aeeeacaa3c1"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after-build.log",
+      "bytes": 3685,
+      "sha256": "a3d14cb31c06c7342297d5ec3ee5fcfdf58e5ee8bd534488c580e227a4c2205a"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/after-capture.log",
+      "bytes": 723,
+      "sha256": "d25de7a46d2907311d75b9b18c26557869aa3ac1c9991debade8e150ad01fbec"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/final-focused.log",
+      "bytes": 27959,
+      "sha256": "e3a025fde511ac8850ff808730e7f0bcf99bacae84e2f8db081c9da0df39fbdb"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/final-native-gated-check.log",
+      "bytes": 14485,
+      "sha256": "dc4443223e846862318f5db5a4cf15f7b14ca2e9d95b9919589f7a1ba4d3b915"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/finish-focused.log",
+      "bytes": 902,
+      "sha256": "e5de94871cf8ca24ac935902955308518c4c057e3e738aee10e99836eee4e50d"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/post-capture-corrected.log",
+      "bytes": 7165,
+      "sha256": "c57f39b6f09c23ad9d60aedc43180753743a320e428b5aeaa529a7b3bf78ff5d"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/repeat-unprofiled.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/finalize-reports.py",
+      "bytes": 9799,
+      "sha256": "f8df88e6da225edc369938e0f542e7c4cdfab71932366dc129837c083a838f19"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/analyze-final-evidence.py",
+      "bytes": 9150,
+      "sha256": "05be5a20d876cd9694ce64e4d78594da8dbf51facee25a298ceefa9ab9ac1c66"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/repeat-unprofiled.sh",
+      "bytes": 1178,
+      "sha256": "4409a8bccebcc57552a0efe37d08a9f535889d74c690c7ce1720c44bfda8725b"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/prepare-cold-control.py",
+      "bytes": 3692,
+      "sha256": "d01114374add993bef1682034c94b3300accf6e3ed0fcdbda1c7612b404e7605"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/baseline-local-peaks.sh",
+      "bytes": 1323,
+      "sha256": "648b641f37156ebe4f226d760b53003a3e55cb1cc8cc7eef55a77eb109015812"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/prepare-baseline-local.py",
+      "bytes": 2994,
+      "sha256": "f5d67dcbfe2f025117e41e3df7ce51f92b883d6620bdf58920897f0864c285b4"
+    },
+    {
+      "path": "/home/simonwjackson/.local/share/forgerie/artifacts/aee69278bdef4b86573ef48e67b81c8ab5493227f66f2457c6113e6aff19ecbe/instrument-meter.py",
+      "bytes": 2968,
+      "sha256": "a996e0bdac6e399faa9dd63a49790e13591f7a4f0b5ee04c9eaacf19c75f3bd6"
+    }
+  ]
+}
