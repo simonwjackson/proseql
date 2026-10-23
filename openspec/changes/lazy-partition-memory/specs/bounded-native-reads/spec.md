@@ -17,9 +17,9 @@
 
 #### Scenario: Ordered aggregation
 - **WHEN** an aggregate visits multiple partitions
-- **THEN** each row SHALL enter the accumulator in natural order, preserving every f64 addition and first-encounter group/tie order, including comparable arrays/objects
+- **THEN** each row SHALL enter the accumulator in the existing engine candidate order (natural order except indexed multi-value unions/search ordering), preserving every f64 addition and first-encounter group/tie order, including comparable arrays/objects
 - **AND** it SHALL not merge monthly SUM or AVG values
-- **AND** top-level search aggregation SHALL retain and globally relevance-sort matching rows before accumulation, preserving the existing native query-then-aggregate order
+- **AND** top-level search and multi-value equality-index union aggregation SHALL retain and globally order matching rows before accumulation, preserving the existing native query-then-aggregate order
 
 #### Scenario: Errors and identity
 - **WHEN** an incoming file has invalid syntax, invalid IDs, schema/callback errors, duplicate IDs across visited partitions, or wrong-bucket records

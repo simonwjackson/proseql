@@ -442,6 +442,7 @@ pub struct QueryMatches {
     input: QueryInput,
     registry: Arc<CallbackRegistry>,
     rows: Vec<Value>,
+    order: Option<super::candidate_order::CandidateOrder>,
 }
 impl QueryMatches {
     pub fn new(input: QueryInput, registry: Arc<CallbackRegistry>) -> Self {
@@ -449,7 +450,34 @@ impl QueryMatches {
             input,
             registry,
             rows: Vec::new(),
+            order: None,
         }
+    }
+    /// Host-managed raw candidates use the same equality-index union order
+    /// and ordered-sort eligibility as a whole resident collection.
+    pub fn for_collection(
+        input: QueryInput,
+        registry: Arc<CallbackRegistry>,
+        collection: &Collection,
+        cursor: Option<&CursorConfig>,
+    ) -> Self {
+        let order =
+            super::candidate_order::CandidateOrder::new(collection, &input, cursor, &registry);
+        Self {
+            input,
+            registry,
+            rows: Vec::new(),
+            order,
+        }
+    }
+    /// Scalar/group folds can avoid row storage only when accumulation order
+    /// is already natural. Search and multi-value index unions need a buffer.
+    pub fn needs_ordered_rows(&self) -> bool {
+        extract_search_config(&self.input.r#where).is_some()
+            || self.order.as_ref().is_some_and(|order| order.reorders())
+    }
+    pub fn matches_natural_candidate(&self, row: &Value) -> bool {
+        self.order.as_ref().is_none_or(|order| order.accepts(row)) && self.matches(row)
     }
     fn matches(&self, row: &Value) -> bool {
         self.input
@@ -458,16 +486,25 @@ impl QueryMatches {
             .is_none_or(|clause| matches_where_with_registry(row, clause, Some(&self.registry)))
     }
     pub fn push(&mut self, row: &Value) {
+        if let Some(order) = &mut self.order {
+            order.observe(row);
+        }
         if self.matches(row) {
             self.rows.push(row.clone());
         }
     }
-    pub fn finish(self) -> Result<Vec<Value>, EngineError> {
+    pub fn finish(mut self) -> Result<Vec<Value>, EngineError> {
         validate_regular_query(&self.input)?;
+        if let Some(order) = &self.order {
+            order.apply(&mut self.rows);
+        }
         finish_query_matches(self.rows, &self.input, &self.registry)
     }
-    pub fn finish_cursor(self, cursor: &CursorConfig) -> Result<CursorPageResult, EngineError> {
+    pub fn finish_cursor(mut self, cursor: &CursorConfig) -> Result<CursorPageResult, EngineError> {
         let sort = effective_cursor_sort(&self.input, cursor)?;
+        if let Some(order) = &self.order {
+            order.apply(&mut self.rows);
+        }
         finish_cursor_matches(self.rows, &self.input, cursor, Some(&sort), &self.registry)
     }
 }

@@ -2990,3 +2990,76 @@ fn aggregate_min_max_null_excluded() {
     assert!((min_val - 4.2).abs() < 1e-9);
     assert!((max_val - 4.2).abs() < 1e-9);
 }
+
+#[test]
+fn streamed_candidates_preserve_index_union_order_and_ordered_sort_authority() {
+    use proseql_engine::descriptor::IndexDescriptor;
+    use proseql_engine::query::{pipeline::QueryMatches, SortOrder};
+    for mixed in [false, true] {
+        let mut descriptor = base_descriptor(SchemaNode::Unknown);
+        descriptor.indexes = vec![
+            IndexDescriptor::Single("group".into()),
+            IndexDescriptor::Compound(vec!["group".into(), "sub".into()]),
+        ];
+        descriptor.ordered_indexes = vec!["at".into()];
+        let registry = Arc::new(CallbackRegistry::new());
+        let make = || {
+            Collection::new_with_clock(
+                "books",
+                descriptor.clone(),
+                Arc::clone(&registry),
+                Box::new(SequentialGenerator::new("s")),
+                Box::new(FixedClock::new("2026-01-01T00:00:00Z")),
+            )
+        };
+        let empty = make();
+        let mut rows = vec![
+            json!({"id":"a","group":"a","sub":1,"at":1}),
+            json!({"id":"b","group":"b","sub":2,"at":1}),
+            json!({"id":"c","group":"a","sub":2,"at":1}),
+            json!({"id":"d","group":"b","sub":1,"at":2}),
+        ];
+        if mixed {
+            rows.push(json!({"id":"e","group":"a","sub":2,"at":"2"}));
+        }
+        let collection = seed(make(), rows);
+        for filter in [
+            json!({"group":{"$in":["b","a","b"]}}),
+            json!({"group":{"$in":["b","a"]},"sub":{"$in":[2,1]}}),
+            json!({"group":{"$in":["b","a"]},"at":{"$gte":0}}),
+            json!({"$and":[{"group":{"$in":["b","a"]}},{"at":{"$gte":0}}]}),
+        ] {
+            for sort in [
+                vec![],
+                vec![("at".into(), SortOrder::Asc)],
+                vec![("at".into(), SortOrder::Desc)],
+            ] {
+                let input = QueryInput {
+                    r#where: Some(filter.clone()),
+                    sort,
+                    offset: Some(1),
+                    limit: Some(3),
+                    select: Some(json!(["id"])),
+                    ..Default::default()
+                };
+                let expected = execute_query(&collection, &input, &registry).unwrap();
+                for initial in [&collection, &empty] {
+                    let mut streamed = QueryMatches::for_collection(
+                        input.clone(),
+                        Arc::clone(&registry),
+                        initial,
+                        None,
+                    );
+                    for (_, row) in collection.entries() {
+                        streamed.push(row);
+                    }
+                    assert_eq!(
+                        streamed.finish().unwrap(),
+                        expected,
+                        "{input:?} mixed={mixed}"
+                    );
+                }
+            }
+        }
+    }
+}

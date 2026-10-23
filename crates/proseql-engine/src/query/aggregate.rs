@@ -271,7 +271,7 @@ impl<'a> AggregateAccumulator<'a> {
 /// Mirrors `computeGroupedAggregates` from
 /// `packages/core/src/operations/query/aggregate.ts`.
 ///
-/// Groups are ordered by first encounter (insertion order via `LinkedList`).
+/// Groups are ordered by first encounter (an ordered vector plus a key-position map).
 ///
 /// # Absent vs null group-by values
 ///

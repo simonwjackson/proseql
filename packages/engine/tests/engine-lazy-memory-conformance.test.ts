@@ -25,6 +25,8 @@ it("keeps shared accumulator float order, group order and array/object min/max i
 					object: Schema.optional(Schema.Unknown),
 				}),
 				relationships: {},
+				indexes: ["group"],
+				orderedIndexes: ["value"],
 			},
 		},
 		{ samples: fixture.rows },
@@ -37,6 +39,15 @@ it("keeps shared accumulator float order, group order and array/object min/max i
 		max: ["comparable", "object"],
 	} as const;
 	expect(await db.samples.aggregate(config)).toEqual(fixture.expected);
+	const union = { group: { $in: ["z", "a"] } } as const;
+	expect(await db.samples.query({ where: union, select: ["id"] })).toEqual([
+		{ id: "a" },
+		{ id: "c" },
+		{ id: "b" },
+	]);
+	expect(
+		(await db.samples.aggregate({ ...config, where: union })).sum?.value,
+	).toBe(0);
 	const grouped = await db.samples.aggregate({ ...config, groupBy: "group" });
 	expect(grouped.map((row) => row.group)).toEqual([
 		{ group: "z" },

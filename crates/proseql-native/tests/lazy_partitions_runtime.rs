@@ -1545,6 +1545,7 @@ fn bounded_queries_keep_global_natural_sort_page_cursor_search_and_selection_sem
         for filter in [
             None,
             Some(json!({"bpm":{"$gte":80}})),
+            Some(json!({"source":{"$in":["workout","rest","awake"]}})),
             Some(json!({"timestamp":{"$gte":"2025-12", "$lt":"2026-03"}})),
             Some(json!({"$search":{"query":"rest", "fields":["source"]}})),
         ] {
@@ -1633,6 +1634,7 @@ fn bounded_aggregates_accumulate_individual_rows_in_eager_order() {
         None,
         Some(json!({"timestamp":{"$gte":"2025-12", "$lt":"2026-04"}})),
         Some(json!({"$search":{"query":"rest", "fields":["source"]}})),
+        Some(json!({"source":{"$in":["rest","awake","workout","live"]}})),
     ] {
         assert_eq!(
             lazy.aggregate_bounded("heartrate", filter.clone(), &aggregate)

@@ -355,65 +355,23 @@ impl QueryIndexes {
         where_clause: &Value,
         _insertion_order: &[String],
     ) -> Option<Vec<String>> {
-        let where_obj = where_clause.as_object()?;
-        if where_obj.contains_key("$or")
-            || where_obj.contains_key("$and")
-            || where_obj.contains_key("$not")
-        {
-            return None;
-        }
-
-        let mut best: Option<(usize, Vec<String>)> = None;
-        for idx in &self.equality {
-            let conditions: Option<Vec<Vec<&Value>>> = idx
-                .fields
-                .iter()
-                .map(|field| extract_equality_values(where_obj, field))
-                .collect();
-            let Some(conditions) = conditions else {
-                continue;
-            };
-
-            if best
-                .as_ref()
-                .is_some_and(|(field_count, _)| *field_count >= idx.fields.len())
-            {
-                continue;
-            }
-
-            let mut combinations: Vec<Vec<&Value>> = vec![Vec::new()];
-            for values in conditions {
-                let mut next = Vec::new();
-                for combination in &combinations {
-                    for value in &values {
-                        let mut extended = combination.clone();
-                        extended.push(*value);
-                        next.push(extended);
-                    }
-                }
-                combinations = next;
-            }
-
-            let mut candidates = Vec::new();
-            let mut seen = HashSet::new();
-            for combination in combinations {
-                let lookup_key = combination
-                    .into_iter()
-                    .map(canonical_index_part)
-                    .collect::<Vec<_>>()
-                    .join("\x00");
-                if let Some(ids) = idx.map.get(&lookup_key) {
-                    for (_, id) in ids {
-                        if seen.insert(id.clone()) {
-                            candidates.push(id.clone());
-                        }
+        let spec = equality_candidate_spec(
+            where_clause,
+            self.equality.iter().map(|index| index.fields.as_slice()),
+        )?;
+        let index = &self.equality[spec.index];
+        let mut candidates = Vec::new();
+        let mut seen = HashSet::new();
+        for key in spec.keys {
+            if let Some(ids) = index.map.get(&key) {
+                for (_, id) in ids {
+                    if seen.insert(id.clone()) {
+                        candidates.push(id.clone());
                     }
                 }
             }
-            best = Some((idx.fields.len(), candidates));
         }
-
-        best.map(|(_, candidates)| candidates)
+        Some(candidates)
     }
 
     /// Try to narrow entity ids using an ordered index.
@@ -529,7 +487,74 @@ impl QueryIndexes {
 ///
 /// Numeric values are canonicalized via f64 so that `1` and `1.0` produce the
 /// same key — JSON integers and floats have the same JS identity (`1 === 1.0`).
-fn equality_key(entity: &Value, fields: &[String]) -> Option<String> {
+/// One source of truth for equality-index choice and condition-value union
+/// order. Streaming hosts use the same keys without retaining all postings.
+pub(super) struct EqualityCandidateSpec<'a> {
+    pub index: usize,
+    pub fields: &'a [String],
+    pub keys: Vec<String>,
+}
+
+pub(super) fn equality_candidate_spec<'a>(
+    where_clause: &Value,
+    indexes: impl Iterator<Item = &'a [String]>,
+) -> Option<EqualityCandidateSpec<'a>> {
+    let where_obj = where_clause.as_object()?;
+    if ["$or", "$and", "$not"]
+        .iter()
+        .any(|key| where_obj.contains_key(*key))
+    {
+        return None;
+    }
+    let mut best = None;
+    for (index, fields) in indexes.enumerate() {
+        let Some(values) = fields
+            .iter()
+            .map(|field| extract_equality_values(where_obj, field))
+            .collect::<Option<Vec<_>>>()
+        else {
+            continue;
+        };
+        if best
+            .as_ref()
+            .is_none_or(|(_, old, _): &(usize, &[String], Vec<Vec<&Value>>)| {
+                fields.len() > old.len()
+            })
+        {
+            best = Some((index, fields, values));
+        }
+    }
+    let (index, fields, values) = best?;
+    let mut combinations = vec![Vec::new()];
+    for values in values {
+        let mut next = Vec::new();
+        for combination in &combinations {
+            for value in &values {
+                let mut extended = combination.clone();
+                extended.push(*value);
+                next.push(extended);
+            }
+        }
+        combinations = next;
+    }
+    let keys = combinations
+        .into_iter()
+        .map(|combination| {
+            combination
+                .into_iter()
+                .map(canonical_index_part)
+                .collect::<Vec<_>>()
+                .join("\x00")
+        })
+        .collect();
+    Some(EqualityCandidateSpec {
+        index,
+        fields,
+        keys,
+    })
+}
+
+pub(super) fn equality_key(entity: &Value, fields: &[String]) -> Option<String> {
     let parts: Option<Vec<String>> = fields
         .iter()
         .map(|f| {

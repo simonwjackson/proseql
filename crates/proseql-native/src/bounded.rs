@@ -9,9 +9,7 @@ use proseql_engine::{
             AggregateAccumulator, AggregateConfig, AggregateResult, GroupResult,
             GroupedAggregateAccumulator,
         },
-        filter::matches_where_with_registry,
         pipeline::{QueryInput, QueryMatches},
-        search::extract_search_config,
         CursorConfig, CursorPageResult,
     },
     relationships::Database,
@@ -55,7 +53,9 @@ impl NativeRuntime {
         self.bounded_fold(
             collection,
             input.r#where.as_ref(),
-            |callbacks| QueryMatches::new(input.clone(), callbacks),
+            |callbacks, records| {
+                QueryMatches::for_collection(input.clone(), callbacks, records, None)
+            },
             |matches, row| {
                 matches.push(row);
                 Ok(())
@@ -74,7 +74,9 @@ impl NativeRuntime {
         self.bounded_fold(
             collection,
             input.r#where.as_ref(),
-            |callbacks| QueryMatches::new(input.clone(), callbacks),
+            |callbacks, records| {
+                QueryMatches::for_collection(input.clone(), callbacks, records, Some(cursor))
+            },
             |matches, row| {
                 matches.push(row);
                 Ok(())
@@ -86,39 +88,48 @@ impl NativeRuntime {
     }
 
     /// Aggregate individual matching rows in natural order, without monthly
-    /// partial sums. A top-level search deliberately buffers matches: existing
-    /// native aggregation first relevance-sorts them, which affects f64 sums.
+    /// partial sums. Search and multi-value equality-index unions deliberately
+    /// buffer matches: existing native query ordering affects f64 sums.
     pub fn aggregate_bounded(
         &self,
         collection: &str,
         filter: Option<Value>,
         config: &AggregateConfig,
     ) -> Result<AggregateResult, EngineError> {
-        if extract_search_config(&filter).is_some() {
-            return self
-                .query_bounded(
-                    collection,
-                    QueryInput {
-                        r#where: filter,
-                        ..Default::default()
-                    },
-                )
-                .map(|rows| proseql_engine::query::aggregate::compute_aggregates(&rows, config));
-        }
         self.bounded_fold(
             collection,
             filter.as_ref(),
-            |callbacks| (AggregateAccumulator::new(config), callbacks),
-            |(accumulator, callbacks), row| {
-                if filter
-                    .as_ref()
-                    .is_none_or(|clause| matches_where_with_registry(row, clause, Some(callbacks)))
-                {
+            |callbacks, records| {
+                (
+                    AggregateAccumulator::new(config),
+                    QueryMatches::for_collection(
+                        QueryInput {
+                            r#where: filter.clone(),
+                            ..Default::default()
+                        },
+                        callbacks,
+                        records,
+                        None,
+                    ),
+                )
+            },
+            |(accumulator, matches), row| {
+                if matches.needs_ordered_rows() {
+                    matches.push(row);
+                } else if matches.matches_natural_candidate(row) {
                     accumulator.push(row);
                 }
                 Ok(())
             },
-            |(accumulator, _)| Ok(accumulator.finish()),
+            |(accumulator, matches)| {
+                if matches.needs_ordered_rows() {
+                    matches.finish().map(|rows| {
+                        proseql_engine::query::aggregate::compute_aggregates(&rows, config)
+                    })
+                } else {
+                    Ok(accumulator.finish())
+                }
+            },
             |database| {
                 database
                     .query(
@@ -142,40 +153,42 @@ impl NativeRuntime {
         group_by: &[String],
         config: &AggregateConfig,
     ) -> Result<Vec<GroupResult>, EngineError> {
-        if extract_search_config(&filter).is_some() {
-            return self
-                .query_bounded(
-                    collection,
-                    QueryInput {
-                        r#where: filter,
-                        ..Default::default()
-                    },
-                )
-                .map(|rows| {
-                    proseql_engine::query::aggregate::compute_grouped_aggregates(
-                        &rows, group_by, config,
-                    )
-                });
-        }
         self.bounded_fold(
             collection,
             filter.as_ref(),
-            |callbacks| {
+            |callbacks, records| {
                 (
                     GroupedAggregateAccumulator::new(group_by, config),
-                    callbacks,
+                    QueryMatches::for_collection(
+                        QueryInput {
+                            r#where: filter.clone(),
+                            ..Default::default()
+                        },
+                        callbacks,
+                        records,
+                        None,
+                    ),
                 )
             },
-            |(accumulator, callbacks), row| {
-                if filter
-                    .as_ref()
-                    .is_none_or(|clause| matches_where_with_registry(row, clause, Some(callbacks)))
-                {
+            |(accumulator, matches), row| {
+                if matches.needs_ordered_rows() {
+                    matches.push(row);
+                } else if matches.matches_natural_candidate(row) {
                     accumulator.push(row);
                 }
                 Ok(())
             },
-            |(accumulator, _)| Ok(accumulator.finish()),
+            |(accumulator, matches)| {
+                if matches.needs_ordered_rows() {
+                    matches.finish().map(|rows| {
+                        proseql_engine::query::aggregate::compute_grouped_aggregates(
+                            &rows, group_by, config,
+                        )
+                    })
+                } else {
+                    Ok(accumulator.finish())
+                }
+            },
             |database| {
                 database
                     .query(
@@ -200,7 +213,7 @@ impl NativeRuntime {
         &self,
         collection: &str,
         filter: Option<&Value>,
-        make: impl FnOnce(Arc<CallbackRegistry>) -> A,
+        make: impl FnOnce(Arc<CallbackRegistry>, &proseql_engine::collection::Collection) -> A,
         mut visit: impl FnMut(&mut A, &Value) -> Result<(), EngineError>,
         finish: impl FnOnce(A) -> Result<R, EngineError>,
         eager: impl FnOnce(&Database) -> Result<R, EngineError>,
@@ -231,7 +244,13 @@ impl NativeRuntime {
             });
         };
         let (_, paths) = sources.lazy_scope(collection, filter, "query")?;
-        let mut accumulator = make(Arc::clone(&sources.callbacks));
+        let mut accumulator = make(
+            Arc::clone(&sources.callbacks),
+            state
+                .database
+                .collection(collection)
+                .expect("lazy collection"),
+        );
         let result = sources.lazy_visit(
             &mut state.database,
             state.host.as_ref(),
