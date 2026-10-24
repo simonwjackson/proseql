@@ -248,13 +248,21 @@ impl NativeSourceSessions {
         &self,
         f: impl FnOnce(&NativeRuntime) -> Result<R, EngineError>,
     ) -> Result<R, EngineError> {
-        let session = self.open_session()?;
+        let mut session = self.open_session()?;
         let result = f(&session);
-        let closed = session.close();
-        match result {
-            Err(error) => Err(error),
-            Ok(value) => closed.map(|()| value),
-        }
+        // Keep the lease until discarded output and secondary close errors
+        // have dropped. Otherwise the allocator trim runs while that memory
+        // is still live. Borrowing here also preserves this drop order if
+        // close unwinds: result drops before the earlier session variable.
+        let closed = session.runtime.close();
+        session.closed = true;
+        let result = match (result, closed) {
+            (Err(error), _) => Err(error),
+            (Ok(value), Ok(())) => Ok(value),
+            (Ok(_), Err(error)) => Err(error),
+        };
+        drop(session);
+        result
     }
 }
 

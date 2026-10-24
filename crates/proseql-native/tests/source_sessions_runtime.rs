@@ -19,7 +19,7 @@ use std::{
     fs,
     panic::{catch_unwind, AssertUnwindSafe},
     path::Path,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 const PAYLOAD: usize = 8192;
@@ -229,6 +229,23 @@ fn no_payloads() {
     );
 }
 
+struct DiscardedResult<'a> {
+    owner: &'a NativeSourceSessions,
+    dropped_before_release: &'a AtomicBool,
+    _rows: Vec<Value>,
+}
+impl Drop for DiscardedResult<'_> {
+    fn drop(&mut self) {
+        let still_owned = matches!(
+            self.owner.open_session(),
+            Err(proseql_engine::errors::EngineError::Operation(ref error))
+                if error.reason == "session-reentrant"
+        );
+        self.dropped_before_release
+            .store(still_owned, Ordering::SeqCst);
+    }
+}
+
 #[test]
 fn source_sessions_release_payloads_after_reads_writes_errors_and_unwinding() {
     let dir = tempfile::tempdir().unwrap();
@@ -329,6 +346,27 @@ fn source_sessions_release_payloads_after_reads_writes_errors_and_unwinding() {
     );
     no_payloads();
     drop(escaped);
+    eprintln!("SESSION_PROOF phase=discard_result_before_release");
+    let discarded_before_release = AtomicBool::new(false);
+    let failure = sessions.with_session(|runtime| {
+        let rows = runtime.query_bounded("samples", QueryInput::default())?;
+        assert!(catch_unwind(AssertUnwindSafe(|| runtime.mutate::<()>(|_| {
+            panic!("synthetic poisoned close with returned rows");
+        })))
+        .is_err());
+        Ok(DiscardedResult {
+            owner: &sessions,
+            dropped_before_release: &discarded_before_release,
+            _rows: rows,
+        })
+    });
+    assert!(failure.is_err());
+    drop(failure);
+    assert!(
+        discarded_before_release.load(Ordering::SeqCst),
+        "discarded output must drop before the source lease and allocator policy"
+    );
+    no_payloads();
     eprintln!("SESSION_PROOF phase=quarantine");
     let error = sessions
         .with_session(|runtime| {
