@@ -19,8 +19,8 @@ use proseql_native::{
     NativeSourceRuntimeConfig, NativeSourceRuntimeOptions,
 };
 use proseql_storage::source_config::{
-    CollectionFileSourceConfig, DatabaseSourceConfig, PartitionKey, PartitionedSourceConfig,
-    TimeBucket,
+    CollectionFileSourceConfig, DatabaseSourceConfig, DocumentSourceConfig, PartitionKey,
+    PartitionedSourceConfig, SourceCollectionSelection, TimeBucket, UnknownCollectionPolicy,
 };
 use serde_json::{json, Value};
 
@@ -77,6 +77,9 @@ struct Args {
     idle_check: bool,
     idle_seconds: u64,
     cache_partitions: usize,
+    source_kind: String,
+    append_one: bool,
+    history_copies: usize,
 }
 
 fn parse_args() -> Result<Args, Error> {
@@ -95,6 +98,9 @@ fn parse_args() -> Result<Args, Error> {
         idle_check: false,
         idle_seconds: 0,
         cache_partitions: 1,
+        source_kind: "month".into(),
+        append_one: false,
+        history_copies: 0,
     };
     let mut iter = std::env::args().skip(1);
     while let Some(flag) = iter.next() {
@@ -123,6 +129,9 @@ fn parse_args() -> Result<Args, Error> {
             "--idle-check" => args.idle_check = true,
             "--idle-seconds" => args.idle_seconds = value()?.parse()?,
             "--cache-partitions" => args.cache_partitions = value()?.parse()?,
+            "--source-kind" => args.source_kind = value()?,
+            "--append-one" => args.append_one = true,
+            "--history-copies" => args.history_copies = value()?.parse()?,
             _ => {
                 return Err(
                     format!("unknown argument {flag}; see docs/benchmarks/lazy-memory.md").into(),
@@ -135,6 +144,14 @@ fn parse_args() -> Result<Args, Error> {
     }
     if !["zero", "ascending", "scan", "eager-id", "empty"].contains(&args.mode.as_str()) {
         return Err("mode must be zero|ascending|scan|eager-id|empty".into());
+    }
+    if !["month", "file", "documents", "sharded", "yaml-partitions"]
+        .contains(&args.source_kind.as_str())
+    {
+        return Err("source-kind must be month|file|documents|sharded|yaml-partitions".into());
+    }
+    if args.history_copies > 9 || (args.history_copies > 0 && args.source_kind != "month") {
+        return Err("history-copies must be 0..=9 and uses the month source kind".into());
     }
     if args.profile.is_some() && !cfg!(feature = "heap-profile") {
         return Err("--heap-profile needs --features heap-profile".into());
@@ -186,6 +203,17 @@ fn consumer_row(month: usize, i: usize, rows: usize) -> Value {
 }
 
 fn marker(args: &Args) -> String {
+    let base = base_marker(args);
+    if args.source_kind == "month" && args.history_copies == 0 {
+        return base;
+    }
+    let mut value: Value = serde_json::from_str(&base).expect("fixture marker");
+    value["source_kind"] = json!(args.source_kind);
+    value["history_copies"] = json!(args.history_copies);
+    value.to_string()
+}
+
+fn base_marker(args: &Args) -> String {
     if args.consumer {
         return json!({"generator":2,"fixture":"consumer","fields":11,
             "months":MONTHS,"rows_per_month":args.rows,"id_rows":args.ids})
@@ -221,6 +249,118 @@ fn prepare(args: &Args) -> Result<(), Error> {
             out.write_all(b"\n")?;
         }
         out.flush()?;
+    }
+    for copy in 0..args.history_copies {
+        let year = 2010 + copy;
+        for month in 1..=MONTHS {
+            let path = args
+                .root
+                .join(COLLECTION)
+                .join(format!("{year}-{month:02}.jsonl"));
+            let mut out =
+                BufWriter::new(OpenOptions::new().create_new(true).write(true).open(path)?);
+            for i in 0..args.rows {
+                let mut row = if args.consumer {
+                    consumer_row(month, i, args.rows)
+                } else {
+                    synthetic_row(month, i, args.rows)
+                };
+                for (key, value) in row.as_object_mut().expect("fixture object") {
+                    if let Value::String(text) = value {
+                        *text = if key == "id" {
+                            text.replacen("synthetic:", &format!("archive{copy:02}:"), 1)
+                        } else if key == "rawId" {
+                            text.replacen("raw:", &format!("{copy:03}:"), 1)
+                        } else {
+                            text.replace("2025", &year.to_string())
+                        };
+                    }
+                }
+                serde_json::to_writer(&mut out, &row)?;
+                out.write_all(b"\n")?;
+            }
+            out.flush()?;
+        }
+    }
+    if args.source_kind == "yaml-partitions" {
+        fs::create_dir_all(args.root.join("yaml-parts"))?;
+        for month in 1..=MONTHS {
+            let rows = (0..args.rows)
+                .map(|i| {
+                    if args.consumer {
+                        consumer_row(month, i, args.rows)
+                    } else {
+                        synthetic_row(month, i, args.rows)
+                    }
+                })
+                .collect::<Vec<_>>();
+            let path = args
+                .root
+                .join("yaml-parts")
+                .join(format!("2025-{month:02}.yaml"));
+            let mut out =
+                BufWriter::new(OpenOptions::new().create_new(true).write(true).open(path)?);
+            let keyed = rows
+                .into_iter()
+                .map(|row| (row["id"].as_str().expect("fixture ID").to_owned(), row))
+                .collect::<IndexMap<_, _>>();
+            serde_json::to_writer(&mut out, &keyed)?;
+            out.flush()?;
+        }
+    }
+    if args.source_kind != "month" {
+        let mut all = BufWriter::new(
+            OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(args.root.join("all.jsonl"))?,
+        );
+        let mut documents = BufWriter::new(
+            OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(args.root.join("records.yaml"))?,
+        );
+        documents.write_all(b"samples:\n")?;
+        let mut shards = Vec::new();
+        if args.source_kind == "sharded" {
+            fs::create_dir_all(args.root.join("shards"))?;
+            for shard in 0..256 {
+                shards.push(BufWriter::new(
+                    OpenOptions::new()
+                        .create_new(true)
+                        .write(true)
+                        .open(args.root.join("shards").join(format!("{shard:02x}.jsonl")))?,
+                ));
+            }
+        }
+        for month in 1..=MONTHS {
+            for i in 0..args.rows {
+                let mut row = if args.consumer {
+                    consumer_row(month, i, args.rows)
+                } else {
+                    synthetic_row(month, i, args.rows)
+                };
+                serde_json::to_writer(&mut all, &row)?;
+                all.write_all(b"\n")?;
+                documents.write_all(b"  ")?;
+                serde_json::to_writer(&mut documents, &row["id"])?;
+                documents.write_all(b": ")?;
+                serde_json::to_writer(&mut documents, &row)?;
+                documents.write_all(b"\n")?;
+                if !shards.is_empty() {
+                    let shard = i % 256;
+                    row["shard"] = json!(format!("{shard:02x}"));
+                    serde_json::to_writer(&mut shards[shard], &row)?;
+                    shards[shard].write_all(b"\n")?;
+                }
+            }
+        }
+        all.flush()?;
+        documents.flush()?;
+        for shard in &mut shards {
+            shard.flush()?;
+        }
     }
     let mut out = BufWriter::new(
         OpenOptions::new()
@@ -331,37 +471,87 @@ fn config(args: &Args) -> (NativeSourceRuntimeConfig, NativeSourceRuntimeOptions
             format: Some("jsonl".into()),
             prose: None,
         })
+    } else if args.source_kind == "file" {
+        DatabaseSourceConfig::CollectionFile(CollectionFileSourceConfig {
+            id: COLLECTION.into(),
+            collection: COLLECTION.into(),
+            path: args.root.join("all.jsonl").to_string_lossy().into_owned(),
+            format: Some("jsonl".into()),
+            prose: None,
+        })
+    } else if args.source_kind == "documents" {
+        DatabaseSourceConfig::Documents(DocumentSourceConfig {
+            id: COLLECTION.into(),
+            root: args.root.to_string_lossy().into_owned(),
+            include: Some(vec!["records.yaml".into()]),
+            exclude: vec![],
+            format: Some("yaml".into()),
+            collections: Some(SourceCollectionSelection::Named(vec![COLLECTION.into()])),
+            unknown_collections: UnknownCollectionPolicy::Preserve,
+            outbox: "records.yaml".into(),
+            optional: false,
+        })
     } else {
         DatabaseSourceConfig::Partitioned(PartitionedSourceConfig {
             id: COLLECTION.into(),
             collection: COLLECTION.into(),
-            root: args.root.join(COLLECTION).to_string_lossy().into_owned(),
-            format: "jsonl".into(),
-            prose: None,
-            partition_by: PartitionKey::TimeBucket {
-                field: if args.consumer {
-                    "atUtc".into()
+            root: args
+                .root
+                .join(if args.source_kind == "sharded" {
+                    "shards"
+                } else if args.source_kind == "yaml-partitions" {
+                    "yaml-parts"
                 } else {
-                    "timestamp".into()
-                },
-                bucket: TimeBucket::Month,
+                    COLLECTION
+                })
+                .to_string_lossy()
+                .into_owned(),
+            format: if args.source_kind == "yaml-partitions" {
+                "yaml".into()
+            } else {
+                "jsonl".into()
+            },
+            prose: None,
+            partition_by: if args.source_kind == "sharded" {
+                PartitionKey::Field {
+                    field: "shard".into(),
+                }
+            } else {
+                PartitionKey::TimeBucket {
+                    field: if args.consumer {
+                        "atUtc".into()
+                    } else {
+                        "timestamp".into()
+                    },
+                    bucket: TimeBucket::Month,
+                }
             },
         })
     };
-    let lazy_partitions = if ids {
-        IndexMap::new()
-    } else {
-        IndexMap::from([(
-            COLLECTION.into(),
-            LazyPartitionPolicy {
-                max_loaded_partitions: args.cache_partitions,
-                full_scan: FullScanPolicy::Allow,
-            },
-        )])
-    };
+    let lazy_partitions =
+        if ids || ["file", "documents", "yaml-partitions"].contains(&args.source_kind.as_str()) {
+            IndexMap::new()
+        } else {
+            IndexMap::from([(
+                COLLECTION.into(),
+                LazyPartitionPolicy {
+                    max_loaded_partitions: args.cache_partitions,
+                    full_scan: FullScanPolicy::Allow,
+                },
+            )])
+        };
+    let mut collection = descriptor(ids, args.consumer);
+    if args.source_kind == "sharded" && !ids {
+        if let SchemaNode::Struct { fields } = &mut collection.schema {
+            fields.push(StructField {
+                name: "shard".into(),
+                schema: SchemaNode::Str,
+            });
+        }
+    }
     (
         NativeSourceRuntimeConfig {
-            collections: vec![NativeCollectionConfig::new(descriptor(ids, args.consumer))],
+            collections: vec![NativeCollectionConfig::new(collection)],
             sources: vec![source],
         },
         NativeSourceRuntimeOptions {
@@ -542,15 +732,16 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
                 0
             };
             assert_eq!(result.len(), expected);
-            assert_eq!(
-                runtime
-                    .lazy_partition_status(COLLECTION)
-                    .map_err(tag)?
-                    .unwrap()
-                    .loaded
-                    .len(),
-                args.cache_partitions.min(end - month)
-            );
+            if let Some(status) = runtime.lazy_partition_status(COLLECTION).map_err(tag)? {
+                assert_eq!(
+                    status.loaded.len(),
+                    args.cache_partitions.min(if args.source_kind == "sharded" {
+                        256
+                    } else {
+                        end - month
+                    })
+                );
+            }
             let snapshot = heap();
             println!(
                 "LM_QUERY {}",
@@ -570,6 +761,29 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
             }
         }
     }
+    if args.append_one {
+        checkpoint("append_total", true);
+        let row = if args.mode == "eager-id" || args.mode == "empty" {
+            json!({"id":"synthetic-appended-id"})
+        } else {
+            let mut row = if args.consumer {
+                consumer_row(10, args.rows + 1, args.rows + 2)
+            } else {
+                synthetic_row(10, args.rows + 1, args.rows + 2)
+            };
+            row["id"] = json!("synthetic-appended-row");
+            if args.source_kind == "sharded" {
+                row["shard"] = json!("ff");
+            }
+            row
+        };
+        drop(
+            runtime
+                .mutate(|tx| tx.create(COLLECTION, row))
+                .map_err(tag)?,
+        );
+        checkpoint("append_total", false);
+    }
     let idle_rows = runtime
         .read(|db| Ok(db.collection(COLLECTION).unwrap().len()))
         .map_err(tag)?;
@@ -581,11 +795,20 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
         checkpoint("idle_after_wait", false);
     }
     let final_heap = heap();
-    let resident_rows = if args.mode == "eager-id" {
-        args.ids
-    } else {
-        args.rows
-    };
+    if ["file", "documents", "yaml-partitions"].contains(&args.source_kind.as_str()) {
+        resident = opened["live"]
+            .as_u64()
+            .unwrap_or(0)
+            .saturating_sub(before_open_heap["live"].as_u64().unwrap_or(0));
+    }
+    let resident_rows =
+        if ["file", "documents", "yaml-partitions"].contains(&args.source_kind.as_str()) {
+            MONTHS * args.rows
+        } else if args.mode == "eager-id" {
+            args.ids
+        } else {
+            args.rows
+        };
     let failed = args.check
         && over_budget(
             resident,
@@ -596,16 +819,21 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
     let resident_measurement = (PROFILING.load(Ordering::Relaxed)
         || cfg!(feature = "allocation-meter"))
     .then_some(resident);
-    let data_bytes = (1..=MONTHS)
-        .map(|month| {
-            fs::metadata(
-                args.root
-                    .join(COLLECTION)
-                    .join(format!("2025-{month:02}.jsonl")),
-            )
-            .map(|m| m.len())
+    let data_bytes = match args.source_kind.as_str() {
+        "file" => fs::metadata(args.root.join("all.jsonl"))?.len(),
+        "documents" => fs::metadata(args.root.join("records.yaml"))?.len(),
+        kind => fs::read_dir(args.root.join(match kind {
+            "sharded" => "shards",
+            "yaml-partitions" => "yaml-parts",
+            _ => COLLECTION,
+        }))?
+        .map(|entry| {
+            entry
+                .and_then(|entry| entry.metadata())
+                .map(|metadata| metadata.len())
         })
-        .sum::<Result<u64, _>>()?;
+        .sum::<Result<u64, _>>()?,
+    };
     println!(
         "LM_SUMMARY {}",
         json!({"mode": args.mode, "bounded": args.bounded, "rows_per_month": args.rows,
@@ -618,7 +846,7 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
         "allocator": allocator_os::stats(), "idle_rows":idle_rows,
         "idle_rss":idle_rss,"idle_allocator":idle_allocator,"idle_seconds":args.idle_seconds,
         "fixture":if args.consumer {"consumer"} else {"legacy"},
-        "cache_partitions":args.cache_partitions,
+        "cache_partitions":args.cache_partitions,"source_kind":args.source_kind,"appended":args.append_one,"history_copies":args.history_copies,
         "check_failed": failed || (args.idle_check && idle_rows != 0), "instrumented": cfg!(feature="bench-observe"), "profiled": PROFILING.load(Ordering::Relaxed)})
     );
     if args.trim_end {
@@ -780,6 +1008,55 @@ mod tests {
                 assert!(row["timestamp"].as_str().unwrap().ends_with('Z'));
                 assert_eq!(row, synthetic_row(month, i, 43_000));
             }
+        }
+    }
+
+    #[test]
+    fn every_synthetic_source_kind_opens_and_returns_the_same_rows() {
+        for kind in ["month", "file", "documents", "sharded", "yaml-partitions"] {
+            let dir = tempfile::tempdir().unwrap();
+            let args = Args {
+                root: dir.path().into(),
+                rows: 2,
+                ids: 2,
+                mode: "scan".into(),
+                prepare: false,
+                profile: None,
+                check: false,
+                bounded: true,
+                layout: false,
+                trim_end: false,
+                consumer: true,
+                idle_check: false,
+                idle_seconds: 0,
+                cache_partitions: 1,
+                source_kind: kind.into(),
+                append_one: false,
+                history_copies: 0,
+            };
+            prepare(&args).unwrap();
+            let (config, options) = config(&args);
+            let runtime = NativeRuntime::open_sources_with_options(config, options).unwrap();
+            let rows = runtime
+                .query_bounded(COLLECTION, QueryInput::default())
+                .unwrap();
+            assert_eq!(rows.len(), MONTHS * args.rows, "source kind {kind}");
+            drop(rows);
+            let mut appended = consumer_row(10, 2, 3);
+            if kind == "sharded" {
+                appended["shard"] = json!("ff");
+            }
+            runtime
+                .mutate(|tx| tx.create(COLLECTION, appended))
+                .unwrap();
+            assert_eq!(
+                runtime
+                    .query_bounded(COLLECTION, QueryInput::default())
+                    .unwrap()
+                    .len(),
+                MONTHS * args.rows + 1
+            );
+            runtime.close().unwrap();
         }
     }
 

@@ -4,7 +4,7 @@ The user requested execution in this chat without child agents. Run all tracks s
 
 ## 1. Track A — measured contract
 
-- [ ] Preserve source-qualified baseline evidence and full Rust/TypeScript suite logs; reproduce the actual idle-retention symptom with an executable failing check; measure the empty runtime, all consumer source kinds, immediate and 30-second idle state, and cold-history growth; attribute rows, IDs, indexes, buffers, snapshots, and allocator memory; write numeric idle and scaling budgets while preserving every original handoff target.
+- [x] Preserve source-qualified baseline evidence and full Rust/TypeScript suite logs; reproduce the actual idle-retention symptom with an executable failing check; measure the empty runtime, all consumer source kinds, immediate and 30-second idle state, and cold-history growth; attribute rows, IDs, indexes, buffers, snapshots, and allocator memory; write numeric idle and scaling budgets while preserving every original handoff target.
 
 ## 2. Track B — compatible implementation (blocked by Track A)
 
