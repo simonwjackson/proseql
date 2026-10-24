@@ -1,7 +1,50 @@
 //! Deterministic lifecycle races. Private state access makes the closing
 //! boundary observable without scheduling sleeps or a public test seam.
 use super::*;
-use std::{sync::mpsc, thread, time::Instant};
+use std::{
+    panic::{catch_unwind, AssertUnwindSafe},
+    sync::mpsc,
+    thread,
+    time::Instant,
+};
+
+struct PanickingWatch;
+impl WatchHandle for PanickingWatch {
+    fn stop(&self) -> Result<(), EngineError> {
+        panic!("synthetic watch stop panic");
+    }
+}
+
+#[test]
+fn close_unwind_releases_state_and_completes_lifecycle() {
+    let runtime = NativeRuntime::open_with_host(
+        NativeRuntimeConfig {
+            path: "/synthetic-unwind.json".into(),
+            collections: vec![],
+        },
+        Arc::new(MemoryStorageHost::default()),
+    )
+    .unwrap();
+    runtime
+        .inner
+        .state
+        .lock()
+        .unwrap()
+        .watch
+        .push(Box::new(PanickingWatch));
+    assert!(catch_unwind(AssertUnwindSafe(|| runtime.close())).is_err());
+    let state = runtime
+        .inner
+        .state
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let released = state.resources_released;
+    drop(state);
+    assert!(released, "unwind left runtime state retained");
+    assert_eq!(runtime.inner.lifecycle.load(Ordering::Acquire), CLOSED);
+    // This must not wait forever for the unwound first closer.
+    runtime.close().unwrap();
+}
 
 #[test]
 fn concurrent_close_waits_for_cleanup_before_returning() {

@@ -381,6 +381,34 @@ struct RuntimeState {
     resources_released: bool,
 }
 
+/// Finish the lifecycle even when a host or codec panics during close. A
+/// waiting closer must never depend on the first caller reaching its return.
+struct ClosingState<'a> {
+    core: &'a RuntimeCore,
+    state: MutexGuard<'a, RuntimeState>,
+}
+
+impl Drop for ClosingState<'_> {
+    fn drop(&mut self) {
+        self.state.watch = Vec::new();
+        self.state.sources = None;
+        self.state.last_persisted_content = None;
+        self.state.last_reload_error = None;
+        self.state.quarantine_error = None;
+        let callbacks = Arc::clone(&self.state.callbacks);
+        self.state.database = Database::new(IndexMap::new(), callbacks);
+        self.state.resources_released = true;
+        if let Ok(mut events) = self.core.watch_events.lock() {
+            *events = Vec::new();
+        }
+        if let Ok(mut pending) = self.core.pending_unpins.lock() {
+            *pending = Vec::new();
+        }
+        self.core.lifecycle.store(CLOSED, Ordering::Release);
+        self.core.close_complete.notify_all();
+    }
+}
+
 fn operation_error(reason: &str, message: impl Into<String>) -> EngineError {
     EngineError::Operation(OperationError {
         operation: "native-runtime".to_owned(),
@@ -1146,13 +1174,18 @@ impl NativeRuntime {
         };
         // A panic can poison an active session. Recover the guard only to stop
         // services and discard state, never to persist a partially applied write.
-        let (mut state, poisoned) = match self.inner.state.lock() {
+        let (state, poisoned) = match self.inner.state.lock() {
             Ok(state) => (state, false),
             Err(error) => (error.into_inner(), true),
         };
         if state.resources_released {
             return Ok(());
         }
+        let mut closing = ClosingState {
+            core: &self.inner,
+            state,
+        };
+        let state = &mut *closing.state;
         self.inner.watch_generation.fetch_add(1, Ordering::AcqRel);
         let flush_result = if poisoned {
             Err(operation_error(
@@ -1160,7 +1193,7 @@ impl NativeRuntime {
                 "Native runtime lock is poisoned. Uncommitted state was not persisted",
             ))
         } else if was_open {
-            persist_current(&mut state)
+            persist_current(state)
         } else {
             Ok(())
         };
@@ -1172,21 +1205,8 @@ impl NativeRuntime {
                 }
             }
         }
-        state.sources = None;
-        state.last_persisted_content = None;
-        state.last_reload_error = None;
-        state.quarantine_error = None;
-        let callbacks = Arc::clone(&state.callbacks);
-        state.database = Database::new(IndexMap::new(), callbacks);
-        state.resources_released = true;
-        if let Ok(mut events) = self.inner.watch_events.lock() {
-            *events = Vec::new();
-        }
-        if let Ok(mut pending) = self.inner.pending_unpins.lock() {
-            *pending = Vec::new();
-        }
-        self.inner.lifecycle.store(CLOSED, Ordering::Release);
-        self.inner.close_complete.notify_all();
+        // ClosingState releases state and wakes other closers on success,
+        // returned errors, and unwinding. It still owns the state lock here.
         flush_result.and(stop_result)
     }
 }
