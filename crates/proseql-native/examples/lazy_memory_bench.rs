@@ -73,6 +73,10 @@ struct Args {
     bounded: bool,
     layout: bool,
     trim_end: bool,
+    consumer: bool,
+    idle_check: bool,
+    idle_seconds: u64,
+    cache_partitions: usize,
 }
 
 fn parse_args() -> Result<Args, Error> {
@@ -87,6 +91,10 @@ fn parse_args() -> Result<Args, Error> {
         bounded: false,
         layout: false,
         trim_end: false,
+        consumer: false,
+        idle_check: false,
+        idle_seconds: 0,
+        cache_partitions: 1,
     };
     let mut iter = std::env::args().skip(1);
     while let Some(flag) = iter.next() {
@@ -105,6 +113,16 @@ fn parse_args() -> Result<Args, Error> {
             "--bounded" => args.bounded = true,
             "--layout-only" => args.layout = true,
             "--trim-end" => args.trim_end = true,
+            "--fixture" => {
+                args.consumer = match value()?.as_str() {
+                    "legacy" => false,
+                    "consumer" => true,
+                    _ => return Err("fixture must be legacy|consumer".into()),
+                };
+            }
+            "--idle-check" => args.idle_check = true,
+            "--idle-seconds" => args.idle_seconds = value()?.parse()?,
+            "--cache-partitions" => args.cache_partitions = value()?.parse()?,
             _ => {
                 return Err(
                     format!("unknown argument {flag}; see docs/benchmarks/lazy-memory.md").into(),
@@ -115,8 +133,8 @@ fn parse_args() -> Result<Args, Error> {
     if !(1..=1_000_000).contains(&args.rows) || !(1..=139_420).contains(&args.ids) {
         return Err("rows-per-month must be 1..=1000000; id-rows must be 1..=139420".into());
     }
-    if !["zero", "ascending", "scan", "eager-id"].contains(&args.mode.as_str()) {
-        return Err("mode must be zero|ascending|scan|eager-id".into());
+    if !["zero", "ascending", "scan", "eager-id", "empty"].contains(&args.mode.as_str()) {
+        return Err("mode must be zero|ascending|scan|eager-id|empty".into());
     }
     if args.profile.is_some() && !cfg!(feature = "heap-profile") {
         return Err("--heap-profile needs --features heap-profile".into());
@@ -155,7 +173,24 @@ fn synthetic_row(month: usize, i: usize, rows: usize) -> Value {
     row
 }
 
+fn consumer_row(month: usize, i: usize, rows: usize) -> Value {
+    let at = timestamp(month, i, rows);
+    json!({
+        "id": format!("synthetic:{month:02}:{i:07}:{}", "i".repeat(63)),
+        "metric": if i % 2 == 0 { "steps" } else { "heartRate" },
+        "at": at.replace('Z', "+00:00"), "end": null, "value": 50 + i % 100,
+        "source": if i % 3 == 0 { "phone" } else { "watch" },
+        "receivedAt": at, "rawId": format!("raw:{month:02}:{i:07}:{}", "r".repeat(33)),
+        "month": format!("2025-{month:02}"), "date": &at[..10], "atUtc": at
+    })
+}
+
 fn marker(args: &Args) -> String {
+    if args.consumer {
+        return json!({"generator":2,"fixture":"consumer","fields":11,
+            "months":MONTHS,"rows_per_month":args.rows,"id_rows":args.ids})
+        .to_string();
+    }
     json!({"generator": 1, "months": MONTHS, "rows_per_month": args.rows,
         "id_rows": args.ids, "row_bytes": ROW_BYTES})
     .to_string()
@@ -177,7 +212,12 @@ fn prepare(args: &Args) -> Result<(), Error> {
             .join(format!("2025-{month:02}.jsonl"));
         let mut out = BufWriter::new(OpenOptions::new().create_new(true).write(true).open(path)?);
         for i in 0..args.rows {
-            serde_json::to_writer(&mut out, &synthetic_row(month, i, args.rows))?;
+            let row = if args.consumer {
+                consumer_row(month, i, args.rows)
+            } else {
+                synthetic_row(month, i, args.rows)
+            };
+            serde_json::to_writer(&mut out, &row)?;
             out.write_all(b"\n")?;
         }
         out.flush()?;
@@ -192,14 +232,29 @@ fn prepare(args: &Args) -> Result<(), Error> {
         writeln!(out, "{{\"id\":\"synthetic-id:{i:07}\"}}")?;
     }
     out.flush()?;
+    fs::write(args.root.join("empty.jsonl"), "")?;
     fs::write(marker_path, marker(args))?;
     println!("LM_DATA {}", marker(args));
     Ok(())
 }
 
-fn descriptor(ids: bool) -> CollectionDescriptor {
+fn descriptor(ids: bool, consumer: bool) -> CollectionDescriptor {
     let fields = if ids {
         vec![("id", SchemaNode::Str)]
+    } else if consumer {
+        vec![
+            ("id", SchemaNode::Str),
+            ("metric", SchemaNode::Str),
+            ("at", SchemaNode::Str),
+            ("end", SchemaNode::NullOr(Box::new(SchemaNode::Str))),
+            ("value", SchemaNode::Num),
+            ("source", SchemaNode::Str),
+            ("receivedAt", SchemaNode::Str),
+            ("rawId", SchemaNode::Str),
+            ("month", SchemaNode::Str),
+            ("date", SchemaNode::Str),
+            ("atUtc", SchemaNode::Str),
+        ]
     } else {
         vec![
             ("id", SchemaNode::Str),
@@ -233,7 +288,11 @@ fn descriptor(ids: bool) -> CollectionDescriptor {
         ordered_indexes: if ids {
             vec![]
         } else {
-            vec!["timestamp".into()]
+            vec![if consumer {
+                "atUtc".into()
+            } else {
+                "timestamp".into()
+            }]
         },
         unique_fields: vec![],
         before_create_hooks: vec![],
@@ -255,12 +314,20 @@ fn descriptor(ids: bool) -> CollectionDescriptor {
 }
 
 fn config(args: &Args) -> (NativeSourceRuntimeConfig, NativeSourceRuntimeOptions) {
-    let ids = args.mode == "eager-id";
+    let ids = args.mode == "eager-id" || args.mode == "empty";
     let source = if ids {
         DatabaseSourceConfig::CollectionFile(CollectionFileSourceConfig {
             id: COLLECTION.into(),
             collection: COLLECTION.into(),
-            path: args.root.join("ids.jsonl").to_string_lossy().into_owned(),
+            path: args
+                .root
+                .join(if args.mode == "empty" {
+                    "empty.jsonl"
+                } else {
+                    "ids.jsonl"
+                })
+                .to_string_lossy()
+                .into_owned(),
             format: Some("jsonl".into()),
             prose: None,
         })
@@ -272,7 +339,11 @@ fn config(args: &Args) -> (NativeSourceRuntimeConfig, NativeSourceRuntimeOptions
             format: "jsonl".into(),
             prose: None,
             partition_by: PartitionKey::TimeBucket {
-                field: "timestamp".into(),
+                field: if args.consumer {
+                    "atUtc".into()
+                } else {
+                    "timestamp".into()
+                },
                 bucket: TimeBucket::Month,
             },
         })
@@ -283,14 +354,14 @@ fn config(args: &Args) -> (NativeSourceRuntimeConfig, NativeSourceRuntimeOptions
         IndexMap::from([(
             COLLECTION.into(),
             LazyPartitionPolicy {
-                max_loaded_partitions: 1,
+                max_loaded_partitions: args.cache_partitions,
                 full_scan: FullScanPolicy::Allow,
             },
         )])
     };
     (
         NativeSourceRuntimeConfig {
-            collections: vec![NativeCollectionConfig::new(descriptor(ids))],
+            collections: vec![NativeCollectionConfig::new(descriptor(ids, args.consumer))],
             sources: vec![source],
         },
         NativeSourceRuntimeOptions {
@@ -322,12 +393,18 @@ fn proc_bytes(key: &str) -> Option<u64> {
 }
 
 fn heap() -> Value {
+    #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
+    {
+        let (live, peak) = ALLOCATOR.live_and_peak();
+        return json!({"live":live,"peak":peak});
+    }
     #[cfg(feature = "heap-profile")]
     if PROFILING.load(Ordering::Relaxed) {
         let stats = dhat::HeapStats::get();
         return json!({"live": stats.curr_bytes, "peak": stats.max_bytes,
             "allocated": stats.total_bytes, "allocations": stats.total_blocks});
     }
+    #[cfg(any(not(feature = "allocation-meter"), feature = "heap-profile"))]
     Value::Null
 }
 
@@ -415,7 +492,7 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
     let opened = heap();
     let open_rss = proc_bytes("VmRSS:");
     let mut resident = 0;
-    if args.mode == "eager-id" {
+    if args.mode == "eager-id" || args.mode == "empty" {
         resident = opened["live"]
             .as_u64()
             .unwrap_or(0)
@@ -424,7 +501,7 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
             runtime
                 .read(|db| Ok(db.collection(COLLECTION).unwrap().len()))
                 .map_err(tag)?,
-            args.ids
+            if args.mode == "empty" { 0 } else { args.ids }
         );
     } else {
         let months = if args.mode == "scan" { 1 } else { MONTHS };
@@ -435,13 +512,14 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
                 _ => 1,
             };
             let end = (month + width).min(MONTHS + 1);
-            let mut filter = json!({"timestamp": {"$gte": format!("2025-{month:02}-01T00:00:00.000Z"), "$lt": format!("2025-{end:02}-01T00:00:00.000Z")}});
+            let time_field = if args.consumer { "atUtc" } else { "timestamp" };
+            let mut filter = json!({time_field: {"$gte": format!("2025-{month:02}-01T00:00:00.000Z"), "$lt": format!("2025-{end:02}-01T00:00:00.000Z")}});
             if args.mode != "ascending" {
                 filter["value"] = json!({"$lt": -1});
             }
             let input = QueryInput {
                 r#where: Some(filter),
-                sort: vec![("timestamp".into(), SortOrder::Asc)],
+                sort: vec![(time_field.into(), SortOrder::Asc)],
                 ..Default::default()
             };
             checkpoint("query_total", true);
@@ -471,7 +549,7 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
                     .unwrap()
                     .loaded
                     .len(),
-                1
+                args.cache_partitions.min(end - month)
             );
             let snapshot = heap();
             println!(
@@ -492,6 +570,16 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
             }
         }
     }
+    let idle_rows = runtime
+        .read(|db| Ok(db.collection(COLLECTION).unwrap().len()))
+        .map_err(tag)?;
+    checkpoint("idle_now", false);
+    let idle_rss = proc_bytes("VmRSS:");
+    let idle_allocator = allocator_os::stats();
+    if args.idle_seconds > 0 {
+        std::thread::sleep(std::time::Duration::from_secs(args.idle_seconds));
+        checkpoint("idle_after_wait", false);
+    }
     let final_heap = heap();
     let resident_rows = if args.mode == "eager-id" {
         args.ids
@@ -505,17 +593,33 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
             opened["live"].as_u64().unwrap_or(0),
             resident_rows,
         );
-    let resident_measurement = PROFILING.load(Ordering::Relaxed).then_some(resident);
+    let resident_measurement = (PROFILING.load(Ordering::Relaxed)
+        || cfg!(feature = "allocation-meter"))
+    .then_some(resident);
+    let data_bytes = (1..=MONTHS)
+        .map(|month| {
+            fs::metadata(
+                args.root
+                    .join(COLLECTION)
+                    .join(format!("2025-{month:02}.jsonl")),
+            )
+            .map(|m| m.len())
+        })
+        .sum::<Result<u64, _>>()?;
     println!(
         "LM_SUMMARY {}",
         json!({"mode": args.mode, "bounded": args.bounded, "rows_per_month": args.rows,
-        "id_rows": args.ids, "data_bytes": MONTHS * args.rows * ROW_BYTES,
+        "id_rows": args.ids, "data_bytes": data_bytes,
         "open_ms": open_ms, "open_rss": open_rss, "opened_heap": opened,
         "first_resident_heap_delta": resident_measurement, "resident_rows": resident_rows,
         "resident_bytes_per_row": resident_measurement.map(|bytes| bytes as f64 / resident_rows as f64),
         "id_data_bytes": fs::metadata(args.root.join("ids.jsonl"))?.len(),
         "final_heap": final_heap, "rss": proc_bytes("VmRSS:"), "rss_hwm": proc_bytes("VmHWM:"),
-        "allocator": allocator_os::stats(), "check_failed": failed, "instrumented": cfg!(feature="bench-observe"), "profiled": PROFILING.load(Ordering::Relaxed)})
+        "allocator": allocator_os::stats(), "idle_rows":idle_rows,
+        "idle_rss":idle_rss,"idle_allocator":idle_allocator,"idle_seconds":args.idle_seconds,
+        "fixture":if args.consumer {"consumer"} else {"legacy"},
+        "cache_partitions":args.cache_partitions,
+        "check_failed": failed || (args.idle_check && idle_rows != 0), "instrumented": cfg!(feature="bench-observe"), "profiled": PROFILING.load(Ordering::Relaxed)})
     );
     if args.trim_end {
         let before_rss = proc_bytes("VmRSS:");
@@ -534,6 +638,12 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
     #[cfg(feature = "heap-profile")]
     drop(_profile);
     runtime.close().map_err(tag)?;
+    if args.idle_check && idle_rows != 0 {
+        return Err(format!(
+            "idle retention: {idle_rows} decoded historical rows remain; expected zero"
+        )
+        .into());
+    }
     if failed {
         return Err(
             "memory budget exceeded (1024 resident B/row; open + 2 partitions + 50 MiB peak)"
@@ -544,7 +654,7 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
 }
 
 fn layout_probe() -> Result<(), Error> {
-    let schema = descriptor(false).schema;
+    let schema = descriptor(false, false).schema;
     #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
     let before = ALLOCATOR.live_and_peak().0;
     let row = proseql_engine::validator::decode_owned_value(&schema, synthetic_row(1, 0, 43_000))
@@ -671,6 +781,19 @@ mod tests {
                 assert_eq!(row, synthetic_row(month, i, 43_000));
             }
         }
+    }
+
+    #[test]
+    fn consumer_fixture_preserves_reported_fields_and_string_lengths() {
+        let row = consumer_row(1, 0, 65_348);
+        assert_eq!(row.as_object().unwrap().len(), 11);
+        assert_eq!(row["id"].as_str().unwrap().len(), 84);
+        assert_eq!(row["rawId"].as_str().unwrap().len(), 48);
+        assert!(row["end"].is_null());
+        assert!(row["at"].as_str().unwrap().ends_with("+00:00"));
+        assert!(row["atUtc"].as_str().unwrap().ends_with('Z'));
+        assert!(row["value"].is_number());
+        assert_eq!(row, consumer_row(1, 0, 65_348));
     }
 
     #[test]

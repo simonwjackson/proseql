@@ -103,6 +103,13 @@ case "$action" in
       python3 scripts/summarize-lazy-rss.py "$out/phase-rss/$mode.stderr" > "$out/phase-rss/$mode.json"
     done
     ;;
+  idle-feedback)
+    # Red-capable idle check: exercise a real bounded ten-month scan, drop
+    # results, then inspect actual engine rows, not just partition metadata.
+    test -x "$out/bin/meter"
+    "$out/bin/meter" --data-dir "$out/idle-feedback-data" --fixture consumer --rows-per-month 1000 --id-rows 100 --prepare-only
+    "$out/bin/meter" --data-dir "$out/idle-feedback-data" --fixture consumer --rows-per-month 1000 --id-rows 100 --mode scan --bounded --idle-check
+    ;;
   feedback)
     "$out/bin/unprofiled" --data-dir "$out/feedback-data" --rows-per-month 1000 --id-rows 100 --prepare-only
     "$out/bin/dhat" --data-dir "$out/feedback-data" --rows-per-month 1000 --id-rows 100 --mode zero --bounded --heap-profile "$out/feedback-dhat.json" --check
@@ -121,7 +128,7 @@ case "$action" in
     done
     ;;
   *)
-    echo "Usage: $0 build|check|before|after|rss|feedback|summarize [artifact-directory]" >&2
+    echo "Usage: $0 build|check|before|after|rss|feedback|idle-feedback|summarize [artifact-directory]" >&2
     exit 2
     ;;
 esac

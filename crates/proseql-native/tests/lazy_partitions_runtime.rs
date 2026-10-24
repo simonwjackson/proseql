@@ -139,6 +139,28 @@ fn open_eager(dir: &Path) -> NativeRuntime {
     .unwrap()
 }
 
+#[test]
+fn zero_cache_bounded_reads_release_rows_and_reread_durable_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let expected = seed(dir.path());
+    let runtime = open_lazy(dir.path(), policy(0, FullScanPolicy::Allow));
+    for _ in 0..2 {
+        let actual = runtime
+            .query_bounded(SOURCE, QueryInput::default())
+            .unwrap();
+        assert_eq!(actual, expected);
+        drop(actual);
+        assert!(loaded(&runtime).is_empty());
+        assert_eq!(
+            runtime
+                .read(|db| Ok(db.collection(SOURCE).unwrap().len()))
+                .unwrap(),
+            0
+        );
+    }
+    runtime.close().unwrap();
+}
+
 // ── Synthetic data ───────────────────────────────────────────────────────────
 
 fn sample(timestamp: &str, n: usize) -> Value {
