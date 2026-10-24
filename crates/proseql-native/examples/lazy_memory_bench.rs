@@ -790,7 +790,7 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
                 "rss": proc_bytes("VmRSS:"), "rss_hwm": proc_bytes("VmHWM:")})
             );
             drop(result);
-            if month == 1 {
+            if ordinal == 1 {
                 resident = heap()["live"]
                     .as_u64()
                     .unwrap_or(0)

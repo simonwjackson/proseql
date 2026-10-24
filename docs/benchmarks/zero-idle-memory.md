@@ -66,4 +66,57 @@ Closing a session does not compact active records. The canonical `(String, Value
 
 The alternative for lower active memory is a compact record store with borrowed field access and compatible owned materialization. It requires engine/query/mutation/watch and WASM parity work. Large owned output also needs its own memory allowance or streaming interface. No such representation or output-contract change is included here.
 
-Final unprofiled qualification, exact consumer pin, timing cost, and combined suite results remain pending. Do not treat the early smoke run as production acceptance. No production data, consumer pin change, push, publication, or service restart is part of these measurements.
+## Qualified measurements and blocked release
+
+The implementation at `23c0f2dd5111d80f6b5139a92b94d121f8102832` passed the complete idle matrix. Evidence is in `build-memory-23c0f2d/idle/manifest.json` under the artifact root above. Each role used separate, byte-identical synthetic files. No builds or suites ran beside these measurements.
+
+All nonempty meter cases ended 3,215 requested bytes above owner initialization. Final requested heap ranged from 9,722 to 14,598 B. The tenfold cold-history comparison added zero idle bytes. These are idle-owner costs, not loaded-row density.
+
+| Source or workload | Unprofiled open RSS | Immediate idle RSS | RSS after 30 s | Peak RSS | Final requested heap in separate meter process |
+|---|---:|---:|---:|---:|---:|
+| Collection-file JSONL, read and append | 6,029,312 B | 7,299,072 B | 7,368,704 B | 119,263,232 B | 11,902 B |
+| Writable YAML documents, read and append | 7,155,712 B | 8,626,176 B | 8,634,368 B | 346,529,792 B | 11,981 B |
+| Eager YAML partitions, read and append | 5,931,008 B | 7,712,768 B | 7,716,864 B | 179,412,992 B | 11,817 B |
+| Legacy 430,000-row scan | 5,984,256 B | 7,192,576 B | 7,258,112 B | 161,206,272 B | 13,538 B |
+| Consumer 653,480-row scan | 6,115,328 B | 7,229,440 B | 7,303,168 B | 326,209,536 B | 13,454 B |
+| Consumer matching-output sequence | 6,172,672 B | 7,245,824 B | 7,311,360 B | 785,596,416 B | 13,465 B |
+| Eager 139,420 IDs | 5,955,584 B | 7,069,696 B | 7,135,232 B | 359,804,928 B | 9,722 B |
+
+The empty configured owner used 6,176,768 B after 30 seconds. Every primary case met both RSS limits. Matching-output cases explicitly dropped each output and called `release_unused_memory()`. The largest unprofiled consumer output-reclaim call took 38.57 ms. The session cannot reclaim caller-owned rows while they remain live.
+
+Allocator-owned address space and resident pages are different. The consumer scan ended with 217,628,672 allocator-owned bytes, counting arenas plus mmap allocations. Requested live heap was 13,454 B in the separate meter run. Current unprofiled RSS was 7,303,168 B. glibc can discard physical pages while retaining allocator address space. Do not report arena bytes as current RSS.
+
+### Active records and index origins
+
+`active-controls-build-final-code-retry1` compares the unmodified `9a11d36` runtime with this implementation. Both use the same added cold-query benchmark code. The baseline omits only the unsupported session module. Its manifest proves that runtime source directories did not change. Five alternating unprofiled trials query October first and report one partition read. Allocation runs are separate.
+
+| Control | Baseline requested B per loaded row | Candidate requested B per loaded row | Original target |
+|---|---:|---:|---:|
+| Legacy 12-field, 43,000 rows | 2,105.11 | 2,105.11 | Keep the original fixture visible. |
+| Consumer 11-field, 65,348 rows | 2,327.57 | 2,327.57 | At most 500 B. Not achieved. |
+| Eager ID-only, 139,420 rows | 943.02 | 943.02 | At most 300 B. Not achieved. |
+
+The large consumer DHAT control attributes 284.58 B/row to collection identity and capacity, 189.61 B/row to ordered indexes, and 150.19 B/row to other query-index metadata. Baseline and candidate values are identical. The identity bucket is not an isolated primary-index measurement. The disjoint classifier retains unclassified sites. No index compaction is included.
+
+| Cold load control | Baseline median | Candidate median | Strict no-slower result |
+|---|---:|---:|---|
+| Legacy, 43,000 rows | 424.42 ms | 434.39 ms | Missed by 2.35%. |
+| Consumer, 65,348 rows | 714.25 ms | 708.98 ms | Met in these five trials. |
+
+These trials do not establish statistical significance. They measure a cold engine over prepared files, not a cold OS page cache. Session wall time also includes reopening, closing and reclamation. For example, the unprofiled consumer ten-month scan took 7,496.98 ms at this source.
+
+Both scans met the peak formula using their measured resident-row sizes. The legacy bound was 239,452,638 B. The consumer bound was 362,748,214 B. They missed the tighter bounds that assume 500 B rows, respectively 101,413,056 B and 123,892,128 B. Do not call the measured-row bound a compact-row result.
+
+A cold-query diagnostic initially recorded the first resident sample only when the month was January. The retained-row controls used the actual final engine row count instead. The benchmark now selects the first query by ordinal, including an October cold query. Failed measurement-driver trials remain preserved.
+
+### Verification and adoption status
+
+At `23c0f2d`, the full Rust run passed 1,182 tests with two ignored tests. Static checks, WASM, typecheck and lint passed. Disposable Logbook and Coach checkouts built and passed 205 and 27 tests. Logbook used `a61a45c8dc4abdc91df7cfdd694e81ccf45089df`. Coach used `06719890e27212cf61fa77987dc4432cd68f1dd4`. Their real manifests and pins did not change.
+
+Combined release acceptance is blocked. The last TypeScript run had 3,992 passes, two skips and 102 failures. Parity examples and real-browser startup also failed. Fresh Node and Bun processes reproduced file-watch creation failures. Node reported `ENOSPC`. Bun reported `EINVAL`. The host watch limit was 524,288. A Forgerie Node process reported 524,142 watch entries. No limit or service was changed. Earlier complete passing gates at `96fe022` do not qualify a later source.
+
+Contract and standards passes were performed separately by the implementation author. They were not independent reviews. Supplementary lifecycle tests still use private synchronization and cleanup assertions. The main payload regressions use public methods and real files.
+
+This change is idle-lifetime support, not completion of the original compact-record handoff. Logbook needs explicit coherent session boundaries to benefit. A dependency pin alone does not release its eager state. Sessions reread durable sources and do not retain last-known-good state across boundaries. Keep a session open for related operations and active watches. Returning large owned output still raises peak memory.
+
+Final receipts must name the exact checked-out source. Do not land while mandatory gates fail. No production data, consumer pin change, push, publication, deployment, or service restart is part of this work.
