@@ -14,6 +14,51 @@ Source mode rejects `replace_all`; use `mutate` for app-owned changes. Single-fi
 
 The consumer example at `crates/proseql-native/examples/support/coach.rs` maps the legacy Coach source configuration. It declares one writable source, two YAML graph sources, and one graph with fifteen JSONL roots. It supplies a custom transform and an opt-in lenient JSONL codec. Coach-specific names do not enter the library implementation.
 
+## Source sessions with no idle row cache
+
+Use `NativeSourceSessions` when durable records must leave memory after an operation. The owner retains configuration and registered services, not a loaded database. It supports the same durable collection files, writable documents, partitions, and read-only graphs as `NativeRuntime`.
+
+```rust
+use proseql_native::{IdleMemoryReclaim, NativeSourceSessions};
+
+// Existing source configuration and options. Keep watch_debounce: None when
+// this operation does not need external-change notifications.
+let sessions = NativeSourceSessions::new(config, options)?;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+let sessions = sessions.reclaim_idle_memory(IdleMemoryReclaim::GlibcTrim)?;
+
+let count = sessions.with_session(|runtime| {
+    let rows = runtime.query_bounded("samples", input)?;
+    // Finish record processing here. Returning a small aggregate lets close
+    // release both the internal state and unused allocator pages.
+    Ok(rows.len())
+})?;
+```
+
+Creation validates configuration and registered services without decoding files. `open_session` and `with_session` report source parse and record errors when they open the sources. Each session uses the existing native engine, guarded mutations, durable writes, reload behavior, and codecs. It reopens sources, rebuilds needed indexes, and reruns load-time defaults, migrations, transforms, and generator factories. This costs I/O and CPU. Repeated reads do not get a permanent warm cache. Use restart-safe ID generators and deterministic migrations.
+
+Concurrent sessions on one owner wait for each other. A nested open on the same thread returns `OperationError` with reason `session-reentrant`. After-hooks can use the active `NativeRuntime`; they must not open another session on that owner. Do not target the same paths through a second owner or runtime instance.
+
+A session keeps its accepted state until it closes, including last-known-good state after a failed reload. A later session reopens disk; it does not retain the prior session's snapshot. Keep one coherent operation inside one session if it needs a stable view. Existing long-lived `NativeRuntime` defaults and cached-state contracts do not change.
+
+`with_session` closes before returning, including when the caller returns an error. Its guard also closes during panic unwinding. Cleanup preserves the original caller error. A poisoned runtime is discarded without persisting its uncommitted state. Closed runtime clones cannot read and no longer retain rows. Normal source writes remain durable before success.
+
+For a live watch or deliberate cache reuse, hold `let session = sessions.open_session()?;` and use its existing runtime methods. Drop watches and then drop or close that guard. An open guard deliberately retains active state, even between calls. The guard stays on its opening thread; share the owner across threads and open each session on the worker that uses it. A watch returned from `with_session` does not stay live after that session closes.
+
+### Allocator and output ownership
+
+| Policy or owner | Memory behavior | Cost or limit |
+|---|---|---|
+| Default `IdleMemoryReclaim::None` | Session state is dropped. The allocator can keep freed pages. | No forced allocator pass; low live heap does not guarantee low RSS. |
+| Explicit `IdleMemoryReclaim::GlibcTrim` | After session state drops, call glibc `malloc_trim(0)`. | Linux GNU only. Unsupported targets fail at policy selection. It acts on process-wide unused glibc pages and adds latency; arbitrary custom allocators need their own policy. |
+| Caller-owned results | Returned records remain valid and allocated until the caller drops them. | Session close cannot release live output. After dropping it, `sessions.release_unused_memory()` applies the selected allocator policy again. Its boolean is glibc's release result, not an RSS measurement. |
+| Open sessions and watches | Their required data stays active. | These are explicit owners, not an idle-cache guarantee. |
+| Custom hosts, callbacks, transforms, and codecs | Registered services remain with the owner. | Memory they retain must be included separately in the consumer budget. |
+
+The session interface does not compact loaded rows, bound an eager source's active load, or eliminate large sorts and returned results. Use bounded reads for eligible lazy sources. Put aggregation inside the session where possible. Do not hold a session while waiting for network input or a user action.
+
+Adoption is an explicit access change, not an automatic benefit for existing consumers. Logbook needs an owner and session boundary around each coherent storage operation; switching a dependency pin alone does not remove its eager resident data. Existing consumers can keep their current runtime and source options unchanged. No persisted format or source layout change is required.
+
 ## Native callbacks
 
 `NativeRuntimeOptions` and `NativeSourceRuntimeOptions` accept a `callbacks: CallbackRegistry` (empty by default). Register Rust closures before opening. The runtime consumes the registry and shares it with the engine; there is no second callback implementation or JavaScript dependency. `CallbackRegistry` is re-exported by `proseql-native`.
@@ -277,9 +322,9 @@ NativeSourceRuntimeOptions {
 
 The default is an empty map, so every existing configuration stays eager. `NativeSourceRuntimeOptions.lazy_watch_interval` (default 2 s) sets how often the managed watch polls lazy sources.
 
-**Preconditions.** The source must be a `Partitioned` JSONL or NDJSON source. Its collection must have `append_only: true`, no `unique_fields`, no relationships, and no other collection may have a relationship to it. Otherwise open fails with `SourceConfigError` naming the source. `max_loaded_partitions` must be at least 1. Lazy collections must have no hooks, computed fields or migrations, even when the callbacks are registered. Global hooks are also refused when a runtime has lazy sources. Eager collections support these callbacks.
+**Preconditions.** The source must be a `Partitioned` JSONL or NDJSON source. Its collection must have `append_only: true`, no `unique_fields`, no relationships, and no other collection may have a relationship to it. Otherwise open fails with `SourceConfigError` naming the source. `max_loaded_partitions` accepts zero, which disables retention of unpinned partitions after an operation. Lazy collections must have no hooks, computed fields or migrations, even when the callbacks are registered. Global hooks are also refused when a runtime has lazy sources. Eager collections support these callbacks.
 
-**Open.** Open lists the partition file names. It reads and decodes no partition, so open time and memory do not grow with history.
+**Open.** Open lists partition file names without decoding their rows. Listing time and filename metadata grow with partition count, not record count within each file. Source sessions discard this manifest when they close.
 
 **Which partitions an operation loads.** `NativeRuntime::query`, `query_with_stats`, `query_cursor`, `aggregate`, `aggregate_grouped`, `find_by_id` and `watch` first compute the partitions the filter can touch, load them, and then run the engine's normal query. The runtime reads the conditions on the partition field: a direct value, `$eq`, `$in`, `$gt`, `$gte`, `$lt`, `$lte` and `$startsWith` with string operands, at the top level and through `$and` and `$or`. For a `TimeBucket` key, each bound is cut to the bucket length (`2026-04-10T05:00:00.000Z` → `2026-04`), which keeps the string order, so a range of timestamps maps to a range of file keys. For a `Field` key the value is the key. A `Prefix` key prunes on equality and `$in` only, because the prefix does not keep the string order.
 
@@ -287,7 +332,9 @@ Pruning compares string intervals and is conservative: it never skips a partitio
 
 **Unfiltered operations.** A filter without a usable partition-field condition (none, `{ bpm: 60 }`, `$not`, `$ne`, `$nin`, an `$or` with one unfiltered branch) cannot prune. With `FullScanPolicy::Allow` it loads every partition for that operation; the bound applies again afterwards. With `FullScanPolicy::Error` it fails with `OperationError` (operation `query`, `watch` or `findById`, reason `lazy-full-scan`) and loads nothing, also when the source is empty or every partition is already loaded, so the outcome does not depend on history or cache state. `find_by_id` cannot know a record's partition from its ID: a hit among the loaded partitions returns at once, and a miss is a full scan. Query by the partition field instead when IDs derive from it.
 
-**Eviction.** After each operation, the runtime evicts least recently used partitions until at most `max_loaded_partitions` partitions that no watch pins stay loaded. Pinned partitions do not count against the bound. Eviction drops the records, their index postings and the stored file contents; a later operation reads and decodes the file again with the same result.
+**Eviction.** After each operation, the runtime evicts least recently used partitions until at most `max_loaded_partitions` partitions that no watch pins stay loaded. Pinned partitions do not count against the bound. Zero leaves no unpinned records or their indexes. Eviction drops the records, index postings, and stored contents. The next access rereads and decodes the file. This does not evict unrelated eager collections. Use source sessions to release all durable source state.
+
+With a zero cache, `find_by_id` cannot hit a retained partition. An ID-only miss still needs a full scan and fails under `FullScanPolicy::Error`; use a query containing the partition field instead. A create can locate its target from the record's partition field. Keeping a positive cache inside an explicit session is also valid and does not retain data after that session closes.
 
 **Results.** Loaded records keep the order of an eager open: partition path order, then file order. Queries, sorts, pages, cursors and aggregates over the loaded records therefore equal the eager results; the conformance tests compare every lazy result with an eager runtime on the same files. Records created in the current session follow the engine's insertion order (the end of the collection) until their partition loads again, as in an eager session.
 
@@ -301,7 +348,7 @@ Pruning compares string intervals and is conservative: it never skips a partitio
 
 **Appends.** The first create into a partition that is not loaded reads and decodes that partition once (in the benchmark: 240 KB and 28 ms for a 1,200-row month, 9.2 MB and 1.2 s for an 83,000-row month; see `docs/benchmarks/timeseries.md`, Step 5). Later creates into the loaded partition cost the same as an eager append: one line, a 4 KiB tail read and one file sync. A create into a partition file that does not exist yet reads nothing. A create whose input does not contain the partition field cannot be routed before the ID check; it fails (`ValidationError` when the schema requires the field, otherwise `OperationError` reason `lazy-partition-not-loaded`) and writes nothing.
 
-**Watches.** `NativeRuntime::watch` and `watch_with_callback` load the partitions the watch filter touches and pin them until the returned `NativeWatch` is dropped. Appends into pinned partitions reach the watch as usual. A new partition file that matches a pinned filter (written by this runtime or found by the watcher) joins the pin and loads. A watch without a partition-field filter pins every partition, or fails under `FullScanPolicy::Error`. `Database::watch` through `read` sees only the loaded records and pins nothing; use the runtime methods.
+**Watches.** `NativeRuntime::watch` and `watch_with_callback` load the partitions the watch filter touches and pin them until the returned `NativeWatch` is dropped. Appends into pinned partitions reach the watch as usual. A new partition file that matches a pinned filter (written by this runtime or found by the watcher) joins the pin and loads. A watch without a partition-field filter pins every partition, or fails under `FullScanPolicy::Error`. `Database::watch` through `read` sees only the loaded records and pins nothing; use the runtime methods. Dropping a runtime watch releases pins immediately when the lock is free. Under contention, one coalesced worker drains release requests after the active operation. Pin release does not wait for a lock held by the dropping thread and does not require another user query.
 
 **`read`.** `NativeRuntime::read` exposes the engine database with the loaded partitions only. Use it for engine calls on eager collections, or after a runtime method has loaded what you need.
 

@@ -10,6 +10,11 @@ out=$(realpath "$out")
 cd "$root"
 case "$action" in
   build)
+    mkdir -p "$out/bin"
+    source_sha=$(git rev-parse HEAD)
+    if [[ -n ${EXPECTED_SOURCE_SHA:-} ]]; then test "$source_sha" = "$EXPECTED_SOURCE_SHA"; fi
+    git status --porcelain > "$out/bin/source.status"
+    git diff --binary HEAD > "$out/bin/source.patch"
     nix develop --command cargo build --manifest-path crates/Cargo.toml -p proseql-native --profile memory-profile --example lazy_memory_bench --example timeseries_bench
     mkdir -p "$out/bin"
     cp crates/target/memory-profile/examples/lazy_memory_bench "$out/bin/unprofiled"
@@ -22,6 +27,13 @@ case "$action" in
     cp crates/target/memory-profile/examples/lazy_memory_bench "$out/bin/dhat"
     nix develop --command cargo build --manifest-path crates/Cargo.toml -p proseql-native --profile memory-profile --features phase-rss --example lazy_memory_bench
     cp crates/target/memory-profile/examples/lazy_memory_bench "$out/bin/rss"
+    test "$(git rev-parse HEAD)" = "$source_sha"
+    git status --porcelain > "$out/bin/source.status.end"
+    git diff --binary HEAD > "$out/bin/source.patch.end"
+    cmp "$out/bin/source.status" "$out/bin/source.status.end"
+    cmp "$out/bin/source.patch" "$out/bin/source.patch.end"
+    printf '%s\n' "$source_sha" > "$out/bin/source.sha"
+    sha256sum "$out/bin/"{unprofiled,checkpoints,meter,dhat,rss} > "$out/bin/SHA256SUMS"
     ;;
   check)
     if [[ ${PROSEQL_IN_DEV_SHELL:-0} != 1 ]]; then
@@ -37,6 +49,7 @@ case "$action" in
     cargo clippy --manifest-path crates/Cargo.toml -p proseql-native -p proseql-storage --lib --examples --features proseql-native/heap-profile -- -D warnings
     cargo fmt --manifest-path crates/Cargo.toml --all -- --check
     bash -n scripts/profile-lazy-memory.sh
+    python3 scripts/profile-idle-memory.py --self-test
     ;;
   before)
     test -x "$out/bin/dhat"
@@ -104,11 +117,12 @@ case "$action" in
     done
     ;;
   idle-feedback)
-    # Red-capable idle check: exercise a real bounded ten-month scan, drop
-    # results, then inspect actual engine rows, not just partition metadata.
-    test -x "$out/bin/meter"
-    "$out/bin/meter" --data-dir "$out/idle-feedback-data" --fixture consumer --rows-per-month 1000 --id-rows 100 --prepare-only
-    "$out/bin/meter" --data-dir "$out/idle-feedback-data" --fixture consumer --rows-per-month 1000 --id-rows 100 --mode scan --bounded --idle-check
+    # Existing allocation-meter executable, same real filesystem generator.
+    python3 scripts/profile-idle-memory.py "$out" --feedback
+    ;;
+  idle)
+    # Independent default/meter roles and fresh byte-identical starting files.
+    python3 scripts/profile-idle-memory.py "$out"
     ;;
   feedback)
     "$out/bin/unprofiled" --data-dir "$out/feedback-data" --rows-per-month 1000 --id-rows 100 --prepare-only
@@ -128,7 +142,7 @@ case "$action" in
     done
     ;;
   *)
-    echo "Usage: $0 build|check|before|after|rss|feedback|idle-feedback|summarize [artifact-directory]" >&2
+    echo "Usage: $0 build|check|before|after|rss|feedback|idle-feedback|idle|summarize [artifact-directory]" >&2
     exit 2
     ;;
 esac

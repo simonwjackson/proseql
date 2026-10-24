@@ -11,9 +11,11 @@ mod callbacks;
 mod lazy;
 mod read_snapshot;
 mod schema_checks;
+mod source_sessions;
 mod sources;
 mod stored_file;
 pub use lazy::{FullScanPolicy, LazyPartitionPolicy, LazyPartitionStatus, NativeQueryStats};
+pub use source_sessions::{IdleMemoryReclaim, NativeSourceSession, NativeSourceSessions};
 use sources::SourceState;
 pub use sources::{NativeSourceRuntimeConfig, NativeSourceRuntimeOptions};
 
@@ -86,10 +88,11 @@ impl Default for NativeRuntimeOptions {
     }
 }
 
+#[derive(Clone)]
 struct RuntimeServices {
     callbacks: Arc<CallbackRegistry>,
     dispatch: Arc<callbacks::Dispatch>,
-    formats: FormatRegistry,
+    formats: Arc<FormatRegistry>,
 }
 
 impl RuntimeServices {
@@ -134,7 +137,7 @@ impl RuntimeServices {
         Ok(Self {
             callbacks,
             dispatch,
-            formats: options.formats,
+            formats: Arc::new(options.formats),
         })
     }
 }
@@ -320,12 +323,13 @@ struct PinGuard {
 
 impl Drop for PinGuard {
     fn drop(&mut self) {
-        // Released at the next lazy operation; dropping must not take the
-        // runtime lock, which the dropping thread may hold.
+        // The dropping thread can already hold the runtime lock. Queue first,
+        // then reclaim with try_lock or one coalesced, nonblocking release job.
         if let Some(core) = self.core.upgrade() {
             if let Ok(mut pending) = core.pending_unpins.lock() {
                 pending.push((std::mem::take(&mut self.collection), self.id));
             }
+            release_unpins(&core);
         }
     }
 }
@@ -355,6 +359,7 @@ struct RuntimeCore {
     watch_events: Mutex<Vec<proseql_storage::host::StorageEvent>>,
     /// Watch pins released by dropped `NativeWatch` values: `(collection, pin)`.
     pending_unpins: Mutex<Vec<(String, u64)>>,
+    unpin_worker: AtomicBool,
 }
 
 struct RuntimeState {
@@ -363,13 +368,14 @@ struct RuntimeState {
     database: Database,
     callbacks: Arc<CallbackRegistry>,
     dispatch: Arc<callbacks::Dispatch>,
-    formats: FormatRegistry,
+    formats: Arc<FormatRegistry>,
     host: Arc<dyn DurableStorageHost>,
     watch: Vec<Box<dyn WatchHandle>>,
     last_persisted_content: Option<String>,
     last_reload_error: Option<EngineError>,
     quarantine_error: Option<EngineError>,
     rollback_failure_once: bool,
+    resources_released: bool,
 }
 
 fn operation_error(reason: &str, message: impl Into<String>) -> EngineError {
@@ -470,40 +476,7 @@ impl NativeRuntime {
         host: Arc<dyn DurableStorageHost>,
         options: NativeSourceRuntimeOptions,
     ) -> Result<Self, EngineError> {
-        let normalized = SourceState::normalize(&config)?;
-        let appendable = SourceState::appendable_collections(&config, &normalized);
-        let lazy = lazy::configure_lazy(&config, &normalized, &options.lazy_partitions)?;
-        if !lazy.is_empty() && has_global_hooks(&options.callbacks) {
-            return Err(operation_error(
-                "unsupported-descriptor",
-                "Lazy sources do not support global hooks",
-            ));
-        }
-        let descriptors = SourceState::descriptor_config(config);
-        let services = RuntimeServices::new(
-            &descriptors,
-            NativeRuntimeOptions {
-                callbacks: options.callbacks,
-                formats: options.formats,
-                plugin_codecs: options.plugin_codecs,
-            },
-        )?;
-        let sources = SourceState::load(
-            host.as_ref(),
-            &services.formats,
-            normalized,
-            appendable,
-            options.transforms,
-            &lazy,
-            options.lazy_watch_interval,
-            &services.callbacks,
-        )?;
-        let loaded = sources.collections();
-        let runtime = Self::from_loaded(descriptors, host, services, loaded, None, Some(sources))?;
-        if let Some(debounce) = options.watch_debounce {
-            runtime.start_managed_watch(debounce)?;
-        }
-        Ok(runtime)
+        source_sessions::PreparedSourceRuntime::new(config, host, options)?.open()
     }
 
     fn from_loaded(
@@ -555,11 +528,13 @@ impl NativeRuntime {
                     last_reload_error: None,
                     quarantine_error: None,
                     rollback_failure_once: false,
+                    resources_released: false,
                 }),
                 lifecycle: AtomicU8::new(OPEN),
                 watch_generation: AtomicU64::new(0),
                 watch_events: Mutex::new(Vec::new()),
                 pending_unpins: Mutex::new(Vec::new()),
+                unpin_worker: AtomicBool::new(false),
             }),
         })
     }
@@ -631,7 +606,7 @@ impl NativeRuntime {
             }),
         }
         .find_by_id(collection, id);
-        let trimmed = sources_trim(state);
+        let trimmed = sources_trim(&self.inner, state);
         let found = found?;
         trimmed?;
         Ok(found)
@@ -834,7 +809,7 @@ impl NativeRuntime {
                 proseql_storage::diagnostics::span("query_engine_including_explain_when_requested");
             f(&state.database).map(|result| (result, read))
         });
-        let trimmed = sources_trim(state);
+        let trimmed = sources_trim(&self.inner, state);
         let (result, read) = result?;
         trimmed?;
         let resident = state
@@ -889,7 +864,7 @@ impl NativeRuntime {
                 sources.lazy_unpin(collection, *pin);
             }
         }
-        let trimmed = sources_trim(state);
+        let trimmed = sources_trim(&self.inner, state);
         let subscription = subscription?;
         trimmed?;
         Ok(NativeWatch {
@@ -949,7 +924,7 @@ impl NativeRuntime {
                 rollback_preserving_original(&self.inner, &mut state, session, &error);
                 if lazy && state.quarantine_error.is_none() {
                     // The original error matters more than an eviction failure.
-                    let _ = sources_trim(&mut state);
+                    let _ = sources_trim(&self.inner, &mut state);
                 }
                 return Err(error);
             }
@@ -957,7 +932,7 @@ impl NativeRuntime {
         if state.sources.is_some() {
             let committed = commit_source_mutation(&self.inner, &mut state, session, result);
             if lazy && state.quarantine_error.is_none() {
-                sources_trim(&mut state)?;
+                sources_trim(&self.inner, &mut state)?;
             }
             let result = committed?;
             let replay = callbacks.finish();
@@ -1137,21 +1112,36 @@ impl NativeRuntime {
     /// failure is returned, but the runtime remains closed and its watcher is
     /// always released.
     pub fn close(&self) -> Result<(), EngineError> {
-        if self
-            .inner
-            .lifecycle
-            .compare_exchange(OPEN, CLOSING, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
+        let was_open = match self.inner.lifecycle.compare_exchange(
+            OPEN,
+            CLOSING,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => true,
+            Err(CLOSING) => return Ok(()),
+            Err(_) => false,
+        };
+        // A panic can poison an active session. Recover the guard only to stop
+        // services and discard state, never to persist a partially applied write.
+        let (mut state, poisoned) = match self.inner.state.lock() {
+            Ok(state) => (state, false),
+            Err(error) => (error.into_inner(), true),
+        };
+        if state.resources_released {
             return Ok(());
         }
         self.inner.watch_generation.fetch_add(1, Ordering::AcqRel);
-        let mut state = self
-            .inner
-            .state
-            .lock()
-            .map_err(|_| operation_error("poisoned", "Native runtime lock is poisoned"))?;
-        let flush_result = persist_current(&mut state);
+        let flush_result = if poisoned {
+            Err(operation_error(
+                "poisoned",
+                "Native runtime lock is poisoned. Uncommitted state was not persisted",
+            ))
+        } else if was_open {
+            persist_current(&mut state)
+        } else {
+            Ok(())
+        };
         let mut stop_result = Ok(());
         for handle in state.watch.drain(..) {
             if let Err(error) = handle.stop() {
@@ -1159,6 +1149,19 @@ impl NativeRuntime {
                     stop_result = Err(error);
                 }
             }
+        }
+        state.sources = None;
+        state.last_persisted_content = None;
+        state.last_reload_error = None;
+        state.quarantine_error = None;
+        let callbacks = Arc::clone(&state.callbacks);
+        state.database = Database::new(IndexMap::new(), callbacks);
+        state.resources_released = true;
+        if let Ok(mut events) = self.inner.watch_events.lock() {
+            *events = Vec::new();
+        }
+        if let Ok(mut pending) = self.inner.pending_unpins.lock() {
+            *pending = Vec::new();
         }
         self.inner.lifecycle.store(CLOSED, Ordering::Release);
         flush_result.and(stop_result)
@@ -1180,6 +1183,51 @@ fn drain_unpins(core: &RuntimeCore, state: &mut RuntimeState) {
     }
 }
 
+/// Reclaim a released watch without waiting for another caller operation.
+/// A busy runtime gets at most one queued release worker, not one per watch.
+fn release_unpins(core: &Arc<RuntimeCore>) {
+    if core.lifecycle.load(Ordering::Acquire) != OPEN {
+        return;
+    }
+    if let Ok(mut state) = core.state.try_lock() {
+        if state.quarantine_error.is_none() && core.lifecycle.load(Ordering::Acquire) == OPEN {
+            let _ = sources_trim(core, &mut state);
+        }
+        return;
+    }
+    if core.unpin_worker.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let weak = Arc::downgrade(core);
+    let spawned = std::thread::Builder::new()
+        .name("proseql-unpin".into())
+        .spawn(move || {
+            let Some(core) = weak.upgrade() else {
+                return;
+            };
+            if let Ok(mut state) = core.state.lock() {
+                if core.lifecycle.load(Ordering::Acquire) == OPEN
+                    && state.quarantine_error.is_none()
+                {
+                    let _ = sources_trim(&core, &mut state);
+                }
+                // Reopen the scheduling slot before the last drain: a release
+                // racing this boundary is either drained here or queues a worker.
+                core.unpin_worker.store(false, Ordering::Release);
+                if core.lifecycle.load(Ordering::Acquire) == OPEN
+                    && state.quarantine_error.is_none()
+                {
+                    let _ = sources_trim(&core, &mut state);
+                }
+            } else {
+                core.unpin_worker.store(false, Ordering::Release);
+            };
+        });
+    if spawned.is_err() {
+        core.unpin_worker.store(false, Ordering::Release);
+    }
+}
+
 /// What one scoped operation loaded.
 struct ScopeStats {
     loaded: usize,
@@ -1188,7 +1236,8 @@ struct ScopeStats {
 }
 
 /// Evict lazy partitions down to their bounds.
-fn sources_trim(state: &mut RuntimeState) -> Result<(), EngineError> {
+fn sources_trim(core: &RuntimeCore, state: &mut RuntimeState) -> Result<(), EngineError> {
+    drain_unpins(core, state);
     match state.sources.as_mut() {
         Some(sources) if !sources.lazy.is_empty() => sources.lazy_trim(&mut state.database),
         _ => Ok(()),

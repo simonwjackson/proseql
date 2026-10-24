@@ -26,6 +26,8 @@ use serde_json::{json, Value};
 
 #[path = "lazy_memory/allocator_os.rs"]
 mod allocator_os;
+#[path = "lazy_memory/sessions.rs"]
+mod sessions;
 
 #[cfg(all(
     feature = "phase-rss",
@@ -80,6 +82,8 @@ struct Args {
     source_kind: String,
     append_one: bool,
     history_copies: usize,
+    source_sessions: bool,
+    reclaim_idle: bool,
 }
 
 fn parse_args() -> Result<Args, Error> {
@@ -101,6 +105,8 @@ fn parse_args() -> Result<Args, Error> {
         source_kind: "month".into(),
         append_one: false,
         history_copies: 0,
+        source_sessions: false,
+        reclaim_idle: false,
     };
     let mut iter = std::env::args().skip(1);
     while let Some(flag) = iter.next() {
@@ -132,6 +138,8 @@ fn parse_args() -> Result<Args, Error> {
             "--source-kind" => args.source_kind = value()?,
             "--append-one" => args.append_one = true,
             "--history-copies" => args.history_copies = value()?.parse()?,
+            "--sessions" => args.source_sessions = true,
+            "--reclaim-idle" => args.reclaim_idle = true,
             _ => {
                 return Err(
                     format!("unknown argument {flag}; see docs/benchmarks/lazy-memory.md").into(),
@@ -142,8 +150,8 @@ fn parse_args() -> Result<Args, Error> {
     if !(1..=1_000_000).contains(&args.rows) || !(1..=139_420).contains(&args.ids) {
         return Err("rows-per-month must be 1..=1000000; id-rows must be 1..=139420".into());
     }
-    if !["zero", "ascending", "scan", "eager-id", "empty"].contains(&args.mode.as_str()) {
-        return Err("mode must be zero|ascending|scan|eager-id|empty".into());
+    if !["zero", "ascending", "scan", "cold", "eager-id", "empty"].contains(&args.mode.as_str()) {
+        return Err("mode must be zero|ascending|scan|cold|eager-id|empty".into());
     }
     if !["month", "file", "documents", "sharded", "yaml-partitions"]
         .contains(&args.source_kind.as_str())
@@ -155,6 +163,34 @@ fn parse_args() -> Result<Args, Error> {
     }
     if args.profile.is_some() && !cfg!(feature = "heap-profile") {
         return Err("--heap-profile needs --features heap-profile".into());
+    }
+    if args.reclaim_idle && !args.source_sessions {
+        return Err("--reclaim-idle requires --sessions".into());
+    }
+    if args.source_sessions && args.check {
+        return Err(
+            "--check measures loaded rows, not session idle; use --idle-check for sessions".into(),
+        );
+    }
+    if args.source_sessions
+        && args.idle_check
+        && !cfg!(feature = "allocation-meter")
+        && args.profile.is_none()
+    {
+        return Err(
+            "session --idle-check needs --features allocation-meter or an active --heap-profile"
+                .into(),
+        );
+    }
+    if args.check
+        && (args.mode == "empty"
+            || (args.cache_partitions == 0
+                && !["eager-id"].contains(&args.mode.as_str())
+                && ["month", "sharded"].contains(&args.source_kind.as_str())))
+    {
+        return Err(
+            "loaded-row --check requires retained rows; use --idle-check for a zero cache".into(),
+        );
     }
     if args.check && args.profile.is_none() {
         return Err("--check requires --heap-profile for allocated-byte assertions".into());
@@ -194,9 +230,9 @@ fn consumer_row(month: usize, i: usize, rows: usize) -> Value {
     let at = timestamp(month, i, rows);
     json!({
         "id": format!("synthetic:{month:02}:{i:07}:{}", "i".repeat(63)),
-        "metric": if i % 2 == 0 { "steps" } else { "heartRate" },
+        "metric": if i.is_multiple_of(2) { "steps" } else { "heartRate" },
         "at": at.replace('Z', "+00:00"), "end": null, "value": 50 + i % 100,
-        "source": if i % 3 == 0 { "phone" } else { "watch" },
+        "source": if i.is_multiple_of(3) { "phone" } else { "watch" },
         "receivedAt": at, "rawId": format!("raw:{month:02}:{i:07}:{}", "r".repeat(33)),
         "month": format!("2025-{month:02}"), "date": &at[..10], "atUtc": at
     })
@@ -586,7 +622,7 @@ fn heap() -> Value {
     #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
     {
         let (live, peak) = ALLOCATOR.live_and_peak();
-        return json!({"live":live,"peak":peak});
+        json!({"live":live,"peak":peak})
     }
     #[cfg(feature = "heap-profile")]
     if PROFILING.load(Ordering::Relaxed) {
@@ -682,6 +718,7 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
     let opened = heap();
     let open_rss = proc_bytes("VmRSS:");
     let mut resident = 0;
+    let mut measured_resident_rows = 0;
     if args.mode == "eager-id" || args.mode == "empty" {
         resident = opened["live"]
             .as_u64()
@@ -693,9 +730,17 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
                 .map_err(tag)?,
             if args.mode == "empty" { 0 } else { args.ids }
         );
+        if args.mode != "empty" {
+            measured_resident_rows = args.ids;
+        }
     } else {
-        let months = if args.mode == "scan" { 1 } else { MONTHS };
-        for month in 1..=months {
+        let months = if args.mode == "scan" || args.mode == "cold" {
+            1
+        } else {
+            MONTHS
+        };
+        for ordinal in 1..=months {
+            let month = if args.mode == "cold" { MONTHS } else { ordinal };
             let width = match args.mode.as_str() {
                 "ascending" => 1 + (month - 1) % 3,
                 "scan" => MONTHS,
@@ -733,14 +778,7 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
             };
             assert_eq!(result.len(), expected);
             if let Some(status) = runtime.lazy_partition_status(COLLECTION).map_err(tag)? {
-                assert_eq!(
-                    status.loaded.len(),
-                    args.cache_partitions.min(if args.source_kind == "sharded" {
-                        256
-                    } else {
-                        end - month
-                    })
-                );
+                assert!(status.loaded.len() <= args.cache_partitions);
             }
             let snapshot = heap();
             println!(
@@ -757,6 +795,9 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
                     .as_u64()
                     .unwrap_or(0)
                     .saturating_sub(opened["live"].as_u64().unwrap_or(0));
+                measured_resident_rows = runtime
+                    .read(|db| Ok(db.collection(COLLECTION).unwrap().len()))
+                    .map_err(tag)?;
                 checkpoint("first_resident_without_results", false);
             }
         }
@@ -801,14 +842,7 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
             .unwrap_or(0)
             .saturating_sub(before_open_heap["live"].as_u64().unwrap_or(0));
     }
-    let resident_rows =
-        if ["file", "documents", "yaml-partitions"].contains(&args.source_kind.as_str()) {
-            MONTHS * args.rows
-        } else if args.mode == "eager-id" {
-            args.ids
-        } else {
-            args.rows
-        };
+    let resident_rows = measured_resident_rows;
     let failed = args.check
         && over_budget(
             resident,
@@ -840,7 +874,7 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
         "id_rows": args.ids, "data_bytes": data_bytes,
         "open_ms": open_ms, "open_rss": open_rss, "opened_heap": opened,
         "first_resident_heap_delta": resident_measurement, "resident_rows": resident_rows,
-        "resident_bytes_per_row": resident_measurement.map(|bytes| bytes as f64 / resident_rows as f64),
+        "resident_bytes_per_row": resident_measurement.filter(|_|resident_rows>0).map(|bytes| bytes as f64 / resident_rows as f64),
         "id_data_bytes": fs::metadata(args.root.join("ids.jsonl"))?.len(),
         "final_heap": final_heap, "rss": proc_bytes("VmRSS:"), "rss_hwm": proc_bytes("VmHWM:"),
         "allocator": allocator_os::stats(), "idle_rows":idle_rows,
@@ -881,12 +915,19 @@ fn run(args: &Args, _profile: Profile) -> Result<(), Error> {
     Ok(())
 }
 
-fn layout_probe() -> Result<(), Error> {
-    let schema = descriptor(false, false).schema;
+fn layout_probe(consumer: bool) -> Result<(), Error> {
+    let schema = descriptor(false, consumer).schema;
     #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
     let before = ALLOCATOR.live_and_peak().0;
-    let row = proseql_engine::validator::decode_owned_value(&schema, synthetic_row(1, 0, 43_000))
-        .map_err(tag)?;
+    let row = proseql_engine::validator::decode_owned_value(
+        &schema,
+        if consumer {
+            consumer_row(1, 0, 65_348)
+        } else {
+            synthetic_row(1, 0, 43_000)
+        },
+    )
+    .map_err(tag)?;
     #[cfg(all(feature = "allocation-meter", not(feature = "heap-profile")))]
     let row_payload_bytes = Some(ALLOCATOR.live_and_peak().0 - before);
     #[cfg(any(not(feature = "allocation-meter"), feature = "heap-profile"))]
@@ -900,7 +941,8 @@ fn layout_probe() -> Result<(), Error> {
         "fields":object.len(),"field_name_bytes":object.keys().map(String::len).sum::<usize>(),
         "string_value_bytes":object.values().filter_map(Value::as_str).map(str::len).sum::<usize>(),
         "row_payload_requested_heap_bytes":row_payload_bytes,
-        "resident_target_bytes":1024,"target_met_by_payload_alone":row_payload_bytes.map(|bytes|bytes<=1024)})
+        "resident_target_bytes":1024,"target_met_by_payload_alone":row_payload_bytes.map(|bytes|bytes<=1024),
+        "compact_handoff_target_bytes":500,"compact_target_met_by_payload_alone":row_payload_bytes.map(|bytes|bytes<=500)})
     );
     Ok(())
 }
@@ -918,7 +960,7 @@ fn main_result() -> Result<(), Error> {
         return prepare(&args);
     }
     if args.layout {
-        return layout_probe();
+        return layout_probe(args.consumer);
     }
     START.get_or_init(Instant::now);
     #[cfg(feature = "heap-profile")]
@@ -931,7 +973,11 @@ fn main_result() -> Result<(), Error> {
     });
     #[cfg(not(feature = "heap-profile"))]
     let profile = Profile;
-    run(&args, profile)
+    if args.source_sessions {
+        sessions::run(&args, profile)
+    } else {
+        run(&args, profile)
+    }
 }
 
 #[cfg(test)]
@@ -1033,6 +1079,8 @@ mod tests {
                 source_kind: kind.into(),
                 append_one: false,
                 history_copies: 0,
+                source_sessions: false,
+                reclaim_idle: false,
             };
             prepare(&args).unwrap();
             let (config, options) = config(&args);

@@ -1,6 +1,6 @@
 # Lazy partition memory and decode benchmark
 
-Synthetic data only. Production behavior is unchanged in the measurement step.
+Synthetic data only. Production behavior is unchanged in the historical measurement step below. The additive zero-idle session work has its own [method, evidence, costs, and remaining targets](zero-idle-memory.md).
 
 ## Reproduce
 
@@ -47,7 +47,7 @@ The v1 fixture has exactly 430,000 rows, 12 flat fields, 316 bytes including eac
 
 Every measured mode opens a new `NativeRuntime` against actual JSONL files. Monthly sources use `TimeBucket::Month`, `append_only`, `DuplicateIdPolicy::IgnoreIdentical`, an ordered `timestamp` index and lazy max=1. The timed call is `NativeRuntime::query`, not the extra explain work of `query_with_stats`. Counts and final cache residency are checked after each query. This checks current behavior, not the future transient guarantee. `ascending` intentionally includes result cloning; `zero` and `scan` retain no output rows and isolate native loading/query/eviction from consumer DTO work. Page cache is warm. The host is shared; wall time is not a controlled CPU microbenchmark.
 
-`memory-profile` inherits release optimization and adds line symbols. Three independently built executables separate default timing, callback-only overhead and DHAT overhead. `LM_QUERY` and `LM_SUMMARY` are JSON-line output. `LM_PHASE` on stderr records begin/end checkpoints. Heap fields are null in binaries without an active DHAT profile. RSS uses Linux `/proc/self/status`; GNU time records peak RSS and whole-process wall time independently.
+`memory-profile` inherits release optimization and adds line symbols. Three independently built executables separate default timing, callback-only overhead and DHAT overhead. `LM_QUERY` and `LM_SUMMARY` are JSON-line output. `LM_PHASE` on stderr records begin/end checkpoints. Heap fields are measured in allocation-meter builds or an active DHAT profile. They are null in unprofiled binaries. RSS uses Linux `/proc/self/status`; GNU time records peak RSS and whole-process wall time independently.
 
 Phase boundaries are inclusive and nested. Do not sum them. Read includes filesystem recovery. ID validation includes decode, cached text access, checking and temporary-value destruction. Schema decode/map construction includes destroying its input values. Native resident validation, record insertion and index maintenance share one boundary. Query includes its planner; eviction includes removal/index work. Remaining uninstrumented gaps include snapshot copying, bucket checks and drop work. Do not assign these gaps to a named phase by subtraction.
 

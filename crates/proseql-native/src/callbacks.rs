@@ -141,10 +141,12 @@ impl Batch {
 
 impl Drop for Batch {
     fn drop(&mut self) {
-        self.dispatch
+        // A failed batch must release the event vector too. Keeping its
+        // capacity retains a record-count-sized buffer in an idle session owner.
+        *self
+            .dispatch
             .queue
             .lock()
-            .expect("native callback queue poisoned")
-            .clear();
+            .expect("native callback queue poisoned") = Vec::new();
     }
 }

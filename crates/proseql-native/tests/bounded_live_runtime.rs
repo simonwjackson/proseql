@@ -71,7 +71,7 @@ fn scoped_queries_never_retain_more_than_n_partitions_plus_one_incoming_payload(
         fs::write(root.join(format!("2025-{month:02}.jsonl")), raw).unwrap();
     }
     assert_eq!(LIVE.load(Ordering::SeqCst), 0);
-    for bound in [1, 2, 3] {
+    for bound in [0, 1, 2, 3] {
         // Start with the repository benchmark descriptor to keep the native
         // source struct-literal contract under test, without a test-only host.
         let mut descriptor = CollectionDescriptor {
@@ -255,7 +255,13 @@ fn scoped_queries_never_retain_more_than_n_partitions_plus_one_incoming_payload(
             fs::write(&january, bad).unwrap();
             PEAK.store(LIVE.load(Ordering::SeqCst), Ordering::SeqCst);
             assert!(runtime
-                .query_bounded("samples", QueryInput::default())
+                .query_bounded(
+                    "samples",
+                    QueryInput {
+                        r#where: Some(json!({"value":{"$lt":0}})),
+                        ..Default::default()
+                    }
+                )
                 .is_err());
             assert!(
                 PEAK.load(Ordering::SeqCst) <= (bound + 1) * ROWS,
@@ -301,6 +307,13 @@ fn scoped_queries_never_retain_more_than_n_partitions_plus_one_incoming_payload(
             PEAK.load(Ordering::SeqCst)
         );
         drop(watch);
+        if bound == 0 {
+            assert_eq!(
+                LIVE.load(Ordering::SeqCst),
+                0,
+                "watch release must free its payloads without another query"
+            );
+        }
         runtime
             .query_bounded(
                 "samples",
@@ -311,8 +324,45 @@ fn scoped_queries_never_retain_more_than_n_partitions_plus_one_incoming_payload(
             )
             .unwrap();
         assert_eq!(LIVE.load(Ordering::SeqCst), bound * ROWS);
+        if bound == 0 {
+            let watch=runtime.watch("samples",proseql_engine::reactive::WatchQueryConfig {r#where:Some(json!({"timestamp":{"$gte":"2025-01-01T00:00:00Z","$lt":"2025-01-31T23:59:59Z"}})),select:Some(json!(["id"])),..Default::default()}).unwrap();
+            let entered = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let release = std::sync::Arc::new(std::sync::Barrier::new(2));
+            std::thread::scope(|scope| {
+                let entered_worker = std::sync::Arc::clone(&entered);
+                let release_worker = std::sync::Arc::clone(&release);
+                let runtime_ref = &runtime;
+                let reader = scope.spawn(move || {
+                    runtime_ref
+                        .read(|_| {
+                            entered_worker.wait();
+                            release_worker.wait();
+                            Ok(())
+                        })
+                        .unwrap()
+                });
+                entered.wait();
+                drop(watch);
+                release.wait();
+                reader.join().unwrap();
+            });
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while LIVE.load(Ordering::SeqCst) > 0 && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert_eq!(
+                LIVE.load(Ordering::SeqCst),
+                0,
+                "a watch dropped during a locked read must reclaim without another query"
+            );
+        }
         eprintln!("LIVE_PAYLOAD_PROOF N={bound} rows_per_partition={ROWS} all_unpinned_peaks<=N+1 pinned_records_and_snapshot_reported=true");
         runtime.close().unwrap();
+        assert_eq!(
+            LIVE.load(Ordering::SeqCst),
+            0,
+            "a closed runtime must release its rows even while the handle remains alive"
+        );
         drop(runtime);
         assert_eq!(
             LIVE.load(Ordering::SeqCst),

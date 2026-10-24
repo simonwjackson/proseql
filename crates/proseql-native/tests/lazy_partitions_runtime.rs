@@ -968,11 +968,6 @@ fn open_rejects_sources_that_do_not_qualify() {
             },
         ),
         (
-            "max_loaded_partitions",
-            config(dir.path()),
-            lazy_options(policy(0, FullScanPolicy::Allow)),
-        ),
-        (
             "JSONL",
             NativeSourceRuntimeConfig {
                 collections: config(dir.path()).collections,

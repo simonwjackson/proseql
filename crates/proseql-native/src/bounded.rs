@@ -297,7 +297,7 @@ impl NativeRuntime {
             &paths,
             |row| visit(&mut accumulator, row),
         );
-        let trimmed = sources_trim(state);
+        let trimmed = sources_trim(&self.inner, state);
         let read = result?;
         trimmed?;
         let sources = state.sources.as_ref().expect("source runtime");

@@ -48,7 +48,7 @@ use crate::sources::{NativeSourceRuntimeConfig, SourceState};
 /// How a lazy partitioned source keeps partitions in memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LazyPartitionPolicy {
-    /// Partitions kept loaded after an operation, at least 1. A full scan and
+    /// Partitions kept loaded after an operation; zero disables unpinned cache retention. A full scan and
     /// partitions pinned by watches can exceed it; the next operation evicts
     /// the least recently used unpinned partitions down to it.
     pub max_loaded_partitions: usize,
@@ -328,11 +328,6 @@ pub(crate) fn configure_lazy(
                 "Lazy partitions do not support relationships into collection '{name}' (from '{}')",
                 other.descriptor.name
             )));
-        }
-        if policy.max_loaded_partitions == 0 {
-            return Err(fail(
-                "Lazy partitions need max_loaded_partitions of at least 1".to_owned(),
-            ));
         }
         lazy.insert(
             name.to_owned(),
