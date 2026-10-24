@@ -9,6 +9,8 @@ mod bounded;
 pub use bounded::BoundedQueryStats;
 mod callbacks;
 mod lazy;
+#[cfg(test)]
+mod lifecycle_tests;
 mod read_snapshot;
 mod schema_checks;
 mod source_sessions;
@@ -21,7 +23,7 @@ pub use sources::{NativeSourceRuntimeConfig, NativeSourceRuntimeOptions};
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use indexmap::IndexMap;
@@ -354,6 +356,7 @@ pub struct NativeRuntime {
 struct RuntimeCore {
     state: Mutex<RuntimeState>,
     lifecycle: AtomicU8,
+    close_complete: Condvar,
     watch_generation: AtomicU64,
     /// Events reported by the managed watcher since the last reload.
     watch_events: Mutex<Vec<proseql_storage::host::StorageEvent>>,
@@ -531,6 +534,7 @@ impl NativeRuntime {
                     resources_released: false,
                 }),
                 lifecycle: AtomicU8::new(OPEN),
+                close_complete: Condvar::new(),
                 watch_generation: AtomicU64::new(0),
                 watch_events: Mutex::new(Vec::new()),
                 pending_unpins: Mutex::new(Vec::new()),
@@ -1119,7 +1123,25 @@ impl NativeRuntime {
             Ordering::Acquire,
         ) {
             Ok(_) => true,
-            Err(CLOSING) => return Ok(()),
+            Err(CLOSING) => {
+                // Another clone owns the close. Its state lock can still be
+                // waiting behind active work, so acquiring that lock alone is
+                // not a completion barrier. A session must wait for cleanup
+                // before releasing its source lease to the next caller.
+                let mut state = self
+                    .inner
+                    .state
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                while !state.resources_released {
+                    state = self
+                        .inner
+                        .close_complete
+                        .wait(state)
+                        .unwrap_or_else(|error| error.into_inner());
+                }
+                return Ok(());
+            }
             Err(_) => false,
         };
         // A panic can poison an active session. Recover the guard only to stop
@@ -1164,6 +1186,7 @@ impl NativeRuntime {
             *pending = Vec::new();
         }
         self.inner.lifecycle.store(CLOSED, Ordering::Release);
+        self.inner.close_complete.notify_all();
         flush_result.and(stop_result)
     }
 }
