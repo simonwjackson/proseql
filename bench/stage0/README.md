@@ -41,7 +41,7 @@ SQLite imports those exact JSON objects into typed columns in separate samples/r
 | open | Construct the backend and its configured metadata; no read query. |
 | idle | Keep a freshly opened backend idle for one second; wall time is the observation interval, not work. |
 
-All successful runs must agree on full-row canonical digests, counts, exact integer-valued f64 sums, and every daily group. Focused tests additionally exercise independent writes, duplicate replay, unsorted append fallback, equal-time sparse block boundaries, and missing/corrupt/stale sidecars. This does not prove general query or mutation parity.
+Native reads use `query_bounded` / `aggregate_grouped_bounded`, matching the consumer's bounded path. Point is a bounded ID-filter query; it is not the separate `find_by_id` cache-miss path, which loads its full scope before trimming (source inspection, not an additional measured API). All successful runs must agree on full-row canonical digests, counts, exact integer-valued f64 sums, and every daily group. Focused tests additionally exercise independent writes, duplicate replay, unsorted append fallback, equal-time sparse block boundaries, and missing/corrupt/stale sidecars. This does not prove general query or mutation parity.
 
 ## Timing, memory and caches
 
@@ -54,6 +54,8 @@ RSS comes from `/proc/self/status`. Reset VmHWM immediately before the operation
 The separate counting allocator reports Rust live/peak *requested bytes*, not allocator arenas. SQLite allocates in C: report its `sqlite3_memory_used`/`sqlite3_memory_highwater` separately. Do not add independent peaks and call that an exact joint peak. `/proc` sampling itself can add a few KiB to meter peaks. Heap-build timings are not baseline timings.
 
 `mincore` probes source-file page residency without touching data pages. Report before process launch and after process exit, rounded to OS pages, including sidecars for the spike and database files for SQLite. This is owned-file residency, not system Cached or disjoint extra RSS. Post-exit SQLite residency includes connection-close checkpoint work outside the append timer. Cold eviction does not evict a virtual disk/controller cache. Warm trials prewarm the whole backend file set before the internal warm-up query. SQLite's single database contains both shapes, while the text file set is the selected collection. Thus warm cache columns describe deliberately prewarmed fixtures, not the query's minimum working set; use the cold-after column to see touched source pages plus readahead. Temporary SQLite sorter pages exist only during the query and are not captured by the post-exit source-file residency probe.
+
+The main matrix keeps the requested default scope policy. A separate OOM diagnostic uses the same 1 GiB/no-swap/nice/timeout limits with `OOMPolicy=continue` only to keep the small observer alive after the native child is killed. It samples `/proc` RSS and the owning cgroup's peak/events. Another diagnostic observes actual SQLite `etilqs_` file descriptors under the owned temp directory; neither diagnostic is a published timing trial.
 
 The perf capability check is the requested `nix run --builders '' nixpkgs#perf -- stat -e instructions:u true`. If supported, the Rust harness uses `perf_event_open` to count user instructions around only the timed operation, excluding setup and sleeps outside that operation. It uses no architecture-specific intrinsics.
 

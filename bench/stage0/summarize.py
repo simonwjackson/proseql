@@ -181,9 +181,54 @@ def summarize(root):
             )
         lines.append("")
     (root / "tables.md").write_text("\n".join(lines))
+    diagnostic = (
+        json.loads((root / "raw-append-diagnostic.json").read_text())
+        if (root / "raw-append-diagnostic.json").exists()
+        else None
+    )
+    temp_check = (
+        json.loads((root / "sqlite-temp-diagnostic.json").read_text())
+        if (root / "sqlite-temp-diagnostic.json").exists()
+        else None
+    )
+    if diagnostic and not (
+        diagnostic["returncode"] == -9
+        and diagnostic["memory_events_after"]["oom_kill"]
+        > diagnostic["memory_events_before"]["oom_kill"]
+    ):
+        raise ValueError("native abort diagnostic did not confirm an OOM kill")
+    if temp_check and (
+        temp_check["returncode"] != 0
+        or not temp_check["temporary_file_paths"]
+        or any(
+            not p.startswith("/home/simon/work/proseql-stage0-data/tmp/")
+            for p in temp_check["temporary_file_paths"]
+        )
+    ):
+        raise ValueError(
+            "SQLite temporary-file location was not observed under the owned data directory"
+        )
     print(
         json.dumps(
             {
+                "native_raw_append_diagnostic": {
+                    k: diagnostic[k]
+                    for k in (
+                        "returncode",
+                        "rss_sampled_peak_lower_bound",
+                        "cgroup_peak_bytes",
+                        "cgroup_anon_sampled_peak",
+                        "cgroup_file_sampled_peak",
+                        "memory_events_before",
+                        "memory_events_after",
+                        "wall_s",
+                    )
+                }
+                if diagnostic
+                else None,
+                "sqlite_temporary_file_paths": temp_check["temporary_file_paths"]
+                if temp_check
+                else None,
                 "trials": len(records),
                 "successful": sum(not r["returncode"] for r in records),
                 "failed": sum(bool(r["returncode"]) for r in records),
