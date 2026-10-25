@@ -37,7 +37,7 @@ SQLite imports those exact JSON objects into typed columns in separate samples/r
 | hour | May 1, 00:00–01:00 UTC, both metrics, return all 90 full records. |
 | month | May, steps only, count/sum by UTC day. |
 | ten | January–October, both metrics, count/sum by day and metric. |
-| append | One batch of 1,000 requests: 900 new IDs and 100 exact existing duplicates, not an unchecked write. |
+| append | Headline (`run.sh append-new`): one batch of 1,000 genuinely new IDs; each is checked for a duplicate against all existing data before the write. Native has two labelled variants: `proseql` (`create_many` as shipped; checks only loaded/routed partitions) and `proseql-global` (a benchmark-only `query_bounded` `id $in` scan of every partition, then `create_many`). Supplement (main matrix, built at `03d0cb0`): 900 new IDs and 100 exact existing duplicates, the rejection path. Neither is an unchecked write. |
 | open | Construct the backend and its configured metadata; no read query. |
 | idle | Keep a freshly opened backend idle for one second; wall time is the observation interval, not work. |
 

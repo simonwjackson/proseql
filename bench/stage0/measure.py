@@ -104,7 +104,7 @@ def run(
     out,
     kinds=("samples", "raw"),
     workloads=("point", "hour", "month", "ten", "append", "open", "idle"),
-    raw_native_single=False,
+    skip_after_kill=False,
 ):
     if os.uname().nodename.split(".")[0] != "yari":
         raise RuntimeError("measurements are allowed only on yari")
@@ -112,6 +112,8 @@ def run(
     records = []
     repeats = int(os.environ.get("STAGE0_REPEATS", "3"))
     selected = os.environ.get("STAGE0_BACKENDS", "sqlite,proseql,spike").split(",")
+    # Cells whose earlier trial was SIGKILLed (the 1 GiB scope's OOM kill).
+    killed = set()
     for profile in ("timing", "meter"):
         for repeat in range(repeats if profile == "timing" else 1):
             for kind in kinds:
@@ -122,16 +124,31 @@ def run(
                         + selected[: repeat % len(selected)]
                     )
                     for backend in order:
-                        # Once an operation is known to abort, do not spend shared-host
-                        # CPU repeating the same OOM merely to manufacture a median.
-                        if (
-                            raw_native_single
-                            and kind == "raw"
-                            and backend in ("proseql", "proseql-global")
-                            and (profile == "meter" or repeat > 0)
-                        ):
-                            continue
                         for cache in ("cold", "warm"):
+                            cell = (kind, workload, backend, cache)
+                            name = f"{profile}-{repeat}-{kind}-{workload}-{backend}-{cache}"
+                            # Once a cell has been SIGKILLed, do not spend shared-host
+                            # CPU repeating the same kill merely to manufacture a median.
+                            # The skip is recorded; it is never counted as a trial.
+                            if skip_after_kill and cell in killed:
+                                with (out / "skipped.jsonl").open("a") as stream:
+                                    stream.write(
+                                        json.dumps(
+                                            {
+                                                "profile": profile,
+                                                "repeat": repeat,
+                                                "kind": kind,
+                                                "workload": workload,
+                                                "backend": backend,
+                                                "cache": cache,
+                                                "reason": "earlier trial of this cell was SIGKILLed",
+                                            },
+                                            sort_keys=True,
+                                        )
+                                        + "\n"
+                                    )
+                                print(name, "skipped", flush=True)
+                                continue
                             root = base
                             if workload == "append":
                                 root = data / "append-trial"
@@ -170,7 +187,6 @@ def run(
                                 workload,
                                 cache,
                             ]
-                            name = f"{profile}-{repeat}-{kind}-{workload}-{backend}-{cache}"
                             scope = [
                                 "systemd-run",
                                 "--user",
@@ -225,6 +241,8 @@ def run(
                                     and count == 1000
                                     and record.get("append_new_rows") == 1000
                                 )
+                            if result.returncode in (-9, 137):
+                                killed.add(cell)
                             (out / f"{name}.stderr").write_text(result.stderr)
                             records.append(record)
                             with (out / "trials.jsonl").open("a") as stream:

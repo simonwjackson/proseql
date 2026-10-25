@@ -115,7 +115,7 @@ case "$action" in
       cp "$out/source.sha" "$out/binaries.sha256" "$out/harness.sha256" "$out/append-new/"
     fi
     scope 300 "$data/timing" reindex "$data/base" > "$out/append-new/reindex.log" 2>&1
-    STAGE0_BACKENDS=sqlite,proseql,proseql-global,spike STAGE0_REPEATS=3 scope 1800 python3 -c 'import sys; from pathlib import Path; sys.path.insert(0, "bench/stage0"); import measure; measure.run(Path(sys.argv[1]), Path(sys.argv[2]), workloads=("append",), raw_native_single=True)' "$data" "$out/append-new"
+    STAGE0_BACKENDS=sqlite,proseql,proseql-global,spike STAGE0_REPEATS=3 scope 1800 python3 -c 'import sys; from pathlib import Path; sys.path.insert(0, "bench/stage0"); import measure; measure.run(Path(sys.argv[1]), Path(sys.argv[2]), workloads=("append",), skip_after_kill=True)' "$data" "$out/append-new"
     ;;
   driver-check)
     mkdir -p "$out/driver-check"
