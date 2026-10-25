@@ -1,0 +1,25 @@
+Running as unit: run-p2312455-i2312456.scope; invocation ID: bc0074e875ad4c3a991922581e980bca
+proseql development environment
+│  core.hooksPath is set locally to '.git/hooks'
+│  Installing hooks anyway in '.git/hooks'
+sync hooks: ✔️ (pre-push, pre-commit)
+   Compiling getrandom v0.4.3
+   Compiling bitflags v2.13.1
+   Compiling rustix v1.1.4
+   Compiling linux-raw-sys v0.12.1
+   Compiling fastrand v2.5.0
+   Compiling once_cell v1.21.4
+   Compiling rusqlite v0.38.0
+   Compiling tempfile v3.27.0
+   Compiling proseql-stage0 v0.0.0 (/home/simon/work/proseql-stage0/bench/stage0)
+    Finished `release` profile [optimized] target(s) in 10.73s
+     Running unittests src/main.rs (bench/stage0/target/release/deps/proseql_stage0-56af8cd14070c86e)
+
+running 4 tests
+test spike::tests::unescaped_fields_are_borrowed_and_escaped_fields_decode ... ok
+test tests::conflicting_duplicates_fail_without_publishing_new_rows ... ok
+test tests::real_backends_agree_on_rows_groups_and_identical_duplicates ... ok
+test tests::stale_index_and_same_timestamp_block_boundaries_are_safe ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 17.36s
+

@@ -1,0 +1,1 @@
+{"fixture":{"generator":1,"rows_per_kind":656640,"minutes_per_month":null,"bytes":483724410},"sqlite":{"sqlite_version":"3.51.1","pragmas":{"journal_mode":"wal","synchronous":1,"cache_size":-2000,"page_size":4096,"mmap_size":0,"temp_store":0},"indexes":["CREATE INDEX raw_metric_time ON raw(metric,time)","CREATE INDEX samples_metric_time ON samples(metric,time)"]}}

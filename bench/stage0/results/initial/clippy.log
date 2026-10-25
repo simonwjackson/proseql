@@ -1,0 +1,6 @@
+proseql development environment
+│  core.hooksPath is set locally to '.git/hooks'
+│  Installing hooks anyway in '.git/hooks'
+sync hooks: ✔️ (pre-commit, pre-push)
+    Checking proseql-stage0 v0.0.0 (/home/simon/work/proseql-stage0/bench/stage0)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.54s

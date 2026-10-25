@@ -1,0 +1,12 @@
+Running as unit: run-p2312180-i2312181.scope; invocation ID: 5592ec5edc8c443d95be0b6d4e3c2d10
+
+ Performance counter stats for 'true':
+
+           789,479      instructions:u                                                        
+
+       0.001494087 seconds time elapsed
+
+       0.001592000 seconds user
+       0.000000000 seconds sys
+
+
