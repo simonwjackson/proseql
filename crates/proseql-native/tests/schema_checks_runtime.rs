@@ -193,12 +193,19 @@ fn single_file_open_and_reload_apply_the_registered_predicate_and_keep_last_know
 
 #[test]
 fn source_and_lazy_reload_validate_host_checks_before_replacing_last_known_good() {
-    for mode in ["documents", "graph", "file", "partitioned", "lazy"] {
+    for mode in [
+        "documents",
+        "graph",
+        "file",
+        "partitioned",
+        "lazy",
+        "lazy-resident-zero",
+    ] {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().to_str().unwrap();
         let file = if mode == "documents" || mode == "graph" {
             "allowed.yaml"
-        } else if mode == "lazy" {
+        } else if mode.starts_with("lazy") {
             "allowed.jsonl"
         } else {
             "allowed.json"
@@ -210,7 +217,7 @@ fn source_and_lazy_reload_validate_host_checks_before_replacing_last_known_good(
             let records = json!({"allowed.one":record});
             match mode {
                 "documents" | "graph" => json!({"items":records}).to_string(),
-                "lazy" => format!("{record}\n"),
+                "lazy" | "lazy-resident-zero" => format!("{record}\n"),
                 _ => records.to_string(),
             }
         };
@@ -253,7 +260,12 @@ fn source_and_lazy_reload_validate_host_checks_before_replacing_last_known_good(
                 id: "source".into(),
                 collection: "items".into(),
                 root: root.into(),
-                format: if mode == "lazy" { "jsonl" } else { "json" }.into(),
+                format: if mode.starts_with("lazy") {
+                    "jsonl"
+                } else {
+                    "json"
+                }
+                .into(),
                 partition_by: PartitionKey::Prefix {
                     field: "id".into(),
                     delimiter: ".".into(),
@@ -262,7 +274,7 @@ fn source_and_lazy_reload_validate_host_checks_before_replacing_last_known_good(
             }),
         };
         let mut descriptor = descriptor();
-        descriptor.append_only = mode == "lazy";
+        descriptor.append_only = mode.starts_with("lazy");
         if let SchemaNode::Struct { fields } = &mut descriptor.schema {
             fields.push(scores_field(SchemaNode::NumFromStr));
         }
@@ -279,8 +291,16 @@ fn source_and_lazy_reload_validate_host_checks_before_replacing_last_known_good(
             NativeSourceRuntimeOptions {
                 callbacks,
                 watch_debounce: None,
-                lazy_partitions: if mode == "lazy" {
-                    IndexMap::from([("source".into(), LazyPartitionPolicy::new(1))])
+                execution_model: if mode == "lazy-resident-zero" {
+                    proseql_native::ExecutionModel::Resident
+                } else {
+                    proseql_native::ExecutionModel::Streaming
+                },
+                lazy_partitions: if mode.starts_with("lazy") {
+                    IndexMap::from([(
+                        "source".into(),
+                        LazyPartitionPolicy::new(if mode == "lazy-resident-zero" { 0 } else { 1 }),
+                    )])
                 } else {
                     IndexMap::new()
                 },
@@ -300,14 +320,36 @@ fn source_and_lazy_reload_validate_host_checks_before_replacing_last_known_good(
         );
         assert!(calls.load(Ordering::SeqCst) > 0, "{mode}");
         std::fs::write(&path, content("blocked", "3")).unwrap();
-        let error = runtime.reload().unwrap_err();
-        assert_predicate_rejection(&error);
-        assert_eq!(
-            runtime.find_by_id("items", "allowed.one").unwrap().unwrap()["name"],
-            "allowed",
-            "{mode}"
-        );
-        assert!(runtime.last_reload_error().unwrap().is_some(), "{mode}");
+        if mode.starts_with("lazy") {
+            // No watch owns a last-known-good result. Reload lists the files;
+            // every read of the invalid generation must fail, never return it.
+            runtime.reload().unwrap();
+            assert_predicate_rejection(&runtime.find_by_id("items", "allowed.one").unwrap_err());
+            assert_predicate_rejection(
+                &runtime
+                    .query("items", Default::default(), None)
+                    .unwrap_err(),
+            );
+            assert_predicate_rejection(
+                &runtime
+                    .aggregate(
+                        "items",
+                        None,
+                        &proseql_engine::query::AggregateConfig::count(),
+                    )
+                    .unwrap_err(),
+            );
+            assert!(runtime.last_reload_error().unwrap().is_none());
+        } else {
+            let error = runtime.reload().unwrap_err();
+            assert_predicate_rejection(&error);
+            assert_eq!(
+                runtime.find_by_id("items", "allowed.one").unwrap().unwrap()["name"],
+                "allowed",
+                "{mode}"
+            );
+            assert!(runtime.last_reload_error().unwrap().is_some(), "{mode}");
+        }
         std::fs::write(&path, content("allowed", "4")).unwrap();
         runtime.reload().unwrap();
         assert_eq!(
