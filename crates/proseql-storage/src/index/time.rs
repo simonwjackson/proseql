@@ -49,7 +49,7 @@ impl TimeIndex {
             ordered: true,
             ..Self::default()
         };
-        index.extend(host, path, 0)?;
+        index.extend(host, path, 0, SourceGeneration::observe(host, path)?)?;
         Ok(index)
     }
 
@@ -58,12 +58,13 @@ impl TimeIndex {
             *self = Self::build(host, &self.path, &self.field, self.stride)?;
             return Ok(());
         };
-        match generation.check(host)? {
+        let (check, current) = generation.advance(host)?;
+        match check {
             GenerationCheck::Unchanged => Ok(()),
             GenerationCheck::Appended { .. } if self.resume == generation.covered_len => {
                 // Publication is atomic even when parsing the new suffix fails.
                 let mut next = self.clone();
-                next.extend(host, &self.path, self.resume)?;
+                next.extend(host, &self.path, self.resume, current)?;
                 *self = next;
                 Ok(())
             }
@@ -79,8 +80,8 @@ impl TimeIndex {
         host: &dyn StorageHost,
         path: &str,
         start: u64,
+        generation: Option<SourceGeneration>,
     ) -> Result<(), EngineError> {
-        let generation = SourceGeneration::observe(host, path)?;
         let end = generation.as_ref().map_or(0, |g| g.covered_len);
         self.resume = end;
         rows::visit_lines(
@@ -166,7 +167,7 @@ impl TimeIndex {
         Some(SeekRange {
             start_offset: start.map_or(0, |entry| entry.offset),
             start_row: start.map_or(0, |entry| entry.row),
-            end_offset,
+            end_offset: end_offset.map(|end| end.max(start.map_or(0, |entry| entry.offset))),
         })
     }
 

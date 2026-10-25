@@ -7,6 +7,10 @@ use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+mod partitions;
+
+const APPEND_DELTA_LIMIT: usize = 4096;
+
 #[derive(Deserialize)]
 struct Identity<'a> {
     #[serde(borrow)]
@@ -15,7 +19,20 @@ struct Identity<'a> {
 
 /// Only this field is materialised; serde skips all record payload fields.
 fn identity(bytes: &[u8]) -> Result<Cow<'_, str>, serde_json::Error> {
-    serde_json::from_slice::<Identity<'_>>(bytes).map(|row| row.id)
+    match serde_json::from_slice::<Identity<'_>>(bytes) {
+        Ok(row) => Ok(row.id),
+        Err(error) => {
+            // Struct decoding rejects repeated object keys; Value decoding
+            // (the resident contract) keeps the last key. This rare fallback
+            // also preserves escaped and repeated `id` field semantics.
+            let value: serde_json::Value = serde_json::from_slice(bytes)?;
+            value
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .map(|id| Cow::Owned(id.to_owned()))
+                .ok_or(error)
+        }
+    }
 }
 
 fn hash(id: &str) -> u64 {
@@ -46,8 +63,10 @@ struct File {
 #[derive(Debug, Clone, Default)]
 pub struct IdLocator {
     entries: Vec<Entry>,
+    delta: Vec<Entry>,
     files: Vec<File>,
     wide_rows: HashMap<(u32, u64), u64>,
+    partitioned: bool,
 }
 
 pub fn id_error(path: &str, message: impl Into<String>) -> EngineError {
@@ -66,7 +85,6 @@ impl IdLocator {
             locator.add_file(host, path)?;
         }
         locator.finish(host)?;
-        locator.entries.shrink_to_fit();
         Ok(locator)
     }
 
@@ -80,21 +98,58 @@ impl IdLocator {
             resume: 0,
             dirty: false,
         });
-        self.scan_file(host, file, 0, 0)
+        self.scan_file(host, file, 0, 0, SourceGeneration::observe(host, path)?)
     }
 
     fn entry(&mut self, file: u32, id: &str, location: RowLocation) {
+        let entry = self.make_entry(file, id, location);
+        // Reserve in bounded steps. Appends use delta, never this base buffer.
+        if self.entries.len() == self.entries.capacity() {
+            self.entries.reserve_exact(APPEND_DELTA_LIMIT);
+        }
+        self.entries.push(entry);
+    }
+
+    fn make_entry(&mut self, file: u32, id: &str, location: RowLocation) -> Entry {
         let row = u32::try_from(location.ordinal).unwrap_or_else(|_| {
             self.wide_rows
                 .insert((file, location.offset), location.ordinal);
             u32::MAX
         });
-        self.entries.push(Entry {
+        Entry {
             hash: hash(id),
             offset: location.offset,
             file,
             row,
-        });
+        }
+    }
+
+    fn merge_delta(&mut self) {
+        if self.delta.is_empty() {
+            return;
+        }
+        self.delta
+            .sort_unstable_by_key(|entry| (entry.hash, entry.file, entry.offset));
+        let base = std::mem::take(&mut self.entries);
+        let delta = std::mem::take(&mut self.delta);
+        // One exact allocation and linear merge; never sort the large base
+        // once per touched partition or double its post-commit capacity.
+        let mut merged = Vec::with_capacity(base.len() + delta.len());
+        let mut base = base.into_iter().peekable();
+        let mut delta = delta.into_iter().peekable();
+        while let (Some(a), Some(b)) = (base.peek(), delta.peek()) {
+            let next = if (a.hash, a.file, a.offset) <= (b.hash, b.file, b.offset) {
+                base.next()
+            } else {
+                delta.next()
+            };
+            if let Some(entry) = next {
+                merged.push(entry);
+            }
+        }
+        merged.extend(base);
+        merged.extend(delta);
+        self.entries = merged;
     }
 
     fn scan_file(
@@ -103,6 +158,7 @@ impl IdLocator {
         file: u32,
         start: u64,
         first: u64,
+        generation: Option<SourceGeneration>,
     ) -> Result<(), EngineError> {
         let path = self.files[file as usize].path.clone();
         // Drop any speculative after_commit entries in the suffix. The scan
@@ -111,7 +167,6 @@ impl IdLocator {
             .retain(|entry| entry.file != file || entry.offset < start);
         self.wide_rows
             .retain(|(index, offset), _| *index != file || *offset < start);
-        let generation = SourceGeneration::observe(host, &path)?;
         let end = generation.as_ref().map_or(0, |g| g.covered_len);
         let mut count = first;
         let mut resume = end;
@@ -209,6 +264,12 @@ impl IdLocator {
     /// Refresh before locate. Membership is exact after candidate verification;
     /// missing files are removed and edits rebuild only the affected files.
     pub fn refresh(&mut self, host: &dyn StorageHost, paths: &[String]) -> Result<(), EngineError> {
+        if self.partitioned {
+            return Err(crate::generation::changed(
+                self.files.first().map_or("", |file| file.path.as_str()),
+            ));
+        }
+        self.merge_delta();
         if !self.files.iter().map(|file| &file.path).eq(paths.iter()) {
             *self = Self::build(host, paths)?;
             return Ok(());
@@ -216,14 +277,18 @@ impl IdLocator {
         let mut changed = false;
         for file in 0..self.files.len() {
             let state = &self.files[file];
-            let check = match &state.generation {
-                Some(generation) => generation.check(host)?,
+            let (check, generation) = match &state.generation {
+                Some(generation) => generation.advance(host)?,
                 None => {
-                    if host.stat(&state.path)?.is_some() {
-                        GenerationCheck::Replaced
-                    } else {
-                        GenerationCheck::Missing
-                    }
+                    let generation = SourceGeneration::observe(host, &state.path)?;
+                    (
+                        if generation.is_some() {
+                            GenerationCheck::Replaced
+                        } else {
+                            GenerationCheck::Missing
+                        },
+                        generation,
+                    )
                 }
             };
             if check == GenerationCheck::Unchanged && !state.dirty {
@@ -252,7 +317,7 @@ impl IdLocator {
                 self.wide_rows
                     .retain(|(index, _), _| *index as usize != file);
             }
-            if let Err(error) = self.scan_file(host, file as u32, start, first) {
+            if let Err(error) = self.scan_file(host, file as u32, start, first, generation) {
                 self.files[file].dirty = true;
                 return Err(error);
             }
@@ -270,7 +335,9 @@ impl IdLocator {
 
     /// Ordinal may be `UNKNOWN_ORDINAL` for rows recorded by
     /// `record_appended` until the next refresh; use locations from `locate`
-    /// for verification reads only, never for ordering.
+    /// for verification reads only, never for ordering. Custom codecs return
+    /// `UNKNOWN_OFFSET`: verify by decoding that partition through its codec,
+    /// never by reading an individual text line.
     pub fn locate(&self, id: &str) -> Result<Vec<(String, RowLocation)>, EngineError> {
         if let Some(file) = self.files.iter().find(|file| file.dirty) {
             return Err(crate::generation::changed(&file.path));
@@ -280,6 +347,7 @@ impl IdLocator {
         Ok(self.entries[begin..]
             .iter()
             .take_while(|entry| entry.hash == key)
+            .chain(self.delta.iter().filter(|entry| entry.hash == key))
             .map(|entry| {
                 let path = &self.files[entry.file as usize].path;
                 let preceding = self.files.iter().filter(|file| file.path < *path);
@@ -299,7 +367,11 @@ impl IdLocator {
                     path.clone(),
                     RowLocation {
                         partition,
-                        offset: entry.offset,
+                        offset: if self.partitioned {
+                            super::UNKNOWN_OFFSET
+                        } else {
+                            entry.offset
+                        },
                         ordinal,
                     },
                 )
@@ -327,19 +399,31 @@ impl IdLocator {
                 index
             }
         };
-        // Check the already sorted prefix by hash. Batch rows are checked
-        // separately until the one final sort, not with an O(rows * table) scan.
-        let covered = self.entries.len();
+        if self.partitioned {
+            // A whole-partition codec can change old IDs when new text is
+            // appended. Only its decoder can publish new membership.
+            self.files[file as usize].dirty = true;
+            return Ok(());
+        }
+        // Search the sorted base by hash and the small append delta linearly.
         for (id, location) in rows {
+            // All row starts before resume are already covered, regardless
+            // of the supplied ID. Newly recorded offsets use the rare-row
+            // table until refresh, so repeats need no table-wide offset scan.
+            if location.offset < self.files[file as usize].resume
+                || self.wide_rows.get(&(file, location.offset)) == Some(&super::UNKNOWN_ORDINAL)
+            {
+                continue;
+            }
             let key = hash(id);
-            let begin = self.entries[..covered].partition_point(|entry| entry.hash < key);
-            let present = self.entries[begin..covered]
+            let begin = self.entries.partition_point(|entry| entry.hash < key);
+            let present = self.entries[begin..]
                 .iter()
                 .take_while(|entry| entry.hash == key)
-                .chain(self.entries[covered..].iter())
+                .chain(self.delta.iter())
                 .any(|entry| entry.file == file && entry.offset == location.offset);
             if !present {
-                self.entry(
+                let entry = self.make_entry(
                     file,
                     id,
                     RowLocation {
@@ -348,18 +432,24 @@ impl IdLocator {
                         ordinal: super::UNKNOWN_ORDINAL,
                     },
                 );
+                if self.delta.len() == self.delta.capacity() {
+                    self.delta
+                        .reserve_exact(APPEND_DELTA_LIMIT - self.delta.len());
+                }
+                self.delta.push(entry);
+                if self.delta.len() >= APPEND_DELTA_LIMIT {
+                    self.merge_delta();
+                }
             }
         }
         // No host was passed: do not advance the checked generation, row
         // count or resume offset. Refresh scans the entire unverified suffix.
-        self.entries
-            .sort_unstable_by_key(|entry| (entry.hash, entry.file, entry.offset));
         Ok(())
     }
 
     pub fn resident_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
-            + self.entries.capacity() * std::mem::size_of::<Entry>()
+            + (self.entries.capacity() + self.delta.capacity()) * std::mem::size_of::<Entry>()
             + self.files.capacity() * std::mem::size_of::<File>()
             + self
                 .files
