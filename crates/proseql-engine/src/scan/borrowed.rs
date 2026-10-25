@@ -112,6 +112,15 @@ impl Serialize for BorrowedValue<'_> {
 }
 impl BorrowedValue<'_> {
     pub fn get(&self, path: &str) -> Option<&Self> {
+        if !path.contains('.') {
+            let Self::Object(fields) = self else {
+                return None;
+            };
+            return fields
+                .iter()
+                .find(|(key, _)| key == path)
+                .map(|(_, value)| value);
+        }
         let mut value = self;
         for part in path.split('.') {
             let Self::Object(fields) = value else {

@@ -14,6 +14,7 @@ pub struct TextHost {
     inner: FsStorageHost,
     pub reads: Mutex<Vec<(u64, usize)>>,
     append_on_read: Mutex<Option<String>>,
+    token: bool,
 }
 impl TextHost {
     pub fn new() -> Self {
@@ -21,6 +22,7 @@ impl TextHost {
             inner: FsStorageHost::new_polling(Duration::from_secs(3600)).unwrap(),
             reads: Mutex::new(Vec::new()),
             append_on_read: Mutex::new(None),
+            token: false,
         }
     }
 }
@@ -54,21 +56,14 @@ impl StorageHost for TextHost {
         Ok(bytes)
     }
     fn stat(&self, path: &str) -> Result<Option<FileStat>, EngineError> {
-        use std::hash::{Hash, Hasher};
-        use std::os::unix::fs::MetadataExt;
+        if self.token {
+            return self.inner.stat(path);
+        }
         let metadata = match fs::metadata(path) {
             Ok(metadata) => metadata,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(error(path, e)),
         };
-        let mut hash = std::collections::hash_map::DefaultHasher::new();
-        (
-            metadata.dev(),
-            metadata.ino(),
-            metadata.ctime(),
-            metadata.ctime_nsec(),
-        )
-            .hash(&mut hash);
         Ok(Some(FileStat {
             len: metadata.len(),
             modified_ns: metadata
@@ -76,7 +71,7 @@ impl StorageHost for TextHost {
                 .ok()
                 .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_nanos()),
-            change_id: Some(hash.finish()),
+            change_id: None,
         }))
     }
     fn write(&self, path: &str, data: &str) -> Result<(), EngineError> {
@@ -117,7 +112,7 @@ impl StorageHost for TextHost {
 }
 
 #[test]
-fn appended_refresh_reads_prefix_once_for_proof_and_decodes_only_suffix() {
+fn tokenless_appended_refresh_proves_prefix_and_decodes_only_suffix() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir
         .path()
@@ -135,14 +130,14 @@ fn appended_refresh_reads_prefix_once_for_proof_and_decodes_only_suffix() {
     host.append(&path, "{\"id\":\"external\"}\n").unwrap();
     locator.refresh(&host, &paths).unwrap();
     let reads = host.reads.lock().unwrap();
-    // One checked prefix hash. A second prefix read would reveal a full ID
-    // rebuild or a second, unsafe check/observe window.
+    // A tokenless host hashes the prefix during advance and again to check
+    // for races after the suffix scan. Neither pass decodes prefix IDs.
     assert_eq!(
         reads
             .iter()
             .filter(|(offset, _)| *offset < old.len() as u64)
             .count(),
-        1
+        2
     );
     assert_eq!(
         reads
@@ -152,6 +147,50 @@ fn appended_refresh_reads_prefix_once_for_proof_and_decodes_only_suffix() {
         2
     );
     assert_eq!(locator.locate("external").unwrap()[0].1.ordinal, 3000);
+}
+
+#[test]
+fn trusted_fs_token_skips_unchanged_text_and_rebuilds_changed_prefixes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir
+        .path()
+        .join("token.jsonl")
+        .to_string_lossy()
+        .into_owned();
+    let mut host = TextHost::new();
+    host.token = true;
+    host.write(&path, "{\"id\":\"old\"}\n").unwrap();
+    let generation = proseql_storage::generation::SourceGeneration::observe(&host, &path)
+        .unwrap()
+        .unwrap();
+    assert!(generation.change_id.is_some());
+    assert!(generation.check_hash.is_none());
+    let paths = vec![path.clone()];
+    let mut locator = IdLocator::build(&host, &paths).unwrap();
+    host.reads.lock().unwrap().clear();
+    locator.refresh(&host, &paths).unwrap();
+    assert!(host.reads.lock().unwrap().is_empty());
+    host.write(&path, "{\"id\":\"new\"}\n").unwrap();
+    assert_eq!(
+        generation.check(&host).unwrap(),
+        proseql_storage::generation::GenerationCheck::Replaced
+    );
+    locator.refresh(&host, &paths).unwrap();
+    assert!(locator.locate("old").unwrap().is_empty());
+    assert_eq!(locator.locate("new").unwrap().len(), 1);
+    host.append(&path, "{\"id\":\"external\"}\n").unwrap();
+    let mut visited = 0;
+    locator
+        .refresh_visiting(&host, &paths, &mut |_, _, _, _| {
+            visited += 1;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        visited, 2,
+        "changed ctime does not prove append-only growth"
+    );
+    assert_eq!(locator.locate("external").unwrap().len(), 1);
 }
 
 /// Run explicitly in release mode on aka with --x86-64-v2 -- --ignored --nocapture.
@@ -251,7 +290,7 @@ fn measure_656k_rows() {
         paths.iter().map(|path| path.capacity()).sum::<usize>()
     );
 
-    // Full-prefix proof is unavoidable without an append token from the host.
+    // Changed identity tokens conservatively rebuild; they do not prove append.
     let generation = proseql_storage::generation::SourceGeneration::observe(&host, &paths[0])
         .unwrap()
         .unwrap();
@@ -263,10 +302,10 @@ fn measure_656k_rows() {
     let start = Instant::now();
     assert!(matches!(
         generation.check(&host).unwrap(),
-        proseql_storage::generation::GenerationCheck::Appended { .. }
+        proseql_storage::generation::GenerationCheck::Replaced
     ));
     println!(
-        "changed_month_prefix_proof_ms={:.3}",
+        "changed_month_token_check_ms={:.3}",
         start.elapsed().as_secs_f64() * 1000.0
     );
     let start = Instant::now();

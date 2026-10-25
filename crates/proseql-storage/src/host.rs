@@ -43,13 +43,15 @@ pub trait WatchHandle: Send + Sync {
 /// substitute an ordinary write. See `docs/native-sources.md` for ownership,
 /// synchronization, watch lifecycle and crash rules.
 /// File metadata for change detection. `modified_ns` is the modification time
-/// in nanoseconds since the Unix epoch. `change_id` is a host-specific identity
-/// that changes when the file is replaced (for example device, inode and
-/// ctime combined); `None` when the host has none.
+/// in nanoseconds since the Unix epoch. `change_id` is a host-specific content
+/// generation token (for example device, inode and ctime combined).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileStat {
     pub len: u64,
     pub modified_ns: Option<u128>,
+    /// `Some` only if the value changes on every content change to the file:
+    /// in-place edit, append, truncation or replacement. Hosts that cannot
+    /// guarantee this must return `None`; callers then use checked hashes.
     pub change_id: Option<u64>,
 }
 

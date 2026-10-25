@@ -36,6 +36,59 @@ fn compare(a: &Value, b: &Value) -> Option<Ordering> {
 }
 
 impl TimeIndex {
+    /// Start an unpublished index to fill during the caller's canonical scan.
+    pub fn begin(
+        host: &dyn StorageHost,
+        path: &str,
+        field: &str,
+        stride: usize,
+    ) -> Result<Self, EngineError> {
+        let generation = SourceGeneration::observe(host, path)?;
+        Ok(Self {
+            path: path.into(),
+            field: field.into(),
+            stride: stride.max(1),
+            ordered: true,
+            resume: generation
+                .as_ref()
+                .map_or(0, |generation| generation.covered_len),
+            generation,
+            ..Self::default()
+        })
+    }
+
+    pub fn push_key(&mut self, key: Value, offset: u64, final_line: bool) {
+        if final_line {
+            self.resume = offset;
+        }
+        if compare(&key, &key).is_none()
+            || self.last.as_ref().is_some_and(|last| {
+                !matches!(compare(last, &key), Some(Ordering::Less | Ordering::Equal))
+            })
+        {
+            self.ordered = false;
+        }
+        if self.rows.is_multiple_of(self.stride as u64) {
+            self.entries.push(Checkpoint {
+                key: key.clone(),
+                offset,
+                row: self.rows,
+            });
+        }
+        self.last = Some(key);
+        self.rows += 1;
+    }
+
+    /// Do not publish offsets unless they still belong to the observed text.
+    pub fn complete(self, host: &dyn StorageHost) -> Result<Self, EngineError> {
+        if let Some(generation) = &self.generation {
+            if generation.check(host)? != GenerationCheck::Unchanged {
+                return Err(crate::generation::changed(&self.path));
+            }
+        }
+        Ok(self)
+    }
+
     pub fn build(
         host: &dyn StorageHost,
         path: &str,
@@ -51,6 +104,34 @@ impl TimeIndex {
         };
         index.extend(host, path, 0, SourceGeneration::observe(host, path)?)?;
         Ok(index)
+    }
+
+    /// Consume checked own-append evidence only for this exact cached prefix.
+    /// A mismatched prefix, repaired tail, or changed accepted generation must
+    /// fall back to ordinary refresh; none can infer an append from metadata.
+    pub fn extend_checked_append(
+        &mut self,
+        host: &dyn StorageHost,
+        before: &SourceGeneration,
+        after: &SourceGeneration,
+        start: u64,
+    ) -> Result<bool, EngineError> {
+        if self.generation.as_ref() != Some(before)
+            || before.path != self.path
+            || after.path != self.path
+            || before.covered_len != start
+            || self.resume != start
+            || after.covered_len < start
+        {
+            return Ok(false);
+        }
+        if after.check(host)? != GenerationCheck::Unchanged {
+            return Ok(false);
+        }
+        let mut next = self.clone();
+        next.extend(host, &self.path, start, Some(after.clone()))?;
+        *self = next;
+        Ok(true)
     }
 
     pub fn refresh(&mut self, host: &dyn StorageHost) -> Result<(), EngineError> {
@@ -92,36 +173,15 @@ impl TimeIndex {
             self.rows,
             |bytes, location, final_line| {
                 // An arbitrary field path is supported, not just Logbook's time key.
-                let value: Value = match serde_json::from_slice(bytes) {
-                    Ok(value) => value,
+                let key = match proseql_engine::scan::field::decode_field(bytes, &self.field) {
+                    Ok(value) => value.unwrap_or(Value::Null),
                     Err(_) if final_line => {
                         self.resume = location.offset;
                         return Ok(());
                     }
                     Err(error) => return Err(rows::parse_error(error)),
                 };
-                if final_line {
-                    self.resume = location.offset;
-                }
-                let key = proseql_engine::query::filter::get_nested_value(&value, &self.field)
-                    .cloned()
-                    .unwrap_or(Value::Null);
-                if compare(&key, &key).is_none()
-                    || self.last.as_ref().is_some_and(|last| {
-                        !matches!(compare(last, &key), Some(Ordering::Less | Ordering::Equal))
-                    })
-                {
-                    self.ordered = false;
-                }
-                if self.rows.is_multiple_of(self.stride as u64) {
-                    self.entries.push(Checkpoint {
-                        key: key.clone(),
-                        offset: location.offset,
-                        row: self.rows,
-                    });
-                }
-                self.last = Some(key);
-                self.rows += 1;
+                self.push_key(key, location.offset, final_line);
                 Ok(())
             },
         )?;

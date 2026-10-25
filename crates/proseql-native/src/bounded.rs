@@ -27,6 +27,11 @@ pub struct BoundedQueryStats {
     pub partitions_resident: usize,
     pub pinned_partitions: usize,
     pub retained_partition_limit: usize,
+    /// Rows examined after partition pruning and positional seeking, including
+    /// rows rejected by filters or pagination. Resident bounded visits count
+    /// visited rows; cached reads count all rows in the selected scope. Eager
+    /// reads count collection rows, rather than engine index candidates.
+    pub candidate_rows: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -318,6 +323,10 @@ impl NativeRuntime {
                         partitions_resident: count,
                         pinned_partitions: 0,
                         retained_partition_limit: 0,
+                        candidate_rows: state
+                            .database
+                            .collection(collection)
+                            .map_or(0, |rows| rows.len()),
                     },
                 )
             });
@@ -328,7 +337,11 @@ impl NativeRuntime {
             && sources.lazy_scope_is_resident(collection, &paths)
         {
             sources.lazy_touch(collection, &paths);
-            let stats = sources.lazy_read_stats(collection, paths.len(), 0);
+            let mut stats = sources.lazy_read_stats(collection, paths.len(), 0);
+            stats.candidate_rows = paths
+                .iter()
+                .map(|path| sources.lazy[collection].resident[path].ids.len())
+                .sum();
             let _phase =
                 proseql_storage::diagnostics::span("query_engine_including_explain_when_requested");
             return eager(&state.database).map(|result| (result, stats));
@@ -340,19 +353,24 @@ impl NativeRuntime {
                 .collection(collection)
                 .expect("lazy collection"),
         );
+        let mut candidate_rows = 0;
         let result = sources.lazy_visit(
             &mut state.database,
             state.host.as_ref(),
             &state.formats,
             collection,
             &paths,
-            |row| visit(&mut accumulator, row),
+            |row| {
+                candidate_rows += 1;
+                visit(&mut accumulator, row)
+            },
         );
         let trimmed = sources_trim(&self.inner, state);
         let read = result?;
         trimmed?;
         let sources = state.sources.as_ref().expect("source runtime");
-        let status = sources.lazy_read_stats(collection, paths.len(), read);
+        let mut status = sources.lazy_read_stats(collection, paths.len(), read);
+        status.candidate_rows = candidate_rows;
         let _phase = proseql_storage::diagnostics::span("query_global_finalize");
         finish(accumulator).map(|result| (result, status))
     }

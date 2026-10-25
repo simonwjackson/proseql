@@ -149,6 +149,8 @@ impl NativeRuntime {
             )?;
             let descriptor = records.descriptor.clone();
             let builtin = state.formats.borrowed_jsonl_compatible(&source.format);
+            let prepared_decoder =
+                proseql_engine::scan::decoder::SimpleDecoder::new(&config.schema);
             let seek = if builtin {
                 range_bounds(&descriptor, filter)
             } else {
@@ -162,6 +164,7 @@ impl NativeRuntime {
                 partitions_resident: 0,
                 pinned_partitions: 0,
                 retained_partition_limit: 0,
+                candidate_rows: 0,
             };
             let mut index_used = IndexUsed::None;
             let mut identities = IdArena::default();
@@ -170,7 +173,10 @@ impl NativeRuntime {
                 if !host.exists(path)? {
                     continue;
                 }
-                let range = match seek {
+                let file_seek = seek.filter(|(field, lower, upper)| {
+                    !covers_partition(&source, path, field, *lower, *upper)
+                });
+                let range = match file_seek {
                     Some((field, lower, upper)) => state
                         .sources
                         .as_mut()
@@ -189,9 +195,22 @@ impl NativeRuntime {
                         .and_then(|index| index.seek(lower, upper)),
                     None => None,
                 };
+                let mut pending_index =
+                    if let Some((field, _, _)) = file_seek.filter(|_| range.is_none()) {
+                        state.sources.as_ref().expect("source").lazy[collection]
+                            .stream
+                            .index
+                            .begin_time_index(host.as_ref(), path, field)
+                            .ok()
+                            .flatten()
+                    } else {
+                        None
+                    };
                 if range.is_some() {
                     index_used = IndexUsed::Ordered;
                 }
+                let identity_start = identities.entries.len();
+                identities.scopes.push((partition, range));
                 stats.partitions_read += 1;
                 let file = proseql_storage::partitioned::file_source(&source, path);
                 let partition_result = if !builtin {
@@ -243,34 +262,52 @@ impl NativeRuntime {
                         range,
                         |bytes, final_unterminated, _line, offset| {
                             use proseql_engine::scan::borrowed::BorrowedValue;
-                            if matches!(
-                                config.id_strategy,
-                                proseql_engine::descriptor::IdStrategy::Provided
-                            ) {
-                                if let Ok(mut borrowed) =
-                                    serde_json::from_slice::<BorrowedValue<'_>>(bytes)
-                                {
-                                    if borrowed.decode_simple(&config.schema)
-                                        && borrowed
-                                            .get("id")
-                                            .and_then(BorrowedValue::as_str)
-                                            .is_some_and(|id| !id.is_empty())
-                                        && borrowed_partition_matches(
-                                            &source,
-                                            expected_key.as_deref(),
-                                            &borrowed,
-                                        )
-                                    {
-                                        let id = borrowed
-                                            .get("id")
-                                            .and_then(BorrowedValue::as_str)
-                                            .expect("validated borrowed ID");
-                                        identities.push(id, partition, offset);
-                                        executor.push_borrowed(&borrowed, ordinal);
-                                        ordinal += 1;
-                                        return Ok(());
-                                    }
+                            let parsed = match &prepared_decoder {
+                                Some(decoder) => {
+                                    decoder.decode(bytes).ok().flatten().map(|row| (row, true))
                                 }
+                                None => serde_json::from_slice::<BorrowedValue<'_>>(bytes)
+                                    .ok()
+                                    .map(|row| (row, false)),
+                            };
+                            if let Some((mut borrowed, decoded)) = parsed {
+                                if let Some(index) = pending_index.as_mut() {
+                                    let field = file_seek.expect("index field").0;
+                                    index.push_key(
+                                        borrowed
+                                            .get(field)
+                                            .map_or(Value::Null, BorrowedValue::to_owned),
+                                        offset,
+                                        final_unterminated,
+                                    );
+                                }
+                                if matches!(
+                                    config.id_strategy,
+                                    proseql_engine::descriptor::IdStrategy::Provided
+                                ) && (decoded || borrowed.decode_simple(&config.schema))
+                                    && borrowed
+                                        .get("id")
+                                        .and_then(BorrowedValue::as_str)
+                                        .is_some_and(|id| !id.is_empty())
+                                    && borrowed_partition_matches(
+                                        &source,
+                                        expected_key.as_deref(),
+                                        &borrowed,
+                                    )
+                                {
+                                    let id = borrowed
+                                        .get("id")
+                                        .and_then(BorrowedValue::as_str)
+                                        .expect("validated borrowed ID");
+                                    identities.push(id, partition, offset);
+                                    executor.push_borrowed(&borrowed, ordinal);
+                                    ordinal += 1;
+                                    return Ok(());
+                                }
+                            } else {
+                                // A torn suffix or canonical replay must not publish
+                                // incomplete positional metadata.
+                                pending_index = None;
                             }
                             // Canonical storage decoding is intentionally row-local:
                             // every read row is decoded and validated before filtering.
@@ -316,12 +353,27 @@ impl NativeRuntime {
                         },
                     )
                 };
+                if partition_result.is_ok() {
+                    if let Some(index) =
+                        pending_index.and_then(|index| index.complete(host.as_ref()).ok())
+                    {
+                        state
+                            .sources
+                            .as_mut()
+                            .expect("source")
+                            .lazy
+                            .get_mut(collection)
+                            .expect("lazy")
+                            .stream
+                            .index
+                            .publish_time_index(path, file_seek.expect("index field").0, index);
+                    }
+                }
                 if let Err(error) = partition_result {
                     // Earlier partitions can already contain a cross-file
                     // duplicate, which precedes this partition's load error.
-                    identities
-                        .entries
-                        .retain(|entry| id_location(*entry, &identities.wide).0 < partition);
+                    identities.entries.truncate(identity_start);
+                    identities.scopes.pop();
                     identities.validate(
                         host.as_ref(),
                         &source,
@@ -363,6 +415,7 @@ impl NativeRuntime {
                 return Err(error);
             }
             let candidate_rows = executor.candidate_rows;
+            stats.candidate_rows = candidate_rows;
             let output = match executor.finish()? {
                 ScanOutput::Rows(rows) => match request {
                     ReadRequest::QueryWithStats { .. } => ReadOutput::RowsWithStats(
@@ -441,6 +494,45 @@ fn range_bounds<'a>(
         }
     }
     None
+}
+
+// Prefix bounds are deliberately stricter than calendar equality: timestamps
+// allow arbitrary fractional precision, so midnight .000Z is not a lexical
+// lower bound for every valid midnight fraction in the same bucket.
+fn covers_partition(
+    source: &proseql_storage::source_config::PartitionedSourceConfig,
+    path: &str,
+    field: &str,
+    lower: Option<&Value>,
+    upper: Option<&Value>,
+) -> bool {
+    use proseql_storage::source_config::PartitionKey;
+    let PartitionKey::TimeBucket {
+        field: partition_field,
+        bucket,
+    } = &source.partition_by
+    else {
+        return false;
+    };
+    if partition_field != field {
+        return false;
+    }
+    let Some(key) = proseql_storage::partition_prune::partition_key_of_path(source, path) else {
+        return false;
+    };
+    let lower_ok = lower.is_none_or(|bound| {
+        bound.as_str().is_some_and(|value| {
+            proseql_storage::partitioned::time_bucket_key(value, *bucket).is_some()
+                && value <= key.as_str()
+        })
+    });
+    let upper_ok = upper.is_none_or(|bound| {
+        bound.as_str().is_some_and(|value| {
+            proseql_storage::partitioned::time_bucket_key(value, *bucket).is_some()
+                && value > format!("{key}~").as_str()
+        })
+    });
+    lower_ok && upper_ok
 }
 
 /// All normal reads use the shared bounded framer. Hosts whose read_range
@@ -528,7 +620,7 @@ fn validate_row(
     proseql_engine::validator::validate_value_with_callbacks(schema, row, Some(callbacks))
 }
 
-fn borrowed_partition_matches(
+pub(crate) fn borrowed_partition_matches(
     source: &proseql_storage::source_config::PartitionedSourceConfig,
     expected: Option<&str>,
     row: &proseql_engine::scan::borrowed::BorrowedValue<'_>,
@@ -557,12 +649,97 @@ fn borrowed_partition_matches(
     })
 }
 
-/// Query-local identities, not record payloads or per-row ID strings. Sorting
-/// hashes at the end bounds ordinary metadata to 16 bytes/row plus one block.
-/// Files over 4 GiB and large partition ordinals use a lossless wide side table.
-/// Hash equality never proves identity: candidates are verified from text.
+/// Ordinary reads keep only 64-bit hashes (8 bytes per visited row). Only hash
+/// collisions replay the visited windows to recover exact candidate locations.
+/// They then use the same text verification and error ordering as before.
 #[derive(Default)]
 struct IdArena {
+    entries: Vec<u64>,
+    scopes: Vec<(usize, Option<proseql_storage::index::SeekRange>)>,
+}
+fn identity_hash(id: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    id.hash(&mut hasher);
+    hasher.finish()
+}
+impl IdArena {
+    fn push(&mut self, id: &str, _partition: usize, _offset: u64) {
+        if self.entries.len() == self.entries.capacity() {
+            self.entries.reserve_exact(4096);
+        }
+        self.entries.push(identity_hash(id));
+    }
+    fn validate(
+        mut self,
+        host: &dyn proseql_storage::host::StorageHost,
+        source: &proseql_storage::source_config::PartitionedSourceConfig,
+        paths: &[String],
+        codec: Option<(
+            &proseql_formats::FormatRegistry,
+            &proseql_storage::persistence::CollectionStorageConfig,
+        )>,
+    ) -> Result<(), EngineError> {
+        self.entries.sort_unstable();
+        let mut collisions: Vec<_> = self
+            .entries
+            .windows(2)
+            .filter(|pair| pair[0] == pair[1])
+            .map(|pair| pair[0])
+            .collect();
+        collisions.dedup();
+        if collisions.is_empty() {
+            return Ok(());
+        }
+        drop(self.entries);
+        let mut candidates = IdCandidates::default();
+        for (partition, range) in self.scopes {
+            let path = &paths[partition];
+            if let Some((formats, config)) = codec {
+                let raw = host.read_bytes(path)?;
+                let loaded = proseql_storage::append::decode_append_bytes(
+                    host,
+                    formats,
+                    &proseql_storage::partitioned::file_source(source, path),
+                    config,
+                    &raw,
+                    true,
+                )?;
+                for (index, id) in loaded.records.keys().enumerate() {
+                    if collisions.binary_search(&identity_hash(id)).is_ok() {
+                        candidates.push(id, partition, index as u64);
+                    }
+                }
+            } else {
+                read_rows(host, path, range, |bytes, final_line, _, offset| {
+                    match proseql_engine::scan::field::decode_field(bytes, "id") {
+                        Ok(Some(Value::String(id))) => {
+                            if collisions.binary_search(&identity_hash(&id)).is_ok() {
+                                candidates.push(&id, partition, offset);
+                            }
+                        }
+                        Err(_) if final_line => {}
+                        _ => {
+                            return Err(crate::operation_error(
+                                "streaming-source-changed",
+                                format!(
+                                "Record at '{path}:{offset}' changed during identity verification"
+                            ),
+                            ))
+                        }
+                    }
+                    Ok(())
+                })?;
+            }
+        }
+        candidates.validate(host, source, paths, codec)
+    }
+}
+
+/// Locations are needed only for collision candidates. Large file offsets use
+/// a lossless wide side table; hashes never prove identity by themselves.
+#[derive(Default)]
+struct IdCandidates {
     entries: Vec<IdEntry>,
     wide: Vec<(usize, u64)>,
 }
@@ -581,7 +758,7 @@ fn id_location(entry: IdEntry, wide: &[(usize, u64)]) -> (usize, u64) {
         wide[(entry.location & !(1 << 63)) as usize]
     }
 }
-impl IdArena {
+impl IdCandidates {
     fn push(&mut self, id: &str, partition: usize, offset: u64) {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();

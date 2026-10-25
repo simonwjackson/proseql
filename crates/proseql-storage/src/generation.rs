@@ -11,8 +11,8 @@ pub struct SourceGeneration {
     pub covered_len: u64,
     pub modified_ns: Option<u128>,
     pub change_id: Option<u64>,
-    /// Full-prefix hash, including on identity-aware hosts: metadata alone
-    /// cannot prove that growth did not also edit the covered prefix.
+    /// Checked prefix evidence for hosts without a trustworthy identity.
+    /// Identity-aware hosts conservatively replace on token changes.
     pub check_hash: Option<u64>,
 }
 
@@ -52,13 +52,13 @@ fn hash_range(
 }
 
 impl SourceGeneration {
-    fn from_stat(path: &str, stat: FileStat, hash: u64) -> Self {
+    fn from_stat(path: &str, stat: FileStat, hash: Option<u64>) -> Self {
         Self {
             path: path.into(),
             covered_len: stat.len,
             modified_ns: stat.modified_ns,
             change_id: stat.change_id,
-            check_hash: Some(hash),
+            check_hash: hash,
         }
     }
 
@@ -66,20 +66,37 @@ impl SourceGeneration {
         let Some(stat) = host.stat(path)? else {
             return Ok(None);
         };
+        if stat.change_id.is_some() {
+            return Ok(Some(Self::from_stat(path, stat, None)));
+        }
         let hash = hash_range(host, path, 0, stat.len, DefaultHasher::new())?.finish();
         if host.stat(path)? != Some(stat) {
             return Err(changed(path));
         }
-        Ok(Some(Self::from_stat(path, stat, hash)))
+        Ok(Some(Self::from_stat(path, stat, Some(hash))))
     }
 
     pub fn check(&self, host: &dyn StorageHost) -> Result<GenerationCheck, EngineError> {
+        if self.change_id.is_some() {
+            return Ok(match host.stat(&self.path)? {
+                None => GenerationCheck::Missing,
+                Some(stat) if self.matches_stat(stat) => GenerationCheck::Unchanged,
+                Some(_) => GenerationCheck::Replaced,
+            });
+        }
         self.advance(host).map(|(check, _)| check)
     }
 
-    /// Check the prefix and capture the next generation under the *same*
-    /// metadata observation. Separating check and observe could otherwise
-    /// accept a prefix edit between the two and publish stale offsets.
+    fn matches_stat(&self, stat: FileStat) -> bool {
+        stat.len == self.covered_len
+            && stat.modified_ns == self.modified_ns
+            && stat.change_id == self.change_id
+    }
+
+    /// Capture the next generation under the same observation. Trustworthy
+    /// tokens avoid content reads; a changed token means replacement, not a
+    /// proven append. Tokenless hosts check the prefix and metadata together:
+    /// separate check/observe calls could otherwise publish stale offsets.
     pub fn advance(
         &self,
         host: &dyn StorageHost,
@@ -87,13 +104,13 @@ impl SourceGeneration {
         let Some(stat) = host.stat(&self.path)? else {
             return Ok((GenerationCheck::Missing, None));
         };
-        let previous = FileStat {
-            len: self.covered_len,
-            modified_ns: self.modified_ns,
-            change_id: self.change_id,
-        };
-        if stat == previous && stat.change_id.is_some() {
-            return Ok((GenerationCheck::Unchanged, Some(self.clone())));
+        if self.change_id.is_some() || stat.change_id.is_some() {
+            let check = if self.matches_stat(stat) {
+                GenerationCheck::Unchanged
+            } else {
+                GenerationCheck::Replaced
+            };
+            return Ok((check, Some(Self::from_stat(&self.path, stat, None))));
         }
         let prefix_len = self.covered_len.min(stat.len);
         let prefix = hash_range(host, &self.path, 0, prefix_len, DefaultHasher::new())?;
@@ -111,6 +128,6 @@ impl SourceGeneration {
         } else {
             GenerationCheck::Unchanged
         };
-        Ok((check, Some(Self::from_stat(&self.path, stat, hash))))
+        Ok((check, Some(Self::from_stat(&self.path, stat, Some(hash)))))
     }
 }

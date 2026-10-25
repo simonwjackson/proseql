@@ -1,6 +1,9 @@
 //! Custom codecs can change record identity and cardinality. Retain only
 //! hashes and decoded row ordinals; verification re-decodes one partition.
-use super::{id_error, EngineError, File, IdLocator, RowLocation, SourceGeneration, StorageHost};
+use super::{
+    entry_order, id_error, location, EngineError, File, IdLocator, RowLocation, SourceGeneration,
+    StorageHost,
+};
 use crate::generation::GenerationCheck;
 
 impl IdLocator {
@@ -40,8 +43,7 @@ impl IdLocator {
         decode: &mut impl FnMut(&str) -> Result<Vec<String>, EngineError>,
     ) -> Result<(), EngineError> {
         let path = self.files[file as usize].path.clone();
-        self.entries.retain(|entry| entry.file != file);
-        self.wide_rows.retain(|(index, _), _| *index != file);
+        self.remove_suffix(file, 0);
         let ids = if generation.is_some() {
             decode(&path)?
         } else {
@@ -81,24 +83,26 @@ impl IdLocator {
         decode: &mut impl FnMut(&str) -> Result<Vec<String>, EngineError>,
     ) -> Result<(), EngineError> {
         self.entries
-            .sort_unstable_by_key(|entry| (entry.hash, entry.file, entry.offset));
+            .sort_unstable_by(|left, right| entry_order(left, right, &self.wide));
         for (position, entry) in self.entries.iter().enumerate().skip(1) {
             if self.entries[position - 1].hash != entry.hash {
                 continue;
             }
-            let path = &self.files[entry.file as usize].path;
-            let id = decoded_id(decode, path, entry.offset)?;
+            let current = location(entry, &self.wide);
+            let path = &self.files[current.file as usize].path;
+            let id = decoded_id(decode, path, current.offset)?;
             let begin = self
                 .entries
                 .partition_point(|candidate| candidate.hash < entry.hash);
             for previous in &self.entries[begin..position] {
+                let previous = location(previous, &self.wide);
                 if decoded_id(
                     decode,
                     &self.files[previous.file as usize].path,
                     previous.offset,
                 )? == id
                 {
-                    let message = if previous.file == entry.file {
+                    let message = if previous.file == current.file {
                         "Partition records need unique string IDs".into()
                     } else {
                         format!("Duplicate partition record '{id}'")

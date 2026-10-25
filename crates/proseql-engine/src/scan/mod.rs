@@ -101,7 +101,7 @@ impl RowSource for SliceLines<'_> {
         while self.position < self.bytes.len() {
             let start = self.position;
             let rest = &self.bytes[start..];
-            let (line, consumed, terminated) = match rest.iter().position(|&byte| byte == b'\n') {
+            let (line, consumed, terminated) = match framer::newline_position(rest) {
                 Some(end) => (&rest[..end], end + 1, true),
                 None => (rest, rest.len(), false),
             };
@@ -129,7 +129,9 @@ impl RowSource for SliceLines<'_> {
 // ── executor (owner: exec; free to change below this line) ─────────────────
 
 pub mod borrowed;
+pub mod decoder;
 pub mod executor;
+pub mod field;
 mod fold;
 pub mod framer;
 

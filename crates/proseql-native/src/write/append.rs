@@ -21,12 +21,13 @@ use proseql_engine::collection::CreateManyResult;
 use proseql_engine::errors::{EngineError, SerializationError};
 use proseql_engine::scan::RowLocation;
 use proseql_storage::append::{jsonl_tail_bytes, JsonlTail, TornLineDiagnostic};
-use proseql_storage::generation::SourceGeneration;
+use proseql_storage::generation::{GenerationCheck, SourceGeneration};
 use proseql_storage::host::StorageHost;
 use proseql_storage::index::rows;
 use proseql_storage::partitioned::partition_path;
 use serde_json::Value;
 use std::collections::HashSet;
+use std::hash::Hasher;
 
 /// State of the open mutation only. Cleared on both publication and rollback.
 #[derive(Default)]
@@ -342,23 +343,73 @@ fn record_committed(
     index: &mut crate::locate::IndexState,
     host: &dyn StorageHost,
     starts: &IndexMap<String, u64>,
+    contents: &IndexMap<String, crate::stored_file::StoredFile>,
 ) -> Result<(), EngineError> {
-    let Some(locator) = index.id_locator_if_built() else {
+    if index.id_locator_if_built().is_none() {
         return Ok(());
-    };
+    }
     for (path, start) in starts {
-        let Some(stat) = host.stat(path)? else {
-            continue;
-        };
-        let mut appended = Vec::new();
-        rows::visit_lines(host, path, *start, stat.len, 0, |bytes, location, _| {
-            let record: Value = serde_json::from_slice(bytes).map_err(json_error)?;
-            if let Some(id) = record.get("id").and_then(Value::as_str) {
-                appended.push((id.to_owned(), location));
-            }
-            Ok(())
+        let generation = SourceGeneration::observe(host, path)?.ok_or_else(|| {
+            crate::operation_error(
+                "source-changed",
+                format!("Source '{path}' disappeared after append"),
+            )
         })?;
-        locator.record_appended(path, &appended)?;
+        // A new ctime alone does not prove that only our suffix changed. Read
+        // the old prefix once and compare the complete accepted append state.
+        // Otherwise a racing prefix edit could become a current false negative.
+        {
+            let _proof = proseql_storage::diagnostics::span("streaming_append_prefix_proof");
+            let mut hash = std::collections::hash_map::DefaultHasher::new();
+            let mut offset = 0;
+            while offset < generation.covered_len {
+                let bytes = host.read_range(
+                    path,
+                    offset,
+                    (generation.covered_len - offset).min(64 * 1024) as usize,
+                )?;
+                if bytes.is_empty() || bytes.len() as u64 > generation.covered_len - offset {
+                    return Err(crate::operation_error(
+                        "source-changed",
+                        format!("Source '{path}' changed during append prefix proof"),
+                    ));
+                }
+                hash.write(&bytes);
+                offset += bytes.len() as u64;
+            }
+            if !contents.get(path).is_some_and(|stored| {
+                stored.len() as u64 == generation.covered_len
+                    && stored.fingerprint()
+                        == crate::lazy::FileFingerprint::from_hash(stored.len(), hash.finish())
+            }) {
+                return Err(crate::operation_error(
+                    "source-changed",
+                    format!("Source '{path}' changed after append"),
+                ));
+            }
+        }
+        let mut appended = Vec::new();
+        rows::visit_lines(
+            host,
+            path,
+            *start,
+            generation.covered_len,
+            0,
+            |bytes, location, _| {
+                let record: Value = serde_json::from_slice(bytes).map_err(json_error)?;
+                if let Some(id) = record.get("id").and_then(Value::as_str) {
+                    appended.push((id.to_owned(), location));
+                }
+                Ok(())
+            },
+        )?;
+        if generation.check(host)? != GenerationCheck::Unchanged {
+            return Err(crate::operation_error(
+                "source-changed",
+                format!("Source '{path}' changed during append bookkeeping"),
+            ));
+        }
+        index.record_appended(generation, *start, &appended)?;
     }
     Ok(())
 }
@@ -373,8 +424,13 @@ pub(crate) fn after_commit(state: &mut RuntimeState) {
         }
         let append = std::mem::take(&mut lazy.stream.append);
         if !append.ids.is_empty()
-            && record_committed(&mut lazy.stream.index, state.host.as_ref(), &append.starts)
-                .is_err()
+            && record_committed(
+                &mut lazy.stream.index,
+                state.host.as_ref(),
+                &append.starts,
+                &sources.contents,
+            )
+            .is_err()
         {
             lazy.stream.index.invalidate();
         }
@@ -496,6 +552,9 @@ mod tests {
             assert!(!stored.ends_with(&bytes[bytes.len() - 8192..]));
             assert!(stored.matches(&bytes));
             assert!(sources.lazy["rows"].resident.is_empty());
+            if i > 0 {
+                assert!(sources.lazy["rows"].stream.index.append_proof(&path).is_some(), "bounded hash proof must retain checked locator coverage across chunk boundaries");
+            }
             assert_eq!(sources.lazy["rows"].stream.append.resident_bytes(), 0);
             assert!(state.database.collection("rows").unwrap().is_empty());
         }

@@ -15,6 +15,9 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+pub(crate) type RowVisitor<'a> =
+    dyn FnMut(&str, &[u8], RowLocation, bool) -> Result<(), EngineError> + 'a;
+
 struct CodecContext {
     positional: bool,
     formats: Arc<FormatRegistry>,
@@ -64,12 +67,23 @@ impl CodecContext {
     }
 }
 
+/// Evidence from the checked accepted text after our own durable append.
+/// A consumer must match its cached generation to `before` and check `after`
+/// against the host before extending from `start`.
+#[derive(Clone)]
+pub(crate) struct AppendProof {
+    pub before: SourceGeneration,
+    pub after: SourceGeneration,
+    pub start: u64,
+}
+
 #[derive(Default)]
 pub(crate) struct IndexState {
     times: BTreeMap<(String, String), TimeIndex>,
     ids: Option<IdLocator>,
     validated: BTreeMap<String, SourceGeneration>,
     codec: Option<CodecContext>,
+    append_proofs: BTreeMap<String, AppendProof>,
 }
 
 impl IndexState {
@@ -81,6 +95,7 @@ impl IndexState {
         self.times.clear();
         self.ids = None;
         self.validated.clear();
+        self.append_proofs.clear();
     }
 
     pub fn time_index(
@@ -93,11 +108,32 @@ impl IndexState {
             return Ok(None);
         }
         let key = (path.to_owned(), field.to_owned());
+        let proof = self.append_proof(path).cloned();
+        let mut clear_proof = false;
         if let Some(index) = self.times.get_mut(&key) {
-            index.refresh(host)?;
-        } else {
-            self.times
-                .insert(key.clone(), TimeIndex::build(host, path, field, 1024)?);
+            let previous = index.generation().cloned();
+            let refreshed = (|| {
+                if let Some(proof) = &proof {
+                    if index.extend_checked_append(
+                        host,
+                        &proof.before,
+                        &proof.after,
+                        proof.start,
+                    )? {
+                        return Ok(());
+                    }
+                }
+                index.refresh(host)?;
+                clear_proof = previous.as_ref() != index.generation();
+                Ok::<_, EngineError>(())
+            })();
+            if let Err(error) = refreshed {
+                self.clear_append_proof(path);
+                return Err(error);
+            }
+        }
+        if clear_proof {
+            self.clear_append_proof(path);
         }
         Ok(self
             .times
@@ -105,28 +141,120 @@ impl IndexState {
             .filter(|index| index.seek(None, None).is_some()))
     }
 
+    pub(crate) fn begin_time_index(
+        &self,
+        host: &dyn StorageHost,
+        path: &str,
+        field: &str,
+    ) -> Result<Option<TimeIndex>, EngineError> {
+        if self.times.contains_key(&(path.into(), field.into()))
+            || self.codec.as_ref().is_some_and(|codec| !codec.positional)
+        {
+            return Ok(None);
+        }
+        // At 2,565 rows per raw shard, stride 1,024 scans much of every shard.
+        // Thirty-two rows bounds that amplification at a measured metadata cost.
+        TimeIndex::begin(host, path, field, 32).map(Some)
+    }
+
+    pub(crate) fn publish_time_index(&mut self, path: &str, field: &str, index: TimeIndex) {
+        self.times.insert((path.into(), field.into()), index);
+    }
+
     pub fn id_locator(
         &mut self,
         host: &dyn StorageHost,
         paths: &[String],
     ) -> Result<&mut IdLocator, EngineError> {
-        if let Some(codec) = self.codec.as_ref().filter(|codec| !codec.positional) {
-            let mut decode = |path: &str| codec.ids(host, path);
-            if let Some(locator) = self.ids.as_mut() {
-                locator.refresh_partitions(host, paths, &mut decode)?;
+        self.id_locator_visiting(host, paths, &mut |_, _, _, _| Ok(()))
+    }
+
+    pub(crate) fn id_locator_visiting(
+        &mut self,
+        host: &dyn StorageHost,
+        paths: &[String],
+        visit: &mut RowVisitor<'_>,
+    ) -> Result<&mut IdLocator, EngineError> {
+        let refreshed = (|| -> Result<(), EngineError> {
+            if let Some(codec) = self.codec.as_ref().filter(|codec| !codec.positional) {
+                let mut decode = |path: &str| codec.ids(host, path);
+                if let Some(locator) = self.ids.as_mut() {
+                    locator.refresh_partitions(host, paths, &mut decode)?;
+                } else {
+                    self.ids = Some(IdLocator::build_partitions(host, paths, &mut decode)?);
+                }
+            } else if let Some(locator) = self.ids.as_mut() {
+                locator.refresh_visiting(host, paths, visit)?;
             } else {
-                self.ids = Some(IdLocator::build_partitions(host, paths, &mut decode)?);
+                self.ids = Some(IdLocator::build_visiting(host, paths, visit)?);
             }
-        } else if let Some(locator) = self.ids.as_mut() {
-            locator.refresh(host, paths)?;
-        } else {
-            self.ids = Some(IdLocator::build(host, paths)?);
+            Ok(())
+        })();
+        if let Err(error) = refreshed {
+            self.append_proofs.clear();
+            return Err(error);
         }
+        self.append_proofs.retain(|path, proof| {
+            self.ids
+                .as_ref()
+                .and_then(|locator| locator.generation_for(path))
+                == Some(&proof.after)
+        });
         Ok(self.ids.as_mut().expect("built locator"))
     }
 
     pub fn id_locator_if_built(&mut self) -> Option<&mut IdLocator> {
         self.ids.as_mut()
+    }
+
+    pub(crate) fn append_proof(&self, path: &str) -> Option<&AppendProof> {
+        self.append_proofs.get(path).inspect(|proof| {
+            debug_assert_eq!(proof.start, proof.before.covered_len);
+            debug_assert!(proof.start <= proof.after.covered_len);
+        })
+    }
+
+    pub(crate) fn clear_append_proof(&mut self, path: &str) {
+        if self.append_proof(path).is_some() {
+            self.append_proofs.remove(path);
+        }
+    }
+
+    /// Called only after append bookkeeping proved the complete accepted text.
+    pub(crate) fn record_appended(
+        &mut self,
+        generation: SourceGeneration,
+        start: u64,
+        rows: &[(String, RowLocation)],
+    ) -> Result<(), EngineError> {
+        let path = generation.path.clone();
+        let before = self
+            .ids
+            .as_ref()
+            .and_then(|locator| locator.generation_for(&path))
+            .cloned();
+        let Some(locator) = self.ids.as_mut() else {
+            return Ok(());
+        };
+        if let Err(error) = locator.accept_appended(generation.clone(), start, rows) {
+            self.clear_append_proof(&path);
+            return Err(error);
+        }
+        if locator.generation_for(&path) != Some(&generation) {
+            self.clear_append_proof(&path);
+            return Ok(());
+        }
+        if let Some(before) = before {
+            let proof = AppendProof {
+                before,
+                after: generation,
+                start,
+            };
+            self.append_proofs.insert(path, proof);
+        } else {
+            self.clear_append_proof(&path);
+        }
+        Ok(())
     }
 
     /// Verify a positional or whole-partition candidate using the runtime's
@@ -144,20 +272,44 @@ impl IndexState {
                 "Streaming index codec context is not configured",
             )
         })?;
-        if location.offset == UNKNOWN_OFFSET {
-            return Ok(codec.decode_partition(host, path)?.records.shift_remove(id));
+        let generation = self
+            .ids
+            .as_ref()
+            .and_then(|locator| locator.generation_for(path));
+        if let Some(generation) = generation {
+            if generation.check(host)? != GenerationCheck::Unchanged {
+                self.append_proofs.remove(path);
+                return Err(crate::operation_error(
+                    "source-changed",
+                    format!("Source '{path}' changed before candidate verification"),
+                ));
+            }
         }
-        let bytes = rows::read_line(host, path, location.offset)?;
-        let file = proseql_storage::partitioned::file_source(&codec.source, path);
-        let decoder = RowDecoder {
-            collection: &codec.collection,
-            storage: &codec.storage,
-            source: &codec.source,
-            callbacks: &codec.callbacks,
+        let row = if location.offset == UNKNOWN_OFFSET {
+            codec.decode_partition(host, path)?.records.shift_remove(id)
+        } else {
+            let bytes = rows::read_line(host, path, location.offset)?;
+            let file = proseql_storage::partitioned::file_source(&codec.source, path);
+            let decoder = RowDecoder {
+                collection: &codec.collection,
+                storage: &codec.storage,
+                source: &codec.source,
+                callbacks: &codec.callbacks,
+            };
+            decoder
+                .decode_row(host, &codec.formats, &file, &bytes)?
+                .filter(|row| row.get("id").and_then(Value::as_str) == Some(id))
         };
-        Ok(decoder
-            .decode_row(host, &codec.formats, &file, &bytes)?
-            .filter(|row| row.get("id").and_then(Value::as_str) == Some(id)))
+        if let Some(generation) = generation {
+            if generation.check(host)? != GenerationCheck::Unchanged {
+                self.append_proofs.remove(path);
+                return Err(crate::operation_error(
+                    "source-changed",
+                    format!("Source '{path}' changed during candidate verification"),
+                ));
+            }
+        }
+        Ok(row)
     }
 }
 
@@ -268,73 +420,148 @@ fn lookup(
         callbacks: &sources.callbacks,
     };
 
-    // The locator scans IDs, not payloads. Validate every row it covers once
-    // per checked generation, as the resident full-scope load does. Validation
-    // never retains a partition's records or populates the engine collection.
+    // Validate inside the locator's first scan. Already-covered membership can
+    // come from append without payload validation; those paths still need a
+    // separate pass. A checked append can reuse its previously validated prefix.
     let validation = proseql_storage::diagnostics::span("streaming_id_validation");
+    let mut needed = BTreeMap::new();
     for path in &paths {
-        let previous = sources.lazy[collection]
-            .stream
-            .index
-            .validated
-            .get(path)
-            .cloned();
-        let check = previous
-            .as_ref()
-            .map(|generation| generation.check(host))
-            .transpose()?;
-        if check == Some(GenerationCheck::Unchanged) {
+        let previous = sources.lazy[collection].stream.index.validated.get(path);
+        let (check, generation) = match previous {
+            Some(previous) => previous.advance(host)?,
+            None => (
+                GenerationCheck::Replaced,
+                SourceGeneration::observe(host, path)?,
+            ),
+        };
+        if check == GenerationCheck::Unchanged {
             continue;
         }
-        let generation = SourceGeneration::observe(host, path)?;
         if let Some(generation) = generation {
-            let file = proseql_storage::partitioned::file_source(&source, path);
+            let prefix = match check {
+                GenerationCheck::Appended { from_offset } => Some(from_offset),
+                _ => None,
+            };
+            needed.insert(path.clone(), (generation, prefix));
+        }
+    }
+    let files: BTreeMap<_, _> = needed
+        .keys()
+        .map(|path| {
+            (
+                path.clone(),
+                (
+                    proseql_storage::partitioned::file_source(&source, path),
+                    proseql_storage::partition_prune::partition_key_of_path(&source, path),
+                ),
+            )
+        })
+        .collect();
+    let prepared = proseql_engine::scan::decoder::SimpleDecoder::new(&config.schema);
+    let validate_line = |path: &str, bytes: &[u8], final_line: bool| -> Result<(), EngineError> {
+        use proseql_engine::scan::borrowed::BorrowedValue;
+        let (file, expected) = &files[path];
+        if matches!(
+            config.id_strategy,
+            proseql_engine::descriptor::IdStrategy::Provided
+        ) {
+            if let Some(row) = prepared
+                .as_ref()
+                .and_then(|decoder| decoder.decode(bytes).ok().flatten())
+            {
+                if row
+                    .get("id")
+                    .and_then(BorrowedValue::as_str)
+                    .is_some_and(|id| !id.is_empty())
+                    && crate::streaming::borrowed_partition_matches(
+                        &source,
+                        expected.as_deref(),
+                        &row,
+                    )
+                {
+                    return Ok(());
+                }
+            }
+        }
+        // Only canonical replay constructs errors and handles complex schemas.
+        let mut terminated = Vec::new();
+        let bytes = if final_line {
+            bytes
+        } else {
+            terminated.extend_from_slice(bytes);
+            terminated.push(b'\n');
+            &terminated
+        };
+        decoder.decode_row(host, formats, file, bytes).map(|_| ())
+    };
+    // Append can build membership without validating payloads. Validate such
+    // scopes before locator errors, preserving validation-before-duplicate
+    // precedence. First-use builds still fuse the two scans.
+    let prevalidated = sources.lazy[collection].stream.index.ids.is_some();
+    if prevalidated {
+        for (path, (generation, _)) in &needed {
             rows::visit_lines(
                 host,
                 path,
                 0,
                 generation.covered_len,
                 0,
-                |bytes, _, final_line| {
-                    // Keep malformed terminated lines strict; single-line append
-                    // decoding would otherwise classify them as a torn tail.
-                    let mut terminated = Vec::new();
-                    let bytes = if final_line {
-                        bytes
-                    } else {
-                        terminated.extend_from_slice(bytes);
-                        terminated.push(b'\n');
-                        &terminated
-                    };
-                    decoder.decode_row(host, formats, &file, bytes).map(|_| ())
-                },
+                |bytes, _, final_line| validate_line(path, bytes, final_line),
             )?;
-            if generation.check(host)? != GenerationCheck::Unchanged {
-                return Err(crate::operation_error(
-                    "source-changed",
-                    format!("Source '{path}' changed during ID validation"),
-                ));
-            }
-            sources
-                .lazy
-                .get_mut(collection)
-                .expect("lazy collection")
-                .stream
-                .index
-                .validated
-                .insert(path.clone(), generation);
         }
     }
+    let mut visited = BTreeMap::<String, u64>::new();
+    let candidates = {
+        let mut visit = |path: &str, bytes: &[u8], location: RowLocation, final_line: bool| {
+            if !prevalidated && needed.contains_key(path) {
+                validate_line(path, bytes, final_line)?;
+                visited.entry(path.into()).or_insert(location.offset);
+            }
+            Ok(())
+        };
+        sources
+            .lazy
+            .get_mut(collection)
+            .expect("lazy collection")
+            .stream
+            .index
+            .id_locator_visiting(host, &paths, &mut visit)
+            .and_then(|locator| locator.locate(id))
+            .map_err(|error| contextualize(error, &source))?
+    };
+    for (path, (generation, prefix)) in &needed {
+        let covered = prevalidated
+            || visited
+                .get(path)
+                .is_some_and(|start| *start == 0 || prefix.is_some_and(|prefix| *start <= prefix));
+        if !covered {
+            rows::visit_lines(
+                host,
+                path,
+                0,
+                generation.covered_len,
+                0,
+                |bytes, _, final_line| validate_line(path, bytes, final_line),
+            )?;
+        }
+        if generation.check(host)? != GenerationCheck::Unchanged {
+            return Err(crate::operation_error(
+                "source-changed",
+                format!("Source '{path}' changed during ID validation"),
+            ));
+        }
+    }
+    for (path, (generation, _)) in needed {
+        sources
+            .lazy
+            .get_mut(collection)
+            .expect("lazy collection")
+            .stream
+            .index
+            .validated
+            .insert(path, generation);
+    }
     drop(validation);
-    let candidates = sources
-        .lazy
-        .get_mut(collection)
-        .expect("lazy collection")
-        .stream
-        .index
-        .id_locator(host, &paths)
-        .and_then(|locator| locator.locate(id))
-        .map_err(|error| contextualize(error, &source))?;
     for (path, location) in candidates {
         if let Some(row) = sources
             .lazy
@@ -371,6 +598,23 @@ pub(crate) fn configure_streaming_index(
 }
 
 impl NativeRuntime {
+    /// Release derived indexes for streaming lazy collections, keeping their
+    /// codec context. Call when idle to trade retained metadata for the next
+    /// operation's rebuild cost (about 360 ms for 656k IDs on aka, plus payload
+    /// validation for ID reads). Results and durable source files do not change.
+    /// This drops allocations; it does not promise allocator RSS reclamation.
+    pub fn release_streaming_indexes(&self) -> Result<(), EngineError> {
+        let mut state = self.lock_open()?;
+        if let Some(sources) = state.sources.as_mut() {
+            for lazy in sources.lazy.values_mut() {
+                if lazy.execution_model == ExecutionModel::Streaming {
+                    lazy.stream.index.invalidate();
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn streaming_find_by_id(
         &self,
         collection: &str,
@@ -424,6 +668,63 @@ mod tests {
     use proseql_formats::{FormatCodec, FormatOptions};
     use proseql_storage::memory::MemoryStorageHost;
     use proseql_storage::source_config::PartitionKey;
+
+    #[test]
+    fn own_append_proofs_chain_and_external_edits_clear_them() {
+        let host = MemoryStorageHost::default();
+        let path = "parts/one.jsonl";
+        host.write(path, "{\"id\":\"a\"}\n").unwrap();
+        let paths = vec![path.to_owned()];
+        let mut index = IndexState::default();
+        let mut before = index
+            .id_locator(&host, &paths)
+            .unwrap()
+            .generation_for(path)
+            .unwrap()
+            .clone();
+        for id in ["b", "c"] {
+            let offset = host.stat(path).unwrap().unwrap().len;
+            host.append(path, &format!("{{\"id\":\"{id}\"}}\n"))
+                .unwrap();
+            let after = SourceGeneration::observe(&host, path).unwrap().unwrap();
+            index
+                .record_appended(
+                    after.clone(),
+                    offset,
+                    &[(
+                        id.into(),
+                        RowLocation {
+                            partition: 0,
+                            offset,
+                            ordinal: 0,
+                        },
+                    )],
+                )
+                .unwrap();
+            let proof = index.append_proof(path).unwrap();
+            assert_eq!(proof.before, before);
+            assert_eq!(proof.after, after);
+            assert_eq!(proof.start, offset);
+            assert_eq!(
+                index.append_proof(path).unwrap().after,
+                after,
+                "proof is non-consuming"
+            );
+            before = after;
+        }
+        host.write(path, "{\"id\":\"external\"}\n").unwrap();
+        index.id_locator(&host, &paths).unwrap();
+        assert!(index.append_proof(path).is_none());
+        assert_eq!(
+            index
+                .id_locator_if_built()
+                .unwrap()
+                .locate("external")
+                .unwrap()
+                .len(),
+            1
+        );
+    }
 
     struct DelegatingCodec;
     impl FormatCodec for DelegatingCodec {

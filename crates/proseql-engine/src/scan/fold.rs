@@ -58,6 +58,30 @@ impl Cell<'_> {
         }
         crate::query::aggregate::compare_for_min_max(&self.owned(), other)
     }
+    fn scalar_key(self) -> Option<Value> {
+        match self {
+            Self::Borrowed(BorrowedValue::String(value)) => Some(Value::String(value.to_string())),
+            Self::Borrowed(BorrowedValue::Bool(value)) => Some(Value::Bool(*value)),
+            Self::Borrowed(BorrowedValue::Null) => Some(Value::Null),
+            Self::Owned(value) if value.is_string() || value.is_boolean() || value.is_null() => {
+                Some(value.clone())
+            }
+            _ => None,
+        }
+    }
+    fn matches_scalar_key(self, expected: &Value) -> bool {
+        match (self, expected) {
+            (Self::Borrowed(BorrowedValue::String(value)), Value::String(expected)) => {
+                value.as_ref() == expected
+            }
+            (Self::Borrowed(BorrowedValue::Bool(value)), Value::Bool(expected)) => {
+                value == expected
+            }
+            (Self::Borrowed(BorrowedValue::Null), Value::Null) => true,
+            (Self::Owned(value), expected) => value == expected,
+            _ => false,
+        }
+    }
     fn json(self, writer: &mut impl Write) {
         match self {
             Self::Borrowed(value) => serde_json::to_writer(writer, value),
@@ -203,11 +227,57 @@ impl<'a> Fold<'a> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn recent_scalar_groups_keep_canonical_keys_order_and_float_additions() {
+        let mut rows = Vec::new();
+        for number in [1e16, 1.0, -1e16] {
+            for key in [
+                json!("a\n"),
+                json!(true),
+                json!(null),
+                json!(1),
+                json!(-0.0),
+                json!([1]),
+                json!({"a":1}),
+                json!("__PTDB_UNDEFINED__"),
+            ] {
+                rows.push(json!({"g":key,"value":number}));
+                rows.push(json!({"g":key,"value":number}));
+            }
+            rows.push(json!({"value":number}));
+        }
+        let fields = vec!["g".into()];
+        let config = AggregateConfig {
+            count: true,
+            sum: vec!["value".into()],
+            ..Default::default()
+        };
+        let expected = crate::query::aggregate::compute_grouped_aggregates(&rows, &fields, &config);
+        let mut owned = GroupFold::new(&fields, &config);
+        let mut borrowed = GroupFold::new(&fields, &config);
+        for row in &rows {
+            owned.push(row);
+            let text = serde_json::to_string(row).unwrap();
+            let row: BorrowedValue<'_> = serde_json::from_str(&text).unwrap();
+            borrowed.push(&row);
+        }
+        assert_eq!(owned.finish(), expected);
+        assert_eq!(borrowed.finish(), expected);
+    }
+}
+
 pub(super) struct GroupFold<'a> {
     fields: &'a [String],
     config: &'a AggregateConfig,
     positions: HashMap<u64, Vec<usize>>,
     groups: Vec<(Vec<u8>, Fold<'a>)>,
+    scalar_keys: Vec<Option<Vec<Option<Value>>>>,
+    recent: [Option<usize>; 2],
 }
 fn write_key(row: &impl Row, fields: &[String], writer: &mut impl Write) {
     for (index, field) in fields.iter().enumerate() {
@@ -257,9 +327,28 @@ impl<'a> GroupFold<'a> {
             config,
             positions: HashMap::new(),
             groups: Vec::new(),
+            scalar_keys: Vec::new(),
+            recent: [None; 2],
         }
     }
     pub fn push(&mut self, row: &impl Row) {
+        // Time-ordered data repeatedly visits the same few scalar groups.
+        // Exact scalar comparison avoids serializing and hashing those keys
+        // twice per row. Numbers/objects retain canonical JSON-key semantics.
+        for index in self.recent.into_iter().flatten() {
+            if self.scalar_keys[index].as_ref().is_some_and(|key| {
+                self.fields.iter().zip(key).all(|(field, expected)| {
+                    match (row.cell(field), expected) {
+                        (None, None) => true,
+                        (Some(value), Some(expected)) => value.matches_scalar_key(expected),
+                        _ => false,
+                    }
+                })
+            }) {
+                self.groups[index].1.push(row);
+                return;
+            }
+        }
         let mut writer = HashWriter(std::collections::hash_map::DefaultHasher::new());
         write_key(row, self.fields, &mut writer);
         let hash = writer.0.finish();
@@ -278,10 +367,20 @@ impl<'a> GroupFold<'a> {
             let mut key = Vec::new();
             write_key(row, self.fields, &mut key);
             let index = self.groups.len();
+            let scalar_key = self
+                .fields
+                .iter()
+                .map(|field| match row.cell(field) {
+                    None => Some(None),
+                    Some(value) => value.scalar_key().map(Some),
+                })
+                .collect();
+            self.scalar_keys.push(scalar_key);
             self.groups.push((key, Fold::new(self.config)));
             self.positions.entry(hash).or_default().push(index);
             index
         });
+        self.recent = [Some(index), self.recent[0]];
         self.groups[index].1.push(row);
     }
     pub fn finish(self) -> Vec<GroupResult> {

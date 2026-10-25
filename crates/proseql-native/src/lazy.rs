@@ -895,6 +895,7 @@ impl SourceState {
                 .filter(|path| pinned.contains(path.as_str()))
                 .count(),
             retained_partition_limit: lazy.policy.max_loaded_partitions,
+            candidate_rows: 0,
         }
     }
 

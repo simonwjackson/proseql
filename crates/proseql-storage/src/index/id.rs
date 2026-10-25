@@ -10,6 +10,17 @@ use std::collections::HashMap;
 mod partitions;
 
 const APPEND_DELTA_LIMIT: usize = 4096;
+const WIDE_FILE: u64 = 4095;
+const WIDE_MARKER: u64 = WIDE_FILE << 52;
+const MAX_SMALL_ROW: u64 = (1 << 20) - 1;
+const SPECULATIVE_TAG: u64 = 1 << 51;
+
+fn speculative_address(file: u32, offset: u64) -> Option<u64> {
+    (file < (1 << 19) && offset <= u64::from(u32::MAX))
+        .then_some(WIDE_MARKER | SPECULATIVE_TAG | (u64::from(file) << 32) | offset)
+}
+
+type RowVisitor<'a> = dyn FnMut(&str, &[u8], RowLocation, bool) -> Result<(), EngineError> + 'a;
 
 #[derive(Deserialize)]
 struct Identity<'a> {
@@ -17,14 +28,11 @@ struct Identity<'a> {
     id: Cow<'a, str>,
 }
 
-/// Only this field is materialised; serde skips all record payload fields.
 fn identity(bytes: &[u8]) -> Result<Cow<'_, str>, serde_json::Error> {
     match serde_json::from_slice::<Identity<'_>>(bytes) {
         Ok(row) => Ok(row.id),
         Err(error) => {
-            // Struct decoding rejects repeated object keys; Value decoding
-            // (the resident contract) keeps the last key. This rare fallback
-            // also preserves escaped and repeated `id` field semantics.
+            // Preserve Value's last-key-wins semantics for repeated ID keys.
             let value: serde_json::Value = serde_json::from_slice(bytes)?;
             value
                 .get("id")
@@ -42,15 +50,41 @@ fn hash(id: &str) -> u64 {
     hash.finish()
 }
 
-// 24 B/row, independent of ID length. Wide row ordinals use the rare overflow
-// table, never truncated values. No arbitrary file-size or row-count limit.
+// Keep the full identity hash. Common locations need 12 file bits, 20 row
+// bits and 32 offset bits. Larger locations use the sparse overflow table;
+// no file size, partition count or ordinal is truncated.
 #[derive(Debug, Clone, Copy)]
 struct Entry {
     hash: u64,
-    offset: u64,
-    file: u32,
-    row: u32,
+    address: u64,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Location {
+    file: u32,
+    offset: u64,
+    row: u64,
+}
+fn location(entry: &Entry, wide: &HashMap<u64, Location>) -> Location {
+    if entry.address >= WIDE_MARKER {
+        wide[&entry.address]
+    } else {
+        Location {
+            file: (entry.address >> 52) as u32,
+            row: (entry.address >> 32) & MAX_SMALL_ROW,
+            offset: entry.address & u64::from(u32::MAX),
+        }
+    }
+}
+fn entry_order(left: &Entry, right: &Entry, wide: &HashMap<u64, Location>) -> std::cmp::Ordering {
+    left.hash.cmp(&right.hash).then_with(|| {
+        // Overflow addresses are allocation keys, never source positions.
+        // Decode only ties so duplicate errors retain file/offset precedence.
+        let left = location(left, wide);
+        let right = location(right, wide);
+        (left.file, left.offset).cmp(&(right.file, right.offset))
+    })
+}
+
 #[derive(Debug, Clone)]
 struct File {
     path: String,
@@ -59,13 +93,13 @@ struct File {
     resume: u64,
     dirty: bool,
 }
-
 #[derive(Debug, Clone, Default)]
 pub struct IdLocator {
     entries: Vec<Entry>,
     delta: Vec<Entry>,
     files: Vec<File>,
-    wide_rows: HashMap<(u32, u64), u64>,
+    wide: HashMap<u64, Location>,
+    next_wide: u64,
     partitioned: bool,
 }
 
@@ -80,15 +114,26 @@ pub fn id_error(path: &str, message: impl Into<String>) -> EngineError {
 
 impl IdLocator {
     pub fn build(host: &dyn StorageHost, paths: &[String]) -> Result<Self, EngineError> {
+        Self::build_visiting(host, paths, &mut |_, _, _, _| Ok(()))
+    }
+    pub fn build_visiting(
+        host: &dyn StorageHost,
+        paths: &[String],
+        visit: &mut RowVisitor<'_>,
+    ) -> Result<Self, EngineError> {
         let mut locator = Self::default();
         for path in paths {
-            locator.add_file(host, path)?;
+            locator.add_file(host, path, visit)?;
         }
         locator.finish(host)?;
         Ok(locator)
     }
-
-    fn add_file(&mut self, host: &dyn StorageHost, path: &str) -> Result<(), EngineError> {
+    fn add_file(
+        &mut self,
+        host: &dyn StorageHost,
+        path: &str,
+        visit: &mut RowVisitor<'_>,
+    ) -> Result<(), EngineError> {
         let file = u32::try_from(self.files.len())
             .map_err(|_| id_error(path, "Too many partition files"))?;
         self.files.push(File {
@@ -98,47 +143,77 @@ impl IdLocator {
             resume: 0,
             dirty: false,
         });
-        self.scan_file(host, file, 0, 0, SourceGeneration::observe(host, path)?)
+        self.scan_file(
+            host,
+            file,
+            0,
+            0,
+            SourceGeneration::observe(host, path)?,
+            visit,
+        )
     }
-
-    fn entry(&mut self, file: u32, id: &str, location: RowLocation) {
-        let entry = self.make_entry(file, id, location);
-        // Reserve in bounded steps. Appends use delta, never this base buffer.
+    fn entry(&mut self, file: u32, id: &str, row: RowLocation) {
+        let entry = self.make_entry(file, id, row);
         if self.entries.len() == self.entries.capacity() {
             self.entries.reserve_exact(APPEND_DELTA_LIMIT);
         }
         self.entries.push(entry);
     }
-
-    fn make_entry(&mut self, file: u32, id: &str, location: RowLocation) -> Entry {
-        let row = u32::try_from(location.ordinal).unwrap_or_else(|_| {
-            self.wide_rows
-                .insert((file, location.offset), location.ordinal);
-            u32::MAX
-        });
+    fn make_entry(&mut self, file: u32, id: &str, row: RowLocation) -> Entry {
+        let address = if u64::from(file) < WIDE_FILE
+            && row.ordinal <= MAX_SMALL_ROW
+            && row.offset <= u64::from(u32::MAX)
+        {
+            (u64::from(file) << 52) | (row.ordinal << 32) | row.offset
+        } else {
+            // Speculative common offsets have a deterministic tagged address,
+            // so idempotence needs one lookup in this same overflow table.
+            let speculative = if row.ordinal == super::UNKNOWN_ORDINAL {
+                speculative_address(file, row.offset)
+            } else {
+                None
+            };
+            let address = if let Some(address) = speculative {
+                address
+            } else {
+                // Freed general overflow addresses are reused. The tagged half
+                // is reserved for deterministic speculative addresses.
+                while self.wide.contains_key(&(WIDE_MARKER | self.next_wide)) {
+                    self.next_wide += 1;
+                }
+                debug_assert!(self.next_wide < SPECULATIVE_TAG);
+                let address = WIDE_MARKER | self.next_wide;
+                self.next_wide += 1;
+                address
+            };
+            self.wide.insert(
+                address,
+                Location {
+                    file,
+                    offset: row.offset,
+                    row: row.ordinal,
+                },
+            );
+            address
+        };
         Entry {
             hash: hash(id),
-            offset: location.offset,
-            file,
-            row,
+            address,
         }
     }
-
     fn merge_delta(&mut self) {
         if self.delta.is_empty() {
             return;
         }
         self.delta
-            .sort_unstable_by_key(|entry| (entry.hash, entry.file, entry.offset));
+            .sort_unstable_by(|left, right| entry_order(left, right, &self.wide));
         let base = std::mem::take(&mut self.entries);
         let delta = std::mem::take(&mut self.delta);
-        // One exact allocation and linear merge; never sort the large base
-        // once per touched partition or double its post-commit capacity.
         let mut merged = Vec::with_capacity(base.len() + delta.len());
         let mut base = base.into_iter().peekable();
         let mut delta = delta.into_iter().peekable();
         while let (Some(a), Some(b)) = (base.peek(), delta.peek()) {
-            let next = if (a.hash, a.file, a.offset) <= (b.hash, b.file, b.offset) {
+            let next = if entry_order(a, b, &self.wide) != std::cmp::Ordering::Greater {
                 base.next()
             } else {
                 delta.next()
@@ -151,7 +226,17 @@ impl IdLocator {
         merged.extend(delta);
         self.entries = merged;
     }
-
+    fn remove_suffix(&mut self, file: u32, start: u64) {
+        let keep = |entry: &Entry| {
+            let pos = location(entry, &self.wide);
+            pos.file != file || pos.offset < start
+        };
+        self.entries.retain(keep);
+        self.delta.retain(keep);
+        self.wide
+            .retain(|_, pos| pos.file != file || pos.offset < start);
+        self.next_wide = 0;
+    }
     fn scan_file(
         &mut self,
         host: &dyn StorageHost,
@@ -159,53 +244,38 @@ impl IdLocator {
         start: u64,
         first: u64,
         generation: Option<SourceGeneration>,
+        visit: &mut RowVisitor<'_>,
     ) -> Result<(), EngineError> {
         let path = self.files[file as usize].path.clone();
-        // Drop any speculative after_commit entries in the suffix. The scan
-        // below proves coverage, including appends by another process.
-        self.entries
-            .retain(|entry| entry.file != file || entry.offset < start);
-        self.wide_rows
-            .retain(|(index, offset), _| *index != file || *offset < start);
+        self.remove_suffix(file, start);
         let end = generation.as_ref().map_or(0, |g| g.covered_len);
         let mut count = first;
         let mut resume = end;
-        rows::visit_lines(
-            host,
-            &path,
-            start,
-            end,
-            first,
-            |bytes, location, final_line| {
-                let id = match identity(bytes) {
-                    Ok(id) => id,
-                    Err(_)
-                        if final_line
-                            && serde_json::from_slice::<serde_json::Value>(bytes).is_err() =>
-                    {
-                        resume = location.offset;
-                        return Ok(());
-                    }
-                    Err(error) => {
-                        if serde_json::from_slice::<serde_json::Value>(bytes).is_ok() {
-                            return Err(id_error(
-                                &path,
-                                "Partition records need unique string IDs",
-                            ));
-                        }
-                        return Err(rows::parse_error(error));
-                    }
-                };
-                self.entry(file, &id, location);
-                count += 1;
-                // An unterminated valid record may be extended, not merely
-                // followed by another line. Rebuild this file on future growth.
-                if final_line {
-                    resume = location.offset;
+        rows::visit_lines(host, &path, start, end, first, |bytes, row, final_line| {
+            visit(&path, bytes, row, final_line)?;
+            let id = match identity(bytes) {
+                Ok(id) => id,
+                Err(_)
+                    if final_line
+                        && serde_json::from_slice::<serde_json::Value>(bytes).is_err() =>
+                {
+                    resume = row.offset;
+                    return Ok(());
                 }
-                Ok(())
-            },
-        )?;
+                Err(error) => {
+                    if serde_json::from_slice::<serde_json::Value>(bytes).is_ok() {
+                        return Err(id_error(&path, "Partition records need unique string IDs"));
+                    }
+                    return Err(rows::parse_error(error));
+                }
+            };
+            self.entry(file, &id, row);
+            count += 1;
+            if final_line {
+                resume = row.offset;
+            }
+            Ok(())
+        })?;
         if let Some(generation) = &generation {
             if generation.check(host)? != GenerationCheck::Unchanged {
                 return Err(crate::generation::changed(&path));
@@ -220,58 +290,58 @@ impl IdLocator {
         };
         Ok(())
     }
-
     fn finish(&mut self, host: &dyn StorageHost) -> Result<(), EngineError> {
         self.entries
-            .sort_unstable_by_key(|entry| (entry.hash, entry.file, entry.offset));
-        for pair in self.entries.windows(2) {
-            if pair[0].hash != pair[1].hash {
+            .sort_unstable_by(|left, right| entry_order(left, right, &self.wide));
+        for (position, entry) in self.entries.iter().enumerate().skip(1) {
+            if self.entries[position - 1].hash != entry.hash {
                 continue;
             }
-            // Do not mistake a hash collision for duplicate identity. Compare
-            // every equal-hash candidate, including non-adjacent collisions.
+            let current = location(entry, &self.wide);
+            let path = &self.files[current.file as usize].path;
+            let bytes = rows::read_line(host, path, current.offset)?;
+            let id = identity(&bytes).map_err(rows::parse_error)?;
             let begin = self
                 .entries
-                .partition_point(|entry| entry.hash < pair[1].hash);
-            let id = rows::read_line(
-                host,
-                &self.files[pair[1].file as usize].path,
-                pair[1].offset,
-            )?;
-            let id = identity(&id).map_err(rows::parse_error)?;
-            for previous in &self.entries[begin..] {
-                if previous.file == pair[1].file && previous.offset == pair[1].offset {
-                    break;
-                }
+                .partition_point(|candidate| candidate.hash < entry.hash);
+            for previous in &self.entries[begin..position] {
+                let previous = location(previous, &self.wide);
                 let bytes = rows::read_line(
                     host,
                     &self.files[previous.file as usize].path,
                     previous.offset,
                 )?;
                 if identity(&bytes).map_err(rows::parse_error)? == id {
-                    let message = if previous.file == pair[1].file {
+                    let message = if previous.file == current.file {
                         "Partition records need unique string IDs".into()
                     } else {
                         format!("Duplicate partition record '{id}'")
                     };
-                    return Err(id_error(&self.files[pair[1].file as usize].path, message));
+                    return Err(id_error(path, message));
                 }
             }
         }
         Ok(())
     }
-
-    /// Refresh before locate. Membership is exact after candidate verification;
-    /// missing files are removed and edits rebuild only the affected files.
+    /// Refresh before locate. A verified candidate supplies exact identity;
+    /// current generations guarantee that membership has no false negatives.
     pub fn refresh(&mut self, host: &dyn StorageHost, paths: &[String]) -> Result<(), EngineError> {
+        self.refresh_visiting(host, paths, &mut |_, _, _, _| Ok(()))
+    }
+    pub fn refresh_visiting(
+        &mut self,
+        host: &dyn StorageHost,
+        paths: &[String],
+        visit: &mut RowVisitor<'_>,
+    ) -> Result<(), EngineError> {
         if self.partitioned {
             return Err(crate::generation::changed(
                 self.files.first().map_or("", |file| file.path.as_str()),
             ));
         }
-        self.merge_delta();
+        // Do not merge an append delta unless a file actually needs rescanning.
         if !self.files.iter().map(|file| &file.path).eq(paths.iter()) {
-            *self = Self::build(host, paths)?;
+            *self = Self::build_visiting(host, paths, visit)?;
             return Ok(());
         }
         let mut changed = false;
@@ -291,13 +361,12 @@ impl IdLocator {
                     )
                 }
             };
-            if check == GenerationCheck::Unchanged && !state.dirty {
+            if !state.dirty
+                && (check == GenerationCheck::Unchanged
+                    || (check == GenerationCheck::Missing && state.generation.is_none()))
+            {
                 continue;
             }
-            if check == GenerationCheck::Missing && state.generation.is_none() && !state.dirty {
-                continue;
-            }
-            changed = true;
             let append = matches!(check, GenerationCheck::Appended { .. })
                 && !state.dirty
                 && state
@@ -309,20 +378,15 @@ impl IdLocator {
             } else {
                 (0, 0)
             };
-            // Invalidate before scanning: if the scan fails, a later attempt
-            // must rebuild rather than publish partially inserted metadata.
             self.files[file].dirty = true;
-            if !append {
-                self.entries.retain(|entry| entry.file as usize != file);
-                self.wide_rows
-                    .retain(|(index, _), _| *index as usize != file);
-            }
-            if let Err(error) = self.scan_file(host, file as u32, start, first, generation) {
+            if let Err(error) = self.scan_file(host, file as u32, start, first, generation, visit) {
                 self.files[file].dirty = true;
                 return Err(error);
             }
+            changed = true;
         }
         if changed {
+            self.merge_delta();
             if let Err(error) = self.finish(host) {
                 for file in &mut self.files {
                     file.dirty = true;
@@ -332,12 +396,8 @@ impl IdLocator {
         }
         Ok(())
     }
-
-    /// Ordinal may be `UNKNOWN_ORDINAL` for rows recorded by
-    /// `record_appended` until the next refresh; use locations from `locate`
-    /// for verification reads only, never for ordering. Custom codecs return
-    /// `UNKNOWN_OFFSET`: verify by decoding that partition through its codec,
-    /// never by reading an individual text line.
+    /// Recorded speculative rows have UNKNOWN_ORDINAL until refresh. Custom
+    /// codec candidates have UNKNOWN_OFFSET and require partition decoding.
     pub fn locate(&self, id: &str) -> Result<Vec<(String, RowLocation)>, EngineError> {
         if let Some(file) = self.files.iter().find(|file| file.dirty) {
             return Err(crate::generation::changed(&file.path));
@@ -349,36 +409,29 @@ impl IdLocator {
             .take_while(|entry| entry.hash == key)
             .chain(self.delta.iter().filter(|entry| entry.hash == key))
             .map(|entry| {
-                let path = &self.files[entry.file as usize].path;
+                let pos = location(entry, &self.wide);
+                let path = &self.files[pos.file as usize].path;
                 let preceding = self.files.iter().filter(|file| file.path < *path);
                 let first: u64 = preceding.clone().map(|file| file.rows).sum();
-                let partition = preceding.count() as u32;
-                let row = self
-                    .wide_rows
-                    .get(&(entry.file, entry.offset))
-                    .copied()
-                    .unwrap_or(u64::from(entry.row));
-                let ordinal = if row == super::UNKNOWN_ORDINAL {
-                    row
-                } else {
-                    first + row
-                };
                 (
                     path.clone(),
                     RowLocation {
-                        partition,
+                        partition: preceding.count() as u32,
                         offset: if self.partitioned {
                             super::UNKNOWN_OFFSET
                         } else {
-                            entry.offset
+                            pos.offset
                         },
-                        ordinal,
+                        ordinal: if pos.row == super::UNKNOWN_ORDINAL {
+                            pos.row
+                        } else {
+                            first + pos.row
+                        },
                     },
                 )
             })
             .collect())
     }
-
     pub fn record_appended(
         &mut self,
         path: &str,
@@ -400,35 +453,41 @@ impl IdLocator {
             }
         };
         if self.partitioned {
-            // A whole-partition codec can change old IDs when new text is
-            // appended. Only its decoder can publish new membership.
             self.files[file as usize].dirty = true;
             return Ok(());
         }
-        // Search the sorted base by hash and the small append delta linearly.
-        for (id, location) in rows {
-            // All row starts before resume are already covered, regardless
-            // of the supplied ID. Newly recorded offsets use the rare-row
-            // table until refresh, so repeats need no table-wide offset scan.
-            if location.offset < self.files[file as usize].resume
-                || self.wide_rows.get(&(file, location.offset)) == Some(&super::UNKNOWN_ORDINAL)
+        for (id, row) in rows {
+            if row.offset < self.files[file as usize].resume
+                || match speculative_address(file, row.offset) {
+                    Some(address) => self.wide.contains_key(&address),
+                    None => self.wide.values().any(|pos| {
+                        pos.file == file
+                            && pos.offset == row.offset
+                            && pos.row == super::UNKNOWN_ORDINAL
+                    }),
+                }
             {
                 continue;
             }
             let key = hash(id);
             let begin = self.entries.partition_point(|entry| entry.hash < key);
+            // Every speculative delta/base entry is already covered by the
+            // overflow-address lookup above. Checked delta rows are before
+            // resume. Only an old unterminated base row can still coincide.
             let present = self.entries[begin..]
                 .iter()
                 .take_while(|entry| entry.hash == key)
-                .chain(self.delta.iter())
-                .any(|entry| entry.file == file && entry.offset == location.offset);
+                .any(|entry| {
+                    let pos = location(entry, &self.wide);
+                    pos.file == file && pos.offset == row.offset
+                });
             if !present {
                 let entry = self.make_entry(
                     file,
                     id,
                     RowLocation {
                         partition: file,
-                        offset: location.offset,
+                        offset: row.offset,
                         ordinal: super::UNKNOWN_ORDINAL,
                     },
                 );
@@ -442,9 +501,94 @@ impl IdLocator {
                 }
             }
         }
-        // No host was passed: do not advance the checked generation, row
-        // count or resume offset. Refresh scans the entire unverified suffix.
         Ok(())
+    }
+    /// Publish an own append only after the caller proved the complete text
+    /// equals the accepted append baseline, under this checked generation.
+    /// A metadata observation alone is not proof of an unchanged old prefix.
+    pub fn accept_appended(
+        &mut self,
+        generation: SourceGeneration,
+        start: u64,
+        rows: &[(String, RowLocation)],
+    ) -> Result<(), EngineError> {
+        if self.partitioned {
+            return self.record_appended(&generation.path, rows);
+        }
+        let file = match self
+            .files
+            .iter()
+            .position(|file| file.path == generation.path)
+        {
+            Some(file) => file,
+            None if start == 0 => {
+                let file = self.files.len();
+                u32::try_from(file)
+                    .map_err(|_| id_error(&generation.path, "Too many partition files"))?;
+                self.files.push(File {
+                    path: generation.path.clone(),
+                    generation: None,
+                    rows: 0,
+                    resume: 0,
+                    dirty: false,
+                });
+                file
+            }
+            None => return Err(crate::generation::changed(&generation.path)),
+        };
+        if self.files[file].dirty || start > generation.covered_len {
+            return Err(crate::generation::changed(&generation.path));
+        }
+        // Unterminated/torn records may start before the kept prefix. Rebuild
+        // instead of retaining a stale old identity at that offset.
+        if self.files[file]
+            .generation
+            .as_ref()
+            .is_some_and(|old| self.files[file].resume != old.covered_len)
+        {
+            self.files[file].dirty = true;
+            return Ok(());
+        }
+        let first = self.files[file].rows;
+        if self.files[file]
+            .generation
+            .as_ref()
+            .is_some_and(|old| old.covered_len != start)
+        {
+            self.files[file].dirty = true;
+            return Ok(());
+        }
+        if self.wide.values().any(|pos| {
+            pos.file as usize == file && pos.offset >= start && pos.row == super::UNKNOWN_ORDINAL
+        }) {
+            self.remove_suffix(file as u32, start);
+        }
+        for (ordinal, (id, row)) in rows.iter().enumerate() {
+            let entry = self.make_entry(
+                file as u32,
+                id,
+                RowLocation {
+                    ordinal: first + ordinal as u64,
+                    ..*row
+                },
+            );
+            self.delta.push(entry);
+        }
+        self.files[file].rows = first + rows.len() as u64;
+        self.files[file].resume = generation.covered_len;
+        self.files[file].generation = Some(generation);
+        if self.delta.len() >= APPEND_DELTA_LIMIT {
+            self.merge_delta();
+        }
+        Ok(())
+    }
+    /// Generation used to prove this path's membership. Callers can check it
+    /// around candidate decoding to reject an intervening edit.
+    pub fn generation_for(&self, path: &str) -> Option<&SourceGeneration> {
+        self.files
+            .iter()
+            .find(|file| file.path == path && !file.dirty)
+            .and_then(|file| file.generation.as_ref())
     }
 
     pub fn resident_bytes(&self) -> usize {
@@ -458,6 +602,103 @@ impl IdLocator {
                     file.path.capacity() + file.generation.as_ref().map_or(0, |g| g.path.capacity())
                 })
                 .sum::<usize>()
-            + self.wide_rows.capacity() * (std::mem::size_of::<((u32, u64), u64)>() + 1)
+            + self.wide.capacity() * (std::mem::size_of::<(u64, Location)>() + 1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn equal_hash_delta_sort_and_merge_use_decoded_source_positions() {
+        let mut locator = IdLocator::default();
+        let first = locator.make_entry(
+            0,
+            "same",
+            RowLocation {
+                partition: 0,
+                offset: 0,
+                ordinal: 0,
+            },
+        );
+        let later_file = locator.make_entry(
+            1,
+            "same",
+            RowLocation {
+                partition: 1,
+                offset: 0,
+                ordinal: 0,
+            },
+        );
+        let overflow = locator.make_entry(
+            0,
+            "same",
+            RowLocation {
+                partition: 0,
+                offset: u64::from(u32::MAX) + 1,
+                ordinal: MAX_SMALL_ROW + 1,
+            },
+        );
+        locator.entries.push(first);
+        locator.delta = vec![later_file, overflow];
+        locator.merge_delta();
+        let positions = locator
+            .entries
+            .iter()
+            .map(|entry| {
+                let row = location(entry, &locator.wide);
+                (row.file, row.offset)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            positions,
+            vec![(0, 0), (0, u64::from(u32::MAX) + 1), (1, 0)]
+        );
+    }
+
+    #[test]
+    fn compact_locations_and_all_overflow_dimensions_round_trip() {
+        assert_eq!(std::mem::size_of::<Entry>(), 16);
+        let mut locator = IdLocator::default();
+        for (file, offset, ordinal) in [
+            (0, 0, 0),
+            (4094, u64::from(u32::MAX), MAX_SMALL_ROW),
+            (4095, 1, 1),
+            (u32::MAX, 1, 1),
+            (0, u64::from(u32::MAX) + 1, 1),
+            (0, 1, MAX_SMALL_ROW + 1),
+            (0, u64::MAX, u64::MAX),
+            (0, 0, super::super::UNKNOWN_ORDINAL),
+            (
+                (1 << 19) - 1,
+                u64::from(u32::MAX),
+                super::super::UNKNOWN_ORDINAL,
+            ),
+            (1 << 19, 0, super::super::UNKNOWN_ORDINAL),
+        ] {
+            let entry = locator.make_entry(
+                file,
+                "id",
+                RowLocation {
+                    partition: file,
+                    offset,
+                    ordinal,
+                },
+            );
+            assert_eq!(
+                location(&entry, &locator.wide),
+                Location {
+                    file,
+                    offset,
+                    row: ordinal
+                }
+            );
+        }
+        assert_eq!(
+            locator.wide.len(),
+            8,
+            "general and speculative addresses must not overlap"
+        );
     }
 }

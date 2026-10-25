@@ -4,6 +4,47 @@
 use super::{ByteChunks, RawRow, RowLocation, RowSource};
 use crate::errors::{EngineError, OperationError};
 
+// Portable scalar word-at-a-time delimiter search. A zero-byte mask is only
+// a candidate: exact byte comparison handles endianness and subtraction carry.
+pub(super) fn newline_position(bytes: &[u8]) -> Option<usize> {
+    let mut chunks = bytes.chunks_exact(8);
+    for (index, chunk) in chunks.by_ref().enumerate() {
+        let word =
+            u64::from_ne_bytes(chunk.try_into().expect("eight-byte chunk")) ^ 0x0a0a_0a0a_0a0a_0a0a;
+        if word.wrapping_sub(0x0101_0101_0101_0101) & !word & 0x8080_8080_8080_8080 != 0 {
+            if let Some(position) = chunk.iter().position(|byte| *byte == b'\n') {
+                return Some(index * 8 + position);
+            }
+        }
+    }
+    chunks
+        .remainder()
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map(|position| bytes.len() - chunks.remainder().len() + position)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn scalar_delimiter_search_matches_byte_search_at_every_word_boundary() {
+        for fill in [0, 1, 9, 10, 11, 127, 255] {
+            for length in 0..96 {
+                for position in 0..=length {
+                    let mut bytes = vec![fill; length];
+                    if position < length {
+                        bytes[position] = b'\n';
+                    }
+                    assert_eq!(
+                        super::newline_position(&bytes),
+                        bytes.iter().position(|byte| *byte == b'\n')
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Push adapter for hosts whose chunk reads are asynchronous. Drain `next_row`
 /// before feeding another chunk. `None` means this chunk is drained; only a
 /// chunk marked final ends the file and emits an unterminated final row.
@@ -70,7 +111,7 @@ impl ChunkLines {
         }
         loop {
             let remaining = &self.input[self.position..];
-            let newline = remaining.iter().position(|&byte| byte == b'\n');
+            let newline = newline_position(remaining);
             let (end, terminated) = match newline {
                 Some(end) => (end, true),
                 None => (remaining.len(), false),
