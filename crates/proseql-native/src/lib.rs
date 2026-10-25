@@ -564,6 +564,12 @@ impl NativeRuntime {
         let mut database = Database::new(collections, Arc::clone(&registry));
         database.commit_snapshot_transaction(states_to_records(loaded))?;
         database.take_committed_changes();
+        let mut sources = sources;
+        if let Some(sources) = sources.as_mut() {
+            // Give streaming index state the codec context it needs for lazy
+            // sources (custom codecs). Reloads keep it (`lazy_adopt`).
+            crate::locate::configure_streaming_index(sources, &formats);
+        }
         Ok(Self {
             inner: Arc::new(RuntimeCore {
                 state: Mutex::new(RuntimeState {
