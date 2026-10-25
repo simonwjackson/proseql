@@ -1,4 +1,8 @@
-use crate::{fixture, query::{Answer, Query}, Error};
+use crate::{
+    fixture,
+    query::{Answer, Query},
+    Error,
+};
 use rusqlite::{params, Connection, Row, Statement};
 use serde_json::{json, Value};
 use std::fs::File;
@@ -21,14 +25,31 @@ fn record(row: &Row<'_>, kind: &str) -> rusqlite::Result<Value> {
         "month":row.get::<_,String>(8)?, "date":row.get::<_,String>(9)?,
         "atUtc":row.get::<_,String>(10)?
     });
-    if kind == "raw" {r["shard"] = json!(row.get::<_,String>(11)?);}
+    if kind == "raw" {
+        r["shard"] = json!(row.get::<_, String>(11)?);
+    }
     Ok(r)
 }
-fn insert(stmt: &mut Statement<'_>, r: &Value) -> Result<(),Error> {
-    stmt.execute(params![r["id"].as_str(),r["metric"].as_str(),r["at"].as_str(),r["end"].as_str(),r["value"].as_f64(),r["source"].as_str(),r["receivedAt"].as_str(),r["rawId"].as_str(),r["month"].as_str(),r["date"].as_str(),r["atUtc"].as_str(),r["shard"].as_str()])?;
+fn insert(stmt: &mut Statement<'_>, r: &Value) -> Result<(), Error> {
+    stmt.execute(params![
+        r["id"].as_str(),
+        r["metric"].as_str(),
+        r["at"].as_str(),
+        r["end"].as_str(),
+        r["value"].as_f64(),
+        r["source"].as_str(),
+        r["receivedAt"].as_str(),
+        r["rawId"].as_str(),
+        r["month"].as_str(),
+        r["date"].as_str(),
+        r["atUtc"].as_str(),
+        r["shard"].as_str()
+    ])?;
     Ok(())
 }
-fn insert_sql(kind: &str) -> String {format!("INSERT INTO {kind} VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)")}
+fn insert_sql(kind: &str) -> String {
+    format!("INSERT INTO {kind} VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)")
+}
 
 pub fn import(root: &Path) -> Result<(), Error> {
     let mut conn = open(root)?;
@@ -41,7 +62,7 @@ pub fn import(root: &Path) -> Result<(), Error> {
             for path in fixture::paths(root, kind)? {
                 for line in BufReader::new(File::open(path)?).lines() {
                     let r: Value = serde_json::from_str(&line?)?;
-                    insert(&mut stmt,&r)?;
+                    insert(&mut stmt, &r)?;
                 }
             }
         }
@@ -54,21 +75,36 @@ pub fn import(root: &Path) -> Result<(), Error> {
 pub fn query(conn: &Connection, kind: &str, q: &Query) -> Result<Answer, Error> {
     if let Some(id) = &q.id {
         let mut stmt = conn.prepare(&format!("SELECT * FROM {kind} WHERE id=?1"))?;
-        let rows = stmt.query_map([id], |row| record(row,kind))?.collect::<Result<Vec<_>, _>>()?;
+        let rows = stmt
+            .query_map([id], |row| record(row, kind))?
+            .collect::<Result<Vec<_>, _>>()?;
         return Ok(Answer::rows(rows));
     }
-    let condition = if q.metrics.len() == 1 {"metric='steps'"} else {"metric IN ('steps','heartRate')"};
+    let condition = if q.metrics.len() == 1 {
+        "metric='steps'"
+    } else {
+        "metric IN ('steps','heartRate')"
+    };
     if q.aggregate {
         let mut stmt = conn.prepare(&format!("SELECT date,metric,count(*),sum(value) FROM {kind} WHERE time>=?1 AND time<?2 AND {condition} GROUP BY date,metric"))?;
-        let mut rows = stmt.query(params![q.from,q.to])?;
+        let mut rows = stmt.query(params![q.from, q.to])?;
         let mut answer = Answer::default();
         while let Some(row) = rows.next()? {
-            answer.group(&row.get::<_, String>(0)?, &row.get::<_, String>(1)?, u64::try_from(row.get::<_,i64>(2)?)?, row.get(3)?);
+            answer.group(
+                &row.get::<_, String>(0)?,
+                &row.get::<_, String>(1)?,
+                u64::try_from(row.get::<_, i64>(2)?)?,
+                row.get(3)?,
+            );
         }
         Ok(answer)
     } else {
-        let mut stmt = conn.prepare(&format!("SELECT * FROM {kind} WHERE time>=?1 AND time<?2 AND {condition}"))?;
-        let rows = stmt.query_map(params![q.from,q.to], |row| record(row,kind))?.collect::<Result<Vec<_>, _>>()?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT * FROM {kind} WHERE time>=?1 AND time<?2 AND {condition}"
+        ))?;
+        let rows = stmt
+            .query_map(params![q.from, q.to], |row| record(row, kind))?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Answer::rows(rows))
     }
 }
@@ -82,8 +118,12 @@ pub fn append(conn: &mut Connection, kind: &str) -> Result<Answer, Error> {
         for r in &rows {
             let mut existing = lookup.query([r["id"].as_str()])?;
             if let Some(stored) = existing.next()? {
-                if &record(stored,kind)? != r { return Err("duplicate ID differs".into()); }
-            } else {insert(&mut stmt,r)?;}
+                if &record(stored, kind)? != r {
+                    return Err("duplicate ID differs".into());
+                }
+            } else {
+                insert(&mut stmt, r)?;
+            }
         }
     }
     tx.commit()?;
@@ -93,7 +133,14 @@ pub fn append(conn: &mut Connection, kind: &str) -> Result<Answer, Error> {
 pub fn info(root: &Path) -> Result<Value, Error> {
     let conn = open(root)?;
     let mut pragmas = serde_json::Map::new();
-    for name in ["journal_mode","synchronous","cache_size","page_size","mmap_size","temp_store"] {
+    for name in [
+        "journal_mode",
+        "synchronous",
+        "cache_size",
+        "page_size",
+        "mmap_size",
+        "temp_store",
+    ] {
         let mut stmt = conn.prepare(&format!("PRAGMA {name}"))?;
         let value = stmt.query_row([], |row| {
             use rusqlite::types::ValueRef;
@@ -103,10 +150,14 @@ pub fn info(root: &Path) -> Result<Value, Error> {
                 _ => Value::Null,
             })
         })?;
-        pragmas.insert(name.into(),value);
+        pragmas.insert(name.into(), value);
     }
-    let mut stmt = conn.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL ORDER BY name")?;
-    let indexes = stmt.query_map([],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+    let mut stmt = conn.prepare(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL ORDER BY name",
+    )?;
+    let indexes = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(json!({"sqlite_version":rusqlite::version(),"pragmas":pragmas,"indexes":indexes}))
 }
 
