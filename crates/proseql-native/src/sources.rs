@@ -700,9 +700,18 @@ impl SourceState {
             };
             let (path, file) = self.append_target(&change.collection, record)?;
             if let Some(lazy) = self.lazy.get(&change.collection) {
-                // The engine's ID check covered the resident partitions; an
-                // append into a partition that is not resident was not checked.
-                if !lazy.resident.contains_key(&path) {
+                // Streaming checks IDs globally, without materialising target
+                // partitions. Only paths prepared before create have a baseline.
+                let checked = if lazy.execution_model == crate::ExecutionModel::Streaming {
+                    lazy.stream
+                        .append
+                        .target_generations()
+                        .iter()
+                        .any(|(target, _)| target == &path)
+                } else {
+                    lazy.resident.contains_key(&path)
+                };
+                if !checked {
                     return Err(crate::operation_error(
                         "lazy-partition-not-loaded",
                         format!(
@@ -774,10 +783,15 @@ impl SourceState {
     /// Record durable appends in the stored file state and source records.
     pub fn apply_appends(&mut self, plan: AppendPlan) {
         for write in &plan.writes {
-            let lazy = self
-                .lazy
-                .values()
-                .any(|lazy| lazy.resident.contains_key(&write.path));
+            let lazy = self.lazy.values().any(|lazy| {
+                lazy.resident.contains_key(&write.path)
+                    || (lazy.execution_model == crate::ExecutionModel::Streaming
+                        && proseql_storage::partition_prune::partition_key_of_path(
+                            &lazy.source,
+                            &write.path,
+                        )
+                        .is_some())
+            });
             let content = self.contents.entry(write.path.clone()).or_insert_with(|| {
                 if lazy {
                     StoredFile::append(&[], None)

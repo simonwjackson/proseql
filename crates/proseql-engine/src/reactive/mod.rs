@@ -38,6 +38,8 @@ use crate::relationships::{
     Database,
 };
 
+pub mod external;
+
 const DEFAULT_DEBOUNCE_MS: u64 = 10;
 const UNSUPPORTED_WATCH_REASON: &str = "missing-reactive-scheduler";
 const UNSUPPORTED_WATCH_MESSAGE: &str = "Reactive watch scheduling is unavailable on this target. Construct Database with Database::new_with_reactive_scheduler(...) and inject a host scheduler.";

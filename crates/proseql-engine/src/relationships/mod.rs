@@ -308,6 +308,18 @@ impl Database {
         self.collections.get(name)
     }
 
+    /// Resolve an ID with the collection's create strategy, without inserting a row.
+    pub fn resolve_create_id(
+        &mut self,
+        collection: &str,
+        data: &Value,
+    ) -> Result<String, EngineError> {
+        self.collections
+            .get_mut(collection)
+            .ok_or_else(|| col_nf(collection))?
+            .resolve_create_id(data)
+    }
+
     /// Synchronize a host materialization that was mutated by its caller.
     /// This is not a formal database mutation and therefore emits no hooks,
     /// reactive events, or committed change delta.

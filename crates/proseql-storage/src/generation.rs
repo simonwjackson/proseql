@@ -1,54 +1,98 @@
-//! Source generations: cheap, checked identity of a partition file's bytes.
-//!
-//! Seam owner: `index` (#15). Contract:
-//! `openspec/changes/query-while-scanning/contract.md`.
-//!
-//! Every derived structure (time index, ID locator, watch state) records the
-//! generation it was built from and checks it before use. A stale generation
-//! must lead to a correct rebuild or a full scan, never to a wrong answer.
-//! Size and mtime alone are not enough: `index` combines `FileStat` with a
-//! checked read (for example a hash of the bytes the structure covers) where
-//! the host gives no `change_id`.
+//! Checked identities for derived, in-memory indexes over text files.
 
-use crate::host::StorageHost;
-use proseql_engine::errors::EngineError;
-use proseql_engine::scan::unimplemented_seam;
+use crate::host::{FileStat, StorageHost};
+use proseql_engine::errors::{EngineError, OperationError};
 
-/// What a structure built from a file knows about the bytes it covered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceGeneration {
     pub path: String,
-    /// Bytes covered (a prefix of the file for append-only sources).
     pub covered_len: u64,
     pub modified_ns: Option<u128>,
     pub change_id: Option<u64>,
-    /// Hash of the covered bytes, or of a checked suffix of them, when the
-    /// host has no `change_id`. The exact scheme belongs to `index`.
+    /// Hash of the entire covered prefix, also retained on identity-aware hosts
+    /// so that growth can be proved to be append-only.
     pub check_hash: Option<u64>,
 }
 
-/// The result of checking a generation against the disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenerationCheck {
-    /// Same bytes as when the structure was built.
     Unchanged,
-    /// The covered prefix is unchanged and the file grew: rows from
-    /// `from_offset` are new (append-only fast path).
     Appended { from_offset: u64 },
-    /// The covered bytes changed or the file was replaced: rebuild.
     Replaced,
-    /// The file is gone.
     Missing,
 }
 
+pub(crate) fn changed(path: &str) -> EngineError {
+    EngineError::Operation(OperationError {
+        operation: "read".into(),
+        reason: "source-changed".into(),
+        message: format!("Source '{path}' changed while building its index; retry the operation"),
+    })
+}
+
+fn hash_prefix(host: &dyn StorageHost, path: &str, len: u64) -> Result<Option<u64>, EngineError> {
+    let mut offset = 0;
+    let mut hash = 0xcbf29ce484222325_u64;
+    while offset < len {
+        let bytes = host.read_range(path, offset, (len - offset).min(64 * 1024) as usize)?;
+        if bytes.is_empty() || bytes.len() as u64 > len - offset {
+            return Ok(None);
+        }
+        offset += bytes.len() as u64;
+        for byte in bytes {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    Ok(Some(hash))
+}
+
 impl SourceGeneration {
-    /// Observe a file now. `Ok(None)` when it is missing.
-    pub fn observe(_host: &dyn StorageHost, _path: &str) -> Result<Option<Self>, EngineError> {
-        Err(unimplemented_seam("SourceGeneration::observe"))
+    pub fn observe(host: &dyn StorageHost, path: &str) -> Result<Option<Self>, EngineError> {
+        let Some(stat) = host.stat(path)? else {
+            return Ok(None);
+        };
+        let hash = hash_prefix(host, path, stat.len)?;
+        if hash.is_none() || host.stat(path)? != Some(stat) {
+            return Err(changed(path));
+        }
+        Ok(Some(Self {
+            path: path.into(),
+            covered_len: stat.len,
+            modified_ns: stat.modified_ns,
+            change_id: stat.change_id,
+            check_hash: hash,
+        }))
     }
 
-    /// Compare with the disk.
-    pub fn check(&self, _host: &dyn StorageHost) -> Result<GenerationCheck, EngineError> {
-        Err(unimplemented_seam("SourceGeneration::check"))
+    pub fn check(&self, host: &dyn StorageHost) -> Result<GenerationCheck, EngineError> {
+        let Some(stat) = host.stat(&self.path)? else {
+            return Ok(GenerationCheck::Missing);
+        };
+        let previous = FileStat {
+            len: self.covered_len,
+            modified_ns: self.modified_ns,
+            change_id: self.change_id,
+        };
+        if stat == previous && stat.change_id.is_some() {
+            return Ok(GenerationCheck::Unchanged);
+        }
+        if stat.len < self.covered_len {
+            return Ok(GenerationCheck::Replaced);
+        }
+        let hash = hash_prefix(host, &self.path, self.covered_len)?;
+        if host.stat(&self.path)? != Some(stat) {
+            return Err(changed(&self.path));
+        }
+        if hash.is_none() || hash != self.check_hash {
+            return Ok(GenerationCheck::Replaced);
+        }
+        Ok(if stat.len > self.covered_len {
+            GenerationCheck::Appended {
+                from_offset: self.covered_len,
+            }
+        } else {
+            GenerationCheck::Unchanged
+        })
     }
 }

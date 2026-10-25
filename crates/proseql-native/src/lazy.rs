@@ -178,14 +178,16 @@ impl LazyCollection {
     /// Record an append by this runtime: the target is resident (checked when
     /// the append was planned) and now exists.
     pub fn record_append(&mut self, path: &str, id: String) {
-        let resident = self
-            .resident
-            .entry(path.to_owned())
-            .or_insert_with(|| Resident {
-                ids: Vec::new(),
-                last_used: 0,
-            });
-        resident.ids.push(id);
+        if self.execution_model == crate::ExecutionModel::Resident {
+            let resident = self
+                .resident
+                .entry(path.to_owned())
+                .or_insert_with(|| Resident {
+                    ids: Vec::new(),
+                    last_used: 0,
+                });
+            resident.ids.push(id);
+        }
         self.pending.remove(path);
         if !self.known.contains_key(path) {
             if let Some(key) = partition_key_of_path(&self.source, path) {
@@ -393,6 +395,7 @@ pub(crate) struct LazyFingerprint {
     resident: Vec<(String, Option<FileFingerprint>)>,
     /// Pending path → fingerprint of the bytes that failed to load.
     pending: Vec<(String, Option<FileFingerprint>)>,
+    generations: Vec<proseql_storage::generation::SourceGeneration>,
 }
 
 fn file_fingerprint(
@@ -441,6 +444,11 @@ pub(crate) fn disk_differs(
         let listed = list_partitions(host, &fingerprint.source)?;
         if !listed.keys().eq(fingerprint.known.iter()) {
             return Ok(true);
+        }
+        for generation in &fingerprint.generations {
+            if generation.check(host)? != proseql_storage::generation::GenerationCheck::Unchanged {
+                return Ok(true);
+            }
         }
         for (path, stored) in fingerprint.resident.iter().chain(&fingerprint.pending) {
             if &file_fingerprint(host, path)? != stored {
@@ -904,6 +912,9 @@ impl SourceState {
         record: &Value,
     ) -> Result<(), EngineError> {
         let lazy = self.lazy_ref(collection)?;
+        if lazy.execution_model == crate::ExecutionModel::Streaming {
+            return Ok(());
+        }
         let Ok(path) = partition_path(&lazy.source, record) else {
             return Ok(());
         };
@@ -1063,6 +1074,13 @@ impl SourceState {
     ) -> Result<(), EngineError> {
         let mut first_error = None;
         for name in self.lazy.keys().cloned().collect::<Vec<_>>() {
+            if self.lazy[&name].execution_model == crate::ExecutionModel::Streaming {
+                let lazy = self.lazy.get_mut(&name).expect("lazy collection");
+                if let Err(error) = crate::write::watch::refresh_collection(lazy, host) {
+                    first_error.get_or_insert(error);
+                }
+                continue;
+            }
             let listed = list_partitions(host, &self.lazy[&name].source)?;
             let resident = self.lazy[&name]
                 .resident
@@ -1188,22 +1206,26 @@ impl SourceState {
         let contents = &self.contents;
         self.lazy
             .values_mut()
-            .map(|lazy| LazyFingerprint {
-                source: lazy.source.clone(),
-                known: lazy.known.keys().cloned().collect(),
-                resident: lazy
-                    .resident
-                    .iter_mut()
-                    .map(|(path, _resident)| {
-                        let stored = contents.get(path).map(|content| content.fingerprint());
-                        (path.clone(), stored)
-                    })
-                    .collect(),
-                pending: lazy
-                    .pending
-                    .iter()
-                    .map(|(path, failed)| (path.clone(), *failed))
-                    .collect(),
+            .map(|lazy| {
+                crate::write::watch::prune(lazy);
+                LazyFingerprint {
+                    generations: lazy.stream.watch.baseline.values().cloned().collect(),
+                    source: lazy.source.clone(),
+                    known: lazy.known.keys().cloned().collect(),
+                    resident: lazy
+                        .resident
+                        .iter_mut()
+                        .map(|(path, _resident)| {
+                            let stored = contents.get(path).map(|content| content.fingerprint());
+                            (path.clone(), stored)
+                        })
+                        .collect(),
+                    pending: lazy
+                        .pending
+                        .iter()
+                        .map(|(path, failed)| (path.clone(), *failed))
+                        .collect(),
+                }
             })
             .collect()
     }

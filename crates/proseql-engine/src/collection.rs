@@ -2683,6 +2683,13 @@ impl Collection {
         })
     }
 
+    /// Resolve a create ID before a host checks nonresident records for duplicates.
+    /// Supplying the returned ID to `create` does not advance the generator again.
+    pub fn resolve_create_id(&mut self, data: &Value) -> Result<String, EngineError> {
+        let obj = require_object(data.clone(), "create input")?;
+        self.resolve_id(&obj)
+    }
+
     /// Resolve the id for a new entity from the input object and `id_strategy`.
     fn resolve_id(&mut self, obj: &Map<String, Value>) -> Result<String, EngineError> {
         match &self.descriptor.id_strategy {
