@@ -40,7 +40,7 @@ case "$action" in
     sha256sum "$data/timing" "$data/meter" > "$out/binaries.sha256"
     ;;
   lock)
-    nix develop --builders '' -c cargo generate-lockfile --manifest-path bench/stage0/Cargo.toml > "$out/lock.log" 2>&1
+    nix develop --builders '' -c cargo metadata --format-version 1 --manifest-path bench/stage0/Cargo.toml > "$out/lock.log" 2>&1
     ;;
   format)
     nix develop --builders '' -c rustfmt --edition 2021 bench/stage0/src/*.rs
