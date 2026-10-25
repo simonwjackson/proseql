@@ -15,12 +15,25 @@ pub struct SimpleDecoder<'a> {
     // Empty names share bucket zero with NUL-prefixed names.
     buckets: [usize; 257],
 }
+fn supported(schema: &SchemaNode) -> bool {
+    match schema {
+        SchemaNode::Str | SchemaNode::Num | SchemaNode::Bool | SchemaNode::Unknown => true,
+        SchemaNode::Optional(inner)
+        | SchemaNode::NullOr(inner)
+        | SchemaNode::OptionalWithDefault { inner, .. } => supported(inner),
+        SchemaNode::Struct { fields } => fields.iter().all(|field| supported(&field.schema)),
+        SchemaNode::Array { item } => supported(item),
+        _ => false,
+    }
+}
 impl<'a> SimpleDecoder<'a> {
     pub fn new(schema: &'a SchemaNode) -> Option<Self> {
         let SchemaNode::Struct { fields } = schema else {
             return None;
         };
-        if fields.len() > 128 {
+        // Unsupported transforms/checks keep the generic borrowed parse, so
+        // canonical payload decoding does not disable positional key building.
+        if fields.len() > 128 || !fields.iter().all(|field| supported(&field.schema)) {
             return None;
         }
         let mut names: Vec<_> = fields

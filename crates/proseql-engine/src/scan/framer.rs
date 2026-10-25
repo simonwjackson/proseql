@@ -24,27 +24,6 @@ pub(super) fn newline_position(bytes: &[u8]) -> Option<usize> {
         .map(|position| bytes.len() - chunks.remainder().len() + position)
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn scalar_delimiter_search_matches_byte_search_at_every_word_boundary() {
-        for fill in [0, 1, 9, 10, 11, 127, 255] {
-            for length in 0..96 {
-                for position in 0..=length {
-                    let mut bytes = vec![fill; length];
-                    if position < length {
-                        bytes[position] = b'\n';
-                    }
-                    assert_eq!(
-                        super::newline_position(&bytes),
-                        bytes.iter().position(|byte| *byte == b'\n')
-                    );
-                }
-            }
-        }
-    }
-}
-
 /// Push adapter for hosts whose chunk reads are asynchronous. Drain `next_row`
 /// before feeding another chunk. `None` means this chunk is drained; only a
 /// chunk marked final ends the file and emits an unterminated final row.
@@ -210,6 +189,27 @@ impl<C: ByteChunks> RowSource for LineFramer<C> {
                 None => {
                     self.lines.push(&[], true)?;
                     self.done = true;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn scalar_delimiter_search_matches_byte_search_at_every_word_boundary() {
+        for fill in [0, 1, 9, 10, 11, 127, 255] {
+            for length in 0..96 {
+                for position in 0..=length {
+                    let mut bytes = vec![fill; length];
+                    if position < length {
+                        bytes[position] = b'\n';
+                    }
+                    assert_eq!(
+                        super::newline_position(&bytes),
+                        bytes.iter().position(|byte| *byte == b'\n')
+                    );
                 }
             }
         }

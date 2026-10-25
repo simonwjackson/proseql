@@ -31,7 +31,13 @@ The storage host supplies byte ranges. The shared `LineFramer` accepts chunks, h
 
 Partition path and file ordinal define natural order. Shared engine candidate-order rules preserve equality unions, stable ties, first-encounter group order, cursor comparisons and `limit + 1` page flags. Aggregates add individual f64 values in canonical order, not partition partial sums. An invalid row still fails a read even when its filter or limit would discard it. Rows excluded by partition pruning or safe positional seeking were not scanned.
 
-A sparse time index records an offset every 1,024 rows for eligible configured ordered fields. It seeks only when ordering and generation checks permit it. Unsorted data or a custom JSONL codec disables seeking. A stale index is rebuilt or the operation scans correctly; it is never authoritative data.
+A sparse time index records an offset every 32 rows for eligible configured ordered fields. On first use, the canonical full-file scan builds checkpoints as a side effect. Existing indexes seek only when ordering and generation checks permit it. A query whose validated UTC bounds conservatively cover an entire time-bucket partition does no index work for that file. Index-only rebuilds decode the key field, not owned payloads. Unsorted data or a custom JSONL codec disables seeking. A stale index is rebuilt or the operation scans correctly; it is never authoritative data.
+
+Whether an invalid row outside the queried range fails a Streaming read can depend on index state: a first-use full scan validates it, while a later safe seek may skip it. Every row actually scanned is still validated. `BoundedQueryStats::candidate_rows` counts those validated scan rows, including filter and page rejections, not index-maintenance rows. `NativeQueryStats::index_used` is None for a first-use full scan and Ordered only when the scanner uses a positional seek. Resident bounded visits count visited rows; Resident cached reads report all rows in the selected scope, and eager reads report the collection row count.
+
+Ordinary query-local identity metadata is 8 bytes per visited row. Equal hashes replay only the visited windows to recover candidate locations, then verify exact IDs from text. This halves ordinary identity storage, but duplicates or hash collisions add replay I/O. First-use ID lookup validates borrowed rows during the locator build; membership built earlier by append still requires payload validation before locator errors.
+
+Own appends can advance time indexes through checked `AppendProof` evidence. The cached generation must exactly match `before`, the host must still match `after`, and the old indexed prefix must end on a complete line. Otherwise the index refreshes normally; an external change clears append evidence. This prevents a same-length external edit followed by an own append from blessing stale checkpoints. Thirty-two-row checkpoints trade faster narrow ranges for more retained metadata: the 256-shard fixture uses 3,487,424 bytes versus 216,832 at stride 1,024. See the [round-2 read report](../benchmarks/query-while-scanning-perf-read.md).
 
 ## ID locator and generations
 
@@ -39,7 +45,7 @@ First ID use builds a compact global membership/location table. `find_by_id` als
 
 `find_by_id` and creates use this same locator. Creates check duplicates globally, including IDs outside the target partition. `ignore_identical` compares validated records, returns the stored record and writes nothing. An ID's apparent embedded timestamp is not trusted for routing: no configured invariant says it equals the row's timestamp.
 
-Generations include file length, identity/metadata and checked content-prefix evidence. Appends can extend derived metadata; hand edits, removals and out-of-order appends invalidate or disable affected indexes. Concurrent edits during building or verification fail explicitly. These checks do not add snapshot isolation, filesystem locking or multi-process write ownership.
+Generations include file length and identity/metadata. Hosts with trustworthy identity/ctime tokens, including `FsStorageHost`, check unchanged generations through metadata without hashing; a changed token means Replaced, not an inferred append. Tokenless hosts retain checked prefix hashes and can classify append-only growth. Own appends can extend derived metadata through explicit checked append evidence. Hand edits, removals and out-of-order appends invalidate or disable affected indexes. Concurrent edits during building or verification fail explicitly. These checks do not add snapshot isolation, filesystem locking or multi-process write ownership.
 
 ## Append and transaction path
 
@@ -57,7 +63,7 @@ The lazy poller lists files and checks watch-covered generations outside the run
 
 ## Changed guarantees
 
-All 13 changes below apply **only when Streaming is selected**. Resident is unchanged. Items 12 and 13 were approved by the parent during integration after reproducing the cache-dependent differences. Item 11 was corrected against the implementation and approved by the parent.
+All 14 changes below apply **only when Streaming is selected**. Resident is unchanged. Items 12 and 13 were approved by the parent during integration after reproducing the cache-dependent differences. Item 11 was corrected against the implementation and approved by the parent. Item 14 was approved during round-2 read optimization.
 
 1. Own creates appear in natural order (partition path, then file order) immediately under streaming; Resident put them at the end until the next reload. Explicitly sorted queries are unchanged.
 2. `create_many` with generated IDs resolves every ID before validating; on a failed batch a stateful generator may have advanced past the first invalid record. Generated IDs were never guaranteed gap-free.
@@ -69,15 +75,17 @@ All 13 changes below apply **only when Streaming is selected**. Resident is unch
 8. Commit-time conflict detection now also catches same-length prefix edits.
 9. Lazy sources with a custom JSONL codec read and verify one whole partition at a time through the codec (transient memory: one partition), with no positional seeks.
 10. A streaming watch holds its delivered result, a serialized equality baseline and file generations, not the covered rows.
-11. The first find_by_id on a lazy collection validates every row once per file generation (about 1.8 s for 656,640 rows on aka; slower on the Celeron, unmeasured). A create's first duplicate check builds the ID locator by scanning only ID fields (about 360 ms) and validates only matching candidate rows (see #3).
+11. The first find_by_id on a lazy collection validates every row once per file generation. Round 2 fuses this validation with locator construction; complete first-lookup timing is in the round-2 read report. Celeron latency remains unmeasured. A create's first duplicate check scans only ID fields and validates only matching candidate rows (see #3).
 12. Last-known-good after an invalid external edit is kept only for lazy partitions a live watch covers. Other reads see the current file: an invalid edit makes them fail with the validation error, as Resident already did whenever the partition was not cached, and `reload()` reports errors only for watched partitions.
 13. Under FullScanPolicy::Error, find_by_id on a lazy collection is always refused (lazy-full-scan), except for records created earlier in the same mutation. Resident allowed it when an earlier filtered query or watch had happened to load the record; that history-dependent exception is gone. Use FullScanPolicy::Allow (find_by_id is then served by the ID locator) or a filtered query on the partition field.
+
+14. First-use range reads validate a full file while building checkpoints. A later indexed read may skip invalid rows outside the queried range. This follows section 5's rule that only rows actually scanned require validation; it does not weaken row validation or add snapshot isolation. The additive `BoundedQueryStats::candidate_rows` field exposes examined-row counts under both models as described above.
 
 Item 3 describes validation, not zero I/O: append preparation can read target bytes for fingerprints/torn-tail handling. Custom codecs retain whole-partition validation. Item 12 preserves watch deliveries, not a hidden copy of every previously read file. A scan detects duplicates across its visited scope; there is no outside-scope resident cache to add historical rows to that scope. Global create checks use the locator.
 
 ## Measured costs, not SQLite qualification
 
-The [index measurements](../../crates/proseql-storage/src/index/MEASUREMENTS.md) are single warm-text trials on aka with scalar `x86-64-v2` builds and synthetic data. They do not establish cold-cache, RSS or SQLite targets.
+The historical round-1 [index measurements](../../crates/proseql-storage/src/index/MEASUREMENTS.md) are single warm-text trials on aka with scalar `x86-64-v2` builds and synthetic data. Round 2's current timings and allocation costs are in the [read report](../benchmarks/query-while-scanning-perf-read.md). They do not establish cold-cache, RSS or SQLite targets.
 
 | Operation | Measured cost | Limit |
 |---|---:|---|

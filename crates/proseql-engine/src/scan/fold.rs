@@ -227,50 +227,6 @@ impl<'a> Fold<'a> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn recent_scalar_groups_keep_canonical_keys_order_and_float_additions() {
-        let mut rows = Vec::new();
-        for number in [1e16, 1.0, -1e16] {
-            for key in [
-                json!("a\n"),
-                json!(true),
-                json!(null),
-                json!(1),
-                json!(-0.0),
-                json!([1]),
-                json!({"a":1}),
-                json!("__PTDB_UNDEFINED__"),
-            ] {
-                rows.push(json!({"g":key,"value":number}));
-                rows.push(json!({"g":key,"value":number}));
-            }
-            rows.push(json!({"value":number}));
-        }
-        let fields = vec!["g".into()];
-        let config = AggregateConfig {
-            count: true,
-            sum: vec!["value".into()],
-            ..Default::default()
-        };
-        let expected = crate::query::aggregate::compute_grouped_aggregates(&rows, &fields, &config);
-        let mut owned = GroupFold::new(&fields, &config);
-        let mut borrowed = GroupFold::new(&fields, &config);
-        for row in &rows {
-            owned.push(row);
-            let text = serde_json::to_string(row).unwrap();
-            let row: BorrowedValue<'_> = serde_json::from_str(&text).unwrap();
-            borrowed.push(&row);
-        }
-        assert_eq!(owned.finish(), expected);
-        assert_eq!(borrowed.finish(), expected);
-    }
-}
-
 pub(super) struct GroupFold<'a> {
     fields: &'a [String],
     config: &'a AggregateConfig,
@@ -409,5 +365,49 @@ impl<'a> GroupFold<'a> {
                 }
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn recent_scalar_groups_keep_canonical_keys_order_and_float_additions() {
+        let mut rows = Vec::new();
+        for number in [1e16, 1.0, -1e16] {
+            for key in [
+                json!("a\n"),
+                json!(true),
+                json!(null),
+                json!(1),
+                json!(-0.0),
+                json!([1]),
+                json!({"a":1}),
+                json!("__PTDB_UNDEFINED__"),
+            ] {
+                rows.push(json!({"g":key,"value":number}));
+                rows.push(json!({"g":key,"value":number}));
+            }
+            rows.push(json!({"value":number}));
+        }
+        let fields = vec!["g".into()];
+        let config = AggregateConfig {
+            count: true,
+            sum: vec!["value".into()],
+            ..Default::default()
+        };
+        let expected = crate::query::aggregate::compute_grouped_aggregates(&rows, &fields, &config);
+        let mut owned = GroupFold::new(&fields, &config);
+        let mut borrowed = GroupFold::new(&fields, &config);
+        for row in &rows {
+            owned.push(row);
+            let text = serde_json::to_string(row).unwrap();
+            let row: BorrowedValue<'_> = serde_json::from_str(&text).unwrap();
+            borrowed.push(&row);
+        }
+        assert_eq!(owned.finish(), expected);
+        assert_eq!(borrowed.finish(), expected);
     }
 }

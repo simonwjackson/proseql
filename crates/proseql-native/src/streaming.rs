@@ -263,9 +263,18 @@ impl NativeRuntime {
                         |bytes, final_unterminated, _line, offset| {
                             use proseql_engine::scan::borrowed::BorrowedValue;
                             let parsed = match &prepared_decoder {
-                                Some(decoder) => {
-                                    decoder.decode(bytes).ok().flatten().map(|row| (row, true))
-                                }
+                                Some(decoder) => decoder
+                                    .decode(bytes)
+                                    .ok()
+                                    .flatten()
+                                    .map(|row| (row, true))
+                                    // A canonical payload fallback can still
+                                    // provide an eligible untransformed key.
+                                    .or_else(|| {
+                                        serde_json::from_slice::<BorrowedValue<'_>>(bytes)
+                                            .ok()
+                                            .map(|row| (row, false))
+                                    }),
                                 None => serde_json::from_slice::<BorrowedValue<'_>>(bytes)
                                     .ok()
                                     .map(|row| (row, false)),

@@ -1,0 +1,768 @@
+## baseline/timing-raw-hour-sqlite-cold-0.perf
+# started on Sun Oct 25 10:18:30 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite raw hour cold':
+
+         4,970,834      instructions:u                                                        
+
+       1.004444801 seconds time elapsed
+
+       0.000000000 seconds user
+       0.003112000 seconds sys
+
+
+
+
+## baseline/timing-raw-hour-sqlite-warm-0.perf
+# started on Sun Oct 25 10:18:33 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite raw hour warm':
+
+         8,723,340      instructions:u                                                        
+
+       1.004172578 seconds time elapsed
+
+       0.001876000 seconds user
+       0.001922000 seconds sys
+
+
+
+
+## baseline/timing-raw-hour-streaming-cold-0.perf
+# started on Sun Oct 25 10:18:37 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming raw hour cold':
+
+    21,628,709,778      instructions:u                                                        
+
+       2.439688184 seconds time elapsed
+
+       1.205347000 seconds user
+       0.166191000 seconds sys
+
+
+
+
+## baseline/timing-raw-hour-streaming-warm-0.perf
+# started on Sun Oct 25 10:18:44 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming raw hour warm':
+
+    27,520,496,470      instructions:u                                                        
+
+       3.156224121 seconds time elapsed
+
+       2.007238000 seconds user
+       0.138547000 seconds sys
+
+
+
+
+## baseline/timing-raw-ten-sqlite-cold-0.perf
+# started on Sun Oct 25 10:17:58 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite raw ten cold':
+
+     4,422,362,628      instructions:u                                                        
+
+       1.386835912 seconds time elapsed
+
+       0.216098000 seconds user
+       0.151496000 seconds sys
+
+
+
+
+## baseline/timing-raw-ten-sqlite-warm-0.perf
+# started on Sun Oct 25 10:18:03 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite raw ten warm':
+
+     8,838,487,117      instructions:u                                                        
+
+       1.582011502 seconds time elapsed
+
+       0.448044000 seconds user
+       0.131711000 seconds sys
+
+
+
+
+## baseline/timing-raw-ten-streaming-cold-0.perf
+# started on Sun Oct 25 10:18:08 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming raw ten cold':
+
+    32,566,919,295      instructions:u                                                        
+
+       3.074450520 seconds time elapsed
+
+       1.821639000 seconds user
+       0.181667000 seconds sys
+
+
+
+
+## baseline/timing-raw-ten-streaming-warm-0.perf
+# started on Sun Oct 25 10:18:18 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming raw ten warm':
+
+    49,293,494,000      instructions:u                                                        
+
+       3.834722560 seconds time elapsed
+
+       2.727006000 seconds user
+       0.097735000 seconds sys
+
+
+
+
+## baseline/timing-samples-hour-sqlite-cold-0.perf
+# started on Sun Oct 25 10:17:16 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples hour cold':
+
+         4,712,110      instructions:u                                                        
+
+       1.005144784 seconds time elapsed
+
+       0.000000000 seconds user
+       0.003921000 seconds sys
+
+
+
+
+## baseline/timing-samples-hour-sqlite-warm-0.perf
+# started on Sun Oct 25 10:17:19 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples hour warm':
+
+         8,195,980      instructions:u                                                        
+
+       1.003295700 seconds time elapsed
+
+       0.001078000 seconds user
+       0.002167000 seconds sys
+
+
+
+
+## baseline/timing-samples-hour-streaming-cold-0.perf
+# started on Sun Oct 25 10:17:22 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples hour cold':
+
+     1,461,536,539      instructions:u                                                        
+
+       1.100023027 seconds time elapsed
+
+       0.088429000 seconds user
+       0.010992000 seconds sys
+
+
+
+
+## baseline/timing-samples-hour-streaming-warm-0.perf
+# started on Sun Oct 25 10:17:26 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples hour warm':
+
+     1,502,186,430      instructions:u                                                        
+
+       1.096373896 seconds time elapsed
+
+       0.087927000 seconds user
+       0.007987000 seconds sys
+
+
+
+
+## baseline/timing-samples-month-sqlite-cold-0.perf
+# started on Sun Oct 25 10:17:00 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples month cold':
+
+       273,855,767      instructions:u                                                        
+
+       1.034631739 seconds time elapsed
+
+       0.016480000 seconds user
+       0.014204000 seconds sys
+
+
+
+
+## baseline/timing-samples-month-sqlite-warm-0.perf
+# started on Sun Oct 25 10:17:03 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples month warm':
+
+       545,758,299      instructions:u                                                        
+
+       1.043513214 seconds time elapsed
+
+       0.032925000 seconds user
+       0.009964000 seconds sys
+
+
+
+
+## baseline/timing-samples-month-streaming-cold-0.perf
+# started on Sun Oct 25 10:17:07 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples month cold':
+
+     4,449,795,528      instructions:u                                                        
+
+       1.288884481 seconds time elapsed
+
+       0.255171000 seconds user
+       0.031949000 seconds sys
+
+
+
+
+## baseline/timing-samples-month-streaming-warm-0.perf
+# started on Sun Oct 25 10:17:11 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples month warm':
+
+     6,041,715,384      instructions:u                                                        
+
+       1.351865413 seconds time elapsed
+
+       0.335650000 seconds user
+       0.014984000 seconds sys
+
+
+
+
+## baseline/timing-samples-point-sqlite-cold-0.perf
+# started on Sun Oct 25 10:17:30 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples point cold':
+
+         1,351,861      instructions:u                                                        
+
+       1.004163042 seconds time elapsed
+
+       0.002006000 seconds user
+       0.001009000 seconds sys
+
+
+
+
+## baseline/timing-samples-point-sqlite-warm-0.perf
+# started on Sun Oct 25 10:17:33 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples point warm':
+
+         1,453,272      instructions:u                                                        
+
+       1.002645138 seconds time elapsed
+
+       0.000000000 seconds user
+       0.002270000 seconds sys
+
+
+
+
+## baseline/timing-samples-point-streaming-cold-0.perf
+# started on Sun Oct 25 10:17:37 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples point cold':
+
+    37,389,536,395      instructions:u                                                        
+
+       3.588794382 seconds time elapsed
+
+       2.387674000 seconds user
+       0.188014000 seconds sys
+
+
+
+
+## baseline/timing-samples-point-streaming-warm-0.perf
+# started on Sun Oct 25 10:17:47 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples point warm':
+
+    36,963,329,043      instructions:u                                                        
+
+       3.522123997 seconds time elapsed
+
+       2.364740000 seconds user
+       0.149476000 seconds sys
+
+
+
+
+## baseline/timing-samples-ten-sqlite-cold-0.perf
+# started on Sun Oct 25 10:16:30 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples ten cold':
+
+     4,422,340,884      instructions:u                                                        
+
+       1.381224693 seconds time elapsed
+
+       0.233538000 seconds user
+       0.129488000 seconds sys
+
+
+
+
+## baseline/timing-samples-ten-sqlite-warm-0.perf
+# started on Sun Oct 25 10:16:35 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples ten warm':
+
+     8,838,500,365      instructions:u                                                        
+
+       1.623507527 seconds time elapsed
+
+       0.467956000 seconds user
+       0.153656000 seconds sys
+
+
+
+
+## baseline/timing-samples-ten-streaming-cold-0.perf
+# started on Sun Oct 25 10:16:40 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples ten cold':
+
+    30,191,004,360      instructions:u                                                        
+
+       2.842093162 seconds time elapsed
+
+       1.668884000 seconds user
+       0.162957000 seconds sys
+
+
+
+
+## baseline/timing-samples-ten-streaming-warm-0.perf
+# started on Sun Oct 25 10:16:49 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples ten warm':
+
+    46,201,096,915      instructions:u                                                        
+
+       3.696782739 seconds time elapsed
+
+       2.549356000 seconds user
+       0.138851000 seconds sys
+
+
+
+
+
+## final/timing-raw-hour-sqlite-cold-0.perf
+# started on Sun Oct 25 11:16:03 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite raw hour cold':
+
+         4,972,604      instructions:u                                                        
+
+       1.004322263 seconds time elapsed
+
+       0.003028000 seconds user
+       0.000000000 seconds sys
+
+
+
+
+## final/timing-raw-hour-sqlite-warm-0.perf
+# started on Sun Oct 25 11:16:04 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite raw hour warm':
+
+         8,725,136      instructions:u                                                        
+
+       1.003383730 seconds time elapsed
+
+       0.001522000 seconds user
+       0.001533000 seconds sys
+
+
+
+
+## final/timing-raw-hour-streaming-cold-0.perf
+# started on Sun Oct 25 11:16:00 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming raw hour cold':
+
+     8,817,617,540      instructions:u                                                        
+
+       1.608658748 seconds time elapsed
+
+       0.456739000 seconds user
+       0.106617000 seconds sys
+
+
+
+
+## final/timing-raw-hour-streaming-warm-0.perf
+# started on Sun Oct 25 11:16:02 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming raw hour warm':
+
+     8,935,390,659      instructions:u                                                        
+
+       1.529186033 seconds time elapsed
+
+       0.475188000 seconds user
+       0.051783000 seconds sys
+
+
+
+
+## final/timing-raw-ten-sqlite-cold-0.perf
+# started on Sun Oct 25 11:15:52 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite raw ten cold':
+
+     4,422,362,710      instructions:u                                                        
+
+       1.416188870 seconds time elapsed
+
+       0.252135000 seconds user
+       0.133429000 seconds sys
+
+
+
+
+## final/timing-raw-ten-sqlite-warm-0.perf
+# started on Sun Oct 25 11:15:54 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite raw ten warm':
+
+     8,838,488,323      instructions:u                                                        
+
+       1.605590333 seconds time elapsed
+
+       0.468989000 seconds user
+       0.134674000 seconds sys
+
+
+
+
+## final/timing-raw-ten-streaming-cold-0.perf
+# started on Sun Oct 25 11:15:56 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming raw ten cold':
+
+     9,842,165,169      instructions:u                                                        
+
+       1.688750004 seconds time elapsed
+
+       0.535432000 seconds user
+       0.105817000 seconds sys
+
+
+
+
+## final/timing-raw-ten-streaming-warm-0.perf
+# started on Sun Oct 25 11:15:58 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming raw ten warm':
+
+    19,288,694,953      instructions:u                                                        
+
+       2.056667473 seconds time elapsed
+
+       0.970279000 seconds user
+       0.082620000 seconds sys
+
+
+
+
+## final/timing-samples-hour-sqlite-cold-0.perf
+# started on Sun Oct 25 11:15:42 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples hour cold':
+
+         4,713,186      instructions:u                                                        
+
+       1.004214270 seconds time elapsed
+
+       0.000000000 seconds user
+       0.003142000 seconds sys
+
+
+
+
+## final/timing-samples-hour-sqlite-warm-0.perf
+# started on Sun Oct 25 11:15:43 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples hour warm':
+
+         8,196,753      instructions:u                                                        
+
+       1.003095711 seconds time elapsed
+
+       0.000000000 seconds user
+       0.002748000 seconds sys
+
+
+
+
+## final/timing-samples-hour-streaming-cold-0.perf
+# started on Sun Oct 25 11:15:44 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples hour cold':
+
+       857,630,104      instructions:u                                                        
+
+       1.056708046 seconds time elapsed
+
+       0.046062000 seconds user
+       0.010032000 seconds sys
+
+
+
+
+## final/timing-samples-hour-streaming-warm-0.perf
+# started on Sun Oct 25 11:15:45 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples hour warm':
+
+       861,170,705      instructions:u                                                        
+
+       1.052511285 seconds time elapsed
+
+       0.048912000 seconds user
+       0.003123000 seconds sys
+
+
+
+
+## final/timing-samples-month-sqlite-cold-0.perf
+# started on Sun Oct 25 11:15:39 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples month cold':
+
+       273,857,310      instructions:u                                                        
+
+       1.034723982 seconds time elapsed
+
+       0.013887000 seconds user
+       0.015775000 seconds sys
+
+
+
+
+## final/timing-samples-month-sqlite-warm-0.perf
+# started on Sun Oct 25 11:15:41 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples month warm':
+
+       545,759,739      instructions:u                                                        
+
+       1.042965676 seconds time elapsed
+
+       0.029656000 seconds user
+       0.012839000 seconds sys
+
+
+
+
+## final/timing-samples-month-streaming-cold-0.perf
+# started on Sun Oct 25 11:15:37 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples month cold':
+
+     1,731,266,441      instructions:u                                                        
+
+       1.112082217 seconds time elapsed
+
+       0.090794000 seconds user
+       0.019950000 seconds sys
+
+
+
+
+## final/timing-samples-month-streaming-warm-0.perf
+# started on Sun Oct 25 11:15:38 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples month warm':
+
+     2,595,254,746      instructions:u                                                        
+
+       1.152410157 seconds time elapsed
+
+       0.137771000 seconds user
+       0.013881000 seconds sys
+
+
+
+
+## final/timing-samples-point-sqlite-cold-0.perf
+# started on Sun Oct 25 11:15:50 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples point cold':
+
+         1,353,333      instructions:u                                                        
+
+       1.003964709 seconds time elapsed
+
+       0.001258000 seconds user
+       0.001257000 seconds sys
+
+
+
+
+## final/timing-samples-point-sqlite-warm-0.perf
+# started on Sun Oct 25 11:15:51 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples point warm':
+
+         1,454,757      instructions:u                                                        
+
+       1.002322085 seconds time elapsed
+
+       0.000000000 seconds user
+       0.002241000 seconds sys
+
+
+
+
+## final/timing-samples-point-streaming-cold-0.perf
+# started on Sun Oct 25 11:15:46 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples point cold':
+
+    11,641,249,822      instructions:u                                                        
+
+       1.661248561 seconds time elapsed
+
+       0.586738000 seconds user
+       0.067742000 seconds sys
+
+
+
+
+## final/timing-samples-point-streaming-warm-0.perf
+# started on Sun Oct 25 11:15:48 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples point warm':
+
+    11,641,604,999      instructions:u                                                        
+
+       1.593479005 seconds time elapsed
+
+       0.550469000 seconds user
+       0.040814000 seconds sys
+
+
+
+
+## final/timing-samples-ten-sqlite-cold-0.perf
+# started on Sun Oct 25 11:15:30 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples ten cold':
+
+     4,422,342,044      instructions:u                                                        
+
+       1.377835672 seconds time elapsed
+
+       0.225733000 seconds user
+       0.125034000 seconds sys
+
+
+
+
+## final/timing-samples-ten-sqlite-warm-0.perf
+# started on Sun Oct 25 11:15:31 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base sqlite samples ten warm':
+
+     8,838,501,776      instructions:u                                                        
+
+       1.596397137 seconds time elapsed
+
+       0.459643000 seconds user
+       0.132276000 seconds sys
+
+
+
+
+## final/timing-samples-ten-streaming-cold-0.perf
+# started on Sun Oct 25 11:15:33 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples ten cold':
+
+     8,831,174,068      instructions:u                                                        
+
+       1.540141960 seconds time elapsed
+
+       0.457741000 seconds user
+       0.076403000 seconds sys
+
+
+
+
+## final/timing-samples-ten-streaming-warm-0.perf
+# started on Sun Oct 25 11:15:35 2026
+
+
+ Performance counter stats for '/home/simonwjackson/work/qws-perf-read-data/timing /home/simonwjackson/work/qws-perf-read-data/base streaming samples ten warm':
+
+    17,618,190,775      instructions:u                                                        
+
+       1.930863506 seconds time elapsed
+
+       0.852956000 seconds user
+       0.074734000 seconds sys
+
+
+

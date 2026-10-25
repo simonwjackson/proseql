@@ -1,0 +1,60 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 48K of event 'instructions:u'
+# Event count (approx.): 24388000000
+#
+# Overhead  Command  Shared Object         Symbol                                                                                                       
+# ........  .......  ....................  .............................................................................................................
+#
+    36.06%  timing   timing                [.] proseql_engine::scan::decoder::SimpleDecoder::decode
+    12.83%  timing   libc.so.6             [.] __memcmp_evex_movbe
+     8.21%  timing   timing                [.] proseql_engine::scan::framer::ChunkLines::advance
+     3.81%  timing   timing                [.] <serde_json::read::SliceRead as serde_json::read::Read>::parse_str
+     3.64%  timing   timing                [.] proseql_engine::scan::fold::GroupFold::push
+     3.42%  timing   timing                [.] proseql_engine::scan::borrowed::BorrowedValue::get
+     3.37%  timing   timing                [.] <proseql_engine::scan::framer::LineFramer<C> as proseql_engine::scan::RowSource>::next_row
+     3.26%  timing   timing                [.] <core::hash::sip::Hasher<S> as core::hash::Hasher>::write
+     3.19%  timing   timing                [.] <core::str::pattern::CharSearcher as core::str::pattern::Searcher>::next_match
+     2.64%  timing   timing                [.] core::ptr::drop_in_place<(alloc::borrow::Cow<str>,proseql_engine::scan::borrowed::BorrowedValue)>
+     2.60%  timing   timing                [.] proseql_native::streaming::<impl proseql_native::NativeRuntime>::streaming_read::{{closure}}::{{closure}}
+     1.84%  timing   timing                [.] serde_json::ser::format_escaped_str
+     1.59%  timing   timing                [.] serde_json::ser::format_escaped_str
+     1.43%  timing   timing                [.] <core::hash::sip::Hasher<S> as core::hash::Hasher>::write
+     1.36%  timing   libc.so.6             [.] __memmove_avx512_unaligned_erms
+     1.04%  timing   timing                [.] <proseql_engine::scan::borrowed::BorrowedValue as serde_core::de::Deserialize>::deserialize
+     0.99%  timing   timing                [.] <serde_json::de::MapAccess<R> as serde_core::de::MapAccess>::next_key_seed
+     0.81%  timing   timing                [.] proseql_engine::scan::borrowed::BorrowedValue::matches_where
+     0.76%  timing   timing                [.] <serde_json::de::MapAccess<R> as serde_core::de::MapAccess>::next_key_seed::has_next_key
+     0.75%  timing   timing                [.] proseql_native::streaming::identity_hash
+     0.73%  timing   timing                [.] core::str::converts::from_utf8
+     0.71%  timing   timing                [.] core::slice::sort::unstable::quicksort::quicksort
+     0.69%  timing   timing                [.] proseql_engine::scan::fold::Fold::push
+     0.56%  timing   timing                [.] <alloc::vec::Vec<T,A> as core::ops::drop::Drop>::drop
+     0.52%  timing   timing                [.] <proseql_engine::scan::borrowed::BorrowedValue as serde_core::ser::Serialize>::serialize
+     0.44%  timing   timing                [.] core::ptr::drop_in_place<proseql_engine::scan::borrowed::BorrowedValue>
+     0.43%  timing   timing                [.] proseql_engine::scan::borrowed::BorrowedValue::decode_simple
+     0.25%  timing   timing                [.] <core::hash::sip::Hasher<S> as core::hash::Hasher>::write
+     0.24%  timing   timing                [.] proseql_engine::scan::executor::Executor::push_borrowed
+     0.23%  timing   timing                [.] core::hash::BuildHasher::hash_one
+     0.23%  timing   timing                [.] proseql_engine::scan::borrowed::BorrowedValue::scalar_eq
+     0.15%  timing   timing                [.] core::slice::sort::shared::smallsort::small_sort_network
+     0.14%  timing   timing                [.] serde_json::de::Deserializer<R>::parse_integer
+     0.13%  timing   libc.so.6             [.] cfree@GLIBC_2.2.5
+     0.11%  timing   timing                [.] proseql_engine::scan::fold::Cell::json
+     0.07%  timing   libc.so.6             [.] __memset_avx512_unaligned_erms
+     0.07%  timing   timing                [.] core::ptr::drop_in_place<proseql_engine::scan::borrowed::BorrowedValue>
+     0.07%  timing   timing                [.] serde_json::de::Deserializer<R>::parse_decimal
+     0.06%  timing   timing                [.] <alloc::vec::Vec<T> as alloc::vec::spec_from_iter_nested::SpecFromIterNested<T,I>>::from_iter
+     0.05%  timing   timing                [.] proseql_native::streaming::borrowed_partition_matches
+     0.04%  timing   timing                [.] proseql_storage::partitioned::time_bucket_key
+     0.03%  timing   timing                [.] proseql_native::streaming::read_rows
+     0.03%  timing   timing                [.] <proseql_engine::scan::borrowed::BorrowedValue as serde_core::ser::Serialize>::serialize
+     0.03%  timing   timing                [.] core::slice::sort::shared::pivot::median3_rec
+     0.02%  timing   libc.so.6             [.] malloc
+     0.02%  timing   [unknown]             [k] 0xffffffff888015f0
+     0.02%  timing   timing                [.] <std::path::Components as core::iter::traits::double_ended::DoubleEndedIterator>::next_back
+     0.02%  timing   libc.so.6             [.] _int_malloc
+     0.02%  timing   timing                [.] core::ffi::c_str::CStr::from_bytes_with_nul
