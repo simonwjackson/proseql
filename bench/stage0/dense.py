@@ -3,8 +3,8 @@
 
 import json
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import measure
 
@@ -43,12 +43,12 @@ def run(data, out):
         sidecar = path.with_suffix(".sparse.json")
         sidecar.write_text(
             json.dumps(
-                dict(
-                    len=stat.st_size,
-                    modified=[stat.st_mtime_ns // 10**9, stat.st_mtime_ns % 10**9],
-                    ordered=ordered,
-                    entries=entries,
-                ),
+                {
+                    "len": stat.st_size,
+                    "modified": [stat.st_mtime_ns // 10**9, stat.st_mtime_ns % 10**9],
+                    "ordered": ordered,
+                    "entries": entries,
+                },
                 separators=(",", ":"),
             )
         )
@@ -64,13 +64,13 @@ def run(data, out):
             raise AssertionError(f"dense-index answer mismatch: {key}")
     (dense / "index.json").write_text(
         json.dumps(
-            dict(
-                stride=stride,
-                index_bytes=index_bytes,
-                original_stride=256,
-                original_index_bytes=original_bytes,
-                correct_against_main_matrix=True,
-            ),
+            {
+                "stride": stride,
+                "index_bytes": index_bytes,
+                "original_stride": 256,
+                "original_index_bytes": original_bytes,
+                "correct_against_main_matrix": True,
+            },
             indent=2,
         )
         + "\n"

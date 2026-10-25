@@ -3,9 +3,9 @@
 
 import csv
 import json
-from pathlib import Path
 import statistics
 import sys
+from pathlib import Path
 
 KINDS = ("samples", "raw")
 WORKLOADS = ("point", "hour", "month", "ten", "append", "open", "idle")
@@ -52,33 +52,37 @@ def summarize(root):
                     rust = heap["rust_heap_live_peak"] if heap else None
                     sqlite = heap["sqlite_c_heap_live_peak"] if heap else None
                     rows.append(
-                        dict(
-                            kind=kind,
-                            workload=workload,
-                            backend=backend,
-                            cache=cache,
-                            timing_passes=len(times),
-                            failures=sum(bool(r["returncode"]) for r in matches),
-                            wall_median_ms=median(times, "wall_ms"),
-                            wall_min_ms=min(
+                        {
+                            "kind": kind,
+                            "workload": workload,
+                            "backend": backend,
+                            "cache": cache,
+                            "timing_passes": len(times),
+                            "failures": sum((bool(r["returncode"]) for r in matches)),
+                            "wall_median_ms": median(times, "wall_ms"),
+                            "wall_min_ms": min(
                                 (r["wall_ms"] for r in times), default=None
                             ),
-                            wall_max_ms=max(
+                            "wall_max_ms": max(
                                 (r["wall_ms"] for r in times), default=None
                             ),
-                            instructions_median=median(times, "instructions"),
-                            rss_peak_max=max(
+                            "instructions_median": median(times, "instructions"),
+                            "rss_peak_max": max(
                                 (r["rss_peak"] for r in times), default=None
                             ),
-                            rss_return_median=median(times, "rss_return"),
-                            rss_1s_median=median(times, "rss_1s"),
-                            rust_heap_live=rust[0] if rust else None,
-                            rust_heap_peak=rust[1] if rust else None,
-                            sqlite_c_heap_live=sqlite[0] if sqlite else None,
-                            sqlite_c_heap_peak=sqlite[1] if sqlite else None,
-                            file_cache_before_median=median(times, "file_cache_before"),
-                            file_cache_after_median=median(times, "file_cache_after"),
-                        )
+                            "rss_return_median": median(times, "rss_return"),
+                            "rss_1s_median": median(times, "rss_1s"),
+                            "rust_heap_live": rust[0] if rust else None,
+                            "rust_heap_peak": rust[1] if rust else None,
+                            "sqlite_c_heap_live": sqlite[0] if sqlite else None,
+                            "sqlite_c_heap_peak": sqlite[1] if sqlite else None,
+                            "file_cache_before_median": median(
+                                times, "file_cache_before"
+                            ),
+                            "file_cache_after_median": median(
+                                times, "file_cache_after"
+                            ),
+                        }
                     )
     with (root / "summary.csv").open("w") as file:
         writer = csv.DictWriter(file, fieldnames=list(rows[0]))

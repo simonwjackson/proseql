@@ -3,11 +3,11 @@
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
-import time
 import tempfile
+import time
+from pathlib import Path
 
 
 def counters(path):
@@ -42,63 +42,65 @@ def main(data, mode):
         if mode == "sqlite-temp"
         else ["proseql", "raw", "append"]
     )
-    stdout_file = tempfile.TemporaryFile(mode="w+t", dir=data / "tmp")
-    stderr_file = tempfile.TemporaryFile(mode="w+t", dir=data / "tmp")
-    process = subprocess.Popen(
-        [str(data / "timing"), str(root), *operation, "cold"],
-        stdout=stdout_file,
-        stderr=stderr_file,
-        text=True,
-    )
-    rss = 0
-    peak_anon = 0
-    peak_file = 0
-    temp_paths = set()
-    started = time.monotonic()
-    while process.poll() is None:
-        try:
-            line = next(
-                line
-                for line in Path(f"/proc/{process.pid}/status").read_text().splitlines()
-                if line.startswith("VmRSS:")
-            )
-            rss = max(rss, int(line.split()[1]) * 1024)
-        except (FileNotFoundError, StopIteration):
-            pass
-        for fd in Path(f"/proc/{process.pid}/fd").glob("*"):
+    with (
+        tempfile.TemporaryFile(mode="w+t", dir=data / "tmp") as stdout_file,
+        tempfile.TemporaryFile(mode="w+t", dir=data / "tmp") as stderr_file,
+    ):
+        process = subprocess.Popen(
+            [str(data / "timing"), str(root), *operation, "cold"],
+            stdout=stdout_file,
+            stderr=stderr_file,
+            text=True,
+        )
+        rss = 0
+        peak_anon = 0
+        peak_file = 0
+        temp_paths = set()
+        started = time.monotonic()
+        while process.poll() is None:
             try:
-                path = os.readlink(fd)
-                if path.startswith(str(data / "tmp")) and "etilqs_" in path:
-                    temp_paths.add(path)
-            except FileNotFoundError:
+                line = next(
+                    line
+                    for line in Path(f"/proc/{process.pid}/status")
+                    .read_text()
+                    .splitlines()
+                    if line.startswith("VmRSS:")
+                )
+                rss = max(rss, int(line.split()[1]) * 1024)
+            except (FileNotFoundError, StopIteration):
                 pass
-        values = counters(cgroup / "memory.stat")
-        peak_anon = max(peak_anon, values.get("anon", 0))
-        peak_file = max(peak_file, values.get("file", 0))
-        time.sleep(0.01)
-    process.wait()
-    stdout_file.seek(0)
-    stderr_file.seek(0)
-    stdout, stderr = stdout_file.read(), stderr_file.read()
-    stdout_file.close()
-    stderr_file.close()
+            for fd in Path(f"/proc/{process.pid}/fd").glob("*"):
+                try:
+                    path = os.readlink(fd)
+                    if path.startswith(str(data / "tmp")) and "etilqs_" in path:
+                        temp_paths.add(path)
+                except FileNotFoundError:
+                    pass
+            values = counters(cgroup / "memory.stat")
+            peak_anon = max(peak_anon, values.get("anon", 0))
+            peak_file = max(peak_file, values.get("file", 0))
+            time.sleep(0.01)
+        process.wait()
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        stdout, stderr = stdout_file.read(), stderr_file.read()
     print(
         json.dumps(
-            dict(
-                mode=mode,
-                temporary_file_paths=sorted(temp_paths),
-                returncode=process.returncode,
-                wall_s=time.monotonic() - started,
-                rss_sampled_peak_lower_bound=rss,
-                cgroup_peak_bytes=int((cgroup / "memory.peak").read_text()),
-                cgroup_anon_sampled_peak=peak_anon,
-                cgroup_file_sampled_peak=peak_file,
-                memory_max=max_before,
-                memory_events_before=events_before,
-                memory_events_after=counters(cgroup / "memory.events"),
-                stdout=stdout,
-                stderr=stderr,
-            ),
+            {
+                "mode": mode,
+                "temporary_file_paths": sorted(temp_paths),
+                "returncode": process.returncode,
+                "wall_s": time.monotonic() - started,
+                "rss_sampled_peak_lower_bound": rss,
+                "cgroup_peak_bytes": int((cgroup / "memory.peak").read_text()),
+                "cgroup_anon_sampled_peak": peak_anon,
+                "cgroup_file_sampled_peak": peak_file,
+                "memory_max": max_before,
+                "memory_events_before": events_before,
+                "memory_events_after": counters(cgroup / "memory.events"),
+                "stdout": stdout,
+                "stderr": stderr,
+            },
             sort_keys=True,
         )
     )

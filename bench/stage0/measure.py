@@ -4,11 +4,11 @@
 import ctypes
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 LIBC = ctypes.CDLL(None, use_errno=True)
 LIBC.mmap.restype = ctypes.c_void_p
@@ -139,23 +139,28 @@ def run(
                             load_before = os.getloadavg()
                             started = time.monotonic()
                             result = subprocess.run(
-                                scope + command, text=True, capture_output=True
+                                scope + command,
+                                text=True,
+                                capture_output=True,
+                                check=False,
                             )
-                            record = dict(
-                                profile=profile,
-                                repeat=repeat,
-                                kind=kind,
-                                workload=workload,
-                                backend=backend,
-                                cache=cache,
-                                load_before=load_before,
-                                load_after=os.getloadavg(),
-                                returncode=result.returncode,
-                                process_wall_s=time.monotonic() - started,
-                                file_cache_before=before,
-                                file_cache_after=residency(files(root, backend, kind)),
-                                command=scope + command,
-                            )
+                            record = {
+                                "profile": profile,
+                                "repeat": repeat,
+                                "kind": kind,
+                                "workload": workload,
+                                "backend": backend,
+                                "cache": cache,
+                                "load_before": load_before,
+                                "load_after": os.getloadavg(),
+                                "returncode": result.returncode,
+                                "process_wall_s": time.monotonic() - started,
+                                "file_cache_before": before,
+                                "file_cache_after": residency(
+                                    files(root, backend, kind)
+                                ),
+                                "command": scope + command,
+                            }
                             if result.returncode == 0:
                                 record.update(json.loads(result.stdout))
                             else:

@@ -97,6 +97,10 @@ case "$action" in
     scope 300 "$data/timing" prepare "$data/base" > "$out/prepare.json" 2> "$out/prepare.stderr"
     scope 14400 python3 bench/stage0/measure.py "$data" "$out"
     ;;
+  driver-check)
+    mkdir -p "$out/driver-check"
+    STAGE0_BACKENDS=sqlite,proseql,spike STAGE0_REPEATS=1 scope 300 python3 -c 'import sys; from pathlib import Path; sys.path.insert(0, "bench/stage0"); import measure; measure.run(Path(sys.argv[1]), Path(sys.argv[2]), kinds=("samples",), workloads=("hour",))' "$data" "$out/driver-check"
+    ;;
   dense)
     scope 1800 python3 bench/stage0/dense.py "$data" "$out"
     ;;
@@ -131,5 +135,5 @@ case "$action" in
     bash "$0" diagnose
     bash "$0" summarize
     ;;
-  *) echo 'usage: run.sh archive|task [ACTION]|checkout|environment|tools|lock|format|build|check|measure|dense|diagnose|summarize|cleanup|all' >&2; exit 2 ;;
+  *) echo 'usage: run.sh archive|task [ACTION]|checkout|environment|tools|lock|format|build|check|measure|driver-check|dense|diagnose|summarize|cleanup|all' >&2; exit 2 ;;
 esac
