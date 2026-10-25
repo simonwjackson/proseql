@@ -21,6 +21,7 @@ static METER: observe::Meter = observe::Meter::new();
 enum Backend {
     Sql(rusqlite::Connection),
     Native(proseql_native::NativeRuntime),
+    NativeGlobal(proseql_native::NativeRuntime),
     Spike(spike::Scanner),
 }
 impl Backend {
@@ -28,6 +29,7 @@ impl Backend {
         Ok(match backend {
             "sqlite" => Self::Sql(sql::open(root)?),
             "proseql" => Self::Native(native::open(root, kind)?),
+            "proseql-global" => Self::NativeGlobal(native::open(root, kind)?),
             "spike" => Self::Spike(spike::Scanner::open(root, kind)?),
             _ => return Err("backend must be sqlite|proseql|spike".into()),
         })
@@ -41,6 +43,7 @@ impl Backend {
             return match self {
                 Self::Sql(c) => sql::append(c, kind),
                 Self::Native(r) => native::append(r, kind),
+                Self::NativeGlobal(r) => native::append_global(r, kind),
                 Self::Spike(_) => spike::append(root, kind),
             };
         }
@@ -48,12 +51,24 @@ impl Backend {
         match self {
             Self::Sql(c) => sql::query(c, kind, &q),
             Self::Native(r) => native::query(r, kind, &q),
+            Self::NativeGlobal(_) => {
+                Err("global preflight is an append-only benchmark variant".into())
+            }
             Self::Spike(r) => r.query(&q),
         }
     }
 }
 fn main() -> Result<(), Error> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
+    if args.len() == 2 && args[0] == "reindex" {
+        for kind in fixture::KINDS {
+            for path in fixture::paths(Path::new(&args[1]), kind)? {
+                spike::build_index(&path)?;
+            }
+        }
+        println!("rebuilt stride-256 sparse indexes");
+        return Ok(());
+    }
     if args.len() == 2 && args[0] == "prepare" {
         let m = fixture::prepare(Path::new(&args[1]), None)?;
         println!(
@@ -67,6 +82,9 @@ fn main() -> Result<(), Error> {
     }
     let root = Path::new(&args[0]);
     let (backend, kind, workload, cache) = (&args[1], &args[2], &args[3], &args[4]);
+    if backend == "proseql-global" && workload != "append" {
+        return Err("proseql-global is only valid for append".into());
+    }
     if !fixture::KINDS.contains(&kind.as_str())
         || !fixture::WORKLOADS.contains(&workload.as_str())
         || !["cold", "warm"].contains(&cache.as_str())
@@ -113,7 +131,7 @@ fn main() -> Result<(), Error> {
     let rss_1s = observe::status("VmRSS:")?;
     println!(
         "{}",
-        serde_json::json!({"backend":backend,"kind":kind,"workload":workload,"cache":cache,"wall_ms":wall_ms,"instructions":instructions,"rss_before":rss_before,"rss_return":rss_return,"rss_peak":rss_peak,"rss_1s":rss_1s,"rust_heap_live_peak":heap,"sqlite_c_heap_live_peak":if backend=="sqlite" {Some(c_heap)} else {None},"answer":answer})
+        serde_json::json!({"backend":backend,"kind":kind,"workload":workload,"cache":cache,"wall_ms":wall_ms,"instructions":instructions,"append_new_rows":if workload=="append" {Some(1000)} else {None},"duplicate_scope":if workload=="append" {Some(if backend=="proseql" {"loaded/routed"} else {"global"})} else {None},"rss_before":rss_before,"rss_return":rss_return,"rss_peak":rss_peak,"rss_1s":rss_1s,"rust_heap_live_peak":heap,"sqlite_c_heap_live_peak":if backend=="sqlite" {Some(c_heap)} else {None},"answer":answer})
     );
     drop(opened);
     Ok(())
@@ -128,7 +146,8 @@ mod tests {
         let root = tmp.path().join("fixture");
         let native_root = tmp.path().join("native");
         let spike_root = tmp.path().join("spike");
-        for path in [&root, &native_root, &spike_root] {
+        let global_root = tmp.path().join("global");
+        for path in [&root, &native_root, &spike_root, &global_root] {
             fixture::prepare(path, Some(1000))?;
         }
         for kind in fixture::KINDS {
@@ -149,63 +168,101 @@ mod tests {
                     "spike {kind} {workload}"
                 );
             }
+            let start_count = sqlite.run(&root, kind, "ten")?.count;
+            let mut global = Backend::open(&global_root, "proseql-global", kind)?;
             let expected = sqlite.run(&root, kind, "append")?;
+            assert_eq!(expected, global.run(&global_root, kind, "append")?);
             assert_eq!(expected, spike.run(&spike_root, kind, "append")?);
             assert_eq!(expected, native.run(&native_root, kind, "append")?);
             // Replays verify exact duplicates; reopen validates rebuilt unsorted indexes.
             assert_eq!(expected, sqlite.run(&root, kind, "append")?);
             assert_eq!(expected, spike.run(&spike_root, kind, "append")?);
             assert_eq!(expected, native.run(&native_root, kind, "append")?);
+            assert_eq!(expected, global.run(&global_root, kind, "append")?);
             drop(spike);
             let mut spike = Backend::open(&spike_root, "spike", kind)?;
             for workload in ["point", "hour", "month", "ten"] {
                 let expected = sqlite.run(&root, kind, workload)?;
+                if workload == "ten" {
+                    assert_eq!(expected.count, start_count + 1000);
+                }
                 assert_eq!(expected, spike.run(&spike_root, kind, workload)?);
                 assert_eq!(expected, native.run(&native_root, kind, workload)?);
+                if let Backend::NativeGlobal(runtime) = &global {
+                    assert_eq!(
+                        expected,
+                        native::query(runtime, kind, &Query::new(kind, workload))?
+                    );
+                }
             }
         }
         Ok(())
     }
     #[test]
     fn conflicting_duplicates_fail_without_publishing_new_rows() -> Result<(), Error> {
-        use std::io::Write;
         let tmp = tempfile::tempdir()?;
         let root = tmp.path().join("fixture");
         fixture::prepare(&root, Some(1000))?;
+        inject_conflicting_id(&root, 10)?;
         let path = root.join("samples/2025-10.jsonl");
-        let id = fixture::row(10, 900, 0, false)["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        let mut rows = std::fs::read_to_string(&path)?
-            .lines()
-            .map(serde_json::from_str::<serde_json::Value>)
-            .collect::<Result<Vec<_>, _>>()?;
-        for row in &mut rows {
-            if row["id"].as_str() == Some(&id) {
-                row["value"] = serde_json::json!(-1.0);
-            }
-        }
-        let mut file = std::fs::File::create(&path)?;
-        for row in rows {
-            writeln!(file, "{row}")?;
-        }
-        file.sync_data()?;
         let size = std::fs::metadata(&path)?.len();
-        let conn = sql::open(&root)?;
-        conn.execute("UPDATE samples SET value=-1 WHERE id=?1", [&id])?;
-        drop(conn);
         let mut backends = [
             Backend::open(&root, "sqlite", "samples")?,
             Backend::open(&root, "proseql", "samples")?,
+            Backend::open(&root, "proseql-global", "samples")?,
             Backend::open(&root, "spike", "samples")?,
         ];
         let expected = backends[0].run(&root, "samples", "ten")?;
         for backend in &mut backends {
             assert!(backend.run(&root, "samples", "append").is_err());
             assert_eq!(std::fs::metadata(&path)?.len(), size);
-            assert_eq!(backend.run(&root, "samples", "ten")?, expected);
+            let after = match backend {
+                Backend::NativeGlobal(runtime) => {
+                    native::query(runtime, "samples", &Query::new("samples", "ten"))?
+                }
+                _ => backend.run(&root, "samples", "ten")?,
+            };
+            assert_eq!(after, expected);
         }
+        Ok(())
+    }
+
+    fn inject_conflicting_id(root: &Path, month: usize) -> Result<(), Error> {
+        use std::io::Write;
+        let mut row = fixture::row(month, 900, 0, false);
+        let source_id = row["id"].as_str().unwrap().to_owned();
+        let id = fixture::append_rows("samples")[900]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        row["id"] = serde_json::json!(id);
+        row["value"] = serde_json::json!(-1.0);
+        let path = root.join(format!("samples/2025-{month:02}.jsonl"));
+        let mut file = std::fs::OpenOptions::new().append(true).open(path)?;
+        writeln!(file, "{row}")?;
+        file.sync_data()?;
+        sql::open(root)?.execute("INSERT INTO samples SELECT ?1,metric,at,end_time,-1,source,received_at,raw_id,month,date,time,shard FROM samples WHERE id=?2",rusqlite::params![id,source_id])?;
+        Ok(())
+    }
+
+    #[test]
+    fn global_preflight_rejects_an_id_in_another_time_partition() -> Result<(), Error> {
+        let tmp = tempfile::tempdir()?;
+        let root = tmp.path().join("fixture");
+        fixture::prepare(&root, Some(1000))?;
+        inject_conflicting_id(&root, 5)?;
+        for backend in ["sqlite", "spike", "proseql-global"] {
+            assert!(
+                Backend::open(&root, backend, "samples")?
+                    .run(&root, "samples", "append")
+                    .is_err(),
+                "{backend}"
+            );
+        }
+        // Deliberately document the shipped API gap, not a production fix.
+        assert!(Backend::open(&root, "proseql", "samples")?
+            .run(&root, "samples", "append")
+            .is_ok());
         Ok(())
     }
 

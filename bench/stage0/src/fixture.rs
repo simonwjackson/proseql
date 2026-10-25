@@ -50,11 +50,11 @@ pub fn point(kind: &str) -> Value {
     }
 }
 
-/// 900 new IDs and 100 exact duplicates; each implementation verifies all 1,000.
+/// 1,000 genuinely new IDs in an existing month (backfilled timestamps).
 pub fn append_rows(kind: &str) -> Vec<Value> {
     (0..1000)
         .map(|i| {
-            let r = row(10, i, 0, i < 900);
+            let r = row(10, i, 0, true);
             if kind == "raw" {
                 raw(r)
             } else {

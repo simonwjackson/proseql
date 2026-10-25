@@ -5,9 +5,11 @@ import ctypes
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
+from contextlib import closing
 from pathlib import Path
 
 LIBC = ctypes.CDLL(None, use_errno=True)
@@ -68,11 +70,41 @@ def warm(paths):
                 pass
 
 
+def verify_appended_rows(root, kind, backend, before_sizes):
+    if backend == "sqlite":
+        initial = json.loads((root / "manifest.json").read_text())["rows_per_kind"]
+        with closing(
+            sqlite3.connect(f"file:{root / 'sqlite.db'}?mode=ro", uri=True)
+        ) as connection:
+            return connection.execute(f"SELECT count(*) FROM {kind}").fetchone()[
+                0
+            ] - initial, None
+    count = 0
+    changed = 0
+    for path in (root / kind).glob("*.jsonl"):
+        old_size = before_sizes.get(path, 0)
+        if path.stat().st_size < old_size:
+            raise AssertionError("append truncated a source file")
+        if path.stat().st_size == old_size:
+            continue
+        changed += 1
+        with path.open("rb") as stream:
+            stream.seek(old_size)
+            for line in stream:
+                if ":append:" not in json.loads(line)["id"]:
+                    raise AssertionError(
+                        "appended record did not have a genuinely new ID"
+                    )
+                count += 1
+    return count, changed
+
+
 def run(
     data,
     out,
     kinds=("samples", "raw"),
     workloads=("point", "hour", "month", "ten", "append", "open", "idle"),
+    raw_native_single=False,
 ):
     if os.uname().nodename.split(".")[0] != "yari":
         raise RuntimeError("measurements are allowed only on yari")
@@ -90,6 +122,15 @@ def run(
                         + selected[: repeat % len(selected)]
                     )
                     for backend in order:
+                        # Once an operation is known to abort, do not spend shared-host
+                        # CPU repeating the same OOM merely to manufacture a median.
+                        if (
+                            raw_native_single
+                            and kind == "raw"
+                            and backend in ("proseql", "proseql-global")
+                            and (profile == "meter" or repeat > 0)
+                        ):
+                            continue
                         for cache in ("cold", "warm"):
                             root = base
                             if workload == "append":
@@ -107,6 +148,14 @@ def run(
                                     ],
                                     check=True,
                                 )
+                            before_sizes = (
+                                {
+                                    p: p.stat().st_size
+                                    for p in (root / kind).glob("*.jsonl")
+                                }
+                                if workload == "append" and backend != "sqlite"
+                                else {}
+                            )
                             owned = [p for p in root.rglob("*") if p.is_file()]
                             evict(owned)
                             relevant = files(root, backend, kind)
@@ -165,6 +214,17 @@ def run(
                                 record.update(json.loads(result.stdout))
                             else:
                                 record["stdout"] = result.stdout
+                            if workload == "append":
+                                count, changed = verify_appended_rows(
+                                    root, kind, backend, before_sizes
+                                )
+                                record["rows_persisted"] = count
+                                record["jsonl_files_appended"] = changed
+                                record["append_verified"] = (
+                                    result.returncode == 0
+                                    and count == 1000
+                                    and record.get("append_new_rows") == 1000
+                                )
                             (out / f"{name}.stderr").write_text(result.stderr)
                             records.append(record)
                             with (out / "trials.jsonl").open("a") as stream:
@@ -175,6 +235,14 @@ def run(
                                 record.get("wall_ms"),
                                 flush=True,
                             )
+                            if (
+                                workload == "append"
+                                and result.returncode == 0
+                                and not record["append_verified"]
+                            ):
+                                raise AssertionError(
+                                    "successful append did not persist 1,000 genuinely new rows"
+                                )
                             evict(owned)
                             if root != base:
                                 shutil.rmtree(root)

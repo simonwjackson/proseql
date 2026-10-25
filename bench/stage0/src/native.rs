@@ -148,6 +148,45 @@ pub fn query(runtime: &NativeRuntime, kind: &str, q: &Query) -> Result<Answer, E
         ))
     }
 }
+/// Benchmark-only composition; the preflight and mutation are not one transaction.
+pub fn append_global(runtime: &NativeRuntime, kind: &str) -> Result<Answer, Error> {
+    let rows = fixture::append_rows(kind);
+    let requested = rows
+        .iter()
+        .map(|r| (r["id"].as_str().unwrap(), r))
+        .collect::<std::collections::HashMap<_, _>>();
+    let ids = rows.iter().map(|r| r["id"].clone()).collect::<Vec<_>>();
+    eprintln!(
+        "{}",
+        serde_json::json!({"stage":"global-preflight","event":"begin"})
+    );
+    let existing = runtime
+        .query_bounded(
+            kind,
+            QueryInput {
+                r#where: Some(serde_json::json!({"id":{"$in":ids}})),
+                ..Default::default()
+            },
+        )
+        .map_err(tag)?;
+    for stored in &existing {
+        let id = stored["id"].as_str().ok_or("preflight row has no ID")?;
+        if requested.get(id).is_some_and(|r| *r != stored) {
+            return Err("global preflight: duplicate ID differs".into());
+        }
+    }
+    eprintln!(
+        "{}",
+        serde_json::json!({"stage":"global-preflight","event":"complete","matched":existing.len(),"next":"mutate/create_many"})
+    );
+    drop(existing);
+    drop(requested);
+    runtime
+        .mutate(|tx| tx.create_many(kind, rows.clone()).map(|_| ()))
+        .map_err(tag)?;
+    Ok(Answer::rows(rows))
+}
+
 pub fn append(runtime: &NativeRuntime, kind: &str) -> Result<Answer, Error> {
     let rows = fixture::append_rows(kind);
     runtime

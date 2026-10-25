@@ -97,6 +97,26 @@ case "$action" in
     scope 300 "$data/timing" prepare "$data/base" > "$out/prepare.json" 2> "$out/prepare.stderr"
     scope 14400 python3 bench/stage0/measure.py "$data" "$out"
     ;;
+  append-build)
+    mkdir -p "$out/append-new"
+    if [[ ! -e "$data/timing-read" ]]; then
+      cp "$data/timing" "$data/timing-read"
+      cp "$data/meter" "$data/meter-read"
+    fi
+    STAGE0_RESULTS="$out/append-new" bash "$0" build
+    ;;
+  append-new)
+    mkdir -p "$out/append-new"
+    if [[ -e "$out/append-new/trials.jsonl" ]]; then
+      echo 'Append results already exist; use a fresh run directory.' >&2
+      exit 1
+    fi
+    if [[ ! -e "$out/append-new/source.sha" ]]; then
+      cp "$out/source.sha" "$out/binaries.sha256" "$out/harness.sha256" "$out/append-new/"
+    fi
+    scope 300 "$data/timing" reindex "$data/base" > "$out/append-new/reindex.log" 2>&1
+    STAGE0_BACKENDS=sqlite,proseql,proseql-global,spike STAGE0_REPEATS=3 scope 1800 python3 -c 'import sys; from pathlib import Path; sys.path.insert(0, "bench/stage0"); import measure; measure.run(Path(sys.argv[1]), Path(sys.argv[2]), workloads=("append",), raw_native_single=True)' "$data" "$out/append-new"
+    ;;
   driver-check)
     mkdir -p "$out/driver-check"
     STAGE0_BACKENDS=sqlite,proseql,spike STAGE0_REPEATS=1 scope 300 python3 -c 'import sys; from pathlib import Path; sys.path.insert(0, "bench/stage0"); import measure; measure.run(Path(sys.argv[1]), Path(sys.argv[2]), kinds=("samples",), workloads=("hour",))' "$data" "$out/driver-check"
@@ -132,8 +152,9 @@ case "$action" in
     bash "$0" tools
     bash "$0" measure
     bash "$0" dense
-    bash "$0" diagnose
+    bash "$0" append-new
+    STAGE0_RESULTS="$out/append-new" bash "$0" diagnose
     bash "$0" summarize
     ;;
-  *) echo 'usage: run.sh archive|task [ACTION]|checkout|environment|tools|lock|format|build|check|measure|driver-check|dense|diagnose|summarize|cleanup|all' >&2; exit 2 ;;
+  *) echo 'usage: run.sh archive|task [ACTION]|checkout|environment|tools|lock|format|build|check|measure|append-build|append-new|driver-check|dense|diagnose|summarize|cleanup|all' >&2; exit 2 ;;
 esac

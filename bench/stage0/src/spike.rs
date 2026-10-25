@@ -7,7 +7,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::os::unix::fs::MetadataExt;
@@ -187,8 +187,35 @@ impl Scanner {
 
 pub fn append(root: &Path, kind: &str) -> Result<Answer, Error> {
     let rows = fixture::append_rows(kind);
+    // Exact global scan, not merely a check of the routed destination files.
+    let wanted = rows
+        .iter()
+        .map(|r| (r["id"].as_str().unwrap(), r))
+        .collect::<HashMap<_, _>>();
+    let mut existing = HashSet::new();
+    let mut line = String::new();
+    for path in fixture::paths(root, kind)? {
+        let mut reader = BufReader::new(File::open(path)?);
+        loop {
+            line.clear();
+            if reader.read_line(&mut line)? == 0 {
+                break;
+            }
+            let row: Row<'_> = serde_json::from_str(&line)?;
+            if let Some((id, expected)) = wanted.get_key_value(row.id.as_ref()) {
+                let stored: Value = serde_json::from_str(&line)?;
+                if &stored != *expected {
+                    return Err("duplicate ID differs".into());
+                }
+                existing.insert(*id);
+            }
+        }
+    }
     let mut by_file: BTreeMap<PathBuf, Vec<&Value>> = BTreeMap::new();
     for row in &rows {
+        if existing.contains(row["id"].as_str().unwrap()) {
+            continue;
+        }
         let stem = if kind == "samples" {
             row["month"].as_str().unwrap()
         } else {
@@ -199,32 +226,8 @@ pub fn append(root: &Path, kind: &str) -> Result<Answer, Error> {
             .or_default()
             .push(row);
     }
-    // Verify exact duplicates before any write. This spike has one owner, no watches,
-    // external-write conflict protocol, cross-file journal or rollback promise.
-    let mut pending = Vec::new();
-    for (path, requested) in by_file {
-        let mut wanted = requested
-            .iter()
-            .map(|r| (r["id"].as_str().unwrap(), *r))
-            .collect::<HashMap<_, _>>();
-        let mut line = String::new();
-        let mut reader = BufReader::new(File::open(&path)?);
-        loop {
-            line.clear();
-            if reader.read_line(&mut line)? == 0 {
-                break;
-            }
-            let row: Row<'_> = serde_json::from_str(&line)?;
-            if let Some(expected) = wanted.remove(row.id.as_ref()) {
-                let stored: Value = serde_json::from_str(&line)?;
-                if &stored != expected {
-                    return Err("duplicate ID differs".into());
-                }
-            }
-        }
-        pending.push((path, wanted.into_values().collect::<Vec<_>>()));
-    }
-    for (path, mut new) in pending {
+    // One owner only: no concurrent-edit protocol or cross-file rollback promise.
+    for (path, mut new) in by_file {
         if new.is_empty() {
             continue;
         }
