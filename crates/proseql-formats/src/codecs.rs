@@ -313,6 +313,10 @@ fn decode_append_lines(
 }
 
 impl FormatCodec for JsonlCodec {
+    fn borrowed_jsonl_compatible(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> &str {
         "jsonl"
     }

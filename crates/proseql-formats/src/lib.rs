@@ -19,6 +19,12 @@ pub trait FormatCodec: Send + Sync {
     fn encode(&self, data: &Value, options: Option<FormatOptions>) -> Result<String, String>;
     fn decode(&self, raw: &str) -> Result<Value, String>;
 
+    /// Opt into the scalar borrowed JSONL decoder. Custom codecs keep their
+    /// registered decode semantics unless they explicitly opt in.
+    fn borrowed_jsonl_compatible(&self) -> bool {
+        false
+    }
+
     /// Optional single-pass JSONL append recovery. Overrides that do not
     /// implement this retain the ordinary whole-file decode contract.
     fn decode_append_jsonl(
@@ -303,6 +309,11 @@ impl FormatRegistry {
                 cause: Some(Value::String(message)),
             })
         })
+    }
+
+    pub fn borrowed_jsonl_compatible(&self, extension: &str) -> bool {
+        self.codec_for(extension)
+            .is_ok_and(|codec| codec.borrowed_jsonl_compatible())
     }
 
     pub fn deserialize_append_jsonl(
