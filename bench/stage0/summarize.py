@@ -225,7 +225,9 @@ def targets(keyed, strict):
                 for w in READS:
                     mine = get(kind, w, backend, c, "rss_peak_max")
                     ratios.append(
-                        None if mine is None else mine / get(kind, w, "sqlite", c, "rss_peak_max")
+                        None
+                        if mine is None
+                        else mine / get(kind, w, "sqlite", c, "rss_peak_max")
                     )
                 per_cache.append(worst(ratios))
             cells.append(f"worst {ratio_pair(per_cache)}: {verdict(per_cache, 2)}")
@@ -403,7 +405,9 @@ def summarize(root):
             and diagnostic["memory_events_after"]["oom_kill"]
             > diagnostic["memory_events_before"]["oom_kill"]
         ):
-            raise ValueError(f"native abort diagnostic did not confirm an OOM kill: {path}")
+            raise ValueError(
+                f"native abort diagnostic did not confirm an OOM kill: {path}"
+            )
         return {
             k: diagnostic[k]
             for k in (
