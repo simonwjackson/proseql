@@ -48,6 +48,15 @@ pub trait RowSource {
     fn next_row(&mut self) -> Result<Option<RawRow<'_>>, EngineError>;
 }
 
+/// A sequence of byte chunks in file order. A returned chunk borrows the
+/// reader's buffer and is valid until the next call. An empty slice is never
+/// returned; `None` is end of input. Defined here (platform-blind) so the
+/// chunked line framer (`framer.rs`, owner `formats`) serves native hosts and
+/// WASM alike; `proseql_storage::readers` re-exports it and adds host readers.
+pub trait ByteChunks {
+    fn next_chunk(&mut self) -> Result<Option<&[u8]>, EngineError>;
+}
+
 /// The error every unimplemented seam returns until its owner fills it in.
 /// Production code never reaches it while `ExecutionModel::Resident` is the
 /// default.

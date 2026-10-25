@@ -3,11 +3,12 @@
 //! Seam owner: `formats` (#17). Contract:
 //! `openspec/changes/query-while-scanning/contract.md`.
 //!
-//! [`ByteChunks`] is the binding seam: it is how a native file, a browser
-//! host or a test buffer supplies bytes without mmap and without holding a
-//! whole file. `formats` implements a chunked JSONL line framer that turns
-//! `ByteChunks` into a [`proseql_engine::scan::RowSource`], and the host
-//! adapters. `exec` consumes them.
+//! [`ByteChunks`] (defined in `proseql_engine::scan`, re-exported here) is the
+//! binding seam: it is how a native file, a browser host or a test buffer
+//! supplies bytes without mmap and without holding a whole file. `formats`
+//! implements the chunked JSONL line framer in
+//! `proseql-engine/src/scan/framer.rs` (platform-blind, so WASM shares it)
+//! and the host adapters here. `exec` consumes them.
 
 use crate::host::StorageHost;
 use proseql_engine::errors::EngineError;
@@ -15,12 +16,8 @@ use proseql_engine::errors::EngineError;
 /// Default chunk size for bounded reads.
 pub const DEFAULT_CHUNK_BYTES: usize = 64 * 1024;
 
-/// A sequence of byte chunks in file order. A returned chunk borrows the
-/// reader's buffer and is valid until the next call. An empty slice is never
-/// returned; `None` is end of input.
-pub trait ByteChunks {
-    fn next_chunk(&mut self) -> Result<Option<&[u8]>, EngineError>;
-}
+/// Defined in the platform-blind engine so WASM can use the same framer.
+pub use proseql_engine::scan::ByteChunks;
 
 /// One in-memory buffer as a single chunk (tests, whole-file hosts).
 pub struct SliceChunks<'a> {
