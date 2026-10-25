@@ -89,9 +89,10 @@ def run(data, out):
                             command = [str(data / profile), str(root), backend, kind, workload, cache]
                             name = f"{profile}-{repeat}-{kind}-{workload}-{backend}-{cache}"
                             scope = ["systemd-run", "--user", "--scope", "-p", "MemoryMax=1G", "-p", "MemorySwapMax=0", "nice", "-n", "10", "timeout", "180"]
+                            load_before = os.getloadavg()
                             started = time.monotonic()
                             result = subprocess.run(scope + command, text=True, capture_output=True)
-                            record = dict(profile=profile, repeat=repeat, kind=kind, workload=workload, backend=backend, cache=cache, returncode=result.returncode, process_wall_s=time.monotonic()-started, file_cache_before=before, file_cache_after=residency(files(root, backend, kind)), command=scope+command)
+                            record = dict(profile=profile, repeat=repeat, kind=kind, workload=workload, backend=backend, cache=cache, load_before=load_before, load_after=os.getloadavg(), returncode=result.returncode, process_wall_s=time.monotonic()-started, file_cache_before=before, file_cache_after=residency(files(root, backend, kind)), command=scope+command)
                             if result.returncode == 0:
                                 record.update(json.loads(result.stdout))
                             else:

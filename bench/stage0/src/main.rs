@@ -56,7 +56,7 @@ fn main() -> Result<(), Error> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.len() == 2 && args[0] == "prepare" {
         let m = fixture::prepare(Path::new(&args[1]), None)?;
-        println!("{}", serde_json::to_string(&m)?);
+        println!("{}", serde_json::json!({"fixture":m,"sqlite":sql::info(Path::new(&args[1]))?}));
         return Ok(());
     }
     if args.len() != 5 {
@@ -163,6 +163,33 @@ mod tests {
         }
         Ok(())
     }
+    #[test]
+    fn conflicting_duplicates_fail_without_publishing_new_rows() -> Result<(),Error> {
+        use std::io::Write;
+        let tmp = tempfile::tempdir()?;
+        let root = tmp.path().join("fixture");
+        fixture::prepare(&root,Some(1000))?;
+        let path = root.join("samples/2025-10.jsonl");
+        let id = fixture::row(10,900,0,false)["id"].as_str().unwrap().to_owned();
+        let mut rows = std::fs::read_to_string(&path)?.lines().map(serde_json::from_str::<serde_json::Value>).collect::<Result<Vec<_>,_>>()?;
+        for row in &mut rows {if row["id"].as_str() == Some(&id) {row["value"] = serde_json::json!(-1.0);}}
+        let mut file = std::fs::File::create(&path)?;
+        for row in rows {writeln!(file,"{row}")?;}
+        file.sync_data()?;
+        let size = std::fs::metadata(&path)?.len();
+        let conn = sql::open(&root)?;
+        conn.execute("UPDATE samples SET value=-1 WHERE id=?1",[&id])?;
+        drop(conn);
+        let mut backends = [Backend::open(&root,"sqlite","samples")?,Backend::open(&root,"proseql","samples")?,Backend::open(&root,"spike","samples")?];
+        let expected = backends[0].run(&root,"samples","ten")?;
+        for backend in &mut backends {
+            assert!(backend.run(&root,"samples","append").is_err());
+            assert_eq!(std::fs::metadata(&path)?.len(),size);
+            assert_eq!(backend.run(&root,"samples","ten")?,expected);
+        }
+        Ok(())
+    }
+
     #[test]
     fn stale_index_and_same_timestamp_block_boundaries_are_safe() -> Result<(), Error> {
         use std::io::Write;

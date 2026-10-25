@@ -65,10 +65,10 @@ case "$action" in
     mkdir -p "$data/test-tmp"
     export TMPDIR="$data/test-tmp"
     nix develop --builders '' -c cargo check --locked --manifest-path bench/stage0/Cargo.toml --all-targets --all-features -j 2 > "$out/check.log" 2>&1
-    scope 300 nix develop --builders '' -c cargo test --locked --manifest-path bench/stage0/Cargo.toml --all-features -j 2 -- --test-threads=1 > "$out/tests.log" 2>&1
+    scope 300 nix develop --builders '' -c cargo test --release --locked --manifest-path bench/stage0/Cargo.toml --all-features -j 2 -- --test-threads=1 > "$out/tests.log" 2>&1
     nix develop --builders '' -c cargo clippy --locked --manifest-path bench/stage0/Cargo.toml --all-targets --all-features --no-deps -j 2 -- -D warnings > "$out/clippy.log" 2>&1
     nix develop --builders '' -c rustfmt --edition 2021 --check bench/stage0/src/*.rs > "$out/format.log" 2>&1
-    shellcheck bench/stage0/run.sh > "$out/shellcheck.log" 2>&1
+    shellcheck --shell bash bench/stage0/run.sh > "$out/shellcheck.log" 2>&1
     python3 -m py_compile bench/stage0/measure.py
     ;;
   measure)
