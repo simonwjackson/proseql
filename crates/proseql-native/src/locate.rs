@@ -25,13 +25,16 @@ pub(crate) struct IndexState {
 }
 
 impl IndexState {
-    /// The current time index of `path`, built or refreshed on demand from
-    /// the text. `None` when the file cannot seek (no ordered key, unsorted
-    /// rows) or the index is not built yet and building is not worth it.
+    /// The current time index of `path` on the ordered field `field`, built or
+    /// refreshed on demand from the text. `exec` passes the field its range
+    /// filter uses. `None` when the file cannot seek on that field (not an
+    /// ordered index of the collection, unsorted rows) or the index is not
+    /// built yet and building is not worth it.
     pub fn time_index(
         &mut self,
         _host: &dyn StorageHost,
         _path: &str,
+        _field: &str,
     ) -> Result<Option<&TimeIndex>, EngineError> {
         Ok(None)
     }
