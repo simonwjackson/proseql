@@ -1,11 +1,11 @@
 mod support;
 
 use proseql_engine::query::QueryInput;
-use proseql_native::ExecutionModel;
 use serde_json::json;
+use support::parity::RuntimeKind;
 use support::parity::{ParityFixture, COLLECTION};
 
-fn check(model: ExecutionModel) {
+fn check(model: RuntimeKind) {
     let fixture = ParityFixture::new(720);
     let runtime = fixture.open(model);
     let input = QueryInput {
@@ -18,17 +18,27 @@ fn check(model: ExecutionModel) {
             .query_bounded_with_stats(COLLECTION, input.clone())
             .unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(stats.partitions_visited, 1);
-        assert_eq!(stats.candidate_rows, 28 * 2 * 2);
+        assert_eq!(
+            stats.partitions_visited,
+            if model == RuntimeKind::Lazy { 1 } else { 3 }
+        );
+        assert_eq!(
+            stats.candidate_rows,
+            if model == RuntimeKind::Lazy {
+                28 * 2 * 2
+            } else {
+                90 * 2 * 2
+            }
+        );
     }
 }
 
 #[test]
-fn resident_reports_visited_and_cached_scope_rows_before_filter_and_limit() {
-    check(ExecutionModel::Resident);
+fn eager_reports_collection_rows_before_filter_and_limit() {
+    check(RuntimeKind::Eager);
 }
 
 #[test]
 fn streaming_reports_validated_rows_before_filter_and_limit() {
-    check(ExecutionModel::Streaming);
+    check(RuntimeKind::Lazy);
 }

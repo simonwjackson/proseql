@@ -1,8 +1,20 @@
 # Query while scanning
 
-Streaming is opt-in. `ExecutionModel::Resident` remains the default because unedited Logbook depends on lazy residency to hydrate query results. Set `NativeSourceRuntimeOptions::execution_model` to `ExecutionModel::Streaming` only after adapting those call sites. Text remains the source of truth. No binary index or cache is written to disk.
+Streaming is now the default and the only lazy execution model. Eager collections
+keep the resident engine. Text remains the source of truth. No binary index or
+cache is written to disk.
 
-Stage #19's removal of the old lazy resident path is **deferred until consumers adopt Streaming**. Making Streaming the default now would silently lose rows for residency-dependent callers. The parent directed integration to retain both paths and the public switch after source inspection reproduced this incompatibility. This is a provisional cutover decision, not a claim that #19's removal acceptance is complete. The architecture below describes the opt-in Streaming path; Resident behavior is unchanged.
+`ExecutionModel::{Resident, Streaming}` and
+`NativeSourceRuntimeOptions::execution_model` remain as deprecated compatibility
+items. Both variants stream lazy collections. The field defaults to Streaming;
+Logbook's adoption branch compiles without edits. `LazyPartitionPolicy` keeps
+both fields; `max_loaded_partitions` is ignored and `full_scan` remains binding.
+
+The deferred #19/#21 cutover is implemented after Logbook adopted returned rows
+(commits `d2ada9e`, `53417a6`, `ad70bd9` on its `streaming-adoption` branch).
+Before this cutover, that branch passed 221 tests, 0 failures and 2 existing
+ignores under both models against `c523e6f`. This removes the earlier blocker,
+not the outstanding SQLite or real-shape measurement requirements.
 
 ## Scope and bounds
 
@@ -21,7 +33,7 @@ Streaming is not a constant-memory promise for every query. Memory includes:
 - One decoded partition for custom codecs or canonical error replay. Append preparation can also read one target partition's bytes to build its compact durable-append baseline.
 - Allocator-held free pages. Dropping query allocations is not an RSS or one-second reclamation guarantee.
 
-Under Streaming, `max_loaded_partitions` is retained for source compatibility but ignored. It no longer bounds anything on that path; streaming memory no longer depends on it. `lazy_partition_status` keeps its shape: `loaded` and `pinned` are always empty under Streaming. Resident still uses the configured cache bound and watch pins. Eager records and transaction-staged creates are not streaming partition residency.
+For every lazy collection, `max_loaded_partitions` is retained for source compatibility but ignored. It no longer bounds anything on that path; streaming memory no longer depends on it. `lazy_partition_status` keeps its shape: `loaded` and `pinned` are always empty. No lazy cache bound or watch pins remain. Eager records and transaction-staged creates are not streaming partition residency.
 
 ## Read path
 
@@ -33,7 +45,7 @@ Partition path and file ordinal define natural order. Shared engine candidate-or
 
 A sparse time index records an offset every 32 rows for eligible configured ordered fields. On first use, the canonical full-file scan builds checkpoints as a side effect. Existing indexes seek only when ordering and generation checks permit it. A query whose validated UTC bounds conservatively cover an entire time-bucket partition does no index work for that file. Index-only rebuilds decode the key field, not owned payloads. Unsorted data or a custom JSONL codec disables seeking. A stale index is rebuilt or the operation scans correctly; it is never authoritative data.
 
-Whether an invalid row outside the queried range fails a Streaming read can depend on index state: a first-use full scan validates it, while a later safe seek may skip it. Every row actually scanned is still validated. `BoundedQueryStats::candidate_rows` counts those validated scan rows, including filter and page rejections, not index-maintenance rows. `NativeQueryStats::index_used` is None for a first-use full scan and Ordered only when the scanner uses a positional seek. Resident bounded visits count visited rows; Resident cached reads report all rows in the selected scope, and eager reads report the collection row count.
+Whether an invalid row outside the queried range fails a Streaming read can depend on index state: a first-use full scan validates it, while a later safe seek may skip it. Every row actually scanned is still validated. `BoundedQueryStats::candidate_rows` counts those validated scan rows, including filter and page rejections, not index-maintenance rows. `NativeQueryStats::index_used` is None for a first-use full scan and Ordered only when the scanner uses a positional seek. Eager bounded reads report the collection row count.
 
 Ordinary query-local identity metadata is 8 bytes per visited row. Equal hashes replay only the visited windows to recover candidate locations, then verify exact IDs from text. This halves ordinary identity storage, but duplicates or hash collisions add replay I/O. First-use ID lookup validates borrowed rows during the locator build; membership built earlier by append still requires payload validation before locator errors.
 
@@ -63,7 +75,7 @@ The lazy poller lists files and checks watch-covered generations outside the run
 
 ## Changed guarantees
 
-All 14 changes below apply **only when Streaming is selected**. Resident is unchanged. Items 12 and 13 were approved by the parent during integration after reproducing the cache-dependent differences. Item 11 was corrected against the implementation and approved by the parent. Item 14 was approved during round-2 read optimization.
+The 13 round-1 changes below now apply to **every lazy collection caller**. Eager behavior is unchanged. Items 12 and 13 were approved by the parent during integration after reproducing the cache-dependent differences. Item 11 was corrected against the implementation and approved by the parent. The round-2 additions below were approved separately.
 
 1. Own creates appear in natural order (partition path, then file order) immediately under streaming; Resident put them at the end until the next reload. Explicitly sorted queries are unchanged.
 2. `create_many` with generated IDs resolves every ID before validating; on a failed batch a stateful generator may have advanced past the first invalid record. Generated IDs were never guaranteed gap-free.
@@ -79,7 +91,15 @@ All 14 changes below apply **only when Streaming is selected**. Resident is unch
 12. Last-known-good after an invalid external edit is kept only for lazy partitions a live watch covers. Other reads see the current file: an invalid edit makes them fail with the validation error, as Resident already did whenever the partition was not cached, and `reload()` reports errors only for watched partitions.
 13. Under FullScanPolicy::Error, find_by_id on a lazy collection is always refused (lazy-full-scan), except for records created earlier in the same mutation. Resident allowed it when an earlier filtered query or watch had happened to load the record; that history-dependent exception is gone. Use FullScanPolicy::Allow (find_by_id is then served by the ID locator) or a filtered query on the partition field.
 
-14. First-use range reads validate a full file while building checkpoints. A later indexed read may skip invalid rows outside the queried range. This follows section 5's rule that only rows actually scanned require validation; it does not weaken row validation or add snapshot isolation. The additive `BoundedQueryStats::candidate_rows` field exposes examined-row counts under both models as described above.
+### Approved round-2 additions
+
+First-use range reads validate a full file while building checkpoints. A later indexed read may skip invalid rows outside the queried range. This follows section 5's rule that only rows actually scanned require validation; it does not weaken row validation or add snapshot isolation. The additive `BoundedQueryStats::candidate_rows` field exposes examined-row counts as described above.
+
+`release_streaming_indexes()` releases ID/time metadata, validated generations
+and append proofs, not codec context or allocator-held RSS. Rebuilding adds
+latency. `FileStat::change_id = Some` requires a token change on every content
+edit, append, truncation or replacement; hosts that cannot guarantee this return
+None. Checked own-append prefix proof remains required.
 
 Item 3 describes validation, not zero I/O: append preparation can read target bytes for fingerprints/torn-tail handling. Custom codecs retain whole-partition validation. Item 12 preserves watch deliveries, not a hidden copy of every previously read file. A scan detects duplicates across its visited scope; there is no outside-scope resident cache to add historical rows to that scope. Global create checks use the locator.
 
@@ -109,13 +129,18 @@ The committed [acceptance provenance](../../bench/acceptance/results/provenance.
 
 ## Residency-dependent APIs
 
-Under Streaming, `NativeRuntime::read` exposes the engine, which contains eager records and no durable lazy rows. Mutation-time ID lookup sees staged creates; it does not hydrate partitions. A `query_bounded { limit: 0 }` probe does not load anything into that engine. `NativeMutation` reads must use its streaming-aware `find_by_id`, not assume earlier operations installed lazy rows. The public restricted mutation view remains available; no raw engine access is added.
+`NativeRuntime::read` exposes the engine, which contains eager records and no durable lazy rows. Mutation-time ID lookup sees staged creates; it does not hydrate partitions. A `query_bounded { limit: 0 }` probe does not load anything into that engine. `NativeMutation` reads must use its streaming-aware `find_by_id`, not assume earlier operations installed lazy rows. The public restricted mutation view remains available; no raw engine access is added.
 
-A caller must consume the scanner's returned rows, request required fields with `select`, use `aggregate_grouped_bounded`, or use `find_by_id` under `FullScanPolicy::Allow`. These replacements can allocate owned output where Resident allowed borrowing a cached row; that is an explicit adoption cost. Retaining Resident avoids a silent behavioral change while consumers make that trade-off.
+A caller must consume the scanner's returned rows, request required fields with `select`, use `aggregate_grouped_bounded`, or use `find_by_id` under `FullScanPolicy::Allow`. These replacements can allocate owned output where Resident allowed borrowing a cached row; that is an explicit adoption cost. All lazy callers must make that trade-off; selecting Resident no longer restores borrowing or hydration.
 
 ## Logbook adoption
 
-Existing configuration literals need no changes to keep Resident. Opting in requires `execution_model: ExecutionModel::Streaming` and the call-site changes below. Under Streaming, `max_loaded_partitions` is ignored; `full_scan` is not. Logbook must complete these changes before it selects Streaming. A dependency pin alone must not change its model.
+Existing option literals still compile, including explicit
+`execution_model: ExecutionModel::Streaming`, with deprecation warnings. No
+selector is needed now. Logbook completed the replacements below on its scratch
+adoption branch; its two lazy sources retain FullScanPolicy::Error. A dependency
+pin for an unported application is not enough: migrate residency-dependent reads
+first. No partition layout change is required by this cutover.
 
 | Call site | Adoption and cost |
 |---|---|
@@ -125,9 +150,9 @@ Existing configuration literals need no changes to keep Resident. Opting in requ
 | `mutate` / `create_many` | Same durability and rollback APIs. Global duplicate checks pay first-ID-use cost; new batches do not load all target partitions. IDs remain gap-tolerant. |
 | `watch*` | No cache tuning or pins. Budget for delivered results and their serialized comparison baselines. |
 
-### Audit at Logbook `5dbb01551ecc9ff9530e9e193e60a48daedd025c`
+### Historical adoption audit at Logbook `5dbb01551ecc9ff9530e9e193e60a48daedd025c`
 
-The paths below are relative to `crates/logbook-core/src/`. This is source inspection, not a consumer test result. Both lazy collections (`raw`, `samples`) configure `FullScanPolicy::Error`. No literal `find_by_id("raw", ...)` or `find_by_id("samples", ...)` was found. The generic `storage.rs::put` helper calls ID lookup and must remain restricted to eager collections or adopt a filtered lookup. Current specialized raw/sample writes use other paths.
+The paths below are relative to `crates/logbook-core/src/`. This historical table explains the pre-adoption blocker; the scratch branch replaced these lazy call sites. Both lazy collections (`raw`, `samples`) configure `FullScanPolicy::Error`. No literal `find_by_id("raw", ...)` or `find_by_id("samples", ...)` was found. The generic `storage.rs::put` helper calls ID lookup and must remain restricted to eager collections or adopt a filtered lookup. Current specialized raw/sample writes use other paths.
 
 | Call site | Residency dependency / streaming replacement |
 |---|---|
@@ -143,13 +168,13 @@ The paths below are relative to `crates/logbook-core/src/`. This is source inspe
 | `storage.rs:242` `repair_latest` | The closure reads eager `supersededRaw`; candidates already come from queries. This access can stay eager, but its query helper must use returned rows after the hydration fix. |
 | `storage/superseded.rs:22/73/210` | These closures enumerate eager `supersededRaw`, not lazy raw/sample records. Keep it eager or replace enumeration with ordinary query/`select` if refactoring the consumer. No lazy exception is needed. |
 | `storage.rs:691/801/1009`; `storage/latest.rs:33/145/198` | Audited reads use eager collections or membership. They can stay on the eager engine; preserve that configuration explicitly. |
-| `storage.rs:2084/2109` tests | Assert sample engine residency after writes. New opt-in tests must assert durable/query results and zero residency instead; leave Resident tests intact. |
+| `storage.rs:2084/2109` tests | Assert sample engine residency after writes. The adoption branch asserts durable/query results and zero residency instead. |
 
 `storage/superseded.rs:164` only checks runtime availability. It does not enumerate lazy rows. The bounded-read query gate serializes these consumer phases but cannot recreate missing residency under Streaming.
 
 A partition layout change is not required. Month files permit time pruning. Raw's 256 hash shards make every time range fan out to every shard. In the [stage-0 proxy report](../benchmarks/sqlite-baseline.md), a one-hour raw scan cost 372.63 / 32.35 ms cold / warm versus 1.40 / 0.45 ms for month-partitioned samples; a denser raw index still cost 217.79 / 5.29 ms. These are yari spike measurements, not current aka or Celeron claims. Per-metric/time partitions could prune metric and time workloads but add files, routing/configuration work and migration cost; metric-only partitions do not by themselves solve long-history time ranges. Measure the consumer workload before changing layout.
 
-## Integration verification
+## Historical round-1 integration verification
 
 The final Resident-default source passed `nix run --builders '' path:.#release-check`
 on aka. The gate includes the full suites and the real browser/packed-package paths.
@@ -169,12 +194,11 @@ Outputs are under `/home/simonwjackson/work/qws-logs` on aka, principally
 `integrator-release-final-browser-evidence.json`. Focused native checks also pass
 with `RUSTFLAGS='-C target-cpu=x86-64-v2'` and all-feature clippy. No SQLite/native acceptance benchmark,
 consumer override, push or deployment was run by integration. The 1,661 B gzip
-headroom is small; future WASM changes must keep the gate. Cutover and consumer
-adoption remain deferred despite these passing library checks.
+headroom is small; future WASM changes must keep the gate. That run predates the round-2 adoption and cutover; it is not current-source verification.
 
 ## Measured on aka
 
-Verify source: `267427c69c819a7612e50b596be12409019e0ba5`, run `20261025T102804Z`. This section supersedes the historical skeleton-only acceptance paragraph above; earlier sections are preserved unchanged. Streaming remains opt-in and Resident remains the default. **Streaming: 12 measured target rows pass, 19 miss.** No target was lowered.
+Verify source: `267427c69c819a7612e50b596be12409019e0ba5`, run `20261025T102804Z`. This section supersedes the historical skeleton-only acceptance paragraph above; earlier sections are preserved unchanged. At that historical source Streaming was opt-in and Resident was the default. **Streaming: 12 measured target rows pass, 19 miss.** No target was lowered.
 
 aka is x86_64 (Ryzen 5 7600X), compiled with `RUSTFLAGS='-C target-cpu=x86-64-v2'` at the Celeron's instruction level, but a much faster CPU. These are synthetic same-machine SQLite NORMAL/WAL comparisons, not absolute comparisons with the yari/aarch64 Stage 0 report or Celeron qualification.
 
@@ -224,3 +248,107 @@ Equal-row-count peak RSS, 16→256 raw shards. Ratios are 256/16, cold / warm; l
 Open ≤1 s on Logbook's real shape, absolute Celeron times and equal-durability qualification remain **unmeasured**: no rakku access by user rule; native synced text and NORMAL WAL also differ in power-loss guarantees.
 
 See the [aka report](../benchmarks/query-while-scanning-aka.md) for every miss's observed floor, inferred cause and cheapest next step, counting-allocator evidence, load policy and limits. [Acceptance provenance](../../bench/acceptance/results/provenance.md) records the exact source, checks and cleanup. The same-row-count shard sweep is not a constant-memory proof. No engine code, consumer pin or default changed in Verify.
+
+## Round-2 cutover removal (#19 / #21)
+
+The native lazy resident path is deleted, not hidden behind the deprecated switch.
+Eager collections still use the engine. Shared engine load/unload primitives stay
+because streaming mutations stage verified duplicate candidates with them.
+
+| File | Removed code (approximate net lines) |
+|---|---|
+| `proseql-native/src/lazy.rs` | 870: `Resident`, `BoundedLoad`, `Pin`, clock/pending/pin maps, `pinned`, `watch_covers`, `LoadedPartition`, `read_partition`, `lazy_position`, `lazy_ensure`, `lazy_ensure_impl`, `lazy_touch`, `lazy_visit`, `lazy_scope_is_resident`, `lazy_read_stats`, `lazy_ensure_for_record`, `lazy_trim`, `lazy_evict`, `lazy_pin`, `lazy_unpin`, `lazy_refresh`, `lazy_reload_partition`, `lazy_resident_count`, resident fingerprints |
+| `proseql-native/src/lib.rs` | 350: `prepare_creates`, mutation/runtime full-scope ID loading, lazy branches of `with_scope` / `watch_scoped`, `PinGuard`, pending-unpin queue/worker, `drain_unpins`, `release_unpins`, `sources_trim`, resident `refresh_lazy_locked` branch |
+| `proseql-native/src/bounded.rs` | 270: `CachedRead`, `ReadScope`, `bounded_fold`, lazy resident read cache, resident fold/visit accumulators |
+| `proseql-engine/src/{resident.rs,collection.rs,reactive/mod.rs,scan/mod.rs}` | Unused `validate_resident_records`, `replace_resident_records` (Database and Collection), `retain_reactive_snapshot_records`, `retain_collection_snapshot_records`, and the rollout-only `unimplemented_seam` helper |
+| `sources.rs`, `streaming.rs`, `locate.rs`, `write/{append,tx,watch}.rs` | Per-collection execution selector, Resident target checks and execution-model branches; refresh uses streaming manifest/watch invalidation only |
+
+The historical benchmark `resident` backend now refuses to run against this
+source. Use its pinned historical source for baseline measurements. It must not
+silently measure the deprecated Resident alias as though the old path remained.
+
+### Test assertion ledger
+
+Differential tests now compare a lazy runtime with an eager runtime over identical
+files. Writes get independent copies. Invalid-file comparisons account for eager
+validation at open versus lazy validation at first use. Existing error tests
+already excluded copy-dependent SourceConfig paths; the fixture now also applies
+that normalization to eager open errors. Values and all other error payloads
+remain exact. No result fixture or page/group/cursor assertion was dropped.
+
+The following Resident-internal expectations were replaced. Repeated assertions
+within one test are listed together; their result assertions remain.
+
+| Test file / original test | Former internal assertions | Replacement |
+|---|---|---|
+| `lazy_partitions_runtime`: `filtered_queries_match_eager_with_sorts_and_pages` | resident count ≥ min(selected, 2) | resident count 0 |
+| `unfiltered_queries_and_aggregates_match_eager_then_return_to_the_bound` | resident count 2; loaded length 2 in loop and after aggregates | zero residency; same rows/groups/sums |
+| `find_by_id_loads_everything_under_allow_and_returns_to_the_bound` | loaded length 1 | empty loaded; same hit/miss |
+| `eviction_drops_the_least_recently_used_partition_and_reloads_it_identically` | loaded Jan/Feb, Jan/Mar, Mar/Apr; engine length 22; candidate count below resident length | empty status/engine; identical reread/eager results; physical candidate count |
+| `watches_pin_the_partitions_their_filter_touches` | Jan remains loaded; loaded length 2; one Jan pin; Feb loaded after drop | empty loaded/pinned throughout; initial/update delivery assertions kept |
+| `appends_into_unloaded_evicted_and_new_partitions` | loaded Jan, Feb, Mar, Sep and post-batch length 1 | no residency; exact append bytes, duplicate refusals and reopened rows kept |
+| `external_files_are_listed_and_loaded_partitions_refresh_while_lazy` | June loaded; March ID visible in raw engine | no residency; same March ID checked in returned rows |
+| `unchanged_reload_keeps_loaded_records_and_identical_retries_write_nothing` | engine length 11 after reload | length 0; same 11 returned rows; byte-identical retries |
+| `a_watched_new_partition_that_fails_to_load_is_retried_after_it_is_corrected` | corrected June pinned | no pins; same corrected watch delivery |
+| `full_scan_error_applies_to_empty_and_fully_loaded_collections` | every queried month loaded | no loaded months; scan refusals kept |
+| `a_conflicting_cold_append_rolls_back_and_keeps_the_loaded_partition` | Jan loaded after failed batch | empty status; unchanged bytes and exact old row retained through query |
+| `bounded_queries_keep_global_natural_sort_page_cursor_search_and_selection_semantics` | retained limit equals configured bound | retained limit 0; all result comparisons kept |
+| `bounded_load_errors_pins_and_duplicates_across_evicted_partitions_are_not_hidden` | one pin/two resident files before drop; one resident file after; failed-load cache membership | zero counts; watch LKG delivery remains unchanged; current-file reads fail |
+| `bounded_windows_read_each_file_at_most_once_and_warm_hits_keep_lru_and_indexes` | cached month avoids I/O; each incoming file decoded once; Mar LRU; warm Nov/Jan membership; resident ordered index | every selected file opens; no membership; scan/index stats replace resident-index stats |
+| `bounded_id_checks_include_the_initial_cache_outside_the_query_scope` | Nov/Dec remain resident and participate outside scope | no cache; duplicate error kept for full visited scope and global create check |
+| `bounded_live_runtime` | retained payloads = bound × rows (three sites), one pin, N-dependent peak bound | zero retained payloads/pins; stronger bound-independent peak; all query/count/group/error assertions kept |
+| `streaming_cutover` | default Resident; returned rows can be borrowed from engine; zero-limit probe hydrates; Resident Error-policy cached ID hit | default Streaming; eager/lazy result equality and empty lazy engine; both compatibility variants refuse cached-hit exception |
+| `schema_checks_runtime`: source/lazy reload test | Unwatched lazy reload fails and engine lookup returns LKG | Live lazy watch preserves the same allowed row after failed reload; current-file ID lookup rejects the invalid predicate. Eager LKG assertions unchanged (#12). |
+| `streaming_parity` | default Resident | default Streaming |
+| `proseql-engine/tests/resident_conformance`: replacement validation test | Calls to the removed replacement/eviction helper | Stage/unload through the primitives still used by streaming writes; every invalid/duplicate/state/index result assertion kept |
+| `streaming_candidate_stats` | Resident selected/cached scope counts | eager collection counts versus lazy validated scan counts |
+| `write/append.rs` unit test; `write/watch.rs` ignored measurement | private `lazy.resident.is_empty()` | public-shaped status is empty |
+
+Approved behavioral differences are also explicit: Error-policy cached ID hits
+are now refused (#13); LKG belongs to delivered watches, not subsequent current-file
+reads (#12); global create checks read membership outside the target (#5); scan
+stats replace resident indexes (#6 and round 2). The old no-I/O assertion for a
+new target is replaced by an assertion that no read addresses that nonexistent
+target before its creation; global locator/proof I/O remains permitted. Failed
+watch generations retry after an edit, not by rereading unchanged bad text.
+
+### Remaining #19 items
+
+The removed-path requirement is implemented. The tested consumer pin still needs
+to be adopted in the real consumers; no manifest, real repository or deployment
+is changed here. SQLite latency/retained-memory misses remain in #20 and the
+round-2 read/write reports. Real Logbook shape, open ≤1 s and Celeron/rakku
+qualification remain unmeasured and excluded by the machine rule. No target was
+lowered. Publication/push remains a separate user decision.
+
+
+## Round-2 cutover verification
+
+Tested runtime SHA: `56e994370d6919ef4e3effa735381ab4b17fe0f0`, including
+`ba90773` (idempotent checked append publication and the single tokenless proof
+hash). All checks below ran on aka. The final complete release-check omitted
+native x86-64-v2 flags so they could not reach the WASM build.
+
+| Check | Verified result |
+|---|---|
+| Rust workspace | 1,316 passed / 0 failed / 10 ignored |
+| Full TypeScript | 4,098 passed / 0 failed / 2 skipped |
+| Effect parity | 2,163 passed / 0 failed / 2 skipped; 16/16 examples |
+| Typecheck, lint, Rust format/check/clippy, WASM | Passed |
+| Packed packages and browser smoke | Passed |
+| Browser budget | 3/3 cold trials pass; gzip 598,572 / 600,000 B |
+| Coach unedited (`0671989`) | Build passed; 27 passed / 0 failed |
+| Logbook streaming-adoption (`ad70bd9`) | Build passed; 221 passed / 0 failed / 2 ignored |
+
+The consumer runs used cutover `1c4f79f`. The parent accepted those results for
+the later localized locator/append fix; the complete final gate includes that
+fix. The read-only consumer sources were not edited. Git hashes of all tracked
+files matched the aka source checkout after the final gate. Only documentation
+changes follow the tested SHA.
+
+Full log: `/home/simonwjackson/work/qws-logs/round2-cutover-release-check.log`.
+[Cutover report and initial failed-invocation explanation](../../bench/acceptance/results/cutover-round2.md).
+The initial full-gate attempt stopped before suites because a native CPU flag
+reached WASM. Its affected build retry and the final complete run passed without
+that flag. Browser gzip has only 1,428 B headroom. Performance, real-data and
+consumer pin/deployment limits above remain unchanged. No push or publication.

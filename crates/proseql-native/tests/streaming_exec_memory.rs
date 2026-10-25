@@ -2,7 +2,6 @@
 mod support;
 
 use proseql_engine::query::AggregateConfig;
-use proseql_native::ExecutionModel;
 use serde_json::json;
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -10,6 +9,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, Instant},
 };
+use support::parity::RuntimeKind;
 use support::parity::{ParityFixture, COLLECTION};
 
 struct Meter;
@@ -87,7 +87,7 @@ fn ten_month_grouped_scan_returns_query_allocations() {
         file.flush().unwrap();
     }
     assert_eq!(count, 656_640);
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let config = AggregateConfig {
         count: true,
         sum: vec!["value".into()],

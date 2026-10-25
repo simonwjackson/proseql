@@ -41,6 +41,7 @@ pub struct NativeSourceRuntimeConfig {
 
 /// Native callback, codec and graph-transform services. Later codec registrations override
 /// earlier registrations for the same extension.
+#[allow(deprecated)] // Compatibility field uses the deprecated selector.
 pub struct NativeSourceRuntimeOptions {
     /// Registered Rust closures; empty by default.
     pub callbacks: CallbackRegistry,
@@ -56,14 +57,15 @@ pub struct NativeSourceRuntimeOptions {
     /// `SourceConfigError` otherwise. See `docs/native-sources.md`.
     pub lazy_partitions: IndexMap<String, crate::lazy::LazyPartitionPolicy>,
     /// How often the managed watch compares lazy sources with the disk (the
-    /// directory listing and the loaded partitions only).
+    /// directory listing and watch-covered generations only).
     pub lazy_watch_interval: Duration,
-    /// How lazy partitioned collections execute (native only). `Resident`
-    /// loads the partitions an operation touches; `Streaming` queries while
-    /// scanning the text and keeps no rows. Other collections ignore it.
+    /// Ignored compatibility selector. Both variants stream lazy collections.
+    /// Eager collections keep the resident engine. Defaults to Streaming.
+    #[deprecated(note = "Lazy collections always stream; omit this setting")]
     pub execution_model: crate::ExecutionModel,
 }
 
+#[allow(deprecated)]
 impl Default for NativeSourceRuntimeOptions {
     fn default() -> Self {
         Self {
@@ -530,8 +532,8 @@ impl SourceState {
         for (name, values) in &self.graph.collections {
             collections.insert(name.clone(), values.clone());
         }
-        // Lazy collections hold their loaded partitions in the engine only;
-        // a snapshot replacement must leave them alone (see `lazy_refresh`).
+        // Lazy sources contribute no durable rows to this snapshot; eager reloads
+        // must leave transaction-staged lazy engine rows alone.
         collections.retain(|name, _| !self.lazy.contains_key(name));
         collections
     }
@@ -702,15 +704,12 @@ impl SourceState {
             if let Some(lazy) = self.lazy.get(&change.collection) {
                 // Streaming checks IDs globally, without materialising target
                 // partitions. Only paths prepared before create have a baseline.
-                let checked = if lazy.execution_model == crate::ExecutionModel::Streaming {
-                    lazy.stream
-                        .append
-                        .target_generations()
-                        .iter()
-                        .any(|(target, _)| target == &path)
-                } else {
-                    lazy.resident.contains_key(&path)
-                };
+                let checked = lazy
+                    .stream
+                    .append
+                    .target_generations()
+                    .iter()
+                    .any(|(target, _)| target == &path);
                 if !checked {
                     return Err(crate::operation_error(
                         "lazy-partition-not-loaded",
@@ -784,13 +783,8 @@ impl SourceState {
     pub fn apply_appends(&mut self, plan: AppendPlan) {
         for write in &plan.writes {
             let lazy = self.lazy.values().any(|lazy| {
-                lazy.resident.contains_key(&write.path)
-                    || (lazy.execution_model == crate::ExecutionModel::Streaming
-                        && proseql_storage::partition_prune::partition_key_of_path(
-                            &lazy.source,
-                            &write.path,
-                        )
-                        .is_some())
+                proseql_storage::partition_prune::partition_key_of_path(&lazy.source, &write.path)
+                    .is_some()
             });
             let content = self.contents.entry(write.path.clone()).or_insert_with(|| {
                 if lazy {
@@ -816,7 +810,7 @@ impl SourceState {
         } in plan.records
         {
             if let Some(lazy) = self.lazy.get_mut(&collection) {
-                lazy.record_append(&path, id);
+                lazy.record_append(&path);
             } else if let Some(partitions) = self.partitions.get_mut(&collection) {
                 partitions.files.entry(path).or_default().insert(id, record);
             } else if let Some(records) = self.files.get_mut(&collection) {

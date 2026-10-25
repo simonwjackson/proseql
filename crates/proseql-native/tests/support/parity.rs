@@ -1,5 +1,5 @@
 //! Differential harness: run the same operation on the same files under
-//! `ExecutionModel::Resident` and `ExecutionModel::Streaming`, and require the
+//! an eager and a lazy runtime, and require the
 //! same answer (values exactly, errors by tag and payload).
 //!
 //! The fixture is Logbook-shaped and synthetic: per-minute samples of two
@@ -18,13 +18,20 @@ use proseql_engine::descriptor::{
 };
 use proseql_engine::errors::EngineError;
 use proseql_native::{
-    ExecutionModel, FullScanPolicy, LazyPartitionPolicy, NativeCollectionConfig, NativeRuntime,
+    FullScanPolicy, LazyPartitionPolicy, NativeCollectionConfig, NativeRuntime,
     NativeSourceRuntimeConfig, NativeSourceRuntimeOptions,
 };
 use proseql_storage::source_config::{
     DatabaseSourceConfig, PartitionKey, PartitionedSourceConfig, TimeBucket,
 };
 use serde_json::{json, Value};
+
+/// Test-only configuration choice. Eager and lazy runtimes use the same files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeKind {
+    Eager,
+    Lazy,
+}
 
 pub const SOURCE: &str = "samples";
 pub const COLLECTION: &str = "samples";
@@ -145,24 +152,30 @@ impl ParityFixture {
         }
     }
 
-    pub fn options(&self, model: ExecutionModel) -> NativeSourceRuntimeOptions {
+    pub fn options(&self, model: RuntimeKind) -> NativeSourceRuntimeOptions {
         NativeSourceRuntimeOptions {
             watch_debounce: None,
-            lazy_partitions: IndexMap::from([(
-                SOURCE.to_owned(),
-                LazyPartitionPolicy {
-                    max_loaded_partitions: 1,
-                    full_scan: FullScanPolicy::Allow,
-                },
-            )]),
-            execution_model: model,
+            lazy_partitions: if model == RuntimeKind::Lazy {
+                IndexMap::from([(
+                    SOURCE.to_owned(),
+                    LazyPartitionPolicy {
+                        max_loaded_partitions: 1,
+                        full_scan: FullScanPolicy::Allow,
+                    },
+                )])
+            } else {
+                IndexMap::new()
+            },
             ..Default::default()
         }
     }
 
-    pub fn open(&self, model: ExecutionModel) -> NativeRuntime {
+    pub fn open(&self, model: RuntimeKind) -> NativeRuntime {
+        self.try_open(model).expect("open fixture runtime")
+    }
+
+    pub fn try_open(&self, model: RuntimeKind) -> Result<NativeRuntime, EngineError> {
         NativeRuntime::open_sources_with_options(self.config(), self.options(model))
-            .expect("open fixture runtime")
     }
 
     /// Run `op` on a fresh runtime of each model over the same files and
@@ -177,11 +190,26 @@ impl ParityFixture {
     {
         let resident_copy = self.copy();
         let streaming_copy = self.copy();
-        let resident = op(&resident_copy.open(ExecutionModel::Resident));
-        let streaming = op(&streaming_copy.open(ExecutionModel::Streaming));
+        // Eager validates files during open; lazy validates during the operation.
+        // SourceConfig paths identify different temporary copies. Existing
+        // error tests compare all other payload fields, not those roots.
+        let normalize = |mut error| {
+            if let EngineError::SourceConfig(ref mut source) = error {
+                source.path = None;
+            }
+            error
+        };
+        let resident = resident_copy
+            .try_open(RuntimeKind::Eager)
+            .and_then(|runtime| op(&runtime))
+            .map_err(normalize);
+        let streaming = streaming_copy
+            .try_open(RuntimeKind::Lazy)
+            .and_then(|runtime| op(&runtime))
+            .map_err(normalize);
         assert_eq!(
             resident, streaming,
-            "Resident and Streaming disagree (left: Resident, right: Streaming)"
+            "Eager and lazy disagree (left: eager, right: lazy)"
         );
         resident
     }

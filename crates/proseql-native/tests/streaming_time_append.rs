@@ -1,8 +1,8 @@
 mod support;
 
 use proseql_engine::query::QueryInput;
-use proseql_native::ExecutionModel;
 use serde_json::json;
+use support::parity::RuntimeKind;
 use support::parity::{sample, ParityFixture, COLLECTION};
 
 fn range() -> QueryInput {
@@ -25,7 +25,7 @@ fn append(runtime: &proseql_native::NativeRuntime) {
 #[test]
 fn checked_own_append_preserves_time_seek_and_results() {
     let fixture = ParityFixture::new(60);
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let first = runtime.query_bounded(COLLECTION, range()).unwrap();
     append(&runtime);
     let (after, stats) = runtime
@@ -38,7 +38,7 @@ fn checked_own_append_preserves_time_seek_and_results() {
 #[test]
 fn external_same_length_edit_then_own_append_rebuilds_stale_time_index() {
     let fixture = ParityFixture::new(60);
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let first = runtime.query_bounded(COLLECTION, range()).unwrap();
     assert_eq!(first.len(), 2);
     let path = fixture.partition_path("2025-02");

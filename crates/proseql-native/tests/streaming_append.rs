@@ -1,11 +1,12 @@
 //! Streaming creates use the real global locator and the ordinary durable
 //! source commit path. No existing partition enters the engine collection.
 mod support;
+use support::parity::RuntimeKind;
 
 use proseql_engine::errors::{EngineError, OperationError};
 use proseql_engine::query::pipeline::QueryInput;
 use proseql_engine::reactive::WatchQueryConfig;
-use proseql_native::{ExecutionModel, NativeRuntime};
+use proseql_native::NativeRuntime;
 use proseql_storage::fs::{DurabilityFaultInjector, DurabilityFaultPoint, FsStorageHost};
 use serde_json::{json, Value};
 use std::fs;
@@ -32,7 +33,7 @@ fn empty_engine(runtime: &NativeRuntime) {
 #[test]
 fn new_rows_append_without_loading_any_partition_and_are_visible_after_commit() {
     let fixture = ParityFixture::new(1440);
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let rows = vec![
         sample("2025-01", 1, 1, "steps"),
         sample("2025-04", 1, 1, "heartRate"),
@@ -91,7 +92,7 @@ fn differential_creates_identical_recreates_and_validation_rollback() {
 #[test]
 fn duplicate_in_an_unloaded_other_partition_is_rejected_and_catching_it_cannot_publish_it() {
     let fixture = ParityFixture::new(1440);
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let before = fs::read(fixture.partition_path("2025-03")).unwrap();
     let mut duplicate = sample("2025-03", 1, 1, "steps");
     duplicate["id"] = sample("2025-01", 1, 0, "steps")["id"].clone();
@@ -113,7 +114,7 @@ fn identical_recreate_compares_the_validated_stored_record_and_does_not_write() 
     existing["notInSchema"] = json!("stripped on load");
     fs::write(fixture.partition_path("2025-01"), format!("{existing}\n")).unwrap();
     let before = fs::read(fixture.partition_path("2025-01")).unwrap();
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let expected = sample("2025-01", 1, 0, "steps");
     let actual = runtime
         .mutate(|db| db.create(COLLECTION, expected.clone()))
@@ -136,7 +137,7 @@ fn identical_recreate_compares_the_validated_stored_record_and_does_not_write() 
 #[test]
 fn rejected_batch_unloads_candidates_and_leaves_engine_and_disk_empty_of_new_rows() {
     let fixture = ParityFixture::new(1440);
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let before = fs::read(fixture.partition_path("2025-01")).unwrap();
     let mut invalid = sample("2025-02", 1, 1, "steps");
     invalid["value"] = Value::Null;
@@ -172,7 +173,7 @@ fn rejected_batch_unloads_candidates_and_leaves_engine_and_disk_empty_of_new_row
 #[test]
 fn a_watch_sees_the_create_but_not_the_silent_engine_removal() {
     let fixture = ParityFixture::new(1440);
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let watch = runtime
         .watch(
             COLLECTION,
@@ -204,7 +205,7 @@ fn a_watch_sees_the_create_but_not_the_silent_engine_removal() {
 #[test]
 fn an_external_append_between_staging_and_commit_rejects_and_rolls_back() {
     let fixture = ParityFixture::new(1440);
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let ours = sample("2025-01", 1, 1, "steps");
     let error = runtime
         .mutate(|db| {
@@ -257,7 +258,7 @@ fn append_write_and_sync_faults_roll_back_and_quarantine_without_weakening_durab
         let runtime = NativeRuntime::open_sources_with_host(
             fixture.config(),
             host,
-            fixture.options(ExecutionModel::Streaming),
+            fixture.options(RuntimeKind::Lazy),
         )
         .unwrap();
         let row = sample("2025-01", 1, 1, "steps");
@@ -271,7 +272,7 @@ fn append_write_and_sync_faults_roll_back_and_quarantine_without_weakening_durab
             .is_err());
         runtime.close().unwrap();
         assert_eq!(fs::read(fixture.partition_path("2025-01")).unwrap(), before);
-        let reopened = fixture.open(ExecutionModel::Streaming);
+        let reopened = fixture.open(RuntimeKind::Lazy);
         assert_eq!(
             reopened
                 .find_by_id(COLLECTION, row["id"].as_str().unwrap())
@@ -312,12 +313,9 @@ fn streaming_append_crash_child() {
         )
         .unwrap(),
     );
-    let runtime = NativeRuntime::open_sources_with_host(
-        config,
-        host,
-        fixture.options(ExecutionModel::Streaming),
-    )
-    .unwrap();
+    let runtime =
+        NativeRuntime::open_sources_with_host(config, host, fixture.options(RuntimeKind::Lazy))
+            .unwrap();
     runtime
         .mutate(|db| db.create(COLLECTION, sample("2025-01", 1, 1, "steps")))
         .unwrap();
@@ -352,7 +350,7 @@ fn killed_mid_append_keeps_a_torn_suffix_and_next_append_truncates_it() {
     let torn = fs::read(fixture.partition_path("2025-01")).unwrap();
     assert!(torn.starts_with(&before) && torn.len() > before.len());
     assert!(!torn.ends_with(b"\n"));
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let row = sample("2025-01", 1, 1, "steps");
     runtime
         .mutate(|db| db.create(COLLECTION, row.clone()))
@@ -376,7 +374,7 @@ impl proseql_engine::id_gen::IdGenerator for CountingIds {
 
 fn counted_runtime(
     fixture: &ParityFixture,
-    model: ExecutionModel,
+    model: RuntimeKind,
 ) -> (NativeRuntime, Arc<std::sync::atomic::AtomicUsize>) {
     let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut config = fixture.config();
@@ -399,7 +397,7 @@ fn generated_ids_are_globally_checked_before_insertion_even_when_errors_are_caug
     let mut existing = sample("2025-01", 1, 0, "steps");
     existing["id"] = json!("counted-1");
     fs::write(fixture.partition_path("2025-01"), format!("{existing}\n")).unwrap();
-    let (runtime, _) = counted_runtime(&fixture, ExecutionModel::Streaming);
+    let (runtime, _) = counted_runtime(&fixture, RuntimeKind::Lazy);
     let mut input = sample("2025-03", 1, 1, "steps");
     input.as_object_mut().unwrap().shift_remove("id");
     runtime
@@ -424,7 +422,7 @@ fn successful_generated_batches_and_all_provided_batches_keep_generator_semantic
     use std::sync::atomic::Ordering;
     let fixture = ParityFixture::new(1440);
     let mut answers = Vec::new();
-    for model in [ExecutionModel::Resident, ExecutionModel::Streaming] {
+    for model in [RuntimeKind::Eager, RuntimeKind::Lazy] {
         let copy = fixture.copy();
         let (runtime, count) = counted_runtime(&copy, model);
         let provided = sample("2025-01", 1, 1, "steps");
@@ -465,10 +463,7 @@ fn successful_generated_batches_and_all_provided_batches_keep_generator_semantic
 #[test]
 fn failed_generated_batches_deliberately_resolve_all_ids_under_streaming() {
     use std::sync::atomic::Ordering;
-    for (model, expected) in [
-        (ExecutionModel::Resident, 2),
-        (ExecutionModel::Streaming, 3),
-    ] {
+    for (model, expected) in [(RuntimeKind::Eager, 2), (RuntimeKind::Lazy, 3)] {
         let fixture = ParityFixture::new(1440);
         let before = fs::read(fixture.partition_path("2025-01")).unwrap();
         let (runtime, count) = counted_runtime(&fixture, model);
@@ -492,7 +487,7 @@ fn failed_generated_batches_deliberately_resolve_all_ids_under_streaming() {
         );
         assert_eq!(count.load(Ordering::SeqCst), expected);
         assert_eq!(fs::read(fixture.partition_path("2025-01")).unwrap(), before);
-        if model == ExecutionModel::Streaming {
+        if model == RuntimeKind::Lazy {
             empty_engine(&runtime);
         }
     }
@@ -527,7 +522,7 @@ fn failure_between_files_keeps_the_durable_prefix_and_quarantines_the_runtime() 
     let runtime = NativeRuntime::open_sources_with_host(
         fixture.config(),
         host,
-        fixture.options(ExecutionModel::Streaming),
+        fixture.options(RuntimeKind::Lazy),
     )
     .unwrap();
     let first = sample("2025-01", 1, 1, "steps");
@@ -539,7 +534,7 @@ fn failure_between_files_keeps_the_durable_prefix_and_quarantines_the_runtime() 
     assert!(error.to_string().contains("completed paths"));
     assert!(runtime.read(|_| Ok(())).is_err());
     runtime.close().unwrap();
-    let reopened = fixture.open(ExecutionModel::Streaming);
+    let reopened = fixture.open(RuntimeKind::Lazy);
     assert_eq!(
         reopened
             .find_by_id(COLLECTION, first["id"].as_str().unwrap())
@@ -561,7 +556,7 @@ fn locator_build_rejects_existing_cross_partition_duplicates_but_an_empty_batch_
     let mut duplicate = sample("2025-02", 1, 0, "steps");
     duplicate["id"] = existing["id"].clone();
     fs::write(fixture.partition_path("2025-02"), format!("{duplicate}\n")).unwrap();
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     assert!(runtime
         .mutate(|db| db.create_many(COLLECTION, vec![]))
         .unwrap()
@@ -582,16 +577,10 @@ fn invalid_unrelated_payload_does_not_block_a_new_id_but_scanning_reads_still_fa
     invalid["value"] = json!("invalid persisted value");
     fs::write(fixture.partition_path("2025-01"), format!("{invalid}\n")).unwrap();
     let resident_copy = fixture.copy();
-    let resident = resident_copy.open(ExecutionModel::Resident);
-    let streaming = fixture.open(ExecutionModel::Streaming);
+    let resident_error = resident_copy.try_open(RuntimeKind::Eager).err().unwrap();
+    assert_eq!(resident_error.tag(), "ValidationError");
+    let streaming = fixture.open(RuntimeKind::Lazy);
     let new = sample("2025-01", 1, 1, "steps");
-    assert_eq!(
-        resident
-            .mutate(|db| db.create(COLLECTION, new.clone()))
-            .unwrap_err()
-            .tag(),
-        "ValidationError"
-    );
     streaming
         .mutate(|db| db.create(COLLECTION, new.clone()))
         .unwrap();
@@ -600,7 +589,6 @@ fn invalid_unrelated_payload_does_not_block_a_new_id_but_scanning_reads_still_fa
         r#where: Some(json!({"atUtc": {"$startsWith": "2025-01"}})),
         ..Default::default()
     };
-    let resident_error = resident.query(COLLECTION, input.clone(), None).unwrap_err();
     let streaming_error = streaming.query(COLLECTION, input, None).unwrap_err();
     assert_eq!(streaming_error, resident_error);
     // A matching locator candidate is never exempt from full validation.
@@ -647,7 +635,7 @@ fn custom_codec_verifies_duplicate_ids_and_ignore_identical_recreates() {
         let decoded = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let mut config = fixture.config();
         config.collections[0].descriptor.duplicate_ids = policy;
-        let mut options = fixture.options(ExecutionModel::Streaming);
+        let mut options = fixture.options(RuntimeKind::Lazy);
         options
             .formats
             .register(Box::new(DelegatingJsonl(Arc::clone(&decoded))));

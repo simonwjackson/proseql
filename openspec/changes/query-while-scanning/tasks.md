@@ -27,7 +27,10 @@ Binding implementation scope: [contract.md](contract.md), section 1. All build/t
 - [x] Trial Streaming default and resident-path removal; identify Logbook's query-then-engine-read hydration dependence. Parent directed deferral rather than silent wrong results.
 - [x] Restore Resident as default and retain the public `ExecutionModel` switch and lazy resident path. Keep original Resident conformance tests and Resident-versus-Streaming differential harness unchanged.
 - [x] Add explicit opt-in regressions for current-file validation, Error-policy ID lookups, staged-ID exceptions and the default residency/hydration contract. Remove unused internal byte-accounting helpers and integrated dead-code allowances.
-- [ ] Flip the default and remove lazy residency/eviction/pinning after consumers adopt returned streaming results. This acceptance item is deferred, not complete.
+- [x] Round 2: after Logbook adoption (`ad70bd9`), default to Streaming and delete lazy residency/eviction/pinning, resident cached reads and lazy full-scope engine loading. Keep deprecated ExecutionModel variants and the options field as identical streaming compatibility selectors; eager collections keep the engine.
+- [x] Convert differential tests to eager-versus-lazy runtimes and record every removed/replaced Resident-internal expectation in the design document.
+- [x] Round-2 final release-check on aka at 56e9943 (includes ba90773), exit 0: Rust 1,316/0/10 ignored; TS 4,098/0/2 skipped; parity 2,163/0/2 skipped and 16/16 examples; gzip 598,572 / 600,000 B. Log: `/home/simonwjackson/work/qws-logs/round2-cutover-release-check.log`. Initial native-flag/WASM invocation failure and affected retry are recorded separately.
+- [x] Round-2 unedited Coach (27/0/0) and Logbook streaming-adoption (221/0/2) override build/tests against cutover 1c4f79f. Parent accepted these results for the later locator-only fix merge.
 - [x] Document lazy reads, appends, watches, stats, memory and all approved guarantee changes in `docs/native-sources.md` and `docs/design/query-while-scanning.md`.
 - [x] Complete final Resident-default `release-check` on aka, exit 0: Rust 1,284 passed / 7 ignored; TypeScript 4,098 passed / 2 skipped; parity 2,163 passed / 2 skipped and 16/16 examples. Typecheck, lint, Rust format/check/clippy, WASM, packed artifacts and browser smoke/budget passed. Browser gzip: 598,339 / 600,000 B. Logs: `/home/simonwjackson/work/qws-logs/integrator-release-check-final.log` and `integrator-release-final-summary.txt`.
 - [x] Commit tested opt-in integration work with the cutover deferred; never push.
@@ -38,7 +41,7 @@ The parent explicitly authorized the fresh complete final-source run above.
 
 ## Verify / consumer qualification (after integration)
 
-- [ ] Run Coach and Logbook override builds/tests against the integration SHA, without editing consumer repositories. Audit Logbook's cached `query_bounded` → `read` sample enumeration pattern.
+- [x] Run consumer override builds/tests and audit Logbook's query-to-read hydration. Coach remains unedited (27/0); Logbook's read-only adoption branch replaces residency dependencies (221/0/2 ignored), both verified at cutover 1c4f79f.
 - [ ] Run the acceptance matrix on aka; add SQLite tables and measured miss/floor explanations. Do not reuse skeleton fallback results as streaming measurements.
 - [ ] Report consumer pin, performance and deployment limits. Absolute Celeron/real-data targets remain unmeasured under the current machine rules.
 - [ ] Independent review and consumer adoption decision. No publication or push without approval.
@@ -46,3 +49,12 @@ The parent explicitly authorized the fresh complete final-source run above.
 ## Conditional level 2 (#18)
 
 - [ ] Start only with separate approval if measured misses justify it. No binary on-disk cache or column artifact is implemented by this change.
+
+## Round-2 cutover open items (#19 / #21)
+
+- [x] Logbook adoption evidence: 221 passed / 0 failed / 2 ignored under both models against c523e6f; explicit Streaming configuration retained.
+- [x] Document one lazy model, deprecated selector, ignored max_loaded_partitions, empty status, eager-only read and the 13 guarantees plus approved round-2 additions.
+- [x] Give consumers the final tested SHA: `56e994370d6919ef4e3effa735381ab4b17fe0f0`; complete evidence is in `bench/acceptance/results/cutover-round2.md`.
+- [ ] Adopt that pin in real consumer manifests and deploy separately; no real consumer repository was edited here.
+- [ ] Resolve #20 latency/retained-memory misses separately; no target reduction or binary cache approval.
+- [ ] Real-shape/Celeron/rakku measurements remain excluded by user rule, not qualified here.

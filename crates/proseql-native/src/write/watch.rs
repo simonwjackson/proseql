@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::lazy::{list_partitions, LazyCollection};
 use crate::streaming::{ReadOutput, ReadRequest};
-use crate::{ExecutionModel, NativeRuntime, NativeWatch, RuntimeState};
+use crate::{NativeRuntime, NativeWatch, RuntimeState};
 use proseql_engine::errors::EngineError;
 use proseql_engine::query::pipeline::QueryInput;
 use proseql_engine::reactive::external::{ChangeEventPublisher, ExternalWatch};
@@ -83,8 +83,7 @@ impl NativeRuntime {
                 state
                     .sources
                     .as_ref()
-                    .and_then(|s| s.lazy.get(collection))
-                    .map(|lazy| lazy.execution_model == ExecutionModel::Streaming)
+                    .map(|sources| sources.is_lazy(collection))
             })
             .unwrap_or(false)
     }
@@ -121,8 +120,7 @@ impl NativeRuntime {
         let mut subscribe = Some(subscribe);
         loop {
             let (before, revision) = {
-                let mut state = self.lock_open()?;
-                self.drain_unpins(&mut state);
+                let state = self.lock_open()?;
                 let sources = state.sources.as_ref().expect("streaming source");
                 let (_, paths) =
                     sources.lazy_scope(collection, config.r#where.as_ref(), "watch")?;
@@ -165,13 +163,7 @@ impl NativeRuntime {
                 },
             );
             watch.baseline.extend(before);
-            return Ok((
-                NativeWatch {
-                    subscription,
-                    _pin: None,
-                },
-                publisher,
-            ));
+            return Ok((NativeWatch { subscription }, publisher));
         }
     }
 
@@ -208,9 +200,6 @@ impl NativeRuntime {
             let mut jobs = Vec::new();
             let mut first_error = None;
             for (name, lazy) in &mut sources.lazy {
-                if lazy.execution_model != ExecutionModel::Streaming {
-                    continue;
-                }
                 let watch = &mut lazy.stream.watch;
                 watch.prune();
                 for (id, entry) in &watch.entries {
@@ -300,24 +289,19 @@ fn observe(
         .collect()
 }
 
-pub(crate) fn refresh_applies(state: &RuntimeState) -> bool {
-    state.sources.as_ref().is_some_and(|s| {
-        s.lazy
-            .values()
-            .any(|lazy| lazy.execution_model == ExecutionModel::Streaming)
-    })
-}
-
 pub(crate) fn refresh(state: &mut RuntimeState) -> Result<(), EngineError> {
+    let mut first_error = None;
     if let Some(sources) = state.sources.as_mut() {
-        sources.lazy_refresh(&mut state.database, state.host.as_ref(), &state.formats)?;
-        state.database.take_committed_changes();
-        sources.lazy_trim(&mut state.database)?;
+        for lazy in sources.lazy.values_mut() {
+            if let Err(error) = refresh_collection(lazy, state.host.as_ref()) {
+                first_error.get_or_insert(error);
+            }
+        }
     }
-    Ok(())
+    first_error.map_or(Ok(()), Err)
 }
 
-/// Also used by explicit source reload, which calls lazy_refresh directly.
+/// Refresh manifests and invalidate derived state; evaluate watches after unlock.
 pub(crate) fn refresh_collection(
     lazy: &mut LazyCollection,
     host: &dyn StorageHost,
@@ -377,9 +361,6 @@ pub(crate) fn capture_commit(state: &mut RuntimeState) {
         return;
     };
     for lazy in sources.lazy.values_mut() {
-        if lazy.execution_model != ExecutionModel::Streaming {
-            continue;
-        }
         lazy.stream.watch.prune();
         lazy.stream.watch.changed();
         let paths = covered_paths(lazy);
@@ -396,9 +377,6 @@ pub(crate) fn capture_external(state: &mut RuntimeState) {
         return;
     };
     for lazy in sources.lazy.values_mut() {
-        if lazy.execution_model != ExecutionModel::Streaming {
-            continue;
-        }
         lazy.stream.watch.prune();
         let paths = covered_paths(lazy);
         if let Ok(current) = observe(state.host.as_ref(), &paths) {
@@ -504,7 +482,6 @@ mod metrics {
                 })],
             },
             NativeSourceRuntimeOptions {
-                execution_model: ExecutionModel::Streaming,
                 watch_debounce: None,
                 lazy_partitions: IndexMap::from([(
                     "samples".into(),
@@ -550,7 +527,7 @@ mod metrics {
                     })
                     .sum::<usize>();
                 eprintln!("watch rows_scanned=66960 result_rows={} result_value_payload_bytes={values} serialized_baseline_bytes={serialized} generations={} generation_payload_bytes={generation_bytes} watch_payload_bytes={}", output.as_array().unwrap().len(), lazy.stream.watch.baseline.len(), lazy.stream.watch.resident_bytes());
-                assert!(lazy.resident.is_empty());
+                assert!(lazy.status().loaded.is_empty());
                 assert_eq!(lazy.stream.watch.baseline.len(), 1);
                 (sources.lazy_fingerprints(), host)
             };

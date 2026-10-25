@@ -75,9 +75,8 @@ pub(crate) enum ReadOutput {
 }
 
 impl NativeRuntime {
-    /// Run `request` by scanning text, if `collection` is lazy and its
-    /// execution model is `Streaming`. Must not be called with the runtime
-    /// lock held. Returns `None` to fall back to the resident path.
+    /// Scan lazy text. Must not be called with the runtime lock held.
+    /// Returns None only for eager collections.
     pub(crate) fn streaming_read(
         &self,
         collection: &str,
@@ -90,12 +89,10 @@ impl NativeRuntime {
         let applies = state
             .sources
             .as_ref()
-            .and_then(|sources| sources.lazy.get(collection))
-            .is_some_and(|lazy| lazy.execution_model == crate::ExecutionModel::Streaming);
+            .is_some_and(|sources| sources.is_lazy(collection));
         if !applies {
             return None;
         }
-        self.drain_unpins(&mut state);
         Some((|| {
             use proseql_engine::query::indexes::IndexUsed;
             use proseql_engine::scan::executor::{Executor, ScanOutput, ScanRequest};

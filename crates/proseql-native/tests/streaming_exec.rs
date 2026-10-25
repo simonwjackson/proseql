@@ -1,14 +1,14 @@
 mod support;
 
 use proseql_engine::query::{AggregateConfig, CursorConfig, QueryInput, SortOrder};
-use proseql_native::ExecutionModel;
 use serde_json::{json, Value};
+use support::parity::RuntimeKind;
 use support::parity::{ParityFixture, COLLECTION};
 
 #[test]
 fn streaming_reads_do_not_make_partitions_resident() {
     let fixture = ParityFixture::new(180);
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let (rows, stats) = runtime
         .query_bounded_with_stats(
             COLLECTION,
@@ -229,7 +229,7 @@ fn streaming_stats_describe_physical_scan_not_resident_indexes() {
                 .map(|(rows, _)| rows)
         })
         .unwrap();
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let (rows, stats) = runtime.query_with_stats(COLLECTION, input, None).unwrap();
     assert_eq!(rows.len(), 2);
     assert_eq!(stats.partitions_loaded, 3);
@@ -241,11 +241,14 @@ fn streaming_stats_describe_physical_scan_not_resident_indexes() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn full_scan_error_does_not_depend_on_execution_model() {
+    use proseql_native::ExecutionModel;
     use proseql_native::{FullScanPolicy, NativeRuntime};
     let fixture = ParityFixture::new(720);
     let run = |model| {
-        let mut options = fixture.options(model);
+        let mut options = fixture.options(RuntimeKind::Lazy);
+        options.execution_model = model;
         options
             .lazy_partitions
             .get_mut(COLLECTION)
@@ -284,7 +287,7 @@ fn custom_jsonl_codecs_keep_their_registered_decode_semantics() {
     let builtins = FormatRegistry::with_builtins();
     assert!(builtins.borrowed_jsonl_compatible("jsonl"));
     assert!(builtins.borrowed_jsonl_compatible("ndjson"));
-    for model in [ExecutionModel::Resident, ExecutionModel::Streaming] {
+    for model in [RuntimeKind::Eager, RuntimeKind::Lazy] {
         let mut options = fixture.options(model);
         options.formats.register(Box::new(lenient_jsonl_codec()));
         assert!(!options.formats.borrowed_jsonl_compatible("jsonl"));
@@ -296,11 +299,11 @@ fn custom_jsonl_codecs_keep_their_registered_decode_semantics() {
         assert_eq!(
             rows,
             fixture
-                .open(ExecutionModel::Resident)
+                .open(RuntimeKind::Eager)
                 .query_bounded(COLLECTION, QueryInput::default())
                 .unwrap()
         );
-        if model == ExecutionModel::Streaming {
+        if model == RuntimeKind::Lazy {
             assert!(runtime
                 .lazy_partition_status(COLLECTION)
                 .unwrap()
@@ -409,10 +412,7 @@ fn canonical_schema_decode_and_callbacks_remain_in_the_read_path() {
             },
         )
     };
-    assert_eq!(
-        run(ExecutionModel::Resident),
-        run(ExecutionModel::Streaming)
-    );
+    assert_eq!(run(RuntimeKind::Eager), run(RuntimeKind::Lazy));
 }
 
 #[test]
@@ -643,15 +643,12 @@ fn a_custom_codec_that_changes_rows_is_not_bypassed() {
             )
             .unwrap();
         assert!(rows.iter().all(|row| row.get("source").is_none()));
-        if model == ExecutionModel::Streaming {
+        if model == RuntimeKind::Lazy {
             assert_eq!(stats.index_used, proseql_engine::query::IndexUsed::None);
         }
         rows
     };
-    assert_eq!(
-        run(ExecutionModel::Resident),
-        run(ExecutionModel::Streaming)
-    );
+    assert_eq!(run(RuntimeKind::Eager), run(RuntimeKind::Lazy));
 }
 
 #[test]
@@ -672,14 +669,11 @@ fn codec_path_preserves_duplicate_before_later_partition_error() {
         options
             .formats
             .register(Box::new(proseql_formats::codecs::lenient_jsonl_codec()));
-        let runtime =
-            proseql_native::NativeRuntime::open_sources_with_options(fixture.config(), options)
-                .unwrap();
-        runtime
-            .query_bounded(COLLECTION, QueryInput::default())
+        proseql_native::NativeRuntime::open_sources_with_options(fixture.config(), options)
+            .and_then(|runtime| runtime.query_bounded(COLLECTION, QueryInput::default()))
             .unwrap_err()
     };
-    let resident = run(ExecutionModel::Resident);
+    let resident = run(RuntimeKind::Eager);
     assert_eq!(resident.tag(), "SourceConfigError");
-    assert_eq!(resident, run(ExecutionModel::Streaming));
+    assert_eq!(resident, run(RuntimeKind::Lazy));
 }

@@ -12,7 +12,16 @@ Binding for every builder in the `query-while-scanning` workflow. Base branch: `
 
 **Out of scope for this run: eager (non-lazy) collections.** They keep the resident engine `Database`: YAML documents, collection files, relationships, populate, search and computed fields depend on it. Their memory is bounded by their file sizes. The design document (#19) records this as a bound, not a hidden exception. "Remove the resident path" (#19) means: no lazy-collection operation loads partitions into the engine collection, and the code that did so (`lazy_ensure`, `lazy_visit`, residency, eviction, pinning in `lazy.rs`, the lazy branches of `with_scope`/`bounded_fold`/`watch_scoped`/`prepare_creates`) is deleted.
 
-## 2. The switch
+## 2. The switch (historical rollout)
+
+Round-2 cutover is complete. `ExecutionModel` and the options field remain only
+as deprecated source-compatibility items. Both variants stream every lazy
+collection; the default is Streaming. There is no per-collection execution-model
+field or lazy Resident branch. Differential tests now use eager runtimes as the
+oracle. The paragraphs below record the original builder rollout, not a second
+current model. See the design document and tasks for current guarantees and
+verification.
+
 
 `proseql_native::ExecutionModel { Resident, Streaming }`, set by the new additive field `NativeSourceRuntimeOptions::execution_model` (default `Resident`). Both consumers build options with `..Default::default()`, so the field is source-compatible. `LazyPartitionPolicy` gets **no** new fields: Logbook constructs it with a struct literal.
 

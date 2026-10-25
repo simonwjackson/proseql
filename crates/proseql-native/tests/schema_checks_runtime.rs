@@ -192,7 +192,7 @@ fn single_file_open_and_reload_apply_the_registered_predicate_and_keep_last_know
 }
 
 #[test]
-fn source_and_lazy_reload_validate_host_checks_before_replacing_last_known_good() {
+fn source_and_lazy_watch_reload_validate_host_checks_before_replacing_last_known_good() {
     for mode in ["documents", "graph", "file", "partitioned", "lazy"] {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().to_str().unwrap();
@@ -299,14 +299,41 @@ fn source_and_lazy_reload_validate_host_checks_before_replacing_last_known_good(
             "{mode}"
         );
         assert!(calls.load(Ordering::SeqCst) > 0, "{mode}");
+        // Lazy last-known-good belongs to a live watch, not an engine read cache.
+        let watch = if mode == "lazy" {
+            Some(
+                runtime
+                    .watch(
+                        "items",
+                        proseql_engine::reactive::WatchQueryConfig {
+                            debounce_ms: Some(0),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap(),
+            )
+        } else {
+            None
+        };
+        let last_good = watch.as_ref().map(|watch| watch.recv().unwrap());
         std::fs::write(&path, content("blocked", "3")).unwrap();
         let error = runtime.reload().unwrap_err();
         assert_predicate_rejection(&error);
-        assert_eq!(
-            runtime.find_by_id("items", "allowed.one").unwrap().unwrap()["name"],
-            "allowed",
-            "{mode}"
-        );
+        if let Some(watch) = &watch {
+            let error = runtime.find_by_id("items", "allowed.one").unwrap_err();
+            assert_predicate_rejection(&error);
+            assert_eq!(last_good.as_ref().unwrap()[0]["name"], "allowed", "{mode}");
+            assert!(
+                watch.try_recv().is_err(),
+                "invalid edit replaced the accepted delivery"
+            );
+        } else {
+            assert_eq!(
+                runtime.find_by_id("items", "allowed.one").unwrap().unwrap()["name"],
+                "allowed",
+                "{mode}"
+            );
+        }
         assert!(runtime.last_reload_error().unwrap().is_some(), "{mode}");
         std::fs::write(&path, content("allowed", "4")).unwrap();
         runtime.reload().unwrap();

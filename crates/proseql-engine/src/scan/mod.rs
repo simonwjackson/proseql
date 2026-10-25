@@ -11,7 +11,7 @@
 //! This module is platform-blind: no I/O, no mmap, no threads. It must build
 //! for `wasm32-unknown-unknown` and with `-C target-cpu=x86-64-v2`.
 
-use crate::errors::{EngineError, OperationError};
+use crate::errors::EngineError;
 
 /// Where a row came from.
 ///
@@ -55,17 +55,6 @@ pub trait RowSource {
 /// WASM alike; `proseql_storage::readers` re-exports it and adds host readers.
 pub trait ByteChunks {
     fn next_chunk(&mut self) -> Result<Option<&[u8]>, EngineError>;
-}
-
-/// The error every unimplemented seam returns until its owner fills it in.
-/// Production code never reaches it while `ExecutionModel::Resident` is the
-/// default.
-pub fn unimplemented_seam(seam: &str) -> EngineError {
-    EngineError::Operation(OperationError {
-        operation: seam.to_owned(),
-        reason: "streaming-unimplemented".to_owned(),
-        message: format!("The query-while-scanning seam '{seam}' is not implemented yet"),
-    })
 }
 
 /// A whole in-memory buffer as a [`RowSource`]. Splits on `\n`, strips a

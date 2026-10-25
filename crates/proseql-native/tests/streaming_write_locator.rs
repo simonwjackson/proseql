@@ -1,7 +1,8 @@
 mod support;
+use support::parity::RuntimeKind;
 
 use proseql_engine::errors::EngineError;
-use proseql_native::{ExecutionModel, NativeRuntime};
+use proseql_native::NativeRuntime;
 use proseql_storage::fs::{DurabilityFaultInjector, DurabilityFaultPoint, FsStorageHost};
 use serde_json::json;
 use std::fs;
@@ -15,7 +16,7 @@ use support::parity::{sample, ParityFixture, COLLECTION};
 #[test]
 fn releasing_indexes_preserves_global_duplicates_and_rebuilds_after_external_edits() {
     let fixture = ParityFixture::new(1440);
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let old = sample("2025-01", 1, 0, "steps");
     assert_eq!(
         runtime
@@ -106,7 +107,7 @@ fn prefix_edit_during_durable_append_is_not_blessed_by_the_postcommit_token() {
     let runtime = NativeRuntime::open_sources_with_host(
         fixture.config(),
         host,
-        fixture.options(ExecutionModel::Streaming),
+        fixture.options(RuntimeKind::Lazy),
     )
     .unwrap();
     runtime
@@ -126,7 +127,7 @@ fn prefix_edit_during_durable_append_is_not_blessed_by_the_postcommit_token() {
 #[test]
 fn release_between_mutations_does_not_change_staged_creates_or_duplicate_checks() {
     let fixture = ParityFixture::new(1440);
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let ours = sample("2025-01", 1, 1, "steps");
     runtime.release_streaming_indexes().unwrap();
     runtime

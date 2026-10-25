@@ -5,18 +5,15 @@
 //! not edit this file; each fills the state type in its own module. Contract:
 //! `openspec/changes/query-while-scanning/contract.md`.
 
-/// How lazy partitioned collections execute reads and writes.
-///
-/// `Resident` is today's model: an operation loads the partitions it touches
-/// into the engine collection, then runs. `Streaming` queries while scanning
-/// the text and keeps no rows after an operation returns. Non-lazy
-/// collections are not affected by this switch. Resident remains the default
-/// until consumers that hydrate through `NativeRuntime::read` adopt scanner
-/// results; see `docs/design/query-while-scanning.md`.
+/// Deprecated compatibility selector. Lazy collections always stream; eager
+/// collections always use the resident engine, regardless of this value.
+#[deprecated(note = "Lazy collections always stream; remove the execution_model setting")]
+#[allow(deprecated)] // Deriving Default refers to the deprecated Streaming variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExecutionModel {
-    #[default]
+    /// Compatibility alias for Streaming. Does not enable lazy residency.
     Resident,
+    #[default]
     Streaming,
 }
 

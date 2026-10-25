@@ -311,7 +311,7 @@ fn published_moves_inside_a_transaction_stay_out_of_the_journal() {
 }
 
 #[test]
-fn replacement_validates_before_eviction_and_keeps_global_position_and_indexes() {
+fn staging_validates_before_insert_and_keeps_global_position_and_indexes() {
     let old = block("b", 9);
     let next = block("c", 9);
     let earlier = block("a", 9);
@@ -322,16 +322,18 @@ fn replacement_validates_before_eviction_and_keeps_global_position_and_indexes()
         .collect::<Vec<_>>();
     let invalid = vec![json!({"id":"broken","at":42,"tag":"red"})];
     assert!(db
-        .replace_resident_records("samples", invalid, &old_ids, Some("c-0"), false)
+        .load_resident_records("samples", invalid, Some(0), false)
         .is_err());
     assert_same(&db, &loaded_with(&[&old, &next]));
     // A duplicate in the outgoing partition must still fail, not be hidden by
     // eviction. That is the same cross-resident ID check as ordinary loads.
     assert!(db
-        .replace_resident_records("samples", old.clone(), &old_ids, None, false)
+        .load_resident_records("samples", old.clone(), None, false)
         .is_err());
     assert_same(&db, &loaded_with(&[&old, &next]));
-    db.replace_resident_records("samples", earlier.clone(), &old_ids, Some("c-0"), false)
+    db.load_resident_records("samples", earlier.clone(), Some(0), false)
+        .unwrap();
+    db.unload_resident_records("samples", &old_ids, false)
         .unwrap();
     assert_same(&db, &loaded_with(&[&earlier, &next]));
     let ids = earlier
@@ -339,7 +341,8 @@ fn replacement_validates_before_eviction_and_keeps_global_position_and_indexes()
         .chain(next.iter())
         .map(|row| row["id"].as_str().unwrap().to_owned())
         .collect::<Vec<_>>();
-    db.replace_resident_records("samples", old.clone(), &ids, None, false)
+    db.unload_resident_records("samples", &ids, false).unwrap();
+    db.load_resident_records("samples", old.clone(), None, false)
         .unwrap();
     assert_same(&db, &loaded_with(&[&old]));
 }

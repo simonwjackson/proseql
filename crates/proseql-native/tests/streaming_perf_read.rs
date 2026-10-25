@@ -1,15 +1,15 @@
 mod support;
 
 use proseql_engine::query::QueryInput;
-use proseql_native::ExecutionModel;
 use serde_json::json;
+use support::parity::RuntimeKind;
 use support::parity::{sample, ParityFixture, COLLECTION};
 
 #[test]
 #[ignore = "synthetic aka append-then-range profile"]
 fn measure_append_then_range() {
     let fixture = ParityFixture::new(2);
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let input = QueryInput {
         r#where: Some(
             json!({"atUtc":{"$gte":"2025-02-01T00:00:00.000Z","$lt":"2025-02-01T01:00:00.000Z"}}),
@@ -47,7 +47,7 @@ fn append_built_membership_does_not_bypass_first_lookup_payload_validation() {
     bad["value"] = json!("invalid");
     text.push_str(&format!("{bad}\n"));
     std::fs::write(&path, text).unwrap();
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let created = sample("2025-03", 31, 1, "steps");
     runtime
         .mutate(|tx| tx.create(COLLECTION, created.clone()).map(|_| ()))
@@ -81,7 +81,7 @@ fn first_range_validates_full_file_and_later_seek_skips_unread_invalid_rows() {
         ),
         ..Default::default()
     };
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     assert!(runtime.query_bounded(COLLECTION, input.clone()).is_err());
     bad["value"] = json!(1);
     std::fs::write(&path, format!("{text}{bad}\n")).unwrap();

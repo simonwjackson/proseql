@@ -1,4 +1,5 @@
 mod support;
+use support::parity::RuntimeKind;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,7 +12,7 @@ use proseql_engine::query::pipeline::QueryInput;
 use proseql_engine::query::SortOrder;
 use proseql_engine::reactive::{ChangeOperation, WatchQueryConfig};
 use proseql_native::{
-    ExecutionModel, FullScanPolicy, LazyPartitionPolicy, NativeCollectionConfig, NativeRuntime,
+    FullScanPolicy, LazyPartitionPolicy, NativeCollectionConfig, NativeRuntime,
     NativeSourceRuntimeConfig, NativeSourceRuntimeOptions,
 };
 use proseql_storage::fs::{DurabilityFaultInjector, DurabilityFaultPoint, FsStorageHost};
@@ -25,7 +26,6 @@ type Watch = proseql_native::NativeWatch<proseql_engine::reactive::ValueSubscrip
 
 fn options(managed: bool) -> NativeSourceRuntimeOptions {
     NativeSourceRuntimeOptions {
-        execution_model: ExecutionModel::Streaming,
         watch_debounce: managed.then_some(Duration::from_millis(10)),
         lazy_watch_interval: Duration::from_millis(30),
         lazy_partitions: IndexMap::from([(
@@ -322,7 +322,9 @@ fn callback_initial_and_own_commit_can_reenter_runtime() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn full_scan_error_watch_parity_including_empty_source() {
+    use proseql_native::ExecutionModel;
     for empty in [false, true] {
         let fixture = ParityFixture::new(720);
         if empty {
@@ -351,7 +353,7 @@ fn full_scan_error_watch_parity_including_empty_source() {
 fn natural_own_append_order_matches_reopened_resident_and_explicit_sort_matches_session() {
     let fixture = ParityFixture::new(720);
     let streaming_fixture = fixture.copy();
-    let resident = fixture.open(ExecutionModel::Resident);
+    let resident = fixture.open(RuntimeKind::Eager);
     let streaming = open(&streaming_fixture, false);
     let config = WatchQueryConfig {
         debounce_ms: Some(0),
@@ -367,7 +369,7 @@ fn natural_own_append_order_matches_reopened_resident_and_explicit_sort_matches_
     streaming
         .mutate(|db| db.create(COLLECTION, row.clone()))
         .unwrap();
-    let reopened = fixture.open(ExecutionModel::Resident);
+    let reopened = fixture.open(RuntimeKind::Eager);
     let expected = reopened
         .query(COLLECTION, QueryInput::default(), None)
         .unwrap();

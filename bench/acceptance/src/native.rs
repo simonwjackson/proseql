@@ -1,3 +1,5 @@
+#![allow(deprecated)] // Retained CLI selector; the removed Resident backend is refused.
+
 use crate::{
     fixture,
     query::{Answer, Query},
@@ -22,6 +24,9 @@ fn tag(error: proseql_engine::errors::EngineError) -> Error {
 }
 
 pub fn open(root: &Path, kind: &str, model: ExecutionModel) -> Result<NativeRuntime, Error> {
+    if model == ExecutionModel::Resident {
+        return Err("Resident lazy backend was removed; use the pinned historical source for baseline measurements".into());
+    }
     let mut fields = [
         "id",
         "metric",

@@ -1,5 +1,5 @@
 //! Commit-time conflict checks for streaming lazy collections.
-use crate::{ExecutionModel, RuntimeState};
+use crate::RuntimeState;
 use proseql_engine::errors::EngineError;
 use proseql_storage::generation::{GenerationCheck, SourceGeneration};
 
@@ -10,9 +10,6 @@ pub(crate) fn check_before_commit(state: &RuntimeState) -> Result<(), EngineErro
         return Ok(());
     };
     for lazy in sources.lazy.values() {
-        if lazy.execution_model != ExecutionModel::Streaming {
-            continue;
-        }
         for (path, generation) in target_generations(&lazy.stream.append) {
             let unchanged = match generation {
                 Some(generation) => {

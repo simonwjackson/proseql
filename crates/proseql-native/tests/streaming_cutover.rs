@@ -1,5 +1,5 @@
-//! Cutover blockers: keep Resident as the compatible default, and state the
-//! explicitly approved opt-in Streaming differences through public APIs.
+//! Streaming default and deprecated-selector compatibility through public APIs.
+#![allow(deprecated)] // This suite deliberately exercises source compatibility.
 mod support;
 
 use proseql_engine::descriptor::{SchemaCheck, SchemaNode};
@@ -8,7 +8,7 @@ use proseql_engine::query::{pipeline::QueryInput, AggregateConfig};
 use proseql_engine::reactive::WatchQueryConfig;
 use proseql_native::{ExecutionModel, FullScanPolicy, NativeRuntime};
 use serde_json::json;
-use support::parity::{sample, ParityFixture, COLLECTION, SOURCE};
+use support::parity::{sample, ParityFixture, RuntimeKind, COLLECTION, SOURCE};
 
 fn reason(error: &EngineError) -> &str {
     match error {
@@ -25,18 +25,25 @@ fn january() -> QueryInput {
 }
 
 #[test]
-fn resident_default_keeps_the_query_then_read_hydration_contract() {
-    assert_eq!(ExecutionModel::default(), ExecutionModel::Resident);
+fn streaming_default_returns_rows_without_query_then_read_hydration() {
+    assert_eq!(ExecutionModel::default(), ExecutionModel::Streaming);
     let fixture = ParityFixture::new(1440);
-    let runtime = fixture.open(ExecutionModel::default());
+    let options = fixture.options(RuntimeKind::Lazy);
+    assert_eq!(options.execution_model, ExecutionModel::Streaming);
+    let runtime = NativeRuntime::open_sources_with_options(fixture.config(), options).unwrap();
     let rows = runtime.query_bounded(COLLECTION, january()).unwrap();
     assert!(!rows.is_empty());
+    assert_eq!(
+        rows,
+        fixture
+            .open(RuntimeKind::Eager)
+            .query_bounded(COLLECTION, january())
+            .unwrap()
+    );
     runtime
         .read(|db| {
             let collection = db.collection(COLLECTION).unwrap();
-            for row in rows {
-                assert_eq!(collection.get(row["id"].as_str().unwrap()), Some(&row));
-            }
+            assert!(collection.is_empty());
             Ok(())
         })
         .unwrap();
@@ -46,7 +53,9 @@ fn resident_default_keeps_the_query_then_read_hydration_contract() {
 fn streaming_zero_limit_probe_cannot_hydrate_the_engine_for_a_later_read() {
     let fixture = ParityFixture::new(1440);
     for model in [ExecutionModel::Resident, ExecutionModel::Streaming] {
-        let runtime = fixture.open(model);
+        let mut options = fixture.options(RuntimeKind::Lazy);
+        options.execution_model = model;
+        let runtime = NativeRuntime::open_sources_with_options(fixture.config(), options).unwrap();
         let rows = runtime
             .query_bounded(
                 COLLECTION,
@@ -61,16 +70,12 @@ fn streaming_zero_limit_probe_cannot_hydrate_the_engine_for_a_later_read() {
         let resident_rows = runtime
             .read(|db| Ok(db.collection(COLLECTION).unwrap().len()))
             .unwrap();
-        if model == ExecutionModel::Resident {
-            assert!(resident_rows > 0);
-        } else {
-            assert_eq!(resident_rows, 0);
-        }
+        assert_eq!(resident_rows, 0);
     }
 }
 
 #[test]
-fn streaming_unwatched_invalid_edits_fail_like_resident_without_a_cache() {
+fn unwatched_invalid_edits_fail_with_either_compatibility_variant() {
     let fixture = ParityFixture::new(1440);
     for model in [ExecutionModel::Resident, ExecutionModel::Streaming] {
         let copy = fixture.copy();
@@ -91,7 +96,8 @@ fn streaming_unwatched_invalid_edits_fail_like_resident_without_a_cache() {
                 Some("nonnegative".into()),
             )],
         };
-        let mut options = copy.options(model);
+        let mut options = copy.options(RuntimeKind::Lazy);
+        options.execution_model = model;
         options
             .lazy_partitions
             .get_mut(SOURCE)
@@ -153,7 +159,8 @@ fn streaming_error_policy_has_no_history_dependent_id_hit_exception() {
     let id = "steps:2025-01-01T00:00:00.000Z";
     for model in [ExecutionModel::Resident, ExecutionModel::Streaming] {
         let copy = fixture.copy();
-        let mut options = copy.options(model);
+        let mut options = copy.options(RuntimeKind::Lazy);
+        options.execution_model = model;
         options.lazy_partitions.get_mut(SOURCE).unwrap().full_scan = FullScanPolicy::Error;
         let runtime = NativeRuntime::open_sources_with_options(copy.config(), options).unwrap();
         assert_eq!(
@@ -171,30 +178,26 @@ fn streaming_error_policy_has_no_history_dependent_id_hit_exception() {
             )
             .unwrap();
         assert!(!watch.recv().unwrap().as_array().unwrap().is_empty());
-        if model == ExecutionModel::Resident {
-            assert!(runtime.find_by_id(COLLECTION, id).unwrap().is_some());
-        } else {
-            assert_eq!(
-                reason(&runtime.find_by_id(COLLECTION, id).unwrap_err()),
-                "lazy-full-scan"
-            );
-            runtime
-                .mutate(|tx| {
-                    assert_eq!(
-                        reason(&tx.find_by_id(COLLECTION, id).unwrap_err()),
-                        "lazy-full-scan"
-                    );
-                    let row = sample("2025-01", 1, 1, "steps");
-                    tx.create(COLLECTION, row.clone())?;
-                    assert_eq!(
-                        tx.find_by_id(COLLECTION, row["id"].as_str().unwrap())?,
-                        Some(row)
-                    );
-                    Ok(())
-                })
-                .unwrap();
-        }
+        assert_eq!(
+            reason(&runtime.find_by_id(COLLECTION, id).unwrap_err()),
+            "lazy-full-scan"
+        );
+        runtime
+            .mutate(|tx| {
+                assert_eq!(
+                    reason(&tx.find_by_id(COLLECTION, id).unwrap_err()),
+                    "lazy-full-scan"
+                );
+                let row = sample("2025-01", 1, 1, "steps");
+                tx.create(COLLECTION, row.clone())?;
+                assert_eq!(
+                    tx.find_by_id(COLLECTION, row["id"].as_str().unwrap())?,
+                    Some(row)
+                );
+                Ok(())
+            })
+            .unwrap();
     }
-    let allowed = fixture.open(ExecutionModel::Streaming);
+    let allowed = fixture.open(RuntimeKind::Lazy);
     assert!(allowed.find_by_id(COLLECTION, id).unwrap().is_some());
 }

@@ -1,9 +1,8 @@
 //! Resident records: a host-managed subset of a collection's stored records.
 //!
 //! The engine assumes that a collection holds every record a query can match.
-//! Native lazy partitions keep that assumption at the runtime layer: before an
-//! operation runs, the runtime makes every partition the operation can touch
-//! resident, so the engine sees all records that can match. These methods move
+//! Streaming native mutations use this seam to stage verified duplicate
+//! candidates, not whole source partitions. These methods move
 //! stored records in and out of a collection without a mutation. They run no
 //! hooks and no foreign-key checks; callers must only use them for
 //! collections without relationships, unique fields or computed fields.
@@ -47,42 +46,6 @@ impl Database {
         Ok(loaded)
     }
 
-    /// Validate a transient canonical Value block with exactly the resident
-    /// loader's schema/callback/ID checks, without storing it or building indexes.
-    pub fn validate_resident_records(
-        &self,
-        collection: &str,
-        records: &[Value],
-    ) -> Result<(), EngineError> {
-        self.collections
-            .get(collection)
-            .ok_or_else(|| col_nf(collection))?
-            .validate_resident_block(records)
-    }
-
-    /// Atomically validate an incoming block, silently evict `removing`, then
-    /// insert before a surviving ID (or append). Outgoing IDs still participate
-    /// in duplicate checks. An error leaves every accepted record unchanged.
-    /// Hosts must never evict records that a live watch can match.
-    pub fn replace_resident_records(
-        &mut self,
-        collection: &str,
-        records: Vec<Value>,
-        removing: &[String],
-        before_id: Option<&str>,
-        publish: bool,
-    ) -> Result<usize, EngineError> {
-        let (loaded, changes) = self
-            .collections
-            .get_mut(collection)
-            .ok_or_else(|| col_nf(collection))?
-            .replace_resident_records(records, removing, before_id, publish)?;
-        if publish && loaded > 0 {
-            self.publish_resident_move(collection, changes);
-        }
-        Ok(loaded)
-    }
-
     /// Drop resident records from `collection` (see
     /// [`crate::collection::Collection::unload_resident_records`]), with the
     /// same journal and publication rules as [`Self::load_resident_records`].
@@ -117,22 +80,6 @@ impl Database {
             collection: collection.to_owned(),
             operation: ChangeOperation::Update,
         });
-    }
-
-    /// Drop snapshot records that no host-managed watch scope needs. Unlike
-    /// refresh, this does not clone resident records into another full snapshot.
-    /// Hosts must include every ID that any live watch can match.
-    pub fn retain_reactive_snapshot_records(
-        &self,
-        collection: &str,
-        ids: &std::collections::HashSet<&str>,
-    ) -> Result<(), EngineError> {
-        if !self.collections.contains_key(collection) {
-            return Err(col_nf(collection));
-        }
-        self.reactive
-            .retain_collection_snapshot_records(collection, ids);
-        Ok(())
     }
 
     /// Replace the snapshot that live watches evaluate for `collection` with

@@ -15,7 +15,7 @@
 //! the whole target partition before a create. This timing change applies to
 //! built-in JSONL; custom codecs retain whole-partition decoding and validation.
 
-use crate::{ExecutionModel, MutationInner, RuntimeState};
+use crate::{MutationInner, RuntimeState};
 use indexmap::IndexMap;
 use proseql_engine::collection::CreateManyResult;
 use proseql_engine::errors::{EngineError, SerializationError};
@@ -59,13 +59,10 @@ impl AppendState {
 }
 
 pub(crate) fn applies(inner: &MutationInner<'_>, collection: &str) -> bool {
-    inner.lazy.as_ref().is_some_and(|access| {
-        access
-            .sources
-            .lazy
-            .get(collection)
-            .is_some_and(|lazy| lazy.execution_model == ExecutionModel::Streaming)
-    })
+    inner
+        .lazy
+        .as_ref()
+        .is_some_and(|access| access.sources.is_lazy(collection))
 }
 
 pub(crate) fn create(
@@ -424,9 +421,6 @@ pub(crate) fn after_commit(state: &mut RuntimeState) {
         return;
     };
     for (name, lazy) in &mut sources.lazy {
-        if lazy.execution_model != ExecutionModel::Streaming {
-            continue;
-        }
         let append = std::mem::take(&mut lazy.stream.append);
         if !append.ids.is_empty()
             && record_committed(
@@ -524,7 +518,6 @@ mod tests {
                 sources: vec![DatabaseSourceConfig::Partitioned(source.clone())],
             },
             NativeSourceRuntimeOptions {
-                execution_model: ExecutionModel::Streaming,
                 watch_debounce: None,
                 lazy_partitions: IndexMap::from([(
                     "rows".into(),
@@ -559,7 +552,7 @@ mod tests {
             let bytes = std::fs::read(&path).unwrap();
             assert!(!stored.ends_with(&bytes[bytes.len() - 8192..]));
             assert!(stored.matches(&bytes));
-            assert!(sources.lazy["rows"].resident.is_empty());
+            assert!(sources.lazy["rows"].status().loaded.is_empty());
             if i > 0 {
                 assert!(sources.lazy["rows"].stream.index.append_proof(&path).is_some(), "bounded hash proof must retain checked locator coverage across chunk boundaries");
             }

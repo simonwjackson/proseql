@@ -47,3 +47,17 @@ consumer servers or contact real services. It cannot establish real-data runtime
 latency, deployment correctness or compatibility with uncommitted consumer code.
 
 Baseline comparison archives `5d1a2aa` and transfers a Git bundle containing the exact consumer pins. The no-override run uses the untouched consumer manifests and `--locked`; an environment-only Git URL rewrite sends the original local source URL to an owned bare mirror with the same commit objects. It is a transport change, not a Cargo source patch. `cargo tree` records actual resolved ProseQL paths/revisions. Each comparison restores the committed consumer lock in its copy before building. No Git config is written to either original consumer repo.
+
+## Cutover adoption branch
+
+Override the read-only archive source, not the real consumer repository:
+
+```sh
+QWS_WORKER=cutover QWS_LOGBOOK_REPO=/tmp/forgerie-scratch/f-ad87c1da/logbook-r2 \
+  bash scripts/consumers/run.sh /absolute/path/to/proseql-source
+```
+
+`QWS_COACH_REPO` is also available; omitted overrides use the original paths.
+`QWS_WORKER` selects the aka-run workspace (default `harness`). Do not overlap
+this with any other command using the same aka-run workspace. The consumer
+source archives still include only committed files, never app data.

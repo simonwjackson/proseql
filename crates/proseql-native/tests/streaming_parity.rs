@@ -5,13 +5,16 @@ mod support;
 
 use proseql_engine::query::pipeline::QueryInput;
 use proseql_engine::query::{AggregateConfig, SortOrder};
-use proseql_native::ExecutionModel;
 use serde_json::json;
 use support::parity::{ParityFixture, COLLECTION};
 
 #[test]
-fn execution_model_defaults_to_resident() {
-    assert_eq!(ExecutionModel::default(), ExecutionModel::Resident);
+#[allow(deprecated)]
+fn execution_model_defaults_to_streaming() {
+    assert_eq!(
+        proseql_native::ExecutionModel::default(),
+        proseql_native::ExecutionModel::Streaming
+    );
 }
 
 #[test]

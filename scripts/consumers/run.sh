@@ -14,7 +14,11 @@ ssh -o BatchMode=yes aka mkdir -p "$remote_source"
 rsync -a --delete --exclude .git --exclude target --exclude node_modules --exclude .direnv --exclude snapshots \
   "$source_path/" "aka:$remote_source/"
 for consumer in coach logbook; do
-  repo="$HOME/code/sandbox/$consumer"
+  if [[ $consumer == logbook ]]; then
+    repo=${QWS_LOGBOOK_REPO:-"$HOME/code/sandbox/logbook"}
+  else
+    repo=${QWS_COACH_REPO:-"$HOME/code/sandbox/coach"}
+  fi
   commit=$(git -C "$repo" rev-parse HEAD)
   snapshot="$tool_root/scripts/consumers/snapshots/$consumer-$commit"
   mkdir -p "$snapshot"
@@ -35,6 +39,6 @@ if [[ ${2:-} == --compare-baseline ]]; then
   mkdir -p scripts/consumers/snapshots/proseql-main
   git archive 5d1a2aa crates | tar -x -C scripts/consumers/snapshots/proseql-main
   git bundle create scripts/consumers/snapshots/pins.bundle main
-  exec bash scripts/qws/aka-run harness --x86-64-v2 --pull -- env QWS_SOURCE_SHA="$sha" bash scripts/consumers/baselines-aka.sh "$remote_source"
+  exec bash scripts/qws/aka-run "${QWS_WORKER:-harness}" --x86-64-v2 --pull -- env QWS_SOURCE_SHA="$sha" bash scripts/consumers/baselines-aka.sh "$remote_source"
 fi
-exec bash scripts/qws/aka-run harness --x86-64-v2 --pull -- env QWS_SOURCE_SHA="$sha" bash scripts/consumers/check-aka.sh "$remote_source"
+exec bash scripts/qws/aka-run "${QWS_WORKER:-harness}" --x86-64-v2 --pull -- env QWS_SOURCE_SHA="$sha" bash scripts/consumers/check-aka.sh "$remote_source"

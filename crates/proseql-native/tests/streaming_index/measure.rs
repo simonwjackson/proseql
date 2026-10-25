@@ -1,6 +1,6 @@
 //! Public-API first-ID cost, including the validation pass, on synthetic text.
 use super::support::parity::{ParityFixture, COLLECTION};
-use proseql_native::ExecutionModel;
+use crate::support::parity::RuntimeKind;
 use std::fs;
 use std::io::Write;
 use std::sync::Mutex;
@@ -49,7 +49,7 @@ fn first_id_validation_656k_rows() {
         file.flush().unwrap();
     }
     let start = Instant::now();
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     let open = start.elapsed();
     let id = "steps:2025-10-01T18:00:00.000Z:synthetic-device-with-a-long-identity";
     let start = Instant::now();

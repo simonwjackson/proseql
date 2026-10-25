@@ -1,9 +1,10 @@
 mod support;
+use support::parity::RuntimeKind;
 
 #[cfg(feature = "bench-observe")]
 #[path = "streaming_index/measure.rs"]
 mod measure;
-use proseql_native::{ExecutionModel, FullScanPolicy, NativeRuntime};
+use proseql_native::{FullScanPolicy, NativeRuntime};
 use serde_json::json;
 use std::fs;
 use support::parity::{sample, ParityFixture, COLLECTION, SOURCE};
@@ -16,7 +17,7 @@ fn find_hits_and_misses_match_resident_without_resident_partitions() {
             .assert_same(|runtime| runtime.find_by_id(COLLECTION, id))
             .unwrap();
     }
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     runtime
         .find_by_id(COLLECTION, "steps:2025-02-03T04:00:00.000Z")
         .unwrap()
@@ -33,7 +34,7 @@ fn find_hits_and_misses_match_resident_without_resident_partitions() {
 #[test]
 fn edited_unsorted_appended_and_deleted_files_match_fresh_full_scans() {
     let fixture = ParityFixture::new(120);
-    let runtime = fixture.open(ExecutionModel::Streaming);
+    let runtime = fixture.open(RuntimeKind::Lazy);
     runtime.find_by_id(COLLECTION, "absent").unwrap();
     let path = fixture.partition_path("2025-02");
     let mut lines = fs::read_to_string(&path)
@@ -55,7 +56,7 @@ fn edited_unsorted_appended_and_deleted_files_match_fresh_full_scans() {
     )
     .unwrap();
     for id in ["edited", "external", "absent"] {
-        let resident = fixture.open(ExecutionModel::Resident);
+        let resident = fixture.open(RuntimeKind::Eager);
         assert_eq!(
             runtime.find_by_id(COLLECTION, id),
             resident.find_by_id(COLLECTION, id)
@@ -68,11 +69,14 @@ fn edited_unsorted_appended_and_deleted_files_match_fresh_full_scans() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn find_keeps_full_scan_error_policy() {
+    use proseql_native::ExecutionModel;
     let fixture = ParityFixture::new(120);
     let mut errors = Vec::new();
     for model in [ExecutionModel::Resident, ExecutionModel::Streaming] {
-        let mut options = fixture.options(model);
+        let mut options = fixture.options(RuntimeKind::Lazy);
+        options.execution_model = model;
         options.lazy_partitions.get_mut(SOURCE).unwrap().full_scan = FullScanPolicy::Error;
         let runtime = NativeRuntime::open_sources_with_options(fixture.config(), options).unwrap();
         errors.push(runtime.find_by_id(COLLECTION, "absent").unwrap_err());
@@ -167,11 +171,11 @@ fn invalid_utf8_keeps_file_global_error_offset() {
         .unwrap()
         .write_all(b"{\"id\":\"bad\",\"metric\":\"\xff\"}\n")
         .unwrap();
-    let resident = fixture.open(ExecutionModel::Resident);
-    let streaming = fixture.open(ExecutionModel::Streaming);
+    let resident = fixture.try_open(RuntimeKind::Eager).err().unwrap();
+    let streaming = fixture.open(RuntimeKind::Lazy);
     assert_eq!(
-        resident.find_by_id(COLLECTION, "absent"),
-        streaming.find_by_id(COLLECTION, "absent")
+        resident,
+        streaming.find_by_id(COLLECTION, "absent").unwrap_err()
     );
 }
 
@@ -209,7 +213,7 @@ fn returned_rows_use_schema_decoding_not_raw_json() {
         fs::write(path, text).unwrap();
     }
     let mut results = Vec::new();
-    for model in [ExecutionModel::Resident, ExecutionModel::Streaming] {
+    for model in [RuntimeKind::Eager, RuntimeKind::Lazy] {
         let mut config = fixture.config();
         if let proseql_engine::descriptor::SchemaNode::Struct { fields } =
             &mut config.collections[0].descriptor.schema
@@ -278,8 +282,8 @@ fn assert_partition_codec_parity(change_rows: bool) {
             .register(Box::new(PartitionCodec { change_rows }));
         NativeRuntime::open_sources_with_options(fixture.config(), options).unwrap()
     };
-    let resident = open(ExecutionModel::Resident);
-    let streaming = open(ExecutionModel::Streaming);
+    let resident = open(RuntimeKind::Eager);
+    let streaming = open(RuntimeKind::Lazy);
     for id in [
         "steps:2025-02-03T04:00:00.000Z",
         "decoded:steps:2025-02-03T04:00:00.000Z",
@@ -327,7 +331,7 @@ fn custom_partition_codec_refresh_matches_fresh_resident_after_append_and_remova
             .register(Box::new(PartitionCodec { change_rows: true }));
         NativeRuntime::open_sources_with_options(fixture.config(), options).unwrap()
     };
-    let runtime = open(ExecutionModel::Streaming);
+    let runtime = open(RuntimeKind::Lazy);
     let id = "decoded:steps:2025-02-03T04:00:00.000Z";
     runtime.find_by_id(COLLECTION, id).unwrap().unwrap();
     let mut row = sample("2025-02", 1, 1, "steps");
@@ -342,7 +346,7 @@ fn custom_partition_codec_refresh_matches_fresh_resident_after_append_and_remova
     )
     .unwrap();
     for id in [id, "decoded:external", "external"] {
-        let resident = open(ExecutionModel::Resident);
+        let resident = open(RuntimeKind::Eager);
         assert_eq!(
             runtime.find_by_id(COLLECTION, id),
             resident.find_by_id(COLLECTION, id)

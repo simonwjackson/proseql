@@ -1646,8 +1646,8 @@ impl Collection {
 
     /// Make stored records resident without a mutation.
     ///
-    /// Native lazy partitions use this to load one partition into a collection
-    /// that holds only some of its stored records. Each record is validated
+    /// Native streaming mutations use this to stage verified duplicate
+    /// candidates without loading source partitions. Each record is validated
     /// like a reload. An id that is already resident, or repeats in `records`,
     /// fails with `DuplicateKeyError` and inserts nothing. `position` places
     /// the block in insertion order; `None` (or a position at the end)
@@ -1664,22 +1664,6 @@ impl Collection {
         describe: bool,
     ) -> Result<(usize, Vec<EntityChange>), EngineError> {
         self.validate_resident_block(&records)?;
-        Ok(self.insert_resident_block(records, position, describe))
-    }
-
-    /// Validate the whole incoming block against the accepted state before
-    /// dropping anything. After that point, eviction and insertion cannot fail.
-    /// `before_id` is resolved after eviction, so surviving row order is stable.
-    pub fn replace_resident_records(
-        &mut self,
-        records: Vec<Value>,
-        removing: &[String],
-        before_id: Option<&str>,
-        describe: bool,
-    ) -> Result<(usize, Vec<EntityChange>), EngineError> {
-        self.validate_resident_block(&records)?;
-        self.unload_resident_records(removing, false);
-        let position = before_id.and_then(|id| self.position_of(id));
         Ok(self.insert_resident_block(records, position, describe))
     }
 

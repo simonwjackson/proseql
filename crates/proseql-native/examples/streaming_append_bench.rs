@@ -7,6 +7,8 @@
 //! no-trim qualification. repeat measures distinct prepared 1,000-row batches.
 //! append-range primes an October range and appends at its last timestamp so
 //! source time order stays valid, then measures the same range after each batch.
+#![allow(deprecated)] // Retained CLI selector; the removed Resident backend is refused.
+
 use indexmap::IndexMap;
 use proseql_engine::descriptor::{
     CollectionDescriptor, DuplicateIdPolicy, IdStrategy, SchemaNode, StructField, ValidationMode,
@@ -132,6 +134,9 @@ fn prepare(root: &Path) -> Result<(), Error> {
     Ok(())
 }
 fn open(root: &Path, kind: &str, model: ExecutionModel) -> Result<NativeRuntime, Error> {
+    if model == ExecutionModel::Resident {
+        return Err("Resident lazy backend was removed; use the pinned historical source for baseline measurements".into());
+    }
     let mut fields = [
         "id",
         "metric",

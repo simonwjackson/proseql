@@ -62,7 +62,7 @@ unsafe impl GlobalAlloc for PayloadAllocator {
 static ALLOCATOR: PayloadAllocator = PayloadAllocator;
 
 #[test]
-fn scoped_queries_never_retain_more_than_n_partitions_plus_one_incoming_payload() {
+fn scoped_queries_retain_no_partition_payloads_regardless_of_compatibility_bound() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("samples");
     fs::create_dir(&root).unwrap();
@@ -152,14 +152,14 @@ fn scoped_queries_never_retain_more_than_n_partitions_plus_one_incoming_payload(
         assert!(result.is_empty());
         assert_eq!(
             LIVE.load(Ordering::SeqCst),
-            bound * ROWS,
-            "the counter tracks actual retained Value string allocations"
+            0,
+            "scans retain no Value string payloads"
         );
         assert!(
-            PEAK.load(Ordering::SeqCst) <= (bound + 1) * ROWS,
+            PEAK.load(Ordering::SeqCst) <= ROWS,
             "actual live row payloads {} exceed N+1 {}",
             PEAK.load(Ordering::SeqCst),
-            (bound + 1) * ROWS
+            ROWS
         );
 
         eprintln!(
@@ -211,7 +211,7 @@ fn scoped_queries_never_retain_more_than_n_partitions_plus_one_incoming_payload(
                 }
             }
             assert!(
-                PEAK.load(Ordering::SeqCst) <= (bound + 1) * ROWS,
+                PEAK.load(Ordering::SeqCst) <= ROWS,
                 "{path} payload peak {}",
                 PEAK.load(Ordering::SeqCst)
             );
@@ -229,7 +229,7 @@ fn scoped_queries_never_retain_more_than_n_partitions_plus_one_incoming_payload(
                 let rows=runtime.query_bounded("samples",QueryInput {r#where:Some(json!({"timestamp":{"$gte":format!("2025-{month:02}-01T00:00:00Z"),"$lt":format!("2025-{end:02}-01T00:00:00Z")},"value":{"$lt":0}})),..Default::default()}).unwrap();
                 assert!(rows.is_empty());
                 assert!(
-                    PEAK.load(Ordering::SeqCst) <= (bound + 1) * ROWS,
+                    PEAK.load(Ordering::SeqCst) <= ROWS,
                     "bound={bound}, repeat={repeat}, month={month}, peak={}",
                     PEAK.load(Ordering::SeqCst)
                 );
@@ -264,13 +264,13 @@ fn scoped_queries_never_retain_more_than_n_partitions_plus_one_incoming_payload(
                 )
                 .is_err());
             assert!(
-                PEAK.load(Ordering::SeqCst) <= (bound + 1) * ROWS,
+                PEAK.load(Ordering::SeqCst) <= ROWS,
                 "failed candidate payload peak {}",
                 PEAK.load(Ordering::SeqCst)
             );
             assert_eq!(
                 LIVE.load(Ordering::SeqCst),
-                bound * ROWS,
+                0,
                 "failed candidate payloads were actually freed"
             );
             assert_eq!(
@@ -280,14 +280,14 @@ fn scoped_queries_never_retain_more_than_n_partitions_plus_one_incoming_payload(
                     .unwrap()
                     .loaded,
                 before_error,
-                "validation must precede replacement eviction"
+                "failed scans do not install a read cache"
             );
         }
         fs::write(&january, good).unwrap();
         let watch=runtime.watch("samples",proseql_engine::reactive::WatchQueryConfig {r#where:Some(json!({"timestamp":{"$gte":"2025-01-01T00:00:00Z","$lt":"2025-01-31T23:59:59Z"}})),select:Some(json!(["id"])),..Default::default()}).unwrap();
         let status = runtime.lazy_partition_status("samples").unwrap().unwrap();
         let pinned = status.pinned.len();
-        assert_eq!(pinned, 1);
+        assert_eq!(pinned, 0);
         PEAK.store(LIVE.load(Ordering::SeqCst), Ordering::SeqCst);
         let (_, stats) = runtime
             .query_bounded_with_stats(
@@ -299,10 +299,10 @@ fn scoped_queries_never_retain_more_than_n_partitions_plus_one_incoming_payload(
             )
             .unwrap();
         assert_eq!(stats.pinned_partitions, pinned);
-        // Pinned engine records + their committed watch snapshot are explicit
-        // extra payloads. No unpinned snapshot may accumulate across the scan.
+        // Selected watch results contain no payload field. No source-row payloads
+        // may accumulate across this scan.
         assert!(
-            PEAK.load(Ordering::SeqCst) <= (bound + 1 + 2 * pinned) * ROWS,
+            PEAK.load(Ordering::SeqCst) <= (1 + 2 * pinned) * ROWS,
             "pinned payload peak {}",
             PEAK.load(Ordering::SeqCst)
         );
@@ -323,7 +323,7 @@ fn scoped_queries_never_retain_more_than_n_partitions_plus_one_incoming_payload(
                 },
             )
             .unwrap();
-        assert_eq!(LIVE.load(Ordering::SeqCst), bound * ROWS);
+        assert_eq!(LIVE.load(Ordering::SeqCst), 0);
         if bound == 0 {
             let watch=runtime.watch("samples",proseql_engine::reactive::WatchQueryConfig {r#where:Some(json!({"timestamp":{"$gte":"2025-01-01T00:00:00Z","$lt":"2025-01-31T23:59:59Z"}})),select:Some(json!(["id"])),..Default::default()}).unwrap();
             let entered = std::sync::Arc::new(std::sync::Barrier::new(2));
@@ -356,7 +356,7 @@ fn scoped_queries_never_retain_more_than_n_partitions_plus_one_incoming_payload(
                 "a watch dropped during a locked read must reclaim without another query"
             );
         }
-        eprintln!("LIVE_PAYLOAD_PROOF N={bound} rows_per_partition={ROWS} all_unpinned_peaks<=N+1 pinned_records_and_snapshot_reported=true");
+        eprintln!("LIVE_PAYLOAD_PROOF N={bound} rows_per_partition={ROWS} no_retained_partition_payloads=true");
         runtime.close().unwrap();
         assert_eq!(
             LIVE.load(Ordering::SeqCst),

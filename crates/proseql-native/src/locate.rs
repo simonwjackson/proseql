@@ -1,5 +1,5 @@
 //! Generation-checked positional indexes and nonresident ID lookup.
-use crate::{ExecutionModel, MutationInner, NativeRuntime};
+use crate::{MutationInner, NativeRuntime};
 use proseql_engine::callbacks::CallbackRegistry;
 use proseql_engine::errors::EngineError;
 use proseql_engine::scan::RowLocation;
@@ -612,9 +612,7 @@ impl NativeRuntime {
         let mut state = self.lock_open()?;
         if let Some(sources) = state.sources.as_mut() {
             for lazy in sources.lazy.values_mut() {
-                if lazy.execution_model == ExecutionModel::Streaming {
-                    lazy.stream.index.invalidate();
-                }
+                lazy.stream.index.invalidate();
             }
         }
         Ok(())
@@ -632,8 +630,7 @@ impl NativeRuntime {
         if !state
             .sources
             .as_ref()
-            .and_then(|sources| sources.lazy.get(collection))
-            .is_some_and(|lazy| lazy.execution_model == ExecutionModel::Streaming)
+            .is_some_and(|sources| sources.is_lazy(collection))
         {
             return None;
         }
@@ -654,9 +651,7 @@ pub(crate) fn mutation_find_by_id(
     id: &str,
 ) -> Option<Result<Option<Value>, EngineError>> {
     let lazy = inner.lazy.as_mut()?;
-    if lazy.sources.lazy.get(collection)?.execution_model != ExecutionModel::Streaming {
-        return None;
-    }
+    lazy.sources.lazy.get(collection)?;
     Some(lookup(
         lazy.sources,
         lazy.host,

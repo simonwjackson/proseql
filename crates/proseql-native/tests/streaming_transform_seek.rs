@@ -1,7 +1,8 @@
 mod support;
+use support::parity::RuntimeKind;
 
 use proseql_engine::{descriptor::SchemaNode, query::QueryInput};
-use proseql_native::{ExecutionModel, NativeRuntime};
+use proseql_native::NativeRuntime;
 use serde_json::{json, Value};
 use support::parity::{ParityFixture, COLLECTION};
 
@@ -26,11 +27,9 @@ fn canonical_transform_fallback_still_builds_time_checkpoints() {
         .find(|field| field.name == "value")
         .unwrap()
         .schema = SchemaNode::NumFromStr;
-    let runtime = NativeRuntime::open_sources_with_options(
-        config,
-        fixture.options(ExecutionModel::Streaming),
-    )
-    .unwrap();
+    let runtime =
+        NativeRuntime::open_sources_with_options(config, fixture.options(RuntimeKind::Lazy))
+            .unwrap();
     let input = QueryInput {
         r#where: Some(
             json!({"atUtc":{"$gte":"2025-02-20T00:00:00.000Z","$lt":"2025-02-20T01:00:00.000Z"}}),

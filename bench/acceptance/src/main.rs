@@ -5,6 +5,8 @@ mod observe;
 mod query;
 mod sql;
 
+#![allow(deprecated)] // Retained CLI selector; the removed Resident backend is refused.
+
 use proseql_native::ExecutionModel;
 use query::{Answer, Query};
 use std::path::Path;

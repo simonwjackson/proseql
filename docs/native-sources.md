@@ -39,7 +39,7 @@ Creation validates configuration and registered services without decoding files.
 
 Concurrent sessions on one owner wait for each other. A nested open on the same thread returns `OperationError` with reason `session-reentrant`. After-hooks can use the active `NativeRuntime`; they must not open another session on that owner. Do not target the same paths through a second owner or runtime instance.
 
-A session keeps its accepted state until it closes, including last-known-good state after a failed reload. A later session reopens disk; it does not retain the prior session's snapshot. Keep one coherent operation inside one session if it needs a stable view. Existing long-lived `NativeRuntime` defaults and cached-state contracts do not change.
+A session keeps its accepted state until it closes, including last-known-good state after a failed reload. A later session reopens disk; it does not retain the prior session's snapshot. Keep one coherent operation inside one session if it needs a stable view. Eager last-known-good state remains resident. Lazy state follows the streaming watch contract below.
 
 `with_session` closes before returning, including when the caller returns an error. Its guard also closes during panic unwinding. Cleanup preserves the original caller error. A poisoned runtime is discarded without persisting its uncommitted state. Closed runtime clones cannot read and no longer retain rows. Normal source writes remain durable before success.
 
@@ -212,7 +212,7 @@ Prose partitions require `ProseCodecOptions` with a template, just like collecti
 
 A mutation groups the candidate records, then encodes only net changed partitions. Updates to the partition field move records between files. Deletes leave empty files with their format header or empty collection. Unchanged files, no-op mutations, flush, and close remain unchanged. Source overlap and intervening edits fail before durable replacement. The existing crash rule applies, including partial commits and quarantine after write failure.
 
-Partitioning reduces write size. On its own it does not reduce aggregate memory use, grouping work, or recursive watch polling. Managed reload discovers new partition files, including creation under an initially absent root. Append-only collections skip the grouping work (see "Append-only collections"). Lazy partitions load only the partitions an operation can touch and poll only loaded partitions (see "Lazy partitions").
+Partitioning reduces write size. On its own it does not reduce aggregate memory use, grouping work, or recursive watch polling. Managed reload discovers new partition files, including creation under an initially absent root. Append-only collections skip the grouping work (see "Append-only collections"). Lazy partitions scan only the selected scope and poll watch-covered generations (see "Lazy partitions").
 
 ## Time-series settings
 
@@ -222,7 +222,7 @@ Partitioning reduces write size. On its own it does not reduce aggregate memory 
 | Duplicate IDs | `CollectionDescriptor.duplicate_ids: DuplicateIdPolicy` (`"error"`, `"ignore_identical"`) | `"error"` | identical re-creates write nothing | one stored-record comparison per create |
 | Time bucket | `PartitionKey::TimeBucket { field, bucket: TimeBucket::{Year, Month, Day} }` | — | key `YYYY`, `YYYY-MM` or `YYYY-MM-DD` from a UTC timestamp | none measurable |
 | Ordered index | `CollectionDescriptor.ordered_indexes: Vec<String>` | empty | ranges and single-field sorts use the index | about 175 B of memory per row; longer open |
-| Lazy partitions | `NativeSourceRuntimeOptions.lazy_partitions: IndexMap<source id, LazyPartitionPolicy { max_loaded_partitions, full_scan }>` and `lazy_watch_interval` | empty map (eager), 2 s | open lists names; operations load the partitions they can touch; LRU eviction | first access to a partition reads and decodes it |
+| Lazy partitions | `NativeSourceRuntimeOptions.lazy_partitions: IndexMap<source id, LazyPartitionPolicy { max_loaded_partitions, full_scan }>` and `lazy_watch_interval` | empty map (eager), 2 s | open lists names; operations scan the selected scope; no row cache | first access to a partition reads and decodes it |
 
 The new descriptor fields are omitted from serialized descriptors at their defaults, so existing descriptor JSON keeps its bytes. Every setting is opt-in. The sections below give the rules and limits.
 
@@ -252,7 +252,7 @@ The rewrite encoder ends a JSONL file without a final newline. The first append 
 
 There is no batch journal. A crash during a multi-record append to one file can keep a prefix of its complete lines, and a crash between files keeps the completed files. Do not blindly retry a create unless the collection uses `duplicate_ids: ignore_identical`.
 
-**Conflict check limits (Resident).** Streaming additionally checks generations and detects same-length prefix edits. The length and tail comparison does not see an external edit elsewhere in the file that keeps the same length. The managed watcher reload still sees such an edit, because it compares contents.
+**Conflict check limits (eager appends).** Lazy appends additionally check generations and detect same-length prefix edits. The length and tail comparison does not see an external edit elsewhere in the file that keeps the same length. The managed watcher reload still sees such an edit, because it compares contents.
 
 **Watcher.** The managed watcher does not reload after the runtime's own appends. When the host reports the changed paths (`StorageEvent.path`; `FsStorageHost` and `MemoryStorageHost` do), it skips a reload when every changed path is a file this runtime appended to and that file still equals its stored bytes. A same-named file elsewhere, for example under a graph source root that shares the watch root, has another path and reloads. When a host reports only file names, it falls back to the names: every file with that name under the watch roots must still equal its stored content, and a graph source root that shares a watch root forces a reload. Any other change reloads as before, and so does the directory change when an append creates a new file.
 
@@ -308,10 +308,15 @@ Costs: each indexed row holds an encoded key, its insertion ordinal and its ID i
 
 ## Lazy partitions
 
-Resident remains the default. The behavior in this section describes Resident
-unless stated otherwise. Streaming is an explicit opt-in and has no lazy row
-cache; see "Opt-in query while scanning" below. The default cannot change until
-consumers that use `read` to hydrate lazy query results adopt returned scan rows.
+Streaming is the only lazy execution model. Eager collections keep the resident
+engine. The 13 round-1 [changed guarantees](design/query-while-scanning.md#changed-guarantees)
+and the approved round-2 additions now apply to every lazy caller.
+`ExecutionModel` and `NativeSourceRuntimeOptions::execution_model` are deprecated
+compatibility items. The default is `Streaming`; `Resident` behaves identically.
+Existing option literals, including Logbook's explicit Streaming setting, compile
+without edits (with deprecation warnings).
+The [cutover verification report](../bench/acceptance/results/cutover-round2.md)
+records the tested SHA, full release-check and consumer results.
 
 Native only. Set `NativeSourceRuntimeOptions.lazy_partitions` to map a source ID to a policy:
 
@@ -327,66 +332,36 @@ NativeSourceRuntimeOptions {
 
 The default is an empty map, so every existing configuration stays eager. `NativeSourceRuntimeOptions.lazy_watch_interval` (default 2 s) sets how often the managed watch polls lazy sources.
 
-**Preconditions.** The source must be a `Partitioned` JSONL or NDJSON source. Its collection must have `append_only: true`, no `unique_fields`, no relationships, and no other collection may have a relationship to it. Otherwise open fails with `SourceConfigError` naming the source. `max_loaded_partitions` accepts zero, which disables retention of unpinned partitions after an operation. Lazy collections must have no hooks, computed fields or migrations, even when the callbacks are registered. Global hooks are also refused when a runtime has lazy sources. Eager collections support these callbacks.
+**Preconditions.** The source must be a `Partitioned` JSONL or NDJSON source. Its collection must have `append_only: true`, no `unique_fields`, no relationships, and no other collection may have a relationship to it. Otherwise open fails with `SourceConfigError` naming the source. `max_loaded_partitions` is accepted but ignored. No lazy partitions stay resident. Lazy collections must have no hooks, computed fields or migrations, even when the callbacks are registered. Global hooks are also refused when a runtime has lazy sources. Eager collections support these callbacks.
 
 **Open.** Open lists partition file names without decoding their rows. Listing time and filename metadata grow with partition count, not record count within each file. Source sessions discard this manifest when they close.
 
-**Which partitions an operation loads.** `NativeRuntime::query`, `query_with_stats`, `query_cursor`, `aggregate`, `aggregate_grouped`, `find_by_id` and `watch` first compute the partitions the filter can touch, load them, and then run the engine's normal query. The runtime reads the conditions on the partition field: a direct value, `$eq`, `$in`, `$gt`, `$gte`, `$lt`, `$lte` and `$startsWith` with string operands, at the top level and through `$and` and `$or`. For a `TimeBucket` key, each bound is cut to the bucket length (`2026-04-10T05:00:00.000Z` → `2026-04`), which keeps the string order, so a range of timestamps maps to a range of file keys. For a `Field` key the value is the key. A `Prefix` key prunes on equality and `$in` only, because the prefix does not keep the string order.
+**Partition pruning.** Reads refresh the manifest and select files from the
+partition-field filter before scanning. The runtime reads the conditions on the partition field: a direct value, `$eq`, `$in`, `$gt`, `$gte`, `$lt`, `$lte` and `$startsWith` with string operands, at the top level and through `$and` and `$or`. For a `TimeBucket` key, each bound is cut to the bucket length (`2026-04-10T05:00:00.000Z` → `2026-04`), which keeps the string order, so a range of timestamps maps to a range of file keys. For a `Field` key the value is the key. A `Prefix` key prunes on equality and `$in` only, because the prefix does not keep the string order.
 
-Pruning compares string intervals and is conservative: it never skips a partition that can hold a match. The cost is that edges can load one more partition than the data needs. Timestamps may carry any number of fraction digits, so `2026-05-01T00:00:00.0000Z` sorts before `2026-05-01T00:00:00.000Z`; a query `{ $gte: "2026-04-01T00:00:00.000Z", $lt: "2026-05-01T00:00:00.000Z" }` therefore loads April and May. An upper bound at or below the first possible timestamp of a bucket excludes it: `$lt: "2026-05-01T00:00:00"` loads only April. Records live only in the file of their own key, because loading rejects wrong-partition records.
+Pruning compares string intervals and is conservative: it never skips a partition that can hold a match. The cost is that edges can select one more partition than the data needs. Timestamps may carry any number of fraction digits, so `2026-05-01T00:00:00.0000Z` sorts before `2026-05-01T00:00:00.000Z`; a query `{ $gte: "2026-04-01T00:00:00.000Z", $lt: "2026-05-01T00:00:00.000Z" }` therefore selects April and May. An upper bound at or below the first possible timestamp of a bucket excludes it: `$lt: "2026-05-01T00:00:00"` selects only April. Records live only in the file of their own key, because scanning rejects wrong-partition records.
 
-**Unfiltered operations.** A filter without a usable partition-field condition (none, `{ bpm: 60 }`, `$not`, `$ne`, `$nin`, an `$or` with one unfiltered branch) cannot prune. With `FullScanPolicy::Allow` it loads every partition for that operation; the bound applies again afterwards. With `FullScanPolicy::Error` it fails with `OperationError` (operation `query`, `watch` or `findById`, reason `lazy-full-scan`) and loads nothing, also when the source is empty or every partition is already loaded, so the outcome does not depend on history or cache state. `find_by_id` cannot know a record's partition from its ID: a hit among the loaded partitions returns at once, and a miss is a full scan. Query by the partition field instead when IDs derive from it.
+**Preconditions and policy remain binding.** An unprunable query, aggregate or
+watch scans every partition with `FullScanPolicy::Allow`, or fails with
+`OperationError`, reason `lazy-full-scan`, with Error. An index cannot bypass
+this policy. ID lookup requires Allow, except for records staged in the current
+mutation. Relationships, unique fields, hooks, computed fields and migrations
+remain unavailable on lazy collections. Use runtime APIs, not raw engine calls,
+for lazy data.
 
-**Eviction.** After each operation, the runtime evicts least recently used partitions until at most `max_loaded_partitions` partitions that no watch pins stay loaded. Pinned partitions do not count against the bound. Zero leaves no unpinned records or their indexes. Eviction drops the records, index postings, and stored contents. The next access rereads and decodes the file. This does not evict unrelated eager collections. Use source sessions to release all durable source state.
+### Query while scanning
 
-With a zero cache, `find_by_id` cannot hit a retained partition. An ID-only miss still needs a full scan and fails under `FullScanPolicy::Error`; use a query containing the partition field instead. A create can locate its target from the record's partition field. Keeping a positive cache inside an explicit session is also valid and does not retain data after that session closes.
 
-**Results.** Loaded records keep the order of an eager open: partition path order, then file order. Queries, sorts, pages, cursors and aggregates over the loaded records therefore equal the eager results; the conformance tests compare every lazy result with an eager runtime on the same files. Records created in the current session follow the engine's insertion order (the end of the collection) until their partition loads again, as in an eager session.
-
-**Indexes.** Equality, ordered and search indexes cover the loaded records only. Loading a partition adds its records to the indexes (incrementally when it loads after every loaded partition, with one rebuild otherwise); eviction removes them. `NativeQueryStats.index_used` comes from `Database::explain_query`.
-
-**Relationships.** None, by precondition. Population never reaches a lazy collection, so queries on other collections are unchanged.
-
-**Aggregates.** `NativeRuntime::aggregate` and `aggregate_grouped` run the filtered query and aggregate its rows, so they load like the query. An aggregate without a partition-field filter is a full scan.
-
-**Unique and duplicate checks.** A create loads the partition its record routes to, so the engine's ID check and the `duplicate_ids: ignore_identical` comparison see that partition (and any other loaded partitions). An ID that also exists in an unloaded partition is not found. This is a documented limit: derive IDs from the partition field (for example `heartrate:<timestamp>`), so the same ID cannot route to two partitions. Wrong-partition records and duplicate IDs across loaded partitions fail with `SourceConfigError` when the partition loads; the operation fails and the loaded state stays as it was. `unique_fields` are refused at open.
-
-**Appends.** The first create into a partition that is not loaded reads and decodes that partition once (in the benchmark: 240 KB and 28 ms for a 1,200-row month, 9.2 MB and 1.2 s for an 83,000-row month; see `docs/benchmarks/timeseries.md`, Step 5). Later creates into the loaded partition cost the same as an eager append: one line, a 4 KiB tail read and one file sync. A create into a partition file that does not exist yet reads nothing. A create whose input does not contain the partition field cannot be routed before the ID check; it fails (`ValidationError` when the schema requires the field, otherwise `OperationError` reason `lazy-partition-not-loaded`) and writes nothing.
-
-**Watches.** `NativeRuntime::watch` and `watch_with_callback` load the partitions the watch filter touches and pin them until the returned `NativeWatch` is dropped. Appends into pinned partitions reach the watch as usual. A new partition file that matches a pinned filter (written by this runtime or found by the watcher) joins the pin and loads. A watch without a partition-field filter pins every partition, or fails under `FullScanPolicy::Error`. `Database::watch` through `read` sees only the loaded records and pins nothing; use the runtime methods. Dropping a runtime watch releases pins immediately when the lock is free. Under contention, one coalesced worker drains release requests after the active operation. Pin release does not wait for a lock held by the dropping thread and does not require another user query.
-
-**`read`.** `NativeRuntime::read` exposes the engine database with the loaded partitions only. Use it for engine calls on eager collections, or after a runtime method has loaded what you need.
-
-**File watcher.** The host's recursive poller does not watch a lazy root; it hashes every file, which would read all history. The managed watch polls lazy sources itself every `lazy_watch_interval`: it lists the directory and hashes only the loaded partitions, outside the runtime lock. Only a difference refreshes: a removed file is dropped, a changed loaded partition is decoded again (the old records stay when the new content fails, and `last_reload_error` reports it), and a new file is listed, and loaded when a watch covers it. Changes found this way are published to watches and change subscribers. The runtime's own appends update the stored contents, so they never cause a refresh. A lazy root inside another source's watch root is still polled by that source's watcher. `NativeRuntime::reload` does the same refresh after reloading the other sources.
-
-**Stats.** `NativeRuntime::query_with_stats` returns the rows and `NativeQueryStats { partitions_loaded, partitions_read, partitions_resident, index_used, candidate_rows, index_sorted }`. `partitions_loaded` is the number of partitions the query needed loaded (every partition file for an eager partitioned source). `partitions_read` counts files this query read. `NativeRuntime::lazy_partition_status(source_id)` lists known, loaded and pinned partition files.
-
-**Costs.** Memory follows the loaded partitions, not total history: in the benchmark, open took 3 to 11 ms and 5 MiB at 140k, 1M and 10M rows, and peak RSS with two loaded partitions was 11 MiB, 36 MiB and 324 MiB (about 2 KB per loaded row). The first operation on a partition pays its read and decode (1.4 s for an 83,000-row month). Each lazy query adds about 5 µs for pruning and eviction. Query time then follows the rows returned (about 2.2 to 2.5 µs per row), not history size. Choose the bucket so that a partition decodes quickly (a month of one-minute samples is about 44,000 rows) and set `max_loaded_partitions` to the working set, for example the current month plus the months that dashboards read.
-
-**Where the runtime boundary is.** The engine assumes that a collection holds every record a query can match. Lazy partitions keep that assumption at the native runtime layer instead of teaching the engine about files: before an operation, the runtime makes every partition that can match resident with `Database::load_resident_records`; after it, the runtime evicts with `unload_resident_records`. These engine methods are not mutations: no hooks and no journal entries, also when a partition loads inside `mutate` (for the ID check of a create, or a `find_by_id` scan). A loaded record therefore never enters the append plan or a rollback. When watches must see loaded records (a partition that a watch covers but did not pin yet, or an external change), the runtime applies them directly to the committed watch snapshot and notifies; a transaction's own uncommitted changes stay invisible until it commits. The engine's query, index, sort, aggregate, transaction and watch code is unchanged, and the WASM engine never calls the new methods. The preconditions make this sound: without relationships, no query reads another collection's lazy records; without unique fields, the only cross-record check on create is the ID, which the target partition covers.
-
-### Opt-in query while scanning
-
-```rust
-NativeSourceRuntimeOptions {
-    execution_model: proseql_native::ExecutionModel::Streaming,
-    // Keep existing lazy_partitions and full_scan policies.
-    ..Default::default()
-}
-```
-
-This changes only configured lazy collections. Eager collections remain resident.
-Existing configurations and struct literals need no changes to keep Resident.
-Do not select Streaming for an application that relies on lazy residency without
-changing its reads first. The [design document](design/query-while-scanning.md)
-lists all 13 approved opt-in guarantee changes and Logbook's adoption blockers.
+Every configured lazy collection uses this path. Remove old query-then-`read`
+hydration and zero-limit warm-up probes. Consume returned rows instead. Eager
+collections, YAML write safety and on-disk text formats are unchanged.
 
 **Reads and memory.** Runtime query, cursor, aggregate and bounded-read methods
 scan selected JSONL/NDJSON files through 64 KiB host chunks and reusable line
 buffers. They validate scanned rows, filter/project while scanning, and preserve
 global stable ordering, cursors and individual f64 accumulation order. They never
 load a lazy partition into the engine. `max_loaded_partitions` is ignored under
-Streaming; no LRU or pins remain on this path. It still controls Resident.
+all lazy collections; no lazy LRU, resident read cache or pins remain.
 
 Memory includes the longest physical line, query-local ID metadata, returned
 records, sort/top-k/cursor or group workspace, derived indexes, append baselines
@@ -402,11 +377,10 @@ unchanged.
 **Indexes and creates.** Sparse time offsets are built on first eligible range
 use and checked against source generations. Unsorted files and custom codecs
 decline positional seeking. The first `find_by_id` builds global ID membership
-and validates every row once per generation (measured about 1.8 s validation,
-2.16 s complete lookup for 656,640 rows on aka). A create's first duplicate check
-scans only ID fields (about 360 ms in the storage measurement), then validates
-matching candidates, not unrelated payloads. About 15 MiB of locator metadata
-remains. No binary sidecar is written. Embedded ID timestamps are not trusted
+and validates every row once per generation. A create's first duplicate check
+scans only ID fields, then validates matching candidates, not unrelated payloads.
+Round-2 synthetic aka point lookups take about 0.6–0.8 s and retain about 10 MiB
+of locator metadata; these still miss SQLite targets. No binary sidecar is written. Embedded ID timestamps are not trusted
 as routing invariants.
 
 Creates check duplicates globally, not only loaded/routed partitions.
@@ -422,9 +396,9 @@ predicates; their order and invocation count can change.
 
 **Full-scan policy and `read`.** Indexes never bypass FullScanPolicy. Under Error,
 `find_by_id` always fails with `lazy-full-scan`, except for records created earlier
-in the same mutation. The Resident cached-hit exception does not apply. Use
+in the same mutation. There is no cached-hit exception. Use
 Allow or a partition-filtered query instead. `NativeRuntime::read` sees no lazy
-rows under Streaming: a `query_bounded` with `limit: 0` does not populate a cache.
+rows: a `query_bounded` with `limit: 0` does not populate a cache.
 Consume returned rows, use `select`, or aggregate inside the runtime instead.
 
 **Watches and reload.** A streaming watch retains delivered results, a serialized
@@ -447,38 +421,58 @@ last-known-good is unchanged.
 | `index_sorted` | false; the executor sorts |
 | `lazy_partition_status.loaded`, `.pinned` | Always empty |
 
-Resident stats and limits retain their previous meaning. All public bounded,
-mutation, watch and status functions remain available under both models.
+Eager stats keep their previous meaning. All public bounded, mutation, watch
+and status functions remain available. `max_loaded_partitions` is ignored.
 
-### Opt-in bounded reads
+### Bounded reads
 
-Issue [#11](https://github.com/simonwjackson/proseql/issues/11) adds these methods without changing configuration structs:
+The existing method names remain source-compatible. All lazy query entry points
+now scan; the bounded methods are no longer a separate residency strategy.
 
 | Method | Behavior |
 |---|---|
-| `query_bounded(collection, input)` | Visit lazy partitions one at a time; return one globally ordered/selected page |
-| `query_bounded_with_stats(collection, input)` | Same results, plus visited/read/resident/pinned partition counts and the retained limit |
+| `query_bounded(collection, input)` | One globally ordered/selected page |
+| `query_bounded_with_stats(collection, input)` | Same results plus physical scan stats |
 | `query_cursor_bounded(collection, input, cursor)` | One global cursor page |
-| `aggregate_bounded(collection, where_clause, config)` | Accumulate individual rows in natural order |
-| `aggregate_grouped_bounded(collection, where_clause, group_by, config)` | Same order, groups in first-encounter order |
+| `aggregate_bounded(collection, where_clause, config)` | Individual f64 additions in canonical order |
+| `aggregate_grouped_bounded(collection, where_clause, group_by, config)` | Same addition order; first-encounter group order |
 
-For one lazy collection/source with limit N, bounded reads hold at most **N unpinned cached partitions plus one incoming partition's records**. Unretained partitions remain transient canonical Value blocks: the shared engine validates and inspects them, but does not build indexes or install them in the cache. The runtime protects cached future scope files, so a multi-month read does not decode the same file twice in one operation. Retained incoming blocks validate before replacement; only then does the engine drop outgoing records/indexes and install the new block. A load validates the incoming candidate before it evicts the previous cache. An invalid incoming file therefore leaves the last accepted cache intact. A bounded query never concatenates monthly pages or drops matches to meet the cache limit. The shared engine filters rows and applies global stable sort, search scoring, pagination/cursors and selection once.
+These methods never concatenate monthly pages or merge monthly partial sums.
+Search and equality-index unions can buffer matching rows to preserve canonical
+candidate and f64 order. Min/max keep comparable-value rules and first ties.
+Memory grows with output, matching-row buffers, groups and visited-ID metadata,
+not a configured resident-partition limit. Custom codecs and canonical error
+replay can decode one whole partition. This is not a constant-memory promise.
+Non-lazy collections still use the engine's ordinary resident query path.
 
-The bound is **per lazy collection during these bounded read methods**, not a total process-memory limit. Other collections, active full-scope operations, mutation sessions, `find_by_id`, watch creation/reload and callers' retained values are not covered by a universal N+1 claim. Existing APIs keep working and may exceed it. Query workspace grows with matching rows, including rows later removed by pagination or selection. Duplicate detection keeps exact boxed string IDs across the entire visited scope and the initial cache outside it, including evicted partitions; that metadata grows with examined/cached IDs. Hash collisions cannot silently drop ID checks because the set compares complete IDs. Pinned partitions remain resident **in addition to N**, and stats report them separately. Committed snapshots retain only records covered by watch pins after trimming. Watch evaluation, error diagnostics and delivered results also cost memory; a consumer can retain delivered values indefinitely. These costs must not be counted as zero merely because the cache reports N.
+First-use eligible range scans validate the full file while building time
+checkpoints; later checked seeks can skip outside-range invalid rows. Every row
+actually scanned is validated. `candidate_rows` counts validated scan rows, not
+index-maintenance rows. `NativeQueryStats::index_used` is Ordered only for an
+actual seek, not first-use index construction.
 
-Ordinary aggregates keep only accumulator/group state and process each row in the same order as the existing native query-then-aggregate path. The engine's equality-index `$in` unions intentionally use condition-value order, not file order. Bounded reads share that index-plan selection and restore the same global candidate order before stable sorting or pagination. Eligible ordered-index sorts still take authority, including tie order; raw rows that cannot match can still disable an index sort, as before. They do not merge monthly sums: f64 addition is not associative. Top-level search and multi-value equality-index unions are explicit buffering exceptions: the existing native path reorders candidates before aggregation, so bounded aggregates retain matching rows and restore that global order before individual f64 additions. A single equality lookup and ordinary range/unfiltered aggregates still stream without retaining rows. This exception can consume O(matching rows), despite a small aggregate result; it does not retain extra partitions in the engine cache. Min/max still use the engine's comparable-value rules for arrays/objects and keep the first value on ties.
+`release_streaming_indexes()` drops derived ID/time indexes, validated generations
+and append proofs, while retaining codec context. It trades retained allocations
+for rebuild work. It does not promise RSS reclamation. No binary cache is written.
+Hosts returning `FileStat::change_id = Some` must change that token on every
+content edit, append, truncation and replacement. Other hosts return None and
+use checked-prefix hashing. Metadata tokens alone never authorize accepting an
+own append: checked prefix evidence is still required.
 
-`FullScanPolicy::Error` still refuses an unprunable bounded read before loading anything. Existing `query`, `query_with_stats`, `query_cursor`, mutation reads and watches keep the full-scope contract above. They can exceed N during an operation; they are **not** a transient-memory guarantee. `read(|db| ...)` still sees only resident records. For non-lazy collections the bounded methods use the ordinary engine path. Bounded lazy methods do not offer population: qualifying lazy collections cannot have relationships. Fully cached query/cursor scopes use the existing indexed engine path and still update LRU use. Cold streaming reads evaluate row predicates in file order before restoring global candidate/sort order; callers must not depend on an index-specific predicate invocation count. Native callbacks remain synchronous and infallible unless their existing contract returns a typed error; typed load/schema errors still fail the operation.
-
-The cost is explicit opt-in at the read call site, O(matching rows) query workspace, and O(visited IDs) duplicate-check metadata. Logbook's on-disk monthly JSONL layout does not need to change. Existing callers benefit from the decode changes automatically; callers need the bounded methods for multi-month transient bounds. Performance and the canonical-value resident floor are measured in `docs/benchmarks/lazy-memory.md`.
+See the [read report](benchmarks/query-while-scanning-perf-read.md),
+[write report](benchmarks/query-while-scanning-write-round2.md) and
+[design](design/query-while-scanning.md) for measured costs, limits and adoption.
 
 ### Decode and source-buffer ownership
 
 Built-in append JSONL/NDJSON loading parses every physical nonblank line once, including a valid unterminated or torn final line. ID checks inspect that decoded value. Owned schema decoding moves string/array payloads instead of cloning them. It still applies NumberFromString, optional/undefined, unknown-field stripping, Record-key checks and host checks. Registered custom codecs retain their whole-file decoder interface; fallback tail classification can parse an unterminated final line separately.
 
-Lazy reads capture one byte buffer and decode those exact bytes. They drop it after constructing canonical records and a compact append baseline. The baseline holds length, the 4096-byte raw tail, the kept-prefix tail/hash state for torn-line recovery, and the full-file watcher fingerprint. Successful appends extend this state only after durable success. Append conflicts still compare **length plus exact tail bytes**, not a weaker new rule. Lazy reload/own-append detection uses the same 64-bit whole-file fingerprint model as the existing lazy watcher, not retained full-byte equality; hash collision is a residual risk. Rewrite/document/eager sources retain full bytes where replacement/conflict/reload needs them. No rewrite is reconstructed from a tail.
-
-Resident row objects remain insertion-ordered `serde_json::Value`, not serialized blobs. Pre-sized schema/identity maps avoid spare vectors; collections with no query indexes no longer allocate insertion-order index metadata. Full-block replacement drops index/table capacity before rebuilding the retained incoming block. The benchmark reports the native 64-bit canonical payload floor separately from indexes, identity tables, source buffers, allocator-held free space, query output and watch memory.
+Lazy scans use chunked host reads. Append preparation can capture one target's
+bytes to build its compact durable baseline (length, tail and prefix hash).
+Own appends extend derived state only after durable success and checked prefix
+proofs. Eager rewrite/document sources retain full bytes where conflict checks
+and byte-preserving replacement need them. No rewrite is reconstructed from a
+tail. Resident eager rows remain insertion-ordered `serde_json::Value`.
 
 ### Configuration for a monthly heart-rate collection
 
@@ -591,7 +585,7 @@ These classes were checked by encoding with the encoder at `b7202d4` and decodin
 
 Source-mode opening starts a managed directory watch by default. Reload is eventual, after the filesystem polling interval and debounce. A reload validates the aggregate database before publishing its records, origins and document metadata together. A malformed reload retains the last valid database and exposes `last_reload_error`.
 
-The filesystem poller compares contents because notify 6 timestamps have only second precision. It recursively hashes watched files, including ignored files under the source root. This adds polling I/O. Lazy partitioned roots are not watched by this poller; the runtime polls them itself and reads only loaded partitions (see "Lazy partitions"). Large raw-shard directories benefit from a longer polling interval through `open_sources_with_host`, a different host, or explicit reload. Source patterns still limit which files the loaders decode.
+The filesystem poller compares contents because notify 6 timestamps have only second precision. It recursively hashes watched files, including ignored files under the source root. This adds polling I/O. Lazy partitioned roots are not watched by this poller; the runtime polls them itself and checks only watch-covered generations (see "Lazy partitions"). Large raw-shard directories benefit from a longer polling interval through `open_sources_with_host`, a different host, or explicit reload. Source patterns still limit which files the loaders decode.
 
 Optional missing roots and unmatched optional file patterns produce empty collections. Creation, replacement and removal of provider files trigger reload. Graph-owned collections reject mutations with `OperationError` reason `read-only-source`. They never participate in write projection.
 

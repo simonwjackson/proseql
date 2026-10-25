@@ -407,8 +407,8 @@ fn open_lists_partition_names_and_reads_no_file() {
     assert_eq!(rows.len(), 3);
     assert_eq!(stats.partitions_loaded, 1);
     assert_eq!(stats.partitions_read, 1);
-    assert_eq!(stats.index_used, IndexUsed::Ordered);
-    assert_eq!(stats.candidate_rows, 3);
+    assert_eq!(stats.index_used, IndexUsed::None);
+    assert_eq!(stats.candidate_rows, 11);
     let read_paths = reads.lock().unwrap().keys().cloned().collect::<Vec<_>>();
     assert_eq!(read_paths.len(), 1);
     assert!(read_paths[0].ends_with("2026-01.jsonl"));
@@ -498,7 +498,7 @@ fn filtered_queries_match_eager_with_sorts_and_pages() {
                 assert_eq!(rows, eager_query(&eager, input), "{filter} {sort:?}");
                 assert_eq!(stats.partitions_loaded, partitions, "{filter}");
                 assert!(stats.partitions_resident <= 2, "{filter}");
-                assert!(stats.partitions_resident >= partitions.min(2), "{filter}");
+                assert_eq!(stats.partitions_resident, 0, "{filter}");
             }
         }
     }
@@ -590,8 +590,8 @@ fn unfiltered_queries_and_aggregates_match_eager_then_return_to_the_bound() {
             .unwrap();
         assert_eq!(rows, eager_query(&eager, input));
         assert_eq!(stats.partitions_loaded, MONTHS.len());
-        assert_eq!(stats.partitions_resident, 2);
-        assert_eq!(loaded(&lazy).len(), 2);
+        assert_eq!(stats.partitions_resident, 0);
+        assert!(loaded(&lazy).is_empty());
     }
     let config = AggregateConfig {
         count: true,
@@ -623,7 +623,7 @@ fn unfiltered_queries_and_aggregates_match_eager_then_return_to_the_bound() {
             compute_grouped_aggregates(&expected_rows, &group_by, &config)
         );
     }
-    assert_eq!(loaded(&lazy).len(), 2);
+    assert!(loaded(&lazy).is_empty());
 }
 
 #[test]
@@ -649,10 +649,14 @@ fn full_scan_error_fails_with_a_typed_error_and_loads_nothing() {
     let error = lazy.find_by_id("heartrate", id).unwrap_err();
     assert_eq!(operation_reason(&error), "lazy-full-scan");
     assert!(loaded(&lazy).is_empty());
-    // An ID found among the loaded partitions needs no scan.
+    // A previous filtered query cannot bypass the full-scan policy.
     lazy_query(&lazy, month("2026-01"));
-    let found = lazy.find_by_id("heartrate", id).unwrap().unwrap();
-    assert_eq!(found["timestamp"], "2026-01-15T12:34:56.789Z");
+    let error = lazy.find_by_id("heartrate", id).unwrap_err();
+    assert_eq!(operation_reason(&error), "lazy-full-scan");
+    let found = lazy_query(&lazy, month("2026-01"));
+    assert!(found
+        .iter()
+        .any(|row| row["timestamp"] == "2026-01-15T12:34:56.789Z"));
 }
 
 #[test]
@@ -669,28 +673,28 @@ fn find_by_id_loads_everything_under_allow_and_returns_to_the_bound() {
         .find_by_id("heartrate", "heartrate:none")
         .unwrap()
         .is_none());
-    assert_eq!(loaded(&lazy).len(), 1);
+    assert!(loaded(&lazy).is_empty());
 }
 
 // ── Eviction and pinning ─────────────────────────────────────────────────────
 
 #[test]
-fn eviction_drops_the_least_recently_used_partition_and_reloads_it_identically() {
+fn repeated_queries_keep_no_residency_and_return_identical_rows() {
     let dir = tempfile::tempdir().unwrap();
     seed(dir.path());
     let eager = open_eager(dir.path());
     let lazy = open_lazy(dir.path(), policy(2, FullScanPolicy::Error));
     let first = lazy_query(&lazy, month("2026-01"));
     lazy_query(&lazy, month("2026-02"));
-    assert_eq!(loaded(&lazy), ["2026-01", "2026-02"]);
+    assert!(loaded(&lazy).is_empty());
     // 2026-01 is used again, so 2026-02 is the least recently used.
     lazy_query(&lazy, month("2026-01"));
     lazy_query(&lazy, month("2026-03"));
-    assert_eq!(loaded(&lazy), ["2026-01", "2026-03"]);
+    assert!(loaded(&lazy).is_empty());
     lazy_query(&lazy, month("2026-04"));
-    assert_eq!(loaded(&lazy), ["2026-03", "2026-04"]);
+    assert!(loaded(&lazy).is_empty());
     // Evicted records and their index postings are gone.
-    assert_eq!(resident_len(&lazy), 22);
+    assert_eq!(resident_len(&lazy), 0);
     let (again, stats) = lazy
         .query_with_stats("heartrate", month("2026-01"), None)
         .unwrap();
@@ -703,19 +707,19 @@ fn eviction_drops_the_least_recently_used_partition_and_reloads_it_identically()
         .query_with_stats("heartrate", input.clone(), None)
         .unwrap();
     assert_eq!(rows, eager_query(&eager, input));
-    assert_eq!(stats.index_used, IndexUsed::Ordered);
-    assert_eq!(stats.candidate_rows, 4);
+    assert_eq!(stats.index_used, IndexUsed::None);
+    assert_eq!(stats.candidate_rows, 11);
     let input = filtered(json!({"source": "live", "timestamp": {"$startsWith": "2026-01"}}));
     let (rows, stats) = lazy
         .query_with_stats("heartrate", input.clone(), None)
         .unwrap();
     assert_eq!(rows, eager_query(&eager, input));
-    assert_ne!(stats.index_used, IndexUsed::None);
-    assert!(stats.candidate_rows < resident_len(&lazy));
+    assert_eq!(stats.index_used, IndexUsed::None);
+    assert_eq!(stats.candidate_rows, 11);
 }
 
 #[test]
-fn watches_pin_the_partitions_their_filter_touches() {
+fn watches_deliver_changes_without_pinning_partitions() {
     let dir = tempfile::tempdir().unwrap();
     seed(dir.path());
     let lazy = open_lazy(dir.path(), policy(1, FullScanPolicy::Error));
@@ -734,12 +738,10 @@ fn watches_pin_the_partitions_their_filter_touches() {
     for prefix in ["2026-02", "2026-03", "2026-04"] {
         lazy_query(&lazy, month(prefix));
         let resident = loaded(&lazy);
-        assert!(resident.contains(&"2026-01".to_owned()), "{resident:?}");
-        assert_eq!(resident.len(), 2, "{resident:?}");
+        assert!(resident.is_empty(), "{resident:?}");
     }
     let status = lazy.lazy_partition_status(SOURCE).unwrap().unwrap();
-    assert_eq!(status.pinned.len(), 1);
-    assert!(status.pinned[0].ends_with("2026-01.jsonl"));
+    assert!(status.pinned.is_empty());
     // An append into the pinned partition reaches the watch.
     lazy.mutate(|db| db.create("heartrate", sample("2026-01-10T07:00:00.000Z", 1)))
         .unwrap();
@@ -750,7 +752,7 @@ fn watches_pin_the_partitions_their_filter_touches() {
     });
     drop(watch);
     lazy_query(&lazy, month("2026-02"));
-    assert_eq!(loaded(&lazy), ["2026-02"]);
+    assert!(loaded(&lazy).is_empty());
     assert!(lazy
         .lazy_partition_status(SOURCE)
         .unwrap()
@@ -788,8 +790,8 @@ fn appends_into_unloaded_evicted_and_new_partitions() {
             .unwrap(),
         first
     );
-    assert_eq!(loaded(&lazy), ["2026-01"]);
-    assert_eq!(reads.lock().unwrap().len(), 1);
+    assert!(loaded(&lazy).is_empty());
+    assert_eq!(reads.lock().unwrap().len(), MONTHS.len());
     let after = fs::read(&january).unwrap();
     assert!(after.starts_with(&before));
     assert_eq!(
@@ -809,7 +811,7 @@ fn appends_into_unloaded_evicted_and_new_partitions() {
     assert!(matches!(error, EngineError::DuplicateKey(_)), "{error:?}");
     // A stored record of the (now evicted) target partition is checked too.
     lazy_query(&lazy, month("2026-02"));
-    assert_eq!(loaded(&lazy), ["2026-02"]);
+    assert!(loaded(&lazy).is_empty());
     let mut existing = all[25].clone();
     assert!(existing["timestamp"]
         .as_str()
@@ -824,25 +826,30 @@ fn appends_into_unloaded_evicted_and_new_partitions() {
 
     // Evicted partition, in a batch with another partition.
     lazy_query(&lazy, month("2026-03"));
-    assert_eq!(loaded(&lazy), ["2026-03"]);
+    assert!(loaded(&lazy).is_empty());
     let second = sample("2026-01-21T08:00:00.000Z", 101);
     let third = sample("2026-03-21T08:00:00.000Z", 102);
     lazy.mutate(|db| db.create_many("heartrate", vec![second.clone(), third.clone()]))
         .unwrap();
-    assert_eq!(loaded(&lazy).len(), 1);
+    assert!(loaded(&lazy).is_empty());
 
     // New partition: no file to read; the file is created.
-    let reads_before = reads.lock().unwrap().values().sum::<usize>();
+    let september = root(dir.path()).join("2026-09.jsonl");
+    assert!(!reads
+        .lock()
+        .unwrap()
+        .contains_key(september.to_str().unwrap()));
     let new = sample("2026-09-01T00:00:00.000Z", 103);
     lazy.mutate(|db| db.create("heartrate", new.clone()))
         .unwrap();
-    assert_eq!(reads.lock().unwrap().values().sum::<usize>(), reads_before);
-    let september = root(dir.path()).join("2026-09.jsonl");
+    // Global index refresh can read other files, but the absent target cannot be read.
+    // Post-commit proofs may read the newly created file.
+    assert!(september.exists());
     assert_eq!(
         fs::read_to_string(&september).unwrap(),
         format!("{}\n", serde_json::to_string(&new).unwrap())
     );
-    assert_eq!(loaded(&lazy), ["2026-09"]);
+    assert!(loaded(&lazy).is_empty());
     assert_eq!(
         lazy_query(&lazy, filtered(json!({"timestamp": {"$gte": "2026-09"}}))),
         vec![new.clone()]
@@ -1096,7 +1103,7 @@ fn external_files_are_listed_and_loaded_partitions_refresh_while_lazy() {
             .try_recv()
             .is_ok_and(|value| value.as_array().is_some_and(|rows| rows.len() == 2))
     });
-    assert!(loaded(&lazy).contains(&"2026-06".to_owned()));
+    assert!(loaded(&lazy).is_empty());
     // A new file no watch covers is listed, not loaded.
     write_partition(dir.path(), "2027-01", &[sample("2027-01-02T00:00:00Z", 10)]);
     wait_until("the uncovered file in the listing", || {
@@ -1125,14 +1132,9 @@ fn external_files_are_listed_and_loaded_partitions_refresh_while_lazy() {
     content.push_str(&serde_json::to_string(&sample("2026-03-30T00:00:00Z", 11)).unwrap());
     fs::write(&march, content).unwrap();
     wait_until("the changed partition", || {
-        lazy.read(|db| {
-            Ok(db
-                .collection("heartrate")
-                .unwrap()
-                .get("heartrate:2026-03-30T00:00:00Z")
-                .is_some())
-        })
-        .unwrap()
+        lazy_query(&lazy, month("2026-03"))
+            .iter()
+            .any(|row| row["id"] == "heartrate:2026-03-30T00:00:00Z")
     });
     assert_eq!(lazy_query(&lazy, month("2026-03")).len(), 12);
     lazy.close().unwrap();
@@ -1165,14 +1167,14 @@ fn explicit_reload_drops_removed_files_and_lists_new_ones() {
 // ── Review regressions ───────────────────────────────────────────────────────
 
 #[test]
-fn unchanged_reload_keeps_loaded_records_and_identical_retries_write_nothing() {
+fn unchanged_reload_keeps_query_results_and_identical_retries_write_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let all = seed(dir.path());
     let lazy = open_lazy(dir.path(), policy(2, FullScanPolicy::Error));
     let before = lazy_query(&lazy, month("2026-01"));
     assert_eq!(before.len(), 11);
     lazy.reload().unwrap();
-    assert_eq!(resident_len(&lazy), 11, "reload dropped the loaded records");
+    assert_eq!(resident_len(&lazy), 0);
     assert_eq!(lazy_query(&lazy, month("2026-01")), before);
     // An identical retry of a stored record must not append a duplicate ID.
     let january = root(dir.path()).join("2026-01.jsonl");
@@ -1249,10 +1251,7 @@ fn a_watched_new_partition_that_fails_to_load_is_retried_after_it_is_corrected()
     });
     assert!(lazy.last_reload_error().unwrap().is_none());
     let status = lazy.lazy_partition_status(SOURCE).unwrap().unwrap();
-    assert!(status
-        .pinned
-        .iter()
-        .any(|path| path.ends_with("2026-06.jsonl")));
+    assert!(status.pinned.is_empty());
     lazy.close().unwrap();
 }
 
@@ -1276,7 +1275,7 @@ fn full_scan_error_applies_to_empty_and_fully_loaded_collections() {
     for (prefix, _) in MONTHS {
         lazy_query(&lazy, month(prefix));
     }
-    assert_eq!(loaded(&lazy).len(), MONTHS.len());
+    assert!(loaded(&lazy).is_empty());
     for input in [QueryInput::default(), filtered(json!({"bpm": 60}))] {
         let error = lazy.query("heartrate", input, None).unwrap_err();
         assert_eq!(operation_reason(&error), "lazy-full-scan");
@@ -1410,9 +1409,12 @@ fn a_conflicting_create_into_a_new_watched_partition_rolls_back_and_keeps_its_re
     assert_eq!(fs::read(&june).unwrap(), bytes);
     assert_eq!(lazy_query(&lazy, month("2026-06")), vec![a.clone()]);
     assert_eq!(
-        lazy.find_by_id("heartrate", a["id"].as_str().unwrap())
-            .unwrap(),
-        Some(a.clone())
+        operation_reason(
+            &lazy
+                .find_by_id("heartrate", a["id"].as_str().unwrap())
+                .unwrap_err()
+        ),
+        "lazy-full-scan"
     );
     wait_for_watch(&watch, std::slice::from_ref(&a));
     lazy.close().unwrap();
@@ -1497,7 +1499,7 @@ fn a_conflicting_cold_append_rolls_back_and_keeps_the_loaded_partition() {
         .unwrap_err();
     assert!(matches!(error, EngineError::DuplicateKey(_)), "{error:?}");
     assert_eq!(fs::read(&january).unwrap(), bytes);
-    assert_eq!(loaded(&lazy), ["2026-01"]);
+    assert!(loaded(&lazy).is_empty());
     let rows = lazy_query(&lazy, month("2026-01"));
     assert_eq!(rows.len(), 11);
     assert!(rows.contains(&all[25]));
@@ -1541,9 +1543,10 @@ fn dropping_the_last_covering_watch_stops_retrying_a_failed_partition() {
             .is_some_and(|error| error.to_string().contains("wrong partition"))
     });
     let reads_of_june = || reads.lock().unwrap().get(&june).copied().unwrap_or(0);
-    // While a watch covers June, the watcher keeps checking the file.
+    // A surviving watch retries when the failed file generation changes.
     drop(first);
     let before = reads_of_june();
+    fs::write(&june, "{broken changed generation}\n").unwrap();
     wait_until("the watcher to read the pending file again", || {
         reads_of_june() > before
     });
@@ -1593,7 +1596,7 @@ fn bounded_queries_keep_global_natural_sort_page_cursor_search_and_selection_sem
                     assert_eq!(rows, eager_query(&eager, input.clone()), "{input:?}");
                     assert!(stats.partitions_resident <= bound);
                     assert_eq!(stats.pinned_partitions, 0);
-                    assert_eq!(stats.retained_partition_limit, bound);
+                    assert_eq!(stats.retained_partition_limit, 0);
                 }
             }
         }
@@ -1696,25 +1699,20 @@ fn bounded_load_errors_pins_and_duplicates_across_evicted_partitions_are_not_hid
     let (_, stats) = lazy
         .query_bounded_with_stats("heartrate", QueryInput::default())
         .unwrap();
-    assert_eq!(stats.pinned_partitions, 1);
-    assert_eq!(stats.partitions_resident, 2);
-    drop(watch);
-    let (_, stats) = lazy
-        .query_bounded_with_stats("heartrate", QueryInput::default())
-        .unwrap();
     assert_eq!(stats.pinned_partitions, 0);
-    assert_eq!(stats.partitions_resident, 1);
-    let last = loaded(&lazy)[0].clone();
+    assert_eq!(stats.partitions_resident, 0);
+    let initial = watch.recv().unwrap();
+    let last = "2025-11".to_owned();
     let path = root(dir.path()).join(format!("{last}.jsonl"));
     fs::write(&path, "broken\n").unwrap();
     assert!(lazy.reload().is_err());
+    assert!(lazy.query_bounded("heartrate", month(&last)).is_err());
+    assert_eq!(initial.as_array().unwrap().len(), 11);
     assert!(
-        !lazy
-            .query_bounded("heartrate", month(&last))
-            .unwrap()
-            .is_empty(),
-        "failed reload keeps last known good"
+        watch.try_recv().is_err(),
+        "invalid reload must not replace the last delivery"
     );
+    drop(watch);
     // A malformed *incoming* partition must fail even for a zero-result filter.
     let bad = root(dir.path()).join("2025-11.jsonl");
     fs::write(&bad, "broken\n").unwrap();
@@ -1724,7 +1722,7 @@ fn bounded_load_errors_pins_and_duplicates_across_evicted_partitions_are_not_hid
             .tag(),
         "SerializationError"
     );
-    assert_eq!(loaded(&lazy), [last]);
+    assert!(loaded(&lazy).is_empty());
     lazy.close().unwrap();
     seed(dir.path());
     let mut a = sample("2025-11-01T00:00:00Z", 1);
@@ -1754,7 +1752,7 @@ fn bounded_load_errors_pins_and_duplicates_across_evicted_partitions_are_not_hid
 }
 
 #[test]
-fn bounded_windows_read_each_file_at_most_once_and_warm_hits_keep_lru_and_indexes() {
+fn bounded_windows_scan_each_selected_file_and_keep_no_read_cache() {
     let dir = tempfile::tempdir().unwrap();
     seed(dir.path());
     let eager = open_eager(dir.path());
@@ -1774,28 +1772,27 @@ fn bounded_windows_read_each_file_at_most_once_and_warm_hits_keep_lru_and_indexe
         .query_bounded_with_stats("heartrate", input.clone())
         .unwrap();
     assert_eq!(rows, eager_query(&eager, input));
-    assert_eq!(stats.partitions_read, 2);
-    assert_eq!(reads.lock().unwrap().len(), 2);
-    assert!(reads.lock().unwrap().values().all(|count| *count == 1));
-    assert_eq!(loaded(&lazy), ["2026-03"]);
+    assert_eq!(stats.partitions_read, 3);
+    assert_eq!(reads.lock().unwrap().len(), 3);
+    assert!(loaded(&lazy).is_empty());
     let warm = open_lazy(dir.path(), policy(2, FullScanPolicy::Allow));
     warm.query_bounded("heartrate", month("2025-11")).unwrap();
     warm.query_bounded("heartrate", month("2025-12")).unwrap();
     let (_, stats) = warm
         .query_bounded_with_stats("heartrate", month("2025-11"))
         .unwrap();
-    assert_eq!(stats.partitions_read, 0);
+    assert_eq!(stats.partitions_read, 1);
     warm.query_bounded("heartrate", month("2026-01")).unwrap();
-    assert_eq!(loaded(&warm), ["2025-11", "2026-01"]);
+    assert!(loaded(&warm).is_empty());
     let (_, stats) = warm
         .query_with_stats("heartrate", month("2026-01"), None)
         .unwrap();
-    assert_eq!(stats.index_used, IndexUsed::Ordered);
-    assert_eq!(stats.partitions_read, 0);
+    assert_eq!(stats.index_used, IndexUsed::None);
+    assert_eq!(stats.partitions_read, 1);
 }
 
 #[test]
-fn bounded_id_checks_include_the_initial_cache_outside_the_query_scope() {
+fn bounded_id_checks_ignore_previous_queries_outside_the_scope_but_check_global_creates() {
     let dir = tempfile::tempdir().unwrap();
     let all = seed(dir.path());
     let lazy = open_lazy(dir.path(), policy(2, FullScanPolicy::Allow));
@@ -1804,13 +1801,23 @@ fn bounded_id_checks_include_the_initial_cache_outside_the_query_scope() {
         filtered(json!({"timestamp":{"$gte":"2025-11","$lt":"2025-12-31T23:59:59.999999Z"}})),
     )
     .unwrap();
-    assert_eq!(loaded(&lazy), ["2025-11", "2025-12"]);
+    assert!(loaded(&lazy).is_empty());
     let mut row = sample("2026-04-15T00:00:00Z", 1);
     row["id"] = all[0]["id"].clone();
     write_partition(dir.path(), "2026-04", &[row]);
     let input = filtered(json!({"timestamp":{"$gte":"2026-01","$lt":"2026-05"}}));
+    let rows = lazy.query_bounded("heartrate", input).unwrap();
+    assert!(rows.iter().any(|row| row["id"] == all[0]["id"]));
     assert_eq!(
-        lazy.query_bounded("heartrate", input).unwrap_err().tag(),
+        lazy.query_bounded("heartrate", QueryInput::default())
+            .unwrap_err()
+            .tag(),
+        "SourceConfigError"
+    );
+    assert_eq!(
+        lazy.mutate(|db| db.create("heartrate", sample("2026-04-16T00:00:00Z", 2)))
+            .unwrap_err()
+            .tag(),
         "SourceConfigError"
     );
 }
