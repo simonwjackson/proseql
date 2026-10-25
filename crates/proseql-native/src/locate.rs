@@ -216,6 +216,18 @@ fn lookup(
     Ok(None)
 }
 
+/// Called once when a runtime is assembled (`NativeRuntime::from_loaded`),
+/// before any operation, with the runtime's final format registry. Store in
+/// each lazy collection's `IndexState` whatever codec context it needs (for
+/// example whether the source's codec is the built-in JSONL codec, the
+/// registry, the source and collection config, and `sources.callbacks`).
+/// Reloads move the configured state (`lazy_adopt`).
+pub(crate) fn configure_streaming_index(
+    _sources: &mut crate::sources::SourceState,
+    _formats: &std::sync::Arc<proseql_formats::FormatRegistry>,
+) {
+}
+
 impl NativeRuntime {
     pub(crate) fn streaming_find_by_id(
         &self,

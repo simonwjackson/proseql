@@ -388,6 +388,29 @@ pub(crate) fn capture_commit(state: &mut RuntimeState) {
     }
 }
 
+/// A failed mutation can still discover valid external rows. Keep the
+/// original mutation error, but let watches accept that external generation.
+pub(crate) fn capture_external(state: &mut RuntimeState) {
+    let Some(sources) = state.sources.as_mut() else {
+        return;
+    };
+    for lazy in sources.lazy.values_mut() {
+        if lazy.execution_model != ExecutionModel::Streaming {
+            continue;
+        }
+        lazy.stream.watch.prune();
+        let paths = covered_paths(lazy);
+        if let Ok(current) = observe(state.host.as_ref(), &paths) {
+            if current != lazy.stream.watch.baseline {
+                lazy.stream.index = Default::default();
+                lazy.stream.watch.baseline = current;
+                lazy.stream.watch.changed();
+                lazy.stream.watch.reload_pending = true;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod metrics {
     use super::*;
@@ -552,29 +575,6 @@ mod metrics {
             prune(lazy);
             assert!(lazy.stream.watch.baseline.is_empty());
             assert!(lazy.stream.watch.entries.is_empty());
-        }
-    }
-}
-
-/// A failed mutation can still discover valid external rows. Keep the
-/// original mutation error, but let watches accept that external generation.
-pub(crate) fn capture_external(state: &mut RuntimeState) {
-    let Some(sources) = state.sources.as_mut() else {
-        return;
-    };
-    for lazy in sources.lazy.values_mut() {
-        if lazy.execution_model != ExecutionModel::Streaming {
-            continue;
-        }
-        lazy.stream.watch.prune();
-        let paths = covered_paths(lazy);
-        if let Ok(current) = observe(state.host.as_ref(), &paths) {
-            if current != lazy.stream.watch.baseline {
-                lazy.stream.index = Default::default();
-                lazy.stream.watch.baseline = current;
-                lazy.stream.watch.changed();
-                lazy.stream.watch.reload_pending = true;
-            }
         }
     }
 }
