@@ -96,32 +96,32 @@ mod tests {
     fn real_backends_agree_on_rows_groups_and_identical_duplicates() -> Result<(),Error> {
         let tmp = tempfile::tempdir()?;
         let root = tmp.path().join("fixture");
-        fixture::prepare(&root,Some(120))?;
+        let native_root = tmp.path().join("native");
+        let spike_root = tmp.path().join("spike");
+        for path in [&root, &native_root, &spike_root] {fixture::prepare(path,Some(1000))?;}
         for kind in fixture::KINDS {
             let mut sqlite = Backend::open(&root,"sqlite",kind)?;
-            let mut native = Backend::open(&root,"proseql",kind)?;
-            let mut spike = Backend::open(&root,"spike",kind)?;
+            let mut native = Backend::open(&native_root,"proseql",kind)?;
+            let mut spike = Backend::open(&spike_root,"spike",kind)?;
             for workload in ["point","hour","month","ten"] {
                 let expected = sqlite.run(&root,kind,workload)?;
                 assert!(expected.count > 0);
-                assert_eq!(expected,native.run(&root,kind,workload)?,"native {kind} {workload}");
-                assert_eq!(expected,spike.run(&root,kind,workload)?,"spike {kind} {workload}");
+                assert_eq!(expected,native.run(&native_root,kind,workload)?,"native {kind} {workload}");
+                assert_eq!(expected,spike.run(&spike_root,kind,workload)?,"spike {kind} {workload}");
             }
-            // Each text implementation needs independent bytes for append parity.
-            drop(native);drop(spike);
             let expected = sqlite.run(&root,kind,"append")?;
-            let mut spike = Backend::open(&root,"spike",kind)?;
-            assert_eq!(expected,spike.run(&root,kind,"append")?);
-            // Reopen native on scanner-written data: all 1,000 now exist, exactly.
-            let mut native = Backend::open(&root,"proseql",kind)?;
-            assert_eq!(expected,native.run(&root,kind,"append")?);
-            // Replay again and validate the stale/unsorted sparse index fallback.
-            assert_eq!(expected,spike.run(&root,kind,"append")?);
-            let mut spike = Backend::open(&root,"spike",kind)?;
+            assert_eq!(expected,spike.run(&spike_root,kind,"append")?);
+            assert_eq!(expected,native.run(&native_root,kind,"append")?);
+            // Replays verify exact duplicates; reopen validates rebuilt unsorted indexes.
+            assert_eq!(expected,sqlite.run(&root,kind,"append")?);
+            assert_eq!(expected,spike.run(&spike_root,kind,"append")?);
+            assert_eq!(expected,native.run(&native_root,kind,"append")?);
+            drop(spike);
+            let mut spike = Backend::open(&spike_root,"spike",kind)?;
             for workload in ["point","hour","month","ten"] {
                 let expected = sqlite.run(&root,kind,workload)?;
-                assert_eq!(expected,spike.run(&root,kind,workload)?);
-                assert_eq!(expected,native.run(&root,kind,workload)?);
+                assert_eq!(expected,spike.run(&spike_root,kind,workload)?);
+                assert_eq!(expected,native.run(&native_root,kind,workload)?);
             }
         }
         Ok(())
@@ -145,6 +145,15 @@ mod tests {
         q.from = "2025-05-01T00:12:00.000Z";
         q.to = "2025-05-01T00:13:00.000Z";
         assert_eq!(scan.query(&q)?.count,602);
+        // Sort the same records so repeated timestamps cross sparse block boundaries.
+        let mut rows = std::fs::read_to_string(&path)?.lines().map(serde_json::from_str::<serde_json::Value>).collect::<Result<Vec<_>,_>>()?;
+        rows.sort_by(|a,b| a["atUtc"].as_str().cmp(&b["atUtc"].as_str()));
+        let mut out = std::fs::File::create(&path)?;
+        for row in rows {writeln!(out,"{row}")?;}
+        out.sync_data()?;
+        assert_eq!(spike::Scanner::open(&root,"samples")?.query(&q)?.count,602);
+        std::fs::remove_file(path.with_extension("sparse.json"))?;
+        assert_eq!(spike::Scanner::open(&root,"samples")?.query(&q)?.count,602);
         // Corrupt sidecar is disposable, not an authoritative answer source.
         std::fs::write(path.with_extension("sparse.json"),"broken")?;
         assert_eq!(spike::Scanner::open(&root,"samples")?.query(&q)?.count,602);
