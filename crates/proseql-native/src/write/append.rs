@@ -384,7 +384,7 @@ pub(crate) fn after_commit(state: &mut RuntimeState) {
             && record_committed(&mut lazy.stream.index, state.host.as_ref(), &append.starts)
                 .is_err()
         {
-            lazy.stream.index = Default::default();
+            lazy.stream.index.invalidate();
         }
         let _ = state
             .database

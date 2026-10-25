@@ -73,6 +73,16 @@ pub(crate) struct IndexState {
 }
 
 impl IndexState {
+    /// Drop every derived index (time indexes, ID locator, validated
+    /// generations) after the sources changed, but keep the codec context
+    /// configured at runtime assembly. Use this instead of replacing the
+    /// state with `Default::default()`, which would lose that context.
+    pub fn invalidate(&mut self) {
+        self.times.clear();
+        self.ids = None;
+        self.validated.clear();
+    }
+
     // called by exec/append; removed at integration
     #[allow(dead_code)]
     pub fn time_index(

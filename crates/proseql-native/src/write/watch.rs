@@ -334,7 +334,7 @@ pub(crate) fn refresh_collection(
             .any(|check| *check != GenerationCheck::Unchanged);
     lazy.known = listed;
     if changed {
-        lazy.stream.index = Default::default();
+        lazy.stream.index.invalidate();
         watch.changed();
         watch.reload_pending = true;
         // Failed bytes are also baselined: retry only after another change.
@@ -402,7 +402,7 @@ pub(crate) fn capture_external(state: &mut RuntimeState) {
         let paths = covered_paths(lazy);
         if let Ok(current) = observe(state.host.as_ref(), &paths) {
             if current != lazy.stream.watch.baseline {
-                lazy.stream.index = Default::default();
+                lazy.stream.index.invalidate();
                 lazy.stream.watch.baseline = current;
                 lazy.stream.watch.changed();
                 lazy.stream.watch.reload_pending = true;
