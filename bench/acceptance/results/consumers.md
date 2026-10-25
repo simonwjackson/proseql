@@ -169,3 +169,82 @@ Full integrated logs are on aka under `/home/simonwjackson/work/qws-logs/consume
 Cleanup removed and checked the absence of all 15 owned directories used for this verification: `qws-harness-{coach,logbook,proseql}`, both consumer target/temp directories, the harness tooling/target, the temporary Streaming Logbook source/temp directories, and both consumers tooling/target pairs (`qws-consumers` and `qws-consumers-monitor`). Only the verification logs above remain from these runs on aka. The earlier unused pinned Git mirror was not touched.
 
 This change updates only this report. `git diff --check` passed. Typecheck and code lint do not apply to the Markdown-only change; the configured Biome inputs exclude Markdown. No project-wide suite was rerun by this worker. Remaining adoption work and allocation costs are listed in the design notes; this experiment does not prove those proposed consumer repairs or real-data performance.
+
+## Round 2 (bd22cf4)
+
+**Verified on aka, 2026-10-25:** unedited Coach and the Logbook adoption branch match the expected passing counts against `bd22cf4d230fd67c3ca02e60096417506929549f`. Unedited Logbook compiles but reproduces all 60 historical Streaming failures. Lazy collections now always stream; the Resident-default conclusions above apply only to round 1. Neither deprecated `ExecutionModel` variant restores lazy residency.
+
+| Consumer source | Consumer commit | Original ProseQL pin | Build, all targets | Full workspace tests |
+|---|---|---|---|---|
+| Coach, unedited | `06719890e27212cf61fa77987dc4432cd68f1dd4` | `0e3666a` | pass, exit 0 | 27 passed, 0 failed, 0 ignored; exit 0 |
+| Logbook, `streaming-adoption` | `ad70bd9464f72b4a53a42f83feb1118f34fd0ad5` | `9a11d36` | pass, exit 0 | 221 passed, 0 failed, 2 ignored; exit 0 |
+| Logbook, unedited | `5dbb01551ecc9ff9530e9e193e60a48daedd025c` | `9a11d36` | pass, exit 0 | 159 passed, 60 failed, 2 ignored; exit 101 |
+
+Coach matches round 1's 27 passes. The adoption branch matches the cutover's 221 passes and 2 ignores. Unedited Logbook matches round 1's informational Streaming experiment, not its Resident-default pass. The two existing Logbook measurements remain ignored; none was enabled or newly ignored here.
+
+### Commands and source verification
+
+The documented runner archived committed code and synthetic fixtures only. The originals and the read-only scratch clone were not edited:
+
+```sh
+# zao: Git/archive/transport only; builds and tests execute on aka.
+QWS_WORKER=consumers2 \
+  QWS_LOGBOOK_REPO=/tmp/forgerie-scratch/f-ad87c1da/logbook-r2 \
+  bash scripts/consumers/run.sh "$PWD"
+QWS_WORKER=consumers2 bash scripts/consumers/run.sh "$PWD"
+```
+
+Both runs supplied the exact integrated SHA above. Builds used `cargo --config <patch> build --workspace --all-targets`; passing tests used `timeout 1200 cargo --config <patch> test --workspace -- --test-threads=1`. The final unedited Logbook run used `--no-fail-fast` to execute every workspace target after failures. All runs used the Nix dev shell, disabled remote builders, nice 10, `CARGO_BUILD_JOBS=2`, `RUSTFLAGS='-C target-cpu=x86-64-v2'`, separate consumer targets and synthetic filesystem temporary data. No consumer server was launched.
+
+**Setup correction:** switching from the adoption archive to the older unedited archive exposed a runner cache bug. Git archive preserves old mtimes, while the runner reuses the same Cargo target. The initial unedited build finished in 0.09 seconds and replayed adoption-only deprecation warnings even though the copied source had no `ExecutionModel`. Its tests were stopped and excluded. On aka, `find . -type f -exec touch {} +` in the owned unedited Logbook copy invalidated inputs without changing contents. The corrected build recompiled all Logbook packages in 22.93 seconds, then ran the complete `--no-fail-fast` suite above. No source repair was needed. Follow-up: key harness targets by consumer/source revision or invalidate archive mtimes when switching revisions; otherwise repeated compatibility runs can report stale results.
+
+`cargo tree` confirmed all four `proseql-*` crates resolved to the supplied path overrides. Before and after the runs, Git content hashes matched all 199 checked runtime, harness and flake files against `bd22cf4`. Recursive consumer-source comparisons matched the committed snapshots, excluding only expected copy-local `Cargo.lock` resolution changes. Touching unedited-copy mtimes did not change file contents.
+
+### ProseQL build warnings
+
+| Build | ProseQL crate warnings | ProseQL API warnings in consumer code |
+|---|---:|---|
+| Coach, unedited | 0 | 0 |
+| Logbook, adoption branch | 0 | 6 distinct deprecation sites: 4 library sites plus 2 test sites |
+| Logbook, unedited, forced rebuild | 0 | 0 |
+
+All six adoption warnings are in `crates/logbook-core/src/storage.rs`:
+
+| Site | Deprecated item |
+|---|---|
+| `10:5` | import of `proseql_native::ExecutionModel` |
+| `33:32` | `ExecutionModel` type on `STORAGE_EXECUTION_MODEL` |
+| `33:65` | `ExecutionModel::Streaming` constant value |
+| `1412:9` | `NativeSourceRuntimeOptions::execution_model` field |
+| `1767:55` | `ExecutionModel::Streaming` in a test |
+| `2118:55` | `ExecutionModel::Streaming` in a test |
+
+The enum/variant message is `Lazy collections always stream; remove the execution_model setting`. The field message is `Lazy collections always stream; omit this setting`. Cargo reports 4 library warnings and 6 library-test warnings (4 duplicates); this is six distinct source sites, not ten distinct warnings. Removing the redundant selector clears these warnings but does not replace residency-dependent reads.
+
+### Unedited Logbook migration impact
+
+**Verified:** the 60 failed test names exactly match the complete round-1 Streaming failure list above, across the same 13 targets. Every first panic site matches too, accounting for round 1's one-line temporary option insertion in `storage.rs`. Of the panic messages, 59 are byte-identical; the remaining message differs only in the print order of the same two expected set members. There are no additional failed tests or unexpected dependency classes.
+
+| Adoption-notes class | Failed tests | Observed failure / required migration |
+|---|---:|---|
+| H — query hydration | 38 | `missing-collection`: `bounded month query did not retain its partition`. Hydrate returned query rows, not engine residency. |
+| R — residency assertions | 4 | Zero loaded/resident partitions instead of one. Assert durable query results and zero lazy residency. |
+| D — duplicate and selector checks | 8 | Existing samples appear new or retries hit `DuplicateKeyError`. Query candidate IDs, raw links and comparison fields. |
+| L — latest rebuild | 1 | Converted sample intervals resolve to an empty list. Fold returned sample rows. |
+| S — raw heads and supersession | 9 | Missing superseded membership, stale projections or extra revisions. Fold returned raw head fields; preserve eager membership reads. |
+
+These are the five historical [adoption-note classes](../../../docs/design/query-while-scanning.md#historical-adoption-audit-at-logbook-5dbb01551ecc9ff9530e9e193e60a48daedd025c), not new engine failures. A pin-only upgrade is unsafe for unported Logbook: compilation succeeds with no warning, but its residency-dependent reads and writes fail. The adoption branch passes against this same engine without relaxing `FullScanPolicy::Error`. This verifies synthetic consumer contracts, not real-data performance or deployment.
+
+### Evidence, cleanup and checks
+
+Full logs and analysis remain on aka at `/home/simonwjackson/work/qws-logs/consumers-bd22cf4/`:
+
+- `adoption/`: both passing builds/tests, commands, path patches and resolved dependency trees.
+- `unedited/`: forced rebuild, full failing suite, commands, dependency tree and exit statuses.
+- `summary.json`, `unedited-failures.md`, `unedited-failure-blocks.txt`, `panic-message-comparison.json`, `panic-site-comparison.json` and the analysis script.
+- `warnings.txt`, `source-checks.txt`, both consumer-source comparisons, source manifest, provenance and `cleanup.txt`.
+- `stale-cache-attempt/`: excluded setup-attempt logs and explanation.
+
+**Verified cleanup:** all nine used aka copy/target/temp directories are absent: `qws-harness-{coach,logbook,proseql}`, `qws-harness-{coach,logbook}-{target,tmp}`, and `qws-consumers2{,-target}`. Only the verification logs remain from this worker. Prior workers' unrelated workspaces were not removed. No real health data, rakku or yari was accessed. Neither original consumer, the adoption scratch clone nor engine code was changed. No push or deployment occurred.
+
+Only this Markdown report changed. `git diff --check` passed. Typecheck and code lint do not apply; Biome excludes Markdown. All consumer builds, tests and result analysis ran on aka. No project-wide suite was run by this worker. The harness timestamp invalidation is a tooling follow-up; the required Logbook migration is demonstrated above.
