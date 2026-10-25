@@ -25,7 +25,7 @@ Write only to files you own. A change to a binding signature goes through the pa
 | Seam (binding items) | Owner | Files you own |
 |---|---|---|
 | `scan::{RowLocation, RawRow, RowSource, SliceLines, unimplemented_seam}` | parent | `proseql-engine/src/scan/mod.rs` above the `executor` marker |
-| Executor: decode, filter, select, sort/top-k, limit, cursor, group, aggregate on borrowed rows; per-query arena | `exec` | `proseql-engine/src/scan/` below the marker and new files there; `proseql-native/src/streaming.rs` |
+| Executor: decode, filter, select, sort/top-k, limit, cursor, group, aggregate on borrowed rows; per-query arena | `exec` | `proseql-engine/src/scan/` below the marker and new files there; `proseql-native/src/streaming.rs`; additive `pub(crate)` visibility and accessors only in `proseql-engine/src/query/` |
 | `readers::{ByteChunks, SliceChunks, HostChunks}`; `StorageHost::{read_range, stat}` defaults | parent | `proseql-storage/src/readers/mod.rs` above the marker |
 | Chunked JSONL line framer (`ByteChunks` → `RowSource`), host overrides of `read_range`/`stat`, WASM chunk path, YAML bound | `formats` | `readers/` below the marker and new files there; `proseql-storage/src/fs.rs`; `proseql-wasm/src/**`; `packages/**` for the browser path |
 | `generation::{SourceGeneration, GenerationCheck}`; `index::{TimeIndex, SeekRange, IdLocator}` public methods | `index` | `proseql-storage/src/generation.rs`, `proseql-storage/src/index/**`, `proseql-native/src/locate.rs` |
