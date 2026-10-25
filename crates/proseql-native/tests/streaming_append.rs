@@ -170,7 +170,6 @@ fn rejected_batch_unloads_candidates_and_leaves_engine_and_disk_empty_of_new_row
 }
 
 #[test]
-#[ignore = "needs mutate's streaming watch; un-ignored at integration"]
 fn a_watch_sees_the_create_but_not_the_silent_engine_removal() {
     let fixture = ParityFixture::new(1440);
     let runtime = fixture.open(ExecutionModel::Streaming);
