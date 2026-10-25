@@ -1,0 +1,7 @@
+{
+  "stride": 16,
+  "index_bytes": 1495550,
+  "original_stride": 256,
+  "original_index_bytes": 115338,
+  "correct_against_main_matrix": true
+}
