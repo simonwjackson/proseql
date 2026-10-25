@@ -1,0 +1,24 @@
+[package]
+name = "proseql-acceptance"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Intentionally not a production workspace member.
+[workspace]
+
+[features]
+heap-meter = []
+
+[dependencies]
+proseql-native = { path = "../../crates/proseql-native" }
+proseql-engine = { path = "../../crates/proseql-engine" }
+proseql-storage = { path = "../../crates/proseql-storage" }
+indexmap = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

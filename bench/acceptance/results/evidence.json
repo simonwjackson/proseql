@@ -1,0 +1,58 @@
+{
+  "run": "20261025T084930Z",
+  "measurement_source_sha": "cacf9850615e1529fafb8adc7fddfa1ccea1e3d5",
+  "engine_base_sha": "11b3b80a398c985b3c2bf8fb915bd647e99d27f5",
+  "trials": 324,
+  "successful": 312,
+  "returncodes": {
+    "0": 312,
+    "-9": 12
+  },
+  "skipped_after_kill": 36,
+  "cold_trials_with_resident_pages_before": 0,
+  "successful_appends_verified": 32,
+  "streaming_target_verdicts": {
+    "miss": 26,
+    "pass": 5
+  },
+  "consumer_totals": {
+    "pinned": {
+      "coach": {
+        "passed": 27,
+        "failed": 0,
+        "ignored": 0
+      },
+      "logbook": {
+        "passed": 219,
+        "failed": 0,
+        "ignored": 2
+      }
+    },
+    "main": {
+      "coach": {
+        "passed": 27,
+        "failed": 0,
+        "ignored": 0
+      },
+      "logbook": {
+        "passed": 219,
+        "failed": 0,
+        "ignored": 2
+      }
+    },
+    "qws-base": {
+      "coach": {
+        "passed": 27,
+        "failed": 0,
+        "ignored": 0
+      },
+      "logbook": {
+        "passed": 219,
+        "failed": 0,
+        "ignored": 2
+      }
+    }
+  },
+  "source_files_manifest_sha256": "1f2028f24978125ff266d863c1bd982065f3dd70f1e506416367de361ee053b9",
+  "harness_manifest_sha256": "49d2feff5f9aa974e380d88b881ede39346b888f552f58aef42ae698fe49bcbd"
+}

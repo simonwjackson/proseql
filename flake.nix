@@ -159,6 +159,7 @@
         "rust-build"
         "bench-timeseries"
         "bench-stage0"
+        "bench-acceptance"
       ];
       taskRunnerFor =
         { pkgs, tooling }:
@@ -335,6 +336,9 @@
             # (the acceptance run; data cached under /var/tmp; later flags override, e.g. --mode baseline)
             task_bench_stage0() {
               ./bench/stage0/run.sh "$@"
+            }
+            task_bench_acceptance() {
+              bash bench/acceptance/run.sh "$@"
             }
             task_bench_timeseries() {
               cargo run --release --manifest-path crates/Cargo.toml -p proseql-native --example timeseries_bench -- --rows 140000,1000000,10000000 --years 10 --mode lazy "$@"
