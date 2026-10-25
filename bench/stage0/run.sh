@@ -38,6 +38,15 @@ case "$action" in
     git fetch "$root/bench/stage0/source.bundle" HEAD
     git reset --mixed FETCH_HEAD
     ;;
+  tools)
+    {
+      nix develop --builders '' -c rustc --version
+      nix develop --builders '' -c cargo --version
+      nix develop --builders '' -c cc --version
+      getconf PAGESIZE
+      nix develop --builders '' -c ldd "$data/timing"
+    } > "$out/toolchain.log" 2>&1
+    ;;
   environment)
     {
       date -u --iso-8601=seconds
@@ -95,8 +104,12 @@ case "$action" in
     python3 bench/stage0/summarize.py "$out" > "$out/summary-check.json"
     ;;
   diagnose)
+    rm -rf -- "$data/diagnostic"
     cp -a --reflink=auto "$data/base" "$data/diagnostic"
-    scope 180 python3 bench/stage0/diagnose.py "$data" > "$out/raw-append-diagnostic.json" 2> "$out/raw-append-diagnostic.stderr"
+    # Keep the tiny observer alive when the native child is OOM-killed. The
+    # measured binary and the memory/swap/priority/time limits are unchanged.
+    systemd-run --user --scope -p MemoryMax=1G -p MemorySwapMax=0 -p OOMPolicy=continue nice -n 10 timeout 180 python3 bench/stage0/diagnose.py "$data" > "$out/raw-append-diagnostic.json" 2> "$out/raw-append-diagnostic.stderr" || test -s "$out/raw-append-diagnostic.json"
+    python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); assert r["returncode"] == -9 and r["memory_events_after"]["oom_kill"] > r["memory_events_before"]["oom_kill"]' "$out/raw-append-diagnostic.json"
     scope 180 python3 bench/stage0/diagnose.py "$data" sqlite-temp > "$out/sqlite-temp-diagnostic.json" 2> "$out/sqlite-temp-diagnostic.stderr"
     ;;
   cleanup)
@@ -104,15 +117,19 @@ case "$action" in
     rm -rf -- /home/simon/work/proseql-stage0-data
     rm -rf -- "$root/bench/stage0/target" "$root/bench/stage0/__pycache__"
     rm -f -- "$root/bench/stage0/source.bundle"
+    test ! -e /home/simon/work/proseql-stage0-data
+    test ! -e "$root/bench/stage0/target"
+    printf '%s\n' 'Verified: owned synthetic data, executable copies, Cargo target, Python bytecode and source bundle removed.' > "$out/cleanup.log"
     ;;
   all)
     bash "$0" environment
     bash "$0" build
     bash "$0" check
+    bash "$0" tools
     bash "$0" measure
     bash "$0" dense
     bash "$0" diagnose
     bash "$0" summarize
     ;;
-  *) echo 'usage: run.sh archive|task [ACTION]|checkout|environment|lock|format|build|check|measure|dense|diagnose|summarize|cleanup|all' >&2; exit 2 ;;
+  *) echo 'usage: run.sh archive|task [ACTION]|checkout|environment|tools|lock|format|build|check|measure|dense|diagnose|summarize|cleanup|all' >&2; exit 2 ;;
 esac
