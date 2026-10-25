@@ -10,7 +10,7 @@ From a committed checkout on **yari**:
 nix run --builders '' .#bench-stage0
 ```
 
-This records the environment and perf capability, checks the pinned production files, builds separate optimized timing/RSS and counting-allocator binaries, runs focused checks, prepares synthetic data, and runs the complete matrix. Nix binary-cache downloads are allowed. Distributed builders are disabled. No build or measurement is permitted on zao or rakku.
+This records the environment and perf capability, checks the pinned production files, builds separate optimized timing/RSS and counting-allocator binaries, runs focused checks, prepares synthetic data, and runs the complete matrix, a stride-16 time-index supplement, an OOM/temp-file diagnostic, and summary generation. Nix binary-cache downloads are allowed. Distributed builders are disabled. No build or measurement is permitted on zao or rakku.
 
 For the edit-on-zao/copy-to-yari workflow, commit first, then copy the worktree with rsync as requested. Because a linked worktree's `.git` pointer is not valid remotely, transfer the commits in an ignored bundle:
 
@@ -19,11 +19,11 @@ For the edit-on-zao/copy-to-yari workflow, commit first, then copy the worktree 
 git bundle create bench/stage0/source.bundle HEAD
 rsync -a --delete --exclude target --exclude node_modules --exclude .git ./ \
   simon@yari:/home/simon/work/proseql-stage0/
-ssh simon@yari /home/simon/work/proseql-stage0/bench/stage0/run.sh\ checkout
-ssh simon@yari /home/simon/work/proseql-stage0/bench/stage0/run.sh\ task\ all
+ssh simon@yari '/home/simon/work/proseql-stage0/bench/stage0/run.sh checkout'
+ssh simon@yari '/home/simon/work/proseql-stage0/bench/stage0/run.sh task all'
 ```
 
-Multi-step remote logic lives in the Nix-shebang script, not ssh command strings. The `checkout` action imports existing commits; it does not create commits on yari. The caller must create `/home/simon/work/proseql-stage0` before the first copy. A fresh run requires a nonexistent `...-data/base`; preparation refuses to overwrite data. Copy the results home before `run.sh cleanup`. Results are under `bench/stage0/results`, synthetic data and executable copies under `/home/simon/work/proseql-stage0-data`.
+Multi-step remote logic lives in the Nix-shebang script, not ssh command strings. The `checkout` action imports existing commits; it does not create commits on yari. The caller must create `/home/simon/work/proseql-stage0` before the first copy. A fresh run requires a nonexistent `...-data/base`; preparation refuses to overwrite data. Copy the results home before `run.sh cleanup`. That action removes owned synthetic data, binary copies, Cargo target output, Python bytecode and the transferred bundle. Results are under `bench/stage0/results`, synthetic data and executable copies under `/home/simon/work/proseql-stage0-data`. If committed result files already exist, `all` selects a new timestamped `results/reproduction-*` directory; it never appends a new run to committed evidence.
 
 ## Fixture and workloads
 
@@ -53,7 +53,7 @@ RSS comes from `/proc/self/status`. Reset VmHWM immediately before the operation
 
 The separate counting allocator reports Rust live/peak *requested bytes*, not allocator arenas. SQLite allocates in C: report its `sqlite3_memory_used`/`sqlite3_memory_highwater` separately. Do not add independent peaks and call that an exact joint peak. `/proc` sampling itself can add a few KiB to meter peaks. Heap-build timings are not baseline timings.
 
-`mincore` probes source-file page residency without touching data pages. Report before process launch and after process exit, rounded to OS pages, including sidecars for the spike and database files for SQLite. This is owned-file residency, not system Cached or disjoint extra RSS. Post-exit SQLite residency includes connection-close checkpoint work outside the append timer. Cold eviction does not evict a virtual disk/controller cache. Warm prelaunch residency is not the exact cache state after the internal warm-up query.
+`mincore` probes source-file page residency without touching data pages. Report before process launch and after process exit, rounded to OS pages, including sidecars for the spike and database files for SQLite. This is owned-file residency, not system Cached or disjoint extra RSS. Post-exit SQLite residency includes connection-close checkpoint work outside the append timer. Cold eviction does not evict a virtual disk/controller cache. Warm trials prewarm the whole backend file set before the internal warm-up query. SQLite's single database contains both shapes, while the text file set is the selected collection. Thus warm cache columns describe deliberately prewarmed fixtures, not the query's minimum working set; use the cold-after column to see touched source pages plus readahead. Temporary SQLite sorter pages exist only during the query and are not captured by the post-exit source-file residency probe.
 
 The perf capability check is the requested `nix run --builders '' nixpkgs#perf -- stat -e instructions:u true`. If supported, the Rust harness uses `perf_event_open` to count user instructions around only the timed operation, excluding setup and sleeps outside that operation. It uses no architecture-specific intrinsics.
 

@@ -13,7 +13,11 @@ if [[ $(hostname -s) != yari || $(uname -m) != aarch64 ]]; then
 fi
 action=${1:-all}
 data=/home/simon/work/proseql-stage0-data
-out="$root/bench/stage0/results"
+out=${STAGE0_RESULTS:-"$root/bench/stage0/results"}
+if [[ "$action" == all && -e "$out/trials.jsonl" ]]; then
+  out="$out/reproduction-$(date -u +%Y%m%dT%H%M%SZ)"
+fi
+export STAGE0_RESULTS="$out"
 mkdir -p "$out" "$data/tmp"
 export TMPDIR="$data/tmp"
 export SQLITE_TMPDIR="$data/tmp"
@@ -65,6 +69,7 @@ case "$action" in
     ;;
   format)
     nix develop --builders '' -c rustfmt --edition 2021 bench/stage0/src/*.rs
+    nix run --builders '' nixpkgs#ruff -- format bench/stage0/*.py
     ;;
   check)
     # Tests create synthetic data on disk, never under tmpfs.
@@ -75,21 +80,39 @@ case "$action" in
     nix develop --builders '' -c cargo clippy --locked --manifest-path bench/stage0/Cargo.toml --all-targets --all-features --no-deps -j 2 -- -D warnings > "$out/clippy.log" 2>&1
     nix develop --builders '' -c rustfmt --edition 2021 --check bench/stage0/src/*.rs > "$out/format.log" 2>&1
     shellcheck --shell bash bench/stage0/run.sh > "$out/shellcheck.log" 2>&1
-    python3 -m py_compile bench/stage0/measure.py
+    python3 -m py_compile bench/stage0/*.py
+    nix run --builders '' nixpkgs#ruff -- check bench/stage0/*.py > "$out/python-lint.log" 2>&1
+    nix fmt --builders '' -- --check flake.nix > "$out/nix-format.log" 2>&1
     ;;
   measure)
     scope 300 "$data/timing" prepare "$data/base" > "$out/prepare.json" 2> "$out/prepare.stderr"
     scope 14400 python3 bench/stage0/measure.py "$data" "$out"
     ;;
+  dense)
+    scope 1800 python3 bench/stage0/dense.py "$data" "$out"
+    ;;
+  summarize)
+    python3 bench/stage0/summarize.py "$out" > "$out/summary-check.json"
+    ;;
+  diagnose)
+    cp -a --reflink=auto "$data/base" "$data/diagnostic"
+    scope 180 python3 bench/stage0/diagnose.py "$data" > "$out/raw-append-diagnostic.json" 2> "$out/raw-append-diagnostic.stderr"
+    scope 180 python3 bench/stage0/diagnose.py "$data" sqlite-temp > "$out/sqlite-temp-diagnostic.json" 2> "$out/sqlite-temp-diagnostic.stderr"
+    ;;
   cleanup)
     # Only this task's fixed owned directory, never consumer or service data.
     rm -rf -- /home/simon/work/proseql-stage0-data
+    rm -rf -- "$root/bench/stage0/target" "$root/bench/stage0/__pycache__"
+    rm -f -- "$root/bench/stage0/source.bundle"
     ;;
   all)
     bash "$0" environment
     bash "$0" build
     bash "$0" check
     bash "$0" measure
+    bash "$0" dense
+    bash "$0" diagnose
+    bash "$0" summarize
     ;;
-  *) echo 'usage: run.sh archive|task [ACTION]|checkout|environment|lock|format|build|check|measure|cleanup|all' >&2; exit 2 ;;
+  *) echo 'usage: run.sh archive|task [ACTION]|checkout|environment|lock|format|build|check|measure|dense|diagnose|summarize|cleanup|all' >&2; exit 2 ;;
 esac
