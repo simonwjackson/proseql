@@ -86,6 +86,12 @@ impl NativeRuntime {
     /// mutation (before host callbacks replay), after `reload`, after the
     /// managed watcher's reload, and after each lazy poll that refreshed.
     /// Deliver pending streaming-watch results here; `streaming_read` may be
-    /// called. Must not fail: record errors where the watch API reports them.
-    pub(crate) fn refresh_streaming_watches(&self) {}
+    /// called. Return the error a resident reload would have returned (for
+    /// example an invalid edit to a covered partition) and also record it in
+    /// `RuntimeState::last_reload_error`, as the resident reload paths do.
+    /// `reload()` returns it; the mutation, watcher and poller call sites
+    /// ignore the return value.
+    pub(crate) fn refresh_streaming_watches(&self) -> Result<(), EngineError> {
+        Ok(())
+    }
 }

@@ -1073,7 +1073,8 @@ impl NativeRuntime {
             let result = committed?;
             let replay = callbacks.finish();
             drop(state);
-            self.refresh_streaming_watches();
+            // The mutation is durable; watch errors surface through the watch API.
+            let _ = self.refresh_streaming_watches();
             replay();
             return Ok(result);
         }
@@ -1150,8 +1151,10 @@ impl NativeRuntime {
         let mut state = self.lock_open()?;
         let result = reload_locked(&mut state, false, None);
         drop(state);
-        self.refresh_streaming_watches();
-        result
+        // An invalid edit to a partition a streaming watch covers fails the
+        // reload, as it does for a resident (pinned) partition today.
+        let watches = self.refresh_streaming_watches();
+        result.and(watches)
     }
 
     pub fn last_reload_error(&self) -> Result<Option<EngineError>, EngineError> {
@@ -1585,7 +1588,8 @@ fn schedule_reload(weak: &Weak<RuntimeCore>, debounce: Duration) {
                 let _ = reload_locked(&mut state, true, changed);
             }
         };
-        NativeRuntime {
+        // Errors are recorded in last_reload_error by the hook.
+        let _ = NativeRuntime {
             inner: Arc::clone(&core),
         }
         .refresh_streaming_watches();
@@ -1746,7 +1750,8 @@ fn start_lazy_poller(
                     state.last_reload_error = result.err();
                 }
             };
-            NativeRuntime {
+            // Errors are recorded in last_reload_error by the hook.
+            let _ = NativeRuntime {
                 inner: Arc::clone(&core),
             }
             .refresh_streaming_watches();
