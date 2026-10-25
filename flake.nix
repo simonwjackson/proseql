@@ -158,6 +158,7 @@
         "rust-wasm-check"
         "rust-build"
         "bench-timeseries"
+        "bench-stage0"
       ];
       taskRunnerFor =
         { pkgs, tooling }:
@@ -332,6 +333,9 @@
 
             # Benchmark a partitioned JSONL time series at 140k/1M/10M synthetic rows in lazy mode
             # (the acceptance run; data cached under /var/tmp; later flags override, e.g. --mode baseline)
+            task_bench_stage0() {
+              ./bench/stage0/run.sh "$@"
+            }
             task_bench_timeseries() {
               cargo run --release --manifest-path crates/Cargo.toml -p proseql-native --example timeseries_bench -- --rows 140000,1000000,10000000 --years 10 --mode lazy "$@"
             }
