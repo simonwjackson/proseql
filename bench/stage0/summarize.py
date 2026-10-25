@@ -164,7 +164,7 @@ def summarize_append(root):
 
 
 def ratio_pair(values):
-    return " / ".join("killed" if v is None else f"{v:.2f}" for v in values)
+    return " / ".join("killed" if v is None else f"{v:.2f}×" for v in values)
 
 
 def verdict(values, limit):
@@ -228,7 +228,7 @@ def targets(keyed, strict):
                         None if mine is None else mine / get(kind, w, "sqlite", c, "rss_peak_max")
                     )
                 per_cache.append(worst(ratios))
-            cells.append(f"worst {ratio_pair(per_cache)}×: {verdict(per_cache, 2)}")
+            cells.append(f"worst {ratio_pair(per_cache)}: {verdict(per_cache, 2)}")
         lines.append(
             f"| Peak RSS, any listed read (point/hour/month/ten) | ≤ 2 × SQLite peak | {kind} | {cells[0]} | {cells[1]} |"
         )
@@ -242,7 +242,7 @@ def targets(keyed, strict):
             cells = []
             for backend in ("proseql", "spike"):
                 r = wall_ratios(kind, workload, backend)
-                cells.append(f"{ratio_pair(r)}×: {verdict(r, limit)}")
+                cells.append(f"{ratio_pair(r)}: {verdict(r, limit)}")
             lines.append(
                 f"| {label} (wall) | ≤ {limit} × SQLite | {kind} | {cells[0]} | {cells[1]} |"
             )
@@ -252,7 +252,7 @@ def targets(keyed, strict):
             preflight = wall_ratios(kind, "append", "proseql-global", strict)
             spike = wall_ratios(kind, "append", "spike", strict)
             lines.append(
-                f"| Append 1,000 new rows with duplicate checks (wall) | ≤ 1 × SQLite | {kind} | as shipped {ratio_pair(shipped)}×: {verdict(shipped, 1)}; + global preflight {ratio_pair(preflight)}×: {verdict(preflight, 1)} | {ratio_pair(spike)}×: {verdict(spike, 1)} |"
+                f"| Append 1,000 new rows with duplicate checks (wall) | ≤ 1 × SQLite | {kind} | as shipped {ratio_pair(shipped)}: {verdict(shipped, 1)}; + global preflight {ratio_pair(preflight)}: {verdict(preflight, 1)} | {ratio_pair(spike)}: {verdict(spike, 1)} |"
             )
     for kind in KINDS:
         cells = []
