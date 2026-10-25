@@ -30,6 +30,7 @@ struct Entry {
 }
 
 impl WatchState {
+    #[cfg(test)]
     pub fn resident_bytes(&self) -> usize {
         self.baseline
             .iter()

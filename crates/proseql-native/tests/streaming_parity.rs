@@ -10,8 +10,8 @@ use serde_json::json;
 use support::parity::{ParityFixture, COLLECTION};
 
 #[test]
-fn execution_model_defaults_to_streaming() {
-    assert_eq!(ExecutionModel::default(), ExecutionModel::Streaming);
+fn execution_model_defaults_to_resident() {
+    assert_eq!(ExecutionModel::default(), ExecutionModel::Resident);
 }
 
 #[test]

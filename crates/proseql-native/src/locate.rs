@@ -83,8 +83,6 @@ impl IndexState {
         self.validated.clear();
     }
 
-    // called by exec/append; removed at integration
-    #[allow(dead_code)]
     pub fn time_index(
         &mut self,
         host: &dyn StorageHost,
@@ -127,8 +125,6 @@ impl IndexState {
         Ok(self.ids.as_mut().expect("built locator"))
     }
 
-    // called by exec/append; removed at integration
-    #[allow(dead_code)]
     pub fn id_locator_if_built(&mut self) -> Option<&mut IdLocator> {
         self.ids.as_mut()
     }
@@ -162,27 +158,6 @@ impl IndexState {
         Ok(decoder
             .decode_row(host, &codec.formats, &file, &bytes)?
             .filter(|row| row.get("id").and_then(Value::as_str) == Some(id)))
-    }
-
-    pub fn resident_bytes(&self) -> usize {
-        std::mem::size_of::<Self>()
-            + self.ids.as_ref().map_or(0, IdLocator::resident_bytes)
-            + self
-                .times
-                .iter()
-                .map(|((path, field), index)| {
-                    path.capacity() + field.capacity() + index.resident_bytes()
-                })
-                .sum::<usize>()
-            + self
-                .validated
-                .iter()
-                .map(|(path, generation)| {
-                    path.capacity()
-                        + generation.path.capacity()
-                        + std::mem::size_of::<SourceGeneration>()
-                })
-                .sum::<usize>()
     }
 }
 

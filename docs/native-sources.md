@@ -252,7 +252,7 @@ The rewrite encoder ends a JSONL file without a final newline. The first append 
 
 There is no batch journal. A crash during a multi-record append to one file can keep a prefix of its complete lines, and a crash between files keeps the completed files. Do not blindly retry a create unless the collection uses `duplicate_ids: ignore_identical`.
 
-**Conflict check limits.** The length and tail comparison does not see an external edit elsewhere in the file that keeps the same length. The managed watcher reload still sees such an edit, because it compares contents.
+**Conflict check limits (Resident).** Streaming additionally checks generations and detects same-length prefix edits. The length and tail comparison does not see an external edit elsewhere in the file that keeps the same length. The managed watcher reload still sees such an edit, because it compares contents.
 
 **Watcher.** The managed watcher does not reload after the runtime's own appends. When the host reports the changed paths (`StorageEvent.path`; `FsStorageHost` and `MemoryStorageHost` do), it skips a reload when every changed path is a file this runtime appended to and that file still equals its stored bytes. A same-named file elsewhere, for example under a graph source root that shares the watch root, has another path and reloads. When a host reports only file names, it falls back to the names: every file with that name under the watch roots must still equal its stored content, and a graph source root that shares a watch root forces a reload. Any other change reloads as before, and so does the directory change when an append creates a new file.
 
@@ -308,6 +308,11 @@ Costs: each indexed row holds an encoded key, its insertion ordinal and its ID i
 
 ## Lazy partitions
 
+Resident remains the default. The behavior in this section describes Resident
+unless stated otherwise. Streaming is an explicit opt-in and has no lazy row
+cache; see "Opt-in query while scanning" below. The default cannot change until
+consumers that use `read` to hydrate lazy query results adopt returned scan rows.
+
 Native only. Set `NativeSourceRuntimeOptions.lazy_partitions` to map a source ID to a policy:
 
 ```rust
@@ -359,6 +364,91 @@ With a zero cache, `find_by_id` cannot hit a retained partition. An ID-only miss
 **Costs.** Memory follows the loaded partitions, not total history: in the benchmark, open took 3 to 11 ms and 5 MiB at 140k, 1M and 10M rows, and peak RSS with two loaded partitions was 11 MiB, 36 MiB and 324 MiB (about 2 KB per loaded row). The first operation on a partition pays its read and decode (1.4 s for an 83,000-row month). Each lazy query adds about 5 µs for pruning and eviction. Query time then follows the rows returned (about 2.2 to 2.5 µs per row), not history size. Choose the bucket so that a partition decodes quickly (a month of one-minute samples is about 44,000 rows) and set `max_loaded_partitions` to the working set, for example the current month plus the months that dashboards read.
 
 **Where the runtime boundary is.** The engine assumes that a collection holds every record a query can match. Lazy partitions keep that assumption at the native runtime layer instead of teaching the engine about files: before an operation, the runtime makes every partition that can match resident with `Database::load_resident_records`; after it, the runtime evicts with `unload_resident_records`. These engine methods are not mutations: no hooks and no journal entries, also when a partition loads inside `mutate` (for the ID check of a create, or a `find_by_id` scan). A loaded record therefore never enters the append plan or a rollback. When watches must see loaded records (a partition that a watch covers but did not pin yet, or an external change), the runtime applies them directly to the committed watch snapshot and notifies; a transaction's own uncommitted changes stay invisible until it commits. The engine's query, index, sort, aggregate, transaction and watch code is unchanged, and the WASM engine never calls the new methods. The preconditions make this sound: without relationships, no query reads another collection's lazy records; without unique fields, the only cross-record check on create is the ID, which the target partition covers.
+
+### Opt-in query while scanning
+
+```rust
+NativeSourceRuntimeOptions {
+    execution_model: proseql_native::ExecutionModel::Streaming,
+    // Keep existing lazy_partitions and full_scan policies.
+    ..Default::default()
+}
+```
+
+This changes only configured lazy collections. Eager collections remain resident.
+Existing configurations and struct literals need no changes to keep Resident.
+Do not select Streaming for an application that relies on lazy residency without
+changing its reads first. The [design document](design/query-while-scanning.md)
+lists all 13 approved opt-in guarantee changes and Logbook's adoption blockers.
+
+**Reads and memory.** Runtime query, cursor, aggregate and bounded-read methods
+scan selected JSONL/NDJSON files through 64 KiB host chunks and reusable line
+buffers. They validate scanned rows, filter/project while scanning, and preserve
+global stable ordering, cursors and individual f64 accumulation order. They never
+load a lazy partition into the engine. `max_loaded_partitions` is ignored under
+Streaming; no LRU or pins remain on this path. It still controls Resident.
+
+Memory includes the longest physical line, query-local ID metadata, returned
+records, sort/top-k/cursor or group workspace, derived indexes, append baselines
+and watch results. Search and equality-union ordering can buffer matching rows.
+Custom JSONL codecs decode and verify one whole partition at a time without
+positional seeks. Canonical error replay and append-baseline construction can
+also use one partition's bytes. No constant-RSS or allocator-reclamation promise
+is added. YAML is never lazy: eager documents retain original bytes, decoded
+records and candidate serialized output during writes. Multiple documents can
+retain their combined sizes. YAML byte preservation and fail-closed safety stay
+unchanged.
+
+**Indexes and creates.** Sparse time offsets are built on first eligible range
+use and checked against source generations. Unsorted files and custom codecs
+decline positional seeking. The first `find_by_id` builds global ID membership
+and validates every row once per generation (measured about 1.8 s validation,
+2.16 s complete lookup for 656,640 rows on aka). A create's first duplicate check
+scans only ID fields (about 360 ms in the storage measurement), then validates
+matching candidates, not unrelated payloads. About 15 MiB of locator metadata
+remains. No binary sidecar is written. Embedded ID timestamps are not trusted
+as routing invariants.
+
+Creates check duplicates globally, not only loaded/routed partitions.
+`ignore_identical` still compares validated records. The engine stages the batch
+and verified duplicate candidates, never entire partitions. Generated batch IDs
+are resolved before validation and need not be gap-free. Own creates immediately
+appear in path/file natural order. Existing durability, rollback, partial-file
+commit and quarantine behavior stays. Generation checks also catch same-length
+prefix edits. Concurrent source changes during index building or verification
+fail explicitly with `source-changed`/`streaming-source-changed`; no snapshot
+isolation or cross-process lock is added. Schema/query callbacks must be pure
+predicates; their order and invocation count can change.
+
+**Full-scan policy and `read`.** Indexes never bypass FullScanPolicy. Under Error,
+`find_by_id` always fails with `lazy-full-scan`, except for records created earlier
+in the same mutation. The Resident cached-hit exception does not apply. Use
+Allow or a partition-filtered query instead. `NativeRuntime::read` sees no lazy
+rows under Streaming: a `query_bounded` with `limit: 0` does not populate a cache.
+Consume returned rows, use `select`, or aggregate inside the runtime instead.
+
+**Watches and reload.** A streaming watch retains delivered results, a serialized
+equality baseline and covered file generations, not covered rows. Initial
+results, own/external deliveries, debounce and last-known-good delivered results
+after invalid edits stay. The lazy poller lists files and checks live-watch
+generations on `lazy_watch_interval`. Own appends do not cause duplicate poller
+deliveries. Unwatched reads see the current file and fail on invalid edits;
+`reload()` reports lazy validation errors only for watched partitions. This was
+already Resident behavior whenever a partition was not cached. Eager reload
+last-known-good is unchanged.
+
+| Stats field under Streaming | Meaning |
+|---|---|
+| `partitions_loaded`, `partitions_visited` | Selected partition scope, not loaded rows |
+| `partitions_read` | Existing files opened by the query |
+| `partitions_resident`, `pinned_partitions`, `retained_partition_limit` | 0 |
+| `candidate_rows` | Validated scan rows, including rows filtered/paged out |
+| `index_used` | Positional seeking, not resident equality/search indexes |
+| `index_sorted` | false; the executor sorts |
+| `lazy_partition_status.loaded`, `.pinned` | Always empty |
+
+Resident stats and limits retain their previous meaning. All public bounded,
+mutation, watch and status functions remain available under both models.
 
 ### Opt-in bounded reads
 

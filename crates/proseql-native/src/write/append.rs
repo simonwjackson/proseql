@@ -38,6 +38,7 @@ pub(crate) struct AppendState {
 }
 
 impl AppendState {
+    #[cfg(test)]
     pub fn resident_bytes(&self) -> usize {
         self.ids.capacity() * std::mem::size_of::<String>()
             + self.ids.iter().map(String::capacity).sum::<usize>()
