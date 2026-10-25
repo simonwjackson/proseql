@@ -58,6 +58,34 @@ impl StorageHost for ReadSnapshot<'_> {
         contents.insert(path.into(), content.clone());
         Ok(content)
     }
+    fn read_range(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, EngineError> {
+        let contents = self
+            .contents
+            .lock()
+            .map_err(|_| crate::operation_error("poisoned", "Read snapshot lock is poisoned"))?;
+        if let Some(bytes) = contents.get(path) {
+            let start = usize::try_from(offset)
+                .unwrap_or(usize::MAX)
+                .min(bytes.len());
+            return Ok(bytes[start..start.saturating_add(len).min(bytes.len())].to_vec());
+        }
+        self.host.read_range(path, offset, len)
+    }
+    fn stat(&self, path: &str) -> Result<Option<proseql_storage::host::FileStat>, EngineError> {
+        let contents = self
+            .contents
+            .lock()
+            .map_err(|_| crate::operation_error("poisoned", "Read snapshot lock is poisoned"))?;
+        if let Some(bytes) = contents.get(path) {
+            // Do not attach a newer disk identity to the captured load bytes.
+            return Ok(Some(proseql_storage::host::FileStat {
+                len: bytes.len() as u64,
+                modified_ns: None,
+                change_id: None,
+            }));
+        }
+        self.host.stat(path)
+    }
     fn exists(&self, path: &str) -> Result<bool, EngineError> {
         self.host.exists(path)
     }

@@ -1,4 +1,26 @@
+export interface JsonlChunkScannerBinding {
+	push(
+		bytes: Uint8Array,
+		finalChunk: boolean,
+		onRow: (
+			bytes: Uint8Array,
+			partition: number,
+			offset: bigint,
+			ordinal: bigint,
+			finalUnterminated: boolean,
+		) => void,
+	): number;
+	buffered_bytes(): number;
+	next_ordinal(): bigint;
+	free(): void;
+}
+
 export type WasmBindingsModule = {
+	readonly JsonlChunkScanner?: new (
+		partition: number,
+		startOffset: bigint,
+		firstOrdinal: bigint,
+	) => JsonlChunkScannerBinding;
 	default?: (input?: {
 		module_or_path?:
 			| RequestInfo

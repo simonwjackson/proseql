@@ -1,0 +1,89 @@
+{
+  "implementationCommit": "ab653ec81040875a0f33e7e809d237abc03ec1ca",
+  "host": "aka",
+  "fixture": {
+    "synthetic": true,
+    "fileBytes": 104857600,
+    "rows": 102400,
+    "lineBytesIncludingNewline": 1024
+  },
+  "native": {
+    "command": "scripts/qws/aka-run formats --x86-64-v2 -- cargo test --manifest-path crates/Cargo.toml -p proseql-storage --test streaming_readers -- --nocapture",
+    "maxHostChunkBytes": 65536,
+    "maxFramerCapacityBytes": 66559,
+    "simultaneousBufferCapacityUpperBoundBytes": 197631,
+    "note": "Buffer capacities, not process RSS. The scan bound includes two host buffers during replacement and both framer buffers. Interrupted durable-replacement recovery now uses fixed-size buffers too; see recovery evidence below.",
+    "recovery": {
+      "command": "scripts/qws/aka-run formats --x86-64-v2 -- cargo test --manifest-path crates/Cargo.toml -p proseql-storage --test streaming_recovery -- --nocapture",
+      "fileBytes": 104857600,
+      "cases": 12,
+      "comparisonStackBufferBytes": 131072,
+      "markerStackBufferBytes": 65536,
+      "maxTotalRequestedHeapBytesPerRecovery": 379,
+      "largestHeapAllocationBytes": 64,
+      "beforeFixRequestedHeapBytes": 209715577,
+      "beforeFixLargestHeapAllocationBytes": 104857600,
+      "note": "Tests both stat and a two-byte range read with absent, PENDING and 100 MiB malformed markers. Identical destination/backup bytes preserve the destination inode; different same-size bytes restore the backup inode. A counting allocator measures all requested heap bytes during each recovery. Existing recovery outcomes and cleanup remain unchanged."
+    }
+  },
+  "chromium": {
+    "command": "scripts/qws/aka-run formats -- bash -c 'bun run --cwd packages/engine build:wasm && bun run tsc --build && node packages/engine/scripts/measure-browser-blob-scan.mjs'",
+    "runtime": "144.0.7559.132",
+    "path": "File -> Blob.slice.arrayBuffer -> WASM shared RowSource (not query execution)",
+    "stats": {
+      "rows": 102400,
+      "bytesRead": 104857600,
+      "maxChunkBytes": 65536,
+      "maxFramerBytes": 66559,
+      "nextOrdinal": "102400"
+    },
+    "jsHeapBytes": {
+      "before": 13470169,
+      "peakSampled": 58510121,
+      "afterOneSecond": 37740345
+    },
+    "wasmLinearBytes": {
+      "before": 1245184,
+      "after": 1376256
+    },
+    "jsHeapAfterGc": 7554428,
+    "note": "Chromium precise performance.memory, sampled every 1024 rows. Initial and final explicit GC use CDP. The one-second value is before the final GC. Selected source File is disk-backed, not loaded in full."
+  },
+  "node": {
+    "command": "scripts/qws/aka-run formats -- bash -c 'bun run --cwd packages/engine build:wasm && bun run tsc --build && node --expose-gc packages/engine/scripts/measure-blob-scan.mjs'",
+    "runtime": "v24.13.0",
+    "path": "openAsBlob -> Blob.slice.arrayBuffer -> WASM shared RowSource (not query execution)",
+    "before": {
+      "rss": 116875264,
+      "heapTotal": 58482688,
+      "heapUsed": 21952272,
+      "external": 6947618,
+      "arrayBuffers": 2091695
+    },
+    "peakSampled": {
+      "rss": 172752896,
+      "heapTotal": 60317696,
+      "heapUsed": 32361920,
+      "external": 51882486,
+      "arrayBuffers": 42280659
+    },
+    "afterOneSecondAndGc": {
+      "rss": 172883968,
+      "heapTotal": 59006976,
+      "heapUsed": 20644136,
+      "external": 8385905,
+      "arrayBuffers": 1231607
+    },
+    "wasmLinearBytes": {
+      "before": 1245184,
+      "after": 1376256
+    }
+  },
+  "limits": [
+    "Raw-row framing evidence, not browser query/executor parity or lazy-partition support.",
+    "Framer memory scales with chunk size plus the longest physical line.",
+    "Each JS callback receives owned row bytes. GC and process RSS do not have the native reusable-buffer bound.",
+    "Chromium retained more JS heap after one second than before the scan. Node retained RSS after explicit GC. No back-to-idle claim.",
+    "The future browser executor should consume rows inside Rust and return only query results to avoid per-row JS allocations."
+  ]
+}

@@ -1,6 +1,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -15,6 +15,56 @@ use crate::path::normalize_path;
 use crate::persistence::DurableStorageHost;
 
 static STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+const RECOVERY_BUFFER_BYTES: usize = 64 * 1024;
+
+// Fill a block before comparing it: regular reads can return different short
+// lengths for identical files, and interruptions must not change recovery.
+fn read_recovery_block(file: &mut std::fs::File, bytes: &mut [u8]) -> std::io::Result<usize> {
+    let mut filled = 0;
+    while filled < bytes.len() {
+        match file.read(&mut bytes[filled..]) {
+            Ok(0) => break,
+            Ok(count) => filled += count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(filled)
+}
+
+fn recovery_files_equal(left: &Path, right: &Path) -> std::io::Result<bool> {
+    let mut left = std::fs::File::open(left)?;
+    let mut right = std::fs::File::open(right)?;
+    let mut left_bytes = [0; RECOVERY_BUFFER_BYTES];
+    let mut right_bytes = [0; RECOVERY_BUFFER_BYTES];
+    loop {
+        let left_len = read_recovery_block(&mut left, &mut left_bytes)?;
+        let right_len = read_recovery_block(&mut right, &mut right_bytes)?;
+        if left_len != right_len || left_bytes[..left_len] != right_bytes[..right_len] {
+            return Ok(false);
+        }
+        if left_len == 0 {
+            return Ok(true);
+        }
+    }
+}
+
+fn recovery_marker_committed(path: &Path) -> std::io::Result<bool> {
+    let mut file = std::fs::File::open(path)?;
+    let mut bytes = [0; RECOVERY_BUFFER_BYTES];
+    let mut seen = false;
+    let mut committed = false;
+    loop {
+        let len = read_recovery_block(&mut file, &mut bytes)?;
+        if len == 0 {
+            return Ok(committed);
+        }
+        committed = !seen && len == 1 && bytes[0] == b'C';
+        seen = true;
+        // Drain malformed markers too: preserve read failures, but never
+        // allocate their entire contents just to classify them as PENDING.
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DurabilityFaultPoint {
@@ -136,14 +186,14 @@ impl FsStorageHost {
     pub fn recover_durable_path(&self, path: &str) -> Result<(), EngineError> {
         let (destination, parent, backup, committed) = Self::durable_artifacts(path)?;
         if committed.exists() {
-            let marker = std::fs::read(&committed).map_err(|error| {
+            let marker_committed = recovery_marker_committed(&committed).map_err(|error| {
                 storage_error(
                     path,
                     StorageOperation::Read,
                     format!("Failed to read durable commit marker: {error}"),
                 )
             })?;
-            if marker == b"C" {
+            if marker_committed {
                 // COMMITTED is written into an already-durable marker inode only
                 // after the candidate and containing directory are durable.
                 if backup.exists() {
@@ -168,10 +218,8 @@ impl FsStorageHost {
 
             // PENDING or malformed means no successful commit was acknowledged.
             if backup.exists() {
-                let already_restored = match (std::fs::read(&destination), std::fs::read(&backup)) {
-                    (Ok(destination_bytes), Ok(backup_bytes)) => destination_bytes == backup_bytes,
-                    _ => false,
-                };
+                // A failed comparison still restores the backup, as before.
+                let already_restored = recovery_files_equal(&destination, &backup).unwrap_or(false);
                 if already_restored {
                     std::fs::remove_file(&backup).map_err(|error| {
                         storage_error(
@@ -211,14 +259,8 @@ impl FsStorageHost {
         if !backup.exists() {
             return Ok(());
         }
-        let unchanged_destination = if destination.exists() {
-            match (std::fs::read(&destination), std::fs::read(&backup)) {
-                (Ok(destination_bytes), Ok(backup_bytes)) => destination_bytes == backup_bytes,
-                _ => false,
-            }
-        } else {
-            false
-        };
+        let unchanged_destination =
+            destination.exists() && recovery_files_equal(&destination, &backup).unwrap_or(false);
         if unchanged_destination {
             std::fs::remove_file(&backup).map_err(|error| {
                 storage_error(
@@ -673,6 +715,79 @@ impl StorageHost for FsStorageHost {
                 format!("Failed to read '{path}': {error}"),
             )
         })
+    }
+
+    fn read_range(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, EngineError> {
+        self.recover_durable_path(path)?;
+        let result = (|| -> std::io::Result<Vec<u8>> {
+            let mut file = std::fs::File::open(path)?;
+            // The metadata bound avoids allocating or seeking past EOF.
+            let available = file.metadata()?.len().saturating_sub(offset);
+            let capacity = available.min(len as u64) as usize;
+            if capacity == 0 {
+                return Ok(Vec::new());
+            }
+            file.seek(SeekFrom::Start(offset))?;
+            let mut bytes = vec![0; capacity];
+            let mut read = 0;
+            while read < capacity {
+                match file.read(&mut bytes[read..]) {
+                    Ok(0) => break,
+                    Ok(count) => read += count,
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) => return Err(error),
+                }
+            }
+            bytes.truncate(read);
+            Ok(bytes)
+        })();
+        result.map_err(|error| {
+            storage_error(
+                path,
+                StorageOperation::Read,
+                format!("Failed to read '{path}': {error}"),
+            )
+        })
+    }
+
+    fn stat(&self, path: &str) -> Result<Option<crate::host::FileStat>, EngineError> {
+        self.recover_durable_path(path)?;
+        let metadata = match std::fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(storage_error(
+                    path,
+                    StorageOperation::Read,
+                    format!("Failed to stat '{path}': {error}"),
+                ))
+            }
+        };
+        #[cfg(unix)]
+        let change_id = {
+            use std::hash::{Hash, Hasher};
+            use std::os::unix::fs::MetadataExt;
+            let mut hash = std::collections::hash_map::DefaultHasher::new();
+            (
+                metadata.dev(),
+                metadata.ino(),
+                metadata.ctime(),
+                metadata.ctime_nsec(),
+            )
+                .hash(&mut hash);
+            Some(hash.finish())
+        };
+        #[cfg(not(unix))]
+        let change_id = None;
+        Ok(Some(crate::host::FileStat {
+            len: metadata.len(),
+            modified_ns: metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_nanos()),
+            change_id,
+        }))
     }
 
     fn write(&self, path: &str, data: &str) -> Result<(), EngineError> {

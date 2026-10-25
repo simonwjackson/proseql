@@ -292,6 +292,12 @@ impl StorageHost for ReplaceOnly {
     fn read(&self, path: &str) -> Result<String, EngineError> {
         self.0.read(path)
     }
+    fn read_range(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, EngineError> {
+        self.0.read_range(path, offset, len)
+    }
+    fn stat(&self, path: &str) -> Result<Option<proseql_storage::host::FileStat>, EngineError> {
+        self.0.stat(path)
+    }
     fn write(&self, path: &str, data: &str) -> Result<(), EngineError> {
         self.0.write(path, data)
     }

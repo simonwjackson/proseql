@@ -522,7 +522,7 @@ pub(crate) fn clear_pending_callback_defect() {
 pub(crate) fn take_pending_callback_defect() -> Option<String> {
     #[cfg(target_arch = "wasm32")]
     {
-        return PENDING_CALLBACK_DEFECT.with(|pending| pending.borrow_mut().take());
+        PENDING_CALLBACK_DEFECT.with(|pending| pending.borrow_mut().take())
     }
     #[cfg(not(target_arch = "wasm32"))]
     None
@@ -647,8 +647,11 @@ fn sort_key_to_js(value: Option<&Value>) -> wasm_bindgen::JsValue {
 }
 
 #[cfg(target_arch = "wasm32")]
+type HostSortColumns = (Vec<SortEntry>, Vec<usize>, js_sys::Array, js_sys::Function);
+
+#[cfg(target_arch = "wasm32")]
 thread_local! {
-    static HOST_SORT_COLUMNS: std::cell::RefCell<Option<(Vec<SortEntry>, Vec<usize>, js_sys::Array, js_sys::Function)>> =
+    static HOST_SORT_COLUMNS: std::cell::RefCell<Option<HostSortColumns>> =
         const { std::cell::RefCell::new(None) };
 }
 

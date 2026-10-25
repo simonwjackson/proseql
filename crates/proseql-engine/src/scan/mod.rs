@@ -128,6 +128,8 @@ impl RowSource for SliceLines<'_> {
 
 // ── executor (owner: exec; free to change below this line) ─────────────────
 
+pub mod framer;
+
 #[cfg(test)]
 mod tests {
     use super::*;

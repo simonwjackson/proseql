@@ -79,16 +79,17 @@ const {
 	wasmOptVersion,
 	wasmOptArgs,
 } = contract.toolchain;
+const cargoTargetDir = process.env.CARGO_TARGET_DIR
+	? resolve(repoRoot, process.env.CARGO_TARGET_DIR)
+	: join(cratesDir, "target");
 const productionTargetWasm = join(
-	cratesDir,
-	"target",
+	cargoTargetDir,
 	rustTarget,
 	productionCargoProfile,
 	"proseql_wasm.wasm",
 );
 const profileTargetWasm = join(
-	cratesDir,
-	"target",
+	cargoTargetDir,
 	rustTarget,
 	profileCargoProfile,
 	"proseql_wasm.wasm",

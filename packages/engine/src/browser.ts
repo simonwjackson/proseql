@@ -40,6 +40,12 @@ import type {
 
 export { WasmEngineDefectError };
 export {
+	type BlobScanOptions,
+	type BlobScanStats,
+	type RawJsonlRow,
+	scanJsonlBlob,
+} from "./host/blob-chunks.js";
+export {
 	createIndexedDBEngineStorageHost,
 	createServiceWorkerIndexedDBEngineStorageHost,
 	createLocalStorageEngineStorageHost,

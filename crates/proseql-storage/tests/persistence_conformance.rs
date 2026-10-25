@@ -157,6 +157,12 @@ impl FailingAppendHost {
 }
 
 impl StorageHost for FailingAppendHost {
+    fn read_range(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, EngineError> {
+        self.inner.read_range(path, offset, len)
+    }
+    fn stat(&self, path: &str) -> Result<Option<proseql_storage::host::FileStat>, EngineError> {
+        self.inner.stat(path)
+    }
     fn read(&self, path: &str) -> Result<String, EngineError> {
         self.inner.read(path)
     }
@@ -218,6 +224,12 @@ impl StorageHost for FailingAppendHost {
 }
 
 impl StorageHost for CountingHost {
+    fn read_range(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, EngineError> {
+        self.inner.read_range(path, offset, len)
+    }
+    fn stat(&self, path: &str) -> Result<Option<proseql_storage::host::FileStat>, EngineError> {
+        self.inner.stat(path)
+    }
     fn read(&self, path: &str) -> Result<String, EngineError> {
         self.inner.read(path)
     }

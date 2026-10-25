@@ -1649,6 +1649,8 @@ impl WasmRuntime {
         })
     }
 
+    // The existing JS ABI passes these scalars without a temporary object.
+    #[allow(clippy::too_many_arguments)]
     pub fn fast_projected_query_slots(
         &self,
         handle: u32,

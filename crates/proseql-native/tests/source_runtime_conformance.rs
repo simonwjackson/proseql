@@ -826,6 +826,24 @@ impl proseql_storage::host::StorageHost for ReadThenReplace {
         }
         Ok(content)
     }
+    fn read_range(
+        &self,
+        path: &str,
+        offset: u64,
+        len: usize,
+    ) -> Result<Vec<u8>, proseql_engine::errors::EngineError> {
+        let bytes = self.inner.read_range(path, offset, len)?;
+        if path == self.path && !self.changed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            self.inner.write(path, &self.replacement)?;
+        }
+        Ok(bytes)
+    }
+    fn stat(
+        &self,
+        path: &str,
+    ) -> Result<Option<proseql_storage::host::FileStat>, proseql_engine::errors::EngineError> {
+        self.inner.stat(path)
+    }
     fn write(&self, path: &str, data: &str) -> Result<(), proseql_engine::errors::EngineError> {
         self.inner.write(path, data)
     }

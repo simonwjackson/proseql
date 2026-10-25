@@ -1206,6 +1206,19 @@ impl StorageHost for CountingHost {
             .insert(path.to_owned());
         Ok(content)
     }
+    fn read_range(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, EngineError> {
+        let bytes = self.inner.read_range(path, offset, len)?;
+        self.bytes_read
+            .fetch_add(bytes.len() as u64, Ordering::Relaxed);
+        self.read_paths
+            .lock()
+            .expect("lock")
+            .insert(path.to_owned());
+        Ok(bytes)
+    }
+    fn stat(&self, path: &str) -> Result<Option<proseql_storage::host::FileStat>, EngineError> {
+        self.inner.stat(path)
+    }
     fn write(&self, path: &str, data: &str) -> Result<(), EngineError> {
         self.wrote(path, data);
         self.inner.write(path, data)

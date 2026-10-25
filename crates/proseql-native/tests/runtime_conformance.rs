@@ -211,6 +211,12 @@ impl StorageHost for FailingDurableHost {
     fn read(&self, p: &str) -> Result<String, EngineError> {
         self.inner.read(p)
     }
+    fn read_range(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, EngineError> {
+        self.inner.read_range(path, offset, len)
+    }
+    fn stat(&self, path: &str) -> Result<Option<proseql_storage::host::FileStat>, EngineError> {
+        self.inner.stat(path)
+    }
     fn write(&self, p: &str, d: &str) -> Result<(), EngineError> {
         self.inner.write(p, d)
     }
@@ -369,6 +375,12 @@ impl BlockingDurableHost {
 impl StorageHost for BlockingDurableHost {
     fn read(&self, path: &str) -> Result<String, EngineError> {
         self.inner.read(path)
+    }
+    fn read_range(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, EngineError> {
+        self.inner.read_range(path, offset, len)
+    }
+    fn stat(&self, path: &str) -> Result<Option<proseql_storage::host::FileStat>, EngineError> {
+        self.inner.stat(path)
     }
     fn write(&self, path: &str, data: &str) -> Result<(), EngineError> {
         self.inner.write(path, data)

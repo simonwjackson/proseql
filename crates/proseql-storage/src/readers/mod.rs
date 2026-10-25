@@ -97,3 +97,5 @@ impl ByteChunks for HostChunks<'_> {
 }
 
 // ── line framing and host adapters (owner: formats; free to change below) ──
+
+pub use proseql_engine::scan::framer::{ChunkLines, LineFramer};
