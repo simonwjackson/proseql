@@ -613,3 +613,100 @@ fn invalid_unrelated_payload_does_not_block_a_new_id_but_scanning_reads_still_fa
     );
     empty_engine(&streaming);
 }
+
+/// A real codec override that delegates JSONL decoding. It deliberately keeps
+/// the custom whole-file decode contract (no decode_append_jsonl override).
+struct DelegatingJsonl(Arc<std::sync::atomic::AtomicUsize>);
+impl proseql_formats::FormatCodec for DelegatingJsonl {
+    fn name(&self) -> &str {
+        "delegating-jsonl"
+    }
+    fn extensions(&self) -> &[&str] {
+        &["jsonl", "ndjson"]
+    }
+    fn encode(
+        &self,
+        data: &Value,
+        options: Option<proseql_formats::FormatOptions>,
+    ) -> Result<String, String> {
+        proseql_formats::codecs::jsonl_codec().encode(data, options)
+    }
+    fn decode(&self, raw: &str) -> Result<Value, String> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        proseql_formats::codecs::jsonl_codec().decode(raw)
+    }
+}
+
+#[test]
+fn custom_codec_verifies_duplicate_ids_and_ignore_identical_recreates() {
+    use proseql_engine::descriptor::DuplicateIdPolicy;
+    for policy in [DuplicateIdPolicy::Error, DuplicateIdPolicy::IgnoreIdentical] {
+        let fixture = ParityFixture::new(1440);
+        let before_january = fs::read(fixture.partition_path("2025-01")).unwrap();
+        let before_march = fs::read(fixture.partition_path("2025-03")).unwrap();
+        let decoded = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut config = fixture.config();
+        config.collections[0].descriptor.duplicate_ids = policy;
+        let mut options = fixture.options(ExecutionModel::Streaming);
+        options
+            .formats
+            .register(Box::new(DelegatingJsonl(Arc::clone(&decoded))));
+        let runtime = NativeRuntime::open_sources_with_options(config, options).unwrap();
+        let stored = sample("2025-01", 1, 0, "steps");
+        let mut different = sample("2025-03", 1, 1, "steps");
+        different["id"] = stored["id"].clone();
+        assert_eq!(
+            runtime
+                .mutate(|db| db.create(COLLECTION, different))
+                .unwrap_err()
+                .tag(),
+            "DuplicateKeyError"
+        );
+        empty_engine(&runtime);
+        let recreated = runtime.mutate(|db| db.create(COLLECTION, stored.clone()));
+        if policy == DuplicateIdPolicy::IgnoreIdentical {
+            assert_eq!(recreated.unwrap(), stored);
+        } else {
+            assert_eq!(recreated.unwrap_err().tag(), "DuplicateKeyError");
+        }
+        empty_engine(&runtime);
+        // Opaque-codec candidates for different IDs can share the same
+        // (path, UNKNOWN_OFFSET). Verification must retain the requested ID.
+        let other = sample("2025-01", 1, 0, "heartRate");
+        let batch =
+            runtime.mutate(|db| db.create_many(COLLECTION, vec![stored.clone(), other.clone()]));
+        if policy == DuplicateIdPolicy::IgnoreIdentical {
+            assert_eq!(batch.unwrap().created, vec![stored, other]);
+        } else {
+            assert_eq!(batch.unwrap_err().tag(), "DuplicateKeyError");
+        }
+        empty_engine(&runtime);
+        assert!(decoded.load(std::sync::atomic::Ordering::SeqCst) > 0);
+        assert_eq!(
+            fs::read(fixture.partition_path("2025-01")).unwrap(),
+            before_january
+        );
+        assert_eq!(
+            fs::read(fixture.partition_path("2025-03")).unwrap(),
+            before_march
+        );
+        // An own append invalidates opaque membership; the next create must
+        // rebuild through the codec, rather than trust physical row offsets.
+        let fresh = sample("2025-03", 1, 1, "steps");
+        runtime
+            .mutate(|db| db.create(COLLECTION, fresh.clone()))
+            .unwrap();
+        let after_append = fs::read(fixture.partition_path("2025-03")).unwrap();
+        let recreated = runtime.mutate(|db| db.create(COLLECTION, fresh.clone()));
+        if policy == DuplicateIdPolicy::IgnoreIdentical {
+            assert_eq!(recreated.unwrap(), fresh);
+        } else {
+            assert_eq!(recreated.unwrap_err().tag(), "DuplicateKeyError");
+        }
+        empty_engine(&runtime);
+        assert_eq!(
+            fs::read(fixture.partition_path("2025-03")).unwrap(),
+            after_append
+        );
+    }
+}

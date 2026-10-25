@@ -12,20 +12,19 @@
 //! collection does not read or validate the other rows of its target partition.
 //! An invalid existing row no longer blocks such a create, but every read that
 //! scans the row still fails with the same error. Resident loads and validates
-//! the whole target partition before a create.
+//! the whole target partition before a create. This timing change applies to
+//! built-in JSONL; custom codecs retain whole-partition decoding and validation.
 
 use crate::{ExecutionModel, MutationInner, RuntimeState};
 use indexmap::IndexMap;
 use proseql_engine::collection::CreateManyResult;
 use proseql_engine::errors::{EngineError, SerializationError};
 use proseql_engine::scan::RowLocation;
-use proseql_storage::append::{
-    decode_append_bytes, jsonl_tail_bytes, JsonlTail, TornLineDiagnostic,
-};
+use proseql_storage::append::{jsonl_tail_bytes, JsonlTail, TornLineDiagnostic};
 use proseql_storage::generation::SourceGeneration;
 use proseql_storage::host::StorageHost;
 use proseql_storage::index::rows;
-use proseql_storage::partitioned::{check_partition_record, partition_path};
+use proseql_storage::partitioned::partition_path;
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -202,14 +201,26 @@ fn candidates(
     host: &dyn StorageHost,
     paths: &[String],
     ids: &[String],
-) -> Result<Vec<(String, RowLocation)>, EngineError> {
+) -> Result<Vec<(String, RowLocation, String)>, EngineError> {
     let locator = index.id_locator(host, paths)?;
     let mut candidates = Vec::new();
     for id in ids {
-        candidates.extend(locator.locate(id)?);
+        candidates.extend(
+            locator
+                .locate(id)?
+                .into_iter()
+                .map(|(path, location)| (path, location, id.clone())),
+        );
     }
-    candidates.sort();
-    candidates.dedup();
+    // Whole-partition candidates can have different ordinals but the same
+    // UNKNOWN_OFFSET. Verify that partition once per requested ID, not once
+    // per colliding locator entry.
+    candidates.sort_by(|left, right| {
+        (&left.0, left.1.offset, &left.2).cmp(&(&right.0, right.1.offset, &right.2))
+    });
+    candidates.dedup_by(|left, right| {
+        left.0 == right.0 && left.1.offset == right.1.offset && left.2 == right.2
+    });
     Ok(candidates)
 }
 
@@ -233,7 +244,6 @@ fn load_candidates(
         .filter_map(|record| record.get("id").and_then(Value::as_str))
         .map(str::to_owned)
         .collect::<Vec<_>>();
-    let wanted = ids.iter().map(String::as_str).collect::<HashSet<_>>();
     let locations = candidates(&mut lazy.stream.index, access.host, &paths, &ids).map_err(
         |error| match error {
             EngineError::SourceConfig(mut error) => {
@@ -248,55 +258,36 @@ fn load_candidates(
             other => other,
         },
     )?;
-    let config = &access.sources.config.collection_configs[collection];
-    let mut decode_config = config.clone();
-    decode_config.schema = crate::schema_checks::storage_decode_schema(&config.schema);
     let mut records = Vec::new();
     let mut borrowed = Vec::new();
     let mut seen = HashSet::new();
-    for (path, location) in locations {
-        let mut bytes = rows::read_line(access.host, &path, location.offset)?;
-        // Keep the registered codec and callback-aware schema decode used by
-        // ordinary partition loading; equality must compare canonical records.
-        bytes.push(b'\n');
-        let file = proseql_storage::partitioned::file_source(&lazy.source, &path);
-        let mut loaded = decode_append_bytes(
-            access.host,
-            access.formats,
-            &file,
-            &decode_config,
-            &bytes,
-            true,
-        )?;
-        crate::schema_checks::decode_loaded_records(
-            &config.schema,
-            &config.id_strategy,
-            &mut loaded.records,
-            &access.sources.callbacks,
-        )?;
-        for (id, record) in loaded.records {
-            check_partition_record(&lazy.source, &path, &id, &record)?;
-            if !wanted.contains(id.as_str()) {
-                continue;
-            }
-            if !seen.insert(id.clone()) {
-                return Err(EngineError::SourceConfig(Box::new(
-                    proseql_engine::errors::SourceConfigError {
-                        source_id: Some(lazy.source_id.clone()),
-                        collection: Some(collection.to_owned()),
-                        path: Some(path.clone()),
-                        message: format!("Duplicate partition record '{id}'"),
-                    },
-                )));
-            }
-            if inner
-                .database
-                .collection(collection)
-                .is_none_or(|records| records.get(&id).is_none())
-            {
-                borrowed.push(id);
-                records.push(record);
-            }
+    for (path, location, id) in locations {
+        // A custom codec has partition-level candidates (UNKNOWN_OFFSET), not
+        // line addresses. The index owns codec-aware decoding and validation.
+        let Some(record) = lazy
+            .stream
+            .index
+            .verify_candidate(access.host, &path, location, &id)?
+        else {
+            continue;
+        };
+        if !seen.insert(id.clone()) {
+            return Err(EngineError::SourceConfig(Box::new(
+                proseql_engine::errors::SourceConfigError {
+                    source_id: Some(lazy.source_id.clone()),
+                    collection: Some(collection.to_owned()),
+                    path: Some(path.clone()),
+                    message: format!("Duplicate partition record '{id}'"),
+                },
+            )));
+        }
+        if inner
+            .database
+            .collection(collection)
+            .is_none_or(|records| records.get(&id).is_none())
+        {
+            borrowed.push(id);
+            records.push(record);
         }
     }
     inner
@@ -507,5 +498,33 @@ mod tests {
             assert_eq!(sources.lazy["rows"].stream.append.resident_bytes(), 0);
             assert!(state.database.collection("rows").unwrap().is_empty());
         }
+        // A metadata read failure after durable success must discard derived
+        // indexes, not the codec/schema context needed for later verification.
+        let invalid_metadata = dir.path().join("invalid-bookkeeping.txt");
+        std::fs::write(&invalid_metadata, "not json\n").unwrap();
+        {
+            let mut state = runtime.lock_open().unwrap();
+            let append = &mut state.sources.as_mut().unwrap().lazy["rows"].stream.append;
+            append.ids.push("not-in-engine".into());
+            append
+                .starts
+                .insert(invalid_metadata.to_string_lossy().into_owned(), 0);
+            after_commit(&mut state);
+        }
+        let error = runtime
+            .mutate(|db| {
+                db.create(
+                    "rows",
+                    json!({"id": "0", "partition": "new", "payload": "different"}),
+                )
+            })
+            .unwrap_err();
+        assert_eq!(error.tag(), "DuplicateKeyError");
+        assert_eq!(
+            runtime
+                .read(|db| Ok(db.collection("rows").unwrap().len()))
+                .unwrap(),
+            0
+        );
     }
 }
