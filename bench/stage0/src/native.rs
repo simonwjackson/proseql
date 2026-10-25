@@ -112,16 +112,18 @@ pub fn open(root: &Path, kind: &str) -> Result<NativeRuntime, Error> {
 }
 pub fn query(runtime: &NativeRuntime, kind: &str, q: &Query) -> Result<Answer, Error> {
     if q.aggregate {
-        let groups = runtime.aggregate_grouped_bounded(
-            kind,
-            Some(q.filter()),
-            &["date".into(), "metric".into()],
-            &AggregateConfig {
-                count: true,
-                sum: vec!["value".into()],
-                ..Default::default()
-            },
-        ).map_err(tag)?;
+        let groups = runtime
+            .aggregate_grouped_bounded(
+                kind,
+                Some(q.filter()),
+                &["date".into(), "metric".into()],
+                &AggregateConfig {
+                    count: true,
+                    sum: vec!["value".into()],
+                    ..Default::default()
+                },
+            )
+            .map_err(tag)?;
         let mut answer = Answer::default();
         for group in groups {
             answer.group(
@@ -133,17 +135,23 @@ pub fn query(runtime: &NativeRuntime, kind: &str, q: &Query) -> Result<Answer, E
         }
         Ok(answer)
     } else {
-        Ok(Answer::rows(runtime.query_bounded(
-            kind,
-            QueryInput {
-                r#where: Some(q.filter()),
-                ..Default::default()
-            },
-        ).map_err(tag)?))
+        Ok(Answer::rows(
+            runtime
+                .query_bounded(
+                    kind,
+                    QueryInput {
+                        r#where: Some(q.filter()),
+                        ..Default::default()
+                    },
+                )
+                .map_err(tag)?,
+        ))
     }
 }
 pub fn append(runtime: &NativeRuntime, kind: &str) -> Result<Answer, Error> {
     let rows = fixture::append_rows(kind);
-    runtime.mutate(|tx| tx.create_many(kind, rows.clone()).map(|_| ())).map_err(tag)?;
+    runtime
+        .mutate(|tx| tx.create_many(kind, rows.clone()).map(|_| ()))
+        .map_err(tag)?;
     Ok(Answer::rows(rows))
 }
