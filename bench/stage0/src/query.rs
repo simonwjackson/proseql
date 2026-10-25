@@ -22,16 +22,26 @@ impl Query {
         };
         let point = fixture::point(kind);
         Self {
-            from, to, metrics: if workload == "month" {vec!["steps"]} else {vec!["steps", "heartRate"]},
+            from,
+            to,
+            metrics: if workload == "month" {
+                vec!["steps"]
+            } else {
+                vec!["steps", "heartRate"]
+            },
             id: (workload == "point").then(|| point["id"].as_str().unwrap().to_owned()),
-            shard: (workload == "point" && kind == "raw").then(|| point["shard"].as_str().unwrap().to_owned()),
+            shard: (workload == "point" && kind == "raw")
+                .then(|| point["shard"].as_str().unwrap().to_owned()),
             aggregate: ["month", "ten"].contains(&workload),
         }
     }
     pub fn filter(&self) -> Value {
         if let Some(id) = &self.id {
-            if let Some(shard) = &self.shard { serde_json::json!({"id":id,"shard":shard}) }
-            else { serde_json::json!({"id":id}) }
+            if let Some(shard) = &self.shard {
+                serde_json::json!({"id":id,"shard":shard})
+            } else {
+                serde_json::json!({"id":id})
+            }
         } else {
             serde_json::json!({"atUtc":{"$gte": self.from,"$lt":self.to}, "metric":{"$in":self.metrics}})
         }
@@ -52,8 +62,11 @@ pub struct Answer {
 }
 impl Answer {
     pub fn rows(mut rows: Vec<Value>) -> Self {
-        rows.sort_by(|a,b| a["id"].as_str().cmp(&b["id"].as_str()));
-        let mut result = Self {count: rows.len() as u64, ..Self::default()};
+        rows.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+        let mut result = Self {
+            count: rows.len() as u64,
+            ..Self::default()
+        };
         let mut encoded = Vec::new();
         for row in rows {
             result.sum += row["value"].as_f64().unwrap();
