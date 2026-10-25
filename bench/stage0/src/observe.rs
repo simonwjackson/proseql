@@ -27,3 +27,34 @@ pub fn status(field: &str) -> Result<u64, Error> {
     Ok(line.split_whitespace().nth(1).ok_or("missing proc value")?.parse::<u64>()? * 1024)
 }
 pub fn reset_rss_peak() -> Result<(), Error> {Ok(fs::write("/proc/self/clear_refs", "5")?)}
+
+/// Linux perf user-instruction counter, enabled only around the operation.
+/// Version-0 perf_event_attr is 64 bytes. No architecture-specific instructions.
+#[repr(C)]
+struct PerfAttr {
+    event_type: u32, size: u32, config: u64, sample_period: u64,
+    sample_type: u64, read_format: u64, flags: u64,
+    wakeup: u32, bp_type: u32, config1: u64,
+}
+pub struct Instructions(libc::c_int);
+impl Instructions {
+    pub fn new() -> Result<Self, Error> {
+        let attr = PerfAttr {event_type:0,size:64,config:1,sample_period:0,sample_type:0,read_format:0,flags:1 | 2 | 32 | 64,wakeup:0,bp_type:0,config1:0};
+        let fd = unsafe {libc::syscall(libc::SYS_perf_event_open, &attr, 0, -1, -1, 0)};
+        if fd < 0 {return Err(std::io::Error::last_os_error().into());}
+        Ok(Self(fd as libc::c_int))
+    }
+    pub fn start(&self) -> Result<(),Error> {
+        for request in [0x2403,0x2400] {
+            if unsafe {libc::ioctl(self.0,request)} < 0 {return Err(std::io::Error::last_os_error().into());}
+        }
+        Ok(())
+    }
+    pub fn stop(&self) -> Result<u64, Error> {
+        if unsafe {libc::ioctl(self.0,0x2401)} < 0 {return Err(std::io::Error::last_os_error().into());}
+        let mut count = 0u64;
+        if unsafe {libc::read(self.0,(&mut count as *mut u64).cast(),8)} != 8 {return Err(std::io::Error::last_os_error().into());}
+        Ok(count)
+    }
+}
+impl Drop for Instructions {fn drop(&mut self) {unsafe {libc::close(self.0);}}}

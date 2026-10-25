@@ -68,11 +68,14 @@ fn main() -> Result<(), Error> {
     #[cfg(feature = "heap-meter")] METER.reset();
     sql::heap(true);
     let rss_before = observe::status("VmRSS:")?;
+    let counter = observe::Instructions::new()?;
+    counter.start()?;
     let start = Instant::now();
     let answer = if workload == "open" {
         opened = Some(Backend::open(root,backend,kind)?); Answer::default()
     } else {opened.as_mut().unwrap().run(root,kind,workload)?};
     let wall_ms = start.elapsed().as_secs_f64()*1000.0;
+    let instructions = counter.stop()?;
     let rss_return = observe::status("VmRSS:")?;
     let rss_peak = observe::status("VmHWM:")?;
     #[cfg(feature = "heap-meter")] let heap = Some(METER.sample());
@@ -81,7 +84,7 @@ fn main() -> Result<(), Error> {
     // Keep the backend open. This is not source-session teardown or malloc_trim.
     std::thread::sleep(Duration::from_secs(1));
     let rss_1s = observe::status("VmRSS:")?;
-    println!("{}",serde_json::json!({"backend":backend,"kind":kind,"workload":workload,"cache":cache,"wall_ms":wall_ms,"rss_before":rss_before,"rss_return":rss_return,"rss_peak":rss_peak,"rss_1s":rss_1s,"rust_heap_live_peak":heap,"sqlite_c_heap_live_peak":if backend=="sqlite" {Some(c_heap)} else {None},"answer":answer}));
+    println!("{}",serde_json::json!({"backend":backend,"kind":kind,"workload":workload,"cache":cache,"wall_ms":wall_ms,"instructions":instructions,"rss_before":rss_before,"rss_return":rss_return,"rss_peak":rss_peak,"rss_1s":rss_1s,"rust_heap_live_peak":heap,"sqlite_c_heap_live_peak":if backend=="sqlite" {Some(c_heap)} else {None},"answer":answer}));
     drop(opened);
     Ok(())
 }

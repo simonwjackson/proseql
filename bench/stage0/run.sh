@@ -1,7 +1,10 @@
 #!/usr/bin/env nix-shell
-#!nix-shell -i bash -p bash coreutils python3 systemd shellcheck
+#!nix-shell -i bash -p bash coreutils python3 systemd shellcheck --builders ''
 # This script is deliberately host-restricted. No local builds on zao.
 set -euo pipefail
+# No distributed builds. Substituter downloads remain enabled.
+export NIX_CONFIG="${NIX_CONFIG:-}
+builders ="
 root=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$root"
 if [[ $(hostname -s) != yari || $(uname -m) != aarch64 ]]; then
@@ -26,30 +29,30 @@ case "$action" in
       nix --version
       sha256sum -c bench/stage0/baseline-files.sha256
     } > "$out/environment.log" 2>&1
-    scope 120 nix run nixpkgs#perf -- stat -e instructions:u true > "$out/perf.log" 2>&1 || true
+    scope 120 nix run --builders '' nixpkgs#perf -- stat -e instructions:u true > "$out/perf.log" 2>&1 || true
     ;;
   build)
     sha256sum -c bench/stage0/baseline-files.sha256 > "$out/baseline-check.log"
-    nix develop -c cargo build --locked --release --manifest-path bench/stage0/Cargo.toml -j 2 > "$out/build.log" 2>&1
+    nix develop --builders '' -c cargo build --locked --release --manifest-path bench/stage0/Cargo.toml -j 2 > "$out/build.log" 2>&1
     cp bench/stage0/target/release/proseql-stage0 "$data/timing"
-    nix develop -c cargo build --locked --release --manifest-path bench/stage0/Cargo.toml --features heap-meter -j 2 > "$out/build-meter.log" 2>&1
+    nix develop --builders '' -c cargo build --locked --release --manifest-path bench/stage0/Cargo.toml --features heap-meter -j 2 > "$out/build-meter.log" 2>&1
     cp bench/stage0/target/release/proseql-stage0 "$data/meter"
     sha256sum "$data/timing" "$data/meter" > "$out/binaries.sha256"
     ;;
   lock)
-    nix develop -c cargo generate-lockfile --manifest-path bench/stage0/Cargo.toml > "$out/lock.log" 2>&1
+    nix develop --builders '' -c cargo generate-lockfile --manifest-path bench/stage0/Cargo.toml > "$out/lock.log" 2>&1
     ;;
   format)
-    nix develop -c rustfmt --edition 2021 bench/stage0/src/*.rs
+    nix develop --builders '' -c rustfmt --edition 2021 bench/stage0/src/*.rs
     ;;
   check)
     # Tests create synthetic data on disk, never under tmpfs.
     mkdir -p "$data/test-tmp"
     export TMPDIR="$data/test-tmp"
-    nix develop -c cargo check --locked --manifest-path bench/stage0/Cargo.toml --all-targets --all-features -j 2 > "$out/check.log" 2>&1
-    scope 300 nix develop -c cargo test --locked --manifest-path bench/stage0/Cargo.toml --all-features -j 2 -- --test-threads=1 > "$out/tests.log" 2>&1
-    nix develop -c cargo clippy --locked --manifest-path bench/stage0/Cargo.toml --all-targets --all-features --no-deps -j 2 -- -D warnings > "$out/clippy.log" 2>&1
-    nix develop -c rustfmt --edition 2021 --check bench/stage0/src/*.rs > "$out/format.log" 2>&1
+    nix develop --builders '' -c cargo check --locked --manifest-path bench/stage0/Cargo.toml --all-targets --all-features -j 2 > "$out/check.log" 2>&1
+    scope 300 nix develop --builders '' -c cargo test --locked --manifest-path bench/stage0/Cargo.toml --all-features -j 2 -- --test-threads=1 > "$out/tests.log" 2>&1
+    nix develop --builders '' -c cargo clippy --locked --manifest-path bench/stage0/Cargo.toml --all-targets --all-features --no-deps -j 2 -- -D warnings > "$out/clippy.log" 2>&1
+    nix develop --builders '' -c rustfmt --edition 2021 --check bench/stage0/src/*.rs > "$out/format.log" 2>&1
     shellcheck bench/stage0/run.sh > "$out/shellcheck.log" 2>&1
     python3 -m py_compile bench/stage0/measure.py
     ;;
