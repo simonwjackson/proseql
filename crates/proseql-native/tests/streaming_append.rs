@@ -366,3 +366,251 @@ fn killed_mid_append_keeps_a_torn_suffix_and_next_append_truncates_it() {
     );
     empty_engine(&runtime);
 }
+
+struct CountingIds(Arc<std::sync::atomic::AtomicUsize>);
+impl proseql_engine::id_gen::IdGenerator for CountingIds {
+    fn generate(&mut self) -> String {
+        use std::sync::atomic::Ordering;
+        format!("counted-{}", self.0.fetch_add(1, Ordering::SeqCst) + 1)
+    }
+}
+
+fn counted_runtime(
+    fixture: &ParityFixture,
+    model: ExecutionModel,
+) -> (NativeRuntime, Arc<std::sync::atomic::AtomicUsize>) {
+    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut config = fixture.config();
+    config.collections[0].descriptor.id_generator = Some("counted".into());
+    let mut options = fixture.options(model);
+    let shared = Arc::clone(&count);
+    options.callbacks.register_id_generator(
+        "counted",
+        Box::new(move || Box::new(CountingIds(Arc::clone(&shared)))),
+    );
+    (
+        NativeRuntime::open_sources_with_options(config, options).unwrap(),
+        count,
+    )
+}
+
+#[test]
+fn generated_ids_are_globally_checked_before_insertion_even_when_errors_are_caught() {
+    let fixture = ParityFixture::new(1440);
+    let mut existing = sample("2025-01", 1, 0, "steps");
+    existing["id"] = json!("counted-1");
+    fs::write(fixture.partition_path("2025-01"), format!("{existing}\n")).unwrap();
+    let (runtime, _) = counted_runtime(&fixture, ExecutionModel::Streaming);
+    let mut input = sample("2025-03", 1, 1, "steps");
+    input.as_object_mut().unwrap().shift_remove("id");
+    runtime
+        .mutate(|db| {
+            assert_eq!(
+                db.create(COLLECTION, input.clone()).unwrap_err().tag(),
+                "DuplicateKeyError"
+            );
+            let created = db.create(COLLECTION, input.clone())?;
+            assert_eq!(created["id"], "counted-2");
+            Ok(())
+        })
+        .unwrap();
+    empty_engine(&runtime);
+    let text = fs::read_to_string(fixture.partition_path("2025-03")).unwrap();
+    assert!(!text.contains("counted-1"));
+    assert!(text.contains("counted-2"));
+}
+
+#[test]
+fn successful_generated_batches_and_all_provided_batches_keep_generator_semantics() {
+    use std::sync::atomic::Ordering;
+    let fixture = ParityFixture::new(1440);
+    let mut answers = Vec::new();
+    for model in [ExecutionModel::Resident, ExecutionModel::Streaming] {
+        let copy = fixture.copy();
+        let (runtime, count) = counted_runtime(&copy, model);
+        let provided = sample("2025-01", 1, 1, "steps");
+        let first = runtime
+            .mutate(|db| db.create_many(COLLECTION, vec![provided.clone()]))
+            .unwrap()
+            .created;
+        assert_eq!(first, vec![provided]);
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        let mut invalid = sample("2025-01", 1, 2, "steps");
+        invalid["value"] = Value::Null;
+        assert_eq!(
+            runtime
+                .mutate(|db| db.create_many(COLLECTION, vec![invalid]))
+                .unwrap_err()
+                .tag(),
+            "ValidationError"
+        );
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        let generated = [3, 4]
+            .into_iter()
+            .map(|minute| {
+                let mut row = sample("2025-01", 1, minute, "steps");
+                row.as_object_mut().unwrap().shift_remove("id");
+                row
+            })
+            .collect();
+        let second = runtime
+            .mutate(|db| db.create_many(COLLECTION, generated))
+            .unwrap()
+            .created;
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        answers.push(second);
+    }
+    assert_eq!(answers[0], answers[1]);
+}
+
+#[test]
+fn failed_generated_batches_deliberately_resolve_all_ids_under_streaming() {
+    use std::sync::atomic::Ordering;
+    for (model, expected) in [
+        (ExecutionModel::Resident, 2),
+        (ExecutionModel::Streaming, 3),
+    ] {
+        let fixture = ParityFixture::new(1440);
+        let before = fs::read(fixture.partition_path("2025-01")).unwrap();
+        let (runtime, count) = counted_runtime(&fixture, model);
+        let rows = [1, 2, 3]
+            .into_iter()
+            .map(|minute| {
+                let mut row = sample("2025-01", 1, minute, "steps");
+                row.as_object_mut().unwrap().shift_remove("id");
+                if minute == 2 {
+                    row["value"] = Value::Null;
+                }
+                row
+            })
+            .collect();
+        assert_eq!(
+            runtime
+                .mutate(|db| db.create_many(COLLECTION, rows))
+                .unwrap_err()
+                .tag(),
+            "ValidationError"
+        );
+        assert_eq!(count.load(Ordering::SeqCst), expected);
+        assert_eq!(fs::read(fixture.partition_path("2025-01")).unwrap(), before);
+        if model == ExecutionModel::Streaming {
+            empty_engine(&runtime);
+        }
+    }
+}
+
+struct FailSecondSync(std::sync::atomic::AtomicUsize);
+impl DurabilityFaultInjector for FailSecondSync {
+    fn check(&self, point: DurabilityFaultPoint) -> Result<(), EngineError> {
+        if point == DurabilityFaultPoint::AppendSync
+            && self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1
+        {
+            return Err(EngineError::Operation(OperationError {
+                operation: "append".into(),
+                reason: "injected-failure".into(),
+                message: "second sync failed".into(),
+            }));
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn failure_between_files_keeps_the_durable_prefix_and_quarantines_the_runtime() {
+    let fixture = ParityFixture::new(1440);
+    let host = Arc::new(
+        FsStorageHost::new_polling_with_fault_injector(
+            Duration::from_secs(2),
+            Arc::new(FailSecondSync(std::sync::atomic::AtomicUsize::new(0))),
+        )
+        .unwrap(),
+    );
+    let runtime = NativeRuntime::open_sources_with_host(
+        fixture.config(),
+        host,
+        fixture.options(ExecutionModel::Streaming),
+    )
+    .unwrap();
+    let first = sample("2025-01", 1, 1, "steps");
+    let second = sample("2025-02", 1, 1, "steps");
+    let error = runtime
+        .mutate(|db| db.create_many(COLLECTION, vec![second.clone(), first.clone()]))
+        .unwrap_err();
+    assert_eq!(error.tag(), "StorageError");
+    assert!(error.to_string().contains("completed paths"));
+    assert!(runtime.read(|_| Ok(())).is_err());
+    runtime.close().unwrap();
+    let reopened = fixture.open(ExecutionModel::Streaming);
+    assert_eq!(
+        reopened
+            .find_by_id(COLLECTION, first["id"].as_str().unwrap())
+            .unwrap(),
+        Some(first)
+    );
+    assert_eq!(
+        reopened
+            .find_by_id(COLLECTION, second["id"].as_str().unwrap())
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn locator_build_rejects_existing_cross_partition_duplicates_but_an_empty_batch_is_a_noop() {
+    let fixture = ParityFixture::new(1440);
+    let existing = sample("2025-01", 1, 0, "steps");
+    let mut duplicate = sample("2025-02", 1, 0, "steps");
+    duplicate["id"] = existing["id"].clone();
+    fs::write(fixture.partition_path("2025-02"), format!("{duplicate}\n")).unwrap();
+    let runtime = fixture.open(ExecutionModel::Streaming);
+    assert!(runtime
+        .mutate(|db| db.create_many(COLLECTION, vec![]))
+        .unwrap()
+        .created
+        .is_empty());
+    let error = runtime
+        .mutate(|db| db.create(COLLECTION, sample("2025-03", 1, 1, "steps")))
+        .unwrap_err();
+    assert_eq!(error.tag(), "SourceConfigError");
+    assert!(error.to_string().contains("Duplicate partition record"));
+    empty_engine(&runtime);
+}
+
+#[test]
+fn invalid_unrelated_payload_does_not_block_a_new_id_but_scanning_reads_still_fail() {
+    let fixture = ParityFixture::new(1440);
+    let mut invalid = sample("2025-01", 1, 0, "steps");
+    invalid["value"] = json!("invalid persisted value");
+    fs::write(fixture.partition_path("2025-01"), format!("{invalid}\n")).unwrap();
+    let resident_copy = fixture.copy();
+    let resident = resident_copy.open(ExecutionModel::Resident);
+    let streaming = fixture.open(ExecutionModel::Streaming);
+    let new = sample("2025-01", 1, 1, "steps");
+    assert_eq!(
+        resident
+            .mutate(|db| db.create(COLLECTION, new.clone()))
+            .unwrap_err()
+            .tag(),
+        "ValidationError"
+    );
+    streaming
+        .mutate(|db| db.create(COLLECTION, new.clone()))
+        .unwrap();
+    empty_engine(&streaming);
+    let input = QueryInput {
+        r#where: Some(json!({"atUtc": {"$startsWith": "2025-01"}})),
+        ..Default::default()
+    };
+    let resident_error = resident.query(COLLECTION, input.clone(), None).unwrap_err();
+    let streaming_error = streaming.query(COLLECTION, input, None).unwrap_err();
+    assert_eq!(streaming_error, resident_error);
+    // A matching locator candidate is never exempt from full validation.
+    assert_eq!(
+        streaming
+            .mutate(|db| db.create(COLLECTION, sample("2025-01", 1, 0, "steps")))
+            .unwrap_err()
+            .tag(),
+        "ValidationError"
+    );
+    empty_engine(&streaming);
+}

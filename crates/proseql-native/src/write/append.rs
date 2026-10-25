@@ -1,6 +1,18 @@
 //! Creates on streaming lazy collections. Only one batch and verified duplicate
 //! candidates enter the engine; source partitions never do. Durability remains
 //! in the ordinary source commit path.
+//!
+//! Under ExecutionModel::Streaming, create_many on a lazy collection resolves
+//! every generated ID before validating the batch. If the batch fails
+//! validation, a stateful ID generator may have advanced past the first invalid
+//! record; Resident stops at the first invalid record. Generated IDs were never
+//! guaranteed to be gap-free.
+//!
+//! Under ExecutionModel::Streaming, creating a record with a new ID in a lazy
+//! collection does not read or validate the other rows of its target partition.
+//! An invalid existing row no longer blocks such a create, but every read that
+//! scans the row still fails with the same error. Resident loads and validates
+//! the whole target partition before a create.
 
 use crate::{ExecutionModel, MutationInner, RuntimeState};
 use indexmap::IndexMap;
@@ -82,6 +94,9 @@ pub(crate) fn create_many(
     collection: &str,
     mut data: Vec<Value>,
 ) -> Result<CreateManyResult, EngineError> {
+    if data.is_empty() {
+        return inner.database.create_many(collection, data, false);
+    }
     for record in &mut data {
         if record.is_object() {
             resolve_id(inner, collection, record)?;
@@ -241,30 +256,6 @@ fn load_candidates(
     let mut seen = HashSet::new();
     for (path, location) in locations {
         let mut bytes = rows::read_line(access.host, &path, location.offset)?;
-        let raw: Value = serde_json::from_slice(&bytes).map_err(json_error)?;
-        let Some(id) = raw.get("id").and_then(Value::as_str) else {
-            continue;
-        };
-        if !wanted.contains(id) {
-            continue;
-        }
-        if !seen.insert(id.to_owned()) {
-            return Err(EngineError::SourceConfig(Box::new(
-                proseql_engine::errors::SourceConfigError {
-                    source_id: Some(lazy.source_id.clone()),
-                    collection: Some(collection.to_owned()),
-                    path: Some(path.clone()),
-                    message: format!("Duplicate partition record '{id}'"),
-                },
-            )));
-        }
-        if inner
-            .database
-            .collection(collection)
-            .is_some_and(|records| records.get(id).is_some())
-        {
-            continue;
-        }
         // Keep the registered codec and callback-aware schema decode used by
         // ordinary partition loading; equality must compare canonical records.
         bytes.push(b'\n');
@@ -285,8 +276,27 @@ fn load_candidates(
         )?;
         for (id, record) in loaded.records {
             check_partition_record(&lazy.source, &path, &id, &record)?;
-            borrowed.push(id);
-            records.push(record);
+            if !wanted.contains(id.as_str()) {
+                continue;
+            }
+            if !seen.insert(id.clone()) {
+                return Err(EngineError::SourceConfig(Box::new(
+                    proseql_engine::errors::SourceConfigError {
+                        source_id: Some(lazy.source_id.clone()),
+                        collection: Some(collection.to_owned()),
+                        path: Some(path.clone()),
+                        message: format!("Duplicate partition record '{id}'"),
+                    },
+                )));
+            }
+            if inner
+                .database
+                .collection(collection)
+                .is_none_or(|records| records.get(&id).is_none())
+            {
+                borrowed.push(id);
+                records.push(record);
+            }
         }
     }
     inner

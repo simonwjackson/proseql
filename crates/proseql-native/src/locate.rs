@@ -16,6 +16,8 @@ pub(crate) struct IndexState {
 }
 
 impl IndexState {
+    // called by exec/append; removed at integration
+    #[allow(dead_code)]
     pub fn time_index(
         &mut self,
         host: &dyn StorageHost,
@@ -48,6 +50,8 @@ impl IndexState {
         Ok(self.ids.as_mut().expect("built locator"))
     }
 
+    // called by exec/append; removed at integration
+    #[allow(dead_code)]
     pub fn id_locator_if_built(&mut self) -> Option<&mut IdLocator> {
         self.ids.as_mut()
     }
