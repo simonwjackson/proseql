@@ -71,3 +71,21 @@ pub(crate) fn refresh_applies(_state: &RuntimeState) -> bool {
 pub(crate) fn refresh(_state: &mut RuntimeState) -> Result<(), EngineError> {
     Err(unimplemented_seam("watch::refresh"))
 }
+
+// ── hooks added in qws/base 2 (requested by mutate) ────────────────────────
+
+/// Called with the runtime lock held, right after `commit_source_mutation`
+/// succeeded and before `append::after_commit` removes the batch from the
+/// engine collection. Capture what streaming watches need from this commit
+/// (for example the committed rows of streaming lazy collections) into
+/// `WatchState`. Must not publish anything to callers here.
+pub(crate) fn capture_commit(_state: &mut RuntimeState) {}
+
+impl NativeRuntime {
+    /// Called without the runtime lock after every successful source-mode
+    /// mutation (before host callbacks replay), after `reload`, after the
+    /// managed watcher's reload, and after each lazy poll that refreshed.
+    /// Deliver pending streaming-watch results here; `streaming_read` may be
+    /// called. Must not fail: record errors where the watch API reports them.
+    pub(crate) fn refresh_streaming_watches(&self) {}
+}

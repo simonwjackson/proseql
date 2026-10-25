@@ -1061,7 +1061,10 @@ impl NativeRuntime {
             }
             let committed = commit_source_mutation(&self.inner, &mut state, session, result);
             match &committed {
-                Ok(_) => crate::write::append::after_commit(&mut state),
+                Ok(_) => {
+                    crate::write::watch::capture_commit(&mut state);
+                    crate::write::append::after_commit(&mut state);
+                }
                 Err(_) => crate::write::append::after_rollback(&mut state),
             }
             if lazy && state.quarantine_error.is_none() {
@@ -1070,6 +1073,7 @@ impl NativeRuntime {
             let result = committed?;
             let replay = callbacks.finish();
             drop(state);
+            self.refresh_streaming_watches();
             replay();
             return Ok(result);
         }
@@ -1144,7 +1148,10 @@ impl NativeRuntime {
     /// and retained as a diagnostic while the current LKG remains visible.
     pub fn reload(&self) -> Result<(), EngineError> {
         let mut state = self.lock_open()?;
-        reload_locked(&mut state, false, None)
+        let result = reload_locked(&mut state, false, None);
+        drop(state);
+        self.refresh_streaming_watches();
+        result
     }
 
     pub fn last_reload_error(&self) -> Result<Option<EngineError>, EngineError> {
@@ -1578,6 +1585,10 @@ fn schedule_reload(weak: &Weak<RuntimeCore>, debounce: Duration) {
                 let _ = reload_locked(&mut state, true, changed);
             }
         };
+        NativeRuntime {
+            inner: Arc::clone(&core),
+        }
+        .refresh_streaming_watches();
     });
 }
 
@@ -1735,6 +1746,10 @@ fn start_lazy_poller(
                     state.last_reload_error = result.err();
                 }
             };
+            NativeRuntime {
+                inner: Arc::clone(&core),
+            }
+            .refresh_streaming_watches();
         })
         .map(|_| ())
         .map_err(|error| {
