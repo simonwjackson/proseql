@@ -16,7 +16,7 @@ use crate::{
 use serde_json::Value;
 use std::collections::HashMap;
 
-pub(super) struct CandidateOrder {
+pub(crate) struct CandidateOrder {
     fields: Vec<String>,
     ranks: HashMap<String, usize>,
     ordered_sort: Option<SortProbe>,
@@ -108,11 +108,23 @@ impl CandidateOrder {
             probe.observe(row);
         }
     }
-    fn rank(&self, row: &Value) -> Option<usize> {
+    pub(crate) fn rank(&self, row: &Value) -> Option<usize> {
         self.ranks.get(&equality_key(row, &self.fields)?).copied()
     }
     pub fn accepts(&self, row: &Value) -> bool {
         self.rank(row).is_some()
+    }
+    pub(crate) fn keys_and_ranks(&self) -> impl Iterator<Item = (&str, usize)> {
+        self.ranks.iter().map(|(key, rank)| (key.as_str(), *rank))
+    }
+    pub(crate) fn fields(&self) -> &[String] {
+        &self.fields
+    }
+    pub(crate) fn rank_count(&self) -> usize {
+        self.ranks.len()
+    }
+    pub(crate) fn ordered_sort_overrides_equality(&self) -> bool {
+        self.ordered_sort.as_ref().is_some_and(SortProbe::can_sort)
     }
     pub fn reorders(&self) -> bool {
         self.ranks.len() > 1

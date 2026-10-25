@@ -508,7 +508,7 @@ impl QueryMatches {
     }
 }
 
-fn finish_query_matches(
+pub(crate) fn finish_query_matches(
     rows: Vec<Value>,
     input: &QueryInput,
     registry: &Arc<CallbackRegistry>,
@@ -542,7 +542,7 @@ pub fn execute_cursor_query_over_entities(
 
 /// The sort a cursor query runs: the explicit sort (whose primary field must
 /// be the cursor key) or an implicit ascending sort on the cursor key.
-fn effective_cursor_sort(
+pub(crate) fn effective_cursor_sort(
     input: &QueryInput,
     cursor_cfg: &CursorConfig,
 ) -> Result<Vec<SortEntry>, EngineError> {
@@ -593,7 +593,7 @@ fn cursor_page(
     finish_cursor_matches(filtered, input, cursor_cfg, sort, registry)
 }
 
-fn finish_cursor_matches(
+pub(crate) fn finish_cursor_matches(
     filtered: Vec<Value>,
     input: &QueryInput,
     cursor_cfg: &CursorConfig,

@@ -128,6 +128,9 @@ impl RowSource for SliceLines<'_> {
 
 // ── executor (owner: exec; free to change below this line) ─────────────────
 
+pub mod borrowed;
+pub mod executor;
+mod fold;
 pub mod framer;
 
 #[cfg(test)]

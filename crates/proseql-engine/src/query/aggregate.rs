@@ -393,7 +393,7 @@ fn is_comparable(v: &Value) -> bool {
 ///    Objects: `{} < {}` → `"[object Object]" < "[object Object]"` → false.
 ///
 /// `Date` is not in the engine's `Value` model yet; it enters as a string.
-fn compare_for_min_max(a: &Value, b: &Value) -> i64 {
+pub(crate) fn compare_for_min_max(a: &Value, b: &Value) -> i64 {
     // Number vs Number: numeric comparison
     if let (Some(an), Some(bn)) = (a.as_f64(), b.as_f64()) {
         return if an < bn {

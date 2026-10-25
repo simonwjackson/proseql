@@ -28,7 +28,7 @@
 //! - `packages/core/src/operations/query/sort-stream.ts` — search relevance scoring
 
 pub mod aggregate;
-mod candidate_order;
+pub(crate) mod candidate_order;
 pub mod computed;
 pub mod cursor;
 pub mod filter;
