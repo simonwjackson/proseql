@@ -1,0 +1,3 @@
+Running as unit: run-p2329230-i2329231.scope; invocation ID: 822506676e2e496f9dad499cca525856
+{"stage":"global-preflight","event":"begin"}
+{"stage":"global-preflight","event":"complete","matched":0,"next":"mutate/create_many"}

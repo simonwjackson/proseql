@@ -1,0 +1,12 @@
+{"backend": "proseql", "cache": "cold", "kind": "raw", "profile": "timing", "reason": "earlier trial of this cell was SIGKILLed", "repeat": 1, "workload": "append"}
+{"backend": "proseql", "cache": "warm", "kind": "raw", "profile": "timing", "reason": "earlier trial of this cell was SIGKILLed", "repeat": 1, "workload": "append"}
+{"backend": "proseql-global", "cache": "cold", "kind": "raw", "profile": "timing", "reason": "earlier trial of this cell was SIGKILLed", "repeat": 1, "workload": "append"}
+{"backend": "proseql-global", "cache": "warm", "kind": "raw", "profile": "timing", "reason": "earlier trial of this cell was SIGKILLed", "repeat": 1, "workload": "append"}
+{"backend": "proseql-global", "cache": "cold", "kind": "raw", "profile": "timing", "reason": "earlier trial of this cell was SIGKILLed", "repeat": 2, "workload": "append"}
+{"backend": "proseql-global", "cache": "warm", "kind": "raw", "profile": "timing", "reason": "earlier trial of this cell was SIGKILLed", "repeat": 2, "workload": "append"}
+{"backend": "proseql", "cache": "cold", "kind": "raw", "profile": "timing", "reason": "earlier trial of this cell was SIGKILLed", "repeat": 2, "workload": "append"}
+{"backend": "proseql", "cache": "warm", "kind": "raw", "profile": "timing", "reason": "earlier trial of this cell was SIGKILLed", "repeat": 2, "workload": "append"}
+{"backend": "proseql", "cache": "cold", "kind": "raw", "profile": "meter", "reason": "earlier trial of this cell was SIGKILLed", "repeat": 0, "workload": "append"}
+{"backend": "proseql", "cache": "warm", "kind": "raw", "profile": "meter", "reason": "earlier trial of this cell was SIGKILLed", "repeat": 0, "workload": "append"}
+{"backend": "proseql-global", "cache": "cold", "kind": "raw", "profile": "meter", "reason": "earlier trial of this cell was SIGKILLed", "repeat": 0, "workload": "append"}
+{"backend": "proseql-global", "cache": "warm", "kind": "raw", "profile": "meter", "reason": "earlier trial of this cell was SIGKILLed", "repeat": 0, "workload": "append"}

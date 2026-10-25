@@ -1,0 +1,14 @@
+{
+  "samples/append": {
+    "count": 1000,
+    "sum": 99500.0,
+    "digest": 16974218388517226321,
+    "groups": {}
+  },
+  "raw/append": {
+    "count": 1000,
+    "sum": 99500.0,
+    "digest": 17906912006715871225,
+    "groups": {}
+  }
+}
