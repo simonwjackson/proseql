@@ -1,0 +1,294 @@
+EXE001 Shebang is present but file is not executable
+ --> bench/stage0/dense.py:1:1
+  |
+1 | #!/usr/bin/env python3
+  | ^^^^^^^^^^^^^^^^^^^^^^
+2 | """Supplement: change only sparse-index density; reuse the same measured binary."""
+  |
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> bench/stage0/dense.py:4:1
+  |
+2 |   """Supplement: change only sparse-index density; reuse the same measured binary."""
+3 |
+4 | / import json
+5 | | import os
+6 | | from pathlib import Path
+7 | | import sys
+8 | |
+9 | | import measure
+  | |______________^
+help: Organize imports
+  |
+5 | import os
+6 + import sys
+7 | from pathlib import Path
+  - import sys
+8 |
+  |
+
+C408 Unnecessary `dict()` call (rewrite as a literal)
+  --> bench/stage0/dense.py:46:17
+   |
+44 |           sidecar.write_text(
+45 |               json.dumps(
+46 | /                 dict(
+47 | |                     len=stat.st_size,
+48 | |                     modified=[stat.st_mtime_ns // 10**9, stat.st_mtime_ns % 10**9],
+49 | |                     ordered=ordered,
+50 | |                     entries=entries,
+51 | |                 ),
+   | |_________________^
+52 |                   separators=(",", ":"),
+53 |               )
+   |
+help: Rewrite as a literal
+
+C408 Unnecessary `dict()` call (rewrite as a literal)
+  --> bench/stage0/dense.py:67:13
+   |
+65 |       (dense / "index.json").write_text(
+66 |           json.dumps(
+67 | /             dict(
+68 | |                 stride=stride,
+69 | |                 index_bytes=index_bytes,
+70 | |                 original_stride=256,
+71 | |                 original_index_bytes=original_bytes,
+72 | |                 correct_against_main_matrix=True,
+73 | |             ),
+   | |_____________^
+74 |               indent=2,
+75 |           )
+   |
+help: Rewrite as a literal
+
+EXE001 Shebang is present but file is not executable
+ --> bench/stage0/diagnose.py:1:1
+  |
+1 | #!/usr/bin/env python3
+  | ^^^^^^^^^^^^^^^^^^^^^^
+2 | """One bounded abort diagnostic: sample RSS and the owning cgroup's OOM counters."""
+  |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> bench/stage0/diagnose.py:4:1
+   |
+ 2 |   """One bounded abort diagnostic: sample RSS and the owning cgroup's OOM counters."""
+ 3 |
+ 4 | / import json
+ 5 | | import os
+ 6 | | from pathlib import Path
+ 7 | | import subprocess
+ 8 | | import sys
+ 9 | | import time
+10 | | import tempfile
+   | |_______________^
+help: Organize imports
+   |
+5  | import os
+   - from pathlib import Path
+6  | import subprocess
+7  | import sys
+8  + import tempfile
+9  | import time
+   - import tempfile
+10 + from pathlib import Path
+11 |
+   |
+
+SIM115 Use a context manager for opening files
+  --> bench/stage0/diagnose.py:45:19
+   |
+43 |         else ["proseql", "raw", "append"]
+44 |     )
+45 |     stdout_file = tempfile.TemporaryFile(mode="w+t", dir=data / "tmp")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^
+46 |     stderr_file = tempfile.TemporaryFile(mode="w+t", dir=data / "tmp")
+47 |     process = subprocess.Popen(
+   |
+
+SIM115 Use a context manager for opening files
+  --> bench/stage0/diagnose.py:46:19
+   |
+44 |     )
+45 |     stdout_file = tempfile.TemporaryFile(mode="w+t", dir=data / "tmp")
+46 |     stderr_file = tempfile.TemporaryFile(mode="w+t", dir=data / "tmp")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^
+47 |     process = subprocess.Popen(
+48 |         [str(data / "timing"), str(root), *operation, "cold"],
+   |
+
+C408 Unnecessary `dict()` call (rewrite as a literal)
+   --> bench/stage0/diagnose.py:87:13
+    |
+ 85 |       print(
+ 86 |           json.dumps(
+ 87 | /             dict(
+ 88 | |                 mode=mode,
+ 89 | |                 temporary_file_paths=sorted(temp_paths),
+ 90 | |                 returncode=process.returncode,
+ 91 | |                 wall_s=time.monotonic() - started,
+ 92 | |                 rss_sampled_peak_lower_bound=rss,
+ 93 | |                 cgroup_peak_bytes=int((cgroup / "memory.peak").read_text()),
+ 94 | |                 cgroup_anon_sampled_peak=peak_anon,
+ 95 | |                 cgroup_file_sampled_peak=peak_file,
+ 96 | |                 memory_max=max_before,
+ 97 | |                 memory_events_before=events_before,
+ 98 | |                 memory_events_after=counters(cgroup / "memory.events"),
+ 99 | |                 stdout=stdout,
+100 | |                 stderr=stderr,
+101 | |             ),
+    | |_____________^
+102 |               sort_keys=True,
+103 |           )
+    |
+help: Rewrite as a literal
+
+EXE001 Shebang is present but file is not executable
+ --> bench/stage0/measure.py:1:1
+  |
+1 | #!/usr/bin/env python3
+  | ^^^^^^^^^^^^^^^^^^^^^^
+2 | """Host-restricted driver. Each trial is a fresh bounded user scope."""
+  |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> bench/stage0/measure.py:4:1
+   |
+ 2 |   """Host-restricted driver. Each trial is a fresh bounded user scope."""
+ 3 |
+ 4 | / import ctypes
+ 5 | | import json
+ 6 | | import os
+ 7 | | from pathlib import Path
+ 8 | | import shutil
+ 9 | | import subprocess
+10 | | import sys
+11 | | import time
+   | |___________^
+12 |
+13 |   LIBC = ctypes.CDLL(None, use_errno=True)
+   |
+help: Organize imports
+   |
+6  | import os
+   - from pathlib import Path
+7  | import shutil
+8  | import subprocess
+9  | import sys
+10 | import time
+11 + from pathlib import Path
+12 |
+   |
+
+PLW1510 `subprocess.run` without explicit `check` argument
+   --> bench/stage0/measure.py:141:38
+    |
+139 | …                     load_before = os.getloadavg()
+140 | …                     started = time.monotonic()
+141 | …                     result = subprocess.run(
+    |                                ^^^^^^^^^^^^^^
+142 | …                         scope + command, text=True, capture_output=True
+143 | …                     )
+    |
+help: Add explicit `check=False`
+
+C408 Unnecessary `dict()` call (rewrite as a literal)
+   --> bench/stage0/measure.py:144:38
+    |
+142 |   …                         scope + command, text=True, capture_output=True
+143 |   …                     )
+144 |   …                     record = dict(
+    |  ________________________________^
+145 | | …                         profile=profile,
+146 | | …                         repeat=repeat,
+147 | | …                         kind=kind,
+148 | | …                         workload=workload,
+149 | | …                         backend=backend,
+150 | | …                         cache=cache,
+151 | | …                         load_before=load_before,
+152 | | …                         load_after=os.getloadavg(),
+153 | | …                         returncode=result.returncode,
+154 | | …                         process_wall_s=time.monotonic() - started,
+155 | | …                         file_cache_before=before,
+156 | | …                         file_cache_after=residency(files(root, backend, kind)),
+157 | | …                         command=scope + command,
+158 | | …                     )
+    | |_______________________^
+159 |   …                     if result.returncode == 0:
+160 |   …                         record.update(json.loads(result.stdout))
+    |
+help: Rewrite as a literal
+
+EXE001 Shebang is present but file is not executable
+ --> bench/stage0/summarize.py:1:1
+  |
+1 | #!/usr/bin/env python3
+  | ^^^^^^^^^^^^^^^^^^^^^^
+2 | """Summarize one final matrix; never mix initial/discarded trials."""
+  |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> bench/stage0/summarize.py:4:1
+   |
+ 2 |   """Summarize one final matrix; never mix initial/discarded trials."""
+ 3 |
+ 4 | / import csv
+ 5 | | import json
+ 6 | | from pathlib import Path
+ 7 | | import statistics
+ 8 | | import sys
+   | |__________^
+ 9 |
+10 |   KINDS = ("samples", "raw")
+   |
+help: Organize imports
+  |
+5 | import json
+  - from pathlib import Path
+6 | import statistics
+7 | import sys
+8 + from pathlib import Path
+9 |
+  |
+
+C408 Unnecessary `dict()` call (rewrite as a literal)
+  --> bench/stage0/summarize.py:55:25
+   |
+53 |                       sqlite = heap["sqlite_c_heap_live_peak"] if heap else None
+54 |                       rows.append(
+55 | /                         dict(
+56 | |                             kind=kind,
+57 | |                             workload=workload,
+58 | |                             backend=backend,
+59 | |                             cache=cache,
+60 | |                             timing_passes=len(times),
+61 | |                             failures=sum(bool(r["returncode"]) for r in matches),
+62 | |                             wall_median_ms=median(times, "wall_ms"),
+63 | |                             wall_min_ms=min(
+64 | |                                 (r["wall_ms"] for r in times), default=None
+65 | |                             ),
+66 | |                             wall_max_ms=max(
+67 | |                                 (r["wall_ms"] for r in times), default=None
+68 | |                             ),
+69 | |                             instructions_median=median(times, "instructions"),
+70 | |                             rss_peak_max=max(
+71 | |                                 (r["rss_peak"] for r in times), default=None
+72 | |                             ),
+73 | |                             rss_return_median=median(times, "rss_return"),
+74 | |                             rss_1s_median=median(times, "rss_1s"),
+75 | |                             rust_heap_live=rust[0] if rust else None,
+76 | |                             rust_heap_peak=rust[1] if rust else None,
+77 | |                             sqlite_c_heap_live=sqlite[0] if sqlite else None,
+78 | |                             sqlite_c_heap_peak=sqlite[1] if sqlite else None,
+79 | |                             file_cache_before_median=median(times, "file_cache_before"),
+80 | |                             file_cache_after_median=median(times, "file_cache_after"),
+81 | |                         )
+   | |_________________________^
+82 |                       )
+83 |       with (root / "summary.csv").open("w") as file:
+   |
+help: Rewrite as a literal
+
+Found 16 errors.
+[*] 4 fixable with the `--fix` option (5 hidden fixes can be enabled with the `--unsafe-fixes` option).

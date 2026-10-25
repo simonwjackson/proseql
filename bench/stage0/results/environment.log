@@ -1,0 +1,238 @@
+2026-10-25T04:14:17+00:00
+03d0cb029aab5ad1a70c364e3f0abf37e0fb7a33
+?? bench/stage0/results/
+?? docs/benchmarks/sqlite-baseline.md
+Linux yari 6.18.53 #1-NixOS SMP PREEMPT Mon Sep 21 13:06:06 UTC 2026 aarch64 GNU/Linux
+Architecture:                            aarch64
+CPU op-mode(s):                          32-bit, 64-bit
+Byte Order:                              Little Endian
+CPU(s):                                  4
+On-line CPU(s) list:                     0-3
+Vendor ID:                               ARM
+Model name:                              Neoverse-N1
+Model:                                   1
+Thread(s) per core:                      1
+Core(s) per socket:                      4
+Socket(s):                               1
+Stepping:                                r3p1
+BogoMIPS:                                50.00
+Flags:                                   fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm lrcpc dcpop asimddp
+NUMA node(s):                            1
+NUMA node0 CPU(s):                       0-3
+Vulnerability Gather data sampling:      Not affected
+Vulnerability Ghostwrite:                Not affected
+Vulnerability Indirect target selection: Not affected
+Vulnerability Itlb multihit:             Not affected
+Vulnerability L1tf:                      Not affected
+Vulnerability Mds:                       Not affected
+Vulnerability Meltdown:                  Not affected
+Vulnerability Mmio stale data:           Not affected
+Vulnerability Old microcode:             Not affected
+Vulnerability Reg file data sampling:    Not affected
+Vulnerability Retbleed:                  Not affected
+Vulnerability Spec rstack overflow:      Not affected
+Vulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl
+Vulnerability Spectre v1:                Mitigation; __user pointer sanitization
+Vulnerability Spectre v2:                Mitigation; CSV2, BHB
+Vulnerability Srbds:                     Not affected
+Vulnerability Tsa:                       Not affected
+Vulnerability Tsx async abort:           Not affected
+Vulnerability Vmscape:                   Not affected
+MemTotal:       24539732 kB
+MemFree:         1610096 kB
+MemAvailable:   23060120 kB
+Buffers:              24 kB
+Cached:         19227468 kB
+SwapCached:          376 kB
+Active:           925976 kB
+Inactive:       18399136 kB
+Active(anon):      83640 kB
+Inactive(anon):    26048 kB
+Active(file):     842336 kB
+Inactive(file): 18373088 kB
+Unevictable:        4068 kB
+Mlocked:               0 kB
+SwapTotal:      12269564 kB
+SwapFree:       12257208 kB
+Zswap:                 0 kB
+Zswapped:              0 kB
+Dirty:              3188 kB
+Writeback:             0 kB
+AnonPages:        101616 kB
+Mapped:           176692 kB
+Shmem:             12068 kB
+KReclaimable:    2551852 kB
+Slab:            3343472 kB
+SReclaimable:    2551852 kB
+SUnreclaim:       791620 kB
+KernelStack:        3688 kB
+PageTables:         4740 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:    24539428 kB
+Committed_AS:    1348220 kB
+VmallocTotal:   135288315904 kB
+VmallocUsed:       76272 kB
+VmallocChunk:          0 kB
+Percpu:             3984 kB
+HardwareCorrupted:     0 kB
+AnonHugePages:         0 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+CmaTotal:          32768 kB
+CmaFree:             340 kB
+Balloon:               0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+0.36 0.33 0.58 1/227 2313918
+Filesystem     Type   Size  Used Avail Use% Mounted on
+/dev/sda2      btrfs  199G   45G  153G  23% /home
+nix (Nix) 2.34.8
+crates/Cargo.lock: OK
+crates/Cargo.toml: OK
+crates/package.nix: OK
+crates/proseql-engine/Cargo.toml: OK
+crates/proseql-engine/src/callbacks.rs: OK
+crates/proseql-engine/src/change_set.rs: OK
+crates/proseql-engine/src/clock.rs: OK
+crates/proseql-engine/src/collection.rs: OK
+crates/proseql-engine/src/descriptor.rs: OK
+crates/proseql-engine/src/errors.rs: OK
+crates/proseql-engine/src/hooks/mod.rs: OK
+crates/proseql-engine/src/id_gen.rs: OK
+crates/proseql-engine/src/lib.rs: OK
+crates/proseql-engine/src/migrations/mod.rs: OK
+crates/proseql-engine/src/operators.rs: OK
+crates/proseql-engine/src/plugins/mod.rs: OK
+crates/proseql-engine/src/query/aggregate.rs: OK
+crates/proseql-engine/src/query/candidate_order.rs: OK
+crates/proseql-engine/src/query/computed.rs: OK
+crates/proseql-engine/src/query/cursor.rs: OK
+crates/proseql-engine/src/query/filter.rs: OK
+crates/proseql-engine/src/query/indexes.rs: OK
+crates/proseql-engine/src/query/mod.rs: OK
+crates/proseql-engine/src/query/ordered_index.rs: OK
+crates/proseql-engine/src/query/paginate.rs: OK
+crates/proseql-engine/src/query/pipeline.rs: OK
+crates/proseql-engine/src/query/search.rs: OK
+crates/proseql-engine/src/query/select.rs: OK
+crates/proseql-engine/src/query/sort.rs: OK
+crates/proseql-engine/src/reactive/mod.rs: OK
+crates/proseql-engine/src/relationships/create.rs: OK
+crates/proseql-engine/src/relationships/delete.rs: OK
+crates/proseql-engine/src/relationships/helpers.rs: OK
+crates/proseql-engine/src/relationships/mod.rs: OK
+crates/proseql-engine/src/relationships/populate.rs: OK
+crates/proseql-engine/src/relationships/update.rs: OK
+crates/proseql-engine/src/resident.rs: OK
+crates/proseql-engine/src/schema_checks.rs: OK
+crates/proseql-engine/src/timestamp.rs: OK
+crates/proseql-engine/src/transactions/mod.rs: OK
+crates/proseql-engine/src/validator.rs: OK
+crates/proseql-engine/src/value.rs: OK
+crates/proseql-engine/tests/crud_conformance.rs: OK
+crates/proseql-engine/tests/descriptor_conformance.rs: OK
+crates/proseql-engine/tests/duplicate_ids_conformance.rs: OK
+crates/proseql-engine/tests/fixtures/lazy-memory.json: OK
+crates/proseql-engine/tests/hooks_conformance.rs: OK
+crates/proseql-engine/tests/migrations_conformance.rs: OK
+crates/proseql-engine/tests/ordered_index_conformance.rs: OK
+crates/proseql-engine/tests/plugins_conformance.rs: OK
+crates/proseql-engine/tests/query_conformance.rs: OK
+crates/proseql-engine/tests/reactive_conformance.rs: OK
+crates/proseql-engine/tests/relationship_conformance.rs: OK
+crates/proseql-engine/tests/resident_conformance.rs: OK
+crates/proseql-engine/tests/streaming_query_conformance.rs: OK
+crates/proseql-engine/tests/transactions_conformance.rs: OK
+crates/proseql-formats/Cargo.toml: OK
+crates/proseql-formats/src/codecs.rs: OK
+crates/proseql-formats/src/lib.rs: OK
+crates/proseql-formats/src/prose.rs: OK
+crates/proseql-formats/tests/format_conformance.rs: OK
+crates/proseql-formats/tests/prose_typed_values.rs: OK
+crates/proseql-formats/tests/prose_unmatched_lines.rs: OK
+crates/proseql-formats/tests/support/yaml_values.rs: OK
+crates/proseql-formats/tests/yaml_round_trip_property.rs: OK
+crates/proseql-formats/tests/yaml_wrap_regression.rs: OK
+crates/proseql-formats/tests/yaml_write_check.rs: OK
+crates/proseql-native/Cargo.toml: OK
+crates/proseql-native/examples/coach_compatibility.rs: OK
+crates/proseql-native/examples/lazy_memory/allocator_os.rs: OK
+crates/proseql-native/examples/lazy_memory/meter.rs: OK
+crates/proseql-native/examples/lazy_memory/rss_peak.rs: OK
+crates/proseql-native/examples/lazy_memory/sessions.rs: OK
+crates/proseql-native/examples/lazy_memory_bench.rs: OK
+crates/proseql-native/examples/support/coach.rs: OK
+crates/proseql-native/examples/timeseries_bench.rs: OK
+crates/proseql-native/examples/yaml_write_check_bench.rs: OK
+crates/proseql-native/src/bounded.rs: OK
+crates/proseql-native/src/callbacks.rs: OK
+crates/proseql-native/src/lazy.rs: OK
+crates/proseql-native/src/lib.rs: OK
+crates/proseql-native/src/lifecycle_tests.rs: OK
+crates/proseql-native/src/read_snapshot.rs: OK
+crates/proseql-native/src/schema_checks.rs: OK
+crates/proseql-native/src/source_sessions.rs: OK
+crates/proseql-native/src/sources.rs: OK
+crates/proseql-native/src/stored_file.rs: OK
+crates/proseql-native/tests/append_runtime.rs: OK
+crates/proseql-native/tests/bounded_live_runtime.rs: OK
+crates/proseql-native/tests/callbacks_conformance.rs: OK
+crates/proseql-native/tests/collection_file_runtime.rs: OK
+crates/proseql-native/tests/fixtures/coach-schema.json: OK
+crates/proseql-native/tests/lazy_partitions_runtime.rs: OK
+crates/proseql-native/tests/ordered_index_runtime.rs: OK
+crates/proseql-native/tests/partitioned_runtime.rs: OK
+crates/proseql-native/tests/runtime_conformance.rs: OK
+crates/proseql-native/tests/schema_checks_runtime.rs: OK
+crates/proseql-native/tests/source_runtime_conformance.rs: OK
+crates/proseql-native/tests/source_sessions_runtime.rs: OK
+crates/proseql-native/tests/time_bucket_runtime.rs: OK
+crates/proseql-native/tests/yaml_write_safety_runtime.rs: OK
+crates/proseql-storage/Cargo.toml: OK
+crates/proseql-storage/examples/korrid_quickstart.rs: OK
+crates/proseql-storage/src/append.rs: OK
+crates/proseql-storage/src/collection_file.rs: OK
+crates/proseql-storage/src/diagnostics.rs: OK
+crates/proseql-storage/src/document_graph.rs: OK
+crates/proseql-storage/src/document_source.rs: OK
+crates/proseql-storage/src/fs.rs: OK
+crates/proseql-storage/src/host.rs: OK
+crates/proseql-storage/src/lib.rs: OK
+crates/proseql-storage/src/memory.rs: OK
+crates/proseql-storage/src/partition_prune.rs: OK
+crates/proseql-storage/src/partitioned.rs: OK
+crates/proseql-storage/src/path.rs: OK
+crates/proseql-storage/src/persistence.rs: OK
+crates/proseql-storage/src/reload.rs: OK
+crates/proseql-storage/src/source_config.rs: OK
+crates/proseql-storage/src/writer.rs: OK
+crates/proseql-storage/src/yaml_splice.rs: OK
+crates/proseql-storage/tests/append_decode_once.rs: OK
+crates/proseql-storage/tests/document_graph_conformance.rs: OK
+crates/proseql-storage/tests/document_source_conformance.rs: OK
+crates/proseql-storage/tests/fs_durability_conformance.rs: OK
+crates/proseql-storage/tests/migration_adapter_conformance.rs: OK
+crates/proseql-storage/tests/persistence_conformance.rs: OK
+crates/proseql-storage/tests/storage_host_conformance.rs: OK
+crates/proseql-storage/tests/writer_reload_conformance.rs: OK
+crates/proseql-storage/tests/yaml_write_property.rs: OK
+crates/proseql-wasm/Cargo.toml: OK
+crates/proseql-wasm/src/bridge.rs: OK
+crates/proseql-wasm/src/callbacks.rs: OK
+crates/proseql-wasm/src/command.rs: OK
+crates/proseql-wasm/src/lib.rs: OK
+crates/proseql-wasm/src/projection.rs: OK
+crates/proseql-wasm/src/reactive.rs: OK
+crates/proseql-wasm/src/runtime.rs: OK
+crates/proseql-wasm/src/types.rs: OK
+crates/proseql-wasm/tests/boundary_conformance.rs: OK
+crates/proseql-wasm/tests/ordered_index_boundary.rs: OK

@@ -1,0 +1,29 @@
+proseql development environment
+│  core.hooksPath is set locally to '.git/hooks'
+│  Installing hooks anyway in '.git/hooks'
+sync hooks: ✔️ (pre-push, pre-commit)
+rustc 1.92.0 (ded5c06cf 2025-12-08)
+proseql development environment
+│  core.hooksPath is set locally to '.git/hooks'
+│  Installing hooks anyway in '.git/hooks'
+sync hooks: ✔️ (pre-push, pre-commit)
+cargo 1.92.0 (344c4567c 2025-10-21)
+proseql development environment
+│  core.hooksPath is set locally to '.git/hooks'
+│  Installing hooks anyway in '.git/hooks'
+sync hooks: ✔️ (pre-push, pre-commit)
+gcc (GCC) 15.2.0
+Copyright (C) 2025 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+4096
+proseql development environment
+│  core.hooksPath is set locally to '.git/hooks'
+│  Installing hooks anyway in '.git/hooks'
+sync hooks: ✔️ (pre-commit, pre-push)
+	linux-vdso.so.1 (0x0000fffff7ffe000)
+	libgcc_s.so.1 => /nix/store/j9nz3m8hqnyjjj5zxz5qvmd35g37rjyi-gcc-15.2.0-lib/lib/libgcc_s.so.1 (0x0000fffff7740000)
+	libm.so.6 => /nix/store/z6pz4znvbr103fln95y5xg1syb864x1i-glibc-2.42-47/lib/libm.so.6 (0x0000fffff7680000)
+	libc.so.6 => /nix/store/z6pz4znvbr103fln95y5xg1syb864x1i-glibc-2.42-47/lib/libc.so.6 (0x0000fffff74a0000)
+	/nix/store/z6pz4znvbr103fln95y5xg1syb864x1i-glibc-2.42-47/lib/ld-linux-aarch64.so.1 (0x0000fffff7fb0000)

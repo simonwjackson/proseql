@@ -1,0 +1,4 @@
+Oct 25 04:53:06 yari systemd[2315698]: Started [systemd-run] /nix/store/p7xdvcvl4aw7m229qzlq601aq0w0nb9n-coreutils-9.11/bin/nice -n 10 timeout 180 python3 bench/stage0/diagnose.py /home/simon/work/proseql-stage0-data.
+Oct 25 04:54:10 yari systemd[2315698]: run-p2315783-i2315784.scope: The kernel OOM killer killed some processes in this unit.
+Oct 25 04:54:10 yari systemd[2315698]: run-p2315783-i2315784.scope: Failed with result 'oom-kill'.
+Oct 25 04:54:10 yari systemd[2315698]: run-p2315783-i2315784.scope: Consumed 1min 5.189s CPU time over 1min 4.260s wall clock time, 1G memory peak.

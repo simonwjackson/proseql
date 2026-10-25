@@ -1,0 +1,175 @@
+proseql development environment
+fatal: --local can only be used inside a git repository
+│  > git rev-parse --path-format=absolute --show-toplevel --git-path hooks --git-path info --git-dir
+│    fatal: not a git repository (or any parent up to mount point /)                                
+│    Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).                     
+│                                                                                                   
+exit status 128
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling serde_core v1.0.229
+   Compiling syn v3.0.3
+   Compiling serde v1.0.229
+   Compiling equivalent v1.0.2
+   Compiling memchr v2.8.3
+   Compiling serde_derive v1.0.229
+   Compiling hashbrown v0.17.1
+   Compiling indexmap v2.14.0
+   Compiling zmij v1.0.23
+   Compiling libc v0.2.189
+   Compiling foldhash v0.2.0
+   Compiling allocator-api2 v0.2.21
+   Compiling itoa v1.0.18
+   Compiling serde_json v1.0.151
+   Compiling hashbrown v0.16.1
+   Compiling aho-corasick v1.1.4
+   Compiling autocfg v1.5.1
+   Compiling thiserror v2.0.19
+   Compiling regex-syntax v0.8.11
+   Compiling regex-automata v0.4.16
+   Compiling num-traits v0.2.19
+   Compiling thiserror-impl v2.0.19
+   Compiling inotify-sys v0.1.8
+   Compiling crossbeam-utils v0.8.22
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling winnow v0.7.15
+   Compiling shlex v2.0.1
+   Compiling toml_write v0.1.2
+   Compiling find-msvc-tools v0.1.15
+   Compiling log v0.4.33
+   Compiling cc v1.10.0
+   Compiling toml_edit v0.22.27
+   Compiling regex v1.13.1
+   Compiling regress v0.11.1
+   Compiling linked-hash-map v0.5.6
+   Compiling unsafe-libyaml v0.2.11
+   Compiling same-file v1.0.6
+   Compiling vcpkg v0.2.15
+   Compiling ryu v1.0.23
+   Compiling ucd-trie v0.1.7
+   Compiling pkg-config v0.3.34
+   Compiling cfg-if v1.0.4
+   Compiling bitflags v1.3.2
+   Compiling lazy_static v1.5.0
+   Compiling inotify v0.9.6
+   Compiling serde-hjson v1.1.0
+   Compiling filetime v0.2.29
+   Compiling libsqlite3-sys v0.36.0
+   Compiling json5 v1.3.1
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling walkdir v2.5.0
+   Compiling proseql-engine v0.1.0 (/home/simon/work/proseql-stage0/crates/proseql-engine)
+   Compiling crossbeam-channel v0.5.16
+   Compiling toml v0.8.23
+   Compiling mio v0.8.11
+   Compiling toon-format v0.5.0
+   Compiling jsonc-parser v0.33.1
+   Compiling bstr v1.13.0
+   Compiling proseql-formats v0.1.0 (/home/simon/work/proseql-stage0/crates/proseql-formats)
+   Compiling globset v0.4.19
+   Compiling notify v6.1.1
+   Compiling proseql-storage v0.1.0 (/home/simon/work/proseql-stage0/crates/proseql-storage)
+   Compiling hashlink v0.11.1
+   Compiling fallible-iterator v0.3.0
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling smallvec v1.16.3
+   Compiling bitflags v2.13.1
+   Compiling proseql-native v0.1.0 (/home/simon/work/proseql-stage0/crates/proseql-native)
+   Compiling rusqlite v0.38.0
+   Compiling proseql-stage0 v0.0.0 (/home/simon/work/proseql-stage0/bench/stage0)
+error[E0277]: `?` couldn't convert the error: `EngineError: StdError` is not satisfied
+   --> src/native.rs:107:65
+    |
+ 20 | pub fn open(root: &Path, kind: &str) -> Result<NativeRuntime, Error> {
+    |                                         ---------------------------- required `EngineError: StdError` because of this
+...
+107 |     Ok(NativeRuntime::open_sources_with_options(config, options)?)
+    |        ---------------------------------------------------------^ the trait `StdError` is not implemented for `EngineError`
+    |        |
+    |        this has type `Result<_, EngineError>`
+    |
+    = note: the question mark operation (`?`) implicitly performs a conversion on the error value using the `From` trait
+    = note: required for `Box<dyn StdError + Send + Sync>` to implement `From<EngineError>`
+
+error[E0277]: `?` couldn't convert the error: `EngineError: StdError` is not satisfied
+   --> src/native.rs:120:10
+    |
+109 |   pub fn query(runtime: &NativeRuntime, kind: &str, q: &Query) -> Result<Answer, Error> {
+    |                                                                   --------------------- required `EngineError: StdError` because of this
+110 |       if q.aggregate {
+111 |           let groups = runtime.aggregate_grouped_bounded(
+    |  ______________________________-
+112 | |             kind,
+113 | |             Some(q.filter()),
+114 | |             &["date".into(), "metric".into()],
+...   |
+119 | |             },
+120 | |         )?;
+    | |         -^ the trait `StdError` is not implemented for `EngineError`
+    | |_________|
+    |           this has type `Result<_, EngineError>`
+    |
+    = note: the question mark operation (`?`) implicitly performs a conversion on the error value using the `From` trait
+    = note: required for `Box<dyn StdError + Send + Sync>` to implement `From<EngineError>`
+
+error[E0277]: `?` couldn't convert the error: `EngineError: StdError` is not satisfied
+   --> src/native.rs:138:10
+    |
+109 |   pub fn query(runtime: &NativeRuntime, kind: &str, q: &Query) -> Result<Answer, Error> {
+    |                                                                   --------------------- required `EngineError: StdError` because of this
+...
+132 |           Ok(Answer::rows(runtime.query_bounded(
+    |  _________________________________-
+133 | |             kind,
+134 | |             QueryInput {
+135 | |                 r#where: Some(q.filter()),
+136 | |                 ..Default::default()
+137 | |             },
+138 | |         )?))
+    | |         -^ the trait `StdError` is not implemented for `EngineError`
+    | |_________|
+    |           this has type `Result<_, EngineError>`
+    |
+    = note: the question mark operation (`?`) implicitly performs a conversion on the error value using the `From` trait
+    = note: required for `Box<dyn StdError + Send + Sync>` to implement `From<EngineError>`
+
+error[E0277]: `?` couldn't convert the error: `EngineError: StdError` is not satisfied
+   --> src/native.rs:143:72
+    |
+141 | pub fn append(runtime: &NativeRuntime, kind: &str) -> Result<Answer, Error> {
+    |                                                       --------------------- required `EngineError: StdError` because of this
+142 |     let rows = fixture::append_rows(kind);
+143 |     runtime.mutate(|tx| tx.create_many(kind, rows.clone()).map(|_| ()))?;
+    |             -----------------------------------------------------------^ the trait `StdError` is not implemented for `EngineError`
+    |             |
+    |             this has type `Result<_, EngineError>`
+    |
+    = note: the question mark operation (`?`) implicitly performs a conversion on the error value using the `From` trait
+    = note: required for `Box<dyn StdError + Send + Sync>` to implement `From<EngineError>`
+
+error[E0277]: the trait bound `u64: FromSql` is not satisfied
+   --> src/sql.rs:69:21
+    |
+ 69 |                 row.get(2)?,
+    |                     ^^^ the trait `FromSql` is not implemented for `u64`
+    |
+    = help: the following other types implement trait `FromSql`:
+              f32
+              f64
+              i16
+              i32
+              i64
+              i8
+              isize
+              u16
+            and 2 others
+note: required by a bound in `rusqlite::Row::<'_>::get`
+   --> /home/simon/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rusqlite-0.38.0/src/row.rs:285:32
+    |
+285 |     pub fn get<I: RowIndex, T: FromSql>(&self, idx: I) -> Result<T> {
+    |                                ^^^^^^^ required by this bound in `Row::<'_>::get`
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `proseql-stage0` (bin "proseql-stage0") due to 5 previous errors

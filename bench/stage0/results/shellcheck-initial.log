@@ -1,0 +1,7 @@
+
+In bench/stage0/run.sh line 1:
+#!/usr/bin/env nix-shell
+^-- SC1008 (error): This shebang was unrecognized. ShellCheck only supports sh/bash/dash/ksh/'busybox sh'. Add a 'shell' directive to specify.
+
+For more information:
+  https://www.shellcheck.net/wiki/SC1008 -- This shebang was unrecognized. Sh...

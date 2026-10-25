@@ -1,0 +1,2 @@
+Running as unit: run-p2315783-i2315784.scope; invocation ID: df0baa9b0ee74bbc9447d70d3cd4f894
+Terminated                 systemd-run --user --scope -p MemoryMax=1G -p MemorySwapMax=0 nice -n 10 timeout "$@"

@@ -1,0 +1,17 @@
+Running as unit: run-p2330270-i2330271.scope; invocation ID: e72332bf73ef41318f6b81195c6e96f6
+proseql development environment
+│  core.hooksPath is set locally to '.git/hooks'
+│  Installing hooks anyway in '.git/hooks'
+sync hooks: ✔️ (pre-push, pre-commit)
+    Finished `release` profile [optimized] target(s) in 0.07s
+     Running unittests src/main.rs (bench/stage0/target/release/deps/proseql_stage0-56af8cd14070c86e)
+
+running 5 tests
+test spike::tests::unescaped_fields_are_borrowed_and_escaped_fields_decode ... ok
+test tests::conflicting_duplicates_fail_without_publishing_new_rows ... ok
+test tests::global_preflight_rejects_an_id_in_another_time_partition ... ok
+test tests::real_backends_agree_on_rows_groups_and_identical_duplicates ... ok
+test tests::stale_index_and_same_timestamp_block_boundaries_are_safe ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.55s
+
