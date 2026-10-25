@@ -163,3 +163,56 @@ with `RUSTFLAGS='-C target-cpu=x86-64-v2'` and all-feature clippy. No SQLite/nat
 consumer override, push or deployment was run by integration. The 1,661 B gzip
 headroom is small; future WASM changes must keep the gate. Cutover and consumer
 adoption remain deferred despite these passing library checks.
+
+## Measured on aka
+
+Verify source: `267427c69c819a7612e50b596be12409019e0ba5`, run `20261025T102804Z`. This section supersedes the historical skeleton-only acceptance paragraph above; earlier sections are preserved unchanged. Streaming remains opt-in and Resident remains the default. **Streaming: 12 measured target rows pass, 19 miss.** No target was lowered.
+
+aka is x86_64 (Ryzen 5 7600X), compiled with `RUSTFLAGS='-C target-cpu=x86-64-v2'` at the Celeron's instruction level, but a much faster CPU. These are synthetic same-machine SQLite NORMAL/WAL comparisons, not absolute comparisons with the yari/aarch64 Stage 0 report or Celeron qualification.
+
+Cold / warm; wall medians of three rotating trials, maximum timing-trial peak, median one-second RSS. Verdicts are Resident / Streaming. Point ≤2× SQLite; hour ≤1.5×; month/ten/append ≤1×; read peak ≤2×; open/idle ≤SQLite +20 MiB. Retained rows divide the delta above fresh idle by max(SQLite retained delta, 1 MiB), not raw SQLite RSS. All operations used 1 GiB/no-swap scopes, nice 10 and timeouts; no consumer malloc_trim.
+
+| #12 workload | Shape | SQLite | Resident | Streaming | Streaming / SQLite | Resident / Streaming |
+|---|---|---:|---:|---:|---:|---|
+| point wall ms | samples | 1.600 / 0.032 | killed / killed | 2550.776 / 0.249 | 1593.910× / 7.829× | miss / miss |
+| hour wall ms | samples | 1.598 / 0.365 | 557.187 / 0.464 | 105.415 / 1.709 | 65.948× / 4.684× | miss / miss |
+| month wall ms | samples | 32.871 / 19.805 | 1059.388 / 616.783 | 294.275 / 91.962 | 8.952× / 4.643× | miss / miss |
+| ten wall ms | samples | 406.403 / 292.580 | 5197.456 / 4883.010 | 1779.972 / 835.600 | 4.380× / 2.856× | miss / miss |
+| append wall ms | samples | 10.690 / 7.475 | 518.536 / 500.945 | 509.959 / 462.410 | 47.702× / 61.862× | miss / miss |
+| open RSS MiB | samples | 6.074 / 6.074 | 7.230 / 7.297 | 7.230 / 7.297 | 1.190× / 1.201× | pass / pass |
+| idle RSS MiB | samples | 6.074 / 6.074 | 7.230 / 7.230 | 7.230 / 7.230 | 1.190× / 1.190× | pass / pass |
+| point peak MiB | samples | 6.305 / 6.305 | killed / killed | 22.578 / 22.578 | 3.581× / 3.581× | miss / miss |
+| point retained MiB at 1 s | samples | 0.230 / 0.230 | killed / killed | 15.410 / 15.410 | 15.410× / 15.410× tolerance | miss / miss |
+| hour peak MiB | samples | 6.562 / 6.578 | 206.055 / 198.973 | 7.836 / 7.840 | 1.194× / 1.192× | miss / pass |
+| hour retained MiB at 1 s | samples | 0.488 / 0.504 | 191.805 / 191.805 | 0.668 / 0.672 | 0.668× / 0.672× tolerance | miss / pass |
+| month peak MiB | samples | 10.145 / 10.262 | 211.645 / 386.172 | 8.613 / 8.855 | 0.849× / 0.863× | miss / pass |
+| month retained MiB at 1 s | samples | 2.230 / 4.188 | 204.477 / 299.910 | 0.516 / 1.688 | 0.231× / 0.403× tolerance | miss / pass |
+| ten peak MiB | samples | 10.145 / 10.344 | 279.688 / 476.469 | 17.738 / 18.395 | 1.749× / 1.778× | miss / pass |
+| ten retained MiB at 1 s | samples | 2.309 / 4.270 | 272.520 / 409.711 | 1.188 / 11.227 | 0.514× / 2.629× tolerance | miss / miss |
+| point wall ms | raw | 1.296 / 0.034 | killed / killed | 2879.890 / 3.254 | 2221.696× / 96.639× | miss / miss |
+| hour wall ms | raw | 1.854 / 0.296 | 3257.378 / 3134.927 | 1442.702 / 314.995 | 778.212× / 1063.554× | miss / miss |
+| month wall ms | raw | 34.904 / 19.507 | 3282.601 / 3167.672 | 1682.301 / 565.154 | 48.197× / 28.971× | miss / miss |
+| ten wall ms | raw | 397.536 / 285.081 | 3443.967 / 3313.977 | 2014.165 / 894.623 | 5.067× / 3.138× | miss / miss |
+| append wall ms | raw | 11.156 / 7.898 | killed / killed | 862.254 / 739.943 | 77.293× / 93.689× | miss / miss |
+| open RSS MiB | raw | 6.074 / 6.074 | 7.316 / 7.383 | 7.316 / 7.383 | 1.205× / 1.215× | pass / pass |
+| idle RSS MiB | raw | 6.074 / 6.074 | 7.316 / 7.316 | 7.316 / 7.316 | 1.205× / 1.205× | pass / pass |
+| point peak MiB | raw | 6.305 / 6.305 | killed / killed | 22.836 / 22.840 | 3.622× / 3.623× | miss / miss |
+| point retained MiB at 1 s | raw | 0.230 / 0.230 | killed / killed | 15.582 / 15.586 | 15.582× / 15.586× tolerance | miss / miss |
+| hour peak MiB | raw | 6.566 / 6.574 | 92.488 / 110.566 | 11.988 / 12.387 | 1.826× / 1.884× | miss / pass |
+| hour retained MiB at 1 s | raw | 0.492 / 0.500 | 68.871 / 103.309 | 1.082 / 5.133 | 1.082× / 5.133× tolerance | miss / miss |
+| month peak MiB | raw | 10.145 / 10.262 | 92.234 / 110.293 | 14.965 / 15.410 | 1.475× / 1.502× | miss / pass |
+| month retained MiB at 1 s | raw | 2.230 / 4.188 | 68.531 / 103.035 | 0.777 / 8.156 | 0.349× / 1.948× tolerance | miss / miss |
+| ten peak MiB | raw | 10.145 / 10.344 | 92.566 / 110.578 | 17.988 / 18.652 | 1.773× / 1.803× | miss / pass |
+| ten retained MiB at 1 s | raw | 2.309 / 4.270 | 68.863 / 102.410 | 1.418 / 11.398 | 0.614× / 2.670× tolerance | miss / miss |
+
+Equal-row-count peak RSS, 16→256 raw shards. Ratios are 256/16, cold / warm; limit ≤1 with no invented tolerance. This is a controlled observed proxy, not a scaling proof.
+
+| Backend | 16-shard peak MiB C/W | 256-shard peak MiB C/W | Growth C/W | Status |
+|---|---:|---:|---:|---|
+| sqlite | 10.145 / 10.344 | 10.145 / 10.344 | 1.000000× / 1.000000× | pass |
+| resident | 211.219 / 322.246 | 92.566 / 110.578 | 0.438249× / 0.343148× | pass |
+| streaming | 17.738 / 18.348 | 17.988 / 18.652 | 1.014094× / 1.016606× | miss |
+
+Open ≤1 s on Logbook's real shape, absolute Celeron times and equal-durability qualification remain **unmeasured**: no rakku access by user rule; native synced text and NORMAL WAL also differ in power-loss guarantees.
+
+See the [aka report](../benchmarks/query-while-scanning-aka.md) for every miss's observed floor, inferred cause and cheapest next step, counting-allocator evidence, load policy and limits. [Acceptance provenance](../../bench/acceptance/results/provenance.md) records the exact source, checks and cleanup. The same-row-count shard sweep is not a constant-memory proof. No engine code, consumer pin or default changed in Verify.

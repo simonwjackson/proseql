@@ -1,0 +1,59 @@
+{
+  "fixture": {
+    "generator": 1,
+    "rows_per_kind": 656640,
+    "minutes_per_month": null,
+    "bytes": 483724410
+  },
+  "sqlite": {
+    "sqlite_version": "3.51.1",
+    "temp_directory": "/home/simonwjackson/work/qws-harness-data/tmp",
+    "pragmas": {
+      "journal_mode": "wal",
+      "synchronous": 1,
+      "cache_size": -2000,
+      "page_size": 4096,
+      "mmap_size": 0,
+      "temp_store": 0
+    },
+    "indexes": [
+      "CREATE INDEX raw_metric_time ON raw(metric,time)",
+      "CREATE INDEX samples_metric_time ON samples(metric,time)"
+    ]
+  },
+  "note": "Actual timing binary prepare/info path on a fresh synthetic fixture; not an extra timing matrix. Fixture deleted after info collection.",
+  "command": [
+    "systemd-run",
+    "--user",
+    "--scope",
+    "-p",
+    "MemoryMax=1G",
+    "-p",
+    "MemorySwapMax=0",
+    "nice",
+    "-n",
+    "10",
+    "timeout",
+    "600",
+    "/home/simonwjackson/work/qws-harness-data/timing",
+    "prepare",
+    "/home/simonwjackson/work/qws-harness-data/qualification-info"
+  ],
+  "load_before": [
+    0.04052734375,
+    0.27978515625,
+    0.65185546875
+  ],
+  "load_after": [
+    0.4677734375,
+    0.3642578125,
+    0.67333984375
+  ],
+  "maximum_sampled_1_5_15_minute_load": [
+    0.5087890625,
+    0.37060546875,
+    0.67724609375
+  ],
+  "sample_interval_s": 5,
+  "attempt": 1
+}

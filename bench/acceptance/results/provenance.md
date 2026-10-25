@@ -1,81 +1,134 @@
-# qws/base acceptance evidence
+# Integrated query-while-scanning acceptance on aka
 
-The harness completed on aka. This is the **skeleton baseline**, not the merged streaming implementation. `Streaming` still falls back to `Resident`; timing differences between them are not streaming improvements.
+**Streaming: 12 measured target rows pass, 19 miss.** Three rakku/durability
+qualifications remain unmeasured. This is not #12/#19 completion or cutover approval.
+Resident is still the default; Streaming is explicitly selected by the harness.
 
-- Measurement source: `cacf9850615e1529fafb8adc7fddfa1ccea1e3d5`.
-- Engine source: `qws/base` at `11b3b80a398c985b3c2bf8fb915bd647e99d27f5`. `git diff 11b3b80 -- crates` is empty.
-- Run: `20261025T084930Z`, aka, AMD Ryzen 5 7600X, x86_64 Linux 6.18.17.
-- Rust builds: `RUSTFLAGS='-C target-cpu=x86-64-v2'`; no distributed Nix builders.
-- Synthetic data: 656,640 records per shape; 10 month partitions, 256 raw shards, and a controlled 16-shard raw supplement.
-- SQLite 3.51.1: WAL, synchronous=1 (NORMAL), cache_size=-2000, page_size=4096, mmap_size=0, temp_store=0; typed columns and `(metric,time)` indexes.
-- Every measured process used `systemd-run --user --scope -p MemoryMax=1G -p MemorySwapMax=0 nice -n 10 timeout 180`.
+- Source: `qws/integration`, `267427c69c819a7612e50b596be12409019e0ba5`.
+- Accepted matrix: `20261025T102804Z`, 2026-10-25 10:28:04–10:43:50 UTC.
+- Host: aka, x86_64 AMD Ryzen 5 7600X, 6 cores/12 threads, Linux 6.18.17,
+  filesystem-backed btrfs `/home`; Rust/Cargo 1.92.0.
+- Rust builds: `RUSTFLAGS='-C target-cpu=x86-64-v2'`, the Celeron's instruction
+  level, on a much faster CPU. No distributed Nix builders. No rakku/yari access.
+- Synthetic records only: 656,640 per shape, 10 month sample files, 256 raw
+  hash shards; equal-row-count raw16 supplement. Generator 1 fixtures were reused
+  and checked for row count, uncapped generation and partition counts.
+- SQLite 3.51.1 uses the committed bundled dependency, NORMAL/WAL, typed records
+  and non-covering `(metric,time)` indexes. [`sqlite.json`](sqlite.json) records the
+  actual timing binary's version, PRAGMAs and index SQL on a fresh fixture.
+- Every matrix operation: `systemd-run --user --scope -p MemoryMax=1G -p
+  MemorySwapMax=0 nice -n 10 timeout 180`. Preparation uses 600 seconds. No limit
+  was raised. There was no consumer `malloc_trim` or runtime close before the
+  one-second RSS reading.
 
-Small committed summaries: [`latest.md`](latest.md), [`latest.jsonl`](latest.jsonl), [`evidence.json`](evidence.json), [`consumers.md`](consumers.md). Raw trials, stderr, source-file manifests, environment and binary hashes remain under `results/runs/20261025T084930Z/` on aka and the local ignored copy. Later report/command-logging edits do not change the measured Rust or Python execution paths.
+The [report](../../../docs/benchmarks/query-while-scanning-aka.md) and appended
+[design section](../../../docs/design/query-while-scanning.md#measured-on-aka)
+contain every #12 target. Small source data: [Markdown](latest.md),
+[JSONL](latest.jsonl), [miss floors](floors.md), [evidence](evidence.json),
+[OOM diagnostics](oom.json). The prior skeleton results remain in Git at
+`267427c:bench/acceptance/results/provenance.md`; they are not these measurements.
+`consumers.md` remains separate skeleton-era consumer evidence, not an integrated
+consumer qualification by this worker.
 
-## Verified results
+## Verified matrix and memory
 
-| Evidence | Result |
+| Check | Result |
 |---|---|
-| Planned trials | 360: 3 timing + 1 meter per cell |
-| Executed trials | 324: 312 successful, 12 SIGKILL |
-| Skips | 36 later repetitions of SIGKILLed cells; never counted as successful trials |
-| Cold trials with resident owned-file pages before launch | 0 |
-| Successful appends | 32; each persisted exactly 1,000 genuinely new rows |
-| Answer equivalence | Every successful trial matched its canonical answer; full ten-month aggregate also matched across samples, raw256 and raw16 |
-| Streaming target rows | 5 pass, 26 miss; 3 separate global qualifications unmeasured |
+| Planned matrix | 360: three rotating timing trials plus one independent meter trial per cell |
+| Executed | 342: 336 succeeded, six Resident SIGKILL; 18 later repetitions skipped after kills |
+| Answers | Every successful trial matched; complete ten-month aggregates matched samples/raw/raw16 |
+| Append persistence | All 40 successful trials persisted exactly 1,000 genuinely new rows |
+| Global-conflict probe | SQLite and Streaming pass both shapes; Resident fails samples; raw probe pass is not a general Resident guarantee |
+| Cold file pages | Zero cold trials had owned fixture pages resident before launch |
+| Source binding | Source/harness/binary SHA-256 manifests verified against actual bytes after the run |
+| Counting allocator | Separate binary covers every successful cell, including ten-month reads, point lookups and raw append |
+| Streaming passes | Four open/idle RSS rows, six non-point read peak rows, sample hour/month retained RSS |
+| Streaming misses | All ten wall rows, both point peaks, six retained-RSS rows, strict partition-count growth proxy |
 
-The five passing Streaming rows are open/idle RSS for both shapes, and the controlled 16-to-256-shard peak-RSS growth proxy. All speed, listed-read peak-RSS and post-query retained-RSS targets miss. The tables show individual ratios and the strict idle denominator, `max(SQLite retained delta, 1 MiB)`.
+The matrix records SIGKILL, not cgroup attribution. Six **independent** cold/warm
+reproductions of the same Resident cells confirmed OOM: point on both shapes and
+raw append. Each fresh scope recorded `memory.peak=1,073,741,824` and
+`oom_kill=1`. They use the same binary, data, options and 1 GiB/no-swap limit;
+`OOMPolicy=continue` and a one-second shell tail preserve counters after the
+victim exits. An outer timeout is 185 seconds; the operation timeout stays 180.
+Those diagnostics are not pooled into matrix timing/RSS. Sampled process RSS is
+a lower bound, not the completed peak or retained RSS. RSS can include shared
+pages charged outside that cgroup, so RSS and cgroup charge are not identical.
 
-| Workload / shape | SQLite ms cold / warm | Streaming fallback ms cold / warm | Streaming / SQLite |
-|---|---:|---:|---:|
-| Ten months / samples | 401.005 / 296.138 | 5258.688 / 4880.813 | 13.114× / 16.482× |
-| Ten months / raw | 394.876 / 288.482 | 3464.331 / 3354.531 | 8.773× / 11.628× |
-| Append / samples | 10.765 / 7.970 | 507.994 / 495.969 | 47.189× / 62.233×; also correctness miss |
-| Point / both shapes | measured in full table | SIGKILL in 1 GiB scope | miss, no completed operation value |
-| Append / raw | 11.423 / 8.162 | SIGKILL in 1 GiB scope | miss, no completed operation value |
+The sample Resident conflict probe is a reproduction of the known global-check
+gap: an October requested ID already exists with different content in May, yet
+public `create_many` accepts the batch. The harness adds no preflight to hide it.
+No engine bug was fixed during Verify.
 
-Point uses public `find_by_id`, not Stage 0's bounded ID-filter query or raw shard hint. The point numbers therefore do not reproduce Stage 0's different public path. SIGKILL is recorded directly; this run did not collect cgroup OOM attribution or a completed RSS peak for those cells.
+## aka load
 
-The sample global-conflict probe fails under Resident and the Streaming fallback. No benchmark preflight hides that miss. The raw 1,000-row batch probe passes. Its routed batch covers all shards (inferred from the unchanged generator and Stage 0's file-count evidence); that does not prove a general global guarantee for smaller Resident batches. Raw append still fails its timing/memory scope.
+aka also builds for the fleet. The policy was set before the run: prebuild both
+binaries, wait for one-minute load ≤1, sample load every five seconds, reject
+and repeat the **whole matrix block** if any one-minute sample exceeds 2.
+This is conservative on a 12-thread host; it does not prove zero interference.
 
-Inferred cause of these misses: the skeleton retains the existing materialize/index/residency model. The next step is to merge the streaming executor, locator and append paths, then rerun this same task. Raising the memory limit or injecting a benchmark-only preflight is not a remedy. Retained ID metadata counts toward the strict post-query delta, even if it fits the separate SQLite + 20 MiB idle allowance.
+| Block | Load 1/5/15 min before | Load 1/5/15 min after | Maximum sampled 1/5/15 min | Action |
+|---|---|---|---|---|
+| Matrix, 190 samples | 0.85 / 1.35 / 1.41 | 0.59 / 0.65 / 0.91 | 1.19 / 1.35 / 1.41 | Accept first block; no high-load repeat needed |
+| Six independent OOM reproductions | Per-cell values in `oom.json` | Per-cell values in `oom.json` | Highest one-minute load 0.814453 | Accept all first attempts |
+| Fresh SQLite info preparation | 0.041 / 0.280 / 0.652 | 0.468 / 0.364 / 0.673 | 0.509 / 0.371 / 0.677 | Accept first attempt |
+
+Our compilation left one-minute load at 2.00 at 10:25:04 UTC. Measurement waited
+until 10:28:04 UTC and load 0.85. Build/cooldown samples do not enter timings.
+The fresh SQLite info preparation has its own before/after/max load in
+`sqlite.json`; it is not another timing matrix.
 
 ## Commands and checks
 
+The actual outer driver was `results/runs/verify-run.sh` (ignored). It applied
+the load policy above around the standard task. The reproducible task and checks,
+from a checkout of the recorded source, are:
+
 ```sh
-# Actual acceptance task (all execution on aka):
-bash scripts/qws/aka-run harness --x86-64-v2 --pull -- \
-  env QWS_SOURCE_SHA=cacf9850615e1529fafb8adc7fddfa1ccea1e3d5 \
+bash scripts/qws/aka-run bench --x86-64-v2 --pull -- \
+  env QWS_SOURCE_SHA=267427c69c819a7612e50b596be12409019e0ba5 \
   proseql-task bench-acceptance
-
-# Focused checks:
-bash scripts/qws/aka-run harness --x86-64-v2 --pull -- \
-  bash bench/acceptance/run.sh check
-
-# All three consumer baselines; see consumers.md for exact Cargo commands:
-bash scripts/consumers/run.sh /absolute/path/to/proseql --compare-baseline
+bash scripts/qws/aka-run bench --x86-64-v2 --pull -- \
+  env ACCEPTANCE_REQUIRE_GLOBAL=1 bash bench/acceptance/run.sh check
 ```
 
 | Focused check on aka | Result |
 |---|---|
-| `cargo check --locked --manifest-path bench/acceptance/Cargo.toml --all-targets --all-features` | pass |
-| Release `cargo test`, standalone harness, all features | 4 passed, 0 failed |
-| `cargo clippy --all-targets --all-features --no-deps -- -D warnings` | pass |
-| `cargo fmt --manifest-path bench/acceptance/Cargo.toml --check` | pass |
-| `python3 -m unittest discover -s bench/acceptance -p 'test_*.py'` | 4 passed |
-| Ruff check and format check, all 3 harness Python files | pass |
-| Shellcheck, harness and consumer scripts | pass; rerun after command-record formatting fix |
-| Result audit on aka | pass: complete matrix, full-shape equivalence, all successful appends, consumer counts |
-| Coach, original pin / main / qws-base | each build pass; each 27 tests passed |
-| Logbook, original pin / main / qws-base | each build pass; each 219 tests passed, 2 pre-existing ignored |
-| `git diff --check` | pass |
+| Cargo check, standalone harness, all targets/features, locked | Pass |
+| Release harness tests, all features, global checks required | 4 passed, 0 failed |
+| Cargo clippy, all targets/features, no deps, `-D warnings` | Pass |
+| Cargo fmt check | Pass |
+| Python harness unit tests | 4 passed |
+| Ruff check and format check, three harness Python files | Pass |
+| Shellcheck, harness and consumer shell scripts | Pass |
+| Independent result audits | Pass: complete matrix, three repeats, all answers/appends, cold eviction, required heap cells, manifests and load policy; every miss has a floor; doc tables match generated data; original design is an unchanged prefix |
+| Git diff check on zao | Pass; engine and harness execution code unchanged; design additions only |
 
-Binary SHA-256: timing `062d1254f71b8c2d1c24465c23ab49a4ca71e554a65a5c47352a16dbc23ef748`; meter `5c67d6e07d19e30700b69781a1a2af02682803ed7c66748c89055a97db5b9e41`. Manifest hashes are in `evidence.json`.
+No full repository suite or consumer override was run by this worker. The parent
+owns combined verification. All execution/builds were on aka through aka-run;
+zao did Git, file edits/reads and source/result transport only. Nothing ran on
+rakku or yari. Stage 0's yari/aarch64 absolute numbers are not compared with aka.
 
-## Limits and follow-up
+## Cleanup and limits
 
-- No full ProseQL suite was run; the parent runs it on the combined implementation.
-- Open ≤1 s on the real Logbook/rakku shape and absolute Celeron times remain **unmeasured**. No rakku/yari access or real health data was used.
-- Equal power-loss durability remains **unmeasured**: native synced text appends and SQLite NORMAL WAL have different guarantees.
-- All consumers must be rerun after the streaming changes merge. The scripts accept the new source without changing consumer repositories.
-- Owned synthetic data, consumer copies and Cargo caches remain in `qws-harness-*` directories for Verify. Large raw logs are not committed. No push or deployment was performed.
+After results were pulled and the final source/result audit passed, cleanup ran
+through `aka-run bench --x86-64-v2` at **2026-10-25T10:52:06Z**, exit 0.
+
+| Owned path on aka | Size before (`du -sh`) | Verified result |
+|---|---:|---|
+| `/home/simonwjackson/work/qws-harness-data` | 2.1G | Removed; `test ! -e` passed |
+| `/home/simonwjackson/work/qws-bench-target` | 455M | Removed; `test ! -e` passed |
+| `/home/simonwjackson/work/qws-bench` | 24M | Removed; `test ! -e` passed |
+
+No active named diagnostic scope remained. Other workers and shared Cargo/Nix
+caches were not removed. Ignored per-trial logs, manifests and driver scripts
+remain only in this local worktree under `results/runs/`; committed summaries
+remain in Git. No updated file exceeds 1 MB; the largest is `latest.jsonl`,
+49,985 bytes. No push or deployment was performed.
+
+Open ≤1 s on Logbook's real shape, absolute Celeron times and equal-durability
+qualification remain **unmeasured**, with no rakku access by user rule. Native
+synced text and NORMAL WAL also have different power-loss guarantees. The strict
+idle tolerance is retained RSS ≤max(SQLite retained delta, 1 MiB) after one
+second. No target was lowered. Proposed next steps in the report are not measured
+fixes or evidence that text-only performance is impossible.

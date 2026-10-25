@@ -1,58 +1,59 @@
 {
-  "run": "20261025T084930Z",
-  "measurement_source_sha": "cacf9850615e1529fafb8adc7fddfa1ccea1e3d5",
-  "engine_base_sha": "11b3b80a398c985b3c2bf8fb915bd647e99d27f5",
-  "trials": 324,
-  "successful": 312,
+  "run": "20261025T102804Z",
+  "measurement_source_sha": "267427c69c819a7612e50b596be12409019e0ba5",
+  "engine_source_sha": "267427c69c819a7612e50b596be12409019e0ba5",
+  "host": "aka",
+  "rustflags": "-C target-cpu=x86-64-v2",
+  "trials": 342,
+  "successful": 336,
   "returncodes": {
-    "0": 312,
-    "-9": 12
+    "0": 336,
+    "-9": 6
   },
-  "skipped_after_kill": 36,
+  "skipped_after_kill": 18,
   "cold_trials_with_resident_pages_before": 0,
-  "successful_appends_verified": 32,
+  "successful_appends_verified": 40,
   "streaming_target_verdicts": {
-    "miss": 26,
-    "pass": 5
+    "miss": 19,
+    "pass": 12
   },
-  "consumer_totals": {
-    "pinned": {
-      "coach": {
-        "passed": 27,
-        "failed": 0,
-        "ignored": 0
-      },
-      "logbook": {
-        "passed": 219,
-        "failed": 0,
-        "ignored": 2
-      }
-    },
-    "main": {
-      "coach": {
-        "passed": 27,
-        "failed": 0,
-        "ignored": 0
-      },
-      "logbook": {
-        "passed": 219,
-        "failed": 0,
-        "ignored": 2
-      }
-    },
-    "qws-base": {
-      "coach": {
-        "passed": 27,
-        "failed": 0,
-        "ignored": 0
-      },
-      "logbook": {
-        "passed": 219,
-        "failed": 0,
-        "ignored": 2
-      }
+  "global_conflict_probes": {
+    "sqlite/samples": true,
+    "sqlite/raw": true,
+    "resident/samples": false,
+    "resident/raw": true,
+    "streaming/samples": true,
+    "streaming/raw": true
+  },
+  "load_policy": "Wait for 1-minute load <=1; reject and repeat entire matrix block if any 5-second sample of 1-minute load >2. Host has 12 logical CPUs.",
+  "load_blocks": [
+    {
+      "block": 1,
+      "accepted": true,
+      "before": [
+        "2026-10-25T10:28:04Z",
+        "0.85 1.35 1.41 1/785 1098811"
+      ],
+      "after": [
+        "2026-10-25T10:43:50Z",
+        "0.59 0.65 0.91 1/759 1100815"
+      ],
+      "sample_count": 190,
+      "sample_interval_s": 5,
+      "maximum_1_5_15_minute_load": [
+        1.19,
+        1.35,
+        1.41
+      ]
     }
-  },
-  "source_files_manifest_sha256": "1f2028f24978125ff266d863c1bd982065f3dd70f1e506416367de361ee053b9",
-  "harness_manifest_sha256": "49d2feff5f9aa974e380d88b881ede39346b888f552f58aef42ae698fe49bcbd"
+  ],
+  "binaries_sha256": [
+    "bdf5bd7c42ef3084a3d05ba3a3e4e45a9aa2c7858371d26c749fcff816f491f3  /home/simonwjackson/work/qws-harness-data/timing",
+    "e4b216f0725b746d7e25aeae9d9992609feb299e224981cedba1b0e220ae16ce  /home/simonwjackson/work/qws-harness-data/meter"
+  ],
+  "source_files_manifest_sha256": "c60fade75a35a7601136bab5cc7fa9991af584d67cf8900acc9855fdb0b9021e",
+  "harness_manifest_sha256": "49d2feff5f9aa974e380d88b881ede39346b888f552f58aef42ae698fe49bcbd",
+  "consumer_results": "Not measured by bench; consumers.md is the separate old skeleton evidence, not integrated-head qualification.",
+  "independent_oom_diagnostics": 6,
+  "diagnostic_oom_kill_events": 6
 }
