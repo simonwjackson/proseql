@@ -75,6 +75,7 @@ enum Workspace<'a> {
 
 enum Rows {
     All(Vec<Value>),
+    Projected(Vec<RankedRow>),
     Top { ranked: TopK, natural: Option<TopK> },
 }
 struct RankedRow {
@@ -237,8 +238,11 @@ impl<'a> Executor<'a> {
                     let backward = cursor.is_some_and(|cursor| cursor.before.is_some());
                     Rows::Top {
                         ranked: TopK::new(capacity, backward, reorders),
-                        natural: reorders.then(|| TopK::new(capacity, backward, false)),
+                        natural: (reorders && !sort.is_empty())
+                            .then(|| TopK::new(capacity, backward, false)),
                     }
+                } else if !search && sort.is_empty() && cursor.is_none() {
+                    Rows::Projected(Vec::new())
                 } else {
                     Rows::All(Vec::new())
                 };
@@ -379,7 +383,7 @@ impl<'a> Executor<'a> {
                 if accepts(ranked) {
                     ranked.push(
                         RankedRow {
-                            row: row.to_owned(),
+                            row: row.select(self.input.select.as_ref()),
                             rank,
                             ordinal,
                         },
@@ -391,7 +395,7 @@ impl<'a> Executor<'a> {
                     if accepts(natural) {
                         natural.push(
                             RankedRow {
-                                row: row.to_owned(),
+                                row: row.select(self.input.select.as_ref()),
                                 rank,
                                 ordinal,
                             },
@@ -401,6 +405,14 @@ impl<'a> Executor<'a> {
                     }
                 }
             }
+            Workspace::Query {
+                rows: Rows::Projected(rows),
+                ..
+            } => rows.push(RankedRow {
+                row: row.select(self.input.select.as_ref()),
+                rank,
+                ordinal,
+            }),
             Workspace::Query {
                 rows: Rows::All(rows),
                 ..
@@ -442,6 +454,14 @@ impl<'a> Executor<'a> {
                 ..
             } => rows.push(row.clone()),
             Workspace::Query {
+                rows: Rows::Projected(rows),
+                ..
+            } => rows.push(RankedRow {
+                row: crate::query::select::apply_selection(row, self.input.select.as_ref()),
+                rank,
+                ordinal,
+            }),
+            Workspace::Query {
                 cursor,
                 sort,
                 rows: Rows::Top { ranked, natural },
@@ -458,7 +478,11 @@ impl<'a> Executor<'a> {
                 }
                 ranked.push(
                     RankedRow {
-                        row: row.clone(),
+                        row: if sort.is_empty() {
+                            crate::query::select::apply_selection(row, self.input.select.as_ref())
+                        } else {
+                            row.clone()
+                        },
                         rank,
                         ordinal,
                     },
@@ -468,7 +492,14 @@ impl<'a> Executor<'a> {
                 if let Some(natural) = natural {
                     natural.push(
                         RankedRow {
-                            row: row.clone(),
+                            row: if sort.is_empty() {
+                                crate::query::select::apply_selection(
+                                    row,
+                                    self.input.select.as_ref(),
+                                )
+                            } else {
+                                row.clone()
+                            },
                             rank,
                             ordinal,
                         },
@@ -511,7 +542,17 @@ impl<'a> Executor<'a> {
         };
         match workspace {
             Workspace::Query { cursor, sort, rows } => {
+                let mut input = input;
+                if matches!(rows, Rows::Projected(_))
+                    || (sort.is_empty() && matches!(rows, Rows::Top { .. }))
+                {
+                    input.select = None;
+                }
                 let rows = match rows {
+                    Rows::Projected(mut rows) => {
+                        rows.sort_by_key(|row| (row.rank, row.ordinal));
+                        rows.into_iter().map(|row| row.row).collect()
+                    }
                     Rows::All(mut rows) => {
                         order_rows(&mut rows);
                         rows

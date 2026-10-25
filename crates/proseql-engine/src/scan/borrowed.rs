@@ -148,6 +148,68 @@ impl BorrowedValue<'_> {
             ),
         }
     }
+    pub fn select(&self, selection: Option<&Value>) -> Value {
+        match selection {
+            Some(Value::Array(fields)) if !fields.is_empty() => {
+                let selection = fields
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|field| (field.to_owned(), Value::Bool(true)))
+                    .collect();
+                self.select_object(&selection)
+            }
+            Some(Value::Object(fields)) if !fields.is_empty() => self.select_object(fields),
+            _ => self.to_owned(),
+        }
+    }
+    fn select_object(&self, selection: &serde_json::Map<String, Value>) -> Value {
+        let mut output = serde_json::Map::new();
+        if !matches!(self, Self::Object(_)) {
+            return Value::Object(output);
+        }
+        for (field, selected) in selection {
+            if field.contains('.') {
+                if selected == &Value::Bool(true) {
+                    if let Some(value) = self.get(field) {
+                        output.insert(field.clone(), value.to_owned());
+                    }
+                }
+                continue;
+            }
+            match selected {
+                Value::Bool(true) => {
+                    if let Some(value) = self.get(field) {
+                        output.insert(field.clone(), value.to_owned());
+                    }
+                }
+                Value::Object(nested) => match self.get(field) {
+                    Some(Self::Object(_)) => {
+                        output.insert(
+                            field.clone(),
+                            self.get(field)
+                                .expect("selected field")
+                                .select_object(nested),
+                        );
+                    }
+                    Some(Self::Array(values)) => {
+                        output.insert(
+                            field.clone(),
+                            Value::Array(
+                                values
+                                    .iter()
+                                    .filter(|value| matches!(value, Self::Object(_)))
+                                    .map(|value| value.select_object(nested))
+                                    .collect(),
+                            ),
+                        );
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        Value::Object(output)
+    }
     pub fn scalar_eq(&self, value: &Value) -> bool {
         match (self, value) {
             (Self::Null, Value::Null) => true,
@@ -305,6 +367,30 @@ impl BorrowedValue<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn borrowed_selection_matches_nested_and_dot_path_selection() {
+        use serde_json::json;
+        let value =
+            json!({"id":"x", "nested":{"a":1,"b":"text"}, "items":[{"a":2},null,3,{"a":4,"b":5}]});
+        let bytes = value.to_string();
+        let borrowed: BorrowedValue<'_> = serde_json::from_str(&bytes).unwrap();
+        for selection in [
+            json!(null),
+            json!([]),
+            json!({}),
+            json!(["id", "nested.a", "missing"]),
+            json!({"nested":{"b":true},"items":{"a":true}}),
+            json!({"nested":{}}),
+            json!([1, false]),
+        ] {
+            assert_eq!(
+                borrowed.select(Some(&selection)),
+                crate::query::select::apply_selection(&value, Some(&selection)),
+                "selection={selection}"
+            );
+        }
+    }
+
     #[test]
     fn scalar_filters_match_canonical_operators() {
         use serde_json::json;

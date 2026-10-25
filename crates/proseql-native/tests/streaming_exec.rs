@@ -653,3 +653,33 @@ fn a_custom_codec_that_changes_rows_is_not_bypassed() {
         run(ExecutionModel::Streaming)
     );
 }
+
+#[test]
+fn codec_path_preserves_duplicate_before_later_partition_error() {
+    let fixture = ParityFixture::new(720);
+    let path = fixture.partition_path("2025-02");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    let mut duplicate = support::parity::sample("2025-02", 1, 1, "steps");
+    duplicate["id"] = json!("steps:2025-01-01T00:00:00.000Z");
+    text.push_str(&format!("{duplicate}\n"));
+    std::fs::write(path, text).unwrap();
+    let path = fixture.partition_path("2025-03");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str("{}\n");
+    std::fs::write(path, text).unwrap();
+    let run = |model| {
+        let mut options = fixture.options(model);
+        options
+            .formats
+            .register(Box::new(proseql_formats::codecs::lenient_jsonl_codec()));
+        let runtime =
+            proseql_native::NativeRuntime::open_sources_with_options(fixture.config(), options)
+                .unwrap();
+        runtime
+            .query_bounded(COLLECTION, QueryInput::default())
+            .unwrap_err()
+    };
+    let resident = run(ExecutionModel::Resident);
+    assert_eq!(resident.tag(), "SourceConfigError");
+    assert_eq!(resident, run(ExecutionModel::Streaming));
+}
