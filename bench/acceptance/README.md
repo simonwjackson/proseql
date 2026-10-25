@@ -1,7 +1,8 @@
 # Query-while-scanning acceptance
 
 This is measurement tooling, not a second engine. It links the real public
-`proseql-native` API and SQLite. `Resident` is the reference baseline.
+`proseql-native` API and SQLite. Lazy collections always stream; the historical
+`Resident` backend is removed and rejected, not measured as a second alias.
 The #12 acceptance decision judges `Streaming` against SQLite.
 
 ## Run on aka only
@@ -10,15 +11,15 @@ From the source checkout, use:
 
 ```sh
 # Local launch does only Git/source transfer; every command runs on aka.
-bash scripts/qws/aka-run harness --x86-64-v2 --pull -- proseql-task bench-acceptance
+bash scripts/qws/aka-run bench2 --x86-64-v2 --pull -- proseql-task bench-acceptance
 # Equivalent single flake task on aka, already inside aka-run:
 # nix run --builders '' path:.#bench-acceptance
 # Focused checks and formatting:
-bash scripts/qws/aka-run harness --x86-64-v2 --pull -- bash bench/acceptance/run.sh check
-bash scripts/qws/aka-run harness --x86-64-v2 --pull -- bash bench/acceptance/run.sh format
+bash scripts/qws/aka-run bench2 --x86-64-v2 --pull -- bash bench/acceptance/run.sh check
+bash scripts/qws/aka-run bench2 --x86-64-v2 --pull -- bash bench/acceptance/run.sh format
 ```
 
-Do not overlap aka-run invocations for `harness`: its rsync uses `--delete`.
+Do not overlap aka-run invocations for `bench2`: its rsync uses `--delete`.
 Run consumer checks before or after the matrix, not while it writes results.
 No commands run on rakku or yari. No real health data is used.
 
@@ -35,11 +36,12 @@ that variable, but an unavailable revision is labelled unknown, not invented.
 
 Results go to `results/runs/<UTC timestamp>/`. Those large per-trial logs are
 ignored. The task also writes `results/latest.md`, `results/latest.jsonl` and
-`results/source.sha`. Commit only these small summaries and a short provenance
+`results/latest-source.sha` (set `ACCEPTANCE_RESULT_PREFIX=round2` to preserve
+the round-1 summaries). Commit only these small summaries and a short provenance
 note. JSONL contains numeric cell summaries, heap, cache and every target verdict.
 The raw trials remain on aka and are pulled back for investigation. Exit 0 means the matrix completed and answers matched; it does **not** mean the performance targets passed. Verify must read the target verdicts in Markdown or JSONL.
 
-Defaults: three timing trials and one meter trial per cell, 360 planned trials.
+Defaults: three timing trials and one meter trial per cell, 272 planned trials.
 For a smoke run only, set `ACCEPTANCE_REPEATS=1`; the table records that reduction.
 `ACCEPTANCE_TIMEOUT` changes the per-operation timeout (default 180 seconds),
 never the 1 GiB/no-swap limit. A SIGKILL skips later repetitions of that exact
@@ -61,27 +63,28 @@ RSS growth for the ten-month aggregate (16 versus 256 shards).
 | month | `aggregate_grouped_bounded`, May steps by UTC day |
 | ten | `aggregate_grouped_bounded`, January–October by day and metric |
 | append | public mutation `create_many`, 1,000 genuinely new IDs, durable commit |
+| append-range | prime October last hour, append 1,000 ordered rows at the last October timestamp, then range on the same runtime; combined and separate stage timers |
 | open | `open_sources_with_options` |
 | idle | freshly opened backend, one-second observation interval |
 
-`NativeSourceRuntimeOptions::execution_model` explicitly selects `Resident` or
-`Streaming`. There are no implementation-specific read/append shortcuts. The
-skeleton's Streaming fallback therefore runs now; merged streaming paths are
-picked up automatically. Unlike Stage 0, point uses the real `find_by_id` API.
+The harness uses default native options, which always stream lazy collections.
+There are no implementation-specific read/append shortcuts. Unlike Stage 0,
+point uses the real `find_by_id` API. After its ordinary one-second RSS sample,
+the harness calls `release_streaming_indexes()` and records RSS one second later,
+without trim or teardown. That diagnostic does not waive the default idle target.
 
 Append timing contains **no benchmark preflight**. A separate small fixture puts
 a requested October ID with conflicting content in May, then calls the same
 public `create_many`. The global-conflict probe runs for both shapes and gates append acceptance. Raw puts the conflicting ID in a deliberately different shard. The
-Resident baseline currently misses this correctness guarantee. It must not be
-reported as a globally checked fast append. The probe automatically sees the
-Streaming guarantee once it is implemented. Set `ACCEPTANCE_REQUIRE_GLOBAL=1` for the focused Rust tests at cutover to require that guarantee, rather than only report the skeleton miss. Each successful timed append must
+Streaming backend must pass this correctness guarantee in focused tests and
+acceptance probes. Each successful timed append must
 persist exactly 1,000 new rows; every trial uses an independent fixture copy.
 
 The SQLite baseline uses the exact typed logical records, TEXT primary keys and
 non-covering `(metric,time)` indexes. WAL, `synchronous=NORMAL`, default page cache,
 no mmap or covering aggregate index. A bounded k-way merge imports chronological
 records in both shapes. SQLite temporary files stay under the owned filesystem
-`/home/simonwjackson/work/qws-harness-data/tmp`. Native synced text appends do not
+`/home/simonwjackson/work/qws-harness-data/bench2/tmp`. Native synced text appends do not
 have equal power-loss durability to NORMAL WAL. Timing against this requested
 bar is measured; the same-durability qualification remains unmeasured.
 
@@ -94,6 +97,11 @@ prewarm the backend file set; read queries additionally prime the same operation
 on the same open runtime. Append warms only file pages, never the mutation.
 SQLite's file contains both shapes; text warming covers the selected collection.
 Inode metadata and controller/hypervisor caches are not evicted.
+
+For append-range, both cache modes prime the October last-hour range before the
+timer, without an ID/mutation preflight. The cache label describes starting file
+pages, not an untouched cold append. Standard append remains unchanged and
+unprimed. Every mutation trial uses an independent copy.
 
 Read timing excludes open and includes canonical answer consumption. Full rows
 are digested and dropped within the timer. All successful implementations must
@@ -122,7 +130,11 @@ is reported as unmeasured/null, never zero. Failed/missing measurements cannot
 pass. Open ≤1 second on the real Logbook/rakku shape and absolute Celeron times
 remain explicitly **unmeasured**. aka is only the approved synthetic proxy.
 
-Synthetic fixtures and binary copies are retained under the fixed owned
-`/home/simonwjackson/work/qws-harness-data` directory for repeated Verify runs.
+Synthetic fixtures and binary copies use the owned
+`/home/simonwjackson/work/qws-harness-data/bench2` directory (override with
+`ACCEPTANCE_DATA`, still under the allowed parent). `prepare` requires a fresh
+data directory. Remove owned fixtures after verification. The matrix waits until
+one-minute aka load is ≤1, samples every five seconds, and rejects/repeats a
+whole block if any one-minute sample exceeds 2 (at most three attempts).
 Costs: roughly 3 GiB of fixture data, build output, and trial time. Do not treat
 these results as consumer latency or a guarantee for the Celeron's disk/allocator.

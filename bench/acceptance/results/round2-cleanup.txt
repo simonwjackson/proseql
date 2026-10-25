@@ -1,0 +1,8 @@
+2026-10-25T18:42:03Z
+2.0G	/home/simonwjackson/work/qws-harness-data/bench2
+455M	/home/simonwjackson/work/qws-bench2-target
+25M	/home/simonwjackson/work/qws-bench2
+Owned bench2 fixture/tmp/binary directory removed; absence verified.
+Owned bench2 Cargo target removed; absence verified.
+2026-10-25T18:42:11Z
+Owned bench2 source checkout removed; absence verified.

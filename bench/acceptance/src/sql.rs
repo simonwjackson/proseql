@@ -143,8 +143,7 @@ pub fn query(conn: &Connection, kind: &str, q: &Query) -> Result<Answer, Error> 
     }
 }
 
-pub fn append(conn: &mut Connection, kind: &str) -> Result<Answer, Error> {
-    let rows = fixture::append_rows(kind);
+pub fn append_rows(conn: &mut Connection, kind: &str, rows: Vec<Value>) -> Result<Answer, Error> {
     let tx = conn.transaction()?;
     {
         let mut lookup = tx.prepare(&format!("SELECT * FROM {kind} WHERE id=?1"))?;

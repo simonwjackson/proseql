@@ -1,7 +1,4 @@
-#![allow(deprecated)] // Retained CLI selector; the removed Resident backend is refused.
-
 use crate::{
-    fixture,
     query::{Answer, Query},
     Error,
 };
@@ -11,7 +8,7 @@ use proseql_engine::descriptor::{
 };
 use proseql_engine::query::{aggregate::AggregateConfig, pipeline::QueryInput};
 use proseql_native::{
-    ExecutionModel, FullScanPolicy, LazyPartitionPolicy, NativeCollectionConfig, NativeRuntime,
+    FullScanPolicy, LazyPartitionPolicy, NativeCollectionConfig, NativeRuntime,
     NativeSourceRuntimeConfig, NativeSourceRuntimeOptions,
 };
 use proseql_storage::source_config::{
@@ -23,10 +20,7 @@ fn tag(error: proseql_engine::errors::EngineError) -> Error {
     format!("{}: {error}", error.tag()).into()
 }
 
-pub fn open(root: &Path, kind: &str, model: ExecutionModel) -> Result<NativeRuntime, Error> {
-    if model == ExecutionModel::Resident {
-        return Err("Resident lazy backend was removed; use the pinned historical source for baseline measurements".into());
-    }
+pub fn open(root: &Path, kind: &str) -> Result<NativeRuntime, Error> {
     let mut fields = [
         "id",
         "metric",
@@ -103,7 +97,6 @@ pub fn open(root: &Path, kind: &str, model: ExecutionModel) -> Result<NativeRunt
         })],
     };
     let options = NativeSourceRuntimeOptions {
-        execution_model: model,
         watch_debounce: None,
         lazy_partitions: IndexMap::from([(
             kind.into(),
@@ -162,8 +155,11 @@ pub fn query(runtime: &NativeRuntime, kind: &str, q: &Query) -> Result<Answer, E
         ))
     }
 }
-pub fn append(runtime: &NativeRuntime, kind: &str) -> Result<Answer, Error> {
-    let rows = fixture::append_rows(kind);
+pub fn append_rows(
+    runtime: &NativeRuntime,
+    kind: &str,
+    rows: Vec<serde_json::Value>,
+) -> Result<Answer, Error> {
     runtime
         .mutate(|tx| tx.create_many(kind, rows.clone()).map(|_| ()))
         .map_err(tag)?;

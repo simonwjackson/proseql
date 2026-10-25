@@ -352,3 +352,85 @@ The initial full-gate attempt stopped before suites because a native CPU flag
 reached WASM. Its affected build retry and the final complete run passed without
 that flag. Browser gzip has only 1,428 B headroom. Performance, real-data and
 consumer pin/deployment limits above remain unchanged. No push or publication.
+
+## Measured on aka — round 2
+
+Integrated runtime: `bd22cf4`. Measured harness source:
+`26449c543f51d0f8fbba900ef65749fabf51820f`. Lazy collections now always
+stream; the deprecated Resident selector does not restore the deleted path.
+The harness rejects that historical backend and omits its column.
+
+**10 default #12 target rows pass; 21 miss**, compared with round 1's 12/19.
+Latency improves, but no default wall-time row passes in both cold and warm
+modes. Warm sample-hour latency passes. Dense raw checkpoints and retained RSS
+cause additional memory misses. No target is lowered. The explicit point-release
+diagnostics are additional: samples pass; raw misses by 0.020 MiB.
+
+Cold / warm milliseconds; medians of three rotating timing trials. Round 1 is
+Streaming from the historical aka report. These are synthetic same-machine
+comparisons, not absolute Celeron qualification.
+
+| Workload | Shape | SQLite round 2 | Round 1 Streaming | Round 2 Streaming | Round 2 / SQLite |
+|---|---|---:|---:|---:|---:|
+| Point | samples | 1.135 / 0.029 | 2550.776 / 0.249 | 650.096 / 0.248 | 572.941× / 8.465× |
+| Hour | samples | 1.658 / 0.410 | 105.415 / 1.709 | 52.752 / 0.342 | 31.823× / 0.835× |
+| Month by day | samples | 33.570 / 19.544 | 294.275 / 91.962 | 105.703 / 46.760 | 3.149× / 2.393× |
+| Ten months by day/metric | samples | 413.099 / 287.973 | 1779.972 / 835.600 | 530.105 / 432.924 | 1.283× / 1.503× |
+| Append 1,000 | samples | 10.205 / 7.803 | 509.959 / 462.410 | 370.443 / 316.396 | 36.301× / 40.546× |
+| Point | raw | 1.229 / 0.029 | 2879.890 / 3.254 | 835.128 / 3.055 | 679.563× / 106.616× |
+| Hour | raw | 2.245 / 0.297 | 1442.702 / 314.995 | 616.902 / 10.361 | 274.828× / 34.925× |
+| Month by day | raw | 31.621 / 19.303 | 1682.301 / 565.154 | 612.672 / 54.556 | 19.375× / 2.826× |
+| Ten months by day/metric | raw | 412.871 / 284.169 | 2014.165 / 894.623 | 659.825 / 476.976 | 1.598× / 1.678× |
+| Append 1,000 | raw | 11.737 / 8.266 | 862.254 / 739.943 | 771.813 / 632.619 | 65.762× / 76.537× |
+
+The complete [round-2 report](../benchmarks/query-while-scanning-aka-round2.md)
+contains every target's SQLite/round-1/round-2 values, ratios, verdicts and every
+miss's observed floor, inferred reason and cheapest next step. Floors are best
+observed trials, not proofs of a text-only physical limit.
+
+Point peak falls from 22.578/22.840 MiB to 17.809/18.113 MiB for samples/raw
+(warm maxima), but still exceeds twice SQLite's 6.227 MiB. Default point
+retention is 10.777/11.043 MiB above idle. One second after explicit
+`release_streaming_indexes()`, it is 0.754/1.020 MiB, without trim. Release does
+not guarantee OS reclamation, and the next lookup rebuilds metadata. Repeated
+release/rebuild cycles can retain more allocator pages, as the write report
+shows. Sample-hour retention also narrowly misses at 1.016 MiB; the 1 MiB
+tolerance remains unchanged. Raw cold-hour peak is 16.371 MiB versus SQLite's
+6.488 MiB, a new peak miss. The strict 16→256-shard growth proxy also misses:
+1.099× / 1.067×. SQLite's own cold proxy varies by 1.012×; no noise tolerance is
+invented for the native target.
+
+The ordered sync probe primes October's last hour, appends 1,000 unique IDs at
+the last October timestamp, then reads the same hour on the same runtime.
+All answers contain 1,090 full rows. Native combined medians are
+365.828 / 320.429 ms (samples) and 624.332 / 622.926 ms (raw), versus SQLite's
+12.467 / 10.271 and 13.760 / 10.924 ms. Following-range medians alone are
+3.071 / 2.967 ms and 14.700 / 14.600 ms. This is an ordered sync measurement,
+not an untouched cold append or a claim about out-of-order checkpoint reuse.
+The ordinary append target remains unprimed, with independent fixture copies
+and global duplicate safety.
+
+All 272 accepted trials succeed and match complete answers. All 64 mutation
+trials persist exactly 1,000 new rows; all four cross-partition conflict probes
+pass. Independent counting-allocator evidence covers point, ten-month aggregate
+and raw append. Raw append requested live/peak is 12.452/24.318 MiB; sample ten
+is 0.474/6.053 MiB; raw ten is 3.538/9.147 MiB. Requested heap is not RSS.
+
+Every build, focused check and measurement ran on aka with native
+`RUSTFLAGS='-C target-cpu=x86-64-v2'`, never WASM. aka's Ryzen 5 7600X is a far
+faster CPU than the Celeron. Each measured operation/preparation used a
+1 GiB/no-swap user scope, nice 10 and a timeout; the limit was never raised.
+The 656,640-row shapes are synthetic: ten month files or 256 raw shards.
+SQLite uses NORMAL/WAL; its temporary files stay in the bench2-owned filesystem
+directory. Synced text and NORMAL WAL do not establish equal power-loss
+durability. Real Logbook open ≤1 s, absolute Celeron times and equal durability
+remain **unmeasured**; no rakku or yari access occurred.
+
+The accepted block's load before was 0.959/1.331/1.361, after
+0.299/0.527/0.940, with maximum one-minute load 0.959. The predeclared policy
+waits for ≤1 and repeats a whole block above 2; no high-load repeat was needed.
+Focused harness check/clippy/fmt, five Rust tests, four Python tests, Ruff and
+shellcheck pass. No engine code changed. The parent owns full combined checks.
+[Round-2 provenance and cleanup](../../bench/acceptance/results/round2-provenance.md)
+and [small numeric evidence](../../bench/acceptance/results/round2.jsonl) record
+the source binding and limits. No push, consumer pin change or deployment.

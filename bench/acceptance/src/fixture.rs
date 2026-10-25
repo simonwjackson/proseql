@@ -7,7 +7,16 @@ use std::path::{Path, PathBuf};
 
 pub const DAYS: [usize; 10] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31];
 pub const KINDS: [&str; 2] = ["samples", "raw"];
-pub const WORKLOADS: [&str; 7] = ["point", "hour", "month", "ten", "append", "open", "idle"];
+pub const WORKLOADS: [&str; 8] = [
+    "point",
+    "hour",
+    "month",
+    "ten",
+    "append",
+    "append-range",
+    "open",
+    "idle",
+];
 
 pub fn hash(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf29ce484222325, |h, b| {
@@ -60,6 +69,20 @@ pub fn append_rows(kind: &str) -> Vec<Value> {
             } else {
                 r
             }
+        })
+        .collect()
+}
+
+/// Ordered sync: unique append IDs at the last existing October timestamp.
+pub fn sync_rows(kind: &str) -> Vec<Value> {
+    let tail = row(10, DAYS[9] * 1440 - 1, 0, false);
+    append_rows(kind)
+        .into_iter()
+        .map(|mut row| {
+            for field in ["at", "atUtc", "date", "receivedAt"] {
+                row[field] = tail[field].clone();
+            }
+            row
         })
         .collect()
 }

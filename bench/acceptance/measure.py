@@ -25,9 +25,9 @@ LIBC.mmap.argtypes = [
 LIBC.mincore.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p]
 LIBC.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
 PAGE = os.sysconf("SC_PAGE_SIZE")
-BACKENDS = ("sqlite", "resident", "streaming")
+BACKENDS = ("sqlite", "streaming")
 READS = ("point", "hour", "month", "ten")
-WORKLOADS = (*READS, "append", "open", "idle")
+WORKLOADS = (*READS, "append", "append-range", "open", "idle")
 CACHES = ("cold", "warm")
 
 
@@ -138,7 +138,7 @@ def run(data, out):
                                 skipped += 1
                                 continue
                             root = base
-                            if workload == "append":
+                            if workload in ("append", "append-range"):
                                 root = data / "append-trial"
                                 if root.exists():
                                     shutil.rmtree(root)
@@ -172,6 +172,7 @@ def run(data, out):
                                 workload,
                                 cache,
                             ]
+                            load_before = os.getloadavg()
                             started = time.monotonic()
                             result = subprocess.run(
                                 command, text=True, capture_output=True, check=False
@@ -192,6 +193,7 @@ def run(data, out):
                                     files(root, backend, kind)
                                 ),
                                 "command": command,
+                                "load_before": load_before,
                                 "load_after": os.getloadavg(),
                             }
                             if result.returncode == 0:
@@ -203,7 +205,7 @@ def run(data, out):
                                 expected[key] = answer
                             else:
                                 record["stdout"] = result.stdout
-                            if workload == "append":
+                            if workload in ("append", "append-range"):
                                 record["rows_persisted"] = verify_append(
                                     root, kind, backend, before_sizes
                                 )
@@ -233,7 +235,10 @@ def run(data, out):
             {
                 "repeats": repeats,
                 "skipped_after_kill": skipped,
-                "expected_trials": (repeats + 1) * 90,
+                "expected_trials": (repeats + 1)
+                * (2 * len(WORKLOADS) + 1)
+                * len(BACKENDS)
+                * len(CACHES),
             },
             indent=2,
         )
@@ -244,5 +249,44 @@ def run(data, out):
     )
 
 
+def guarded_run(data, out):
+    """Reject and repeat a complete matrix block if one-minute load exceeds 2."""
+    blocks = []
+    for attempt in range(1, 4):
+        cooldown = []
+        while os.getloadavg()[0] > 1:
+            cooldown.append({"time": time.time(), "load": os.getloadavg()})
+            time.sleep(5)
+        block = out / f"block-{attempt}"
+        block.mkdir()
+        samples = [{"time": time.time(), "load": os.getloadavg()}]
+        child = subprocess.Popen(
+            [sys.executable, __file__, str(data), str(block), "--block"]
+        )
+        while child.poll() is None:
+            time.sleep(5)
+            samples.append({"time": time.time(), "load": os.getloadavg()})
+        accepted = child.returncode == 0 and max(s["load"][0] for s in samples) <= 2
+        blocks.append(
+            {
+                "attempt": attempt,
+                "accepted": accepted,
+                "returncode": child.returncode,
+                "cooldown": cooldown,
+                "samples": samples,
+            }
+        )
+        (out / "load.json").write_text(json.dumps(blocks, indent=2) + "\n")
+        if child.returncode:
+            raise RuntimeError(f"matrix failed: {child.returncode}; see {block}")
+        if accepted:
+            for name in ("trials.jsonl", "run.json", "equivalence.json"):
+                shutil.copyfile(block / name, out / name)
+            return
+        print(f"high load: reject whole block {attempt}", flush=True)
+    raise RuntimeError("three high-load blocks rejected; no accepted measurement")
+
+
 if __name__ == "__main__":
-    run(Path(sys.argv[1]), Path(sys.argv[2]))
+    action = run if "--block" in sys.argv else guarded_run
+    action(Path(sys.argv[1]), Path(sys.argv[2]))

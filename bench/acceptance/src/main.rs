@@ -5,9 +5,6 @@ mod observe;
 mod query;
 mod sql;
 
-#![allow(deprecated)] // Retained CLI selector; the removed Resident backend is refused.
-
-use proseql_native::ExecutionModel;
 use query::{Answer, Query};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -25,10 +22,15 @@ impl Backend {
     fn open(root: &Path, backend: &str, kind: &str) -> Result<Self, Error> {
         Ok(match backend {
             "sqlite" => Self::Sql(sql::open(root)?),
-            "resident" => Self::Native(native::open(root, kind, ExecutionModel::Resident)?),
-            "streaming" => Self::Native(native::open(root, kind, ExecutionModel::Streaming)?),
-            _ => return Err("backend must be sqlite|resident|streaming".into()),
+            "streaming" => Self::Native(native::open(root, kind)?),
+            _ => return Err("backend must be sqlite|streaming".into()),
         })
+    }
+    fn append_rows(&mut self, kind: &str, rows: Vec<serde_json::Value>) -> Result<Answer, Error> {
+        match self {
+            Self::Sql(c) => sql::append_rows(c, kind, rows),
+            Self::Native(r) => native::append_rows(r, kind, rows),
+        }
     }
     fn run(&mut self, kind: &str, workload: &str) -> Result<Answer, Error> {
         if workload == "idle" {
@@ -36,10 +38,7 @@ impl Backend {
             return Ok(Answer::default());
         }
         if workload == "append" {
-            return match self {
-                Self::Sql(c) => sql::append(c, kind),
-                Self::Native(r) => native::append(r, kind),
-            };
+            return self.append_rows(kind, fixture::append_rows(kind));
         }
         let q = Query::new(kind, workload);
         match self {
@@ -50,7 +49,7 @@ impl Backend {
 }
 
 /// A new ID routed to October already exists (with different content) in May.
-/// Report a known Resident gap, not a benchmark-only preflight that hides it.
+/// This independent probe never primes the measured append runtime.
 fn global_duplicate_probe(root: &Path, backend: &str, kind: &str) -> Result<bool, Error> {
     use std::io::Write;
     fixture::prepare(root, Some(120), 256)?;
@@ -124,7 +123,7 @@ fn main() -> Result<(), Error> {
         return Ok(());
     }
     if args.len() != 5 {
-        return Err("usage: proseql-acceptance prepare|prepare16 ROOT | duplicate-check ROOT BACKEND samples|raw | ROOT sqlite|resident|streaming samples|raw WORKLOAD cold|warm".into());
+        return Err("usage: proseql-acceptance prepare|prepare16 ROOT | duplicate-check ROOT BACKEND samples|raw | ROOT sqlite|streaming samples|raw WORKLOAD cold|warm".into());
     }
     let root = Path::new(&args[0]);
     let (backend, kind, workload, cache) = (&args[1], &args[2], &args[3], &args[4]);
@@ -142,9 +141,14 @@ fn main() -> Result<(), Error> {
     if cache == "warm" {
         if workload == "open" {
             drop(Backend::open(root, backend, kind)?);
-        } else if !["append", "idle"].contains(&workload.as_str()) {
+        } else if !["append", "append-range", "idle"].contains(&workload.as_str()) {
             opened.as_mut().unwrap().run(kind, workload)?;
         }
+    }
+    // Both cache modes prime a checked time index before the sync pattern.
+    // No ID/mutation preflight: the timed append still builds global membership.
+    if workload == "append-range" {
+        opened.as_mut().unwrap().run(kind, "sync-range")?;
     }
     observe::reset_rss_peak()?;
     #[cfg(feature = "heap-meter")]
@@ -163,7 +167,16 @@ fn main() -> Result<(), Error> {
         counter.start()?;
     }
     let start = Instant::now();
-    let answer = if workload == "open" {
+    let mut sync_stages_ms = None;
+    let answer = if workload == "append-range" {
+        let runtime = opened.as_mut().unwrap();
+        runtime.append_rows(kind, fixture::sync_rows(kind))?;
+        let append_ms = start.elapsed().as_secs_f64() * 1000.0;
+        let range_start = Instant::now();
+        let answer = runtime.run(kind, "sync-range")?;
+        sync_stages_ms = Some((append_ms, range_start.elapsed().as_secs_f64() * 1000.0));
+        answer
+    } else if workload == "open" {
         opened = Some(Backend::open(root, backend, kind)?);
         Answer::default()
     } else {
@@ -181,9 +194,30 @@ fn main() -> Result<(), Error> {
     // Keep the backend alive: no malloc_trim, close, or source-session teardown.
     std::thread::sleep(Duration::from_secs(1));
     let rss_1s = observe::status("VmRSS:")?;
+    let mut rss_release_1s = None;
+    let mut release_ms = None;
+    #[cfg(feature = "heap-meter")]
+    let mut heap_after_release = None;
+    #[cfg(not(feature = "heap-meter"))]
+    let heap_after_release: Option<(usize, usize)> = None;
+    if workload == "point" {
+        if let Some(Backend::Native(runtime)) = &opened {
+            let start = Instant::now();
+            runtime
+                .release_streaming_indexes()
+                .map_err(|e| e.to_string())?;
+            release_ms = Some(start.elapsed().as_secs_f64() * 1000.0);
+            std::thread::sleep(Duration::from_secs(1));
+            rss_release_1s = Some(observe::status("VmRSS:")?);
+            #[cfg(feature = "heap-meter")]
+            {
+                heap_after_release = Some(METER.sample());
+            }
+        }
+    }
     println!(
         "{}",
-        serde_json::json!({"backend":backend,"kind":kind,"workload":workload,"cache":cache,"wall_ms":wall_ms,"instructions":instructions,"append_new_rows":if workload=="append" {Some(1000)} else {None},"rss_before":rss_before,"rss_return":rss_return,"rss_peak":rss_peak,"rss_1s":rss_1s,"rust_heap_live_peak":heap,"sqlite_c_heap_live_peak":if backend=="sqlite" {Some(c_heap)} else {None},"answer":answer})
+        serde_json::json!({"sync_stages_ms":sync_stages_ms,"rss_release_1s":rss_release_1s,"release_ms":release_ms,"rust_heap_after_release":heap_after_release,"backend":backend,"kind":kind,"workload":workload,"cache":cache,"wall_ms":wall_ms,"instructions":instructions,"append_new_rows":if ["append","append-range"].contains(&workload.as_str()) {Some(1000)} else {None},"rss_before":rss_before,"rss_return":rss_return,"rss_peak":rss_peak,"rss_1s":rss_1s,"rust_heap_live_peak":heap,"sqlite_c_heap_live_peak":if backend=="sqlite" {Some(c_heap)} else {None},"answer":answer})
     );
     drop(opened);
     Ok(())
@@ -198,7 +232,7 @@ mod tests {
         let tmp = tempfile::tempdir()?;
         for kind in fixture::KINDS {
             let mut expected = Vec::new();
-            for backend in ["sqlite", "resident", "streaming"] {
+            for backend in ["sqlite", "streaming"] {
                 let root = tmp.path().join(format!("{kind}-{backend}"));
                 fixture::prepare(&root, Some(120), 256)?;
                 let mut runtime = Backend::open(&root, backend, kind)?;
@@ -221,6 +255,33 @@ mod tests {
         Ok(())
     }
     #[test]
+    fn append_then_same_month_range_matches_and_release_preserves_lookup() -> Result<(), Error> {
+        let tmp = tempfile::tempdir()?;
+        for kind in fixture::KINDS {
+            let mut expected = None;
+            for backend in ["sqlite", "streaming"] {
+                let root = tmp.path().join(format!("sync-{kind}-{backend}"));
+                fixture::prepare(&root, Some(120), 256)?;
+                let mut runtime = Backend::open(&root, backend, kind)?;
+                runtime.run(kind, "sync-range")?;
+                runtime.append_rows(kind, fixture::sync_rows(kind))?;
+                let answer = runtime.run(kind, "sync-range")?;
+                assert_eq!(answer.count, 1000);
+                if let Some(expected) = &expected {
+                    assert_eq!(&answer, expected);
+                }
+                expected = Some(answer);
+                let before = runtime.run(kind, "point")?;
+                if let Backend::Native(r) = &runtime {
+                    r.release_streaming_indexes().map_err(|e| e.to_string())?;
+                }
+                assert_eq!(before, runtime.run(kind, "point")?);
+            }
+        }
+        assert!(Backend::open(tmp.path(), "resident", "samples").is_err());
+        Ok(())
+    }
+    #[test]
     fn sqlite_rejects_cross_partition_conflicts_without_partial_append() -> Result<(), Error> {
         let tmp = tempfile::tempdir()?;
         for kind in fixture::KINDS {
@@ -233,21 +294,16 @@ mod tests {
         Ok(())
     }
     #[test]
-    fn global_conflict_probe_runs_both_public_models_and_can_gate_cutover() -> Result<(), Error> {
+    fn global_conflict_probe_requires_streaming_guarantee() -> Result<(), Error> {
         let tmp = tempfile::tempdir()?;
-        for backend in ["resident", "streaming"] {
+        for backend in ["streaming"] {
             for kind in fixture::KINDS {
                 let supported = global_duplicate_probe(
                     &tmp.path().join(format!("{backend}-{kind}")),
                     backend,
                     kind,
                 )?;
-                // Skeleton runs report the known miss. Verify can require the final
-                // Streaming guarantee without changing this test or adding a preflight.
-                if backend == "streaming" && std::env::var_os("ACCEPTANCE_REQUIRE_GLOBAL").is_some()
-                {
-                    assert!(supported, "Streaming must reject cross-partition conflicts");
-                }
+                assert!(supported, "Streaming must reject cross-partition conflicts");
             }
         }
         Ok(())

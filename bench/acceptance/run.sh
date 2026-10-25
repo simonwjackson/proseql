@@ -18,7 +18,7 @@ if [[ $(uname -m) != x86_64 || ${RUSTFLAGS:-} != '-C target-cpu=x86-64-v2' ]]; t
 fi
 export NIX_CONFIG="${NIX_CONFIG:-}
 builders ="
-data=/home/simonwjackson/work/qws-harness-data
+data=${ACCEPTANCE_DATA:-/home/simonwjackson/work/qws-harness-data/bench2}
 mkdir -p "$data/tmp"
 export TMPDIR="$data/tmp" SQLITE_TMPDIR="$data/tmp"
 export CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-2}
@@ -58,6 +58,7 @@ case "$action" in
     cargo build --locked --release --manifest-path "$manifest" --features heap-meter > "$out/build-meter.log" 2>&1
     cp "$CARGO_TARGET_DIR/release/proseql-acceptance" "$data/meter"
     sha256sum "$data/timing" "$data/meter" > "$out/binaries.sha256"
+    { date -u; cat /proc/loadavg; } > "$out/preparation-load-before.txt"
     if [[ ! -e "$data/base" ]]; then
       scope 600 "$data/timing" prepare "$data/base" > "$out/prepare.json"
     else
@@ -67,18 +68,20 @@ case "$action" in
       scope 600 "$data/timing" prepare16 "$data/base16" > "$out/prepare16.json"
     fi
     # Independent probe fixtures. Never insert a conflict into measured data.
-    for backend in sqlite resident streaming; do
+    for backend in sqlite streaming; do
       for kind in samples raw; do
         scope 180 "$data/timing" duplicate-check "$data/probe-$stamp-$backend-$kind" "$backend" "$kind" > "$out/duplicate-$backend-$kind.json"
       done
     done
-    python -c 'import json,sys; from pathlib import Path; p=Path(sys.argv[1]); (p/"duplicates.json").write_text(json.dumps({f"{b}/{k}":json.loads((p/f"duplicate-{b}-{k}.json").read_text())["global_duplicate_checks"] for b in ("sqlite","resident","streaming") for k in ("samples","raw")}))' "$out"
+    python -c 'import json,sys; from pathlib import Path; p=Path(sys.argv[1]); (p/"duplicates.json").write_text(json.dumps({f"{b}/{k}":json.loads((p/f"duplicate-{b}-{k}.json").read_text())["global_duplicate_checks"] for b in ("sqlite","streaming") for k in ("samples","raw")}))' "$out"
+    { date -u; cat /proc/loadavg; } > "$out/preparation-load-after.txt"
     # The driver is small; each measured process has its own 1 GiB/no-swap scope.
     python bench/acceptance/measure.py "$data" "$out"
     python bench/acceptance/summarize.py "$out"
-    cp "$out/tables.md" bench/acceptance/results/latest.md
-    cp "$out/summary.jsonl" bench/acceptance/results/latest.jsonl
-    cp "$out/source.sha" bench/acceptance/results/source.sha
+    prefix=${ACCEPTANCE_RESULT_PREFIX:-latest}
+    cp "$out/tables.md" "bench/acceptance/results/$prefix.md"
+    cp "$out/summary.jsonl" "bench/acceptance/results/$prefix.jsonl"
+    cp "$out/source.sha" "bench/acceptance/results/$prefix-source.sha"
     echo "Results: $out"
     ;;
   *) echo 'usage: run.sh all|check|format' >&2; exit 2 ;;

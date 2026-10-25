@@ -22,6 +22,8 @@ def aggregate(records):
     for key in (
         "wall_ms",
         "rss_1s",
+        "rss_release_1s",
+        "release_ms",
         "instructions",
         "file_cache_before",
         "file_cache_after",
@@ -114,7 +116,7 @@ def summarize(root):
         )
 
     for shape in ("samples", "raw"):
-        for backend in ("resident", "streaming"):
+        for backend in ("streaming",):
             for workload, limit in (
                 ("point", 2),
                 ("hour", 1.5),
@@ -191,6 +193,37 @@ def summarize(root):
                     1,
                     note="tolerance=max(SQLite retained delta, 1 MiB); backend remains open; no malloc_trim",
                 )
+    for shape in ("samples", "raw"):
+        target(
+            "point retained RSS after release at 1 s / tolerance",
+            shape,
+            "streaming",
+            [
+                None
+                if any(
+                    v is None
+                    for v in (
+                        get(shape, "point", "streaming", c, "rss_release_1s"),
+                        get(shape, "idle", "streaming", c, "rss_1s"),
+                        get(shape, "point", "sqlite", c, "rss_1s"),
+                        get(shape, "idle", "sqlite", c, "rss_1s"),
+                    )
+                )
+                else max(
+                    0,
+                    get(shape, "point", "streaming", c, "rss_release_1s")
+                    - get(shape, "idle", "streaming", c, "rss_1s"),
+                )
+                / max(
+                    get(shape, "point", "sqlite", c, "rss_1s")
+                    - get(shape, "idle", "sqlite", c, "rss_1s"),
+                    MIB,
+                )
+                for c in CACHES
+            ],
+            1,
+            note="one second after explicit release; no trim; warm point includes a prior lookup",
+        )
     for backend in BACKENDS:
         target(
             "peak RSS growth: 16 to 256 shards",
@@ -229,7 +262,7 @@ def summarize(root):
     lines = [
         "# Query-while-scanning acceptance on aka",
         "",
-        "Resident is the reference baseline; #12 targets judge Streaming against SQLite. Synthetic x86-64-v2 proxy, not rakku/Celeron qualification. Cold / warm. A failed trial makes its cell a miss; killed trials are not zero. Timing medians; RSS peak maximum; heap is a separate instrumented trial.",
+        "The removed Resident backend is omitted; #12 targets judge Streaming against SQLite. Synthetic x86-64-v2 proxy, not rakku/Celeron qualification. Cold / warm. A failed trial makes its cell a miss; killed trials are not zero. Timing medians; RSS peak maximum; heap is a separate instrumented trial.",
         "",
         f"Timing repeats: {run['repeats']}. Trials: {len(records)}; failures: {sum(bool(r['returncode']) for r in records)}; skipped after kill: {run['skipped_after_kill']}.",
         "",
