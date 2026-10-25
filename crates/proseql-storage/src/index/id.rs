@@ -513,6 +513,14 @@ impl IdLocator {
         rows: &[(String, RowLocation)],
     ) -> Result<(), EngineError> {
         if self.partitioned {
+            if start <= generation.covered_len
+                && self
+                    .files
+                    .iter()
+                    .any(|file| !file.dirty && file.generation.as_ref() == Some(&generation))
+            {
+                return Ok(());
+            }
             return self.record_appended(&generation.path, rows);
         }
         let file = match self
@@ -538,6 +546,11 @@ impl IdLocator {
         };
         if self.files[file].dirty || start > generation.covered_len {
             return Err(crate::generation::changed(&generation.path));
+        }
+        // Publication can be retried after success, including after a delta
+        // merge. Coverage already includes these bytes; never dirty or add it twice.
+        if self.files[file].generation.as_ref() == Some(&generation) {
+            return Ok(());
         }
         // Unterminated/torn records may start before the kept prefix. Rebuild
         // instead of retaining a stale old identity at that offset.

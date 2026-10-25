@@ -233,6 +233,11 @@ impl IndexState {
             .as_ref()
             .and_then(|locator| locator.generation_for(&path))
             .cloned();
+        // A repeated checked publication must preserve the original link,
+        // not replace it with after→after evidence using the old start offset.
+        if before.as_ref() == Some(&generation) {
+            return Ok(());
+        }
         let Some(locator) = self.ids.as_mut() else {
             return Ok(());
         };
@@ -724,6 +729,59 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn repeated_checked_publication_keeps_the_original_append_proof() {
+        for count in [1, 4096] {
+            let host = MemoryStorageHost::default();
+            let path = "parts/one.jsonl";
+            let first = "{\"id\":\"a\"}\n";
+            host.write(path, first).unwrap();
+            let mut index = IndexState::default();
+            let before = index
+                .id_locator(&host, &[path.into()])
+                .unwrap()
+                .generation_for(path)
+                .unwrap()
+                .clone();
+            let mut suffix = String::new();
+            let rows = (0..count)
+                .map(|ordinal| {
+                    let id = format!("b-{ordinal}");
+                    let offset = (first.len() + suffix.len()) as u64;
+                    suffix.push_str(&format!("{{\"id\":\"{id}\"}}\n"));
+                    (
+                        id,
+                        RowLocation {
+                            partition: 0,
+                            offset,
+                            ordinal: 0,
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
+            host.append(path, &suffix).unwrap();
+            let after = SourceGeneration::observe(&host, path).unwrap().unwrap();
+            for _ in 0..3 {
+                index
+                    .record_appended(after.clone(), first.len() as u64, &rows)
+                    .unwrap();
+                let proof = index.append_proof(path).expect("checked proof retained");
+                assert_eq!(proof.before, before);
+                assert_eq!(proof.after, after);
+                assert_eq!(proof.start, first.len() as u64);
+                assert_eq!(
+                    index
+                        .id_locator_if_built()
+                        .unwrap()
+                        .locate("b-0")
+                        .unwrap()
+                        .len(),
+                    1
+                );
+            }
+        }
     }
 
     struct DelegatingCodec;

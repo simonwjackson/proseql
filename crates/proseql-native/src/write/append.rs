@@ -355,32 +355,37 @@ fn record_committed(
                 format!("Source '{path}' disappeared after append"),
             )
         })?;
-        // A new ctime alone does not prove that only our suffix changed. Read
-        // the old prefix once and compare the complete accepted append state.
-        // Otherwise a racing prefix edit could become a current false negative.
+        // A new ctime alone does not prove that only our suffix changed. A
+        // tokenless observation already hashed the complete accepted text;
+        // reuse that evidence, then independently check the generation below.
         {
             let _proof = proseql_storage::diagnostics::span("streaming_append_prefix_proof");
-            let mut hash = std::collections::hash_map::DefaultHasher::new();
-            let mut offset = 0;
-            while offset < generation.covered_len {
-                let bytes = host.read_range(
-                    path,
-                    offset,
-                    (generation.covered_len - offset).min(64 * 1024) as usize,
-                )?;
-                if bytes.is_empty() || bytes.len() as u64 > generation.covered_len - offset {
-                    return Err(crate::operation_error(
-                        "source-changed",
-                        format!("Source '{path}' changed during append prefix proof"),
-                    ));
+            let fingerprint_hash = if let Some(hash) = generation.check_hash {
+                hash
+            } else {
+                let mut hash = std::collections::hash_map::DefaultHasher::new();
+                let mut offset = 0;
+                while offset < generation.covered_len {
+                    let bytes = host.read_range(
+                        path,
+                        offset,
+                        (generation.covered_len - offset).min(64 * 1024) as usize,
+                    )?;
+                    if bytes.is_empty() || bytes.len() as u64 > generation.covered_len - offset {
+                        return Err(crate::operation_error(
+                            "source-changed",
+                            format!("Source '{path}' changed during append prefix proof"),
+                        ));
+                    }
+                    hash.write(&bytes);
+                    offset += bytes.len() as u64;
                 }
-                hash.write(&bytes);
-                offset += bytes.len() as u64;
-            }
+                hash.finish()
+            };
             if !contents.get(path).is_some_and(|stored| {
                 stored.len() as u64 == generation.covered_len
                     && stored.fingerprint()
-                        == crate::lazy::FileFingerprint::from_hash(stored.len(), hash.finish())
+                        == crate::lazy::FileFingerprint::from_hash(stored.len(), fingerprint_hash)
             }) {
                 return Err(crate::operation_error(
                     "source-changed",
@@ -447,6 +452,9 @@ pub(crate) fn after_rollback(state: &mut RuntimeState) {
         }
     }
 }
+
+#[cfg(test)]
+mod proof_tests;
 
 #[cfg(test)]
 mod tests {

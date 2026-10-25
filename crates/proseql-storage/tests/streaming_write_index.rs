@@ -48,6 +48,60 @@ fn overflow_cross_file_duplicate_reports_later_path() {
     assert_eq!(error.path.as_ref(), Some(&paths[1]));
 }
 
+fn repeated_checked_publication(rows: usize) {
+    use proseql_engine::scan::RowLocation;
+    use proseql_storage::generation::SourceGeneration;
+    let host = MemoryStorageHost::default();
+    let first = "{\"id\":\"a\"}\n";
+    host.write("a", first).unwrap();
+    let mut locator = IdLocator::build(&host, &["a".into()]).unwrap();
+    let mut suffix = String::new();
+    let rows = (0..rows)
+        .map(|ordinal| {
+            let id = format!("b-{ordinal}");
+            let offset = (first.len() + suffix.len()) as u64;
+            suffix.push_str(&format!("{{\"id\":\"{id}\"}}\n"));
+            (
+                id,
+                RowLocation {
+                    partition: 0,
+                    offset,
+                    ordinal: 0,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    host.append("a", &suffix).unwrap();
+    let generation = SourceGeneration::observe(&host, "a").unwrap().unwrap();
+    locator
+        .accept_appended(generation.clone(), first.len() as u64, &rows)
+        .unwrap();
+    let bytes = locator.resident_bytes();
+    for _ in 0..2 {
+        locator
+            .accept_appended(generation.clone(), first.len() as u64, &rows)
+            .unwrap();
+        assert_eq!(locator.resident_bytes(), bytes);
+        assert_eq!(locator.generation_for("a"), Some(&generation));
+        for (ordinal, (id, row)) in rows.iter().enumerate() {
+            let found = locator.locate(id).unwrap();
+            assert_eq!(found.len(), 1);
+            assert_eq!(found[0].1.offset, row.offset);
+            assert_eq!(found[0].1.ordinal, ordinal as u64 + 1);
+        }
+    }
+}
+
+#[test]
+fn repeated_checked_publication_before_delta_merge() {
+    repeated_checked_publication(1);
+}
+
+#[test]
+fn repeated_checked_publication_after_delta_merge() {
+    repeated_checked_publication(4096);
+}
+
 #[test]
 fn checked_append_normalizes_speculative_entries_idempotently() {
     use proseql_engine::scan::RowLocation;

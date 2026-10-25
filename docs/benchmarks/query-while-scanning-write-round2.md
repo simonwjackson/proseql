@@ -109,3 +109,13 @@ On aka at x86-64-v2:
 Global duplicate checks, validated `ignore_identical`, custom-codec partition candidates, full-scan policy, torn-suffix repair, synced appends, rollback, partial-file crash behavior and quarantine stay unchanged. A deterministic test edits an old ID at `AppendSync`; the post-commit proof rejects that coverage, and the next create still detects the edited ID. Candidate verification checks the source generation before and after decoding. The public release method and the clarified token contract are approved additions; `GenerationCheck` conservatively reports replacement for changed trusted tokens.
 
 Raw final trials and summaries are retained as text JSON under `/home/simonwjackson/work/qws-perf-write-{final.jsonl,final-summary.json}` on aka. Owned synthetic fixture directories, trial copies, SQLite temporary files and standalone benchmark binary copies are removed after measurement. The source checkout and Cargo build cache remain for checks.
+
+## Later review fixes: checked republication and tokenless proof reuse
+
+`317984c` makes an already-accepted generation a no-op and retains its original before/after proof. Regressions first reproduced invalidation on identical republication, then passed for both one-row deltas and 4,096-row merged deltas. Native proof retention is tested in both cases.
+
+Tokenless bookkeeping now compares the baseline with the fresh observation's `check_hash`, instead of hashing the same file a second time before the final safety check. The final independent generation check remains. A real-filesystem wrapper with no tokens or timestamps verifies the exact bytes read and detects a same-length prefix edit between observation and publication.
+
+On aka, scalar x86-64-v2 release, five warm-text post-commit trials used a 16,088,903-byte synthetic file and a 13-byte appended row. The measured median falls from **20.181 to 13.618 ms**; source bytes read fall from **48,266,722 to 32,177,819** per call (three full hashes to two, plus the suffix read). Each trial ran in a 1 GiB/no-swap scope with nice and timeout. This is bookkeeping-only evidence, not a new whole-append or SQLite qualification. Temporary fixtures remove themselves after each test.
+
+After these fixes, focused storage/native tests pass (110 passed, eight routine ignored entries), as do cargo check, clippy `-D warnings` and fmt. The ignored tokenless measurement was selected separately and passed.
