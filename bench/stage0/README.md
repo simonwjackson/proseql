@@ -29,7 +29,7 @@ Multi-step remote logic lives in the Nix-shebang script, not ssh command strings
 
 The generator adapts the existing lazy-memory consumer fixture. January–October 2025 contains 437,760 UTC minutes. Every minute has a steps sample; even minutes also have heartRate: **656,640 records per shape**. There are 11 consumer fields, including long IDs, nullable `end`, the UTC day `date` and UTC time `atUtc`. Raw records copy those fields and add an FNV-1a-derived two-hex-digit `shard`; 256 files preserve chronological source order. These are synthetic raw-shaped records, not a copy of a private raw payload schema.
 
-SQLite imports those exact JSON objects into typed columns in separate samples/raw tables. Returned rows reconstruct all original fields; there is no redundant JSON blob. It uses a primary-key B-tree, a `(metric,time)` B-tree, WAL, default page cache and `synchronous=NORMAL`. No covering aggregate index or precomputed daily totals is used.
+SQLite imports those exact JSON objects into typed columns in separate samples/raw tables. Returned rows reconstruct all original fields; there is no redundant JSON blob. It uses a primary-key B-tree, a `(metric,time)` B-tree, WAL, default page cache and `synchronous=NORMAL`. No covering aggregate index or precomputed daily totals is used. A bounded k-way merge imports both shapes in chronological ingestion order, so hash-file export order does not impose an artificially scattered SQLite table layout. SQLite temporary files are forced under the owned data directory with `SQLITE_TMPDIR` and `TMPDIR`; the SQLite adapter refuses a missing or off-directory setting.
 
 | Workload | Operation |
 |---|---|
@@ -59,7 +59,7 @@ The perf capability check is the requested `nix run --builders '' nixpkgs#perf -
 
 ## Spike limits and durability
 
-The scanner uses borrowed serde string fields and a reused line buffer. It skips unused fields, filters before materializing results, folds groups as it scans, and seeks using one time/offset sample every 256 rows. Sparse JSON sidecars are disposable, validated by length and nanosecond mtime; missing, invalid or stale sidecars rebuild. Unsorted files fall back to scanning. Metadata-preserving adversarial edits are not detected: this is not the production invalidation contract.
+The scanner uses borrowed serde string fields and a reused line buffer. It skips unused fields, filters before materializing results, folds groups using fixed-width UTC-day/metric keys (no per-row owned group-key allocation), and seeks using one time/offset sample every 256 rows. Sparse JSON sidecars are disposable, validated by length and nanosecond mtime; missing, invalid or stale sidecars rebuild. Unsorted files fall back to scanning. Metadata-preserving adversarial edits are not detected: this is not the production invalidation contract.
 
 The scanner has no primary-key positional index. Sample point lookup scans all months; raw point lookup scans one hash shard. Exact append checks scan affected files and verify matching records; it syncs changed text files and rebuilds affected time indexes. This is deliberately not a transaction/watch implementation: no rollback journal, concurrent-edit conflict protocol, schema validation, callbacks or cross-file crash atomicity.
 

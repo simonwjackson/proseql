@@ -10,6 +10,15 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 pub fn open(root: &Path) -> Result<Connection, Error> {
+    let temp = std::env::var("SQLITE_TMPDIR")
+        .map_err(|_| "SQLITE_TMPDIR must point to the owned filesystem-backed data directory")?;
+    if !Path::new(&temp).starts_with("/home/simon/work/proseql-stage0-data")
+        || !Path::new(&temp).is_dir()
+    {
+        return Err(
+            "SQLite temporary files must stay under the owned /home/simon data directory".into(),
+        );
+    }
     let connection = Connection::open(root.join("sqlite.db"))?;
     connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
     // Deliberately do not change cache_size, mmap_size or temp_store.
@@ -51,6 +60,22 @@ fn insert_sql(kind: &str) -> String {
     format!("INSERT INTO {kind} VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)")
 }
 
+type MergeHeap = std::collections::BinaryHeap<std::cmp::Reverse<(String, String, usize, String)>>;
+fn queue_next(reader: &mut BufReader<File>, i: usize, heap: &mut MergeHeap) -> Result<(), Error> {
+    let mut line = String::new();
+    if reader.read_line(&mut line)? == 0 {
+        return Ok(());
+    }
+    let row: Value = serde_json::from_str(&line)?;
+    heap.push(std::cmp::Reverse((
+        row["atUtc"].as_str().ok_or("missing UTC time")?.to_owned(),
+        row["id"].as_str().ok_or("missing ID")?.to_owned(),
+        i,
+        line,
+    )));
+    Ok(())
+}
+
 pub fn import(root: &Path) -> Result<(), Error> {
     let mut conn = open(root)?;
     for kind in fixture::KINDS {
@@ -59,11 +84,20 @@ pub fn import(root: &Path) -> Result<(), Error> {
         let tx = conn.transaction()?;
         {
             let mut stmt = tx.prepare(&insert_sql(kind))?;
-            for path in fixture::paths(root, kind)? {
-                for line in BufReader::new(File::open(path)?).lines() {
-                    let r: Value = serde_json::from_str(&line?)?;
-                    insert(&mut stmt, &r)?;
-                }
+            // Import in chronological ingestion order, including hash-sharded raw.
+            // A bounded k-way merge avoids giving SQLite an artificially scattered
+            // table layout just because the plain-text export uses hash shards.
+            let mut readers = fixture::paths(root, kind)?
+                .into_iter()
+                .map(|p| File::open(p).map(BufReader::new))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut heap = std::collections::BinaryHeap::new();
+            for (i, reader) in readers.iter_mut().enumerate() {
+                queue_next(reader, i, &mut heap)?;
+            }
+            while let Some(std::cmp::Reverse((_, _, i, line))) = heap.pop() {
+                insert(&mut stmt, &serde_json::from_str::<Value>(&line)?)?;
+                queue_next(&mut readers[i], i, &mut heap)?;
             }
         }
         tx.commit()?;
@@ -158,7 +192,9 @@ pub fn info(root: &Path) -> Result<Value, Error> {
     let indexes = stmt
         .query_map([], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(json!({"sqlite_version":rusqlite::version(),"pragmas":pragmas,"indexes":indexes}))
+    Ok(
+        json!({"sqlite_version":rusqlite::version(),"temp_directory":std::env::var("SQLITE_TMPDIR")?,"pragmas":pragmas,"indexes":indexes}),
+    )
 }
 
 pub fn heap(reset: bool) -> (i64, i64) {

@@ -103,7 +103,8 @@ impl Scanner {
     }
     pub fn query(&self, q: &Query) -> Result<Answer, Error> {
         let mut rows = Vec::new();
-        let mut answer = Answer::default();
+        // Fixed UTC day + metric ordinal: no per-row owned group-key allocation.
+        let mut groups = BTreeMap::<([u8; 10], u8), crate::query::Group>::new();
         let mut line = String::with_capacity(1024);
         for (path, index) in &self.files {
             let stem = path.file_stem().unwrap().to_str().unwrap();
@@ -152,13 +153,31 @@ impl Scanner {
                     continue;
                 }
                 if q.aggregate {
-                    answer.group(&row.at[..10], &row.metric, 1, row.value);
+                    let date: [u8; 10] = row
+                        .at
+                        .as_bytes()
+                        .get(..10)
+                        .ok_or("short UTC time")?
+                        .try_into()?;
+                    let metric = u8::from(row.metric.as_ref() == "heartRate");
+                    let group = groups.entry((date, metric)).or_default();
+                    group.count += 1;
+                    group.sum += row.value;
                 } else {
                     rows.push(serde_json::from_str::<Value>(&line)?);
                 }
             }
         }
         if q.aggregate {
+            let mut answer = Answer::default();
+            for ((date, metric), group) in groups {
+                answer.group(
+                    std::str::from_utf8(&date)?,
+                    if metric == 0 { "steps" } else { "heartRate" },
+                    group.count,
+                    group.sum,
+                );
+            }
             Ok(answer)
         } else {
             Ok(Answer::rows(rows))

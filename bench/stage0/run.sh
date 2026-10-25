@@ -14,11 +14,17 @@ fi
 action=${1:-all}
 data=/home/simon/work/proseql-stage0-data
 out="$root/bench/stage0/results"
-mkdir -p "$out" "$data"
+mkdir -p "$out" "$data/tmp"
+export TMPDIR="$data/tmp"
+export SQLITE_TMPDIR="$data/tmp"
 scope() {
   systemd-run --user --scope -p MemoryMax=1G -p MemorySwapMax=0 nice -n 10 timeout "$@"
 }
 case "$action" in
+  archive)
+    mkdir -p "$out/initial"
+    find "$out" -maxdepth 1 -type f -exec mv -t "$out/initial" -- {} +
+    ;;
   task)
     nix run --builders '' .#bench-stage0 -- "${2:-all}"
     ;;
@@ -85,5 +91,5 @@ case "$action" in
     bash "$0" check
     bash "$0" measure
     ;;
-  *) echo 'usage: run.sh task [ACTION]|checkout|environment|lock|format|build|check|measure|cleanup|all' >&2; exit 2 ;;
+  *) echo 'usage: run.sh archive|task [ACTION]|checkout|environment|lock|format|build|check|measure|cleanup|all' >&2; exit 2 ;;
 esac
