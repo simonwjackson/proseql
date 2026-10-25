@@ -81,6 +81,12 @@ pub(crate) fn refresh(_state: &mut RuntimeState) -> Result<(), EngineError> {
 /// `WatchState`. Must not publish anything to callers here.
 pub(crate) fn capture_commit(_state: &mut RuntimeState) {}
 
+/// Called with the runtime lock held after a source-mode mutation failed and
+/// rolled back (not quarantined), before `refresh_streaming_watches` runs
+/// without the lock. Mark streaming watches whose covered files the failed
+/// mutation found changed or new as dirty. Must not publish anything here.
+pub(crate) fn capture_external(_state: &mut RuntimeState) {}
+
 impl NativeRuntime {
     /// Called without the runtime lock after every successful source-mode
     /// mutation (before host callbacks replay), after `reload`, after the

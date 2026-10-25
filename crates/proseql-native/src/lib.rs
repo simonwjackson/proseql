@@ -1050,6 +1050,7 @@ impl NativeRuntime {
                     // The original error matters more than an eviction failure.
                     let _ = sources_trim(&self.inner, &mut state);
                 }
+                self.after_failed_mutation(state);
                 return Err(error);
             }
         };
@@ -1057,6 +1058,7 @@ impl NativeRuntime {
             if let Err(error) = crate::write::tx::check_before_commit(&state) {
                 rollback_preserving_original(&self.inner, &mut state, session, &error);
                 crate::write::append::after_rollback(&mut state);
+                self.after_failed_mutation(state);
                 return Err(error);
             }
             let committed = commit_source_mutation(&self.inner, &mut state, session, result);
@@ -1070,7 +1072,13 @@ impl NativeRuntime {
             if lazy && state.quarantine_error.is_none() {
                 sources_trim(&self.inner, &mut state)?;
             }
-            let result = committed?;
+            let result = match committed {
+                Ok(result) => result,
+                Err(error) => {
+                    self.after_failed_mutation(state);
+                    return Err(error);
+                }
+            };
             let replay = callbacks.finish();
             drop(state);
             // The mutation is durable; watch errors surface through the watch API.
@@ -1101,6 +1109,19 @@ impl NativeRuntime {
         drop(state);
         replay();
         Ok(result)
+    }
+
+    /// After a source-mode mutation failed and rolled back (and the runtime is
+    /// not quarantined): let streaming watches pick up external rows the
+    /// failed mutation discovered, as a resident load would have published
+    /// them. The caller returns its original error unchanged.
+    fn after_failed_mutation(&self, mut state: MutexGuard<'_, RuntimeState>) {
+        if state.sources.is_none() || state.quarantine_error.is_some() {
+            return;
+        }
+        crate::write::watch::capture_external(&mut state);
+        drop(state);
+        let _ = self.refresh_streaming_watches();
     }
 
     /// Validate and durably replace every collection in single-file mode.
