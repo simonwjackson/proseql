@@ -126,6 +126,10 @@ pub(crate) struct LazyCollection {
     clock: u64,
     pins: HashMap<u64, Pin>,
     next_pin: u64,
+    /// From `NativeSourceRuntimeOptions::execution_model`.
+    pub execution_model: crate::ExecutionModel,
+    /// Query-while-scanning state; see `execution.rs`.
+    pub stream: crate::execution::LazyStreamState,
 }
 
 pub(crate) struct Resident {
@@ -159,6 +163,8 @@ impl LazyCollection {
             pins: HashMap::new(),
             next_pin: 1,
             pending: BTreeMap::new(),
+            execution_model: self.execution_model,
+            stream: Default::default(),
         }
     }
 
@@ -235,6 +241,7 @@ pub(crate) fn configure_lazy(
     config: &NativeSourceRuntimeConfig,
     normalized: &NormalizedSourceConfig,
     policies: &IndexMap<String, LazyPartitionPolicy>,
+    execution_model: crate::ExecutionModel,
 ) -> Result<IndexMap<String, LazyCollection>, EngineError> {
     let mut lazy = IndexMap::new();
     for (source_id, policy) in policies {
@@ -342,6 +349,8 @@ pub(crate) fn configure_lazy(
                 pins: HashMap::new(),
                 next_pin: 1,
                 pending: BTreeMap::new(),
+                execution_model,
+                stream: Default::default(),
             },
         );
     }
@@ -1021,6 +1030,7 @@ impl SourceState {
             lazy.clock = old.clock;
             lazy.next_pin = old.next_pin;
             lazy.pending = std::mem::take(&mut old.pending);
+            lazy.stream = std::mem::take(&mut old.stream);
             for path in lazy.resident.keys() {
                 if let Some(content) = previous.contents.get(path) {
                     self.contents.insert(path.clone(), content.clone());

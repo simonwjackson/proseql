@@ -1,5 +1,6 @@
 //! Opt-in partition-at-a-time reads. Existing full-scope and watch interfaces
 //! remain unchanged. Query operators stay in the shared engine.
+use crate::streaming::{ReadOutput, ReadRequest};
 use crate::{sources_trim, NativeRuntime};
 use proseql_engine::{
     callbacks::CallbackRegistry,
@@ -62,6 +63,18 @@ impl NativeRuntime {
         input: QueryInput,
     ) -> Result<(Vec<Value>, BoundedQueryStats), EngineError> {
         proseql_engine::query::pipeline::validate_regular_query(&input)?;
+        if let Some(read) = self.streaming_read(
+            collection,
+            ReadRequest::Query {
+                input: &input,
+                populate: None,
+            },
+        ) {
+            return read.map(|(output, stats)| match output {
+                ReadOutput::Rows(rows) => (rows, stats),
+                _ => unreachable!("streaming query returns rows"),
+            });
+        }
         self.bounded_fold(
             ReadScope {
                 collection,
@@ -86,6 +99,19 @@ impl NativeRuntime {
         input: QueryInput,
         cursor: &CursorConfig,
     ) -> Result<CursorPageResult, EngineError> {
+        if let Some(read) = self.streaming_read(
+            collection,
+            ReadRequest::Cursor {
+                input: &input,
+                cursor,
+                populate: None,
+            },
+        ) {
+            return read.map(|(output, _)| match output {
+                ReadOutput::Page(page) => page,
+                _ => unreachable!("streaming cursor query returns a page"),
+            });
+        }
         self.bounded_fold(
             ReadScope {
                 collection,
@@ -114,6 +140,18 @@ impl NativeRuntime {
         filter: Option<Value>,
         config: &AggregateConfig,
     ) -> Result<AggregateResult, EngineError> {
+        if let Some(read) = self.streaming_read(
+            collection,
+            ReadRequest::Aggregate {
+                filter: filter.as_ref(),
+                config,
+            },
+        ) {
+            return read.map(|(output, _)| match output {
+                ReadOutput::Aggregate(result) => result,
+                _ => unreachable!("streaming aggregate returns an aggregate"),
+            });
+        }
         self.bounded_fold(
             ReadScope {
                 collection,
@@ -174,6 +212,19 @@ impl NativeRuntime {
         group_by: &[String],
         config: &AggregateConfig,
     ) -> Result<Vec<GroupResult>, EngineError> {
+        if let Some(read) = self.streaming_read(
+            collection,
+            ReadRequest::Grouped {
+                filter: filter.as_ref(),
+                group_by,
+                config,
+            },
+        ) {
+            return read.map(|(output, _)| match output {
+                ReadOutput::Grouped(groups) => groups,
+                _ => unreachable!("streaming grouped aggregate returns groups"),
+            });
+        }
         self.bounded_fold(
             ReadScope {
                 collection,

@@ -1,0 +1,64 @@
+#!/usr/bin/env nix
+#! nix shell nixpkgs#bash nixpkgs#rsync nixpkgs#openssh --command bash
+# Run a command for the query-while-scanning work on aka, never locally.
+#
+# Usage: scripts/qws/aka-run <worker-name> [--x86-64-v2] [--pull] -- <command...>
+#
+# Copies the current checkout (without .git, target or node_modules) to
+# aka:/home/simonwjackson/work/qws-<worker-name>/ and runs the command there
+# inside the project's dev shell, with its own CARGO_TARGET_DIR, under
+# nice -n 10, with Nix remote builders disabled. --x86-64-v2 sets
+# RUSTFLAGS='-C target-cpu=x86-64-v2' (the Celeron's level: SSE4.2, no AVX).
+# --pull copies files the command changed (for example `cargo fmt`) back into
+# the local checkout afterwards, without deleting anything locally.
+set -euo pipefail
+
+if [[ $# -lt 3 ]]; then
+  echo "usage: $0 <worker-name> [--x86-64-v2] -- <command...>" >&2
+  exit 2
+fi
+name=$1
+shift
+rustflags=""
+pull=0
+while [[ ${1:-} == --* && ${1:-} != "--" ]]; do
+  case $1 in
+    --x86-64-v2) rustflags="-C target-cpu=x86-64-v2" ;;
+    --pull) pull=1 ;;
+    *) echo "unknown option $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+if [[ ${1:-} != "--" ]]; then
+  echo "expected -- before the command" >&2
+  exit 2
+fi
+shift
+if [[ ! $name =~ ^[a-z][a-z0-9-]{0,31}$ ]]; then
+  echo "worker name must match ^[a-z][a-z0-9-]{0,31}$" >&2
+  exit 2
+fi
+
+root=$(git rev-parse --show-toplevel)
+remote_dir=/home/simonwjackson/work/qws-$name
+target_dir=/home/simonwjackson/work/qws-$name-target
+
+ssh -o BatchMode=yes aka mkdir -p "$remote_dir" "$target_dir"
+rsync -a --delete \
+  --exclude .git --exclude target --exclude node_modules --exclude .direnv \
+  "$root"/ "aka:$remote_dir/"
+
+command=$(printf '%q ' "$@")
+# The dev shell's hooks need a Git repository; a local empty one is enough.
+ssh -o BatchMode=yes aka \
+  "cd $(printf '%q' "$remote_dir") && { test -e .git || git init -q; } && \
+   CARGO_TARGET_DIR=$(printf '%q' "$target_dir") RUSTFLAGS=$(printf '%q' "$rustflags") \
+   nice -n 10 nix --extra-experimental-features 'nix-command flakes' develop --builders '' path:. -c bash -c $(printf '%q' "$command")" \
+  && status=0 || status=$?
+
+if [[ $pull == 1 ]]; then
+  rsync -a --checksum \
+    --exclude .git --exclude target --exclude node_modules --exclude .direnv \
+    "aka:$remote_dir/" "$root"/
+fi
+exit "$status"

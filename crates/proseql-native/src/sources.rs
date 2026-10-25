@@ -58,6 +58,10 @@ pub struct NativeSourceRuntimeOptions {
     /// How often the managed watch compares lazy sources with the disk (the
     /// directory listing and the loaded partitions only).
     pub lazy_watch_interval: Duration,
+    /// How lazy partitioned collections execute (native only). `Resident`
+    /// loads the partitions an operation touches; `Streaming` queries while
+    /// scanning the text and keeps no rows. Other collections ignore it.
+    pub execution_model: crate::ExecutionModel,
 }
 
 impl Default for NativeSourceRuntimeOptions {
@@ -70,6 +74,7 @@ impl Default for NativeSourceRuntimeOptions {
             watch_debounce: Some(Duration::from_millis(50)),
             lazy_partitions: IndexMap::new(),
             lazy_watch_interval: Duration::from_secs(2),
+            execution_model: crate::ExecutionModel::default(),
         }
     }
 }

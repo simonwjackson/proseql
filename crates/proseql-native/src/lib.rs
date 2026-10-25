@@ -8,14 +8,19 @@
 mod bounded;
 pub use bounded::BoundedQueryStats;
 mod callbacks;
+mod execution;
+pub use execution::ExecutionModel;
 mod lazy;
 #[cfg(test)]
 mod lifecycle_tests;
+mod locate;
 mod read_snapshot;
 mod schema_checks;
 mod source_sessions;
 mod sources;
 mod stored_file;
+mod streaming;
+mod write;
 pub use lazy::{FullScanPolicy, LazyPartitionPolicy, LazyPartitionStatus, NativeQueryStats};
 pub use source_sessions::{IdleMemoryReclaim, NativeSourceSession, NativeSourceSessions};
 use sources::SourceState;
@@ -191,6 +196,15 @@ impl MutationInner<'_> {
     }
 
     fn find_by_id(&mut self, collection: &str, id: &str) -> Result<Option<Value>, EngineError> {
+        let in_engine = self
+            .database
+            .collection(collection)
+            .is_some_and(|records| records.get(id).is_some());
+        if !in_engine {
+            if let Some(found) = crate::locate::mutation_find_by_id(self, collection, id) {
+                return found;
+            }
+        }
         let found = self
             .database
             .collection(collection)
@@ -251,6 +265,9 @@ impl NativeMutation<'_> {
     pub fn create(&mut self, collection: &str, data: Value) -> Result<Value, EngineError> {
         self.require_writable(collection)?;
         let inner = self.inner.get_mut();
+        if crate::write::append::applies(inner, collection) {
+            return crate::write::append::create(inner, collection, data);
+        }
         inner.prepare_creates(collection, [&data])?;
         inner.database.create(collection, data)
     }
@@ -264,6 +281,9 @@ impl NativeMutation<'_> {
     ) -> Result<proseql_engine::collection::CreateManyResult, EngineError> {
         self.require_writable(collection)?;
         let inner = self.inner.get_mut();
+        if crate::write::append::applies(inner, collection) {
+            return crate::write::append::create_many(inner, collection, data);
+        }
         inner.prepare_creates(collection, &data)?;
         inner.database.create_many(collection, data, false)
     }
@@ -609,6 +629,9 @@ impl NativeRuntime {
     /// Find a record by ID. For a lazy collection, a miss among the loaded
     /// partitions is a full scan (see `FullScanPolicy`).
     pub fn find_by_id(&self, collection: &str, id: &str) -> Result<Option<Value>, EngineError> {
+        if let Some(found) = self.streaming_find_by_id(collection, id) {
+            return found;
+        }
         let mut state = self.lock_open()?;
         if !state
             .sources
@@ -653,6 +676,18 @@ impl NativeRuntime {
         input: QueryInput,
         populate: Option<Value>,
     ) -> Result<Vec<Value>, EngineError> {
+        if let Some(read) = self.streaming_read(
+            collection,
+            streaming::ReadRequest::Query {
+                input: &input,
+                populate: populate.as_ref(),
+            },
+        ) {
+            return read.map(|(output, _)| match output {
+                streaming::ReadOutput::Rows(rows) => rows,
+                _ => unreachable!("streaming query returns rows"),
+            });
+        }
         let where_clause = input.r#where.clone();
         self.with_scope(collection, where_clause.as_ref(), "query", |database| {
             database.query(collection, input, populate)
@@ -675,6 +710,18 @@ impl NativeRuntime {
         input: QueryInput,
         populate: Option<Value>,
     ) -> Result<(Vec<Value>, NativeQueryStats), EngineError> {
+        if let Some(read) = self.streaming_read(
+            collection,
+            streaming::ReadRequest::QueryWithStats {
+                input: &input,
+                populate: populate.as_ref(),
+            },
+        ) {
+            return read.map(|(output, _)| match output {
+                streaming::ReadOutput::RowsWithStats(rows, stats) => (rows, stats),
+                _ => unreachable!("streaming query_with_stats returns rows and stats"),
+            });
+        }
         let where_clause = input.r#where.clone();
         self.with_scope(collection, where_clause.as_ref(), "query", |database| {
             let stats = database.explain_query(collection, &input)?;
@@ -704,6 +751,19 @@ impl NativeRuntime {
         cursor: &proseql_engine::query::CursorConfig,
         populate: Option<Value>,
     ) -> Result<proseql_engine::query::CursorPageResult, EngineError> {
+        if let Some(read) = self.streaming_read(
+            collection,
+            streaming::ReadRequest::Cursor {
+                input: &input,
+                cursor,
+                populate: populate.as_ref(),
+            },
+        ) {
+            return read.map(|(output, _)| match output {
+                streaming::ReadOutput::Page(page) => page,
+                _ => unreachable!("streaming cursor query returns a page"),
+            });
+        }
         self.with_scope(collection, input.r#where.as_ref(), "query", |database| {
             database.query_cursor(collection, &input, cursor, populate)
         })
@@ -718,6 +778,18 @@ impl NativeRuntime {
         where_clause: Option<Value>,
         config: &AggregateConfig,
     ) -> Result<AggregateResult, EngineError> {
+        if let Some(read) = self.streaming_read(
+            collection,
+            streaming::ReadRequest::Aggregate {
+                filter: where_clause.as_ref(),
+                config,
+            },
+        ) {
+            return read.map(|(output, _)| match output {
+                streaming::ReadOutput::Aggregate(result) => result,
+                _ => unreachable!("streaming aggregate returns an aggregate"),
+            });
+        }
         let rows = self.query(
             collection,
             QueryInput {
@@ -738,6 +810,19 @@ impl NativeRuntime {
         group_by: &[String],
         config: &AggregateConfig,
     ) -> Result<Vec<GroupResult>, EngineError> {
+        if let Some(read) = self.streaming_read(
+            collection,
+            streaming::ReadRequest::Grouped {
+                filter: where_clause.as_ref(),
+                group_by,
+                config,
+            },
+        ) {
+            return read.map(|(output, _)| match output {
+                streaming::ReadOutput::Grouped(groups) => groups,
+                _ => unreachable!("streaming grouped aggregate returns groups"),
+            });
+        }
         let rows = self.query(
             collection,
             QueryInput {
@@ -759,6 +844,9 @@ impl NativeRuntime {
         collection: &str,
         config: WatchQueryConfig,
     ) -> Result<NativeWatch<ValueSubscription>, EngineError> {
+        if self.streaming_watch_applies(collection) {
+            return self.streaming_watch(collection, config);
+        }
         let filter = config.r#where.clone();
         self.watch_scoped(collection, filter.as_ref(), move |database| {
             database.watch(collection, config)
@@ -772,6 +860,9 @@ impl NativeRuntime {
         config: WatchQueryConfig,
         callback: Box<dyn Fn(Value) + Send + Sync>,
     ) -> Result<NativeWatch<CallbackSubscription>, EngineError> {
+        if self.streaming_watch_applies(collection) {
+            return self.streaming_watch_with_callback(collection, config, callback);
+        }
         let filter = config.r#where.clone();
         self.watch_scoped(collection, filter.as_ref(), move |database| {
             database.watch_with_callback(collection, config, callback)
@@ -954,6 +1045,7 @@ impl NativeRuntime {
             Ok(result) => result,
             Err(error) => {
                 rollback_preserving_original(&self.inner, &mut state, session, &error);
+                crate::write::append::after_rollback(&mut state);
                 if lazy && state.quarantine_error.is_none() {
                     // The original error matters more than an eviction failure.
                     let _ = sources_trim(&self.inner, &mut state);
@@ -962,7 +1054,16 @@ impl NativeRuntime {
             }
         };
         if state.sources.is_some() {
+            if let Err(error) = crate::write::tx::check_before_commit(&state) {
+                rollback_preserving_original(&self.inner, &mut state, session, &error);
+                crate::write::append::after_rollback(&mut state);
+                return Err(error);
+            }
             let committed = commit_source_mutation(&self.inner, &mut state, session, result);
+            match &committed {
+                Ok(_) => crate::write::append::after_commit(&mut state),
+                Err(_) => crate::write::append::after_rollback(&mut state),
+            }
             if lazy && state.quarantine_error.is_none() {
                 sources_trim(&self.inner, &mut state)?;
             }
@@ -1561,6 +1662,9 @@ fn reload_locked(
 /// Compare lazy sources with the disk (listing and loaded partitions only)
 /// and publish what changed.
 fn refresh_lazy_locked(state: &mut RuntimeState) -> Result<(), EngineError> {
+    if crate::write::watch::refresh_applies(state) {
+        return crate::write::watch::refresh(state);
+    }
     let RuntimeState {
         database,
         sources,

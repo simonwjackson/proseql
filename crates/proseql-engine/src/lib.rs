@@ -62,3 +62,6 @@ mod resident;
 pub mod transactions;
 
 pub mod schema_checks;
+
+// Query-while-scanning (#12)
+pub mod scan;

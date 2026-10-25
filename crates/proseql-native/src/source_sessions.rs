@@ -123,7 +123,12 @@ impl PreparedSourceRuntime {
     ) -> Result<Self, EngineError> {
         let normalized = SourceState::normalize(&config)?;
         let appendable = SourceState::appendable_collections(&config, &normalized);
-        let lazy = lazy::configure_lazy(&config, &normalized, &options.lazy_partitions)?;
+        let lazy = lazy::configure_lazy(
+            &config,
+            &normalized,
+            &options.lazy_partitions,
+            options.execution_model,
+        )?;
         if !lazy.is_empty() && has_global_hooks(&options.callbacks) {
             return Err(operation_error(
                 "unsupported-descriptor",
