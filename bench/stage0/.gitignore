@@ -1,1 +1,3 @@
 /target/
+/source.bundle
+/__pycache__/

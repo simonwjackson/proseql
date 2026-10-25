@@ -17,6 +17,10 @@ use proseql_storage::source_config::{
 };
 use std::path::Path;
 
+fn tag(error: proseql_engine::errors::EngineError) -> Error {
+    format!("{}: {error}", error.tag()).into()
+}
+
 pub fn open(root: &Path, kind: &str) -> Result<NativeRuntime, Error> {
     let mut fields = [
         "id",
@@ -104,7 +108,7 @@ pub fn open(root: &Path, kind: &str) -> Result<NativeRuntime, Error> {
         )]),
         ..Default::default()
     };
-    Ok(NativeRuntime::open_sources_with_options(config, options)?)
+    NativeRuntime::open_sources_with_options(config, options).map_err(tag)
 }
 pub fn query(runtime: &NativeRuntime, kind: &str, q: &Query) -> Result<Answer, Error> {
     if q.aggregate {
@@ -117,7 +121,7 @@ pub fn query(runtime: &NativeRuntime, kind: &str, q: &Query) -> Result<Answer, E
                 sum: vec!["value".into()],
                 ..Default::default()
             },
-        )?;
+        ).map_err(tag)?;
         let mut answer = Answer::default();
         for group in groups {
             answer.group(
@@ -135,11 +139,11 @@ pub fn query(runtime: &NativeRuntime, kind: &str, q: &Query) -> Result<Answer, E
                 r#where: Some(q.filter()),
                 ..Default::default()
             },
-        )?))
+        ).map_err(tag)?))
     }
 }
 pub fn append(runtime: &NativeRuntime, kind: &str) -> Result<Answer, Error> {
     let rows = fixture::append_rows(kind);
-    runtime.mutate(|tx| tx.create_many(kind, rows.clone()).map(|_| ()))?;
+    runtime.mutate(|tx| tx.create_many(kind, rows.clone()).map(|_| ())).map_err(tag)?;
     Ok(Answer::rows(rows))
 }

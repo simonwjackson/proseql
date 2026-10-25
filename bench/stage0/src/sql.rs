@@ -66,7 +66,7 @@ pub fn query(conn: &Connection, kind: &str, q: &Query) -> Result<Answer, Error> 
             answer.group(
                 &row.get::<_, String>(0)?,
                 &row.get::<_, String>(1)?,
-                row.get(2)?,
+                u64::try_from(row.get::<_, i64>(2)?)?,
                 row.get(3)?,
             );
         }
