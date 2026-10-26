@@ -316,6 +316,19 @@ impl StorageHost for ReplaceOnly {
     fn list_directory(&self, path: &str) -> Result<Vec<String>, EngineError> {
         self.0.list_directory(path)
     }
+    fn list_directory_with_stat(
+        &self,
+        dir_path: &str,
+    ) -> Result<Vec<(String, proseql_storage::host::FileStat)>, EngineError> {
+        let mut entries = Vec::new();
+        for path in self.list_directory(dir_path)? {
+            if let Some(stat) = self.stat(&path)? {
+                entries.push((path, stat));
+            }
+        }
+        Ok(entries)
+    }
+
     fn list_recursive(&self, path: &str) -> Result<Vec<String>, EngineError> {
         self.0.list_recursive(path)
     }
@@ -350,4 +363,41 @@ fn default_durable_append_matches_the_filesystem_append() {
     );
     let tail = host.read_tail(path, 4).unwrap().unwrap();
     assert_eq!((tail.len, tail.tail), (16, b":3}\n".to_vec()));
+}
+
+#[test]
+fn identity_append_proves_read_back_prefix_and_exact_suffix() {
+    use std::hash::Hasher;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("identity.jsonl");
+    let path = path.to_str().unwrap();
+    let host = FsStorageHost::new_polling(Duration::from_secs(3600)).unwrap();
+    host.append_durable(path, 0, "{\"id\":\"a\"}\n").unwrap();
+    let before = host.stat(path).unwrap().unwrap();
+    let identity = host
+        .append_durable_with_identity(path, before.len, "{\"id\":\"b\"}\n")
+        .unwrap();
+    #[cfg(unix)]
+    {
+        let identity = identity.unwrap();
+        assert_eq!(identity.before, before);
+        assert_eq!(Some(identity.after), host.stat(path).unwrap());
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        hash.write(b"{\"id\":\"a\"}\n");
+        assert_eq!(identity.preserved_prefix_hash, hash.finish());
+    }
+    #[cfg(not(unix))]
+    assert!(identity.is_none());
+}
+
+#[test]
+fn identity_default_preserves_replace_only_host_and_returns_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("default.jsonl");
+    let host = ReplaceOnly(FsStorageHost::new_polling(Duration::from_secs(3600)).unwrap());
+    assert!(host
+        .append_durable_with_identity(path.to_str().unwrap(), 0, "one\n")
+        .unwrap()
+        .is_none());
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "one\n");
 }

@@ -1212,10 +1212,9 @@ fn commit_source_mutation<R>(
                 .map_err(|cause| {
                     operation_error("source-write-failed", format!("Durable source write failed at '{}'; completed paths: {:?}; cause: {cause}. Reopen and inspect before retrying", write.path, completed))
                 }),
-            Write::Append(write) => state
-                .host
-                .append_durable(&write.path, write.keep_len, &write.data)
-                .map_err(|cause| append_failure(&write.path, &completed, cause)),
+            Write::Append(write) => crate::write::append::commit(
+                state.host.as_ref(), state.sources.as_mut().expect("source mode"), write,
+            ).map_err(|cause| append_failure(&write.path, &completed, cause)),
         };
         if let Err(error) = outcome {
             rollback_preserving_original(core, state, session, &error);

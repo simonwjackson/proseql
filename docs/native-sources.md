@@ -457,7 +457,25 @@ for rebuild work. It does not promise RSS reclamation. No binary cache is writte
 Hosts returning `FileStat::change_id = Some` must change that token on every
 content edit, append, truncation and replacement. Other hosts return None and
 use checked-prefix hashing. Metadata tokens alone never authorize accepting an
-own append: checked prefix evidence is still required.
+own append: checked prefix evidence is still required. The additive durable-host
+`append_durable_with_identity` method can supply that evidence from its open
+append descriptor. Its safe default calls `append_durable` and returns None,
+which keeps the runtime's separate checked-prefix proof.
+
+Fs reads the kept prefix after the append sync, compares the read-back suffix
+with the requested bytes, and checks descriptor metadata before and after that
+read-back. The runtime compares the prefix hash with its pre-append baseline,
+then freshly checks the path's accepted generation before publishing derived
+coverage. The prefix is still read once; only separate post-commit prefix reads,
+opens and recovery probes are removed. Torn baselines conservatively keep the
+old proof. A read-back failure discards evidence, not a durable success.
+
+There is no exclusive filesystem lock. An external prefix edit during the
+write changes the checked hash; a suffix edit fails read-back; replacement of
+the path after open fails the runtime's fresh path check. A change after that
+last check and before metadata publication is still possible, as with the old
+proof. The next operation freshly checks cached generations. This does not add
+snapshot isolation or permit concurrent writable runtime owners.
 
 See the [read report](benchmarks/query-while-scanning-perf-read.md),
 [write report](benchmarks/query-while-scanning-write-round2.md) and

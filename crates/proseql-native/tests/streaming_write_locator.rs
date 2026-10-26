@@ -145,3 +145,42 @@ fn release_between_mutations_does_not_change_staged_creates_or_duplicate_checks(
         ours
     );
 }
+
+#[test]
+fn suffix_edit_during_identity_append_does_not_create_false_negative_membership() {
+    let fixture = ParityFixture::new(1440);
+    let ours = sample("2025-01", 1, 1, "steps");
+    let original_id = ours["id"].as_str().unwrap().to_owned();
+    let changed_id = original_id.replacen("steps:", "stops:", 1);
+    let host = Arc::new(
+        FsStorageHost::new_polling_with_fault_injector(
+            Duration::from_secs(3600),
+            Arc::new(EditPrefixAtSync {
+                path: fixture.partition_path("2025-01"),
+                original_id,
+                changed_id: changed_id.clone(),
+                fired: AtomicBool::new(false),
+            }),
+        )
+        .unwrap(),
+    );
+    let runtime = NativeRuntime::open_sources_with_host(
+        fixture.config(),
+        host,
+        fixture.options(RuntimeKind::Lazy),
+    )
+    .unwrap();
+    runtime
+        .mutate(|db| db.create(COLLECTION, ours.clone()))
+        .unwrap();
+    let mut conflicting = ours;
+    conflicting["id"] = json!(changed_id);
+    conflicting["value"] = json!(-1);
+    assert_eq!(
+        runtime
+            .mutate(|db| db.create(COLLECTION, conflicting))
+            .unwrap_err()
+            .tag(),
+        "DuplicateKeyError"
+    );
+}

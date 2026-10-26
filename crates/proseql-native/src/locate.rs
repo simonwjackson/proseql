@@ -18,6 +18,10 @@ use std::sync::Arc;
 pub(crate) type RowVisitor<'a> =
     dyn FnMut(&str, &[u8], RowLocation, bool) -> Result<(), EngineError> + 'a;
 
+pub(crate) type PathObservations = BTreeMap<String, Option<SourceGeneration>>;
+pub(crate) type DecodedRowVisitor<'a> =
+    dyn FnMut(&str, &[u8], RowLocation, bool) -> Result<Option<Box<str>>, EngineError> + 'a;
+
 struct CodecContext {
     positional: bool,
     formats: Arc<FormatRegistry>,
@@ -166,7 +170,22 @@ impl IndexState {
         host: &dyn StorageHost,
         paths: &[String],
     ) -> Result<&mut IdLocator, EngineError> {
-        self.id_locator_visiting(host, paths, &mut |_, _, _, _| Ok(()))
+        if self.codec.as_ref().is_some_and(|codec| !codec.positional) {
+            return self.id_locator_visiting(host, paths, &mut |_, _, _, _| Ok(()));
+        }
+        // Appends need identities, not payload validation. Do not dispatch an
+        // empty visitor and decoded-result adapter for every historical row.
+        let refreshed = if let Some(locator) = self.ids.as_mut() {
+            locator.refresh(host, paths)
+        } else {
+            IdLocator::build(host, paths).map(|locator| self.ids = Some(locator))
+        };
+        if let Err(error) = refreshed {
+            self.append_proofs.clear();
+            return Err(error);
+        }
+        self.retain_append_proofs();
+        Ok(self.ids.as_mut().expect("built locator"))
     }
 
     pub(crate) fn id_locator_visiting(
@@ -174,6 +193,29 @@ impl IndexState {
         host: &dyn StorageHost,
         paths: &[String],
         visit: &mut RowVisitor<'_>,
+    ) -> Result<&mut IdLocator, EngineError> {
+        self.id_locator_observed(host, paths, &PathObservations::new(), visit)
+    }
+
+    pub(crate) fn id_locator_observed(
+        &mut self,
+        host: &dyn StorageHost,
+        paths: &[String],
+        observed: &PathObservations,
+        visit: &mut RowVisitor<'_>,
+    ) -> Result<&mut IdLocator, EngineError> {
+        self.id_locator_observed_decoded(host, paths, observed, &mut |path, bytes, row, last| {
+            visit(path, bytes, row, last)?;
+            Ok(None)
+        })
+    }
+
+    pub(crate) fn id_locator_observed_decoded(
+        &mut self,
+        host: &dyn StorageHost,
+        paths: &[String],
+        observed: &PathObservations,
+        visit: &mut DecodedRowVisitor<'_>,
     ) -> Result<&mut IdLocator, EngineError> {
         let refreshed = (|| -> Result<(), EngineError> {
             if let Some(codec) = self.codec.as_ref().filter(|codec| !codec.positional) {
@@ -184,9 +226,11 @@ impl IndexState {
                     self.ids = Some(IdLocator::build_partitions(host, paths, &mut decode)?);
                 }
             } else if let Some(locator) = self.ids.as_mut() {
-                locator.refresh_visiting(host, paths, visit)?;
+                locator.refresh_observed_decoded(host, paths, observed, visit)?;
             } else {
-                self.ids = Some(IdLocator::build_visiting(host, paths, visit)?);
+                self.ids = Some(IdLocator::build_observed_decoded(
+                    host, paths, observed, visit,
+                )?);
             }
             Ok(())
         })();
@@ -194,13 +238,17 @@ impl IndexState {
             self.append_proofs.clear();
             return Err(error);
         }
+        self.retain_append_proofs();
+        Ok(self.ids.as_mut().expect("built locator"))
+    }
+
+    fn retain_append_proofs(&mut self) {
         self.append_proofs.retain(|path, proof| {
             self.ids
                 .as_ref()
                 .and_then(|locator| locator.generation_for(path))
                 == Some(&proof.after)
         });
-        Ok(self.ids.as_mut().expect("built locator"))
     }
 
     pub fn id_locator_if_built(&mut self) -> Option<&mut IdLocator> {

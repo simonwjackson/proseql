@@ -66,14 +66,25 @@ impl SourceGeneration {
         let Some(stat) = host.stat(path)? else {
             return Ok(None);
         };
+        Self::observe_stat(host, path, stat).map(Some)
+    }
+
+    /// Reuse a listed observation. Trusted tokens need no second stat here;
+    /// consumers still check it after a scan. Tokenless observations hash the
+    /// file and reject a changed stat, rather than silently re-observing.
+    pub fn observe_stat(
+        host: &dyn StorageHost,
+        path: &str,
+        stat: FileStat,
+    ) -> Result<Self, EngineError> {
         if stat.change_id.is_some() {
-            return Ok(Some(Self::from_stat(path, stat, None)));
+            return Ok(Self::from_stat(path, stat, None));
         }
         let hash = hash_range(host, path, 0, stat.len, DefaultHasher::new())?.finish();
         if host.stat(path)? != Some(stat) {
             return Err(changed(path));
         }
-        Ok(Some(Self::from_stat(path, stat, Some(hash))))
+        Ok(Self::from_stat(path, stat, Some(hash)))
     }
 
     pub fn check(&self, host: &dyn StorageHost) -> Result<GenerationCheck, EngineError> {

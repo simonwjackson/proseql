@@ -63,6 +63,19 @@ impl StorageHost for TokenlessFs {
     fn list_directory(&self, path: &str) -> Result<Vec<String>, EngineError> {
         self.inner.list_directory(path)
     }
+    fn list_directory_with_stat(
+        &self,
+        dir_path: &str,
+    ) -> Result<Vec<(String, proseql_storage::host::FileStat)>, EngineError> {
+        let mut entries = Vec::new();
+        for path in self.list_directory(dir_path)? {
+            if let Some(stat) = self.stat(&path)? {
+                entries.push((path, stat));
+            }
+        }
+        Ok(entries)
+    }
+
     fn list_recursive(&self, path: &str) -> Result<Vec<String>, EngineError> {
         self.inner.list_recursive(path)
     }
@@ -129,7 +142,13 @@ impl ProofFixture {
         }
     }
     fn record(&mut self) -> Result<(), EngineError> {
-        record_committed(&mut self.index, &self.host, &self.starts, &self.contents)
+        record_committed(
+            &mut self.index,
+            &self.host,
+            &self.starts,
+            &self.contents,
+            &IndexMap::new(),
+        )
     }
 }
 

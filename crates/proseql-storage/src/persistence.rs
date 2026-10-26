@@ -21,6 +21,20 @@ use serde_json::{Map, Value};
 use crate::host::StorageHost;
 use crate::path::{get_file_extension, normalize_path};
 
+/// Checked read-back evidence from a durable append. The host reads the kept
+/// prefix and verifies the suffix equals `data` after syncing, through the same
+/// descriptor used for the append. `after` must remain unchanged throughout
+/// read-back and have a trustworthy `change_id`. This is not an exclusive lock.
+/// Callers compare the prefix hash with their checked baseline and check the
+/// path still matches `after` before publishing derived coverage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppendIdentity {
+    pub before: crate::host::FileStat,
+    pub after: crate::host::FileStat,
+    /// DefaultHasher::new(), fed the first `keep_len` bytes with Hasher::write.
+    pub preserved_prefix_hash: u64,
+}
+
 /// Storage host capable of replacing one persisted source as a durable commit.
 ///
 /// Implementations must not return success until the complete replacement is
@@ -58,6 +72,20 @@ pub trait DurableStorageHost: StorageHost {
         content.truncate(keep);
         content.push_str(data);
         self.replace_durable(path, &content)
+    }
+
+    /// Append with optional checked read-back evidence. The safe default keeps
+    /// existing durability and returns no evidence; callers retain their proof.
+    /// Missing evidence, including a failed read-back after durable success,
+    /// must not turn a successful durable append into a write failure.
+    fn append_durable_with_identity(
+        &self,
+        path: &str,
+        keep_len: u64,
+        data: &str,
+    ) -> Result<Option<AppendIdentity>, EngineError> {
+        self.append_durable(path, keep_len, data)?;
+        Ok(None)
     }
 
     /// The byte length of `path` and up to `max_tail` of its final bytes, or

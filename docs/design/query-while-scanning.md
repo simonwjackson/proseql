@@ -101,6 +101,31 @@ latency. `FileStat::change_id = Some` requires a token change on every content
 edit, append, truncation or replacement; hosts that cannot guarantee this return
 None. Checked own-append prefix proof remains required.
 
+### Approved round-3 host additions
+
+`StorageHost::list_directory_with_stat` and `SourceGeneration::observe_stat`
+share directory observations without a second stat per ordinary file. Fs uses
+one directory pass and the same content-token rules as `stat`; symlinks keep
+`stat`'s follow-link behavior. Sibling recovery artifacts trigger recovery and
+fresh metadata only for affected paths. The default lists then stats through
+the host. Observations are not a snapshot. Trusted listed tokens require the
+consumer's fresh post-scan check; tokenless observations hash and reject changed
+metadata before returning.
+
+`DurableStorageHost::append_durable_with_identity` safely defaults to no evidence.
+Fs supplies `AppendIdentity { before, after, preserved_prefix_hash }` only after
+reading the kept prefix and verifying the exact suffix through the append's
+open descriptor after sync, with unchanged metadata across that read-back. The
+runtime compares the hash with the pre-append baseline and freshly checks the
+accepted path generation before extending the locator and `AppendProof`. Torn
+baselines and missing/failed evidence retain the old proof. No metadata pair
+alone authorizes a shortcut, and the prefix is still read once. There is no
+exclusivity claim: another writer can edit after the final check and before
+publication; the next operation checks cached generations again. Durability,
+quarantine, duplicate equality/error rules and the 13 guarantees above do not
+change. The [round-3 write report](../benchmarks/query-while-scanning-write-round3.md)
+records the measurements and every remaining append miss.
+
 Item 3 describes validation, not zero I/O: append preparation can read target bytes for fingerprints/torn-tail handling. Custom codecs retain whole-partition validation. Item 12 preserves watch deliveries, not a hidden copy of every previously read file. A scan detects duplicates across its visited scope; there is no outside-scope resident cache to add historical rows to that scope. Global create checks use the locator.
 
 ## Measured costs, not SQLite qualification

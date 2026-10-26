@@ -38,7 +38,22 @@ static PREFIX_PROOF: std::sync::Mutex<(Option<Instant>, Duration)> =
     std::sync::Mutex::new((None, Duration::ZERO));
 
 #[cfg(feature = "bench-observe")]
+type Phases = std::collections::BTreeMap<&'static str, (Vec<Instant>, Duration, usize)>;
+#[cfg(feature = "bench-observe")]
+static PHASES: std::sync::Mutex<Phases> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+#[cfg(feature = "bench-observe")]
 fn observe(phase: &'static str, begin: bool) {
+    if phase.starts_with("streaming_append_") || phase.starts_with("streaming_id_locator_") {
+        let mut phases = PHASES.lock().unwrap();
+        let entry = phases.entry(phase).or_default();
+        if begin {
+            entry.0.push(Instant::now());
+        } else if let Some(start) = entry.0.pop() {
+            entry.1 += start.elapsed();
+            entry.2 += 1;
+        }
+    }
     if phase != "streaming_append_prefix_proof" {
         return;
     }
@@ -48,6 +63,26 @@ fn observe(phase: &'static str, begin: bool) {
     } else if let Some(start) = state.0.take() {
         state.1 += start.elapsed();
     }
+}
+fn phases() -> Value {
+    #[cfg(feature = "bench-observe")]
+    {
+        return Value::Object(
+            PHASES
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(name, (_, elapsed, calls))| {
+                    (
+                        (*name).into(),
+                        json!({"ms": elapsed.as_secs_f64() * 1000.0, "calls": calls}),
+                    )
+                })
+                .collect(),
+        );
+    }
+    #[cfg(not(feature = "bench-observe"))]
+    Value::Null
 }
 fn heap_start() {
     #[cfg(feature = "allocation-meter")]
@@ -415,6 +450,7 @@ fn repeat(root: &Path, kind: &str, batches: usize, after_range: bool) -> Result<
         #[cfg(feature = "bench-observe")]
         {
             PREFIX_PROOF.lock().unwrap().1 = Duration::ZERO;
+            PHASES.lock().unwrap().clear();
         }
         fs::write("/proc/self/clear_refs", "5")?;
         heap_start();
@@ -443,7 +479,7 @@ fn repeat(root: &Path, kind: &str, batches: usize, after_range: bool) -> Result<
             "{}",
             json!({"mode":if after_range {"append-range"} else {"repeat"}, "shape":kind,"batch":batch,"new_rows":1000,
             "wall_ms":wall_ms,"prefix_proof_ms":prefix_ms,"peak_rss":rss("VmHWM:")?,"heap":heap,
-            "range_ms":range_ms,"range_rows_candidates_index":range,"targets_this_batch":targets})
+            "range_ms":range_ms,"range_rows_candidates_index":range,"targets_this_batch":targets,"phases":phases()})
         );
     }
     Ok(())

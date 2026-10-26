@@ -1239,6 +1239,19 @@ impl StorageHost for CountingHost {
     fn list_directory(&self, dir_path: &str) -> Result<Vec<String>, EngineError> {
         self.inner.list_directory(dir_path)
     }
+    fn list_directory_with_stat(
+        &self,
+        dir_path: &str,
+    ) -> Result<Vec<(String, proseql_storage::host::FileStat)>, EngineError> {
+        let mut entries = Vec::new();
+        for path in self.list_directory(dir_path)? {
+            if let Some(stat) = self.stat(&path)? {
+                entries.push((path, stat));
+            }
+        }
+        Ok(entries)
+    }
+
     fn list_recursive(&self, root_path: &str) -> Result<Vec<String>, EngineError> {
         self.inner.list_recursive(root_path)
     }
@@ -1266,6 +1279,16 @@ impl DurableStorageHost for CountingHost {
     fn append_durable(&self, path: &str, keep_len: u64, data: &str) -> Result<(), EngineError> {
         self.wrote(path, data);
         self.inner.append_durable(path, keep_len, data)
+    }
+    fn append_durable_with_identity(
+        &self,
+        path: &str,
+        keep_len: u64,
+        data: &str,
+    ) -> Result<Option<proseql_storage::persistence::AppendIdentity>, EngineError> {
+        self.wrote(path, data);
+        self.inner
+            .append_durable_with_identity(path, keep_len, data)
     }
     fn read_tail(&self, path: &str, max_tail: usize) -> Result<Option<FileTail>, EngineError> {
         let tail = self.inner.read_tail(path, max_tail)?;

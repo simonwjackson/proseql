@@ -235,6 +235,19 @@ impl StorageHost for FailingDurableHost {
     fn list_directory(&self, p: &str) -> Result<Vec<String>, EngineError> {
         self.inner.list_directory(p)
     }
+    fn list_directory_with_stat(
+        &self,
+        dir_path: &str,
+    ) -> Result<Vec<(String, proseql_storage::host::FileStat)>, EngineError> {
+        let mut entries = Vec::new();
+        for path in self.list_directory(dir_path)? {
+            if let Some(stat) = self.stat(&path)? {
+                entries.push((path, stat));
+            }
+        }
+        Ok(entries)
+    }
+
     fn list_recursive(&self, p: &str) -> Result<Vec<String>, EngineError> {
         self.inner.list_recursive(p)
     }
@@ -254,6 +267,16 @@ impl StorageHost for FailingDurableHost {
     }
 }
 impl DurableStorageHost for FailingDurableHost {
+    fn append_durable_with_identity(
+        &self,
+        path: &str,
+        keep_len: u64,
+        data: &str,
+    ) -> Result<Option<proseql_storage::persistence::AppendIdentity>, EngineError> {
+        // Keep this wrapper's replacement fault/blocking seam in the path.
+        self.append_durable(path, keep_len, data)?;
+        Ok(None)
+    }
     fn replace_durable(&self, path: &str, data: &str) -> Result<(), EngineError> {
         if *self.fail.lock().unwrap() {
             return Err(EngineError::Storage(Box::new(StorageError {
@@ -400,6 +423,19 @@ impl StorageHost for BlockingDurableHost {
     fn list_directory(&self, path: &str) -> Result<Vec<String>, EngineError> {
         self.inner.list_directory(path)
     }
+    fn list_directory_with_stat(
+        &self,
+        dir_path: &str,
+    ) -> Result<Vec<(String, proseql_storage::host::FileStat)>, EngineError> {
+        let mut entries = Vec::new();
+        for path in self.list_directory(dir_path)? {
+            if let Some(stat) = self.stat(&path)? {
+                entries.push((path, stat));
+            }
+        }
+        Ok(entries)
+    }
+
     fn list_recursive(&self, path: &str) -> Result<Vec<String>, EngineError> {
         self.inner.list_recursive(path)
     }
@@ -420,6 +456,16 @@ impl StorageHost for BlockingDurableHost {
 }
 
 impl DurableStorageHost for BlockingDurableHost {
+    fn append_durable_with_identity(
+        &self,
+        path: &str,
+        keep_len: u64,
+        data: &str,
+    ) -> Result<Option<proseql_storage::persistence::AppendIdentity>, EngineError> {
+        // Keep this wrapper's replacement fault/blocking seam in the path.
+        self.append_durable(path, keep_len, data)?;
+        Ok(None)
+    }
     fn replace_durable(&self, path: &str, data: &str) -> Result<(), EngineError> {
         let (lock, signal) = &*self.state;
         let mut state = lock.lock().unwrap();

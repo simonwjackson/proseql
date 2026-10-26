@@ -25,6 +25,7 @@ use proseql_storage::generation::{GenerationCheck, SourceGeneration};
 use proseql_storage::host::StorageHost;
 use proseql_storage::index::rows;
 use proseql_storage::partitioned::partition_path;
+use proseql_storage::persistence::DurableStorageHost;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::hash::Hasher;
@@ -36,6 +37,7 @@ pub(crate) struct AppendState {
     targets: Vec<(String, Option<SourceGeneration>)>,
     /// Where the next durable append starts, including a possible separator.
     starts: IndexMap<String, u64>,
+    identities: IndexMap<String, SourceGeneration>,
 }
 
 impl AppendState {
@@ -131,6 +133,7 @@ fn prepare(
     collection: &str,
     data: &[Value],
 ) -> Result<(), EngineError> {
+    let _prepare = proseql_storage::diagnostics::span("streaming_append_prepare");
     let access = inner.lazy.as_mut().expect("streaming lazy access");
     for record in data {
         let lazy = &access.sources.lazy[collection];
@@ -201,6 +204,7 @@ fn candidates(
     paths: &[String],
     ids: &[String],
 ) -> Result<Vec<(String, RowLocation, String)>, EngineError> {
+    let _membership = proseql_storage::diagnostics::span("streaming_append_membership");
     let locator = index.id_locator(host, paths)?;
     let mut candidates = Vec::new();
     for id in ids {
@@ -326,6 +330,47 @@ fn finish_create(
         .unload_resident_records(collection, borrowed, false);
 }
 
+/// Durable commit seam. Only lazy targets request read-back evidence. Eager
+/// append-only sources retain the existing host path and failure semantics.
+pub(crate) fn commit(
+    host: &dyn DurableStorageHost,
+    sources: &mut crate::sources::SourceState,
+    write: &proseql_storage::append::PlannedAppend,
+) -> Result<(), EngineError> {
+    let _commit = proseql_storage::diagnostics::span("streaming_append_commit_file");
+    let Some(lazy) = sources
+        .lazy
+        .values_mut()
+        .find(|lazy| lazy.stream.append.starts.contains_key(&write.path))
+    else {
+        return host.append_durable(&write.path, write.keep_len, &write.data);
+    };
+    let identity = host.append_durable_with_identity(&write.path, write.keep_len, &write.data)?;
+    if let Some(identity) = identity {
+        // Torn or unterminated baselines can have different kept coverage.
+        // Refuse shortcuts unless the full pre-apply baseline is the prefix.
+        let prefix = crate::lazy::FileFingerprint::from_hash(
+            write.keep_len as usize,
+            identity.preserved_prefix_hash,
+        );
+        let matches = sources.contents.get(&write.path).map_or_else(
+            || write.keep_len == 0 && prefix == crate::lazy::FileFingerprint::of(&[]),
+            |stored| stored.len() as u64 == write.keep_len && stored.fingerprint() == prefix,
+        );
+        if matches
+            && identity.after.change_id.is_some()
+            && identity.before.len >= write.keep_len
+            && identity.after.len == write.keep_len + write.data.len() as u64
+        {
+            lazy.stream.append.identities.insert(
+                write.path.clone(),
+                SourceGeneration::observe_stat(host, &write.path, identity.after)?,
+            );
+        }
+    }
+    Ok(())
+}
+
 fn json_error(error: serde_json::Error) -> EngineError {
     EngineError::Serialization(Box::new(SerializationError {
         format: "jsonl".into(),
@@ -341,21 +386,30 @@ fn record_committed(
     host: &dyn StorageHost,
     starts: &IndexMap<String, u64>,
     contents: &IndexMap<String, crate::stored_file::StoredFile>,
+    identities: &IndexMap<String, SourceGeneration>,
 ) -> Result<(), EngineError> {
+    let _bookkeeping = proseql_storage::diagnostics::span("streaming_append_bookkeeping");
     if index.id_locator_if_built().is_none() {
         return Ok(());
     }
     for (path, start) in starts {
-        let generation = SourceGeneration::observe(host, path)?.ok_or_else(|| {
-            crate::operation_error(
-                "source-changed",
-                format!("Source '{path}' disappeared after append"),
-            )
-        })?;
+        let generation = identities
+            .get(path)
+            .cloned()
+            .map_or_else(
+                || SourceGeneration::observe(host, path),
+                |generation| Ok(Some(generation)),
+            )?
+            .ok_or_else(|| {
+                crate::operation_error(
+                    "source-changed",
+                    format!("Source '{path}' disappeared after append"),
+                )
+            })?;
         // A new ctime alone does not prove that only our suffix changed. A
         // tokenless observation already hashed the complete accepted text;
         // reuse that evidence, then independently check the generation below.
-        {
+        if !identities.contains_key(path) {
             let _proof = proseql_storage::diagnostics::span("streaming_append_prefix_proof");
             let fingerprint_hash = if let Some(hash) = generation.check_hash {
                 hash
@@ -428,6 +482,7 @@ pub(crate) fn after_commit(state: &mut RuntimeState) {
                 state.host.as_ref(),
                 &append.starts,
                 &sources.contents,
+                &append.identities,
             )
             .is_err()
         {

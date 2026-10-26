@@ -865,6 +865,20 @@ impl proseql_storage::host::StorageHost for ReadThenReplace {
     ) -> Result<Vec<String>, proseql_engine::errors::EngineError> {
         self.inner.list_directory(path)
     }
+    fn list_directory_with_stat(
+        &self,
+        dir_path: &str,
+    ) -> Result<Vec<(String, proseql_storage::host::FileStat)>, proseql_engine::errors::EngineError>
+    {
+        let mut entries = Vec::new();
+        for path in self.list_directory(dir_path)? {
+            if let Some(stat) = self.stat(&path)? {
+                entries.push((path, stat));
+            }
+        }
+        Ok(entries)
+    }
+
     fn list_recursive(
         &self,
         path: &str,
@@ -889,6 +903,18 @@ impl proseql_storage::host::StorageHost for ReadThenReplace {
     }
 }
 impl proseql_storage::persistence::DurableStorageHost for ReadThenReplace {
+    fn append_durable_with_identity(
+        &self,
+        path: &str,
+        keep_len: u64,
+        data: &str,
+    ) -> Result<
+        Option<proseql_storage::persistence::AppendIdentity>,
+        proseql_engine::errors::EngineError,
+    > {
+        self.inner
+            .append_durable_with_identity(path, keep_len, data)
+    }
     fn replace_durable(
         &self,
         path: &str,

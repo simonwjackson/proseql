@@ -5,7 +5,7 @@ use proseql_engine::errors::{EngineError, SourceConfigError};
 use proseql_engine::scan::RowLocation;
 use serde::Deserialize;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 mod partitions;
 
@@ -21,6 +21,8 @@ fn speculative_address(file: u32, offset: u64) -> Option<u64> {
 }
 
 type RowVisitor<'a> = dyn FnMut(&str, &[u8], RowLocation, bool) -> Result<(), EngineError> + 'a;
+type DecodedRowVisitor<'a> =
+    dyn FnMut(&str, &[u8], RowLocation, bool) -> Result<Option<Box<str>>, EngineError> + 'a;
 
 #[derive(Deserialize)]
 struct Identity<'a> {
@@ -114,48 +116,68 @@ pub fn id_error(path: &str, message: impl Into<String>) -> EngineError {
 
 impl IdLocator {
     pub fn build(host: &dyn StorageHost, paths: &[String]) -> Result<Self, EngineError> {
-        Self::build_visiting(host, paths, &mut |_, _, _, _| Ok(()))
+        Self::build_internal(host, paths, &BTreeMap::new(), &mut None)
     }
     pub fn build_visiting(
         host: &dyn StorageHost,
         paths: &[String],
         visit: &mut RowVisitor<'_>,
     ) -> Result<Self, EngineError> {
+        Self::build_observed_decoded(
+            host,
+            paths,
+            &BTreeMap::new(),
+            &mut |path, bytes, row, last| {
+                visit(path, bytes, row, last)?;
+                Ok(None)
+            },
+        )
+    }
+    /// Reuse observations from the same operation. Scanned paths are checked
+    /// again before publication; missing map entries receive fresh observations.
+    pub fn build_observed_decoded(
+        host: &dyn StorageHost,
+        paths: &[String],
+        observed: &BTreeMap<String, Option<SourceGeneration>>,
+        visit: &mut DecodedRowVisitor<'_>,
+    ) -> Result<Self, EngineError> {
+        Self::build_internal(host, paths, observed, &mut Some(visit))
+    }
+
+    fn build_internal(
+        host: &dyn StorageHost,
+        paths: &[String],
+        observed: &BTreeMap<String, Option<SourceGeneration>>,
+        visit: &mut Option<&mut DecodedRowVisitor<'_>>,
+    ) -> Result<Self, EngineError> {
+        let _build = crate::diagnostics::span("streaming_id_locator_build");
         let mut locator = Self::default();
         for path in paths {
-            locator.add_file(host, path, visit)?;
+            let file = u32::try_from(locator.files.len())
+                .map_err(|_| id_error(path, "Too many partition files"))?;
+            locator.files.push(File {
+                path: path.clone(),
+                generation: None,
+                rows: 0,
+                resume: 0,
+                dirty: true,
+            });
+            let generation = match observed.get(path) {
+                Some(generation) => generation.clone(),
+                None => SourceGeneration::observe(host, path)?,
+            };
+            locator.scan_file(host, file, (0, 0), generation, false, visit)?;
         }
         locator.finish(host)?;
         Ok(locator)
     }
-    fn add_file(
-        &mut self,
-        host: &dyn StorageHost,
-        path: &str,
-        visit: &mut RowVisitor<'_>,
-    ) -> Result<(), EngineError> {
-        let file = u32::try_from(self.files.len())
-            .map_err(|_| id_error(path, "Too many partition files"))?;
-        self.files.push(File {
-            path: path.into(),
-            generation: None,
-            rows: 0,
-            resume: 0,
-            dirty: false,
-        });
-        self.scan_file(
-            host,
-            file,
-            0,
-            0,
-            SourceGeneration::observe(host, path)?,
-            visit,
-        )
-    }
     fn entry(&mut self, file: u32, id: &str, row: RowLocation) {
         let entry = self.make_entry(file, id, row);
         if self.entries.len() == self.entries.capacity() {
-            self.entries.reserve_exact(APPEND_DELTA_LIMIT);
+            // Bound spare capacity to 1 MiB, without reallocating the entire
+            // 10 MiB table once per 4,096 rows. Finish releases the spare space.
+            let growth = self.entries.capacity().clamp(APPEND_DELTA_LIMIT, 64 * 1024);
+            self.entries.reserve_exact(growth);
         }
         self.entries.push(entry);
     }
@@ -241,19 +263,29 @@ impl IdLocator {
         &mut self,
         host: &dyn StorageHost,
         file: u32,
-        start: u64,
-        first: u64,
+        position: (u64, u64),
         generation: Option<SourceGeneration>,
-        visit: &mut RowVisitor<'_>,
+        clear: bool,
+        visit: &mut Option<&mut DecodedRowVisitor<'_>>,
     ) -> Result<(), EngineError> {
+        let (start, first) = position;
         let path = self.files[file as usize].path.clone();
-        self.remove_suffix(file, start);
+        // A newly allocated file has no old entries. Retaining every prior
+        // shard here made first-use construction O(files * rows).
+        if clear {
+            self.remove_suffix(file, start);
+        }
         let end = generation.as_ref().map_or(0, |g| g.covered_len);
         let mut count = first;
         let mut resume = end;
         rows::visit_lines(host, &path, start, end, first, |bytes, row, final_line| {
-            visit(&path, bytes, row, final_line)?;
-            let id = match identity(bytes) {
+            let decoded = match visit.as_mut() {
+                Some(visit) => visit(&path, bytes, row, final_line)?,
+                None => None,
+            };
+            let id = match decoded
+                .map_or_else(|| identity(bytes), |id| Ok(Cow::Owned(id.into_string())))
+            {
                 Ok(id) => id,
                 Err(_)
                     if final_line
@@ -291,6 +323,7 @@ impl IdLocator {
         Ok(())
     }
     fn finish(&mut self, host: &dyn StorageHost) -> Result<(), EngineError> {
+        let _sort = crate::diagnostics::span("streaming_id_locator_finish");
         self.entries
             .sort_unstable_by(|left, right| entry_order(left, right, &self.wide));
         for (position, entry) in self.entries.iter().enumerate().skip(1) {
@@ -321,18 +354,46 @@ impl IdLocator {
                 }
             }
         }
+        self.entries.shrink_to_fit();
         Ok(())
     }
     /// Refresh before locate. A verified candidate supplies exact identity;
     /// current generations guarantee that membership has no false negatives.
     pub fn refresh(&mut self, host: &dyn StorageHost, paths: &[String]) -> Result<(), EngineError> {
-        self.refresh_visiting(host, paths, &mut |_, _, _, _| Ok(()))
+        self.refresh_internal(host, paths, &BTreeMap::new(), &mut None)
     }
     pub fn refresh_visiting(
         &mut self,
         host: &dyn StorageHost,
         paths: &[String],
         visit: &mut RowVisitor<'_>,
+    ) -> Result<(), EngineError> {
+        self.refresh_observed_decoded(
+            host,
+            paths,
+            &BTreeMap::new(),
+            &mut |path, bytes, row, last| {
+                visit(path, bytes, row, last)?;
+                Ok(None)
+            },
+        )
+    }
+    pub fn refresh_observed_decoded(
+        &mut self,
+        host: &dyn StorageHost,
+        paths: &[String],
+        observed: &BTreeMap<String, Option<SourceGeneration>>,
+        visit: &mut DecodedRowVisitor<'_>,
+    ) -> Result<(), EngineError> {
+        self.refresh_internal(host, paths, observed, &mut Some(visit))
+    }
+
+    fn refresh_internal(
+        &mut self,
+        host: &dyn StorageHost,
+        paths: &[String],
+        observed: &BTreeMap<String, Option<SourceGeneration>>,
+        visit: &mut Option<&mut DecodedRowVisitor<'_>>,
     ) -> Result<(), EngineError> {
         if self.partitioned {
             return Err(crate::generation::changed(
@@ -341,24 +402,39 @@ impl IdLocator {
         }
         // Do not merge an append delta unless a file actually needs rescanning.
         if !self.files.iter().map(|file| &file.path).eq(paths.iter()) {
-            *self = Self::build_visiting(host, paths, visit)?;
+            *self = Self::build_internal(host, paths, observed, visit)?;
             return Ok(());
         }
         let mut changed = false;
         for file in 0..self.files.len() {
             let state = &self.files[file];
-            let (check, generation) = match &state.generation {
-                Some(generation) => generation.advance(host)?,
-                None => {
-                    let generation = SourceGeneration::observe(host, &state.path)?;
-                    (
-                        if generation.is_some() {
-                            GenerationCheck::Replaced
-                        } else {
-                            GenerationCheck::Missing
-                        },
-                        generation,
-                    )
+            let (check, generation) = if let Some(generation) = observed.get(&state.path) {
+                let check = if generation == &state.generation {
+                    if generation.is_some() {
+                        GenerationCheck::Unchanged
+                    } else {
+                        GenerationCheck::Missing
+                    }
+                } else if generation.is_none() {
+                    GenerationCheck::Missing
+                } else {
+                    GenerationCheck::Replaced
+                };
+                (check, generation.clone())
+            } else {
+                match &state.generation {
+                    Some(generation) => generation.advance(host)?,
+                    None => {
+                        let generation = SourceGeneration::observe(host, &state.path)?;
+                        (
+                            if generation.is_some() {
+                                GenerationCheck::Replaced
+                            } else {
+                                GenerationCheck::Missing
+                            },
+                            generation,
+                        )
+                    }
                 }
             };
             if !state.dirty
@@ -379,7 +455,9 @@ impl IdLocator {
                 (0, 0)
             };
             self.files[file].dirty = true;
-            if let Err(error) = self.scan_file(host, file as u32, start, first, generation, visit) {
+            if let Err(error) =
+                self.scan_file(host, file as u32, (start, first), generation, true, visit)
+            {
                 self.files[file].dirty = true;
                 return Err(error);
             }

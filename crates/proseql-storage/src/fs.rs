@@ -10,9 +10,10 @@ use notify::{Config, EventKind, PollWatcher, RecursiveMode, Watcher};
 use proseql_engine::errors::{EngineError, StorageOperation};
 use walkdir::WalkDir;
 
+use crate::host::FileStat;
 use crate::host::{storage_error, StorageEvent, StorageEventKind, StorageHost, WatchHandle};
 use crate::path::normalize_path;
-use crate::persistence::DurableStorageHost;
+use crate::persistence::{AppendIdentity, DurableStorageHost};
 
 static STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const RECOVERY_BUFFER_BYTES: usize = 64 * 1024;
@@ -381,8 +382,14 @@ impl FsStorageHost {
     }
 }
 
-impl DurableStorageHost for FsStorageHost {
-    fn append_durable(&self, path: &str, keep_len: u64, data: &str) -> Result<(), EngineError> {
+impl FsStorageHost {
+    fn append_file(
+        &self,
+        path: &str,
+        keep_len: u64,
+        data: &str,
+        prove: bool,
+    ) -> Result<Option<AppendIdentity>, EngineError> {
         Self::ensure_parent(path)?;
         self.recover_durable_path(path)?;
         let destination = PathBuf::from(path);
@@ -400,10 +407,12 @@ impl DurableStorageHost for FsStorageHost {
             .truncate(false)
             .open(&destination)
             .map_err(|error| write_error(format!("Failed to open '{path}' for append: {error}")))?;
-        let len = file
-            .metadata()
-            .map_err(|error| write_error(format!("Failed to stat '{path}': {error}")))?
-            .len();
+        let before = file_stat(
+            &file
+                .metadata()
+                .map_err(|error| write_error(format!("Failed to stat '{path}': {error}")))?,
+        );
+        let len = before.len;
         if keep_len > len {
             return Err(write_error(format!(
                 "Cannot append to '{path}': kept length {keep_len} exceeds file length {len}"
@@ -434,7 +443,7 @@ impl DurableStorageHost for FsStorageHost {
             }
             Ok(())
         })();
-        if result.is_err() {
+        if let Err(error) = result {
             // Best effort: drop the partial append. A crash before this point
             // leaves a torn final line, which the append-only loader ignores.
             if created && keep_len == 0 {
@@ -444,8 +453,73 @@ impl DurableStorageHost for FsStorageHost {
             } else if file.set_len(keep_len).is_ok() {
                 let _ = file.sync_data();
             }
+            return Err(error);
         }
-        result
+        // Read-back is disposable metadata work, outside the durable commit.
+        // Never quarantine an already successful append if this check fails.
+        Ok(if prove {
+            self.append_identity(&mut file, before, keep_len, data)
+                .ok()
+                .flatten()
+        } else {
+            None
+        })
+    }
+
+    fn append_identity(
+        &self,
+        file: &mut std::fs::File,
+        before: FileStat,
+        keep_len: u64,
+        data: &str,
+    ) -> std::io::Result<Option<AppendIdentity>> {
+        use std::hash::Hasher;
+        let _proof = crate::diagnostics::span("streaming_append_prefix_proof");
+        let after = file_stat(&file.metadata()?);
+        if after.change_id.is_none() || after.len != keep_len + data.len() as u64 {
+            return Ok(None);
+        }
+        file.seek(SeekFrom::Start(0))?;
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        let mut buffer = [0; 64 * 1024];
+        let mut remaining = keep_len;
+        while remaining > 0 {
+            let count = remaining.min(buffer.len() as u64) as usize;
+            file.read_exact(&mut buffer[..count])?;
+            hash.write(&buffer[..count]);
+            remaining -= count as u64;
+        }
+        // A concurrent editor can also change our suffix before the read-back.
+        // Identity pairs alone cannot distinguish that from our own write.
+        for expected in data.as_bytes().chunks(buffer.len()) {
+            file.read_exact(&mut buffer[..expected.len()])?;
+            if &buffer[..expected.len()] != expected {
+                return Ok(None);
+            }
+        }
+        if file_stat(&file.metadata()?) != after {
+            return Ok(None);
+        }
+        Ok(Some(AppendIdentity {
+            before,
+            after,
+            preserved_prefix_hash: hash.finish(),
+        }))
+    }
+}
+
+impl DurableStorageHost for FsStorageHost {
+    fn append_durable(&self, path: &str, keep_len: u64, data: &str) -> Result<(), EngineError> {
+        self.append_file(path, keep_len, data, false).map(|_| ())
+    }
+
+    fn append_durable_with_identity(
+        &self,
+        path: &str,
+        keep_len: u64,
+        data: &str,
+    ) -> Result<Option<AppendIdentity>, EngineError> {
+        self.append_file(path, keep_len, data, true)
     }
 
     fn read_tail(
@@ -721,13 +795,22 @@ impl StorageHost for FsStorageHost {
         self.recover_durable_path(path)?;
         let result = (|| -> std::io::Result<Vec<u8>> {
             let mut file = std::fs::File::open(path)?;
-            // The metadata bound avoids allocating or seeking past EOF.
-            let available = file.metadata()?.len().saturating_sub(offset);
-            let capacity = available.min(len as u64) as usize;
-            if capacity == 0 {
+            if len == 0 {
+                return Ok(Vec::new());
+            }
+            // Indexed callers already supply a checked end offset. Do not
+            // fstat the descriptor again for every 64 KiB chunk. Still bound
+            // initial allocation for callers requesting more than the file.
+            if offset > i64::MAX as u64 {
                 return Ok(Vec::new());
             }
             file.seek(SeekFrom::Start(offset))?;
+            if len > 64 * 1024 {
+                let mut bytes = Vec::with_capacity(64 * 1024);
+                file.take(len as u64).read_to_end(&mut bytes)?;
+                return Ok(bytes);
+            }
+            let capacity = len;
             let mut bytes = vec![0; capacity];
             let mut read = 0;
             while read < capacity {
@@ -763,31 +846,7 @@ impl StorageHost for FsStorageHost {
                 ))
             }
         };
-        #[cfg(unix)]
-        let change_id = {
-            use std::hash::{Hash, Hasher};
-            use std::os::unix::fs::MetadataExt;
-            let mut hash = std::collections::hash_map::DefaultHasher::new();
-            (
-                metadata.dev(),
-                metadata.ino(),
-                metadata.ctime(),
-                metadata.ctime_nsec(),
-            )
-                .hash(&mut hash);
-            Some(hash.finish())
-        };
-        #[cfg(not(unix))]
-        let change_id = None;
-        Ok(Some(crate::host::FileStat {
-            len: metadata.len(),
-            modified_ns: metadata
-                .modified()
-                .ok()
-                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|duration| duration.as_nanos()),
-            change_id,
-        }))
+        Ok(Some(file_stat(&metadata)))
     }
 
     fn write(&self, path: &str, data: &str) -> Result<(), EngineError> {
@@ -867,6 +926,13 @@ impl StorageHost for FsStorageHost {
         Ok(entries)
     }
 
+    fn list_directory_with_stat(
+        &self,
+        dir_path: &str,
+    ) -> Result<Vec<(String, crate::host::FileStat)>, EngineError> {
+        list_directory_observations(dir_path, &mut |path| self.recover_durable_path(path))
+    }
+
     fn list_recursive(&self, root_path: &str) -> Result<Vec<String>, EngineError> {
         let mut entries = WalkDir::new(root_path)
             .into_iter()
@@ -936,5 +1002,119 @@ impl StorageHost for FsStorageHost {
                 on_change(storage_event);
             },
         )
+    }
+}
+
+fn file_stat(metadata: &std::fs::Metadata) -> FileStat {
+    #[cfg(unix)]
+    let change_id = {
+        use std::hash::{Hash, Hasher};
+        use std::os::unix::fs::MetadataExt;
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        (
+            metadata.dev(),
+            metadata.ino(),
+            metadata.ctime(),
+            metadata.ctime_nsec(),
+        )
+            .hash(&mut hash);
+        Some(hash.finish())
+    };
+    #[cfg(not(unix))]
+    let change_id = None;
+    FileStat {
+        len: metadata.len(),
+        modified_ns: metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_nanos()),
+        change_id,
+    }
+}
+
+// Sibling artifacts make recovery discoverable without probing two nonexistent
+// paths for every ordinary entry. Finish recovery before taking any metadata.
+fn list_directory_observations(
+    dir_path: &str,
+    recover: &mut dyn FnMut(&str) -> Result<(), EngineError>,
+) -> Result<Vec<(String, FileStat)>, EngineError> {
+    let error = |error: std::io::Error| {
+        storage_error(
+            dir_path,
+            StorageOperation::List,
+            format!("Failed to list '{dir_path}' with metadata: {error}"),
+        )
+    };
+    let listed = std::fs::read_dir(dir_path)
+        .map_err(error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(error)?;
+    let mut recovery = std::collections::BTreeSet::new();
+    for entry in &listed {
+        let name = entry.file_name();
+        let Some(name) = name.to_str().and_then(|name| name.strip_prefix('.')) else {
+            continue;
+        };
+        if let Some(name) = name
+            .strip_suffix(".proseql-backup")
+            .or_else(|| name.strip_suffix(".proseql-committed"))
+        {
+            recovery.insert(normalize_path(
+                &Path::new(dir_path).join(name).to_string_lossy(),
+            ));
+        }
+    }
+    for path in &recovery {
+        recover(path)?;
+    }
+    let mut entries = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for entry in listed {
+        let path = normalize_path(&entry.path().to_string_lossy());
+        let metadata = if recovery.contains(&path) {
+            // Recovery can replace this inode or remove a pending first write.
+            std::fs::metadata(entry.path())
+        } else {
+            match entry.metadata() {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    std::fs::metadata(entry.path())
+                }
+                result => result,
+            }
+        };
+        match metadata {
+            Ok(metadata) => {
+                seen.insert(path.clone());
+                entries.push((path, file_stat(&metadata)));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(cause) => return Err(error(cause)),
+        }
+    }
+    // A backup can restore a destination that was absent during read_dir.
+    for path in recovery.difference(&seen) {
+        match std::fs::metadata(path) {
+            Ok(metadata) => entries.push((path.clone(), file_stat(&metadata))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(cause) => return Err(error(cause)),
+        }
+    }
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(entries)
+}
+
+#[cfg(test)]
+mod listing_tests {
+    use super::*;
+    #[test]
+    fn normal_listing_never_calls_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.jsonl"), "text").unwrap();
+        let entries = list_directory_observations(dir.path().to_str().unwrap(), &mut |_| {
+            panic!("ordinary entry recovered")
+        })
+        .unwrap();
+        assert_eq!(entries.len(), 1);
     }
 }
